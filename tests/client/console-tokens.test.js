@@ -34,6 +34,10 @@ function styledFiles() {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         if (entry.name === 'borders') continue; // image assets only
+        // Third-party source carried verbatim (issue #1329, gui/vendor/). Our
+        // token vocabulary is not its author's problem, and a finding in there
+        // could only be fixed by editing bytes this repository does not own.
+        if (entry.name === 'vendor') continue;
         walk(full);
       } else if (/\.(html|js|css)$/.test(entry.name)) {
         out.push(full);

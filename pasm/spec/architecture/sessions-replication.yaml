@@ -7,6 +7,8 @@ entities:
       summary: Host-owned persistent session records keyed by client-held UUID token rather than transient PeerJS peer id.
       rationale:
         - Reconnect must restore a player's identity and eligible station relationship after WebRTC peer replacement.
+        - "[ai] SUPERSEDES the summary above on two facts issue #1112 checked against gui/session-token.js. The token is 32 lowercase hex characters (crypto.getRandomValues over 16 bytes), not a UUIDv4, and it is held primarily in sessionStorage with a persistent localStorage copy the first tab adopts, not in localStorage alone. Per-tab storage is load-bearing: two console tabs on one desktop sharing a token collapsed into one server-side player. The ephemeral identifier it is contrasted with is now a rendezvous peer id and a DataChannel — PeerJS was retired in the same issue."
+        - "[ai] Since #1112 the transport re-sends Identify with the same token on every automatic reconnect, so restoring the held station and pushing the current projection is the ordinary Identify path rather than a second mechanism."
     architecture:
       kind: session-manager
       authority: authoritative
@@ -52,10 +54,16 @@ entities:
 
   - component: peer-transport-bridge
     core:
-      status: implemented
+      status: removed
       confidence: confirmed
       title: Peer Transport Bridge
       summary: Browser host and phone-client transport bridge that maps peer connections to session tokens and exchanges encoded messages.
+      rationale:
+        - "[ai] SUPERSEDED by issue #1112: this bridge was PeerJS's, and PeerJS is gone. Its role belongs to rendezvous-transport-bridge in architecture/rendezvous-transport.yaml, which owns BOTH ends of the crew transport. `status` is the one unmarked field changed rather than annotated — implemented → removed — because leaving it claiming an implementation would make pasm scan's declared-versus-observed check assert a transport that is not in the tree."
+        - "[ai] The `runs_in: [phone-browser-runtime]` below was always incomplete: this bridge ran host-side too, which is why its replacement declares both runtimes. Left as written for ratification rather than corrected in place."
+        - "[ai] It also duplicated client-network-interface in engineering-damage.yaml, which described the same client transport from another slice's point of view. WRITING_PASM §2.6 forbids duplicate truth; #1112 resolved it by giving rendezvous-transport-bridge the transport and leaving the other entity the client command gateway it actually is."
+        - "[ai] Retained rather than deleted so crew-transport-peerjs-to-phoenix has an origin to name."
+        - "[ai] Its `implementation:` block is gone rather than annotated. It declared `symbols: [ConnectionManager]`, and #1112 deleted that class; tests/client/connection-manager.test.js survives but no longer covers a transport at all — the lifecycle tests moved with the class, and what is left is the ICE/timing policy the module kept. A declaration naming a symbol that is not in the tree, against tests that no longer exercise this entity, is what pasm scan's declared-versus-observed check exists to catch. The paths it named live on crew-transport-peerjs-to-phoenix's legacy_paths/target_paths instead."
     architecture:
       kind: transport-adapter
       authority: non-authoritative
@@ -65,11 +73,34 @@ entities:
       platforms:
         allowed: [browser]
         forbidden: [host-only]
+
+  - migration: crew-transport-peerjs-to-phoenix
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Crew Transport — PeerJS to Phoenix
+      summary: >-
+        Issue #1112's cutover of the complete browser crew star from PeerJS and its public cloud
+        broker onto the Phoenix rendezvous service and direct WebRTC DataChannels. One transport,
+        no flag: the CDN script tags, the peer-id-in-the-URL-fragment mechanic, the
+        ConnectionManager lifecycle, the ?rendezvous opt-in and the BroadcastChannel peerjs-shim
+        are all gone.
+      rationale:
+        - Mandated by p2p-delta-transport-is-a-star-today — Phoenix replaces PeerJS rather than layering more product behaviour onto a public broker.
+        - "[ai] Complete rather than adapter-shaped, because there was nothing left to adapt: the JS-to-WASM networking surface is three functions that never knew what a peer was, so retiring the transport touched no Rust beyond the version-pin flip in join-compatibility-gate."
+        - "[ai] gui/host-peer-routing.js survived verbatim — its isOpen() already accepted a raw RTCDataChannel as well as a PeerJS DataConnection, so the outbound router needed no change at all."
+        - "[ai] gui/connection-manager.js kept its name and its ICE/timing exports and lost only the ConnectionManager class; the reconnect, backoff and snapshot-channel behaviour it carried moved into the joiner half of gui/rendezvous-transport.js, so there is one connection lifecycle instead of two."
+        - "[ai] The smoke suite's PeerJS shim went with it. tests/smoke/rendezvous-shim.js is now the ONE transport stand-in, behind the tests/smoke/transport-fixture.js seam, so the ~40 specs that take a test client did not change."
+        - "[ai] REPLACES peer-transport-bridge (this slice, now `removed`); TARGET is rendezvous-transport-bridge in architecture/rendezvous-transport.yaml. Written as prose rather than WRITING_PASM §10's `replaces:`/`target:`/`removal_conditions:` keys because the pinned pasm schema rejects those as unknown fields under `architecture:` and reads a second `migration:` block as a duplicate key — the guide's §10 example does not validate against the tool this repo runs. Removal conditions, for the record: no `ConnectionManager` class and no `window.Peer` anywhere in the tree."
     implementation:
-      status: declared
-      paths: [server.html, client.html, gui/connection-manager.js, src/server/bridge.rs]
-      symbols: [ConnectionManager]
-      tests: [tests/client/connection-manager.test.js, tests/smoke/client-connect.spec.js]
+      legacy_paths: [gui/connection-manager.js]
+      target_paths:
+        - gui/rendezvous-transport.js
+        - gui/rendezvous-protocol.js
+        - server.html
+        - client.html
+        - tests/smoke/rendezvous-shim.js
+        - tests/smoke/transport-fixture.js
 
   - message: session-identify-command
     core:
@@ -77,18 +108,22 @@ entities:
       confidence: confirmed
       title: Session Identify Command
       summary: Client reconnect handshake carrying persistent token and player name to establish or restore a host session.
+      rationale:
+        - "[ai] ADDS to the summary above, which stands: since #1112 it travels on the reliable DataChannel, and only after the host's compatibility gate has accepted the joining build — an open channel is not admission, so nothing before JoinAccepted reaches the Identify gate."
+        - "[ai] Re-sent on EVERY reconnect since #1112, not only the first channel open: the host restores seat, rating and projection from the token each time it arrives, which is what makes an automatic reconnect resume the same station without the guest re-entering a join code."
+        - "[ai] `producer`, `paths` and `tests` below are repointed rather than annotated in place: peer-transport-bridge is `removed` and gui/connection-manager.js no longer sends anything, so a reference model that still named them would fail its own reference-integrity and declared-versus-observed checks. The producer is now rendezvous-transport-bridge; the JS path is gui/rendezvous-transport.js; the vitest is tests/client/rendezvous-transport.test.js."
     architecture:
       authority: request
-      producer: [peer-transport-bridge]
+      producer: [rendezvous-transport-bridge]
       consumer: [session-identity-manager]
       validator: [session-identity-manager]
       trust_boundary: client-to-host
       payload: Identify
     implementation:
       status: declared
-      paths: [src/core/messages.rs, src/lobby/handler.rs, gui/connection-manager.js]
+      paths: [src/core/messages.rs, src/lobby/handler.rs, gui/rendezvous-transport.js]
       messages: [Identify, Welcome]
-      tests: [cargo test, tests/client/connection-manager.test.js]
+      tests: [cargo test, tests/client/rendezvous-transport.test.js]
 
   - component: station-claim-router
     core:

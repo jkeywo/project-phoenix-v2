@@ -4264,6 +4264,15 @@ pub struct GlobalConfig {
     /// content error at load, not a quiet performance cliff.
     #[serde(default = "default_sim_tick_hz")]
     pub sim_tick_hz: f32,
+    /// Peer-local autosave cadence in simulation seconds (issue #865).
+    ///
+    /// Persistence is a local side effect, but every simulation peer schedules
+    /// its rolling autosave from this deterministic clock. The interval must
+    /// therefore convert to a positive whole number of [`Self::sim_tick_hz`]
+    /// ticks; `world::config::parse_world` rejects values that would require
+    /// rounding rather than letting peers choose their own boundary.
+    #[serde(default = "default_autosave_interval_secs")]
+    pub autosave_interval_secs: f32,
     /// Fixed rate (Hz) of the ONE shared AI decision tick (issue #889).
     ///
     /// Gates every AI policy host — the six per-axis helm systems, the seven
@@ -4340,6 +4349,41 @@ pub struct GlobalConfig {
     /// TOML authors the key, it IS the shipped tuning.
     #[serde(default = "default_trigger_fire_history_depth")]
     pub trigger_fire_history_depth: u32,
+    /// How many damage/destruction rows the browser GM activity feed retains
+    /// (issue #1297, PRD #930).
+    ///
+    /// The feed is a peer-local presentation projection over unconditional
+    /// balance events. This authored bound keeps a long-running facilitated
+    /// session from growing page or simulation memory without limit. The serde
+    /// default is the one sanctioned hardcoded copy (AGENTS.md #11); worlds
+    /// may tune the depth without changing the event stream or authoritative
+    /// reducer state.
+    #[serde(default = "default_gm_activity_history_depth")]
+    pub gm_activity_history_depth: u32,
+    /// The lockstep input delay a FLEET playing this mission agrees on, in
+    /// logical ticks (issue #1116).
+    ///
+    /// A command a crew issues on tick *T* applies on tick *T + this*, on every
+    /// host in the fleet. It is what buys agreement: a peer may be up to this
+    /// many ticks behind before anybody has to wait, so it is the mission's
+    /// latency budget expressed in the only unit the simulation has.
+    ///
+    /// **It applies only to a fleet.** A single host has nobody to wait for and
+    /// runs at zero, which is `command_admission::log::CommandDelay`'s default
+    /// and the only value `crate::lockstep::join_fleet` ever gives a lone host.
+    /// So authoring this cannot slow down single-player play.
+    ///
+    /// It is authored rather than constant because it is a property of the
+    /// MISSION, not of the engine: a scenario meant for a group on one LAN can
+    /// afford a shorter delay than one meant for players on separate mobile
+    /// networks, and the trade — input latency against how often the fleet
+    /// stalls — is the author's to make. AGENTS.md rule 7 records this as the
+    /// deliberate amendment it always said a non-zero delay would be.
+    ///
+    /// Validated at world load (`world::config::parse_world`), because a wrong
+    /// value here is a permanent stall or a desync rather than a balance change.
+    #[serde(default = "default_command_delay_ticks")]
+    pub command_delay_ticks: u32,
 }
 
 /// Serde default for [`GlobalConfig::intent_break_off_hull_fraction`]: half
@@ -4371,6 +4415,13 @@ fn default_station_activity_bucket_secs() -> f32 {
     15.0
 }
 
+/// Serde default for [`GlobalConfig::autosave_interval_secs`]: thirty
+/// simulation seconds (issue #865). The only sanctioned hardcoded copy of the
+/// shipped cadence (AGENTS.md #11) — a TOML-parse fallback.
+fn default_autosave_interval_secs() -> f32 {
+    30.0
+}
+
 /// Serde default for [`GlobalConfig::trigger_fire_history_depth`]: sixteen fires
 /// per trigger (issue #1151). The only sanctioned hardcoded copy of the shipped
 /// ring depth (AGENTS.md #11) — a TOML-parse fallback. Sixteen is deep enough to
@@ -4380,6 +4431,40 @@ fn default_trigger_fire_history_depth() -> u32 {
     16
 }
 
+/// Serde default for [`GlobalConfig::gm_activity_history_depth`]: 128 rows
+/// (issue #1297). The only sanctioned hardcoded copy of the shipped GM feed
+/// bound (AGENTS.md #11) -- a TOML-parse fallback.
+fn default_gm_activity_history_depth() -> u32 {
+    128
+}
+
+/// Serde default for [`GlobalConfig::command_delay_ticks`]: six logical ticks
+/// (issue #1116). The only sanctioned hardcoded copy of the shipped fleet delay
+/// (AGENTS.md #11) — a TOML-parse fallback.
+///
+/// `[ai]` Six is AI-origin tuning. At the default `sim_tick_hz = 60` it is
+/// 100 ms, chosen as a round number in the unit that actually matters (wall
+/// time on the wire, not ticks): it covers a one-way WebRTC hop over broadband
+/// or a good mobile link with room to spare, while staying inside the ~100 ms
+/// band where added input latency is not felt as sluggishness on a bridge
+/// console — these are second-scale orders (set a heading, raise shields), not
+/// twitch aim. A fleet on one LAN could halve it; one spread across mobile
+/// networks should raise it, and will see stalls named in the host log if it
+/// has not. Ratification: this is a starting value from measurement of the
+/// medium rather than of play, and the first fleet playtest is what should
+/// confirm or move it.
+pub fn default_command_delay_ticks() -> u32 {
+    6
+}
+
+/// The largest fleet delay a world may author: two seconds at the default tick
+/// rate.
+///
+/// Not a balance ceiling — a taste one. Beyond about this, a helm order lands
+/// so long after the key that a crew stops attributing the movement to their
+/// own input, which is a worse failure than the stalls a shorter delay causes.
+pub const MAX_COMMAND_DELAY_TICKS: u32 = 120;
+
 impl Default for GlobalConfig {
     fn default() -> Self {
         Self {
@@ -4387,17 +4472,44 @@ impl Default for GlobalConfig {
             title: None,
             description: None,
             sim_tick_hz: default_sim_tick_hz(),
+            autosave_interval_secs: default_autosave_interval_secs(),
             ai_tick_hz: default_ai_tick_hz(),
             ai_snapshot_hz: default_ai_snapshot_hz(),
             intent_break_off_hull_fraction: default_intent_break_off_hull_fraction(),
             attacked_memory_secs: default_attacked_memory_secs(),
             station_activity_bucket_secs: default_station_activity_bucket_secs(),
             trigger_fire_history_depth: default_trigger_fire_history_depth(),
+            gm_activity_history_depth: default_gm_activity_history_depth(),
+            command_delay_ticks: default_command_delay_ticks(),
         }
     }
 }
 
 impl GlobalConfig {
+    /// Convert the authored autosave interval into exact logical ticks.
+    ///
+    /// `None` means the interval is non-finite, non-positive, too large for a
+    /// `u64`, or falls between tick boundaries. In particular this never rounds
+    /// an authored duration onto a nearby tick: that would let the declared
+    /// cadence and the deterministic capture boundary disagree.
+    pub fn checked_autosave_interval_ticks(&self) -> Option<u64> {
+        let tick_hz = f64::from(self.sim_tick_hz);
+        let interval_secs = f64::from(self.autosave_interval_secs);
+        if !(tick_hz.is_finite()
+            && tick_hz > 0.0
+            && interval_secs.is_finite()
+            && interval_secs > 0.0)
+        {
+            return None;
+        }
+
+        let ticks = tick_hz * interval_secs;
+        if !ticks.is_finite() || ticks < 1.0 || ticks.fract() != 0.0 || ticks >= u64::MAX as f64 {
+            return None;
+        }
+        Some(ticks as u64)
+    }
+
     /// The number of base AI ticks per slower snapshot tick.
     ///
     /// `None` when the authored pair is not a positive integer relationship —

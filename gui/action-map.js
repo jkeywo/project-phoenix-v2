@@ -6,7 +6,6 @@
  *
  *   send(type, data?)  — enqueues a ClientMessage to the server
  *   mutate(patch)      — applies a partial update to the local client state
- *                        (currently only needed for `set_sensors_target`)
  *
  * All functions are pure (no side effects, no DOM dependency) so they can be
  * unit-tested in Node via Vitest.
@@ -19,34 +18,54 @@
 import { dispatchRepairTeam, setRepairPriority, setRepairTargetPriority } from './repair-dispatch.js';
 import {
   sendHelmInput,
+  sendThrust,
+  sendSteering,
+  sendLateralThrust,
   startImpulseCharge,
   cancelImpulse,
   toggleBoost,
   setBoost,
+  HELM_THRUST_SYSTEM_ID,
+  HELM_STEERING_SYSTEM_ID,
+  HELM_IMPULSE_SYSTEM_ID,
+  HELM_BOOST_SYSTEM_ID,
+  LATERAL_THRUST_SYSTEM_ID,
 } from './helm-dispatch.js';
+
+function controlSystemId(action, fallback) {
+  return typeof action?.control_system_id === 'string' && action.control_system_id
+    ? action.control_system_id
+    : fallback;
+}
 
 export const ACTION_MAP = Object.freeze({
   /** Fire a specific phaser bank (issue #846: via ControlSystem envelope). */
   fire_phaser: (a, send) => {
     if (!a.bank) return;
-    send('ControlSystem', {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
       target: `phaser-${a.bank}`,
       payload: { type: 'FirePhaser' },
     });
   },
 
   /** Engage the tractor beam against the ship's current lock (issue #1156). */
-  engage_tractor: (_a, send) => {
-    send('ControlSystem', {
-      target: 'tractor',
+  engage_tractor: (a, send) => {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
+      target: controlSystemId(a, 'tractor'),
       payload: { type: 'EngageTractor' },
     });
   },
 
   /** Release the tractor beam, dropping any coupling (issue #1156). */
-  release_tractor: (_a, send) => {
-    send('ControlSystem', {
-      target: 'tractor',
+  release_tractor: (a, send) => {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
+      target: controlSystemId(a, 'tractor'),
       payload: { type: 'ReleaseTractor' },
     });
   },
@@ -55,38 +74,48 @@ export const ACTION_MAP = Object.freeze({
    * nearest viable dock-marker pair; `target` is the authored Dock SystemId
    * resolved into the Helm view by the #1251 metadata tracer. */
   dock: (a, send) => {
-    if (!a.target) return;
-    send('ControlSystem', {
-      target: a.target,
+    const target = controlSystemId(a, a.target);
+    if (!target) return;
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
+      target,
       payload: { type: 'Dock' },
     });
   },
 
   /** Undock, backing the ship clear and returning ordinary flight (issue #1159). */
   undock: (a, send) => {
-    if (!a.target) return;
-    send('ControlSystem', {
-      target: a.target,
+    const target = controlSystemId(a, a.target);
+    if (!target) return;
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
+      target,
       payload: { type: 'Undock' },
     });
   },
 
   /**
    * Dispatch a repair team to the ship's designated target — a nearby ally or
-   * structure (issue #1161). Targets the `repair` system; the team crosses to
-   * whatever the ship currently has locked, read server-side.
+   * structure (issue #1161). Targets the exact Repair owner carried by the
+   * projection; the team crosses to the server-side current lock.
    */
-  dispatch_external_repair: (_a, send) => {
-    send('ControlSystem', {
-      target: 'repair',
+  dispatch_external_repair: (a, send) => {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
+      target: controlSystemId(a, 'repair'),
       payload: { type: 'DispatchExternalRepair' },
     });
   },
 
   /** Recall a dispatched repair team to the hull's own sweep (issue #1161). */
-  recall_external_repair: (_a, send) => {
-    send('ControlSystem', {
-      target: 'repair',
+  recall_external_repair: (a, send) => {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
+      target: controlSystemId(a, 'repair'),
       payload: { type: 'RecallExternalRepair' },
     });
   },
@@ -94,17 +123,21 @@ export const ACTION_MAP = Object.freeze({
   /** Start the transfer umbilical's flow (issue #1160). The server resolves the
    * two ledgers from the hull's own `[umbilical]` terms and its docked partner;
    * the command carries no argument. */
-  start_transfer: (_a, send) => {
-    send('ControlSystem', {
-      target: 'umbilical',
+  start_transfer: (a, send) => {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
+      target: controlSystemId(a, 'umbilical'),
       payload: { type: 'StartTransfer' },
     });
   },
 
   /** Stop the transfer umbilical's flow (issue #1160). What has moved has moved. */
-  stop_transfer: (_a, send) => {
-    send('ControlSystem', {
-      target: 'umbilical',
+  stop_transfer: (a, send) => {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
+      target: controlSystemId(a, 'umbilical'),
       payload: { type: 'StopTransfer' },
     });
   },
@@ -112,7 +145,9 @@ export const ACTION_MAP = Object.freeze({
   /** Fire a specific blaster bank (issue #631). */
   fire_blaster: (a, send) => {
     if (!a.bank) return;
-    send('ControlSystem', {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
       target: `blaster-${a.bank}`,
       payload: { type: 'FireBlaster' },
     });
@@ -127,7 +162,9 @@ export const ACTION_MAP = Object.freeze({
    */
   charge_blaster_start: (a, send) => {
     if (!a.bank) return;
-    send('ControlSystem', {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
       target: `blaster-${a.bank}`,
       payload: { type: 'ChargeBlasterStart' },
     });
@@ -142,7 +179,9 @@ export const ACTION_MAP = Object.freeze({
    */
   charge_blaster_cancel: (a, send) => {
     if (!a.bank) return;
-    send('ControlSystem', {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
       target: `blaster-${a.bank}`,
       payload: { type: 'ChargeBlasterCancel' },
     });
@@ -152,7 +191,9 @@ export const ACTION_MAP = Object.freeze({
   fire_torpedo: (a, send) => {
     var tube = a.tube || 'fore';
     var sysId = 'torpedo-tube-' + String(tube).replace(/_/g, '-');
-    send('ControlSystem', {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
       target: sysId,
       payload: { type: 'FireTorpedo', data: { target_uuid: a.target_uuid || null } },
     });
@@ -184,7 +225,9 @@ export const ACTION_MAP = Object.freeze({
   set_torpedo_volley_target: (a, send) => {
     if (a.tube == null || a.count == null) return;
     const sysId = 'torpedo-tube-' + String(a.tube).replace(/_/g, '-');
-    send('ControlSystem', {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
       target: sysId,
       payload: { type: 'SetTorpedoVolleyTarget', data: { count: a.count } },
     });
@@ -194,10 +237,11 @@ export const ACTION_MAP = Object.freeze({
    *  Wire target is 'tactical-radar' (issue #801): target lock lives on the
    *  tactical radar fine system; the coarse 'tactical' id is a station id,
    *  not a wire target. */
-  set_target: (a, send, mutate) => {
+  set_target: (a, send) => {
     if (a.uuid) {
-      mutate({ weaponsTarget: a.uuid });
-      send('ControlSystem', {
+      const correlated = typeof a.correlation === 'string' && a.correlation;
+      send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+        ...(correlated ? { correlation: a.correlation } : {}),
         target: 'tactical-radar',
         payload: { type: 'SetTarget', data: { uuid: a.uuid } },
       });
@@ -209,10 +253,14 @@ export const ACTION_MAP = Object.freeze({
    *  settings system. */
   set_phaser_mode: (a, send) => {
     if (a.mode)
-      send('ControlSystem', {
+      {
+        const correlated = typeof a.correlation === 'string' && a.correlation;
+        send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+          ...(correlated ? { correlation: a.correlation } : {}),
         target: 'phaser-control',
         payload: { type: 'SetPhaserMode', data: { mode: a.mode } },
-      });
+        });
+      }
   },
 
   /** Switch the view-screen to a named camera marker or non-camera mode. */
@@ -224,7 +272,9 @@ export const ACTION_MAP = Object.freeze({
     } else {
       mode = { kind: a.direction };
     }
-    send('ControlSystem', {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
       target: 'viewscreen',
       payload: { type: 'SetView', data: { mode } },
     });
@@ -235,7 +285,9 @@ export const ACTION_MAP = Object.freeze({
    *  duplicated, or retried command is idempotent (the host assigns, it does
    *  not invert). */
   set_red_alert: (a, send) => {
-    send('ControlSystem', {
+    if (typeof a.correlation !== 'string' || !a.correlation) return;
+    send('ControlSystemCorrelated', {
+      correlation: a.correlation,
       target: 'red-alert',
       payload: { type: 'SetRedAlert', data: { active: !!a.active } },
     });
@@ -248,7 +300,9 @@ export const ACTION_MAP = Object.freeze({
    *  whole firing posture. Explicit like its sibling above, so a stale,
    *  duplicated or retried command is idempotent. */
   set_weapons_hold: (a, send) => {
-    send('ControlSystem', {
+    if (typeof a.correlation !== 'string' || !a.correlation) return;
+    send('ControlSystemCorrelated', {
+      correlation: a.correlation,
       target: 'red-alert',
       payload: { type: 'SetWeaponsHold', data: { held: !!a.held } },
     });
@@ -269,8 +323,9 @@ export const ACTION_MAP = Object.freeze({
 
   /** Toggle Captain priority boost on an objective (issue #675). */
   set_objective_priority: (a, send) => {
-    if (!a.id) return;
-    send('ControlSystem', {
+    if (!a.id || typeof a.correlation !== 'string' || !a.correlation) return;
+    send('ControlSystemCorrelated', {
+      correlation: a.correlation,
       target: 'captain',
       payload: { type: 'SetObjectivePriority', data: { id: a.id } },
     });
@@ -286,7 +341,9 @@ export const ACTION_MAP = Object.freeze({
    */
   scan_target: (a, send) => {
     if (!a.uuid) return;
-    send('ControlSystem', {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
       target: 'sensors',
       payload: { type: 'ScanTarget', data: { uuid: a.uuid } },
     });
@@ -301,40 +358,96 @@ export const ACTION_MAP = Object.freeze({
    *  human owns. Component emitters (ph-helm-joystick) are unchanged.
    */
   helm_input: (a, send) => {
-    sendHelmInput(a.thrust, a.steering, send);
+    sendHelmInput(a.thrust, a.steering, send, {
+      thrustSystemId: a.thrust_system_id,
+      steeringSystemId: a.steering_system_id,
+    });
   },
 
   /** Set helm via analog joystick (ph-helm-joystick component).
    *  Same per-axis fan-out as helm_input (issue #801); the joystick's yaw
    *  maps to the steering axis. */
   set_helm: (a, send) => {
-    sendHelmInput(a.thrust, a.yaw, send);
+    sendHelmInput(a.thrust, a.yaw, send, {
+      thrustSystemId: a.thrust_system_id,
+      steeringSystemId: a.steering_system_id,
+    });
+  },
+
+  /** Continuous semantic steering uses only the existing narrow axis route. */
+  set_helm_steering: (a, send) => {
+    if (!Number.isFinite(a.value)) return;
+    sendSteering(a.value, send, controlSystemId(a, HELM_STEERING_SYSTEM_ID));
+  },
+
+  /** Continuous semantic thrust uses only the existing narrow axis route. */
+  set_helm_thrust: (a, send) => {
+    if (!Number.isFinite(a.value)) return;
+    sendThrust(a.value, send, controlSystemId(a, HELM_THRUST_SYSTEM_ID));
+  },
+
+  /** Ship-specific lateral thrust retains its independently admitted route. */
+  set_helm_lateral: (a, send) => {
+    if (!Number.isFinite(a.value)) return;
+    sendLateralThrust(a.value, send, controlSystemId(a, LATERAL_THRUST_SYSTEM_ID));
   },
 
   /** Begin charging the impulse drive. Targets 'helm-impulse' (issue #801). */
   start_impulse_charge: (a, send) => {
-    startImpulseCharge(send);
+    const target = controlSystemId(a, HELM_IMPULSE_SYSTEM_ID);
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    if (!correlated) {
+      startImpulseCharge(send, target);
+      return;
+    }
+    send('ControlSystemCorrelated', {
+      correlation: a.correlation,
+      target,
+      payload: { type: 'StartImpulseCharge' },
+    });
   },
 
   /** Cancel an active impulse charge. Targets 'helm-impulse' (issue #801). */
   cancel_impulse: (a, send) => {
-    cancelImpulse(send);
+    const target = controlSystemId(a, HELM_IMPULSE_SYSTEM_ID);
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    if (!correlated) {
+      cancelImpulse(send, target);
+      return;
+    }
+    send('ControlSystemCorrelated', {
+      correlation: a.correlation,
+      target,
+      payload: { type: 'CancelImpulse' },
+    });
   },
 
   /** Toggle the boost drive on/off. Targets 'helm-boost' (issue #801). */
   toggle_boost: (a, send) => {
-    toggleBoost(send);
+    toggleBoost(send, controlSystemId(a, HELM_BOOST_SYSTEM_ID));
   },
 
   /** Explicitly set boost on or off (hold-to-boost). Targets 'helm-boost'. */
   set_boost: (a, send) => {
-    setBoost(a.active, send);
+    const target = controlSystemId(a, HELM_BOOST_SYSTEM_ID);
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    if (!correlated) {
+      setBoost(a.active, send, target);
+      return;
+    }
+    send('ControlSystemCorrelated', {
+      correlation: a.correlation,
+      target,
+      payload: { type: 'SetBoost', data: { active: !!a.active } },
+    });
   },
 
   /** Switch the view-screen to the radar mode. */
   set_radar_view: (a, send) => {
-    send('ControlSystem', {
-      target: 'viewscreen',
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
+      target: controlSystemId(a, 'viewscreen'),
       payload: { type: 'SetView', data: { mode: { kind: 'Radar' } } },
     });
   },
@@ -348,7 +461,11 @@ export const ACTION_MAP = Object.freeze({
    * `RepairTarget::Core` and is sent as `{ type: 'Core' }`.
    */
   dispatch_repair_team: (a, send) => {
-    dispatchRepairTeam(a.team_idx, a.target, send);
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    const route = correlated
+      ? (_type, data) => send('ControlSystemCorrelated', { correlation: a.correlation, ...data })
+      : send;
+    dispatchRepairTeam(a.team_idx, a.target, route, controlSystemId(a, 'repair'));
   },
 
   /**
@@ -364,7 +481,7 @@ export const ACTION_MAP = Object.freeze({
    */
   set_repair_priority: (a, send) => {
     if (a.team_idx != null && a.priority != null) {
-      setRepairPriority(a.team_idx, a.priority, send);
+      setRepairPriority(a.team_idx, a.priority, send, controlSystemId(a, 'repair'));
     }
   },
 
@@ -380,7 +497,11 @@ export const ACTION_MAP = Object.freeze({
    */
   set_repair_target_priority: (a, send) => {
     if (a.system_id) {
-      setRepairTargetPriority(a.system_id, send);
+      const correlated = typeof a.correlation === 'string' && a.correlation;
+      const route = correlated
+        ? (_type, data) => send('ControlSystemCorrelated', { correlation: a.correlation, ...data })
+        : send;
+      setRepairTargetPriority(a.system_id, route, controlSystemId(a, 'repair'));
     }
   },
 
@@ -393,16 +514,16 @@ export const ACTION_MAP = Object.freeze({
    *
    * `{ action: "set_power", console: "Power", target: "helm", level: 3 }`
    *
-   * Wire target is `'power-reactor'` (issue #513): the reactor fine system
-   * owns the allocation surface, and `handle_power_messages` reads only
-   * `AdmittedCommands.for_target("power-reactor")`. Do NOT change back to
-   * `'power'` — the coarse system id is retained only for the aggregate
-   * blackboard, not for control input.
+   * Wire target is the exact authored reactor SystemId carried by the current
+   * projection (issue #513). The canonical literal remains only as a legacy
+   * direct-action fallback; the coarse `power` id is never control input.
    */
   set_power: (a, send) => {
     if (a.target && typeof a.level === 'number') {
-      send('ControlSystem', {
-        target: 'power-reactor',
+      const correlated = typeof a.correlation === 'string' && a.correlation;
+      send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+        ...(correlated ? { correlation: a.correlation } : {}),
+        target: controlSystemId(a, 'power-reactor'),
         payload: { type: 'SetPowerGroupAllocation', data: { group: a.target, level: a.level } },
       });
     }
@@ -425,7 +546,9 @@ export const ACTION_MAP = Object.freeze({
   set_shield_focus: (a, send) => {
     if (!a.arc_id) return;
     const focused = a.focused === undefined ? true : !!a.focused;
-    send('ControlSystem', {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
       target: `shield-arc-${a.arc_id}`,
       payload: { type: 'SetShieldArcFocus', data: { focused } },
     });
@@ -433,7 +556,9 @@ export const ACTION_MAP = Object.freeze({
 
   /** Switch the view-screen to navigation chart mode. */
   set_navigation_chart: (a, send) => {
-    send('ControlSystem', {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
       target: 'viewscreen',
       payload: { type: 'SetView', data: { mode: { kind: 'NavigationChart' } } },
     });
@@ -454,7 +579,9 @@ export const ACTION_MAP = Object.freeze({
       if (typeof a.source_uuid === 'string' && a.source_uuid.length > 0) {
         data.source_uuid = a.source_uuid;
       }
-      send('ControlSystem', {
+      const correlated = typeof a.correlation === 'string' && a.correlation;
+      send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+        ...(correlated ? { correlation: a.correlation } : {}),
         target: 'navigation',
         payload: { type: 'SetNavigationWaypoint', data },
       });
@@ -463,7 +590,9 @@ export const ACTION_MAP = Object.freeze({
 
   /** Clear the shared custom navigation waypoint. */
   clear_navigation_waypoint: (a, send) => {
-    send('ControlSystem', {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
       target: 'navigation',
       payload: { type: 'ClearNavigationWaypoint' },
     });
@@ -504,39 +633,34 @@ export const ACTION_MAP = Object.freeze({
       order = { verb: 'dock', structure: a.structure };
     }
     if (!order) return;
-    send('ControlSystem', {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
       target: 'navigation',
       payload: { type: 'OrderCivilian', data: { target: a.target, order } },
     });
   },
 
-  /**
-   * Select a science target.  Mutates local `state.sensorsTarget` so the
-   * sensor display updates before the server acks the message.
-   */
-  set_sensors_target: (a, send, mutate) => {
+  /** Select a science target. The authoritative Sensors payload paints it. */
+  set_sensors_target: (a, send) => {
     if (a.uuid) {
-      mutate({ sensorsTarget: a.uuid });
-      send('ControlSystem', { target: 'sensors', payload: { type: 'SetScienceTarget', data: { uuid: a.uuid } } });
+      const correlated = typeof a.correlation === 'string' && a.correlation;
+      send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+        ...(correlated ? { correlation: a.correlation } : {}),
+        target: 'sensors',
+        payload: { type: 'SetScienceTarget', data: { uuid: a.uuid } },
+      });
     }
   },
 
   /** Open a comms channel to a contact by UUID. */
   hail: (a, send) => {
     if (a.target_uuid) {
-      send('ControlSystem', {
+      const correlated = typeof a.correlation === 'string' && a.correlation;
+      send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+        ...(correlated ? { correlation: a.correlation } : {}),
         target: 'comms',
         payload: { type: 'Hail', data: { target_uuid: a.target_uuid } },
-      });
-    }
-  },
-
-  /** Mark a comms message as selected / read. */
-  select_comms_message: (a, send) => {
-    if (a.message_id) {
-      send('ControlSystem', {
-        target: 'comms',
-        payload: { type: 'SelectCommsMessage', data: { message_id: a.message_id } },
       });
     }
   },
@@ -544,7 +668,9 @@ export const ACTION_MAP = Object.freeze({
   /** Send a pre-written response to a comms message. */
   respond_to_message: (a, send) => {
     if (a.message_id) {
-      send('ControlSystem', {
+      const correlated = typeof a.correlation === 'string' && a.correlation;
+      send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+        ...(correlated ? { correlation: a.correlation } : {}),
         target: 'comms',
         payload: {
           type: 'RespondToMessage',
@@ -556,7 +682,9 @@ export const ACTION_MAP = Object.freeze({
 
   /** Clear all read/acknowledged comms messages from the inbox. */
   clear_comms: (a, send) => {
-    send('ControlSystem', {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
       target: 'comms',
       payload: { type: 'ClearComms' },
     });
@@ -565,7 +693,9 @@ export const ACTION_MAP = Object.freeze({
   /** Send the selected comms message to the view screen. */
   show_on_screen: (a, send) => {
     if (a.message_id) {
-      send('ControlSystem', {
+      const correlated = typeof a.correlation === 'string' && a.correlation;
+      send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+        ...(correlated ? { correlation: a.correlation } : {}),
         target: 'comms',
         payload: { type: 'ShowOnScreen', data: { message_id: a.message_id } },
       });

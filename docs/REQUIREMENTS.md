@@ -9,7 +9,7 @@ A unified feature list distilled from every PRD issue on the project issue track
 Project Phoenix is a multiplayer bridge simulator in the spirit of Artemis. One screen — the "view screen" — drives a shared 3D view of space and acts as the authoritative simulation host. Each crew member joins from their own phone by scanning a QR code, picks a station that bundles one or more consoles, and plays through scripted missions against AI ships and environmental hazards.
 
 The game is built in Rust + Bevy, deployed two ways:
-- A WebAssembly build hosted on GitHub Pages, with one tab as the view screen and phones joining via PeerJS/WebRTC.
+- A WebAssembly build hosted on GitHub Pages, with one tab as the view screen and phones joining over the Phoenix transport (a Phoenix-owned rendezvous service for signalling, then direct WebRTC DataChannels).
 - A native PC binary that runs the same simulation core, exposes the same client page over an embedded HTTP/WebSocket server, and tunnels to the internet via a bundled Cloudflare quick-tunnel sidecar.
 
 Both deployments share the same simulation core, the same wire protocol, and the same client page. Phones never install anything.
@@ -49,7 +49,7 @@ Both deployments share the same simulation core, the same wire protocol, and the
 - A failed `SelectStation` (unknown name, occupied, wrong phase) is silently dropped; the client re-syncs from the next assignment broadcast.
 
 ### Validation
-- Malformed station configs refuse to boot the server with a structured error rendered as a fatal overlay on the view-screen page (PeerJS never starts, lobby never opens).
+- Malformed station configs refuse to boot the server with a structured error rendered as a fatal overlay on the view-screen page (the host never registers a join code, lobby never opens).
 
 ---
 
@@ -108,8 +108,8 @@ A per-console complexity tier hides UI elements and adds AI to operate the hidde
 ### Browser deployment (WASM)
 - One Rust crate, two Trunk entry points: `server.html` (view screen) and `client.html` (phones).
 - CI deploys built assets to GitHub Pages via `peaceiris/actions-gh-pages` on push to `main`.
-- Transport is PeerJS (WebRTC, star topology). The view screen is the host; phones are spokes.
-- PeerJS cloud broker used for signalling. The view-screen page automatically reconnects with `peer.reconnect()` on transient drops; permanent error states require manual refresh.
+- Transport is the Phoenix transport (WebRTC, star topology): a Phoenix-owned rendezvous service (`worker-rendezvous/`, a Cloudflare Worker + Durable Object) carries typed join-code lookup and WebRTC signalling over a secure WebSocket, and game traffic then runs over two direct DataChannels per client — a reliable ordered one for commands and reliable messages, and a lossy unordered one for the snapshot class. The view screen is the host; phones are spokes. PeerJS and its public cloud broker were retired in issue #1112 and there is no second route.
+- Signalling and media are independent planes. A client whose link drops re-resolves the SAME join code on an exponential backoff and re-sends `Identify` with the same session token, so the host restores the held station without anybody re-typing the code; a host that loses its rendezvous record re-registers and is issued a FRESH code while every already-admitted crew connection keeps playing. Only an answer a retry cannot change (about the code or about the build) ends a loop.
 
 ### Native PC binary
 - `cargo build --release --features native` produces a single executable.
@@ -118,7 +118,7 @@ A per-console complexity tier hides UI elements and adds AI to operate the hidde
 - A `TunnelManager` parses cloudflared stdout for the `trycloudflare.com` URL; the view-screen UI shows spinner (Pending) → QR code (Ready) → error (Failed).
 - An embedded axum server serves the static client page at `/client/*` and a WebSocket endpoint at `/ws`, sharing a single TCP port that is tunnelled to the internet.
 - Map and entity TOML loaded synchronously from disk; no internet needed to start a session.
-- `client.html` auto-detects transport from the URL fragment: a `wss://` / `ws://` fragment opens a WebSocket; otherwise the existing PeerJS path runs. The first message in either transport is `Identify { token, name }`.
+- `client.html` takes the structured join code from the URL fragment (what the QR encodes) or five typed letters, and joins the same way either way; `gui/join-code.js` decides which a given string is. The first crew-protocol message is `Identify { token, name }`, sent on the reliable DataChannel only after the host compatibility handshake has accepted the build.
 - The WASM deployment and native binary share the simulation, lobby, session, physics, damage, scenario, and codec modules unchanged. Native and WASM bridges live behind mutually exclusive Cargo features (`server`, `client`, `native`).
 
 ---
@@ -620,13 +620,13 @@ Transitions are evaluated in declaration order; first match fires. `from` accept
 ## Networking & Wire Protocol
 
 ### Transports
-- WebRTC via PeerJS (browser deployment, star topology).
+- WebRTC over the Phoenix rendezvous transport (browser deployment, star topology): two DataChannels per client, reliable ordered and lossy unordered.
 - WebSocket via axum (native deployment).
 - Both transports carry the same `ClientMessage` / `ServerMessage` JSON, with `Identify { token, name }` as the first frame.
 
 ### Identity
-- Session token (UUID v4) stored in client `localStorage`. Server maps tokens to player records and re-attaches reconnecting players to their previous station/spectator slot per the station reassignment rules.
-- PeerJS peer IDs and WebSocket connection IDs are ephemeral; identity is solely token-based.
+- Session token (32 lowercase hex characters) held primarily in the tab's `sessionStorage`, with a persistent `localStorage` copy the first/only tab adopts, so two console tabs on one desktop are two players and one phone still reconnects after a browser restart. Server maps tokens to player records and re-attaches reconnecting players to their previous station/spectator slot per the station reassignment rules.
+- Rendezvous peer ids, DataChannels and WebSocket connection IDs are all ephemeral; identity is solely token-based.
 
 ### Routing
 - Outbound targets: `All`, `Token(token)`, `AllExcept(token)`.
@@ -727,7 +727,7 @@ Transitions are evaluated in declaration order; first match fires. `from` accept
 ## Smoke Testing
 
 - Playwright-based smoke harness runs in Chromium against `dist/` served by `npx serve`.
-- A BroadcastChannel PeerJS shim is injected via Playwright's `addInitScript` to replace `window.Peer` with a fake transport — zero production-code footprint.
+- A transport stand-in (`tests/smoke/rendezvous-shim.js`) is injected via Playwright's `addInitScript` as `window.PhoenixTransportFactories`: it fakes only the WebSocket and `RTCPeerConnection`, pairing two pages' DataChannels over a `BroadcastChannel` while the REAL `worker-rendezvous` registry terminates the protocol inside the host page. `tests/smoke/transport-fixture.js` is the single seam every spec's transport assumption lives behind — zero production-code footprint.
 - A `wasm-ready` window event from the shim signals reliable WASM readiness; tests then wait ~500ms before the first `Identify` to let Bevy startup systems complete.
 - Smoke specs cover: server.html loads + WASM initialises without console errors; client connect + Identify + Welcome handshake; station picker (replaces old console picker) including SelectStation/ReleaseStation, atomic swap, captain validation; reassignment cascades (2→3 join, 3→2 leave, spectator promotion); StartGame all-clients-receive-GameStarted; first SimState within 2s; `SetThrust` → next SimState reflects change; complexity broadcast; comms flow; AI patrol → pursue transition; regions render on Science radar; damage zone reduces hull; modifier flag at the wire level; debug-overlay toggle; native WebSocket transport reaches Connected.
 - Three additional smoke tests are written co-located with the features they validate: **tactical fire-flow** (phaser fires, hits hull-bearing target, damage applied — written alongside the phaser/NPC damage fix); **helm input/physics** (thrust and yaw inputs produce expected position and heading changes — written alongside the impulse data-driven fix); **view-selector** (switching view modes produces correct `SimSnapshot` view-mode fields — written alongside view-mode work).
@@ -744,7 +744,7 @@ Transitions are evaluated in declaration order; first match fires. `from` accept
 - The `webgl2` Bevy feature is included for `server`/`client` only; native uses the native wgpu backend.
 
 ### Entry points
-- `server.html` (Trunk) → WASM view screen. PeerJS chrome stays as plain HTML/CSS/JS (fullscreen button, connection-status dot, QR code, save-slot selection screen).
+- `server.html` (Trunk) → WASM view screen. Page chrome stays as plain HTML/CSS/JS (fullscreen button, connection-status dot, join code + QR, save-slot selection screen).
 - `client.html` (Trunk) → WASM phone console; identical JS chrome to `server.html` for fullscreen, status dot, and name input.
 - Native `[[bin]]` target compiled only when `native` is active.
 
@@ -767,7 +767,7 @@ The following appear as explicit non-goals in one or more PRDs and remain out of
 - Authentication / access control.
 - Mobile-native apps.
 - A native client (phones remain browser-based).
-- Self-hosted PeerJS broker.
+- Self-hosted PeerJS broker — moot since issue #1112 replaced PeerJS with Phoenix's own rendezvous service rather than self-hosting a third-party one.
 - Binary wire format (architecture supports swapping; not implemented).
 - macOS / Windows code signing.
 - Lobby ship selection (the player ship is hardcoded at startup).

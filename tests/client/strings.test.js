@@ -242,6 +242,14 @@ describe('localiseTree', () => {
     });
   });
 
+  it('never localises an opaque ActionFeedback correlation that equals a string id', () => {
+    const msg = {
+      type: 'ActionFeedback',
+      data: { correlation: 'entity.cruiser.name', outcome: 'Applied' },
+    };
+    expect(localiseTree(msg)).toEqual(msg);
+  });
+
   it('resolves ids inside arrays', () => {
     expect(localiseTree(['entity.cruiser.name', 'other']))
       .toEqual(['[Alliance Cruiser]', 'other']);

@@ -4,11 +4,12 @@ entities:
       status: implemented
       confidence: confirmed
       title: Navigation Waypoint Controller
-      summary: Owns each ship's free or entity-anchored navigation waypoint, applying admitted set and clear commands — from a human console OR the Navigation AI operator, symmetrically — and driving the same Channel-3 NavigateTo clearance to the Helm station.
+      summary: Owns each ship's free or entity-anchored navigation waypoint, applying admitted set and clear commands — from a human console OR the Navigation AI operator, symmetrically — returning terminal feedback for correlated human inputs, and driving the same Channel-3 NavigateTo clearance to the Helm station.
       rationale:
         - "A waypoint reaches the AI Helm identically no matter who set it (AGENTS.md rule 6): the single admitted applier (`handle_navigation_waypoint`) writes the shared component for BOTH sources — the human `SetNavigationWaypoint` and the Navigation AI's admitted emission (issue #830) — and the shared issuer enqueues the clearance, so the message, the delivery lag, and the HelmWaypointClearance latch are the same. Previously the AI wrote the waypoint component directly, bypassing admission."
         - "Issue #830 moved the applier from Input into Physics `.after(operate_navigation_ai)`: admission clears AdmittedCommands once per tick before Input, so the AI operator's same-tick emission must be applied after it in Physics. The clearance issuer is pinned `.after(handle_navigation_waypoint)` so a waypoint set this tick — by either writer — gets its clearance this tick (the #702 shared-issuer invariant)."
         - The sender origin is derived from the navigation system's resolved control source, like every other post-admission enqueuer, not assumed from the wire path. Clearing needs no clearance message because a cleared waypoint leaves the Helm nothing to follow.
+        - "Issue #1286 leaves waypoint and Coordination ownership unchanged while making input completion truthful: the owning consumer emits correlated Applied only after a finite set or clear has run, and Refused for a non-finite placement. The browser remains pending until that reply and never projects an unaccepted waypoint."
     architecture:
       kind: control-handler
       authority: authoritative
@@ -20,9 +21,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/navigation/mod.rs, src/core/messages.rs, gui/components/ph-navigation-map.js]
-      symbols: [enqueue_navigate_to_clearance]
-      tests: [cargo test, npx vitest run]
+      paths: [src/console/navigation/mod.rs, src/console/navigation/server.rs, src/core/messages.rs, gui/stations/navigation-actions.js, gui/components/ph-navigation-map.js]
+      symbols: [handle_navigation_waypoint, enqueue_navigate_to_clearance]
+      tests: [cargo test, "cargo test correlated_waypoint_owner_applies_or_refuses_each_exact_occurrence", npx vitest run]
 
   - state: navigation-waypoint-state
     core:
@@ -187,7 +188,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Civilian Traffic Adapter
-      summary: Advances each civilian craft's compliance clock once per logical tick against the live world, validates and publishes its finite authored order options, takes the orders both surfaces queue for it, mirrors the craft's PatrolCursor index onto its state, and keeps ONE doctrine objective on the hull pointed at whatever the craft is currently trying to do.
+      summary: Advances each civilian craft's compliance clock once per logical tick against the live world, validates and publishes its finite authored order options, takes the orders both surfaces queue for it, returns terminal delivery feedback for correlated console orders, mirrors the craft's PatrolCursor index onto its state, and keeps ONE doctrine objective on the hull pointed at whatever the craft is currently trying to do.
       rationale:
         - "[ai] NO SECOND STEERING IMPLEMENTATION, and that is the whole design. A civilian is an ordinary NPC hull: its doctrine is scored by aggregate_doctrine_blackboards, its winning directive is flown by plan_helm_travel, and the result reaches it as ordinary admitted SetThrust/SetSteering commands. The adapter's entire job is to keep the single `civilian-route` doctrine entry current - Patrol over the route's anchor chain, Reach for a diverted anchor, Dock for a berth, and NOTHING at all for a hold, which is how every objective-less NPC already comes to a stop."
         - "[ai] The existing PatrolCursor IS the leg pointer; the adapter mirrors its index rather than keeping a second one. Per-leg speed is that leg's authored value written onto the directive's target_speed, and an authored hold_secs dwell is the same lever set to zero - which is why a dwelling craft KEEPS its directive, and therefore its place on the lane, instead of being taken off it and put back."
@@ -196,6 +197,8 @@ entities:
         - "[ai] The human surface is finite and authored: each [civilian] may publish order_options with a stable id, strings.csv label and existing CivilianOrder. The Navigation blackboard copies those options to <ph-civilian-traffic>, whose accessible buttons submit the ordinary order_civilian action. The browser neither invents destinations nor owns scenario policy."
         - "[ai] Runs in SimSet::Input, so a console order admitted this tick is acted on this tick and the doctrine entry it produces is in place before PublishAggregate scores the pool. A scripted order is one tick later by construction - its applier runs in Physics - which is the same one-tick bridge every other world-event consumer rides."
         - "[ai] Craft are walked in UUID order, never query order: Bevy archetype order is not part of the simulation's contract, and two craft racing for the same order would otherwise resolve differently on two hosts."
+        - "[ai] Issue #1286 distinguishes input delivery from the actor's later choice. A correlated console order is Applied only after the owner has entered a valid order into the compliance machine; unknown targets and malformed orders are Refused. A later authored civilian refusal remains an authoritative compliance outcome, not a retroactive input refusal."
+        - "[ai] A correlated console order is still consumed and Refused when its target despawns between publication and civilian-traffic consumption; an empty traffic query cannot turn terminal feedback into a silent drop."
     architecture:
       kind: subsystem
       authority: authoritative
@@ -233,7 +236,7 @@ entities:
         - PendingCivilianOrder
         - tick_civilian_traffic
         - CIVILIAN_ROUTE_OBJECTIVE_ID
-      tests: [cargo test, npm run test:editor, "cargo test --features headless --test headless_runner civilian_orders_walk", "cargo test --features headless --test headless_runner falling_skyway_ordered_traffic"]
+      tests: [cargo test, "cargo test a_correlated_console_order_is_applied_only_by_the_civilian_owner", "cargo test correlated_unknown_and_malformed_orders_are_refused_by_the_civilian_owner", npm run test:editor, "cargo test --features headless --test headless_runner civilian_orders_walk", "cargo test --features headless --test headless_runner falling_skyway_ordered_traffic"]
     evidence:
       - kind: test
         reference: "tests/headless_runner.rs::civilian_orders_walk_the_compliance_machine_while_the_lane_keeps_being_flown"

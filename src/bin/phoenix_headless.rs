@@ -166,12 +166,14 @@ fn record(args: &HeadlessArgs) -> Result<bevy::app::App, Box<dyn std::error::Err
     // log records — a replay re-derives them from the seed.
     let mut sim = drive_run(args, &[], args.digest_every)?;
     let log = sim.recorded_log();
+    let gm_actions = sim.recorded_gm_actions();
+    let final_tick = sim.tick();
     let ledger = sim.seal();
     let path = args
         .record_path
         .as_deref()
         .expect("record() is only called when --record was given");
-    let artifact = ReplayArtifact::capture(args, log, ledger)?;
+    let artifact = ReplayArtifact::capture(args, log, gm_actions, final_tick, ledger)?;
     artifact.write(path)?;
     eprintln!(
         "phoenix-headless: wrote replay artifact to {path:?} — seed {}, {} command(s), \

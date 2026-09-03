@@ -1178,22 +1178,46 @@ pub(crate) fn compile_world_scripts(
 }
 
 /// `OnEnter(GamePhase::InProgress)` system: seeds the `ship_power` counter in
-/// the world flag store from the selected ship's `power_rating`.
+/// the world flag store from the fleet's authoritative hull `power_rating`.
 ///
 /// This runs before `spawn_game_start_entities` so that `when` predicates on
 /// `[[entity]]` entries with `spawn_on = "GameStart"` can gate spawns on
 /// `counter(ship_power) >= N`.
 ///
-/// If `ShipClientConfigResource.power_rating` is `None` (the ship TOML omits
-/// the field), no counter is written and `ship_power` defaults to `0`.
+/// The value must fold identically on every peer (issue #1116): the counter is
+/// part of the scenario-flag digest, and a stationless GM owns no local ship
+/// while two ship hosts each own a *different* one. So the rating is derived
+/// from the frozen [`FleetRoster`]'s hull paths — resolved through the same
+/// config cache on every peer — rather than from this peer's own
+/// `ShipClientConfigResource`. A fleet ship whose `ship_path` is `None` is the
+/// solo default ("the hull this peer's own lobby selected"), which is exactly
+/// the local ship config; a solo run therefore keeps its pre-fleet value to the
+/// byte. Multiple crewed hulls take the highest rating, so a mixed fleet is
+/// gated by its heaviest ship rather than by whichever host happens to seed.
+///
+/// If no hull declares a `power_rating`, no counter is written and `ship_power`
+/// defaults to `0`.
 pub fn seed_ship_power_counter(
+    fleet_roster: Option<Res<crate::lockstep::FleetRoster>>,
     ship_client_config: Res<crate::lobby::server::ShipClientConfigResource>,
     runtime: Option<ResMut<WorldContentRuntime>>,
 ) {
     let Some(mut runtime) = runtime else {
         return;
     };
-    if let Some(rating) = ship_client_config.0.power_rating {
+    let cache = crate::entities::config_cache::get_config_cache();
+    let rating = match fleet_roster.as_deref() {
+        Some(roster) => roster
+            .ships()
+            .iter()
+            .filter_map(|ship| match &ship.ship_path {
+                Some(path) => cache.get(path).and_then(|config| config.power_rating),
+                None => ship_client_config.0.power_rating,
+            })
+            .max(),
+        None => ship_client_config.0.power_rating,
+    };
+    if let Some(rating) = rating {
         runtime.flags.set_flag_value("ship_power", rating as i64);
     }
 }
@@ -1844,7 +1868,7 @@ pub(crate) fn merge_layer_scripts(
 /// Runs after `init_world_runtime` in the Startup chain. Each path is pushed
 /// into `PendingWorldLayerChanges` rather than applied directly so the same
 /// `apply_world_layer_changes` path handles both startup and trigger-fired loads.
-fn load_extra_worlds(
+pub(crate) fn load_extra_worlds(
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     mut pending: ResMut<PendingWorldLayerChanges>,
 ) {
@@ -1894,18 +1918,23 @@ pub(crate) fn broadcast_objective_summary(
 /// same `OnEnter` chain). Without this, round two would measure `after_secs`
 /// from round one's start and arrive with its whole schedule already expired.
 ///
-/// It writes `None` rather than a reading of its own because it does not run
-/// in a fixed step. Bevy applies a `NextState<GamePhase>` write at whichever
-/// `StateTransition` site comes first, and the two production start paths use
-/// different ones: the lobby countdown and headless auto-start write from
-/// `FixedUpdate` (the fixed-schedule site `register_fixed_state_transition`
-/// installs), while `auto_transition_from_loading` writes from `Update` (the
-/// frame-level site). `Time` resolves to `Time<Fixed>` at the first and
-/// `Time<Virtual>` at the second, and those two clocks disagree by up to one
-/// timestep, so a reading taken here would make the schedule a function of
-/// which path started the mission and of frame pacing. Deferring the reading
-/// to [`anchor_mission_clock`], which only ever runs inside a fixed step,
-/// keeps it on one clock.
+/// It writes `None` rather than a reading of its own because it cannot know
+/// which clock it is standing on. Bevy applies a `NextState<GamePhase>` write
+/// at whichever `StateTransition` site comes first; `Time` resolves to
+/// `Time<Fixed>` at the fixed-schedule site `register_fixed_state_transition`
+/// installs and to `Time<Virtual>` at the frame-level one, and those two clocks
+/// disagree by up to one timestep — so a reading taken here would make the
+/// schedule a function of which path started the mission and of frame pacing.
+/// Deferring the reading to [`anchor_mission_clock`], which only ever runs
+/// inside a fixed step, keeps it on one clock.
+///
+/// Since issue #1121's fix round every *production* start path writes from
+/// `FixedUpdate`: the lobby countdown, headless and native-host auto-start, and
+/// `auto_transition_from_loading`, which moved there for the #907 reason this
+/// paragraph describes. That makes the hazard harder to reach, not gone — a
+/// bare-`App` fixture or a test driver writing the phase from a frame schedule
+/// still lands on the frame-level site, and the deferral is what keeps the
+/// mission clock right for those too.
 pub(crate) fn arm_mission_clock(mut runtime: ResMut<WorldContentRuntime>) {
     runtime.mission_clock_anchor_secs = None;
 }
@@ -2475,6 +2504,34 @@ pub(crate) fn tick_trigger_pipeline(
 
         let mut next_events: Vec<WorldEvent> = Vec::new();
         for (idx, ft) in fired {
+            let handler = script
+                .runtime
+                .as_deref()
+                .and_then(|runtime| runtime.handlers.get(idx))
+                .and_then(Clone::clone);
+            let origin = handler
+                .as_ref()
+                .map(|handler| handler.script_path.clone())
+                .or_else(|| ft.origin_layer.clone())
+                .unwrap_or_else(|| "base-world".to_owned());
+            let trigger_id = runtime.trigger_states[idx].trigger.id.clone().or_else(|| {
+                handler
+                    .as_ref()
+                    .map(|handler| format!("{}::{}", handler.script_path, handler.fn_name))
+            });
+            if let (Some(trigger_id), Some(msgs)) = (trigger_id, balance_events.as_deref_mut()) {
+                let entity = ft
+                    .entity_name
+                    .as_deref()
+                    .and_then(|name| name_to_uuid.get(name))
+                    .cloned();
+                msgs.write(crate::core::balance::BalanceEvent::TriggerFired {
+                    trigger_id,
+                    origin,
+                    entity,
+                });
+            }
+
             // The handler for this trigger (IP-2, issue #984, Rhai M6 phase 2a).
             // A per-action dispatch loop for the fired trigger's own
             // `[[trigger.action]]` array used to run first; issue #985 deleted
@@ -2497,7 +2554,6 @@ pub(crate) fn tick_trigger_pipeline(
                     "WorldScriptRuntime::handlers has desynced from \
                      WorldContentRuntime::trigger_states"
                 );
-                let handler = sr.handlers.get(idx).and_then(|h| h.clone());
                 if let Some(h) = handler {
                     // The store chain THIS handler reads through (issue #1045):
                     // its own layer first, then outward to the base world — the
@@ -3115,6 +3171,7 @@ pub(crate) fn apply_dispatch_result(
                 command_stance,
                 origin_layer,
             } => {
+                let activity_targets = targets.clone();
                 let added = objectives.0.add_full_with_params(
                     id.clone(),
                     text,
@@ -3131,6 +3188,13 @@ pub(crate) fn apply_dispatch_result(
                 // a genuinely new insert, and only for layer-authored
                 // triggers with a live layer-map entry.
                 if added {
+                    if let Some(msgs) = balance_events.as_deref_mut() {
+                        msgs.write(crate::core::balance::BalanceEvent::ObjectiveChanged {
+                            objective_id: id.clone(),
+                            status: crate::core::messages::ObjectiveStatus::Active,
+                            targets: activity_targets,
+                        });
+                    }
                     if let (Some(path), Some(lm)) = (origin_layer, layer_map.as_deref_mut()) {
                         if let Some(layer) = lm.0.get_mut(&path) {
                             layer.owned_objective_ids.push(id);
@@ -3158,12 +3222,25 @@ pub(crate) fn apply_dispatch_result(
                         msgs.write(crate::core::balance::BalanceEvent::ObjectiveCompleted {
                             objective_id: id.clone(),
                         });
+                        msgs.write(crate::core::balance::BalanceEvent::ObjectiveChanged {
+                            objective_id: id.clone(),
+                            status: crate::core::messages::ObjectiveStatus::Completed,
+                            targets: objectives.0.targets(&id).unwrap_or_default().to_vec(),
+                        });
                     }
                 }
             }
 
             ActionCmd::FailObjective { id } => {
-                objectives.0.fail(&id);
+                if objectives.0.fail(&id) {
+                    if let Some(msgs) = balance_events.as_deref_mut() {
+                        msgs.write(crate::core::balance::BalanceEvent::ObjectiveChanged {
+                            objective_id: id.clone(),
+                            status: crate::core::messages::ObjectiveStatus::Failed,
+                            targets: objectives.0.targets(&id).unwrap_or_default().to_vec(),
+                        });
+                    }
+                }
             }
 
             ActionCmd::ApplyModifier {
@@ -4342,11 +4419,28 @@ fn apply_loaded_layer(
     root_tick_hz: f32,
 ) {
     let crate::world::layers::LoadedLayer {
-        name_to_uuid_inserts,
-        scenario_config,
+        mut name_to_uuid_inserts,
+        mut scenario_config,
         emit_world_loaded,
         scripts,
     } = layer;
+
+    // A named layer entity is authored identity, not one incarnation of the
+    // layer. Unload deliberately leaves the live name registry intact, so a
+    // later load can restore the same UUID instead of exposing a removal and
+    // reappearance as two unrelated contacts (issue #1296). Keep the parsed
+    // config and the registrations in lockstep: the former is what spawning
+    // reads, while the latter is what the live runtime records below. Anonymous
+    // layer entities have no entry here and retain their mint-on-load policy.
+    for (name, uuid) in &mut name_to_uuid_inserts {
+        let Some(existing_uuid) = runtime.name_to_uuid.get(name).cloned() else {
+            continue;
+        };
+        *uuid = existing_uuid.clone();
+        scenario_config
+            .name_to_uuid
+            .insert(name.clone(), existing_uuid);
+    }
 
     // Merge the layer's compiled `[script]` set into the live script runtime
     // (issue #1045). Script-free layers take the `None` branch without changing

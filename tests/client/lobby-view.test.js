@@ -1,11 +1,19 @@
 import { describe, it, expect } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { lobbyViewModel, nextLobbyConsole, releaseConfirmStep } from '../../gui/lobby-view.js';
+
+const CLIENT_HTML = fs.readFileSync(path.join(
+  path.dirname(fileURLToPath(import.meta.url)), '../../client.html',
+), 'utf-8');
 
 const MY = 'tok-me';
 
 function uiState(overrides = {}) {
   return {
     players: [],
+    gms: [],
     stations: [],
     maxPlayers: 0,
     allReady: false,
@@ -278,5 +286,44 @@ describe('lobbyViewModel — crew counter', () => {
       stations: [helmRow({ holder_name: 'Ada' }), helmRow({ id: 'captain' })],
     });
     expect(lobbyViewModel(s, MY, null).crew).toEqual({ filled: 1, max: 3 });
+  });
+
+  it('keeps equal GM peers in a distinct group outside the crew count', () => {
+    const s = uiState({
+      maxPlayers: 3,
+      stations: [helmRow({ holder_name: 'Ada' })],
+      gms: [
+        { id: 'gm-a', name: 'Morgan', connected: true, ready: true },
+        { id: 'gm-b', name: 'Rin', connected: false, ready: true },
+      ],
+    });
+    const vm = lobbyViewModel(s, MY, null);
+    expect(vm.crew).toEqual({ filled: 1, max: 3 });
+    expect(vm.gmGroup).toEqual({
+      visible: true,
+      headingId: 'lobby.gms.heading',
+      entries: [
+        {
+          id: 'gm-a', name: 'Morgan', connected: true, ready: true,
+          labelId: 'lobby.gms.connected', readinessLabelId: 'lobby.gms.ready',
+        },
+        {
+          id: 'gm-b', name: 'Rin', connected: false, ready: false,
+          labelId: 'lobby.gms.disconnected', readinessLabelId: 'lobby.gms.not_ready',
+        },
+      ],
+    });
+  });
+
+  it('ships a read-only labelled crew-lobby region and no fleet-role control', () => {
+    expect(CLIENT_HTML).toContain('id="gm-presence" role="region" aria-labelledby="gm-presence-heading"');
+    expect(CLIENT_HTML).toContain('id="gm-presence-list" role="list"');
+    expect(CLIENT_HTML).toContain("row.setAttribute('role', 'listitem')");
+    expect(CLIENT_HTML).toContain("row.dataset.ready = gm.ready ? 'true' : 'false'");
+    expect(CLIENT_HTML).toContain("+ ' · ' + t(gm.readinessLabelId)");
+    expect(CLIENT_HTML).not.toContain('fleet-role-gm');
+    expect(CLIENT_HTML).not.toContain('__hostSetFleetRole');
+    expect(CLIENT_HTML).not.toContain('gm-force-start-btn');
+    expect(CLIENT_HTML).not.toContain('forceStart()');
   });
 });

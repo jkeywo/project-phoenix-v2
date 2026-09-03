@@ -256,6 +256,10 @@ entities:
       confidence: confirmed
       title: Station Backfill Transition
       summary: Applies Backfill automation to a disconnected station and restores or yields the prior station on reconnect according to live ownership.
+      rationale:
+        - "[ai] In a fleet, a whole ship whose host has vanished takes the same transition on every surviving host at one agreed tick."
+        - "[ai] Issue #1119 adds the fleet variant WITHOUT forking the flip. When a ship host disappears, lockstep::host_loss::apply_host_loss_backfill runs the SAME ship::rating::apply_rating(BACKFILL) per station on the lost ship — the machinery this component already owns — at a tick every survivor agrees on. The cause (a session/socket closing) is host-local and never replicated; only the effect (active-station-rating-state, system-control-source-state) is authoritative, so a survivor that carries no session for the lost crew still performs the identical transition. The lost ship keeps its complete authoritative state; nothing is despawned or simplified."
+        - "[ai] The agreement is a tick-stamped mesh event, not a per-host decision: host_loss::agreed_loss_tick is the first tick past the departed host's own last watermark (lockstep::session::LockstepSession::watermark_of), but it is derived by exactly ONE authority per loss — the star relay's connection holder, which alone sees the socket close (the tick-0 self-observation the bridge injects) — and stamped into the report it re-broadcasts. Every other survivor honours that carried tick VERBATIM rather than re-deriving from its own watermark, because a still-live-or-propagating slot's watermark is skew-prone across honest survivors; that is what makes the flip land on the same tick everywhere and keeps the authoritative digest equal under any frame-arrival interleaving. FleetRoster::depart_slot empties the lost slot's frozen crewing so resolve_human_seeking_hosts re-resolves its human-seeking systems to AI in the same tick. Reordered/duplicate/delayed reports converge via the PendingHostLoss max-merge plus a departed-slot guard in the barrier."
     architecture:
       kind: lifecycle-policy
       authority: authoritative
@@ -264,8 +268,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/lobby/session.rs, src/lobby/server.rs, src/ship_plugin.rs]
-      tests: [cargo test, tests/smoke/reconnect.spec.js]
+      paths: [src/lobby/session.rs, src/lobby/server.rs, src/ship_plugin.rs, src/lockstep/host_loss.rs, src/lockstep/mod.rs]
+      symbols: [process_disconnect_with_stations, apply_rating, apply_host_loss_backfill, PendingHostLoss, agreed_loss_tick]
+      tests: [cargo test, tests/smoke/reconnect.spec.js, tests/lockstep_backfill.rs]
 
   - component: admitted-command-router
     core:

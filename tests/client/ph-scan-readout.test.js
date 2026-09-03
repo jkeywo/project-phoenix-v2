@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { t } from '../../gui/strings.js';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import {
+  describe, it, expect, beforeEach, afterEach, vi,
+} from 'vitest';
 import { formatCondition, formatTolerance } from '../../gui/components/ph-scan-readout.js';
 import '../../gui/components/ph-scan-readout.js';
 
@@ -51,8 +53,14 @@ function button(el) {
 }
 
 describe('PhScanReadout', () => {
-  beforeEach(() => { document.body.innerHTML = ''; });
-  afterEach(() => { document.body.innerHTML = ''; });
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    delete window.activateSemanticAction;
+  });
+  afterEach(() => {
+    document.body.innerHTML = '';
+    delete window.activateSemanticAction;
+  });
 
   it('is defined and registered as a custom element', () => {
     expect(customElements.get('ph-scan-readout')).toBeDefined();
@@ -156,24 +164,23 @@ describe('PhScanReadout', () => {
     expect(el.shadowRoot.querySelector('.subject')).toBe(null);
   });
 
-  it('sends scan_target for the selected contact when the button is pressed', () => {
+  it('activates the shared scan identity for the selected contact', () => {
     const el = setup();
-    const sent = [];
-    el.sendAction = (name, payload) => sent.push([name, payload]);
+    window.activateSemanticAction = vi.fn();
     el.state = panelState();
     button(el).click();
-    expect(sent).toEqual([
-      ['scan_target', { uuid: '00000000-0000-8000-8000-000000000042' }],
-    ]);
+    expect(window.activateSemanticAction).toHaveBeenCalledWith('sensors.scan', {
+      source: 'control',
+      detail: { uuid: '00000000-0000-8000-8000-000000000042' },
+    });
   });
 
   it('sends nothing when there is no contact selected', () => {
     const el = setup();
-    const sent = [];
-    el.sendAction = (name, payload) => sent.push([name, payload]);
+    window.activateSemanticAction = vi.fn();
     el.state = panelState({ target_uuid: null });
     button(el).click();
-    expect(sent).toEqual([]);
+    expect(window.activateSemanticAction).not.toHaveBeenCalled();
   });
 });
 

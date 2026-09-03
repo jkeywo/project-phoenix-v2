@@ -2640,8 +2640,13 @@ fn combat_test_spawns_its_waves_on_the_clock_in_a_real_run() {
 /// in while assets stream, `headless_auto_start` only fires from `Lobby`, and
 /// headless registers no asset preloader (`SimPluginOptions::render` is false),
 /// so nothing leaves that phase until this test writes `NextState` — from
-/// outside the fixed schedule, which is also how `auto_transition_from_loading`
-/// does it in the browser. The `SimSet` chain is gated on `InProgress`, so no
+/// outside the fixed schedule, which is the harder of the two
+/// `StateTransition` sites for the mission clock to be right at, and therefore
+/// the one worth driving here. (`auto_transition_from_loading`, the browser's
+/// own way out of `Loading`, wrote from `Update` too until issue #1121's fix
+/// round moved it onto the tick for the #907 reason; this driver deliberately
+/// keeps exercising the frame-level site, which any bare-`App` fixture still
+/// reaches.) The `SimSet` chain is gated on `InProgress`, so no
 /// trigger is evaluated for those 90 seconds; `Time<Virtual>` and `Time<Fixed>`
 /// advance through them regardless, and that gap is the whole bug.
 ///
@@ -2707,8 +2712,12 @@ fn combat_test_wave_clock_measures_from_mission_start_not_app_boot() {
          may spawn before the mission starts"
     );
 
-    // Start the mission the way the browser host does: `NextState` written
-    // outside the fixed schedule, applied at the frame-level `StateTransition`.
+    // Start the mission by writing `NextState` from OUTSIDE the fixed
+    // schedule — deliberately exercising the frame-level `StateTransition`
+    // site that bare-`App` fixtures and frame-driven test drivers still
+    // reach. Every production phase writer (bridge force-start, asset
+    // preloader, headless/native auto-start, lobby countdown) has been
+    // fixed-scheduled since #1121's fix round.
     app.world_mut()
         .resource_mut::<NextState<GamePhase>>()
         .set(GamePhase::InProgress);

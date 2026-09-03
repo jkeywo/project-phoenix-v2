@@ -752,6 +752,7 @@ fn admit_clear_comms(app: &mut App) {
             target: crate::ship::system_registry::comms_system_id(),
             payload: SystemControlPayload::ClearComms,
             response_token: None,
+            feedback_correlation: None,
         });
 }
 
@@ -1273,7 +1274,35 @@ fn destroyed_comms_hull() -> crate::entities::spawner::EntitySystemHull {
 // `pub(crate)`) and is imported here rather than duplicated.
 use crate::comms::content::{CommsDialogueNode, CommsResponse};
 use crate::comms::server::tests::{comms_test_app, push_msg, setup_game_with_comms, tick};
-use crate::core::messages::{ClientMessage, ServerMessage};
+use crate::core::messages::{
+    ActionCorrelationId, ActionFeedbackOutcome, ClientMessage, DeliveryClass, ServerMessage,
+};
+
+fn correlated_comms(correlation: &str, payload: SystemControlPayload) -> ClientMessage {
+    ClientMessage::ControlSystemCorrelated {
+        correlation: ActionCorrelationId::new(correlation).expect("valid test correlation"),
+        target: crate::ship::system_registry::comms_system_id(),
+        payload,
+    }
+}
+
+fn has_action_feedback(
+    messages: &[crate::lobby::OutboundMessage],
+    correlation: &str,
+    outcome: ActionFeedbackOutcome,
+) -> bool {
+    messages.iter().any(|message| {
+        message.target == crate::lobby::Target::Token("comms".into())
+            && message.delivery == DeliveryClass::Reliable
+            && matches!(
+                &message.msg,
+                ServerMessage::ActionFeedback {
+                    correlation: actual,
+                    outcome: actual_outcome,
+                } if actual.as_str() == correlation && *actual_outcome == outcome
+            )
+    })
+}
 
 // -- PRD #397 fix 2: comms-response action dispatch parity ----------------
 //
@@ -2045,6 +2074,220 @@ fn find_rejection(out: &[crate::lobby::OutboundMessage]) -> Option<(String, usiz
         } => Some((message_id.clone(), *response_index)),
         _ => None,
     })
+}
+
+// -- Issue #1283: shared Comms action feedback -----------------------------
+
+#[test]
+fn correlated_hail_reports_the_existing_range_gate_result() {
+    let station_uuid = "feedback-hail-target";
+    let mut app = comms_test_app();
+    setup_game_with_comms(&mut app, station_uuid);
+    let _ = tick(&mut app);
+
+    push_msg(
+        &mut app,
+        "comms",
+        correlated_comms(
+            "hail-applied",
+            SystemControlPayload::Hail {
+                target_uuid: station_uuid.into(),
+            },
+        ),
+    );
+    let out = tick(&mut app);
+    assert!(has_action_feedback(
+        &out,
+        "hail-applied",
+        ActionFeedbackOutcome::Applied
+    ));
+    assert!(
+        app.world()
+            .resource::<CommsRuntime>()
+            .open_hails
+            .contains(station_uuid),
+        "an applied hail keeps the existing authoritative open-hail effect"
+    );
+
+    {
+        let mut comms = app.world_mut().resource_mut::<CommsRuntime>();
+        comms.range_active = true;
+        comms.range_flags.insert("out-of-range".into(), false);
+    }
+    push_msg(
+        &mut app,
+        "comms",
+        correlated_comms(
+            "hail-refused",
+            SystemControlPayload::Hail {
+                target_uuid: "out-of-range".into(),
+            },
+        ),
+    );
+    let out = tick(&mut app);
+    assert!(has_action_feedback(
+        &out,
+        "hail-refused",
+        ActionFeedbackOutcome::Refused
+    ));
+    assert!(
+        !app.world()
+            .resource::<CommsRuntime>()
+            .open_hails
+            .contains("out-of-range"),
+        "feedback must not widen the existing reachability gate"
+    );
+}
+
+#[test]
+fn correlated_unavailable_response_preserves_bespoke_rejection_and_reports_refused() {
+    let station_uuid = "feedback-response-sender";
+    let mut app = comms_test_app();
+    setup_game_with_comms(&mut app, station_uuid);
+    let _ = tick(&mut app);
+
+    push_msg(
+        &mut app,
+        "comms",
+        correlated_comms(
+            "response-refused",
+            SystemControlPayload::RespondToMessage {
+                message_id: "no-live-dialogue".into(),
+                response_index: 7,
+            },
+        ),
+    );
+    let out = tick(&mut app);
+    assert_eq!(
+        find_rejection(&out),
+        Some(("no-live-dialogue".into(), 7)),
+        "the exact existing response control rejection remains available"
+    );
+    assert!(has_action_feedback(
+        &out,
+        "response-refused",
+        ActionFeedbackOutcome::Refused
+    ));
+}
+
+#[test]
+fn correlated_valid_response_reports_applied_after_exact_choice_is_recorded() {
+    let station_uuid = "feedback-valid-response";
+    let mut app = comms_test_app();
+    setup_game_with_comms(&mut app, station_uuid);
+    app.world_mut()
+        .insert_resource(crate::comms::scripted::tests::compile_fixture(
+            "fn on_ack(ctx) { }",
+        ));
+    let id = seat_scripted_dialogue(
+        &mut app,
+        station_uuid,
+        "Acknowledge?",
+        vec!["on_ack"],
+        false,
+    );
+    push_msg(
+        &mut app,
+        "comms",
+        correlated_comms(
+            "response-applied",
+            SystemControlPayload::RespondToMessage {
+                message_id: id.clone(),
+                response_index: 0,
+            },
+        ),
+    );
+    let out = tick(&mut app);
+    assert!(has_action_feedback(
+        &out,
+        "response-applied",
+        ActionFeedbackOutcome::Applied
+    ));
+    assert_eq!(
+        app.world()
+            .resource::<CommsInboxRes>()
+            .0
+            .messages()
+            .into_iter()
+            .find(|message| message.id == id)
+            .expect("answered message remains in history")
+            .selected_response,
+        Some(0),
+        "Applied is emitted only after the exact response is accepted"
+    );
+}
+
+#[test]
+fn correlated_clear_and_show_on_screen_report_their_terminal_results() {
+    let station_uuid = "feedback-clear-show";
+    let mut app = comms_test_app();
+    setup_game_with_comms(&mut app, station_uuid);
+    let mut shown = msg("show-this");
+    shown.is_read = true;
+    app.world_mut()
+        .resource_mut::<CommsInboxRes>()
+        .0
+        .inject(shown);
+
+    push_msg(
+        &mut app,
+        "comms",
+        correlated_comms(
+            "show-applied",
+            SystemControlPayload::ShowOnScreen {
+                message_id: "show-this".into(),
+            },
+        ),
+    );
+    let out = tick(&mut app);
+    assert!(has_action_feedback(
+        &out,
+        "show-applied",
+        ActionFeedbackOutcome::Applied
+    ));
+    assert_eq!(
+        app.world()
+            .resource::<crate::comms::server::OnScreenMessage>()
+            .0
+            .as_ref()
+            .map(|message| message.id.as_str()),
+        Some("show-this")
+    );
+
+    push_msg(
+        &mut app,
+        "comms",
+        correlated_comms(
+            "show-refused",
+            SystemControlPayload::ShowOnScreen {
+                message_id: "missing".into(),
+            },
+        ),
+    );
+    let out = tick(&mut app);
+    assert!(has_action_feedback(
+        &out,
+        "show-refused",
+        ActionFeedbackOutcome::Refused
+    ));
+
+    push_msg(
+        &mut app,
+        "comms",
+        correlated_comms("clear-applied", SystemControlPayload::ClearComms),
+    );
+    let out = tick(&mut app);
+    assert!(has_action_feedback(
+        &out,
+        "clear-applied",
+        ActionFeedbackOutcome::Applied
+    ));
+    assert!(app
+        .world()
+        .resource::<CommsInboxRes>()
+        .0
+        .messages()
+        .is_empty());
 }
 
 /// A `RespondToMessage` for a message with no active dialogue (stale — the

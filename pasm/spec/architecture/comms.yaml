@@ -200,7 +200,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Comms Response Rejection Feedback
-      summary: Host-to-phone rejection feedback that lets the attempted response flash red when a stale (no active dialogue), out-of-range, or out-of-bounds submission is refused. The host emits `ServerMessage::CommsResponseRejected { message_id, response_index }` to the submitting comms token at the drop points in `handle_respond_to_message`; the client folds it into sim state and the comms component flashes the matching response control red.
+      summary: Host-to-phone rejection feedback that lets the attempted response flash red when a stale (no active dialogue), out-of-range, or out-of-bounds submission is refused. The host emits `ServerMessage::CommsResponseRejected { message_id, response_index }` to the submitting comms token at the drop points in `handle_respond_to_message`; the client folds it into sim state and the comms component flashes the matching response control red. Since issue #1283 a correlated submission also completes the product-wide semantic lifecycle with `ActionFeedback::Refused`; this exact-control channel remains additive rather than being weakened or replaced.
     architecture:
       kind: interaction-feedback-contract
       authority: authoritative
@@ -211,3 +211,24 @@ entities:
       paths: [src/console/comms/server.rs, src/core/messages.rs, src/core/codec.rs, gui/sim-state.js, gui/console-state.js, gui/dirty-consoles.js, gui/components/ph-comms-current-message.js]
       symbols: [handle_respond_to_message, CommsRespondAux]
       tests: [cargo test, npx vitest run]
+
+  - component: comms-semantic-action-adapters
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Shared Comms Actions and Terminal Feedback
+      summary: Every shipped Comms operation is registered in the context-scoped semantic action registry with two remappable keyboard/gamepad slots. Contact hailing, exact dialogue responses, clearing, and show-on-screen commands use correlated envelopes and complete only in their existing authoritative consumers. Message selection sends no host command; pointer and parameter-free binding activation call the shared renderer's one local owner, which validates or cycles the live message set and repaints the list and current thread before completing Applied. Both dedicated Comms hull variants use the same adapters and component activation seam.
+      rationale:
+        - "Issue #1283 preserves the existing authority boundaries: adapters carry explicit contact UUID, message id and response index, while handle_hail and handle_respond_to_message retain range, active-dialogue, sender, bounds, script and budget validation. An important response still requires the component's two-step confirmation before the shared adapter submits it."
+        - "Only exact Comms target/payload pairs with owning terminal consumers enter the correlated admission allowlist. The local selection adapter does not emit the legacy SelectCommsMessage envelope at all, so a command with no host completion path cannot sit Pending until timeout or falsely report Applied without changing presentation state."
+    architecture:
+      kind: client-input-adapter
+      authority: non-authoritative
+      reads: [comms-inbox-state, comms-dialogue-state, comms-range-state]
+      depends_on: [client-console-family-router]
+      runs_in: [phone-browser-runtime, host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [gui/stations/comms-actions.js, gui/stations/comms-console.js, gui/console-core.js, gui/client-semantic-actions.js, gui/action-map.js, gui/components/ph-comms-contact-list.js, gui/components/ph-comms-hail-list.js, gui/components/ph-comms-current-message.js, src/command_admission/mod.rs, src/console/comms/server.rs]
+      symbols: [registerCommsActions, createCommsActionRegistry, makeCommsRender, handle_hail, handle_respond_to_message, handle_clear_comms, handle_show_on_screen]
+      tests: [cargo test, npx vitest run, npx playwright test]

@@ -60,21 +60,134 @@ pub struct DeliveryRefusal {
 /// cache or a redirect, and the header is what a real client sends.
 pub fn client_stamp_from_request(req: &http::Request) -> Option<DeliveryStamp> {
     if let Some(raw) = req.header(http::CLIENT_STAMP_HEADER) {
-        let mut parts = raw.split('/');
-        let (protocol, content_id, epoch) = (parts.next(), parts.next(), parts.next());
-        // A header with a fourth field is malformed, not merely long: content
-        // ids never contain `/`, so an extra field means the sender is speaking
-        // some other format and its first three fields cannot be trusted.
-        if parts.next().is_none() {
-            return DeliveryStamp::from_params(protocol, content_id, epoch);
-        }
-        return None;
+        return parse_stamp_field(raw);
     }
     DeliveryStamp::from_params(
         req.query_param("protocol"),
         req.query_param("content_id"),
         req.query_param("content_epoch"),
     )
+}
+
+/// Parse the `<protocol>/<content_id>/<content_epoch>` field.
+///
+/// One spelling, two carriers: the `x-phoenix-client-stamp` header a native
+/// host reads off a request, and the browser host's in-band join handshake
+/// (issue #1111). A field with a fourth part is malformed, not merely long:
+/// content ids never contain `/`, so an extra part means the sender is speaking
+/// some other format and its first three parts cannot be trusted.
+pub fn parse_stamp_field(raw: &str) -> Option<DeliveryStamp> {
+    let mut parts = raw.split('/');
+    let (protocol, content_id, epoch) = (parts.next(), parts.next(), parts.next());
+    if parts.next().is_some() {
+        return None;
+    }
+    DeliveryStamp::from_params(protocol, content_id, epoch)
+}
+
+/// The browser host's authoritative join check (issue #1111).
+///
+/// The rendezvous service can only give *advice* about version compatibility —
+/// its version GUID is a coarse release marker carried in a printed join code.
+/// This is the check that binds, and it is deliberately the same
+/// [`stamp::check_client_stamp`] the native host runs at `/host/manifest.json`,
+/// so a Phoenix host has one version pin rather than two.
+///
+/// **Every joiner must present a stamp** (issue #1112). #1111 admitted an absent
+/// one, because PeerJS was still the default route and had never stamped
+/// anything, so refusing the unstamped would have locked out the shipped join
+/// path. #1112 retired PeerJS: every client that can reach this host is a
+/// Phoenix client built by `scripts/build-client.mjs`, which writes the field
+/// into `<meta name="phoenix-client-stamp">` on every build. Nothing legitimate
+/// arrives unstamped any more, so an absent stamp is refused with the same
+/// `ClientStampMissing` a garbled one gets — neither is evidence of
+/// compatibility, and admitting the silent case would leave the only
+/// version-skew hole exactly where a stale cached bundle sits.
+///
+/// One departure from the native host's rules remains, because a browser host
+/// is a live process rather than a served bundle: **a host with no content
+/// identity checks the protocol half only.** The native rule ("an unidentified
+/// content set matches nothing") protects a host serving a bundle it cannot
+/// name. A browser host sitting in the lobby has simply not loaded a manifest
+/// yet, and refusing every phone until it does would be a race, not a safety
+/// property.
+pub fn check_join_stamp(
+    host: &DeliveryStamp,
+    client_field: Option<&str>,
+) -> Result<(), StampMismatch> {
+    let Some(raw) = client_field.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Err(StampMismatch::ClientStampMissing);
+    };
+    let Some(client) = parse_stamp_field(raw) else {
+        return Err(StampMismatch::ClientStampMissing);
+    };
+    if host.content_id.trim().is_empty() {
+        if host.protocol != client.protocol {
+            return Err(StampMismatch::Protocol {
+                host: host.protocol,
+                client: client.protocol,
+            });
+        }
+        return Ok(());
+    }
+    stamp::check_client_stamp(host, Some(&client))
+}
+
+/// The fleet's authoritative host-to-host check (issue #1114).
+///
+/// Same three numbers, same [`stamp::check_client_stamp`] comparison, one
+/// deliberate difference: **there is no grace here at all.** Protocol AND
+/// content must match, including the content-identity half that
+/// [`check_join_stamp`] waives for a host that has not loaded a manifest yet.
+///
+/// The waiver is right for a phone and wrong for a ship. A phone that connects
+/// to a host still sitting in its lobby is joining something that has not
+/// chosen its content yet, and refusing it would be a race rather than a safety
+/// property — the phone will be sent whatever the host later loads. Two HOSTS
+/// are not in that relationship. Each runs its own authoritative simulation
+/// over its own content, and #1116 will make them advance one shared tick
+/// stream; two hosts that agree on the protocol and differ on the content set
+/// do not desynchronise loudly, they desynchronise silently and later. "I have
+/// not decided what I am running yet" is therefore not a reason to admit a
+/// fleet member — it is the strongest possible reason not to.
+///
+/// "Undecided" is refused on BOTH sides, and that is not the same as comparing
+/// them. Two hosts that have not loaded a manifest both carry `content_id ==
+/// ""`, and an equality test admits that pair happily — `"" == ""`, epochs
+/// `(0, 0)` — which is the exact case the paragraph above says is the strongest
+/// possible reason to refuse. An empty identity is an ABSENT one, not a value
+/// two parties can agree on, and it is treated here the way
+/// [`stamp::check_bundle_content`] already treats a bundle whose manifest
+/// declares no `[content]`: as missing, never as matching.
+///
+/// The reason codes are `StampMismatch`'s own, unchanged, and deliberately so:
+/// a fleet refusal reads back through the same `reasonStringId` map on the same
+/// wire (`gui/join-code.js`), so "the other ship is on a different build" gets
+/// one sentence in this project rather than two. Read `client` in
+/// `client-stamp-missing` as "the joining side", which is what it has always
+/// meant.
+pub fn check_host_stamp(
+    host: &DeliveryStamp,
+    peer_field: Option<&str>,
+) -> Result<(), StampMismatch> {
+    let Some(raw) = peer_field.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Err(StampMismatch::ClientStampMissing);
+    };
+    let Some(peer) = parse_stamp_field(raw) else {
+        return Err(StampMismatch::ClientStampMissing);
+    };
+    // Protocol first, then the ordinary comparison — the shared check owns the
+    // order, and reporting a content difference over a protocol one would send
+    // the operator after the wrong thing.
+    stamp::check_client_stamp(host, Some(&peer))?;
+    // They agreed. On nothing, if neither has decided what it is running.
+    if host.content_id.trim().is_empty() || peer.content_id.trim().is_empty() {
+        return Err(StampMismatch::ContentId {
+            host: host.content_id.clone(),
+            client: peer.content_id.clone(),
+        });
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -151,6 +264,191 @@ mod tests {
             .unwrap_err()
             .code(),
             "client-stamp-missing"
+        );
+    }
+
+    // ── The browser host's in-band join handshake (issue #1111) ─────────────
+
+    fn browser_host() -> DeliveryStamp {
+        DeliveryStamp {
+            protocol: PROTOCOL_VERSION,
+            content_id: "phoenix-base".into(),
+            content_epoch: 1,
+        }
+    }
+
+    #[test]
+    fn a_join_stamp_matching_the_host_is_admitted() {
+        let field = format!("{PROTOCOL_VERSION}/phoenix-base/1");
+        assert!(check_join_stamp(&browser_host(), Some(&field)).is_ok());
+    }
+
+    #[test]
+    fn a_join_from_another_protocol_is_refused_by_the_host_not_the_rendezvous() {
+        let field = format!("{}/phoenix-base/1", PROTOCOL_VERSION + 1);
+        let err = check_join_stamp(&browser_host(), Some(&field)).unwrap_err();
+        assert_eq!(err.code(), "protocol-mismatch");
+    }
+
+    #[test]
+    fn a_join_from_another_content_set_is_refused() {
+        let field = format!("{PROTOCOL_VERSION}/other-game/1");
+        assert_eq!(
+            check_join_stamp(&browser_host(), Some(&field))
+                .unwrap_err()
+                .code(),
+            "content-id-mismatch"
+        );
+    }
+
+    #[test]
+    fn an_unstamped_join_is_refused_now_that_every_client_is_a_phoenix_one() {
+        // The #1112 flip. Until PeerJS was retired an unstamped joiner was the
+        // shipped client, so admitting it was the only option; now the only way
+        // to arrive unstamped is to not be a built Phoenix bundle.
+        for absent in [None, Some(""), Some("  ")] {
+            assert_eq!(
+                check_join_stamp(&browser_host(), absent)
+                    .unwrap_err()
+                    .code(),
+                "client-stamp-missing",
+                "{absent:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_garbled_join_stamp_is_refused_under_the_same_code_as_an_absent_one() {
+        for garbled in ["1/phoenix-base", "1/phoenix-base/1/extra", "nonsense"] {
+            assert_eq!(
+                check_join_stamp(&browser_host(), Some(garbled))
+                    .unwrap_err()
+                    .code(),
+                "client-stamp-missing",
+                "{garbled}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_host_that_has_not_loaded_a_manifest_still_binds_the_protocol_half() {
+        let lobby = DeliveryStamp::for_manifest("");
+        assert!(lobby.content_id.is_empty());
+        // Content cannot be compared yet, so a real client is admitted…
+        let ok = format!("{PROTOCOL_VERSION}/phoenix-base/1");
+        assert!(check_join_stamp(&lobby, Some(&ok)).is_ok());
+        // …but a protocol difference is still fatal.
+        let bad = format!("{}/phoenix-base/1", PROTOCOL_VERSION + 1);
+        assert_eq!(
+            check_join_stamp(&lobby, Some(&bad)).unwrap_err().code(),
+            "protocol-mismatch"
+        );
+    }
+
+    // ── The fleet's host-to-host handshake (issue #1114) ────────────────────
+
+    #[test]
+    fn a_matching_ship_host_is_admitted_to_the_fleet() {
+        let field = format!("{PROTOCOL_VERSION}/phoenix-base/1");
+        assert!(check_host_stamp(&browser_host(), Some(&field)).is_ok());
+    }
+
+    #[test]
+    fn a_ship_host_on_another_protocol_or_content_set_is_refused() {
+        for (field, code) in [
+            (
+                format!("{}/phoenix-base/1", PROTOCOL_VERSION + 1),
+                "protocol-mismatch",
+            ),
+            (
+                format!("{PROTOCOL_VERSION}/other-game/1"),
+                "content-id-mismatch",
+            ),
+            (
+                format!("{PROTOCOL_VERSION}/phoenix-base/2"),
+                "content-epoch-mismatch",
+            ),
+        ] {
+            assert_eq!(
+                check_host_stamp(&browser_host(), Some(&field))
+                    .unwrap_err()
+                    .code(),
+                code,
+                "{field}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unstamped_or_garbled_ship_host_is_refused_like_an_unstamped_phone() {
+        for absent in [
+            None,
+            Some(""),
+            Some("  "),
+            Some("1/phoenix-base"),
+            Some("junk"),
+        ] {
+            assert_eq!(
+                check_host_stamp(&browser_host(), absent)
+                    .unwrap_err()
+                    .code(),
+                "client-stamp-missing",
+                "{absent:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_fleet_admits_nobody_until_it_knows_what_content_it_is_running() {
+        // The one behavioural difference from the crew handshake, and the whole
+        // reason this function exists rather than a call to check_join_stamp: a
+        // host with no manifest loaded waives the CONTENT half for a phone, and
+        // must not waive it for another authoritative simulation.
+        let undecided = DeliveryStamp::for_manifest("");
+        let ok = format!("{PROTOCOL_VERSION}/phoenix-base/1");
+        assert!(check_join_stamp(&undecided, Some(&ok)).is_ok());
+        assert_eq!(
+            check_host_stamp(&undecided, Some(&ok)).unwrap_err().code(),
+            "content-id-mismatch"
+        );
+        // The other direction: a host that knows what it is running refuses a
+        // ship host that does not.
+        let unstated = format!("{PROTOCOL_VERSION}//0");
+        assert_eq!(
+            check_host_stamp(&browser_host(), Some(&unstated))
+                .unwrap_err()
+                .code(),
+            "content-id-mismatch"
+        );
+        // And the case an equality test admits: NEITHER of them has decided.
+        // "" is an absent identity, not a value two hosts can agree on — this
+        // is the pair that would otherwise fly one mission over two different
+        // content sets and desynchronise silently, later.
+        assert_eq!(
+            check_host_stamp(&undecided, Some(&unstated))
+                .unwrap_err()
+                .code(),
+            "content-id-mismatch"
+        );
+        // A protocol difference still outranks it, so the operator is sent
+        // after the thing that makes every other field's meaning uncertain.
+        let other_protocol = format!("{}//0", PROTOCOL_VERSION + 1);
+        assert_eq!(
+            check_host_stamp(&undecided, Some(&other_protocol))
+                .unwrap_err()
+                .code(),
+            "protocol-mismatch"
+        );
+    }
+
+    #[test]
+    fn the_join_handshake_parses_the_same_field_the_http_header_carries() {
+        let field = "1/phoenix-base/2";
+        assert_eq!(
+            parse_stamp_field(field),
+            client_stamp_from_request(&request(&format!(
+                "GET /host/manifest.json HTTP/1.1\r\nx-phoenix-client-stamp: {field}\r\n"
+            )))
         );
     }
 }

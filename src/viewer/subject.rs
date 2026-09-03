@@ -22,6 +22,8 @@ use bevy::prelude::*;
 use crate::entities::celestial_visual::{insert_planet_visual, insert_star_visual};
 use crate::entities::config::{EntityConfig, MeshShape};
 use crate::entities::glb_visual::{spawn_glb_visual, GlbSpawnOutcome, PendingSceneHandle};
+use crate::entities::model_markers::resolve_sidecar_rig;
+use crate::entities::model_rig::ModelMarkers;
 use crate::entities::planet::{PlanetCloudMaterial, PlanetSurfaceMaterial};
 use crate::entities::star::{StarHaloMaterial, StarSurfaceMaterial};
 
@@ -164,14 +166,30 @@ pub fn poll_pending_model(
     mut planet_surface: ResMut<Assets<PlanetSurfaceMaterial>>,
     mut planet_cloud: ResMut<Assets<PlanetCloudMaterial>>,
     ladder: Option<Res<crate::viewer::lod::LadderState>>,
-    subjects: Query<(Entity, Option<&PendingSceneHandle>), With<Subject>>,
+    subjects: Query<(Entity, Option<&PendingSceneHandle>, Option<&ModelMarkers>), With<Subject>>,
 ) {
     if state.settled {
         return;
     }
-    let Ok((entity, pending)) = subjects.single() else {
+    let Ok((entity, pending, markers)) = subjects.single() else {
         // Zero subjects during a respawn, or more than one mid-teardown.
         return;
+    };
+
+    // The viewer is an authoring surface rather than an authoritative app, but
+    // its gizmos still preview the canonical PRIMARY rig. Keep those markers on
+    // the subject across GLB, shape, and billboard LOD previews; the active
+    // visual tier must never become their source.
+    let primary_rig = if let Some(primary_model) = args.model.as_deref() {
+        let Some(rig) = resolve_sidecar_rig(primary_model, args.variant.as_deref()) else {
+            return;
+        };
+        if markers.is_none() {
+            commands.entity(entity).insert(ModelMarkers::from_rig(&rig));
+        }
+        Some(rig)
+    } else {
+        None
     };
 
     // A procedural LOD level: built through the game's own cache-backed
@@ -282,11 +300,12 @@ pub fn poll_pending_model(
                 // so the answer is `None` either way; take it without asking.
                 state.extents = match &declared {
                     Some(rig) => rig.extents.as_ref().map(|e| Vec3::from_array(e.size)),
-                    None => crate::entities::glb_visual::resolve_sidecar_rig(
-                        &model_path,
-                        variant.as_deref(),
-                    )
-                    .and_then(|rig| rig.extents.map(|e| Vec3::from_array(e.size))),
+                    None if level_glb.is_none() => primary_rig
+                        .as_ref()
+                        .and_then(|rig| rig.extents.as_ref())
+                        .map(|extents| Vec3::from_array(extents.size)),
+                    None => resolve_sidecar_rig(&model_path, variant.as_deref())
+                        .and_then(|rig| rig.extents.map(|e| Vec3::from_array(e.size))),
                 };
                 state.settled = true;
             }

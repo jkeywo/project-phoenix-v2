@@ -129,10 +129,18 @@ pub fn reconcile_fixed_timestep(
 /// after `FixedUpdate`.
 ///
 /// `StatesPlugin` registers `StateTransition` in the `MainScheduleOrder` after
-/// `PreUpdate`, i.e. once per rendered frame. That is the right place for the
-/// writers that are still frame-driven (the JS bridge's force-start, the asset
-/// preloader, headless' auto-start), and it stays registered there — this adds
-/// a SECOND run site rather than moving the first.
+/// `PreUpdate`, i.e. once per rendered frame. Since issue #1121's fix round
+/// every *production* `NextState<GamePhase>` writer — the JS bridge's
+/// force-start (`server::bridge::apply_force_start`), the asset preloader
+/// (`server::asset_preload::auto_transition_from_loading`), headless' and
+/// the native host's auto-start (`headless::app::headless_auto_start`,
+/// `native_host::solo_auto_start`) and the lobby countdown
+/// (`lobby::server::tick_countdown`) — writes from `FixedUpdate` instead, so
+/// this frame-level site no longer has a production writer to serve. It stays
+/// registered anyway, for bare-`App` fixtures and test drivers that write the
+/// phase from a frame schedule (e.g. `tests/headless_runner.rs` setting
+/// `NextState<GamePhase>` directly rather than going through a fixed system)
+/// — this adds a SECOND run site rather than moving the first.
 ///
 /// The second site is what makes a phase change deterministic. Every in-game
 /// `NextState<GamePhase>` writer runs in `FixedUpdate`, so on a frame that

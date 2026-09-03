@@ -64,6 +64,18 @@
 # and the decay authored below is exactly that, walking every tick. If a later
 # change moves this digest without moving either, something started folding a
 # scan, and that is the question to ask before re-blessing this line.
+#
+# RECORDED PRE-#1086, AND NO LONGER SAFE TO ASSUME. The BUCKET named above just
+# emptied: issue #1086's `sim_digest::fold_scenario_records` now walks the
+# deadline table, the commitments ledger and the evidence log this paragraph
+# names as a scan reading's unfolded company. This world puts nothing in any of
+# them — no `[script]` block, no deadline, no commitment, no evidence entry —
+# so a scan reading stays exactly as unfolded as the paragraph above claims, and
+# the number MAY still reproduce on the empty-walk affordance the fold gives a
+# scenario-free world. "May" is doing the work: this line has not been
+# re-measured since #1086, so it is recorded here as pre-#1086 provenance
+# rather than re-blessed as current. Re-measure before treating it as a
+# baseline again.
 
 [global]
 seed = 1032

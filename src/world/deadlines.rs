@@ -337,9 +337,21 @@ impl DeadlineTable {
         armed
     }
 
-    /// Whether anything is authored here.
+    /// Whether anything is authored here **and** the table has never armed.
+    ///
+    /// This is the payload's `skip_serializing_if` (see
+    /// [`crate::snapshot::ScenarioState::deadlines`]), so it decides whether the
+    /// table travels at all — and the `armed` latch has to be part of it. An
+    /// armed-but-record-less table is a real state: `arm_mission_deadlines`
+    /// latches before it walks the authored list, and a world whose every
+    /// deadline was subsequently cancelled and removed sits in exactly that
+    /// state. Testing `records` alone serialised such a table as ABSENT, so the
+    /// restore wrote back a `Default` with `armed = false` and the resumed
+    /// mission re-armed from the world file — the silent re-arming this field
+    /// exists to prevent, and a state `sim_digest::fold_scenario_records`
+    /// distinguishes but the payload could not round-trip.
     pub fn is_empty(&self) -> bool {
-        self.records.is_empty()
+        self.records.is_empty() && !self.armed
     }
 
     /// How many whole seconds are left on `id` at `now_tick`.

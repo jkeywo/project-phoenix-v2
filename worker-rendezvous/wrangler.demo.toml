@@ -1,0 +1,24 @@
+name = "phoenix-rendezvous-demo"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+
+[vars]
+# The canonical public demo origin. Cloudflare Pages serves that site behind
+# its pp-demo.kiwigamedesign.co.uk custom domain. The dev rendezvous worker
+# (wrangler.toml) has its own origin list and is untouched by this file.
+#
+# Same drift trap as everywhere else: a deployed value only changes on
+# `wrangler deploy`. Verify with the /v1/health recipe in
+# docs/delivery-checklist.md after every change.
+ALLOWED_ORIGIN = "https://pp-demo.kiwigamedesign.co.uk"
+
+[[durable_objects.bindings]]
+name = "RENDEZVOUS"
+class_name = "RendezvousRegistry"
+
+[[migrations]]
+tag = "v1"
+# SQLite-backed, matching wrangler.toml — see the note there.
+new_sqlite_classes = ["RendezvousRegistry"]
+
+# No secrets. See worker-rendezvous/wrangler.toml.

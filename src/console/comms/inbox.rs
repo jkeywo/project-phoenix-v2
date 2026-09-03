@@ -64,6 +64,29 @@ impl CommsInbox {
         self.records.iter().map(|r| r.message.clone()).collect()
     }
 
+    /// Borrow the inbox in inbox order, without cloning a single message.
+    ///
+    /// [`messages`](Self::messages) clones the whole inbox, which is the right
+    /// shape for a payload that is about to be serialised or broadcast and the
+    /// wrong shape for a reader that only wants to *look*: `sim_digest`'s comms
+    /// fold (issue #1086) walks this inbox once per digest sample (and per save
+    /// and restore) and must not allocate a copy of the conversation to do it —
+    /// still less once #1118 puts the fold on a per-tick exchange, which is the
+    /// cadence this borrow is sized for.
+    pub fn iter(&self) -> impl Iterator<Item = &CommsMessage> {
+        self.records.iter().map(|record| &record.message)
+    }
+
+    /// How many messages the inbox holds.
+    pub fn len(&self) -> usize {
+        self.records.len()
+    }
+
+    /// Whether the inbox holds nothing at all.
+    pub fn is_empty(&self) -> bool {
+        self.records.is_empty()
+    }
+
     /// Remove a single message by id (no-op if not found). Used by the
     /// pending-follow-up timer to retire the `...` placeholder on expiry.
     pub fn remove(&mut self, message_id: &str) {

@@ -129,6 +129,12 @@ thread_local! {
     /// Set of sidecar paths already requested to avoid duplicate JS fetches.
     static SIDECAR_FETCH_REQUESTED: RefCell<HashSet<String>> =
         RefCell::new(HashSet::new());
+
+    /// Canonical primary-rig paths discovered from preloaded entity templates
+    /// but not yet delivered. This participates in the same one-shot preload
+    /// completion as entity TOML so boot cannot freeze content identity first.
+    static SIDECAR_PRELOAD_PENDING: RefCell<HashSet<String>> =
+        RefCell::new(HashSet::new());
 }
 
 // The sidecar TOML inbox is a pure-Rust thread-local map: JS pushes here on
@@ -578,6 +584,48 @@ pub fn set_config_request_callback(callback: Function) {
     });
 }
 
+#[cfg(target_arch = "wasm32")]
+fn settle_preload_complete() -> bool {
+    let complete = PENDING_QUEUE.with(|q| q.borrow().is_empty())
+        && IN_FLIGHT.with(|q| q.borrow().is_empty())
+        && SIDECAR_PRELOAD_PENDING.with(|q| q.borrow().is_empty());
+    PRELOAD_COMPLETE.with(|flag| {
+        *flag.borrow_mut() = complete;
+    });
+    complete
+}
+
+#[cfg(target_arch = "wasm32")]
+fn queue_primary_sidecar_preload(path: String) {
+    let path = crate::entities::include_resolve::canonical_template_path(&path);
+    if is_pending_sidecar_delivered(&path) {
+        return;
+    }
+
+    // A pack-supplied rig is already resident authoritative content; never
+    // replace it with the base HTTP body merely because the template preload
+    // reached it before the runtime sidecar loader did.
+    if let Some(body) = mod_pack_overlay_get(&path) {
+        let _ = wasm_push_sidecar_toml(path, body);
+        return;
+    }
+
+    let inserted =
+        SIDECAR_PRELOAD_PENDING.with(|pending| pending.borrow_mut().insert(path.clone()));
+    if !inserted {
+        return;
+    }
+    PRELOAD_COMPLETE.with(|flag| *flag.borrow_mut() = false);
+    SIDECAR_FETCH_REQUESTED.with(|requested| {
+        requested.borrow_mut().insert(path.clone());
+    });
+    CONFIG_REQUEST_CB.with(|slot| {
+        if let Some(cb) = slot.borrow().as_ref() {
+            let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(&path));
+        }
+    });
+}
+
 /// Load an entity template from a TOML string, resolve its include closure and
 /// insert the resolved config into the cache.
 ///
@@ -636,9 +684,16 @@ pub fn wasm_load_config(path: String, toml_str: String) -> Result<JsValue, JsVal
             match resolved.parse() {
                 Ok(config) => {
                     let nested = nested_template_paths(&config);
+                    let primary_sidecar = config
+                        .mesh
+                        .as_ref()
+                        .and_then(crate::entities::model_markers::primary_sidecar_path);
                     CONFIG_CACHE.with(|cache| {
                         cache.borrow_mut().insert(requested, config);
                     });
+                    if let Some(path) = primary_sidecar {
+                        queue_primary_sidecar_preload(path);
+                    }
                     for nested_path in nested {
                         mark_entity_template(&nested_path);
                         queue_and_fire(nested_path);
@@ -661,12 +716,7 @@ pub fn wasm_load_config(path: String, toml_str: String) -> Result<JsValue, JsVal
     // Check if preload is complete. A failed template still counts as
     // "processed" — `drain_resolved_templates` settles it — so a bad TOML must
     // not permanently block finishInit().
-    let has_pending = PENDING_QUEUE.with(|q| !q.borrow().is_empty());
-    let has_in_flight = IN_FLIGHT.with(|q| !q.borrow().is_empty());
-    if !has_pending && !has_in_flight {
-        PRELOAD_COMPLETE.with(|flag| {
-            *flag.borrow_mut() = true;
-        });
+    if settle_preload_complete() {
         // Return TRUE so handleConfigRequest calls finishInit().
         Ok(JsValue::TRUE)
     } else if failures.is_empty() {
@@ -868,13 +918,13 @@ pub fn request_world_fetch(path: String) {
 
 // ── Model-rig sidecar fetch bridge (mirrors the world-toml flow) ─────────────
 //
-// The sidecar fetch reuses the same JS fetch callback registered via
-// `set_world_fetch_callback` (server.html's callback simply `fetch(path)`s any
-// path, so a single callback serves both world TOMLs and rig sidecars). Only
-// the pending-queue + requested-set are sidecar-specific so the two flows stay
-// independent.
+// Primary rigs are discovered during entity-config preload and use its config
+// callback so their exact bodies arrive before content identity freezes. Later
+// runtime/generated reads reuse the JS callback registered through
+// `set_world_fetch_callback`. The persistent inbox and requested sets are shared
+// by both delivery routes, so each canonical path is fetched once.
 
-/// Push a runtime-fetched sidecar TOML into the pending queue.
+/// Push a preloaded or runtime-fetched sidecar TOML into the persistent inbox.
 ///
 /// Called by JS after it has fetched a rig sidecar at a path that Rust
 /// requested via `request_sidecar_fetch`. An empty string signals "absent"
@@ -882,10 +932,26 @@ pub fn request_world_fetch(path: String) {
 ///
 /// Available on native too so unit tests can simulate JS delivery without
 /// dragging in wasm-bindgen.
-pub fn wasm_push_sidecar_toml(path: String, toml_str: String) {
+pub fn wasm_push_sidecar_toml(path: String, toml_str: String) -> bool {
+    let path = crate::entities::include_resolve::canonical_template_path(&path);
+    // Delivery is the browser's pre-freeze content-ingestion boundary. Record
+    // the exact body before parsing: an empty 404 and malformed non-empty TOML
+    // are both authoritative inputs even though both produce an identity rig.
+    crate::content_ledger::record(&path, &toml_str);
     PENDING_SIDECAR_TOML.with(|m| {
-        m.borrow_mut().insert(path, toml_str);
+        m.borrow_mut().insert(path.clone(), toml_str);
     });
+    #[cfg(target_arch = "wasm32")]
+    {
+        SIDECAR_PRELOAD_PENDING.with(|pending| {
+            pending.borrow_mut().remove(&path);
+        });
+        settle_preload_complete()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        false
+    }
 }
 
 /// Get the TOML for a previously-requested sidecar path, if available.
@@ -899,7 +965,8 @@ pub fn wasm_push_sidecar_toml(path: String, toml_str: String) {
 /// asteroid rocks of the same type) can all read it without the first
 /// consumer destroying it for the rest.
 pub fn take_pending_sidecar_toml(path: &str) -> Option<String> {
-    PENDING_SIDECAR_TOML.with(|m| m.borrow().get(path).cloned())
+    let path = crate::entities::include_resolve::canonical_template_path(path);
+    PENDING_SIDECAR_TOML.with(|m| m.borrow().get(&path).cloned())
 }
 
 /// Non-destructive check: has JS delivered the sidecar TOML for `path` yet?
@@ -909,7 +976,8 @@ pub fn take_pending_sidecar_toml(path: &str) -> Option<String> {
 /// contents. Leaves the entry in `PENDING_SIDECAR_TOML` so the renderer can
 /// still consume it via [`take_pending_sidecar_toml`].
 pub fn is_pending_sidecar_delivered(path: &str) -> bool {
-    PENDING_SIDECAR_TOML.with(|m| m.borrow().contains_key(path))
+    let path = crate::entities::include_resolve::canonical_template_path(path);
+    PENDING_SIDECAR_TOML.with(|m| m.borrow().contains_key(&path))
 }
 
 /// Fire the JS fetch callback for a sidecar `path` if not already requested.
@@ -918,10 +986,18 @@ pub fn is_pending_sidecar_delivered(path: &str) -> bool {
 /// this read is an EXISTENCE TEST, so a 404 is one of its expected answers and
 /// the page must resolve it to the empty string without logging a failed fetch.
 /// Only the legacy ladder-convention probe sets it (see
-/// [`crate::entities::glb_visual::Absence`]); every other sidecar read still
+/// [`crate::entities::model_markers::Absence`]); every other sidecar read still
 /// wants a missing file reported.
 #[cfg(target_arch = "wasm32")]
 pub fn request_sidecar_fetch(path: String, optional: bool) {
+    let path = crate::entities::include_resolve::canonical_template_path(&path);
+    if is_pending_sidecar_delivered(&path) {
+        return;
+    }
+    if let Some(body) = mod_pack_overlay_get(&path) {
+        let _ = wasm_push_sidecar_toml(path, body);
+        return;
+    }
     let already = SIDECAR_FETCH_REQUESTED.with(|s| s.borrow().contains(&path));
     if already {
         return;

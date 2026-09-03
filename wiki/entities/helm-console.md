@@ -2,8 +2,8 @@
 title: Helm Console
 type: entity
 tags: [console, helm, input, ship, physics, radar, impulse, boost]
-sources: [gui/battleship/helm.html, gui/cruiser/helm.html, gui/destroyer/helm.html, gui/console-state.js, gui/components/ph-helm-radar.js, src/console/helm/server.rs, src/ship/helm_admission.rs, src/ship/physics_systems.rs, src/ship/physics.rs, src/ship/impulse.rs, src/ship/boost.rs, src/ship/impulse_boost_systems.rs, src/modifiers/coordination.rs, assets/entities/alliance_destroyer.toml]
-updated: 2026-08-27
+sources: [gui/battleship/helm.html, gui/cruiser/helm.html, gui/destroyer/helm.html, gui/console-state.js, gui/components/ph-helm-radar.js, gui/components/ph-helm-joystick.js, gui/stations/helm-actions.js, gui/gamepad-input.js, src/console/helm/server.rs, src/ship/helm_admission.rs, src/ship/physics_systems.rs, src/ship/physics.rs, src/ship/impulse.rs, src/ship/boost.rs, src/ship/impulse_boost_systems.rs, src/modifiers/coordination.rs, assets/entities/alliance_destroyer.toml]
+updated: 2026-08-31
 ---
 
 # Helm Console
@@ -25,6 +25,14 @@ model in `src/ship/physics.rs`.
 Human and Backfill Helm use the same commands and physics path. Admission and
 the station's active rating decide which source may operate each fine system;
 the physics layer does not branch on who issued the command.
+
+The real `helm.steering` semantic action maps the selected standard gamepad's
+left-stick X axis onto the existing `SetSteering` command at an authored
+100-millisecond cadence. The parent client owns explicit device selection,
+deadzone/inversion tuning and disconnect/reconnect neutral gating; the Helm
+iframe adapter and `action-map.js` keep using `helm-steering`, so this adds no
+authority or protocol route. `ph-helm-joystick` retains pointer and WASD input
+but no longer polls arbitrary gamepads itself.
 
 ## Impulse and boost
 

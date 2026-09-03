@@ -21,7 +21,7 @@ pub fn anchors_from_world_config(
 
 use crate::ai::lod::{evaluate_lod, LodState};
 use crate::entities::spawner::{BehaviourSection, EntityUuid};
-use crate::server_app::{LocalShip, Ship};
+use crate::server_app::Ship;
 use crate::ship::state::ShipPhysics;
 
 // The slower snapshot cadence that gates `build_world_snapshot` and
@@ -301,9 +301,9 @@ pub struct LodTransitionTimer {
 /// Starbase Alpha in `combat_test` sat in low-LOD being ground down while the
 /// player hunted elsewhere, its own point defence never running and the raiders
 /// sieging it dead-reckoned rather than fighting. A bubble makes "is this near
-/// enough to the action to simulate in full" a property of *anchors*: a player
-/// ship always projects one (the `LocalShip` is an implicit anchor at
-/// [`DEFAULT_PLAYER_LOD_BUBBLE_RADIUS`] unless it authors its own), and a
+/// enough to the action to simulate in full" a property of *anchors*: every
+/// frozen-roster fleet ship always projects one (at
+/// [`DEFAULT_FLEET_LOD_BUBBLE_RADIUS`] unless it authors its own), and a
 /// stationary defended object like the station projects a smaller one, so the
 /// raid sieging it — and the station's own guns — run in full whether or not the
 /// player is looking. Authored as `[lod_bubble] radius = N`.
@@ -312,14 +312,14 @@ pub struct LodBubble {
     pub radius: f32,
 }
 
-/// The bubble radius a player `LocalShip` projects when it authors no
-/// `[lod_bubble]` of its own — every player hull is an anchor without having to
-/// repeat the block. Generous enough to cover a normal engagement so an NPC
-/// closing on the player is in full fidelity before it opens fire; deliberately
-/// WIDER than the old per-NPC `sensor_range` promotion, which is what re-timed
-/// far-from-player combats (`probe_despawn`'s duel gains its natural second kill
-/// once both hulls run in full).
-pub const DEFAULT_PLAYER_LOD_BUBBLE_RADIUS: f32 = 600.0;
+/// The bubble radius a frozen-roster fleet ship projects when it authors no
+/// `[lod_bubble]` of its own — every crewed hull is an anchor on every peer
+/// without repeating the block. Generous enough to cover a normal engagement so
+/// an NPC closing on any fleet ship is in full fidelity before it opens fire;
+/// deliberately wider than the old per-NPC `sensor_range` promotion, which is
+/// what re-timed far-from-player combats (`probe_despawn`'s duel gains its
+/// natural second kill once both hulls run in full).
+pub const DEFAULT_FLEET_LOD_BUBBLE_RADIUS: f32 = 600.0;
 
 /// Per-objective route cursors: where this ship is on each objective's route.
 ///
@@ -460,6 +460,7 @@ pub(crate) fn build_world_snapshot(
         With<crate::server_app::Asteroid>,
     >,
 ) {
+    // Sorted by uuid at the end of this build — see below.
     snapshot.entities = query
         .iter()
         .map(
@@ -1148,17 +1149,23 @@ const LOD_HYSTERESIS: f32 = 0.2;
 /// Minimum time (seconds) that must elapse before a demotion is allowed.
 const LOD_DWELL_SECS: f64 = 2.0;
 
-/// Evaluate LOD for every NPC ship against the high-fidelity **bubbles** in the
-/// world (see [`LodBubble`]).
+/// Evaluate LOD for every non-fleet NPC ship against the high-fidelity
+/// **bubbles** in the world (see [`LodBubble`]).
 ///
 /// An NPC is promoted to `AiHighFidelity` while it is inside any bubble and
 /// demoted once it has left every bubble by the hysteresis margin for the dwell
-/// window. The anchors are the player `LocalShip` (an implicit bubble at
-/// [`DEFAULT_PLAYER_LOD_BUBBLE_RADIUS`], or its authored `[lod_bubble]` radius)
-/// plus every entity carrying a [`LodBubble`] — the station's smaller one. An
-/// NPC that is itself a bubble carrier (the station) is held high-fidelity
-/// unconditionally: it anchors a zone, so it is never demoted out of one.
-/// `LocalShip` is never evaluated and keeps its `AiHighFidelity` marker.
+/// window. Every fleet ship is an implicit anchor at
+/// [`DEFAULT_FLEET_LOD_BUBBLE_RADIUS`] (or its authored `[lod_bubble]` radius),
+/// plus every non-fleet entity carrying a [`LodBubble`] — the station's smaller
+/// one. This must be the whole frozen fleet rather than the one `LocalShip`:
+/// a stationless GM has no local projection, and two ship hosts tag different
+/// hulls, but all authoritative peers must make the same fidelity decision.
+/// A non-fleet NPC that is itself a bubble carrier (the station) is held
+/// high-fidelity unconditionally: it anchors a zone, so it is never demoted out
+/// of one. Fleet ships are never evaluated; their spawn path keeps their
+/// `AiHighFidelity` marker permanently. `LocalShip` is deliberately absent from
+/// this mechanic: it is a host-local presentation marker and may not influence
+/// authoritative fidelity.
 ///
 /// Promotion keys on the ANCHOR's radius, not the NPC's own `sensor_range` as it
 /// used to: "is this near enough to the action to run in full" is a fact about
@@ -1168,8 +1175,11 @@ const LOD_DWELL_SECS: f64 = 2.0;
 /// same bubble.
 fn lod_ai_ships(
     time: Res<Time>,
-    player: Query<(&Transform, Option<&LodBubble>), (With<LocalShip>, With<Ship>)>,
-    anchor_bubbles: Query<(&Transform, &LodBubble), Without<LocalShip>>,
+    fleet: Query<
+        (&Transform, Option<&LodBubble>),
+        (With<crate::lockstep::FleetSlotOf>, With<Ship>),
+    >,
+    anchor_bubbles: Query<(&Transform, &LodBubble), Without<crate::lockstep::FleetSlotOf>>,
     npcs: Query<
         (
             Entity,
@@ -1178,25 +1188,27 @@ fn lod_ai_ships(
             Has<AiHighFidelity>,
             Option<&LodTransitionTimer>,
         ),
-        (With<Ship>, Without<LocalShip>),
+        (With<Ship>, Without<crate::lockstep::FleetSlotOf>),
     >,
     mut commands: Commands,
 ) {
-    let Ok((player_transform, player_bubble)) = player.single() else {
-        return;
-    };
     let now_secs = time.elapsed_secs() as f64;
 
-    // Anchors: the player (implicit or authored radius) plus every non-player
-    // bubble carrier (the station). `(x, z, radius)`.
-    let player_radius = player_bubble
-        .map(|b| b.radius)
-        .unwrap_or(DEFAULT_PLAYER_LOD_BUBBLE_RADIUS);
-    let mut anchors: Vec<(f32, f32, f32)> = vec![(
-        player_transform.translation.x,
-        player_transform.translation.z,
-        player_radius,
-    )];
+    // Anchors: every ship in the frozen fleet, identically on every peer.
+    // `(x, z, radius)`.
+    let mut anchors: Vec<(f32, f32, f32)> = fleet
+        .iter()
+        .map(|(transform, bubble)| {
+            (
+                transform.translation.x,
+                transform.translation.z,
+                bubble
+                    .map(|bubble| bubble.radius)
+                    .unwrap_or(DEFAULT_FLEET_LOD_BUBBLE_RADIUS),
+            )
+        })
+        .collect();
+    // Authored non-fleet bubbles remain anchors even in a stationless world.
     for (transform, bubble) in &anchor_bubbles {
         anchors.push((
             transform.translation.x,
@@ -1222,7 +1234,7 @@ fn lod_ai_ships(
             // `evaluate_lod` makes "inside if ANY bubble contains it" fall out
             // of the same distance-vs-threshold comparison the single-bubble
             // form used, with the hysteresis judged against that same bubble.
-            let (distance, radius) = anchors
+            let Some((distance, radius)) = anchors
                 .iter()
                 .map(|&(ax, az, r)| {
                     let dx = transform.translation.x - ax;
@@ -1231,10 +1243,20 @@ fn lod_ai_ships(
                 })
                 .max_by(|(d1, r1), (d2, r2)| {
                     (r1 - d1)
-                        .partial_cmp(&(r2 - d2))
-                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .total_cmp(&(r2 - d2))
+                        // Equal penetration against different radii can sit on
+                        // opposite sides of high→low hysteresis. Bevy query
+                        // order is not a peer-stable tiebreak, so use the
+                        // radius (and therefore the corresponding distance) as
+                        // the canonical second key.
+                        .then_with(|| r1.total_cmp(r2))
                 })
-                .expect("anchors always contains at least the player");
+            else {
+                // No fleet, local projection, or authored bubble: there is no
+                // high-fidelity zone to compare against, so preserve the
+                // current state rather than inventing a host-local anchor.
+                continue;
+            };
             let last_change = timer.map(|t| t.last_state_change_secs).unwrap_or(0.0);
             evaluate_lod(
                 current_state,

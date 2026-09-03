@@ -259,6 +259,8 @@ export class ConsoleLatencyMeter {
     this._enabled = false;
     /** @type {Map<string, Array<{action: string, sendMs: number, inputToSend: number}>>} */
     this._pending = new Map();
+    /** @type {Map<string, {action: string, sendMs: number, inputToSend: number}>} */
+    this._correlated = new Map();
     /** @type {Array<object>} */
     this._samples = [];
     /** @type {Map<string, number>} action → unanswered count since the last drain */
@@ -285,6 +287,7 @@ export class ConsoleLatencyMeter {
     const next = !!on;
     if (next !== this._enabled) {
       this._pending.clear();
+      this._correlated.clear();
       this._samples.length = 0;
       this._expired.clear();
     }
@@ -316,6 +319,52 @@ export class ConsoleLatencyMeter {
     // an action this surface never answered.
     while (queue.length > this.maxPending) this._countExpired(queue.shift());
     this._pending.set(key, queue);
+  }
+
+  /**
+   * Record a dispatch whose authoritative response carries an exact
+   * correlation.  It never joins the surface-refresh queue above: only
+   * `noteCorrelatedAck` for this identity can settle it.
+   */
+  noteCorrelatedDispatch(correlation, action, inputMs) {
+    if (!this._enabled || typeof correlation !== 'string' || !correlation
+        || typeof action !== 'string' || !action || this._correlated.has(correlation)) return;
+    const sendMs = this._now();
+    const inputToSend = Number.isFinite(inputMs)
+      ? Math.max(0, sendMs - inputMs)
+      : 0;
+    this._correlated.set(correlation, { action, sendMs, inputToSend });
+    while (this._correlated.size > this.maxPending) {
+      const oldest = this._correlated.keys().next().value;
+      const item = this._correlated.get(oldest);
+      this._correlated.delete(oldest);
+      this._countExpired(item);
+    }
+  }
+
+  /** Settle exactly one correlated action from its ActionFeedback response. */
+  noteCorrelatedAck(correlation) {
+    if (!this._enabled) return false;
+    const ackMs = this._now();
+    this._expire(ackMs);
+    const item = this._correlated.get(correlation);
+    if (!item) return false;
+    this._correlated.delete(correlation);
+    this._push({
+      action: item.action,
+      input_to_send_ms: item.inputToSend,
+      send_to_ack_ms: Math.max(0, ackMs - item.sendMs),
+    });
+    return true;
+  }
+
+  /** Count a parent-routed timeout without manufacturing a duration. */
+  noteCorrelatedTimeout(correlation) {
+    const item = this._correlated.get(correlation);
+    if (!item) return false;
+    this._correlated.delete(correlation);
+    this._countExpired(item);
+    return true;
   }
 
   /**
@@ -369,7 +418,7 @@ export class ConsoleLatencyMeter {
   pendingCount() {
     let total = 0;
     for (const queue of this._pending.values()) total += queue.length;
-    return total;
+    return total + this._correlated.size;
   }
 
   /**
@@ -391,6 +440,11 @@ export class ConsoleLatencyMeter {
       }
       if (kept.length === 0) this._pending.delete(key);
       else if (kept.length !== queue.length) this._pending.set(key, kept);
+    }
+    for (const [correlation, item] of this._correlated) {
+      if (nowMsValue - item.sendMs <= this.expiryMs) continue;
+      this._correlated.delete(correlation);
+      this._countExpired(item);
     }
   }
 

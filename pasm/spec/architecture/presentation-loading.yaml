@@ -71,32 +71,48 @@ entities:
       status: implemented
       confidence: confirmed
       title: Model Rig and Marker Loader
-      summary: Resolves model sidecars into base transforms, extents, marker points, target points, the [[lod]] distance chain, and camera markers used by entity rendering and system effects.
+      summary: Resolves each spawned entity's primary authored model sidecar into renderer-independent authoritative marker and target geometry. Every authoritative profile preloads those primary sidecars and binds their exact bytes into frozen content identity before mission start; an unresolved live entity holds the fixed clock until an immediate simulation-side sync can attach its canonical state. Entity rendering and active GLB, procedural, or billboard LOD tiers consume it but never replace or remove it.
     architecture:
       kind: model-loader
       authority: authoritative
-      owns: [model-marker-runtime-state]
-      reads: [asset-manifest-state, spawned-entity-state]
-      produces: [model-marker-runtime-state]
-      runs_in: [host-browser-runtime]
+      owns: [model-marker-runtime-state, model-rig-readiness-state]
+      reads: [entity-template-state, spawned-entity-state]
+      produces: [model-marker-runtime-state, model-rig-readiness-state]
+      runs_in: [host-browser-runtime, headless-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [src/entities/model_rig.rs, src/entities/loader.rs]
+      paths: [src/entities/model_markers.rs, src/entities/model_rig.rs, src/entities/config_cache.rs, src/entities/loader.rs, src/server_app/registration.rs, src/lockstep/mod.rs, src/lobby/server.rs, src/server/viewscreen_border.rs, src/server/bridge.rs, server.html]
+      symbols: [ModelRigReadiness, primary_sidecar_path, sync_authoritative_model_markers, wasm_push_sidecar_toml, gate_lockstep_ticks]
       tests: [cargo test]
+
+  - state: model-rig-readiness-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Model Rig Readiness State
+      summary: Peer-local asynchronous delivery bookkeeping for primary authored rig sidecars and the narrow virtual-clock hold while a live entity lacks resolved canonical geometry. Delivery frame and pending-set order are not simulation state; the frozen sidecar bytes and resulting ModelMarkers are authoritative instead.
+    architecture:
+      classification: local
+      owner: model-rig-and-marker-loader
+      writers: [model-rig-and-marker-loader]
+    implementation:
+      status: declared
+      paths: [src/entities/model_markers.rs, src/entities/config_cache.rs, src/server_app/registration.rs, src/lockstep/mod.rs]
+      symbols: [ModelRigReadiness, sync_authoritative_model_markers, gate_lockstep_ticks]
 
   - state: model-marker-runtime-state
     core:
       status: implemented
       confidence: confirmed
       title: Model Marker Runtime State
-      summary: Resolved per-model marker and rig data used for camera placement, weapon origins, target points, and presentation attachments.
+      summary: Resolved per-entity marker and target geometry from the primary authored rig, used for camera placement, authoritative weapon origins and target points, and read-only presentation attachments. Active presentation/LOD state cannot mutate it.
     architecture:
       classification: authoritative
       owner: model-rig-and-marker-loader
       writers: [model-rig-and-marker-loader]
     implementation:
       status: declared
-      paths: [src/entities/model_rig.rs]
+      paths: [src/entities/model_markers.rs, src/entities/model_rig.rs]
       symbols: [ModelRig, ModelMarkers]
 
   - component: host-presentation-effects

@@ -40,12 +40,12 @@ See [`wiki/`](./wiki/) for a deeper architectural map and [GitHub PRDs](https://
 |---|---|
 | Game engine (authoritative server) | [Bevy](https://bevyengine.org/) 0.18 (Rust/WASM) |
 | Physics | [bevy_rapier3d](https://github.com/dimforge/bevy_rapier) 0.33 |
-| Networking | [PeerJS](https://peerjs.com/) (WebRTC, no server needed) |
+| Networking | Phoenix transport: a Cloudflare Worker rendezvous service (`worker-rendezvous/`) for typed join codes + WebRTC signalling, then direct DataChannels |
 | Client | Pure HTML/CSS/JavaScript |
 | Build | [Trunk](https://trunkrs.dev/) for the server; Node build script for the client |
 | Hosting | GitHub Pages |
 
-The host page (`server.html`) runs the authoritative WebAssembly game simulation. The phone client (`client.html`) is pure HTML/CSS/JavaScript; it renders lobby and console interfaces, sends inputs, and applies JSON state snapshots over PeerJS.
+The host page (`server.html`) runs the authoritative WebAssembly game simulation. The phone client (`client.html`) is pure HTML/CSS/JavaScript; it renders lobby and console interfaces, sends inputs, and applies JSON state snapshots over its two WebRTC DataChannels.
 
 ---
 
@@ -54,9 +54,9 @@ The host page (`server.html`) runs the authoritative WebAssembly game simulation
 ```
         ┌─────────────────────┐
         │  server.html (WASM) │  ← authoritative simulation
-        │  Bevy + Rapier3D    │     PeerJS host peer
+        │  Bevy + Rapier3D    │     rendezvous host record
         └────────┬────────────┘
-                 │  WebRTC (PeerJS)
+                 │  WebRTC DataChannels (reliable + lossy)
         ┌────────┴────────┐
         ▼                 ▼
   client.html       client.html
@@ -64,8 +64,9 @@ The host page (`server.html`) runs the authoritative WebAssembly game simulation
 ```
 
 - **Star topology** — clients never talk to each other, only to the host.
-- **Session tokens** — UUID stored in `localStorage`, survives page refresh. Same token = same player, auto-reconnect restores console assignment.
-- **No backend** — PeerJS uses a public broker for the initial WebRTC handshake; all game data flows peer-to-peer.
+- **Session tokens** — 32 hex characters, held per tab in `sessionStorage` with a persistent `localStorage` copy the first tab adopts. Survives a page refresh; same token = same player, and an automatic reconnect re-sends it to restore the held station and the current projection.
+- **Join by typing a code** — the host is issued a private code; the QR carries the full structured form of the same code, so scanning and typing land in the same place.
+- **Almost no backend** — the rendezvous service handles code lookup and the WebRTC handshake and then gets out of the way; all game data flows peer-to-peer.
 
 ---
 
@@ -123,7 +124,9 @@ npx playwright test --headed
 The smoke suite covers:
 | Spec | What it tests |
 |---|---|
-| `shim.spec.js` | BroadcastChannel PeerJS shim (unit) |
+| `transport-shim.spec.js` | BroadcastChannel transport stand-in (unit) |
+| `rendezvous-join.spec.js` | Typed join, QR link, distinct refusals |
+| `multi-client-crew.spec.js` | Four phones on one code, four seats |
 | `server-load.spec.js` | WASM initialises without JS errors |
 | `client-connect.spec.js` | Client page connects and receives Welcome |
 | `lobby.spec.js` | Console selection broadcasts; only captain can start game |
@@ -234,8 +237,10 @@ assets/
   factions/*.toml               — AI faction definitions
   complexity/*.toml             — per-console complexity presets (Low / Full)
 
-server.html           — host page: loads WASM, owns PeerJS host peer
-client.html           — client page: loads client WASM, connects via PeerJS
+server.html           — host page: loads WASM, registers with the rendezvous
+                        service, owns the per-token connection maps
+client.html           — client page: pure HTML/JS, joins by typed code
+worker-rendezvous/    — the rendezvous service (Worker + Durable Object)
 Trunk.toml            — build config for server.html (server feature)
 client-trunk.toml     — build config for client.html (client feature)
 wiki/                 — LLM-maintained knowledge base (see wiki/SCHEMA.md)

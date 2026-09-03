@@ -3,8 +3,8 @@ use bevy::prelude::*;
 
 use crate::command_admission::ai_emit::emit_ai_command;
 use crate::core::messages::{
-    CoordinationPayload, CoordinationPresentation, ModifierSlot, SensorsBlackboard,
-    SystemBlackboard, SystemControlPayload, SystemId,
+    ActionFeedbackOutcome, CoordinationPayload, CoordinationPresentation, ModifierSlot,
+    SensorsBlackboard, SystemBlackboard, SystemControlPayload, SystemId,
 };
 use crate::ship_plugin::CoordinationEnqueue;
 
@@ -170,6 +170,9 @@ pub fn handle_sensors_messages(
         &crate::entities::spawner::EntityName,
     )>,
     mut writer: MessageWriter<CoordinationEnqueue>,
+    mut outbound: Option<
+        ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
+    >,
 ) {
     for (entity, admitted, ship_config, mut entity_target, control_sources) in ship_query.iter_mut()
     {
@@ -180,6 +183,11 @@ pub fn handle_sensors_messages(
                     // A clear deselects — there is no contact to designate,
                     // so no channel-3 advisory is emitted.
                     entity_target.0 = None;
+                    crate::command_admission::finish_action_feedback(
+                        cmd,
+                        &mut outbound,
+                        ActionFeedbackOutcome::Applied,
+                    );
                     continue;
                 }
                 _ => continue,
@@ -187,6 +195,11 @@ pub fn handle_sensors_messages(
 
             // Write to this ship's own SensorRadarSelection component (player or NPC).
             entity_target.0 = Some(uuid.clone());
+            crate::command_admission::finish_action_feedback(
+                cmd,
+                &mut outbound,
+                ActionFeedbackOutcome::Applied,
+            );
 
             // Resolve a human-readable label for the target, falling back to
             // the raw uuid if no matching EntityName is found (e.g. asteroids
@@ -497,6 +510,15 @@ pub fn tick_sensors_threat_warning(
             ));
         }
     }
+    // Sorted before the walk, because the walk below keeps the FIRST strict
+    // minimum and two contacts can be exactly equidistant — the fleet case is
+    // not exotic, it is two ships in formation with a hostile on the centreline.
+    // Raw query order is archetype-creation order, which is not the same on two
+    // hosts of one mission (`LocalShip` is on a different ship on each, so the
+    // ships group into archetypes differently). This is the pattern issue #1052
+    // established for the damage sites, applied to a decision instead of a draw:
+    // collect, sort on a stable key, then walk.
+    candidates.sort_by(|a, b| a.0.cmp(&b.0));
 
     for (
         entity,
@@ -849,7 +871,7 @@ pub fn operate_sensors_ai(
 
     // Build the shared candidate snapshot once (world state is the same for
     // every ship this tick). Each entry: (uuid, [x, y, z], faction).
-    let hostile_candidates: Vec<(String, [f32; 3], Option<uuid::Uuid>)> = hostile_ship_q
+    let mut hostile_candidates: Vec<(String, [f32; 3], Option<uuid::Uuid>)> = hostile_ship_q
         .iter()
         .map(|(uuid, physics, faction)| {
             (uuid.0.clone(), [physics.x, 0.0, physics.z], Some(faction.0))
@@ -862,6 +884,10 @@ pub fn operate_sensors_ai(
             )
         }))
         .collect();
+    // Sorted for the reason the threat scan above is: this list is scored and
+    // the top score wins, so two candidates that score identically are decided
+    // by position in the list, and raw query order is archetype order.
+    hostile_candidates.sort_by(|a, b| a.0.cmp(&b.0));
     for (
         ship_entity,
         entity_uuid,

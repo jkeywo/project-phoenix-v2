@@ -2,11 +2,17 @@
 import { t } from '../../gui/strings.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import '../../gui/components/ph-impulse-btn.js';
+import {
+  HELM_ACTION_CONTEXT,
+  HELM_IMPULSE_ACTION_ID,
+} from '../../gui/stations/helm-actions.js';
+
+const IMPULSE_SOURCE = String(customElements.get('ph-impulse-btn'));
 
 function setup(opts) {
-  const sendAction = opts && opts.sendAction;
-  if (sendAction) {
-    window.sendAction = sendAction;
+  const activateSemanticAction = opts && opts.activateSemanticAction;
+  if (activateSemanticAction) {
+    window.activateSemanticAction = activateSemanticAction;
   }
   document.body.innerHTML = '<ph-impulse-btn id="test-el"></ph-impulse-btn>';
   const el = document.getElementById('test-el');
@@ -16,77 +22,21 @@ function setup(opts) {
 describe('PhImpulseBtn', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
-    delete window.sendAction;
+    delete window.activateSemanticAction;
   });
 
   afterEach(() => {
     document.body.innerHTML = '';
-    delete window.sendAction;
+    delete window.activateSemanticAction;
   });
 
   it('is defined and registered as a custom element', () => {
     expect(customElements.get('ph-impulse-btn')).toBeDefined();
   });
 
-  describe('Ctrl keybind', () => {
-    const ctrlDown = (init) => document.dispatchEvent(
-      new KeyboardEvent('keydown', Object.assign({ code: 'ControlLeft', bubbles: true }, init)));
-
-    it('starts the charge when ready', () => {
-      const sendAction = vi.fn();
-      const { el } = setup({ sendAction });
-      el.state = { state: 'ready', charge_pct: 0, auto: false };
-      ctrlDown();
-      expect(sendAction).toHaveBeenCalledWith('start_impulse_charge', {});
-    });
-
-    it('cancels the charge when already charging', () => {
-      const sendAction = vi.fn();
-      const { el } = setup({ sendAction });
-      el.state = { state: 'charging', charge_pct: 40, auto: false };
-      ctrlDown();
-      expect(sendAction).toHaveBeenCalledWith('cancel_impulse', {});
-    });
-
-    it('ignores auto-repeat so a held Ctrl does not start/cancel repeatedly', () => {
-      const sendAction = vi.fn();
-      const { el } = setup({ sendAction });
-      el.state = { state: 'ready', charge_pct: 0, auto: false };
-      ctrlDown();
-      ctrlDown({ repeat: true });
-      ctrlDown({ repeat: true });
-      expect(sendAction).toHaveBeenCalledTimes(1);
-    });
-
-    it('does nothing under AUTO or on cooldown', () => {
-      const sendAction = vi.fn();
-      const { el } = setup({ sendAction });
-      el.state = { state: 'ready', charge_pct: 0, auto: true };
-      ctrlDown();
-      el.state = { state: 'cooldown', charge_pct: 0, auto: false };
-      ctrlDown();
-      expect(sendAction).not.toHaveBeenCalled();
-    });
-
-    it('ignores other keys and keys typed into a text field', () => {
-      const sendAction = vi.fn();
-      const { el } = setup({ sendAction });
-      el.state = { state: 'ready', charge_pct: 0, auto: false };
-      document.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW', bubbles: true }));
-      const input = document.createElement('input');
-      document.body.appendChild(input);
-      input.dispatchEvent(new KeyboardEvent('keydown', { code: 'ControlLeft', bubbles: true }));
-      expect(sendAction).not.toHaveBeenCalled();
-    });
-
-    it('stops listening once removed from the page', () => {
-      const sendAction = vi.fn();
-      const { el } = setup({ sendAction });
-      el.state = { state: 'ready', charge_pct: 0, auto: false };
-      el.remove();
-      ctrlDown();
-      expect(sendAction).not.toHaveBeenCalled();
-    });
+  it('leaves Ctrl and gamepad matching to the parent semantic runtime', () => {
+    expect(IMPULSE_SOURCE).not.toContain('observeGamepadButton');
+    expect(IMPULSE_SOURCE).not.toContain("document.addEventListener('keydown'");
   });
 
   it('creates a shadow root', () => {
@@ -147,24 +97,27 @@ describe('PhImpulseBtn', () => {
     expect(btn.disabled).toBe(true);
   });
 
-  it('clicking button when ready calls sendAction with start_impulse_charge', () => {
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
+  it('clicking when ready activates the shared impulse identity', () => {
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
     el.state = { state: 'ready', charge_pct: 0, system_id: 'helm-impulse', auto: false };
     const btn = el.shadowRoot.getElementById('btn');
     btn.click();
-    expect(sendAction).toHaveBeenCalledTimes(1);
-    expect(sendAction).toHaveBeenCalledWith('start_impulse_charge', {});
+    expect(activateSemanticAction).toHaveBeenCalledOnce();
+    expect(activateSemanticAction).toHaveBeenCalledWith(
+      HELM_IMPULSE_ACTION_ID, { context: HELM_ACTION_CONTEXT, source: 'control' },
+    );
   });
 
-  it('clicking button when charging dispatches cancel_impulse', () => {
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
+  it('clicking when charging retains the same semantic identity', () => {
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
     el.state = { state: 'charging', charge_pct: 50, system_id: 'helm-impulse', auto: false };
     const btn = el.shadowRoot.getElementById('btn');
     btn.click();
-    expect(sendAction).toHaveBeenCalledTimes(1);
-    expect(sendAction).toHaveBeenCalledWith('cancel_impulse', {});
+    expect(activateSemanticAction).toHaveBeenCalledWith(
+      HELM_IMPULSE_ACTION_ID, { context: HELM_ACTION_CONTEXT, source: 'control' },
+    );
   });
 
   it('resets the charge fill to 0 when not charging', () => {

@@ -138,6 +138,22 @@ impl AsLogFilter for Option<Res<'_, LogFilterConfig>> {
     }
 }
 
+/// The shape an **exclusive** system has the config in.
+///
+/// A `&mut World` system cannot hold a `Res` borrow across the mutations that
+/// are the reason it is exclusive, so it does
+/// `world.get_resource::<LogFilterConfig>().cloned()` once at the top and logs
+/// through that. Same `None` semantics as the `Option<Res<_>>` impl above —
+/// warn-level, no entity filtering — so the two call-site shapes cannot drift.
+impl AsLogFilter for Option<LogFilterConfig> {
+    fn log_filter(&self) -> &LogFilterConfig {
+        match self {
+            Some(cfg) => cfg,
+            None => fallback(),
+        }
+    }
+}
+
 /// Keeps [`EntityFilter::allowed`] in sync with the world.
 ///
 /// Driven by `Added<EntityName>` and `RemovedComponents<EntityName>`, so it is

@@ -22,7 +22,10 @@
 //!   the byte-stable composed document, keyed by the template's canonical
 //!   path — so a shared fragment moving the digest is visible on either
 //!   target without the two recording different shapes.
-//! * Model-rig sidecars — `entities::glb_visual::load_sidecar_toml`.
+//! * Primary model-rig sidecars — entity-config preload on wasm and
+//!   `entities::loader::FsTemplateLoader` on native bind their exact bytes
+//!   before freeze; `entities::model_markers::resolve_sidecar_rig` reuses the
+//!   delivered body at runtime.
 //! * Pack-supplied Rhai scripts — `config_cache::OverlayScriptResolver` records
 //!   every script it resolves (issue #988), so a scenario loaded with a
 //!   script-carrying mod pack folds a different content digest than the same

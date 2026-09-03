@@ -221,9 +221,27 @@ pub(crate) fn clear_last_attacker_on_red_alert_off(
     }
 }
 
-/// Publish the `LocalShip` viewscreen blackboard: hull/alert status plus the
-/// scored objective pool the player ship's per-system AI (weapons, helm,
-/// navigation) reads to pick a directive to serve.
+/// Publish every FLEET ship's viewscreen blackboard: hull/alert status plus the
+/// scored objective pool that ship's per-system AI (weapons, helm, navigation)
+/// reads to pick a directive to serve.
+///
+/// # Every ship a host in the fleet flies, not just this host's (issue #1116)
+///
+/// It used to be `With<LocalShip>` and `.single()`, which was right while a host
+/// had one crewed hull and became a divergence the moment it had two: the
+/// SCENARIO's objective pool reached only the ship this host happens to project,
+/// so on host A the mission's `Destroy wave_2` steered slot 1 and slot 2 sat
+/// there on its template doctrine, while host B ran precisely the opposite. Two
+/// hosts, one mission, two different simulations — and it showed up as the
+/// remote fleet ship simply not manoeuvring.
+///
+/// A mission's objectives are the mission's: they belong to every crewed hull in
+/// the fleet, and a fleet ship's AI has to be able to serve them wherever it is
+/// being simulated. So this now runs `With<FleetSlotOf>` and does the whole
+/// merge per ship, from that ship's own hull, alert state, combat activity and
+/// Captain boost scope — which the boost already keyed by ship uuid (issue
+/// #752), so nothing about a solo run moved. NPCs are still excluded: they carry
+/// no fleet slot, and `aggregate_doctrine_blackboards` remains their one writer.
 ///
 /// # Why this MERGES rather than clobbers (issue #842)
 ///
@@ -259,8 +277,6 @@ pub(crate) fn clear_last_attacker_on_red_alert_off(
 pub(crate) fn publish_viewscreen_blackboard(
     time: Res<Time>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
-    hull_q: Query<&crate::entities::spawner::EntitySystemHull, With<LocalShip>>,
-    local_uuid_q: Query<&crate::entities::spawner::EntityUuid, With<LocalShip>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
     boost: Option<Res<CaptainPriorityBoost>>,
     mut ship_blackboards_q: Query<
@@ -270,138 +286,126 @@ pub(crate) fn publish_viewscreen_blackboard(
             Option<&crate::ship::combat_activity::RecentCombatActivity>,
             Option<&crate::console::weapons::LastShipAttacker>,
             Option<&crate::entities::spawner::BehaviourSection>,
+            Option<&crate::entities::spawner::EntitySystemHull>,
+            Option<&crate::entities::spawner::EntityUuid>,
         ),
-        With<LocalShip>,
+        With<crate::lockstep::FleetSlotOf>,
     >,
 ) {
     use crate::core::messages::{SystemBlackboard, SystemId, ViewscreenBlackboard};
     use crate::objectives::WorldConditions;
     use crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID;
 
-    let entity_state = ship_blackboards_q.single().ok();
-    // Lift Combat Lock + Science Target from the local ship's own radar
-    // blackboards (issue #829), published this tick in `SimSet::Publish`.
-    let combat_lock = entity_state.as_ref().and_then(|(bbs, _, _, _, _)| {
-        match bbs
+    for (mut entity_bbs, ra, activity, last_attacker, behaviour, hull, uuid) in
+        ship_blackboards_q.iter_mut()
+    {
+        // Lift Combat Lock + Science Target from THIS ship's own radar
+        // blackboards (issue #829), published this tick in `SimSet::Publish`.
+        let combat_lock = match entity_bbs
             .0
             .get(&crate::ship::system_registry::tactical_radar_system_id())
         {
             Some(SystemBlackboard::TacticalRadar(bb)) => bb.selected_target.clone(),
             _ => None,
-        }
-    });
-    let science_target = entity_state.as_ref().and_then(|(bbs, _, _, _, _)| {
-        match bbs
+        };
+        let science_target = match entity_bbs
             .0
             .get(&crate::ship::system_registry::sensor_radar_system_id())
         {
             Some(SystemBlackboard::SensorRadar(bb)) => bb.selected_target.clone(),
             _ => None,
-        }
-    });
-    let red_alert = entity_state
-        .as_ref()
-        .and_then(|(_, ra, _, _, _)| ra.map(|r| r.0))
-        .unwrap_or(false);
-    let last_damage_taken_secs = entity_state
-        .as_ref()
-        .and_then(|(_, _, act, _, _)| act.and_then(|a| a.last_damage_taken));
-    let last_hostile_fire_taken_secs = entity_state
-        .as_ref()
-        .and_then(|(_, _, act, _, _)| act.and_then(|a| a.last_hostile_fire_taken));
-    let last_weapon_fired_secs = entity_state
-        .as_ref()
-        .and_then(|(_, _, act, _, _)| act.and_then(|a| a.last_weapon_fired));
-    let last_attacker_uuid = entity_state
-        .as_ref()
-        .and_then(|(_, _, _, la, _)| la.and_then(|l| l.0.clone()));
+        };
+        let red_alert = ra.map(|r| r.0).unwrap_or(false);
+        let last_damage_taken_secs = activity.and_then(|a| a.last_damage_taken);
+        let last_hostile_fire_taken_secs = activity.and_then(|a| a.last_hostile_fire_taken);
+        let last_weapon_fired_secs = activity.and_then(|a| a.last_weapon_fired);
+        let last_attacker_uuid = last_attacker.and_then(|l| l.0.clone());
 
-    let hull_integrity_pct = hull_q
-        .single()
-        .map(|h| {
-            let max = h.0.total_max();
-            let cur = h.0.total_current();
-            if max > 0.0 {
-                (cur / max * 100.0).clamp(0.0, 100.0)
-            } else {
-                100.0
-            }
-        })
-        .unwrap_or(100.0);
+        let hull_integrity_pct = hull
+            .map(|h| {
+                let max = h.0.total_max();
+                let cur = h.0.total_current();
+                if max > 0.0 {
+                    (cur / max * 100.0).clamp(0.0, 100.0)
+                } else {
+                    100.0
+                }
+            })
+            .unwrap_or(100.0);
 
-    let conditions = WorldConditions {
-        red_alert,
-        hull_fraction: hull_integrity_pct / 100.0,
-        attacked: false,
-    };
-    // Scope the captain boost to this (local) ship, so a boost only ever
-    // reorders this ship's own objective consumers (issue #752).
-    let local_uuid = local_uuid_q.single().ok().map(|u| u.0.clone());
-    let scope = CaptainPriorityBoost::scope_key(local_uuid.as_deref());
-    let captain_boost = boost.as_ref().and_then(|b| b.boost_arg(scope));
-    let mut scored_objectives = objectives
-        .as_ref()
-        .map(|o| o.0.scored_pool_with_boost(&conditions, captain_boost))
-        .unwrap_or_default();
-
-    // Merge the hull's standing template doctrine into the scenario pool (see
-    // the "why this MERGES" note above). Score the doctrine with the same
-    // `attacked` signal the NPC path (`aggregate_doctrine_blackboards`) uses, so
-    // a backfilled player and a world-spawned copy of the same hull evaluate
-    // their identical doctrine identically (#842 AC4 symmetry). Both sites run
-    // the one `objectives::last_landed_hit_secs` fold into the one
-    // `objectives::attacked_recently` predicate (issue #1010) — a decaying
-    // recency window over the last hit that CONNECTED, shields or hull, not the
-    // `LastShipAttacker` latch — so the symmetry holds by construction rather
-    // than by two copies of the rule staying in step. The scenario pool keeps
-    // its own conditions (unchanged), so existing player-objective scoring is
-    // untouched.
-    if let Some((_, _, _, _, Some(behaviour))) = entity_state.as_ref() {
-        // Sim seconds off the fixed clock (`Res<Time>` is `Time<Fixed>` inside
-        // `FixedUpdate`), never a wall clock — AGENTS.md #7.
-        let attacked_memory_secs = world_config
-            .as_deref()
-            .map(|wc| wc.global.attacked_memory_secs)
-            .unwrap_or_else(|| {
-                crate::entities::config::GlobalConfig::default().attacked_memory_secs
-            });
-        let doctrine_conditions = WorldConditions {
+        let conditions = WorldConditions {
             red_alert,
             hull_fraction: hull_integrity_pct / 100.0,
-            attacked: crate::objectives::attacked_recently(
-                crate::objectives::last_landed_hit_secs(
-                    last_damage_taken_secs,
-                    last_hostile_fire_taken_secs,
-                ),
-                time.elapsed_secs(),
-                attacked_memory_secs,
-            ),
+            attacked: false,
         };
-        let doctrine_pool =
-            crate::ai::score_doctrine_pool(&behaviour.0.doctrine, &doctrine_conditions);
-        scored_objectives.extend(doctrine_pool);
-    }
+        // Scope the captain boost to THIS ship, so a boost only ever reorders
+        // its own objective consumers (issue #752) — which is what makes the
+        // per-ship walk above a widening rather than a change of meaning.
+        let scope = CaptainPriorityBoost::scope_key(uuid.map(|u| u.0.as_str()));
+        let captain_boost = boost.as_ref().and_then(|b| b.boost_arg(scope));
+        let mut scored_objectives = objectives
+            .as_ref()
+            .map(|o| o.0.scored_pool_with_boost(&conditions, captain_boost))
+            .unwrap_or_default();
 
-    // Re-sort the unioned pool descending by score. `sort_by` is stable, so
-    // ties keep concatenation order (scenario objectives before doctrine ones —
-    // a deterministic tiebreak the `top_destroy_objective_target` / helm
-    // consumers rely on to read the highest-scored directive first). `total_cmp`
-    // gives a total, deterministic order the rng-determinism guard depends on.
-    scored_objectives.sort_by(|a, b| b.score.total_cmp(&a.score));
+        // Merge the hull's standing template doctrine into the scenario pool (see
+        // the "why this MERGES" note above). Score the doctrine with the same
+        // `attacked` signal the NPC path (`aggregate_doctrine_blackboards`) uses, so
+        // a backfilled player and a world-spawned copy of the same hull evaluate
+        // their identical doctrine identically (#842 AC4 symmetry). Both sites run
+        // the one `objectives::last_landed_hit_secs` fold into the one
+        // `objectives::attacked_recently` predicate (issue #1010) — a decaying
+        // recency window over the last hit that CONNECTED, shields or hull, not the
+        // `LastShipAttacker` latch — so the symmetry holds by construction rather
+        // than by two copies of the rule staying in step. The scenario pool keeps
+        // its own conditions (unchanged), so existing player-objective scoring is
+        // untouched.
+        if let Some(behaviour) = behaviour {
+            // Sim seconds off the fixed clock (`Res<Time>` is `Time<Fixed>`
+            // inside `FixedUpdate`), never a wall clock — AGENTS.md #7.
+            let attacked_memory_secs = world_config
+                .as_deref()
+                .map(|wc| wc.global.attacked_memory_secs)
+                .unwrap_or_else(|| {
+                    crate::entities::config::GlobalConfig::default().attacked_memory_secs
+                });
+            let doctrine_conditions = WorldConditions {
+                red_alert,
+                hull_fraction: hull_integrity_pct / 100.0,
+                attacked: crate::objectives::attacked_recently(
+                    crate::objectives::last_landed_hit_secs(
+                        last_damage_taken_secs,
+                        last_hostile_fire_taken_secs,
+                    ),
+                    time.elapsed_secs(),
+                    attacked_memory_secs,
+                ),
+            };
+            let doctrine_pool =
+                crate::ai::score_doctrine_pool(&behaviour.0.doctrine, &doctrine_conditions);
+            scored_objectives.extend(doctrine_pool);
+        }
 
-    let bb = ViewscreenBlackboard {
-        red_alert,
-        hull_integrity_pct,
-        last_damage_taken_secs,
-        last_weapon_fired_secs,
-        last_attacker_uuid,
-        scored_objectives,
-        combat_lock,
-        science_target,
-    };
+        // Re-sort the unioned pool descending by score. `sort_by` is stable, so
+        // ties keep concatenation order (scenario objectives before doctrine
+        // ones — a deterministic tiebreak the `top_destroy_objective_target` /
+        // helm consumers rely on to read the highest-scored directive first).
+        // `total_cmp` gives a total, deterministic order the rng-determinism
+        // guard depends on.
+        scored_objectives.sort_by(|a, b| b.score.total_cmp(&a.score));
 
-    // Write directly to the per-entity component.
-    if let Some((mut entity_bbs, _, _, _, _)) = ship_blackboards_q.iter_mut().next() {
+        let bb = ViewscreenBlackboard {
+            red_alert,
+            hull_integrity_pct,
+            last_damage_taken_secs,
+            last_weapon_fired_secs,
+            last_attacker_uuid,
+            scored_objectives,
+            combat_lock,
+            science_target,
+        };
+
+        // Write directly to the per-entity component.
         entity_bbs.0.insert(
             SystemId(VIEWSCREEN_SYSTEM_ID.to_string()),
             SystemBlackboard::Viewscreen(bb),

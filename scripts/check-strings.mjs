@@ -121,10 +121,19 @@ const table = buildTable(csvText);
 // gui/strings.js and gui/strings-boot.js are the machinery itself — their
 // doc comments contain illustrative t('console.sensors.…') calls that are
 // examples, not real lookups, and would otherwise be reported as missing.
+//
+// gui/vendor/ is somebody else's minified source (issue #1329), carried
+// verbatim and never edited. Skipped WHOLESALE rather than listed in
+// UNLOCALISED_FILES below, because that set only silences the hardcoded-text
+// warnings: a minifier names half its locals `t`, so a bundle full of `t("…")`
+// calls would fail the id-existence check above with dozens of errors about
+// rows nobody should add. Nothing in there is ours to localise.
 const codeFiles = [
   ...await walk(
     path.join(root, 'gui'),
-    (f) => /\.(js|html)$/.test(f) && !/[\\/]strings(-boot)?\.js$/.test(f),
+    (f) => /\.(js|html)$/.test(f)
+      && !/[\\/]strings(-boot)?\.js$/.test(f)
+      && !/[\\/]vendor[\\/]/.test(f),
   ),
   path.join(root, 'client.html'),
   path.join(root, 'server.html'),

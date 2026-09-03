@@ -48,6 +48,44 @@ html, body {
   letter-spacing: 0.02em;
 }
 
+.semantic-action-feedback {
+  position: fixed;
+  z-index: 900;
+  right: max(0.75rem, env(safe-area-inset-right));
+  bottom: max(0.75rem, env(safe-area-inset-bottom));
+  max-width: min(28rem, calc(100vw - 1.5rem));
+  min-height: 1.5rem;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--edge);
+  background: rgba(var(--rgb-panel), 0.94);
+  color: var(--ink);
+  font: 600 var(--text-xs) "JetBrains Mono", monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+.semantic-action-feedback:empty {
+  display: none;
+}
+
+.semantic-action-feedback[data-state="Refused"],
+.semantic-action-feedback[data-state="TimedOut"] {
+  border-color: var(--fire);
+  color: var(--fire);
+}
+
+.semantic-action-feedback__item + .semantic-action-feedback__item {
+  margin-top: 0.25rem;
+  padding-top: 0.25rem;
+  border-top: 1px solid var(--edge);
+}
+
+.semantic-action-feedback__item[data-state="Refused"],
+.semantic-action-feedback__item[data-state="TimedOut"] {
+  color: var(--fire);
+}
+
 .mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
 
 /* The root font-size every `rem` is relative to, multiplied by the private
@@ -489,6 +527,26 @@ body .frame { height: 100dvh; }
 
 /* Legacy hidden utility; station ratings replaced complexity-preset hiding. */
 .cpx-hidden { display: none !important; }
+
+/* Crew-public Game Master takeover status (issue #1299). Mounted by the shared
+   console runtime so every authored Station interface exposes the same truth. */
+.gm-takeover-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 900;
+  box-sizing: border-box;
+  padding: 0.45rem 0.8rem;
+  border-bottom: 1px solid var(--reloading);
+  background: rgba(var(--rgb-deep), 0.96);
+  color: var(--reloading-bright);
+  font-family: "JetBrains Mono", monospace;
+  font-size: var(--text-sm);
+  letter-spacing: 0.08em;
+  text-align: center;
+}
+.gm-takeover-banner[hidden] { display: none; }
 
 /* ── Contextual tutorial overlays (issue #916) ─────────────────────────
    The overlay card itself is <ph-tutorial-overlay> shadow DOM (mounted into

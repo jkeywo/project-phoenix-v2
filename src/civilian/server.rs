@@ -62,7 +62,10 @@ use crate::authoritative::{DeclareState, StateClass};
 use crate::civilian::traffic::{
     CivilianConfig, CivilianOrder, CivilianState, CivilianTravel, ComplianceDisposition,
 };
-use crate::core::messages::{AdmittedCommands, SystemControlPayload};
+use crate::core::messages::{
+    ActionCorrelationId, ActionFeedbackOutcome, AdmittedCommands, ServerMessage,
+    SystemControlPayload,
+};
 use crate::effect_queue::EffectQueue;
 use crate::entities::config::DoctrineObjective;
 use crate::entities::spawner::{BehaviourSection, EntityUuid, FactionComponent};
@@ -182,9 +185,6 @@ pub fn tick_civilian_traffic(
     let Some(runtime) = runtime else {
         return;
     };
-    if civilians.is_empty() && civilian_orders_queue.0.is_empty() {
-        return;
-    }
     let now = sim_tick.map(|t| t.0).unwrap_or(0);
     let tick_hz = world_config
         .as_deref()
@@ -206,7 +206,8 @@ pub fn tick_civilian_traffic(
     // issuing on the same tick resolve in a fixed order — and the crew wins,
     // because the later `receive_order` replaces the earlier.
     let mut queued: Vec<PendingCivilianOrder> = std::mem::take(&mut civilian_orders_queue.0);
-    let mut rejections: Vec<(String, String, String)> = Vec::new();
+    let mut rejections: Vec<(String, String, String, Option<ActionCorrelationId>)> = Vec::new();
+    let mut accepted_feedback: Vec<(String, String, ActionCorrelationId)> = Vec::new();
     for admitted in order_sources.iter() {
         for cmd in admitted.for_target(crate::ship::system_registry::NAVIGATION_SYSTEM_ID) {
             let SystemControlPayload::OrderCivilian { target, order } = &cmd.payload else {
@@ -214,17 +215,34 @@ pub fn tick_civilian_traffic(
             };
             let token = cmd.response_token.clone().unwrap_or_default();
             if order.validate().is_err() {
-                rejections.push((token, target.clone(), REJECT_MALFORMED_ORDER.to_string()));
+                rejections.push((
+                    token,
+                    target.clone(),
+                    REJECT_MALFORMED_ORDER.to_string(),
+                    cmd.feedback_correlation.clone(),
+                ));
                 continue;
             }
             match resolve_civilian(&runtime, target).filter(|uuid| addressable.contains(uuid)) {
-                Some(uuid) => queued.push(PendingCivilianOrder {
-                    uuid,
-                    order: order.clone(),
-                }),
-                None => {
-                    rejections.push((token, target.clone(), REJECT_UNKNOWN_CIVILIAN.to_string()))
+                Some(uuid) => {
+                    queued.push(PendingCivilianOrder {
+                        uuid: uuid.clone(),
+                        order: order.clone(),
+                    });
+                    if let Some(correlation) = cmd
+                        .feedback_correlation
+                        .clone()
+                        .filter(|_| !token.is_empty())
+                    {
+                        accepted_feedback.push((uuid, token, correlation));
+                    }
                 }
+                None => rejections.push((
+                    token,
+                    target.clone(),
+                    REJECT_UNKNOWN_CIVILIAN.to_string(),
+                    cmd.feedback_correlation.clone(),
+                )),
             }
         }
     }
@@ -238,7 +256,7 @@ pub fn tick_civilian_traffic(
             pending.uuid
         );
     }
-    for (token, target, reason) in rejections {
+    for (token, target, reason, correlation) in rejections {
         crate::pwarn!(
             log,
             crate::logging::LogCat::Nav,
@@ -249,9 +267,18 @@ pub fn tick_civilian_traffic(
         }
         if let Some(outbox) = outbox.as_deref_mut() {
             outbox.push_reliable((
-                crate::lobby::Target::Token(token),
-                crate::core::messages::ServerMessage::CivilianOrderRejected { target, reason },
+                crate::lobby::Target::Token(token.clone()),
+                ServerMessage::CivilianOrderRejected { target, reason },
             ));
+            if let Some(correlation) = correlation {
+                outbox.push_reliable((
+                    crate::lobby::Target::Token(token.clone()),
+                    ServerMessage::ActionFeedback {
+                        correlation,
+                        outcome: ActionFeedbackOutcome::Refused,
+                    },
+                ));
+            }
         }
     }
 
@@ -285,6 +312,21 @@ pub fn tick_civilian_traffic(
                     t.from.as_str(),
                     t.to.as_str()
                 );
+            }
+        }
+        // A console order is Applied when this owning consumer has delivered
+        // it into the civilian's compliance machine. The craft may still
+        // refuse on its authored clock later; that is authoritative traffic
+        // state, not a transport-level command refusal.
+        if let Some(outbox) = outbox.as_deref_mut() {
+            for (_, token, correlation) in accepted_feedback.iter().filter(|(id, ..)| id == &uuid) {
+                outbox.push_reliable((
+                    crate::lobby::Target::Token(token.clone()),
+                    ServerMessage::ActionFeedback {
+                        correlation: correlation.clone(),
+                        outcome: ActionFeedbackOutcome::Applied,
+                    },
+                ));
             }
         }
 
@@ -866,6 +908,165 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_correlated_console_order_is_applied_only_by_the_civilian_owner() {
+        use crate::core::messages::{AdmittedCommand, SystemId};
+
+        let mut app = test_app();
+        let civilian_uuid = uuid::Uuid::from_u128(0x1286).to_string();
+        let civilian = spawn_civilian(&mut app, &civilian_uuid, CivilianConfig::default());
+        app.world_mut()
+            .spawn(AdmittedCommands(vec![AdmittedCommand {
+                target: SystemId(crate::ship::system_registry::NAVIGATION_SYSTEM_ID.to_string()),
+                payload: SystemControlPayload::OrderCivilian {
+                    target: civilian_uuid,
+                    order: CivilianOrder::Hold,
+                },
+                response_token: Some("nav-holder".into()),
+                feedback_correlation: Some(ActionCorrelationId::new("civilian-hold").unwrap()),
+            }]));
+
+        app.world_mut().run_schedule(FixedUpdate);
+
+        assert_eq!(
+            app.world()
+                .get::<CivilianTraffic>(civilian)
+                .and_then(|state| state.0.order()),
+            Some(&CivilianOrder::Hold),
+            "the traffic owner must receive the order before it reports Applied"
+        );
+        let feedback: Vec<_> = app
+            .world()
+            .resource::<crate::server_app::SimOutbox>()
+            .iter()
+            .filter_map(|(target, message)| match message {
+                ServerMessage::ActionFeedback {
+                    correlation,
+                    outcome,
+                } => Some((target.clone(), correlation.as_str().to_string(), *outcome)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(feedback.len(), 1);
+        assert!(matches!(
+            &feedback[0],
+            (crate::lobby::Target::Token(token), correlation, ActionFeedbackOutcome::Applied)
+                if token == "nav-holder" && correlation == "civilian-hold"
+        ));
+    }
+
+    #[test]
+    fn correlated_unknown_and_malformed_orders_are_refused_by_the_civilian_owner() {
+        use crate::core::messages::{AdmittedCommand, SystemId};
+
+        let mut app = test_app();
+        let civilian_uuid = uuid::Uuid::from_u128(0x1287).to_string();
+        let civilian = spawn_civilian(&mut app, &civilian_uuid, CivilianConfig::default());
+        let command = |target: &str, order: CivilianOrder, correlation: &str| AdmittedCommand {
+            target: SystemId(crate::ship::system_registry::NAVIGATION_SYSTEM_ID.to_string()),
+            payload: SystemControlPayload::OrderCivilian {
+                target: target.to_string(),
+                order,
+            },
+            response_token: Some("nav-holder".into()),
+            feedback_correlation: Some(ActionCorrelationId::new(correlation).unwrap()),
+        };
+        app.world_mut().spawn(AdmittedCommands(vec![
+            command("no-such-civilian", CivilianOrder::Hold, "civilian-unknown"),
+            command(
+                &civilian_uuid,
+                CivilianOrder::Divert {
+                    route: Some("lane-a".into()),
+                    anchor: Some("anchor-a".into()),
+                },
+                "civilian-malformed",
+            ),
+        ]));
+
+        app.world_mut().run_schedule(FixedUpdate);
+
+        let outbox = app.world().resource::<crate::server_app::SimOutbox>();
+        let feedback: Vec<_> = outbox
+            .iter()
+            .filter_map(|(target, message)| match message {
+                ServerMessage::ActionFeedback {
+                    correlation,
+                    outcome,
+                } => Some((target.clone(), correlation.as_str().to_string(), *outcome)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(feedback.len(), 2);
+        for expected in ["civilian-unknown", "civilian-malformed"] {
+            assert!(feedback.iter().any(|(target, correlation, outcome)| {
+                matches!(target, crate::lobby::Target::Token(token) if token == "nav-holder")
+                    && correlation == expected
+                    && *outcome == ActionFeedbackOutcome::Refused
+            }));
+        }
+        assert_eq!(
+            outbox
+                .iter()
+                .filter(|(_, message)| matches!(
+                    message,
+                    ServerMessage::CivilianOrderRejected { .. }
+                ))
+                .count(),
+            2,
+            "the existing crew-facing rejection reasons remain alongside terminal feedback"
+        );
+        assert_eq!(
+            app.world()
+                .get::<CivilianTraffic>(civilian)
+                .expect("civilian remains")
+                .0
+                .compliance(),
+            ComplianceState::Unordered,
+            "neither refused occurrence may mutate civilian traffic"
+        );
+    }
+
+    #[test]
+    fn correlated_order_is_refused_when_no_civilian_owner_remains() {
+        use crate::core::messages::{AdmittedCommand, SystemId};
+
+        let mut app = test_app();
+        let departed_uuid = uuid::Uuid::from_u128(0x1288).to_string();
+        app.world_mut()
+            .spawn(AdmittedCommands(vec![AdmittedCommand {
+                target: SystemId(crate::ship::system_registry::NAVIGATION_SYSTEM_ID.to_string()),
+                payload: SystemControlPayload::OrderCivilian {
+                    target: departed_uuid.clone(),
+                    order: CivilianOrder::Hold,
+                },
+                response_token: Some("nav-holder".into()),
+                feedback_correlation: Some(ActionCorrelationId::new("civilian-departed").unwrap()),
+            }]));
+
+        app.world_mut().run_schedule(FixedUpdate);
+
+        let outbox = app.world().resource::<crate::server_app::SimOutbox>();
+        assert!(outbox.iter().any(|(target, message)| matches!(
+            (target, message),
+            (
+                crate::lobby::Target::Token(token),
+                ServerMessage::ActionFeedback {
+                    correlation,
+                    outcome: ActionFeedbackOutcome::Refused,
+                },
+            ) if token == "nav-holder" && correlation.as_str() == "civilian-departed"
+        )));
+        assert!(outbox.iter().any(|(target, message)| matches!(
+            (target, message),
+            (
+                crate::lobby::Target::Token(token),
+                ServerMessage::CivilianOrderRejected { target, reason },
+            ) if token == "nav-holder"
+                && target == &departed_uuid
+                && reason == REJECT_UNKNOWN_CIVILIAN
+        )));
+    }
+
     /// **AC3.** An order the host cannot deliver bounces back to the console
     /// that sent it, with a reason, rather than vanishing into a queue nobody
     /// drains.
@@ -889,6 +1090,7 @@ mod tests {
                 order,
             },
             response_token: Some("nav-holder".into()),
+            feedback_correlation: None,
         };
         app.world_mut().spawn(AdmittedCommands(vec![
             console("nobody", CivilianOrder::Hold),

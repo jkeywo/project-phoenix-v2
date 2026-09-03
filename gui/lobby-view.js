@@ -67,6 +67,7 @@ export function lobbyViewModel(s, myToken, lobbyConsole, opts = {}) {
   // where `reason` is the PRIVATE functional explanation shown only to this
   // player. Default: everything eligible (no profile / no projection).
   const eligibilityFor = opts.eligibilityFor || (() => ({ eligible: true, reason: null }));
+  const gms = Array.isArray(s.gms) ? s.gms : [];
 
   const myPlayer = (s.players || []).find(p => p.token === myToken) || null;
   // Explicit Spectator role (issue #1105) — a real flag on the player, not the
@@ -187,6 +188,22 @@ export function lobbyViewModel(s, myToken, lobbyConsole, opts = {}) {
     crew: {
       filled: (s.stations || []).filter(st => st.holder_name).length,
       max: s.maxPlayers || 0,
+    },
+    // Equal GM peers are deliberately separate from the crew counter and the
+    // Spectator role. The DOM glue renders this as its own labelled region.
+    gmGroup: {
+      visible: gms.length > 0,
+      headingId: 'lobby.gms.heading',
+      entries: gms.map(gm => ({
+        id: gm && gm.id != null ? String(gm.id) : '',
+        name: gm && gm.name != null ? String(gm.name) : '',
+        connected: !!(gm && gm.connected),
+        ready: !!(gm && gm.connected && gm.ready),
+        labelId: gm && gm.connected ? 'lobby.gms.connected' : 'lobby.gms.disconnected',
+        readinessLabelId: gm && gm.connected && gm.ready
+          ? 'lobby.gms.ready'
+          : 'lobby.gms.not_ready',
+      })),
     },
     allReady: !!s.allReady,
   };

@@ -95,8 +95,12 @@ pub(crate) struct ScriptedCommsAux<'w> {
 /// # Determinism
 /// A no-op for every script-free world: no `WorldScriptRuntime` means an early
 /// return before any `DerefMut`, so no change-detection tick flips and no
-/// resource is written. `state_digest` folds no comms state at all, so a
-/// script-free digest is byte-identical by construction. For a scripted world
+/// resource is written. A script-free world's digest is byte-identical for a
+/// reason that survived issue #1086 changing the premise: `state_digest` DOES
+/// fold comms state now (`sim_digest::fold_comms_scope` walks the inbox, the
+/// live dialogues, the open hails and the pending opens), but that walk takes
+/// the empty-walk affordance — with all four containers empty it folds nothing
+/// at all, not even a marker. For a scripted world
 /// the queue is an ordered `Vec` drained front-to-back, every peer runs the same
 /// requests through the same shared budget in the same order, and both minted
 /// ids come from the tick-scoped `WorldIdMint`.

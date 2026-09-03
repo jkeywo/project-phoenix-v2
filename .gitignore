@@ -64,3 +64,23 @@ __pycache__/
 # wrangler local dev state + local-only worker secrets
 worker/.wrangler/
 worker/.dev.vars
+
+# Ultralight runtime debris, from a `--features ultralight` build's local
+# Station panes (issue #1122). None of it is source and none of it may land:
+#   resources/  the SDK's own CA bundle and ICU table, staged into the working
+#               directory at startup by vellum_ultralight::staging. Ultralight
+#               is proprietary and is never vendored into this repository.
+#   default/    Ultralight's own per-origin session storage (cookies,
+#               localStorage) for whatever port a pane was served on. Only a
+#               pane that asked for no session of its own lands here.
+#   pane-<n>/   one per pane, because each pane gets its OWN storage session
+#               (`PaneSession`, so two panes served from this host's single
+#               origin do not share a cookie jar). Ultralight lays a directory
+#               down per session even for a NON-persistent one — the session is
+#               still in memory, but the SDK creates the path — so this is
+#               per-run junk rather than state anything reads back.
+#   ultralight.log  the SDK's own log, written beside the process
+/resources/
+/default/
+/pane-*/
+ultralight.log

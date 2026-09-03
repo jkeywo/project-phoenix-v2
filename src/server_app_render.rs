@@ -20,9 +20,10 @@ use bevy::prelude::*;
 
 use crate::core::messages::GamePhase;
 use crate::entities::glb_visual::{
-    resolve_sidecar_rig, resolve_tier_parent_scale, spawn_glb_visual, tier_parent_scale_at,
-    GlbSpawnOutcome, PendingSceneHandle,
+    resolve_tier_parent_scale, spawn_glb_visual, tier_parent_scale_at, GlbSpawnOutcome,
+    PendingSceneHandle,
 };
+use crate::entities::model_markers::resolve_sidecar_rig;
 use crate::server_app::{FacePlayerLight, LocalShip, LocalShipModel};
 use std::collections::HashMap;
 
@@ -195,9 +196,9 @@ pub(crate) struct MeshLods {
     /// far tiers still need is [`tier_parent_scale`]'s question, not this one's.
     base_scale: [f32; 3],
     /// Cached [`resolve_tier_parent_scale`] for this ladder: the scale a
-    /// non-near tier folds onto the PARENT transform. Resolved on the first
-    /// switch away from the near tier and reused after, so the extra sidecar
-    /// read costs once per entity rather than once per LOD crossing.
+    /// non-near tier folds onto its presentation-only visual root. Resolved on
+    /// the first switch away from the near tier and reused after, so the extra
+    /// sidecar read costs once per entity rather than once per LOD crossing.
     tier_scale: Option<Vec3>,
     /// Active level index; `None` until the first evaluation establishes it.
     current: Option<usize>,
@@ -218,24 +219,13 @@ pub(crate) struct MeshLods {
 /// outgoing child is NOT despawned here: it is handed to
 /// [`crate::entities::visual_fade`], which fades it out over the window and
 /// despawns it at the end, while the incoming tier fades in over the same
-/// window. Both tiers are on screen for it, so the outgoing one is rescaled to
-/// hold the world size it had — the entity's own transform is about to become
-/// the INCOMING tier's, and that scale is the thing `tier_parent_scale` exists
-/// to get right. `fade_secs = 0` is the same-frame cut this always was.
+/// window. Every tier owns its scale on its own visual root, so retirement does
+/// not touch either the outgoing root or the authoritative parent transform.
+/// `fade_secs = 0` is the same-frame cut this always was.
 ///
-/// Note: this intentionally does NOT remove `ModelMarkers`. On a GLB→GLB switch
-/// the new level's `spawn_glb_visual` re-inserts `ModelMarkers`, and because
-/// commands apply in enqueue order, a blanket `remove` here (queued after that
-/// insert) would clobber the new markers. `ModelMarkers` is instead cleared
-/// explicitly in the procedural branch of [`update_mesh_lod`] when switching
-/// away from a GLB level to a shape level.
-fn retire_lod_visual(
-    commands: &mut Commands,
-    lods: &mut MeshLods,
-    fade_secs: f32,
-    outgoing_parent_scale: Vec3,
-    incoming_parent_scale: Vec3,
-) {
+/// Authoritative `ModelMarkers` live on the parent independently of this visual
+/// and are therefore neither replaced nor removed here (issue #1291).
+fn retire_lod_visual(commands: &mut Commands, lods: &mut MeshLods, fade_secs: f32) {
     let Some(child) = lods.scene_child.take() else {
         return;
     };
@@ -243,25 +233,34 @@ fn retire_lod_visual(
         commands.entity(child).try_despawn();
         return;
     }
-    let correction = crate::entities::visual_fade::parent_scale_correction(
-        outgoing_parent_scale,
-        incoming_parent_scale,
-    );
     commands
         .entity(child)
         .insert(crate::entities::visual_fade::VisualFade::fade_out(
             fade_secs,
-        ))
-        .entry::<Transform>()
-        .and_modify(move |mut tf| tf.scale *= correction);
+        ));
+}
+
+/// Put one active LOD tier beneath a presentation-only scale root.
+///
+/// The simulation entity's `Transform` carries authored position, attitude and
+/// `[mesh].scale`; marker, weapon and target-point resolution consumes it on
+/// fixed ticks. Camera-selected tier compensation therefore belongs strictly
+/// below that entity. The extra root also preserves the old transform order for
+/// non-uniform scales: `entity -> tier scale -> rig/level rotation -> geometry`.
+fn wrap_lod_visual(commands: &mut Commands, entity: Entity, visual: Entity, scale: Vec3) -> Entity {
+    let root = commands.spawn(Transform::from_scale(scale)).id();
+    commands.entity(root).add_child(visual);
+    commands.entity(entity).add_child(root);
+    root
 }
 
 /// Add visual meshes and materials to spawned entities that have a `[mesh]`
 /// section but no `RenderProcessed` yet. When `cfg.model` is set, loads a GLB
 /// scene instead of creating a procedural shape — but defers insertion until
 /// the asset is actually loaded (avoids attaching an unloaded handle that
-/// would never retry). Applies `cfg.scale` and `cfg.rotation` to the entity's
-/// transform in both paths. Additionally, if the entity carries a `Lights`
+/// would never retry). The simulation-side marker loader has already applied
+/// `cfg.scale` and `cfg.rotation` to the authoritative parent in every profile.
+/// Additionally, if the entity carries a `Lights`
 /// component (from one or more `[[light]]` TOML entries), attach the matching
 /// `PointLight`/`DirectionalLight` components (single light → inline, multiple
 /// → spawned as child entities).
@@ -285,7 +284,6 @@ pub(crate) fn render_spawned_entities(
     entities: Query<
         (
             Entity,
-            &Transform,
             Option<&crate::entities::spawner::MeshSection>,
             Option<&crate::entities::spawner::StarSection>,
             Option<&crate::entities::spawner::PlanetSection>,
@@ -310,11 +308,8 @@ pub(crate) fn render_spawned_entities(
         phase.is_some_and(|p| *p.get() == GamePhase::InProgress),
     );
 
-    for (entity, transform, mesh_sec, star_sec, planet_sec, lights_opt, pending, local_ship) in
-        entities.iter()
+    for (entity, mesh_sec, star_sec, planet_sec, lights_opt, pending, local_ship) in entities.iter()
     {
-        let mesh_cfg_for_transform = mesh_sec.map(|mesh_sec| &mesh_sec.0);
-
         if let Some(star_sec) = star_sec {
             crate::entities::celestial_visual::insert_star_visual(
                 &mut commands,
@@ -421,23 +416,6 @@ pub(crate) fn render_spawned_entities(
             continue;
         }
 
-        // Apply scale/rotation — preserves spawn position. `mesh_cfg_for_transform`
-        // is `None` for stars, so this is a no-op on that path.
-        if let Some(cfg) =
-            mesh_cfg_for_transform.filter(|cfg| cfg.scale != 1.0 || cfg.rotation != [0.0, 0.0, 0.0])
-        {
-            commands.entity(entity).insert(Transform {
-                translation: transform.translation,
-                rotation: bevy::math::Quat::from_euler(
-                    bevy::math::EulerRot::XYZ,
-                    cfg.rotation[0],
-                    cfg.rotation[1],
-                    cfg.rotation[2],
-                ),
-                scale: Vec3::splat(cfg.scale),
-            });
-        }
-
         // Mark processed so we never visit this entity again.
         let mut ec = commands.entity(entity);
         ec.insert(RenderProcessed);
@@ -495,7 +473,7 @@ pub(crate) fn update_mesh_lod(
     camera: Query<&GlobalTransform, With<crate::render_setup::GameCamera>>,
     mut lod_entities: Query<(
         Entity,
-        &mut Transform,
+        &Transform,
         &mut MeshLods,
         Option<&PendingSceneHandle>,
     )>,
@@ -514,7 +492,7 @@ pub(crate) fn update_mesh_lod(
     let tuning = tuning.map(|t| *t).unwrap_or_default();
     let mid_mission = phase.is_some_and(|p| *p.get() == GamePhase::InProgress);
 
-    for (entity, mut transform, mut lods, pending) in lod_entities.iter_mut() {
+    for (entity, transform, mut lods, pending) in lod_entities.iter_mut() {
         // Use the entity's LOCAL transform, not its `GlobalTransform`: on the
         // frame an entity is first rendered its `MeshLods` is inserted this same
         // Update, but global transforms aren't propagated until PostUpdate, so a
@@ -556,16 +534,17 @@ pub(crate) fn update_mesh_lod(
             continue;
         };
 
-        // Recompute the entity's scale from the flat `[mesh] scale` and this
-        // level's optional `[x, y, z]`. Recomputed rather than multiplied in,
-        // so switching between levels that do and do not declare one is
-        // symmetric and leaves nothing to unwind: a level with no `scale` puts
-        // the entity back to exactly what it spawned with.
+        // Recompute the presentation root's scale from this tier's compensation
+        // and optional `[x, y, z]`. Recomputed rather than multiplied in, so
+        // switching between levels that do and do not declare one is symmetric
+        // and leaves nothing to unwind.
         //
         // `tier_base` folds in however much of the primary sidecar's
         // `[base].scale` this tier still needs — see `tier_parent_scale`, which
-        // the viewer's own LOD path asks the same question of. Resolved once per
-        // entity, then cached.
+        // the viewer's own LOD path asks the same question of. The historical
+        // name describes transform composition; the scale now rides a visual
+        // child rather than the authoritative parent. Resolved once per entity,
+        // then cached.
         let ladder_tier_scale = match lods.tier_scale {
             Some(scale) => scale,
             None => {
@@ -586,20 +565,7 @@ pub(crate) fn update_mesh_lod(
             }
         };
         let tier_base = tier_parent_scale_at(target, ladder_tier_scale);
-        // NOT assigned yet. A GLB level can come back `Pending` for any number
-        // of frames while its scene streams, and the OLD level's child is still
-        // on screen for every one of them — so rescaling the parent here would
-        // dress the outgoing model in the incoming tier's scale and hold it
-        // there until the swap lands. Each branch below assigns it at the point
-        // it actually commits to the new level.
-        let next_scale = Vec3::splat(lods.base.scale)
-            * tier_base
-            * level.scale.map(Vec3::from_array).unwrap_or(Vec3::ONE);
-        // The scale the OUTGOING tier is currently drawn at — read before any
-        // branch overwrites it, because that is what a cross-fading outgoing
-        // child has to be corrected back to once the entity takes the incoming
-        // tier's scale.
-        let outgoing_scale = transform.scale;
+        let tier_visual_scale = tier_base * level.scale.map(Vec3::from_array).unwrap_or(Vec3::ONE);
 
         // This entity's FIRST visual materialises (if the mission is already
         // running); every later one cross-fades with the tier it replaces.
@@ -650,34 +616,24 @@ pub(crate) fn update_mesh_lod(
                     // nothing incoming to fade the outgoing tier against, and
                     // holding a dead tier on screen for the window would only
                     // delay the (already wrong) empty result.
-                    transform.scale = next_scale;
-                    retire_lod_visual(&mut commands, &mut lods, 0.0, outgoing_scale, next_scale);
+                    retire_lod_visual(&mut commands, &mut lods, 0.0);
                     lods.current = Some(target);
                 }
                 GlbSpawnOutcome::Spawned(child) => {
-                    transform.scale = next_scale;
                     if lods.is_local_ship {
                         decorate_local_ship_model(&mut commands, child);
                     }
-                    retire_lod_visual(
-                        &mut commands,
-                        &mut lods,
-                        fade_out_secs,
-                        outgoing_scale,
-                        next_scale,
-                    );
+                    let visual_root =
+                        wrap_lod_visual(&mut commands, entity, child, tier_visual_scale);
+                    retire_lod_visual(&mut commands, &mut lods, fade_out_secs);
                     if let Some(fade) = arrival {
-                        commands.entity(child).insert(fade);
+                        commands.entity(visual_root).insert(fade);
                     }
-                    lods.scene_child = Some(child);
+                    lods.scene_child = Some(visual_root);
                     lods.current = Some(target);
                 }
             }
         } else if let Some(shape) = level.shape {
-            // A procedural level builds its mesh from cached primitives and so
-            // commits this same frame — nothing to wait for, so the scale lands
-            // here rather than in a branch below.
-            transform.scale = next_scale;
             // Procedural level — fields fall back to the flat `base` config.
             let radius = level.radius.unwrap_or(lods.base.radius);
             let minor = level.minor_radius.unwrap_or(lods.base.minor_radius);
@@ -698,19 +654,7 @@ pub(crate) fn update_mesh_lod(
                 &colour,
                 emissive_mul,
             );
-            retire_lod_visual(
-                &mut commands,
-                &mut lods,
-                fade_out_secs,
-                outgoing_scale,
-                next_scale,
-            );
-            // Switching to a shape level: drop any `ModelMarkers` left by a prior
-            // GLB level (no-op if absent). Enqueued after teardown, so it never
-            // races a freshly-inserted marker map.
-            commands
-                .entity(entity)
-                .remove::<crate::entities::model_rig::ModelMarkers>();
+            retire_lod_visual(&mut commands, &mut lods, fade_out_secs);
             // The mesh goes on a CHILD, as a GLB level's `SceneRoot` does, so
             // the level can carry its own rotation. Rotating the entity itself
             // is not available: an entity's rotation is simulation state, and
@@ -722,38 +666,24 @@ pub(crate) fn update_mesh_lod(
                     Transform::from_rotation(level_rotation(&level)),
                 ))
                 .id();
-            commands.entity(entity).add_child(child);
+            let visual_root = wrap_lod_visual(&mut commands, entity, child, tier_visual_scale);
             if let Some(fade) = arrival {
-                commands.entity(child).insert(fade);
+                commands.entity(visual_root).insert(fade);
             }
-            lods.scene_child = Some(child);
+            lods.scene_child = Some(visual_root);
             lods.current = Some(target);
         } else if let Some(atlas) = level.billboard.as_deref() {
             // Billboard level: a camera-facing quad textured from a yaw-ring
             // atlas. Width/height (world units) come from the level's `scale`;
-            // the ENTITY takes a UNIFORM scale here rather than `next_scale` —
-            // that would multiply in this level's `[w, h, 1]`, which on a quad
-            // that rotates to face the camera would shear it. The width/height
-            // instead ride the child's own scale (see `spawn_billboard_child`),
-            // leaving the parent uniform. A billboard commits this frame too, so
-            // this is its equivalent of the `next_scale` assignment above.
-            let billboard_scale = Vec3::splat(lods.base.scale);
-            transform.scale = billboard_scale;
+            // Width/height ride the child's own scale (see
+            // `spawn_billboard_child`), leaving the authoritative parent at its
+            // authored uniform `[mesh].scale`.
             // Quad size and ring size are the billboard module's rules, asked
             // for here rather than restated — the viewer's own billboard
             // preview asks the same two questions of the same two functions.
             let [w, h] = crate::entities::billboard::billboard_quad_size(level.scale, tier_base);
             let views = crate::entities::billboard::billboard_yaw_views(&level);
-            retire_lod_visual(
-                &mut commands,
-                &mut lods,
-                fade_out_secs,
-                outgoing_scale,
-                billboard_scale,
-            );
-            commands
-                .entity(entity)
-                .remove::<crate::entities::model_rig::ModelMarkers>();
+            retire_lod_visual(&mut commands, &mut lods, fade_out_secs);
             let child = crate::entities::billboard::spawn_billboard_child(
                 &mut commands,
                 &mut meshes,
@@ -865,6 +795,248 @@ pub(crate) fn face_player_lights(
 mod tests {
     use super::*;
 
+    /// Shape and billboard tiers are presentation replacements only. Crossing
+    /// either boundary must preserve the primary rig's authoritative weapon
+    /// geometry on the parent (issue #1291).
+    #[test]
+    fn non_glb_lod_tiers_cannot_remove_authoritative_markers() {
+        fn level(toml: &str) -> crate::entities::config::LodLevel {
+            toml::from_str(toml).expect("fixture LOD parses")
+        }
+
+        fn lods(level: crate::entities::config::LodLevel) -> MeshLods {
+            MeshLods {
+                levels: vec![level],
+                base: crate::entities::config::MeshConfig {
+                    model: Some("assets/models/primary.glb".into()),
+                    variant: None,
+                    shape: crate::entities::config::MeshShape::Sphere,
+                    colour: vec![0.5, 0.5, 0.5],
+                    radius: 1.0,
+                    size: None,
+                    minor_radius: 0.0,
+                    emissive: None,
+                    scale: 1.0,
+                    rotation: [0.0, 0.0, 0.0],
+                },
+                base_rig: crate::entities::model_rig::ModelRig::default(),
+                base_scale: [1.0, 1.0, 1.0],
+                tier_scale: Some(Vec3::ONE),
+                current: None,
+                scene_child: None,
+                is_local_ship: false,
+            }
+        }
+
+        let rig = crate::entities::model_rig::ModelRig::from_toml(
+            r#"
+            [markers.weapon]
+            position = [1.0, 2.0, 3.0]
+            direction = [0.0, 0.0, -1.0]
+            "#,
+        )
+        .unwrap();
+        let markers = crate::entities::model_rig::ModelMarkers::from_rig(&rig);
+
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+            .init_asset::<Mesh>()
+            .init_asset::<Image>()
+            .init_asset::<StandardMaterial>()
+            .init_asset::<bevy::scene::Scene>()
+            .init_resource::<ProceduralMeshCache>()
+            .add_systems(Update, update_mesh_lod);
+        app.world_mut().spawn((
+            crate::render_setup::GameCamera,
+            GlobalTransform::from_translation(Vec3::ZERO),
+        ));
+        let shape = app
+            .world_mut()
+            .spawn((
+                Transform::from_translation(Vec3::new(0.0, 0.0, 10.0)),
+                lods(level("shape = \"sphere\"")),
+                markers.clone(),
+            ))
+            .id();
+        let billboard = app
+            .world_mut()
+            .spawn((
+                Transform::from_translation(Vec3::new(0.0, 0.0, 20.0)),
+                lods(level(
+                    "billboard = \"assets/models/fixture.png\"\nscale = [2.0, 1.0, 1.0]",
+                )),
+                markers,
+            ))
+            .id();
+
+        app.update();
+
+        for entity in [shape, billboard] {
+            assert_eq!(
+                app.world()
+                    .get::<crate::entities::model_rig::ModelMarkers>(entity)
+                    .and_then(|markers| markers.get("weapon"))
+                    .map(|marker| marker.position),
+                Some([1.0, 2.0, 3.0]),
+                "changing visual tiers must leave canonical primary-rig markers intact"
+            );
+        }
+    }
+
+    /// The renderer may choose a non-unit tier scale, but that presentation
+    /// choice must not change any simulation-owned transform or marker result.
+    /// A rendererless GM therefore resolves exactly the same weapon geometry as
+    /// a rendered peer before and after a real LOD transition (issue #1291).
+    #[test]
+    fn non_unit_lod_transition_matches_rendererless_authority() {
+        fn level(toml: &str) -> crate::entities::config::LodLevel {
+            toml::from_str(toml).expect("fixture LOD parses")
+        }
+
+        fn resolved_geometry(world: &World, entity: Entity) -> (Vec3, Vec3, Vec3) {
+            let transform = world
+                .get::<Transform>(entity)
+                .expect("authoritative transform remains present");
+            let markers = world
+                .get::<crate::entities::model_rig::ModelMarkers>(entity)
+                .expect("authoritative markers remain present");
+            (
+                markers
+                    .resolve_world_position(transform, "weapon")
+                    .expect("weapon position resolves"),
+                markers
+                    .resolve_world_direction(transform, "weapon")
+                    .expect("weapon direction resolves"),
+                markers
+                    .resolve_target_point_world_position(transform, 0)
+                    .expect("target point resolves"),
+            )
+        }
+
+        let rig = crate::entities::model_rig::ModelRig::from_toml(
+            r#"
+            [base]
+            offset = [0.25, -0.5, 1.0]
+            rotation = [0.1, 0.2, -0.3]
+            scale = [2.0, 3.0, 4.0]
+
+            [markers.weapon]
+            position = [1.0, 2.0, 3.0]
+            direction = [0.25, 0.5, -1.0]
+
+            [[target_points]]
+            position = [-0.5, 0.25, 1.5]
+            "#,
+        )
+        .expect("fixture rig parses");
+        let markers = crate::entities::model_rig::ModelMarkers::from_rig(&rig);
+        let canonical = Transform {
+            translation: Vec3::new(11.0, -4.0, 20.0),
+            rotation: Quat::from_euler(EulerRot::XYZ, -0.2, 0.4, 0.15),
+            scale: Vec3::splat(1.75),
+        };
+
+        let mut rendererless = World::new();
+        let rendererless_entity = rendererless.spawn((canonical, markers.clone())).id();
+        let rendererless_geometry = resolved_geometry(&rendererless, rendererless_entity);
+
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+            .init_asset::<Mesh>()
+            .init_asset::<Image>()
+            .init_asset::<StandardMaterial>()
+            .init_asset::<bevy::scene::Scene>()
+            .init_resource::<ProceduralMeshCache>()
+            .add_systems(Update, update_mesh_lod);
+        let camera = app
+            .world_mut()
+            .spawn((
+                crate::render_setup::GameCamera,
+                GlobalTransform::from_translation(canonical.translation),
+            ))
+            .id();
+        let rendered_entity = app
+            .world_mut()
+            .spawn((
+                canonical,
+                MeshLods {
+                    levels: vec![
+                        level("max_distance = 10.0\nshape = \"sphere\"\nscale = [1.0, 1.0, 1.0]"),
+                        level("shape = \"cuboid\"\nscale = [0.5, 2.0, 1.0]"),
+                    ],
+                    base: crate::entities::config::MeshConfig {
+                        model: Some("assets/models/primary.glb".into()),
+                        variant: None,
+                        shape: crate::entities::config::MeshShape::Sphere,
+                        colour: vec![0.5, 0.5, 0.5],
+                        radius: 1.0,
+                        size: None,
+                        minor_radius: 0.0,
+                        emissive: None,
+                        scale: 1.75,
+                        rotation: [-0.2, 0.4, 0.15],
+                    },
+                    base_rig: rig,
+                    base_scale: [2.0, 3.0, 4.0],
+                    tier_scale: Some(Vec3::new(2.0, 3.0, 4.0)),
+                    current: None,
+                    scene_child: None,
+                    is_local_ship: false,
+                },
+                markers,
+            ))
+            .id();
+
+        app.update();
+        assert_eq!(
+            *app.world().get::<Transform>(rendered_entity).unwrap(),
+            canonical,
+            "selecting the near tier cannot mutate the simulation transform"
+        );
+        assert_eq!(
+            resolved_geometry(app.world(), rendered_entity),
+            rendererless_geometry
+        );
+        let near_root = app
+            .world()
+            .get::<MeshLods>(rendered_entity)
+            .and_then(|lods| lods.scene_child)
+            .expect("near visual root is recorded");
+        assert_eq!(
+            app.world().get::<Transform>(near_root).unwrap().scale,
+            Vec3::ONE,
+            "the primary GLB convention folds no extra compensation into tier zero"
+        );
+
+        app.world_mut()
+            .entity_mut(camera)
+            .insert(GlobalTransform::from_translation(
+                canonical.translation + Vec3::X * 100.0,
+            ));
+        app.update();
+
+        assert_eq!(
+            *app.world().get::<Transform>(rendered_entity).unwrap(),
+            canonical,
+            "selecting a non-unit far tier cannot mutate simulation state"
+        );
+        assert_eq!(
+            resolved_geometry(app.world(), rendered_entity),
+            rendererless_geometry,
+            "renderer and rendererless peers must resolve identical geometry"
+        );
+        let far_root = app
+            .world()
+            .get::<MeshLods>(rendered_entity)
+            .and_then(|lods| lods.scene_child)
+            .expect("far visual root is recorded");
+        assert_eq!(
+            app.world().get::<Transform>(far_root).unwrap().scale,
+            Vec3::new(1.0, 6.0, 4.0),
+            "the non-unit far scale still applies to presentation"
+        );
+    }
+
     // ── LOD tier retirement (PRD #1023, module 5) ────────────────────────
 
     mod lod_cross_fade {
@@ -894,7 +1066,7 @@ mod tests {
 
         /// Retire one LOD visual through a real `Commands`, and hand back the
         /// world plus the child that was retired.
-        fn retire(fade_secs: f32, outgoing: Vec3, incoming: Vec3) -> (World, Entity) {
+        fn retire(fade_secs: f32) -> (World, Entity) {
             let mut world = World::new();
             let entity = world.spawn(Transform::default()).id();
             let child = world
@@ -914,7 +1086,7 @@ mod tests {
             };
             {
                 let mut commands = world.commands();
-                retire_lod_visual(&mut commands, &mut lods, fade_secs, outgoing, incoming);
+                retire_lod_visual(&mut commands, &mut lods, fade_secs);
             }
             world.flush();
             assert_eq!(
@@ -928,7 +1100,7 @@ mod tests {
         /// behaviour every LOD test written before the cross-fade assumes.
         #[test]
         fn a_zero_window_despawns_the_outgoing_tier_immediately() {
-            let (world, child) = retire(0.0, Vec3::ONE, Vec3::splat(0.75));
+            let (world, child) = retire(0.0);
             assert!(
                 world.get_entity(child).is_err(),
                 "with no window the outgoing tier goes this frame"
@@ -939,7 +1111,7 @@ mod tests {
         /// the fade driver, which owns its despawn.
         #[test]
         fn a_window_keeps_the_outgoing_tier_and_fades_it() {
-            let (world, child) = retire(0.25, Vec3::ONE, Vec3::splat(0.75));
+            let (world, child) = retire(0.25);
             let fade = world
                 .get::<VisualFade>(child)
                 .expect("the outgoing tier is handed to the fade driver");
@@ -948,32 +1120,11 @@ mod tests {
             assert_eq!(fade.alpha(), 1.0, "the fade starts from fully visible");
         }
 
-        /// The invariant the flash fix (9135d400) established, extended across
-        /// the window: the new scale lands with the new tier, so the OUTGOING
-        /// tier has to be corrected off it or it changes size while it fades.
-        /// A hull ladder's near tier folds in nothing and its far tiers the
-        /// whole `[base].scale`, so an uncorrected outgoing near tier would
-        /// visibly shrink to 75% over the quarter-second it is dying.
+        /// Each tier now owns its presentation scale, so retirement must leave
+        /// the outgoing root unchanged while the fade driver owns its lifetime.
         #[test]
-        fn the_outgoing_tier_holds_its_world_size_while_the_entity_takes_the_new_one() {
-            let outgoing_parent = Vec3::ONE;
-            let incoming_parent = Vec3::splat(0.75);
-            let (world, child) = retire(0.25, outgoing_parent, incoming_parent);
-            let corrected = world.get::<Transform>(child).unwrap().scale;
-            let world_size = corrected * incoming_parent;
-            let was = Vec3::splat(OUTGOING_CHILD_SCALE) * outgoing_parent;
-            assert!(
-                (world_size - was).length() < 1e-5,
-                "the fading tier must stay at {was:?} in world units, got {world_size:?}"
-            );
-        }
-
-        /// Tiers whose parent scale does not change across the switch — every
-        /// pipeline ladder, where the base scale rides the child — must not be
-        /// touched at all.
-        #[test]
-        fn an_unchanged_parent_scale_leaves_the_outgoing_tier_alone() {
-            let (world, child) = retire(0.25, Vec3::ONE, Vec3::ONE);
+        fn retirement_leaves_the_outgoing_visual_scale_alone() {
+            let (world, child) = retire(0.25);
             assert_eq!(
                 world.get::<Transform>(child).unwrap().scale,
                 Vec3::splat(OUTGOING_CHILD_SCALE)
@@ -998,7 +1149,7 @@ mod tests {
             };
             {
                 let mut commands = world.commands();
-                retire_lod_visual(&mut commands, &mut lods, 0.25, Vec3::ONE, Vec3::ONE);
+                retire_lod_visual(&mut commands, &mut lods, 0.25);
             }
             world.flush();
             assert_eq!(lods.scene_child, None);

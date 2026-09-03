@@ -362,7 +362,10 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     "project_phoenix::world::server::PendingScenarioLoad",
     "project_phoenix::world::server::WorldContentRuntime",
     // The Rhai scripting seam (issue #984, Rhai M6 phase 2a/2b). Both are
-    // authoritative-but-deferred, exactly like `WorldContentRuntime` above:
+    // authoritative and PARTLY folded since issue #1086 — see the paragraph at
+    // the end of this block for exactly which fields moved into the fold and why
+    // neither type is declared `Folded` outright. The rest reads as it was
+    // written, before the widening, and still holds for what is left:
     // `RawWorldSource` is the world TOML the script loader reads at `Startup`
     // (as loaded, after any headless duel-side transform);
     // `WorldScriptRuntime` holds the compiled handler ASTs, the
@@ -554,6 +557,52 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // authored none is that same registered type, instantiated where a script-free
     // world previously had nothing. See `src/world/layers.rs` and the parallel-vec
     // invariant documented on `WorldScriptRuntime::handlers`.
+    //
+    // Issue #1086 CASHED IN most of the "belongs in the same digest fold"
+    // language above, and the two entries stay here for a narrower reason than
+    // they used to. `sim_digest::fold_scenario_scope` now walks, on every digest
+    // sample and on every save and restore: `WorldContentRuntime`'s `flags`,
+    // `trigger_states` (authored identity plus latches),
+    // `pending_world_events`, `entity_groups`, `deadlines`, `commitments`,
+    // `evidence` and `workforce`; and `WorldScriptRuntime`'s `pending_callbacks`
+    // and `pending_comms_opens`. So every FIELD the paragraphs above account for
+    // — the deadline table (#1024), the commitments ledger (#1029), the evidence
+    // log (#1031), the workforce register (#1035), the scanned-flag bit (#1038)
+    // and the campaign handoff counters (#1043) — is folded rather than merely
+    // snapshotted.
+    //
+    // ── THE CLASSIFICATION RULE ──────────────────────────────────────────────
+    //
+    // Defined ONCE, at `authoritative::StateClass`'s own doc comment — not
+    // restated here, so the two copies cannot drift apart again. Short version:
+    // `Folded` means `sim_digest::world_digest` walks EVERY field of the type;
+    // anything less keeps `DeferredFold` (or, as here, stays unclassified) with
+    // an adjacent comment naming the folded/unfolded split.
+    //
+    // #1086's three partly-folded types are held to that rule in
+    // `server_app::registration`, each with its own naming comment:
+    // `comms::server::CommsRuntime` (dialogues and hails walked; contacts, range
+    // flags, range_active and the broadcast bookkeeping not),
+    // `comms::server::CommsInboxRes` (the inbox's `records` walked; its `dirty`
+    // broadcast flag not — see the registration comment for why demoting it
+    // from an earlier `Folded` declaration was the correction, not the
+    // regression) and `world::server::WorldLayerMap` (each active layer's path,
+    // loader_path, position and flags walked; anchors, spawned handles, owned
+    // objective ids, the unload policy, the script units and the raw activation
+    // ordinal not) — all three `DeferredFold`. No #1086 type on the comms/world
+    // side is declared `Folded`; `CommsInboxRes` was, briefly, and the
+    // correction is the point of naming it here.
+    //
+    // What keeps both types below on THIS list, by that rule: `WorldContentRuntime`
+    // still carries `pending_delayed_actions` (authoritative, and deliberately
+    // out of both the payload and the fold — see `fold_scenario_records`),
+    // `name_to_uuid` and `observed_hull_fractions` (re-derived), the
+    // `mission_clock_anchor_secs` reading, `trigger_table_generation` (the
+    // cache token four bullets up) and `loaded_scenario_paths` (the layer-load
+    // dedup set, which the payload does not carry). `WorldScriptRuntime` is
+    // mostly compiled ASTs, the per-tick budget and the content hash, none of
+    // which the AUTHORITATIVE fold has any business touching — `content_digest`
+    // answers for them.
     "project_phoenix::world::server::BridgeWorldSource",
     "project_phoenix::world::server::PreCompiledScripts",
     "project_phoenix::world::server::RawWorldSource",
@@ -686,10 +735,13 @@ fn every_registered_type_maps_to_the_digest_record() {
          the #894 digest-boundary record: {newly_unclassified:?}\n\
          Classify each one by declaring it at its OWNING plugin's `build()` via \
          `app.declare_state::<T>(class, pasm)` (issue #1220's registry):\n\
-         \x20 - if it is authoritative simulation state, declare it \
-         `StateClass::Folded` when `src/sim_digest.rs` folds it or \
-         `StateClass::DeferredFold` when it does not yet — the census feeds this \
-         authoritative set — and add its name to the owning PASM \
+         \x20 - if it is authoritative simulation state, pick the class by the \
+         rule at `authoritative::StateClass`'s own doc comment: \
+         `StateClass::Folded` ONLY when `src/sim_digest.rs` walks EVERY field of \
+         the type, `StateClass::DeferredFold` for anything less — a type \
+         `sim_digest.rs` folds PART of is `DeferredFold`, never `Folded`, with \
+         an adjacent comment naming the folded/unfolded split — the census feeds \
+         this authoritative set — and add its name to the owning PASM \
          `classification: authoritative` state entity's `implementation.symbols` \
          under pasm/spec/architecture/*.yaml;\n\
          \x20 - otherwise declare it with the right exclusion StateClass \

@@ -85,6 +85,14 @@
 # `fold_infrastructure_namespace`, so every register below is a number the
 # authoritative digest can see.
 #
+# RECORDED PRE-#1086, AND NO LONGER REPRODUCIBLE. "Unlike most scenario state"
+# was true of the fold this was measured against; it is not true of this one.
+# Issue #1086's `sim_digest::fold_scenario_records` now walks the two
+# `[[deadline]]` entries above by name and time, the `probe_window_open`/
+# `probe_window_supply`/`claim_*` flags the script sets, and the four
+# `on_timer` trigger latches — none of which folded when 8563713307821982951
+# was measured. Re-measure before treating it as a baseline again.
+#
 # WHAT DOES NOT MOVE IT: `skyhook.toml` growing thresholds. This is the only
 # probe that fields a skyhook, and the collapse slice (#1040) added three warning
 # rungs to that template — which lengthens the fold row of every head that

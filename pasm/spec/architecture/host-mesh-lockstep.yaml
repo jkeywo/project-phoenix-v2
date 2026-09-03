@@ -1,0 +1,335 @@
+entities:
+  - component: fleet-lockstep-session
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Fleet Lockstep Session
+      summary: >-
+        The frozen fleet as one authoritative host sees it while a mission runs: its own slot,
+        the peers it waits for, the agreed input delay, and each peer's watermark. Decides
+        whether the next fixed tick may run at all, and names the peer holding it up when it
+        may not.
+      rationale:
+        - "A host may simulate tick T only once every peer is ready through T. Every host declares itself ready through SimTick + CommandDelay each tick — it will never issue anything for a tick at or below that again — so the first delay+1 ticks run unblocked and thereafter a peer may fall delay ticks behind before anybody waits."
+        - "[ai] The order is PEER-INDEPENDENT rather than owner-sequenced, and the fleet lead was considered and rejected. An owner-assigned order costs every non-owner a second network hop before its own command is ordered, which doubles the delay the fleet must agree — and the delay is the entire latency budget. It also makes the lead a single point of failure for ORDERING, which #1119's host loss and #1120's slot recovery would then have to arbitrate before doing anything else. CommandOrder needs neither: (origin slot, that slot's own sequence) is a total order computable from the key alone. The lead is still what makes it work, because it minted the slot ids (p2p-delta-identity-is-minted), it simply is not on the critical path of every command."
+        - "[ai] A stall PAUSES Time<Virtual>, which starves the fixed accumulator so the withheld tick never begins. p2p-delta-tick-is-fixedupdate rules out both a second accumulator beside Time<Fixed> and a stall that skips systems inside a tick; this is neither, and it reuses the seam SimulationPaused already uses rather than inventing a second pausing mechanism."
+        - "[ai] Watermarks only move forward, so a reordered or duplicated frame is inert rather than a step backwards. That is cheaper to build in here than to bolt onto #1119, which needs reordered and repeated disconnect observations to converge."
+        - "[ai] Peers start ready through `delay`, which is not optimism: a host that has run no ticks has by definition already issued everything it ever will for ticks 0..=delay. Seeding anything lower deadlocks the fleet on tick zero, because no host can send a frame before it has stepped."
+        - "[ai] A fleet of one is a real state — the operator opened a fleet and nobody joined — and it behaves exactly as an unfleeted host does: no barrier, no delay, no frames. Otherwise the solo path acquires a stall it can never clear."
+    architecture:
+      kind: pure-module
+      authority: authoritative
+      owns: [fleet-lockstep-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/lockstep/session.rs, src/lockstep/mod.rs, src/server/bridge.rs, gui/fleet-session.js]
+      symbols:
+        - LockstepSession
+        - FleetLockstep
+        - Stall
+        - gate_lockstep_ticks
+        - join_fleet
+        - wasm_join_fleet
+        - wasm_mesh_status
+      tests: [cargo test, tests/lockstep_mesh.rs, tests/smoke/fleet-lockstep.spec.js]
+
+  - state: fleet-lockstep-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Fleet Lockstep State
+      summary: >-
+        This host's slot, its peers' input watermarks, the agreed CommandDelay, and the frozen
+        roster of which host flies which hull and who is crewing it. Transport state: who is
+        connected where, on which machine — not state of the world.
+      rationale:
+        - "[ai] The roster's crewing is FROZEN and carries the Station Rating as well as the seat. Sessions describes only the local crew, so a host seeding a peer's ship from its own sessions would boot that hull fully AI-backfilled here and human-crewed on the machine its crew is sitting at — two hosts running different AI on one ship from tick zero. The Rating travels with the seat because it decides which systems the station automates."
+        - "[ai] Not folded into the authoritative digest and not snapshotted. It is a fact about the SESSION rather than about the world: who is connected where, on which machine — which is the same reason `world_id` excludes session tokens and lobby identity. What crosses into the simulation from it is the ships it spawns and the ratings it seeds, and those are folded like anything else. Declared into the #894 census (issue #1220) as `StateClass::Timer` for the roster and the session, and `ClearedAtFold` for the two mesh queues, which `apply_mesh_inbox` and the transport empty every frame."
+    architecture:
+      classification: transport
+      owner: fleet-lockstep-session
+      writers: [fleet-lockstep-session]
+    implementation:
+      status: declared
+      paths: [src/lockstep/mod.rs, src/lockstep/session.rs]
+      symbols: [FleetLockstep, FleetRoster, FleetShip, FleetSlotOf, MeshInbox, MeshOutbox]
+      tests: [cargo test, tests/authoritative_state_enumeration.rs]
+
+  - message: lockstep-tick-frame
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Lockstep Tick and Digest Frames
+      summary: >-
+        Host-mesh revision 2's running-mission half: a `tick` frame carrying one host's commands
+        for its own crew plus the watermark that says there is no more input for those ticks, and
+        a `digest` frame carrying a sampled authoritative fold for agreement checking.
+      rationale:
+        - "A tick frame is emitted EVERY tick even with nothing to say, because \"no input\" is an answer a peer has to receive. A fleet whose hosts only spoke when they had something to say would stall until somebody pressed a key."
+        - "[ai] A receiver does not re-run the sending host's OWN authority check (human-vs-AI, station tenure) and cannot: that check is against the sending host's Sessions, and a session token is a bearer credential that never leaves the host holding it. The contract is the one a replay already keeps — a command on this wire is one an authority check already accepted. What the receiver DOES enforce for itself is ship ownership: apply_mesh_inbox drops any peer command whose target ShipKey is not the hull the sending slot owns (looked up from the spawned FleetSlotOf ships), so a host cannot drive another player's ship or an NPC. is_from checks the companion frame-consistency rule (a frame's from and its commands' order origin agree)."
+        - "[ai] The one authority dimension NOT yet enforced (issue #1116 review) is that a frame's declared `from` is the connection that delivered it. A transport-authenticated sender slot is deferred to #1118/#1120 mesh hardening: the star relay means a member cannot authenticate a sibling frame the lead forwarded without the lead tagging it, which would change #1114's verbatim-relay envelope. It is deferred rather than half-built, and the ship-ownership check above holds regardless — a spoofed `from` can still speak only for the hull that slot owns. A TODO at the apply site and is_from's own doc record the boundary."
+        - "[ai] No AI emission crosses this wire. Every host derives every NPC from the same ticks, the same seeded streams and the same authored policies (AGENTS.md rule 6, p2p-delta-ai-output-is-not-logged); shipping AI output would double-apply it against the replay contract."
+        - "[ai] The protocol revision is declared in BOTH halves — HOST_MESH_PROTOCOL in Rust and in gui/host-mesh.js — with a test pinning the number on each side. A host whose Rust half speaks 2 and whose JS half speaks 1 would assemble a fleet and then silently fail to agree a tick, and #1114's decoder refuses an unknown `m` precisely so that fails loudly instead."
+    architecture:
+      authority: request
+      producer: [fleet-lockstep-session]
+      consumer: [fleet-lockstep-session]
+      validator: [fleet-lockstep-session]
+      trust_boundary: client-to-host
+      payload: MeshFrame
+    implementation:
+      status: declared
+      paths: [src/lockstep/frame.rs, src/core/codec.rs, gui/host-mesh.js, gui/fleet-session.js]
+      symbols:
+        - MeshFrame
+        - TickFrame
+        - DigestFrame
+        - MeshCommand
+        - HOST_MESH_PROTOCOL
+        - encode_mesh_frame
+        - decode_mesh_frame
+        - wasm_receive_mesh_frame
+        - wasm_take_mesh_frames
+        - apply_mesh_inbox
+      tests: [cargo test, tests/lockstep_mesh.rs, tests/client/host-mesh.test.js, tests/smoke/fleet-lockstep.spec.js]
+
+  - component: peer-independent-command-order
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Peer-Independent Command Order
+      summary: >-
+        The total order commands from different hosts apply in: (origin fleet slot, that slot's
+        own run-scoped sequence), as the tiebreak inside the existing PendingCommands queue and
+        as a field on every LoggedCommand.
+      rationale:
+        - "p2p-delta-command-log-shape's must_not_be is explicit: not ordered across peers by local arrival index, and not a second queue beside PendingCommands. The key widened and the queue did not fork."
+        - "[ai] A lone host mints every order from HostSlot::SOLO with a run-wide sequence, so (tick, order) sorts exactly as the pre-#1116 (tick, arrival) did and no single-player behaviour moved. SOLO is 0 and fleet slots are numbered from 1, so a solo entry can never collide with a fleet member's."
+        - "[ai] The log is written when a command APPLIES, not when it is accepted. Under a fleet delay those are different moments and acceptance is the wrong one: each host accepts its own crew's commands as its clock reaches them and a peer's whenever the frame arrives, so two hosts applying an identical tick identically would still have written two different logs — and a host a tick behind would record a later stamp before an earlier one, which ticks_are_monotonic correctly calls unreplayable. Draining and recording are one act, as queueing and recording were."
+        - "[ai] Because of that, two hosts of one mission write BYTE-IDENTICAL command logs. That is the first diagnostic to reach for on a divergence: identical logs rule input out and point at the simulation, different logs name the command."
+        - "[ai] A due command is applied to the ship its ShipKey names, resolved at the instant it lands rather than at the instant it was accepted. That closes the routing gap headless::replay recorded in so many words, and is what lets a peer's command — which this host never routed, and whose ship may not have existed when the frame arrived — reach the right hull."
+    architecture:
+      kind: pure-module
+      authority: authoritative
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/command_admission/log.rs, src/command_admission/mod.rs]
+      symbols:
+        - CommandOrder
+        - HostSlot
+        - PendingCommands
+        - stamp_accepted_command
+        - admit_system_commands
+      tests: [cargo test, tests/lockstep_mesh.rs]
+
+  - component: local-ship-projection-boundary
+    core:
+      status: implemented
+      confidence: confirmed
+      title: LocalShip Is a Projection Marker, Not a Simulation One
+      summary: >-
+        LocalShip marks the ship whose crew is on THIS machine, so with two hosts running one
+        mission it is a different ship on each of them. Nothing it gates may reach the
+        authoritative digest, and tests/local_ship_neutrality.rs is the standing guard.
+      rationale:
+        - "The rule is checkable rather than aspirational: the guard runs the same seeded world twice, moving the marker to a different fleet ship, and compares the fold on every tick of a mission with combat in it."
+        - "[ai] Four sites failed it when it was written, and all four were fixed rather than blessed. Visual banking lerped ShipPhysics.roll for the LocalShip alone and the digest folds all eight physics fields. The scenario's objective pool reached only the LocalShip, so each host's mission steered a different hull. A beam hit routed to a shield facing by bearing for the LocalShip and to arc zero for everything else, justified as \"an NPC has one facing\" — a peer's player hull has four. And the helm blackboard's radar range came from the player-only client config for the LocalShip and from the ship's own authored section otherwise: the same number spelled twice, until two hosts spelled it differently for one hull."
+        - "[ai] The #[require]s #984 put on LocalShip moved onto the player-ship bundle, where every FLEET ship gets them in the same spawn burst. Requiring them on the marker would have made their PRESENCE follow which ship a host projects, which is the cross-host asymmetry this rule forbids; putting them on the bundle keeps #984's actual property — no mid-run archetype move, no Commands in the resolver."
+        - "[ai] The marker still shapes archetypes, and that is allowed: #1052's guard says the digest is independent of archetype-creation order, proved under a stronger perturbation than this one. What #1116 found is that three AI target scans still broke an exact distance tie by position in the list, which two hosts order differently — a fleet in formation with a contact on the centreline is the ordinary case. They now sort on the contact's own id first, which is #1052's pattern applied to a decision rather than a draw."
+        - "[ai] The human-seeking resolver's crewing answer is frozen for a fleet ship, the local one included (issue #1116 review). It used to answer the LOCAL ship from live Sessions and peers from the frozen roster — but is_afk/is_eligible/the Station Rating are live per-session flags an ordinary in-mission player message flips, so a crew member stepping AFK mid-mission would re-seek the station on their own host alone while the peer, which never saw the toggle, kept it crewed — two hosts running different control sources, and therefore different AI, on one hull. In a fleet every ship now answers from the frozen roster; only a solo mission (no peer to diverge from) keeps the live answer a reconnecting single-player pilot needs. A proper tick-stamped AFK/rating fleet event belongs to #1119 alongside its host-loss transitions, and is deliberately deferred rather than approximated here."
+        - "[ai] Asteroid streaming was a fifth site, found by the #1116 review after the first four. update_asteroid_window centred its ring-buffer window on the single LocalShip, and a rock's position folds into sim_digest (it is what a collision resolves against), so two hosts streamed different belts and diverged on ANY asteroid world — combat_test, the demo, included; the original neutrality world had no asteroids to catch it. The window now follows fleet_stream_centre, the geometric mean over every FleetSlotOf ship: identical on every host because every host simulates every fleet ship, and for a fleet of one exactly that ship's position, so solo streaming is byte-for-byte unchanged. The single ring-buffer arena cannot hold a literal per-cell union of widely separated ships (its rem_euclid slot addressing aliases beyond the arena side), so the mean is the deterministic fleet point it centres on; a fleet closing on one objective — the mission case — is covered. tests/local_ship_neutrality.rs gained a probe world with a streaming belt (probe_fleet_asteroids.toml) whose two hulls sit far enough apart that a per-ship window and a fleet-wide one load visibly different cell sets."
+    architecture:
+      kind: invariant
+      authority: authoritative
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/server_app/components.rs
+        - src/server_app/world_setup.rs
+        - src/ship/physics_systems.rs
+        - src/ship/coordination_systems.rs
+        - src/server_app/broadcast_publish.rs
+        - src/console/weapons/beam.rs
+        - src/asteroids/lifecycle.rs
+      symbols: [LocalShip, FleetSlotOf, insert_player_core_bundle, update_asteroid_window, fleet_stream_centre]
+      tests: [tests/local_ship_neutrality.rs, tests/lockstep_mesh.rs, tests/archetype_order_determinism.rs]
+
+  - component: fleet-digest-exchange
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Fleet Digest Exchange
+      summary: >-
+        Each host periodically folds its authoritative state and publishes the sample; a peer's
+        sample for a tick this host also sampled is compared, and a mismatch is reported with its
+        tick and the slot that disagreed. Detection only — electing a recovery leader and healing
+        the split is fleet-divergence-recovery's (issue #1118), which reads this exchange's ledgers.
+      rationale:
+        - "The comparator is not re-invented: DigestLedger already pairs samples BY TICK and already answers \"they agreed at tick 240 and disagreed by 250\", which is what #1118's affected-tick report needs. This holds one ledger per peer and lets that code answer."
+        - "[ai] sim_digest::digest_stages was added alongside it: the running accumulator after each named scope of the fold. \"Two hosts disagree at tick 240\" is where an investigation starts and not where it can usefully stop; comparing the two lists says which SCOPE they disagree in, which is the difference between a bisection and a look. It is not a second digest — the last stage is always world_digest's own answer, pinned by a test."
+        - "[ai] The exchange cadence is a diagnostic interval and moves nothing in the simulation, so it is a constant rather than authored content. 300 ticks is five seconds at the default rate: short enough that a crew hears about a split in the engagement it happened in, long enough to be invisible beside the per-tick input traffic."
+        - "[ai] The fold is taken from INSIDE the fixed schedule — FixedLast, before advance_sim_tick, the same fold point seal_tick_frame uses — once per fixed step, NOT once per frame in Last (issue #1116 review). A frame that catches up several fixed steps (a browser under load, a post-stall unpause) can advance SimTick past a checkpoint multiple mid-frame, e.g. 299 to 301 across interval 300; a once-per-frame sampler that only read the end-of-frame SimTick would never fold or publish tick 300, and a real divergence at exactly that tick would go undetected. Per-step sampling observes every checkpoint the frame crosses. The fold-point rule still holds: at FixedLast the tick has fully committed (SimSet and the fixed StateTransition have run) and render interpolation, which writes Transform in the frame schedules, has not. Gated to a running fleet so a solo host takes no per-step exclusive sync point for an exchange it has no peer for. tests/lockstep_mesh.rs's a_multi_step_frame_samples_every_checkpoint_it_crosses drives two fixed steps across a checkpoint in one update and asserts it is recorded and published."
+        - "[ai] AC6's cross-instance state-matching is delivered by the native multi-instance test, not the browser one. tests/lockstep_mesh.rs runs two full simulations with a different crew driving each and folds both after EVERY tick — the strong claim, two differently-crewed hosts agreeing. The browser smoke (tests/smoke/fleet-lockstep.spec.js) covers the WIRE — the vocabulary, the encode/decode seam, the wasm boundary and the barrier that reads it. It does not fold and compare the two pages' digests, deliberately: per-slot crewing is not published yet (both pages adopt the identical empty-crew roster, so a browser compare would be identical inputs agreeing, a weaker claim than the native one), and the 300-tick diagnostic exchange — gated by the barrier to the throttled background tab's pace — is not reachable inside CI's smoke timeouts without flakiness. The split is honest and recorded here rather than left implied."
+    architecture:
+      authority: authoritative
+      owns: [fleet-agreement-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/lockstep/mod.rs, src/sim_digest.rs]
+      symbols:
+        - MeshAgreement
+        - MeshDisagreement
+        - sample_and_publish_digest
+        - digest_stages
+        - first_divergent_scope
+      tests: [cargo test, tests/lockstep_mesh.rs, tests/smoke/fleet-lockstep.spec.js]
+
+  - state: fleet-agreement-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Fleet Agreement State
+      summary: This host's sampled digest ledger, one ledger per peer, and every tick the fleet is known to have disagreed on.
+    architecture:
+      classification: derived
+      owner: fleet-digest-exchange
+      writers: [fleet-digest-exchange]
+    implementation:
+      status: declared
+      paths: [src/lockstep/mod.rs]
+      symbols: [MeshAgreement, MeshDisagreement, MeshDiagnostics]
+      tests: [cargo test, tests/authoritative_state_enumeration.rs]
+
+  - component: fleet-divergence-recovery
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Fleet Divergence Recovery
+      summary: >-
+        When the digest exchange names a real fold divergence, every host derives the same recovery
+        plan from the shared ledgers — the divergence tick, the majority-canonical leader, and the
+        boundary tick — holds the fleet at that boundary, has the leader transfer #1117's whole-payload
+        record, restores the divergent host, and resumes only after the restore folds to the leader's
+        state, retaining a diagnostic artifact of the whole event.
+      rationale:
+        - "[ai] Every recovery DECISION is a deterministic function of the digest exchange, which is state the lockstep barrier guarantees all hosts share — never a local-only, arrival-ordered, skew-prone value. The divergence tick is the earliest checkpoint the whole fleet has sampled and NOT agreed on; the leader is the lowest slot in the group whose fold commands a STRICT MAJORITY at that tick; the boundary is pure arithmetic on the divergence tick, the digest interval and the agreed delay. Same shared input, same plan on every host — the property a sibling issue (#1119) failed review twice for violating, pinned here by recovery_plan's every_host_computes_the_identical_plan and by the integration suite asserting all three hosts elect the same leader."
+        - "[ai] A divergent peer is never eligible to lead and cannot overwrite the fleet blindly. Leadership is a function of the fold VALUES at the divergence tick, not of who noticed first, so a peer in the minority is never chosen. And the receiver is ARMED (MeshRestoreArm): drain_mesh_restore commits a staged record only when this host is the designated recovering host AND the record came from the elected leader — an unarmed host, or an armed host presented a record from any other slot, DROPS it without touching the world. Before #1118 that drain committed any completed record unconditionally, so any peer could overwrite another host's whole world by sending it a snapshot; the arm closes that (#1117 review carried this to #1118)."
+        - "[ai] The boundary is placed PAST the detection horizon — a peer's fold for tick T is in hand before any host runs tick T+delay+1 on the reliable-ordered channel — and at least one interval ahead, so every host has set its boundary before it would run that tick and all pause at the same tick. The hold is a separate RecoveryHold resource the barrier reads BESIDE its own peer-stall (gate_lockstep_ticks), so the #1116 barrier decision is unchanged and the recovery withhold is a clearly-separable addition — which also keeps it out of #1119's way in host_loss.rs."
+        - "[ai] The rollback-able checkpoint closes the other half of the #1117 review. gate_and_restore_against captures the live world BEFORE overwriting it and, on a fold mismatch or an incomplete restore, restores that checkpoint back — so a refused host is left byte-identical, never half-restored. A committed restore folds to exactly the leader's transferred state, which IS the post-restore agreement AC3 requires; the divergent host resumes only on that, and never runs its divergent world past the boundary."
+        - "[ai] Resume: the recovering host lifts its hold on a FOLDED value (its restored fold equals the leader's record). Canonical hosts lift theirs on a monotone LIVENESS signal — the recovering host's watermark advancing past the boundary — which is deliberately not a simulation decision: which ticks actually run is still governed by the shared barrier, so a canonical host lifting a frame early or late cannot make the fold diverge, it can only wait for the peer it must wait for anyway. On resolve every host forgets the divergent samples through the boundary so the same stale split cannot re-trigger."
+        - "[ai] Clean failure is honest, not hidden (AC6). Two hosts that disagree have no majority and therefore no safe canonical record: recovery refuses with a diagnostic and transfers nothing rather than overwrite one half from the other on a coin-flip, and neither world is touched. A leader record that will not gate is rolled back and recorded as NoValidRecord. Both are terminal — recorded once, holding nothing, not re-decided — so a persistent unrecoverable split is reported without a re-attempt storm."
+        - "[ai] The diagnostic artifact (RecoveryDiagnostic, one per host per event) records the command window between the last agreement and the divergence, every slot's fold at the divergence tick, the leader choice, the boundary and the result, retained in RecoveryLog and serialised to JSON (not RON — this module compiles for the wasm server host, where serde_json is linked and ron is not), version-guarded by RECOVERY_ARTIFACT_VERSION the way headless::replay's ARTIFACT_VERSION guards the replay artifact."
+    architecture:
+      kind: pure-module
+      authority: authoritative
+      owns: [fleet-recovery-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/lockstep/recovery.rs
+        - src/lockstep/recovery_plan.rs
+        - src/lockstep/snapshot_relay.rs
+        - src/lockstep/mod.rs
+      symbols:
+        - drive_recovery
+        - RecoveryPlan
+        - decide
+        - elect
+        - earliest_divergence
+        - recovery_boundary
+        - RecoveryDiagnostic
+        - RECOVERY_ARTIFACT_VERSION
+        - MeshRestoreArm
+        - gate_and_restore_against
+        - drain_mesh_restore
+      tests: [cargo test, tests/lockstep_recovery.rs, tests/lockstep_snapshot_transfer.rs]
+
+  - state: fleet-recovery-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Fleet Recovery State
+      summary: >-
+        This host's view of the recovery in flight — the shared plan, its role, and how far past the
+        boundary to withhold — plus the receiver arm and the diagnostic log. Session bookkeeping and a
+        report about folds, never folded into the authoritative digest.
+      rationale:
+        - "[ai] Declared into the #894 census as StateClass::Timer for RecoveryState/RecoveryHold and the MeshRestoreArm (session state about whether a recovery is in flight and whom to accept a record from) and StateClass::Derived for RecoveryLog (a report ABOUT folds and the barrier's decisions). Every honest host derives all of it from the same shared plan, so none of it crosses into the fold."
+    architecture:
+      classification: derived
+      owner: fleet-divergence-recovery
+      writers: [fleet-divergence-recovery]
+    implementation:
+      status: declared
+      paths: [src/lockstep/recovery.rs, src/lockstep/snapshot_relay.rs]
+      symbols: [RecoveryState, RecoveryHold, RecoveryLog, MeshRestoreArm]
+      tests: [cargo test, tests/authoritative_state_enumeration.rs]
+
+  - component: fleet-slot-recovery
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Fleet Slot Recovery
+      summary: >-
+        The privileged server code on a REPLACEMENT machine reclaiming one disconnected fixed ship
+        slot during an active mission (the final piece of PRD #1093). The fleet resolves racing claims
+        deterministically, the elected leader transfers #1117's whole-payload record, the replacement
+        arms as the joining host and restores it, proves agreement, and takes over the slot — while a
+        transport-authenticated sender slot closes the mesh boundary the three prior issues deferred.
+      rationale:
+        - "[ai] AC2's claim resolution is deterministic from SHARED state, the same discipline #1118's leader election keeps. Every claim passes through the fleet owner — the star centre (p2p-delta-transport-is-a-star-today) — which stamps it with a monotonic claim_seq in arrival order and broadcasts one SlotClaimFrame; PendingSlotClaims elects the LOWEST claim_seq as the winner, a function of the shared value and not of who-processed-first locally (the skew-prone mistake #1119's two failed fix rounds are the cautionary tale for). The recovery boundary (recovery_boundary, reused from #1118) and the leader (the lowest roster slot that is not the recovering one) are pure functions of the winning claim and the frozen roster, identical on every host."
+        - "[ai] AC3 REUSES #1118 rather than re-inventing it — MeshRestoreArm's own docs named this issue as 'the other legitimate arm; it will set this for a joining host the same way'. drive_slot_recovery arms the replacement naming the elected leader, the leader captures at the boundary and transfers through #1117, and gate_and_restore commits only when the restored world folds to the record's own digest — the post-restore agreement — rolling back a bad record so a failed restore leaves the world clean. The boundary hold is a separate SlotRecoveryHold the barrier reads BESIDE its peer-stall and the #1118 hold, so the #1116 barrier decision is unchanged. The replacement suppresses its own mesh egress while it bootstraps toward the transfer, so its throwaway pre-restore world publishes neither a divergent digest (which would false-trigger #1118 on a survivor) nor a premature watermark. A slot recovery and a divergence recovery are mutually exclusive — each defers to the other in flight — so at most one arms a host at a time."
+        - "[ai] AC1 — server-code entry can select ONLY a disconnected fixed slot and cannot add a ship, change a loadout or displace a connected host — is the JS lobby layer's (host-mesh.js's claimSlot): a post-freeze hello naming a slot to CLAIM is judged against whether that slot exists, is currently disconnected, and is not the owner's; the frozen ship and crew are kept verbatim (the claim carries no loadout), and a later slot patch is refused by updateSlot's freeze. The Rust half enforces 'cannot displace a connected host' a second time — a survivor opens a recovery only for a slot IT HAS DEPARTED (#1119's depart), deferring a claim for a slot it still holds a live connection to."
+        - "[ai] The CARRIED sender authentication (owned here, deferred by #1117/#1118/#1119): MeshInbox carries a MeshOrigin beside each frame, and apply_mesh_inbox refuses a frame whose declared from disagrees with the connection's authenticated slot or names a non-roster peer. It is a REJECTION at ingress, identical on every honest host — the authenticated origin is a stable transport fact, never an arrival-order or watermark value — so it cannot diverge the fold. The star accommodation: the lead authenticates every member frame against the connection it arrived on and drops a forged origin before relaying it (JS binds conn->slot at join, wasm_mesh_frame_from lets the opaque body's from be checked); a member cannot re-authenticate a relayed sibling, so it tags every frame with the lead's slot and the rule from==authenticated OR authenticated==lead accepts it. This closes #1118's F1 (the RefusedWrongSender condition becomes real) and the #1119 forged-loss gap — a tick-0 self-observation is honoured only from a LocalObservation, never over a peer connection, so a forged self-loss cannot make this host derive a skewed flip tick. The residue — a byzantine lead, or a peer asserting a false fact under its real identity — is a transport-trust question for the Phoenix rendezvous cutover, not a forged-origin one."
+        - "[ai] AC4/AC5 land at the fleet level here: claimSlot rebinds the disconnected slot's peer to the replacement and keeps its frozen ship, so the recovered ship resumes the same loadout and its slot identity is unchanged. The crew-console rebind — the recovered ship's private client bundle reconnecting to the replacement host — rides the existing Session/rendezvous reconnect (SessionManager restores a station to a returning session token), and the crew-facing rendezvous takeover (the replacement re-registering the ship's crew join code so the crew's phones resolve to IT) is the one capability the CURRENT PeerJS-style relay does not provide: it is named as the real rendezvous-worker cutover rather than half-built against the current transport."
+    architecture:
+      kind: pure-module
+      authority: authoritative
+      owns: [fleet-slot-recovery-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/lockstep/slot_recovery.rs
+        - src/lockstep/mod.rs
+        - src/lockstep/frame.rs
+        - src/lockstep/session.rs
+        - src/server/bridge.rs
+        - gui/host-mesh.js
+        - gui/fleet-session.js
+      symbols:
+        - drive_slot_recovery
+        - PendingSlotClaims
+        - leader_for
+        - SlotClaimFrame
+        - MeshOrigin
+        - claimSlot
+        - wasm_mesh_frame_from
+        - wasm_claim_slot
+      tests: [cargo test, tests/lockstep_slot_recovery.rs, tests/client/fleet-session.test.js, tests/client/host-mesh.test.js]
+
+  - state: fleet-slot-recovery-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Fleet Slot Recovery State
+      summary: >-
+        The claims each host has heard and the deterministic winner of each, this host's view of a slot
+        recovery in flight and how far to withhold, and the event log. Session bookkeeping derived from
+        the shared claim frames, never folded into the authoritative digest.
+      rationale:
+        - "[ai] Declared into the #894 census as StateClass::Timer for PendingSlotClaims, SlotRecoveryState and SlotRecoveryHold (session state about which claims won and whether a recovery is in flight — every honest host derives it from the same shared SlotClaimFrames) and StateClass::Derived for SlotRecoveryLog (a report ABOUT the event). Nothing here crosses into the fold; what crosses IN is the restored snapshot and the barrier hold, classified where they already live."
+    architecture:
+      classification: derived
+      owner: fleet-slot-recovery
+      writers: [fleet-slot-recovery]
+    implementation:
+      status: declared
+      paths: [src/lockstep/slot_recovery.rs]
+      symbols: [PendingSlotClaims, SlotRecoveryState, SlotRecoveryHold, SlotRecoveryLog]
+      tests: [cargo test, tests/authoritative_state_enumeration.rs]

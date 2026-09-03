@@ -1,0 +1,45 @@
+/** Parent-realm catalogue of every semantic action retained by the private
+ * operator profile. Individual surfaces filter which entries they display. */
+
+import { createSemanticActionRegistry } from './semantic-action-registry.js';
+import {
+  CAPTAIN_ACTIONS,
+} from './stations/captain-actions.js';
+import { HELM_ACTIONS } from './stations/helm-actions.js';
+import { COMMS_ACTIONS } from './stations/comms-actions.js';
+import { SENSOR_SCIENCE_ACTIONS } from './stations/sensors-actions.js';
+import { MOD_ACTIONS } from './editor-mod-actions.js';
+import { NAVIGATION_ACTIONS } from './stations/navigation-actions.js';
+import { TACTICAL_ACTIONS } from './stations/tactical-actions.js';
+import { ENGINEERING_ACTIONS } from './stations/engineering-actions.js';
+
+export function createClientSemanticActionRegistry({ adapters = {}, actionFeedback } = {}) {
+  const registry = createSemanticActionRegistry({ actionFeedback });
+  for (const action of [
+    ...CAPTAIN_ACTIONS,
+    ...HELM_ACTIONS,
+    ...TACTICAL_ACTIONS,
+    ...COMMS_ACTIONS,
+    ...SENSOR_SCIENCE_ACTIONS,
+    ...NAVIGATION_ACTIONS,
+    ...ENGINEERING_ACTIONS,
+    ...MOD_ACTIONS,
+  ]) {
+    registry.register(action, adapters[action.id]);
+  }
+  return registry;
+}
+
+/** Settings on a play surface omit editor-only controls while retaining their
+ * bindings in the shared private profile. */
+export function clientSettingsSemanticActions(registry) {
+  if (!registry || typeof registry.list !== 'function') return [];
+  return registry.list().filter((entry) => (
+    entry.contexts.some((context) => !context.startsWith('editor.'))
+  ));
+}
+
+if (typeof window !== 'undefined') {
+  window.createClientSemanticActionRegistry = createClientSemanticActionRegistry;
+  window.clientSettingsSemanticActions = clientSettingsSemanticActions;
+}

@@ -16,6 +16,7 @@ Current implementation orientation only. For intended design use
 
 ## Domain entities
 
+- [GM Operator](./entities/gm-operator.md)
 - [Player](./entities/player.md)
 - [Session](./entities/session.md)
 - [Station](./entities/station.md)
@@ -71,6 +72,8 @@ Current implementation orientation only. For intended design use
 - [Codec Seam](./concepts/codec-seam.md)
 - [Asset Preload](./concepts/asset-preload.md)
 - [Build and Deployment](./concepts/build-and-deployment.md)
+- [Native Host](./concepts/native-host.md) — the Windows authoritative host: fourth boot profile, native wgpu viewscreen, transport seam, local Ultralight Station panes, per-ship-class saved bridge layouts, and the guided acceptance kit for the whole bridge lobby on real monitors
+- [Peer-Local Save Catalogues](./concepts/save-catalogues.md) — deterministic fixed-tick capture, private browser/native stores, and fresh-session restore
 - [Testing Strategy](./concepts/testing-strategy.md)
 - [Model Viewer](./concepts/model-viewer.md)
 - [LOD Generation](./concepts/lod-generation.md)

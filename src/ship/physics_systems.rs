@@ -2,7 +2,6 @@ use bevy::prelude::*;
 
 use crate::core::messages::ModifierSlot;
 use crate::modifiers::ShipModifiers;
-use crate::server_app::LocalShip;
 use crate::server_app::{ShipBoost, ShipImpulse};
 use crate::ship::components::{
     BankConfigResource, BoostConfigResource, ImpulseConfigResource, ShipPhysicsConfigResource,
@@ -118,10 +117,10 @@ pub(crate) fn apply_helm_commands(
 ///  - exactly one `compute_physics` call per ship per frame,
 ///  - visual banking/roll lerp.
 ///
-/// Visual banking/roll is preserved as LocalShip-only, exactly as before — the
-/// helm AI has never applied roll to NPCs (the `operate_helm_ai` monolith did
-/// not, nor do its per-axis successors), and this system doesn't start doing so
-/// either.
+/// Visual banking/roll runs for EVERY ship since issue #1116. `ShipPhysics.roll`
+/// is folded into the authoritative digest, so gating it on `LocalShip` made a
+/// folded value depend on which hull a host happens to project — see the site
+/// itself for why banking every ship is the fix rather than narrowing the fold.
 ///
 /// This system is the only *helm-path* writer of
 /// `ShipPhysics.x/z/yaw/forward_speed/lateral_speed/roll`, enforced in debug
@@ -136,7 +135,6 @@ pub(crate) fn integrate_ship_physics(
     mut ships: Query<
         (
             Entity,
-            Has<LocalShip>,
             &ShipSystemControlSources,
             &mut ShipPhysics,
             Option<&ShipModifiers>,
@@ -180,7 +178,6 @@ pub(crate) fn integrate_ship_physics(
         // Only read by the debug-only write tracker below; underscored so
         // release builds need no blanket `allow(unused_variables)`.
         _entity,
-        is_local,
         sources,
         mut physics,
         modifiers,
@@ -384,32 +381,48 @@ pub(crate) fn integrate_ship_physics(
         physics.lateral_speed = result.lateral_speed;
         physics.vertical_speed = result.vertical_speed;
 
-        // Visual banking: LocalShip only, exactly as before — the helm AI has
-        // never applied roll to NPCs (neither the old `operate_helm_ai` nor its
-        // per-axis successors), and this shared step doesn't start doing so
-        // either. Uses the unscaled
-        // `input.steering` so roll reflects intent, not engine count.
-        if is_local {
-            let bank_cfg = bank_cfg_comp
-                .cloned()
-                .or_else(|| bank_cfg_res.as_deref().cloned())
-                .unwrap_or_default();
-            let max_bank_rad = bank_cfg.max_bank_deg.to_radians();
-            let target_roll = if impulse_active {
-                0.0
-            } else {
-                -input.steering * max_bank_rad
-            };
-            let lerp_factor = (bank_cfg.bank_lerp_rate * dt).min(1.0);
-            physics.roll = physics.roll + (target_roll - physics.roll) * lerp_factor;
-        }
+        // Banking, for EVERY ship (issue #1116, was `LocalShip` only).
+        //
+        // This looks like a presentation detail and is not one: `roll` is a
+        // `ShipPhysics` field, and `sim_digest::fold_physics` folds all eight of
+        // them. Gating it on `LocalShip` therefore made an authoritative value
+        // depend on WHICH SHIP THIS HOST HAPPENS TO PROJECT — so two hosts
+        // running one mission, each tagging its own hull, disagreed on the
+        // fleet's roll from the first tick either of them steered. It was the
+        // first thing `tests/local_ship_neutrality.rs` caught.
+        //
+        // Of the three ways out — fold nothing, fold everything, or stop
+        // folding `roll` — this is the one that keeps the digest honest.
+        // Dropping `roll` from the fold would narrow the authoritative record
+        // over a field the snapshot still carries and `cross_target_probe`
+        // deliberately writes; banking every hull instead makes the value mean
+        // the same thing everywhere, and costs one lerp per ship per tick.
+        //
+        // It is also what the unified-ship model says: `LocalShip` "must never
+        // gate shared gameplay mechanics — those run on `With<Ship>` so the
+        // local ship and NPCs behave identically". An NPC now leans into its
+        // turns like anything else with a helm, which is a visual improvement
+        // rather than a cost. Uses the unscaled `input.steering` so roll
+        // reflects intent, not engine count.
+        let bank_cfg = bank_cfg_comp
+            .cloned()
+            .or_else(|| bank_cfg_res.as_deref().cloned())
+            .unwrap_or_default();
+        let max_bank_rad = bank_cfg.max_bank_deg.to_radians();
+        let target_roll = if impulse_active {
+            0.0
+        } else {
+            -input.steering * max_bank_rad
+        };
+        let lerp_factor = (bank_cfg.bank_lerp_rate * dt).min(1.0);
+        physics.roll = physics.roll + (target_roll - physics.roll) * lerp_factor;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server_app::Ship;
+    use crate::server_app::{LocalShip, Ship};
     use crate::ship::control_source::ControlSource;
     use crate::ship::helm_ai::helm_axes_operate_ai;
     use crate::ship::impulse::{ImpulsePhase, IMPULSE_CHARGE_DURATION};
@@ -750,6 +763,49 @@ mod tests {
         assert!(
             c.yaw != 0.0 && c.lateral_speed != 0.0,
             "control ship (no impulse) must steer and strafe from the same intent, got {c:?}"
+        );
+    }
+
+    /// **Issue #1116.** Banking is not a projection: `ShipPhysics.roll` is
+    /// folded into the authoritative digest, so it must not depend on which
+    /// hull a host happens to project to its own crew.
+    ///
+    /// Two ships with identical steering intent, one tagged `LocalShip` and one
+    /// not, must roll identically. Before #1116 the untagged one stayed at
+    /// exactly zero while the tagged one leaned — which is a digest two hosts
+    /// running the same mission could never agree on, because each tags a
+    /// different ship.
+    #[test]
+    fn banking_does_not_depend_on_which_ship_this_host_projects() {
+        let mut app = integrator_only_app();
+        let local = spawn_integrator_ship(&mut app, ControlSource::Human, true, 0.0, 1.0, 0.0);
+        let remote = spawn_integrator_ship(&mut app, ControlSource::Human, false, 0.0, 1.0, 0.0);
+        // `BankConfigResource::default()` authors `max_bank_deg = 0.0` — a hull
+        // that does not lean — so both ships would hold roll at exactly zero and
+        // the comparison below would be two zeroes agreeing. Give both the same
+        // banking hull, which is what the precondition then checks.
+        for entity in [local, remote] {
+            app.world_mut()
+                .entity_mut(entity)
+                .insert(BankConfigResource {
+                    max_bank_deg: 30.0,
+                    ..BankConfigResource::default()
+                });
+        }
+
+        for _ in 0..5 {
+            tick(&mut app);
+        }
+
+        let local_roll = physics_of(&mut app, local).roll;
+        let remote_roll = physics_of(&mut app, remote).roll;
+        assert!(
+            local_roll.abs() > 1e-6,
+            "precondition: the steering intent must actually produce a lean, or              the equality below is two zeroes agreeing"
+        );
+        assert_eq!(
+            local_roll, remote_roll,
+            "roll is folded into the authoritative digest, so it cannot be              gated on `LocalShip`: two hosts tag different ships and would              disagree from the first tick either crew steered"
         );
     }
 

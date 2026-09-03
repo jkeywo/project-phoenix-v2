@@ -153,6 +153,7 @@
     import '../components/ph-boost-btn.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
+    import { HELM_ACTION_CONTEXT, HELM_DOCK_ACTION_ID } from '../stations/helm-actions.js';
     // The render lives in gui/destroyer/helm.console.js (issue #1235): the
     // shared Helm renderer + this hull's variant (lateral joystick, static
     // footer, plus a bespoke Dock/under-tow-load tail). s is a
@@ -164,12 +165,12 @@
 
     // The one dock button toggles dock/undock through the action map, which
     // sends the same admitted command a dock AI would (issues #1159, #1251).
-    // "Which one" and the authored Dock SystemId are read off button state
-    // renderStation refreshes on every push, so neither can go stale.
+    // The semantic adapter reads the current authoritative dock view, so the
+    // contextual ship variant cannot dispatch a stale system id or verb.
     document.getElementById('dock-btn').addEventListener('click', function() {
-      var button = document.getElementById('dock-btn');
-      var docked = button.classList.contains('docked');
-      consoleHandle.sendAction(docked ? 'undock' : 'dock', { target: button.dataset.systemId });
+      consoleHandle.activateSemanticAction(HELM_DOCK_ACTION_ID, {
+        context: HELM_ACTION_CONTEXT, source: 'control',
+      });
     });
   </script>
 </body>

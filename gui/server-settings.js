@@ -1,7 +1,7 @@
 /**
  * gui/server-settings.js — the host page's settings cog (issue #939).
  *
- * A gear in the top-left of server.html opens a three-tab panel:
+ * A gear in the top-left of server.html opens a four-tab panel:
  *
  *   - **Debug / Cheat** — the toggles that used to be loose buttons in the
  *     debug dock's toolbar, plus the four debug OUTPUT selectors. Absent
@@ -11,6 +11,9 @@
  *   - **Gameplay** — pause/resume, the viewscreen join QR, and exit-to-lobby.
  *     Deliberately NOT build-gated, so nothing on this tab may reach for
  *     debug-only plumbing.
+ *
+ *   - **Controls** — host-local semantic action bindings. The QR action is the
+ *     tracer; its button and remapped keyboard path share one adapter.
  *
  * Two behaviours are new rather than moved:
  *
@@ -42,6 +45,18 @@ import {
   renderEntityInspectorDebug,
 } from './debug-overlays.js';
 import { TABS, visibleTabs, resolveActiveTab } from './settings-tabs.js';
+import {
+  ActionFeedbackLifecycle,
+  emitActionFeedbackTransition,
+} from './action-feedback.js';
+import {
+  HOST_ACTION_CONTEXT,
+  HOST_QR_CODE_ACTION_ID,
+  createHostActionRegistry,
+} from './host-actions.js';
+import { GM_ACTION_CONTEXT } from './gm-session-actions.js';
+import { createGamepadInputRuntime } from './gamepad-input.js';
+import { createSemanticControlsRemapper } from './semantic-controls-remapper.js';
 import {
   mountOverlayShell,
   renderTabBar,
@@ -166,7 +181,7 @@ export const DEBUG_COMMANDS = [
 ];
 
 // The tab list — and the "which tab survives this build" answer — moved to
-// `gui/settings-tabs.js` when the phone client grew the same three tabs (issue
+// `gui/settings-tabs.js` when the phone client grew the same shared tabs (issue
 // #940). Both pages must gate the same tab in the same build, so both import
 // from there; this page keeps no copy of its own. Re-exported here so this
 // module's existing importers are unchanged.
@@ -174,6 +189,7 @@ export { TABS, visibleTabs, resolveActiveTab };
 
 const BUTTON_ID = 'server-settings-btn';
 const OVERLAY_ID = 'server-settings-overlay';
+const ACTION_FEEDBACK_ID = 'host-action-feedback';
 const OUTPUT_HOST_ID = 'debug-dock';
 const OUTPUT_CONTENT_ID = 'debug-content';
 
@@ -252,7 +268,7 @@ export function mountServerSettings(opts = {}) {
   let rafHandle = null;
   const controls = {
     toggles: {}, commands: {}, outputs: {}, pause: null, qr: null,
-    volumeReadout: null,
+    volumeReadout: null, joinCode: {}, fleet: {},
   };
 
   // ── Elements ───────────────────────────────────────────────────────────────
@@ -270,6 +286,50 @@ export function mountServerSettings(opts = {}) {
   // `buildPanel` is a hoisted function declaration, so this may run before
   // its textual definition below.
   shell.buildContent = buildPanel;
+
+  // The shared lifecycle's presenter belongs to the host page, not the
+  // Settings modal: a keyboard action can run while Settings is closed, and
+  // closing the modal must not erase its Applied result from visual or live
+  // status. This node is presentation only; QR on/off still comes exclusively
+  // from __hostIsQrVisible in refresh().
+  let actionFeedbackStatus = doc.getElementById(ACTION_FEEDBACK_ID);
+  if (!actionFeedbackStatus) {
+    actionFeedbackStatus = doc.createElement('div');
+    actionFeedbackStatus.id = ACTION_FEEDBACK_ID;
+    actionFeedbackStatus.className = 'host-action-feedback';
+    actionFeedbackStatus.setAttribute('role', 'status');
+    actionFeedbackStatus.setAttribute('aria-live', 'polite');
+    actionFeedbackStatus.setAttribute('aria-atomic', 'true');
+    actionFeedbackStatus.setAttribute(
+      'aria-label',
+      t('semantic_action.host.qr_code.accessibility'),
+    );
+    shell.btn.insertAdjacentElement('afterend', actionFeedbackStatus);
+  }
+
+  const presentHostActionFeedback = (value) => {
+    if (!value || value.actionId !== HOST_QR_CODE_ACTION_ID || value.isCurrent === false) return;
+    actionFeedbackStatus.dataset.state = value.state || '';
+    actionFeedbackStatus.textContent = value.statusId
+      ? t('semantic_action.host.qr_code.feedback', { status: t(value.statusId) })
+      : '';
+  };
+  const onHostActionFeedback = (event) => presentHostActionFeedback(event && event.detail);
+  if (win && typeof win.addEventListener === 'function') {
+    win.addEventListener('phoenix-action-feedback', onHostActionFeedback);
+  }
+  const actionFeedback = opts.actionFeedback || bindings.__hostActionFeedback
+    || new ActionFeedbackLifecycle({
+      onTransition: (value) => emitActionFeedbackTransition(win, value),
+    });
+  // server.html supplies one page-scoped registry already carrying GM
+  // Pause/Resume. The fallback keeps isolated tests and old embeddings useful.
+  const hostActions = opts.semanticActions || bindings.__hostSemanticActions
+    || createHostActionRegistry({
+      actionFeedback,
+      toggleQrCode: () => (typeof bindings.__hostToggleQrCode === 'function'
+        ? bindings.__hostToggleQrCode() : false),
+    });
 
   const outputHost = doc.getElementById(OUTPUT_HOST_ID);
   const outputContent = doc.getElementById(OUTPUT_CONTENT_ID);
@@ -297,6 +357,101 @@ export function mountServerSettings(opts = {}) {
     });
     return el;
   }
+
+  /** A plain action button whose already-localised label is supplied by the remapper. */
+  function actionControl(label, onClick) {
+    const el = doc.createElement('button');
+    el.type = 'button';
+    el.className = 'server-settings-control';
+    el.textContent = label;
+    el.addEventListener('click', (event) => {
+      if (event && typeof event.preventDefault === 'function') event.preventDefault();
+      if (!el.disabled) onClick();
+    });
+    return el;
+  }
+
+  function currentHostActionContext() {
+    try {
+      return typeof bindings.__hostLocalGm === 'function' && bindings.__hostLocalGm()
+        ? GM_ACTION_CONTEXT : HOST_ACTION_CONTEXT;
+    } catch (_) {
+      return HOST_ACTION_CONTEXT;
+    }
+  }
+
+  function activateQrCode(source = 'control') {
+    const result = hostActions.activate(HOST_QR_CODE_ACTION_ID, {
+      context: currentHostActionContext(),
+      source,
+    });
+    if (result.handled) refresh();
+    return result;
+  }
+
+  // Host bindings are document-scoped so they remain available when the
+  // Settings overlay is closed. Registry input-target guards and the shared
+  // remapper's capture listeners keep typing/capture from leaking into them.
+  const onHostKeydown = (event) => {
+    const result = hostActions.dispatchKeyboardEvent(event, currentHostActionContext());
+    if (result.claimed && typeof event.stopPropagation === 'function') event.stopPropagation();
+    if (result.handled) refresh();
+  };
+  // Capture before server.html's legacy page shortcuts so a remap keeps its
+  // semantic meaning even when that physical key also has host-page chrome.
+  // Editable/capture targets are still rejected by the registry itself.
+  doc.addEventListener('keydown', onHostKeydown, true);
+
+  let semanticControls = null;
+  const gamepad = opts.gamepadRuntime || createGamepadInputRuntime({
+    getGamepads: typeof opts.getGamepads === 'function'
+      ? opts.getGamepads
+      : () => (bindings.navigator && typeof bindings.navigator.getGamepads === 'function'
+        ? bindings.navigator.getGamepads() : []),
+    getContext: currentHostActionContext,
+    getActions: (context) => hostActions.list(context),
+    activate: (actionId, activation) => {
+      const result = hostActions.activate(actionId, activation);
+      if (result && result.handled) refresh();
+      return result;
+    },
+    onCapture: (target, binding) => {
+      if (semanticControls) semanticControls.proposeBinding(target.actionId, target.slot, binding);
+    },
+    onStateChange: () => {
+      // Beginning capture changes runtime state synchronously from the input's
+      // focus handler. Rebuilding there would detach the very control waiting
+      // for a keyboard/gamepad choice. The remapper rebuilds after a completed
+      // capture; connection/status changes outside capture still repaint here.
+      const focused = doc.activeElement;
+      const capturing = focused && typeof focused.getAttribute === 'function'
+        && focused.getAttribute('data-semantic-binding-capture') != null;
+      if (!capturing && shell.isOpen() && activeTab === 'controls') buildPanel();
+    },
+    isTransportLive: () => true,
+    ...(win && typeof win.requestAnimationFrame === 'function'
+      ? { requestAnimationFrame: (callback) => win.requestAnimationFrame(callback) }
+      : {}),
+    ...(win && typeof win.cancelAnimationFrame === 'function'
+      ? { cancelAnimationFrame: (handle) => win.cancelAnimationFrame(handle) }
+      : {}),
+  });
+  semanticControls = createSemanticControlsRemapper({
+    doc,
+    root: overlay,
+    setBinding: hostActions.setBinding,
+    resetAction: hostActions.resetAction,
+    resetAll: hostActions.resetAllBindings,
+    onCapture: (actionId, slot, active) => {
+      if (active) gamepad.beginCapture(actionId, slot);
+      else gamepad.endCapture(actionId, slot);
+    },
+    rebuild: () => { if (shell.isOpen()) buildPanel(); },
+  });
+  const stopGamepad = opts.startGamepad !== false && autoRefresh
+    && win && typeof win.requestAnimationFrame === 'function'
+    ? gamepad.start(win)
+    : null;
 
   // ── Output panel ───────────────────────────────────────────────────────────
 
@@ -477,14 +632,13 @@ export function mountServerSettings(opts = {}) {
 
     const qrSection = section('settings.qr_code');
     const qrRow = rowHost();
-    const qr = control('qr-code', 'settings.toggle_qr', () => {
-      invoke('__hostToggleQrCode');
-      refresh();
-    });
+    const qr = control('qr-code', 'settings.toggle_qr', () => activateQrCode('control'));
     controls.qr = qr;
     qrRow.appendChild(qr);
     qrSection.appendChild(qrRow);
     body.appendChild(qrSection);
+
+    buildJoinCodeSection(body);
 
     const sessionSection = section('settings.gameplay.session');
     const sessionRow = rowHost();
@@ -496,6 +650,307 @@ export function mountServerSettings(opts = {}) {
     );
     sessionSection.appendChild(sessionRow);
     body.appendChild(sessionSection);
+
+    buildFleetSection(body);
+  }
+
+  function buildControlsTab(body) {
+    const gamepadState = gamepad.state();
+    semanticControls.render(body, {
+      // One page-scoped catalogue means GM remaps use the same two-slot
+      // profile and conflict replacement path as ordinary host chrome.
+      actions: hostActions.list(),
+      capturing: gamepadState.capturing || null,
+      hintId: 'settings.controls.host_hint',
+      pressPromptId: 'settings.controls.host_press_key',
+      section,
+      hint,
+      row: rowHost,
+      action: actionControl,
+      beforeActions: (target) => {
+        const gamepadSection = section('settings.controls.gamepad.heading');
+        gamepadSection.appendChild(hint('settings.controls.gamepad.hint'));
+
+        const label = doc.createElement('label');
+        label.className = 'settings-binding-label';
+        label.textContent = t('settings.controls.gamepad.selector');
+        const selector = doc.createElement('select');
+        selector.setAttribute('data-control', 'semantic-gamepad-select');
+        selector.setAttribute('aria-label', t('settings.controls.gamepad.selector'));
+        const none = doc.createElement('option');
+        none.value = '';
+        none.textContent = t('settings.controls.gamepad.none');
+        selector.appendChild(none);
+        const seen = new Set();
+        for (const device of gamepadState.devices || []) {
+          const option = doc.createElement('option');
+          option.value = String(device.index);
+          option.disabled = !device.supported;
+          option.textContent = t(
+            device.supported
+              ? 'settings.controls.gamepad.device'
+              : 'settings.controls.gamepad.device_unsupported',
+            { slot: String(Number(device.index) + 1) },
+          );
+          seen.add(Number(device.index));
+          selector.appendChild(option);
+        }
+        if (gamepadState.selectedIndex != null
+            && !seen.has(Number(gamepadState.selectedIndex))) {
+          const disconnected = doc.createElement('option');
+          disconnected.value = String(gamepadState.selectedIndex);
+          disconnected.textContent = t('settings.controls.gamepad.device_disconnected', {
+            slot: String(Number(gamepadState.selectedIndex) + 1),
+          });
+          selector.appendChild(disconnected);
+        }
+        selector.value = gamepadState.selectedIndex == null
+          ? '' : String(gamepadState.selectedIndex);
+        selector.addEventListener('change', () => {
+          gamepad.select(selector.value === '' ? null : Number(selector.value));
+          buildPanel();
+        });
+        label.appendChild(selector);
+        gamepadSection.appendChild(label);
+
+        const status = doc.createElement('div');
+        status.className = 'server-settings-hint settings-gamepad-status';
+        status.setAttribute('data-control', 'semantic-gamepad-status');
+        status.setAttribute('role', gamepadState.status === 'disconnected' ? 'alert' : 'status');
+        status.setAttribute(
+          'aria-live',
+          gamepadState.status === 'disconnected' ? 'assertive' : 'polite',
+        );
+        status.textContent = t(`settings.controls.gamepad.status_${gamepadState.status || 'none'}`);
+        gamepadSection.appendChild(status);
+        target.appendChild(gamepadSection);
+      },
+    });
+  }
+
+  /**
+   * The crew join-code readout + rotate lever (issue #1115) — this ship's
+   * OWN typed code, mirrored from the viewscreen overlay onto the cog
+   * so the operator can regenerate it without hunting for the QR panel.
+   *
+   * Built once and painted from `refresh()`, same discipline as the fleet
+   * section below: an operator who has the panel open sees a rotate that
+   * just happened (this host's own click, or — in principle — any other
+   * cause) within one animation frame, without the click handler needing to
+   * know that.
+   */
+  function buildJoinCodeSection(body) {
+    const el = section('settings.gameplay.join_code');
+    const row = rowHost();
+
+    const readout = doc.createElement('span');
+    readout.className = 'server-settings-code-readout';
+    readout.setAttribute('data-control', 'join-code-readout');
+    readout.setAttribute('aria-label', t('settings.gameplay.join_code_label'));
+    controls.joinCode.readout = readout;
+    row.appendChild(readout);
+
+    controls.joinCode.rotate = control('rotate-join-code', 'settings.gameplay.rotate_code', () => {
+      invoke('__hostRotateJoinCode');
+      refresh();
+    });
+    row.appendChild(controls.joinCode.rotate);
+
+    el.appendChild(row);
+    body.appendChild(el);
+  }
+
+  /** What `server.html` says about this host's crew join code, or null. */
+  function joinCodeState() {
+    const raw = invoke('__hostJoinCodeState');
+    return raw && typeof raw === 'object' ? raw : null;
+  }
+
+  /** Paint the readout and the rotate lever's enabled state. */
+  function paintJoinCode() {
+    const state = joinCodeState();
+    if (controls.joinCode.readout) {
+      controls.joinCode.readout.textContent = (state && state.suffix) || '';
+    }
+    applyRotateLockState(controls.joinCode.rotate, state && state.rotatable !== false);
+  }
+
+  /**
+   * Shared disabled/tooltip treatment for a rotate lever (issue #1115 AC2) —
+   * the crew one above and the fleet one below both use it, so the same rule
+   * cannot drift between the two surfaces.
+   */
+  function applyRotateLockState(el, rotatable) {
+    if (!el) return;
+    el.disabled = !rotatable;
+    el.classList.toggle('disabled', !rotatable);
+    el.title = rotatable ? '' : t('settings.gameplay.rotate_locked_hint');
+  }
+
+  /**
+   * The fleet controls (issue #1114) — this session's multi-ship lever.
+   *
+   * On the GAMEPLAY tab, not Debug: flying alongside another ship host is a way
+   * to play, and the demo build must keep it. So nothing here may reach for
+   * debug-only plumbing, and every binding it calls is one `server.html`
+   * publishes unconditionally.
+   *
+   * Every control is built once and shown or hidden in `refresh()` rather than
+   * rebuilt per state, so opening a fleet does not steal focus from under the
+   * operator mid-click.
+   */
+  function buildFleetSection(body) {
+    const el = section('settings.fleet');
+    el.appendChild(hint('settings.fleet.hint'));
+
+    // Fleet role belongs to this privileged HOST, never a phone/crew member.
+    // It is chosen before opening or joining and then disappears while the
+    // membership is live, so role cannot drift underneath an authenticated
+    // connection. Two ordinary pressed buttons give touch, keyboard and
+    // screen-reader users the same mutually-exclusive choice.
+    const roleRow = rowHost();
+    const roleGroup = doc.createElement('div');
+    roleGroup.className = 'server-settings-role-group';
+    roleGroup.setAttribute('role', 'group');
+    roleGroup.setAttribute('aria-label', t('settings.fleet.role_heading'));
+    roleGroup.setAttribute('data-control', 'fleet-role-group');
+    controls.fleet.roleGroup = roleGroup;
+    controls.fleet.roleShip = control('fleet-role-ship', 'settings.fleet.role_ship', () => {
+      invoke('__hostSetFleetRole', 'ship');
+      refresh();
+    });
+    controls.fleet.roleGm = control('fleet-role-gm', 'settings.fleet.role_gm', () => {
+      invoke('__hostSetFleetRole', 'gm');
+      refresh();
+    });
+    roleGroup.appendChild(controls.fleet.roleShip);
+    roleGroup.appendChild(controls.fleet.roleGm);
+    roleRow.appendChild(roleGroup);
+    el.appendChild(roleRow);
+
+    const openRow = rowHost();
+    controls.fleet.open = control('fleet-open', 'settings.fleet.open', () => {
+      invoke('__hostFleetOpen');
+      refresh();
+    });
+    openRow.appendChild(controls.fleet.open);
+
+    // The typed route. A ship host reads the code off another viewscreen
+    // exactly as a phone does; the QR on that panel is the same code by camera.
+    //
+    // No `maxLength` literal. The OTHER route through this one field is a paste
+    // of the whole structured code the fleet panel renders as selectable text —
+    // two GUIDs and a suffix, 79 characters — and a length invented here would
+    // silently truncate it into a `malformed` refusal that says nothing about
+    // truncation. The authored bound (`[limits] max_code_length`, the same one
+    // the rendezvous service applies) is installed by `paintFleet` as soon as
+    // the host page has the join table; until then the field is unbounded,
+    // because accepting too much is a refusal and accepting too little is a lie.
+    const input = doc.createElement('input');
+    input.type = 'text';
+    input.className = 'server-settings-input';
+    input.setAttribute('data-control', 'fleet-code');
+    input.placeholder = t('settings.fleet.code_placeholder');
+    input.setAttribute('aria-label', t('settings.fleet.code_label'));
+    controls.fleet.input = input;
+    openRow.appendChild(input);
+
+    controls.fleet.join = control('fleet-join', 'settings.fleet.join', () => {
+      const typed = String(input.value || '').trim();
+      if (!typed) return;
+      invoke('__hostFleetJoin', typed);
+      refresh();
+    });
+    openRow.appendChild(controls.fleet.join);
+
+    controls.fleet.admission = control('fleet-admission', 'settings.fleet.close', () => {
+      const state = fleetState();
+      invoke('__hostFleetSetAdmission', state && state.admission === 'closed' ? 'open' : 'closed');
+      refresh();
+    });
+    openRow.appendChild(controls.fleet.admission);
+
+    controls.fleet.leave = control('fleet-leave', 'settings.fleet.leave', () => {
+      invoke('__hostFleetLeave');
+      refresh();
+    });
+    openRow.appendChild(controls.fleet.leave);
+
+    // Lead only (issue #1115 AC2/AC3) — a member has no code of its own to
+    // rotate, it is a guest on the lead's.
+    controls.fleet.rotate = control('fleet-rotate', 'settings.fleet.rotate', () => {
+      invoke('__hostFleetRotate');
+      refresh();
+    });
+    openRow.appendChild(controls.fleet.rotate);
+
+    el.appendChild(openRow);
+    body.appendChild(el);
+  }
+
+  /** What `server.html` says about this host's fleet, or null before one. */
+  function fleetState() {
+    const raw = invoke('__hostFleetState');
+    return raw && typeof raw === 'object' ? raw : null;
+  }
+
+  /** The pre-join role selected on the privileged host. */
+  function fleetRole() {
+    return invoke('__hostFleetRole') === 'gm' ? 'gm' : 'ship';
+  }
+
+  /**
+   * Show the controls this host's fleet state actually offers.
+   *
+   * The admission lever disables rather than vanishes once the roster is
+   * frozen: the operator went looking for it, and a control that has gone
+   * reads as a broken menu where a disabled one reads as "not any more".
+   */
+  function paintFleet() {
+    const state = fleetState();
+    const has = !!(state && state.open);
+    const show = (el, on) => { if (el) el.style.display = on ? '' : 'none'; };
+    // The authored bound, once the host page has the join table in hand.
+    const limit = invoke('__hostFleetCodeLimit');
+    if (controls.fleet.input && Number.isFinite(limit) && limit > 0) {
+      controls.fleet.input.maxLength = limit;
+    }
+    show(controls.fleet.roleGroup, !has);
+    const role = fleetRole();
+    for (const [name, el] of [
+      ['ship', controls.fleet.roleShip],
+      ['gm', controls.fleet.roleGm],
+    ]) {
+      if (!el) continue;
+      const selected = role === name;
+      el.classList.toggle('active', selected);
+      el.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    }
+    show(controls.fleet.open, !has);
+    show(controls.fleet.input, !has);
+    show(controls.fleet.join, !has);
+    show(controls.fleet.leave, has);
+    if (controls.fleet.leave && has) {
+      const canLeave = state.canLeave !== false;
+      controls.fleet.leave.disabled = !canLeave;
+      controls.fleet.leave.classList.toggle('disabled', !canLeave);
+    }
+    show(controls.fleet.admission, has && !!state.owner);
+    if (controls.fleet.admission && has && state.owner) {
+      const closed = state.admission === 'closed';
+      controls.fleet.admission.textContent = t(
+        closed ? 'settings.fleet.reopen' : 'settings.fleet.close',
+      );
+      controls.fleet.admission.setAttribute('aria-pressed', closed ? 'true' : 'false');
+      controls.fleet.admission.disabled = !!state.frozen;
+      controls.fleet.admission.classList.toggle('disabled', !!state.frozen);
+    }
+    // Rotation is independent of the freeze latch — see gui/fleet-session.js's
+    // `rotate()` doc — so this reads the mission-phase gate, not `frozen`.
+    show(controls.fleet.rotate, has && !!state.owner);
+    if (controls.fleet.rotate && has && state.owner) {
+      applyRotateLockState(controls.fleet.rotate, !!invoke('__hostCodesRotatable'));
+    }
   }
 
   // ── Panel ──────────────────────────────────────────────────────────────────
@@ -514,6 +969,8 @@ export function mountServerSettings(opts = {}) {
     controls.pause = null;
     controls.qr = null;
     controls.volumeReadout = null;
+    controls.joinCode = {};
+    controls.fleet = {};
 
     overlay.innerHTML = '';
 
@@ -539,12 +996,14 @@ export function mountServerSettings(opts = {}) {
     if (activeTab === 'debug') buildDebugTab(body);
     else if (activeTab === 'audio') buildAudioTab(body);
     else if (activeTab === 'gameplay') buildGameplayTab(body);
+    else if (activeTab === 'controls') buildControlsTab(body);
 
     paintOutput();
     refresh();
   }
 
   function selectTab(id) {
+    if (id !== activeTab) semanticControls.resetTransient();
     activeTab = id;
     if (shell.isOpen()) buildPanel();
   }
@@ -581,6 +1040,8 @@ export function mountServerSettings(opts = {}) {
       controls.qr.classList.toggle('active', visible);
       controls.qr.setAttribute('aria-pressed', visible ? 'true' : 'false');
     }
+    if (controls.joinCode.rotate) paintJoinCode();
+    if (controls.fleet.open) paintFleet();
     // The output panel keeps streaming while it is open, panel or no panel.
     if (outputs.viewing) paintOutput();
   }
@@ -600,6 +1061,12 @@ export function mountServerSettings(opts = {}) {
       win.cancelAnimationFrame(rafHandle);
     }
     rafHandle = null;
+    doc.removeEventListener('keydown', onHostKeydown, true);
+    if (win && typeof win.removeEventListener === 'function') {
+      win.removeEventListener('phoenix-action-feedback', onHostActionFeedback);
+    }
+    if (typeof stopGamepad === 'function') stopGamepad();
+    semanticControls.destroy();
     shell.close();
   }
 
@@ -609,6 +1076,8 @@ export function mountServerSettings(opts = {}) {
     isOpen: shell.isOpen,
     refresh,
     selectTab,
+    semanticActions: hostActions,
+    gamepad,
     destroy,
   };
 }

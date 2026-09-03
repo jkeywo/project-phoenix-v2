@@ -961,6 +961,56 @@ describe('buildHelmConsoleState', () => {
     expect(() => parse(buildHelmConsoleState(EMPTY))).not.toThrow();
   });
 
+  it('projects exact command-owner ids from arbitrary authored System kinds', () => {
+    const ids = [
+      'delta-throttle',
+      'crosswind-servo',
+      'port-burst',
+      'pulse-coil-nine',
+      'overdrive-cell',
+      'berthing-clamps',
+    ];
+    const s = parse(buildHelmConsoleState({
+      systemKinds: {
+        'delta-throttle': 'helm_thrust',
+        'crosswind-servo': 'helm_steering',
+        'port-burst': 'lateral_thrust',
+        'pulse-coil-nine': 'helm_impulse',
+        'overdrive-cell': 'helm_boost',
+        'bridge-glass': 'viewscreen',
+        'berthing-clamps': 'dock',
+      },
+      blackboards: {
+        'berthing-clamps': {
+          range: 250, available: true, engaged: false, docked: false,
+        },
+      },
+    }, ids));
+
+    expect(s).toMatchObject({
+      thrust_system_id: 'delta-throttle',
+      steering_system_id: 'crosswind-servo',
+      lateral_system_id: 'port-burst',
+      impulse_system_id: 'pulse-coil-nine',
+      boost_system_id: 'overdrive-cell',
+      // Viewscreen is not in Helm's owned ids; the selected-ship kind map is
+      // intentionally the cross-station authority projection.
+      viewscreen_system_id: 'bridge-glass',
+      dock: { system_id: 'berthing-clamps' },
+    });
+  });
+
+  it('keeps owner ids nullable for a legacy Welcome without the kind projection', () => {
+    expect(parse(buildHelmConsoleState(EMPTY))).toMatchObject({
+      thrust_system_id: null,
+      steering_system_id: null,
+      lateral_system_id: null,
+      impulse_system_id: null,
+      boost_system_id: null,
+      viewscreen_system_id: null,
+    });
+  });
+
   it('heading is in degrees [0, 360)', () => {
     const cases = [
       { yaw: 0,           expectedHeading: 0 },
@@ -1314,6 +1364,7 @@ describe('buildRepairConsoleState', () => {
         travel_duration_secs: 5.0,
         system_hull: systemHull,
         damageable_systems: ['core', 'helm-radar', 'repair'],
+        priority_targets: [],
         aggregate_hull_fraction: 0.5,
         ...extra,
       },
@@ -1457,6 +1508,19 @@ describe('buildRepairConsoleState', () => {
       { system_id: 'core', display_name: 'Core', current: 6, max_hp: 10, tier: 'Damaged' },
     ])));
     expect(s.damaged_systems.map(d => d.system_id)).toEqual(['core']);
+  });
+
+  it('damaged_systems echoes exact owner-projected priority eligibility', () => {
+    const s = parse(buildRepairConsoleState(projectedState(
+      [
+        { system_id: 'core', display_name: 'Core', current: 0, max_hp: 10, tier: 'Destroyed' },
+        { system_id: 'repair', display_name: 'Repair', current: 7, max_hp: 10, tier: 'Damaged' },
+      ],
+      { priority_targets: ['repair'] },
+    )));
+    const byId = Object.fromEntries(s.damaged_systems.map(d => [d.system_id, d]));
+    expect(byId.core.prioritisable).toBe(false);
+    expect(byId.repair.prioritisable).toBe(true);
   });
 
   it('damaged_systems echoes the host pin rather than deriving a highlight', () => {
@@ -1643,6 +1707,20 @@ describe('buildPowerConsoleState', () => {
     expect(s.battery_charge).toBe(25);
     // `draining` replaced `locked` when issue #952 retired the brownout lock.
     expect(s.draining).toBe(true);
+  });
+
+  it('carries the exact authored reactor SystemId for allocation commands', () => {
+    const s = parse(buildPowerConsoleState({
+      blackboards: {
+        'reactor-main': { is_online: true },
+        'battery-port': { is_online: true },
+      },
+      blackboardKinds: {
+        'reactor-main': 'PowerReactor',
+        'battery-port': 'PowerBattery',
+      },
+    }, ['reactor-main', 'battery-port']));
+    expect(s.system_id).toBe('reactor-main');
   });
 
   it('falls back to empty consoles when groups is missing', () => {

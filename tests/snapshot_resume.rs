@@ -3391,8 +3391,15 @@ fn phase_of(app: &bevy::prelude::App) -> GamePhase {
     app.world().resource::<State<GamePhase>>().get().clone()
 }
 
-/// The scenario state a scripted world resumes from, named rather than left
-/// inside a digest that folds none of it.
+/// The scenario state a scripted world resumes from, named field by field.
+///
+/// This used to read "named rather than left inside a digest that folds none of
+/// it". Issue #1086 folded it — the flag stores, the trigger latches, both
+/// scheduled queues, the named records and the whole of comms — so the two
+/// checks now work together rather than one standing in for the other: naming
+/// the fields says WHAT travelled, and the at-restore digest equality asserted
+/// throughout this file is what keeps the widening honest, because a fold over
+/// state the payload cannot round-trip fails it.
 fn scenario_of(payload: &PhoenixSnapshot) -> &project_phoenix::snapshot::ScenarioState {
     payload
         .scenario
@@ -3908,8 +3915,13 @@ fn scripted_comms_args() -> HeadlessArgs {
     }
 }
 
-/// The comms state a mid-conversation save resumes from, named rather than left
-/// inside a digest that folds none of it.
+/// The comms state a mid-conversation save resumes from, named field by field.
+///
+/// This used to read "named rather than left inside a digest that folds none of
+/// it". Issue #1086's `sim_digest::fold_comms_scope` folds all of it — the inbox
+/// whole, the live dialogues, the open hails and the pending scripted opens — so
+/// naming the fields says WHAT travelled and the at-restore digest equality says
+/// that it arrived intact.
 fn comms_of(payload: &PhoenixSnapshot) -> &project_phoenix::snapshot::CommsState {
     payload
         .comms
@@ -3955,12 +3967,17 @@ fn step_to_the_open_thread(app: &mut bevy::prelude::App) -> u64 {
 /// The capture is taken on the one frame where thread A is shown and unanswered
 /// (see the fixture). The resumed world is then stepped alongside the live one
 /// across the Backfill Comms AI's answer, and the claim is read off
-/// `world_digest` every frame — which folds no comms state at all, and does not
-/// need to: answering mints the follow-up thread's ids from the tick-scoped
-/// `WorldIdMint` (whose per-namespace counters the digest DOES fold) and the
-/// second thread's `on_pick` ends the run in a declared victory (`GamePhase`,
-/// also folded). A resumed world that came back with an empty `active_dialogues`
-/// answers nothing, mints nothing and never gets there.
+/// `world_digest` every frame. Since issue #1086 that digest folds the comms
+/// state directly (`fold_comms_scope` walks the inbox, the dialogues, the open
+/// hails and the pending opens), so an empty `active_dialogues` in the resumed
+/// world is caught on the restore tick rather than several frames later. The
+/// INDIRECT reading this test was originally written on still holds and is what
+/// makes it a continuation claim rather than a photograph: answering mints the
+/// follow-up thread's ids from the tick-scoped `WorldIdMint` (whose
+/// per-namespace counters the digest folds) and the second thread's `on_pick`
+/// ends the run in a declared victory (`GamePhase`, also folded). A resumed
+/// world that came back with an empty `active_dialogues` answers nothing, mints
+/// nothing and never gets there.
 #[test]
 fn a_scripted_dialogue_open_at_the_save_is_answerable_after_a_resume() {
     let mut live = boot(&scripted_comms_args());
@@ -4952,6 +4969,82 @@ fn a_dynamically_unloaded_startup_layer_stays_absent_after_resume() {
     );
 }
 
+/// A run that GAPPED its activation ordinals still resumes to an equal digest.
+///
+/// `WorldRuntime::activation_order` is `max(active) + 1` at each load, so
+/// unloading a layer from the middle leaves every survivor holding an ordinal
+/// with a hole in front of it and nothing renumbers them. The payload carries
+/// only the vector POSITION (`LayerFlags` says so in terms), and
+/// `reconcile_world_layers` rebuilds a resumed composition by replaying the
+/// saved paths in that order — so the resumed layer is numbered from one while
+/// the live one is not.
+///
+/// `sim_digest::fold_scenario_flags` therefore folds the enumerate index of the
+/// sorted layer vector and not the ordinal. Folding the ordinal made a run like
+/// this one fail its own restore's digest equality, which `restore` reports as
+/// "the save did not restore cleanly" — a corruption message for a save that is
+/// exactly right.
+#[test]
+fn a_run_that_gapped_its_layer_ordinals_resumes_to_an_equal_digest() {
+    use project_phoenix::world::server::WorldLayerMap;
+
+    let ordinal_of = |app: &bevy::prelude::App, path: &str| {
+        app.world()
+            .resource::<WorldLayerMap>()
+            .0
+            .get(path)
+            .expect("the layer is live")
+            .activation_order
+    };
+
+    let mut live = boot(&dynamic_layer_args());
+    step(&mut live, 20);
+    // Two layers in, then the FIRST one out — the shape that gaps the survivor.
+    queue_layer_load(&mut live, LAYER_ENTITY_PATH, None);
+    step_until_layers_are_active(&mut live, &[LAYER_ENTITY_PATH]);
+    queue_layer_load(&mut live, LAYER_DEADLINE_PATH, None);
+    step_until_layers_are_active(&mut live, &[LAYER_DEADLINE_PATH]);
+    queue_layer_unload(&mut live, LAYER_ENTITY_PATH);
+    step_until_layer_is_absent(&mut live, LAYER_ENTITY_PATH);
+    step(&mut live, 30);
+
+    let live_ordinal = ordinal_of(&live, LAYER_DEADLINE_PATH);
+    assert!(
+        live_ordinal > 1,
+        "precondition: the surviving layer must hold a GAPPED ordinal, or this \
+         test cannot tell the two folds apart; got {live_ordinal}"
+    );
+
+    let payload = capture(live.world());
+    let captured_digest = world_digest(live.world());
+    assert_eq!(
+        payload
+            .layer_flags
+            .iter()
+            .map(|layer| layer.path.as_str())
+            .collect::<Vec<_>>(),
+        vec![LAYER_DEADLINE_PATH],
+        "the capture records the runtime composition, unloads and all"
+    );
+
+    let mut resumed = boot_to_restore_point(&dynamic_layer_args(), &payload);
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+
+    assert_ne!(
+        ordinal_of(&resumed, LAYER_DEADLINE_PATH),
+        live_ordinal,
+        "the reconcile genuinely renumbers, so the ordinal is a number the two \
+         worlds cannot be asked to agree on"
+    );
+    assert_eq!(
+        world_digest(resumed.world()),
+        captured_digest,
+        "and the resumed world stands exactly where the capture did anyway — \
+         what folds is the layer's PLACE, which the payload does carry"
+    );
+}
+
 /// The deadline table round-trips through the save's RON, and a world that
 /// authors no deadline writes nothing deadline-shaped at all.
 #[test]
@@ -4988,6 +5081,78 @@ fn the_deadline_table_round_trips_and_a_deadline_free_world_writes_none() {
     assert!(
         scenario_of(&quiet_payload).deadlines.is_empty(),
         "a world with no authored deadlines captures no deadline state"
+    );
+}
+
+/// An **armed but record-less** table is a real state, and one the payload can
+/// round-trip.
+///
+/// `arm_mission_deadlines` latches before it walks the authored list, and
+/// `arm_mission_workforces` does the same, so a world whose every deadline was
+/// cancelled and removed sits armed with nothing in it.
+/// `sim_digest::fold_scenario_records` folds that apart from an unarmed table —
+/// correctly, because the arming systems read exactly that bit on the very next
+/// tick. The payload's `skip_serializing_if` used to test `records` alone, so
+/// such a table serialised as ABSENT, deserialised as `Default` with
+/// `armed = false`, and the restore wrote that over the top: the resumed mission
+/// re-armed from the world file, and the recomputed digest disagreed with the
+/// recorded one — which `restore` reports to the player as a save that did not
+/// restore cleanly. Both predicates now account for the latch.
+#[test]
+fn an_armed_but_record_less_table_survives_the_save_and_the_restore() {
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let mut live = duel();
+    step(&mut live, 120);
+    {
+        let mut runtime = live.world_mut().resource_mut::<WorldContentRuntime>();
+        assert!(
+            runtime.deadlines.records.is_empty() && runtime.workforce.records.is_empty(),
+            "precondition: the duel authors neither a deadline nor a dispute, so \
+             the latch is the only thing under test"
+        );
+        runtime.deadlines.armed = true;
+        runtime.workforce.armed = true;
+    }
+    let payload = capture(live.world());
+    let captured_digest = world_digest(live.world());
+
+    assert!(
+        !scenario_of(&payload).deadlines.is_empty() && !scenario_of(&payload).workforce.is_empty(),
+        "an armed table is not an empty one, so neither may skip serialisation"
+    );
+
+    let run = run_for(
+        payload.clone(),
+        captured_digest,
+        SEED,
+        DUEL,
+        current_versions(DUEL),
+    );
+    let store = FileStore::new(scratch("armed-but-empty"));
+    save_to(&store, "autosave", &run).expect("the save is written");
+    let stored = load_from(&store, "autosave", &current_versions(DUEL))
+        .expect("the save reloads")
+        .snapshot
+        .expect("a saved game carries a snapshot");
+    assert!(
+        scenario_of(&stored.state).deadlines.armed && scenario_of(&stored.state).workforce.armed,
+        "the latch survives RON with no record to hang it on"
+    );
+
+    let mut resumed = boot_to_restore_point(&args(DUEL, ("cruiser", "destroyer")), &stored.state);
+    let report = restore(resumed.world_mut(), &stored.state);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+
+    let runtime = resumed.world().resource::<WorldContentRuntime>();
+    assert!(
+        runtime.deadlines.armed && runtime.workforce.armed,
+        "the resumed world comes back armed, so nothing re-arms over the top"
+    );
+    assert_eq!(
+        world_digest(resumed.world()),
+        captured_digest,
+        "and the state the fold distinguishes is a state the payload reproduces"
     );
 }
 

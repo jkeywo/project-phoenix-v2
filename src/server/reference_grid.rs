@@ -237,7 +237,7 @@ pub fn decide_patch_action(
 /// config cache — the same path `server::radar` reads the viewscreen's radar
 /// ranges through, so the grid and the radar can never disagree about which
 /// hull the player is flying.
-fn resolve_reference_grid_config(
+pub(crate) fn resolve_reference_grid_config(
     mut commands: Commands,
     selected_ship: Option<Res<crate::lobby::SelectedShipResource>>,
     log: Option<Res<crate::logging::LogFilterConfig>>,

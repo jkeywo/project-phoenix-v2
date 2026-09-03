@@ -1,5 +1,6 @@
 pub use crate::core::debug_surface::DebugSurface;
 pub use crate::entities::tags::EntityTag;
+pub use crate::gm_roster::GmOperator;
 use crate::lobby::stations_config::ShipStations;
 use crate::ship::damage::DamageTier;
 pub use crate::ship::manual::ShipManualWire;
@@ -220,7 +221,7 @@ pub type BlasterBank = String;
 
 /// How an outbound `ServerMessage` should be delivered over the wire.
 ///
-/// `Reliable` rides the ordered/retransmit DataChannel (PeerJS default).
+/// `Reliable` rides the ordered/retransmitting DataChannel (label `reliable`).
 /// `Snapshot` rides the unordered/no-retransmit DataChannel when available,
 /// falling back to the reliable channel when the snapshot channel has not
 /// opened yet or has failed. The server decides the delivery class; clients
@@ -239,6 +240,61 @@ pub enum DeliveryClass {
 /// addressing unit for station ownership in the station/system architecture.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct StationId(pub String);
+
+/// Maximum UTF-8 byte length of one opaque semantic-action correlation.
+///
+/// This is a protocol/resource bound, not a gameplay value.  The client mints
+/// UUID-shaped ids today, but every receiver treats the contents as opaque.
+pub const MAX_ACTION_CORRELATION_BYTES: usize = 64;
+
+/// Opaque identity connecting one semantic-action press to its targeted host
+/// acknowledgement (issue #1276).
+///
+/// The value is deliberately absent from [`SystemControlPayload`], command
+/// logs, mesh frames, snapshots and replay.  It is transient reply-routing
+/// metadata, validated at the wire boundary and bounded before it can key any
+/// client/host map.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
+#[serde(transparent)]
+pub struct ActionCorrelationId(String);
+
+impl ActionCorrelationId {
+    pub fn new(value: impl Into<String>) -> Result<Self, &'static str> {
+        let value = value.into();
+        if value.is_empty() {
+            return Err("action correlation must not be empty");
+        }
+        if value.len() > MAX_ACTION_CORRELATION_BYTES {
+            return Err("action correlation is too long");
+        }
+        if !value.bytes().all(|byte| (0x21..=0x7e).contains(&byte)) {
+            return Err("action correlation must contain visible ASCII only");
+        }
+        Ok(Self(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for ActionCorrelationId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::new(value).map_err(serde::de::Error::custom)
+    }
+}
+
+/// Terminal authoritative outcomes carried by [`ServerMessage::ActionFeedback`].
+/// `TimedOut` is client-local: by definition no host response produced it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ActionFeedbackOutcome {
+    Applied,
+    Refused,
+}
 
 /// Explicit destination for a delayed Coordination message.
 ///
@@ -1487,6 +1543,15 @@ pub struct ShipClientConfig {
     /// System instance has an entry; clients never infer it from id spelling.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub system_console_families: HashMap<String, ConsoleFamily>,
+    /// Resolved authored System instance id -> System kind projection.
+    ///
+    /// This is the command-authority counterpart to
+    /// `system_console_families`: Console Family selects a presentation,
+    /// while the authored kind selects the exact fine System instance that
+    /// accepts a command. Clients must not recover either fact from an id's
+    /// spelling. Every selected-ship `[[system]]` entry has one mapping.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub system_kinds: HashMap<String, String>,
     /// Reserved/aggregate blackboard key -> Console Family metadata.
     ///
     /// These keys share the blackboard map's `SystemId` wire wrapper but are
@@ -1643,6 +1708,7 @@ impl Default for ShipClientConfig {
             ship_css: None,
             station_systems: HashMap::new(),
             system_console_families: HashMap::new(),
+            system_kinds: HashMap::new(),
             blackboard_console_families: HashMap::new(),
             station_assist_gaps: HashMap::new(),
             threat_bearing_epsilon_rad: default_threat_bearing_epsilon_rad(),
@@ -1695,6 +1761,31 @@ pub struct SimSnapshot {
     /// map keeps the authoritative byte stream deterministic.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub control_sources: BTreeMap<SystemId, String>,
+    /// Active GM takeover rows for the local player ship. Station-scoped and
+    /// crew-public: this lets every authentic console show that its ordinary
+    /// Backfill AI is currently suppressed, including the last attributed GM
+    /// System action admitted on that Station.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub station_puppets: Vec<StationPuppetSnapshot>,
+}
+
+/// Crew-visible takeover status for one Station on the recipient's ship.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StationPuppetSnapshot {
+    pub station: StationId,
+    pub operators: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_activity: Option<StationPuppetActivitySnapshot>,
+}
+
+/// Attribution retained at the GM admission/activity seam. This projection is
+/// presentation only; System command consumers never receive these fields.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StationPuppetActivitySnapshot {
+    pub tick: u64,
+    pub operator_id: String,
+    pub target: SystemId,
+    pub action: String,
 }
 
 /// One complete human-seeking Station's current placement and effective rating.
@@ -2105,6 +2196,19 @@ pub enum SystemControlPayload {
         station: StationId,
         stance: String,
     },
+    /// Replicate a station's active RATING (control-source assignment) to every
+    /// fleet peer (issue #1119). Server-authored, not a client control: the ship
+    /// host mints one whenever a crew connect/disconnect/claim/rating change
+    /// alters its own ship's `ActiveStationRatings` during active lockstep, so a
+    /// stationless GM (and every other peer) makes the same Backfill<->Human
+    /// transition on the same agreed tick rather than each following its own view
+    /// of who is connected. Targets the Command coarse system (`command`) like
+    /// [`SetStationStance`]; `station` names the Station and `rating` its rating
+    /// id (or `Backfill`). Assign-not-invert, so a duplicate is idempotent.
+    AssignStationRating {
+        station: StationId,
+        rating: String,
+    },
     /// Set the throttle axis. Targets `helm-thrust` (issue #801).
     SetThrust {
         value: f32,
@@ -2463,6 +2567,15 @@ pub enum ClientMessage {
         target: SystemId,
         payload: SystemControlPayload,
     },
+    /// A `ControlSystem` request that asks for a targeted authoritative
+    /// lifecycle acknowledgement. Only target/payload pairs whose consumer
+    /// owns a terminal feedback path are admitted with this envelope; the
+    /// legacy envelope above remains the path for uncorrelated commands.
+    ControlSystemCorrelated {
+        correlation: ActionCorrelationId,
+        target: SystemId,
+        payload: SystemControlPayload,
+    },
     /// Change the active rating for the sender's station. The rating name
     /// must match one of the station's defined ratings, or be "Backfill"
     /// (which automates every system owned by the station). When the rating
@@ -2578,6 +2691,34 @@ pub enum ClientMessage {
     /// instead — the same schedule the host page's own pause toggle uses.
     #[cfg(not(phoenix_demo_build))]
     TogglePause,
+    /// Show or hide the join QR on the host's viewscreen, from a connected
+    /// phone's settings menu (issue #1329).
+    ///
+    /// The oldest button in the settings panel and the newest variant here, and
+    /// the gap is the whole story: on a BROWSER host this message never reaches
+    /// Rust at all. `server.html` intercepts it in the per-connection handler
+    /// and flips its own overlay, because the panel is a page's chrome and the
+    /// page is right there. A NATIVE host has no page in front of its
+    /// simulation — the viewscreen is a composited surface fed by
+    /// `native_host::host_lobby` — so the same button on the same phone needs a
+    /// wire shape to arrive as, and this is it.
+    ///
+    /// **In every build**, unlike its `TogglePause` and `ToggleDebugFlag`
+    /// neighbours. Those are compiled out of a demo because N strangers on N
+    /// phones must not be able to freeze a mission or open a cheat surface.
+    /// Showing the code that lets somebody else join is not that: it is what
+    /// the panel is FOR, and a late arrival asking a seated player to press it
+    /// is the intended use.
+    ///
+    /// Carries nothing, and is not a "set visible" with a value: the panel's
+    /// visibility lives in the DOM of whichever surface is showing it
+    /// (`gui/host-qr.js` reads `#overlay`), so a boolean here would be a second
+    /// opinion about a state the sender cannot see and the two would drift.
+    ///
+    /// Never crosses command admission — it changes no simulation outcome a
+    /// replay must re-derive — for the same reason `ToggleDebugFlag` and
+    /// `StationVisited` do not.
+    ToggleQrCode,
     /// A client's own console input-to-feedback measurements (issue #1169,
     /// PRD #1144).
     ///
@@ -2940,6 +3081,16 @@ pub enum ServerMessage {
         /// `RatingChanged` or `SimState`.
         #[serde(default)]
         station_ratings: HashMap<StationId, String>,
+        /// Crew-public equal Game Master identities. GMs are host-class peers,
+        /// not `Player` rows and not player-ship fleet slots.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        gms: Vec<GmOperator>,
+    },
+    /// Full replacement of the crew-public GM roster (issue #1289). A delta
+    /// would make reconnect/order handling part of every client; the host page
+    /// already owns the complete rendezvous projection, so the wire does too.
+    GmRosterChanged {
+        gms: Vec<GmOperator>,
     },
     PlayerJoined {
         player: Player,
@@ -2981,6 +3132,12 @@ pub enum ServerMessage {
     AfkChanged {
         token: String,
         afk: bool,
+    },
+    /// Reliable, token-targeted terminal result for one correlated semantic
+    /// action.  Never broadcast: the correlation belongs only to its origin.
+    ActionFeedback {
+        correlation: ActionCorrelationId,
+        outcome: ActionFeedbackOutcome,
     },
     NameChanged {
         token: String,
@@ -4531,9 +4688,10 @@ pub struct PowerBlackboard {
 
 /// An authority-checked intra-system command produced by `admit_system_commands`.
 ///
-/// The source identity is stripped at admission; `response_token` carries the
-/// originating client's token purely for routing replies (not for behavioral
-/// branching).
+/// The source identity is stripped at admission; `response_token` is an opaque
+/// host-local reply target used purely for routing (not for behavioral
+/// branching). Ordinary client input carries that client's bearer token; an
+/// internal producer may instead use an unclaimable reserved target.
 ///
 /// Deliberately **not** `Serialize` (issue #898). This type is in-process only.
 /// The command log's entry type is
@@ -4546,9 +4704,13 @@ pub struct PowerBlackboard {
 pub struct AdmittedCommand {
     pub target: SystemId,
     pub payload: SystemControlPayload,
-    /// Token used to address a reply back to the originating client.
+    /// Opaque host-local target used to address a reply to the origin route.
     /// Handlers must not branch on this for any behavioral decision.
     pub response_token: Option<String>,
+    /// Transient correlated-feedback identity.  It survives command delay so
+    /// the owning consumer can acknowledge actual consumption, but is never
+    /// projected into `LoggedCommand`, mesh traffic, snapshots or replay.
+    pub feedback_correlation: Option<ActionCorrelationId>,
 }
 
 /// Cleared and refilled each tick by `admit_system_commands` (runs before
@@ -4751,6 +4913,11 @@ pub struct RepairBlackboard {
     /// Systems that can be targeted for repair dispatch (in display order).
     #[serde(default)]
     pub damageable_systems: Vec<SystemId>,
+    /// Exact SystemIds a named priority order can currently reach through an
+    /// on-site team's sweep. Derived by the Repair owner from the same
+    /// `RepairTeams::prioritise_system` candidate rule that applies the order.
+    #[serde(default)]
+    pub priority_targets: Vec<SystemId>,
     /// Priority-queue preview entries (worst-first) for human repair UI (issue #682).
     #[serde(default)]
     pub queue_depth: Vec<QueueEntryPreview>,
@@ -5208,8 +5375,21 @@ pub struct LobbyStatePayload {
     /// as the launch gate in the per-player Ready flow).
     #[serde(default)]
     pub all_ready: bool,
+    /// This ship host's connected non-spectator crew and ready subset. The
+    /// browser mesh combines one tally per ship; `all_ready` remains the local
+    /// backwards-compatible convenience projection.
+    #[serde(default)]
+    pub readiness: crate::lobby::start_policy::ReadinessTally,
+    /// Whether this host has finished its local render/presentation preload.
+    /// Fleet coordination combines this with the other hosts' values before
+    /// issuing a start grant; it is presentation state, not crew readiness.
+    pub presentation_ready: bool,
     pub stations: Vec<StationPayload>,
     pub spectators: Vec<String>,
+    /// Separate equal GM operators. They consume neither a Station nor one of
+    /// `max_players`, and therefore never affect crew/readiness counts here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gms: Vec<GmOperator>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub loading_progress: Option<f32>,
     /// Remaining seconds in the pre-game countdown, or 0 when no countdown is active.
@@ -5220,6 +5400,19 @@ pub struct LobbyStatePayload {
 /// One station slot in the lobby grid payload.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct StationPayload {
+    /// The ship's own authoring key for this station (issue #1331).
+    ///
+    /// Not display text — `name` is that, and it is what a person reads. This
+    /// is never shown: it is the key the native host's per-station **screen
+    /// row** is matched to its card by, because the bridge layout law is keyed
+    /// on [`StationId`] and a card matched by its localised name would stop
+    /// matching the moment somebody translated it.
+    ///
+    /// `#[serde(default)]` so a lobby payload written before this field existed
+    /// still decodes; such a card simply gets no screen row, which is the
+    /// honest state for a host with no monitors to offer.
+    #[serde(default)]
+    pub id: String,
     pub name: String,
     pub short_code: String,
     pub rank: String,

@@ -1,7 +1,8 @@
 use bevy::prelude::*;
 
 use crate::core::messages::{
-    AdmittedCommands, InterSystemMsg, InterSystemPayload, InterSystemQueue, SystemControlPayload,
+    ActionFeedbackOutcome, AdmittedCommands, InterSystemMsg, InterSystemPayload, InterSystemQueue,
+    SystemControlPayload,
 };
 use crate::regions::server::RegionMembership;
 use crate::server_app::LocalShip;
@@ -40,6 +41,28 @@ fn entity_inside_blocks_impulse(
         }
     }
     false
+}
+
+fn authored_system_id_for_kind<'a>(
+    config: Option<&'a crate::ship::components::ShipConfigComponent>,
+    kind: &str,
+) -> Option<&'a crate::core::messages::SystemId> {
+    config.and_then(|config| {
+        config
+            .0
+            .systems
+            .iter()
+            .find(|system| system.kind == kind)
+            .map(|system| &system.id)
+    })
+}
+
+fn target_is_owner(
+    target: &str,
+    authored: Option<&crate::core::messages::SystemId>,
+    legacy_id: &str,
+) -> bool {
+    authored.map_or(target == legacy_id, |system_id| target == system_id.0)
 }
 
 /// Per-entity admitted-command applier for the Helm path (issue #824): turns
@@ -97,9 +120,13 @@ pub(crate) fn process_helm_inputs(
         Option<&mut BoostCommand>,
         Option<&BoostConfigResource>,
         Option<&ShipBoost>,
+        Option<&crate::ship::components::ShipConfigComponent>,
         Option<&ShipSystemControlSources>,
         Has<LocalShip>,
     )>,
+    mut outbound: Option<
+        ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
+    >,
 ) {
     for (
         entity,
@@ -113,11 +140,34 @@ pub(crate) fn process_helm_inputs(
         mut boost_cmd,
         boost_cfg,
         ship_boost,
+        ship_config,
         sources,
         is_local,
     ) in ships.iter_mut()
     {
         let mut last_input = if is_local { last_input } else { None };
+        let thrust_system_id = authored_system_id_for_kind(
+            ship_config,
+            crate::ship::system_registry::HELM_THRUST_KIND,
+        );
+        let steering_system_id = authored_system_id_for_kind(
+            ship_config,
+            crate::ship::system_registry::HELM_STEERING_KIND,
+        );
+        let lateral_system_id = authored_system_id_for_kind(
+            ship_config,
+            crate::ship::system_registry::LATERAL_THRUST_KIND,
+        );
+        let vertical_system_id = authored_system_id_for_kind(
+            ship_config,
+            crate::ship::system_registry::VERTICAL_THRUST_KIND,
+        );
+        let impulse_system_id = authored_system_id_for_kind(
+            ship_config,
+            crate::ship::system_registry::HELM_IMPULSE_KIND,
+        );
+        let boost_system_id =
+            authored_system_id_for_kind(ship_config, crate::ship::system_registry::HELM_BOOST_KIND);
 
         // ── Offline-axis latch clear (issue #968) ─────────────────────────
         // The four helm intent components are LATCHES: written on admission and
@@ -141,34 +191,50 @@ pub(crate) fn process_helm_inputs(
         // `LastHelmInput` is deliberately untouched: it is the LocalShip's HUD
         // mirror of what the human asked for, not an actuator command.
         if let Some(sources) = sources {
-            if sources
-                .0
-                .is_offline(&crate::ship::system_registry::helm_thrust_system_id())
-            {
+            if thrust_system_id.map_or_else(
+                || {
+                    sources
+                        .0
+                        .is_offline(&crate::ship::system_registry::helm_thrust_system_id())
+                },
+                |system_id| sources.0.is_offline(system_id),
+            ) {
                 if let Some(ti) = thrust_in.as_deref_mut() {
                     ti.0 = 0.0;
                 }
             }
-            if sources
-                .0
-                .is_offline(&crate::ship::system_registry::helm_steering_system_id())
-            {
+            if steering_system_id.map_or_else(
+                || {
+                    sources
+                        .0
+                        .is_offline(&crate::ship::system_registry::helm_steering_system_id())
+                },
+                |system_id| sources.0.is_offline(system_id),
+            ) {
                 if let Some(si) = steering_in.as_deref_mut() {
                     si.0 = 0.0;
                 }
             }
-            if sources
-                .0
-                .is_offline(&crate::ship::system_registry::lateral_thrust_system_id())
-            {
+            if lateral_system_id.map_or_else(
+                || {
+                    sources
+                        .0
+                        .is_offline(&crate::ship::system_registry::lateral_thrust_system_id())
+                },
+                |system_id| sources.0.is_offline(system_id),
+            ) {
                 if let Some(la) = lateral_in.as_deref_mut() {
                     la.0 = 0.0;
                 }
             }
-            if sources
-                .0
-                .is_offline(&crate::ship::system_registry::vertical_thrust_system_id())
-            {
+            if vertical_system_id.map_or_else(
+                || {
+                    sources
+                        .0
+                        .is_offline(&crate::ship::system_registry::vertical_thrust_system_id())
+                },
+                |system_id| sources.0.is_offline(system_id),
+            ) {
                 if let Some(vi) = vertical_in.as_deref_mut() {
                     vi.0 = 0.0;
                 }
@@ -194,7 +260,11 @@ pub(crate) fn process_helm_inputs(
         for cmd in admitted.0.iter() {
             match (&cmd.target.0, &cmd.payload) {
                 (t, SystemControlPayload::SetThrust { value })
-                    if t.as_str() == crate::ship::system_registry::HELM_THRUST_SYSTEM_ID =>
+                    if target_is_owner(
+                        t,
+                        thrust_system_id,
+                        crate::ship::system_registry::HELM_THRUST_SYSTEM_ID,
+                    ) =>
                 {
                     if let Some(ti) = thrust_in.as_deref_mut() {
                         ti.0 = *value;
@@ -204,7 +274,11 @@ pub(crate) fn process_helm_inputs(
                     }
                 }
                 (t, SystemControlPayload::SetSteering { value })
-                    if t.as_str() == crate::ship::system_registry::HELM_STEERING_SYSTEM_ID =>
+                    if target_is_owner(
+                        t,
+                        steering_system_id,
+                        crate::ship::system_registry::HELM_STEERING_SYSTEM_ID,
+                    ) =>
                 {
                     if let Some(si) = steering_in.as_deref_mut() {
                         si.0 = *value;
@@ -214,7 +288,11 @@ pub(crate) fn process_helm_inputs(
                     }
                 }
                 (t, SystemControlPayload::LateralThrustInput { lateral })
-                    if *t == crate::ship::system_registry::lateral_thrust_system_id().0 =>
+                    if target_is_owner(
+                        t,
+                        lateral_system_id,
+                        crate::ship::system_registry::LATERAL_THRUST_SYSTEM_ID,
+                    ) =>
                 {
                     if let Some(la) = lateral_in.as_deref_mut() {
                         la.0 = *lateral;
@@ -226,72 +304,105 @@ pub(crate) fn process_helm_inputs(
                 // Vertical thrust (issue #744): AI-only, so no `LastHelmInput`
                 // mirror (that HUD cache carries no vertical field).
                 (t, SystemControlPayload::VerticalThrustInput { vertical })
-                    if *t == crate::ship::system_registry::vertical_thrust_system_id().0 =>
+                    if target_is_owner(
+                        t,
+                        vertical_system_id,
+                        crate::ship::system_registry::VERTICAL_THRUST_SYSTEM_ID,
+                    ) =>
                 {
                     if let Some(vi) = vertical_in.as_deref_mut() {
                         vi.0 = *vertical;
                     }
                 }
-                // The blocks-impulse region check lives in the guard: a charge
-                // commanded inside such a region falls through to `_ => {}`,
-                // i.e. it is ignored — the same no-op the inner `if` produced
-                // before it was collapsed (clippy::collapsible_if).
                 (t, SystemControlPayload::StartImpulseCharge)
-                    if t.as_str() == crate::ship::system_registry::HELM_IMPULSE_SYSTEM_ID
-                        && !entity_inside_blocks_impulse(entity, &membership, &region_query) =>
+                    if target_is_owner(
+                        t,
+                        impulse_system_id,
+                        crate::ship::system_registry::HELM_IMPULSE_SYSTEM_ID,
+                    ) =>
                 {
-                    {
+                    let blocked = entity_inside_blocks_impulse(entity, &membership, &region_query);
+                    let outcome = if !blocked {
                         if let Some(ic) = impulse_cmd.as_deref_mut() {
                             ic.0 = crate::ship::impulse::ImpulsePhase::Charging;
+                            // Zero the LocalShip's cached helm input the moment a
+                            // charge is commanded, so a stale steering/thrust
+                            // value can't resurface when impulse cancels or the
+                            // autopilot disengages (the pre-#824 phase-edge
+                            // detection, applied at the command rather than one
+                            // tick later at the observed transition). A Set*
+                            // admitted later in this same tick still overrides —
+                            // the loop applies commands in admission order.
+                            if is_local {
+                                if let Some(li) = last_input.as_deref_mut() {
+                                    li.thrust = 0.0;
+                                    li.steering = 0.0;
+                                }
+                                if let Some(ti) = thrust_in.as_deref_mut() {
+                                    ti.0 = 0.0;
+                                }
+                                if let Some(si) = steering_in.as_deref_mut() {
+                                    si.0 = 0.0;
+                                }
+                            }
+                            ActionFeedbackOutcome::Applied
+                        } else {
+                            ActionFeedbackOutcome::Refused
                         }
-                        // Zero the LocalShip's cached helm input the moment a
-                        // charge is commanded, so a stale steering/thrust
-                        // value can't resurface when impulse cancels or the
-                        // autopilot disengages (the pre-#824 phase-edge
-                        // detection, applied at the command rather than one
-                        // tick later at the observed transition). A Set*
-                        // admitted later in this same tick still overrides —
-                        // the loop applies commands in admission order.
-                        if is_local {
-                            if let Some(li) = last_input.as_deref_mut() {
-                                li.thrust = 0.0;
-                                li.steering = 0.0;
-                            }
-                            if let Some(ti) = thrust_in.as_deref_mut() {
-                                ti.0 = 0.0;
-                            }
-                            if let Some(si) = steering_in.as_deref_mut() {
-                                si.0 = 0.0;
-                            }
-                        }
-                    }
+                    } else {
+                        ActionFeedbackOutcome::Refused
+                    };
+                    crate::command_admission::finish_action_feedback(cmd, &mut outbound, outcome);
                 }
                 (t, SystemControlPayload::CancelImpulse)
-                    if t.as_str() == crate::ship::system_registry::HELM_IMPULSE_SYSTEM_ID =>
+                    if target_is_owner(
+                        t,
+                        impulse_system_id,
+                        crate::ship::system_registry::HELM_IMPULSE_SYSTEM_ID,
+                    ) =>
                 {
-                    if let Some(ic) = impulse_cmd.as_deref_mut() {
+                    let outcome = if let Some(ic) = impulse_cmd.as_deref_mut() {
                         ic.0 = crate::ship::impulse::ImpulsePhase::Idle;
-                    }
+                        ActionFeedbackOutcome::Applied
+                    } else {
+                        ActionFeedbackOutcome::Refused
+                    };
+                    crate::command_admission::finish_action_feedback(cmd, &mut outbound, outcome);
                 }
-                // Boost (issue #881). The `enabled` guard lives in the arm
-                // guard, so a payload for a boost-less hull falls through to
-                // `_ => {}` — the same no-op the retired applier's early
-                // return produced.
                 (t, SystemControlPayload::SetBoost { active })
-                    if t.as_str() == crate::ship::system_registry::HELM_BOOST_SYSTEM_ID
-                        && boost_enabled =>
+                    if target_is_owner(
+                        t,
+                        boost_system_id,
+                        crate::ship::system_registry::HELM_BOOST_SYSTEM_ID,
+                    ) =>
                 {
-                    desired_boost = Some(*active);
+                    let outcome = if boost_enabled && boost_cmd.is_some() {
+                        desired_boost = Some(*active);
+                        ActionFeedbackOutcome::Applied
+                    } else {
+                        ActionFeedbackOutcome::Refused
+                    };
+                    crate::command_admission::finish_action_feedback(cmd, &mut outbound, outcome);
                 }
                 (t, SystemControlPayload::ToggleBoost)
-                    if t.as_str() == crate::ship::system_registry::HELM_BOOST_SYSTEM_ID
-                        && boost_enabled =>
+                    if target_is_owner(
+                        t,
+                        boost_system_id,
+                        crate::ship::system_registry::HELM_BOOST_SYSTEM_ID,
+                    ) =>
                 {
-                    // Read-modify-write against this ship's live `ShipBoost`,
-                    // or against an earlier payload in the same tick.
-                    let current = desired_boost
-                        .unwrap_or_else(|| ship_boost.map(|b| b.0.is_active()).unwrap_or(false));
-                    desired_boost = Some(!current);
+                    let outcome = if boost_enabled && boost_cmd.is_some() {
+                        // Read-modify-write against this ship's live `ShipBoost`,
+                        // or against an earlier payload in the same tick.
+                        let current = desired_boost.unwrap_or_else(|| {
+                            ship_boost.map(|b| b.0.is_active()).unwrap_or(false)
+                        });
+                        desired_boost = Some(!current);
+                        ActionFeedbackOutcome::Applied
+                    } else {
+                        ActionFeedbackOutcome::Refused
+                    };
+                    crate::command_admission::finish_action_feedback(cmd, &mut outbound, outcome);
                 }
                 _ => {}
             }
@@ -409,9 +520,221 @@ pub(crate) fn operate_helm_engine_ai(
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
-    use crate::core::messages::ClientMessage;
+    use crate::core::messages::{
+        ActionCorrelationId, AdmittedCommand, ClientMessage, DeliveryClass, ServerMessage, SystemId,
+    };
+    use crate::lobby::{server::OutboundMessage, Target};
     use crate::ship::control_source::ControlSource;
     use crate::ship::test_support::*;
+
+    fn correlated_command(
+        target: &str,
+        payload: SystemControlPayload,
+        correlation: &str,
+    ) -> AdmittedCommand {
+        AdmittedCommand {
+            target: SystemId(target.to_string()),
+            payload,
+            response_token: Some("sensors".to_string()),
+            feedback_correlation: Some(
+                ActionCorrelationId::new(correlation).expect("valid test correlation"),
+            ),
+        }
+    }
+
+    fn cancel_command(correlation: &str) -> AdmittedCommand {
+        correlated_command(
+            crate::ship::system_registry::HELM_IMPULSE_SYSTEM_ID,
+            SystemControlPayload::CancelImpulse,
+            correlation,
+        )
+    }
+
+    fn has_feedback(
+        messages: &[OutboundMessage],
+        correlation: &str,
+        outcome: ActionFeedbackOutcome,
+    ) -> bool {
+        messages.iter().any(|message| {
+            message.target == Target::Token("sensors".to_string())
+                && message.delivery == DeliveryClass::Reliable
+                && matches!(
+                    &message.msg,
+                    ServerMessage::ActionFeedback {
+                        correlation: actual,
+                        outcome: actual_outcome,
+                    } if actual.as_str() == correlation && *actual_outcome == outcome
+                )
+        })
+    }
+
+    fn feedback_count(messages: &[OutboundMessage], correlation: &str) -> usize {
+        messages
+            .iter()
+            .filter(|message| {
+                matches!(
+                    &message.msg,
+                    ServerMessage::ActionFeedback {
+                        correlation: actual,
+                        ..
+                    } if actual.as_str() == correlation
+                )
+            })
+            .count()
+    }
+
+    fn cancel_feedback_app(
+        impulse: Option<crate::ship::helm::ImpulseCommand>,
+        correlation: &str,
+    ) -> (App, Entity) {
+        let mut app = App::new();
+        app.add_message::<OutboundMessage>()
+            .add_systems(Update, process_helm_inputs);
+        let entity = app
+            .world_mut()
+            .spawn(AdmittedCommands(vec![cancel_command(correlation)]))
+            .id();
+        if let Some(impulse) = impulse {
+            app.world_mut().entity_mut(entity).insert(impulse);
+        }
+        (app, entity)
+    }
+
+    #[test]
+    fn cancel_impulse_reports_applied_only_after_the_owner_cancels_it() {
+        let (mut app, entity) = cancel_feedback_app(
+            Some(crate::ship::helm::ImpulseCommand(
+                crate::ship::impulse::ImpulsePhase::Charging,
+            )),
+            "cancel-applied",
+        );
+        let mut cursor = app
+            .world()
+            .resource::<Messages<OutboundMessage>>()
+            .get_cursor();
+
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<crate::ship::helm::ImpulseCommand>(entity)
+                .expect("the impulse owner remains present")
+                .0,
+            crate::ship::impulse::ImpulsePhase::Idle,
+        );
+        let feedback: Vec<_> = cursor
+            .read(app.world().resource::<Messages<OutboundMessage>>())
+            .cloned()
+            .collect();
+        assert!(has_feedback(
+            &feedback,
+            "cancel-applied",
+            ActionFeedbackOutcome::Applied,
+        ));
+    }
+
+    #[test]
+    fn cancel_impulse_reports_refused_when_the_owner_component_is_absent() {
+        let (mut app, _) = cancel_feedback_app(None, "cancel-refused");
+        let mut cursor = app
+            .world()
+            .resource::<Messages<OutboundMessage>>()
+            .get_cursor();
+
+        app.update();
+
+        let feedback: Vec<_> = cursor
+            .read(app.world().resource::<Messages<OutboundMessage>>())
+            .cloned()
+            .collect();
+        assert!(has_feedback(
+            &feedback,
+            "cancel-refused",
+            ActionFeedbackOutcome::Refused,
+        ));
+    }
+
+    #[test]
+    fn start_impulse_reports_one_terminal_outcome_for_present_and_missing_owners() {
+        for (correlation, impulse, expected) in [
+            (
+                "start-applied",
+                Some(crate::ship::helm::ImpulseCommand::default()),
+                ActionFeedbackOutcome::Applied,
+            ),
+            ("start-refused", None, ActionFeedbackOutcome::Refused),
+        ] {
+            let mut app = App::new();
+            app.add_message::<OutboundMessage>()
+                .add_systems(Update, process_helm_inputs);
+            let command = correlated_command(
+                crate::ship::system_registry::HELM_IMPULSE_SYSTEM_ID,
+                SystemControlPayload::StartImpulseCharge,
+                correlation,
+            );
+            let entity = app.world_mut().spawn(AdmittedCommands(vec![command])).id();
+            if let Some(impulse) = impulse {
+                app.world_mut().entity_mut(entity).insert(impulse);
+            }
+            let mut cursor = app
+                .world()
+                .resource::<Messages<OutboundMessage>>()
+                .get_cursor();
+
+            app.update();
+
+            let feedback: Vec<_> = cursor
+                .read(app.world().resource::<Messages<OutboundMessage>>())
+                .cloned()
+                .collect();
+            assert!(has_feedback(&feedback, correlation, expected));
+            assert_eq!(feedback_count(&feedback, correlation), 1);
+        }
+    }
+
+    #[test]
+    fn set_boost_reports_one_terminal_outcome_for_enabled_and_missing_owners() {
+        for (correlation, with_owner, expected) in [
+            ("boost-applied", true, ActionFeedbackOutcome::Applied),
+            ("boost-refused", false, ActionFeedbackOutcome::Refused),
+        ] {
+            let mut app = App::new();
+            app.add_message::<OutboundMessage>()
+                .add_systems(Update, process_helm_inputs);
+            let command = correlated_command(
+                crate::ship::system_registry::HELM_BOOST_SYSTEM_ID,
+                SystemControlPayload::SetBoost { active: true },
+                correlation,
+            );
+            let entity = app.world_mut().spawn(AdmittedCommands(vec![command])).id();
+            if with_owner {
+                app.world_mut().entity_mut(entity).insert((
+                    crate::ship::components::BoostConfigResource {
+                        enabled: true,
+                        ..Default::default()
+                    },
+                    ShipBoost::default(),
+                    BoostCommand::default(),
+                ));
+            }
+            let mut cursor = app
+                .world()
+                .resource::<Messages<OutboundMessage>>()
+                .get_cursor();
+
+            app.update();
+
+            let feedback: Vec<_> = cursor
+                .read(app.world().resource::<Messages<OutboundMessage>>())
+                .cloned()
+                .collect();
+            assert!(has_feedback(&feedback, correlation, expected));
+            assert_eq!(feedback_count(&feedback, correlation), 1);
+            if with_owner {
+                assert!(app.world().get::<BoostCommand>(entity).unwrap().0);
+            }
+        }
+    }
 
     #[test]
     fn control_system_helm_input_updates_last_input_and_moves_ship() {
@@ -608,16 +931,35 @@ mod tests {
     /// `process_helm_inputs` to land on. Registers `ai:<uuid>` in the
     /// `AiTokenRegistry` and returns `(entity, token)`.
     fn spawn_admission_npc(app: &mut App, source: ControlSource) -> (Entity, String) {
-        let mut sources = ShipSystemControlSources::default();
-        sources.0.set(
-            crate::ship::system_registry::helm_thrust_system_id(),
+        spawn_admission_npc_with_thrust_id(
+            app,
             source,
-        );
+            crate::ship::system_registry::HELM_THRUST_SYSTEM_ID,
+        )
+    }
+
+    fn spawn_admission_npc_with_thrust_id(
+        app: &mut App,
+        source: ControlSource,
+        thrust_id: &str,
+    ) -> (Entity, String) {
+        let mut config = crate::ship::components::ShipConfigComponent::default();
+        config
+            .0
+            .systems
+            .iter_mut()
+            .find(|system| system.kind == crate::ship::system_registry::HELM_THRUST_KIND)
+            .expect("the test hull has a thrust owner")
+            .id = crate::core::messages::SystemId(thrust_id.into());
+        let mut sources = ShipSystemControlSources::default();
+        sources
+            .0
+            .set(crate::core::messages::SystemId(thrust_id.into()), source);
         let npc = app
             .world_mut()
             .spawn((
                 crate::server_app::Ship,
-                crate::ship::components::ShipConfigComponent::default(),
+                config,
                 sources,
                 crate::core::messages::AdmittedCommands::default(),
                 ThrustInput::default(),
@@ -664,6 +1006,26 @@ mod tests {
             0.0,
             "the LocalShip's ThrustInput must be untouched by an NPC-routed command"
         );
+    }
+
+    #[test]
+    fn arbitrary_authored_helm_instance_routes_and_applies_by_kind() {
+        let mut app = test_app();
+        let thrust_id = "port-main-drive";
+        let (npc, token) =
+            spawn_admission_npc_with_thrust_id(&mut app, ControlSource::Ai, thrust_id);
+
+        push(
+            &mut app,
+            &token,
+            ClientMessage::ControlSystem {
+                target: crate::core::messages::SystemId(thrust_id.into()),
+                payload: SystemControlPayload::SetThrust { value: 0.65 },
+            },
+        );
+        tick(&mut app);
+
+        assert_eq!(thrust_input_of(&app, npc), 0.65);
     }
 
     /// AC (issue #824): a human token still routes to the LocalShip even

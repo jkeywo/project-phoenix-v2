@@ -12,10 +12,11 @@
 //! lives here beyond the tiny `apply_god_mode_toggle` applier that owns
 //! [`GodMode`], and the empty `sim_processing_anchor`.
 //!
-//! Load-bearing invariant: `LocalShip` REQUIRES `HumanSeekingHosts` /
-//! `VisitingStationHosts` / `ScenarioDetailFloor` so those components arrive in
-//! the spawn-burst archetype transition — a mid-run archetype move here would
-//! re-order archetype ids and move the authoritative digest (see `LocalShip`).
+//! Load-bearing invariant: `HumanSeekingHosts` / `VisitingStationHosts` /
+//! `ScenarioDetailFloor` arrive in the spawn-burst archetype transition on
+//! EVERY fleet ship — a mid-run archetype move would re-order archetype ids,
+//! and making their presence depend on which ship a host tagged `LocalShip`
+//! would give two hosts different worlds from tick zero (see `LocalShip`).
 
 use super::*;
 
@@ -42,26 +43,48 @@ pub struct Ship;
 /// It must never gate shared gameplay mechanics (damage, physics, AI) — those
 /// run on `With<Ship>` so the local ship and NPCs behave identically.
 ///
-/// # Why it REQUIRES `HumanSeekingHosts` (issue #984)
+/// # The cross-host rule (issue #1116)
 ///
-/// `resolve_human_seeking_hosts` is the only writer of that map, and it runs on
-/// exactly this marker. If it had to `Commands::insert` the component the first
-/// time it ran, the player ship would perform an ARCHETYPE MOVE on a mid-run
-/// tick — long after the world settled — and that is not a private bookkeeping
-/// detail: Bevy allocates archetype ids in creation order and every query
-/// iterates its matched archetypes in that order, so one extra archetype
-/// created at that moment re-orders the archetype ids the NPC hulls land in.
-/// Two NPC hull groups then swap places in every query that matches both, the
-/// per-entity RNG draws and command inserts interleave differently, and the
-/// authoritative digest moves — measured: `duel` and `rng_coverage` both moved
-/// on nothing but the move itself (a zero-sized dummy marker inserted in the
-/// same place reproduced it byte for byte). Requiring the component makes it
-/// arrive in the SAME transition as the marker, during the spawn burst, so no
-/// mid-run archetype move ever happens and the resolver needs no `Commands`.
+/// With two ship hosts running one mission, **this marker is on a different
+/// ship on each of them**: it says "the ship whose crew is on this machine".
+/// That makes the sentence above load-bearing rather than tidy, and sharpens it
+/// into a rule a test can hold the code to:
+///
+/// > **Nothing `LocalShip` gates may reach the authoritative digest.**
+///
+/// Anything that does is, by construction, a value two hosts compute
+/// differently from tick zero — and a fleet whose hosts disagree from tick zero
+/// has no mission. `tests/local_ship_neutrality.rs` is the guard: it runs the
+/// same seeded world twice, moving the marker to a different fleet ship, and
+/// compares the fold on every tick. Two sites failed it when it was written and
+/// were fixed rather than blessed (visual banking in `integrate_ship_physics`,
+/// which now runs for every ship; and the human-seeking/detail-floor resolvers,
+/// which now run for every ship in the fleet off the frozen roster).
+///
+/// # Why it no longer REQUIREs `HumanSeekingHosts` (issue #984, revised #1116)
+///
+/// #984 made this marker `#[require]` `HumanSeekingHosts` /
+/// `VisitingStationHosts` / `ScenarioDetailFloor` because
+/// `resolve_human_seeking_hosts` ran on exactly this marker and would otherwise
+/// have had to `Commands::insert` the map on its first run — a MID-RUN
+/// ARCHETYPE MOVE, which measurably moved `duel` and `rng_coverage` (proven, not
+/// inferred: a zero-sized dummy marker in the same place reproduced both
+/// digests byte for byte).
+///
+/// The requirement has moved rather than gone. Those three components are now
+/// inserted by `world_setup::insert_player_core_bundle` on **every ship in the
+/// fleet**, in the same spawn burst, whether or not that ship is the local one
+/// — so the resolvers still need no `Commands`, no mid-run move can happen, and
+/// every fleet hull carries the identical component set regardless of which
+/// host is looking at it. A `#[require]` on this marker would have done the
+/// opposite: it would have made the *presence* of those components depend on
+/// which ship a host tagged, which is precisely the cross-host asymmetry the
+/// rule above forbids.
+///
+/// The standing guard against archetype-creation order moving the digest at all
+/// is `tests/archetype_order_determinism.rs` (issue #1052), which reverses the
+/// hull groups' archetype ids mid-run and asserts the fold does not care.
 #[derive(Component)]
-#[require(crate::ship_plugin::HumanSeekingHosts)]
-#[require(crate::ship_plugin::VisitingStationHosts)]
-#[require(crate::ship_plugin::ScenarioDetailFloor)]
 pub struct LocalShip;
 
 /// Marker component on the scene-root child entity of the local ship's GLB

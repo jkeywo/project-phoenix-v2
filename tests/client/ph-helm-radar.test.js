@@ -2,6 +2,10 @@
 import { t } from '../../gui/strings.js';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import '../../gui/components/ph-helm-radar.js';
+import {
+  HELM_ACTION_CONTEXT,
+  HELM_VIEWSCREEN_ACTION_ID,
+} from '../../gui/stations/helm-actions.js';
 import { makeRadarCtx } from './radar-canvas-stub.js';
 
 let rafCb;
@@ -41,8 +45,8 @@ function restoreRAF() {
 }
 
 function setup(opts) {
-  if (opts && opts.sendAction) {
-    window.sendAction = opts.sendAction;
+  if (opts && opts.activateSemanticAction) {
+    window.activateSemanticAction = opts.activateSemanticAction;
   }
   document.body.innerHTML = '<ph-helm-radar id="test-el"></ph-helm-radar>';
   const el = document.getElementById('test-el');
@@ -52,7 +56,7 @@ function setup(opts) {
 describe('PhHelmRadar', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
-    delete window.sendAction;
+    delete window.activateSemanticAction;
     mockRAF();
     origRO = window.ResizeObserver;
     window.ResizeObserver = function () {
@@ -64,7 +68,7 @@ describe('PhHelmRadar', () => {
 
   afterEach(() => {
     document.body.innerHTML = '';
-    delete window.sendAction;
+    delete window.activateSemanticAction;
     restoreRAF();
     if (origRO) window.ResizeObserver = origRO;
     if (origGetContext) HTMLCanvasElement.prototype.getContext = origGetContext;
@@ -109,14 +113,16 @@ describe('PhHelmRadar', () => {
     expect(inner.state.config).toEqual({ max_range: 5000 });
   });
 
-  it('ON SCREEN button dispatches sendAction with set_radar_view when clicked', () => {
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
+  it('ON SCREEN button activates the shared Helm viewscreen identity', () => {
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
 
     const btn = el.shadowRoot.getElementById('on-screen-btn');
     btn.click();
 
-    expect(sendAction).toHaveBeenCalledWith('set_radar_view', {});
+    expect(activateSemanticAction).toHaveBeenCalledWith(
+      HELM_VIEWSCREEN_ACTION_ID, { context: HELM_ACTION_CONTEXT, source: 'control' },
+    );
   });
 
   it('ON SCREEN button shows active class when on_screen_active is true', () => {

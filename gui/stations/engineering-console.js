@@ -106,7 +106,13 @@ export function makeEngineeringRender(variant) {
     }
     const repairEl = doc.getElementById(ids.repairTeams);
     if (repairEl) {
-      repairEl.state = { teams: r.teams || [], auto: !!r.repair_auto, targets: r.dispatch_targets || [], damaged: r.damaged_systems || [] };
+      repairEl.state = {
+        teams: r.teams || [],
+        auto: !!r.repair_auto,
+        targets: r.dispatch_targets || [],
+        damaged: r.damaged_systems || [],
+        externally_committed_teams: r.external_dispatch?.target != null ? 1 : 0,
+      };
     }
 
     // ── Station-damage footer ──────────────────────────────────────────

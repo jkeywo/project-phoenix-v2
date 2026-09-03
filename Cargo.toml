@@ -23,12 +23,18 @@ resolver = "2"
 # so the repo carries a single vellum revision rather than one per crate. Adding
 # a second vellum consumer that pins a different rev now fails structurally.
 [workspace.dependencies]
-vellum-perf = { git = "https://github.com/jkeywo/vellum", rev = "a08dca9ca49033307bb6d5e85cb068205c1164b6", features = ["json"] }
-vellum-rng = { git = "https://github.com/jkeywo/vellum", rev = "a08dca9ca49033307bb6d5e85cb068205c1164b6" }
-vellum-replay = { git = "https://github.com/jkeywo/vellum", rev = "a08dca9ca49033307bb6d5e85cb068205c1164b6" }
-vellum-digest = { git = "https://github.com/jkeywo/vellum", rev = "a08dca9ca49033307bb6d5e85cb068205c1164b6" }
-vellum-save = { git = "https://github.com/jkeywo/vellum", rev = "a08dca9ca49033307bb6d5e85cb068205c1164b6", features = ["run"] }
-vellum-script = { git = "https://github.com/jkeywo/vellum", rev = "a08dca9ca49033307bb6d5e85cb068205c1164b6" }
+vellum-perf = { git = "https://github.com/jkeywo/vellum", rev = "b4e8bca41967644f3ca83adba092b2a503d3506a", features = ["json"] }
+vellum-rng = { git = "https://github.com/jkeywo/vellum", rev = "b4e8bca41967644f3ca83adba092b2a503d3506a" }
+vellum-replay = { git = "https://github.com/jkeywo/vellum", rev = "b4e8bca41967644f3ca83adba092b2a503d3506a" }
+vellum-digest = { git = "https://github.com/jkeywo/vellum", rev = "b4e8bca41967644f3ca83adba092b2a503d3506a" }
+vellum-save = { git = "https://github.com/jkeywo/vellum", rev = "b4e8bca41967644f3ca83adba092b2a503d3506a", features = ["run"] }
+vellum-script = { git = "https://github.com/jkeywo/vellum", rev = "b4e8bca41967644f3ca83adba092b2a503d3506a" }
+# vellum-ultralight (issue #1122): the shared Ultralight pane plumbing, pinned to
+# the same rev as the crates above. Its SDK-linking `ultralight` feature is OFF
+# here — the crate's pure half (the JS-bridge escaping and record splitting
+# `native_host::panes` uses) has no dependencies and compiles everywhere, wasm
+# included; only this repo's own `ultralight` feature pulls `ul-next`.
+vellum-ultralight = { git = "https://github.com/jkeywo/vellum", rev = "b4e8bca41967644f3ca83adba092b2a503d3506a" }
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -58,12 +64,17 @@ name = "phoenix-perf"
 path = "src/bin/phoenix_perf.rs"
 required-features = ["perf"]
 
-# Native delivery host (PRD #855): serves the client bundle, the content
-# manifest and the scenario catalogue over HTTP. Native-only, and — like every
-# native-only bin here — it MUST carry `required-features` or Trunk's wasm build
-# finds a second target artifact and refuses to build. The `host` feature gates
-# only this BINARY: `crate::delivery` itself is unconditional, so its unit tests
-# run under the `cargo test` CI already runs, with no extra feature set.
+# Native host (PRD #855 delivery, issue #1121 authoritative simulation): serves
+# the client bundle, the content manifest and the scenario catalogue over HTTP,
+# and with `--world` runs the simulation with a native Bevy/wgpu viewscreen.
+# Native-only, and — like every native-only bin here — it MUST carry
+# `required-features` or Trunk's wasm build finds a second target artifact and
+# refuses to build. The `host` feature gates only this BINARY: `crate::delivery`
+# itself is unconditional, so its unit tests run under the `cargo test` CI
+# already runs, with no extra feature set. Since #1121 `host` PULLS IN `server`
+# (see the [features] note) because the authoritative half draws the viewscreen
+# through the presentation plugins — `required-features` stays `["host"]` because
+# the feature now implies the other.
 [[bin]]
 name = "phoenix-host"
 path = "src/bin/phoenix_host.rs"
@@ -162,17 +173,51 @@ falling-skyway-sim-tests = ["headless"]
 # exists to keep that binary out of the wasm target list rather than to gate any
 # code — see the `[[bin]]` note above.
 perf = []
-# Host feature: builds the `phoenix-host` native delivery binary (PRD #855).
-# Like `perf`, it gates a BINARY and no code — `crate::delivery` compiles on
-# both targets unconditionally, because the catalogue contract and the version
-# pin are shared with the browser host and a feature-gated copy would be exactly
-# the fork the PRD forbids.
-host = []
+# Host feature: builds the `phoenix-host` binary — PRD #855's delivery half and
+# issue #1121's authoritative half, one binary, two modes.
+#
+# It still gates no code OF ITS OWN: `crate::delivery` compiles on both targets
+# unconditionally, because the catalogue contract and the version pin are shared
+# with the browser host and a feature-gated copy would be exactly the fork the
+# PRD forbids. What changed in #1121 is that the binary grew a second half —
+# `--world` runs the simulation and draws the viewscreen through
+# `crate::native_host`, which is gated on `server` because it names the
+# presentation `crate::server::{renderer,viewscreen_border}` plugins. So `host`
+# now DEPENDS on `server` instead of standing alone: without that dependency
+# `--no-default-features --features host` compiles a `main` that names a module
+# which is not there, a combination CI never builds and nothing would catch.
+host = ["server", "dep:tungstenite"]
 # Capture feature: builds the `capture-billboard` tool, a native headless
 # renderer that bakes a model's far-LOD billboard atlas (see src/bin). Pulls in
 # the `image` crate for PNG encoding; kept out of the default/wasm builds because
 # it renders offscreen with a native GPU adapter.
 capture = ["server", "dep:image", "dep:crossbeam-channel"]
+# Ultralight feature: local Station panes in the native host (issue #1122).
+#
+# It turns on ONE thing — `vellum-ultralight`'s own `ultralight` feature, which
+# links the Ultralight SDK — and with it `native_host::panes::ultralight`, the
+# only module in this repository that names an Ultralight type. Everything else
+# about a pane (identity, the registry, audience routing, the per-frame loop,
+# the document assembly) compiles and is tested with this feature OFF, which is
+# how every job in ci.yml builds.
+#
+# It must stay that way. `ul-next-sys`'s build script DOWNLOADS a proprietary
+# ~100 MB SDK archive at build time. Every CI job here is `ubuntu-latest`, the
+# wasm build has no use for any of it, and a plain `cargo test` must not pay a
+# download to run four thousand unit tests. Nothing in `default`, `server`,
+# `host`, `headless`, `capture` or `viewer` may ever imply this feature.
+#
+# AND NEITHER MAY `--all-features`, which is the part that was got wrong the
+# first time: it enables everything declared here regardless of what any of
+# them imply, and the `test` job's clippy step asked for exactly that. That
+# step now names its features explicitly — every one below except this — and
+# AGENTS.md's local gate command mirrors it. A feature added here belongs in
+# both lists, or it is a feature nothing lints.
+#
+# `host` is implied the other way round: a pane is only meaningful in the
+# process that serves the client bundle it loads and runs the simulation it
+# talks to.
+ultralight = ["host", "vellum-ultralight/ultralight"]
 
 [dependencies]
 # The deterministic-math foundation (issue #1184), extracted into its own
@@ -354,6 +399,17 @@ vellum-save = { workspace = true }
 # ActionCmd boundary, the sugared `flags` type, the loader, and cross-reference
 # validation) stays here (`world/script/`), per vellum's charter.
 vellum-script = { workspace = true }
+# Off-screen Ultralight HTML panes (issue #1122) — the shared plumbing behind
+# `native_host::panes`. Extracted rather than copied: void-and-thunder had the
+# same SDK staging, the same surface→RGBA copy and the same `evaluate_script`
+# push/poll bridge, and two independent arrivals at one mechanism is the fleet's
+# own test for a shared crate (see vellum's `docs/handbook/dependencies.md`).
+#
+# Unconditional, because its pure half is: with `vellum-ultralight/ultralight`
+# off the crate has NO dependencies, so the wasm build and every SDK-free CI job
+# carry three small pure modules and nothing else. See the workspace pin above
+# for the pre-merge warning on where it currently points.
+vellum-ultralight = { workspace = true }
 # The Rhai engine itself, named directly because `world::script` constructs the
 # host-fn vocabulary on the engines vellum-script hands back and must fix the
 # global hashing seed before any engine is built (M0 spike:
@@ -398,6 +454,23 @@ bevy = { version = "0.18.1", features = ["debug"] }
 # the guard that makes silently re-adding it fail.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 bevy_rapier3d = { version = "0.33" }
+# The native host's crew path (issue #1113): one outbound `wss:` client socket
+# to the rendezvous service, which is how a browser client joins a native host.
+#
+# `[ai]` DEPENDENCY CHOICE, and it is a deliberate one rather than the obvious
+# one. `tokio-tungstenite` and `async-tungstenite` are the names usually reached
+# for; both wrap THIS crate and both bring an async runtime with them. This
+# repository has no async runtime and every native I/O surface it owns is
+# blocking std threads — `delivery::serve` is a `TcpListener` with a thread per
+# connection — so a runtime would be a new architectural dependency bought for
+# one socket, and `native_host::relay_transport`'s seam is a non-blocking
+# `poll()`/`send()` pair that a reader thread feeds either way. Optional and
+# enabled by `host`, so plain `cargo test` does not build it while the protocol
+# logic it carries (and that logic's tests) stay on the default feature set.
+# `rustls-tls-webpki-roots` rather than `native-tls`: the service is a
+# `*.workers.dev` origin with an ordinary public certificate, and bundled roots
+# mean no platform trust-store dependency on a Windows release build.
+tungstenite = { version = "0.28", optional = true, default-features = false, features = ["handshake", "rustls-tls-webpki-roots"] }
 # Baselines are authored RON read by the headless harness, which is native-only
 # (`src/headless` is cfg'd off under wasm). Keeping the reader here means the
 # browser build carries no parser it cannot reach.
@@ -406,6 +479,22 @@ ron = "0.12"
 # filesystem is: the browser gets `backend-web` in the wasm stanza below. Both
 # unify into the single `vellum-save` declared in `[dependencies]`.
 vellum-save = { workspace = true, features = ["backend-fs"] }
+# The operator's own settings directory, for the per-ship-class bridge layouts
+# a native host remembers (issue #1334) — `%APPDATA%` on Windows,
+# `~/.local/share` on Linux, `~/Library/Application Support` on macOS.
+#
+# NATIVE-ONLY, in this stanza rather than in `[dependencies]`, for the reason
+# `ron` two lines up gives: `native_host` is itself `cfg(not(wasm32))`, so the
+# browser build must not carry a home-directory resolver it can never reach —
+# and on wasm this crate's platform code has nothing to resolve against.
+#
+# `BaseDirs` rather than `ProjectDirs` ([ai]): `ProjectDirs` appends its own
+# `config`/`data` leaf on Windows (`%APPDATA%\<Org>\<App>\data`), which is not
+# the path issue #1334 specifies. `BaseDirs::data_dir()` IS `%APPDATA%`, and the
+# store joins `ProjectPhoenix/bridge-layouts` onto it — so the Windows path is
+# exactly the authored one and the other platforms get their own conventional
+# root for free.
+directories = "6"
 
 # WASM: no parallel, uses single-threaded runtime
 # getrandom 0.3+ needs wasm_js feature + cfg(getrandom_backend="js")

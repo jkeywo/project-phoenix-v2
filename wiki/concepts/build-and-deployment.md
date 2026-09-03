@@ -2,8 +2,8 @@
 title: Build & Deployment
 type: concept
 tags: [trunk, wasm, github-pages, cloudflare, native-host, ci]
-sources: [Trunk.toml, scripts/build-client.mjs, scripts/generate-debug-surfaces.mjs, scripts/check-deploy-headers.mjs, gui/debug-surfaces.generated.js, .github/workflows/, README.md, worker/wrangler.toml, worker/wrangler.demo.toml, deploy/cloudflare/_headers, src/delivery/, docs/delivery-checklist.md, pasm/spec/architecture/native-delivery.yaml]
-updated: 2026-08-28
+sources: [Trunk.toml, scripts/build-client.mjs, scripts/generate-debug-surfaces.mjs, scripts/check-deploy-headers.mjs, gui/debug-surfaces.generated.js, gui/vendor/README.md, .github/workflows/, README.md, worker/wrangler.toml, worker/wrangler.demo.toml, deploy/cloudflare/_headers, src/delivery/, docs/delivery-checklist.md, pasm/spec/architecture/native-delivery.yaml]
+updated: 2026-09-01
 ---
 
 # Build & Deployment
@@ -15,7 +15,7 @@ updated: 2026-08-28
 | `TRUNK_BUILD_RELEASE=true trunk build --release` | `dist/index.html` (server.html → view screen) | Builds the Rust/Bevy WASM host with the default `server` feature and enables the release-only post-build optimisation hook. |
 | `node scripts/build-client.mjs` | `dist/client/index.html` plus GUI assets | First rejects a stale Rust-derived Debug Surface module, then copies the pure HTML/JS phone client; there is no client-side WASM feature. |
 
-The server is authoritative and runs the simulation. The client is a pure JS shell that connects to the host via PeerJS/WebRTC and renders HTML console panels.
+The server is authoritative and runs the simulation. The client is a pure JS shell that joins the host by a typed code through the rendezvous service, connects over WebRTC DataChannels, and renders HTML console panels.
 
 ## Local dev
 
@@ -31,7 +31,9 @@ TRUNK_BUILD_RELEASE=true trunk build --release
 node scripts/build-client.mjs
 ```
 
-Outputs land in `dist/` with the client at `dist/client/`. The QR code on the view screen encodes `https://<host>/client/index.html#<peerId>` so phones land on the right page.
+Outputs land in `dist/` with the client at `dist/client/`. The QR code on the view screen encodes `https://<host>/client/index.html#<PROJECT_GUID>_<VERSION_GUID>_<CODE>` so phones land on the right page already carrying the join code; the same code's typed suffix is printed beside it for guests who type instead of scanning.
+
+**Nothing in a built bundle fetches a script from a CDN.** The QR encoder is vendored at `gui/vendor/qrcode.js` (issue #1329) and carried into both bundles by Trunk's `copy-dir gui` link and `build-client.mjs`, so a host serving its own bundle — a native host on a bridge machine especially — draws a join code with no internet at all. Google Fonts is the one remaining external `<link>`, and it degrades to a fallback face rather than to no join code.
 
 Debug Surface identity, stable order, and wire names are authored in the Rust
 macro at `src/core/debug_surface.rs`. Run `npm run debug-surfaces` after changing
@@ -188,13 +190,51 @@ Windows prompts to allow it through the firewall on first run. Pass
 - `--client-dir` is version-pinned at startup against the manifest the host
   serves: a bundle built for other content refuses to start, before the port is
   taken. `/host/manifest.json` pins a running client's protocol per request.
-- Serves **delivery only**. The authoritative simulation is still `server.html`
-  or `phoenix-headless`, PeerJS signalling is unchanged, and there is no TLS or
-  auth — LAN or behind something else, never a public address.
+- With no `--world` it serves **delivery only**, exactly as PRD #855 shipped it:
+  the authoritative simulation is `server.html` or `phoenix-headless`, and crew
+  signalling goes through the rendezvous service exactly as in a browser.
+  Either way there is no TLS or auth — LAN or behind something else, never a
+  public address.
 
 The catalogue it publishes is the browser host's own: `src/delivery/payload.rs`
 holds the single field list that both `wasm_get_scenario_catalog` and the JSON
 encoder walk. See `pasm/spec/architecture/native-delivery.yaml`.
+
+## Native authoritative host (issue #1121)
+
+`--world` turns the same binary into an authoritative host with a native
+Bevy/wgpu viewscreen — see [Native Host](./native-host.md). Every delivery flag
+above keeps its exact meaning; the bundle serving, the catalogue restriction and
+the startup version pin are the same code in both modes, which is why #1121
+evolved this binary instead of adding a second one.
+
+```bash
+./target/release/phoenix-host --world assets/worlds/combat_test.toml \
+  --client-dir dist --solo
+```
+
+Browser crew clients cannot join a native host until the Phoenix transport
+(issue #1112) replaces PeerJS, so a host with none of `--solo`, `--pane` or a
+lobby surface waits in a lobby nothing can enter — and says so loudly at boot
+rather than refusing, because the mode becomes correct the day #1112 lands.
+Since issue #1328 a `--client-dir` host has a third route to a running mission:
+the AI-launch control on the viewscreen's own lobby surface. `--manifest` also
+narrows the **default hull** this process flies, not only the catalogue it
+publishes.
+
+```bash
+# Boot onto the scenario picker instead of naming a world, and choose on screen
+# (issue #1328). --world skips the scenario stage; --world --ship skips both.
+./target/release/phoenix-host --client-dir dist --lobby
+# On Windows, the wrapper: no argument is the delivery host above, `lobby` adds
+# --lobby, and anything after the mode is forwarded verbatim.
+run-native.bat lobby
+```
+
+The packaged Windows demo bundle is `phoenix-host.exe`, `dist/` and `assets/`
+side by side, so both of its README invocations run from that folder with the
+default `--content-dir .`. Passing `--content-dir assets` would look for
+`assets/assets/scenarios.toml` and refuse to start.
 
 ## Related
 

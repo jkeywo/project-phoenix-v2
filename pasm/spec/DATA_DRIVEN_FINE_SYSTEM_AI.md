@@ -611,7 +611,7 @@ claim about this scenario.
 Playwright smoke coverage deliberately stops at world load, spawn anchors, and
 first-wave spawn (`tests/smoke/combat-test-scenario.spec.js`). Proving
 *engagement* there would mean waiting on a weapon discharge through the
-BroadcastChannel PeerJS shim, which is precisely the time-sensitive class of
+BroadcastChannel transport shim, which is precisely the time-sensitive class of
 assertion that suite excludes to stay fast. Engagement is therefore proved on
 the deterministic fixed-timestep runner instead, and should not be re-added to
 the smoke suite.

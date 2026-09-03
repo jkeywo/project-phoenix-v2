@@ -255,6 +255,15 @@
 # opens no operations. `probe_strike.toml` is where those numbers move, and its
 # own baseline is where they are written down.
 #
+# RECORDED PRE-#1086, AND NO LONGER REPRODUCIBLE. Issue #1086 widened the
+# authoritative digest over the scenario's own state, so the two reasons above
+# that lean on the old fold — "the register is a field on WorldContentRuntime,
+# which nothing folds, exactly like the flag store and the deadline table beside
+# it" — are no longer true of this build: the register, the flag store and the
+# deadline table are all walked by `sim_digest::fold_scenario_records` /
+# `fold_scenario_flags`. The A/B was a same-build comparison and stands; the
+# recorded value does not.
+#
 # STILL 0x14d6dc5dcf05a3c1 AFTER #1036 as well, and for a reason the header can
 # name rather than a coincidence. The slice adds no entity, moves no position and
 # touches no condition, capacity or deadline number; everything it authors is Act
@@ -408,6 +417,16 @@
 # None of them fields a skyhook; the two that fly the destroyer never run an
 # operation on it, and the one this slice added never pulls a weapons hold.
 #
+# RECORDED PRE-#1086, AND NO LONGER REPRODUCIBLE. Issue #1086 widened the
+# authoritative digest over the scenario's own state — the flag stores, the
+# trigger latches, the scheduled queues, the named records (deadlines,
+# commitments, evidence, workforce) and the whole of CommsState — so every
+# number above, and this world's own, moved. The A/B REASONING is untouched:
+# each was a same-build comparison, and the two lines above that lean on the
+# old fold ("a [[deadline]] lives on WorldContentRuntime, which nothing folds"
+# and "the digest folds no comms state") were true of the build they were
+# measured on. Re-measure before treating any of these as a baseline.
+#
 # MOVED AGAIN IN #1042, to 0x1341ba04afa6feeb (1387594689496415979), with
 # 15608756571256264688 at tick 0. The mechanism is ONE authored block, and it is
 # the same class as #1038's extra threshold rather than #1039's extra hull:
@@ -492,6 +511,13 @@
 # 8563713307821982951, and probe_destroy 14665104268980394769. None of them
 # fields a moored civilian with nothing to do, and the shelter berth is authored
 # per instance on a depot only this world spawns.
+#
+# RECORDED PRE-#1086, AND NO LONGER REPRODUCIBLE — see the note under the
+# earlier anchor block. The scenario-state fold widened the digest over the flag
+# stores, the trigger latches, the scheduled queues, the named records and
+# CommsState, so these numbers moved; and the "authoritative-but-unfolded
+# bucket" the paragraph above puts this slice's script band in is exactly what
+# #1086 folded. The same-build A/B stands; the recorded values do not.
 #
 # What legitimately moves it: any edit to this file's entity list, positions,
 # routes, condition/capacity numbers or deadline times; any change to the hulls
@@ -585,6 +611,13 @@
 # depot or a skyhook in it — and they hold anyway, because a station collider
 # only folds into a digest when something is touching it. This world is the one
 # that parks traffic on top of one.
+#
+# RECORDED PRE-#1086, AND NO LONGER REPRODUCIBLE — see the note under the first
+# anchor block. Every number in this paragraph, and the tick-0 value above it,
+# was measured before the scenario-state fold widened the digest over the flag
+# stores, the trigger latches, the scheduled queues, the named records and
+# CommsState. The claim they support — that a collider radius moves only what
+# touches it — was an A/B on one build and still holds.
 #
 # NOT re-authored, and flagged instead: the berth anchors ARE the depot
 # positions, so `ladder_run` steers civilians into a structure rather than

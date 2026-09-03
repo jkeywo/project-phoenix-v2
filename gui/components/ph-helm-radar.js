@@ -5,6 +5,10 @@ import './ph-radar.js';
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import {
+  HELM_ACTION_CONTEXT,
+  HELM_VIEWSCREEN_ACTION_ID,
+} from '../stations/helm-actions.js';
 import { phColor } from './ph-console-styles.js';
 import {
   SCOPE_CHROME_CSS, scopeChromeMarkup, updateScopeChrome,
@@ -83,8 +87,11 @@ export class PhHelmRadar extends PhElement {
     this.setAttribute('role', 'group');
     this.setAttribute('aria-label', t('component.helm_radar.label'));
     this.shadowRoot.getElementById('on-screen-btn').addEventListener('click', () => {
-      if (this.sendAction) {
-        this.sendAction('set_radar_view', {});
+      const activate = typeof window !== 'undefined' && window.activateSemanticAction;
+      if (typeof activate === 'function') {
+        activate(HELM_VIEWSCREEN_ACTION_ID, {
+          context: HELM_ACTION_CONTEXT, source: 'control',
+        });
       }
     });
   }

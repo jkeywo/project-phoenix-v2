@@ -7,6 +7,11 @@ import { t } from '../strings.js';
 import { weaponReadinessView } from '../weapon-readiness.js';
 import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
 import { PhElement, phDefine } from './ph-element.js';
+import {
+  TACTICAL_PHASER_FIRE_ACTION_ID,
+  TACTICAL_PHASER_MODE_ACTION_ID,
+} from '../stations/tactical-actions.js';
+import { activateTacticalAction } from '../stations/tactical-action-control.js';
 
 export class PhPhasersControls extends PhElement {
   #roving = null;
@@ -47,10 +52,10 @@ export class PhPhasersControls extends PhElement {
     this.setAttribute('aria-label', t('component.phasers.title'));
     const toggle = this.shadowRoot.getElementById('mode-toggle');
     toggle.addEventListener('click', () => {
-      if (!this.sendAction) return;
       const mode = (this.state && this.state.mode) || 'Auto';
       // Flip between the two operator modes; Auto = banks fire themselves.
-      this.sendAction('set_phaser_mode', { mode: mode === 'Auto' ? 'Manual' : 'Auto' });
+      activateTacticalAction(this, TACTICAL_PHASER_MODE_ACTION_ID,
+        { mode: mode === 'Auto' ? 'Manual' : 'Auto' }, 'set_phaser_mode');
     });
     // Roving tabindex over the mode toggle + each bank's FIRE button (issue
     // #1170): one Tab stop for the whole toolbar, arrows between its controls.
@@ -126,8 +131,9 @@ export class PhPhasersControls extends PhElement {
         btn.className = 'btn';
         btn.innerHTML = '<span class="btn-bg"></span><span class="led"></span><span class="label">' + t('console.common.fire') + '</span>';
         btn.addEventListener('click', () => {
-          if (this.sendAction && !btn.disabled) {
-            this.sendAction('fire_phaser', { bank: bank.id });
+          if (!btn.disabled) {
+            activateTacticalAction(this, TACTICAL_PHASER_FIRE_ACTION_ID,
+              { bank: bank.id }, 'fire_phaser');
           }
         });
         row.appendChild(btn);

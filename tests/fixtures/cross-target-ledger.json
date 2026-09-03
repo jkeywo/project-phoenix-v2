@@ -6,88 +6,88 @@
   "checkpoints": [
     {
       "tick": 0,
-      "digest": "3d297864b3655239"
+      "digest": "04c84c03c37a4797"
     },
     {
       "tick": 12,
-      "digest": "76db18df89ad39a2"
+      "digest": "d851898e430c1df4"
     },
     {
       "tick": 24,
-      "digest": "0a6d428fa1d73ed5"
+      "digest": "3d3e21a1d7a77c53"
     },
     {
       "tick": 36,
-      "digest": "bee380e61678ed55"
+      "digest": "e47d035d79412263"
     },
     {
       "tick": 48,
-      "digest": "69699f56bb75a8ea"
+      "digest": "c7a50ea8a3dea56c"
     },
     {
       "tick": 60,
-      "digest": "e9effce8f9ed624a"
+      "digest": "580b174e858e28d0"
     },
     {
       "tick": 72,
-      "digest": "03d3b4fb2499d567"
+      "digest": "85c23d7c29de4789"
     },
     {
       "tick": 84,
-      "digest": "cbf3e96c684e649a"
+      "digest": "73dbc4ba7b139210"
     },
     {
       "tick": 96,
-      "digest": "13cc052ad223b646"
+      "digest": "b9d7c002ba78aac4"
     },
     {
       "tick": 108,
-      "digest": "139fdcfab2a4b931"
+      "digest": "c3b71e607c6204bf"
     },
     {
       "tick": 120,
-      "digest": "10a7ff4c78545a07"
+      "digest": "a6cbc32e3b0bd081"
     },
     {
       "tick": 132,
-      "digest": "a310d597c37ee5ab"
+      "digest": "baec9647fe99c841"
     },
     {
       "tick": 144,
-      "digest": "7ae1591c00c3a21b"
+      "digest": "d640d9b668f61049"
     },
     {
       "tick": 156,
-      "digest": "c5a38a117e07c26b"
+      "digest": "69a19a570562ebcd"
     },
     {
       "tick": 168,
-      "digest": "81da16d032f830d9"
+      "digest": "337fce9119dfb7eb"
     },
     {
       "tick": 180,
-      "digest": "7a6eaa8096c0f813"
+      "digest": "a623a105fdff0109"
     },
     {
       "tick": 192,
-      "digest": "1fdf60a81d84fe88"
+      "digest": "e94f213c6f241872"
     },
     {
       "tick": 204,
-      "digest": "41b51c25637491f1"
+      "digest": "d3d896eec7c29cf3"
     },
     {
       "tick": 216,
-      "digest": "29cfc203b4301e62"
+      "digest": "66802d2736615f34"
     },
     {
       "tick": 228,
-      "digest": "9edf5cd114dab41c"
+      "digest": "0dacdc04c130c982"
     },
     {
       "tick": 240,
-      "digest": "0731e22ba23b23ba"
+      "digest": "79fb847a02282e24"
     }
   ],
-  "final_digest": "0731e22ba23b23ba"
+  "final_digest": "79fb847a02282e24"
 }

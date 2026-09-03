@@ -26,7 +26,7 @@
 
 /**
  * @param {'connecting'|'ready'|'disconnected'|'error'} status
- *        the connection-manager status, verbatim.
+ *        the transport status, verbatim.
  * @param {boolean} hasFirstData
  *        whether any authoritative state has landed since the link came up.
  * @returns {{ mode: 'connecting'|'live'|'dead',

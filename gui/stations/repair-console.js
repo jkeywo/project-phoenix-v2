@@ -60,7 +60,13 @@ export function makeRepairRender(variant) {
 
     const teamsEl = doc.getElementById(ids.repairTeams);
     if (teamsEl) {
-      teamsEl.state = { teams: s.teams || [], auto: !!s.repair_auto, targets: s.dispatch_targets || [], damaged: s.damaged_systems || [] };
+      teamsEl.state = {
+        teams: s.teams || [],
+        auto: !!s.repair_auto,
+        targets: s.dispatch_targets || [],
+        damaged: s.damaged_systems || [],
+        externally_committed_teams: s.external_dispatch?.target != null ? 1 : 0,
+      };
     }
 
     if (ids.stationDamage) {

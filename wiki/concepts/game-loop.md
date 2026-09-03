@@ -1,9 +1,9 @@
 ---
 title: Game Loop
 type: concept
-tags: [loop, ticks, simulation, rates, determinism]
-sources: [src/server_app/registration.rs, src/sim_tick.rs, src/ai/cadence.rs, src/command_admission/log.rs, src/ship/physics.rs, src/server/bridge.rs, AGENTS.md]
-updated: 2026-08-27
+tags: [loop, ticks, simulation, rates, determinism, lockstep, fleet]
+sources: [src/server_app/registration.rs, src/sim_tick.rs, src/ai/cadence.rs, src/command_admission/log.rs, src/gm_action.rs, src/lockstep/mod.rs, src/lockstep/session.rs, src/ship/physics.rs, src/server/bridge.rs, gui/host-actions.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/server-settings.js, AGENTS.md]
+updated: 2026-09-01
 ---
 
 # Game Loop
@@ -30,27 +30,56 @@ TOML-authored `[global] sim_tick_hz` (serde default 60 Hz). `SimTick`
 1. **Lobby handlers** (`LobbySystemSet`) consume inbound messages, mutate
    `SessionManager`, drive the countdown on tick time.
 2. **Command admission** — clears and refills every ship's `AdmittedCommands`
-   exactly once per tick, before `SimSet::Input`. The same pass records the
-   application tick
-   (`src/command_admission/log.rs`): an accepted command is stamped for the
-   tick it applies on (`SimTick` + `CommandDelay`), queued for that tick in
-   `PendingCommands`, and recorded in the run's `CommandLog` in one step, so
-   the record and the apply order cannot drift. `CommandDelay` is `0` on a
-   local host, so the queue drains inside the same pass that filled it. The log
-   records what crossed the *network boundary*
-   only — AI decisions emitted in-process by `emit_ai_command` are absent,
-   because a replay re-derives them from the seed. Both halves of the seam
-   are registered by one call (`register_admission_seam`), and the log is
-   cleared at the run boundary in `OnEnter(GamePhase::InProgress)` so a
-   second round starts fresh.
+   exactly once per tick, before `SimSet::Input`. The same pass stamps the
+   application tick (`src/command_admission/log.rs`): an accepted command is
+   stamped for the tick it applies on (`SimTick` + `CommandDelay`) and queued
+   for that tick in `PendingCommands`, ordered by `CommandOrder` — `(origin
+   fleet slot, that slot's own sequence)`. When the tick comes round the queue
+   drains into the routed ship and writes the run's `CommandLog` in one step,
+   so the record and the apply order cannot drift. The log records what crossed
+   the *network boundary* only — AI decisions emitted in-process by
+   `emit_ai_command` are absent, because a replay re-derives them from the seed.
+   Both halves of the seam are registered by one call
+   (`register_admission_seam`), and the log is cleared at the run boundary in
+   `OnEnter(GamePhase::InProgress)` so a second round starts fresh.
+
+   `CommandDelay` is `0` for a lone host, so the queue drains inside the same
+   pass that filled it and a command applies the tick it was admitted on. A host
+   in a **fleet** (issue #1116) runs at the mission's authored `[global]
+   command_delay_ticks` instead: a crew's command applies that many ticks later,
+   on the same tick on every host, which is what gives each host time to receive
+   every peer's input for a tick before it simulates it. A host that has not
+   received it withholds the tick — `Time<Virtual>` paused, so the tick never
+   begins — rather than speculating. See `src/lockstep/`.
+
+   **When a ship host vanishes (issue #1119)** the fleet keeps running: its ship
+   is not removed and not replaced by a simplified sim — it keeps its complete
+   authoritative state, and only its control *source* flips to ordinary Backfill,
+   through the same `ship::rating::apply_rating` a single-host disconnect uses.
+   The *when* is a tick-stamped mesh event (`MeshFrame::HostLoss`) applied at one
+   agreed tick on every survivor: `host_loss::agreed_loss_tick`, the first tick
+   past the lost host's own last watermark, derived identically on every survivor
+   from reliable-delivered frames rather than from who noticed the close first —
+   so the flip lands on the same tick everywhere and the digest stays equal.
+   `FleetRoster::depart_slot` empties the lost slot's frozen crewing so
+   `resolve_human_seeking_hosts` re-seeks its Comms/Nav to AI the same tick.
+   Reordered, duplicate and delayed reports converge on one transition (the
+   `PendingHostLoss` max-merge plus a departed-slot guard in the barrier). See
+   `src/lockstep/host_loss.rs` and `tests/lockstep_backfill.rs`.
 3. **The `SimSet` chain** — Input → Physics → Damage → Modifiers → Publish →
    PublishAggregate → Broadcast, gated on `GamePhase::InProgress`.
 4. **Phase transitions** — Bevy's `StateTransition` schedule is inserted into
    the `FixedMainScheduleOrder` after `FixedUpdate` (`sim_tick.rs`), so a
    `NextState<GamePhase>` written by the lobby countdown or a game-over setter
    applies on the tick that wrote it, and `OnEnter` spawns land on a tick
-   boundary. It still runs once per frame as well, for the frame-driven writers
-   (JS bridge force-start, asset preloader, headless auto-start).
+   boundary. Since issue #1121's fix round every *production* phase writer —
+   the lobby countdown, the JS bridge's force-start, the asset preloader, and
+   headless' and the native host's auto-start — writes from `FixedUpdate` this
+   way. The frame-level `StateTransition` site (registered once per rendered
+   frame by `StatesPlugin` itself) still runs too, but only bare-`App`
+   fixtures and test drivers that write the phase from a frame schedule land
+   on it now (e.g. `tests/headless_runner.rs` setting `NextState<GamePhase>`
+   directly rather than through a fixed system).
 5. **AI cadence derivation** (`FixedLast`, `src/ai/cadence.rs`) — the AI
    decision tick is every `sim_tick_hz / ai_tick_hz`-th logical tick, and the
    snapshot tick every `ai_tick_hz / ai_snapshot_hz`-th of those; both ratios
@@ -90,19 +119,34 @@ inside the fixed loop, so any frame rate covers the same logical ticks per
 sim-second. The browser exposes the counter as `wasm_sim_tick()` for the
 smoke tests (`tests/smoke/sim-tick.spec.js`).
 
-## Simulation pause (settings cog)
+## Simulation pause
 
 `wasm_toggle_pause()` (`drain_host_controls` in `src/server/bridge.rs`)
 pauses `Time<Virtual>`, which starves the fixed accumulator — `FixedUpdate`
 stops running altogether while paused, not just the `SimSet` chain inside it.
 
-The host settings cog exposes pause on its **Gameplay** tab. It remains
-available in the demo build even though the Debug/Cheat tab is absent. The cog
-is the only host driver; there is no keyboard binding.
+The host settings cog exposes that raw local pause on its **Gameplay** tab. It
+remains available in the demo build even though the Debug/Cheat tab is absent;
+it is local, unbound, and separate from deterministic GM authority.
+
+GM Pause and Resume use typed attributed `SetSessionPaused { active }` actions,
+with KeyP/KeyR defaults and two keyboard-or-standard-gamepad slots per command.
+They are absolute state-setting commands ordered through the host mesh, and the
+GM surface changes its displayed pause state only from the authoritative
+projection. Applying a typed Pause in `PreUpdate` zeroes the current virtual
+frame delta and discards unbegun whole fixed overstep so no catch-up step leaks
+past its logical boundary; Resume removes only the GM hold and cannot release a
+lockstep, recovery, or model-readiness hold.
 
 The same Gameplay tab exposes the viewscreen join-QR toggle. Phones carry the
-matching control in their Gameplay settings. Both routes change the host page's
-shared QR overlay state.
+matching control in their Gameplay settings. The host's `host.qr-code` semantic
+action has two host-local remappable slots (KeyQ plus an empty slot by default),
+and its visible button, native button keyboard activation and remapped key all
+call the existing page toggle through one adapter. Its shared lifecycle
+completes locally as Pressed → Pending → Applied; no tick, Rust message or
+simulation state is involved. Persistent QR visibility and the host button's
+`aria-pressed` still read the page's shared QR state because lobby and phone
+routes can also change it.
 
 Lobby countdown/readiness, command admission, and the `SimSet` chain all run in
 `FixedUpdate`. Pausing therefore freezes the lobby and stops admitting commands

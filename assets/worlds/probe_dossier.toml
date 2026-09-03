@@ -58,6 +58,15 @@
 # If a later change makes the digest move without moving either, something
 # started folding a projection, and that is the question to ask before
 # re-blessing this line.
+#
+# RECORDED PRE-#1086, AND NO LONGER REPRODUCIBLE. The premise above ("folded by
+# nothing") was true of the projection but never quite the whole story: the
+# promise `give_word` records at t=2 is a `WorldContentRuntime::commitments`
+# entry, and issue #1086's `sim_digest::fold_scenario_records` now walks that
+# ledger — so the SOURCE the dossier derives from is folded even though the
+# projection itself still is not. The number above predates that fold and does
+# not reproduce on a clean tree. Re-measure before treating it as a baseline
+# again.
 
 [global]
 seed = 1030

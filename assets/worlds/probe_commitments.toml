@@ -55,6 +55,15 @@
 # folded" decision showing its work. If a later change makes these two numbers
 # diverge, something started folding scenario state, and that is the question to
 # ask before re-blessing either line.
+#
+# THE PREDICTION FIRED, on this branch. Issue #1086's
+# `sim_digest::fold_scenario_records` walks `WorldContentRuntime::deadlines` and
+# `::commitments` as separate named records, each folding its own authored
+# content — a deadline table and a commitments ledger with different contents
+# no longer produce the same residue. probe_deadlines.toml and this file are
+# RECORDED PRE-#1086, AND NO LONGER REPRODUCIBLE, and no longer expected to
+# agree: something started folding scenario state, and this is it. Re-measure
+# each world independently before treating either number as a baseline again.
 
 [global]
 seed = 1029

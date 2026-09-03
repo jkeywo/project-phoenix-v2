@@ -108,7 +108,12 @@
       }
     }
 
-    initConsole({ name: 'comms', render: renderStation });
+    initConsole({
+      name: 'comms',
+      render: renderStation,
+      actionFamilies: ['comms', 'navigation'],
+      navigationActions: { supportsChart: false, supportsCivilianOrders: false },
+    });
 
     document.getElementById('nav-toggle').addEventListener('click', function() { toggleOverlay('nav-overlay', 'nav-toggle'); });
     document.getElementById('nav-back').addEventListener('click', closeAllOverlays);

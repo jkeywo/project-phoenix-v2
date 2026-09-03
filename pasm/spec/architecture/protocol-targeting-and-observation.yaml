@@ -5,6 +5,8 @@ entities:
       confidence: confirmed
       title: Host Local Console Bridge
       summary: Routes host-page HTML console actions through the shared gui/action-map.js dispatch table into full ClientMessage envelopes and injects them via wasm_receive_message under the dedicated local-console identity, allowing only the host's local ship to be controlled without a PeerJS session claim.
+      rationale:
+        - "[ai] #1112 retired PeerJS. \"A PeerJS session claim\" above is the human's original wording and stands as written; it now denotes a network session claim generally — any rendezvous/WebRTC session token, not literally a PeerJS one — since PeerJS is no longer the (or any) transport. The distinction this bridge draws, host-local UI versus a remote player's session claim, is unchanged; only what backs a remote claim changed."
     architecture:
       kind: local-command-bridge
       authority: authoritative
@@ -75,17 +77,34 @@ entities:
       status: implemented
       confidence: confirmed
       title: Host Page Push Bridge
-      summary: Single named Host Channel seam that drains host HUD, lobby, AI chatter, audio config/cue events plus the per-frame shake and forcefield-level taps and forwards each as (name, payload) to the one server-page JavaScript callback, without making that page authoritative for simulation state.
+      summary: Single named Host Channel seam that drains host HUD, lobby, AI chatter, audio config/cue events, the rendererless GM peer's one-entity local authoritative projection, plus the per-frame shake and forcefield-level taps and forwards each as (name, payload) to the one server-page JavaScript callback, without making that page authoritative for simulation state. The GM projection is peer-local by construction and is excluded from ServerMessage, MeshFrame, SimOutbox, and the peer outbound callback; snapshot recovery remains the only state-transfer path.
     architecture:
       kind: host-presentation-bridge
       authority: derived
+      owns: [browser-gm-profile-marker-state]
       reads: [simulation-state-replica, lobby-session-replica]
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console_bridge.rs, src/server/bridge.rs, src/server/viewscreen_border.rs, src/server/audio.rs]
-      symbols: [flush_host_channels, set_host_channel_callback, HudStateChanged, LobbyStateChanged, AiChatterEvent, AudioConfigChanged, AudioCueEvent]
-      tests: [cargo test]
+      paths: [src/console_bridge.rs, src/server/bridge.rs, src/server/viewscreen_border.rs, src/server/audio.rs, src/gm_projection.rs, gui/gm-local-projection.js]
+      symbols: [flush_host_channels, set_host_channel_callback, HudStateChanged, LobbyStateChanged, AiChatterEvent, AudioConfigChanged, AudioCueEvent, GmEntityProjectionChanged]
+      tests: [cargo test, tests/client/gm-local-projection.test.js, tests/smoke/gm-page.spec.js]
+
+  - state: browser-gm-profile-marker-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Browser GM Profile Marker State
+      summary: Peer-local derived boot marker installed only for the explicit rendererless browser GM profile. It gates the local GM Host Channel projection and carries no simulation authority, world state, or peer-visible privilege.
+    architecture:
+      classification: derived
+      owner: host-page-push-bridge
+      writers: [host-page-push-bridge]
+    implementation:
+      status: declared
+      paths: [src/gm_projection.rs, src/server/bridge.rs, server.html]
+      symbols: [BrowserGameMaster, GmProjectionPlugin]
+      tests: [cargo test, tests/smoke/gm-page.spec.js]
 
   - component: entity-targetability-contract
     core:

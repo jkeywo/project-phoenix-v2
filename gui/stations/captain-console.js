@@ -62,25 +62,40 @@ import { setAutoState } from '../console-ui.js';
 export function makeCaptainRender(variant) {
   const ids = variant.ids || {};
 
+  function captainView(state) {
+    return variant.captainView ? variant.captainView(state) : state;
+  }
+
+  // This is deliberately a property of the returned renderer: console-core
+  // hands the same resolver to the semantic Captain adapter, so a key/gamepad
+  // cycle can never see a broader set of views than the visible selector.
+  // The courier's filter is the motivating case, but every variant goes
+  // through this one seam.
+  function availableCameraViews(state) {
+    const view = captainView(state);
+    let views = Array.isArray(view?.camera_views) ? view.camera_views : [];
+    if (variant.filterCameraViews) views = variant.filterCameraViews(views);
+    return Array.isArray(views) ? views : [];
+  }
+
   /**
    * @param {object} s   the (shape-normalised) console payload
    * @param {Document} [doc]  the document to render into; defaults to the
    *   ambient `document` in a browser. A vitest suite passes a jsdom document.
    */
-  return function renderStation(s, doc) {
+  function renderStation(s, doc) {
     doc = doc || (typeof document !== 'undefined' ? document : null);
     if (!doc || !s) return;
 
     // The captain view the panels read from — `s` itself for a flat-family
     // hull, a metadata-selected family slice for a keyed one.
-    const view = variant.captainView ? variant.captainView(s) : s;
+    const view = captainView(s);
 
     // ── Camera / viewscreen ─────────────────────────────────────────────
     if (ids.camera) {
       const el = doc.getElementById(ids.camera);
       if (el) {
-        let views = view.camera_views || [];
-        if (variant.filterCameraViews) views = variant.filterCameraViews(views);
+        const views = availableCameraViews(s);
         el.state = { views, current_view: view.view_direction || '', auto: !!view.viewscreen_auto };
       }
     }
@@ -115,7 +130,13 @@ export function makeCaptainRender(variant) {
 
     // ── Bespoke per-hull tail ────────────────────────────────────────────
     if (variant.tail) variant.tail(s, view, doc, t);
-  };
+  }
+
+  Object.defineProperty(renderStation, 'availableCameraViews', {
+    value: availableCameraViews,
+    enumerable: false,
+  });
+  return renderStation;
 }
 
 /**

@@ -4,9 +4,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import '../../gui/components/ph-comms-current-message.js';
 
 function setup(opts) {
-  const sendAction = opts && opts.sendAction;
-  if (sendAction) {
-    window.sendAction = sendAction;
+  const activateSemanticAction = opts && opts.activateSemanticAction;
+  if (activateSemanticAction) {
+    window.activateSemanticAction = activateSemanticAction;
   }
   document.body.innerHTML = '<ph-comms-current-message id="test-el"></ph-comms-current-message>';
   const el = document.getElementById('test-el');
@@ -21,12 +21,12 @@ function queryText(host, sel) {
 describe('PhCommsCurrentMessage', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
-    delete window.sendAction;
+    delete window.activateSemanticAction;
   });
 
   afterEach(() => {
     document.body.innerHTML = '';
-    delete window.sendAction;
+    delete window.activateSemanticAction;
   });
 
   it('is defined and registered as a custom element', () => {
@@ -74,8 +74,8 @@ describe('PhCommsCurrentMessage', () => {
   });
 
   it('shows a read live Critical hail as non-modal text, shape, and colour', () => {
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
     const thread = {
       id: 'm-critical', thread_id: 'lark', sender_name: 'Lark',
       body: 'Is the corridor safe?', priority: 'Critical', is_read: true,
@@ -90,8 +90,9 @@ describe('PhCommsCurrentMessage', () => {
     expect(el.shadowRoot.querySelector('[role="dialog"]')).toBeNull();
 
     el.shadowRoot.querySelector('.resp-btn').click();
-    expect(sendAction).toHaveBeenCalledWith('respond_to_message', {
-      message_id: 'm-critical', response_index: 0,
+    expect(activateSemanticAction).toHaveBeenCalledWith('comms.respond', {
+      source: 'control',
+      detail: { message_id: 'm-critical', response_index: 0, confirmed: false },
     });
   });
 
@@ -130,9 +131,9 @@ describe('PhCommsCurrentMessage', () => {
     expect(container.textContent).toContain('(empty)');
   });
 
-  it('clicking a response button calls sendAction with respond', () => {
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
+  it('clicking a response button activates the shared response identity', () => {
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
     el.state = {
       thread: {
         id: 'm1',
@@ -144,8 +145,10 @@ describe('PhCommsCurrentMessage', () => {
     const btns = el.shadowRoot.querySelectorAll('.resp-btn');
     expect(btns.length).toBe(2);
     btns[0].click();
-    expect(sendAction).toHaveBeenCalledTimes(1);
-    expect(sendAction).toHaveBeenCalledWith('respond_to_message', { message_id: 'm1', response_index: 0 });
+    expect(activateSemanticAction).toHaveBeenCalledTimes(1);
+    expect(activateSemanticAction).toHaveBeenCalledWith('comms.respond', {
+      source: 'control', detail: { message_id: 'm1', response_index: 0, confirmed: false },
+    });
   });
 
   it('highlights selected response with checkmark and disables it', () => {
@@ -204,8 +207,8 @@ describe('PhCommsCurrentMessage', () => {
   // ── AC1: important responses require a two-step confirm ─────────────────────
 
   it('important response arms on first click and submits on second', () => {
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
     el.state = {
       thread: {
         id: 'm1',
@@ -217,18 +220,20 @@ describe('PhCommsCurrentMessage', () => {
     const btn = el.shadowRoot.querySelector('.resp-btn');
     // First click: arms, does NOT submit, shows the confirm prompt.
     btn.click();
-    expect(sendAction).not.toHaveBeenCalled();
+    expect(activateSemanticAction).not.toHaveBeenCalled();
     expect(btn.textContent.trim()).toBe(t('component.comms_message.confirm_important'));
     expect(btn.classList.contains('important')).toBe(true);
     // Second click: submits.
     btn.click();
-    expect(sendAction).toHaveBeenCalledTimes(1);
-    expect(sendAction).toHaveBeenCalledWith('respond_to_message', { message_id: 'm1', response_index: 0 });
+    expect(activateSemanticAction).toHaveBeenCalledTimes(1);
+    expect(activateSemanticAction).toHaveBeenCalledWith('comms.respond', {
+      source: 'control', detail: { message_id: 'm1', response_index: 0, confirmed: true },
+    });
   });
 
   it('non-important response still submits immediately (single click)', () => {
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
     el.state = {
       thread: {
         id: 'm1',
@@ -238,15 +243,17 @@ describe('PhCommsCurrentMessage', () => {
       },
     };
     el.shadowRoot.querySelector('.resp-btn').click();
-    expect(sendAction).toHaveBeenCalledTimes(1);
-    expect(sendAction).toHaveBeenCalledWith('respond_to_message', { message_id: 'm1', response_index: 0 });
+    expect(activateSemanticAction).toHaveBeenCalledTimes(1);
+    expect(activateSemanticAction).toHaveBeenCalledWith('comms.respond', {
+      source: 'control', detail: { message_id: 'm1', response_index: 0, confirmed: false },
+    });
   });
 
   // ── AC2: unavailable responses are greyed + disabled ────────────────────────
 
   it('unavailable response is greyed, disabled, and does not submit', () => {
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
     el.state = {
       thread: {
         id: 'm1',
@@ -259,7 +266,7 @@ describe('PhCommsCurrentMessage', () => {
     expect(btn.disabled).toBe(true);
     expect(btn.classList.contains('unavailable')).toBe(true);
     btn.click();
-    expect(sendAction).not.toHaveBeenCalled();
+    expect(activateSemanticAction).not.toHaveBeenCalled();
   });
 
   // ── AC3: red flash on host rejection ────────────────────────────────────────

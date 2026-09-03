@@ -1,0 +1,63 @@
+# Probe world for issue #1116 — a two-ship fleet flying an ASTEROID field.
+#
+# The sibling of `probe_fleet_duel.toml`, and it exists for one reason
+# `probe_fleet_duel` cannot cover: that world has no asteroids, and asteroid
+# streaming is the last `LocalShip`-gated write that folds into the
+# authoritative digest. `update_asteroid_window` used to centre its ring-buffer
+# window on the single `LocalShip`, which is a DIFFERENT ship on each host of a
+# two-host mission — so two hosts streamed different rocks and diverged on any
+# asteroid world (the demo, `combat_test.toml`, included). `tests/
+# local_ship_neutrality.rs` runs this world twice, moving the marker between
+# runs, and folds every tick: the fix (a fleet-wide streaming centre) agrees,
+# the pre-fix `LocalShip` centre does not.
+#
+# The two fleet ships sit 300 units apart on the X axis — 12 lattice cells at
+# the field's 25-unit resolution, wider than the hysteresis band, so a window
+# centred on one ship loads a visibly different cell set than one centred on the
+# other. The field is a dense DISC (fill_gameplay = 0 admits every covered cell)
+# large enough that every cell either window reaches carries a rock, so the
+# differing edge cells are never empty and the divergence is real rather than
+# incidental. There is deliberately no hostile: the fold already changes every
+# tick because `SimTick` is in it, and a combat probe's seed-sensitive draws
+# would only add noise to a test about which rocks are loaded, not who wins.
+
+[global]
+seed = 1116
+# Authored for completeness — a fleet mission on this world would run at this
+# delay — but `local_ship_neutrality` never joins a lockstep session, so it is
+# inert there.
+command_delay_ticks = 2
+
+# Slot 1's ship takes `[player_spawn]`.
+[player_spawn]
+position = [-150.0, 0.0, 0.0]
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "fleet-ship-1"
+transform = { position = [-150.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# Slot 2's ship, 300 units (12 cells) away on the +X axis.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "fleet-ship-2"
+transform = { position = [150.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# The belt both ships fly. A disc around the origin (shape omitted → the legacy
+# distance test, `inner_radius = 0`), out to 1000 units so every cell within
+# reach of either ship's window is eligible, with `fill_gameplay = 0.0` so every
+# eligible cell spawns a rock. `spawn_cells`/`despawn_cells` are pulled in from
+# the default 10/12 to 6/7: at the 25-unit resolution that is a 6-cell spawn
+# radius, so the two ships 12 cells apart have windows that touch at just one
+# column — a per-ship centre loads an almost entirely different belt than its
+# peer, while the fleet centroid loads the identical one on both. It also keeps
+# the streamed rock count modest (~170) so three 1200-tick runs stay quick.
+# Everything else — asteroid types, resolution, jitter — comes from the shared
+# field template.
+[[entity]]
+template_path = "assets/entities/asteroid_field_main.toml"
+id = "fleet-belt"
+transform = { position = [0.0, 0.0, 0.0] }
+overrides = { asteroid_field = { inner_radius = 0.0, outer_radius = 1000.0, weight = 1.0, grid = { fill_gameplay = 0.0, spawn_cells = 6, despawn_cells = 7 } } }

@@ -7,8 +7,9 @@
 //   keyed by globally-unique asteroid UUID)
 // - check_destroyed_asteroids: despawns asteroids with HP ≤ 0, clears slot
 // - update_asteroid_window: composes every `AsteroidFieldSection` entity into
-//   one weighted density field and drives spawn/despawn for it based on
-//   player movement
+//   one weighted density field and drives spawn/despawn for it based on the
+//   FLEET's streaming centre (the mean over every `FleetSlotOf` ship), not the
+//   single `LocalShip` — see `fleet_stream_centre` and issue #1116
 //
 // History: pre-#475 the window was a global resource; #475 made it a
 // per-field component so multiple fields could stream concurrently — which
@@ -174,10 +175,21 @@ pub fn check_destroyed_asteroids(
     }
 }
 
-/// Update the composed asteroid field's ring-buffer window when the player
-/// moves. Runs every frame; a no-op if the player has not crossed a lattice
-/// cell boundary since the previous tick and the authored field set is
+/// Update the composed asteroid field's ring-buffer window when the fleet
+/// moves. Runs every fixed step; a no-op if the streaming centre has not crossed
+/// a lattice cell boundary since the previous tick and the authored field set is
 /// unchanged.
+///
+/// The window centre is [`fleet_stream_centre`] — the geometric mean over every
+/// `With<FleetSlotOf>` ship — NOT the single `LocalShip`. `LocalShip` marks a
+/// different ship on each host of a two-host mission, and the loaded cell set
+/// folds into `sim_digest` (a rock's position is what a collision resolves
+/// against), so a `LocalShip`-centred window streamed a different belt on each
+/// host and the two diverged from tick zero on any asteroid world (issue #1116,
+/// `tests/local_ship_neutrality.rs` guards it). A fleet-wide centre is the
+/// identical point on every host because every host simulates every fleet ship;
+/// for a fleet of one (every solo mission) it is that ship's exact position, so
+/// solo streaming is unchanged.
 ///
 /// Every `AsteroidFieldSection` entity contributes to ONE evaluator: the
 /// contributions are gathered each tick (in spawn order, which follows the
@@ -186,7 +198,7 @@ pub fn check_destroyed_asteroids(
 /// rebuild against the new composition.
 pub fn update_asteroid_window(
     mut commands: Commands,
-    physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,
+    fleet_q: Query<(&ShipPhysics, &crate::lockstep::FleetSlotOf)>,
     fields: Query<(Entity, &AsteroidFieldSection)>,
     mut window: ResMut<AsteroidWindow>,
     mut world: ResMut<WorldResource>,
@@ -225,8 +237,8 @@ pub fn update_asteroid_window(
         return;
     };
 
-    let physics = physics_q.single().ok().copied().unwrap_or_default();
-    let (gx, gz) = compute_player_grid_cell(physics.x, physics.z, lattice.resolution);
+    let (cx, cz) = fleet_stream_centre(&fleet_q).unwrap_or_default();
+    let (gx, gz) = compute_player_grid_cell(cx, cz, lattice.resolution);
 
     let needs_init =
         window.needs_init || window.composition_key != key || window.player_grid.is_none();
@@ -326,11 +338,49 @@ pub fn update_asteroid_window(
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
+/// The fleet's asteroid-streaming centre: the geometric mean of every ship any
+/// host in the fleet flies (`With<FleetSlotOf>`), or `None` when no such ship
+/// exists (a bare fixture, or before the fleet has spawned).
+///
+/// This is what drives the streaming window off FLEET-WIDE geometry rather than
+/// off the single `LocalShip`, so every host loads the identical cell set no
+/// matter which ship is local (issue #1116). The `AsteroidWindow` is one
+/// ring-buffer arena centred on one lattice cell — its slot addressing is
+/// `rem_euclid(2*despawn_cells+1)`, which aliases two cells more than the arena
+/// side apart — so it cannot hold a literal per-cell union of windows centred on
+/// two widely separated ships. The mean is the deterministic fleet point it CAN
+/// centre on: for a fleet whose ships share the streamed window (the mission
+/// case — a fleet closes on one objective, not scatters) it covers every ship,
+/// and it is identical on every host because every host simulates every fleet
+/// ship from the same ticks.
+///
+/// Summed in slot order so the floating-point mean is bit-identical across
+/// hosts. For a fleet of ONE — every solo mission, whose single ship still
+/// carries `FleetSlotOf` — the mean is that ship's exact position, so the cell
+/// the window centres on is byte-for-byte the one the old `LocalShip` query
+/// produced and solo streaming does not move.
+fn fleet_stream_centre(
+    fleet: &Query<(&ShipPhysics, &crate::lockstep::FleetSlotOf)>,
+) -> Option<(f32, f32)> {
+    let mut ships: Vec<_> = fleet.iter().map(|(p, slot)| (slot.0, p.x, p.z)).collect();
+    if ships.is_empty() {
+        return None;
+    }
+    ships.sort_by_key(|entry| entry.0);
+    let (mut sum_x, mut sum_z) = (0.0f32, 0.0f32);
+    for (_, x, z) in &ships {
+        sum_x += *x;
+        sum_z += *z;
+    }
+    let n = ships.len() as f32;
+    Some((sum_x / n, sum_z / n))
+}
+
 /// Order-sensitive fingerprint of the live contribution set, used to detect
 /// mid-run composition changes (world layers loading or unloading a field).
 /// Debug formatting is stable within a run, which is all the key needs —
 /// it never has to survive a process restart.
-fn composition_key(fields: &[FieldContribution]) -> u64 {
+pub(crate) fn composition_key(fields: &[FieldContribution]) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in format!("{fields:?}").bytes() {
         hash ^= byte as u64;
@@ -627,12 +677,11 @@ pub type RockBundle = (
     Visibility,
     bevy_rapier3d::prelude::Collider,
     // Pin the physics shape to the authored radius regardless of the rock's
-    // `Transform.scale`. Field rocks carry LOD ladders too, so under `render`
-    // `update_mesh_lod` writes the model's `[base].scale` onto this transform at
-    // the far tiers — the same leak that inflated the starbase collider (see
-    // `entity_spawner::spawn_entity`). `Absolute(ONE)` keeps the rock's collision
-    // radius equal to `config.collider.radius` in the browser as it already is
-    // headless, so it moves no digest and stops a distant rock over-colliding.
+    // canonical `Transform.scale`, which carries its authored `[mesh].scale` in
+    // every profile. Camera-selected LOD compensation lives below it on a
+    // presentation-only child. `Absolute(ONE)` therefore keeps the collision
+    // radius equal to `config.collider.radius` in rendered and headless runs,
+    // independent of both authored model scale and visual distance.
     bevy_rapier3d::prelude::ColliderScale,
     bevy_rapier3d::prelude::RigidBody,
 );
@@ -1024,9 +1073,13 @@ mod tests {
         app.init_resource::<WorldResource>();
         app.init_resource::<crate::server_app::LastBroadcastEntityPositions>();
         app.init_resource::<crate::server_app::LastBroadcastEntityHealth>();
-        // Spawn a LocalShip entity with ShipPhysics so update_asteroid_window can query it.
+        // Spawn a fleet ship with ShipPhysics so update_asteroid_window can
+        // query it. `FleetSlotOf` is what the window now centres on (issue
+        // #1116); `LocalShip` rides along because `set_ship_pos` moves the ship
+        // through that marker and, in production, the two sit on the same hull.
         app.world_mut().spawn((
             crate::server_app::LocalShip,
+            crate::lockstep::FleetSlotOf(crate::command_admission::HostSlot::SOLO),
             bevy::prelude::Transform::default(),
             crate::ship::state::ShipPhysics::default(),
         ));
@@ -1143,6 +1196,56 @@ mod tests {
         assert_eq!(window.spawn_cells, 2);
         assert_eq!(window.despawn_cells, 3);
         assert!(!window.needs_init, "first tick must run the full rebuild");
+    }
+
+    #[test]
+    fn canonical_window_is_restore_ready_before_a_paused_candidate_spends_a_tick() {
+        use crate::entities::spawner::EntityUuid;
+
+        let mut canonical = test_app();
+        canonical
+            .world_mut()
+            .spawn((AsteroidFieldSection(field(15.0)), Transform::default()));
+        canonical
+            .world_mut()
+            .spawn(EntityUuid("standing-entity".into()));
+        canonical.update();
+        let snapshot = crate::snapshot::capture(canonical.world());
+        assert!(
+            !snapshot
+                .asteroid_window
+                .as_ref()
+                .expect("the canonical host captures its window")
+                .needs_init
+        );
+
+        // This is the reconnect candidate immediately after its GameStart
+        // topology arrived under the technical Pause: fields and roster rows
+        // exist, but FixedUpdate has not run and must not run before restore.
+        let mut candidate = test_app();
+        candidate
+            .world_mut()
+            .spawn((AsteroidFieldSection(field(15.0)), Transform::default()));
+        candidate
+            .world_mut()
+            .spawn(EntityUuid("standing-entity".into()));
+        assert!(candidate.world().resource::<AsteroidWindow>().needs_init);
+        assert!(
+            crate::snapshot::ready_to_restore(candidate.world(), &snapshot),
+            "matching live fields make the canonical window safe to install without a private tick"
+        );
+
+        let mut wrong = test_app();
+        wrong
+            .world_mut()
+            .spawn((AsteroidFieldSection(field(30.0)), Transform::default()));
+        wrong
+            .world_mut()
+            .spawn(EntityUuid("standing-entity".into()));
+        assert!(
+            !crate::snapshot::ready_to_restore(wrong.world(), &snapshot),
+            "a different field composition must still fail closed"
+        );
     }
 
     #[test]

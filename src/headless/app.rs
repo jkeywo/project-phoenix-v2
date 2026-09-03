@@ -7,21 +7,26 @@
 //! [`boot::build`](crate::boot::build), so the headless inventory can no longer
 //! drift from the two browser inventories (a drift boot's three-profile parity
 //! test guards). What stays here is the genuinely headless-only work boot has no
-//! reason to know about: the diagnostic template preload and its model-marker
-//! gate, the seed-precedence resolution, the player-hull materiel, the
-//! simulation/lobby plugins, and the frame clock, auto-start and telemetry the
-//! harness loop reads.
+//! reason to know about: the seed-precedence resolution, the player-hull
+//! materiel, the simulation/lobby plugins, and the frame clock, auto-start and
+//! telemetry the harness loop reads.
+//!
+//! The template preload and its model-marker gate moved out to
+//! [`crate::entities::template_preload`] in issue #1121, so the native windowed
+//! host runs the identical populate — it is behind no feature now, where it used
+//! to be reachable only with `--features headless`. Two behaviours were
+//! deliberately strengthened on the way (a canonicalised cache key; a
+//! zero-template walk refused rather than returned as an empty success); that
+//! module's docs say what each one is and why it is safe for this caller.
 
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 
 use crate::asteroids::lifecycle::AsteroidLifecyclePlugin;
-use crate::boot::{BootError, BootPlan, BootProfile, WorldIngest};
+use crate::boot::{BootError, BootPlan, BootProfile, NativeRenderSurface, WorldIngest};
 use crate::core::messages::{GamePhase, ServerMessage};
-use crate::entities::ai_declaration_manifest;
-use crate::entities::config::EntityConfig;
 use crate::entities::loader::TemplateLoader;
-use crate::entities::marker_validate::MarkerFinding;
+use crate::entities::template_preload::preload_entity_templates;
 use crate::lobby::{LobbyOutbox, LobbyPlugin, SelectedShipResource, Target};
 use crate::logging::LoggingPlugin;
 use crate::modifiers::coordination::ModifierCoordinationPlugin;
@@ -73,230 +78,16 @@ fn map_boot_error(e: BootError) -> BuildError {
         }
         BootError::WorldLoad(other) => BuildError(format!("world load: {other}")),
         BootError::WorldInvalid(msg) => BuildError(format!("world activation blocked: {msg}")),
+        // Unreachable from here: the native template-cache check is a
+        // `BootProfile::NativeHost` property (issue #1121) and headless
+        // populates that cache itself, before boot, for its own model-marker
+        // gate. Mapped rather than `unreachable!`d so a future profile change
+        // reports instead of panicking.
+        BootError::NativeTemplatesMissing(missing) => BuildError(format!(
+            "native entity templates not loaded: {}",
+            missing.join(", ")
+        )),
     }
-}
-
-/// Every spawnable template under `dir`, recursively, EXCEPT the fragment tree.
-///
-/// Recursive since issue #954, which moved the three-weapon RNG-coverage escort
-/// to `assets/entities/test/rng_coverage_lancer.toml` so that no *shipped fleet*
-/// hull carries all three weapon kinds. That relocation is invisible to the
-/// fleet walks, which read the top level only — but it must NOT be invisible
-/// here.
-///
-/// **The reason has changed since #973, and the old one is no longer true.** It
-/// used to be that the spawn path was cache-only, so a world naming a template
-/// this walk skipped logged "entity template not found in cache" and silently
-/// spawned nothing. `entity_loader::resolve_entity_via` now falls back to
-/// `WasmTemplateLoader`, which on native reads the filesystem, so that
-/// particular hole is closed at the spawn rather than here. What the recursive
-/// walk still buys is the model-marker contract gate below, which is scoped to
-/// exactly the templates this walk discovers and validates them *before*
-/// `App::new()` — a template it skips is a template whose markers nobody
-/// checks. Keeping the cache complete is a second, smaller benefit: it is what
-/// stops the spawn depending on that filesystem fallback in the first place.
-///
-/// `fragments/` is the one subdirectory excluded, and it is excluded for a
-/// reason that is a property of its contents rather than of its name: nothing in
-/// it is spawnable. They are partial documents that hulls compose FROM (see
-/// `include_resolve::tests::the_fragments_live_outside_the_shipped_template_directory`),
-/// so caching them as templates would offer the world loader entities that are
-/// not entities.
-fn spawnable_templates_under(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    let mut paths: Vec<std::path::PathBuf> = entries.flatten().map(|e| e.path()).collect();
-    // Sorted so the cache is populated in the same order on every filesystem —
-    // the load order is observable through `content_ledger::record`.
-    paths.sort();
-    for path in paths {
-        if path.is_dir() {
-            if path.file_name().is_some_and(|n| n == "fragments") {
-                continue;
-            }
-            spawnable_templates_under(&path, out);
-        } else if path.extension().and_then(|e| e.to_str()) == Some("toml") {
-            out.push(path);
-        }
-    }
-}
-
-/// Load every spawnable template under `assets/entities/` into the native
-/// template cache.
-///
-/// The browser fills this cache from a JS-driven preload before the app starts.
-/// Several simulation paths (`asteroids::lifecycle`, the spawn helpers in
-/// `server_app`, `world::server::setup_world`) read the cache with no
-/// filesystem fallback of their own, so headless has to do the equivalent up
-/// front or those paths quietly find nothing.
-///
-/// Templates that fail to parse are reported and skipped rather than aborting
-/// the run — `assets/entities/` holds a lot of files and one bad cosmetic
-/// asteroid should not stop a combat test.
-///
-/// Every template that *does* parse is also checked against the model-marker
-/// contract (issue #758): each authored `marker` / `markers` reference must
-/// resolve in the rig sidecar the template's `[mesh]` selects. The findings are
-/// returned rather than logged here so the caller can gate on them before
-/// anything spawns — an unresolved marker would otherwise attach a beam,
-/// exhaust plume, or camera to the ship's centre with no diagnostic at all.
-/// Note the deliberate asymmetry with the parse-skip policy above: a marker
-/// error in ANY discovered template aborts the run, because unlike a parse
-/// failure it is silent and would corrupt the run's numbers rather than stop
-/// it. See the gate in [`build_headless_app`].
-///
-/// The third return is the AI-declaration manifest (issue #885a): one rendered
-/// line per (template, AI-capable fine system), saying whether the template
-/// declared it or which synthesiser is filling it. Returned rather than logged
-/// here for the same reason as the marker findings — this runs before
-/// `LogPlugin` installs a subscriber, so anything emitted here goes nowhere.
-/// Diagnostic only; nothing about it gates the load, because the thing that
-/// gates is strict mode and that lives in `EntityConfig::from_toml`.
-fn preload_entity_templates(
-    dir: &str,
-) -> Result<(usize, Vec<MarkerFinding>, AiDeclarationReport), BuildError> {
-    // Trailing slash trimmed for the same reason the old `format!`-built key did
-    // it: the cache key is this path with separators normalised, and
-    // `"assets/entities/"` would key everything under `assets/entities//…`,
-    // which matches nothing a world file authors.
-    let root = std::path::Path::new(dir.trim_end_matches('/'));
-    // A missing directory stays an error, as it was when this read the directory
-    // itself: a preload that silently caches nothing is the worst possible way
-    // to report a wrong `--ship` path.
-    std::fs::read_dir(root).map_err(|e| BuildError(format!("could not list {dir:?}: {e}")))?;
-    let mut entries: Vec<std::path::PathBuf> = Vec::new();
-    spawnable_templates_under(root, &mut entries);
-
-    let mut loaded = 0;
-    let mut findings: Vec<MarkerFinding> = Vec::new();
-    // Accumulated across the whole template set so the summary is a fleet total
-    // rather than a per-file trickle.
-    let mut report = AiDeclarationReport::default();
-    for path in entries {
-        // Key on the repo-relative path the world TOML uses, with forward
-        // slashes — on Windows `Path::display` would emit backslashes and every
-        // lookup would miss. Built from the WHOLE path rather than
-        // `dir` + file name, so a template in a subdirectory is keyed by the
-        // path a world actually names it with
-        // (`assets/entities/test/rng_coverage_lancer.toml`, not
-        // `assets/entities/rng_coverage_lancer.toml`).
-        let key = path.to_string_lossy().replace('\\', "/");
-        if std::fs::read_to_string(&path).is_err() {
-            warn!(target: "config", "template unreadable, skipping: {key}");
-            continue;
-        }
-        // Resolve the template's `includes` closure BEFORE parsing (issue
-        // #869): only the fully composed document is ever validated, and it is
-        // the composed text that marker validation and the AI-declaration
-        // manifest must read.
-        //
-        // Note the deliberate asymmetry with the parse-skip policy below. A
-        // *composition* failure — cycle, missing fragment, malformed
-        // `includes` — aborts the whole build, because a template that
-        // declares includes has said it is incomplete on its own: skipping it
-        // would silently drop content the author explicitly assembled. A plain
-        // TOML parse error keeps the historical skip-with-warning, so one bad
-        // cosmetic asteroid still cannot stop a combat test.
-        let resolved = match crate::entities::include_resolve::resolve_from_disk(&key) {
-            Ok(resolved) => resolved,
-            Err(e) => return Err(BuildError(format!("template composition failed: {e}"))),
-        };
-        let composed = resolved.is_composed();
-        let toml = resolved.toml.clone();
-        match resolved.parse() {
-            Ok(cfg) => {
-                findings.extend(validate_template_markers(&key, &toml, &cfg));
-                let stem = path.file_stem().unwrap_or_default().to_string_lossy();
-                let missing = ai_declaration_manifest::undeclared_keys(&cfg).len();
-                if missing > 0 {
-                    report.undeclared += missing;
-                    report.templates_with_gaps += 1;
-                    report
-                        .lines
-                        .extend(ai_declaration_manifest::manifest_lines(&stem, &cfg));
-                }
-                crate::entities::config_cache::insert_native_config(key, cfg);
-                loaded += 1;
-            }
-            Err(e) if composed => {
-                // A composed template that does not validate is a load error:
-                // the offending combination exists in no single authored file,
-                // so skipping it would hide the one thing composition can get
-                // wrong that authoring cannot.
-                return Err(BuildError(format!("composed template is invalid: {e}")));
-            }
-            Err(e) => warn!(target: "config", "template failed to parse, skipping: {key}: {e}"),
-        }
-    }
-    Ok((loaded, findings, report))
-}
-
-/// The fleet-wide AI-declaration manifest gathered while preloading templates
-/// (issue #885a), held until a `tracing` subscriber exists to receive it.
-#[derive(Default)]
-struct AiDeclarationReport {
-    /// AI-capable fine systems that declared neither a policy nor an explicit
-    /// idle state, across every template loaded.
-    undeclared: usize,
-    /// How many templates contributed at least one of those.
-    templates_with_gaps: usize,
-    /// One rendered line per (template, fine system) — the per-slot worklist.
-    lines: Vec<String>,
-}
-
-impl AiDeclarationReport {
-    /// Emit the manifest. `info` for the fleet total, `debug` for the per-slot
-    /// worklist: both sit under the default `warn` filter, so a normal run is
-    /// unchanged and `--log config=debug` is what asks for the breakdown.
-    fn emit(&self) {
-        if self.undeclared == 0 {
-            return;
-        }
-        info!(
-            target: "config",
-            "AI-declaration manifest: {} AI-capable fine system(s) across {} \
-             template(s) declare neither a policy nor an explicit idle state, so a \
-             Rust-side synthesiser supplies their automation (PRD #774 US7; issue \
-             #885b's worklist). Run with `--log config=debug` for the \
-             per-(template, system) breakdown.",
-            self.undeclared,
-            self.templates_with_gaps
-        );
-        for line in &self.lines {
-            debug!(target: "config", "{line}");
-        }
-    }
-}
-
-/// Model-marker contract check for one parsed template: resolve its rig
-/// sidecar off disk (identity rig when genuinely absent, mirroring
-/// `glb_visual::resolve_sidecar_rig` on native) and validate every authored
-/// marker reference against it, plus the sidecar's own duplicate declarations.
-fn validate_template_markers(key: &str, toml: &str, cfg: &EntityConfig) -> Vec<MarkerFinding> {
-    let mut findings = Vec::new();
-    let rig = cfg.mesh.as_ref().and_then(|mesh| {
-        let model = mesh.model.as_deref()?;
-        let path = crate::entities::model_rig::sidecar_path(model, mesh.variant.as_deref());
-        let sidecar = std::fs::read_to_string(&path).unwrap_or_default();
-        findings.extend(crate::entities::marker_validate::duplicate_marker_findings(
-            &path, &sidecar,
-        ));
-        match crate::entities::model_rig::ModelRig::from_toml(&sidecar) {
-            Ok(rig) => Some(rig),
-            Err(e) => {
-                warn!(target: "config", "rig sidecar {path} failed to parse: {e}");
-                None
-            }
-        }
-    });
-    findings.extend(crate::entities::marker_validate::validate_entity_markers(
-        key,
-        toml,
-        cfg,
-        rig.as_ref(),
-    ));
-    findings
 }
 
 /// Test-only overrides for how the simulation plugins are registered.
@@ -368,38 +159,18 @@ pub fn build_headless_app_with(
         .parent()
         .map(|p| p.to_string_lossy().replace('\\', "/"))
         .unwrap_or_else(|| "assets/entities".to_string());
-    let (loaded, marker_findings, ai_declarations) = preload_entity_templates(&template_dir)?;
+    let preload = preload_entity_templates(&template_dir).map_err(BuildError)?;
+    let loaded = preload.loaded();
 
     // Model-marker contract gate (issue #758). This validates EVERY template
     // discovered in `template_dir` — not just the ones this run will actually
     // spawn — and a single error aborts the whole build before boot composes an
-    // `App`.
-    //
-    // That is deliberately stricter than the parse-skip policy in the preload (a
-    // template that fails to *parse* is skipped so one bad cosmetic asteroid
-    // cannot stop a combat test). The asymmetry is the point: a parse failure is
-    // loud and self-limiting — the template simply isn't in the cache, so
-    // anything that needs it fails visibly — whereas an unresolved marker is
-    // silent by construction. It attaches the beam, exhaust, or camera to the
-    // ship's centre and produces a plausible-looking run whose numbers are
-    // wrong. Since the run's spawn set is not known until the world and the AI
-    // have had their say, "every discovered template" is the only scope that can
-    // be checked before anything spawns.
+    // `App`. See [`TemplatePreload::marker_gate`] for why it is stricter than
+    // the preload's own parse-skip policy.
     //
     // Errors abort now; warnings are reported below, once boot's `LogPlugin` has
     // installed a subscriber (before it, every `tracing` line goes nowhere).
-    if crate::entities::marker_validate::has_error(&marker_findings) {
-        let errors: Vec<String> = marker_findings
-            .iter()
-            .filter(|f| f.is_error())
-            .map(MarkerFinding::describe)
-            .collect();
-        return Err(BuildError(format!(
-            "model-marker contract violated; spawning blocked ({} error(s)): {}",
-            errors.len(),
-            errors.join("; ")
-        )));
-    }
+    preload.marker_gate().map_err(BuildError)?;
 
     // The duel side transform (issue #844), now the boot load's `raw_transform`
     // hook. It rewrites only the raw `toml::Value` the script loader reads —
@@ -459,6 +230,10 @@ pub fn build_headless_app_with(
         // same machine.
         single_threaded: args.deterministic,
         raw_transform,
+        // Headless has no renderer at all, so the native presentation axis is
+        // inert for it — `Contract` is the only value a non-render-stack
+        // profile can carry, and boot never consults it here.
+        native_surface: NativeRenderSurface::Contract,
     };
     let mut app = crate::boot::build(plan).map_err(map_boot_error)?;
 
@@ -469,10 +244,7 @@ pub fn build_headless_app_with(
     // `warn!` for the marker findings so the default `warn` filter still lets
     // them through; the manifest sits below it (`--log config=debug` asks for
     // the breakdown), so a normal run pays nothing.
-    for f in marker_findings.iter().filter(|f| !f.is_error()) {
-        warn!(target: "assets", "marker validation [warn] {}", f.describe());
-    }
-    ai_declarations.emit();
+    preload.report();
 
     // Crate-side log filtering (`plog!`), separate from boot's bevy `LogPlugin`.
     app.insert_resource(args.log.clone())

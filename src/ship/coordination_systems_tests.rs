@@ -2749,6 +2749,118 @@ station = "navigation"
 }
 
 #[test]
+fn a_fleet_ship_freezes_crewing_so_a_mid_mission_afk_does_not_move_control_sources() {
+    // Issue #1116. The SAME hull and crewing as the solo AFK test above, but
+    // resolved inside a FLEET. Every ship in a fleet — this host's own included
+    // — answers from the FROZEN roster, not live `Sessions`, so a crew member
+    // stepping AFK mid-mission must NOT re-seek the station here: the PEER host
+    // never saw the toggle and would keep the seat crewed, and two hosts running
+    // different control sources on the same hull is the divergence the freeze
+    // exists to prevent. Where the solo test flips navigation to `Ai`, this one
+    // must hold it `Human`.
+    let config = crate::ship::config::ShipConfig::from_toml(
+        r#"
+[[station]]
+id = "navigation"
+name = "Navigation"
+description = ""
+rank = ""
+human_seeking = true
+host_order = ["captain"]
+visiting_rating = "Visit"
+[[station.rating]]
+name = "Floor"
+automated_systems = []
+[[station.rating]]
+name = "Visit"
+automated_systems = []
+
+[[station]]
+id = "captain"
+name = "Captain"
+description = ""
+rank = ""
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[system]]
+id = "navigation"
+kind = "navigation"
+station = "navigation"
+"#,
+        &["navigation"],
+    )
+    .expect("valid authored hull data");
+    let mut app = seeking_config_app(config, &["captain"]);
+    let navigation_system = crate::core::messages::SystemId("navigation".into());
+
+    // Freeze the fleet: the fixture's own ship (tagged `FleetSlotOf(SOLO)`) is
+    // crewed at captain in the roster, and a second slot makes this a genuine
+    // fleet rather than a fleet of one — the latter would keep the live-Sessions
+    // path, exactly as a solo mission must.
+    let local = crate::command_admission::HostSlot::SOLO;
+    let roster = crate::lockstep::FleetRoster::new(
+        vec![
+            crate::lockstep::FleetShip {
+                host: local,
+                ship_path: None,
+                crew: vec![(
+                    crate::core::messages::StationId("captain".into()),
+                    "Std".to_string(),
+                )],
+            },
+            crate::lockstep::FleetShip::new(crate::command_admission::HostSlot(9)),
+        ],
+        local,
+    );
+    // A genuine (non-solo) fleet adoption is startup-only and needs the
+    // authored world seed to canonicalise RNG across peers (the save-catalogue
+    // amendment to `join_fleet`); give the bare fixture one, and assert the
+    // adoption actually happened — a silently refused join would leave the
+    // live-Sessions path in force and this test asserting nothing.
+    {
+        let mut world_config = crate::world::config::WorldConfig::default();
+        world_config.global.seed = Some(7);
+        app.world_mut().insert_resource(world_config);
+    }
+    assert!(
+        crate::lockstep::join_fleet(app.world_mut(), roster, 2),
+        "the fixture fleet must adopt, or the freeze under test never engages"
+    );
+    // Adoption canonicalised the fixed clock (`join_fleet` replaces
+    // `Time<Fixed>`), which also wiped the fresh-app overstep preload
+    // `test_app()` made — and this app has still never run `update()`, whose
+    // first call reports a zero delta by Bevy design. Re-prime, exactly as the
+    // fixture did before the join, so the baseline tick below runs a real
+    // fixed step. A production host has updated long before it joins a fleet,
+    // so only this artificial fresh-app fixture needs the second prime.
+    drive_one_fixed_step_per_update(&mut app, TEST_TICK);
+
+    // Baseline: the frozen captain seat hosts navigation as a human.
+    tick(&mut app);
+    assert_eq!(
+        source_of(&mut app, &navigation_system),
+        ControlSource::Human,
+        "baseline: the frozen roster's captain seat hosts navigation"
+    );
+
+    // The live captain steps AFK. In a fleet this is inert for control sources.
+    {
+        let mut sessions = app.world_mut().resource_mut::<Sessions>();
+        sessions.0.set_afk("officer-captain", true);
+    }
+    tick(&mut app);
+    assert_eq!(
+        source_of(&mut app, &navigation_system),
+        ControlSource::Human,
+        "a fleet ship's control sources are frozen against a live AFK toggle — \
+         the peer host never saw it, so moving control here would fork the AI on \
+         a hull both hosts simulate (a live re-seek belongs to #1119)"
+    );
+}
+
+#[test]
 fn shipped_combat_test_floor_resolves_through_destroyer_hull_and_production_writer() {
     let config = hull_ship_config("alliance_destroyer");
     let mut app = seeking_config_app(config, &["tactical"]);

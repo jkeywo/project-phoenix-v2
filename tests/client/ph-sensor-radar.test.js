@@ -13,6 +13,9 @@ function setup(opts) {
   if (opts.sendAction) {
     window.sendAction = opts.sendAction;
   }
+  if (opts.activateSemanticAction) {
+    window.activateSemanticAction = opts.activateSemanticAction;
+  }
   document.body.innerHTML = '<ph-sensor-radar id="test-el"></ph-sensor-radar>';
   const el = document.getElementById('test-el');
   const innerRadar = el.shadowRoot.getElementById('inner-radar');
@@ -28,6 +31,7 @@ describe('PhSensorRadar', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
     delete window.sendAction;
+    delete window.activateSemanticAction;
     origGetContext = HTMLCanvasElement.prototype.getContext;
     HTMLCanvasElement.prototype.getContext = function () { return makeFakeCtx(); };
     origRAF = window.requestAnimationFrame;
@@ -43,6 +47,7 @@ describe('PhSensorRadar', () => {
   afterEach(() => {
     document.body.innerHTML = '';
     delete window.sendAction;
+    delete window.activateSemanticAction;
     HTMLCanvasElement.prototype.getContext = origGetContext;
     window.requestAnimationFrame = origRAF;
     window.cancelAnimationFrame = origCARAF;
@@ -60,11 +65,13 @@ describe('PhSensorRadar', () => {
     expect(el.shadowRoot.getElementById('on-screen-btn')).toBeDefined();
   });
 
-  it('on-screen button click calls sendAction with SensorsRadar view request', () => {
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
+  it('on-screen button click activates the shared Sensors viewscreen identity', () => {
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
     el.shadowRoot.getElementById('on-screen-btn').click();
-    expect(sendAction).toHaveBeenCalledWith('set_view', { direction: 'SensorsRadar' });
+    expect(activateSemanticAction).toHaveBeenCalledWith('sensors.viewscreen', {
+      source: 'control',
+    });
   });
 
   it('passes base state through to inner ph-radar', () => {
@@ -116,24 +123,26 @@ describe('PhSensorRadar', () => {
     expect(ringed).toEqual(['selected_target_uuid']);
   });
 
-  it('blip click on inner radar dispatches set_sensors_target directly', () => {
-    const sendAction = vi.fn();
-    const { el, innerRadar } = setup({ sendAction });
+  it('blip click on inner radar activates the shared target-selection identity', () => {
+    const activateSemanticAction = vi.fn();
+    const { el, innerRadar } = setup({ activateSemanticAction });
     el.state = {
       blips: [{ uuid: 'abc' }],
       science_target_uuid: 'def',
     };
 
     innerRadar.sendAction('set_target', { uuid: 'abc' });
-    expect(sendAction).toHaveBeenCalledTimes(1);
-    expect(sendAction).toHaveBeenCalledWith('set_sensors_target', { uuid: 'abc' });
+    expect(activateSemanticAction).toHaveBeenCalledTimes(1);
+    expect(activateSemanticAction).toHaveBeenCalledWith('sensors.target-selection', {
+      source: 'control', detail: { uuid: 'abc' },
+    });
   });
 
   it('does not forward set_target upstream', () => {
-    const sendAction = vi.fn();
-    const { el, innerRadar } = setup({ sendAction });
+    const activateSemanticAction = vi.fn();
+    const { el, innerRadar } = setup({ activateSemanticAction });
 
     innerRadar.sendAction('set_target', { uuid: 'abc' });
-    expect(sendAction).not.toHaveBeenCalledWith('set_target', expect.anything());
+    expect(activateSemanticAction).not.toHaveBeenCalledWith('set_target', expect.anything());
   });
 });

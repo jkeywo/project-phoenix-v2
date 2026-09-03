@@ -18,11 +18,9 @@ export const renderStation = makeCommsRender({
     stationDamage: 'station-damage',
     autoBadge: 'comms-auto-badge',
   },
-  tail: (s, view, doc, t) => {
+  tail: (s, view, doc, t, threadMsg) => {
     const el = doc.getElementById('footer-target');
     if (!el) return;
-    const msgs = view.messages || [];
-    const threadMsg = msgs.find((m) => !m.is_read) || msgs[msgs.length - 1] || null;
     el.textContent = threadMsg ? (threadMsg.sender_name || t('console.common.active_hail')) : t('console.common.no_active_hail');
   },
 });

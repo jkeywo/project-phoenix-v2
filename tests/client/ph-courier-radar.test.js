@@ -13,6 +13,9 @@ function setup(opts) {
   if (opts.sendAction) {
     window.sendAction = opts.sendAction;
   }
+  if (opts.activateSemanticAction) {
+    window.activateSemanticAction = opts.activateSemanticAction;
+  }
   document.body.innerHTML = '<ph-courier-radar id="test-el"></ph-courier-radar>';
   const el = document.getElementById('test-el');
   const innerRadar = el.shadowRoot.getElementById('inner-radar');
@@ -28,6 +31,7 @@ describe('PhCourierRadar', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
     delete window.sendAction;
+    delete window.activateSemanticAction;
     origGetContext = HTMLCanvasElement.prototype.getContext;
     HTMLCanvasElement.prototype.getContext = function () { return makeFakeCtx(); };
     origRAF = window.requestAnimationFrame;
@@ -62,25 +66,29 @@ describe('PhCourierRadar', () => {
 
   // The whole reason this component exists: the Courier has one station, so a
   // single tap has to drive both the blaster target and the sensor readout.
-  it('fans one blip tap out to both set_target and set_sensors_target', () => {
+  it('fans one blip tap to the exact Tactical lock and shared Sensors action', () => {
     const sendAction = vi.fn();
-    const { innerRadar } = setup({ sendAction });
+    const activateSemanticAction = vi.fn();
+    const { innerRadar } = setup({ sendAction, activateSemanticAction });
 
     innerRadar.sendAction('set_target', { uuid: 'abc' });
 
-    expect(sendAction).toHaveBeenCalledTimes(2);
+    expect(sendAction).toHaveBeenCalledTimes(1);
     expect(sendAction).toHaveBeenCalledWith('set_target', { uuid: 'abc' });
-    expect(sendAction).toHaveBeenCalledWith('set_sensors_target', { uuid: 'abc' });
+    expect(activateSemanticAction).toHaveBeenCalledWith('sensors.target-selection', {
+      source: 'control', detail: { uuid: 'abc' },
+    });
   });
 
   it('sends the same uuid to both actions', () => {
     const sendAction = vi.fn();
-    const { innerRadar } = setup({ sendAction });
+    const activateSemanticAction = vi.fn();
+    const { innerRadar } = setup({ sendAction, activateSemanticAction });
 
     innerRadar.sendAction('set_target', { uuid: 'ship-42' });
 
-    const uuids = sendAction.mock.calls.map(([, payload]) => payload.uuid);
-    expect(uuids).toEqual(['ship-42', 'ship-42']);
+    expect(sendAction.mock.calls[0][1].uuid).toBe('ship-42');
+    expect(activateSemanticAction.mock.calls[0][1].detail.uuid).toBe('ship-42');
   });
 
   it('still passes state through to the inner radar', () => {

@@ -37,26 +37,30 @@
 //! # Consequence for AGENTS.md constraint 7
 //!
 //! Constraint 7 says "helm commands apply the tick they are admitted". Option A
-//! leaves that **intact and unamended**. A logged command carries the tick it
+//! left that intact for a solo host: a logged command carries the tick it
 //! applies on explicitly, and [`CommandDelay`] — the lockstep input delay — is
-//! `0` for a local host, so the apply tick *is* the admission tick and the
-//! command lands in `AdmittedCommands` in the same run of the same system, in
-//! the same order, as it did before this module existed.
+//! `0` when there is nobody to wait for, so the apply tick *is* the admission
+//! tick and the command lands in `AdmittedCommands` in the same run of the same
+//! system, in the same order, as it did before this module existed.
 //!
-//! What changes is that the tick is now written down rather than implied, and
-//! that admission consumes from an ordered queue keyed on it. A non-zero
-//! `CommandDelay` — which only P2P lockstep (#854) has a reason to set, once
-//! there is a second peer to negotiate one with — is therefore the *deliberate*
-//! amendment point for constraint 7, not an accident waiting in the plumbing.
+//! **Issue #1116 made the amendment constraint 7 named in advance.** A host in a
+//! fleet runs with a non-zero delay authored as `[global] command_delay_ticks`,
+//! so a crew's command applies `delay` ticks after it is admitted — the same
+//! tick on every host in the fleet, which is the whole of what lockstep buys.
+//! The amendment is a change of *value*, not of plumbing: the tick a command
+//! applies on is still written on the command, still the key the queue drains
+//! on, and still the tick the log records. AGENTS.md rule 7 carries the amended
+//! wording; [`crate::lockstep`] is the only writer of the resource.
 //!
 //! # The session token never enters the log
 //!
-//! An [`AdmittedCommand`] carries a `response_token` — the sender's session
-//! token — so a reply can be addressed back to whoever asked. That token is a
-//! **bearer credential**: AGENTS.md constraint 2 makes the UUIDv4 in a client's
-//! `localStorage` the whole of its identity, so anything holding the string can
-//! impersonate that player. The log's destinations are exactly the two places
-//! such a string must not go: a save file on disk, and a peer over the wire.
+//! An [`AdmittedCommand`] carries a `response_token` so a reply can be addressed
+//! back to its host-local origin route. For ordinary client input this is the
+//! sender's session token, a **bearer credential**: AGENTS.md constraint 2 makes
+//! the UUIDv4 in a client's `localStorage` the whole of its identity, so
+//! anything holding the string can impersonate that player. Internal producers
+//! may use only an unclaimable reserved target. Neither shape may enter the
+//! log: its destinations are a save file on disk and a peer over the wire.
 //!
 //! So a [`LoggedCommand`] is not an `AdmittedCommand` with a tick bolted on. It
 //! is the *non-secret projection* of one: the tick, the target system, the
@@ -76,18 +80,43 @@
 //!
 //! # Ordering
 //!
-//! The log **is** the order. Entries are keyed on `(apply tick, arrival)`:
+//! The log **is** the order. Entries are keyed on `(apply tick, `[`CommandOrder`]`)`:
 //!
 //! - *apply tick* is `SimTick` at admission plus [`CommandDelay`], so a command
 //!   stamped for a future tick sorts after everything already due.
-//! - *arrival* is a monotonic counter over the whole run, assigned in the order
-//!   [`super::admit_system_commands`] reads `InboundMessage`s — which is the
-//!   order the bridge decoded them from the wire.
+//! - [`CommandOrder`] is `(origin host slot, per-origin sequence)` — the
+//!   **peer-independent** tiebreak issue #1116 needs. A single host mints every
+//!   order from its own slot with a run-wide monotonic sequence, so it
+//!   degenerates exactly to the pre-#1116 arrival counter; a fleet of hosts each
+//!   mints from its OWN slot, and every host sorts the merged set the same way
+//!   because the key says who issued the command rather than when this
+//!   particular receiver happened to decode it.
+//!
+//! `p2p-delta-command-log-shape` states the rule this satisfies:
+//! `must_not_be: [ordered across peers by local arrival index, a second command
+//! queue beside PendingCommands]`. The key widened; the queue did not fork.
 //!
 //! [`PendingCommands`] is a `BTreeMap` on that key, so draining it is ordered by
-//! construction rather than by a sort that could be made unstable. Recording and
-//! queueing happen in one step ([`stamp_accepted_command`]) precisely so the two
-//! orders cannot drift.
+//! construction rather than by a sort that could be made unstable.
+//!
+//! ## The log is written when a command APPLIES, not when it is accepted
+//!
+//! #898 recorded at the moment of acceptance, which was the same moment as the
+//! apply while [`CommandDelay`] was zero. Under a fleet delay they are different
+//! moments, and acceptance is the wrong one: a host accepts its own crew's
+//! commands as its clock reaches each tick and a peer's whenever the frame
+//! arrives, so two hosts that apply an identical tick in an identical order
+//! would still have *recorded* it in two different orders — and a host running
+//! a tick or two behind would record a later stamp before an earlier one, which
+//! [`CommandLog::ticks_are_monotonic`] correctly calls unreplayable.
+//!
+//! So [`PendingCommands::drain_due`] takes the log and writes each entry as it
+//! hands the command over. Recording and applying remain **one act**, which is
+//! the property #898 introduced [`stamp_accepted_command`] for; it is now the
+//! stronger act, because the resulting log is byte-identical on every host in
+//! the fleet rather than merely equivalent. A command stamped for a future tick
+//! is in the queue and not yet in the log, which is the honest answer: it has
+//! not happened yet.
 //!
 //! # What is deliberately not here
 //!
@@ -138,6 +167,77 @@ impl ShipKey {
     }
 }
 
+/// Which host in the frozen fleet roster issued a command (issue #1116).
+///
+/// The fleet owner mints slot ids as `slot-N` (`gui/host-mesh.js`), and the
+/// ordinal `N` is what crosses the simulation boundary: it is small, totally
+/// ordered, and — because one machine minted every id in one monotonic sequence
+/// — it means the same thing on every host. `p2p-delta-identity-is-minted` is
+/// the reason the ordinal cannot be self-assigned: "an id is a function of when
+/// and in what order a peer minted it".
+///
+/// A host with no fleet — the single-host case, and every fixture — is
+/// [`HostSlot::SOLO`]. That is a real slot rather than an absence, so the
+/// ordering key has the same shape whether or not a mesh is running and the
+/// solo path is not a second code path.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
+pub struct HostSlot(pub u32);
+
+impl HostSlot {
+    /// The slot a host with no fleet issues from.
+    ///
+    /// Deliberately `0` and not `1`: `gui/host-mesh.js` numbers fleet slots from
+    /// `slot-1`, so a solo host's key can never collide with a fleet member's,
+    /// and a log carrying solo entries beside fleet entries (a fleet formed
+    /// mid-session would be exactly that) still sorts unambiguously.
+    pub const SOLO: HostSlot = HostSlot(0);
+
+    /// Parse the ordinal out of a `slot-N` id from the host-mesh roster.
+    ///
+    /// `None` for anything that is not one, because a roster id this side
+    /// cannot parse is a protocol disagreement rather than a slot to guess at.
+    pub fn from_slot_id(id: &str) -> Option<Self> {
+        id.strip_prefix("slot-")?.parse().ok().map(HostSlot)
+    }
+
+    /// The `slot-N` id this ordinal renders as, for the host-mesh roster.
+    pub fn slot_id(&self) -> String {
+        format!("slot-{}", self.0)
+    }
+}
+
+/// The peer-independent tiebreak between commands that apply on the same tick
+/// (issue #1116).
+///
+/// Ordering is the derived field order — origin first, then that origin's own
+/// sequence — so the whole fleet's traffic for one tick has exactly one order,
+/// and every host computes it from the key alone without knowing what arrived
+/// when. The pre-#1116 `arrival` counter was the opposite: a local wire-decode
+/// index, which is a fact about the receiver rather than about the command.
+///
+/// `seq` restarts at zero on the run boundary along with the log
+/// ([`reset_command_log`]), on every host, because a run boundary is a tick
+/// every host agrees on. Trap T8 of the #1116 brief is exactly this: an
+/// ordering key that survived the reset on one host and not another would
+/// tiebreak round two differently from round one.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
+pub struct CommandOrder {
+    /// The host that admitted this command from its own crew.
+    pub origin: HostSlot,
+    /// That host's own monotonic counter, restarted at each run boundary.
+    pub seq: u64,
+}
+
+impl CommandOrder {
+    pub fn new(origin: HostSlot, seq: u64) -> Self {
+        Self { origin, seq }
+    }
+}
+
 /// One accepted command, as the log records it: the logical tick it applies on,
 /// the ship it applies to, and what it asks for.
 ///
@@ -154,6 +254,16 @@ impl ShipKey {
 pub struct LoggedCommand {
     /// The `SimTick` value this command applies on.
     pub tick: u64,
+    /// Where this command sits in the fleet's agreed order for that tick
+    /// (issue #1116).
+    ///
+    /// Carried explicitly for the same reason `tick` is: the log's own `Vec`
+    /// order is the applied order *on the host that wrote it*, and a recovering
+    /// host (#1118) merging two partial logs has nothing but this key to
+    /// reconstruct the order from. It also names the host a divergent command
+    /// came from, which is the difference between "the fleet disagreed at tick
+    /// 240" and a diagnostic somebody can act on.
+    pub order: CommandOrder,
     /// The ship whose `AdmittedCommands` this lands in, as admission's routing
     /// rule resolved it when the command arrived.
     pub ship: ShipKey,
@@ -181,10 +291,11 @@ pub struct CommandLog {
 }
 
 impl CommandLog {
-    /// Append one accepted command.
+    /// Append one applied command.
     ///
-    /// Private to the module on purpose: everything that records goes through
-    /// [`stamp_accepted_command`], which cannot record without also queueing.
+    /// Private to the module on purpose: the one recording site is
+    /// [`PendingCommands::drain_due`], which cannot record without also
+    /// handing the command to the ship it applies on.
     fn record(&mut self, entry: LoggedCommand) {
         self.entries.push(entry);
     }
@@ -201,6 +312,18 @@ impl CommandLog {
     /// The log, in order.
     pub fn entries(&self) -> &[LoggedCommand] {
         &self.entries
+    }
+
+    /// Replace the applied history from a gated authoritative transfer.
+    ///
+    /// Ordinary gameplay still has exactly one recording site
+    /// ([`PendingCommands::drain_due`]).  A mid-session GM join is different:
+    /// the new peer did not execute the earlier ticks, so the portable record
+    /// must install the already-applied history beside the snapshot it proves.
+    /// Keeping that exceptional write here prevents transfer code from growing
+    /// a second command-log representation or reaching into private storage.
+    pub fn replace_from_transfer(&mut self, entries: Vec<LoggedCommand>) {
+        self.entries = entries;
     }
 
     pub fn len(&self) -> usize {
@@ -236,15 +359,26 @@ impl CommandLog {
 /// Lockstep input delay, in logical ticks: how far ahead of the tick it is
 /// admitted on a command is stamped to apply.
 ///
-/// `0` — the shipped value, and the only correct one for a single host, where
-/// there is nobody to wait for. It is a resource rather than a constant because
-/// it is the knob P2P lockstep (#854) turns: peers agree a delay so that every
-/// instance has every peer's input for tick *T* before it simulates *T*. It is
-/// deliberately *not* TOML gameplay data — no designer tunes it, and a wrong
-/// value is a desync rather than a balance change.
+/// `0` for a host with nobody to wait for, which is still the default and still
+/// the only correct value for a solo run.
 ///
-/// See the module docs for what a non-zero value means for AGENTS.md
-/// constraint 7.
+/// # The amendment (issue #1116)
+///
+/// This used to say the value was "deliberately not TOML data — no designer
+/// tunes it". Issue #1116 is the amendment that entry anticipated, and it moved
+/// the number rather than the reasoning: a fleet's delay IS authored, as
+/// `[global] command_delay_ticks` in the world TOML, because it is a property of
+/// the mission the fleet agreed to play — a scenario meant for players on one
+/// LAN wants a shorter delay than one meant for players on separate mobile
+/// networks, and that is a choice about the mission, not a constant about the
+/// engine. What has not changed is that a *wrong* value is a stall or a desync
+/// rather than a balance change, so the authored number is validated at world
+/// load like the tick ratios beside it.
+///
+/// [`crate::lockstep`] is what sets it: joining a fleet applies the authored
+/// value, and leaving one puts it back to zero. Nothing else writes it, so the
+/// solo path cannot acquire a delay by accident — which is the property
+/// AGENTS.md rule 7 asks for.
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CommandDelay(pub u64);
 
@@ -253,8 +387,12 @@ pub struct CommandDelay(pub u64);
 pub struct PendingCommand {
     /// The logical tick this applies on.
     pub tick: u64,
-    /// Monotonic arrival index — the tiebreak within a tick.
-    pub arrival: u64,
+    /// Where this sits in the fleet's agreed order for that tick.
+    pub order: CommandOrder,
+    /// The routed ship, named the way anything outside this process names it.
+    /// Carried alongside `route` so the log entry written on apply describes
+    /// the ship admission resolved, not one re-derived a tick later.
+    pub ship: ShipKey,
     /// The ship whose `AdmittedCommands` this lands in, resolved by admission's
     /// routing rule when the command arrived.
     pub route: Entity,
@@ -262,83 +400,139 @@ pub struct PendingCommand {
 }
 
 /// Commands accepted at the boundary and not yet due, ordered by
-/// `(apply tick, arrival)`.
+/// `(apply tick, `[`CommandOrder`]`)`.
 ///
 /// With [`CommandDelay`] at zero every command enqueued during a tick drains
 /// again inside the same run of [`super::admit_system_commands`], so this is a
-/// pass-through today and the observable behaviour is exactly what it was
-/// before #898. The queue exists so that it stays a pass-through *by
+/// pass-through for a solo host and the observable behaviour is exactly what it
+/// was before #898. The queue exists so that it stays a pass-through *by
 /// configuration* rather than by construction: a future-stamped command slots
 /// in with no redesign of the admission path.
+///
+/// Issue #1116 widened the key and left the queue alone, which is the shape
+/// `p2p-delta-command-log-shape` requires — a second queue beside this one is
+/// on its `must_not_be` list. A solo host's [`CommandOrder`]s all carry
+/// [`HostSlot::SOLO`], so `(tick, order)` sorts identically to the old
+/// `(tick, arrival)` and no solo behaviour moved.
 #[derive(Resource, Default, Debug)]
 pub struct PendingCommands {
-    next_arrival: u64,
-    queue: BTreeMap<(u64, u64), PendingCommand>,
+    /// The slot this host mints its own commands' order from. Written once when
+    /// a fleet forms; [`HostSlot::SOLO`] otherwise.
+    origin: HostSlot,
+    next_seq: u64,
+    queue: BTreeMap<(u64, CommandOrder), PendingCommand>,
 }
 
 impl PendingCommands {
-    /// Queue one accepted command for `tick`, returning the log entry that
-    /// records it.
+    /// Adopt this host's fleet slot, so the commands it admits from its own
+    /// crew are ordered under that slot on every host in the fleet.
     ///
-    /// Private for the same reason [`CommandLog::record`] is: queueing and
-    /// recording are one act, and [`stamp_accepted_command`] is where it
-    /// happens.
+    /// Idempotent, and deliberately does **not** reset `next_seq`: a fleet is
+    /// joined before the mission starts, and [`reset_command_log`] at the run
+    /// boundary is the one place a sequence restarts.
+    pub fn set_origin(&mut self, origin: HostSlot) {
+        self.origin = origin;
+    }
+
+    /// The slot this host mints from.
+    pub fn origin(&self) -> HostSlot {
+        self.origin
+    }
+
+    /// The [`CommandOrder`] this host's next own-crew command will carry.
+    fn next_order(&mut self) -> CommandOrder {
+        let seq = self.next_seq;
+        self.next_seq = self.next_seq.wrapping_add(1);
+        CommandOrder::new(self.origin, seq)
+    }
+
+    /// Queue one accepted command for `tick`, returning the order it carries.
+    ///
+    /// `order` is `None` for a command this host admitted from its own crew —
+    /// the order is minted here, from this host's slot. It is `Some` only for a
+    /// command that arrived from another host already carrying the order that
+    /// host minted, which is the whole of what makes the total order
+    /// peer-independent: a receiver never renumbers a sender's traffic.
+    ///
+    /// Private for the same reason [`CommandLog::record`] is: the queue is
+    /// reached only through [`stamp_accepted_command`], which is only ever
+    /// called on the accepted branch of the authority check.
     fn enqueue(
         &mut self,
         tick: u64,
+        order: Option<CommandOrder>,
         route: Entity,
         ship: ShipKey,
         command: AdmittedCommand,
-    ) -> LoggedCommand {
-        let arrival = self.next_arrival;
-        self.next_arrival = self.next_arrival.wrapping_add(1);
-        // The log entry is built here, from the command about to be queued, so
-        // the projection can never describe a different command from the one
-        // that applies. The token stays on the `AdmittedCommand` this queue
-        // holds; only the non-secret half is returned for recording.
-        let entry = LoggedCommand {
-            tick,
-            ship,
-            target: command.target.clone(),
-            payload: command.payload.clone(),
+    ) -> CommandOrder {
+        let order = match order {
+            Some(order) => order,
+            None => self.next_order(),
         };
         self.queue.insert(
-            (tick, arrival),
+            (tick, order),
             PendingCommand {
                 tick,
-                arrival,
+                order,
+                ship,
                 route,
                 command,
             },
         );
-        entry
+        order
     }
 
-    /// Drop every queued command and restart the arrival counter.
+    /// Drop every queued command and restart this host's sequence counter.
     ///
-    /// The counter restarts because arrival is "the *n*th command of this run",
-    /// and [`reset_command_log`] is where a run ends. A second round that kept
-    /// counting would tiebreak identical inputs on a different number from the
-    /// first, which is exactly the kind of hidden run-to-run state a replay
-    /// cannot reproduce.
+    /// The counter restarts because `seq` is "the *n*th command this host
+    /// issued this run", and [`reset_command_log`] is where a run ends. A
+    /// second round that kept counting would tiebreak identical inputs on a
+    /// different number from the first, which is exactly the kind of hidden
+    /// run-to-run state a replay cannot reproduce — and, across a fleet, a
+    /// number two hosts would restart differently (trap T8).
+    ///
+    /// The fleet slot is NOT cleared: it is who this host is, not what it did.
     pub fn clear(&mut self) {
         self.queue.clear();
-        self.next_arrival = 0;
+        self.next_seq = 0;
     }
 
     /// Remove and return everything due at or before `now`, in
-    /// `(tick, arrival)` order.
+    /// `(tick, `[`CommandOrder`]`)` order, **recording each one in `log` as it
+    /// goes**.
+    ///
+    /// The log takes its entries here rather than at acceptance so that the
+    /// record is the applied sequence — see the module docs. Draining and
+    /// recording are one act for the same reason queueing and recording used to
+    /// be: there is no way to apply a command without writing it down, and no
+    /// way to write one down that did not apply.
     ///
     /// "At or before" rather than "exactly": a command stamped for a tick that
     /// has somehow already passed is applied late rather than stranded in the
-    /// queue forever. That cannot happen on a local host — `SimTick` advances
+    /// queue forever. That cannot happen on a solo host — `SimTick` advances
     /// one step at a time and the stamp is never in the past — but a stranded
     /// command would be a silent, permanent input loss, and a late one is at
     /// least visible in the log it was recorded in.
-    pub fn drain_due(&mut self, now: u64) -> Vec<PendingCommand> {
-        let later = self.queue.split_off(&(now.saturating_add(1), 0));
+    pub fn drain_due(&mut self, now: u64, log: &mut CommandLog) -> Vec<PendingCommand> {
+        let later = self
+            .queue
+            .split_off(&(now.saturating_add(1), CommandOrder::default()));
         let due = std::mem::replace(&mut self.queue, later);
-        due.into_values().collect()
+        due.into_values()
+            .inspect(|pending| {
+                // Built here, from the command about to be applied, so the
+                // projection can never describe a different command from the
+                // one that lands. The token stays on the `AdmittedCommand`;
+                // only the non-secret half is recorded.
+                log.record(LoggedCommand {
+                    tick: pending.tick,
+                    order: pending.order,
+                    ship: pending.ship.clone(),
+                    target: pending.command.target.clone(),
+                    payload: pending.command.payload.clone(),
+                });
+            })
+            .collect()
     }
 
     /// How many commands are waiting for a future tick.
@@ -351,15 +545,16 @@ impl PendingCommands {
     }
 }
 
-/// Stamp one accepted command for the tick it applies on: queue it for that
-/// tick *and* record it in the log, in one step.
+/// Stamp one accepted command for the tick it applies on and queue it there.
 ///
-/// The two happen together so the log order and the apply order cannot drift —
-/// the log is not a commentary on the queue, it is the same sequence written
-/// down. There is deliberately no way to record without queueing.
+/// The log is written by [`PendingCommands::drain_due`] when the command
+/// actually applies, so the record is the applied sequence and every host in a
+/// fleet writes the same one — see the module docs for why acceptance is the
+/// wrong moment once [`CommandDelay`] is non-zero.
 ///
 /// Only ever called on the accepted branch of admission's authority check, which
-/// is what keeps refusals out of the log (`vellum_replay`'s third rule).
+/// is what keeps refusals out of the queue and therefore out of the log
+/// (`vellum_replay`'s third rule).
 ///
 /// `route` and `ship` are the same destination said twice, in the two
 /// vocabularies that need it: the `Entity` the queue delivers to inside this
@@ -367,16 +562,20 @@ impl PendingCommands {
 /// taken together, here, because this is the one site that has admission's
 /// resolved route in hand — deriving the key anywhere else would mean a second
 /// copy of the routing rule.
+///
+/// `order` is `None` for a command this host's own crew issued and `Some` for
+/// one that arrived from a peer already ordered. Either way this stays the ONE
+/// recording site, which is what lets issue #1116's mesh merge sit *at* this
+/// call rather than after it (`p2p-delta-command-log-shape`).
 pub fn stamp_accepted_command(
-    log: &mut CommandLog,
     pending: &mut PendingCommands,
     apply_tick: u64,
+    order: Option<CommandOrder>,
     route: Entity,
     ship: ShipKey,
     command: AdmittedCommand,
-) {
-    let entry = pending.enqueue(apply_tick, route, ship, command);
-    log.record(entry);
+) -> CommandOrder {
+    pending.enqueue(apply_tick, order, route, ship, command)
 }
 
 /// Install the command-log resources. Idempotent (`init_resource` is).
@@ -535,6 +734,8 @@ fn fnv1a(seed: u64, bytes: &[u8]) -> u64 {
 /// to change shape whenever the types do.
 fn fold_command(seed: u64, entry: &LoggedCommand) -> u64 {
     let mut hash = fnv1a(seed, &entry.tick.to_le_bytes());
+    hash = fnv1a(hash, &entry.order.origin.0.to_le_bytes());
+    hash = fnv1a(hash, &entry.order.seq.to_le_bytes());
     hash = fnv1a(hash, entry.ship.0.as_bytes());
     hash = fnv1a(hash, entry.target.0.as_bytes());
     fnv1a(hash, format!("{:?}", entry.payload).as_bytes())
@@ -553,34 +754,39 @@ mod tests {
             target: SystemId(target.into()),
             payload: SystemControlPayload::SetRedAlert { active: true },
             response_token: Some(token.into()),
+            feedback_correlation: None,
         }
     }
 
     fn entry(tick: u64, target: &str) -> LoggedCommand {
         LoggedCommand {
             tick,
+            order: CommandOrder::default(),
             ship: ShipKey(SHIP.into()),
             target: SystemId(target.into()),
             payload: SystemControlPayload::SetRedAlert { active: true },
         }
     }
 
-    fn stamp(log: &mut CommandLog, pending: &mut PendingCommands, tick: u64, target: &str) {
+    /// Queue one command from this host's own crew. The `log` argument is kept
+    /// so every call site still reads as "log and queue"; nothing is written
+    /// until [`PendingCommands::drain_due`] applies it.
+    fn stamp(_log: &mut CommandLog, pending: &mut PendingCommands, tick: u64, target: &str) {
         stamp_accepted_command(
-            log,
             pending,
             tick,
+            None,
             Entity::from_raw_u32(1).unwrap(),
             ShipKey(SHIP.into()),
             command(target, "t1"),
         );
     }
 
-    /// The ordering key is `(tick, arrival)`, not arrival alone: a command
+    /// The ordering key is `(tick, order)`, not the order alone: a command
     /// stamped for a later tick waits behind one stamped for an earlier tick
-    /// even though it arrived first.
+    /// even though it was issued first.
     #[test]
-    fn the_queue_drains_in_tick_then_arrival_order() {
+    fn the_queue_drains_in_tick_then_order() {
         let mut log = CommandLog::default();
         let mut pending = PendingCommands::default();
 
@@ -588,16 +794,16 @@ mod tests {
         stamp(&mut log, &mut pending, 3, "early");
         stamp(&mut log, &mut pending, 3, "also-3");
 
-        let due = pending.drain_due(3);
+        let due = pending.drain_due(3, &mut log);
         let targets: Vec<&str> = due.iter().map(|p| p.command.target.0.as_str()).collect();
         assert_eq!(
             targets,
             vec!["early", "also-3"],
-            "tick 3's commands drain in arrival order and tick 7's stays behind"
+            "tick 3's commands drain in issue order and tick 7's stays behind"
         );
         assert_eq!(pending.len(), 1);
 
-        let due = pending.drain_due(7);
+        let due = pending.drain_due(7, &mut log);
         assert_eq!(due.len(), 1);
         assert_eq!(due[0].command.target.0, "late");
         assert!(pending.is_empty());
@@ -613,7 +819,7 @@ mod tests {
         let mut pending = PendingCommands::default();
         stamp(&mut log, &mut pending, 0, "helm");
 
-        let due = pending.drain_due(0);
+        let due = pending.drain_due(0, &mut log);
         assert_eq!(
             due[0].command.response_token.as_deref(),
             Some("t1"),
@@ -638,14 +844,24 @@ mod tests {
         assert_eq!(ShipKey::from_uuid(Some(&uuid)), ShipKey("abc".into()));
     }
 
-    /// Recording and queueing are one act: the log is the drain order.
+    /// Applying and recording are one act: the log is the drain order.
+    ///
+    /// Stamping alone writes nothing — the three commands below are recorded
+    /// only as the two drains hand them over, which is why the log ends up in
+    /// apply order rather than in the order they happened to be accepted in.
     #[test]
-    fn the_log_records_every_stamp_in_apply_order() {
+    fn the_log_records_every_applied_command_in_apply_order() {
         let mut log = CommandLog::default();
         let mut pending = PendingCommands::default();
-        for (tick, target) in [(0_u64, "a"), (0, "b"), (5, "c")] {
+        for (tick, target) in [(5_u64, "c"), (0, "a"), (0, "b")] {
             stamp(&mut log, &mut pending, tick, target);
         }
+        assert!(
+            log.is_empty(),
+            "nothing has applied yet, so nothing is written down yet"
+        );
+        pending.drain_due(0, &mut log);
+        pending.drain_due(5, &mut log);
 
         let recorded: Vec<(u64, &str)> = log
             .entries()
@@ -737,21 +953,22 @@ mod tests {
         let mut pending = PendingCommands::default();
         let route = Entity::from_raw_u32(1).unwrap();
         stamp_accepted_command(
-            &mut log,
             &mut pending,
             0,
+            None,
             route,
             ShipKey(SHIP.into()),
             command("helm", "session-token-aaaa"),
         );
         stamp_accepted_command(
-            &mut log,
             &mut pending,
             12,
+            None,
             route,
             ShipKey(SHIP.into()),
             command("power", "session-token-bbbb"),
         );
+        pending.drain_due(12, &mut log);
 
         let text = ron::ser::to_string(&log).expect("the log serialises");
         assert!(
@@ -778,8 +995,12 @@ mod tests {
         let mut pending = PendingCommands::default();
         stamp(&mut log, &mut pending, 0, "helm");
         stamp(&mut log, &mut pending, 99, "power");
-        assert_eq!(log.len(), 2);
-        assert_eq!(pending.drain_due(0).len(), 1, "tick 0's command applies");
+        assert_eq!(
+            pending.drain_due(0, &mut log).len(),
+            1,
+            "tick 0's command applies"
+        );
+        assert_eq!(log.len(), 1, "and only the applied one is written down");
         assert_eq!(
             pending.len(),
             1,
@@ -799,8 +1020,141 @@ mod tests {
         // Round two's first command is round two's arrival 0: the drain order
         // of identical input must not depend on how much round one saw.
         stamp(&mut log, &mut pending, 0, "shields");
-        let due = pending.drain_due(0);
+        let due = pending.drain_due(0, &mut log);
         assert_eq!(due.len(), 1);
-        assert_eq!(due[0].arrival, 0);
+        assert_eq!(due[0].order, CommandOrder::new(HostSlot::SOLO, 0));
+    }
+
+    // ── Issue #1116: the peer-independent total order ────────────────────────
+
+    /// The ordering key is a fact about the ISSUER, not about the receiver.
+    ///
+    /// Two hosts admit each other's traffic in opposite arrival orders — which
+    /// is the normal case, because each one reads its own crew's command
+    /// locally and the other's off a socket — and still drain the tick in the
+    /// same order, because the key says who issued each command and with what
+    /// sequence. Under the pre-#1116 arrival counter these two queues would
+    /// have drained in mirror-image orders and the two hosts would have applied
+    /// the same tick's input differently.
+    #[test]
+    fn two_hosts_drain_a_tick_in_the_same_order_whatever_order_they_heard_it_in() {
+        let alpha = CommandOrder::new(HostSlot(1), 0);
+        let beta = CommandOrder::new(HostSlot(2), 0);
+        let route = Entity::from_raw_u32(1).unwrap();
+
+        let drained = |first: CommandOrder, second: CommandOrder| -> Vec<CommandOrder> {
+            let mut log = CommandLog::default();
+            let mut pending = PendingCommands::default();
+            for order in [first, second] {
+                stamp_accepted_command(
+                    &mut pending,
+                    4,
+                    Some(order),
+                    route,
+                    ShipKey(SHIP.into()),
+                    command("helm", "t1"),
+                );
+            }
+            pending
+                .drain_due(4, &mut log)
+                .into_iter()
+                .map(|p| p.order)
+                .collect()
+        };
+
+        assert_eq!(
+            drained(alpha, beta),
+            drained(beta, alpha),
+            "the drain order must not depend on which host's traffic arrived \
+             first — that is the whole of `peer-independent`"
+        );
+        assert_eq!(
+            drained(beta, alpha),
+            vec![alpha, beta],
+            "slot 1 sorts first"
+        );
+    }
+
+    /// A receiver never renumbers a sender: an order that arrived is the order
+    /// that is queued and the order that is recorded, and it does not consume
+    /// this host's own sequence.
+    #[test]
+    fn a_peers_order_is_carried_not_reassigned() {
+        let mut log = CommandLog::default();
+        let mut pending = PendingCommands::default();
+        pending.set_origin(HostSlot(1));
+
+        let peer = CommandOrder::new(HostSlot(2), 77);
+        stamp_accepted_command(
+            &mut pending,
+            0,
+            Some(peer),
+            Entity::from_raw_u32(1).unwrap(),
+            ShipKey(SHIP.into()),
+            command("helm", "t1"),
+        );
+        stamp(&mut log, &mut pending, 0, "shields");
+        pending.drain_due(0, &mut log);
+
+        assert_eq!(
+            log.entries().iter().map(|e| e.order).collect::<Vec<_>>(),
+            vec![CommandOrder::new(HostSlot(1), 0), peer],
+            "both apply on tick 0, and the FLEET order decides which lands \
+             first — slot 1 before slot 2 — not which of them arrived first"
+        );
+        assert_eq!(
+            log.entries()[1].order,
+            peer,
+            "the peer's order is carried, never reassigned: a receiver that \
+             renumbered a sender's traffic would give two hosts different \
+             orders for the same tick"
+        );
+        assert_eq!(
+            log.entries()[0].order.seq,
+            0,
+            "and this host's own first command is still seq 0 — a peer's \
+             traffic must not advance a counter that means 'the nth command \
+             THIS host issued'"
+        );
+    }
+
+    /// A `slot-N` roster id round-trips to the ordinal the simulation orders on,
+    /// and anything else is refused rather than guessed at.
+    #[test]
+    fn a_roster_slot_id_round_trips_to_its_ordinal() {
+        assert_eq!(HostSlot::from_slot_id("slot-3"), Some(HostSlot(3)));
+        assert_eq!(HostSlot(3).slot_id(), "slot-3");
+        assert_eq!(HostSlot::from_slot_id("slot-x"), None);
+        assert_eq!(HostSlot::from_slot_id("3"), None);
+        assert_eq!(
+            HostSlot::from_slot_id("slot-1"),
+            Some(HostSlot(1)),
+            "the fleet owner is slot-1, and it must never collide with SOLO"
+        );
+        assert_ne!(HostSlot::SOLO, HostSlot(1));
+    }
+
+    /// The run boundary restarts the sequence but not the identity: round two
+    /// numbers from zero again, still under this host's own slot.
+    #[test]
+    fn a_run_boundary_restarts_the_sequence_and_keeps_the_slot() {
+        let mut log = CommandLog::default();
+        let mut pending = PendingCommands::default();
+        pending.set_origin(HostSlot(2));
+        stamp(&mut log, &mut pending, 0, "helm");
+        stamp(&mut log, &mut pending, 0, "power");
+        pending.drain_due(0, &mut log);
+        assert_eq!(log.entries()[1].order, CommandOrder::new(HostSlot(2), 1));
+
+        log.clear();
+        pending.clear();
+        stamp(&mut log, &mut pending, 0, "shields");
+        pending.drain_due(0, &mut log);
+        assert_eq!(
+            log.entries()[0].order,
+            CommandOrder::new(HostSlot(2), 0),
+            "round two must number from zero, under the same slot"
+        );
+        assert_eq!(pending.origin(), HostSlot(2));
     }
 }

@@ -2,14 +2,14 @@
 title: Player
 type: entity
 tags: [player, session, identity, station, reconnect]
-sources: [src/core/messages.rs, src/lobby/session.rs, src/lobby/handler.rs, src/lobby/server.rs]
-updated: 2026-08-27
+sources: [src/core/messages.rs, src/lobby/session.rs, src/lobby/handler.rs, src/lobby/server.rs, src/gm_roster.rs]
+updated: 2026-08-31
 ---
 
 # Player
 
 A Player is one participant record in authoritative session state. The stable
-key is the browser's UUID session token, not its current PeerJS connection id.
+key is the browser's 32-hex session token, not its current rendezvous peer id.
 
 The wire record carries the player's name, connection and readiness state,
 optional directly claimed `StationId`, last human rating for reconnect
@@ -25,6 +25,11 @@ restoration, and the public Spectator and AFK flags.
   its systems to Backfill and makes that player ineligible to host a visiting
   station. Leaving AFK restores the saved control configuration.
 
+A [GM Operator](./gm-operator.md) is not another Player presence role. It is
+admitted by privileged server code, has its own reconnect identity and public
+roster, consumes no player-ship or Station capacity, and never enters
+`SessionManager` as crew or Spectator.
+
 ## Lifecycle
 
 1. `Identify` registers or reconnects the token and returns `Welcome`.
@@ -32,7 +37,8 @@ restoration, and the public Spectator and AFK flags.
    explicitly enters or leaves the no-seat Spectator role.
 3. `SetReady` participates in collective lobby readiness. During an active
    round, a seatless participant can claim a free station and then confirm the
-   handoff from Backfill.
+   handoff from Backfill. A connected seatless participant still counts in the
+   lobby tally; Station choice does not decide whether a human is present.
 4. Disconnect marks the player absent, clears readiness, keeps the station id
    for restoration, and applies the station's Backfill rating.
 5. Reconnect restores the remembered seat and rating when the seat is still
@@ -44,6 +50,7 @@ destroy token-based identity and rating restoration.
 ## Related
 
 - [Session](./session.md)
+- [GM Operator](./gm-operator.md)
 - [Station](./station.md)
 - [Console](./console.md)
 - [Networking](../concepts/networking.md)

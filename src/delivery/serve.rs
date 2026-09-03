@@ -16,18 +16,143 @@ use crate::delivery::args::{ClientSource, HostArgs};
 use crate::delivery::http::{self, CachePolicy, PathRefusal, Request, MANIFEST_PATH, STAMP_PATH};
 use crate::delivery::stamp::{check_bundle_content, check_client_stamp, DeliveryStamp};
 use crate::delivery::{client_stamp_from_request, DeliveryManifest, DeliveryRefusal};
-use crate::world::manifest::{build_catalog, parse_manifest, validate_manifest};
+use crate::world::manifest::{
+    build_catalog, build_merged_catalog, parse_manifest, validate_manifest, Manifest,
+    MergedCatalog, ScenarioCatalog,
+};
 
 /// The largest request head this host will read before giving up. A browser's
 /// head is well under a kilobyte; the cap is here so a client that never sends
 /// a blank line cannot make the host read forever.
 const MAX_HEAD_BYTES: usize = 8 * 1024;
 
+/// How long one connection may take to finish sending its request head.
+///
+/// [`MAX_HEAD_BYTES`] bounds how MUCH a caller may send before being cut off,
+/// and until issue #1353 nothing bounded how LONG it could take to send it: a
+/// socket that opened, sent one byte a minute and never sent a blank line held
+/// a connection thread for as long as it liked. That is the slow-loris shape,
+/// and it became worth closing when this loop grew a second door
+/// ([`ConnectionUpgrade`]) that a phone on an untrusted LAN can knock on.
+///
+/// Generous rather than tight: this is not a rate limit and a head that arrives
+/// in three TCP segments over a bad Wi-Fi link is ordinary. Not a gameplay
+/// value — it is one socket's own patience (AGENTS.md rule 11).
+const HEAD_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// The scenario manifest a built client bundle carries, relative to its root.
 /// `scripts/build-client.mjs` and `trunk` both place the assets tree here, and
 /// `deploy-demo.yml` overwrites exactly this file with the curated manifest —
 /// so it is where the bundle states which content set it was built for.
 pub const BUNDLE_MANIFEST_REL: &str = "assets/scenarios.toml";
+
+/// Where a request came from, as far as the socket loop could tell.
+///
+/// The one thing [`route`] needs from the connection itself, and the reason it
+/// needs it is [`Route::Document`]: this host binds `0.0.0.0:8080` by default,
+/// with no TLS and no authentication, because its job is handing a bundle to
+/// phones on a LAN. The bundle, the manifest and the stamp are *for* that
+/// audience. A document this process publishes in memory is not — it is a local
+/// Station pane's own page, and a pane always connects from this machine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PeerOrigin {
+    /// The connection's peer address is a loopback address.
+    Loopback,
+    /// Anything else — **including** an address the OS would not report, which
+    /// is the safe way round for a gate.
+    Remote,
+}
+
+/// Classify a connection's peer address.
+///
+/// `None` (the OS refused to name the peer) is [`PeerOrigin::Remote`]: a gate
+/// that opened on "I could not tell" would be no gate at all.
+///
+/// The IPv4-mapped case is not pedantry. A dual-stack listener on `[::]`
+/// reports an IPv4 loopback connection as `::ffff:127.0.0.1`, and
+/// `Ipv6Addr::is_loopback` answers `false` for that — so without the second arm
+/// a pane on an IPv6-bound host would be refused its own document.
+pub fn peer_origin(addr: Option<std::net::SocketAddr>) -> PeerOrigin {
+    let loopback = match addr.map(|a| a.ip()) {
+        Some(std::net::IpAddr::V4(v4)) => v4.is_loopback(),
+        Some(std::net::IpAddr::V6(v6)) => {
+            v6.is_loopback() || v6.to_ipv4_mapped().is_some_and(|v4| v4.is_loopback())
+        }
+        None => false,
+    };
+    if loopback {
+        PeerOrigin::Loopback
+    } else {
+        PeerOrigin::Remote
+    }
+}
+
+/// Documents this process publishes itself, in addition to whatever is on disk
+/// under `--client-dir` (issue #1122).
+///
+/// One user, and a deliberately general shape rather than a pane-specific one:
+/// a native Station pane loads *the shipped client page with two scripts
+/// injected* (`native_host::panes::document`), and that document exists only in
+/// this process's memory. It has to arrive over HTTP from this host, same
+/// origin, at the client directory's own depth — that is what makes every
+/// relative URL in the page, every `gui/` module and every console iframe
+/// resolve exactly as they do for a phone, with nothing rewritten and no CORS
+/// question to answer.
+///
+/// Checked **before** the static bundle, so a published document shadows a file
+/// of the same name rather than racing it, and **only for a loopback peer** —
+/// see [`PeerOrigin`]. Nothing here is written to disk, and the bundle is never
+/// modified.
+#[derive(Clone, Default)]
+pub struct HostedDocuments {
+    documents: Arc<std::sync::RwLock<std::collections::BTreeMap<String, String>>>,
+}
+
+impl HostedDocuments {
+    fn read(&self) -> std::sync::RwLockReadGuard<'_, std::collections::BTreeMap<String, String>> {
+        self.documents.read().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Publish `html` at `path` (an absolute request path, e.g.
+    /// `/client/pane-0.html`). Replaces whatever was there.
+    pub fn publish(&self, path: impl Into<String>, html: String) {
+        self.documents
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(path.into(), html);
+    }
+
+    /// Stop publishing `path`.
+    pub fn withdraw(&self, path: &str) {
+        self.documents
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(path);
+    }
+
+    /// The document published at `path`, if any.
+    pub fn get(&self, path: &str) -> Option<String> {
+        self.read().get(path).cloned()
+    }
+
+    /// How many documents are published. Diagnostic.
+    pub fn len(&self) -> usize {
+        self.read().len()
+    }
+
+    /// Whether nothing is published — the state of every delivery-only host.
+    pub fn is_empty(&self) -> bool {
+        self.read().is_empty()
+    }
+}
+
+impl std::fmt::Debug for HostedDocuments {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HostedDocuments")
+            .field("paths", &self.read().keys().collect::<Vec<_>>())
+            .finish()
+    }
+}
 
 /// What a host has loaded off disk and is ready to publish.
 #[derive(Clone, Debug)]
@@ -39,41 +164,121 @@ pub struct LoadedContent {
     pub findings: Vec<String>,
 }
 
+/// One scenario manifest, read off disk, with the world-resolver every
+/// catalogue build over it shares.
+///
+/// The native answer to the two things the browser gets from its JS preload:
+/// the manifest TOML (`wasm_push_scenario_manifest`) and a way to resolve each
+/// `[[scenario]] world` to its raw text (`wasm_push_world_toml`, read back by
+/// `resolved_world_source`). Native has neither — `config_cache::
+/// resolved_world_source` is a `None` stub off the browser — so the resolver is
+/// a filesystem read rooted at `content_dir`, and it lives HERE rather than
+/// being re-typed at each call site: [`load_content`] publishes a catalogue over
+/// HTTP and [`Self::merged_catalog`] hands one to the native host's lobby
+/// (issue #1326), and the two must never resolve a world differently.
+///
+/// Touches no process-global state.
+pub struct ManifestSource {
+    /// The content tree every relative path resolves against.
+    root: PathBuf,
+    /// The manifest's raw text — also this host's content identity, which
+    /// [`DeliveryStamp::for_manifest`] is taken over.
+    pub toml: String,
+    /// The path the manifest was read from, as given (relative to `root`).
+    pub manifest_rel: String,
+    /// The parsed manifest.
+    pub manifest: Manifest,
+}
+
+impl ManifestSource {
+    /// Read and parse `<content_dir>/<manifest_rel>`.
+    pub fn read(content_dir: &str, manifest_rel: &str) -> Result<Self, String> {
+        let root = Path::new(content_dir).to_path_buf();
+        let manifest_path = root.join(manifest_rel);
+        let toml = std::fs::read_to_string(&manifest_path).map_err(|e| {
+            format!(
+                "cannot read scenario manifest {}: {e}",
+                manifest_path.display()
+            )
+        })?;
+        let manifest = parse_manifest(&toml).map_err(|e| {
+            format!(
+                "scenario manifest {} is malformed: {e}",
+                manifest_path.display()
+            )
+        })?;
+        Ok(Self {
+            root,
+            toml,
+            manifest_rel: manifest_rel.to_string(),
+            manifest,
+        })
+    }
+
+    /// The raw text of one manifest-listed world, or `None` when it cannot be
+    /// read. The whole of native's `resolve_world`.
+    pub fn resolve_world(&self, rel: &str) -> Option<String> {
+        std::fs::read_to_string(self.root.join(rel)).ok()
+    }
+
+    /// `validate_manifest`'s findings, flattened to one line each for the
+    /// startup summary.
+    pub fn findings(&self) -> Vec<String> {
+        validate_manifest(&self.manifest, &self.toml, |rel| self.resolve_world(rel))
+            .into_iter()
+            .map(|f| format!("[{}] {}: {}", f.category, f.source.reference, f.message))
+            .collect()
+    }
+
+    /// The published catalogue — base manifest only, which is what a delivery
+    /// host serves.
+    pub fn catalog(&self) -> ScenarioCatalog {
+        build_catalog(&self.manifest, |rel| self.resolve_world(rel))
+    }
+
+    /// The catalogue a host *offers*: the base manifest merged with every
+    /// active mod pack, in load order — the same
+    /// [`build_merged_catalog`] call `wasm_get_scenario_catalog` makes
+    /// (issue #1326).
+    ///
+    /// On native the overlay stack is empty today (nothing calls
+    /// `config_cache::push_mod_pack` off the browser), so this returns exactly
+    /// what [`Self::catalog`] does; going through the merge anyway is what keeps
+    /// the native lobby's catalogue the browser's catalogue rather than a second
+    /// derivation of it, and is the seam a native mod-pack path would land on.
+    pub fn merged_catalog(&self) -> MergedCatalog {
+        let active = crate::entities::config_cache::active_packs();
+        let parsed: Vec<(String, Manifest)> = active
+            .iter()
+            .filter_map(|p| {
+                parse_manifest(&p.manifest_toml)
+                    .ok()
+                    .map(|m| (p.id.clone(), m))
+            })
+            .collect();
+        let mods: Vec<(&str, &Manifest)> = parsed.iter().map(|(id, m)| (id.as_str(), m)).collect();
+        build_merged_catalog(&self.manifest, &mods, |rel| self.resolve_world(rel))
+    }
+
+    /// The published document this manifest yields.
+    pub fn loaded_content(&self) -> LoadedContent {
+        LoadedContent {
+            manifest: DeliveryManifest {
+                stamp: DeliveryStamp::for_manifest(&self.toml),
+                manifest_path: self.manifest_rel.clone(),
+                scenarios: crate::delivery::payload::catalog_payload(&self.catalog()),
+            },
+            findings: self.findings(),
+        }
+    }
+}
+
 /// Read the manifest and its worlds off disk and build the published document.
 ///
 /// Touches no process-global state, so it is safe from a unit test — unlike
 /// [`preload_templates`], which is not.
 pub fn load_content(content_dir: &str, manifest_rel: &str) -> Result<LoadedContent, String> {
-    let root = Path::new(content_dir);
-    let manifest_path = root.join(manifest_rel);
-    let manifest_toml = std::fs::read_to_string(&manifest_path).map_err(|e| {
-        format!(
-            "cannot read scenario manifest {}: {e}",
-            manifest_path.display()
-        )
-    })?;
-    let manifest = parse_manifest(&manifest_toml).map_err(|e| {
-        format!(
-            "scenario manifest {} is malformed: {e}",
-            manifest_path.display()
-        )
-    })?;
-
-    let resolve_world = |rel: &str| std::fs::read_to_string(root.join(rel)).ok();
-    let findings = validate_manifest(&manifest, &manifest_toml, resolve_world)
-        .into_iter()
-        .map(|f| format!("[{}] {}: {}", f.category, f.source.reference, f.message))
-        .collect();
-
-    let catalog = build_catalog(&manifest, resolve_world);
-    Ok(LoadedContent {
-        manifest: DeliveryManifest {
-            stamp: DeliveryStamp::for_manifest(&manifest_toml),
-            manifest_path: manifest_rel.to_string(),
-            scenarios: crate::delivery::payload::catalog_payload(&catalog),
-        },
-        findings,
-    })
+    Ok(ManifestSource::read(content_dir, manifest_rel)?.loaded_content())
 }
 
 /// Populate the process-global native entity-template cache so the published
@@ -135,6 +340,8 @@ pub enum Route {
         body: String,
         refusal: Option<&'static str>,
     },
+    /// Serve this in-memory document, published by the host itself.
+    Document { body: String },
     /// Serve this bundle-relative file.
     Static { rel_path: String },
     /// No bundle is being served, or the path escaped it.
@@ -144,7 +351,24 @@ pub enum Route {
 }
 
 /// Decide what a request gets. Pure.
-pub fn route(req: &Request, content: &LoadedContent, client: &ClientSource) -> Route {
+///
+/// `documents` are the host's own in-memory publications (issue #1122) and are
+/// checked after the two version-pin endpoints and **before** the client bundle,
+/// so a published document shadows a file of the same name deterministically
+/// rather than racing it. A delivery-only host passes an empty set and routes
+/// exactly as it always did.
+///
+/// `peer` is the only thing here that comes from the connection rather than
+/// from the request, and it gates exactly one decision: a hosted document is
+/// served to [`PeerOrigin::Loopback`] and to nothing else. Everything the LAN is
+/// meant to fetch — the bundle, the manifest, the stamp — is unaffected.
+pub fn route(
+    req: &Request,
+    content: &LoadedContent,
+    client: &ClientSource,
+    documents: &HostedDocuments,
+    peer: PeerOrigin,
+) -> Route {
     if req.method != "GET" && req.method != "HEAD" {
         return Route::MethodNotAllowed;
     }
@@ -178,21 +402,154 @@ pub fn route(req: &Request, content: &LoadedContent, client: &ClientSource) -> R
                 }
             }
         }
-        path => match client {
-            ClientSource::Hosted => Route::NotFound {
-                detail: "this host serves no client assets (started without --client-dir)",
-            },
-            ClientSource::Bundled { .. } => match http::resolve_static_path(path) {
-                Ok(rel_path) => Route::Static { rel_path },
-                Err(PathRefusal::Traversal) => Route::NotFound {
-                    detail: "path escapes the client directory",
+        path => {
+            // A hosted document is a local pane's own console page, carrying a
+            // live participant's view of the bridge. It is looked up at all
+            // only for a peer on this machine — and a remote caller then gets
+            // whatever any unknown path gets, so the refusal does not even
+            // confirm the path exists.
+            if peer == PeerOrigin::Loopback {
+                if let Some(body) = documents.get(path) {
+                    return Route::Document { body };
+                }
+            }
+            match client {
+                ClientSource::Hosted => Route::NotFound {
+                    detail: "this host serves no client assets (started without --client-dir)",
                 },
-                Err(PathRefusal::NotAbsolute) => Route::NotFound {
-                    detail: "path is not absolute",
+                ClientSource::Bundled { .. } => match http::resolve_static_path(path) {
+                    Ok(rel_path) => Route::Static { rel_path },
+                    Err(PathRefusal::Traversal) => Route::NotFound {
+                        detail: "path escapes the client directory",
+                    },
+                    Err(PathRefusal::NotAbsolute) => Route::NotFound {
+                        detail: "path is not absolute",
+                    },
                 },
-            },
+            }
+        }
+    }
+}
+
+// ── The upgrade door (issue #1353) ──────────────────────────────────────────
+
+/// What a request asking to leave HTTP behind turned out to be.
+///
+/// Pure, so the rule is decided and tested here rather than inside whichever
+/// handler took the socket. The three answers are the three the rendezvous
+/// worker gives on the same paths (`worker-rendezvous/src/index.js`): serve the
+/// request as ordinary HTTP, refuse it with a stated status, or hand the socket
+/// over.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum UpgradeVerdict {
+    /// Not an upgrade at all — route it as HTTP.
+    Http,
+    /// It asked for a WebSocket and this is the client's `Sec-WebSocket-Key`,
+    /// verbatim. Whoever takes the socket derives the accept value from it.
+    WebSocket { key: String },
+    /// It asked for something this host will not do, with the status and the
+    /// machine reason to answer. `426` mirrors the worker's
+    /// `expected-websocket-upgrade`; `400` is a malformed WebSocket request.
+    Refused { status: u16, reason: &'static str },
+}
+
+/// Classify one parsed request's upgrade intent.
+///
+/// `claimed` says whether a handler serves this path, and it changes only the
+/// NEGATIVE answers: an ordinary bundle path that carries an `Upgrade` header
+/// is still just a bundle path (a proxy or a browser extension may add one),
+/// while `/v1/join` without a valid upgrade is a caller that has misunderstood
+/// the endpoint and is told so instead of being handed a 404 from the static
+/// tree.
+///
+/// The positive answer needs all four of RFC 6455's request conditions — GET,
+/// `Upgrade: websocket`, `Connection: upgrade`, `Sec-WebSocket-Version: 13` —
+/// plus a key. Missing any of them on a claimed path is a **clean 400**, never
+/// a socket handed to a handshake that will then sit waiting for bytes that
+/// will never come.
+pub fn websocket_upgrade(req: &Request, claimed: bool) -> UpgradeVerdict {
+    let header_has = |name: &str, token: &str| {
+        req.header(name)
+            .is_some_and(|v| v.to_ascii_lowercase().split(',').any(|p| p.trim() == token))
+    };
+    let asks_websocket = header_has("upgrade", "websocket");
+    if !claimed {
+        return UpgradeVerdict::Http;
+    }
+    if !asks_websocket {
+        // The worker's own answer for a plain GET of an upgrade endpoint.
+        return UpgradeVerdict::Refused {
+            status: 426,
+            reason: "expected-websocket-upgrade",
+        };
+    }
+    if req.method != "GET" {
+        return UpgradeVerdict::Refused {
+            status: 400,
+            reason: "upgrade-must-be-get",
+        };
+    }
+    if !header_has("connection", "upgrade") {
+        return UpgradeVerdict::Refused {
+            status: 400,
+            reason: "upgrade-without-connection-upgrade",
+        };
+    }
+    if req.header("sec-websocket-version").map(str::trim) != Some("13") {
+        return UpgradeVerdict::Refused {
+            status: 400,
+            reason: "unsupported-websocket-version",
+        };
+    }
+    // A base64 16-byte nonce is 24 characters. Checked for shape rather than
+    // decoded: this module owns no base64, and a key of the wrong length is the
+    // only malformation that reaches a handshake as an ambiguous stall.
+    match req.header("sec-websocket-key").map(str::trim) {
+        Some(key) if key.len() == 24 && !key.contains(char::is_whitespace) => {
+            UpgradeVerdict::WebSocket {
+                key: key.to_string(),
+            }
+        }
+        _ => UpgradeVerdict::Refused {
+            status: 400,
+            reason: "missing-websocket-key",
         },
     }
+}
+
+/// Something that takes a connection over when its request asked to upgrade.
+///
+/// The seam issue #1353 needs and the reason it is a TRAIT rather than a
+/// function: `delivery::serve` is compiled for every native build and must not
+/// name `tungstenite`, which is optional and behind the `host` feature. So this
+/// module owns the door — detection, the refusal answers, the timeouts — and
+/// [`crate::native_host::direct_join`] owns what is behind it.
+///
+/// An implementation is handed a stream on which **nothing but the request head
+/// has been read**, so it may write the `101` itself and then wrap the raw
+/// socket. It owns the connection from that moment: the serving loop neither
+/// writes to it nor closes it again.
+pub trait ConnectionUpgrade: Send + Sync + 'static {
+    /// Whether this handler serves `path`. Consulted before anything else, so a
+    /// host with a handler installed answers exactly one more path than one
+    /// without.
+    fn serves(&self, path: &str) -> bool;
+
+    /// Take the stream over. `key` is the validated `Sec-WebSocket-Key`.
+    ///
+    /// The connection is the handler's from this call onwards — it takes the
+    /// stream by value, so a refusal is the handler's to WRITE as well as to
+    /// decide. `Err` therefore reports a refusal that has already been answered
+    /// (or a client that had already gone); the serving loop only logs it.
+    fn accept(&self, stream: TcpStream, req: &Request, key: &str) -> Result<(), UpgradeRefusal>;
+}
+
+/// A handler's refusal of a connection it was offered, for the operator log.
+/// The handler has already answered the client — see [`ConnectionUpgrade::accept`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UpgradeRefusal {
+    pub status: u16,
+    pub reason: &'static str,
 }
 
 /// Something worth telling the operator about. The module itself never prints —
@@ -227,6 +584,13 @@ struct ServerState {
     content: LoadedContent,
     client: ClientSource,
     client_root: Option<PathBuf>,
+    documents: HostedDocuments,
+    /// The one handler that may take a connection off the HTTP path
+    /// (issue #1353). Behind a lock rather than a constructor argument because
+    /// it is installed AFTER the bind: the direct-join service needs the port
+    /// the listener actually took, which a `:0` bind does not know until then —
+    /// the same ordering constraint the panes and the lobby surface have.
+    upgrade: std::sync::RwLock<Option<Arc<dyn ConnectionUpgrade>>>,
 }
 
 impl HostServer {
@@ -276,8 +640,33 @@ impl HostServer {
                 content,
                 client: args.client.clone(),
                 client_root,
+                documents: HostedDocuments::default(),
+                upgrade: std::sync::RwLock::new(None),
             }),
         })
+    }
+
+    /// Install the handler that takes upgraded connections (issue #1353).
+    ///
+    /// Idempotent in the sense that a second call replaces the first; there is
+    /// one door and one handler behind it. Safe to call while the loop is
+    /// running — connections already being served are unaffected.
+    pub fn on_upgrade(&self, handler: Arc<dyn ConnectionUpgrade>) {
+        *self
+            .state
+            .upgrade
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = Some(handler);
+    }
+
+    /// The host's own in-memory publications (issue #1122), for a caller that
+    /// wants to publish into them.
+    ///
+    /// Cheap to clone and shared with the serving thread, so a caller may keep
+    /// its handle and publish or withdraw while the host runs — which is what a
+    /// pane opening or closing mid-mission does.
+    pub fn hosted_documents(&self) -> HostedDocuments {
+        self.state.documents.clone()
     }
 
     /// The address actually bound — the port a `:0` bind was given.
@@ -296,6 +685,10 @@ impl HostServer {
     /// Accept and serve until the listener errors. One thread per connection,
     /// each closed when its response is written: a client fetching a 38 MiB
     /// WASM must not block the phone asking for the manifest behind it.
+    ///
+    /// Blocks forever and cannot be stopped — which is right for the
+    /// delivery-only host, whose whole job is this loop, and wrong for a host
+    /// that also runs a simulation. That one uses [`serve_until`](Self::serve_until).
     pub fn serve_forever<F>(&self, on_event: F)
     where
         F: Fn(HostEvent) + Send + Sync + 'static,
@@ -306,30 +699,140 @@ impl HostServer {
         });
         for stream in self.listener.incoming() {
             match stream {
-                Ok(stream) => {
-                    let state = Arc::clone(&self.state);
-                    let events = Arc::clone(&on_event);
-                    // A panic in one connection must not take the host down, and
-                    // a spawn failure is worth saying out loud rather than
-                    // silently dropping the client.
-                    if let Err(e) = std::thread::Builder::new()
-                        .name("phoenix-host-conn".to_string())
-                        .spawn(move || handle_connection(stream, &state, events.as_ref()))
-                    {
-                        on_event(HostEvent::Failed {
-                            detail: format!("cannot spawn connection thread: {e}"),
-                        });
-                    }
-                }
+                Ok(stream) => self.spawn_connection(stream, &on_event),
                 Err(e) => on_event(HostEvent::Failed {
                     detail: format!("accept failed: {e}"),
                 }),
             }
         }
     }
+
+    /// Install the shutdown poll seam [`serve_until`](Self::serve_until) needs,
+    /// so a caller can find out it is unavailable **before** it commits to the
+    /// arrangement that depends on it (issue #1121).
+    ///
+    /// `phoenix-host` calls this before it spawns the delivery thread, because
+    /// the next thing it does is hand the main thread to Bevy for the rest of
+    /// the process's life. Idempotent; `serve_until` calls it again itself, so a
+    /// caller that does not care may simply not call it.
+    pub fn enable_shutdown_polling(&self) -> std::io::Result<()> {
+        self.listener.set_nonblocking(true)
+    }
+
+    /// [`serve_forever`](Self::serve_forever), with a way out (issue #1121).
+    ///
+    /// A native *authoritative* host runs this on a worker thread while Bevy
+    /// owns the main one — winit requires the main thread on Windows — and the
+    /// two have to be able to stop together. `serve_forever`'s blocking
+    /// `accept()` has no such seam: nothing short of process exit unblocks it,
+    /// so the delivery thread would outlive a clean `AppExit`.
+    ///
+    /// So this polls instead. The listener goes non-blocking and the loop
+    /// checks `shutdown` between accepts, sleeping [`ACCEPT_POLL`] when there
+    /// is nothing waiting. Each accepted stream is put **back** into blocking
+    /// mode before it is handled: on Windows an accepted socket inherits the
+    /// listener's non-blocking flag, and a non-blocking read would make
+    /// `read_head` see `WouldBlock`, give up, and answer 400 to a
+    /// perfectly good request.
+    ///
+    /// **A listener that cannot be made non-blocking is fatal, not a fallback.**
+    /// This used to log and drop into `serve_forever`'s blocking loop, which
+    /// reads as graceful and is not: the caller's shutdown path is
+    /// `shutdown.stop()` followed by `handle.join()`, and a thread parked in
+    /// `accept()` never observes the flag — so the window would close, the join
+    /// would block forever, and the process would sit on port 8080 with nothing
+    /// on screen and no way out but the task manager. Returning `Err` lets
+    /// `enable_shutdown_polling`'s caller refuse to start at the prompt instead.
+    pub fn serve_until<F>(&self, shutdown: ShutdownSignal, on_event: F) -> Result<(), String>
+    where
+        F: Fn(HostEvent) + Send + Sync + 'static,
+    {
+        let on_event = Arc::new(on_event);
+        if let Err(e) = self.enable_shutdown_polling() {
+            let detail =
+                format!("cannot poll for shutdown ({e}); refusing to serve without a stop path");
+            on_event(HostEvent::Failed {
+                detail: detail.clone(),
+            });
+            return Err(detail);
+        }
+        on_event(HostEvent::Bound {
+            addr: self.local_addr(),
+        });
+        while !shutdown.is_stopped() {
+            match self.listener.accept() {
+                Ok((stream, _)) => {
+                    let _ = stream.set_nonblocking(false);
+                    self.spawn_connection(stream, &on_event);
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(ACCEPT_POLL);
+                }
+                Err(e) => on_event(HostEvent::Failed {
+                    detail: format!("accept failed: {e}"),
+                }),
+            }
+        }
+        Ok(())
+    }
+
+    /// Hand one accepted stream to its own thread. A panic in one connection
+    /// must not take the host down, and a spawn failure is worth saying out
+    /// loud rather than silently dropping the client.
+    fn spawn_connection<F>(&self, stream: TcpStream, on_event: &Arc<F>)
+    where
+        F: Fn(HostEvent) + Send + Sync + 'static,
+    {
+        let state = Arc::clone(&self.state);
+        let events = Arc::clone(on_event);
+        if let Err(e) = std::thread::Builder::new()
+            .name("phoenix-host-conn".to_string())
+            .spawn(move || handle_connection(stream, &state, events.as_ref()))
+        {
+            on_event(HostEvent::Failed {
+                detail: format!("cannot spawn connection thread: {e}"),
+            });
+        }
+    }
+}
+
+/// How long [`HostServer::serve_until`] waits between accept attempts when
+/// nothing is connecting. Short enough that shutdown is imperceptible, long
+/// enough that an idle host is not a busy loop.
+const ACCEPT_POLL: std::time::Duration = std::time::Duration::from_millis(25);
+
+/// The stop lever for [`HostServer::serve_until`]. Cheap to clone; every clone
+/// refers to the same flag, so the thread that runs the simulation can stop the
+/// thread that serves the bundle.
+#[derive(Clone, Default)]
+pub struct ShutdownSignal(Arc<std::sync::atomic::AtomicBool>);
+
+impl ShutdownSignal {
+    /// A signal that has not been raised.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Ask the serving loop to return after at most one [`ACCEPT_POLL`].
+    pub fn stop(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whether [`stop`](Self::stop) has been called.
+    pub fn is_stopped(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
 }
 
 fn handle_connection<F: Fn(HostEvent)>(mut stream: TcpStream, state: &ServerState, on_event: &F) {
+    // Read BEFORE anything else can fail: this is the only point at which the
+    // connection's own origin is knowable, and `route` gates the host's
+    // in-memory documents on it. See `PeerOrigin`.
+    let peer = peer_origin(stream.peer_addr().ok());
+    // A caller gets [`HEAD_READ_TIMEOUT`] to finish its head and no longer. The
+    // timeout is CLEARED again before the stream is handed to an upgrade
+    // handler, which sets its own pumping cadence (issue #1353).
+    let _ = stream.set_read_timeout(Some(HEAD_READ_TIMEOUT));
     let head = match read_head(&mut stream) {
         Some(head) => head,
         None => {
@@ -365,7 +868,70 @@ fn handle_connection<F: Fn(HostEvent)>(mut stream: TcpStream, state: &ServerStat
     };
     let head_only = req.method == "HEAD";
 
-    match route(&req, &state.content, &state.client) {
+    // The upgrade door (issue #1353), BEFORE routing: a `/v1/join` upgrade is
+    // not a document request, and letting `route` answer it first would hand a
+    // WebSocket client a 404 out of the static tree. A host with no handler
+    // installed never reaches this branch at all.
+    let handler = state
+        .upgrade
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    let claimed = handler.as_ref().is_some_and(|h| h.serves(&req.path));
+    match websocket_upgrade(&req, claimed) {
+        UpgradeVerdict::Http => {}
+        UpgradeVerdict::WebSocket { key } => {
+            // The handler pumps on its own cadence and sets its own timeouts;
+            // ours would cut its first blocking read short.
+            let _ = stream.set_read_timeout(None);
+            let outcome = handler
+                .as_ref()
+                .expect("claimed implies a handler")
+                .accept(stream, &req, &key);
+            match outcome {
+                Ok(()) => on_event(HostEvent::Served {
+                    method: req.method.clone(),
+                    path: req.path.clone(),
+                    status: 101,
+                }),
+                // The handler owns the socket either way, so it has already
+                // answered the client; this is the operator's copy.
+                Err(refusal) => on_event(HostEvent::Refused {
+                    path: req.path.clone(),
+                    code: refusal.reason,
+                }),
+            }
+            return;
+        }
+        UpgradeVerdict::Refused { status, reason } => {
+            // A malformed or mis-addressed upgrade is answered as ordinary
+            // HTTP and the connection closes. Never a stall: nothing here waits
+            // for more bytes, and the accept loop was never blocked on it —
+            // this whole function runs on its own connection thread.
+            let body = reason.to_string();
+            let head = http::response_head(
+                status,
+                if status == 426 {
+                    "Upgrade Required"
+                } else {
+                    "Bad Request"
+                },
+                "text/plain; charset=utf-8",
+                CachePolicy::Revalidate,
+                body.len(),
+                &[],
+            );
+            write_all(&mut stream, &head, body.as_bytes());
+            on_event(HostEvent::Served {
+                method: req.method.clone(),
+                path: req.path.clone(),
+                status,
+            });
+            return;
+        }
+    }
+
+    match route(&req, &state.content, &state.client, &state.documents, peer) {
         Route::Json {
             status,
             reason,
@@ -399,6 +965,30 @@ fn handle_connection<F: Fn(HostEvent)>(mut stream: TcpStream, state: &ServerStat
                     status,
                 }),
             }
+        }
+        Route::Document { body } => {
+            // Revalidated, never cached as immutable: a pane document carries
+            // that pane's own session token, and the pane it belongs to may be
+            // closed and reopened within one process lifetime. The same policy
+            // the client's own `index.html` gets.
+            let head = http::response_head(
+                200,
+                "OK",
+                "text/html; charset=utf-8",
+                CachePolicy::Revalidate,
+                body.len(),
+                &[],
+            );
+            write_all(
+                &mut stream,
+                &head,
+                if head_only { &[] } else { body.as_bytes() },
+            );
+            on_event(HostEvent::Served {
+                method: req.method.clone(),
+                path: req.path.clone(),
+                status: 200,
+            });
         }
         Route::Static { rel_path } => {
             let root = state.client_root.as_ref();
@@ -564,6 +1154,149 @@ template_path = \"assets/entities/alliance_cruiser.toml\"
         http::parse_request(head).expect("well-formed head")
     }
 
+    /// A well-formed WebSocket upgrade head, with `extra` lines spliced in.
+    fn upgrade_head(path: &str, lines: &[&str]) -> String {
+        let mut head = format!("GET {path} HTTP/1.1\r\nHost: 192.168.1.5:8080\r\n");
+        for line in lines {
+            head.push_str(line);
+            head.push_str("\r\n");
+        }
+        head.push_str("\r\n");
+        head
+    }
+
+    const WS_LINES: &[&str] = &[
+        "Upgrade: websocket",
+        "Connection: Upgrade",
+        "Sec-WebSocket-Version: 13",
+        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+    ];
+
+    #[test]
+    fn a_well_formed_upgrade_on_a_claimed_path_hands_the_key_over() {
+        let req = request(&upgrade_head("/v1/join", WS_LINES));
+        assert_eq!(
+            websocket_upgrade(&req, true),
+            UpgradeVerdict::WebSocket {
+                key: "dGhlIHNhbXBsZSBub25jZQ==".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn an_upgrade_header_on_an_unclaimed_path_is_still_just_a_file_request() {
+        // A proxy or a browser extension may add an `Upgrade` header to an
+        // ordinary GET. Nothing about the bundle changes because it did.
+        let req = request(&upgrade_head("/index.html", WS_LINES));
+        assert_eq!(websocket_upgrade(&req, false), UpgradeVerdict::Http);
+        // …and a host with no handler installed claims nothing at all, so even
+        // the join path routes as HTTP and 404s out of the static tree.
+        let req = request(&upgrade_head("/v1/join", WS_LINES));
+        assert_eq!(websocket_upgrade(&req, false), UpgradeVerdict::Http);
+    }
+
+    #[test]
+    fn a_plain_get_of_the_join_endpoint_is_told_what_it_is_for() {
+        // The worker's own 426 rather than a 404 out of the bundle: a caller
+        // that has misunderstood the endpoint learns which mistake it made.
+        let req = request("GET /v1/join HTTP/1.1\r\nHost: x\r\n\r\n");
+        assert_eq!(
+            websocket_upgrade(&req, true),
+            UpgradeVerdict::Refused {
+                status: 426,
+                reason: "expected-websocket-upgrade"
+            }
+        );
+    }
+
+    #[test]
+    fn a_malformed_upgrade_is_a_clean_400_and_never_a_handshake_that_stalls() {
+        // Each of these reached `tungstenite` would be a socket sitting waiting
+        // for bytes that are not coming, on a thread nothing reclaims. They are
+        // refused before the stream is handed anywhere.
+        let cases: [(&[&str], &str); 4] = [
+            (
+                &[
+                    "Upgrade: websocket",
+                    "Sec-WebSocket-Version: 13",
+                    "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+                ],
+                "upgrade-without-connection-upgrade",
+            ),
+            (
+                &[
+                    "Upgrade: websocket",
+                    "Connection: Upgrade",
+                    "Sec-WebSocket-Version: 8",
+                    "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+                ],
+                "unsupported-websocket-version",
+            ),
+            (
+                &[
+                    "Upgrade: websocket",
+                    "Connection: Upgrade",
+                    "Sec-WebSocket-Version: 13",
+                ],
+                "missing-websocket-key",
+            ),
+            (
+                &[
+                    "Upgrade: websocket",
+                    "Connection: Upgrade",
+                    "Sec-WebSocket-Version: 13",
+                    "Sec-WebSocket-Key: short",
+                ],
+                "missing-websocket-key",
+            ),
+        ];
+        for (lines, reason) in cases {
+            let req = request(&upgrade_head("/v1/join", lines));
+            assert_eq!(
+                websocket_upgrade(&req, true),
+                UpgradeVerdict::Refused {
+                    status: 400,
+                    reason
+                },
+                "{lines:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_header_tokens_are_read_the_way_browsers_write_them() {
+        // `Connection: keep-alive, Upgrade` is what a real browser sends, and a
+        // whole-value comparison would refuse every genuine client. Case is
+        // likewise not a browser's promise.
+        let req = request(&upgrade_head(
+            "/v1/join",
+            &[
+                "Upgrade: WebSocket",
+                "Connection: keep-alive, Upgrade",
+                "Sec-WebSocket-Version: 13",
+                "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+            ],
+        ));
+        assert!(matches!(
+            websocket_upgrade(&req, true),
+            UpgradeVerdict::WebSocket { .. }
+        ));
+    }
+
+    #[test]
+    fn an_upgrade_that_is_not_a_get_is_refused_rather_than_upgraded() {
+        let mut head = upgrade_head("/v1/join", WS_LINES);
+        head = head.replacen("GET", "POST", 1);
+        let req = request(&head);
+        assert_eq!(
+            websocket_upgrade(&req, true),
+            UpgradeVerdict::Refused {
+                status: 400,
+                reason: "upgrade-must-be-get"
+            }
+        );
+    }
+
     fn matching_stamp_query() -> String {
         format!("protocol={PROTOCOL_VERSION}&content_id=phoenix-base&content_epoch=1")
     }
@@ -626,6 +1359,8 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
             &request("GET /host/stamp.json HTTP/1.1\r\n"),
             &content,
             &ClientSource::Hosted,
+            &HostedDocuments::default(),
+            PeerOrigin::Loopback,
         );
         match r {
             Route::Json { status, body, .. } => {
@@ -645,7 +1380,13 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
             "GET /host/manifest.json?{} HTTP/1.1\r\n",
             matching_stamp_query()
         );
-        match route(&request(&head), &content, &ClientSource::Hosted) {
+        match route(
+            &request(&head),
+            &content,
+            &ClientSource::Hosted,
+            &HostedDocuments::default(),
+            PeerOrigin::Loopback,
+        ) {
             Route::Json {
                 status,
                 body,
@@ -669,7 +1410,13 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
             "GET /host/manifest.json?protocol={}&content_id=phoenix-base&content_epoch=1 HTTP/1.1\r\n",
             PROTOCOL_VERSION + 7
         );
-        match route(&request(&head), &content, &ClientSource::Hosted) {
+        match route(
+            &request(&head),
+            &content,
+            &ClientSource::Hosted,
+            &HostedDocuments::default(),
+            PeerOrigin::Loopback,
+        ) {
             Route::Json {
                 status,
                 body,
@@ -695,6 +1442,8 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
             &request("GET /host/manifest.json HTTP/1.1\r\n"),
             &content,
             &ClientSource::Hosted,
+            &HostedDocuments::default(),
+            PeerOrigin::Loopback,
         ) {
             Route::Json {
                 status, refusal, ..
@@ -714,7 +1463,9 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
             route(
                 &request("GET /index.html HTTP/1.1\r\n"),
                 &content,
-                &ClientSource::Hosted
+                &ClientSource::Hosted,
+                &HostedDocuments::default(),
+                PeerOrigin::Loopback,
             ),
             Route::NotFound { .. }
         ));
@@ -728,11 +1479,208 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
             dir: "dist".to_string(),
         };
         assert_eq!(
-            route(&request("GET / HTTP/1.1\r\n"), &content, &bundled),
+            route(
+                &request("GET / HTTP/1.1\r\n"),
+                &content,
+                &bundled,
+                &HostedDocuments::default(),
+                PeerOrigin::Loopback,
+            ),
             Route::Static {
                 rel_path: "index.html".to_string()
             }
         );
+    }
+
+    #[test]
+    fn a_document_the_host_publishes_itself_is_served_ahead_of_the_bundle() {
+        // Issue #1122's pane document: the shipped client page with two scripts
+        // injected, existing only in this process's memory, arriving from this
+        // host at the client directory's own depth so every relative URL in it
+        // resolves exactly as it does for a phone.
+        let fx = Fixture::new("documents", MANIFEST);
+        let content = load_content(&fx.path(), "assets/scenarios.toml").unwrap();
+        let bundled = ClientSource::Bundled {
+            dir: "dist".to_string(),
+        };
+        let documents = HostedDocuments::default();
+        assert!(documents.is_empty());
+        documents.publish("/client/pane-0.html", "<html>pane</html>".to_string());
+        assert_eq!(documents.len(), 1);
+
+        assert_eq!(
+            route(
+                &request("GET /client/pane-0.html HTTP/1.1\r\n"),
+                &content,
+                &bundled,
+                &documents,
+                PeerOrigin::Loopback,
+            ),
+            Route::Document {
+                body: "<html>pane</html>".to_string()
+            }
+        );
+        // Everything else still routes to the bundle, unchanged.
+        assert_eq!(
+            route(
+                &request("GET /client/index.html HTTP/1.1\r\n"),
+                &content,
+                &bundled,
+                &documents,
+                PeerOrigin::Loopback,
+            ),
+            Route::Static {
+                rel_path: "client/index.html".to_string()
+            }
+        );
+
+        documents.withdraw("/client/pane-0.html");
+        assert!(matches!(
+            route(
+                &request("GET /client/pane-0.html HTTP/1.1\r\n"),
+                &content,
+                &bundled,
+                &documents,
+                PeerOrigin::Loopback,
+            ),
+            Route::Static { .. }
+        ));
+    }
+
+    #[test]
+    fn a_hosted_document_is_never_served_to_a_peer_that_is_not_this_machine() {
+        // The finding this gate answers. `phoenix-host` binds 0.0.0.0:8080 by
+        // default, with no TLS and no authentication — that is the shape PRD
+        // #855 wanted, because the audience is phones on a LAN. A pane's own
+        // console page is not for that audience: it belongs to a live
+        // participant on this machine, and a pane always connects from here.
+        //
+        // The bundle and the two version-pin endpoints stay LAN-open, which is
+        // their job, and this test says so rather than leaving it implied.
+        let fx = Fixture::new("documents-remote", MANIFEST);
+        let content = load_content(&fx.path(), "assets/scenarios.toml").unwrap();
+        let bundled = ClientSource::Bundled {
+            dir: "dist".to_string(),
+        };
+        let documents = HostedDocuments::default();
+        documents.publish("/client/pane-0-abcd.html", "<html>pane</html>".to_string());
+
+        let pane_request = request("GET /client/pane-0-abcd.html HTTP/1.1\r\n");
+        let remote = route(
+            &pane_request,
+            &content,
+            &bundled,
+            &documents,
+            PeerOrigin::Remote,
+        );
+        assert!(
+            !matches!(remote, Route::Document { .. }),
+            "a LAN caller must not be handed a pane's document: {remote:?}"
+        );
+        // And it is refused the way any unknown path is, so the refusal does
+        // not even confirm the document exists. (`dist/` holds no such file, so
+        // the socket loop answers this Static route 404.)
+        assert_eq!(
+            remote,
+            Route::Static {
+                rel_path: "client/pane-0-abcd.html".to_string()
+            }
+        );
+
+        // The same request from this machine is served, so the gate is about
+        // the peer and nothing else.
+        assert!(matches!(
+            route(
+                &pane_request,
+                &content,
+                &bundled,
+                &documents,
+                PeerOrigin::Loopback
+            ),
+            Route::Document { .. }
+        ));
+
+        // The LAN keeps everything it is meant to have.
+        for path in [STAMP_PATH, "/client/index.html"] {
+            let r = route(
+                &request(&format!("GET {path} HTTP/1.1\r\n")),
+                &content,
+                &bundled,
+                &documents,
+                PeerOrigin::Remote,
+            );
+            assert!(
+                !matches!(r, Route::NotFound { .. }),
+                "{path} is what this host exists to serve to a phone: {r:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_peer_address_is_loopback_only_when_it_really_is() {
+        use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+        let at = |ip: IpAddr| SocketAddr::new(ip, 51234);
+        assert_eq!(
+            peer_origin(Some(at(IpAddr::V4(Ipv4Addr::LOCALHOST)))),
+            PeerOrigin::Loopback
+        );
+        // The whole 127/8 block, not just .0.0.1.
+        assert_eq!(
+            peer_origin(Some(at(IpAddr::V4(Ipv4Addr::new(127, 3, 2, 1))))),
+            PeerOrigin::Loopback
+        );
+        assert_eq!(
+            peer_origin(Some(at(IpAddr::V6(Ipv6Addr::LOCALHOST)))),
+            PeerOrigin::Loopback
+        );
+        // A dual-stack listener reports an IPv4 loopback connection like this,
+        // and `Ipv6Addr::is_loopback` says false for it — so a pane on an
+        // IPv6-bound host would be refused its own document without this arm.
+        assert_eq!(
+            peer_origin(Some(at(IpAddr::V6(Ipv4Addr::LOCALHOST.to_ipv6_mapped())))),
+            PeerOrigin::Loopback
+        );
+
+        assert_eq!(
+            peer_origin(Some(at(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 5))))),
+            PeerOrigin::Remote
+        );
+        assert_eq!(
+            peer_origin(Some(at(IpAddr::V6(Ipv6Addr::new(
+                0x2001, 0xdb8, 0, 0, 0, 0, 0, 1
+            ))))),
+            PeerOrigin::Remote
+        );
+        // "I could not tell" is Remote: a gate that opened on an unknown peer
+        // would be no gate.
+        assert_eq!(peer_origin(None), PeerOrigin::Remote);
+    }
+
+    #[test]
+    fn the_version_pin_endpoints_cannot_be_shadowed_by_a_published_document() {
+        // A host publishes its own documents; it does not get to replace the
+        // compatibility handshake with one. The stamp and the manifest are
+        // matched before anything else in `route` for exactly this reason.
+        let fx = Fixture::new("shadow", MANIFEST);
+        let content = load_content(&fx.path(), "assets/scenarios.toml").unwrap();
+        let documents = HostedDocuments::default();
+        documents.publish(STAMP_PATH, "<html>not the stamp</html>".to_string());
+        documents.publish(MANIFEST_PATH, "<html>not the manifest</html>".to_string());
+        for path in [STAMP_PATH, MANIFEST_PATH] {
+            assert!(
+                matches!(
+                    route(
+                        &request(&format!("GET {path} HTTP/1.1\r\n")),
+                        &content,
+                        &ClientSource::Hosted,
+                        &documents,
+                        PeerOrigin::Loopback,
+                    ),
+                    Route::Json { .. }
+                ),
+                "{path} must stay the version pin's"
+            );
+        }
     }
 
     #[test]
@@ -746,7 +1694,9 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
             route(
                 &request("GET /../../etc/passwd HTTP/1.1\r\n"),
                 &content,
-                &bundled
+                &bundled,
+                &HostedDocuments::default(),
+                PeerOrigin::Loopback,
             ),
             Route::NotFound { .. }
         ));
@@ -760,7 +1710,9 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
             route(
                 &request("POST /host/manifest.json HTTP/1.1\r\n"),
                 &content,
-                &ClientSource::Hosted
+                &ClientSource::Hosted,
+                &HostedDocuments::default(),
+                PeerOrigin::Loopback,
             ),
             Route::MethodNotAllowed
         );
@@ -773,7 +1725,13 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
         let head = format!(
             "GET /host/manifest.json HTTP/1.1\r\n{CLIENT_STAMP_HEADER}: {PROTOCOL_VERSION}/phoenix-base/1\r\n"
         );
-        match route(&request(&head), &content, &ClientSource::Hosted) {
+        match route(
+            &request(&head),
+            &content,
+            &ClientSource::Hosted,
+            &HostedDocuments::default(),
+            PeerOrigin::Loopback,
+        ) {
             Route::Json { status, .. } => assert_eq!(status, 200),
             other => panic!("expected JSON, got {other:?}"),
         }

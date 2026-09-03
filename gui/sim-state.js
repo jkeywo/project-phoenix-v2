@@ -86,6 +86,7 @@ export class ClientSimState {
     const stationHosts = preserveAuthorityProjection ? this.stationHosts : {};
     const stationHealth = preserveAuthorityProjection ? this.stationHealth : {};
     const stationImportance = preserveAuthorityProjection ? this.stationImportance : {};
+    const stationPuppets = preserveAuthorityProjection ? this.stationPuppets : {};
     /** Static world snapshot { entities: [EntitySnapshot], scenario_title, scenario_description } */
     this.world = defaultWorld();
     /** 'Auto' | 'Manual' */
@@ -142,6 +143,10 @@ export class ClientSimState {
      *  Welcome ship_config.system_console_families. Every owned System has an
      *  entry; the client never infers presentation from its id spelling. */
     this.systemConsoleFamilies = {};
+    /** Authoritative System id → authored System kind projection, populated
+     *  from Welcome ship_config.system_kinds. Command surfaces use this to
+     *  select exact fine-System owners without parsing instance-id spelling. */
+    this.systemKinds = {};
     /** Authoritative reserved/aggregate blackboard key → Console Family
      *  projection. Kept separate because these keys are not Systems and convey
      *  no ownership or command authority. */
@@ -169,6 +174,8 @@ export class ClientSimState {
      * importance has resolved simply drops out of the map.
      */
     this.stationImportance = stationImportance;
+    /** Active GM takeover status by Station id, rebuilt from SimState. */
+    this.stationPuppets = stationPuppets;
     /** Per-system control source ("Human" or "Ai"), populated from SimSnapshot. */
     this.controlSources = controlSources;
     /** Per-system/reserved-channel blackboard mirror, keyed by wire id.
@@ -208,8 +215,10 @@ export class ClientSimState {
      *  a hull that omits the key looks the same as one that authors it. */
     this.hostileArcColor = [1, 0.3, 0.3, 0.07];
     // ── Mirror-only UI fields formerly hand-maintained by client.html (#819) ──
-    /** Sensors console target uuid. Set locally by set_sensors_target (the
-     *  action-map mutate patch lands here), cleared when the entity despawns. */
+    /** Legacy Sensors target mirror retained for flat console-state inputs.
+     *  Shipped selection routes never write it: the authoritative Sensors
+     *  blackboard's `science_target_uuid` drives live consoles. If a legacy
+     *  fixture populates this mirror, entity despawn still clears it. */
     this.sensorsTarget = null;
     /** Authoritative server blips from the latest WeaponsUpdate, when sent. */
     this.weaponsBlips = [];
@@ -339,6 +348,10 @@ export class ClientSimState {
         // Missing on older protocol-compatible hosts, where the console
         // builders retain their station-rating fallback.
         this.controlSources = snap.control_sources || {};
+        this.stationPuppets = Object.fromEntries(
+          (snap.station_puppets || []).filter(Boolean)
+            .map(entry => [entry.station, entry]),
+        );
         // Update live positions/hull/shield of known entities IN PLACE — never append.
         for (const st of (snap.entity_states || [])) {
           const entity = this.world.entities.find(e => e.uuid === st.uuid);
@@ -403,6 +416,7 @@ export class ClientSimState {
         this.stationRatings = d.station_ratings || {};
         this.stationSystems = sc.station_systems || {};
         this.systemConsoleFamilies = sc.system_console_families || {};
+        this.systemKinds = sc.system_kinds || {};
         this.blackboardConsoleFamilies = sc.blackboard_console_families || {};
         // Anonymous eligibility projection (issue #1103): per station → per
         // rating → the assist-functions that station forces manual. Hull-derived
@@ -782,7 +796,7 @@ export class ClientSimState {
 
 // ── Outbound ClientMessage builders ─────────────────────────────────────────
 // Each returns a plain `{ type, data? }` object matching the serde wire
-// format; callers JSON.stringify before sending over PeerJS.
+// format; callers JSON.stringify before sending over the crew transport.
 
 export function redAlertSetMessage(active) {
   return {

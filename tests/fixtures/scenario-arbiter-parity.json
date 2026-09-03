@@ -1,0 +1,265 @@
+{
+  "_comment": [
+    "Shared parity case table for the first-valid-wins pre-scenario arbiter.",
+    "",
+    "There are two implementations of one rule set: gui/scenario-arbiter.js (the",
+    "browser host, issue #755) and src/lobby/scenario_arbiter.rs (the native host,",
+    "issue #1326, written as a transcription of the JS rather than a second",
+    "design). Nothing but prose held them together until this file: each side had",
+    "its own hand-written cases, so a rule could drift on one side and every test",
+    "would stay green. This table is consumed by BOTH:",
+    "",
+    "  * tests/client/scenario-arbiter-parity.test.js  (vitest, drives the JS)",
+    "  * src/lobby/scenario_arbiter.rs `mod tests`     (cargo, drives the Rust)",
+    "",
+    "Add a case here, not to either consumer. A behaviour only one side can",
+    "satisfy is a bug in that side, not a reason to fork the table.",
+    "",
+    "`outcome` is the JS's own outcome string, lowercased: accepted | ignored |",
+    "rejected. `selection` is the selection the call RETURNS — which on ignored",
+    "and rejected is the held one, normalised, never a half-write.",
+    "",
+    "Note (recorded rather than fixed): ServerMessage::ScenarioCatalog carries no",
+    "`active_packs` field, so a native host's catalogue message cannot state the",
+    "mod packs a browser host's synthesized one does. It is inert today — a native",
+    "host applies no packs — so this is a note for slice #1328, not a gap the",
+    "table can pin."
+  ],
+  "catalog": [
+    {
+      "id": "default",
+      "world": "assets/worlds/default.toml",
+      "label": "Starbase Alpha",
+      "ships": [
+        { "template_path": "assets/entities/alliance_cruiser.toml", "label": "Cruiser" },
+        { "template_path": "assets/entities/alliance_destroyer.toml", "label": "Destroyer" }
+      ]
+    },
+    {
+      "id": "combat_test",
+      "world": "assets/worlds/combat_test.toml",
+      "label": "Combat Test",
+      "ships": [
+        { "template_path": "assets/entities/alliance_battleship.toml", "label": "Battleship" }
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "name": "the first valid scenario request locks it and leaves the hull open",
+      "call": "select_scenario",
+      "selection": { "scenario_id": null, "template_path": null },
+      "argument": "default",
+      "outcome": "accepted",
+      "selection_after": { "scenario_id": "default", "template_path": null }
+    },
+    {
+      "name": "a scenario id the catalogue does not list is rejected and locks nothing",
+      "call": "select_scenario",
+      "selection": { "scenario_id": null, "template_path": null },
+      "argument": "does_not_exist",
+      "outcome": "rejected",
+      "selection_after": { "scenario_id": null, "template_path": null }
+    },
+    {
+      "name": "a second scenario request is ignored — first valid wins",
+      "call": "select_scenario",
+      "selection": { "scenario_id": "default", "template_path": null },
+      "argument": "combat_test",
+      "outcome": "ignored",
+      "selection_after": { "scenario_id": "default", "template_path": null }
+    },
+    {
+      "name": "re-lock clearing: accepting a scenario clears any hull held beside it",
+      "call": "select_scenario",
+      "selection": {
+        "scenario_id": null,
+        "template_path": "assets/entities/alliance_cruiser.toml"
+      },
+      "argument": "combat_test",
+      "outcome": "accepted",
+      "selection_after": { "scenario_id": "combat_test", "template_path": null }
+    },
+    {
+      "name": "re-lock clearing does NOT happen on an ignored scenario request",
+      "call": "select_scenario",
+      "selection": {
+        "scenario_id": "default",
+        "template_path": "assets/entities/alliance_cruiser.toml"
+      },
+      "argument": "combat_test",
+      "outcome": "ignored",
+      "selection_after": {
+        "scenario_id": "default",
+        "template_path": "assets/entities/alliance_cruiser.toml"
+      }
+    },
+    {
+      "name": "re-lock clearing does NOT happen on a rejected scenario request",
+      "call": "select_scenario",
+      "selection": {
+        "scenario_id": null,
+        "template_path": "assets/entities/alliance_cruiser.toml"
+      },
+      "argument": "does_not_exist",
+      "outcome": "rejected",
+      "selection_after": {
+        "scenario_id": null,
+        "template_path": "assets/entities/alliance_cruiser.toml"
+      }
+    },
+    {
+      "name": "an empty scenario id is rejected rather than locked",
+      "call": "select_scenario",
+      "selection": { "scenario_id": null, "template_path": null },
+      "argument": "",
+      "outcome": "rejected",
+      "selection_after": { "scenario_id": null, "template_path": null }
+    },
+    {
+      "name": "an empty held scenario id is not a lock, so the next request is accepted",
+      "call": "select_scenario",
+      "selection": { "scenario_id": "", "template_path": null },
+      "argument": "default",
+      "outcome": "accepted",
+      "selection_after": { "scenario_id": "default", "template_path": null }
+    },
+    {
+      "name": "an empty held scenario id normalises away on a rejected request",
+      "call": "select_scenario",
+      "selection": { "scenario_id": "", "template_path": "" },
+      "argument": "does_not_exist",
+      "outcome": "rejected",
+      "selection_after": { "scenario_id": null, "template_path": null }
+    },
+    {
+      "name": "a hull the locked scenario offers completes the selection",
+      "call": "select_player_ship",
+      "selection": { "scenario_id": "default", "template_path": null },
+      "argument": "assets/entities/alliance_destroyer.toml",
+      "outcome": "accepted",
+      "selection_after": {
+        "scenario_id": "default",
+        "template_path": "assets/entities/alliance_destroyer.toml"
+      }
+    },
+    {
+      "name": "a hull another scenario offers is rejected — hulls are scoped (#754 AC4)",
+      "call": "select_player_ship",
+      "selection": { "scenario_id": "default", "template_path": null },
+      "argument": "assets/entities/alliance_battleship.toml",
+      "outcome": "rejected",
+      "selection_after": { "scenario_id": "default", "template_path": null }
+    },
+    {
+      "name": "a hull before any scenario is locked is rejected",
+      "call": "select_player_ship",
+      "selection": { "scenario_id": null, "template_path": null },
+      "argument": "assets/entities/alliance_cruiser.toml",
+      "outcome": "rejected",
+      "selection_after": { "scenario_id": null, "template_path": null }
+    },
+    {
+      "name": "a hull against an empty held scenario id is rejected, not accepted",
+      "call": "select_player_ship",
+      "selection": { "scenario_id": "", "template_path": null },
+      "argument": "assets/entities/alliance_cruiser.toml",
+      "outcome": "rejected",
+      "selection_after": { "scenario_id": null, "template_path": null }
+    },
+    {
+      "name": "a second hull request is ignored — first valid wins on the hull too",
+      "call": "select_player_ship",
+      "selection": {
+        "scenario_id": "default",
+        "template_path": "assets/entities/alliance_cruiser.toml"
+      },
+      "argument": "assets/entities/alliance_destroyer.toml",
+      "outcome": "ignored",
+      "selection_after": {
+        "scenario_id": "default",
+        "template_path": "assets/entities/alliance_cruiser.toml"
+      }
+    },
+    {
+      "name": "an empty held hull is not a lock, so the next valid hull is accepted",
+      "call": "select_player_ship",
+      "selection": { "scenario_id": "default", "template_path": "" },
+      "argument": "assets/entities/alliance_cruiser.toml",
+      "outcome": "accepted",
+      "selection_after": {
+        "scenario_id": "default",
+        "template_path": "assets/entities/alliance_cruiser.toml"
+      }
+    },
+    {
+      "name": "an empty hull request is rejected — no entry offers it",
+      "call": "select_player_ship",
+      "selection": { "scenario_id": "default", "template_path": null },
+      "argument": "",
+      "outcome": "rejected",
+      "selection_after": { "scenario_id": "default", "template_path": null }
+    },
+    {
+      "name": "a hull against a scenario id the catalogue no longer lists is rejected",
+      "call": "select_player_ship",
+      "selection": { "scenario_id": "retired_scenario", "template_path": null },
+      "argument": "assets/entities/alliance_cruiser.toml",
+      "outcome": "rejected",
+      "selection_after": { "scenario_id": "retired_scenario", "template_path": null }
+    }
+  ],
+  "derived": [
+    {
+      "name": "nothing locked is incomplete and resolves no world",
+      "selection": { "scenario_id": null, "template_path": null },
+      "is_complete": false,
+      "world_path": null,
+      "curated_ships": []
+    },
+    {
+      "name": "a scenario alone is incomplete but already resolves its world and hulls",
+      "selection": { "scenario_id": "default", "template_path": null },
+      "is_complete": false,
+      "world_path": "assets/worlds/default.toml",
+      "curated_ships": [
+        "assets/entities/alliance_cruiser.toml",
+        "assets/entities/alliance_destroyer.toml"
+      ]
+    },
+    {
+      "name": "both halves locked is complete",
+      "selection": {
+        "scenario_id": "combat_test",
+        "template_path": "assets/entities/alliance_battleship.toml"
+      },
+      "is_complete": true,
+      "world_path": "assets/worlds/combat_test.toml",
+      "curated_ships": ["assets/entities/alliance_battleship.toml"]
+    },
+    {
+      "name": "empty strings are not locks, so this is incomplete and resolves nothing",
+      "selection": { "scenario_id": "", "template_path": "" },
+      "is_complete": false,
+      "world_path": null,
+      "curated_ships": []
+    },
+    {
+      "name": "an empty hull beside a real scenario is incomplete",
+      "selection": { "scenario_id": "default", "template_path": "" },
+      "is_complete": false,
+      "world_path": "assets/worlds/default.toml",
+      "curated_ships": [
+        "assets/entities/alliance_cruiser.toml",
+        "assets/entities/alliance_destroyer.toml"
+      ]
+    },
+    {
+      "name": "an unlisted scenario id resolves no world and no hulls",
+      "selection": { "scenario_id": "retired_scenario", "template_path": null },
+      "is_complete": false,
+      "world_path": null,
+      "curated_ships": []
+    }
+  ]
+}

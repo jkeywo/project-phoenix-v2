@@ -4,9 +4,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import '../../gui/components/ph-comms-contact-list.js';
 
 function setup(opts) {
-  const sendAction = opts && opts.sendAction;
-  if (sendAction) {
-    window.sendAction = sendAction;
+  const activateSemanticAction = opts && opts.activateSemanticAction;
+  if (activateSemanticAction) {
+    window.activateSemanticAction = activateSemanticAction;
   }
   document.body.innerHTML = '<ph-comms-contact-list id="test-el"></ph-comms-contact-list>';
   const el = document.getElementById('test-el');
@@ -21,12 +21,12 @@ function queryText(host, sel) {
 describe('PhCommsContactList', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
-    delete window.sendAction;
+    delete window.activateSemanticAction;
   });
 
   afterEach(() => {
     document.body.innerHTML = '';
-    delete window.sendAction;
+    delete window.activateSemanticAction;
   });
 
   it('is defined and registered as a custom element', () => {
@@ -105,23 +105,28 @@ describe('PhCommsContactList', () => {
     expect(btn.disabled).toBe(false);
   });
 
-  it('clicking hail button on in-range contact calls sendAction with hail', () => {
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
+  it('clicking hail on a wire contact activates its UUID-scoped semantic action', () => {
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
     el.state = {
       contacts: [
-        { id: 'ent-42', name: 'Station Alpha', stance: 'friendly', in_range: true },
+        {
+          uuid: 'authoritative-42', id: 'legacy-42', name: 'Station Alpha',
+          stance: 'friendly', in_range: true,
+        },
       ],
     };
     const btn = el.shadowRoot.querySelector('.hail-btn');
     btn.click();
-    expect(sendAction).toHaveBeenCalledTimes(1);
-    expect(sendAction).toHaveBeenCalledWith('hail', { target_uuid: 'ent-42' });
+    expect(activateSemanticAction).toHaveBeenCalledTimes(1);
+    expect(activateSemanticAction).toHaveBeenCalledWith('comms.hail', {
+      source: 'control', detail: { target_uuid: 'authoritative-42' },
+    });
   });
 
-  it('clicking hail button on out-of-range contact does not call sendAction', () => {
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
+  it('clicking hail button on out-of-range contact does not activate an action', () => {
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
     el.state = {
       contacts: [
         { id: 'ent-99', name: 'Distant Ship', stance: 'neutral', in_range: false },
@@ -129,6 +134,6 @@ describe('PhCommsContactList', () => {
     };
     const btn = el.shadowRoot.querySelector('.hail-btn');
     btn.click();
-    expect(sendAction).not.toHaveBeenCalled();
+    expect(activateSemanticAction).not.toHaveBeenCalled();
   });
 });

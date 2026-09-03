@@ -11,8 +11,9 @@
  * The view (`mod-mode-view.js`) owns all IO: it reads the on-disk base files to
  * build the base-file map this workspace classifies against, resolves a composed
  * hull's fragment closure into extra members (#910), reads back an imported ZIP,
- * and drives export/import through `mod-pack-export.js`. This module only records
- * and reports — every method is synchronous and side-effect-free.
+ * and drives export/import through `mod-pack-export.js`. Imported workspaces also
+ * retain immutable raw archive/entry provenance while the semantic model is
+ * repaired. Every method remains synchronous and side-effect-free.
  */
 
 import { parse as tomlParse } from 'smol-toml';
@@ -21,6 +22,26 @@ import { crc32, PACK_FORMAT, MANIFEST_PATH, parsePackManifest } from './mod-pack
 const encoder = new TextEncoder();
 
 const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v));
+
+function cloneSourceEntry(entry) {
+  if (!entry || typeof entry.path !== 'string' || !(entry.bytes instanceof Uint8Array)) {
+    return null;
+  }
+  return {
+    path: entry.path,
+    pathBytes: entry.pathBytes instanceof Uint8Array ? Uint8Array.from(entry.pathBytes) : null,
+    bytes: Uint8Array.from(entry.bytes),
+    text: str(entry.text),
+  };
+}
+
+function cloneSourceArchive(source) {
+  if (!source || !(source.bytes instanceof Uint8Array) || !Array.isArray(source.entries)) {
+    return null;
+  }
+  const entries = source.entries.map(cloneSourceEntry).filter(Boolean);
+  return { bytes: Uint8Array.from(source.bytes), entries };
+}
 
 /**
  * Content digest used to detect base-file drift for the stale-patch warning.
@@ -68,7 +89,7 @@ function normalisePackMeta(pack) {
 export class ModPackWorkspace {
   constructor(initial = {}) {
     this._pack = normalisePackMeta(initial.pack);
-    /** @type {Array<{id:string, world:string, label?:string}>} */
+    /** @type {Array<{id:string, world:string, label?:string, ships?:string[]}>} */
     this._scenarios = [];
     /** @type {Map<string,{path:string,text:string,classification:string,baseDigest:string|null}>} */
     this._members = new Map();
@@ -87,6 +108,46 @@ export class ModPackWorkspace {
         });
       }
     }
+
+    // Imported source is immutable provenance, separate from the editable
+    // semantic model. It survives repairs (including deliberate removals) so
+    // callers can always inspect the exact bundle that produced this workspace.
+    this._sourceArchive = cloneSourceArchive(initial.sourceArchive);
+    this._sourceManifestState = this._findSourceEntry(MANIFEST_PATH)
+      ? this._manifestState()
+      : null;
+  }
+
+  _manifestState() {
+    // Imported content_epoch can span Rust's full i64 range and therefore be a
+    // BigInt. Preserve its type/value in the provenance equality key instead of
+    // either throwing here or coercing it through a lossy Number.
+    return JSON.stringify(
+      { pack: this.getPack(), scenarios: this.getScenarios() },
+      (_key, value) => (
+        typeof value === 'bigint' ? { __phoenixTomlInteger: value.toString() } : value
+      ),
+    );
+  }
+
+  _findSourceEntry(path) {
+    const entries = this._sourceArchive?.entries || [];
+    // `readStoreZipArchive().files` has last-entry-wins map semantics, so use
+    // the corresponding final raw entry when a malformed source repeats a path.
+    for (let i = entries.length - 1; i >= 0; i -= 1) {
+      if (entries[i].path === path) return entries[i];
+    }
+    return null;
+  }
+
+  /** Exact imported archive bytes and ordered entries, defensively copied. */
+  getSourceArchive() {
+    return cloneSourceArchive(this._sourceArchive);
+  }
+
+  /** Exact imported bytes/text for one source entry, even after it is removed. */
+  getSourceEntry(path) {
+    return cloneSourceEntry(this._findSourceEntry(path));
   }
 
   // ── Pack identity ([pack] header) ─────────────────────────────────────────
@@ -125,11 +186,20 @@ export class ModPackWorkspace {
   _appendScenario(s) {
     const entry = { id: str(s?.id), world: str(s?.world) };
     if (typeof s?.label === 'string' && s.label.length > 0) entry.label = s.label;
+    if (s?.ships !== undefined) {
+      if (!Array.isArray(s.ships) || s.ships.some((ship) => typeof ship !== 'string')) {
+        throw new Error('a scenario ships list must contain only template-path strings');
+      }
+      if (s.ships.length > 0) entry.ships = [...s.ships];
+    }
     this._scenarios.push(entry);
   }
 
   getScenarios() {
-    return this._scenarios.map((s) => ({ ...s }));
+    return this._scenarios.map((s) => ({
+      ...s,
+      ...(Array.isArray(s.ships) ? { ships: [...s.ships] } : {}),
+    }));
   }
 
   setScenarios(list) {
@@ -183,6 +253,16 @@ export class ModPackWorkspace {
     return m ? { ...m } : null;
   }
 
+  /** Replace one imported/member source text without rewriting its identity or
+   * base provenance. Exact source bytes remain available separately through
+   * `getSourceEntry`; export reuses them only when this text is unchanged. */
+  setMemberText(path, text) {
+    const member = this._members.get(path);
+    if (!member) return false;
+    member.text = str(text);
+    return true;
+  }
+
   /** Members in insertion order (which is archive order after an import). */
   getMembers() {
     return [...this._members.values()].map((m) => ({ ...m }));
@@ -231,8 +311,10 @@ export class ModPackWorkspace {
   toExportInput() {
     const files = [];
     for (const m of this._members.values()) {
+      const source = this._findSourceEntry(m.path);
+      const sourceBytes = source?.text === m.text ? Uint8Array.from(source.bytes) : undefined;
       if (m.path.endsWith('.rhai')) {
-        files.push({ path: m.path, text: m.text });
+        files.push({ path: m.path, text: m.text, sourceBytes });
         continue;
       }
       let parsed;
@@ -241,9 +323,17 @@ export class ModPackWorkspace {
       } catch {
         parsed = undefined;
       }
-      files.push({ path: m.path, text: m.text, parsed });
+      files.push({ path: m.path, text: m.text, parsed, sourceBytes });
     }
-    return { pack: this.getPack(), scenarios: this.getScenarios(), files };
+    const input = { pack: this.getPack(), scenarios: this.getScenarios(), files };
+    const manifestSource = this._findSourceEntry(MANIFEST_PATH);
+    if (manifestSource && this._sourceManifestState === this._manifestState()) {
+      input.manifestSource = {
+        text: manifestSource.text,
+        bytes: Uint8Array.from(manifestSource.bytes),
+      };
+    }
+    return input;
   }
 
   // ── Import ────────────────────────────────────────────────────────────────
@@ -253,14 +343,16 @@ export class ModPackWorkspace {
    * `{ path: text }` map). The manifest seeds pack metadata + scenarios; every
    * other entry becomes a member, classified against `baseFiles`. Members keep
    * the archive's insertion order, so re-exporting an unedited import produces
-   * BYTE-IDENTICAL archive bytes.
+   * BYTE-IDENTICAL archive bytes. `sourceArchive`, when supplied by the
+   * source-aware ZIP reader, remains available independently of later edits and
+   * lets unchanged manifest/member entries export with their exact bytes.
    */
-  static fromArchiveFiles(files, baseFiles = {}) {
+  static fromArchiveFiles(files, baseFiles = {}, sourceArchive = null) {
     const manifestText = files && files[MANIFEST_PATH];
     const { pack, scenarios } = manifestText
       ? parsePackManifest(manifestText)
       : { pack: null, scenarios: [] };
-    const ws = new ModPackWorkspace({ pack, scenarios });
+    const ws = new ModPackWorkspace({ pack, scenarios, sourceArchive });
     for (const path of Object.keys(files || {})) {
       if (path === MANIFEST_PATH) continue;
       ws.addMember({ path, text: files[path] }, baseFiles);

@@ -87,8 +87,8 @@ of the uploaded directory, so no dashboard configuration is needed for them.
       means something was unreachable.
 
 - [ ] **Leave `require_isolation` off.** Cross-origin isolation buys the current
-      single-threaded build nothing and would break the cross-origin PeerJS and
-      TURN fetches. It becomes a requirement only if the worker-thread spike in
+      single-threaded build nothing and would break the cross-origin rendezvous
+      socket and TURN fetches. It becomes a requirement only if the worker-thread spike in
       §5 says yes.
 
 The check is deliberately not a push gate: it talks to a live origin, so as a
@@ -144,7 +144,18 @@ promise. Everything below still needs doing.
       and a source that starts failing then costs a header line rather than the
       relay.
 - [ ] **Verify each worker by hand after any domain, origin or secret change.**
-      The failure is silent from the page's side, so check it from outside:
+      The failure is silent from the page's side, so check it from outside. The
+      whole recipe — this worker and the rendezvous one in §3a — is now a script
+      (issue #1113), which makes the judgements for you and exits non-zero when
+      one fails:
+
+      ```
+      node scripts/check-rendezvous.mjs \
+        --turn   https://phoenix-turn-credentials-demo.project-phoenix.workers.dev \
+        --origin https://pp-demo.kiwigamedesign.co.uk
+      ```
+
+      The `curl` it replaces, for when you want to look at the raw headers:
 
       ```
       curl -D - -o /dev/null -H "Origin: https://pp-demo.kiwigamedesign.co.uk" \
@@ -165,6 +176,115 @@ promise. Everything below still needs doing.
 - [ ] **Record what you deployed.** Note the date, the `ALLOWED_ORIGIN` value
       and which credential sources were configured, for each worker, here or in
       the deploy notes. The deployed values are otherwise invisible.
+
+---
+
+## 3a. The rendezvous workers — the same trap, worse consequences
+
+> **BLOCKING SINCE ISSUE #1112.** This service is not deployed, and PeerJS —
+> which used to be underneath it — is gone. Until the boxes below are ticked,
+> a deployed build has **no join path at all**: the viewscreen shows no code,
+> the diagnostics row says the service was lost, and no phone can reach the
+> host by any route. This is no longer an opt-in extra; it is the transport.
+
+`worker-rendezvous/` (issues #1111/#1112) is a **sibling** of `worker/`: same two-config
+pattern (`wrangler.toml` = `phoenix-rendezvous`, `wrangler.demo.toml` =
+`phoenix-rendezvous-demo`), same `ALLOWED_ORIGIN` var, same repo secrets for the
+deploy itself, and **no secrets of its own**. It is not a route on the TURN
+worker because it holds live state — the join-code registry, presence and the
+signalling relay live in a Durable Object.
+
+**Read §3 first, then read this sentence: for TURN a stale `ALLOWED_ORIGIN`
+degrades the connection; for rendezvous it means nobody can join at all.** There
+is no OpenRelay-shaped safety net here — a rendezvous service is not something a
+client can silently fall back to a free public copy of. Verification is the
+mitigation, so do not skip the health check.
+
+- [ ] **Decide the Durable Objects tier.** They are an account-plan decision, and
+      this is the repository's first use of any Cloudflare primitive beyond
+      Workers and Pages. Nothing deploys until the account allows them. Both
+      configs declare the class with `new_sqlite_classes` — the SQLite-backed
+      storage class, which works on the free tier as well as the paid one and is
+      Cloudflare's current default for a new class — so nothing here commits the
+      account to the paid path while this box is unticked. `new_classes`
+      (key-value-backed, paid-only) is the deliberate edit to make if the tier
+      decision goes the other way; changing it after a deploy is a migration,
+      not a config tweak.
+- [ ] **Deploy the dev worker** — manual, like the dev TURN worker, and no CI
+      step deploys it, which is half of how §3's drift happened:
+
+      ```
+      cd worker-rendezvous && npx wrangler deploy
+      ```
+- [ ] **Deploy the demo worker** alongside the demo build:
+
+      ```
+      cd worker-rendezvous && npx wrangler deploy --config wrangler.demo.toml
+      ```
+
+      Add the matching `cloudflare/wrangler-action@v3` step to
+      `.github/workflows/deploy-demo.yml` (`workingDirectory: worker-rendezvous`)
+      when the demo build starts using this route, together with a
+      sweep-and-verify patch of the service URL literal — the same treatment
+      `DEV_TURN_URL` already gets, for the same reason: the literal is baked into
+      more than one built file, so a hardcoded file list would miss one.
+
+      **That sweep does not exist yet**, and until it does a demo build's
+      rendezvous route points at the DEV worker. `deploy-demo.yml` patches
+      `DEV_TURN_URL` only. `gui/rendezvous-transport.js`'s comment above
+      `DEV_RENDEZVOUS_URL` says so; update both in the same change, or the next
+      agent trusts a CI guard that is not there.
+- [ ] **Verify each worker by hand after any origin change.** This service has a
+      health endpoint precisely because a WebSocket upgrade is awkward to curl
+      and an origin refusal is otherwise invisible from the page's side. Since
+      issue #1113 the whole contract — both workers — is a script, and it is
+      what a field session's preconditions ask you to run:
+
+      ```
+      node scripts/check-rendezvous.mjs \
+        --rendezvous https://phoenix-rendezvous-demo.project-phoenix.workers.dev \
+        --turn       https://phoenix-turn-credentials-demo.project-phoenix.workers.dev \
+        --origin     https://pp-demo.kiwigamedesign.co.uk
+      ```
+
+      Exit 0 means both contracts hold; 1 is a real finding; 2 means something
+      was unreachable. It asserts more than the eye does: TLS, the protocol
+      revision against this checkout's, the bundled join-code table version,
+      that a socket endpoint demands an upgrade, and — the one a human never
+      thinks to check — that an origin that is NOT ours is refused, because an
+      `ALLOWED_ORIGIN` of `"*"` passes every other test while letting anybody's
+      page register a host here.
+
+      The `curl` it replaces, for when you want the raw body:
+
+      ```
+      curl -s -H "Origin: https://pp-demo.kiwigamedesign.co.uk" \
+        https://phoenix-rendezvous-demo.project-phoenix.workers.dev/v1/health
+      ```
+
+      Expect `{"ok":true,…,"origin_allowed":true}`, with the `origin` field
+      echoing what you sent. `"origin_allowed":false` is the 2026-08 failure
+      class, caught before a player meets it.
+- [ ] **Run the check before every field session, not only after a deploy.** The
+      deployed value is invisible and drifts with nothing to notice; the whole
+      point of §3's story is that the repository was right and the edge was
+      wrong for weeks. `docs/acceptance/1113-networks.md` makes this its first
+      precondition for exactly that reason.
+- [ ] **Keep the two `ALLOWED_ORIGIN` lists in step with reality**, and **record
+      what you deployed** — date and value, per worker. Same reasoning as §3: a
+      worker only picks up `[vars]` on `wrangler deploy`.
+- [ ] **Do not look for an opt-in flag: there is not one any more.** #1111
+      shipped this route behind `?rendezvous`; #1112 retired PeerJS and with it
+      the flag. Both pages now reach for the service on every load.
+      `?rendezvous=<url>` survives as a service OVERRIDE — point a dev build at
+      a local `wrangler dev` — and the retired spellings (`?rendezvous`, `=on`,
+      `=off`) are ignored rather than honoured, so an old bookmark still opens
+      the game instead of dialling a host called "on".
+- [ ] **Expect a fresh code after a service blip.** A host that loses its record
+      re-registers on a backoff and is issued a NEW code, because the old record
+      really is gone and the letters on screen resolve to nothing. Anyone reading
+      a code aloud across the room has to re-read it. Keeping the SAME code
+      across a host drop needs persistence in the service and is issue #1115.
 
 ---
 
@@ -221,12 +341,105 @@ cargo build --release --features host --bin phoenix-host
 
 State this in any release notes, because the gap is not obvious from the name:
 
-- It serves assets, the content manifest, the catalogue and the version pin. It
-  does **not** run the simulation — the authoritative sim is still the browser
-  host (`server.html`) or `phoenix-headless`.
-- It does **not** do PeerJS signalling. Clients still reach the host through the
-  PeerJS cloud broker exactly as they do today.
-- It has no snapshot, save, or session surface.
+- With no `--world` it serves assets, the content manifest, the catalogue and
+  the version pin, and nothing else — the authoritative sim is then still the
+  browser host (`server.html`) or `phoenix-headless`. With `--world` (issue
+  #1121) it *is* the authoritative host and draws the viewscreen itself.
+- Since issue #1113 it **can** carry a crew of its own: `--rendezvous <URL>
+  --origin <URL>` registers it with the rendezvous service and browser clients
+  join over the service's WebSocket game relay, because a native process has no
+  WebRTC. It prints the typed code at startup. A `--world` host can
+  therefore be crewed by phones over the relay, by `--solo` (all Backfill), or
+  by local Ultralight panes (§4a) — and without the rendezvous flags nobody can
+  join and the host says so at boot, which is what `--solo` is for.
+- What it still does **not** do is WebRTC. Every crew member on a native host is
+  relayed, so the service carries their traffic for the whole mission rather
+  than only introducing them. That is a real cost difference from a browser
+  host, and the reason the relay's bounds are authored in
+  `assets/join/join-codes.toml` rather than assumed.
+- Its rendezvous socket **redials** if it dies (a Durable Object eviction, a
+  worker redeploy, a Wi-Fi blip), on the same backoff the browser host uses.
+  Expect a **new typed code** on the operator log when it comes back: the
+  old record died with the socket, so the letters already read out across the
+  room resolve to nothing. Anyone still connected is reported disconnected and
+  their stations flip to Backfill until they re-join with the new code. Keeping
+  the same code across a host drop needs persistence in the service and is
+  issue #1115's, on the browser side and this one alike.
+- Snapshot save/restore works (`tests/native_host_snapshot.rs`); there is no
+  operator-facing session surface for it yet.
+
+---
+
+## 4a. Ultralight local Station panes (issue #1122)
+
+`--pane <NAME>` opens a local bridge station in an embedded browser view inside
+the host process. It needs a build with the `ultralight` cargo feature, which
+**no CI job sets and none may ever set**: `ul-next-sys`'s build script downloads
+a proprietary ~100 MB SDK archive at build time.
+
+Keeping that true takes an arrangement, not just a default-off feature.
+`--all-features` enables it regardless, and the `test` job's clippy step asked
+for exactly that until issue #1122's review caught it. That step now names its
+features — every one `Cargo.toml` declares that **gates code**, except
+`ultralight` — and `AGENTS.md`'s local gate command mirrors the same list.
+`falling-skyway-sim-tests` is left out of both and costs nothing: its only use
+is `#[cfg_attr(not(feature = …), ignore)]` in `tests/headless_runner.rs`, so it
+flips 55 tests between run and ignored and compiles not one extra line. **A new
+cargo feature that gates code belongs in both lists**, or it is a feature
+nothing lints. Vellum does the same thing a different way: its engine job
+selects the workspace with `--exclude vellum-ultralight`, and type-checks the
+SDK half in a manual, non-required job.
+
+```
+node scripts/build-client.mjs            # a pane loads the BUILT bundle's page
+cargo build --release --features ultralight --bin phoenix-host
+./target/release/phoenix-host --client-dir dist \
+    --world assets/worlds/combat_test.toml --pane Ada --pane Grace
+```
+
+- [ ] **REPOINT THE `vellum-ultralight` DEPENDENCY BEFORE THIS BATCH MERGES.**
+      `Cargo.toml`'s `[workspace.dependencies]` currently reads
+      `vellum-ultralight = { git = "file:///C:/Coding/vellum", branch =
+      "phoenix-ultralight" }` — a **local clone on one Windows machine**, because
+      the vellum branch that carries the crate is not pushed yet. **CI cannot
+      resolve that line**: cargo fetches every git dependency during resolution,
+      optional or not, feature-gated or not, so an `ubuntu-latest` runner fails
+      at `cargo metadata` before it compiles anything. Expected on the issue
+      branch; a merge blocker.
+      The fix, once the vellum branch is pushed: change it to
+      `{ git = "https://github.com/jkeywo/vellum", rev = "<merged rev>" }` **and
+      bump the other six vellum revs to that same rev in the same diff**, because
+      issue #1184's rule is one vellum revision for the whole repository. A
+      comment in `Cargo.toml` says the same thing; this line exists because a
+      comment is not a gate.
+- [ ] **Decide whether a packaged release ships the Ultralight build at all.**
+      Today `deploy-demo.yml`'s `package-native-demo` builds
+      `--features host`, which has no Ultralight in it, so the published archive
+      is unaffected by any of this. Shipping panes means adding the SDK
+      download to that job and the redistributables to the archive — a
+      decision with a licence question attached (below), not a flag.
+- [ ] **Ultralight licence and redistributables.** The SDK is proprietary. The
+      download is a public, unauthenticated URL (`ul-next-sys`'s build script);
+      **no credential exists and none is checked in**, and nothing about the SDK
+      is vendored into this repository or into vellum. The terms are the
+      **Ultralight Free License Agreement V1**, shipped inside the download at
+      `<ul-sdk>/license/LICENSE.txt`, alongside `EULA.txt` and `NOTICES.md`;
+      `vellum_ultralight::staging::licence_files` prints their paths from a
+      checkout, and `phoenix-host` logs them at startup. Read them before
+      putting `Ultralight.dll`, `UltralightCore.dll`, `WebCore.dll` or
+      `AppCore.dll` in a distributed archive.
+- [ ] **Runtime staging is automatic but local.** Cargo links the SDK and stages
+      nothing, so `panes::ultralight::stage_sdk` copies the four libraries
+      beside the executable and the SDK's `resources/` (CA bundle, ICU table)
+      into the working directory at startup, from
+      `target/<profile>/build/ul-next-sys-*/out/ul-sdk`. **That path only exists
+      in a build tree.** A packaged archive has to carry them itself — decide
+      that with the packaging decision above. On Windows a missing DLL is a
+      process that exits with an OS error code and *no message at all*, so the
+      operator log names each one.
+- [ ] **`--pane` needs `--client-dir`.** A pane loads the client bundle this same
+      process serves, from this process's own address; the argument parser
+      refuses the combination at the prompt rather than opening a blank view.
 
 ---
 
@@ -241,8 +454,8 @@ not quietly skipped later:
       (`phoenix-perf`'s `browser` scenario and the committed baselines) and
       state what a multi-threaded build would have to beat.
 - [ ] **Price the cost, not just the win.** Isolation means COOP/COEP on both
-      entry points, which blocks every cross-origin subresource — PeerJS and the
-      TURN credential worker included. Both would need a same-origin path or a
+      entry points, which blocks every cross-origin subresource — the rendezvous
+      service and the TURN credential worker included. Both would need a same-origin path or a
       CORP header from their side before isolation is even possible.
 - [ ] **Only then** flip `require_isolation` on in the header-check workflow and
       add the COOP/COEP rules to `deploy/cloudflare/_headers`. The checker

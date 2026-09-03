@@ -125,6 +125,12 @@
     import '../components/ph-hull-integrity.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
+    import {
+      EXTERNAL_REPAIR_TOGGLE_ACTION_ID,
+      TRACTOR_TOGGLE_ACTION_ID,
+      UMBILICAL_TOGGLE_ACTION_ID,
+    } from '../stations/engineering-actions.js';
+    import { activateEngineeringAction } from '../stations/engineering-action-control.js';
     // The render lives in gui/destroyer/engineering.console.js (issue #1235):
     // the shared Engineering renderer + this hull's variant (Shields + Power +
     // Repair, plus a Tractor/Umbilical/Field-Repair-dispatch tail). s is a
@@ -140,21 +146,36 @@
     // sets it fresh on every push, so it is never stale.
     document.getElementById('tractor-btn').addEventListener('click', function() {
       var engaged = document.getElementById('tractor-btn').classList.contains('engaged');
-      consoleHandle.sendAction(engaged ? 'release_tractor' : 'engage_tractor');
+      activateEngineeringAction(
+        consoleHandle,
+        TRACTOR_TOGGLE_ACTION_ID,
+        null,
+        engaged ? 'release_tractor' : 'engage_tractor',
+      );
     });
 
     // The one umbilical button toggles start/stop through the action map, which
     // sends the same admitted command an umbilical AI would (issue #1160).
     document.getElementById('umbilical-btn').addEventListener('click', function() {
       var running = document.getElementById('umbilical-btn').classList.contains('engaged');
-      consoleHandle.sendAction(running ? 'stop_transfer' : 'start_transfer');
+      activateEngineeringAction(
+        consoleHandle,
+        UMBILICAL_TOGGLE_ACTION_ID,
+        null,
+        running ? 'stop_transfer' : 'start_transfer',
+      );
     });
 
     // The one dispatch button toggles dispatch/recall through the action map,
     // which sends the same admitted command a repair AI would (issue #1161).
     document.getElementById('dispatch-btn').addEventListener('click', function() {
       var working = document.getElementById('dispatch-btn').classList.contains('engaged');
-      consoleHandle.sendAction(working ? 'recall_external_repair' : 'dispatch_external_repair');
+      activateEngineeringAction(
+        consoleHandle,
+        EXTERNAL_REPAIR_TOGGLE_ACTION_ID,
+        null,
+        working ? 'recall_external_repair' : 'dispatch_external_repair',
+      );
     });
   </script>
 </body>

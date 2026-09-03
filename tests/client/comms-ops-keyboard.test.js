@@ -27,12 +27,14 @@ import '../../gui/components/ph-ship-picker.js';
 beforeEach(() => {
   document.body.innerHTML = '';
   window.sendAction = vi.fn();
+  window.activateSemanticAction = vi.fn();
   setShipCards({});   // no card-art fetch in jsdom; render is complete without it
 });
 
 afterEach(() => {
   document.body.innerHTML = '';   // disconnects components → removes listeners
   delete window.sendAction;
+  delete window.activateSemanticAction;
   setShipCards(null);
 });
 
@@ -103,14 +105,18 @@ describe('ph-comms-hail-list (comms) keyboard contract', () => {
     expect(rows[0].tabIndex).toBe(-1);
   });
 
-  it('a click dispatches select_comms_message and marks the row selected', () => {
+  it('a click activates selection but only the shared owner projection marks the row', () => {
     const el = mount('ph-comms-hail-list', state);
     const rows = options(el);
     rows[1].click();
-    expect(window.sendAction).toHaveBeenCalledTimes(1);
-    expect(window.sendAction).toHaveBeenCalledWith('select_comms_message', { message_id: 'm2' });
-    expect(rows[1].getAttribute('aria-selected')).toBe('true');
+    expect(window.activateSemanticAction).toHaveBeenCalledTimes(1);
+    expect(window.activateSemanticAction).toHaveBeenCalledWith('comms.select-message', {
+      source: 'control', detail: { message_id: 'm2' },
+    });
+    expect(rows[1].getAttribute('aria-selected')).toBe('false');
     expect(rows[0].getAttribute('aria-selected')).toBe('false');
+    el.state = { ...state, selected_message_id: 'm2' };
+    expect(rows[1].getAttribute('aria-selected')).toBe('true');
   });
 
   it('the roving host keydown does not fork the action onto Enter or Space', () => {
@@ -163,18 +169,21 @@ describe('ph-objective-list (ops) keyboard contract', () => {
     expect(rows[1].tabIndex).toBe(0);
   });
 
-  it('a click dispatches set_objective_priority; the roving keydown does not fork it', () => {
+  it('a click dispatches the objective semantic identity; roving keydown does not fork it', () => {
     const el = mount('ph-objective-list', state);
     const rows = options(el);
     rows[0].click();
-    expect(window.sendAction).toHaveBeenCalledTimes(1);
-    expect(window.sendAction).toHaveBeenCalledWith('set_objective_priority', { id: 'o1' });
+    expect(window.activateSemanticAction).toHaveBeenCalledTimes(1);
+    expect(window.activateSemanticAction).toHaveBeenCalledWith(
+      'captain.objective-priority',
+      expect.objectContaining({ detail: { id: 'o1' } }),
+    );
 
-    window.sendAction.mockClear();
+    window.activateSemanticAction.mockClear();
     rows[0].focus();
     keydown(rows[0], 'Enter');
     keydown(rows[0], ' ');
-    expect(window.sendAction).not.toHaveBeenCalled();
+    expect(window.activateSemanticAction).not.toHaveBeenCalled();
   });
 });
 

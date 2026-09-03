@@ -1815,6 +1815,21 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         ));
     }
 
+    // Autosaves are scheduled from the deterministic logical clock (issue
+    // #865), so an authored duration must land on one exact tick boundary.
+    // Rounding here would make the configured cadence a lie and create a
+    // second timing rule beside the simulation's own tick count.
+    if raw.global.checked_autosave_interval_ticks().is_none() {
+        return Err(format!(
+            "[global] autosave_interval_secs = {} at sim_tick_hz = {} does not produce a \
+             positive whole number of simulation ticks (got {} ticks): autosave timing is \
+             deterministic and cannot be rounded",
+            raw.global.autosave_interval_secs,
+            raw.global.sim_tick_hz,
+            raw.global.autosave_interval_secs * raw.global.sim_tick_hz,
+        ));
+    }
+
     // The AI decision tick is in turn derived from the logical simulation tick
     // by counting (issue #895), so the same commensurability contract applies
     // one level up: `sim_tick_hz / ai_tick_hz` must be a positive integer.
@@ -1849,6 +1864,32 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
              is false, so the doctrine `not_attacked` gate would never close and a \
              raid under active fire would silently never break off",
             raw.global.attacked_memory_secs,
+        ));
+    }
+
+    // The fleet lockstep delay (issue #1116). Both bounds are refusals rather
+    // than clamps, for the same reason the tick ratios above are: a wrong value
+    // here does not make the mission play badly, it makes two hosts disagree or
+    // wait forever, and neither failure names itself at the moment it is
+    // authored. Zero is refused because a fleet running with no delay has no
+    // window in which to receive a peer's input for the tick it is about to
+    // simulate — every peer command would arrive stamped for a tick already
+    // gone, and the queue would apply it late on whichever hosts happened to be
+    // slower. The value is inert for a single host, which takes zero by
+    // construction (`lockstep::join_fleet`), so this bounds fleet play only.
+    if raw.global.command_delay_ticks == 0
+        || raw.global.command_delay_ticks > crate::entities::config::MAX_COMMAND_DELAY_TICKS
+    {
+        return Err(format!(
+            "[global] command_delay_ticks = {} is outside 1..={}: it is the number of \
+             logical ticks a fleet stamps its crews' commands into the future so that \
+             every host has every peer's input for a tick before it simulates it. Zero \
+             leaves no window at all — a peer's command would always arrive for a tick \
+             that has already passed — and anything above the ceiling puts a helm order \
+             so long after the key that a crew stops recognising it as their own input. \
+             A single host ignores this and runs at zero.",
+            raw.global.command_delay_ticks,
+            crate::entities::config::MAX_COMMAND_DELAY_TICKS,
         ));
     }
 

@@ -75,6 +75,8 @@
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
     import { t } from '../strings.js';
+    import { activateNavigationAction } from '../stations/navigation-action-control.js';
+    import { NAVIGATION_CHART_ACTION_ID } from '../stations/navigation-actions.js';
     // The render lives in gui/battleship/navigation.console.js (issue
     // #1235): the shared Navigation renderer + this hull's variant. s is a
     // NavigationConsolePayload — see the @typedef in gui/console-state.js.
@@ -94,7 +96,12 @@
     });
 
     document.getElementById('btn-on-screen').addEventListener('click', function() {
-      consoleApi.sendAction('set_navigation_chart', {});
+      activateNavigationAction(
+        document.getElementById('btn-on-screen'),
+        NAVIGATION_CHART_ACTION_ID,
+        {},
+        function() { consoleApi.sendAction('set_navigation_chart', {}); },
+      );
     });
   </script>
 </body>

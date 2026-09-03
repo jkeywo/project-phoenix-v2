@@ -67,8 +67,37 @@ jobs:
       # linted too. Without it, clippy runs only on `project-phoenix` (the sole
       # default workspace member) and builds `phoenix-math` merely as a
       # dependency — leaving the deterministic foundation's own source unlinted.
+      #
+      # AN EXPLICIT FEATURE LIST, NOT `--all-features` (issue #1122). This step
+      # ran `--all-features` until the `ultralight` feature existed, at which
+      # point it started enabling it — and `ul-next-sys`'s build script
+      # DOWNLOADS a ~100 MB proprietary SDK archive at build time. Every job
+      # here is ubuntu-latest and can never load that SDK, so the download would
+      # be pure cost on every push, and four separate places in this repository
+      # said no CI job enabled the feature. They were wrong; this is what makes
+      # them right.
+      #
+      # The list is every feature `Cargo.toml` declares that GATES CODE, except
+      # `ultralight`: server, viewer, debug, headless, perf, host, capture.
+      # `--features` applies only to the selected packages that declare each
+      # one, exactly as `--features headless` does in the test step below.
+      #
+      # `falling-skyway-sim-tests` is the one deliberate omission that costs
+      # nothing. It gates no compiled code at all — its only use is
+      # `#[cfg_attr(not(feature = "falling-skyway-sim-tests"), ignore = …)]` in
+      # tests/headless_runner.rs, so it flips 55 tests between run and ignored
+      # and nothing else. Both spellings compile the same source, so naming it
+      # here would lint not one extra line.
+      #
+      # KEEP IT IN SYNC. A new feature added to Cargo.toml that gates code, and
+      # not added here, is a feature nothing lints — which is the same failure
+      # `--all-features` was there to prevent, so the trade is real and this
+      # comment is the mitigation.
+      # `ultralight`'s own module (`native_host::panes::ultralight`) is therefore
+      # linted by a human on a Windows machine, and everything else about a pane
+      # compiles and is tested with the feature off on purpose.
       - name: Clippy (deny warnings)
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --features server,viewer,debug,headless,perf,host,capture -- -D warnings
 
       # One invocation, one feature set, one compile of the crate and of every
       # integration-test binary. This previously ran as four steps across two
@@ -165,9 +194,10 @@ jobs:
   # ── Viewer tests (`--features viewer`) ────────────────────────────────────────
   #
   # The standalone model/shader viewer's own tests, EXECUTED. Until this job
-  # existed they were compiled by two steps and run by none: `test`'s
-  # `cargo clippy --all-targets --all-features` type-checks them, and nothing
-  # else in this workflow ever passes `--features viewer` to `cargo test`. A
+  # existed they were compiled by two steps and run by none: `test`'s clippy
+  # step type-checks them (its explicit feature list includes `viewer`), and
+  # nothing else in this workflow ever passes `--features viewer` to `cargo
+  # test`. A
   # viewer test could therefore go stale rather than red indefinitely, and one
   # did — the billboard-preview assertion in `src/viewer/lod.rs` claimed a far
   # level was a procedural sphere for a whole release after the imposter atlases
@@ -192,9 +222,11 @@ jobs:
   # the reason the steady-state marginal wall time here is the test RUN and not
   # a from-scratch dependency build.
   #
-  # No fmt and no clippy: `test` already runs both, and its clippy pass is
-  # `--all-features`, which is what type-checks this feature set. Duplicating
-  # them here would buy nothing and cost a second lint pass.
+  # No fmt and no clippy: `test` already runs both, and its clippy pass names
+  # `viewer` in its explicit feature list, which is what type-checks this
+  # feature set. Duplicating them here would buy nothing and cost a second lint
+  # pass. (If a feature is ever dropped from that list, this sentence stops
+  # being true — which is why the list has a keep-in-sync note of its own.)
   viewer-test:
     runs-on: ubuntu-latest
 
@@ -449,6 +481,18 @@ jobs:
           name: playwright-report
           path: tests/smoke/playwright-report/
           retention-days: 7
+
+      # Issue #1300's peer-tracer is a stable, sanitized index of the complete
+      # GM M1 exit run: seed/roster/actions plus snapshot framing and digests,
+      # never snapshot RON or the private reconnect capability.
+      - name: Upload GM M1 exit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gm-m1-exit-report
+          path: target/gm-m1-exit/report.json
+          if-no-files-found: error
+          retention-days: 14
 
       # Handed to the perf job, which has the Rust toolchain that owns the
       # comparison (issue #868).

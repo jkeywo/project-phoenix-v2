@@ -1,0 +1,195 @@
+{
+  "note": [
+    "GENERATED FILE — edit assets/join/join-codes.toml, not this one.",
+    "Regenerate with `node scripts/build-client.mjs`; tests/client/join-codes-data.test.js",
+    "fails when this file and the TOML have drifted apart.",
+    "",
+    "It is committed rather than built on demand because its three consumers read",
+    "it with no parser and no build step: the phone fetches it, the vitest suites",
+    "read it from disk, and esbuild bundles it into the rendezvous Worker."
+  ],
+  "format_version": 1,
+  "suffix": {
+    "length": 8,
+    "alphabet": "ABCDEFGHIJKMNOPQRSTUVWXYZ",
+    "strip": "-_ \t",
+    "normalise": {
+      "0": "O",
+      "1": "I",
+      "L": "I"
+    }
+  },
+  "namespaces": {
+    "client": "2f6b0a11-9c4e-4d7a-8f31-5b90c2d47e18",
+    "server": "8d13c7a4-0e52-49bb-9a6c-4f27ed3b90d1"
+  },
+  "version": {
+    "guid": "5c0a3e91-7b18-4f26-8d43-9e61af07c25b"
+  },
+  "limits": {
+    "record_ttl_seconds": 43200,
+    "max_lookups_per_connection": 60,
+    "max_peers_per_record": 32,
+    "max_fleet_hosts": 4,
+    "max_slot_name_length": 48,
+    "max_slot_ship_path_length": 160,
+    "max_code_length": 160,
+    "reclaim_grace_seconds": 120,
+    "max_grace_records": 256,
+    "max_relay_peers_per_record": 8,
+    "max_relay_frame_bytes": 262144,
+    "max_relay_queue_reliable": 256,
+    "max_relay_queue_snapshot": 32,
+    "max_relay_send_buffer_bytes": 262144
+  },
+  "deny": [
+    {
+      "word": "ADMIN",
+      "reason": "misleading: reads as a privileged account rather than a room code"
+    },
+    {
+      "word": "DEBUG",
+      "reason": "misleading: reads as a diagnostic mode"
+    },
+    {
+      "word": "ERROR",
+      "reason": "misleading: a player would read the code itself as a failure"
+    },
+    {
+      "word": "FATAL",
+      "reason": "misleading: reads as a crash report"
+    },
+    {
+      "word": "ABORT",
+      "reason": "misleading: reads as an instruction to stop"
+    },
+    {
+      "word": "RESET",
+      "reason": "misleading: reads as an instruction, not an identifier"
+    },
+    {
+      "word": "LOGIN",
+      "reason": "misleading: implies an account system Phoenix does not have"
+    },
+    {
+      "word": "CRASH",
+      "reason": "misleading: reads as a failure report"
+    },
+    {
+      "word": "EMPTY",
+      "reason": "misleading: reads as 'no code issued'"
+    },
+    {
+      "word": "FALSE",
+      "reason": "misleading: reads as a boolean, not an identifier"
+    },
+    {
+      "word": "STAFF",
+      "reason": "misleading: implies an official/organiser channel"
+    },
+    {
+      "word": "BITCH",
+      "reason": "offensive: profanity"
+    },
+    {
+      "word": "CUNTS",
+      "reason": "offensive: profanity"
+    },
+    {
+      "word": "TWATS",
+      "reason": "offensive: profanity"
+    },
+    {
+      "word": "SHITE",
+      "reason": "offensive: profanity"
+    },
+    {
+      "word": "SHITS",
+      "reason": "offensive: profanity"
+    },
+    {
+      "word": "WANKS",
+      "reason": "offensive: profanity"
+    },
+    {
+      "word": "PISST",
+      "reason": "offensive: profanity"
+    },
+    {
+      "word": "WHORE",
+      "reason": "offensive: slur"
+    },
+    {
+      "word": "SLUTS",
+      "reason": "offensive: slur"
+    },
+    {
+      "word": "PENIS",
+      "reason": "offensive: sexual"
+    },
+    {
+      "word": "PUSSY",
+      "reason": "offensive: sexual"
+    },
+    {
+      "word": "PORNO",
+      "reason": "offensive: sexual"
+    },
+    {
+      "word": "RAPES",
+      "reason": "offensive: sexual violence"
+    },
+    {
+      "word": "RAPED",
+      "reason": "offensive: sexual violence"
+    },
+    {
+      "word": "PEDOS",
+      "reason": "offensive: sexual abuse"
+    },
+    {
+      "word": "NAZIS",
+      "reason": "offensive: hate"
+    },
+    {
+      "word": "KKKKK",
+      "reason": "offensive: hate"
+    },
+    {
+      "word": "COONS",
+      "reason": "offensive: racial slur"
+    },
+    {
+      "word": "CHINK",
+      "reason": "offensive: racial slur"
+    },
+    {
+      "word": "SPICS",
+      "reason": "offensive: racial slur"
+    },
+    {
+      "word": "KIKES",
+      "reason": "offensive: racial slur"
+    },
+    {
+      "word": "NEGRO",
+      "reason": "offensive: racial slur"
+    },
+    {
+      "word": "GYPSY",
+      "reason": "offensive: ethnic slur"
+    },
+    {
+      "word": "DYKES",
+      "reason": "offensive: homophobic slur"
+    },
+    {
+      "word": "FAGOT",
+      "reason": "offensive: homophobic slur"
+    },
+    {
+      "word": "TRANY",
+      "reason": "offensive: transphobic slur"
+    }
+  ]
+}

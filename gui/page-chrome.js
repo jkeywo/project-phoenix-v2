@@ -45,8 +45,8 @@
  * ## What is deliberately NOT unified
  *
  * server.html's `renderConnDiag` summarised multi-client ICE stages across
- * every connected phone (host-side, keyed by peer id, driven by PeerJS
- * connection events). client.html's `renderDiag` summarised this one
+ * every connected phone (host-side, keyed by rendezvous peer id, driven by
+ * per-joiner ICE events). client.html's `renderDiag` summarised this one
  * device's own relay probe verdict plus its own ICE attempt/candidate
  * history (client-side, keyed by attempt number, driven by
  * connection-manager's `onDiag` callback). The data shapes and every

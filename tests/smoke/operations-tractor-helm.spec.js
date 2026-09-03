@@ -17,7 +17,7 @@
 //      gameplay number.
 //
 // This runs under the same Playwright harness as the other smokes (WASM host +
-// PeerJS-shimmed message clients), so it is GATE/CI work, not the cheap vitest
+// shimmed-transport message clients), so it is GATE/CI work, not the cheap vitest
 // pass. The `createTestClient` shim is a raw message client, so "real consoles"
 // means the real SERVER consoles/admission/hosts driven by the real console wire
 // protocol — the same standard every smoke here holds.

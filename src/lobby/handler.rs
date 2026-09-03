@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::core::messages::{
-    GamePhase, GameState, ServerMessage, ShipClientConfig, StationId, WorldData,
+    GamePhase, GameState, GmOperator, ServerMessage, ShipClientConfig, StationId, WorldData,
 };
 use crate::lobby::session::SessionManager;
 use crate::lobby::stations_config::{get_station, ShipStations};
@@ -58,6 +58,39 @@ pub fn derive_game_state(
     }
 }
 
+/// The `Welcome` a client is sent, built in one place.
+///
+/// Two callers, and deliberately not two constructions:
+///
+///   - [`handle_identify`], which sends it to the session that just identified;
+///   - [`crate::native_host::world_load`], which re-sends it to **every**
+///     connected session after a runtime world load (issue #1326) — because the
+///     roster and the client config a phone was welcomed with before the pick
+///     belonged to `load_ship_config_from_disk`'s battleship fallback, not to the
+///     hull that was actually chosen. The browser host has the same refresh for
+///     free: its phones are welcomed by a Bevy app that does not exist until
+///     after `wasm_init`, i.e. after the world is loaded.
+///
+/// Every field is derived from the arguments, so a re-send carries whatever the
+/// host currently believes rather than a remembered payload.
+pub(crate) fn welcome_message(
+    sessions: &SessionManager,
+    phase: &GamePhase,
+    world: Option<&WorldData>,
+    ship_stations: &ShipStations,
+    ship_config: &ShipClientConfig,
+    station_ratings: &HashMap<StationId, String>,
+    gm_operators: &[GmOperator],
+) -> ServerMessage {
+    ServerMessage::Welcome {
+        state: derive_game_state(sessions, phase, world),
+        ship_stations: ship_stations.clone(),
+        ship_config: ship_config.clone(),
+        station_ratings: station_ratings.clone(),
+        gms: gm_operators.to_vec(),
+    }
+}
+
 /// True when `token` is reserved for the host runtime and so must never be
 /// claimable by a network peer.
 ///
@@ -93,6 +126,7 @@ pub(crate) fn handle_identify(
     ship_stations: &ShipStations,
     ship_config: &ShipClientConfig,
     station_ratings: &HashMap<StationId, String>,
+    gm_operators: &[GmOperator],
 ) -> LobbyHandlerResult {
     let mut outbound = Vec::new();
     let mut station_rating_update: Option<(StationId, String)> = None;
@@ -153,15 +187,17 @@ pub(crate) fn handle_identify(
             .find(|p| p.token == *id_token)
             .cloned()
             .unwrap();
-        let state = derive_game_state(sessions, &phase, world);
         outbound.push((
             Target::Token(id_token.clone()),
-            ServerMessage::Welcome {
-                state,
-                ship_stations: ship_stations.clone(),
-                ship_config: ship_config.clone(),
-                station_ratings: station_ratings.clone(),
-            },
+            welcome_message(
+                sessions,
+                &phase,
+                world,
+                ship_stations,
+                ship_config,
+                station_ratings,
+                gm_operators,
+            ),
         ));
         outbound.push((
             Target::AllExcept(id_token.clone()),

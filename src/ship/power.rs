@@ -377,6 +377,7 @@ pub fn handle_power_messages(
         With<crate::server_app::Ship>,
     >,
     power_res: Option<ResMut<ShipPowerSystem>>,
+    mut outbound: Option<ResMut<Messages<crate::lobby::OutboundMessage>>>,
 ) {
     let mut power_res = power_res;
     // Iterate every ship (player + NPC) so the player's Power console commands
@@ -387,30 +388,43 @@ pub fn handle_power_messages(
     // `AdmittedCommands` queue — there is no longer a separate
     // `integrate_power_state` adapter mutating `ShipPowerSystem` directly.
     for (admitted, mut power_comp, is_local) in ship_query.iter_mut() {
-        let mut pending: Vec<(crate::core::messages::PowerGroupId, u8)> = Vec::new();
         for cmd in admitted.for_target(crate::ship::system_registry::POWER_REACTOR_SYSTEM_ID) {
             if let crate::core::messages::SystemControlPayload::SetPowerGroupAllocation {
                 group,
                 level,
             } = &cmd.payload
             {
-                pending.push((group.clone(), *level));
-            }
-        }
-        if pending.is_empty() {
-            continue;
-        }
-        for (group, level) in pending {
-            if let Some(pc) = power_comp.as_deref_mut() {
-                if let Err(err) = pc.0.set_group_allocation(&group, level) {
-                    warn!("power.allocation_ignored={err:?}");
-                }
-            } else if is_local {
-                if let Some(pr) = power_res.as_deref_mut() {
-                    if let Err(err) = pr.0.set_group_allocation(&group, level) {
-                        warn!("power.allocation_ignored={err:?}");
+                let applied = if let Some(pc) = power_comp.as_deref_mut() {
+                    match pc.0.set_group_allocation(group, *level) {
+                        Ok(()) => true,
+                        Err(err) => {
+                            warn!("power.allocation_ignored={err:?}");
+                            false
+                        }
                     }
-                }
+                } else if is_local {
+                    match power_res.as_deref_mut() {
+                        Some(pr) => match pr.0.set_group_allocation(group, *level) {
+                            Ok(()) => true,
+                            Err(err) => {
+                                warn!("power.allocation_ignored={err:?}");
+                                false
+                            }
+                        },
+                        None => false,
+                    }
+                } else {
+                    false
+                };
+                crate::command_admission::finish_admitted_action_feedback(
+                    &mut outbound,
+                    cmd,
+                    if applied {
+                        crate::core::messages::ActionFeedbackOutcome::Applied
+                    } else {
+                        crate::core::messages::ActionFeedbackOutcome::Refused
+                    },
+                );
             }
         }
         // Dual-write: keep the Resource in sync with the LocalShip's

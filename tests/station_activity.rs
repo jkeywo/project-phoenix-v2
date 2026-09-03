@@ -80,6 +80,7 @@ fn admitted(target: &str) -> AdmittedCommand {
             target: RepairTarget::Core,
         },
         response_token: None,
+        feedback_correlation: None,
     }
 }
 

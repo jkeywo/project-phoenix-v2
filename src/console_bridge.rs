@@ -12,7 +12,7 @@ use bevy::prelude::*;
 
 /// Session token used for actions originating from the local HTML consoles
 /// (browser server viewscreen / native wry server), where the operator drives
-/// a console directly rather than through a remote PeerJS session. The host
+/// a console directly rather than through a remote network session. The host
 /// page routes its console actions through `gui/action-map.js` into full
 /// `ClientMessage` JSON and submits them via `wasm_receive_message` under this
 /// token (issue #822); the gameplay console handlers treat it as an authorized
@@ -77,4 +77,34 @@ pub struct AudioConfigChanged {
 #[derive(Message, Clone, Debug)]
 pub struct AudioCueEvent {
     pub json: String,
+}
+
+/// Absolute omniscient ship-map projection for the rendererless GM page.
+/// Drained only by the local Host Channel; it is intentionally not part of the
+/// peer wire.
+#[derive(Message, Clone, Debug)]
+pub struct GmEntityProjectionChanged {
+    pub payload: crate::gm_projection::GmEntityProjectionPayload,
+}
+
+/// Absolute bounded multi-category activity for the rendererless GM page.
+/// Drained only by the local Host Channel; it never enters the peer wire.
+#[derive(Message, Clone, Debug)]
+pub struct GmActivityFeedChanged {
+    pub payload: crate::gm_activity::GmActivityFeedPayload,
+}
+
+/// Absolute authentic-Station projection for the rendererless GM page. Like
+/// `GmEntityProjectionChanged`, this is page-local Host Channel data and never
+/// a peer protocol message.
+#[derive(Message, Clone, Debug)]
+pub struct GmStationProjectionChanged {
+    pub payload: crate::gm_projection::GmStationProjectionPayload,
+}
+
+/// Absolute GM session state and bounded attributed result feed. Local Host
+/// Channel only; the grants themselves cross the typed host mesh.
+#[derive(Message, Clone, Debug)]
+pub struct GmSessionChanged {
+    pub payload: crate::gm_action::GmSessionProjection,
 }

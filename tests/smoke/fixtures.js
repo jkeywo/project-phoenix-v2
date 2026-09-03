@@ -61,21 +61,57 @@
 import { test as base, expect } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
+import {
+  installTransportFixture,
+  readHostJoinTarget,
+  connectTestClient,
+} from './transport-fixture';
 
+// The transport stand-in itself is no longer re-exported from here. It is
+// installed by installTransportFixture() below, and a spec that wants to drive
+// it directly (transport-shim.spec.js) does so through the pages this fixture
+// already gives it — window.PhoenixTransportFactories and
+// window.__transportShim — rather than by injecting a second copy of the
+// script into a context of its own.
 
-export const SHIM = fs.readFileSync(path.join(__dirname, 'peerjs-shim.js'), 'utf-8');
+// The shim runs the REAL rendezvous registry inside the host page rather than a
+// second implementation of it, so that module has to be reachable as a URL. It
+// is not part of dist/ (it is a Cloudflare Worker's source), so it is served
+// from disk through a route. Its own `../../gui/join-code.js` import resolves
+// against the site root, where the built gui/ directory already sits.
+//
+// Its SIBLING imports do not, and that is worth stating because it cost a whole
+// smoke run. The registry is served at `/__rendezvous-registry.js`, so the
+// `import './relay.js'` #1113 added resolves to `/relay.js` at the site root —
+// a URL dist/ has no file for. The dynamic import rejected, the host page's
+// registry promise stayed rejected, every `callOwner` silently dropped, no host
+// socket ever reached the registry, no `hosted` frame, no typed code, and
+// EVERY spec timed out waiting for `__wasmReady`. One 404 on one sibling module
+// reads as seventeen unrelated failures with nothing in the logs connecting
+// them. So each worker-rendezvous module the registry pulls in is routed below,
+// at the path its own specifier resolves to.
+const workerSrc = (name) =>
+  fs.readFileSync(path.join(__dirname, '..', '..', 'worker-rendezvous', 'src', name), 'utf-8');
 
-// Stub CDN scripts so they don't overwrite the shim or block execution.
-// In CI environments the unpkg / jsdelivr CDN can be slow or blocked, and
-// synchronous <script src="..."> tags block all inline scripts below them.
-const STUB_PEER_JS = `'use strict';
-// No-op — window.Peer is already provided by the peerjs-shim addInitScript.
-if (typeof window.Peer === 'undefined') { window.Peer = function Peer() {}; };
-`;
+export const RENDEZVOUS_REGISTRY_JS = workerSrc('registry.js');
+export const RENDEZVOUS_RELAY_JS = workerSrc('relay.js');
 
+// Stub the QR encoder. It is no longer a CDN dependency — issue #1329 vendored
+// it to gui/vendor/qrcode.js, same-origin, precisely so that a room with no
+// internet still gets a join code — so this is no longer about a slow jsdelivr;
+// it is that rasterising a real QR into a canvas is work no smoke assertion
+// reads. The route below still matches, because it matches on the file name.
+//
+// It RECORDS instead of ignoring: `window.__qrDraws` is the list of URLs the
+// page asked to be drawn, in order, so a spec can assert the join QR draw was
+// actually reached (issue #1329 AC5 — the draw used to sit in a PeerJS callback
+// that #1112 deleted) rather than only that the page did not crash.
 const STUB_QRCODE = `'use strict';
 // Minimal stub so server.html QR rendering code doesn't crash during tests.
-window.QRCode = { toCanvas: function () { return Promise.resolve(); } };
+window.__qrDraws = [];
+window.QRCode = {
+  toCanvas: function (canvas, text) { window.__qrDraws.push(text); return Promise.resolve(); },
+};
 `;
 
 // Minimal default world used by every smoke test that doesn't route its own
@@ -159,22 +195,29 @@ fn on_survey(ctx) {
 """
 `;
 
-// Override the default context fixture to inject the PeerJS shim into every
-// page that the test creates. The override keeps Playwright's own `context`
-// fixture shape — it still hands each spec a BrowserContext, just one with the
-// shim, the CDN stubs and the default world route already installed.
+// Override the default context fixture to inject the transport stand-in into
+// every page that the test creates. The override keeps Playwright's own
+// `context` fixture shape — it still hands each spec a BrowserContext, just one
+// with the shim, the QR stub, the registry route and the default world route
+// already installed.
 export const test = base.extend({
   context: async ({ browser }, use) => {
     const ctx = await browser.newContext();
-    await ctx.addInitScript({ content: STUB_PEER_JS });
+    await installTransportFixture(ctx);
     await ctx.addInitScript({ content: STUB_QRCODE });
-    await ctx.addInitScript({ content: SHIM });
 
-    // Intercept CDN script loads — stub PeerJS so the real library doesn't
-    // overwrite the shim, and stub QRCode so it doesn't block.
-    await ctx.route('**/peerjs*.js', (route) =>
-      route.fulfill({ contentType: 'application/javascript', body: STUB_PEER_JS }),
+    // Serve the rendezvous service's own registry module to the host page,
+    // and the sibling it imports at the path that import resolves to. See the
+    // note beside RENDEZVOUS_RELAY_JS — this second route is the difference
+    // between the whole suite running and the whole suite timing out.
+    await ctx.route('**/__rendezvous-registry.js', (route) =>
+      route.fulfill({ contentType: 'application/javascript', body: RENDEZVOUS_REGISTRY_JS }),
     );
+    await ctx.route('**/relay.js', (route) =>
+      route.fulfill({ contentType: 'application/javascript', body: RENDEZVOUS_RELAY_JS }),
+    );
+
+    // Intercept the QR CDN load — stub QRCode so it doesn't block.
     await ctx.route('**/qrcode*.js', (route) =>
       route.fulfill({ contentType: 'application/javascript', body: STUB_QRCODE }),
     );
@@ -194,7 +237,8 @@ export const test = base.extend({
 
 export { expect };
 
-/** Default timeout for waiting on __wasmReady (PhoenixReady + Peer open).
+/** Default timeout for waiting on __wasmReady (PhoenixReady + the host's
+ *  rendezvous socket open).
  *
  * In CI / long-running test suites Chrome throttles rAF on non-active pages
  * (~1 fps), which can delay the Bevy init → PhoenixReady dispatch by 20-40 s.
@@ -270,9 +314,24 @@ export function captureFetchFailures(page) {
   return failures;
 }
 
+/**
+ * The origin this checkout's `dist/` is served on — 3000 unless
+ * `PHOENIX_SMOKE_PORT` moved it, which is how a second worktree avoids silently
+ * testing the other one's bundle (see playwright.config.js).
+ *
+ * Every blank page a spec opens has to be on THIS origin: BroadcastChannel is
+ * same-origin, and the transport stand-in pairs pages over one. It was once
+ * written as a literal `http://localhost:3000` in three places, so
+ * PHOENIX_SMOKE_PORT moved the host page and left every test client dialling a
+ * port with nothing on it — 95 specs failing as "Welcome timeout", which reads
+ * exactly like a broken join path rather than a wrong port.
+ */
+export const SMOKE_ORIGIN = `http://localhost:${Number(process.env.PHOENIX_SMOKE_PORT || 3000)}`;
+
 // ── Test client helper ────────────────────────────────────────────────────────
-// Creates a blank page at localhost:3000 (same BroadcastChannel origin),
-// connects to the host peer, sends Identify, and waits for Welcome.
+// Creates a blank page on SMOKE_ORIGIN (same BroadcastChannel origin),
+// joins the host through the rendezvous service with its join code, completes
+// the compatibility handshake, sends Identify, and waits for Welcome.
 // Exposes helpers for sending messages and waiting for specific message types.
 
 /**
@@ -293,13 +352,16 @@ export function captureFetchFailures(page) {
 
 /**
  * @param {import('@playwright/test').BrowserContext} ctx
- * @param {string} hostId  peer id read from the server page's QR link
- * @param {{ token?: string, name?: string, waitFor?: string }} [opts]
+ * @param {string} hostId  join code read from the server page's QR link
+ * @param {{ token?: string, name?: string, waitFor?: string, snapshot?: boolean }} [opts]
  *   `waitFor` is the message type to block on before resolving — defaults to
  *   `'Welcome'` (the world has loaded). A phone that connects DURING the
  *   QR-first scenario stage never gets a Welcome (Bevy is not running yet); the
  *   host answers `Identify` with a synthesized `ScenarioCatalog` (server.html
  *   `sendCatalogTo`), so those specs pass `waitFor: 'ScenarioCatalog'`.
+ *   `snapshot` (default true) negotiates the lossy unordered channel alongside
+ *   the reliable one, as the shipped client does; `false` models a client whose
+ *   lossy channel never came up.
  * @returns {Promise<TestClient>}
  */
 export async function createTestClient(
@@ -317,70 +379,24 @@ export async function createTestClient(
   await page.route(`**/blank-${routeKey}`, (r) =>
     r.fulfill({ contentType: 'text/html', body: '<!DOCTYPE html><html><body></body></html>' }),
   );
-  await page.goto(`http://localhost:3000/blank-${routeKey}`);
+  await page.goto(`${SMOKE_ORIGIN}/blank-${routeKey}`);
 
   // Connect to host and wait for the readiness message before returning.
-  await page.evaluate(
-    ({ hostId, token, name, waitFor }) =>
-      new Promise((resolve, reject) => {
-        window.__messages = [];
-        const peer = new window.Peer();
-        peer.on('open', () => {
-          const conn = peer.connect(hostId);
-          window.__conn = conn;
-          conn.on('open', () => {
-            conn.send(JSON.stringify({ type: 'Identify', data: { token, name } }));
-          });
-          conn.on('data', (raw) => {
-            try { window.__messages.push(JSON.parse(raw)); } catch { /* ignore */ }
-          });
-        });
-        const t = setInterval(() => {
-          if (window.__messages?.some((m) => m.type === waitFor)) {
-            clearInterval(t);
-            resolve();
-          }
-        }, 50);
-        setTimeout(() => { clearInterval(t); reject(new Error(`${waitFor} timeout (token=${token})`)); }, 15_000);
-      }),
-    { hostId, token, name, waitFor },
+  // Every transport-shaped detail of "connect" lives in transport-fixture.js
+  // — this function only owns the Playwright page lifecycle and the stable
+  // façade shape below.
+  const { send, waitForMessage, lastMessage } = await connectTestClient(
+    page,
+    hostId,
+    { token, name, waitFor, snapshot: opts.snapshot },
   );
 
   const client = {
     page,
     token,
-
-    async send(type, data) {
-      await page.evaluate(
-        ({ type, data }) => {
-          const msg = data !== undefined ? { type, data } : { type };
-          window.__conn.send(JSON.stringify(msg));
-        },
-        { type, data },
-      );
-    },
-
-    async waitForMessage(type, timeout = 15_000) {
-      await page.waitForFunction(
-        (t) => window.__messages?.some((m) => m.type === t),
-        type,
-        { timeout },
-      );
-      return page.evaluate(
-        (t) => window.__messages.find((m) => m.type === t),
-        type,
-      );
-    },
-
-    async lastMessage(type) {
-      return page.evaluate(
-        (t) => {
-          const msgs = window.__messages || [];
-          return msgs.filter((m) => m.type === t).pop() ?? null;
-        },
-        type,
-      );
-    },
+    send,
+    waitForMessage,
+    lastMessage,
 
     async close() {
       await page.close();
@@ -566,18 +582,12 @@ export function readModPackManifest(name) {
   throw new Error(`mod-pack fixture ${name}.zip has no scenarios.toml`);
 }
 
-// Reads the host peer ID from the server page's QR-link href, which is set
-// after the PeerJS peer opens.
+// Reads the host's join target from the server page's QR-link href, which is
+// set once the rendezvous service has issued this host a code. Thin wrapper
+// kept under its original name/signature for the ~44 spec files that import it
+// — the actual scrape lives in transport-fixture.js's readHostJoinTarget, the
+// neutral seam this name delegates to. The NAME is now historical: what comes
+// back is a structured join code, not a peer id (issue #1112).
 export async function readHostPeerId(serverPage) {
-  await serverPage.waitForFunction(
-    () => {
-      const el = document.getElementById('qr-link');
-      return el?.href?.includes('#');
-    },
-    { timeout: 20_000 },
-  );
-  return serverPage.evaluate(() => {
-    const href = document.getElementById('qr-link').href;
-    return href.split('#')[1];
-  });
+  return readHostJoinTarget(serverPage);
 }

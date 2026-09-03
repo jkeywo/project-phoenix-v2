@@ -75,6 +75,84 @@ pub fn station_for_system(
     None
 }
 
+/// Payload-aware System target used by every authority path. A viewscreen is
+/// only the transport target for `SetView`; authority and availability belong
+/// to the authored System that supplies the selected view.
+pub fn effective_target_for_command(
+    config: &crate::ship::config::ShipConfig,
+    target: &crate::core::messages::SystemId,
+    payload: &SystemControlPayload,
+) -> crate::core::messages::SystemId {
+    let is_viewscreen_target = config
+        .system(target)
+        .is_some_and(|system| system.kind == crate::ship::system_registry::VIEWSCREEN_KIND)
+        || (target.0 == crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID
+            && !config
+                .systems
+                .iter()
+                .any(|system| system.kind == crate::ship::system_registry::VIEWSCREEN_KIND));
+    if !is_viewscreen_target {
+        return target.clone();
+    }
+    let SystemControlPayload::SetView { mode } = payload else {
+        return target.clone();
+    };
+    let source_kind = match mode {
+        crate::core::messages::ViewMode::Camera(_) | crate::core::messages::ViewMode::Cinematic => {
+            crate::ship::system_registry::CAPTAIN_KIND
+        }
+        crate::core::messages::ViewMode::Radar => crate::ship::system_registry::HELM_RADAR_KIND,
+        crate::core::messages::ViewMode::ScienceRadar
+        | crate::core::messages::ViewMode::SensorsRadar => {
+            crate::ship::system_registry::SENSORS_KIND
+        }
+        crate::core::messages::ViewMode::SystemChart
+        | crate::core::messages::ViewMode::NavigationChart => {
+            crate::ship::system_registry::NAVIGATION_KIND
+        }
+        crate::core::messages::ViewMode::Comms => crate::ship::system_registry::COMMS_KIND,
+    };
+    config
+        .systems
+        .iter()
+        .find(|system| system.kind == source_kind)
+        .map(|system| system.id.clone())
+        .unwrap_or_else(|| crate::ship::viewscreen::source_system_for_view_mode(mode))
+}
+
+/// Refusal from the payload-aware Station authority/availability half of
+/// System Admission. Authentication is deliberately absent: the caller has
+/// already authenticated one GM operator and substitutes the selected Station
+/// as authority at this seam.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StationCommandPolicyFailure {
+    SystemOutsideStation,
+    SystemUnavailable,
+}
+
+/// Validate an authenticated GM Station command against the same effective
+/// target and live availability used by ordinary System Admission. This does
+/// not require the resolver's source to be Human: a legitimate takeover starts
+/// while the Station is Backfill (`Ai`) and substitutes Station authority at
+/// this boundary. Damage- and rating-offline Systems remain unavailable.
+pub fn authorize_station_command(
+    station: &StationId,
+    target: &crate::core::messages::SystemId,
+    payload: &SystemControlPayload,
+    control_sources: &crate::ship_plugin::ShipSystemControlSources,
+    config: &crate::ship::config::ShipConfig,
+    hosts: Option<&crate::ship_plugin::HumanSeekingHosts>,
+) -> Result<crate::core::messages::SystemId, StationCommandPolicyFailure> {
+    let effective_target = effective_target_for_command(config, target, payload);
+    if station_for_system(config, hosts, &effective_target).as_ref() != Some(station) {
+        return Err(StationCommandPolicyFailure::SystemOutsideStation);
+    }
+    if !control_sources.0.policy_for(&effective_target).coordinate {
+        return Err(StationCommandPolicyFailure::SystemUnavailable);
+    }
+    Ok(effective_target)
+}
+
 pub fn is_command_authorized(
     token: &str,
     target: &crate::core::messages::SystemId,
@@ -84,16 +162,7 @@ pub fn is_command_authorized(
     config: &crate::ship::config::ShipConfig,
     hosts: Option<&crate::ship_plugin::HumanSeekingHosts>,
 ) -> bool {
-    // Viewscreen SetView: authority derives from the view mode's source system.
-    let effective_target = if target.0 == crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID {
-        if let SystemControlPayload::SetView { mode } = payload {
-            crate::ship::viewscreen::source_system_for_view_mode(mode)
-        } else {
-            target.clone()
-        }
-    } else {
-        target.clone()
-    };
+    let effective_target = effective_target_for_command(config, target, payload);
 
     let policy = control_sources.0.policy_for(&effective_target);
 
@@ -190,6 +259,74 @@ station = "repair"
         sm.register(token.into(), "Engineer".into()).unwrap();
         sm.set_station(token, Some(StationId("repair".into())));
         crate::lobby::Sessions(sm)
+    }
+
+    fn config_with_authored_viewscreen_ids() -> crate::ship::config::ShipConfig {
+        crate::ship::config::ShipConfig::from_toml(
+            r#"
+[[station]]
+id = "captain"
+name = "Captain"
+description = "Command."
+rank = "Capt."
+
+[[station]]
+id = "helm"
+name = "Helm"
+description = "Flight control."
+rank = "Lt."
+
+[[system]]
+id = "bridge-display"
+kind = "viewscreen"
+station = "captain"
+
+[[system]]
+id = "flight-scope"
+kind = "helm_radar"
+station = "helm"
+"#,
+            &[
+                crate::ship::system_registry::VIEWSCREEN_KIND,
+                crate::ship::system_registry::HELM_RADAR_KIND,
+            ],
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn authored_viewscreen_target_uses_authored_radar_source_for_authority() {
+        let config = config_with_authored_viewscreen_ids();
+        let mut sm = crate::lobby::session::SessionManager::new();
+        sm.register("pilot".into(), "Pilot".into()).unwrap();
+        sm.set_station("pilot", Some(StationId("helm".into())));
+        let sessions = crate::lobby::Sessions(sm);
+        let sources = ShipSystemControlSources::default();
+        let payload = SystemControlPayload::SetView {
+            mode: crate::core::messages::ViewMode::Radar,
+        };
+
+        assert!(is_command_authorized(
+            "pilot",
+            &SystemId("bridge-display".into()),
+            &payload,
+            &sources,
+            &sessions,
+            &config,
+            None,
+        ));
+        assert!(
+            !is_command_authorized(
+                "pilot",
+                &crate::ship::system_registry::viewscreen_system_id(),
+                &payload,
+                &sources,
+                &sessions,
+                &config,
+                None,
+            ),
+            "a custom viewscreen instance must not retain a hidden canonical alias"
+        );
     }
 
     fn dispatch() -> SystemControlPayload {

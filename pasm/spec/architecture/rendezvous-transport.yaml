@@ -1,0 +1,457 @@
+entities:
+  - component: join-code-scheme
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Typed Join-Code Scheme
+      summary: >-
+        Pure canonicalisation, composition and parsing of PROJECT_GUID_VERSION_GUID_CODE join
+        identifiers, with distinct stable client and server project GUIDs, one compatible-release
+        version GUID, typed suffixes and an authored deny-list. Normal entry supplies only the
+        suffix from local project/version context; the full form is what a QR fragment or a paste
+        carries.
+      rationale:
+        - The alphabet excludes every letter the confusable map folds away, so a minted code always survives the normalisation that makes it typeable.
+        - Deny-list entries are authored in ordinary spelling and canonicalised before comparison, so one entry refuses every confusable spelling of the word.
+        - Machine reasons map to strings.csv ids in the one module, so the phone and the host page cannot describe the same failure differently.
+        - "[ai] That map covers the HOST's own StampMismatch codes too — an unmapped refusal renders as \"no ship is using that code\", which is a lie about a build the host authoritatively refused."
+        - "[ai] The designer-facing source is assets/join/join-codes.toml (AGENTS.md rule 11: the deny-list and its per-entry rationale are exactly the tunable data that rule is about, and TOML gives them real comments). assets/join/join-codes.json is a COMMITTED generated artifact, because the three consumers read the table with no parser and no build step — the phone fetches it, vitest reads it from disk, esbuild bundles it into the Worker. scripts/build-client.mjs regenerates it and a vitest drift gate fails when the two disagree."
+        - "[ai] The shape of a typed input is decided before canonicalisation, because `_` is both the part separator and an authored strip character: splitting first reported a player's spaced-out the code as malformed."
+    architecture:
+      kind: identifier-scheme
+      authority: non-authoritative
+      runs_in: [host-browser-runtime, phone-browser-runtime, node-tooling-runtime]
+    implementation:
+      status: declared
+      paths:
+        - gui/join-code.js
+        - assets/join/join-codes.toml
+        - assets/join/join-codes.json
+        - scripts/join-codes.mjs
+      symbols: [canonicaliseSuffix, validateSuffix, parseJoinCode, mintSuffix]
+      tests: [tests/client/join-code.test.js, tests/client/join-codes-data.test.js]
+
+  - component: rendezvous-service
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Phoenix Rendezvous Service
+      summary: >-
+        Secure-WebSocket rendezvous and signalling service owning typed join-code lookup, code
+        issue and lifecycle, admission state, presence and the WebRTC signalling relay. A sibling
+        Cloudflare Worker to the stateless TURN-credential worker, with the live registry in a
+        Durable Object and the whole protocol in a transport-free state machine beside it.
+      rationale:
+        - One registry instance sees both typed namespaces and every active release at once, which is the only way unknown, wrong-type and version-mismatch stay three answers instead of one.
+        - The Worker adapter decides nothing, so the contract tests drive the shipped protocol without wrangler, miniflare or a socket.
+        - Issue #1111 issues codes in both namespaces but admits joins only to the client one; enabling server-code joining (#1114) adds an entry to joinableNamespaces rather than reshaping the lookup.
+        - "[ai] That entry was added in #1114 and the lookup did not need reshaping — but it did need one more input. With BOTH namespaces joinable, a fleet code is a perfectly good record and only the FIELD it was typed into makes it wrong, so `resolve`/`join` carry an optional `namespace`. Absent means `client`, so a page built before #1114 means exactly what it always did."
+        - "[ai] That namespace is also the fallback a BARE typed suffix is composed under. Without it the fleet field would compose the crew project and resolve a crew record holding the same word — not a refusal but a wrong success, which is the failure mode the typed scheme exists to prevent."
+        - It replaces the public PeerJS broker for the crew star, per p2p-delta-transport-is-a-star-today; the crew protocol itself is untouched.
+        - "[ai] That replacement DID happen, in issue #1112 — see crew-transport-peerjs-to-phoenix in architecture/sessions-replication.yaml. The two bullets above still read as #1111's forward statement of it; nothing about the namespace rule or the untouched crew protocol changed in the doing."
+        - "[ai] Since that cutover it is a HARD dependency: there is no second route underneath it, so an undeployed or origin-blocked service means nobody can join at all rather than a degraded connection. docs/delivery-checklist.md §3a says so at the top; it is not deployed yet."
+        - "[ai] All registry state is in memory in one Durable Object instance and nothing is written to storage: a code cannot outlive its host socket or a redeploy. That is #1111's whole scope — persistence is what #1115 (rotation) and #1120 (rebinding) would add — and the module doc says so rather than leaving it inferred."
+        - "[ai] The service is unauthenticated and its codes are private over a 25^5 space, so the bounds are authored data in join-codes.toml's [limits]: a per-connection lookup cap that cuts the socket off, a record TTL swept lazily, a per-record peer cap, and length/shape validation on anything stored. Cross-socket rate limiting stays Cloudflare's edge to apply."
+        - "[ai] Both upgrade endpoints REQUIRE a present, allow-listed Origin; only /v1/health keeps the no-Origin exemption, because the deploy verification recipe is a bare curl. Every legitimate browser upgrade is cross-origin here, so exempting requests without an Origin would exempt only the scripted caller the refusal exists to stop."
+        - "[ai] The diagnostics snapshot carries no suffix. The suffix IS the private client code; a view that includes it is one route away from publishing every live session."
+        - "[ai] Since #1113 it also carries the GAME, for a joiner whose direct ladder is spent and for a native host that has no WebRTC at all — worker-rendezvous/src/relay.js, a bounded mailbox hub with its own authored [limits]. That is a genuinely different resource profile from signalling (a signalling peer exchanges two SDP blobs and then costs nothing; a relayed crew member costs every command and every snapshot for the mission), which is why it is a separate module with bounds of its own rather than more verbs on the registry."
+        - "[ai] A Durable Object's WebSocket exposes no bufferedAmount, so the hub's queue depths only bite while a target socket is unwritable and the backpressure half that meets a real backlog belongs to the SENDERS (the browser's and tungstenite's, which do report one). relay.js's header says so rather than implying a bound it cannot enforce."
+    architecture:
+      kind: signalling-service
+      authority: non-authoritative
+      owns: [join-code-registry-state]
+      receives: [rendezvous-signalling-frame]
+      platforms:
+        allowed: [browser]
+        forbidden: [host-only]
+    implementation:
+      status: declared
+      paths:
+        - worker-rendezvous/src/registry.js
+        - worker-rendezvous/src/relay.js
+        - worker-rendezvous/src/index.js
+        - worker-rendezvous/wrangler.toml
+        - worker-rendezvous/wrangler.demo.toml
+      symbols: [createRegistry, RendezvousRegistry, createRelayHub]
+      tests:
+        - tests/client/rendezvous-registry.test.js
+        - tests/client/rendezvous-worker.test.js
+        - tests/client/rendezvous-relay.test.js
+
+  - state: join-code-registry-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Join-Code Registry State
+      summary: >-
+        Live map from a typed (project, version, suffix) identifier to the host socket holding it,
+        with its admission state and attached joiner presence. Transport-plane only: it never
+        enters simulation state, a snapshot, or another ship host's state.
+      rationale:
+        - p2p-human-readable-join-namespaces forbids a join code being stored in authoritative simulation state or shared between hosts; keeping the registry outside every host process is what makes that structural rather than a rule to remember.
+        - A host's code dies with its socket in #1111. Rotation, stale-record invalidation and rebinding a code to a replacement host are #1115 and #1120.
+        - "[ai] The record's suffix leaves the registry in exactly one frame — the `hosted` code issued to the host that minted it. Not in the diagnostics view, not in a joiner's `joined`, and never over the crew channel."
+    architecture:
+      classification: transport
+      owner: rendezvous-service
+      writers: [rendezvous-service]
+    implementation:
+      status: declared
+      paths: [worker-rendezvous/src/registry.js]
+      symbols: [createRegistry]
+      tests: [tests/client/rendezvous-registry.test.js]
+
+  - message: rendezvous-signalling-frame
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Rendezvous Signalling Frame
+      summary: >-
+        The versioned JSON vocabulary between a host or client page and the rendezvous service —
+        host-open, host-admission, host-close, resolve, join, signal, leave, relay-open, relay,
+        relay-close inbound; hosted, resolved, joined, peer-joined, peer-left, signal, closed,
+        error, relay-ready, relay-peer, relay, relay-peer-left, relay-closed, relay-degraded
+        outbound. Every frame carries its protocol revision and a frame from another revision is
+        refused rather than guessed at.
+      rationale:
+        - Deliberately NOT a ClientMessage/ServerMessage variant — p2p-delta-transport-is-a-star-today forbids layering transport concerns onto the crew protocol, which is unchanged by this work.
+        - Failures are a stable machine reason, never prose, so the service ships no player-visible text and the phone resolves the wording through strings.csv.
+        - "[ai] Issue #1113 added the relay verbs listed in the summary, plus a `transports` field on host-open and joined. They carry the GAME's own frames when no direct link can be built, and the load-bearing property is what they do NOT do: `payload` is an opaque string holding exactly the bytes a DataChannel would have carried, and nothing in the service may ever grow an opinion about what is inside it. That is what \"the WebSocket fallback does not fork the game protocol\" means concretely — same ClientMessage/ServerMessage JSON, same in-band compatibility handshake, same Identify gate, same localiseTree ingress."
+        - "[ai] The delivery CLASS survives the fallback, because it is a transport property rather than a protocol one: a relay frame declares reliable or snapshot, the service's mailbox sheds the second at its authored depth and never the first, and a reliable queue that fills ends that pair's session with a stated reason rather than becoming quietly lossy. Mailboxes are keyed by (owner, sender) rather than by destination, so a bound bites the pair that reached it instead of every crew member sharing the host's queue."
+        - "[ai] Issue #1354 — the reliable sever is on SUSTAINED backpressure, not instantaneous depth, on the native DIRECT leg (src/native_host/direct_join.rs's PeerOutbox). The direct leg is always WS-relay, so it is the first path to push a whole mission-start burst — GameStarted + the single WorldSetup + one AsteroidSpawned per asteroid, hundreds of reliable frames in one tick — through the reliable queue. The old check severed the instant queue depth passed a count bound, so a burst the NEXT pump fully drained was misread as a peer that had stopped reading, and a phone joining a LAN host was cut with relay-overflow and dropped to the lobby at mission start. The fix severs only when the reliable BYTES stay over a soft bound across a GRACE window (the writer genuinely not draining) or blow an absolute hard byte ceiling in one push; a transient burst the next drain clears resets the grace and survives. The DoS guard is intact — a peer that stopped reading keeps the buffer over-bound across the window and is severed within it, and the hard ceiling bounds memory outright. The grace and ceilings are transport-plane (AdmissionBudgets), never authored gameplay values. The browser build never hit this because it carries the snapshot over a WebRTC DataChannel."
+        - "[ai] `error` is a per-REQUEST refusal, not a link event, and reading it as one was a crew-wide outage. registry.js's fail() answers relay/no-peer whenever a host addresses a peer whose attachment has just gone, which is every ordinary departure. Only a handful of reasons (unreachable, not-connected, unsupported-protocol) may end a session; the frame names the request and never the peer, so there is no subject to drop even for no-peer. `relay-peer-left` is the frame that DOES name one."
+        - "[ai] REVISED by #1113; the bullet this replaces said the revision literal is declared once in gui/rendezvous-protocol.js and both halves import it. There is now a THIRD speaker — a native Rust host, src/core/rendezvous.rs — which cannot import a JS module and MIRRORS the constant instead. Two copies held together by a comment is exactly the outage that bullet warned about, so the pairing is pinned by tests/native_relay_protocol.rs, which reads the JS module's own text. Every frame is still hard-refused on a mismatch, and #1114/#1115 are both edits to this vocabulary."
+        - "[ai] No frame carries a delivery stamp in either direction. The host's compatibility check is in-band on the DataChannel, and relayed copies (resolved.host_stamp, joined.host_stamp, peer-joined.stamp) were read by nobody — dead surface the next extension would have had to keep."
+        - "[ai] The `resolve` verb stays as the lookup primitive even though the shipped phone goes straight to `join`: it is the side-effect-free question a launcher or a fleet flow asks, and it is role-gated exactly like `join`."
+    architecture:
+      authority: request
+      producer: [rendezvous-transport-bridge, native-relay-transport]
+      consumer: [rendezvous-service]
+      validator: [rendezvous-service]
+      trust_boundary: client-to-host
+      payload: RendezvousFrame
+    implementation:
+      status: declared
+      paths:
+        - worker-rendezvous/src/registry.js
+        - worker-rendezvous/src/relay.js
+        - gui/rendezvous-transport.js
+        - gui/rendezvous-relay.js
+        - src/core/rendezvous.rs
+      tests:
+        - tests/client/rendezvous-registry.test.js
+        - tests/client/rendezvous-transport.test.js
+        - tests/client/rendezvous-relay.test.js
+        - tests/native_relay_protocol.rs
+
+  - component: rendezvous-transport-bridge
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Rendezvous Transport Bridge
+      summary: >-
+        The browser halves of the Phoenix join path: a host that registers, is issued a code and
+        answers offers into the existing Identify gate, and a client that resolves a typed code,
+        offers, opens a direct reliable DataChannel and completes the compatibility handshake
+        before speaking ordinary crew protocol. Additive in #1111 — the PeerJS bridge remains the
+        default route until #1112.
+      rationale:
+        - "[ai] SUPERSEDES the summary above, which describes #1111's additive state. Issue #1112 delivered it: this is now the ONLY crew transport, there is no PeerJS bridge and no default to fall back to, the joiner opens a lossy channel alongside the reliable one, and it keeps an accepted link alive across drops on its own backoff. The open_questions below are answered by the same work, and `status` moved partially-implemented → implemented for the same reason — the one unmarked field changed rather than annotated, because a partial claim over a shipped-and-only transport is what pasm scan's declared-versus-observed check exists to catch."
+        - The host adapter presents the channel with PeerJS's DataConnection shape, so server.html's reserved-token refusal, duplicate-token dance and disconnect guard are reused rather than reimplemented.
+        - "[ai] With PeerJS gone the shape is no longer borrowed — the host hands the page one connection object carrying BOTH channels — but the reuse the bullet above is about held: those three server.html code paths were not rewritten."
+        - "[ai] An open DataChannel is not admission: the connection reaches the page only after the compatibility verdict is ok. Frames before that are dropped rather than buffered, everything after a refusal is dropped, and the 250ms before the channel closes is a send-flush for the refusal — otherwise a build the host had just refused could still dispatch into the simulation."
+        - "[ai] BOTH channels are created by the JOINER, before the offer, so the answering host picks them up by label off one negotiation. The lossy one is opened whether or not anything ends up riding it: negotiating it lazily would run the first minute of every session's snapshots down the reliable channel for no reason."
+        - "[ai] Nothing assumes the lossy channel exists. gui/host-peer-routing.js falls back to the reliable channel PER TOKEN, so one phone whose snapshot channel never came up cannot drag the whole bridge onto the reliable path; the joiner's own send applies the same rule upward."
+        - "[ai] Reconnect re-resolves the SAME code and re-sends Identify with the SAME session token, so a dropped radio never puts the code back in front of the guest. Only an answer a retry cannot change ends the loop — one about the code (unknown, wrong-type, version-mismatch, admission-closed, host-gone) or about the build (the host's StampMismatch codes); an unreachable service, a signalling drop or an ICE timeout is retried."
+        - "[ai] 'connecting' is not re-reported on each reconnect attempt. Once the host has accepted the build the page is in its reconnect loop, and reporting 'connecting' per attempt flashed the status dot green and hid the retry control several times a second."
+        - "[ai] The page holds a STABLE façade over whichever joiner is current (window.phoenixLink), because the joiner behind it is replaced on every reconnect — anything holding the joiner itself would be driving a dead connection immediately after the event it exists to survive."
+        - "[ai] A failed attempt tears its own transport down before the next one, and a terminal frame closes the joiner, so an abandoned attempt cannot keep a socket, a registry connection and a peer connection alive and still fire into the page's callbacks."
+        - "[ai] A host that loses its record re-registers on a backoff and is issued a FRESH code, and the join panel blanks until it arrives. There is no PeerJS route underneath any more, so a host that merely reported the loss would be unjoinable until someone reloaded the viewscreen; keeping the SAME code across a host drop needs persistence in the service and is #1115's."
+        - "[ai] SIGNALLING and MEDIA are independent planes, and this is the invariant the rest of the transport's failure handling hangs off. Losing the rendezvous socket, or being told the RECORD has gone, says nothing about an RTCPeerConnection already carrying the game — the phones cannot even observe it. So the host's lostService() discards only the socket, the code and the peers still mid-signalling, and the joiner logs and ignores closed/error frames while its channel is up. Both halves originally tore live sessions down on a Durable Object eviction or a lazy TTL sweep, which read from the bridge as everybody being disconnected mid-mission for no reason."
+        - "[ai] A retryable failure is retried BEFORE the host has accepted the build too, not only after. Retrying only once established meant a first join got exactly one 8s attempt, so connectTimeoutMs's 8/16/30s ladder — added for TURN-over-TCP allocation on cellular, which is a FIRST-join problem — was unreachable by anyone who had not already got in. Bounded at JOIN_ATTEMPTS_BEFORE_ENTRY (4) before acceptance, because a guest who has never got in may be reading the wrong code; unbounded after, because the code is then known good."
+        - "[ai] 'disconnected' is reported only alongside a scheduled retry. It renders as \"Disconnected — reconnecting…\" with a retry control under it, so reporting it on the give-up path (which it was, for any link that had ever been accepted) left the page claiming a loop that had stopped."
+        - "[ai] close() severs BOTH channels and the RTCPeerConnection, and marks the peer refused. It is server.html's only eviction mechanism — the reserved-token refusal and the duplicate-token dance — and closing the reliable channel alone left the lossy one open with its own inbound handler still wired to deliver(), so an evicted device could keep dispatching into the simulation down the other pipe."
+        - "[ai] Every send is wrapped, on the host adapter, in routeOutbound and in the joiner. This is a raw RTCDataChannel with no chunking under it (PeerJS provided one), so a payload over the SDP-negotiated max-message-size throws — and routeOutbound runs inside the callback Rust's outbound flush invokes, where one throw aborted delivery to every remaining crew member. Nothing shipped approaches 262144 bytes; the wrapping is about one dead link not taking the bridge with it."
+        - "[ai] There is no route flag left. `?rendezvous=<url>` survives as a SERVICE override, and only for a LOOPBACK origin — a local wrangler dev. Under #1111 it was also the route opt-in, so honouring an arbitrary origin only affected somebody deliberately turning the route on; since #1112 it applies on every ordinary client load, and `client/index.html?rendezvous=https://attacker.example#<code>` handed to a guest would route their SDP, ICE candidates, session token and display name through a third party with nothing on screen saying so. The #1111 opt-in spellings are ignored rather than honoured, so an old bookmark opens the game instead of dialling a host called \"on\". A fragment that is not a valid code is not a third route either — it goes through the same parse and gets a stated reason in front of the entry field."
+        - Inbound frames go through localiseTree exactly as the PeerJS path does; every console downstream assumes string ids are already resolved.
+        - "[ai] With the PeerJS path gone, that boundary is simply the one place: gui/rendezvous-transport.js's deliver(). The rule the bullet above states is unchanged; only the comparison it drew has expired."
+        - WebSocket and RTCPeerConnection come from an injectable factory pair, which is what lets the browser smoke suite drive the whole path with no real WebRTC and what a native in-process station pane will supply later.
+      open_questions:
+        - The lossy unordered snapshot channel, reconnect/backoff and PeerJS retirement are #1112; #1111 opens only the reliable channel.
+    architecture:
+      kind: transport-adapter
+      authority: non-authoritative
+      sends: [rendezvous-signalling-frame, session-identify-command]
+      runs_in: [host-browser-runtime, phone-browser-runtime]
+      platforms:
+        allowed: [browser]
+        forbidden: [host-only]
+    implementation:
+      status: declared
+      paths:
+        - gui/rendezvous-transport.js
+        - gui/rendezvous-protocol.js
+        - gui/host-peer-routing.js
+        - gui/connection-manager.js
+        - server.html
+        - client.html
+      symbols: [createRendezvousHost, createRendezvousJoiner, joinRouteFromLocation, outboundTargets]
+      tests:
+        - tests/client/rendezvous-transport.test.js
+        - tests/client/host-peer-routing.test.js
+        - tests/smoke/rendezvous-join.spec.js
+        - tests/smoke/multi-client-crew.spec.js
+        - tests/smoke/snapshot-channel.spec.js
+        - tests/smoke/reconnect-midgame-sever.spec.js
+        - tests/smoke/transport-shim.spec.js
+
+  - component: native-relay-transport
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Native Host Relay Transport
+      origin: ai
+      summary: >-
+        The native host's crew path: a NativeTransport implementation whose wire is the rendezvous
+        service's WebSocket game relay. One outbound wss: connection registers as a host declaring
+        transports ["ws-relay"], is issued a typed code the operator reads out, and carries
+        every crew member's traffic — the same frame vocabulary, the same opaque payloads, the same
+        in-band compatibility handshake answered from delivery::check_join_stamp, the same Identify
+        gate and reserved-token refusal. A phone cannot tell it is talking to a native host.
+      rationale:
+        - "[ai] It is a USER of the browser's fallback rather than a second transport, which is the whole point: the alternative was a join protocol for native processes, and two join protocols is what #1111 and #1112 spent themselves removing. It answers what #1121 deferred — src/native_host/transport.rs was a seam with nothing plugged into it, because WebRTC does not run in a Rust process and a native host is simply the case where a direct link can NEVER be built."
+        - "[ai] It declares its transports honestly rather than by omission. Without the claim a joiner would spend the entire 8/16/30 s ladder, four times over, discovering that a host with no WebRTC has no WebRTC; with it, the joiner skips the direct rungs on the strength of the `joined` frame."
+        - "[ai] The socket is tungstenite, the synchronous client, not one of its async wrappers: this crate has no async runtime and every native I/O surface it owns is a blocking std thread, so a runtime would be a new architectural dependency bought for one socket. Native-only behind the host feature; the browser build cannot reach any of it."
+        - "[ai] The socket REDIALS on a backoff, mirroring the browser host's lostService(). A Durable Object eviction, a worker redeploy or a Wi-Fi blip would otherwise leave a process running an authoritative mission with no route in for the rest of it — and a native host has no viewscreen to reload. Losing the link clears the issued code AND the registered flag, so the reconnected socket re-registers on the service's next `ready` and the operator log prints the fresh the code. The old code is genuinely dead; keeping the same letters across a host drop needs persistence in the service and is #1115's, exactly as on the browser side."
+        - "[ai] Identity guards are the browser's, in Rust: a reserved token (__local_console__, the ai: prefix) is refused AT the transport with an in-band JoinRefused rather than dropped downstream — a peer left attached under one still sits in audience() and receives that token's private projection — and a duplicate token severs the prior peer without reporting a disconnect, because on a native host EVERY crew member is relayed, so re-Identify on a fresh peer id is the ordinary reconnect rather than an exotic case."
+        - "[ai] It cannot log for itself: plog! takes a Bevy system parameter and this is a resource Bevy calls. So it queues RelayNotice values on a shared handle and the host binary's report_relay_notices drains them onto its operator log, beside the join code it prints."
+    architecture:
+      kind: transport-adapter
+      authority: non-authoritative
+      sends: [rendezvous-signalling-frame]
+      runs_in: [native-host-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/native_host/relay_transport.rs
+        - src/native_host/relay_socket.rs
+        - src/core/rendezvous.rs
+        - src/bin/phoenix_host.rs
+      symbols:
+        - RelayTransport
+        - RelaySocket
+        - WsRelaySocket
+        - RelayHostConfig
+        - RelayNotice
+        - RendezvousFrame
+        - HandshakeFrame
+      tests:
+        - src/native_host/relay_transport_tests.rs
+        - tests/native_relay_protocol.rs
+        - tests/native_relay_live.rs
+        - tests/native_direct_join.rs
+
+  - component: native-direct-join-service
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Native Host Direct Join Service
+      origin: ai
+      summary: >-
+        The host as its own rendezvous (issue #1353). A native host accepts the crew's game socket
+        on the SAME port it serves the client bundle from: an upgrade on /v1/join is taken off the
+        HTTP path by delivery::serve's ConnectionUpgrade door and answered in process by the
+        single-game subset of the rendezvous service — joiner attach with the typed code lookup,
+        the protocol-version gate, the join stamp, the frame ferry per delivery class, and detach on
+        close. A LAN game therefore needs no external service at all. It is not a second host
+        implementation: it is a RelaySocket, so native-relay-transport sits on top of it unchanged
+        and both legs run at once.
+      rationale:
+        - "[ai] Both hosts dialled OUT to a meet-in-the-middle relay because a BROWSER host cannot accept an inbound connection — two browsers can only meet at a third party. A native process can accept; it is already accepting HTTP on that port. Issue #1121 deferred this leg explicitly, and until it landed a LAN game depended on a Cloudflare Worker that has never been deployed."
+        - "[ai] The reuse is the design. RelayTransport already holds the whole host end of the protocol behind the narrow RelaySocket trait, so implementing THAT rather than NativeTransport means registration, the in-band stamp handshake, the Identify gate, the reserved-token refusal, the duplicate-token sever, audience resolution and the shedding rule are the same code on both legs — and a phone cannot tell which leg answered it, which is the property the whole feature is for."
+        - "[ai] What collapses relative to the worker: no /v1/host socket (the host IS this process), one record instead of a map, and no code rotation or reclaim grace — a record whose host has gone is a process that has exited, so the two lifecycle features #1115 grew for a socket that might come back have nothing to be about. What does NOT collapse is any validation, because a phone must get the same answers from both legs or they are different games."
+        - "[ai] The handshake's 101 is written by this module and the socket wrapped with WebSocket::from_raw_socket, rather than handed to tungstenite::accept. delivery::serve has ALREADY read the request head — that is how the path and the key were known at all — so there is no handshake left to read, and std cannot peek a socket without consuming it portably. The alternative was restructuring the accept loop to defer its read, which would have made every ordinary bundle request pay for the one endpoint that upgrades."
+        - "[ai] No Origin allow-list on this leg, deliberately. The worker's gate is right for a public multi-tenant service on a different origin from every page it serves; here the page and the socket are the same origin by construction, so a list would have to name every address and hostname a phone might reach the machine by, and a wrong entry refuses the whole crew with nothing on screen saying why — the 2026-08 TURN incident's failure mode, bought for no defence. The port already hands the entire bundle to the LAN. What makes that decision SOUND is the gate that replaces it: the minimal honest one here is attempt-limiting, not an origin list. A hostile page open in a crew member's browser dials this port with its own site's Origin, so a header list would not have stopped it, and the join stamp is public — which leaves the code as the only secret in front of a game. So the join is gated by the attempt limits below, and only then by the compatibility handshake and the reserved-token refusal, which decide what a joiner may BE rather than whether it may guess."
+        - "[ai] The host MINTS its own code, which core::rendezvous deliberately refuses to do — a host is ISSUED a code and never composes one. That stays true of that module: a host that is its own service is the party that mints, so join_codes.rs does it natively, reading assets/join/join-codes.toml rather than writing the scheme down a second time. Only the small logic around the data is mirrored, function by function, against gui/join-code.js and the registry's lookup()."
+        - "[ai] One thread per joiner, the same pump shape as relay_socket's and delivery::serve's: this repository has no async runtime and every native I/O surface it owns is a blocking std thread. The authored table bounds crew (max_peers_per_record), relay peers, lookups per connection, the frame ceiling and the per-class queue depths; sockets that upgrade and never join are counted SEPARATELY, against AdmissionBudgets::unjoined_total rather than the record's peer cap, because a device holding thirty-two silent sockets used to refuse the room with join-sockets-full. The thread ceiling is therefore peers plus un-joined, stated rather than discovered, and both directions of a socket are time-bounded — the write timeout is what stops a joiner that stalls its own reads parking a host thread inside send for as long as the OS will hold a full buffer. The socket is also given a WebSocket config sized from max_relay_frame_bytes rather than tungstenite's 64 MiB/16 MiB defaults, which were buffered and DECODED before any budget was consulted."
+        - "[ai] Every state a joiner socket can be in has a clock, and that completeness is the point: JOIN_DEADLINE is gated on !joined, so before this a socket that had resolved the code was reaped by NOTHING and its read loop returned WouldBlock for ever. A joined socket that never sends relay-open is reaped on attach_deadline (30s, measured against the one thing a real joiner does next — the client sends relay-open from the same case 'joined' arm that received it), and an ATTACHED peer is held to WebSocket ping/pong: a ping after 10s of silence, detached after 30s unanswered. A deadline cannot answer the attached case, because an attached console is legitimately silent for as long as its player is — the only honest liveness signal is one the host generates, and tungstenite answers a Ping for every client with no client code at all. The failure this closes is a phone dropping without a FIN (out of range, a venue AP losing the association, a battery gone mid-frame): the TCP is half-open rather than closed, the seat is held by nobody, and a bad night accumulates zombie seats until the room is locked out with nothing on screen saying why. Every reap goes down the ORDINARY departure path, so the seat flips to Backfill and the phone's own reconnect yields it straight back."
+        - "[ai] Guessing the code is bounded by three layers, because none of them is sufficient alone and the per-connection cap is not a limit at all. max_lookups_per_connection is charged to a SOCKET, which is exactly what a guesser discards: an unbudgeted door answered wrong codes at rates in the high hundreds to a few thousand per second on the machines this was measured on (the figure is dominated by the prober's own hardware, so the assertions in tests/native_direct_join.rs are relative — the same probe against two hosts differing only in these budgets — rather than absolute). (1) A per-source failed-guess token bucket keyed on the peer address read at accept and held by the RECORD, so it survives reconnection — 20 burst, one refunded every 5s — plus a per-source cap on un-joined sockets (4 of 16, a quarter rather than a half so that two addresses cannot hold every slot; IPv6 privacy addressing makes a second address free). Only FAILED lookups are charged, so a correct code costs nothing and a crew sharing one NAT address is spending a typo allowance, not a join allowance. (2) A global circuit-breaker: wrong guesses in a rolling minute ramp a delay onto every lookup answer, correct ones included (answering a right code faster during an attack is a timing oracle), capped at 2s — under the client's own 8s first-connect timeout, so a guest caught in an attack waits once and gets in, while the service cannot answer more than unjoined_total / breaker_max ≈ 8 wrong guesses a second however many addresses the guessing comes from. This is the layer that covers a guesser the per-source table cannot track, and it is asserted as a composite ceiling over many synthetic sources rather than inferred from a loopback ramp: 8.2/s sustained against a stated 8.5/s, ~10.2/s through the ramp's own first window. (3) Authored entropy: the suffix is eight letters, 25^8 ≈ 1.526e11 (37.15 bits), which is ~377 days of expected search at the OLD unthrottled rate before any limit applies — where five letters (25^5, 23.2 bits) fell in ~35 minutes. At the composite rate the two limits allow, it is centuries."
+        - "[ai] The residual is stated rather than defended against. A guesser with many addresses is not slowed by layer 1 at all — past tracked_sources a new address's guesses are not even charged to a bucket — and layer 2 is what answers it, on the one resource an attacker cannot multiply: the un-joined socket. What such a caller CAN still do is hold the un-joined budget, so a crew member's upgrade meets join-sockets-busy and its Retry-After. That is lockout PRESSURE during an active attack rather than a lockout: every slot is reclaimed within JOIN_DEADLINE whether the caller cooperates or not, and the refusal is soft. Defending it would mean refusing addresses the table cannot track, which is a venue-NAT outage bought to protect a LAN port that already serves the whole client bundle to anyone who asks."
+        - "[ai] Every one of those refusals is SOFT and says so — a stated reason in band, a Retry-After on a refused upgrade, a bucket that refills on a clock — because a whole crew can share one address and a lockout that did not lift would be a self-inflicted outage waiting for one clumsy typist. The numbers are transport plane rather than authored scheme (AGENTS.md rule 11): they describe one TCP listener defending itself, never enter the simulation, and live in Rust beside the pump's own timeouts. They are a struct rather than constants only so a test can watch a bucket empty in milliseconds; production takes the defaults."
+        - "[ai] The client half is a rule rather than a parameter: a page dials the origin that served it unless that origin is one of the published browser-game web origins, which cannot accept a socket. That supersedes #1336's ?rendezvous= posture question for the served-by-a-host case — a default has no link somebody can be handed."
+        - "[ai] It is CI-testable where the cloud leg never was. tests/native_relay_live.rs needs a service running and is #[ignore]d, because a test that skips when it cannot reach one reports green for a broken build; this leg's equivalent binds a host on loopback and drives a real tungstenite client through the whole join, so it runs on every cargo test --features host."
+    architecture:
+      kind: service
+      authority: authoritative
+      sends: [rendezvous-signalling-frame]
+      coordinates: [join-code-scheme, join-compatibility-gate]
+      runs_in: [native-host-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/native_host/direct_join.rs
+        - src/native_host/join_codes.rs
+        - src/delivery/serve.rs
+        - src/bin/phoenix_host.rs
+        - gui/join-url.js
+        - assets/join/join-codes.toml
+      symbols:
+        - DirectJoinService
+        - DirectJoinGate
+        - AdmissionBudgets
+        - JoinCodeTable
+        - ConnectionUpgrade
+        - websocket_upgrade
+        - UpgradeVerdict
+        - on_upgrade
+        - rendezvousBaseForOrigin
+        - KNOWN_WEB_ORIGINS
+      tests:
+        - src/native_host/direct_join_tests.rs
+        - tests/native_direct_join.rs
+        - tests/client/join-url.test.js
+
+  - component: join-compatibility-gate
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Host Join Compatibility Gate
+      summary: >-
+        The host's authoritative protocol/content check on a joining client, run over the direct
+        DataChannel before Identify. Reuses the delivery version pin — the same DeliveryStamp and
+        check_client_stamp a native host enforces at /host/manifest.json — so a Phoenix host has
+        one version authority rather than two.
+      rationale:
+        - The rendezvous service's version GUID is coarse discovery advice; p2p-human-readable-join-namespaces forbids it replacing the host handshake, so the verdict is computed in Rust and only relayed by JavaScript.
+        - An absent stamp is admitted, because the PeerJS route has never stamped anything and #1111 is additive; a garbled stamp is refused, because a broken stamp is not evidence of compatibility.
+        - "[ai] SUPERSEDES the bullet above: a stamp is REQUIRED since #1112, and absent and garbled are now both refused as client-stamp-missing. #1111 admitted an absent one because PeerJS was still the default route and had never stamped anything, so refusing the unstamped would have locked out the shipped join path. With PeerJS retired, every client that can reach a host is a built Phoenix bundle carrying the field, so admitting the silent case would leave the only version-skew hole exactly where a stale cached bundle sits."
+        - A host that has not yet loaded a manifest binds the protocol half only — a browser host in the lobby has no content identity to compare, and refusing every phone until it does would be a race rather than a safety property.
+        - "[ai] The host page still admits when it cannot reach wasm_check_client_stamp at all. A host that cannot ask cannot refuse, and locking out every phone because an export was unreachable is a worse failure than admitting one build the check would have caught."
+        - "[ai] A joining SHIP HOST is judged by check_host_stamp instead (#1114), and BOTH of the two leniencies above are inverted for it. There is no content-identity waiver: a host that has not loaded a manifest admits a phone on the protocol alone, because that phone will be sent whatever the host later loads, and two authoritative simulations are not in that relationship. And an unreachable export refuses rather than admits, because seating an unchecked simulation is exactly the failure this gate exists to prevent — one that does not surface loudly but desynchronises quietly, later, once #1116 shares a tick stream."
+        - "[ai] The reason codes are StampMismatch's own, unchanged, so a fleet refusal reads back through the one reasonStringId map rather than growing a fleet-only spelling of \"that build does not match\". What DOES differ is the wording: the same reason is a different sentence on a host viewscreen than on a phone (a ship host typing a crew code into the fleet field is not being told \"that is a fleet code\"), so reasonStringId takes the surface and only the reasons whose wording depends on it get a second row."
+        - "[ai] An EMPTY content identity is refused on both sides rather than compared. Two hosts that have not loaded a manifest both carry content_id \"\", and an equality test admits that pair happily — the exact case this function exists to refuse. Absent is not a value two parties can agree on, and it is treated the way check_bundle_content already treats a bundle whose manifest declares no [content]."
+    architecture:
+      kind: version-gate
+      authority: authoritative
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/delivery/mod.rs
+        - src/delivery/stamp.rs
+        - src/server/bridge.rs
+        - src/core/codec.rs
+        - scripts/client-stamp.mjs
+      symbols:
+        - check_join_stamp
+        - check_host_stamp
+        - parse_stamp_field
+        - wasm_check_client_stamp
+        - wasm_check_host_stamp
+        - encode_join_verdict
+      tests: [cargo test, tests/client/client-stamp.test.js]
+
+  - message: host-mesh-frame
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Host-Mesh Frame
+      summary: >-
+        The versioned, tick-stampable JSON vocabulary between two ship hosts — hello, welcome,
+        refused, slot, roster and admission in revision 1. Carried on the direct DataChannel
+        between a fleet lead and an admitted member, and deliberately separate from both
+        ClientMessage/ServerMessage and the rendezvous signalling frames.
+      rationale:
+        - PRD #1093 and p2p-delta-transport-is-a-star-today both require the host-to-host message set to stay separate from the crew protocol; a ship host holds no station, is never projected to, and everything it says is meaningless on a phone.
+        - "[ai] The envelope keys are m/t/d, not v/type/data. `v` belongs to the rendezvous frames and `type`/`data` to the crew protocol, so a host frame that lands on the wrong wire is REFUSED by whichever decoder receives it rather than half understood — every crew decoder in the project switches on `.type`, which a host frame does not have. That is what makes \"each crew star stays attached only to its own host\" checkable rather than merely intended."
+        - "[ai] Every frame carries a `tick` field and #1114 never sets it — a fleet lobby has no running simulation to stamp against. It is present from the first frame because #1116's lockstep work cannot retrofit a stamp onto a vocabulary already in the field, and because AGENTS.md rule 7's CommandDelay amendment is precisely \"the tick a command applies on travels with the command\"."
+        - "[ai] Six frames and no more. #1116 grows this vocabulary with the lockstep command/tick traffic; a frame invented here that nothing sends would be surface that work would have to keep."
+        - "[ai] Decoding answers null for every \"this is not a frame of a revision I speak\" case together — unparseable text, a crew message, a rendezvous frame, a future revision. The caller's answer to all of them is to drop it, and distinguishing them would invite a receiver to act on a frame it does not understand."
+        - "[ai] `refused` names WHICH frame it answers (`of: hello | slot`), and that field is load-bearing rather than diagnostic. The lead refuses from two places — a hello it will not seat, and a slot patch from a host it already seated — and a member that cannot tell them apart has to treat both as terminal, which throws a legitimate host out of a fleet it belongs to for touching its own loadout after the freeze."
+        - "[ai] `hello` carries NO delivery stamp. The build verdict is the transport plane's, made by delivery::check_host_stamp over the in-band JoinHandshake before a hello is ever read; a copy of an authoritative fact in the fleet vocabulary would be a peer-supplied, unvalidated field sitting where a future reader looks first."
+        - "[ai] A member's self-reported `name` and `ship` are bounded and shape-checked before they enter the roster ([limits] max_slot_name_length / max_slot_ship_path_length). They are the only two fields one host writes into every other host's roster, and the lead re-encodes that roster to the whole fleet on every change — the same discipline the registry applies to RELEASE_GUID, its one host-supplied indexed value."
+    architecture:
+      authority: request
+      producer: [fleet-lobby-session]
+      consumer: [fleet-lobby-session]
+      validator: [fleet-lobby-session]
+      trust_boundary: client-to-host
+      payload: HostMeshFrame
+    implementation:
+      status: declared
+      paths: [gui/host-mesh.js]
+      symbols: [hostFrame, encodeHostFrame, decodeHostFrame, asHostFrame]
+      tests: [tests/client/host-mesh.test.js, tests/client/fleet-session.test.js]
+
+  - component: fleet-lobby-session
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Fleet Lobby Session
+      summary: >-
+        The two ends of a multi-ship session: an owner that registers a SECOND rendezvous record in
+        the server namespace, is issued the one privileged fleet code and holds the slot roster, and
+        a member that types that code, passes a strict host compatibility handshake and renders
+        whatever roster the owner sends. Assembles and freezes a fleet; it does not run one.
+      rationale:
+        - p2p-human-readable-join-namespaces gives the multi-ship session exactly one privileged server code, distinct from every ship's private crew code, and it is transport metadata the simulation never sees.
+        - "[ai] The fleet is N independent single-ship processes plus this coordination layer, not more ships in one ECS world. Nothing in src/lobby, src/core/messages or the broadcaster seam changed: SessionManager, GamePhase and ShipStations stay process-singletons, exactly as the design intended."
+        - "[ai] A member never sends Identify, is never given a session token, never enters peerTokens/tokenConns and never reaches wasm_receive_message. Crew isolation is structural — a different socket, in a different namespace, carrying a different protocol — rather than a filter something downstream applies."
+        - "[ai] Slot ids are minted by the OWNER from one monotonic counter and are never reused, including after the host holding one leaves. p2p-delta-identity-is-minted says an id is a function of who minted it and in what order; members numbering their own slots would produce ids no other host agrees with the moment #1116 needs them in a shared command stream."
+        - "[ai] Closing admission answers FUTURE joiners and nothing else. An admitted member's link is a direct DataChannel that owes the signalling plane nothing — the same two-planes property the crew transport keeps — so closing a fleet is not an eviction."
+        - "[ai] Mission start RELEASES the service-side gate rather than tightening it, which looks backwards and is not. p2p-fixed-host-slot-recovery makes the server code a recovery capability that survives mission start (\"closing new-host admission does not invalidate it for a known disconnected slot\"), so an entry after the freeze has to REACH the lead to be judged. A record the service refuses at lookup could never carry that claim, and a pre-start closure would silently become a permanent lockout of the replacement machine."
+        - "[ai] What such an entry is judged AS is this issue's honest limit: every post-freeze hello is answered `recovery-only`, a reason distinct from `admission-closed` precisely so #1120 lands as a change of answer rather than a change of protocol."
+        - "[ai] A slot dropped BEFORE the freeze is deleted and one dropped after is kept and marked disconnected. The second is the object #1120's recovery claims, and it is the same non-pruning discipline SessionManager keeps for the same reason: a record that is deleted cannot be reconnected to."
+        - "[ai] Fleet capacity is authored ([limits] max_fleet_hosts) rather than a number in code, and is deliberately smaller than the service's own max_peers_per_record — one is how big a fleet the game fields, the other is a memory bound on any record that knows nothing about ships."
+        - "[ai] The namespace on a resolve/join frame is a fact about the FIELD the code was typed into, never about the code. parseJoinCode reads a structured code's namespace out of the project GUID inside it, so sending that would have the asker echo the record back at the service, which then always agrees — and the typed refusal could never fire for the very form the fleet panel hands the operator to paste. The joiner sends the caller's namespace and refuses the disagreement locally, before a socket is opened."
+        - "[ai] A host's CONTENT IDENTITY is established on every boot path, not only the scenario-picker one. The stamp both sides of the fleet handshake compare is built from the scenario manifest, and the manifest push used to live inside the catalogue build that `?scenario=` skips — so a bypassed host stamped an empty identity, two of them compared \"\" against \"\" and were seated in one fleet, and a bypassed host could never agree with a picker one at all. That last case was the invitation link's own: it deliberately carries no ?scenario. It does carry ?manifest, because that names the file the identity comes from."
+      open_questions:
+        - Running the frozen fleet as one deterministic mission is #1116; recovering a disconnected slot onto a replacement machine is #1120.
+        - "[ai] The compatibility handshake distinguishes BUILDS, not ROLES. `askedNamespace` takes the namespace off the caller's own frame and both namespaces are joinable, so a peer that holds the private fleet code and claims `server` reaches the lead; the in-band gate behind it compares the same three numbers a client bundle carries, and a phone's stamp is identical to its host's by construction. Nothing in #1114 establishes that a joiner is a ship host rather than a console. Bounded today — the shipped phone always says `client`, the fleet code is private, and such a peer still never enters peerTokens/tokenConns or reaches wasm_receive_message — but #1116 admits these same peers into a shared tick stream, so it needs a real role assertion: a lead-issued capability, or a hello field the lead can check, rather than inheriting \"the stamp matched\" as proof of hostness."
+        - "The roster reaches each host's own operator surface — the viewscreen fleet panel and the settings cog — and not yet a phone. The route when it does is decided and is NOT forwarding a host-mesh frame to a crew client: that would put another ship's host protocol on a console's wire and make crew isolation a forwarding rule rather than a fact. A phone learns the fleet from ITS OWN host, as an ordinary ServerMessage broadcast to that ship's crew, fed in through the same wasm boundary the pre-Bevy scenario catalogue already crosses. That message belongs with #1116, which is when a crew has something to do about it."
+    architecture:
+      kind: transport-adapter
+      authority: non-authoritative
+      owns: [fleet-roster-state]
+      sends: [host-mesh-frame, rendezvous-signalling-frame]
+      receives: [host-mesh-frame]
+      runs_in: [host-browser-runtime]
+      platforms:
+        allowed: [browser]
+        forbidden: [host-only]
+    implementation:
+      status: declared
+      paths:
+        - gui/host-mesh.js
+        - gui/fleet-session.js
+        - gui/server-settings.js
+        - server.html
+      symbols: [createFleetOwner, createFleetMember, openFleet, admitHost, freezeFleet]
+      tests:
+        - tests/client/host-mesh.test.js
+        - tests/client/fleet-session.test.js
+        - tests/client/server-settings.test.js
+        - tests/smoke/fleet-lobby.spec.js
+
+  - state: fleet-roster-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Fleet Roster State
+      summary: >-
+        The player-ship slots of a multi-ship session — slot identity, the hull each host has
+        selected, readiness, connectedness — plus the fleet's admission state and whether mission
+        start has frozen it. Held by the fleet lead and synced to every admitted host.
+      rationale:
+        - "[ai] Transport-plane, like the join codes beside it: it is never written into simulation state, never enters a snapshot, and no ship host learns another's private crew code from it."
+        - "[ai] The synced roster carries no rendezvous peer ids. Those are the lead's own bookkeeping — ephemeral, meaningless on another machine, and the sort of cross-host identity leak p2p-human-readable-join-namespaces keeps out of everything but the service."
+        - "[ai] Mission start makes it immutable: no new slot, and no change to a slot's selected hull. The freeze is the roster's, so it is one flag rather than a rule each mutation has to remember."
+    architecture:
+      classification: transport
+      owner: fleet-lobby-session
+      writers: [fleet-lobby-session]
+    implementation:
+      status: declared
+      paths: [gui/host-mesh.js, gui/fleet-session.js]
+      symbols: [openFleet, rosterOf, updateSlot, dropHost]
+      tests: [tests/client/host-mesh.test.js, tests/client/fleet-session.test.js]

@@ -51,7 +51,10 @@ const FIXTURES = {
 
 // ── Battleship: the reference hull, flat `comms` family ───────────────────────
 describe('battleship comms renderStation', () => {
-  beforeEach(() => mount(FIXTURES.battleship));
+  beforeEach(() => {
+    battleshipRender.resetSelection();
+    mount(FIXTURES.battleship);
+  });
 
   const base = {
     contacts: [{ id: 'c1' }],
@@ -64,9 +67,20 @@ describe('battleship comms renderStation', () => {
   it('drives the contact list, hail list, current message and station-damage from the flat payload', () => {
     battleshipRender(base, document);
     expect(el('comms-contact-list').state).toEqual({ contacts: [{ id: 'c1' }] });
-    expect(el('comms-hail-list').state).toEqual(base);
+    expect(el('comms-hail-list').state).toEqual({ ...base, selected_message_id: null });
     expect(el('comms-current-message').state).toEqual({ thread: { id: 'm2', is_read: false, sender_name: 'Ops' }, messages: base.messages, rejection: null });
     expect(el('station-damage').state).toEqual({ pct: 0.9 });
+  });
+
+  it('owns local message selection and repaints the list, thread and footer together', () => {
+    battleshipRender(base, document);
+    expect(battleshipRender.selectMessage(base, 'm1', document)).toBe(true);
+    expect(el('comms-hail-list').state.selected_message_id).toBe('m1');
+    expect(el('comms-current-message').state.thread.id).toBe('m1');
+    expect(el('footer-target').textContent).toBe('Old');
+    expect(battleshipRender.currentMessage(base).id).toBe('m1');
+    expect(battleshipRender.selectMessage(base, 'missing', document)).toBe(false);
+    expect(el('comms-current-message').state.thread.id).toBe('m1');
   });
 
   it('shows the active hail sender name, or the localized fallback for an unnamed hail', () => {
@@ -107,7 +121,10 @@ describe('battleship comms renderStation', () => {
 
 // ── Cruiser: keyed payload, Navigation absorbed into the same Station ────────
 describe('cruiser comms renderStation', () => {
-  beforeEach(() => mount(FIXTURES.cruiser));
+  beforeEach(() => {
+    rawCruiserRender.resetSelection();
+    mount(FIXTURES.cruiser);
+  });
 
   const comms = {
     contacts: [{ id: 'c1' }],
@@ -125,14 +142,14 @@ describe('cruiser comms renderStation', () => {
   it('reads the comms view via projected Console Family for the shared core', () => {
     cruiserRender(payload, document);
     expect(el('comms-contact-list').state).toEqual({ contacts: [{ id: 'c1' }] });
-    expect(el('comms-hail-list').state).toEqual(comms);
+    expect(el('comms-hail-list').state).toEqual({ ...comms, selected_message_id: null });
     expect(el('comms-current-message').state).toEqual({ thread: { id: 'm1', is_read: false }, messages: comms.messages, rejection: 'console.common.no_target' });
     expect(el('station-damage').state).toEqual({ pct: 0.5 });
   });
 
   it('drives the navigation map and its overlay clone from the absorbed navigation system', () => {
     cruiserRender(payload, document);
-    const expected = { blips: [{ uuid: 'n1' }], regions: [{ id: 'r1' }], range: 4000, ship_pos: { x: 1, z: 2 }, ship_heading: 90, waypoint: { name: 'Gate' } };
+    const expected = { blips: [{ uuid: 'n1' }], regions: [{ id: 'r1' }], range: 4000, ship_pos: { x: 1, z: 2 }, ship_heading: 90, waypoint: { name: 'Gate' }, auto: true };
     expect(el('navigation-map').state).toEqual(expected);
     expect(el('nav-overlay-map').state).toEqual(expected);
   });

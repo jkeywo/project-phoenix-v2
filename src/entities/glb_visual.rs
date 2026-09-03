@@ -8,159 +8,21 @@
 
 use bevy::prelude::*;
 
+// Compatibility re-exports for viewer/render call sites that historically
+// reached the sidecar resolver through this presentation module. Ownership is
+// now simulation-side in `model_markers` (issue #1291).
+pub use crate::entities::model_markers::{
+    resolve_sidecar_rig, resolve_sidecar_rig_optional, Absence,
+};
+
 /// Holds a pending GLB scene handle so the asset server keeps the asset alive
 /// across frames until it finishes loading.
 #[derive(Component)]
 pub struct PendingSceneHandle(pub Handle<bevy::scene::Scene>);
 
-/// Read a model-rig sidecar TOML for `path`.
-///
-/// - **Native**: `std::fs::read_to_string` (returns `None` when absent).
-/// - **WASM**: checks the pending-sidecar queue populated by JS via
-///   `wasm_push_sidecar_toml`; fires a deferred JS fetch on first miss and
-///   returns `None` until the fetch resolves. An empty pushed string (404)
-///   resolves to `Some(String::new())`, which parses to an identity rig.
-///
-/// **Non-destructive**: the entry stays in the queue, so every entity sharing a
-/// model reads the same body and the preload poller can read it too (that is
-/// what lets `asset_preload` expand a sidecar's `[[lod]]` chain without stealing
-/// it from the renderer). Callers that only need readiness should still prefer
-/// [`crate::entities::config_cache::is_pending_sidecar_delivered`].
-fn load_sidecar_toml(path: &str, absence: Absence) -> Option<String> {
-    let text = load_sidecar_toml_text(path, absence);
-    // Issue #935: a rig sidecar is authored content too — record it into the
-    // ledger the same way the world/entity loaders do.
-    if let Some(text) = &text {
-        crate::content_ledger::record(path, text);
-    }
-    text
-}
-
-/// Whether a sidecar that turns out not to exist is news.
-///
-/// On native this changes nothing — a missing file is a `None` from the
-/// filesystem either way. On wasm the read is an HTTP fetch, and the page logs a
-/// failed one as an error, because a sidecar that should be there and is not is
-/// a model rendering without its markers and its ladder. A read we are taking
-/// *in order to find out whether the file exists* must not be reported that way:
-/// absence is one of its two valid answers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Absence {
-    /// The file is expected to exist; a 404 is a defect worth logging.
-    Unexpected,
-    /// The read is itself the existence test; a 404 is an answer, not a fault.
-    Expected,
-}
-
-fn load_sidecar_toml_text(path: &str, absence: Absence) -> Option<String> {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let _ = absence;
-        std::fs::read_to_string(path).ok()
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        crate::entities::config_cache::take_pending_sidecar_toml(path).or_else(|| {
-            crate::entities::config_cache::request_sidecar_fetch(
-                path.to_string(),
-                absence == Absence::Expected,
-            );
-            None
-        })
-    }
-}
-
-/// Resolve a model's rig sidecar to a `ModelRig`.
-///
-/// Returns:
-/// - `Some(rig)` once the sidecar is resolved — either parsed, or an identity
-///   rig when the sidecar is genuinely absent (native: file missing; wasm: JS
-///   pushed an empty string for a 404) or fails to parse.
-/// - `None` while a wasm fetch is still in flight (caller retries next frame).
-///   On native this never returns `None` (the filesystem read is synchronous).
-///
-/// # Failure modes now that the sidecar owns the LOD chain (issue #914)
-///
-/// The identity fallback is deliberately *degrade, never black-hole*: a model
-/// with no readable sidecar still appears on screen. But an identity rig also
-/// carries an EMPTY `lod`, so the two absence cases mean different things and
-/// are reported differently:
-///
-/// * **Genuinely absent sidecar** — no ladder was ever authored. That is the
-///   normal case for every ship hull, so it is silent, and the entity renders
-///   its flat `[mesh]` exactly as a model with no ladder always has.
-/// * **Present but malformed sidecar** — the author *did* write something and
-///   we cannot tell how much of it was a ladder. Falling back silently would
-///   drop the whole chain and quietly render one level forever, so this logs at
-///   ERROR (not warn) and says so explicitly.
-pub fn resolve_sidecar_rig(
-    model_path: &str,
-    variant: Option<&str>,
-) -> Option<crate::entities::model_rig::ModelRig> {
-    resolve_sidecar_rig_where(model_path, variant, Absence::Unexpected)
-}
-
-/// [`resolve_sidecar_rig`] for a read that is ITSELF an existence test — the
-/// legacy convention probe in [`resolve_tier_parent_scale`], and nothing else.
-///
-/// Same answers, but a wasm 404 resolves quietly to the identity rig instead of
-/// being logged as a failed fetch. A ladder that declares `tier_rig` never comes
-/// here; only a sidecar predating the field does.
-pub fn resolve_sidecar_rig_optional(
-    model_path: &str,
-    variant: Option<&str>,
-) -> Option<crate::entities::model_rig::ModelRig> {
-    resolve_sidecar_rig_where(model_path, variant, Absence::Expected)
-}
-
-fn resolve_sidecar_rig_where(
-    model_path: &str,
-    variant: Option<&str>,
-    absence: Absence,
-) -> Option<crate::entities::model_rig::ModelRig> {
-    let path = crate::entities::model_rig::sidecar_path(model_path, variant);
-    match load_sidecar_toml(&path, absence) {
-        Some(toml_str) => {
-            if toml_str.trim().is_empty() {
-                // Absent (404 / empty) → identity rig so the model still renders.
-                Some(crate::entities::model_rig::ModelRig::default())
-            } else {
-                match crate::entities::model_rig::ModelRig::from_toml(&toml_str) {
-                    Ok(rig) => Some(rig),
-                    Err(e) => {
-                        // A present-but-malformed sidecar degrades to an identity
-                        // rig so the model still renders — but that identity rig
-                        // has no markers AND no LOD chain, so say both out loud
-                        // rather than let a typo pass as "this model has no ladder".
-                        bevy::log::error!(
-                            target: crate::logging::LogCat::Assets.target(),
-                            "rig sidecar {path} failed to parse: {e}; falling back to an \
-                             identity rig — this model loses its markers AND any [[lod]] \
-                             chain, and will render only its flat [mesh] level"
-                        );
-                        Some(crate::entities::model_rig::ModelRig::default())
-                    }
-                }
-            }
-        }
-        None => {
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                // Native: a missing file is "genuinely absent" → identity rig.
-                Some(crate::entities::model_rig::ModelRig::default())
-            }
-            #[cfg(target_arch = "wasm32")]
-            {
-                // WASM: fetch still in flight → retry next frame.
-                None
-            }
-        }
-    }
-}
-
-/// The scale a NON-near LOD tier folds onto the PARENT transform, given the
-/// primary sidecar's `[base].scale` and the scale the ladder's own GENERATED
-/// tiers already carry.
+/// The extra scale a NON-near LOD tier's composition root must supply, given
+/// the primary sidecar's `[base].scale` and the scale the ladder's own
+/// GENERATED tiers already carry.
 ///
 /// Every tier of one model has to reach the same world size — the primary
 /// sidecar's `[base].scale`. Two ladder shapes deliver it differently, and
@@ -168,14 +30,15 @@ fn resolve_sidecar_rig_where(
 ///
 /// * A **hull ladder** (every ship, the starbase, the research outpost) ships
 ///   no sidecar beside its generated tier GLBs. Each generated tier therefore
-///   resolves an identity rig, so the parent must supply the whole base scale.
+///   resolves an identity rig, so the tier root must supply the whole base
+///   scale.
 ///   This is the case bf4c4b02 fixed: before it, a starbase at
 ///   `[base].scale = [15, 18, 18]` snapped back to raw model size the moment it
 ///   left its near band.
 /// * A **pipeline ladder** (every asteroid class, since e20a5035) writes a
 ///   sidecar beside EVERY tier GLB carrying the primary's `[base]` rig
-///   verbatim. The child applies the base scale itself, so the parent must
-///   supply NONE of it.
+///   verbatim. The GLB child applies the base scale itself, so the tier root
+///   must supply NONE of it.
 ///
 /// This is a question about GLB TIERS ONLY. A billboard level's `scale` is the
 /// quad's world size on both conventions — `capture-billboards.mjs` records it
@@ -297,13 +160,13 @@ pub fn declared_tier_rig(
     }
 }
 
-/// The scale the tier at `index` folds onto its PARENT transform.
+/// The extra composition scale for the tier at `index`.
 ///
 /// The near tier (index 0) IS the primary GLB, so its child already carries the
-/// whole `[base].scale` from the primary sidecar and the parent must fold in
-/// nothing; every other tier takes [`resolve_tier_parent_scale`]'s answer. Both
-/// the game's LOD swap and the viewer's ask exactly this question, so they ask
-/// it in one place.
+/// whole `[base].scale` from the primary sidecar and needs no extra scale;
+/// every other tier takes [`resolve_tier_parent_scale`]'s answer. The game puts
+/// this on a presentation-only visual root, while the standalone viewer may put
+/// it on its preview subject. Both ask the same composition question here.
 pub fn tier_parent_scale_at(index: usize, ladder_tier_scale: Vec3) -> Vec3 {
     if index == 0 {
         Vec3::ONE
@@ -325,11 +188,12 @@ pub enum GlbSpawnOutcome {
 /// Spawn a GLB scene as a child of `entity`, mirroring PATH A of the flat
 /// renderer. Resolves the scene handle (storing a [`PendingSceneHandle`] on the
 /// parent to keep it alive across frames), waits for both the scene asset and
-/// the rig sidecar, then spawns the `SceneRoot` child and attaches
-/// [`crate::entities::model_rig::ModelMarkers`] to the parent. Returns the spawned child
+/// the rig sidecar, then spawns the `SceneRoot` child. Returns the spawned child
 /// so callers can tear it down on an LOD switch, or decorate it — the local
 /// ship, for instance, adds `Visibility::Hidden` and `NoFrustumCulling` to the
-/// returned entity.
+/// returned entity. Authoritative marker geometry is deliberately outside this
+/// presentation helper; [`crate::entities::model_markers`] resolves it from the
+/// primary authored rig independently of whichever visual is active.
 ///
 /// `resolved_rig` lets a caller that has ALREADY resolved this exact sidecar
 /// this frame (to answer some prior question, e.g. `render_spawned_entities`
@@ -404,11 +268,6 @@ pub fn spawn_glb_visual(
         .spawn((bevy::scene::SceneRoot(scene), base_tf))
         .id();
     commands.entity(entity).add_child(child);
-    // Attach the resolved marker map so downstream systems (weapons, exhaust, …)
-    // can resolve mount points by name.
-    commands
-        .entity(entity)
-        .insert(crate::entities::model_rig::ModelMarkers::from_rig(rig));
     GlbSpawnOutcome::Spawned(child)
 }
 
@@ -724,6 +583,78 @@ mod tests {
             baked, 64,
             "expected the 32 shipped asteroid variant ladders' two generated tiers \
              each to ship one"
+        );
+    }
+
+    /// Materialising a scene is presentation work. Even when the active tier's
+    /// rig disagrees with the primary authored rig, `spawn_glb_visual` must not
+    /// replace the parent's authoritative marker geometry (issue #1291).
+    #[test]
+    fn spawning_a_glb_visual_cannot_replace_authoritative_markers() {
+        fn materialise_visual(
+            mut commands: Commands,
+            asset_server: Res<AssetServer>,
+            scenes: Res<Assets<bevy::scene::Scene>>,
+            parent: Query<(Entity, &PendingSceneHandle)>,
+        ) {
+            let (entity, pending) = parent.single().expect("one parent");
+            let presentation_rig = crate::entities::model_rig::ModelRig::from_toml(
+                r#"
+                [markers.weapon]
+                position = [99.0, 0.0, 0.0]
+                direction = [1.0, 0.0, 0.0]
+                "#,
+            )
+            .unwrap();
+            assert!(matches!(
+                spawn_glb_visual(
+                    &mut commands,
+                    &asset_server,
+                    &scenes,
+                    entity,
+                    "assets/models/presentation-only.glb",
+                    None,
+                    Some(pending),
+                    Some(&presentation_rig),
+                ),
+                GlbSpawnOutcome::Spawned(_)
+            ));
+        }
+
+        let canonical_rig = crate::entities::model_rig::ModelRig::from_toml(
+            r#"
+            [markers.weapon]
+            position = [1.0, 2.0, 3.0]
+            direction = [0.0, 0.0, -1.0]
+            "#,
+        )
+        .unwrap();
+
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+            .init_asset::<bevy::scene::Scene>()
+            .add_systems(Update, materialise_visual);
+        let scene = app
+            .world_mut()
+            .resource_mut::<Assets<bevy::scene::Scene>>()
+            .add(bevy::scene::Scene::new(World::new()));
+        let parent = app
+            .world_mut()
+            .spawn((
+                crate::entities::model_rig::ModelMarkers::from_rig(&canonical_rig),
+                PendingSceneHandle(scene),
+            ))
+            .id();
+
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<crate::entities::model_rig::ModelMarkers>(parent)
+                .and_then(|markers| markers.get("weapon"))
+                .map(|marker| marker.position),
+            Some([1.0, 2.0, 3.0]),
+            "the visual tier's marker map must not overwrite the primary rig"
         );
     }
 }

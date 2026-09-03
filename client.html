@@ -17,6 +17,16 @@
        gui/build-flags.js resolves it; the settings cog hides its Debug/Cheat
        tab when it is true. -->
   <meta name="phoenix-build-demo" content="false" />
+  <!-- This bundle's delivery stamp, `<protocol>/<content_id>/<content_epoch>`
+       (issue #1111) — the same field a native host reads off the
+       `x-phoenix-client-stamp` header. scripts/build-client.mjs writes it at
+       build time, because a pure-JS page has no WASM to compile a version
+       into. The phone declares it over the Phoenix join handshake and the host
+       answers with `delivery::check_join_stamp`. Since #1112 that check
+       REQUIRES the field: an un-built checkout leaves it empty and a host
+       refuses the join with `client-stamp-missing` rather than admitting it,
+       because every client that can reach a Phoenix host is a built bundle. -->
+  <meta name="phoenix-client-stamp" content="" />
   <title data-i18n="client.doc_title">Project Phoenix — Console</title>
   <link rel="icon" type="image/x-icon" href="favicon.ico" />
 <!-- The shared design vocabulary (PRD #1023 module 1): colours, edges, ink,
@@ -29,7 +39,9 @@
        focus — see gui/bg-raf-keepalive.js. Must load before any other
        script calls requestAnimationFrame. -->
   <script src="gui/bg-raf-keepalive.js"></script>
-  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <!-- No transport CDN tag: issue #1112 retired PeerJS and its public broker.
+       The crew transport is gui/rendezvous-transport.js, loaded as a module
+       island below alongside the join-code table it needs. -->
   <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <!-- Loads assets/strings/strings.csv before anything renders. Its top-level
        await blocks every module that imports gui/strings.js, so t() is ready
@@ -81,7 +93,22 @@
        the issuing console's surface is next handed fresh state — both stamps on
        THIS device, so no cross-clock arithmetic is involved. -->
   <script type="module" src="gui/console-latency.js"></script>
+  <!-- Correlated Pressed/Pending/Applied-or-refused presentation.  This owns
+       only client-local lifecycle state and exact iframe routing; the normal
+       Captain blackboard remains the sole Red Alert gameplay state. -->
+  <script type="module" src="gui/action-feedback.js"></script>
   <script type="module" src="gui/action-map.js"></script>
+  <!-- One explicitly selected standard gamepad is sampled in this parent
+       realm. Logical bindings are copied to console iframes, but only the
+       action's owning iframe receives semantic activation. -->
+  <script type="module" src="gui/gamepad-input.js"></script>
+  <script type="module" src="gui/composite-action-routing.js"></script>
+  <!-- Parent-realm semantic action metadata + live private binding profile. The
+       active console iframe owns its own registry instance and receives this
+       profile through an explicit update seam. -->
+  <script type="module" src="gui/stations/captain-actions.js"></script>
+  <script type="module" src="gui/stations/helm-actions.js"></script>
+  <script type="module" src="gui/client-semantic-actions.js"></script>
   <!-- Pure JS client-state modules (issue #460). Each exposes a singleton
        (window.lobbyState / simState / commsState) with an apply(serverMessage)
        method returning a fresh semantic result; handleMessage() feeds every
@@ -97,8 +124,19 @@
   <script type="module" src="gui/tutorial-state.js"></script>
   <script type="module" src="gui/device-orientation.js"></script>
   <script type="module" src="gui/comms-state.js"></script>
-  <!-- Connection manager: PeerJS lifecycle extracted into a tested module (issue #603) -->
+  <!-- ICE/TURN server list, relay probe and the connect/backoff schedules the
+       transport is tuned by (issues #603, #1226). -->
   <script type="module" src="gui/connection-manager.js"></script>
+  <!-- Typed join codes and the Phoenix crew transport (issues
+       #1111/#1112). THE route: every join goes through the rendezvous service,
+       whether the code was typed, pasted or opened from a QR link. -->
+  <script type="module" src="gui/join-code.js"></script>
+  <script type="module" src="gui/rendezvous-transport.js"></script>
+  <!-- Which transport rung(s) this load may use, and what the #conn-diag
+       readout says about the one it ended up on (issue #1113). Both publish
+       onto window for the classic script below. -->
+  <script type="module" src="gui/transport-levers.js"></script>
+  <script type="module" src="gui/connection-diagnostics.js"></script>
   <!-- Settings panel: client controls plus Station Help and Ship Manual. -->
   <script type="module" src="gui/settings-panel.js"></script>
   <!-- Private per-player Accessibility profile (issue #1102): presentation
@@ -107,6 +145,14 @@
        window.applyAccessibilityProfile / setAccessibilityPresentation for the
        inline script below. Never sent to the host — client-local. -->
   <script type="module" src="gui/accessibility-profile.js"></script>
+  <!-- One portable, private profile now owns Accessibility, semantic bindings,
+       gamepad preference/tuning, feedback preferences and future GM
+       confirmations. It never enters a ClientMessage or a session save. -->
+  <script type="module" src="gui/operator-profile.js"></script>
+  <!-- Projects that one unchanged profile onto the APIs this browser or native
+       pane actually has. Capability loss suppresses an output, never a saved
+       portable choice. -->
+  <script type="module" src="gui/operator-surface-adapter.js"></script>
   <style>
     /* The lobby's vocabulary is gui/tokens.css, linked above — it used to keep
        a parallel `:root` here whose `--edge` was a different colour from the
@@ -129,8 +175,52 @@
     /* Connection diagnostics readout: sits above #status, same corner. Shows
        relay reachability + per-attempt ICE stage so a phone user can report
        why a connection is stuck without opening devtools. */
-    #conn-diag { position: fixed; bottom: 1.6rem; left: 0.75rem; color: var(--edge-strong);
-      font-size: var(--text-xs); z-index: 25; white-space: pre-line; max-width: 85vw; }
+    /* Readout and its copy control share ONE left-anchored fixed row, sized to
+       its contents. The button used to be pinned to the opposite corner "so it
+       never overlaps a readout that has grown to several lines" — which solved
+       the harmless overlap and created a real one: bottom-right is where the
+       lobby footer puts #ready-btn, so a fixed button at z-index 26 sat on top
+       of the primary control of the whole screen and swallowed the tap. Four
+       smoke specs could not press READY, and neither could a player.
+       Bottom-LEFT is already this page's chrome corner (#status lives there),
+       and a row that ends where its content ends cannot reach the far side. */
+    #conn-diag-row { position: fixed; bottom: 1.6rem; left: 0.75rem; z-index: 25;
+      display: flex; align-items: flex-end; gap: 0.5rem; max-width: 85vw;
+      pointer-events: none; }
+    #conn-diag { color: var(--edge-strong);
+      font-size: var(--text-xs); white-space: pre-line; }
+    /* Only the button takes pointer events back — the readout beside it is
+       text, and a transparent div over the lobby would swallow taps for
+       nothing. */
+    #conn-diag-copy { pointer-events: auto; flex: 0 0 auto;
+      font-size: var(--text-xs); color: var(--edge-strong); background: transparent;
+      border: 1px solid var(--edge-strong); border-radius: 3px; padding: 0.1rem 0.4rem; }
+    #gamepad-input-alert { position: fixed; left: 50%; bottom: 3.5rem;
+      transform: translateX(-50%); z-index: 26; max-width: min(32rem, 88vw);
+      padding: 0.55rem 0.75rem; border: 1px solid var(--warning);
+      border-radius: 3px; background: var(--surface-panel); color: var(--warning);
+      font-family: 'JetBrains Mono', monospace; font-size: var(--text-sm);
+      line-height: 1.35; text-align: center; }
+    #gamepad-input-alert[hidden] { display: none; }
+    /* Typed join entry (issue #1111). Shown only when this page was opened
+       with no host in its fragment — the case that until now was a dead end
+       reading "no host id in URL". The field takes either the code
+       read off the viewscreen or a whole pasted PROJECT_VERSION_CODE. */
+    #join-entry { position: fixed; inset: 0; z-index: 30; display: none;
+      flex-direction: column; align-items: center; justify-content: center; gap: 0.9rem;
+      background: var(--surface-abyss); padding: 1.5rem; text-align: center; }
+    #join-entry.open { display: flex; }
+    #join-entry-title { font-size: var(--text-lg); color: var(--ink); }
+    #join-code-input { width: min(14ch, 80vw); padding: 0.6rem 0.4rem; text-align: center;
+      font-family: monospace; font-size: var(--text-xl); letter-spacing: 0.35em;
+      text-transform: uppercase; background: var(--surface-deep); color: var(--ink);
+      border: 1px solid var(--edge-strong); border-radius: 4px; }
+    #join-submit-btn { padding: 0.55rem 1.6rem; font-size: var(--text-md);
+      background: var(--surface-raised); color: var(--ink);
+      border: 1px solid var(--edge-bright); border-radius: 4px; }
+    #join-entry-hint { font-size: var(--text-xs); color: var(--ink-faint); max-width: 32ch; }
+    #join-entry-error { font-size: var(--text-sm); color: var(--fire); min-height: 1.2em;
+      max-width: 34ch; }
     section { display: none; }
     section.active { display: block; }
     #top-bar {
@@ -595,6 +685,27 @@
     }
     #lobby-mods .mods-active-version { color: var(--ink-dim); margin-left: 6px; }
 
+    /* Crew-public equal GM presence. It is a sibling of the Station roster,
+       not a Station row: GMs never enter crew/spectator counts or controls. */
+    #gm-presence[aria-hidden="true"] { display: none; }
+    #gm-presence {
+      flex-shrink: 0; margin-top: 6px; padding: 7px 9px;
+      border: 1px solid var(--edge); border-radius: 5px;
+      background: var(--surface-panel);
+    }
+    #gm-presence-heading {
+      margin: 0 0 5px; color: var(--ink-dim); font-size: var(--text-xs);
+      letter-spacing: .08em; text-transform: uppercase;
+    }
+    #gm-presence-list { display: flex; flex-wrap: wrap; gap: 5px; }
+    .gm-presence-pill {
+      padding: 3px 7px; border: 1px solid var(--signal);
+      border-radius: 3px; color: var(--signal); font-size: var(--text-sm);
+    }
+    .gm-presence-pill.disconnected {
+      opacity: .6; border-style: dashed; color: var(--ink-dim);
+    }
+
 
     /* -- Lobby section: full-viewport when active ------------------------ */
     #lobby-ui.active {
@@ -905,6 +1016,35 @@
       color: var(--signal);
     }
     .settings-rating-btn:active { background: var(--cyan-dim); }
+    .settings-binding-row { display: flex; gap: 0.5rem; }
+    .settings-binding-label {
+      display: grid; grid-template-columns: minmax(4.5rem, auto) minmax(8rem, 1fr);
+      align-items: center; gap: 0.6rem; width: 100%;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: var(--text-sm); color: var(--ink-faint);
+    }
+    .settings-binding-capture {
+      min-height: var(--control-hit-min); width: 100%; box-sizing: border-box;
+      border: 1px solid var(--edge); border-radius: 3px;
+      background: var(--surface-panel-up); color: var(--ink);
+      font: inherit; text-align: center; cursor: pointer;
+    }
+    .settings-binding-capture:focus {
+      border-color: var(--signal); outline: 2px solid var(--signal); outline-offset: 2px;
+    }
+    .settings-binding-feedback,
+    .settings-binding-conflict {
+      display: flex; flex-direction: column; gap: 0.45rem;
+      padding: 0.65rem; border: 1px solid var(--warning);
+      background: var(--surface-panel-up); color: var(--warning);
+      font-family: 'JetBrains Mono', monospace; font-size: var(--text-sm);
+    }
+    .settings-binding-conflict-heading {
+      font-family: 'Chakra Petch', sans-serif; font-weight: 700;
+      letter-spacing: 0.08em; text-transform: uppercase;
+    }
+    .settings-binding-conflict-item { color: var(--ink); }
+    .settings-binding-conflict-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
     .settings-vol-row {
       display: flex; align-items: center; gap: 0.6rem;
     }
@@ -1074,6 +1214,13 @@
         </label>
       </div>
 
+      <!-- Public Game Master presence, separate from every crew and Station
+           count. The heading labels the region for assistive technology. -->
+      <section id="gm-presence" role="region" aria-labelledby="gm-presence-heading" aria-hidden="true">
+        <h2 id="gm-presence-heading" data-i18n="lobby.gms.heading"></h2>
+        <div id="gm-presence-list" role="list"></div>
+      </section>
+
       <!-- Station list -->
       <div id="station-list"></div>
 
@@ -1146,8 +1293,37 @@
          continue to resolve. -->
   </div>
 
+  <!-- Client-level controller ownership warning. It remains outside Settings
+       so a lost selected pad is visible and announced while the modal is shut. -->
+  <div id="gamepad-input-alert" role="alert" aria-live="assertive"
+       aria-atomic="true" hidden></div>
   <div id="status" data-i18n="client.connecting">Connecting…</div>
-  <div id="conn-diag"></div>
+  <!-- The readout and the control that copies it, in one left-anchored row so
+       neither can reach the corner the lobby's READY button lives in. -->
+  <div id="conn-diag-row">
+    <div id="conn-diag"></div>
+    <!-- Copies the readout beside it, plus everything behind it, for pasting
+         into an issue thread (issue #1113, docs/acceptance/1113-networks.md).
+         Hidden until the script confirms the browser has a clipboard to write
+         to. -->
+    <button id="conn-diag-copy" type="button" style="display:none"></button>
+  </div>
+
+  <!-- Typed join entry (issue #1111). Hidden while a join from the fragment is
+       in flight; shown when there is nothing to join with, or when an attempt
+       came back with a reason. One field takes either the code a guest
+       reads off the viewscreen or a whole pasted/QR'd PROJECT_VERSION_CODE —
+       gui/join-code.js decides which it is, so there is no second control and
+       no wrong box to type into. -->
+  <div id="join-entry">
+    <div id="join-entry-title" data-i18n="client.join.title">Enter the join code</div>
+    <input id="join-code-input" type="text" autocomplete="off" autocapitalize="characters"
+           autocorrect="off" spellcheck="false" maxlength="96"
+           data-i18n-attr="placeholder:client.join.code_placeholder,aria-label:client.join.code_label" />
+    <button id="join-submit-btn" data-i18n="client.join.submit">Join</button>
+    <div id="join-entry-hint" data-i18n="client.join.hint">Eight letters from the viewscreen.</div>
+    <div id="join-entry-error"></div>
+  </div>
 
   <div id="top-bar">
     <span id="conn-label"></span>
@@ -1407,9 +1583,8 @@
       const btn = document.getElementById('retry-now-btn');
       if (!btn) return;
       btn.addEventListener('click', () => {
-        if (window.connectionManager && typeof window.connectionManager.retryNow === 'function') {
-          window.connectionManager.retryNow();
-        }
+        const link = currentLink();
+        if (link && typeof link.retryNow === 'function') link.retryNow();
       });
     })();
 
@@ -1464,6 +1639,20 @@
     /// The mounted settings panel (issue #940), or null before the connection
     /// bootstrap runs. handleMessage repaints it when `DebugState` arrives.
     let settingsPanel = null;
+    /// Parent-owned, client-local semantic binding profile. The operator
+    /// profile persists it; console iframe module instances are separate
+    /// realms, so updates are explicitly copied
+    /// through __updateSemanticActionBindings instead of relying on a singleton.
+    let semanticActionRegistry = null;
+    let operatorProfile = null;
+    let preferredGamepadSlot = null;
+    let operatorSurfaceCapabilities = null;
+    let activeFeedbackPreferences = { vibration: true, semanticCues: true };
+    let _actionFeedbackRouter = null;
+    /// Parent-only gamepad sampler. Iframes never poll navigator.getGamepads(),
+    /// so an inactive or disconnected Station cannot receive controller input.
+    let gamepadInputRuntime = null;
+    let disposeGamepadInput = null;
     let pendingMidGameClaim = false;
     // #771 AC3: a mid-round station release is a two-step arm→confirm (imitates
     // ph-comms-current-message). First click arms + swaps the button to a
@@ -1534,12 +1723,24 @@
     function isCaptain(s)     { return playerStation(s) === 'captain'; }
     function isHelm(s)        { return playerStation(s) === 'helm'; }
 
+    // The live link this page speaks through: the Phoenix joiner from
+    // gui/rendezvous-transport.js, wrapped in a STABLE façade that outlives any
+    // one attempt. `connected` / `send(type, data, deliveryClass)` /
+    // `retryNow()` is the whole contract, and because the façade object itself
+    // is never replaced — only the joiner behind it — a caller (or a smoke
+    // spec) that took a reference to it before a reconnect is still holding the
+    // live link afterwards. Also published as `window.phoenixLink`, which is
+    // what `window.connectionManager` used to be before #1112 retired PeerJS.
+    let activeLink = null;
+    function currentLink() { return activeLink; }
+
     function send(type, data) {
-      if (!window.connectionManager || !window.connectionManager.connected) return;
+      const link = currentLink();
+      if (!link || !link.connected) return;
       const clickType = (type === 'ControlSystem' && data && data.payload) ? data.payload.type : type;
       if (!NO_CLICK.has(clickType)) playClick();
       // Client messages (commands, lobby actions) are always reliable
-      window.connectionManager.send(type, data, 'reliable');
+      link.send(type, data, 'reliable');
     }
 
     function setStatus(text) { $('status').textContent = text; }
@@ -2149,7 +2350,13 @@
       // only writes DOM. Boot race: skip the paint until the module loads —
       // the next server message re-renders.
       if (typeof window.lobbyViewModel !== 'function') return;
-      const vm = window.lobbyViewModel(s, myToken, lobbyConsole, {
+      // The reducer owns the public GM list. It is deliberately not duplicated
+      // into the legacy shell mirror, so splice the current authoritative list
+      // into the pure view input at render time.
+      const lobbyProjection = window.lobbyState
+        ? { ...s, gms: window.lobbyState.gms }
+        : s;
+      const vm = window.lobbyViewModel(lobbyProjection, myToken, lobbyConsole, {
         labelFor: stationLabel,
         describeFor: stationDescription,
         stationRatings: window.simState ? window.simState.stationRatings : null,
@@ -2160,6 +2367,26 @@
       // the view model.
       lobbyConsole = vm.selectedConsole;
       const mine = myConsoles(s);
+
+      // Equal GM presence is crew-public but never a Station/spectator row.
+      const gmRegion = document.getElementById('gm-presence');
+      const gmHeading = document.getElementById('gm-presence-heading');
+      const gmList = document.getElementById('gm-presence-list');
+      if (gmRegion && gmList) {
+        gmRegion.setAttribute('aria-hidden', vm.gmGroup.visible ? 'false' : 'true');
+        if (gmHeading) gmHeading.textContent = t(vm.gmGroup.headingId);
+        gmList.innerHTML = '';
+        for (const gm of vm.gmGroup.entries) {
+          const row = document.createElement('span');
+          row.className = 'gm-presence-pill' + (gm.connected ? '' : ' disconnected');
+          row.setAttribute('role', 'listitem');
+          row.dataset.gmId = gm.id;
+          row.dataset.ready = gm.ready ? 'true' : 'false';
+          row.textContent = t(gm.labelId, { name: gm.name || gm.id })
+            + ' · ' + t(gm.readinessLabelId);
+          gmList.appendChild(row);
+        }
+      }
       // #771 AC3/AC4: the armed-release confirm only exists in-progress; leaving
       // InProgress (or never being in it) disarms so lobby release is immediate.
       const inProgress = s.phase === 'InProgress';
@@ -2445,6 +2672,27 @@
         ? window.iframeIdFor(name) : (name + '-iframe');
     }
 
+    function actionFeedbackRouter() {
+      if (_actionFeedbackRouter) return _actionFeedbackRouter;
+      if (typeof window.ActionFeedbackRouter !== 'function') return null;
+      _actionFeedbackRouter = new window.ActionFeedbackRouter({
+        deliver: (value) => {
+          const iframe = $(consoleIframeId(value.console));
+          try {
+            const update = iframe && iframe.contentWindow
+              && iframe.contentWindow.__updateActionFeedback;
+            if (typeof update === 'function') update(value);
+          } catch (_) { /* cross-origin/not-yet-loaded: the terminal state is safely dropped */ }
+          const meter = latencyMeter();
+          if (meter) {
+            if (value.state === 'TimedOut') meter.noteCorrelatedTimeout(value.correlation);
+            else meter.noteCorrelatedAck(value.correlation);
+          }
+        },
+      });
+      return _actionFeedbackRouter;
+    }
+
     // ── Console input-to-feedback latency (issue #1169, PRD #1144) ───────────
     // The phone measures its OWN round trip: `console-core.sendAction` stamps
     // the input event inside the console document, the dispatch below stamps the
@@ -2551,6 +2799,172 @@
       return $(consoleIframeId(activeConsole));
     }
 
+    function pushSemanticBindingsToIframe(iframeEl) {
+      if (!iframeEl || !semanticActionRegistry) return;
+      try {
+        const target = iframeEl.contentWindow;
+        const update = target
+          && iframeEl.contentWindow.__updateSemanticActionBindings;
+        if (typeof update === 'function') {
+          update(semanticActionRegistry.bindingProfile());
+        }
+        const updateFeedback = target && target.__updateActionFeedbackPreferences;
+        if (typeof updateFeedback === 'function') {
+          updateFeedback(activeFeedbackPreferences);
+        }
+      } catch (_) { /* a cross-origin or not-yet-loaded frame is retried on load */ }
+    }
+
+    function pushSemanticBindingsToConsoles() {
+      const stations = (uiState.shipStations && uiState.shipStations.stations) || [];
+      for (const station of stations) {
+        if (station && station.id) {
+          pushSemanticBindingsToIframe($(consoleIframeId(station.id)));
+        }
+      }
+    }
+
+    function operatorProfileStorage() {
+      try { return window.localStorage; } catch (_) { return null; }
+    }
+
+    function snapshotOperatorProfile() {
+      const api = window.OperatorProfile;
+      if (!api || typeof api.createOperatorProfileSnapshot !== 'function') return null;
+      operatorProfile = api.createOperatorProfileSnapshot({
+        accessibility: window.simState ? window.simState.accessibilityProfile : null,
+        bindings: semanticActionRegistry ? semanticActionRegistry.bindingProfile() : {},
+        preferredGamepadSlot,
+        tuning: semanticActionRegistry ? semanticActionRegistry.tuningProfile() : {},
+        feedback: operatorProfile && operatorProfile.feedback,
+        gmConfirmations: operatorProfile && operatorProfile.gmConfirmations,
+      });
+      return operatorProfile;
+    }
+
+    function persistOperatorProfile() {
+      const api = window.OperatorProfile;
+      const profile = snapshotOperatorProfile();
+      if (!api || !profile || typeof api.saveOperatorProfile !== 'function') {
+        return { status: 'rejected', code: 'profile-storage-write' };
+      }
+      return api.saveOperatorProfile(operatorProfileStorage(), profile);
+    }
+
+    // accessibility-profile.js calls this after either Accessibility reducer.
+    // Keeping the hook local avoids turning a private choice into a wire path.
+    window.persistOperatorProfile = persistOperatorProfile;
+
+    function applyPreparedOperatorProfile(prepared) {
+      const api = window.OperatorProfile;
+      const adapter = window.OperatorSurfaceAdapter;
+      if (!api || !adapter || !prepared || !prepared.profile || !semanticActionRegistry) {
+        return { status: 'rejected', code: 'profile-registry-unavailable' };
+      }
+      const applied = adapter.applyOperatorProfileToSurface(
+        prepared.profile,
+        semanticActionRegistry,
+        { root: window },
+      );
+      if (!applied || applied.status !== 'applied') return applied;
+      operatorProfile = applied.portableProfile;
+      operatorSurfaceCapabilities = applied.capabilities;
+      activeFeedbackPreferences = applied.active.feedback;
+      preferredGamepadSlot = operatorProfile.gamepad.preferredSlot;
+      if (window.simState && applied.active.accessibility) {
+        window.simState.accessibilityProfile = applied.active.accessibility;
+      }
+      if (gamepadInputRuntime
+          && typeof gamepadInputRuntime.restorePreferred === 'function') {
+        gamepadInputRuntime.restorePreferred(applied.active.preferredGamepadSlot);
+      }
+      pushSemanticBindingsToConsoles();
+      if (gamepadInputRuntime) gamepadInputRuntime.neutralize();
+      if (typeof window.applyAccessibilityProfile === 'function') {
+        window.applyAccessibilityProfile();
+      }
+      if (typeof window.onAccessibilityAssistanceChanged === 'function') {
+        try { window.onAccessibilityAssistanceChanged(); } catch (_) { /* best-effort */ }
+      }
+      return prepared;
+    }
+
+    function importOperatorProfileJson(text) {
+      const api = window.OperatorProfile;
+      if (!api || !semanticActionRegistry) {
+        return { status: 'rejected', code: 'profile-registry-unavailable' };
+      }
+      const prepared = api.prepareOperatorProfileImport(text, {
+        registry: semanticActionRegistry,
+      });
+      if (prepared.status === 'rejected') return prepared;
+      // Persist first. A quota/privacy-mode refusal leaves every live setting
+      // untouched rather than applying a profile that a reload immediately
+      // forgets.
+      const saved = api.saveOperatorProfile(operatorProfileStorage(), prepared.profile);
+      if (saved.status !== 'saved') return saved;
+      return applyPreparedOperatorProfile(prepared);
+    }
+
+    function exportOperatorProfileJson() {
+      const api = window.OperatorProfile;
+      const profile = snapshotOperatorProfile();
+      return api && profile ? api.serializeOperatorProfile(profile) : null;
+    }
+
+    function updateSemanticBinding(actionId, slot, binding, options) {
+      if (!semanticActionRegistry) return { status: 'unavailable' };
+      const result = semanticActionRegistry.setBinding(actionId, slot, binding, options);
+      if (result.status === 'applied') {
+        pushSemanticBindingsToConsoles();
+        if (gamepadInputRuntime) gamepadInputRuntime.neutralize();
+        persistOperatorProfile();
+      }
+      return result;
+    }
+
+    function resetSemanticAction(actionId) {
+      if (!semanticActionRegistry) return { status: 'unavailable' };
+      const result = semanticActionRegistry.resetAction(actionId);
+      if (result.status === 'applied') {
+        pushSemanticBindingsToConsoles();
+        if (gamepadInputRuntime) gamepadInputRuntime.neutralize();
+        persistOperatorProfile();
+      }
+      return result;
+    }
+
+    function resetAllSemanticActions() {
+      if (!semanticActionRegistry) return { status: 'unavailable' };
+      const result = semanticActionRegistry.resetAllBindings();
+      if (result.status === 'applied') {
+        pushSemanticBindingsToConsoles();
+        if (gamepadInputRuntime) gamepadInputRuntime.neutralize();
+        persistOperatorProfile();
+      }
+      return result;
+    }
+
+    function updateSemanticTuning(actionId, tuning) {
+      if (!semanticActionRegistry) return { status: 'unavailable' };
+      const result = semanticActionRegistry.setTuning(actionId, tuning);
+      if (result.status === 'applied' && gamepadInputRuntime) {
+        gamepadInputRuntime.neutralize();
+      }
+      if (result.status === 'applied') persistOperatorProfile();
+      return result;
+    }
+
+    function updateGamepadClientWarning(state) {
+      const warning = $('gamepad-input-alert');
+      if (!warning) return;
+      const disconnected = state && state.status === 'disconnected';
+      warning.textContent = disconnected
+        ? t('client.gamepad.disconnect_warning')
+        : '';
+      warning.hidden = !disconnected;
+    }
+
     // Send the host's key events to the active console, so helm's WASD/arrows,
     // Ctrl impulse and Shift boost keep working after a click on the tab bar or
     // any other host chrome moved focus out of the console iframe. Called from
@@ -2618,6 +3032,7 @@
         if (typeof window.applyAccessibilityProfile === 'function') {
           window.applyAccessibilityProfile({ iframes: [iframeEl] });
         }
+        pushSemanticBindingsToIframe(iframeEl);
       });
     }
 
@@ -2749,32 +3164,46 @@
         // outbound `ClientMessage` from named fields, so it never crosses the
         // wire.
         const meter = latencyMeter();
-        if (meter) meter.noteDispatch(action.action, action.console || activeConsole, action.__input_ms);
-        // Optimistic local patches (weaponsTarget / sensorsTarget) land on the
-        // one sim store; simState.weaponsTarget has a setter for this path.
+        const feedback = actionFeedbackRouter();
+        const correlated = feedback && feedback.track({
+          correlation: action.correlation,
+          actionId: action.semantic_action,
+          console: action.console || activeConsole,
+          inputMs: action.__input_ms,
+        });
+        if (meter) {
+          if (correlated) {
+            meter.noteCorrelatedDispatch(action.correlation, action.action, action.__input_ms);
+          } else {
+            meter.noteDispatch(action.action, action.console || activeConsole, action.__input_ms);
+          }
+        }
+        // Target selection is authoritative: neither Tactical nor Sensors
+        // paints optimistic gameplay state before the host projects it back.
         window.dispatchConsoleAction(action, send, (patch) => {
           if (window.simState) Object.assign(window.simState, patch);
         });
         return;
       }
       // Fallback for the rare race window before module scripts load.
-      // Only covers set_sensors_target (mutates local state); other actions
-      // are silently deferred (non-critical — they arrive after module load).
-      if (action.action === 'set_sensors_target' && action.uuid) {
-        if (window.simState) window.simState.sensorsTarget = action.uuid;
-        send('ControlSystem', {
-          target: 'sensors',
-          payload: { type: 'SetScienceTarget', data: { uuid: action.uuid } },
-        });
-      } else if (action.action === 'set_navigation_waypoint'
+      // Semantic actions deliberately have no direct-wire fallback: bypassing
+      // action-map would discard their correlation and feedback lifecycle.
+      // Console iframes mount after DOMContentLoaded, when deferred modules are
+      // ready; a synthetic pre-module semantic message is therefore ignored.
+      // These two older Navigation actions remain until their own migration.
+      if (action.action === 'set_navigation_waypoint'
           && Number.isFinite(action.x)
           && Number.isFinite(action.z)) {
-        send('ControlSystem', {
+        const correlation = typeof action.correlation === 'string' && action.correlation;
+        send(correlation ? 'ControlSystemCorrelated' : 'ControlSystem', {
+          ...(correlation ? { correlation: action.correlation } : {}),
           target: 'navigation',
           payload: { type: 'SetNavigationWaypoint', data: { x: action.x, z: action.z } },
         });
       } else if (action.action === 'clear_navigation_waypoint') {
-        send('ControlSystem', {
+        const correlation = typeof action.correlation === 'string' && action.correlation;
+        send(correlation ? 'ControlSystemCorrelated' : 'ControlSystem', {
+          ...(correlation ? { correlation: action.correlation } : {}),
           target: 'navigation',
           payload: { type: 'ClearNavigationWaypoint' },
         });
@@ -2814,6 +3243,15 @@
       // #1023 user story 15). Any message counts: the point is that the link
       // is carrying traffic, not which traffic.
       if (msg && !linkHasData) { linkHasData = true; scheduleRender(); }
+      // Targeted authoritative feedback settles only the exact originating
+      // correlation.  It is presentation/measurement, not simulation state,
+      // so it bypasses the reducers and never mutates Red Alert optimistically.
+      if (msg && msg.type === 'ActionFeedback') {
+        const router = actionFeedbackRouter();
+        if (router && msg.data) router.resolve(msg.data);
+        maybeReportConsoleLatency();
+        return;
+      }
       // JS state modules (issue #460) — every inbound ServerMessage is applied
       // to the pure state modules first. window.simState is the ONLY sim
       // store (issue #819): the console builders read it directly. Guards
@@ -2933,184 +3371,496 @@
       }
     }
 
-    // -- PeerJS connection (extracted to gui/connection-manager.js, issue #603) --
+    // -- Connection (Phoenix transport: gui/rendezvous-transport.js, #1111/#1112;
+    //                ICE + timing policy: gui/connection-manager.js, #603/#1226) --
 
-    const hostPeerId = location.hash.slice(1);
+    (async () => {
+      // Gate on DOMContentLoaded before touching any module-dependent state.
+      // See the comment above the original gate for the full rationale.
+      if (document.readyState === 'loading') {
+        await new Promise(resolve =>
+          document.addEventListener('DOMContentLoaded', resolve, { once: true }));
+      }
 
-    if (!hostPeerId) {
-      setStatus(t('client.status_no_host_id'));
-    } else {
-      (async () => {
-        // Gate on DOMContentLoaded before touching any module-dependent state.
-        // See the comment above the original gate for the full rationale.
-        if (document.readyState === 'loading') {
-          await new Promise(resolve =>
-            document.addEventListener('DOMContentLoaded', resolve, { once: true }));
-        }
+      // Which route this page load is on is one pure decision (tested in
+      // tests/client/rendezvous-transport.test.js), not two ifs here:
+      //   'rendezvous'  something in the fragment — a QR link, a pasted full
+      //                 code, or a stale bookmark: join with it straight away
+      //   'entry'       nothing in the fragment: ask for the code
+      // There is no third route since #1112 retired PeerJS, and no route flag:
+      // a fragment that is not a valid code still comes here and gets a stated
+      // reason in front of the entry field, because gui/join-code.js is the one
+      // place that decides what a typed string is.
+      // Asked here rather than at script scope: every gui/ module is deferred,
+      // so window.rendezvousTransport does not exist until this gate clears.
+      // The 'none' fallback is for the module genuinely failing to load, which
+      // leaves this page with no way to reach any host at all.
+      const joinRoute = (window.rendezvousTransport
+        ? window.rendezvousTransport.joinRouteFromLocation(location.search, location.hash)
+        : { route: 'none' });
 
-        // Resolve this tab's session token now that all deferred modules have
-        // run. Each tab gets its own token, which is what lets several clients
-        // on one desktop connect as distinct players. The inline branch is a
-        // last-ditch fallback for the rare case the module genuinely failed to
-        // load.
-        myToken = (typeof window.installSessionToken === 'function')
-          ? window.installSessionToken()
-          : (() => {
-              let t = sessionStorage.getItem('session-token');
-              if (!t) {
-                t = Array.from(crypto.getRandomValues(new Uint8Array(16)))
-                  .map(b => b.toString(16).padStart(2, '0')).join('');
-                sessionStorage.setItem('session-token', t);
-              }
-              return t;
-            })();
-        console.log(`[client] session token ${myToken.slice(0, 8)}`);
+      // Which transport path(s) this load may use (issue #1113). Read once,
+      // here, and handed to the joiner and the diagnostics readout from the
+      // same value, so a pinned link cannot restrict the transport without the
+      // readout saying it did. `auto` — the whole ladder — is the default and
+      // what an ordinary QR scan gets.
+      const transportLevers = window.transportLevers
+        ? window.transportLevers.transportLeversFromLocation(location.search)
+        : { mode: 'auto', iceTransportPolicy: 'all', useIceServers: true, wsRelay: 'auto', pinned: false };
 
-        installConsoleKeyRelay();
+      if (joinRoute.route === 'none') {
+        // Not "no host id in the URL" — there are no host ids any more, and
+        // the QR would only reload this same page. The one thing that can help
+        // is a fresh load of a page whose modules all arrive.
+        console.error('[client] transport module failed to load — cannot join');
+        setStatus(t('client.status_transport_unavailable'));
+        return;
+      }
 
-        // Mount the settings panel (gear button + overlay) once state is ready.
-        // Provide send, a getState closure, and the UI click audio element.
-        if (typeof window.mountSettings === 'function') {
-          settingsPanel = window.mountSettings({
-            send: (type, data) => send(type, data),
-            // Station roster from the lobby mirror; the active rating and the
-            // host's debug read-back (issue #940) live in the sim store,
-            // composed here so the panel sees one object.
-            getState: () => ({
-              ...uiState,
-              stationRatings: window.simState ? window.simState.stationRatings : {},
-              debugFlags: window.simState ? window.simState.debugFlags : null,
-              // Private Accessibility profile (issue #1102); the tab paints the
-              // player's explicit choices from it. Client-local, never on the wire.
-              accessibilityProfile: window.simState ? window.simState.accessibilityProfile : null,
-            }),
-            // The Accessibility tab's write path (issue #1102): update the
-            // client-local profile, persist it privately, and re-apply to the
-            // shell + every mounted console iframe. Deliberately NOT `send` —
-            // no accessibility setting ever becomes a ClientMessage (AC5).
-            onAccessibility: (effect, value) => {
-              if (typeof window.setAccessibilityPresentation === 'function') {
-                window.setAccessibilityPresentation(effect, value);
+      // Resolve this tab's session token now that all deferred modules have
+      // run. Each tab gets its own token, which is what lets several clients
+      // on one desktop connect as distinct players. The inline branch is a
+      // last-ditch fallback for the rare case the module genuinely failed to
+      // load.
+      myToken = (typeof window.installSessionToken === 'function')
+        ? window.installSessionToken()
+        : (() => {
+            let t = sessionStorage.getItem('session-token');
+            if (!t) {
+              t = Array.from(crypto.getRandomValues(new Uint8Array(16)))
+                .map(b => b.toString(16).padStart(2, '0')).join('');
+              sessionStorage.setItem('session-token', t);
+            }
+            return t;
+          })();
+      console.log(`[client] session token ${myToken.slice(0, 8)}`);
+
+      semanticActionRegistry = typeof window.createClientSemanticActionRegistry === 'function'
+        ? window.createClientSemanticActionRegistry()
+        : null;
+
+      if (window.OperatorProfile && semanticActionRegistry) {
+        const loadedProfile = window.OperatorProfile.loadOperatorProfile(
+          operatorProfileStorage(),
+          { registry: semanticActionRegistry },
+        );
+        // Even a refused stored record supplies a fresh authored-default
+        // profile. Applying that result is safe and, critically, never falls
+        // back to a stale Accessibility-only record behind a corrupt current
+        // key.
+        applyPreparedOperatorProfile(loadedProfile);
+      }
+
+      gamepadInputRuntime = (!operatorSurfaceCapabilities || operatorSurfaceCapabilities.gamepad)
+        && typeof window.createGamepadInputRuntime === 'function'
+        ? window.createGamepadInputRuntime({
+            getContext: () => window.CompositeActionRouting
+              ? window.CompositeActionRouting.semanticContextForIframe(
+                  activeConsoleIframe(), activeConsole,
+                )
+              : activeConsole,
+            getActions: (context) => {
+              const actions = semanticActionRegistry
+                ? semanticActionRegistry.list(context)
+                : [];
+              return window.CompositeActionRouting
+                ? window.CompositeActionRouting.semanticActionsForIframe(
+                    actions,
+                    activeConsoleIframe(),
+                    context,
+                  )
+                : actions;
+            },
+            isTransportLive: () => !!(activeLink && activeLink.connected),
+            activate: (actionId, options) => {
+              // A safety neutral belongs to the context that emitted the last
+              // nonzero value, even when the operator has already switched
+              // tabs. Never redirect it into whichever iframe is active now.
+              const context = options && options.context;
+              const activeIframe = activeConsoleIframe();
+              const iframe = context && window.CompositeActionRouting
+                ? window.CompositeActionRouting.iframeForSemanticContext(
+                    context,
+                    activeIframe,
+                    (value) => $(consoleIframeId(value)),
+                  )
+                : context ? $(consoleIframeId(context)) : activeIframe;
+              try {
+                const activate = iframe && iframe.contentWindow
+                  && iframe.contentWindow.activateSemanticAction;
+                return typeof activate === 'function'
+                  ? activate(actionId, options)
+                  : false;
+              } catch (_) { return false; }
+            },
+            onCapture: (target, binding) => {
+              if (settingsPanel && typeof settingsPanel.proposeSemanticBinding === 'function') {
+                settingsPanel.proposeSemanticBinding(target.actionId, target.slot, binding);
+              } else {
+                updateSemanticBinding(target.actionId, target.slot, binding);
               }
             },
-            // Every audio channel this page owns. Master volume scales each
-            // element's own authored level rather than replacing it, so adding
-            // a channel here needs no other change (issue #940).
-            audioEls: [document.getElementById('ui-click')],
-            getManual: () => (window.simState ? window.simState.shipManual : null),
-            myToken: myToken,
-          });
-        }
+            onStateChange: (state) => {
+              updateGamepadClientWarning(state);
+              if (settingsPanel
+                  && typeof settingsPanel.updateGamepadState === 'function') {
+                settingsPanel.updateGamepadState(state);
+              }
+            },
+          })
+        : null;
+      if (gamepadInputRuntime
+          && typeof gamepadInputRuntime.restorePreferred === 'function') {
+        gamepadInputRuntime.restorePreferred(preferredGamepadSlot);
+      }
 
-        // Apply the private Accessibility profile to the shell at boot (issue
-        // #1102). Console iframes are (re)covered as they mount and on every
-        // iframe load — see mountConsoles / _attachIframeLoadListener.
-        if (typeof window.applyAccessibilityProfile === 'function') {
-          window.applyAccessibilityProfile();
-        }
+      installConsoleKeyRelay();
 
-        console.log('[PeerJS] fetching ICE servers');
-        const { servers: iceServers, relayAvailable, relaySource } = await window.fetchIceServers();
-        console.log('[PeerJS] ICE config:', iceServers.map(s => s.urls));
+      // Mount the settings panel (gear button + overlay) once state is ready.
+      // Provide send, a getState closure, and the UI click audio element.
+      if (typeof window.mountSettings === 'function') {
+        settingsPanel = window.mountSettings({
+          send: (type, data) => send(type, data),
+          // Station roster from the lobby mirror; the active rating and the
+          // host's debug read-back (issue #940) live in the sim store,
+          // composed here so the panel sees one object.
+          getState: () => ({
+            ...uiState,
+            stationRatings: window.simState ? window.simState.stationRatings : {},
+            debugFlags: window.simState ? window.simState.debugFlags : null,
+            // Private Accessibility profile (issue #1102); the tab paints the
+            // player's explicit choices from it. Client-local, never on the wire.
+            accessibilityProfile: window.simState ? window.simState.accessibilityProfile : null,
+          }),
+          // The Accessibility tab's write path (issue #1102): update the
+          // client-local profile, persist it privately, and re-apply to the
+          // shell + every mounted console iframe. Deliberately NOT `send` —
+          // no accessibility setting ever becomes a ClientMessage (AC5).
+          onAccessibility: (effect, value) => {
+            if (typeof window.setAccessibilityPresentation === 'function') {
+              window.setAccessibilityPresentation(effect, value);
+            }
+          },
+          getSemanticActions: () => semanticActionRegistry
+            ? (typeof window.clientSettingsSemanticActions === 'function'
+                ? window.clientSettingsSemanticActions(semanticActionRegistry)
+                : semanticActionRegistry.list())
+            : [],
+          onSemanticBinding: (actionId, slot, binding, options) => {
+            return updateSemanticBinding(actionId, slot, binding, options);
+          },
+          onSemanticResetAction: (actionId) => resetSemanticAction(actionId),
+          onSemanticResetAll: () => resetAllSemanticActions(),
+          onSemanticTuning: (actionId, tuning) => {
+            return updateSemanticTuning(actionId, tuning);
+          },
+          getOperatorCapabilities: () => operatorSurfaceCapabilities,
+          getGamepadState: () => gamepadInputRuntime
+            ? gamepadInputRuntime.state()
+            : {
+                devices: [], selectedIndex: null,
+                retainedIndex: preferredGamepadSlot,
+                status: operatorSurfaceCapabilities
+                  && !operatorSurfaceCapabilities.gamepad ? 'unavailable' : 'none',
+                capturing: null,
+              },
+          onGamepadSelection: (index) => gamepadInputRuntime
+            ? (() => {
+                const result = gamepadInputRuntime.select(index);
+                if (result.status === 'selected' || result.status === 'none') {
+                  preferredGamepadSlot = result.status === 'selected' ? result.index : null;
+                  persistOperatorProfile();
+                }
+                return result;
+              })()
+            : { status: 'unavailable' },
+          onSemanticCapture: (actionId, slot, active) => {
+            if (!gamepadInputRuntime) return;
+            if (active) gamepadInputRuntime.beginCapture(actionId, slot);
+            else gamepadInputRuntime.endCapture(actionId, slot);
+          },
+          onOperatorProfileExport: () => exportOperatorProfileJson(),
+          onOperatorProfileImport: (json) => importOperatorProfileJson(json),
+          // Every audio channel this page owns. Master volume scales each
+          // element's own authored level rather than replacing it, so adding
+          // a channel here needs no other change (issue #940).
+          audioEls: [document.getElementById('ui-click')],
+          getManual: () => (window.simState ? window.simState.shipManual : null),
+          myToken: myToken,
+        });
+      }
 
-        // Connection diagnostics readout (#conn-diag). A phone stuck behind
-        // CGNAT shows "connecting…" forever with the real story buried in an
-        // unreachable console — this mirrors the relay + ICE stage on screen.
-        //
-        // writeDiagLines is the shared mechanical half from gui/page-chrome.js
-        // (issue #1227) — guard for a missing #conn-diag, join, set
-        // textContent. The line-building logic here (this device's own relay
-        // probe + ICE attempt history) is client-specific and stays local;
-        // see that module's doc comment for why it isn't unified with
-        // server.html's own renderConnDiag. diagEl itself is still looked up
-        // directly below for the show/hide toggle, which isn't part of the
-        // shared renderer's job.
-        const diagEl = document.getElementById('conn-diag');
-        // _pageChrome can still be null here: this async function resumes
-        // after the fetchIceServers() await, and nothing guarantees the
-        // page-chrome module island has mounted (fired
-        // window.__pageChromeReady) by then — the other three bridge calls
-        // above all guard the same race. mountConnDiag returns a value
-        // rather than firing a queueable side effect, so a no-op fallback
-        // (not the queue) is the guard here.
-        const writeDiagLines = _pageChrome ? _pageChrome.mountConnDiag('conn-diag') : () => {};
-        const diag = { attempt: 0, ice: '', types: [], probe: null, relayAvailable, relaySource };
-        function renderDiag() {
-          const lines = [];
-          if (!diag.relayAvailable) lines.push(t('client.diag_no_relay'));
-          else if (diag.probe === 'unreachable') lines.push(t('client.diag_relay_fail'));
-          else if (diag.relaySource === 'openrelay') {
-            lines.push(diag.probe === 'reachable'
-              ? t('client.diag_relay_fallback_ok')
-              : t('client.diag_relay_fallback'));
+      if (gamepadInputRuntime) {
+        disposeGamepadInput = gamepadInputRuntime.start(window) || null;
+        window.addEventListener('pagehide', () => {
+          if (!disposeGamepadInput) return;
+          const dispose = disposeGamepadInput;
+          disposeGamepadInput = null;
+          dispose();
+        }, { once: true });
+      }
+
+      // Apply the private Accessibility profile to the shell at boot (issue
+      // #1102). Console iframes are (re)covered as they mount and on every
+      // iframe load — see mountConsoles / _attachIframeLoadListener.
+      if (typeof window.applyAccessibilityProfile === 'function') {
+        window.applyAccessibilityProfile();
+      }
+
+      console.log('[client] fetching ICE servers');
+      const { servers: iceServers, relayAvailable, relaySource } = await window.fetchIceServers();
+      console.log('[client] ICE config:', iceServers.map(s => s.urls));
+
+      // Connection diagnostics readout (#conn-diag). A phone stuck behind
+      // CGNAT shows "connecting…" forever with the real story buried in an
+      // unreachable console — this mirrors the relay + ICE stage on screen.
+      //
+      // writeDiagLines is the shared mechanical half from gui/page-chrome.js
+      // (issue #1227) — guard for a missing #conn-diag, join, set
+      // textContent. The line-building logic here (this device's own relay
+      // probe + ICE attempt history) is client-specific and stays local;
+      // see that module's doc comment for why it isn't unified with
+      // server.html's own renderConnDiag. diagEl itself is still looked up
+      // directly below for the show/hide toggle, which isn't part of the
+      // shared renderer's job.
+      const diagEl = document.getElementById('conn-diag');
+      // _pageChrome can still be null here: this async function resumes
+      // after the fetchIceServers() await, and nothing guarantees the
+      // page-chrome module island has mounted (fired
+      // window.__pageChromeReady) by then — the other three bridge calls
+      // above all guard the same race. mountConnDiag returns a value
+      // rather than firing a queueable side effect, so a no-op fallback
+      // (not the queue) is the guard here.
+      const writeDiagLines = _pageChrome ? _pageChrome.mountConnDiag('conn-diag') : () => {};
+      // The line-building logic itself moved to gui/connection-diagnostics.js
+      // in #1113: it grew enough to be worth testing (which rung of the
+      // transport ladder, which relay actually carried the traffic, whether
+      // the link is shedding snapshots), and it now has a second reader — the
+      // copy-pasteable dump below, which must not be able to disagree with
+      // what is on screen. What stays here is the wiring.
+      // Guarded like window.rendezvousTransport and window.transportLevers
+      // above, and for the same stated reason: every gui/ module is deferred,
+      // and one genuinely failing to load must cost this page its diagnostics
+      // readout and nothing else. Unguarded, the next line threw a TypeError
+      // partway through the join wiring.
+      const diagnostics = window.connectionDiagnostics;
+      const diag = diagnostics
+        ? diagnostics.createClientDiagnostics({
+          relayAvailable,
+          relaySource,
+          lever: transportLevers,
+        })
+        : { relayAvailable, relaySource, probe: null, lever: transportLevers };
+      function renderDiag() {
+        if (!diagnostics) return;
+        writeDiagLines(diagnostics.clientDiagnosticsLines(diag, t));
+      }
+      renderDiag();
+
+      // The copy control the acceptance kit asks a tester to use
+      // (docs/acceptance/1113-networks.md): one tap puts the whole state in
+      // the clipboard for pasting into the issue thread. Hidden when the
+      // browser has no clipboard to write to — an inert button that silently
+      // does nothing is worse than no button.
+      const diagCopyBtn = document.getElementById('conn-diag-copy');
+      if (diagnostics && diagCopyBtn && navigator.clipboard && navigator.clipboard.writeText) {
+        diagCopyBtn.style.display = '';
+        diagCopyBtn.textContent = t('client.diag_copy');
+        diagCopyBtn.onclick = () => {
+          const stamp = document.querySelector('meta[name="phoenix-client-stamp"]');
+          navigator.clipboard.writeText(diagnostics.diagnosticsDump(diag, {
+            page: 'client',
+            service: joinRoute.base,
+            build: stamp ? stamp.getAttribute('content') : null,
+          })).then(() => {
+            diagCopyBtn.textContent = t('client.diag_copied');
+            setTimeout(() => { diagCopyBtn.textContent = t('client.diag_copy'); }, 2000);
+          }).catch(() => {});
+        };
+      }
+      if (relayAvailable && typeof window.probeTurnRelay === 'function') {
+        window.probeTurnRelay(iceServers).then(verdict => {
+          console.log('[ICE] relay probe:', verdict);
+          diag.probe = verdict;
+          renderDiag();
+        });
+      }
+
+      // Everything the transport needs to drive this page: identity, the
+      // inbound message sink, and the four status/diagnostic callbacks that
+      // paint the status line, the console's live/dead treatment and the
+      // #conn-diag readout. `onError` is supplied by startPhoenixJoin below,
+      // because a refusal belongs in front of the entry field with its own
+      // sentence rather than on a status line the guest cannot act on.
+      const connectOptions = {
+        iceServers,
+        // Which rung(s) of the transport ladder this load may use. `auto` — the
+        // whole ladder — unless the URL pinned one (gui/transport-levers.js).
+        levers: transportLevers,
+        getIdent: () => ({ token: myToken, name: myName }),
+        onData: handleMessage,
+        onStatus: (state) => {
+          setConnectionStatus(state);
+          // The console's live/connecting/dead treatment is part of render()
+          // (PRD #1023 module 4); a status change has to repaint it.
+          scheduleRender();
+          // Diagnostics only matter while the link is down; hide them once
+          // the DataChannel is up so they don't sit under the lobby.
+          if (diagEl) diagEl.style.display = state === 'ready' ? 'none' : '';
+          if (state === 'ready') {
+            acquireWakeLock();
+            setStatus(t('client.status_waiting_server'));
+          } else if (state === 'connecting') {
+            setStatus(t('client.status_connecting_host'));
+          } else if (state === 'disconnected') {
+            releaseWakeLock();
+            setStatus(t('client.status_disconnected'));
+          } else if (state === 'error') {
+            releaseWakeLock();
+            setStatus(t('client.status_unreachable'));
           }
-          else if (diag.probe === 'reachable') lines.push(t('client.diag_relay_ok'));
-          if (diag.attempt > 0) {
-            lines.push(t('client.diag_stage', {
-              attempt: diag.attempt,
-              ice: diag.ice || '—',
-              types: diag.types.length ? diag.types.join(', ') : t('client.diag_none'),
-            }));
-          }
-          writeDiagLines(lines);
-        }
-        renderDiag();
-        if (relayAvailable && typeof window.probeTurnRelay === 'function') {
-          window.probeTurnRelay(iceServers).then(verdict => {
-            console.log('[ICE] relay probe:', verdict);
-            diag.probe = verdict;
-            renderDiag();
-          });
-        }
+        },
+        onLog: (msg) => console.log(msg),
+        onDiag: (e) => {
+          if (!diagnostics) return;
+          diagnostics.applyClientDiagEvent(diag, e);
+          renderDiag();
+        },
+      };
 
-        if (typeof window.connectionManager === 'undefined') {
-          console.warn('[client] connection-manager module not loaded; falling back to inline Peer setup');
+      await startPhoenixJoin(joinRoute, connectOptions);
+    })();
+
+    // -- Phoenix join (issues #1111 / #1112) --------------------------------
+    //
+    // Either the code arrived in the fragment (a QR link, or a pasted full
+    // code) and we join at once, or nothing did and the guest types the five
+    // letters they can read off the viewscreen. Both land in the same
+    // attempt() below, because gui/join-code.js decides what was typed rather
+    // than the form offering two boxes to get wrong.
+    //
+    // attempt() is only ever a NEW code being tried. Keeping an accepted link
+    // alive across a dropped radio is the joiner's own job — it re-resolves the
+    // same code on a backoff and re-sends Identify with the same session token
+    // (#1112 AC3) — so nothing here re-asks for the code the guest already
+    // typed.
+    async function startPhoenixJoin(route, connectOptions) {
+      const codes = window.joinCode;
+      const transport = window.rendezvousTransport;
+      if (!codes || !transport) {
+        // Same condition as the route:'none' branch above, reached by the
+        // other door: a module this page needs never evaluated, so there is no
+        // join path at all and only a reload can produce one.
+        console.error('[client] join-code or transport module missing — cannot join');
+        setStatus(t('client.status_transport_unavailable'));
+        return;
+      }
+
+      let data = codes.getJoinCodeData();
+      if (!data) {
+        try {
+          data = await codes.loadJoinCodeData();
+        } catch (err) {
+          console.error('[join] could not load the join-code format', err);
+          setStatus(t('client.status_unreachable'));
           return;
         }
+      }
 
-        window.connectionManager.connect(hostPeerId, {
-          iceServers,
-          getIdent: () => ({ token: myToken, name: myName }),
-          onData: handleMessage,
-          onStatus: (state) => {
-            setConnectionStatus(state);
-            // The console's live/connecting/dead treatment is part of render()
-            // (PRD #1023 module 4); a status change has to repaint it.
-            scheduleRender();
-            // Diagnostics only matter while the link is down; hide them once
-            // the DataChannel is up so they don't sit under the lobby.
-            if (diagEl) diagEl.style.display = state === 'ready' ? 'none' : '';
-            if (state === 'ready') {
-              acquireWakeLock();
-              setStatus(t('client.status_waiting_server'));
-            } else if (state === 'connecting') {
-              setStatus(t('client.status_connecting_host'));
-            } else if (state === 'disconnected') {
-              releaseWakeLock();
-              setStatus(t('client.status_disconnected'));
-            } else if (state === 'error') {
-              releaseWakeLock();
-              setStatus(t('client.status_unreachable'));
-            }
-          },
-          onError: (type) => {
-            if (type === 'peer-unavailable') {
-              setStatus(t('client.status_host_not_found'));
-            } else {
-              setStatus(t('client.status_peer_error', { type: type }));
-            }
-          },
-          onLog: (msg) => console.log(msg),
-          onDiag: (e) => {
-            if (e.event === 'attempt') { diag.attempt = e.attempt; diag.ice = ''; diag.types = []; }
-            else if (e.event === 'ice-state') diag.ice = e.state;
-            else if (e.event === 'candidates') diag.types = e.types;
-            else if (e.event === 'timeout') diag.ice = 'timeout';
-            else if (e.event === 'open') diag.ice = 'connected';
-            renderDiag();
+      // This bundle's own identity, presented to the host's compatibility
+      // handshake. Empty only in an un-built checkout, which the host refuses
+      // since #1112 — `scripts/build-client.mjs` writes the field on every
+      // build, so a shipped page always carries one.
+      const stampMeta = document.querySelector('meta[name="phoenix-client-stamp"]');
+      const stamp = (stampMeta && stampMeta.content) || '';
+
+      const panel = document.getElementById('join-entry');
+      const input = document.getElementById('join-code-input');
+      const submit = document.getElementById('join-submit-btn');
+      const errorEl = document.getElementById('join-entry-error');
+      let lastTyped = '';
+      // The joiner from the attempt in flight, if any. Mistyping the code
+      // and retrying is the ordinary path through this screen, so each attempt
+      // has to close the one before it: an orphaned joiner keeps its socket,
+      // its registry connection and its RTCPeerConnection, and stays wired to
+      // these same page callbacks — a late failure on a stale one would pop
+      // this overlay back over a session that had since connected.
+      let joiner = null;
+
+      // The page's stable handle on whatever joiner is current. Created ONCE,
+      // so a reference taken before a reconnect still drives the live link
+      // afterwards; `retryNow` prefers the joiner's own immediate re-attempt
+      // (same code, same token) and only falls back to re-running the typed
+      // attempt when there is no joiner to ask.
+      activeLink = {
+        get connected() { return !!joiner && joiner.connected; },
+        send: (type, payload, deliveryClass) => {
+          if (joiner) joiner.send(type, payload, deliveryClass);
+        },
+        retryNow: () => {
+          if (joiner) joiner.retryNow();
+          else attempt(lastTyped);
+        },
+      };
+      window.phoenixLink = activeLink;
+
+      function showEntry(reason) {
+        if (errorEl) errorEl.textContent = reason ? t(codes.reasonStringId(reason)) : '';
+        if (panel) panel.classList.add('open');
+        if (input) { input.focus(); input.select(); }
+      }
+
+      function attempt(typed) {
+        lastTyped = typed;
+        if (joiner) { joiner.close(); joiner = null; }
+        const parsed = codes.parseJoinCode(typed, codes.NAMESPACE_CLIENT, data);
+        if (!parsed.ok) { showEntry(parsed.reason); return; }
+        if (errorEl) errorEl.textContent = '';
+        if (panel) panel.classList.remove('open');
+        setStatus(t('client.status_connecting_host'));
+
+        joiner = transport.createRendezvousJoiner({
+          base: route.base,
+          data,
+          code: parsed.full,
+          stamp,
+          iceServers: connectOptions.iceServers,
+          // The transport levers, and forwarding them is load-bearing rather
+          // than tidy: without this line the phone READ `?transport=` /
+          // `?forceRelay=` for its diagnostics readout and then joined on the
+          // defaults regardless, so every pin worked on the host and on nothing
+          // else. docs/acceptance/1113-networks.md tells a tester to pin both
+          // ends and says pinning only the phone proves nothing — it was the
+          // other way round.
+          levers: connectOptions.levers,
+          getIdent: connectOptions.getIdent,
+          onData: connectOptions.onData,
+          onStatus: connectOptions.onStatus,
+          onLog: connectOptions.onLog,
+          onDiag: connectOptions.onDiag,
+          // Unknown, wrong-type and version-mismatch are three different
+          // sentences here — that is the whole point of the typed namespaces —
+          // and every one of them puts the guest back in front of the field
+          // rather than leaving them on a status line they cannot act on.
+          // Only a refusal a retry cannot fix reaches this callback at all;
+          // an unreachable service on an established link is the joiner's own
+          // backoff loop, and the guest sees "reconnecting", not the field.
+          onError: (reason, detail) => {
+            console.warn(`[join] ${reason}${detail ? `: ${detail}` : ''}`);
+            showEntry(reason);
           },
         });
-      })();
+      }
+
+      if (submit) submit.addEventListener('click', () => attempt(input ? input.value : ''));
+      if (input) {
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') attempt(input.value);
+        });
+      }
+
+      if (route.route === 'rendezvous') attempt(route.code);
+      else showEntry(null);
     }</script>
 </body>
 </html>

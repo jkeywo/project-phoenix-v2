@@ -2728,38 +2728,53 @@ fn the_backfill_draw_advances_the_shared_stream_the_same_way_on_both_hosts() {
     );
 }
 
-/// …and the half that stays local: this host submits its OWN hull's answer and
-/// nothing else's. The peer's identical answer arrives replicated, exactly as a
-/// human officer's press does.
+/// …and the EMISSION half, which is fleet-wide for the same reason the draw is.
+///
+/// This test used to assert the opposite — that only the projected hull
+/// submits, "because a peer's hull is answered by the peer and replicated
+/// here". That is true of a human press and false of an AI one:
+/// `lockstep::frame` states that a `MeshCommand` deliberately carries no AI
+/// emission, and `command_admission::ai_emit::emit_ai_command` pushes into
+/// `AdmittedCommands` without ever building a `LoggedCommand` to replicate. So
+/// there is no peer copy to arrive, and a host that emitted only for its own
+/// hull applied only its own hull's pick — which with a weighted pool is a
+/// different index per hull, and so a straight divergence.
 #[test]
-fn only_the_projected_hull_submits_its_backfill_answer() {
+fn every_fleet_hull_submits_its_backfill_answer_on_every_host() {
+    let mut rows_by_projection = Vec::new();
     for local in [FLEET_SLOT_ONE, FLEET_SLOT_TWO] {
         let mut app = weighted_fleet_app(11, local);
         tick_to(&mut app, 0);
         tick_to(&mut app, skyway_delay_ticks());
 
         let rows = fleet_admitted_indices(&mut app);
-        for (slot, indices) in rows {
-            if slot == local {
-                assert_eq!(
-                    indices.len(),
-                    1,
-                    "the hull this host projects answers through the ordinary \
-                     admitted path"
-                );
-                assert!(
-                    indices[0] > 0,
-                    "and never with the zero-weight stand-by at index 0"
-                );
-            } else {
-                assert!(
-                    indices.is_empty(),
-                    "a peer's hull is answered by the peer — emitting for it \
-                     here would put the same command on the wire twice"
-                );
-            }
+        assert_eq!(
+            rows.len(),
+            2,
+            "precondition: the fixture fleet is two hulls"
+        );
+        for (slot, indices) in &rows {
+            assert_eq!(
+                indices.len(),
+                1,
+                "slot {} must answer through the ordinary admitted path on \
+                 EVERY host: an AI response never crosses the mesh, so a host \
+                 that skipped it would simply never apply that hull's pick",
+                slot.0
+            );
+            assert!(
+                indices[0] > 0,
+                "and never with the zero-weight stand-by at index 0"
+            );
         }
+        rows_by_projection.push(rows);
     }
+    assert_eq!(
+        rows_by_projection[0], rows_by_projection[1],
+        "and the same hulls answer with the same indices whichever hull this \
+         host projects — `LocalShip` reaches nothing this system decides or \
+         emits"
+    );
 }
 
 /// FINDING 1 regression, hail half — an authored `[comms_console.selector]`

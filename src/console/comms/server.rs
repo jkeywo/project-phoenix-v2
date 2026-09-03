@@ -289,15 +289,78 @@ pub(crate) struct CommsRespondAux<'w> {
     time: Option<Res<'w, bevy::time::Time>>,
 }
 
+/// One hull's answering context for this tick — everything the router needs
+/// about the ship a `RespondToMessage` was admitted on, resolved once before the
+/// submissions are walked.
+///
+/// Exists because the walk is fleet-wide (see [`handle_respond_to_message`]) and
+/// the two things it used to read off "the local ship" — the narrative actor and
+/// the rejection channel — are per-hull facts, not per-tick ones.
+struct RespondingHull<'a> {
+    /// The hull's own uuid: the narrative SOURCE of every beat it answers
+    /// (issue #1338). `Option` because a bare-`App` fixture can put
+    /// `AdmittedCommands` on a hull with no `EntityUuid`.
+    uuid: Option<&'a EntityUuid>,
+    /// The Comms seat this hull actually resolved, or `None` when it resolved
+    /// none — never a string-cast of the system id (AGENTS.md rule 6).
+    station: Option<crate::core::messages::StationId>,
+    /// The session token a refusal flashes red at, and the ONE thing here that
+    /// is deliberately local-only: `Sessions` is this host's own table, so a
+    /// peer's hull has no holder here and asking for one would address the
+    /// refusal at whoever sits in the same-named seat on THIS bridge. `None`
+    /// for a peer's hull, which simply gets no client feedback on this machine —
+    /// a presentation channel, folded into nothing.
+    token: Option<String>,
+    admitted: &'a crate::core::messages::AdmittedCommands,
+}
+
 /// Handle `RespondToMessage { message_id, response_index }` from Comms holders.
 ///
 /// Calls the picked response's `on_pick` fn, applies the effects it buffered,
 /// records the choice on the inbox message, and advances the dialogue to the
 /// follow-up node the fn returned (if any).
+///
+/// # Why it drains EVERY fleet hull, not just this host's (issue #1343)
+///
+/// This ran `With<LocalShip>` until #1343, on the reasoning that a peer's hull
+/// is answered by the peer and replicated here. That is true of a human press
+/// and false of an AI one, and the difference is not a detail:
+/// [`crate::lockstep::frame`] states that a `MeshCommand` deliberately carries no
+/// AI emission, and
+/// [`emit_ai_command`](crate::command_admission::ai_emit::emit_ai_command) pushes
+/// into `AdmittedCommands` without ever building a `LoggedCommand` to replicate.
+/// So a Backfill `RespondToMessage` never crosses the wire, and a
+/// `With<LocalShip>` drain applied only the hull this host happens to project —
+/// which with #1343's weighted picker is a DIFFERENT index per hull, and so a
+/// straight cross-host disagreement about `selected_response`, about whatever the
+/// `on_pick` wrote, and about which dialogue got retired.
+///
+/// The drain is therefore fleet-wide, and nothing is applied twice by it:
+///
+/// * an **AI** answer is emitted on every host by
+///   [`operate_comms_response_ai`] and reaches exactly one `AdmittedCommands`
+///   per host, so draining every hull applies it once per host — the doctrine
+///   `lockstep::frame` states, that every host derives every NPC from the same
+///   ticks and the same RNG streams; and
+/// * a **human** press keeps the replicated path it already had. It lands in its
+///   own ship's `AdmittedCommands` on the admitting host and, via
+///   `lockstep::apply_mesh_inbox`, in that same ship's queue on each peer —
+///   never twice on one host, because a host does not replay its own staged
+///   frames.
+///
+/// Hulls are walked in fleet-slot order (uuid as the tiebreak for a slotless
+/// fixture hull) rather than archetype order, because the `on_pick` effects two
+/// hulls answer with in one tick mint ids and write flags in the order they run.
 pub(crate) fn handle_respond_to_message(
     ship_query: Query<
         (
             &crate::core::messages::AdmittedCommands,
+            // The host-neutral fleet identity, and the sort key below. `Option`
+            // for the bare-`App` fixtures that spawn a bridge without a roster.
+            Option<&crate::lockstep::FleetSlotOf>,
+            // Whether THIS host projects this hull to its own crew. Reaches the
+            // rejection channel and nothing else — see `RespondingHull::token`.
+            bevy::ecs::query::Has<crate::server_app::LocalShip>,
             // The comms rejection channel is addressed to whoever is HOSTING
             // the comms system (issue #984), which on the destroyer is the
             // Tactical seat and on the courier the Captain's — resolved, never
@@ -310,7 +373,7 @@ pub(crate) fn handle_respond_to_message(
             // put `AdmittedCommands` on a hull with no `EntityUuid`.
             Option<&EntityUuid>,
         ),
-        With<crate::server_app::LocalShip>,
+        With<crate::server_app::Ship>,
     >,
     mut runtime: ResMut<WorldContentRuntime>,
     mut comms: ResMut<CommsRuntime>,
@@ -341,56 +404,88 @@ pub(crate) fn handle_respond_to_message(
     // the same sinks the trigger/callback paths use.
     mut effect_queues: EffectQueues,
 ) {
-    let Some((admitted, ship_config, seeking_hosts, local_ship_uuid)) = ship_query.iter().next()
-    else {
-        return;
-    };
-    // Resolve the submitting comms token once per tick: the rejection channel
-    // (issue #761) targets whoever currently holds the Comms console — the
-    // station `station_for_system` resolves for the comms SYSTEM, which is the
-    // sought human-seeking host when there is one and the hull's authored
-    // station otherwise.
-    //
-    // Kept as an `Option` alongside the fallback because the narrative source
-    // below (issue #1338) may only name a station the hull ACTUALLY resolved:
-    // the `unwrap_or_else` arm is a string-cast of the system id, good enough to
-    // address a rejection at, and a lie if the timeline records it as the seat
-    // the crew answered from (AGENTS.md rule 6 — never string-cast a station).
-    let resolved_comms_station = ship_config.and_then(|c| {
-        crate::command_admission::station_for_system(
-            &c.0,
-            seeking_hosts,
-            &crate::ship::system_registry::comms_system_id(),
+    // The fleet, in slot order. Sorted rather than walked in query order for the
+    // reason `operate_comms_response_ai` sorts: archetype order is an allocation
+    // detail, and two hulls answering in one tick run their `on_pick` effects —
+    // id mints, flag writes, spawns — in whatever order this walk chooses.
+    let mut fleet: Vec<_> = ship_query.iter().collect();
+    fleet.sort_by_key(|(_, slot, _, _, _, uuid)| {
+        (
+            slot.map(|s| s.0),
+            uuid.map(|u| u.0.clone()).unwrap_or_default(),
         )
     });
-    let comms_station = resolved_comms_station.clone().unwrap_or_else(|| {
-        crate::core::messages::StationId(crate::ship::system_registry::COMMS_SYSTEM_ID.into())
-    });
-    let comms_token = aux
-        .sessions
-        .0
-        .holder_for_station(&comms_station)
-        .map(|t| t.to_string());
-    // Helper: push a `CommsResponseRejected` for the attempted control so the
-    // client can flash it red. A no-op when no comms holder is seated.
-    let reject = |outbox: &mut crate::server_app::SimOutbox, message_id: &str, idx: usize| {
-        if let Some(token) = comms_token.as_deref() {
-            outbox.push_reliable((
-                crate::lobby::Target::Token(token.to_string()),
-                crate::core::messages::ServerMessage::CommsResponseRejected {
-                    message_id: message_id.to_string(),
-                    response_index: idx,
-                },
-            ));
-        }
-    };
-    for cmd in admitted.for_target(crate::ship::system_registry::COMMS_SYSTEM_ID) {
-        let (message_id, response_index) = match &cmd.payload {
-            crate::core::messages::SystemControlPayload::RespondToMessage {
-                message_id,
-                response_index,
-            } => (message_id, response_index),
-            _ => continue,
+    // Resolve each hull's comms seat and rejection channel once: the channel
+    // (issue #761) targets whoever currently holds THAT hull's Comms console —
+    // the station `station_for_system` resolves for the comms SYSTEM, which is
+    // the sought human-seeking host when there is one and the hull's authored
+    // station otherwise.
+    //
+    // `station` is kept as an `Option` alongside the fallback because the
+    // narrative source below (issue #1338) may only name a station the hull
+    // ACTUALLY resolved: the `unwrap_or_else` arm is a string-cast of the system
+    // id, good enough to address a rejection at, and a lie if the timeline
+    // records it as the seat the crew answered from (AGENTS.md rule 6 — never
+    // string-cast a station).
+    let hulls: Vec<RespondingHull<'_>> = fleet
+        .into_iter()
+        .map(
+            |(admitted, _slot, is_local, ship_config, seeking_hosts, uuid)| {
+                let station = ship_config.and_then(|c| {
+                    crate::command_admission::station_for_system(
+                        &c.0,
+                        seeking_hosts,
+                        &crate::ship::system_registry::comms_system_id(),
+                    )
+                });
+                let comms_station = station.clone().unwrap_or_else(|| {
+                    crate::core::messages::StationId(
+                        crate::ship::system_registry::COMMS_SYSTEM_ID.into(),
+                    )
+                });
+                let token = is_local
+                    .then(|| aux.sessions.0.holder_for_station(&comms_station))
+                    .flatten()
+                    .map(|t| t.to_string());
+                RespondingHull {
+                    uuid,
+                    station,
+                    token,
+                    admitted,
+                }
+            },
+        )
+        .collect();
+    // Every Comms submission in the fleet this tick: hull by hull in slot order,
+    // and within a hull in the order admission queued them.
+    let submissions: Vec<(&RespondingHull<'_>, &String, &usize)> = hulls
+        .iter()
+        .flat_map(|hull| {
+            hull.admitted
+                .for_target(crate::ship::system_registry::COMMS_SYSTEM_ID)
+                .filter_map(move |cmd| match &cmd.payload {
+                    crate::core::messages::SystemControlPayload::RespondToMessage {
+                        message_id,
+                        response_index,
+                    } => Some((hull, message_id, response_index)),
+                    _ => None,
+                })
+        })
+        .collect();
+
+    for (hull, message_id, response_index) in submissions {
+        // Helper: push a `CommsResponseRejected` for the attempted control so the
+        // client can flash it red. A no-op when no comms holder is seated here.
+        let reject = |outbox: &mut crate::server_app::SimOutbox, message_id: &str, idx: usize| {
+            if let Some(token) = hull.token.as_deref() {
+                outbox.push_reliable((
+                    crate::lobby::Target::Token(token.to_string()),
+                    crate::core::messages::ServerMessage::CommsResponseRejected {
+                        message_id: message_id.to_string(),
+                        response_index: idx,
+                    },
+                ));
+            }
         };
 
         // Look up active dialogue for this message.
@@ -700,7 +795,7 @@ pub(crate) fn handle_respond_to_message(
         // crediting the counterparty with the crew's choice.
         //
         // Each axis is named only when it is actually known: no `EntityUuid` on
-        // the local hull (a bare fixture) leaves `entity` null, and a station
+        // the answering hull (a bare fixture) leaves `entity` null, and a station
         // that `station_for_system` could not resolve leaves `station` null
         // rather than recording the system id cast to a station.
         if let Some(msgs) = aux.narrative_events.as_deref_mut() {
@@ -709,8 +804,8 @@ pub(crate) fn handle_respond_to_message(
                 dialogue.thread_id.clone(),
             )
             .from_actor(crate::core::narrative::NarrativeActor {
-                entity: local_ship_uuid.map(|uuid| uuid.0.clone()),
-                station: resolved_comms_station.as_ref().map(|s| s.0.clone()),
+                entity: hull.uuid.map(|uuid| uuid.0.clone()),
+                station: hull.station.as_ref().map(|s| s.0.clone()),
                 system: Some(crate::ship::system_registry::COMMS_SYSTEM_ID.to_string()),
             })
             .text("message_id", message_id.clone())
@@ -1892,7 +1987,7 @@ pub fn operate_comms_ai(
 /// against, and a fingerprint that no longer matches re-arms rather than
 /// answering a screen that has been repriced.
 ///
-/// # Compute for the whole fleet, emit for this host's hull (issue #1116)
+/// # Every host decides — and answers — for the whole fleet (issues #1116/#1343)
 ///
 /// This host used to run `With<LocalShip>`. It cannot, now that it writes
 /// [`CommsRuntime::pending_ai_responses`] and draws from
@@ -1906,17 +2001,30 @@ pub fn operate_comms_ai(
 /// So the walk runs over the whole frozen fleet — every
 /// [`FleetSlotOf`](crate::lockstep::FleetSlotOf) hull, in SLOT order rather than
 /// archetype order — and every host therefore arms the same waits and takes the
-/// same draws in the same sequence. Only the last step is local: the admitted
-/// `RespondToMessage` is emitted for the hull whose crew is on THIS machine, and
-/// a peer's hull is answered by the peer and replicated here, exactly as a human
-/// officer's press is. That split is the same one admission already makes for a
-/// human input, which is why it needs no new seam.
+/// same draws in the same sequence.
 ///
-/// The pass is consequently in two halves: one read-only sweep that decides for
-/// every hull, then one mutable sweep that submits the local hull's answers. A
-/// hull that sits out its own `evaluate_every_ticks` does not thereby cancel its
-/// waits — its existing entries are carried forward untouched, which is what
-/// keeps two hulls on different cadences from wiping each other's schedules.
+/// The EMISSION is fleet-wide for the same reason, and this is the half #1343
+/// got wrong at first. A host cannot leave a peer's hull to be answered "by the
+/// peer and replicated here": an admitted AI command is never logged, so it never
+/// crosses the mesh at all — [`crate::lockstep::frame`] says so in as many words
+/// ("Any AI emission … an AI decision never crosses one"), and
+/// [`emit_ai_command`](crate::command_admission::ai_emit::emit_ai_command) pushes
+/// straight into `AdmittedCommands` without ever building a `LoggedCommand`. A
+/// host that emitted only for its own hull would therefore apply only its own
+/// hull's pick, and with a WEIGHTED pool the picks differ per hull — which is a
+/// divergence in `selected_response`, in whatever the `on_pick` wrote, and in the
+/// retired dialogue. Every host consequently emits every hull's answer, which is
+/// the doctrine every other NPC AI host already follows: *every host derives every
+/// NPC from the same ticks and the same RNG streams*. There is no double-apply,
+/// because there is no second copy to apply — the human path, which DOES
+/// replicate, still reaches exactly one `AdmittedCommands` per host.
+///
+/// The pass is nonetheless in two halves: one read-only sweep that decides for
+/// every hull (it borrows the whole fleet at once), then one mutable sweep that
+/// submits, per hull, in the order the first sweep decided. A hull that sits out
+/// its own `evaluate_every_ticks` does not thereby cancel its waits — its existing
+/// entries are carried forward untouched, which is what keeps two hulls on
+/// different cadences from wiping each other's schedules.
 ///
 /// # AC4 — read-only scenario state
 ///
@@ -1935,14 +2043,14 @@ pub fn operate_comms_response_ai(
     // [`CommsResponseContext`].
     context: CommsResponseContext,
     // EVERY hull the frozen roster put in the world (`&FleetSlotOf` is the
-    // filter as well as the sort key), never `With<LocalShip>` — see the
-    // "Compute for the whole fleet" section above. `Has<LocalShip>` rides along
-    // because the EMISSION, and only the emission, is this host's business.
+    // filter as well as the sort key), never `With<LocalShip>` — see the "Every
+    // host decides — and answers — for the whole fleet" section above. The
+    // marker is absent from this query on purpose: nothing this system does,
+    // decision or emission, is allowed to depend on which hull the host projects.
     mut ships: Query<(
         Entity,
         Option<&EntityUuid>,
         &crate::lockstep::FleetSlotOf,
-        bevy::ecs::query::Has<crate::server_app::LocalShip>,
         &ShipSystemControlSources,
         Option<&crate::ship_plugin::ShipConfigComponent>,
         &mut crate::core::messages::AdmittedCommands,
@@ -2000,9 +2108,10 @@ pub fn operate_comms_response_ai(
     // POPULATION is host-neutral (every host spawns a hull per roster slot), so
     // this guard is not a `LocalShip` reading in disguise.
     let mut fleet_seen = false;
-    // The local hull's answers, in the order the pass decided them. Emission is
-    // deferred to a second sweep because the decision sweep is read-only over the
-    // whole fleet while an emission needs `&mut AdmittedCommands` for one ship.
+    // The FLEET's answers, in the order the pass decided them (roster order, then
+    // inbox order). Emission is deferred to a second sweep because the decision
+    // sweep is read-only over the whole fleet while an emission needs
+    // `&mut AdmittedCommands` for one ship — not because any of it is local.
     let mut answers: Vec<(Entity, String, usize)> = Vec::new();
 
     // ── Pass one: every fleet hull decides, in ROSTER ORDER ──────────────────
@@ -2017,7 +2126,6 @@ pub fn operate_comms_response_ai(
         entity,
         _entity_uuid,
         slot,
-        is_local,
         sources,
         _ship_config,
         _admitted,
@@ -2132,13 +2240,12 @@ pub fn operate_comms_response_ai(
                     // and the record is not carried forward: the router answers
                     // the message this same tick.
                     //
-                    // The DRAW above happened on every host; only the hull whose
-                    // crew is on this machine submits, and a peer's hull submits
-                    // its own identical answer on its own machine.
+                    // Queued for EVERY hull, not just this host's: the draw above
+                    // ran identically on every host, and an AI emission never
+                    // crosses the mesh, so a host that skipped a peer's hull here
+                    // would simply never apply that hull's pick.
                     WeightedChoiceOutcome::Answer(index) => {
-                        if is_local {
-                            answers.push((entity, message.id.clone(), index));
-                        }
+                        answers.push((entity, message.id.clone(), index));
                     }
                 }
                 continue;
@@ -2195,11 +2302,9 @@ pub fn operate_comms_response_ai(
                 continue;
             }
 
-            // Same split as the weighted branch: the policy resolved for every
-            // fleet hull, but only this host's hull submits.
-            if is_local {
-                answers.push((entity, message.id.clone(), index));
-            }
+            // Same rule as the weighted branch: the policy resolved for every
+            // fleet hull, so every fleet hull's answer is queued on every host.
+            answers.push((entity, message.id.clone(), index));
         }
     }
 
@@ -2214,13 +2319,13 @@ pub fn operate_comms_response_ai(
         comms_res.pending_ai_responses = pending_next;
     }
 
-    // ── Pass two: this host submits its own hull's answers ───────────────────
+    // ── Pass two: submit the fleet's answers ─────────────────────────────────
     //
     // In the order pass one decided them (roster order, then inbox order), so a
-    // hull answering two conversations on one tick admits them in one sequence.
+    // hull answering two conversations on one tick admits them in one sequence,
+    // and two hulls answering on one tick admit in slot order.
     for (entity, message_id, index) in answers {
-        let Ok((_, entity_uuid, _, _, sources, ship_config, mut admitted, ..)) =
-            ships.get_mut(entity)
+        let Ok((_, entity_uuid, _, sources, ship_config, mut admitted, ..)) = ships.get_mut(entity)
         else {
             continue;
         };

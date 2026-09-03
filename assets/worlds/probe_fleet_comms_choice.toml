@@ -15,19 +15,18 @@
 # walks. This world enters that scope, holds a wait open across many ticks, and
 # then resolves it.
 #
-# ONE WEIGHTED OPTION, NOT TWO, and that is a property of the HARNESS rather
-# than of the mechanism. The neutrality runs are deliberately not lockstep
-# sessions (see that file's header): there is no mesh, so a peer's admitted
-# `RespondToMessage` is never replicated into the run and only the hull this host
-# projects actually submits its answer. Both hulls still DECIDE — that is the
-# point of the comparison — but only one of them lands its pick, so a pool of two
-# equally-weighted options would let the two runs answer the corridor
-# differently and the comparison would then be about the mission's outcome
-# rather than about the marker. Falling Skyway is where the two-option shape is
-# exercised end to end (`tests/headless_runner.rs`); what this world is for is
-# the fold.
+# TWO EQUALLY-WEIGHTED OPTIONS, which is the shape Falling Skyway's lift band
+# actually authors and the only shape that makes the comparison bite. With a pool
+# of one, every hull on every host draws the same answer and the guard passes
+# whatever the emission does; with a pool of two, the two hulls draw
+# independently and generally pick DIFFERENTLY, so a host that applied only the
+# hull it happens to project would answer the corridor one way as slot 1 and the
+# other way as slot 2 — a divergence in `selected_response`, in the flags the
+# `on_pick` wrote, and in the retired dialogue. That is exactly the bug
+# `handle_respond_to_message`'s fleet-wide drain fixes, and this world is what
+# holds it fixed.
 #
-# The stand-by still sits at index 0 carrying `ai_weight = 0`, because the thing
+# The stand-by sits at index 0 carrying `ai_weight = 0`, because the other thing
 # worth proving here is that an unmanned bridge does NOT answer with it.
 
 [global]
@@ -97,10 +96,9 @@ fn open_corridor_claim(ctx) {
     });
 }
 
-// Five authored seconds of silence, then the one option an absent officer is
-// allowed to take. The hold is index 0 and forbidden outright; the refusal is
-// authored but unweighted, which is the other half of "an unmanned console
-// reaches only for what the author gave it a weight for".
+// Five authored seconds of silence, then a coin-flip between the two options an
+// absent officer is allowed to take. The hold is index 0 and forbidden outright;
+// grant and refuse are equally weighted, the Falling Skyway lift shape.
 fn corridor_claim(ctx) {
     #{
         message: "world.probe_fleet_comms_choice.comms.claim",
@@ -113,7 +111,7 @@ fn corridor_claim(ctx) {
                ai_weight: 1, ai_delay_seconds: 5 },
             #{ text: "world.probe_fleet_comms_choice.comms.refuse",
                on_pick: "on_corridor_refuse",
-               ai_delay_seconds: 5 },
+               ai_weight: 1, ai_delay_seconds: 5 },
         ],
     }
 }

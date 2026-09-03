@@ -76,8 +76,10 @@ const ASTEROID_WORLD: &str = "assets/worlds/probe_fleet_asteroids.toml";
 /// single `open_comms` call, so `sim_digest::fold_comms_scope` takes its
 /// everything-empty arm on every tick and the comms half of the fold — the
 /// unmanned consoles' running weighted decisions included — was never entered by
-/// this guard at all. See that world's own header for why its pool authors ONE
-/// weighted option.
+/// this guard at all. Its pool authors TWO equally-weighted options, the Falling
+/// Skyway lift shape, so the two hulls generally draw different answers and a
+/// host that applied only the hull it projects answers the corridor differently
+/// from its peer.
 const COMMS_CHOICE_WORLD: &str = "assets/worlds/probe_fleet_comms_choice.toml";
 
 /// Long enough that both fleet ships have acquired the hostile, manoeuvred and
@@ -323,8 +325,10 @@ struct CommsRun {
     /// Every fleet slot that held a running weighted wait at any point — the
     /// evidence that the walk really is fleet-wide rather than local-hull-only.
     waiting_slots: Vec<u32>,
-    /// How the corridor was answered, by the end.
+    /// How the corridor was answered, by the end. The pool is a coin flip
+    /// between `granted` and `refused`; `held` is the forbidden stand-by.
     granted: i64,
+    refused: i64,
     held: i64,
 }
 
@@ -359,6 +363,7 @@ fn run_comms_host(local: HostSlot) -> CommsRun {
         digests,
         waiting_slots: waiting_slots.into_iter().collect(),
         granted: flags.counter("corridor_granted"),
+        refused: flags.counter("corridor_refused"),
         held: flags.counter("corridor_held"),
     }
 }
@@ -371,9 +376,19 @@ fn run_comms_host(local: HostSlot) -> CommsRun {
 /// `SimStream::CommsBackfillChoice` (`SimRngState` is folded whole). Both used to
 /// be written by a `With<LocalShip>` host, which is a different hull on each host
 /// of a fleet — so the schedule a peer folded, and the number of draws it had
-/// taken, depended on which crew was sitting where. The fix walks every
-/// `FleetSlotOf` hull in slot order and gates only the EMISSION of the admitted
-/// response on the local marker, exactly as a human officer's press replicates.
+/// taken, depended on which crew was sitting where.
+///
+/// And a third thing, which is what the world's TWO equally-weighted options are
+/// for. Making the schedule fleet-wide while still EMITTING only for the local
+/// hull fixes nothing on its own: an admitted AI command is never logged, so it
+/// never crosses the mesh (`lockstep::frame` — "an AI decision never crosses
+/// one"), and a host that emitted for its own hull alone would apply only that
+/// hull's pick. With a one-option pool both hulls pick the same index and the
+/// hole is invisible; with two, they draw independently, and the two runs below
+/// would grant the corridor as slot 1 and refuse it as slot 2. So
+/// `operate_comms_response_ai` emits for every hull and
+/// `handle_respond_to_message` drains every hull — the doctrine every other NPC
+/// AI host follows, that every host derives every NPC identically.
 #[test]
 fn the_digest_does_not_care_which_ship_a_host_projects_through_a_backfill_decision() {
     let first = run_comms_host(SLOT_ONE);
@@ -396,16 +411,23 @@ fn the_digest_does_not_care_which_ship_a_host_projects_through_a_backfill_decisi
     // …and the decision actually RESOLVED, so the comparison covers arm → fold →
     // draw → admitted answer → `on_pick`, not just an armed wait.
     assert_eq!(
-        (first.granted, first.held),
+        (first.granted + first.refused, first.held),
         (1, 0),
-        "the corridor must be granted exactly once and never held: index 0 is \
+        "the corridor must be answered exactly once and never held: index 0 is \
          the stand-by and carries `ai_weight = 0`, so an unmanned bridge is \
          forbidden it outright"
     );
+    // The sharp end of THIS assertion: which of the two equally-weighted options
+    // landed. Both hulls decide, and with a two-option pool they generally decide
+    // differently, so a host that applied only the hull it projects records a
+    // different answer here from its peer.
     assert_eq!(
-        (second.granted, second.held),
-        (first.granted, first.held),
-        "and answered identically whichever hull this host projects"
+        (second.granted, second.refused, second.held),
+        (first.granted, first.refused, first.held),
+        "the corridor must be answered the SAME way whichever hull this host \
+         projects. An admitted AI command is never logged and so never \
+         replicates, so every host must apply every fleet hull's Backfill \
+         answer — see `handle_respond_to_message`'s fleet-wide drain"
     );
 
     assert_eq!(

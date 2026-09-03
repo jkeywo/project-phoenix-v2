@@ -408,7 +408,10 @@ mod tests {
 
     #[test]
     fn every_refusal_has_a_distinct_string_id() {
-        let mut ids: Vec<&str> = DemolitionRefusal::ALL.iter().map(|r| r.string_id()).collect();
+        let mut ids: Vec<&str> = DemolitionRefusal::ALL
+            .iter()
+            .map(|r| r.string_id())
+            .collect();
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(ids.len(), DemolitionRefusal::ALL.len());

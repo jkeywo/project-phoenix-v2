@@ -77,18 +77,18 @@ pub mod cross_target_probe;
 /// Owns no consequence — a strike's damage, its objective and its computer cue
 /// are the world file's.
 pub mod debris;
-/// Controlled demolition (issue #1350): the pure detonation verdict and
-/// four-outcome decision, and the adapter that fires `DetonateCharges` on the
-/// `security` target it borrows. Reads Security and the tractor, owns an
-/// operation not a system, and hands every consequence to the world file through
-/// the authored flags it raises.
-pub mod demolition;
 /// Delivery (PRD #855): how a host — browser tab or native `phoenix-host`
 /// process — publishes its client bundle, its content manifest, its scenario
 /// catalogue and its version pin. Compiles on both targets on purpose: the
 /// catalogue field list and the pin are shared code, and only the socket loop
 /// (`delivery::serve`) is native-only.
 pub mod delivery;
+/// Controlled demolition (issue #1350): the pure detonation verdict and
+/// four-outcome decision, and the adapter that fires `DetonateCharges` on the
+/// `security` target it borrows. Reads Security and the tractor, owns an
+/// operation not a system, and hands every consequence to the world file through
+/// the authored flags it raises.
+pub mod demolition;
 /// Helm docking (issue #1159): the pure marker-mating module and its Bevy
 /// adapter. A hull with a `[dock]` table and dock markers in its rig sidecar can
 /// dock with, or be docked by, another hull carrying dock markers; the docked

@@ -128,7 +128,9 @@ struct TargetRow {
 
 /// Read every entity that authors a demolition target into plain rows, in uuid
 /// order so two hosts walk them identically.
-fn target_rows(query: &Query<(&EntityUuid, Option<&EntityName>, &DemolitionTarget)>) -> Vec<TargetRow> {
+fn target_rows(
+    query: &Query<(&EntityUuid, Option<&EntityName>, &DemolitionTarget)>,
+) -> Vec<TargetRow> {
     let mut rows: Vec<TargetRow> = query
         .iter()
         .map(|(uuid, name, target)| TargetRow {
@@ -324,17 +326,8 @@ pub fn operate_demolition_ai(
     order.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.index().cmp(&b.1.index())));
 
     for (_, entity) in order {
-        let Ok((
-            _,
-            uuid,
-            sources,
-            config,
-            hull,
-            security,
-            beam,
-            mut admitted,
-            _control,
-        )) = ships.get_mut(entity)
+        let Ok((_, uuid, sources, config, hull, security, beam, mut admitted, _control)) =
+            ships.get_mut(entity)
         else {
             continue;
         };

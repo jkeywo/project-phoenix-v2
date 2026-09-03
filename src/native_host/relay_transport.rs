@@ -251,6 +251,14 @@ impl RelayTransport {
         self.peers.values().filter(|p| p.admitted).count()
     }
 
+    /// Bytes the underlying service is holding, un-written, across every peer —
+    /// the same total the transport sheds snapshots against. Exposed for
+    /// operator diagnostics and so a test can watch the reliable-backpressure
+    /// ceiling hold under a stalled peer (issue #1354).
+    pub fn buffered_bytes(&self) -> usize {
+        self.socket.buffered_bytes()
+    }
+
     fn send_frame(&mut self, frame: &RendezvousFrame) {
         match encode_rendezvous_frame(frame) {
             Ok(text) => self.socket.send(text),

@@ -190,6 +190,55 @@ const LIVENESS_PING_INTERVAL: Duration = Duration::from_secs(10);
 /// (AGENTS.md rule 11).
 const LIVENESS_SILENCE_DEADLINE: Duration = Duration::from_secs(30);
 
+/// The reliable buffer level above which a peer is WATCHED for sustained
+/// backpressure.
+///
+/// Crossing it arms nothing on its own — it starts a grace clock
+/// ([`RELIABLE_BACKPRESSURE_GRACE`]) that the very next successful [`drain`] of
+/// the queue resets. It exists so an idle-but-healthy peer, whose queue is
+/// empty between pumps, is never even watched; only a peer carrying a real
+/// backlog is. It mirrors `max_relay_send_buffer_bytes` (the level at which the
+/// host already sheds SNAPSHOT frames), because "this link is behind" is the
+/// same judgement about the same wire. Not a gameplay value (AGENTS.md rule 11)
+/// — it is one socket's own send bookkeeping.
+///
+/// [`drain`]: PeerOutbox::drain
+const RELIABLE_BACKPRESSURE_SOFT_BYTES: usize = 256 * 1024;
+
+/// The absolute reliable-buffer ceiling: past it the session ends the instant
+/// the frame is pushed, grace or no grace.
+///
+/// This is the DoS backstop of last resort — a burst so large it cannot be
+/// buffered at all is refused even inside the grace window, so a stalled peer's
+/// reliable memory can never grow without bound however fast the host produces.
+/// It is sized to sit WELL above the largest legitimate mission-start reliable
+/// burst (`GameStarted` + the single `WorldSetup` frame + one `AsteroidSpawned`
+/// per asteroid), which for the authored worlds is sub-megabyte: sixteen
+/// mebibytes is ~30x that, so it cannot fire on a real snapshot and reintroduce
+/// the very defect this change removes, while still bounding a hostile peer to
+/// a bounded, transient buffer that the grace or the write timeout severs
+/// first in practice. Were a future world's start-of-mission reliable burst to
+/// approach this ceiling, the fix is to chunk the snapshot or move it off the
+/// reliable class, not to raise the ceiling (issue #1354's own note). Not a
+/// gameplay value (AGENTS.md rule 11).
+const RELIABLE_BACKPRESSURE_HARD_BYTES: usize = 16 * 1024 * 1024;
+
+/// How long the reliable buffer may stay over [`RELIABLE_BACKPRESSURE_SOFT_BYTES`]
+/// before the peer is severed for sustained backpressure.
+///
+/// This is the fix's heart: the old check severed on INSTANTANEOUS queue depth,
+/// so a one-tick mission-start burst that the next pump fully cleared was
+/// misread as a peer that had stopped reading. A grace window turns it into a
+/// SUSTAINED-backpressure check — a transient burst is drained by the next pump
+/// (which resets the clock) and never severs, while a peer that genuinely
+/// stopped draining keeps the buffer over the bound across the window and is
+/// severed within it. Twice [`PUMP_WRITE_TIMEOUT`], deliberately: one `send`
+/// may legitimately block a slow-but-draining reader for up to that timeout, so
+/// a single slow write must not trip the grace — aligning it above the write
+/// timeout is what keeps a slow link from being mistaken for a dead one. Not a
+/// gameplay value (AGENTS.md rule 11) — it is one socket's own send scheduling.
+const RELIABLE_BACKPRESSURE_GRACE: Duration = Duration::from_secs(10);
+
 /// The peer id this service uses for the host itself, on the `from` field of a
 /// frame it hands a joiner. The worker puts the host's connection id there; a
 /// joiner does not read it (`gui/rendezvous-relay.js` routes on `class`), so
@@ -383,6 +432,23 @@ pub struct AdmissionBudgets {
     /// the reason that field's note gives: proving that a half-open link is
     /// detected otherwise means waiting out the production number on every run.
     pub silence_deadline: Duration,
+    /// The reliable buffer level above which a peer is watched for sustained
+    /// backpressure — see [`RELIABLE_BACKPRESSURE_SOFT_BYTES`], this field's
+    /// production value.
+    pub reliable_soft_bytes: usize,
+    /// The absolute reliable-buffer ceiling — see
+    /// [`RELIABLE_BACKPRESSURE_HARD_BYTES`], this field's production value.
+    pub reliable_hard_bytes: usize,
+    /// How long the reliable buffer may stay over the soft bound before the peer
+    /// is severed — see [`RELIABLE_BACKPRESSURE_GRACE`], this field's production
+    /// value.
+    ///
+    /// It rides here with the socket clocks above so a test can watch a
+    /// transient burst survive and a stalled peer be severed in milliseconds
+    /// rather than waiting out the production grace on every run — exactly as
+    /// [`Self::write_timeout`] does for the write path. Nothing ships a
+    /// test-sized value: production reads the constant.
+    pub reliable_grace: Duration,
 }
 
 impl Default for AdmissionBudgets {
@@ -402,6 +468,9 @@ impl Default for AdmissionBudgets {
             attach_deadline: ATTACH_DEADLINE,
             ping_interval: LIVENESS_PING_INTERVAL,
             silence_deadline: LIVENESS_SILENCE_DEADLINE,
+            reliable_soft_bytes: RELIABLE_BACKPRESSURE_SOFT_BYTES,
+            reliable_hard_bytes: RELIABLE_BACKPRESSURE_HARD_BYTES,
+            reliable_grace: RELIABLE_BACKPRESSURE_GRACE,
         }
     }
 }
@@ -637,10 +706,14 @@ impl Admissions {
 /// and this is where the promise is kept on THIS side of the wire — the mirror
 /// of `worker-rendezvous/src/relay.js`'s mailboxes:
 ///
-/// * **reliable** is ordered and never shed. A queue past its authored depth
-///   ends the session with a stated reason rather than becoming a quietly lossy
-///   reliable channel — a dropped command would fork the guarantee the
-///   simulation is written against.
+/// * **reliable** is ordered and never shed. It severs the session — with a
+///   stated reason, rather than becoming a quietly lossy reliable channel — only
+///   on SUSTAINED backpressure: a buffer that has stayed over
+///   [`AdmissionBudgets::reliable_soft_bytes`] across
+///   [`AdmissionBudgets::reliable_grace`] (the writer genuinely is not draining)
+///   or one that blows the absolute [`AdmissionBudgets::reliable_hard_bytes`]
+///   ceiling in a single push. A one-tick mission-start burst that the next
+///   [`Self::drain`] clears resets the clock and never severs (issue #1354).
 /// * **snapshot** is latest-wins. Past its depth the OLDEST frames go, because
 ///   a late snapshot is worthless and the next tick supersedes it.
 struct PeerOutbox {
@@ -657,33 +730,48 @@ struct PeerOutbox {
     /// notice. A running total, not a delta: a queue at its bound sheds one
     /// frame per arrival, so a delta reads "1" forever however many were lost.
     dropped: AtomicU64,
-    max_reliable: usize,
     max_snapshot: usize,
+    /// The reliable-backpressure bounds, copied from the record's
+    /// [`AdmissionBudgets`] so a test can shorten them.
+    reliable_soft_bytes: usize,
+    reliable_hard_bytes: usize,
+    reliable_grace: Duration,
 }
 
 #[derive(Default)]
 struct OutQueue {
     reliable: VecDeque<String>,
     snapshot: VecDeque<String>,
+    /// Bytes held in [`Self::reliable`] alone — the memory the backpressure
+    /// bounds are measured against, tracked incrementally so a push never sums
+    /// the whole queue.
+    reliable_bytes: usize,
+    /// When the reliable buffer first went over the soft bound and has stayed
+    /// there since. `None` whenever it is at or below the soft bound, or has
+    /// just been drained. The grace window is measured from here.
+    over_since: Option<Instant>,
 }
 
 /// What enqueuing one frame did.
 enum Enqueued {
     /// Queued; this many snapshot frames were displaced by it.
     Ok { dropped: u64 },
-    /// The reliable queue is past its authored depth: this session is over.
+    /// The reliable buffer is over its bound — sustained past the grace, or over
+    /// the hard ceiling outright: this session is over.
     Overflowed,
 }
 
 impl PeerOutbox {
-    fn new(limits: &crate::native_host::join_codes::RawLimits) -> Self {
+    fn new(limits: &crate::native_host::join_codes::RawLimits, budgets: &AdmissionBudgets) -> Self {
         Self {
             queue: Mutex::new(OutQueue::default()),
             queued: AtomicUsize::new(0),
             closed: AtomicBool::new(false),
             dropped: AtomicU64::new(0),
-            max_reliable: limits.max_relay_queue_reliable,
             max_snapshot: limits.max_relay_queue_snapshot,
+            reliable_soft_bytes: budgets.reliable_soft_bytes,
+            reliable_hard_bytes: budgets.reliable_hard_bytes,
+            reliable_grace: budgets.reliable_grace,
         }
     }
 
@@ -707,9 +795,27 @@ impl PeerOutbox {
             return Enqueued::Ok { dropped };
         }
         queue.reliable.push_back(text);
+        queue.reliable_bytes += len;
         self.queued.fetch_add(len, Ordering::Relaxed);
-        if queue.reliable.len() > self.max_reliable {
+        // The absolute backstop first: a burst so large it cannot be buffered at
+        // all is refused even inside the grace window, so reliable memory is
+        // bounded however fast the host produces.
+        if queue.reliable_bytes > self.reliable_hard_bytes {
             return Enqueued::Overflowed;
+        }
+        // Otherwise sever only on SUSTAINED backpressure. Below the soft bound
+        // the peer is not even watched; over it, the grace clock runs from the
+        // first push that crossed it and is reset by the next drain — so a
+        // transient burst the writer clears never reaches the window, and a peer
+        // that has genuinely stopped draining does (issue #1354).
+        if queue.reliable_bytes > self.reliable_soft_bytes {
+            let now = Instant::now();
+            let since = *queue.over_since.get_or_insert(now);
+            if now.saturating_duration_since(since) >= self.reliable_grace {
+                return Enqueued::Overflowed;
+            }
+        } else {
+            queue.over_since = None;
         }
         Enqueued::Ok { dropped: 0 }
     }
@@ -719,6 +825,10 @@ impl PeerOutbox {
     /// The classes drain in a fixed order rather than interleaved, and reliable
     /// goes first deliberately: a command and the snapshot that reflects it must
     /// not swap places, while two snapshots are already free to.
+    ///
+    /// Emptying the reliable queue clears the backpressure clock: the peer
+    /// accepted its backlog, which is the signal a transient burst gives and a
+    /// stalled peer cannot.
     fn drain(&self) -> Vec<String> {
         let mut queue = self.queue.lock().unwrap_or_else(|e| e.into_inner());
         let mut out: Vec<String> = queue.reliable.drain(..).collect();
@@ -728,6 +838,8 @@ impl PeerOutbox {
             bytes.min(self.queued.load(Ordering::Relaxed)),
             Ordering::Relaxed,
         );
+        queue.reliable_bytes = 0;
+        queue.over_since = None;
         out
     }
 
@@ -972,9 +1084,12 @@ impl RelaySocket for DirectJoinService {
                     }
                     Enqueued::Ok { .. } => {}
                     Enqueued::Overflowed => {
-                        // A reliable queue that filled is a session that can no
-                        // longer keep the promise its class makes. End it with a
-                        // reason both ends can render — `flushRelay`'s answer.
+                        // A reliable buffer that stayed over its bound across the
+                        // grace window — or blew the hard ceiling outright — is a
+                        // peer that has stopped draining, not a transient burst
+                        // (issue #1354). It can no longer keep the promise its
+                        // class makes; end it with a reason both ends can render
+                        // — `flushRelay`'s answer.
                         Self::close_peer(record, &to, "relay-overflow");
                     }
                 }
@@ -1601,7 +1716,10 @@ fn on_client_frame(record: &Arc<Record>, joiner: &mut Joiner, text: &str) {
                 return;
             }
             let peer = joiner.id.clone();
-            let outbox = Arc::new(PeerOutbox::new(&record.table.limits));
+            let outbox = Arc::new(PeerOutbox::new(
+                &record.table.limits,
+                &record.admissions.budgets,
+            ));
             {
                 let mut peers = record.peers.lock().unwrap_or_else(|e| e.into_inner());
                 if peers.len() >= record.table.limits.max_relay_peers_per_record {

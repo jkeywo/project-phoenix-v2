@@ -352,7 +352,8 @@ fn the_snapshot_class_stays_lossy_and_the_reliable_class_stays_ordered() {
     // silently upgrade the lossy class into a reliable one and reintroduce the
     // head-of-line blocking it exists to avoid.
     let (record, _rx) = service();
-    let outbox = PeerOutbox::new(&record.table.limits);
+    let budgets = AdmissionBudgets::default();
+    let outbox = PeerOutbox::new(&record.table.limits, &budgets);
     let depth = record.table.limits.max_relay_queue_snapshot;
     for i in 0..depth + 5 {
         outbox.push(CLASS_SNAPSHOT, format!("snap-{i}"));
@@ -366,7 +367,7 @@ fn the_snapshot_class_stays_lossy_and_the_reliable_class_stays_ordered() {
     assert_eq!(outbox.dropped.load(Ordering::Relaxed), 5);
 
     // Reliable frames keep their order and are never shed…
-    let outbox = PeerOutbox::new(&record.table.limits);
+    let outbox = PeerOutbox::new(&record.table.limits, &budgets);
     for i in 0..10 {
         outbox.push(CLASS_RELIABLE, format!("cmd-{i}"));
     }
@@ -375,28 +376,60 @@ fn the_snapshot_class_stays_lossy_and_the_reliable_class_stays_ordered() {
     assert_eq!(drained[0], "cmd-0");
     assert_eq!(drained[9], "cmd-9");
 
-    // …until the queue passes its bound, which ends the session rather than
-    // becoming a quietly lossy reliable channel.
-    let outbox = PeerOutbox::new(&record.table.limits);
-    let mut overflowed = false;
-    for i in 0..record.table.limits.max_relay_queue_reliable + 2 {
-        if matches!(
-            outbox.push(CLASS_RELIABLE, format!("cmd-{i}")),
-            Enqueued::Overflowed
-        ) {
-            overflowed = true;
-        }
+    // …and a reliable buffer only ends the session on SUSTAINED backpressure,
+    // never on a transient burst the next drain clears (issue #1354). Tiny
+    // bounds so the shape is provable in milliseconds.
+    let tight = AdmissionBudgets {
+        reliable_soft_bytes: 8,
+        reliable_hard_bytes: 1024,
+        reliable_grace: Duration::from_millis(50),
+        ..AdmissionBudgets::default()
+    };
+    let outbox = PeerOutbox::new(&record.table.limits, &tight);
+    // A burst well over the soft bound, drained before the grace elapses: every
+    // frame is delivered, in order, and nothing severs.
+    for i in 0..50 {
+        assert!(
+            matches!(
+                outbox.push(CLASS_RELIABLE, format!("cmd-{i}")),
+                Enqueued::Ok { .. }
+            ),
+            "a transient burst is not severed on instantaneous depth"
+        );
     }
+    let drained = outbox.drain();
+    assert_eq!(drained.len(), 50, "the whole burst is delivered");
+    assert_eq!(drained[0], "cmd-0");
+    assert_eq!(drained[49], "cmd-49");
+
+    // A buffer left over the soft bound past the grace — the writer genuinely
+    // not draining — does sever.
+    outbox.push(CLASS_RELIABLE, "x".repeat(16));
+    std::thread::sleep(Duration::from_millis(60));
     assert!(
-        overflowed,
-        "a full reliable queue is a dead session, said so"
+        matches!(
+            outbox.push(CLASS_RELIABLE, "y".repeat(16)),
+            Enqueued::Overflowed
+        ),
+        "sustained backpressure past the grace is a dead session, said so"
+    );
+
+    // …and a single push past the hard ceiling severs at once, grace or no: the
+    // absolute memory backstop.
+    let outbox = PeerOutbox::new(&record.table.limits, &tight);
+    assert!(
+        matches!(
+            outbox.push(CLASS_RELIABLE, "z".repeat(2048)),
+            Enqueued::Overflowed
+        ),
+        "a burst too large to buffer at all is refused immediately"
     );
 }
 
 #[test]
 fn reliable_frames_leave_before_snapshots_so_a_command_never_trails_its_effect() {
     let (record, _rx) = service();
-    let outbox = PeerOutbox::new(&record.table.limits);
+    let outbox = PeerOutbox::new(&record.table.limits, &record.admissions.budgets);
     outbox.push(CLASS_SNAPSHOT, "snap".to_string());
     outbox.push(CLASS_RELIABLE, "cmd".to_string());
     assert_eq!(outbox.drain(), vec!["cmd".to_string(), "snap".to_string()]);
@@ -522,7 +555,10 @@ fn closing_the_service_shuts_every_joiner_and_reports_the_link_down() {
     )
     .unwrap();
     let record = Arc::clone(&service.record);
-    let outbox = Arc::new(PeerOutbox::new(&record.table.limits));
+    let outbox = Arc::new(PeerOutbox::new(
+        &record.table.limits,
+        &record.admissions.budgets,
+    ));
     record
         .peers
         .lock()

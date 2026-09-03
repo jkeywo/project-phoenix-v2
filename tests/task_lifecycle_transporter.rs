@@ -106,25 +106,26 @@ fn send(app: &mut App, target: SystemId, payload: SystemControlPayload) {
     run(app, 2);
 }
 
-fn objective_status(report: &RunReport, id: &str) -> Option<ObjectiveStatus> {
-    report
-        .scenario
-        .as_ref()
-        .expect("the probe world loads a scenario")
-        .objectives
-        .iter()
+/// Read one objective's live status off the running world — WITHOUT
+/// `build_report`, which finalizes the task lifecycle (draining every open task
+/// as `mission_ended`) and so must be called exactly once, at the very end.
+fn objective_status_live(app: &mut App, id: &str) -> Option<ObjectiveStatus> {
+    app.world()
+        .resource::<project_phoenix::world::server::ObjectiveManagerRes>()
+        .0
+        .sorted_snapshots()
+        .into_iter()
         .find(|o| o.id == id)
-        .map(|o| o.status.clone())
+        .map(|o| o.status)
 }
 
-fn flag_set(report: &RunReport, name: &str) -> bool {
-    report
-        .scenario
-        .as_ref()
-        .expect("the probe world loads a scenario")
+/// Whether a world flag is set, read live off the flag store.
+fn flag_live(app: &mut App, name: &str) -> bool {
+    app.world()
+        .resource::<project_phoenix::world::server::WorldContentRuntime>()
         .flags
-        .iter()
-        .any(|f| f.name == name && f.value > 0)
+        .counter(name)
+        > 0
 }
 
 fn lifecycle_rows(report: &RunReport) -> Vec<(u64, String, String, String)> {
@@ -167,12 +168,16 @@ fn a_scan_reveals_civilians_and_the_transporter_recovers_them() {
     run(&mut app, 2);
 
     // Before the scan, the discovery objective must not exist — the computer has
-    // announced nothing.
-    let before = build_report(&mut app, &args, 0.0);
+    // announced nothing. (Live read: `build_report` is deferred to the very end,
+    // because it finalizes the task lifecycle.)
     assert_eq!(
-        objective_status(&before, "obj-rescue-civilians"),
+        objective_status_live(&mut app, "obj-rescue-civilians"),
         None,
         "the rescue objective must not post before the revealing scan"
+    );
+    assert!(
+        !flag_live(&mut app, "scan.lighter.taken"),
+        "nothing has scanned the lighter yet"
     );
 
     // Scan the lighter through the ordinary admitted path.
@@ -186,18 +191,19 @@ fn a_scan_reveals_civilians_and_the_transporter_recovers_them() {
     // Give the scan flag its one-tick bridge and the discovery beat a tick.
     run(&mut app, 6);
 
-    let discovered = build_report(&mut app, &args, 0.0);
     assert!(
-        flag_set(&discovered, "scan.lighter.taken"),
+        flag_live(&mut app, "scan.lighter.taken"),
         "the scan must latch its taken flag"
     );
     assert_eq!(
-        objective_status(&discovered, "obj-rescue-civilians"),
+        objective_status_live(&mut app, "obj-rescue-civilians"),
         Some(ObjectiveStatus::Active),
         "the rescue objective posts once the scan has revealed the life signs"
     );
 
-    // Select the lighter and start the transport.
+    // Select the lighter and start the transport. (The Engineering backfill would
+    // do this on its own off the Rescue directive; driving it explicitly makes
+    // the recovery deterministic and exercises the admitted command path.)
     send(
         &mut app,
         SystemId(TRANSPORTER_SYSTEM_ID.into()),
@@ -213,6 +219,21 @@ fn a_scan_reveals_civilians_and_the_transporter_recovers_them() {
     // Four civilians at two seconds each: eight seconds, plus slack.
     run(&mut app, ticks_for_sim_seconds(12.0, args.dt));
 
+    // The completion flag and the objective, read live before the single
+    // finalizing `build_report`.
+    assert!(
+        flag_live(&mut app, "rescue.lighter.recovered"),
+        "the transporter raises the recovered flag when every civilian is aboard"
+    );
+    assert_eq!(
+        objective_status_live(&mut app, "obj-rescue-civilians"),
+        Some(ObjectiveStatus::Completed),
+        "the rescue objective completes when the recovery lands"
+    );
+
+    // ONE build_report, at the very end: it finalizes the lifecycle, so a task
+    // still open here would read `mission_ended`. The transport has already
+    // completed, so its End beat is `completed`.
     let report = build_report(&mut app, &args, 0.0);
 
     // The transport lifecycle: exactly one start and one `completed` terminal.
@@ -232,17 +253,5 @@ fn a_scan_reveals_civilians_and_the_transporter_recovers_them() {
             .iter()
             .any(|(_, _, _, reason)| reason == "completed"),
         "the transport must complete when every civilian is recovered: {transport:?}"
-    );
-
-    // The recovery raised its completion flag, and the rescue objective
-    // completed off it (the saved report row is authored off the same flag).
-    assert!(
-        flag_set(&report, "rescue.lighter.recovered"),
-        "the transporter raises the recovered flag when every civilian is aboard"
-    );
-    assert_eq!(
-        objective_status(&report, "obj-rescue-civilians"),
-        Some(ObjectiveStatus::Completed),
-        "the rescue objective completes when the recovery lands"
     );
 }

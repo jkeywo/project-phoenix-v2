@@ -223,6 +223,7 @@ impl DirectiveField {
                     | DirectiveKind::Transfer
                     | DirectiveKind::FieldRepair
                     | DirectiveKind::Secure
+                    | DirectiveKind::Rescue
                     | DirectiveKind::Order
             ),
             Self::DoctrineDestroyTarget => matches!(kind, DirectiveKind::Destroy),
@@ -237,6 +238,7 @@ impl DirectiveField {
                     | DirectiveKind::Transfer
                     | DirectiveKind::FieldRepair
                     | DirectiveKind::Secure
+                    | DirectiveKind::Rescue
             ),
             Self::DoctrineOrderTarget | Self::WorldRoute | Self::DoctrineOrderRoute => {
                 matches!(kind, DirectiveKind::Order)

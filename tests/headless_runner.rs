@@ -9644,8 +9644,43 @@ fn falling_skyway_idle_crew_fails_every_era_headless_checks() {
         &mut app,
         "world.falling_skyway.entity.skyhook.name"
     ));
+    // AC5 (issue #1351): a catastrophic ending is a REPORTED ending. The
+    // collision writes what it settled — the head lost, Lark down in the throat,
+    // and the survey this idle crew never filed — before it declares defeat, so
+    // `classify()` upgrades the run to `Reported` and the account survives.
     let report = build_report(&mut app, &args, collision_due);
-    assert_eq!(report.outcome_report.outcome, RunOutcome::Defeat);
+    assert_eq!(
+        report.outcome_report.outcome,
+        RunOutcome::Reported,
+        "the catastrophe now carries report rows, so it classifies reported rather \
+         than throwing the reasoning away as a bare defeat"
+    );
+    assert_report_row(
+        &app,
+        "skyhook",
+        "world.falling_skyway.report.skyhook.heading",
+        "world.falling_skyway.report.skyhook.lost",
+        "lost",
+        -4,
+    );
+    assert_report_row(
+        &app,
+        "traffic",
+        "world.falling_skyway.report.traffic.heading",
+        "world.falling_skyway.report.traffic.thinned",
+        "partial",
+        0,
+    );
+    assert_report_row(
+        &app,
+        "survey",
+        "world.falling_skyway.report.survey.heading",
+        "world.falling_skyway.report.survey.missed",
+        "lost",
+        -2,
+    );
+    // AC2: the headless total is exactly the sum of those visible rows.
+    assert_eq!(assert_report_total_is_the_sum(&app), -6);
 }
 
 /// **Issue #1139, full-Backfill proof.** Nobody connects and no scan, hail or

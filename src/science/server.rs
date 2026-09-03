@@ -526,12 +526,25 @@ fn subject_condition(condition: Option<&InfrastructureCondition>) -> Option<Subj
 /// The subject's raw debris geometry (issue #1347), stated relative to the asset
 /// its `[debris]` table names — **and the only path a hazard reaches a scan by**.
 ///
-/// `None` for every subject that carries no `[debris]` table, and `None` again
-/// for one that carries a table naming an asset no longer in the world. The
-/// second case matters: a rock aimed at a depot that has already been destroyed
-/// is not "aimed at nothing at zero range", it is a contact with no answer to
-/// give, and reporting a projection against an absence would be worse than
-/// reporting none.
+/// `None` only for a subject that carries no `[debris]` table at all: every
+/// moving hazard a crew can point an instrument at answers, because being read
+/// is what makes a rock *read*. `ScanReading::debris` says as much in its own
+/// doc — `None` for every subject that is not debris — and the whole beat turns
+/// on a contact the crew RULED OUT being distinguishable from one nobody has
+/// been to yet.
+///
+/// Two of those answers carry no asset to project against, and both are stated
+/// the same way: separation `[0.0, 0.0]` against an empty `protected_name`, so
+/// [`assess`](crate::debris::assess) reports a course, no collision course and
+/// no impact — which is exactly the finding, and exactly what its own
+/// `an_unprotected_contact_is_never_on_a_collision_course` describes.
+///
+/// * A table that names **nothing** — a field of harmless wreckage the crew have
+///   to rule out. Authored, and the reason ruling one in matters.
+/// * A table naming an asset **no longer in the world**. A rock aimed at a depot
+///   that has already been destroyed has nothing left to hit, and the honest
+///   reading is that it is on course for nothing rather than that there is no
+///   reading to be had.
 ///
 /// Lifted out as its own function for `subject_condition`'s reason: the gate is
 /// then one readable line inside the tick rather than a clause in the middle of
@@ -552,23 +565,40 @@ fn debris_subject(
 ) -> Option<crate::debris::DebrisSubject> {
     let threat = threat?;
     let protected = &threat.config.protected_target;
-    if protected.is_empty() {
-        return None;
-    }
-    let asset = subjects
-        .iter()
-        .find(|(_, _, name, ..)| name.is_some_and(|n| n.0 == *protected))
-        .map(|(_, tf, ..)| tf.translation)?;
+    let asset = if protected.is_empty() {
+        None
+    } else {
+        subjects
+            .iter()
+            .find(|(_, _, name, ..)| name.is_some_and(|n| n.0 == *protected))
+            .map(|(_, tf, ..)| tf.translation)
+    };
+    // The course is the authored drift either way: what a contact is DOING is a
+    // fact about the contact, and only what it is doing *to something* needs an
+    // asset to be stated against.
+    //
+    // The protected asset is world furniture — a depot, a rung, a control tower
+    // — and the rock is the only thing moving, so the authored drift IS the
+    // relative velocity. The day a scenario protects something that moves, this
+    // is the one line that subtracts.
+    let relative_velocity = [threat.config.drift[0], threat.config.drift[2]];
+    let Some(asset) = asset else {
+        return Some(crate::debris::DebrisSubject {
+            relative_position: [0.0, 0.0],
+            relative_velocity,
+            protected_name: String::new(),
+            // No radius, so `assess` can never confirm this contact however near
+            // it passes to anything — which is the authored point of a mass aimed
+            // at nothing.
+            impact_radius: 0.0,
+        });
+    };
     Some(crate::debris::DebrisSubject {
         relative_position: [
             subject_transform.translation.x - asset.x,
             subject_transform.translation.z - asset.z,
         ],
-        // The protected asset is world furniture — a depot, a rung, a control
-        // tower — and the rock is the only thing moving, so the authored drift
-        // IS the relative velocity. The day a scenario protects something that
-        // moves, this is the one line that subtracts.
-        relative_velocity: [threat.config.drift[0], threat.config.drift[2]],
+        relative_velocity,
         protected_name: protected.clone(),
         impact_radius: threat.config.impact_radius,
     })

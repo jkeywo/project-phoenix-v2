@@ -23891,3 +23891,747 @@ fn no_combat_test_hostile_parks_in_its_bow_hold() {
          `acquisition_band` (issue #1243)."
     );
 }
+
+// ── Falling Skyway, Act 3: the corridor sheds (issue #1347) ──────────────────
+//
+// The unit suites under `src/debris/`, `src/science/scan.rs`, `src/ship/sensors.rs`
+// and `src/console/weapons/server.rs` pin the ENGINE — the projection, the four
+// flags, the assessment gate on each Backfilled seat and the urgency ordering.
+// What none of them can pin is that the authored beat in `falling_skyway.toml`
+// actually runs: that three masses are shed where the world says, that a reading
+// taken through the ordinary admitted `ScanTarget` path names what is under one,
+// and that the three endings the scenario authors are three genuinely different
+// records rather than three spellings of one.
+//
+// These drive the real mission. The only shortcuts are the two this file already
+// takes everywhere: the storm's own deadlines are pulled onto the current tick
+// rather than simulated for eighteen minutes, and a hull or a rock is placed by
+// hand rather than flown — flying is not this group's subject. Every scan, every
+// flag, every objective and every message below is the shipped path.
+
+const SHED_LEAD: &str = "world.falling_skyway.entity.debris_lead.name";
+const SHED_TRAIL: &str = "world.falling_skyway.entity.debris_trail.name";
+const SHED_STRAY: &str = "world.falling_skyway.entity.debris_stray.name";
+const SHED_LADDER_A: &str = "world.falling_skyway.entity.depot_ladder_a.name";
+const SHED_LADDER_B: &str = "world.falling_skyway.entity.depot_ladder_b.name";
+
+/// Long enough for the whole beat and nothing like the mission's authored clock:
+/// every test in this group pulls the storm forward and then works in seconds.
+fn shed_args() -> HeadlessArgs {
+    skyway_args(SKYWAY_DT, 600.0)
+}
+
+/// Drive a fixture to the tick the corridor sheds.
+///
+/// The storm's two deadlines are pulled onto the current tick — the same lever
+/// `falling_skyway_pre_front_traffic_loss_stays_failed_after_storm_passage`
+/// uses — and the world's own six-second delay before the masses appear is then
+/// run at the real rate, so the schedule that spawns them is the authored one.
+fn shed_the_corridor(app: &mut bevy::prelude::App) {
+    skyway_pull_deadline_now(app, "storm_front_due");
+    run(app, 3);
+    skyway_pull_deadline_now(app, "storm_passed_due");
+    run(app, 3);
+    assert_eq!(
+        skyway_flag(app, "skyway_storm_passed"),
+        1,
+        "the shed hangs off the corridor clearing; nothing below is reachable without it"
+    );
+    // The authored `ctx.schedule.after(6, ..)`, plus a second of slack.
+    run(app, ticks_for_sim_seconds(7.0, SKYWAY_DT));
+    assert!(
+        shed_threat_opt(app, SHED_LEAD).is_some(),
+        "six seconds after the corridor cleared the world must have shed its masses"
+    );
+}
+
+/// A Falling Skyway fixture standing at the tick the masses appear, with the
+/// shipped Backfill policies intact.
+fn shed_app() -> (bevy::prelude::App, bevy::prelude::Entity) {
+    let args = shed_args();
+    let mut app = build_headless_app(&args).expect("the scenario world must load and build");
+    run(&mut app, 10);
+    let ship = app
+        .world_mut()
+        .query_filtered::<bevy::prelude::Entity, With<LocalShip>>()
+        .iter(app.world())
+        .next()
+        .expect("the crew's hull");
+    shed_the_corridor(&mut app);
+    (app, ship)
+}
+
+/// The same fixture with a PERSON at Sensors — `seat_skyway_sensors`' contract,
+/// and the one every test below that sends its own `ScanTarget` needs.
+///
+/// A field of unread contacts is precisely the situation the Backfilled seat
+/// exists for, so leaving it installed means the seat races the fixture for the
+/// hull's one scan record and a reading the test asked for is overwritten by one
+/// it did not. The seat's own behaviour is the subject of exactly one test at the
+/// bottom of this group, which keeps it.
+fn shed_app_crewed() -> (bevy::prelude::App, bevy::prelude::Entity) {
+    let args = shed_args();
+    let mut app = build_headless_app(&args).expect("the scenario world must load and build");
+    run(&mut app, 10);
+    let ship = app
+        .world_mut()
+        .query_filtered::<bevy::prelude::Entity, With<LocalShip>>()
+        .iter(app.world())
+        .next()
+        .expect("the crew's hull");
+    seat_skyway_sensors(&mut app, ship);
+    shed_the_corridor(&mut app);
+    (app, ship)
+}
+
+/// One shed contact's authoritative threat state, or `None` when it has not been
+/// shed (or has been shot).
+fn shed_threat_opt(
+    app: &mut bevy::prelude::App,
+    name: &str,
+) -> Option<project_phoenix::debris::DebrisThreat> {
+    use project_phoenix::debris::DebrisThreat;
+    use project_phoenix::entities::spawner::EntityName;
+
+    let mut q = app.world_mut().query::<(&EntityName, &DebrisThreat)>();
+    q.iter(app.world())
+        .find(|(n, _)| n.0 == name)
+        .map(|(_, threat)| threat.clone())
+}
+
+fn shed_threat(app: &mut bevy::prelude::App, name: &str) -> project_phoenix::debris::DebrisThreat {
+    shed_threat_opt(app, name).unwrap_or_else(|| panic!("{name} is not a shed mass in this world"))
+}
+
+/// Place a shed mass by writing its `Transform`, which is the only thing that
+/// moves one: `debris::server::tick_debris_drift` integrates the authored drift
+/// into that same field and nothing else touches it. This substitutes for
+/// waiting out four minutes of drift, never for the geometry.
+fn shed_place(app: &mut bevy::prelude::App, name: &str, position: bevy::prelude::Vec3) {
+    use project_phoenix::entities::spawner::EntityName;
+
+    let entity = app
+        .world_mut()
+        .query::<(bevy::prelude::Entity, &EntityName)>()
+        .iter(app.world())
+        .find(|(_, n)| n.0 == name)
+        .map(|(entity, _)| entity)
+        .unwrap_or_else(|| panic!("{name} is not in this world"));
+    app.world_mut()
+        .get_mut::<Transform>(entity)
+        .unwrap_or_else(|| panic!("{name} has no transform"))
+        .translation = position;
+}
+
+/// Take a reading of one shed mass through the ordinary admitted Sensors
+/// command, from inside the suite's authored reach.
+fn shed_scan(app: &mut bevy::prelude::App, ship: bevy::prelude::Entity, name: &str) {
+    let position = skyway_position(app, name);
+    skyway_move(
+        app,
+        ship,
+        position + bevy::prelude::Vec3::new(50.0, 0.0, 0.0),
+    );
+    run(app, 2);
+    // The contact's own minted `EntityUuid`, read off the entity rather than out
+    // of the world's authored name table: these masses are shed by a script at
+    // run time, so the authored table is not where their identity lives.
+    let uuid = scan_uuid_named(app, name);
+    ask_for_scan(app, &uuid);
+    run(app, 3);
+    let hull = app
+        .world()
+        .get::<Transform>(ship)
+        .expect("the crew's hull has a transform")
+        .translation;
+    let subject = skyway_position(app, name);
+    assert!(
+        hull.distance(subject) < 100.0,
+        "the fixture failed to close the range on {name} before asking for a \
+         reading (hull {hull:?}, contact {subject:?})"
+    );
+}
+
+/// The reading the crew's own hull is holding.
+fn shed_last_reading(
+    app: &mut bevy::prelude::App,
+    ship: bevy::prelude::Entity,
+) -> project_phoenix::science::ScanReading {
+    let record = app
+        .world()
+        .get::<project_phoenix::science::server::ShipScanRecord>(ship)
+        .expect("the destroyer carries a survey suite and therefore a scan record")
+        .clone();
+    record.last.clone().unwrap_or_else(|| {
+        panic!(
+            "the admitted scan must have latched a reading; it was refused with {:?}",
+            record.refusal
+        )
+    })
+}
+
+/// The one message the ship's computer is showing, as `(id, severity, station)`.
+fn shed_message(
+    app: &bevy::prelude::App,
+) -> (
+    String,
+    project_phoenix::core::computer_message::ComputerMessageSeverity,
+    Option<String>,
+) {
+    let state = app
+        .world()
+        .resource::<project_phoenix::core::computer_message::ActiveComputerMessage>()
+        .current
+        .clone()
+        .expect("the ship's computer must be showing something");
+    (state.id, state.severity, state.station.map(|s| s.0.clone()))
+}
+
+/// Destroy one shed mass the way a landed shot does — the same
+/// `AiEntityDestroyed` the traffic-loss tests use, which is what the world's
+/// `on_destroyed` handlers actually hang off.
+fn shed_destroy(app: &mut bevy::prelude::App, name: &str) {
+    let uuid = scan_uuid_named(app, name);
+    app.world_mut()
+        .resource_mut::<bevy::ecs::message::Messages<project_phoenix::ai::server::AiEntityDestroyed>>()
+        .write(project_phoenix::ai::server::AiEntityDestroyed { entity_uuid: uuid });
+    run(app, 3);
+}
+
+/// The crew hull's one Tactical lock, or `None` when nothing ever set it.
+fn shed_lock(app: &bevy::prelude::App, ship: bevy::prelude::Entity) -> Option<String> {
+    app.world()
+        .get::<project_phoenix::console::weapons::beam::TacticalRadarSelection>(ship)
+        .and_then(|lock| lock.0.clone())
+}
+
+/// **AC1, and the negative half of AC3.** Six seconds after the corridor clears,
+/// three masses are in it: two authored against a working rung, one aimed at
+/// nothing at all. Every one of them arrives UNREAD — no threat state, no
+/// deadline, no interception objective and no lock — and the only thing the crew
+/// are told is that there are contacts and nobody knows what they are.
+///
+/// The stray is why the beat exists. It is the nearest return and it is going
+/// nowhere, so a field where looking is optional is a field where guessing works.
+#[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_the_corridor_sheds_three_masses_and_names_none_of_them() {
+    use project_phoenix::core::computer_message::ComputerMessageSeverity;
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    let (mut app, ship) = shed_app_crewed();
+
+    // ── AC1: three moving contacts, two of them authored against a rung ──────
+    let lead = shed_threat(&mut app, SHED_LEAD);
+    assert_eq!(lead.config.protected_target, SHED_LADDER_A);
+    assert!(
+        lead.config.impact_radius > 0.0 && lead.config.urgent_secs > 0.0,
+        "the lead mass must author both the radius it strikes inside and the \
+         window that makes an impact urgent: {:?}",
+        lead.config
+    );
+    let trail = shed_threat(&mut app, SHED_TRAIL);
+    assert_eq!(trail.config.protected_target, SHED_LADDER_B);
+    let stray = shed_threat(&mut app, SHED_STRAY);
+    assert_eq!(
+        stray.config.protected_target, "",
+        "the third mass is authored against nothing, which is what makes ruling \
+         one in mean anything"
+    );
+
+    // Moving, at the authored drift, through the shipped fixed-tick system.
+    let before = skyway_position(&mut app, SHED_LEAD);
+    run(&mut app, ticks_for_sim_seconds(10.0, SKYWAY_DT));
+    let after = skyway_position(&mut app, SHED_LEAD);
+    assert!(
+        after.z - before.z > 10.0,
+        "the lead mass must be closing on its rung under its authored drift \
+         ({before:?} -> {after:?})"
+    );
+
+    // ── AC1/AC3: unread is unread ───────────────────────────────────────────
+    for name in [SHED_LEAD, SHED_TRAIL, SHED_STRAY] {
+        let threat = shed_threat(&mut app, name);
+        assert!(
+            !threat.assessed && !threat.confirmed && !threat.urgent,
+            "{name} arrived already known about: {threat:?}"
+        );
+        assert_eq!(
+            threat.reckoned_secs_to_impact, None,
+            "{name} has a deadline nobody worked out"
+        );
+    }
+    for flag in [
+        "skyway_debris_lead_confirmed",
+        "skyway_debris_trail_confirmed",
+        "skyway_debris_lead_read",
+        "skyway_debris_trail_read",
+        "skyway_debris_stray_read",
+    ] {
+        assert_eq!(
+            skyway_flag(&app, flag),
+            0,
+            "'{flag}' rose without a reading"
+        );
+    }
+    assert!(
+        objective_status_opt(&app, "obj-a3-debris-lead").is_none()
+            && objective_status_opt(&app, "obj-a3-debris-trail").is_none(),
+        "an interception objective posted before anybody looked"
+    );
+
+    // ── AC1: the work the crew are actually given is to go and look ─────────
+    for id in [
+        "obj-a3-debris-scan-near",
+        "obj-a3-debris-scan-lead",
+        "obj-a3-debris-scan-trail",
+    ] {
+        assert_eq!(
+            objective_status(&app, id),
+            ObjectiveStatus::Active,
+            "{id} must be on the panel as soon as the masses are shed"
+        );
+    }
+
+    // ── AC3, negatively: no lock has been handed to anybody ────────────────
+    assert_eq!(
+        shed_lock(&app, ship),
+        None,
+        "the scenario reached into Tactical and set a target"
+    );
+
+    // ── AC3: the cue says what is true and not which one matters ───────────
+    let (id, severity, station) = shed_message(&app);
+    assert_eq!(id, "skyway_debris_unidentified");
+    assert_eq!(severity, ComputerMessageSeverity::Advisory);
+    assert_eq!(station.as_deref(), Some("captain"));
+}
+
+/// **AC2 and AC3.** One reading, taken through the ordinary admitted
+/// `ScanTarget` path from inside the suite's authored reach, and the crew know
+/// four things they did not: what the contact is, how heavy it is, what is under
+/// it and when it arrives. The interception objective posts off that reading and
+/// the computer says so — and Tactical's lock is exactly where it was, because
+/// confirming a threat is not a firing order.
+///
+/// Tactical is held by an idle person here, which is what makes that last claim
+/// testable at all: a Backfilled Tactical reaching the same rock through its own
+/// selector is correct and is the point of the beat (it is asserted at the bottom
+/// of this group), so the only way to see whether anything ELSE writes the lock
+/// is to take the AI's hand off it.
+///
+/// Then the stray, read the same way, comes back a finding rather than a threat.
+#[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_a_reading_names_what_is_under_the_lead_mass_and_posts_the_intercept() {
+    use project_phoenix::core::computer_message::ComputerMessageSeverity;
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    let (mut app, ship) = shed_app_crewed();
+    skyway_seat_idle_tactical(&mut app);
+    assert_eq!(shed_lock(&app, ship), None, "the crew start with no lock");
+    shed_scan(&mut app, ship, SHED_LEAD);
+
+    // ── AC2: identification, bulk, trajectory, what is under it, and when ───
+    let reading = shed_last_reading(&mut app, ship);
+    assert_eq!(
+        reading.subject_name, SHED_LEAD,
+        "the reading must identify the contact it was taken of"
+    );
+    assert!(
+        !reading.mass_class.is_empty() && !reading.mass_class_label.is_empty(),
+        "the survey suite's bulk ladder must answer for a shed mass: {reading:?}"
+    );
+    let projection = reading
+        .debris
+        .as_ref()
+        .expect("a reading of a moving hazard must carry its projection");
+    assert_eq!(
+        projection.protected_name, SHED_LADDER_A,
+        "the one thing a threat readout has to say is what is under the rock"
+    );
+    assert!(
+        projection.on_collision_course,
+        "the lead mass is authored on the rung's own axis: {projection:?}"
+    );
+    assert!(
+        projection.course[1] > 0.0,
+        "the projection must carry the contact's course, not just its verdict: {projection:?}"
+    );
+    assert!(
+        projection.closest_approach < lead_impact_radius(&mut app),
+        "a contact on a collision course closes inside the authored impact radius: {projection:?}"
+    );
+    let impact = projection
+        .seconds_to_impact
+        .expect("a confirmed contact must say when it arrives");
+    assert!(
+        impact > 0.0,
+        "the lead mass is authored hundreds of units up-track; it does not arrive now"
+    );
+
+    // The authoritative threat state, latched on the contact itself.
+    let lead = shed_threat(&mut app, SHED_LEAD);
+    assert!(lead.assessed && lead.confirmed, "{lead:?}");
+    assert!(
+        !lead.urgent,
+        "a mass at its authored start is not inside the window: {lead:?}"
+    );
+    assert!(
+        lead.reckoned_secs_to_impact.is_some_and(|s| s > 0.0),
+        "the deadline Tactical prioritises on must be published: {lead:?}"
+    );
+    assert_eq!(skyway_flag(&app, "skyway_debris_lead_read"), 1);
+    assert_eq!(skyway_flag(&app, "skyway_debris_lead_confirmed"), 1);
+
+    // ── AC3: the objective posts and updates off the reading ───────────────
+    assert_eq!(
+        objective_status(&app, "obj-a3-debris-scan-lead"),
+        ObjectiveStatus::Completed,
+        "the order to go and look is finished the moment the reading lands"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a3-debris-lead"),
+        ObjectiveStatus::Active
+    );
+    assert_eq!(
+        objective_targets(&app, "obj-a3-debris-lead"),
+        vec![SHED_LEAD.to_string()],
+        "the interception objective must name the contact it was posted for"
+    );
+    let (id, severity, station) = shed_message(&app);
+    assert_eq!(id, "skyway_debris_collision_lead");
+    assert_eq!(severity, ComputerMessageSeverity::Warning);
+    assert_eq!(station.as_deref(), Some("tactical"));
+
+    // ── AC3, the constraint: no Combat Lock authority changed hands ─────────
+    assert_eq!(
+        shed_lock(&app, ship),
+        None,
+        "confirming a threat set Tactical's lock; the objective and the message \
+         are the whole of what confirmation is allowed to do"
+    );
+    assert_eq!(
+        skyway_flag(&app, "skyway_debris_trail_read"),
+        0,
+        "reading one contact must not reveal the others"
+    );
+
+    // ── AC2, the negative: a mass aimed at nothing reads as aimed at nothing ─
+    shed_scan(&mut app, ship, SHED_STRAY);
+    let stray = shed_threat(&mut app, SHED_STRAY);
+    assert!(
+        stray.assessed && !stray.confirmed,
+        "the stray is read and ruled out; it can never be confirmed: {stray:?}"
+    );
+    let stray_reading = shed_last_reading(&mut app, ship);
+    assert_eq!(stray_reading.subject_name, SHED_STRAY);
+    assert!(
+        stray_reading
+            .debris
+            .as_ref()
+            .is_some_and(|d| !d.on_collision_course),
+        "the stray's projection must come back a finding: {:?}",
+        stray_reading.debris
+    );
+    assert_eq!(skyway_flag(&app, "skyway_debris_stray_read"), 1);
+    assert_eq!(skyway_flag(&app, "skyway_debris_stray_confirmed"), 0);
+    assert_eq!(
+        objective_status(&app, "obj-a3-debris-scan-near"),
+        ObjectiveStatus::Completed
+    );
+    let (id, severity, _) = shed_message(&app);
+    assert_eq!(id, "skyway_debris_stray_clear");
+    assert_eq!(severity, ComputerMessageSeverity::Info);
+    assert!(
+        objective_status_opt(&app, "obj-a3-debris-stray").is_none(),
+        "ruling a mass out must not post anything to shoot"
+    );
+}
+
+/// The lead mass's authored impact radius, read off the contact rather than
+/// restated here: the world file's numbers are unratified and a tuning pass
+/// moves them.
+fn lead_impact_radius(app: &mut bevy::prelude::App) -> f32 {
+    shed_threat(app, SHED_LEAD).config.impact_radius
+}
+
+/// **AC4, the two interceptions.** The same outcome — the rung is untouched and
+/// the objective goes green — recorded two different ways, because the margin is
+/// the thing a debrief should be able to speak to. The lead is broken up with
+/// minutes in hand; the trail is caught after its urgency window has already
+/// opened, and only THAT one writes a late row.
+///
+/// With both aimed masses resolved, the corridor-clear cue lands.
+#[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_an_early_interception_and_a_late_one_are_two_different_records() {
+    use project_phoenix::core::computer_message::ComputerMessageSeverity;
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    let args = shed_args();
+    let mut app = build_headless_app(&args).expect("the scenario world must load and build");
+    run(&mut app, 10);
+    let ship = app
+        .world_mut()
+        .query_filtered::<bevy::prelude::Entity, With<LocalShip>>()
+        .iter(app.world())
+        .next()
+        .expect("the crew's hull");
+    // Built inline rather than through `shed_app_crewed` only because the run
+    // report at the bottom needs these same `args`.
+    seat_skyway_sensors(&mut app, ship);
+    shed_the_corridor(&mut app);
+
+    // ── Early: read at its authored start and broken up straight away ───────
+    shed_scan(&mut app, ship, SHED_LEAD);
+    assert!(!shed_threat(&mut app, SHED_LEAD).urgent);
+    shed_destroy(&mut app, SHED_LEAD);
+
+    assert_eq!(skyway_flag(&app, "skyway_ladder_a_debris_saved"), 1);
+    assert_eq!(
+        skyway_flag(&app, "skyway_ladder_a_debris_late"),
+        0,
+        "a mass broken up minutes out is not a late interception"
+    );
+    assert_eq!(
+        skyway_flag(&app, "skyway_ladder_a_debris_harmed"),
+        0,
+        "the rung it was aimed at was never touched"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a3-debris-lead"),
+        ObjectiveStatus::Completed
+    );
+
+    // ── Late: the trail is caught inside its own urgency window ─────────────
+    //
+    // Placed just inside the window rather than waiting out the drift: the
+    // distance is computed from the contact's OWN authored drift, radius and
+    // urgency seconds, so a tuning pass that moves any of the three keeps this
+    // test honest. The geometry the reading runs on is the shipped one.
+    let trail_config = shed_threat(&mut app, SHED_TRAIL).config;
+    let closing = trail_config.drift[2];
+    let stand_off = trail_config.impact_radius + closing * trail_config.urgent_secs * 0.5;
+    let ladder_b = skyway_position(&mut app, SHED_LADDER_B);
+    shed_place(
+        &mut app,
+        SHED_TRAIL,
+        bevy::prelude::Vec3::new(ladder_b.x, ladder_b.y, ladder_b.z - stand_off),
+    );
+    run(&mut app, 2);
+    shed_scan(&mut app, ship, SHED_TRAIL);
+
+    let trail = shed_threat(&mut app, SHED_TRAIL);
+    assert!(
+        trail.confirmed && trail.urgent,
+        "a mass inside its own urgency window must read confirmed AND urgent: {trail:?}"
+    );
+    assert_eq!(skyway_flag(&app, "skyway_debris_trail_urgent"), 1);
+    let (id, severity, station) = shed_message(&app);
+    assert_eq!(
+        id, "skyway_debris_urgent_trail",
+        "the urgent cue supersedes the confirmation cue raised on the same reading"
+    );
+    assert_eq!(severity, ComputerMessageSeverity::Critical);
+    assert_eq!(station.as_deref(), Some("tactical"));
+
+    shed_destroy(&mut app, SHED_TRAIL);
+    assert_eq!(skyway_flag(&app, "skyway_ladder_b_debris_saved"), 1);
+    assert_eq!(
+        skyway_flag(&app, "skyway_ladder_b_debris_late"),
+        1,
+        "an interception taken after the window opened is recorded as a late one"
+    );
+    assert_eq!(
+        skyway_flag(&app, "skyway_ladder_b_debris_harmed"),
+        0,
+        "late is still saved: the rung took nothing"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a3-debris-trail"),
+        ObjectiveStatus::Completed,
+        "they did the job; what differs is the record, not the result"
+    );
+
+    // ── The corridor is clear, once and only once both aimed masses resolved ─
+    assert_eq!(skyway_flag(&app, "skyway_debris_resolved"), 2);
+    let (id, severity, _) = shed_message(&app);
+    assert_eq!(id, "skyway_debris_corridor_clear");
+    assert_eq!(severity, ComputerMessageSeverity::Info);
+
+    // ── AC4: distinct narrative records, and no strike among them ──────────
+    let report = build_report(&mut app, &args, 0.0);
+    let beats: Vec<String> = report
+        .narrative
+        .events
+        .iter()
+        .filter(|e| e.event.kind.as_str() == "beat_fired")
+        .map(|e| e.event.id.clone())
+        .collect();
+    for beat in [
+        "skyway_corridor_shed",
+        "skyway_debris_confirmed_lead",
+        "skyway_debris_cleared_lead",
+        "skyway_debris_confirmed_trail",
+        "skyway_debris_late_trail",
+        "skyway_corridor_clear",
+    ] {
+        assert!(
+            beats.iter().any(|b| b == beat),
+            "the timeline must record '{beat}': {beats:?}"
+        );
+    }
+    assert!(
+        !beats.iter().any(|b| b == "skyway_debris_cleared_trail"),
+        "a late interception must not also record a clean one: {beats:?}"
+    );
+    assert!(
+        !beats.iter().any(|b| b.contains("struck")),
+        "nothing was struck in this run: {beats:?}"
+    );
+}
+
+/// **AC4, the miss.** Nobody stops the lead mass and it lands. The rung takes
+/// authored damage on its OWN condition track — the same track the rest of the
+/// mission reads its pumping thresholds off — the interception objective goes
+/// red, the computer says so, and the strike is filed against the rung as
+/// evidence rather than announced as a score.
+///
+/// The impact is judged on the simulation's own geometry, so it does not matter
+/// whether anybody looked. The crew here did look, only so there is an objective
+/// to fail.
+#[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_a_mass_nobody_stops_lands_on_the_rung_it_was_aimed_at() {
+    use project_phoenix::core::computer_message::ComputerMessageSeverity;
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    let (mut app, ship) = shed_app_crewed();
+    shed_scan(&mut app, ship, SHED_LEAD);
+    assert_eq!(
+        objective_status(&app, "obj-a3-debris-lead"),
+        ObjectiveStatus::Active
+    );
+
+    let before = skyway_condition(&mut app, SHED_LADDER_A);
+    let inside = lead_impact_radius(&mut app) * 0.5;
+    let ladder_a = skyway_position(&mut app, SHED_LADDER_A);
+    shed_place(
+        &mut app,
+        SHED_LEAD,
+        bevy::prelude::Vec3::new(ladder_a.x, ladder_a.y, ladder_a.z - inside),
+    );
+    run(&mut app, 4);
+
+    assert_eq!(skyway_flag(&app, "skyway_debris_lead_struck"), 1);
+    assert_eq!(skyway_flag(&app, "skyway_ladder_a_debris_harmed"), 1);
+    assert_eq!(
+        skyway_flag(&app, "skyway_ladder_a_debris_saved"),
+        0,
+        "a rung that took the mass was not saved from it"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a3-debris-lead"),
+        ObjectiveStatus::Failed
+    );
+    let after = skyway_condition(&mut app, SHED_LADDER_A);
+    assert!(
+        after < before,
+        "the strike must land on the rung's own condition track ({before} -> {after})"
+    );
+    let (id, severity, _) = shed_message(&app);
+    assert_eq!(id, "skyway_debris_struck_lead");
+    assert_eq!(severity, ComputerMessageSeverity::Critical);
+    assert!(
+        skyway_sheet_texts(&mut app, SHED_LADDER_A)
+            .iter()
+            .any(|text| text == "world.falling_skyway.evidence.debris_strike"),
+        "the strike is filed against the rung it happened to"
+    );
+
+    // A rock that has arrived does not arrive twice, and does not drift on.
+    let landed = skyway_position(&mut app, SHED_LEAD);
+    run(&mut app, ticks_for_sim_seconds(5.0, SKYWAY_DT));
+    assert_eq!(skyway_position(&mut app, SHED_LEAD), landed);
+    assert_eq!(skyway_flag(&app, "skyway_debris_lead_struck"), 1);
+    assert_eq!(
+        skyway_flag(&app, "skyway_debris_resolved"),
+        1,
+        "one aimed mass has resolved; the corridor is not clear while the other is live"
+    );
+}
+
+/// **AC5, first half, end to end.** The three Scan objectives the shed posts are
+/// what makes a Backfilled Sensors seat go and look — and it works DOWN the
+/// field rather than staring at the first contact: with the hull inside the
+/// suite's reach of the lead mass it reads that one unprompted, and moved into
+/// reach of the trail it reads that one too, without a single crew command.
+///
+/// Tactical's half closes the loop in the same run: the ORDER confirmed threats
+/// are taken in is pinned tick-exactly in `console::weapons::server::tests`, and
+/// what this adds is that a Backfilled Tactical really does reach a rock the
+/// Sensors seat confirmed for it, in the shipped world, with nobody touching a
+/// console. That lock is Tactical's own — arrived at through its own selector off
+/// the authoritative threat state — and is the reason the test above can insist
+/// that nothing else writes it.
+#[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_backfilled_sensors_works_down_the_shed_masses_unprompted() {
+    let (mut app, ship) = shed_app();
+
+    let lead = skyway_position(&mut app, SHED_LEAD);
+    skyway_move(
+        &mut app,
+        ship,
+        lead + bevy::prelude::Vec3::new(60.0, 0.0, 0.0),
+    );
+    skyway_run_until_flag(&mut app, "skyway_debris_lead_read", 1, 60.0);
+    assert_eq!(
+        skyway_flag(&app, "skyway_debris_lead_confirmed"),
+        1,
+        "the seat's own reading is what confirms the threat"
+    );
+
+    let trail = skyway_position(&mut app, SHED_TRAIL);
+    skyway_move(
+        &mut app,
+        ship,
+        trail + bevy::prelude::Vec3::new(60.0, 0.0, 0.0),
+    );
+    skyway_run_until_flag(&mut app, "skyway_debris_trail_read", 1, 60.0);
+    assert_eq!(
+        skyway_flag(&app, "skyway_debris_trail_confirmed"),
+        1,
+        "a seat that stopped after the first contact would never reach this one"
+    );
+
+    // ── AC5, Tactical's half: the seat acts on what Sensors confirmed ───────
+    //
+    // The hull is standing off the trailing mass, which is the confirmed threat
+    // in reach, so that is the one Backfilled Tactical should be holding. Nobody
+    // designated it and no handler set it: the seat read the authoritative threat
+    // state its own crewmate raised.
+    run(&mut app, ticks_for_sim_seconds(5.0, SKYWAY_DT));
+    let trail_uuid = scan_uuid_named(&mut app, SHED_TRAIL);
+    assert_eq!(
+        shed_lock(&app, ship),
+        Some(trail_uuid),
+        "a Backfilled Tactical must take up the confirmed mass beside it"
+    );
+}

@@ -977,6 +977,45 @@ mod tests {
         );
     }
 
+    /// A mass aimed at nothing still comes back a READING, and the reading is
+    /// what says so (issue #1347).
+    ///
+    /// This is the finding the whole beat turns on: "we looked and there is
+    /// nothing under it" has to be a different state from "nobody has been", and
+    /// the only thing that can carry the difference is a projection that answers.
+    /// A `None` here would leave a crew who ruled a contact out indistinguishable
+    /// from a crew who never went, and would leave the Sensors seat asking for
+    /// the same rock forever.
+    #[test]
+    fn a_mass_aimed_at_nothing_still_reads_as_a_finding() {
+        let mut rock = depot(0.5);
+        rock.debris = Some(crate::debris::DebrisSubject {
+            relative_position: [0.0, 0.0],
+            relative_velocity: [-2.2, 0.9],
+            protected_name: String::new(),
+            impact_radius: 0.0,
+        });
+        let reading = derive(&suite(), &rock, &at(400.0), 1).expect("a reading");
+        let assessment = reading
+            .debris
+            .expect("a hazard the crew read must come back with an answer");
+        assert!(
+            !assessment.on_collision_course,
+            "there is no radius to cross, so nothing to confirm"
+        );
+        assert_eq!(assessment.seconds_to_impact, None);
+        assert_eq!(
+            assessment.protected_name, "",
+            "and the reading names no asset, because there is none"
+        );
+        assert_eq!(
+            assessment.course,
+            [-2.2, 0.9],
+            "what it is DOING is a fact about the contact and survives having \
+             nothing to do it to"
+        );
+    }
+
     /// A refused scan reveals nothing about a hazard. The gate that matters for
     /// debris is RANGE, and it is the ladder's existing one: a crew told "out of
     /// range" have not learned what the rock is aimed at.

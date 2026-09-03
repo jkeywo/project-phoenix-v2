@@ -7713,6 +7713,31 @@ fn shed_one(ctx, name, anchor, mass, drift_x, drift_z, protects, radius, key) {
         groups: ["skyway_debris"],
         overrides: #{
             mass: mass,
+            // THE ROCK'S OWN INTEGRITY, and the reason a survey suite has
+            // anything to answer about it at all.
+            //
+            // `science::scan` refuses a subject with no readable condition
+            // track, deliberately and for issue #1030's reason, so a mass with
+            // no `[infrastructure]` is a mass no crew can read — including the
+            // trajectory, because the projection is folded into the reading the
+            // refusal replaces. Giving debris a condition track is not a
+            // workaround for that gate: it is what the track MEANS here. A rock
+            // has structural integrity, breaking it up is the whole of what
+            // Tactical is asked to do to it, and "how solid is it" belongs
+            // beside "where is it going" in the same reading.
+            //
+            // The shipped `hull_damage_share` default of 1.0 is left alone, so
+            // weapons fire falls point for point onto this track — unlike the
+            // skyhook's survivor craft, whose problem is that they have no way
+            // home rather than that anybody is shooting at them.
+            //
+            // [ai] 60 points unratified. It is the size of the firing problem:
+            // how much of the window an interception costs, against the same
+            // banks the rest of Act 3 is competing for.
+            infrastructure: #{
+                condition_max: flt("60.0"),
+                decay_per_sec: flt("0.0"),
+            },
             debris: #{
                 drift: [drift_x, flt("0.0"), drift_z],
                 protected_target: protects,

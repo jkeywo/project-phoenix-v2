@@ -806,9 +806,45 @@ fn sensors_ai_test_app() -> App {
                 .expect("the shipped Sensors selector decodes"),
             power_rating: None,
         },
+        // The hull's own scan suite (issue #1347). Present because the hull this
+        // fixture stands in for — the destroyer, the one shipped hull that
+        // authors a `[scan]` table — has one, and because the debris source is
+        // gated on it: a seat with no instrument is offered no rocks at all, so
+        // a fixture without this would make every debris assertion below vacuous
+        // in the wrong direction. `scan_suite` names the reach explicitly, which
+        // is what `backfilled_sensors_ignores_a_hazard_beyond_its_suite` turns on.
+        scan_suite(SCAN_SUITE_REACH),
     ));
 
     app
+}
+
+/// The reach of the fixture's scan suite, comfortably past every debris contact
+/// the tests below place and comfortably inside the radar horizon, so a test
+/// that means to exercise the horizon is not accidentally exercising this.
+const SCAN_SUITE_REACH: f32 = 400.0;
+
+/// A one-band scan suite reaching `max_range` (issue #1347).
+///
+/// One band, because nothing in this file reads a band: what
+/// `operate_sensors_ai` asks a suite is only ever "could a reading of a contact
+/// at this distance come back", and `ScanConfig::band_for` answers that off the
+/// ladder's reach alone.
+fn scan_suite(max_range: f32) -> crate::science::server::ShipScanRecord {
+    crate::science::server::ShipScanRecord {
+        config: crate::science::scan::ScanConfig {
+            bands: vec![crate::science::scan::ScanBandConfig {
+                id: "coarse".into(),
+                label: "test.scan.band.coarse.label".into(),
+                max_range,
+                condition_step: 0.25,
+                report_thresholds: true,
+                report_capacities: true,
+            }],
+            ..Default::default()
+        },
+        ..Default::default()
+    }
 }
 
 /// Admitted sensors commands currently queued on the single test ship.
@@ -2272,10 +2308,13 @@ fn backfilled_sensors_actually_takes_the_reading() {
 
 #[test]
 fn backfilled_sensors_stops_asking_once_a_hazard_has_been_read() {
-    // The bound on the emission. A reading resolves on the tick it is asked for,
-    // so `needs_assessment` is false the next tick and the seat stops — otherwise
-    // "keep assessing" would mean a scan every tick, and the task lifecycle would
-    // fill with a rock nobody learned anything new about.
+    // One of the two bounds on the emission: a reading that SUCCEEDS resolves on
+    // the tick it is asked for, so `needs_assessment` is false the next tick and
+    // the seat stops — otherwise "keep assessing" would mean a scan every tick,
+    // and the task lifecycle would fill with a rock nobody learned anything new
+    // about. The other bound is the one a refusal needs, since a refused reading
+    // marks nothing: `backfilled_sensors_never_asks_a_hull_with_no_suite_to_scan`
+    // and `backfilled_sensors_ignores_a_hazard_beyond_its_suite` hold that end.
     let mut app = sensors_ai_test_app();
     let rock = uuid::Uuid::new_v4().to_string();
     // `reassess_secs` defaults to 0 — read once — so this contact never comes
@@ -2374,5 +2413,129 @@ fn backfilled_sensors_leaves_a_struck_hazard_alone() {
         get_sensors_target(&mut app),
         None,
         "a contact that has already struck is not worth an instrument"
+    );
+}
+
+/// How many scans of `uuid` this ship has asked for since the fixture started.
+///
+/// The harness never clears `AdmittedCommands` (there is no
+/// `admit_system_commands` in it), so the queue is a running tally — which is
+/// exactly what the two tests below need: the failure they guard against is not
+/// one wrong scan but an unbounded stream of them.
+fn scans_asked_for(app: &mut App, uuid: &str) -> usize {
+    admitted_sensors_payloads(app)
+        .iter()
+        .filter(|p| matches!(p, SystemControlPayload::ScanTarget { uuid: u } if u == uuid))
+        .count()
+}
+
+/// Strip the fixture ship's scan suite, leaving the hull a `[scan]`-less courier
+/// is: `ship_requiem_courier.toml` and `alliance_courier.toml` both inherit the
+/// `debris-assessment` source from `fragments/ai/fleet_baseline.toml` and neither
+/// authors a suite, so this is a shipped configuration and not a hypothetical.
+fn remove_scan_suite(app: &mut App) {
+    let ship = {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::server_app::Ship>>();
+        q.single(app.world()).unwrap()
+    };
+    app.world_mut()
+        .entity_mut(ship)
+        .remove::<crate::science::server::ShipScanRecord>();
+}
+
+#[test]
+fn backfilled_sensors_never_asks_a_hull_with_no_suite_to_scan() {
+    // The unbounded case. A refused scan sets nothing on the contact, and
+    // `DebrisThreat::assessed` is per-CONTACT rather than per-ship, so an ungated
+    // seat on a hull that cannot scan finds the same rock stale on every snapshot
+    // for the rest of the mission: a `ScanTarget` and a Start/End lifecycle pair
+    // each time, and a `ShipScanRecord` conjured onto a hull that never had one.
+    // The bound is that a seat with no instrument is offered no rocks at all.
+    let mut app = sensors_ai_test_app();
+    remove_scan_suite(&mut app);
+    let rock = uuid::Uuid::new_v4().to_string();
+    spawn_debris_at(&mut app, &rock, 20.0, 0.0, false, false);
+
+    for _ in 0..8 {
+        tick_sensors_ai(&mut app);
+    }
+
+    assert_eq!(
+        scans_asked_for(&mut app, &rock),
+        0,
+        "a hull with no [scan] table must not ask for a reading it can never take"
+    );
+    assert_eq!(
+        get_sensors_target(&mut app),
+        None,
+        "and it must not park its science designation on the rock either — doctrine \
+         scores a hazard above an incidental radar hostile, so an unreadable rock \
+         left in the candidate list would hold this seat for the whole mission"
+    );
+}
+
+#[test]
+fn backfilled_sensors_ignores_a_hazard_beyond_its_suite() {
+    // The same bound, from the other side: the hull HAS a suite, the rock is
+    // inside the radar horizon and the crew can see it — but it is past the
+    // coarsest authored band, so every reading of it would come back `OutOfRange`
+    // and never mark it read. Seeing a thing and being able to read it are two
+    // different reaches, and this seat has to respect the narrower one.
+    let mut app = sensors_ai_test_app();
+    let rock = uuid::Uuid::new_v4().to_string();
+    let horizon = app
+        .world()
+        .resource::<crate::lobby::server::ShipClientConfigResource>()
+        .0
+        .sensors_radar_range;
+    let beyond_the_suite = (SCAN_SUITE_REACH + horizon) / 2.0;
+    assert!(
+        beyond_the_suite > SCAN_SUITE_REACH && beyond_the_suite < horizon,
+        "the contact has to sit in the gap between the two reaches or this test \
+         is about the horizon instead"
+    );
+    spawn_debris_at(&mut app, &rock, beyond_the_suite, 0.0, false, false);
+
+    for _ in 0..8 {
+        tick_sensors_ai(&mut app);
+    }
+
+    assert_eq!(
+        scans_asked_for(&mut app, &rock),
+        0,
+        "a rock past the suite's coarsest band is not a rock this seat can read"
+    );
+    assert_eq!(
+        get_sensors_target(&mut app),
+        None,
+        "nor one it should be holding"
+    );
+}
+
+#[test]
+fn backfilled_sensors_takes_the_reading_once_the_hazard_is_in_the_suite_s_reach() {
+    // And the gate is a reach, not a refusal to work: the same contact, moved
+    // inside the coarsest band, is read. Without this the two tests above would
+    // pass just as well against a seat that had stopped scanning altogether.
+    let mut app = sensors_ai_test_app();
+    let rock = uuid::Uuid::new_v4().to_string();
+    let entity = spawn_debris_at(&mut app, &rock, SCAN_SUITE_REACH + 40.0, 0.0, false, false);
+
+    tick_sensors_ai(&mut app);
+    assert_eq!(scans_asked_for(&mut app, &rock), 0, "still out of reach");
+
+    app.world_mut()
+        .get_mut::<Transform>(entity)
+        .expect("the contact has a transform")
+        .translation
+        .x = SCAN_SUITE_REACH - 40.0;
+    tick_sensors_ai(&mut app);
+
+    assert_eq!(
+        scans_asked_for(&mut app, &rock),
+        1,
+        "a hazard that has drifted into the suite's reach gets read"
     );
 }

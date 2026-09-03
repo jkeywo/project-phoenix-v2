@@ -227,6 +227,14 @@ switch_margin = 0.0
 # `hostile` test that gates every other source refuses it. Kept byte-for-byte
 # identical to the shared `fragments/ai/fleet_baseline.toml` selector, which is
 # where the reasoning lives (this hull authors it inline).
+#
+# INERT ON THIS HULL AS IT STANDS, and deliberately left declared. This ship
+# authors no `[scan]` table, and `operate_sensors_ai` offers the debris source
+# no contact a hull's own suite could not take a reading of - so the terms below
+# score nothing here until somebody gives it an instrument, at which point they
+# start working with no further edit. Diverging this block from the shared
+# fragment to say so would cost that, and would put a second, subtly different
+# Sensors doctrine in the fleet.
 eligibility = "candidate_fact(detectable) > 0 and (candidate_fact(hostile) > 0 or candidate_fact(source_debris_assess) > 0)"
 
 [[sensors_console.selector.score]]

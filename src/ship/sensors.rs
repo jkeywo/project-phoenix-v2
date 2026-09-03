@@ -935,6 +935,14 @@ pub fn operate_sensors_ai(
             Option<&crate::ship_plugin::ShipConfigComponent>,
             Option<&crate::entities::spawner::FactionComponent>,
             Option<&SensorsTargetSelector>,
+            // This hull's own scan suite (issue #1347), read-only and optional:
+            // a hull that authors no `[scan]` table carries no record at all.
+            // It is what says whether a debris contact is a thing this seat can
+            // still learn something about — see `scan_reach` below. Safe to read
+            // beside `science::server::tick_scans`' `&mut` on the same component
+            // because that system is in `Modifiers` and this one is in `Input`,
+            // which the `SimSet` chain orders strictly.
+            Option<&crate::science::server::ShipScanRecord>,
             &mut crate::core::messages::AdmittedCommands,
         ),
         With<crate::server_app::Ship>,
@@ -1025,6 +1033,7 @@ pub fn operate_sensors_ai(
         ship_config_comp,
         self_faction,
         target_selector,
+        scan_record,
         mut admitted,
     ) in &mut ships
     {
@@ -1107,6 +1116,37 @@ pub fn operate_sensors_ai(
             let dx = pos[0] - physics.x;
             let dz = pos[2] - physics.z;
             dx * dx + dz * dz <= range_sq
+        };
+
+        // The SUITE's reach, which is not the radar's (issue #1347).
+        //
+        // "Can this seat still learn something about that contact" is two
+        // questions, and the horizon above only answers the first. The second is
+        // whether the instrument could return a reading at all: a hull that
+        // authored no `[scan]` table carries no record (or, once it has been
+        // asked once, the empty-laddered stand-in `tick_scans` inserts), and a
+        // hull that authored one still answers nothing past its coarsest band.
+        // `ScanConfig::band_for` is the same resolution `derive` runs, so the two
+        // agree by construction rather than by a second copy of the numbers here.
+        //
+        // Why this gate exists at all, given `tick_scans` owns refusals: a scan
+        // that comes back refused never sets `DebrisThreat::assessed`, so
+        // `needs_assessment` stays true forever and an ungated seat would re-ask
+        // on every AI snapshot for the rest of the mission — a rock it can never
+        // read holding its designation, and a Start/End pair per snapshot in the
+        // AAR timeline. The mission Scan directive at the top of this loop is a
+        // different case and is deliberately left alone: it is bounded by its
+        // objective staying active, which a scenario ends.
+        //
+        // XZ like the horizon tests above, and for the same reason: this seat
+        // works from `ShipPhysics`, which is a plane.
+        let scan_reach = |pos: [f32; 3]| {
+            let Some(record) = scan_record else {
+                return false;
+            };
+            let dx = pos[0] - physics.x;
+            let dz = pos[2] - physics.z;
+            record.config.band_for((dx * dx + dz * dz).sqrt()).is_some()
         };
 
         // ── Build candidate sources for the data-driven target selector (#776) ──
@@ -1211,16 +1251,25 @@ pub fn operate_sensors_ai(
         // with no faction, which is why the authored eligibility has to name it
         // to let one through.
         //
-        // Every unstruck rock is offered, read or unread, and `debris_unassessed`
-        // says which is which. That split is what "keeps assessing" actually
-        // means: doctrine scores an unread contact above a read one, so the seat
-        // reads a rock, that rock stops asking for attention, and the next
-        // unknown becomes the best candidate — the field gets worked down instead
-        // of the first rock being stared at. A contact whose authored
-        // `reassess_secs` has elapsed re-enters the unread tier on its own, so a
-        // plot Tactical is prioritising on does not silently rot.
+        // Every unstruck rock IN THIS SUITE'S REACH is offered, read or unread,
+        // and `debris_unassessed` says which is which. That split is what "keeps
+        // assessing" actually means: doctrine scores an unread contact above a
+        // read one, so the seat reads a rock, that rock stops asking for
+        // attention, and the next unknown becomes the best candidate — the field
+        // gets worked down instead of the first rock being stared at. A contact
+        // whose authored `reassess_secs` has elapsed re-enters the unread tier on
+        // its own, so a plot Tactical is prioritising on does not silently rot.
+        //
+        // `scan_reach` is a *source* filter and not merely an emit guard because
+        // an unreadable rock left in the list still WINS: the doctrine weights a
+        // hazard above an incidental radar hostile, so a courier with no `[scan]`
+        // table — every hull that inherits `fragments/ai/fleet_baseline.toml`
+        // without authoring a suite — would park its science designation on a
+        // rock it can never read, in front of the contact its Tactical actually
+        // wants designated. A thing this instrument cannot learn anything about
+        // is not a candidate for it.
         for (uuid, pos, wants_assessment, confirmed) in &debris_contacts {
-            if !in_range_pos(*pos) {
+            if !in_range_pos(*pos) || !scan_reach(*pos) {
                 continue;
             }
             candidates.push(debris_candidate(uuid, *pos, *wants_assessment, *confirmed));
@@ -1263,17 +1312,26 @@ pub fn operate_sensors_ai(
         // `reassess_secs` elapses, and that tick is by definition one where the
         // selection has not changed.
         //
-        // It is nonetheless bounded rather than per-tick spam. Scans resolve on
-        // the tick they are asked for, so `needs_assessment` is false again next
-        // tick and this stops firing until the cadence comes round — and this
-        // whole system runs on the slower AI snapshot cadence to begin with. No
-        // range or capability pre-check: `tick_scans` owns refusals, so a rock
-        // out of scan range simply refuses and is retried, exactly as a mission
-        // Scan directive is.
+        // It is bounded by `scan_reach`, and it has to be. A SUCCESSFUL reading
+        // resolves on the tick it is asked for, so `needs_assessment` is false
+        // again next tick and this stops firing until the cadence comes round —
+        // but a REFUSED one sets nothing, and `DebrisThreat::assessed` is
+        // per-contact rather than per-ship, so a seat that cannot read a rock
+        // would find it stale again on every AI snapshot for the rest of the
+        // mission. That is not a retry, it is a loop with no exit: a Start/End
+        // lifecycle pair per snapshot in the AAR timeline and a `ShipScanRecord`
+        // conjured onto a hull that never had a suite. So the permanent refusal
+        // classes — no `[scan]` table (`NotCapable`) and past the coarsest band
+        // (`OutOfRange`) — are pre-checked here, and only they. The transient
+        // ones (`Underpowered`, `Blinded` inside a storm) are still left to
+        // `tick_scans`, because the condition that caused them genuinely does
+        // change and re-asking is the right behaviour.
         if let Some(target) = decided.as_deref() {
             if debris_contacts
                 .iter()
-                .any(|(uuid, _, wants_assessment, _)| uuid == target && *wants_assessment)
+                .any(|(uuid, pos, wants_assessment, _)| {
+                    uuid == target && *wants_assessment && scan_reach(*pos)
+                })
             {
                 emit_ai_command(
                     entity_uuid,

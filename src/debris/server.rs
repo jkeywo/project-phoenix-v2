@@ -241,8 +241,20 @@ impl Plugin for DebrisPlugin {
             FixedUpdate,
             (
                 // Drift first, so this tick's assessment is taken against this
-                // tick's position rather than last tick's.
-                tick_debris_drift.in_set(crate::sim_sets::SimSet::Modifiers),
+                // tick's position rather than last tick's. The `.before` edge is
+                // what MAKES that true rather than merely intending it: both
+                // systems sit in `Modifiers`, and both touch a debris contact's
+                // `Transform` — this one mutably, `tick_scans` read-only through
+                // the `subjects` query it hands to `debris_subject`. Conflicting
+                // access with no edge is an ambiguity the multi-threaded executor
+                // resolves however it likes, so without this the projection
+                // stamped into `ScanReading::debris` — and with it
+                // `seconds_to_impact`, the deadline Tactical ranks on, and the
+                // tick the `urgent_flag` rises — could be taken against last
+                // tick's position on one host and this tick's on another.
+                tick_debris_drift
+                    .in_set(crate::sim_sets::SimSet::Modifiers)
+                    .before(crate::science::server::tick_scans),
                 // Then the plot, after the scan that may have moved it. The
                 // explicit `after` is what makes an assessment land on the same
                 // tick the crew asked for it, rather than one behind.

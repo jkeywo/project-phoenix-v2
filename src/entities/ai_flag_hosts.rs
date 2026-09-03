@@ -1473,9 +1473,12 @@ const SENSORS_SELECTOR_FACTS: &[FactDescriptor] = &[
         SOURCE_DEBRIS_ASSESS,
         "sensors selector",
         "1.0 when the candidate is a moving hazard worth a look (issue #1347) — \
-         a `[debris]` contact inside the horizon that has not struck yet, read \
-         or unread. This is the ONE source that surfaces a non-hostile contact \
-         to this seat, which is why the authored eligibility names it",
+         a `[debris]` contact that has not struck yet, read or unread, inside \
+         BOTH this ship's radar horizon and its own [scan] suite's reach, \
+         because a rock this hull could never take a reading of is not a thing \
+         this instrument can learn anything about. This is the ONE source that \
+         surfaces a non-hostile contact to this seat, which is why the authored \
+         eligibility names it",
         "false — not that source, which is every contact carrying no [debris]",
         "ship::sensors::operate_sensors_ai",
     ),

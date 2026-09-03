@@ -1511,7 +1511,10 @@ fn the_backfill_choice_metadata_and_its_running_wait_move_the_digest() {
         .resource_mut::<CommsRuntime>()
         .pending_ai_responses
         .insert(
-            "msg-1".into(),
+            crate::comms::server::PendingAiResponseKey::new(
+                crate::command_admission::HostSlot::SOLO,
+                "msg-1",
+            ),
             crate::comms::server::PendingAiResponse {
                 due_tick: 300,
                 response_fingerprint: 0xabcd,
@@ -1523,14 +1526,44 @@ fn the_backfill_choice_metadata_and_its_running_wait_move_the_digest() {
     world
         .resource_mut::<CommsRuntime>()
         .pending_ai_responses
-        .get_mut("msg-1")
+        .get_mut(&crate::comms::server::PendingAiResponseKey::new(
+            crate::command_admission::HostSlot::SOLO,
+            "msg-1",
+        ))
         .expect("armed")
         .due_tick = 301;
+    let retimed = world_digest(&world);
     assert_ne!(
-        armed,
-        world_digest(&world),
+        armed, retimed,
         "two hosts that agree a wait is running but not WHEN it expires have \
          already diverged"
+    );
+
+    // …and WHICH hull is waiting. A fleet has one inbox but a Comms console per
+    // hull, so the same message waited on by a different fleet slot is a
+    // different mission state (issues #1343 + #1116).
+    {
+        let mut comms = world.resource_mut::<CommsRuntime>();
+        let record = comms
+            .pending_ai_responses
+            .remove(&crate::comms::server::PendingAiResponseKey::new(
+                crate::command_admission::HostSlot::SOLO,
+                "msg-1",
+            ))
+            .expect("armed");
+        comms.pending_ai_responses.insert(
+            crate::comms::server::PendingAiResponseKey::new(
+                crate::command_admission::HostSlot(2),
+                "msg-1",
+            ),
+            record,
+        );
+    }
+    assert_ne!(
+        retimed,
+        world_digest(&world),
+        "the fleet slot holding the wait is folded too — two peers that swapped \
+         which hull is waiting have diverged even though the message ids agree"
     );
 }
 

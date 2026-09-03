@@ -71,6 +71,12 @@ pub(crate) fn comms_test_app() -> App {
     app.world_mut().spawn((
         crate::server_app::Ship,
         crate::server_app::LocalShip,
+        // The host-neutral fleet identity `operate_comms_response_ai` walks by
+        // since #1343 (it may not read `LocalShip`, which names a different hull
+        // on each host of a fleet). Production inserts it on every ship the
+        // frozen roster spawns, so a fixture hull without one is invisible to
+        // that host.
+        crate::lockstep::FleetSlotOf(crate::command_admission::HostSlot::SOLO),
         crate::ship_plugin::ShipConfigComponent::default(),
         crate::ship_plugin::ShipSystemControlSources::default(),
         crate::ship_plugin::ActiveStationRatings::default(),
@@ -1255,7 +1261,10 @@ fn a_weighted_dialogue_and_its_running_wait_survive_a_save() {
         },
     );
     runtime.pending_ai_responses.insert(
-        "lift-1".into(),
+        crate::comms::server::PendingAiResponseKey::new(
+            crate::command_admission::HostSlot::SOLO,
+            "lift-1",
+        ),
         crate::comms::server::PendingAiResponse {
             due_tick: 421,
             response_fingerprint: crate::comms::ai_choice::response_set_fingerprint(
@@ -1293,7 +1302,10 @@ fn a_weighted_dialogue_and_its_running_wait_survive_a_save() {
     assert_eq!(
         runtime
             .pending_ai_responses
-            .get("lift-1")
+            .get(&crate::comms::server::PendingAiResponseKey::new(
+                crate::command_admission::HostSlot::SOLO,
+                "lift-1",
+            ))
             .map(|w| w.due_tick),
         Some(421),
         "the wait resumes where it was rather than restarting"

@@ -1331,8 +1331,13 @@ fn fold_comms_scope(world: &World, mut acc: u64) -> u64 {
         // WHEN one of them gets answered have diverged, and this is the tick
         // that says so rather than the tick the answer lands.
         acc = fold_u64(acc, pending_ai_len as u64);
-        for (message_id, record) in &comms.pending_ai_responses {
-            acc = fold_str(acc, message_id);
+        for (key, record) in &comms.pending_ai_responses {
+            // The fleet slot first, because the key's own ordering is slot-first
+            // and because "which hull is waiting" is half of what two peers must
+            // agree about — a fleet whose two consoles swapped waits folds the
+            // same message ids and is still diverged.
+            acc = fold_u64(acc, u64::from(key.host.0));
+            acc = fold_str(acc, &key.message_id);
             acc = fold_u64(acc, record.due_tick);
             acc = fold_u64(acc, record.response_fingerprint);
         }

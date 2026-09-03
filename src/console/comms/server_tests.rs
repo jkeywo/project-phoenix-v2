@@ -1513,14 +1513,39 @@ fn comms_ai_response_app_with(comms_source: ControlSource) -> App {
     .insert_resource(CommsInboxRes(crate::console::comms::CommsInbox::new()))
     .add_systems(Update, operate_comms_response_ai);
 
+    spawn_response_ai_hull(
+        &mut app,
+        crate::command_admission::HostSlot::SOLO,
+        true,
+        comms_source,
+    );
+    app
+}
+
+/// Spawn one fleet hull the response host can walk: the roster slot it flies
+/// for, whether THIS host projects it to its own crew, and who holds Comms.
+///
+/// Factored out for the two-hull fixtures below (issue #1343): the neutrality
+/// claim is about a fleet, and a fleet needs a second hull that is identical in
+/// every respect except its slot and its marker.
+fn spawn_response_ai_hull(
+    app: &mut App,
+    slot: crate::command_admission::HostSlot,
+    local: bool,
+    comms_source: ControlSource,
+) -> Entity {
     let mut resolver = ControlSourceResolver::new();
     resolver.set(
         crate::ship::system_registry::comms_system_id(),
         comms_source,
     );
-    app.world_mut().spawn((
+    let mut hull = app.world_mut().spawn((
         crate::server_app::Ship,
-        crate::server_app::LocalShip,
+        // The host-neutral fleet identity `operate_comms_response_ai` walks by
+        // and keys its waits on since #1343. Production inserts it on every ship
+        // the frozen roster spawns (`world_setup::spawn_game_start_entities`), so
+        // a fixture hull without one is a hull the host cannot see at all.
+        crate::lockstep::FleetSlotOf(slot),
         ShipSystemControlSources(resolver),
         crate::ship_plugin::ShipConfigComponent::default(),
         AdmittedCommands::default(),
@@ -1541,7 +1566,10 @@ fn comms_ai_response_app_with(comms_source: ControlSource) -> App {
             power_rating: None,
         },
     ));
-    app
+    if local {
+        hull.insert(crate::server_app::LocalShip);
+    }
+    hull.id()
 }
 
 /// Seat one open dialogue: an un-answered inbox message from `sender_uuid`
@@ -2095,10 +2123,22 @@ fn admitted_response_indices(app: &mut App) -> Vec<usize> {
 }
 
 fn pending_wait(app: &App, message_id: &str) -> Option<crate::comms::server::PendingAiResponse> {
+    pending_wait_of(app, crate::command_admission::HostSlot::SOLO, message_id)
+}
+
+/// The wait one FLEET SLOT's console is holding on `message_id` — the shape the
+/// map really has since #1343, and what the two-hull tests below read.
+fn pending_wait_of(
+    app: &App,
+    host: crate::command_admission::HostSlot,
+    message_id: &str,
+) -> Option<crate::comms::server::PendingAiResponse> {
     app.world()
         .resource::<CommsRuntime>()
         .pending_ai_responses
-        .get(message_id)
+        .get(&crate::comms::server::PendingAiResponseKey::new(
+            host, message_id,
+        ))
         .copied()
 }
 
@@ -2544,6 +2584,182 @@ fn a_node_without_metadata_answers_first_and_moves_no_stream() {
         "a world that authors no weights must not move ANY stream — the \
          weighted picker exists without being paid for"
     );
+}
+
+// ── The fleet half: compute everywhere, emit locally (issues #1343 + #1116) ──
+//
+// `CommsRuntime::pending_ai_responses` is folded into the authoritative digest
+// and the weighted draw moves a SHARED `SimRng` stream, so neither may be
+// decided from `LocalShip` — that marker names a different hull on each host of
+// a fleet. These three tests are the unit-level statement of what
+// `tests/local_ship_neutrality.rs` asserts end-to-end.
+
+/// The two roster slots the fixture fleet flies for.
+const FLEET_SLOT_ONE: crate::command_admission::HostSlot = crate::command_admission::HostSlot(1);
+const FLEET_SLOT_TWO: crate::command_admission::HostSlot = crate::command_admission::HostSlot(2);
+
+/// A TWO-hull fleet with one open weighted conversation, projecting `local`.
+///
+/// The only difference between the two calls this fixture is made for is which
+/// hull carries `LocalShip` — the same single variable
+/// `tests/local_ship_neutrality.rs` isolates.
+fn weighted_fleet_app(seed: u64, local: crate::command_admission::HostSlot) -> App {
+    let mut app = App::new();
+    crate::ai::host::register_ai_host_env(&mut app);
+    app.insert_resource(crate::lobby::Sessions(
+        crate::lobby::session::SessionManager::new(),
+    ))
+    .insert_resource(WorldContentRuntime::default())
+    .insert_resource(CommsRuntime::default())
+    .insert_resource(CommsInboxRes(crate::console::comms::CommsInbox::new()))
+    .insert_resource(crate::sim_tick::SimTick(0))
+    .insert_resource(crate::sim_rng::SimRng::new(
+        seed,
+        crate::sim_rng::SeedSource::Cli,
+    ))
+    .add_systems(Update, operate_comms_response_ai);
+
+    for slot in [FLEET_SLOT_ONE, FLEET_SLOT_TWO] {
+        spawn_response_ai_hull(&mut app, slot, slot == local, ControlSource::Ai);
+    }
+    seat_weighted_dialogue(
+        &mut app,
+        "lift-1",
+        "committee",
+        "sender-uuid",
+        lift_responses(),
+    );
+    app
+}
+
+/// Every response index each fleet hull has admitted, keyed by its slot.
+fn fleet_admitted_indices(app: &mut App) -> Vec<(crate::command_admission::HostSlot, Vec<usize>)> {
+    let mut q = app
+        .world_mut()
+        .query::<(&crate::lockstep::FleetSlotOf, &AdmittedCommands)>();
+    let mut rows: Vec<_> = q
+        .iter(app.world())
+        .map(|(slot, admitted)| {
+            (
+                slot.0,
+                admitted
+                    .for_target(crate::ship::system_registry::COMMS_SYSTEM_ID)
+                    .filter_map(|cmd| match &cmd.payload {
+                        SystemControlPayload::RespondToMessage { response_index, .. } => {
+                            Some(*response_index)
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect();
+    rows.sort_by_key(|(slot, _)| slot.0);
+    rows
+}
+
+/// **The headline.** Both hulls' waits are armed, and armed IDENTICALLY,
+/// whichever of them this host happens to project.
+///
+/// The wait map is folded by `sim_digest::fold_comms_scope`, so a schedule that
+/// depended on `LocalShip` would put two peers of one fleet on different
+/// authoritative digests from the tick the first conversation opened.
+#[test]
+fn both_fleet_hulls_arm_the_same_waits_whichever_one_this_host_projects() {
+    let mut projecting_one = weighted_fleet_app(11, FLEET_SLOT_ONE);
+    let mut projecting_two = weighted_fleet_app(11, FLEET_SLOT_TWO);
+    tick_to(&mut projecting_one, 0);
+    tick_to(&mut projecting_two, 0);
+
+    let waits = |app: &App| {
+        app.world()
+            .resource::<CommsRuntime>()
+            .pending_ai_responses
+            .clone()
+    };
+    assert_eq!(
+        waits(&projecting_one).len(),
+        2,
+        "a fleet of two AI-backfilled Comms consoles holds TWO waits on one \
+         shared conversation — one per hull, keyed by its slot"
+    );
+    assert_eq!(
+        waits(&projecting_one),
+        waits(&projecting_two),
+        "the wait schedule is authoritative state and must not depend on which \
+         hull this host projects — see `server_app::components::LocalShip`"
+    );
+    assert!(
+        pending_wait_of(&projecting_one, FLEET_SLOT_TWO, "lift-1").is_some(),
+        "the PEER's hull must be given its own wait by this host too, or the \
+         two peers disagree the moment it expires"
+    );
+}
+
+/// The randomness half of the same rule: `SimRngState` is folded whole, so a
+/// draw taken on one host and not the other diverges the fleet even when both
+/// end up picking the same option.
+#[test]
+fn the_backfill_draw_advances_the_shared_stream_the_same_way_on_both_hosts() {
+    let mut projecting_one = weighted_fleet_app(11, FLEET_SLOT_ONE);
+    let mut projecting_two = weighted_fleet_app(11, FLEET_SLOT_TWO);
+    let armed = projecting_one
+        .world()
+        .resource::<crate::sim_rng::SimRng>()
+        .state();
+
+    for app in [&mut projecting_one, &mut projecting_two] {
+        tick_to(app, 0);
+        tick_to(app, skyway_delay_ticks());
+    }
+
+    let rng_of = |app: &App| app.world().resource::<crate::sim_rng::SimRng>().state();
+    assert_ne!(
+        rng_of(&projecting_one),
+        armed,
+        "precondition: the pause expired and the fleet actually drew"
+    );
+    assert_eq!(
+        rng_of(&projecting_one),
+        rng_of(&projecting_two),
+        "both hulls draw on EVERY host, in roster order — a draw taken only for \
+         the locally-projected hull leaves the shared stream in two different \
+         places"
+    );
+}
+
+/// …and the half that stays local: this host submits its OWN hull's answer and
+/// nothing else's. The peer's identical answer arrives replicated, exactly as a
+/// human officer's press does.
+#[test]
+fn only_the_projected_hull_submits_its_backfill_answer() {
+    for local in [FLEET_SLOT_ONE, FLEET_SLOT_TWO] {
+        let mut app = weighted_fleet_app(11, local);
+        tick_to(&mut app, 0);
+        tick_to(&mut app, skyway_delay_ticks());
+
+        let rows = fleet_admitted_indices(&mut app);
+        for (slot, indices) in rows {
+            if slot == local {
+                assert_eq!(
+                    indices.len(),
+                    1,
+                    "the hull this host projects answers through the ordinary \
+                     admitted path"
+                );
+                assert!(
+                    indices[0] > 0,
+                    "and never with the zero-weight stand-by at index 0"
+                );
+            } else {
+                assert!(
+                    indices.is_empty(),
+                    "a peer's hull is answered by the peer — emitting for it \
+                     here would put the same command on the wire twice"
+                );
+            }
+        }
+    }
 }
 
 /// FINDING 1 regression, hail half — an authored `[comms_console.selector]`

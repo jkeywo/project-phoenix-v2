@@ -54,7 +54,7 @@ impl Plugin for CommsConsolePlugin {
                 // coin-flip.
                 // `.after(handle_hail)` closes the last unordered pair: without
                 // it these two conflict on `CommsRuntime`, `WorldContentRuntime`
-                // and the LocalShip's `AdmittedCommands` with no edge between
+                // and the player hulls' `AdmittedCommands` with no edge between
                 // them, so the documented order was not actually total. No
                 // cycle — `handle_hail` already precedes
                 // `handle_respond_to_message`.
@@ -1089,8 +1089,10 @@ pub struct CommsResponseAiCadence(pub u32);
 ///   * `server_app::spawn_game_start_entities` — the PLAYER ship, which never
 ///     goes through the spawner at all.
 ///
-/// Both `operate_comms_ai` and `operate_comms_response_ai` are filtered
-/// `With<LocalShip>`, i.e. they run ONLY on the player ship, so the second call
+/// `operate_comms_ai` is filtered `With<LocalShip>` and
+/// [`operate_comms_response_ai`] `With<FleetSlotOf>` (issue #1343 — see its own
+/// docs for why a folded schedule may not be gated on the local marker); either
+/// way both run only on PLAYER hulls, so the second call
 /// site is the one that actually matters: without it `[comms_console]` parses,
 /// validates, and is then silently ignored because the host's tick-local
 /// canonical default always wins — and `self_fact/fact(power_rating)` is
@@ -1890,6 +1892,32 @@ pub fn operate_comms_ai(
 /// against, and a fingerprint that no longer matches re-arms rather than
 /// answering a screen that has been repriced.
 ///
+/// # Compute for the whole fleet, emit for this host's hull (issue #1116)
+///
+/// This host used to run `With<LocalShip>`. It cannot, now that it writes
+/// [`CommsRuntime::pending_ai_responses`] and draws from
+/// [`SimStream::CommsBackfillChoice`](crate::sim_rng::SimStream::CommsBackfillChoice):
+/// both are folded into the authoritative digest, and `LocalShip` is a
+/// DIFFERENT hull on each host of a fleet, so a schedule (or an RNG position)
+/// derived from it is a value two peers disagree about from the tick it is
+/// written. `server_app::components::LocalShip` states that rule and
+/// `tests/local_ship_neutrality.rs` enforces it.
+///
+/// So the walk runs over the whole frozen fleet — every
+/// [`FleetSlotOf`](crate::lockstep::FleetSlotOf) hull, in SLOT order rather than
+/// archetype order — and every host therefore arms the same waits and takes the
+/// same draws in the same sequence. Only the last step is local: the admitted
+/// `RespondToMessage` is emitted for the hull whose crew is on THIS machine, and
+/// a peer's hull is answered by the peer and replicated here, exactly as a human
+/// officer's press is. That split is the same one admission already makes for a
+/// human input, which is why it needs no new seam.
+///
+/// The pass is consequently in two halves: one read-only sweep that decides for
+/// every hull, then one mutable sweep that submits the local hull's answers. A
+/// hull that sits out its own `evaluate_every_ticks` does not thereby cancel its
+/// waits — its existing entries are carried forward untouched, which is what
+/// keeps two hulls on different cadences from wiping each other's schedules.
+///
 /// # AC4 — read-only scenario state
 ///
 /// Same structural guarantee as [`operate_comms_ai`]: `WorldContentRuntime` is a
@@ -1906,27 +1934,30 @@ pub fn operate_comms_response_ai(
     // cadence (tick + interval) bundled as one `SystemParam` (issue #1185). See
     // [`CommsResponseContext`].
     context: CommsResponseContext,
-    mut ships: Query<
-        (
-            Entity,
-            Option<&EntityUuid>,
-            &ShipSystemControlSources,
-            Option<&crate::ship_plugin::ShipConfigComponent>,
-            &mut crate::core::messages::AdmittedCommands,
-            Option<&crate::ship::state::ShipRedAlert>,
-            Option<&crate::entities::spawner::EntitySystemHull>,
-            Option<&CommsResponseAiPolicy>,
-            Option<&CommsResponseAiCadence>,
-            // The authored ship `power_rating` lives on the CO-LOCATED selector
-            // component (both are inserted on the same entity at spawn), so it
-            // is read from there rather than left permanently absent — the #779
-            // empty-facts lesson: a fact an authored guard can name must carry a
-            // real value in production, or `fact(power_rating) > 3` silently
-            // never fires.
-            Option<&CommsTargetSelector>,
-        ),
-        With<crate::server_app::LocalShip>,
-    >,
+    // EVERY hull the frozen roster put in the world (`&FleetSlotOf` is the
+    // filter as well as the sort key), never `With<LocalShip>` — see the
+    // "Compute for the whole fleet" section above. `Has<LocalShip>` rides along
+    // because the EMISSION, and only the emission, is this host's business.
+    mut ships: Query<(
+        Entity,
+        Option<&EntityUuid>,
+        &crate::lockstep::FleetSlotOf,
+        bevy::ecs::query::Has<crate::server_app::LocalShip>,
+        &ShipSystemControlSources,
+        Option<&crate::ship_plugin::ShipConfigComponent>,
+        &mut crate::core::messages::AdmittedCommands,
+        Option<&crate::ship::state::ShipRedAlert>,
+        Option<&crate::entities::spawner::EntitySystemHull>,
+        Option<&CommsResponseAiPolicy>,
+        Option<&CommsResponseAiCadence>,
+        // The authored ship `power_rating` lives on the CO-LOCATED selector
+        // component (both are inserted on the same entity at spawn), so it
+        // is read from there rather than left permanently absent — the #779
+        // empty-facts lesson: a fact an authored guard can name must carry a
+        // real value in production, or `fact(power_rating) > 3` silently
+        // never fires.
+        Option<&CommsTargetSelector>,
+    )>,
 ) {
     // Restore the pre-#1185 locals so the policy body below reads as it did.
     let CommsResponseContext {
@@ -1959,29 +1990,46 @@ pub fn operate_comms_response_ai(
     // CANCELLED by being left out of it — see the system docs for why the four
     // authored cancellation cases all reduce to that one rule.
     let mut pending_next: std::collections::BTreeMap<
-        String,
+        crate::comms::server::PendingAiResponseKey,
         crate::comms::server::PendingAiResponse,
     > = std::collections::BTreeMap::new();
-    // Whether any ship's own cadence actually let it walk its conversations this
-    // tick. A pass that decided NOTHING must not be mistaken for one that
-    // cancelled everything: a hull authoring `evaluate_every_ticks = 4` would
-    // otherwise have every running wait wiped on the three ticks in four it
-    // sits out, and so would a tick with no `LocalShip` at all.
-    let mut walked_any = false;
+    // Whether the frozen fleet is in the world at all this tick. A pass that saw
+    // NO hull must not be mistaken for one that cancelled everything — a
+    // snapshot restore re-establishes this map a tick before it re-spawns the
+    // hulls, and a world that has not reached `game_start` has none yet. Fleet
+    // POPULATION is host-neutral (every host spawns a hull per roster slot), so
+    // this guard is not a `LocalShip` reading in disguise.
+    let mut fleet_seen = false;
+    // The local hull's answers, in the order the pass decided them. Emission is
+    // deferred to a second sweep because the decision sweep is read-only over the
+    // whole fleet while an emission needs `&mut AdmittedCommands` for one ship.
+    let mut answers: Vec<(Entity, String, usize)> = Vec::new();
 
+    // ── Pass one: every fleet hull decides, in ROSTER ORDER ──────────────────
+    //
+    // Sorted by fleet slot rather than walked in query order: archetype order is
+    // an allocation detail, and the draws taken below advance a SHARED RNG
+    // stream, so two hulls answering on the same tick have to consume it in an
+    // order every host computes the same way.
+    let mut fleet: Vec<_> = ships.iter().collect();
+    fleet.sort_by_key(|(_, _, slot, ..)| slot.0);
     for (
         entity,
-        entity_uuid,
+        _entity_uuid,
+        slot,
+        is_local,
         sources,
-        ship_config,
-        mut admitted,
+        _ship_config,
+        _admitted,
         red_alert,
         hull,
         policy_comp,
         cadence_comp,
         selector_comp,
-    ) in ships.iter_mut()
+    ) in fleet
     {
+        fleet_seen = true;
+        let host = slot.0;
         // Read-only for the length of the pass; the one write (`pending_next`
         // replacing the running waits) lands after the loop, so nothing inside it
         // can see a half-updated schedule.
@@ -2003,9 +2051,19 @@ pub fn operate_comms_response_ai(
             base_interval,
             evaluate_every_ticks,
         ) {
+            // Sitting out this tick is NOT a cancellation: carry this hull's own
+            // running waits forward untouched. Without this, two hulls on
+            // different `evaluate_every_ticks` would wipe each other's schedules
+            // on every tick only one of them walked.
+            pending_next.extend(
+                comms
+                    .pending_ai_responses
+                    .iter()
+                    .filter(|(key, _)| key.host == host)
+                    .map(|(key, record)| (key.clone(), *record)),
+            );
             continue;
         }
-        walked_any = true;
         // The read-only scenario flag chain (AC4), anchored at the layer that
         // spawned THIS ship (issue #891 stage 2).
         let flag_chain = ai_env.flag_chain(entity);
@@ -2044,6 +2102,7 @@ pub fn operate_comms_response_ai(
                     WeightedChoiceInputs {
                         comms,
                         inbox,
+                        host,
                         message: &message,
                         responses,
                         sender_in_range,
@@ -2063,26 +2122,23 @@ pub fn operate_comms_response_ai(
                     // The wait is running — just armed, still counting, or
                     // re-armed because the options moved under it.
                     WeightedChoiceOutcome::Wait(record) => {
-                        pending_next.insert(message.id.clone(), record);
+                        pending_next.insert(
+                            crate::comms::server::PendingAiResponseKey::new(host, &message.id),
+                            record,
+                        );
                     }
                     // The wait expired and the draw picked an option. It goes
                     // through the ordinary admitted path a human's press takes,
                     // and the record is not carried forward: the router answers
                     // the message this same tick.
+                    //
+                    // The DRAW above happened on every host; only the hull whose
+                    // crew is on this machine submits, and a peer's hull submits
+                    // its own identical answer on its own machine.
                     WeightedChoiceOutcome::Answer(index) => {
-                        emit_backfill_response(
-                            &BackfillResponseEmit {
-                                entity,
-                                entity_uuid,
-                                message_id: &message.id,
-                                index,
-                                sources,
-                                sessions: &sessions,
-                                ship_config,
-                                log: log.as_deref(),
-                            },
-                            &mut admitted,
-                        );
+                        if is_local {
+                            answers.push((entity, message.id.clone(), index));
+                        }
                     }
                 }
                 continue;
@@ -2139,19 +2195,11 @@ pub fn operate_comms_response_ai(
                 continue;
             }
 
-            emit_backfill_response(
-                &BackfillResponseEmit {
-                    entity,
-                    entity_uuid,
-                    message_id: &message.id,
-                    index,
-                    sources,
-                    sessions: &sessions,
-                    ship_config,
-                    log: log.as_deref(),
-                },
-                &mut admitted,
-            );
+            // Same split as the weighted branch: the policy resolved for every
+            // fleet hull, but only this host's hull submits.
+            if is_local {
+                answers.push((entity, message.id.clone(), index));
+            }
         }
     }
 
@@ -2162,8 +2210,33 @@ pub fn operate_comms_response_ai(
     // Guarded on the schedule having actually MOVED, so a steady-state tick does
     // not flip `CommsRuntime`'s change-detection tick for a map that is
     // identical to the one already there.
-    if walked_any && comms_res.pending_ai_responses != pending_next {
+    if fleet_seen && comms_res.pending_ai_responses != pending_next {
         comms_res.pending_ai_responses = pending_next;
+    }
+
+    // ── Pass two: this host submits its own hull's answers ───────────────────
+    //
+    // In the order pass one decided them (roster order, then inbox order), so a
+    // hull answering two conversations on one tick admits them in one sequence.
+    for (entity, message_id, index) in answers {
+        let Ok((_, entity_uuid, _, _, sources, ship_config, mut admitted, ..)) =
+            ships.get_mut(entity)
+        else {
+            continue;
+        };
+        emit_backfill_response(
+            &BackfillResponseEmit {
+                entity,
+                entity_uuid,
+                message_id: &message_id,
+                index,
+                sources,
+                sessions: &sessions,
+                ship_config,
+                log: log.as_deref(),
+            },
+            &mut admitted,
+        );
     }
 }
 
@@ -2239,6 +2312,10 @@ enum WeightedChoiceOutcome {
 struct WeightedChoiceInputs<'a> {
     comms: &'a CommsRuntime,
     inbox: &'a CommsInboxRes,
+    /// The fleet slot whose console is deciding — the half of the wait's key
+    /// that is not the message, and the reason two crewed hulls do not share
+    /// (or overwrite) one schedule.
+    host: crate::command_admission::HostSlot,
     message: &'a CommsMessage,
     responses: &'a [crate::comms::content::CommsResponse],
     sender_in_range: bool,
@@ -2305,7 +2382,10 @@ fn weighted_backfill_choice(
     let armed = inputs
         .comms
         .pending_ai_responses
-        .get(&inputs.message.id)
+        .get(&crate::comms::server::PendingAiResponseKey::new(
+            inputs.host,
+            &inputs.message.id,
+        ))
         .filter(|record| record.response_fingerprint == fingerprint);
     let Some(record) = armed else {
         // First sight of this node, or the options moved under a running wait.

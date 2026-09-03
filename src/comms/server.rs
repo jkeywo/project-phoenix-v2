@@ -92,7 +92,8 @@ pub struct CommsRuntime {
     /// dirty tick. `None` until the first broadcast (or after a tick with no
     /// resolvable host).
     pub last_broadcast_host: Option<String>,
-    /// Backfill Comms's running weighted decisions, keyed by CommsMessage id
+    /// Backfill Comms's running weighted decisions, keyed by the FLEET SLOT
+    /// whose console is waiting and the CommsMessage it is waiting on
     /// (issue #1343).
     ///
     /// Authoritative simulation state, not AI memory, and it lives in this
@@ -101,16 +102,66 @@ pub struct CommsRuntime {
     /// schedule is folded by `sim_digest` and carried by a snapshot exactly as
     /// the dialogues it points at are.
     ///
+    /// # Why the key carries a slot (the #1116 rule)
+    ///
+    /// The inbox is fleet-wide but a Comms console is not: whether a wait runs
+    /// is decided from PER-SHIP components (the ship's Control Sources, its
+    /// `[comms_console.ai]` policy, its evaluate cadence), and in a two-hull
+    /// fleet those differ between the hulls. Keying on the message alone would
+    /// make one hull's wait overwrite the other's, and the surviving entry would
+    /// depend on which hull was walked last — so the map has to name the slot it
+    /// belongs to. [`crate::lockstep::FleetSlotOf`] is the host-stable name for
+    /// that ship: `server_app::components::LocalShip` says "the ship whose crew
+    /// is on THIS machine" and is a different hull on each host, so nothing this
+    /// map holds may be derived from it.
+    ///
     /// A `BTreeMap` rather than a `HashMap` — unlike `active_dialogues` this map
     /// is ITERATED (to retire cancelled entries), and an unordered iteration
     /// feeding authoritative state is precisely the determinism hazard
-    /// AGENTS.md names.
+    /// AGENTS.md names. The key sorts by slot first, so the iteration order is
+    /// the fleet's own order on every host.
     ///
     /// Entries are armed, re-armed and retired by
     /// [`crate::console::comms::server::operate_comms_response_ai`]; nothing
     /// else writes them. One exists only while a live, unanswered, AI-operated
     /// dialogue node is waiting out its authored pause.
-    pub pending_ai_responses: std::collections::BTreeMap<String, PendingAiResponse>,
+    pub pending_ai_responses: std::collections::BTreeMap<PendingAiResponseKey, PendingAiResponse>,
+}
+
+/// Which fleet console is waiting on which conversation (issue #1343).
+///
+/// Ordered slot-first so the map's iteration — which the digest fold and the
+/// snapshot both walk — is the roster's order rather than a string order that
+/// interleaves two hulls' waits.
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    Default,
+)]
+pub struct PendingAiResponseKey {
+    /// The fleet slot whose Comms console is waiting, read from that ship's
+    /// [`crate::lockstep::FleetSlotOf`]. Host-stable by construction: the fleet
+    /// owner mints the ordinals and every host reads the same frozen roster.
+    pub host: crate::command_admission::HostSlot,
+    /// The [`crate::console::comms::CommsMessage`] id the wait is on.
+    pub message_id: String,
+}
+
+impl PendingAiResponseKey {
+    /// The key one ship's wait on one message is filed under.
+    pub fn new(host: crate::command_admission::HostSlot, message_id: impl Into<String>) -> Self {
+        Self {
+            host,
+            message_id: message_id.into(),
+        }
+    }
 }
 
 /// One unmanned console's running wait on one open dialogue (issue #1343).

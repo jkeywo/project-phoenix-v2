@@ -70,6 +70,16 @@ const WORLD: &str = "assets/worlds/probe_fleet_duel.toml";
 /// different cell sets — the reason a revert of the fix fails this test.
 const ASTEROID_WORLD: &str = "assets/worlds/probe_fleet_asteroids.toml";
 
+/// A two-ship world that opens a WEIGHTED Comms decision (issue #1343).
+///
+/// The class the two worlds above cannot cover: neither of them contains a
+/// single `open_comms` call, so `sim_digest::fold_comms_scope` takes its
+/// everything-empty arm on every tick and the comms half of the fold — the
+/// unmanned consoles' running weighted decisions included — was never entered by
+/// this guard at all. See that world's own header for why its pool authors ONE
+/// weighted option.
+const COMMS_CHOICE_WORLD: &str = "assets/worlds/probe_fleet_comms_choice.toml";
+
 /// Long enough that both fleet ships have acquired the hostile, manoeuvred and
 /// traded fire, so the comparison covers per-victim RNG draws and mid-run
 /// projectile mints rather than two hulls coasting.
@@ -303,4 +313,123 @@ fn the_digest_does_not_care_which_ship_a_host_projects_on_an_asteroid_world() {
          is not simulating anything worth comparing",
         distinct.len()
     );
+}
+
+// ── The Comms class (issue #1343) ────────────────────────────────────────────
+
+/// What one run of [`COMMS_CHOICE_WORLD`] did, beyond its per-tick digests.
+struct CommsRun {
+    digests: Vec<(u64, u64)>,
+    /// Every fleet slot that held a running weighted wait at any point — the
+    /// evidence that the walk really is fleet-wide rather than local-hull-only.
+    waiting_slots: Vec<u32>,
+    /// How the corridor was answered, by the end.
+    granted: i64,
+    held: i64,
+}
+
+/// Run the comms probe with `local` as this host's ship, sampling the fold and
+/// the unmanned consoles' schedule after every tick.
+fn run_comms_host(local: HostSlot) -> CommsRun {
+    use project_phoenix::comms::server::CommsRuntime;
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let args = args_for(COMMS_CHOICE_WORLD);
+    let mut app = build_headless_app(&args).expect("app should build");
+    app.insert_resource(roster(local));
+
+    let mut digests = Vec::with_capacity(TICKS as usize);
+    let mut waiting_slots = std::collections::BTreeSet::new();
+    for _ in 0..TICKS {
+        run(&mut app, 1);
+        let tick = app.world().resource::<SimTick>().0;
+        digests.push((tick, world_digest(app.world())));
+        for key in app
+            .world()
+            .resource::<CommsRuntime>()
+            .pending_ai_responses
+            .keys()
+        {
+            waiting_slots.insert(key.host.0);
+        }
+    }
+
+    let flags = &app.world().resource::<WorldContentRuntime>().flags;
+    CommsRun {
+        digests,
+        waiting_slots: waiting_slots.into_iter().collect(),
+        granted: flags.counter("corridor_granted"),
+        held: flags.counter("corridor_held"),
+    }
+}
+
+/// **The Comms class.** The same neutrality claim on a world that opens a
+/// WEIGHTED Backfill decision — the scope neither probe above reaches.
+///
+/// Two folded things #1343 added hang on this: `CommsRuntime::pending_ai_responses`
+/// (walked by `sim_digest::fold_comms_scope`) and the position of
+/// `SimStream::CommsBackfillChoice` (`SimRngState` is folded whole). Both used to
+/// be written by a `With<LocalShip>` host, which is a different hull on each host
+/// of a fleet — so the schedule a peer folded, and the number of draws it had
+/// taken, depended on which crew was sitting where. The fix walks every
+/// `FleetSlotOf` hull in slot order and gates only the EMISSION of the admitted
+/// response on the local marker, exactly as a human officer's press replicates.
+#[test]
+fn the_digest_does_not_care_which_ship_a_host_projects_through_a_backfill_decision() {
+    let first = run_comms_host(SLOT_ONE);
+    let second = run_comms_host(SLOT_TWO);
+
+    // Anti-vacuity, and the sharp end of the claim: BOTH hulls must have held a
+    // wait of their own. One slot here means the walk saw one hull — which is
+    // the `LocalShip` gating this test exists to forbid.
+    assert_eq!(
+        first.waiting_slots,
+        vec![SLOT_ONE.0, SLOT_TWO.0],
+        "every fleet hull's Comms console decides on every host; a schedule \
+         holding only one slot's wait was computed from `LocalShip`"
+    );
+    assert_eq!(
+        first.waiting_slots, second.waiting_slots,
+        "and the same two slots whichever hull this host projects"
+    );
+
+    // …and the decision actually RESOLVED, so the comparison covers arm → fold →
+    // draw → admitted answer → `on_pick`, not just an armed wait.
+    assert_eq!(
+        (first.granted, first.held),
+        (1, 0),
+        "the corridor must be granted exactly once and never held: index 0 is \
+         the stand-by and carries `ai_weight = 0`, so an unmanned bridge is \
+         forbidden it outright"
+    );
+    assert_eq!(
+        (second.granted, second.held),
+        (first.granted, first.held),
+        "and answered identically whichever hull this host projects"
+    );
+
+    assert_eq!(
+        first.digests.len(),
+        TICKS as usize,
+        "precondition: the run must reach the end rather than stopping early"
+    );
+    if let Some((tick, mine, theirs)) = first
+        .digests
+        .iter()
+        .zip(second.digests.iter())
+        .find(|((_, a), (_, b))| a != b)
+        .map(|((tick, a), (_, b))| (*tick, *a, *b))
+    {
+        panic!(
+            "the authoritative digest diverged at tick {tick} on a world holding \
+             a WEIGHTED Comms decision: the host projecting slot 1 folds \
+             {mine:#018x}, the host projecting slot 2 folds {theirs:#018x}.\n\n\
+             `CommsRuntime::pending_ai_responses` and the `CommsBackfillChoice` \
+             stream's position are both folded, so the walk that writes them must \
+             run over every `FleetSlotOf` hull in slot order — never \
+             `With<LocalShip>`. Only the EMISSION of the admitted \
+             `RespondToMessage` is this host's business. See \
+             `console::comms::server::operate_comms_response_ai`."
+        );
+    }
 }

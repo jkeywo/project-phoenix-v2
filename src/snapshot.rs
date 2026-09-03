@@ -2206,9 +2206,14 @@ pub struct CommsState {
     /// there is nothing to normalise away.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_opens: Vec<OpenCommsRequest>,
-    /// `CommsRuntime::pending_ai_responses` as `(message_id, record)`, already
-    /// ordered (a `BTreeMap`) — an unmanned Comms console's running waits on the
-    /// weighted decisions it has been left holding (issue #1343).
+    /// `CommsRuntime::pending_ai_responses` as `(key, record)`, already ordered
+    /// (a `BTreeMap`, slot-first) — every unmanned Comms console's running waits
+    /// on the weighted decisions it has been left holding (issue #1343).
+    ///
+    /// The key carries the FLEET SLOT as well as the message id, because a fleet
+    /// has one inbox but a Comms console per hull: a save that flattened the two
+    /// hulls' waits together would resume a mission whose second hull had
+    /// silently adopted the first one's schedule.
     ///
     /// It travels for the reason `open_hails` does: it is a record of where the
     /// run got to, not something a resumed world can re-derive. Dropping it
@@ -2220,7 +2225,10 @@ pub struct CommsState {
     /// The due ticks are absolute and the tick counter is itself restored, so
     /// they mean the same thing on the way back in.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pending_ai_responses: Vec<(String, crate::comms::server::PendingAiResponse)>,
+    pub pending_ai_responses: Vec<(
+        crate::comms::server::PendingAiResponseKey,
+        crate::comms::server::PendingAiResponse,
+    )>,
 }
 
 /// One live dialogue - see [`CommsState`] for why every one of them travels.
@@ -2801,11 +2809,11 @@ fn capture_comms(world: &World) -> Option<CommsState> {
             .get_resource::<WorldScriptRuntime>()
             .map(|script| script.pending_comms_opens.clone())
             .unwrap_or_default(),
-        // Already in message-id order — it is a `BTreeMap`.
+        // Already in fleet-slot-then-message-id order — it is a `BTreeMap`.
         pending_ai_responses: comms
             .pending_ai_responses
             .iter()
-            .map(|(id, record)| (id.clone(), *record))
+            .map(|(key, record)| (key.clone(), *record))
             .collect(),
     })
 }
@@ -5524,7 +5532,7 @@ fn restore_comms(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut Res
         comms.pending_ai_responses = stored
             .pending_ai_responses
             .iter()
-            .map(|(id, record)| (id.clone(), *record))
+            .map(|(key, record)| (key.clone(), *record))
             .collect();
         // `range_flags` / `range_active` / `contacts` are all recomputed by
         // `update_comms_range_flags` on the next tick; what they need is for the

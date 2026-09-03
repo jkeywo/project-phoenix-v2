@@ -302,16 +302,33 @@ pub fn tractor_directive_target(directive: &AiDirective) -> Option<&str> {
 }
 
 /// The target a `Rescue` directive names, or `None` for any other directive
-/// (issue #1348). The transporter host's `wanted` predicate, factored out so the
-/// host and its tests read one rule. Runs INDEPENDENTLY of
-/// [`tractor_directive_target`] on the shared Engineering seat: the tractor-
-/// versus-rescue priority the mission wants is decided by which objective the
-/// scored pool ranks higher, not by cross-referencing the two here.
+/// (issue #1348). The transporter host's own-kind test, factored out so the host
+/// and its tests read one rule. The tractor-versus-rescue precedence is settled
+/// through [`engineering_seat_operate_target`] (the shared seat), not here.
 pub fn rescue_directive_target(directive: &AiDirective) -> Option<&str> {
     match directive {
         AiDirective::Rescue { target } => Some(target.as_str()),
         _ => None,
     }
+}
+
+/// The target of any directive that occupies the single Engineering backfill
+/// seat — a tractor verb (`Tow`/`Stabilise`/`Escort`) or the transporter's
+/// `Rescue` — or `None` for anything else (issue #1348).
+///
+/// The tractor and the rescue transporter are distinct systems but share one
+/// Engineering seat: one pair of hands. Both backfill hosts pass THIS predicate
+/// to [`top_operate_directive`], so they rank the tractor and rescue orders
+/// against the ONE scored pool and the seat resolves to a single winner. Each
+/// host then keeps only its own kind of that winner (via
+/// [`tractor_directive_target`] / [`rescue_directive_target`]): when a tractor
+/// obligation outscores a rescue the transporter host sees `None` and stands
+/// down, and when a rescue outscores the tractor the tractor host stands down —
+/// so a higher-scored life-saving stabilisation defers the rescue exactly as the
+/// acceptance criterion requires, and neither ever runs while the other holds the
+/// seat.
+pub fn engineering_seat_operate_target(directive: &AiDirective) -> Option<&str> {
+    tractor_directive_target(directive).or_else(|| rescue_directive_target(directive))
 }
 
 /// The target a `Transfer` directive names, or `None` (issue #1162). Shared by
@@ -1006,6 +1023,60 @@ mod tests {
             })
             .is_none()
         );
+    }
+
+    #[test]
+    fn engineering_seat_defers_rescue_to_a_higher_scored_tractor_obligation() {
+        // Both orders sit on the one Engineering seat. The tractor Stabilise
+        // outscores the rescue, so the seat winner is the Stabilise.
+        let pool = vec![
+            scored_dir(
+                "stab",
+                9.0,
+                AiDirective::Stabilise {
+                    target: "tender".into(),
+                },
+            ),
+            scored_dir(
+                "rescue",
+                4.0,
+                AiDirective::Rescue {
+                    target: "lifeboat".into(),
+                },
+            ),
+        ];
+        let seat = |d: &AiDirective| engineering_seat_operate_target(d).is_some();
+        let winner = top_operate_directive(&pool, SystemAffinity::Engineering, seat);
+        // Transporter host keeps only a rescue winner → stands down here.
+        assert_eq!(winner.and_then(rescue_directive_target), None);
+        // Tractor host keeps the tractor winner → holds the seat.
+        assert_eq!(winner.and_then(tractor_directive_target), Some("tender"));
+    }
+
+    #[test]
+    fn engineering_seat_gives_a_higher_scored_rescue_the_seat() {
+        // Reverse the scores: the rescue now outranks the tractor obligation.
+        let pool = vec![
+            scored_dir(
+                "rescue",
+                9.0,
+                AiDirective::Rescue {
+                    target: "lifeboat".into(),
+                },
+            ),
+            scored_dir(
+                "stab",
+                4.0,
+                AiDirective::Stabilise {
+                    target: "tender".into(),
+                },
+            ),
+        ];
+        let seat = |d: &AiDirective| engineering_seat_operate_target(d).is_some();
+        let winner = top_operate_directive(&pool, SystemAffinity::Engineering, seat);
+        // Rescue wins the seat; the tractor host stands down.
+        assert_eq!(winner.and_then(rescue_directive_target), Some("lifeboat"));
+        assert_eq!(winner.and_then(tractor_directive_target), None);
     }
 
     #[test]

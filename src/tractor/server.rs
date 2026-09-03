@@ -413,7 +413,11 @@ pub fn operate_tractor_ai(
             continue;
         }
         // The named target of the top tractor operate directive, owned so the
-        // borrow of the blackboard is released before the emit.
+        // borrow of the blackboard is released before the emit. Ranked against
+        // the rescue that shares the one Engineering seat (issue #1348): a
+        // higher-scored `Rescue` wins the seat and `tractor_directive_target`
+        // returns `None` here, so this host stands down for the transporter —
+        // one pair of hands.
         let directive_target: Option<String> = match blackboards
             .0
             .get(&crate::ship::system_registry::viewscreen_system_id())
@@ -421,7 +425,7 @@ pub fn operate_tractor_ai(
             Some(SystemBlackboard::Viewscreen(vbb)) => crate::objectives::top_operate_directive(
                 &vbb.scored_objectives,
                 SystemAffinity::Engineering,
-                |d| crate::objectives::tractor_directive_target(d).is_some(),
+                |d| crate::objectives::engineering_seat_operate_target(d).is_some(),
             )
             .and_then(crate::objectives::tractor_directive_target)
             .map(str::to_string),

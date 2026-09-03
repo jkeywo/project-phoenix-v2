@@ -719,12 +719,15 @@ pub fn rescue_lost_flag(entity_id: &str) -> String {
 /// human Engineering officer sends, through the SAME `emit_ai_command` →
 /// `validate_and_admit` seam (AGENTS.md rule 6).
 ///
-/// Runs INDEPENDENTLY of the tractor's own backfill on the shared Engineering
-/// seat: the tractor-versus-rescue priority the mission wants is decided by which
-/// objective the scored pool ranks higher — this host serves the top `Rescue`,
-/// the tractor host serves the top `Tow`/`Stabilise`/`Escort`, and the seat has
-/// one pair of hands, so whichever the scenario scored higher wins. Decides only
-/// on the shared AI cadence (rule 7).
+/// Shares the ONE Engineering seat with the tractor's backfill — one pair of
+/// hands. Both hosts rank the tractor and rescue orders against the same scored
+/// pool through [`engineering_seat_operate_target`](crate::objectives::engineering_seat_operate_target);
+/// this host then keeps only a `Rescue` winner. A higher-scored life-saving
+/// `Stabilise`/`Tow`/`Escort` therefore makes this host stand down and hold its
+/// transport, deferring to the tractor exactly as acceptance criterion #4 wants
+/// ("respecting more urgent life-saving tractor obligations"); when the rescue
+/// outscores the tractor it wins the seat and the tractor host stands down.
+/// Decides only on the shared AI cadence (rule 7).
 #[allow(clippy::type_complexity)]
 pub fn operate_transporter_ai(
     mut commands: Commands,
@@ -751,10 +754,15 @@ pub fn operate_transporter_ai(
             .0
             .get(&crate::ship::system_registry::viewscreen_system_id())
         {
+            // Rank the rescue against the tractor obligations that share the one
+            // Engineering seat, then keep only a rescue winner: a higher-scored
+            // Tow/Stabilise/Escort makes `rescue_directive_target` return `None`
+            // here, so this host stands down and holds while the tractor keeps
+            // the seat (acceptance criterion #4).
             Some(SystemBlackboard::Viewscreen(vbb)) => crate::objectives::top_operate_directive(
                 &vbb.scored_objectives,
                 SystemAffinity::Engineering,
-                |d| crate::objectives::rescue_directive_target(d).is_some(),
+                |d| crate::objectives::engineering_seat_operate_target(d).is_some(),
             )
             .and_then(crate::objectives::rescue_directive_target)
             .map(str::to_string),
@@ -1194,6 +1202,186 @@ mod tests {
                 .counter(&rescue_lost_flag("lighter")),
             0,
             "an empty hulk is not a casualty — everyone was already recovered"
+        );
+    }
+
+    // ── Backfill rescue AI (host-level) ──────────────────────────────────────
+
+    use crate::core::messages::{
+        AiDirective, ObjectiveSnapshot, ObjectiveSource, ObjectiveStatus, ScoredObjective,
+        ViewscreenBlackboard,
+    };
+    use crate::server_app::ShipSystemBlackboards;
+    use crate::ship::control_source::{ControlSource, ControlSourceResolver};
+    use crate::ship::system_registry::viewscreen_system_id;
+    use crate::ship_plugin::ShipSystemControlSources;
+
+    /// A scored Engineering-affinity objective at `score`, wrapping `directive`.
+    fn scored(id: &str, score: f32, directive: AiDirective) -> ScoredObjective {
+        ScoredObjective {
+            id: id.into(),
+            score,
+            directive,
+            source: ObjectiveSource::Mission,
+            relevance: vec![SystemAffinity::Engineering],
+            snapshot: ObjectiveSnapshot {
+                id: id.into(),
+                text: String::new(),
+                text_params: BTreeMap::new(),
+                mandatory: false,
+                status: ObjectiveStatus::Active,
+                targets: vec![],
+                source: ObjectiveSource::Mission,
+            },
+        }
+    }
+
+    /// An AI-operated transporter host whose viewscreen blackboard carries
+    /// `scored`, its transport already running iff `transporting`, and the
+    /// [`TransporterAiEngaged`] marker present iff `engaged`. Returns the world
+    /// and the operator entity; drive it with `operate_transporter_ai`.
+    fn backfill_world(
+        scored_objectives: Vec<ScoredObjective>,
+        transporting: bool,
+        engaged: bool,
+    ) -> (World, Entity) {
+        let mut world = World::new();
+        world.insert_resource(crate::lobby::Sessions(
+            crate::lobby::session::SessionManager::default(),
+        ));
+
+        let mut sources = ControlSourceResolver::new();
+        sources.set(transporter_system_id(), ControlSource::Ai);
+
+        let mut blackboards = ShipSystemBlackboards::default();
+        blackboards.0.insert(
+            viewscreen_system_id(),
+            SystemBlackboard::Viewscreen(ViewscreenBlackboard {
+                scored_objectives,
+                ..Default::default()
+            }),
+        );
+
+        let mut transporter = transporter();
+        transporter.transporting = transporting;
+        if transporting {
+            transporter.selected_contact = Some("uuid-lighter".into());
+        }
+
+        let mut entity = world.spawn((
+            EntityUuid("uuid-destroyer".into()),
+            ShipSystemControlSources(sources),
+            transporter,
+            blackboards,
+            AdmittedCommands(vec![]),
+        ));
+        if engaged {
+            entity.insert(TransporterAiEngaged);
+        }
+        let operator = entity.id();
+        (world, operator)
+    }
+
+    /// The payloads the host admitted this run, in order.
+    fn admitted_payloads(world: &mut World, operator: Entity) -> Vec<SystemControlPayload> {
+        world
+            .get::<AdmittedCommands>(operator)
+            .unwrap()
+            .0
+            .iter()
+            .map(|c| c.payload.clone())
+            .collect()
+    }
+
+    #[test]
+    fn backfill_selects_and_starts_off_a_rescue_directive() {
+        let (mut world, operator) = backfill_world(
+            vec![scored(
+                "rescue",
+                5.0,
+                AiDirective::Rescue {
+                    target: "uuid-lighter".into(),
+                },
+            )],
+            false,
+            false,
+        );
+        world
+            .run_system_once(operate_transporter_ai)
+            .expect("the backfill host runs");
+
+        assert_eq!(
+            admitted_payloads(&mut world, operator),
+            vec![
+                SystemControlPayload::TransportSelectContact {
+                    uuid: "uuid-lighter".into(),
+                },
+                SystemControlPayload::StartTransport,
+            ],
+            "a Rescue directive makes Backfill select the contact and start the transport",
+        );
+        assert!(
+            world.get::<TransporterAiEngaged>(operator).is_some(),
+            "the host claims the seat it just engaged",
+        );
+    }
+
+    #[test]
+    fn backfill_stops_when_the_rescue_directive_is_withdrawn() {
+        // A transport this host started (engaged marker present) with no directive
+        // left in the pool: the host lets go.
+        let (mut world, operator) = backfill_world(vec![], true, true);
+        world
+            .run_system_once(operate_transporter_ai)
+            .expect("the backfill host runs");
+
+        assert_eq!(
+            admitted_payloads(&mut world, operator),
+            vec![SystemControlPayload::StopTransport],
+            "a withdrawn Rescue directive stops the transport this host started",
+        );
+        assert!(
+            world.get::<TransporterAiEngaged>(operator).is_none(),
+            "the host releases the seat it stood down from",
+        );
+    }
+
+    #[test]
+    fn backfill_defers_a_rescue_to_a_higher_scored_tractor_obligation() {
+        // Both orders sit on the one Engineering seat; the life-saving Stabilise
+        // outscores the rescue, so the transporter host must stand down and admit
+        // nothing — the tractor keeps the seat (acceptance criterion #4).
+        let (mut world, operator) = backfill_world(
+            vec![
+                scored(
+                    "stabilise",
+                    9.0,
+                    AiDirective::Stabilise {
+                        target: "uuid-tender".into(),
+                    },
+                ),
+                scored(
+                    "rescue",
+                    4.0,
+                    AiDirective::Rescue {
+                        target: "uuid-lighter".into(),
+                    },
+                ),
+            ],
+            false,
+            false,
+        );
+        world
+            .run_system_once(operate_transporter_ai)
+            .expect("the backfill host runs");
+
+        assert!(
+            admitted_payloads(&mut world, operator).is_empty(),
+            "a higher-scored tractor obligation defers the rescue — the host admits nothing",
+        );
+        assert!(
+            world.get::<TransporterAiEngaged>(operator).is_none(),
+            "the deferring host never claims the seat",
         );
     }
 

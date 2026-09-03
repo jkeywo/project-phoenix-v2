@@ -8503,6 +8503,90 @@ fn ai_target_selection_locks_a_nonhostile_only_via_an_operate_directive() {
     );
 }
 
+/// Attach a [`CivilianRescue`](crate::transporter::CivilianRescue) to a
+/// previously-spawned target: `count` souls authored, `recovered` already
+/// aboard, so `remaining() == count - recovered` decides carrier membership.
+fn attach_civilian_rescue(app: &mut App, uuid: &str, count: u32, recovered: u32) {
+    let mut q = app
+        .world_mut()
+        .query::<(Entity, &crate::entities::spawner::EntityUuid)>();
+    let target = q
+        .iter(app.world())
+        .find(|(_, u)| u.0 == uuid)
+        .map(|(e, _)| e)
+        .expect("the civilian carrier must be spawned before its rescue is attached");
+    let mut rescue = crate::transporter::CivilianRescue::new(count);
+    rescue.recovered = recovered;
+    rescue.revealed = true;
+    app.world_mut().entity_mut(target).insert(rescue);
+}
+
+/// Tactical Backfill excludes a contact still carrying unrecovered civilians
+/// (issue #1348, acceptance criterion #5): even the operate-directive path that
+/// WOULD lock the same non-hostile derelict (proved by
+/// [`ai_target_selection_locks_a_nonhostile_only_via_an_operate_directive`])
+/// must find no candidate once souls are aboard — the AI never fires on people
+/// it could rescue.
+#[test]
+fn ai_target_selection_excludes_a_contact_with_unrecovered_civilians() {
+    let mut app = test_app();
+    let carrier_uuid = uuid::Uuid::new_v4().to_string();
+
+    set_tactical_radar_range(&mut app, 200.0);
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+    spawn_entity_target(&mut app, &carrier_uuid, 0.0, -30.0);
+    // Four authored, one recovered → three souls still aboard.
+    attach_civilian_rescue(&mut app, &carrier_uuid, 4, 1);
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .name_to_uuid
+        .insert("hulk".into(), carrier_uuid.clone());
+    // The very Tow directive that locks a bare derelict above.
+    insert_operate_objective_blackboard(&mut app, "hulk", 80.0);
+    set_local_last_attacker(&mut app, None);
+
+    tick(&mut app);
+
+    assert!(
+        get_weapons_target(&mut app).is_none(),
+        "a contact carrying unrecovered civilians must be excluded from AI target selection, even \
+         under an operate directive that would otherwise lock it"
+    );
+}
+
+/// The other side of the same distinction: a FULLY-recovered carrier
+/// (`remaining() == 0`) is an ordinary hulk again and remains targetable through
+/// the operate-directive path — so the exclusion turns strictly on souls still
+/// aboard, not on ever having carried any.
+#[test]
+fn ai_target_selection_locks_a_fully_recovered_carrier() {
+    let mut app = test_app();
+    let carrier_uuid = uuid::Uuid::new_v4().to_string();
+
+    set_tactical_radar_range(&mut app, 200.0);
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+    spawn_entity_target(&mut app, &carrier_uuid, 0.0, -30.0);
+    // Three authored, all three recovered → nobody left aboard.
+    attach_civilian_rescue(&mut app, &carrier_uuid, 3, 3);
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .name_to_uuid
+        .insert("hulk".into(), carrier_uuid.clone());
+    insert_operate_objective_blackboard(&mut app, "hulk", 80.0);
+    set_local_last_attacker(&mut app, None);
+
+    tick(&mut app);
+
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some(carrier_uuid.as_str()),
+        "a fully-recovered carrier is an ordinary hulk once its souls are aboard and remains \
+         lockable through the operate directive — the civilian exclusion is not sticky"
+    );
+}
+
 /// An explicit operate objective identifies both the target and the installed
 /// system that can execute it. That system's authored reach is a bounded,
 /// objective-only acquisition horizon; it does not widen radar candidates.

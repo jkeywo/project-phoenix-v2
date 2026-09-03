@@ -74,6 +74,12 @@ pub struct DebrisConfig {
     /// still scannable, but no closest approach is projected and it can never
     /// be confirmed. That is a legitimate authoring choice — a field of harmless
     /// wreckage the crew have to *rule out* is what makes ruling one in matter.
+    ///
+    /// The lookup resolves by AUTHORED NAME and takes the first match (see
+    /// `tick_debris_state`), so the name must identify one asset in the world. A
+    /// scenario that spawns two entities under one name leaves which of them
+    /// this contact is aimed at up to spawn order, which is not a thing a
+    /// designer can reason about.
     #[serde(default)]
     pub protected_target: String,
     /// Distance from the protected asset's centre at which this debris strikes

@@ -25028,3 +25028,149 @@ fn falling_skyway_breaking_up_an_unread_mass_ends_the_reading_it_was_the_subject
         "and a mass that WAS read completes its reading task rather than failing it"
     );
 }
+
+/// **The same rule, on the contact the beat's own header says a crew are most
+/// likely to shoot.** The stray is the nearest, most obvious return and it is
+/// aimed at nothing; a human Tactical who assumes and shoots kills THIS one
+/// first, which is the mistake the file calls interesting and which `shed_one`
+/// makes reachable by giving the stray the same condition track as its siblings.
+///
+/// It has no protected asset, so the engine can never confirm it and can never
+/// strike it — being shot is the only ending it has other than being read. Left
+/// unclosed, that ending costs more than the two aimed masses' does: the stray's
+/// reading task is posted at 62, ABOVE lead's 61 and trail's 60, so it outranks
+/// both of them in the Sensors-affined pool for ever. `operate_sensors_ai` takes
+/// the FIRST positive Sensors Scan directive out of that pool and has no
+/// fallback when the name fails to resolve, so a despawned stray standing over
+/// the two aimed masses stops the seat's one mission-Scan channel ever reaching
+/// them — the two contacts that are actually on course for a rung.
+///
+/// Three claims, then: the task ends with the rock, the corridor-clear counter
+/// does not move (the stray was never a threat), and the seat's top request
+/// advances to the lead mass and resolves — proved by the seat going and taking
+/// that reading itself.
+#[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_breaking_up_the_stray_frees_the_sensors_seat_for_the_aimed_masses() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    let (mut app, ship) = shed_app();
+    assert_eq!(
+        skyway_flag(&app, "skyway_debris_stray_read"),
+        0,
+        "precondition: nobody has read the stray"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a3-debris-scan-near"),
+        ObjectiveStatus::Active
+    );
+    assert_eq!(
+        skyway_flag(&app, "skyway_debris_resolved"),
+        0,
+        "precondition: nothing in the corridor has settled yet"
+    );
+
+    // The corridor is not the only thing this seat has to look at — Act 3's
+    // other survey work shares the pool — so the ordering claim is made over the
+    // shed masses, which is where it bites: the stray stands over both of the
+    // aimed ones, so neither is reachable while it is there.
+    let shed_only = |targets: &[String]| -> Vec<String> {
+        targets
+            .iter()
+            .filter(|target| [SHED_LEAD, SHED_TRAIL, SHED_STRAY].contains(&target.as_str()))
+            .cloned()
+            .collect()
+    };
+
+    // Precondition, and what makes the third claim mean anything: the stray is
+    // the seat's first call on the corridor right now.
+    run(&mut app, ticks_for_sim_seconds(2.0, SKYWAY_DT));
+    let before = shed_scan_directive_targets(&mut app);
+    assert_eq!(
+        shed_only(&before).first().map(String::as_str),
+        Some(SHED_STRAY),
+        "the nearest return outranks the two aimed masses in the Sensors pool, \
+         which is why leaving it there blocks them: {before:?}"
+    );
+
+    // A human Tactical locks the obvious thing and breaks it up, unread.
+    shed_destroy(&mut app, SHED_STRAY);
+    assert_eq!(
+        skyway_flag(&app, "skyway_debris_stray_read"),
+        0,
+        "it went down UNREAD, which is the case under test"
+    );
+
+    // ── Claim 1: the reading task ends with the rock ────────────────────────
+    assert_ne!(
+        objective_status(&app, "obj-a3-debris-scan-near"),
+        ObjectiveStatus::Active,
+        "the reading task outlived the rock it named"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a3-debris-scan-near"),
+        ObjectiveStatus::Failed,
+        "nobody ever looked at this mass, which is the honest record of it"
+    );
+
+    // ── Claim 2: nothing was resolved ───────────────────────────────────────
+    //
+    // The stray was never on course for a rung. Counting it would carry the
+    // corridor-clear cue one mass closer off a contact that was never in the
+    // corridor's way, and with the other rock still inbound.
+    assert_eq!(
+        skyway_flag(&app, "skyway_debris_resolved"),
+        0,
+        "shooting the harmless mass moved the corridor-clear counter"
+    );
+    assert_eq!(
+        skyway_flag(&app, "skyway_ladder_a_debris_saved"),
+        0,
+        "and it must not be recorded as having saved anything"
+    );
+    assert_eq!(skyway_flag(&app, "skyway_ladder_b_debris_saved"), 0);
+
+    // ── Claim 3: the seat's channel is free, and it uses it ─────────────────
+    run(&mut app, ticks_for_sim_seconds(10.0, SKYWAY_DT));
+    let targets = shed_scan_directive_targets(&mut app);
+    assert!(
+        !targets.iter().any(|target| target == SHED_STRAY),
+        "the Backfilled Sensors seat is still asking for a reading of a contact \
+         that no longer exists: {targets:?}"
+    );
+    assert_eq!(
+        shed_only(&targets).first().map(String::as_str),
+        Some(SHED_LEAD),
+        "the seat's first call on the corridor must have advanced to the aimed \
+         mass the beat is about: {targets:?}"
+    );
+
+    // …and that top request RESOLVES, which is the half a directive pool cannot
+    // show on its own: `operate_sensors_ai` looks the name up and silently emits
+    // nothing when it misses. The seat taking the reading is that lookup
+    // succeeding through the shipped path.
+    let lead = skyway_position(&mut app, SHED_LEAD);
+    skyway_move(
+        &mut app,
+        ship,
+        lead + bevy::prelude::Vec3::new(60.0, 0.0, 0.0),
+    );
+    skyway_run_until_flag(&mut app, "skyway_debris_lead_read", 1, 60.0);
+    assert_eq!(
+        skyway_flag(&app, "skyway_debris_lead_read"),
+        1,
+        "a seat whose one mission-Scan channel was still pointed at the dead \
+         stray would never reach the lead mass"
+    );
+    // The flag is the engine's; the handler that consumes it runs when the world
+    // event it queued is dispatched, on the following tick.
+    run(&mut app, 4);
+    assert_eq!(
+        objective_status(&app, "obj-a3-debris-scan-lead"),
+        ObjectiveStatus::Completed,
+        "and the reading it took closes the task that asked for it"
+    );
+}

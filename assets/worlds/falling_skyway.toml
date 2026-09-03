@@ -7692,6 +7692,25 @@ on_flag_set("skyway_debris_trail_read", "on_debris_trail_read");
 
 on_destroyed("world.falling_skyway.entity.debris_lead.name", "on_debris_lead_cleared");
 on_destroyed("world.falling_skyway.entity.debris_trail.name", "on_debris_trail_cleared");
+// The stray gets one too, and by exactly the mistake the header above calls
+// interesting: it is the nearest, most obvious return, so a human Tactical who
+// assumes and shoots kills THIS one first. That ends the contact, and an ending
+// closes every task it was the subject of — see `on_debris_stray_cleared`.
+on_destroyed("world.falling_skyway.entity.debris_stray.name", "on_debris_stray_cleared");
+
+// ONE CONTACT, ONE READING TASK, AND ONE PLACE THAT SPELLS ITS ID.
+//
+// The three ids are deliberately not uniform: the stray's task is authored
+// "near" because that is what the crew see — the nearest return — while the two
+// aimed masses are named for where they sit in the corridor. So every site that
+// posts or ends a reading task asks this instead of building the id out of the
+// contact key. The one rule that did (`"obj-a3-debris-scan-" + key`) quietly
+// missed the stray, which is how its task came to be closable from exactly one
+// place. A fourth contact costs one line here and cannot reintroduce that.
+fn debris_scan_objective(key) {
+    if key == "stray" { return "obj-a3-debris-scan-near"; }
+    "obj-a3-debris-scan-" + key
+}
 
 // Six seconds after the corridor clears, so the shedding reads as a consequence
 // of the weather rather than as part of it.
@@ -7814,17 +7833,17 @@ fn shed_the_corridor(ctx) {
     // Above the transfer window's 54 (unknown masses in the corridor outrank
     // paperwork) and below Act 3's rescue work at 85, which is people.
     post_survey_scan_objective(ctx,
-        "obj-a3-debris-scan-near",
+        debris_scan_objective("stray"),
         "world.falling_skyway.objective.debris_scan_near.text",
         "world.falling_skyway.entity.debris_stray.name",
         "skyway_debris_stray_read", 62);
     post_survey_scan_objective(ctx,
-        "obj-a3-debris-scan-lead",
+        debris_scan_objective("lead"),
         "world.falling_skyway.objective.debris_scan_lead.text",
         "world.falling_skyway.entity.debris_lead.name",
         "skyway_debris_lead_read", 61);
     post_survey_scan_objective(ctx,
-        "obj-a3-debris-scan-trail",
+        debris_scan_objective("trail"),
         "world.falling_skyway.objective.debris_scan_trail.text",
         "world.falling_skyway.entity.debris_trail.name",
         "skyway_debris_trail_read", 60);
@@ -7908,7 +7927,7 @@ fn on_debris_trail_urgent(ctx) { urge_one(ctx, "trail"); }
 // crew can stop thinking about it. A beat is recorded because "they checked"
 // is a thing the debrief should be able to say.
 fn on_debris_stray_read(ctx) {
-    ctx.effects.complete_objective("obj-a3-debris-scan-near");
+    ctx.effects.complete_objective(debris_scan_objective("stray"));
     ctx.effects.show_message(
         "skyway_debris_stray_clear",
         "world.falling_skyway.computer_message.debris_stray_clear",
@@ -7934,11 +7953,42 @@ fn on_debris_stray_read(ctx) {
 // ENDED unread, which is what the two terminal handlers below now close — stops
 // being re-requested on every AI snapshot.
 fn read_one(ctx, key) {
-    ctx.effects.complete_objective("obj-a3-debris-scan-" + key);
+    ctx.effects.complete_objective(debris_scan_objective(key));
 }
 
 fn on_debris_lead_read(ctx)  { read_one(ctx, "lead"); }
 fn on_debris_trail_read(ctx) { read_one(ctx, "trail"); }
+
+// ── The stray's ending ──────────────────────────────────────────────────────
+//
+// The stray has no protected asset, so the engine never confirms it and never
+// strikes it: `tick_debris_state` skips arrival for a contact with an empty
+// `protected_target`. Its two possible endings are therefore the reading, above,
+// and THIS — a Tactical who locked the nearest return and broke it up before
+// anybody looked, which the header calls the interesting mistake and which
+// `shed_one` makes reachable by giving the stray the same condition track as its
+// siblings.
+//
+// What must follow is the closure the two aimed masses already get: the reading
+// task ends with the rock rather than sitting Active on the crew's panel over a
+// despawned entity — and, because a Backfilled Sensors seat's Scan directive is
+// live for exactly as long as its objective is, the seat's TOP request is this
+// one (posted at 62, above lead's 61 and trail's 60). Left Active it names a
+// contact nothing can resolve for the rest of the mission, and the seat's one
+// mission-Scan channel never reaches the two masses the beat is actually about.
+//
+// Failed rather than completed, for the same reason as the other two: for an
+// unread contact the honest record is that nobody ever looked. A stray that WAS
+// read completed this on its `_read` flag, and `ObjectiveManager::fail` moves
+// `Active` records only, so this is a no-op there rather than a downgrade.
+//
+// And it does NOT resolve anything. `skyway_debris_resolved` counts the two
+// AIMED masses — the corridor is clear when the things on course for a rung are
+// settled — and the stray was never a threat, so shooting it must not carry the
+// corridor-clear cue one mass closer. See `debris_resolved`.
+fn on_debris_stray_cleared(ctx) {
+    ctx.effects.fail_objective(debris_scan_objective("stray"));
+}
 
 // ── The three endings, per protected asset ──────────────────────────────────
 //
@@ -7987,6 +8037,10 @@ fn on_debris_trail_read(ctx) { read_one(ctx, "trail"); }
 // And an ending closes EVERY task the contact was the subject of: both handlers
 // end its Scan objective as well as its interception one, so nothing on the
 // crew's panel — or in a Backfilled seat's directive pool — outlives the rock.
+// That is a rule about CONTACTS, not about the two aimed ones, which is why the
+// stray has `on_debris_stray_cleared` above: it has no interception order to end
+// and nothing to resolve, but it has a reading task like the other two and it
+// dies like the other two.
 fn debris_pending(ctx, key) {
     ctx.flags["skyway_debris_" + key + "_resolved"] < 1
 }
@@ -8024,7 +8078,7 @@ fn clear_one(ctx, key, objective, saved_flag, late_flag) {
     // already completed this objective on its `_read` flag and
     // `ObjectiveManager::fail` moves `Active` records only, so this is a no-op
     // there rather than a downgrade.
-    ctx.effects.fail_objective("obj-a3-debris-scan-" + key);
+    ctx.effects.fail_objective(debris_scan_objective(key));
     debris_resolved(ctx, key);
 }
 
@@ -8088,7 +8142,7 @@ fn strike_one(ctx, key, objective, depot, harmed_flag) {
     // The same closure `clear_one` makes, for the other ending: a mass nobody
     // read and nobody stopped has still ENDED, and the task that asked for a
     // reading of it ends with it rather than outliving the rock on the panel.
-    ctx.effects.fail_objective("obj-a3-debris-scan-" + key);
+    ctx.effects.fail_objective(debris_scan_objective(key));
     debris_resolved(ctx, key);
 }
 

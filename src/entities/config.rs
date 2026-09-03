@@ -3183,6 +3183,23 @@ pub struct EntityConfig {
     /// every shipped hull and every existing world is untouched by this slice.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub security_target: Option<crate::security::SecurityTargetConfig>,
+    /// The rescue transporter's terms (issue #1348) — range, per-civilian
+    /// duration and minimum power level. Present on a hull whose engineering seat
+    /// can recover civilians from a discovered contact; absent for everything
+    /// else, which carries no `Transporter` component and is unchanged in every
+    /// way. The `[[system]] kind = "transporter"` block declares the system's
+    /// identity (power group, station, damage entry); this table carries what the
+    /// transporter itself is, and a hull that authors one without the other is
+    /// refused by name at load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transporter: Option<crate::transporter::TransporterConfig>,
+    /// The civilians this entity carries, to be discovered by scan and recovered
+    /// by transporter (issue #1348) — the mirror of `transporter`: that table
+    /// says what a hull can do the rescuing with, this one says what a contact
+    /// offers. Absent for every entity that authors nothing, which carries no
+    /// `CivilianRescue` component and is unchanged in every way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub civilian_rescue: Option<crate::transporter::CivilianRescueConfig>,
     /// The faint world-locked lattice drawn under this hull on the viewscreen.
     /// Present only on a hull meant to be FLOWN — the grid is a motion cue for
     /// the crew looking out of their own ship, and it is only ever read off the
@@ -3619,6 +3636,43 @@ impl EntityConfig {
                      tractor's power allocation is what an interruption checks",
                 ));
             }
+        }
+
+        // Validation: a [transporter] table has to describe a transporter that
+        // can recover (issue #1348), paired with the system that gives it its
+        // identity — the tractor's shape exactly. A zero range, per-civilian
+        // duration or minimum power is caught by `TransporterConfig::validate`;
+        // the pairing is checked here because the terms live in a table and the
+        // power group, station and damage entry live on a `[[system]] kind =
+        // "transporter"` block.
+        if let Some(ref transporter) = config.transporter {
+            transporter.validate().map_err(SerdeError::custom)?;
+            let system = config
+                .ship_config
+                .as_ref()
+                .and_then(|sc| {
+                    sc.systems
+                        .iter()
+                        .find(|s| s.kind == crate::ship::system_registry::TRANSPORTER_KIND)
+                })
+                .ok_or_else(|| {
+                    SerdeError::custom(
+                        "a [transporter] table needs a matching [[system]] kind = \"transporter\" \
+                         block to declare its power group, station and damage entry",
+                    )
+                })?;
+            if system.power_group.is_none() {
+                return Err(SerdeError::custom(
+                    "the [[system]] kind = \"transporter\" block must declare a power_group — the \
+                     transporter's power allocation is what an interruption checks",
+                ));
+            }
+        }
+
+        // Validation: a [civilian_rescue] table has to carry someone (issue
+        // #1348).
+        if let Some(ref civilian_rescue) = config.civilian_rescue {
+            civilian_rescue.validate().map_err(SerdeError::custom)?;
         }
 
         // Validation: a [held_response] table has to match its own kind (issue

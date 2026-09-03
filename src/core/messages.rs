@@ -404,6 +404,11 @@ pub enum ConsoleFamily {
     /// tractor and the umbilical are the same shape: engineering-owned, drawn by
     /// their own family.
     Security,
+    /// The rescue transporter (issue #1348). Its own family, the way the tractor
+    /// and umbilical have theirs: engineering-owned, drawn by a bespoke readout
+    /// (a selected contact, its life signs, the recovery progress) that is
+    /// nothing like any other console.
+    Transporter,
 }
 
 impl ConsoleFamily {
@@ -422,6 +427,7 @@ impl ConsoleFamily {
             Self::Tractor => "tractor",
             Self::Umbilical => "umbilical",
             Self::Security => "security",
+            Self::Transporter => "transporter",
         }
     }
 }
@@ -2431,6 +2437,38 @@ pub enum SystemControlPayload {
     /// umbilical, so there is nothing to disambiguate. What has already moved has
     /// moved.
     StopTransfer,
+    /// Select a discovered rescue contact for the transporter (issue #1348).
+    ///
+    /// Targets the engineering-owned `transporter` system
+    /// (`system_registry::TRANSPORTER_SYSTEM_ID`), a real station-owned system,
+    /// so it takes the ordinary station-tenure admission path — the Engineering
+    /// holder may send it, an AI operating the transporter may emit it, and
+    /// nobody else is admitted.
+    ///
+    /// Unlike the tractor's `EngageTractor` (which couples to the ship's combat
+    /// lock), the transporter NAMES its target: a rescue is a deliberate act
+    /// against a specific discovered contact, not against whatever Tactical has
+    /// locked, so the uuid is carried — the same identifier `SetScienceTarget`
+    /// carries and the console already holds from its radar blips. Selecting is
+    /// intent only; `StartTransport` begins the recovery.
+    TransportSelectContact {
+        /// The selected contact's uuid.
+        uuid: String,
+    },
+    /// Start recovering civilians from the selected rescue contact (issue #1348).
+    /// Targets the `transporter` system. No fields — the target is whatever
+    /// `TransportSelectContact` last named, resolved server-side. Explicit
+    /// intent, not a toggle: `StopTransport` is its own command, so a retried or
+    /// stale-UI start is idempotent. A start with no contact, an undiscovered or
+    /// out-of-range contact, or one carrying no unrecovered civilians is refused
+    /// with a reason the console shows.
+    StartTransport,
+    /// Stop the rescue transport, leaving whoever has already been recovered
+    /// aboard (issue #1348). Targets the `transporter` system, the sibling of
+    /// `StartTransport`. No fields — a ship runs one transporter. Resuming is a
+    /// fresh `StartTransport` on the same selection, which picks the recovery up
+    /// where it left off.
+    StopTransport,
     /// Send one Security team to a named target to perform a named action (issue
     /// #1346). Targets the `security` system — a real station-owned system, so it
     /// takes the ordinary station-tenure admission path: on the Alliance Destroyer
@@ -4349,6 +4387,57 @@ pub enum SystemBlackboard {
     /// the hull gave it to (Tactical, on the Alliance Destroyer), and its teams go
     /// off the board when it is knocked out.
     Security(SecurityBlackboard),
+    /// The rescue transporter's readout (issue #1348). One per ship carrying a
+    /// `transporter` system, keyed by `system_registry::transporter_system_id` —
+    /// a REAL system id, not a reserved channel, because unlike an operation the
+    /// transporter IS a thing aboard the ship: it declares a power group, carries
+    /// a damage entry and is commanded and refused through the engineering
+    /// console.
+    Transporter(TransporterBlackboard),
+}
+
+/// Raw sim truth for a ship's rescue transporter, published each tick under its
+/// system id (issue #1348).
+///
+/// Additive on the wire in both directions, the way `TractorBlackboard` is: the
+/// adjacently-tagged `SystemBlackboard` enum's other variants are untouched by
+/// adding `Transporter`, and every field here is `#[serde(default)]`, so a
+/// payload predating one decodes rather than being refused whole. No English
+/// crosses: `selected_contact_name` is a world entity name id and `refusal` a
+/// `strings.csv` id the console resolves.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct TransporterBlackboard {
+    /// The authored transporter range, so the console can show the crew how far
+    /// the transporter reaches. Authored content, not live state.
+    #[serde(default)]
+    pub range: f32,
+    /// The uuid of the contact currently selected for rescue, or `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_contact: Option<String>,
+    /// The selected contact's authored world entity name id, resolved for
+    /// display, or `None` when nothing is selected or it has no authored name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_contact_name: Option<String>,
+    /// Whether the selected contact has been revealed by a completed scan — the
+    /// discovery gate, published so the console can show "life signs confirmed".
+    #[serde(default)]
+    pub discovered: bool,
+    /// Whether the transport is running (recovering civilians) this tick.
+    #[serde(default)]
+    pub transporting: bool,
+    /// How many civilians the selected contact still carries, so the console can
+    /// show the crew what is left to bring aboard.
+    #[serde(default)]
+    pub civilians_remaining: u32,
+    /// Accrual toward the NEXT civilian, 0.0–1.0 — the progress bar the console
+    /// draws while a transport runs.
+    #[serde(default)]
+    pub progress: f32,
+    /// `strings.csv` id for why the last start or transport could not run —
+    /// `transporter.refused.*`. Retained until the operator selects, starts or
+    /// stops again; `None` while the transporter is idle or running cleanly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal: Option<String>,
 }
 
 /// Raw sim truth for a ship's Security teams, published each tick under its
@@ -5467,6 +5556,22 @@ pub enum AiDirective {
     /// authored work to `urgent_objective` in the backfill ranking, and never
     /// below what it already was.
     Secure { target: String },
+    /// Rescue the civilians aboard the named target (issue #1348): Engineering
+    /// selects the discovered contact and runs the transporter until everyone is
+    /// recovered. Routes to Engineering, the transporter's owner.
+    ///
+    /// A *per-verb operate directive* like the tractor's: it lives upstream of
+    /// admission and names WHAT to rescue, not the concrete command; the
+    /// transporter seat decides the `TransportSelectContact`/`StartTransport`/
+    /// `StopTransport`. Unlike `Tow`/`Stabilise`/`Escort` it does NOT resolve
+    /// through the combat lock — the transporter names its own contact — so it
+    /// never routes to the Weapons Tactical selector. The tractor-versus-rescue
+    /// priority the mission wants is an AUTHORED-SCORING concern: the Engineering
+    /// backfill runs its own rescue query independently of the tractor query, and
+    /// whichever objective the scenario's utility scoring ranks higher is the one
+    /// the seat serves that tick (AGENTS.md rule 6 — the seat has one pair of
+    /// hands, and the scored pool decides which life-saving order wins it).
+    Rescue { target: String },
 }
 
 /// Whether an objective originates from the active mission or from standing doctrine.

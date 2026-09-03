@@ -1,0 +1,127 @@
+# Probe world for issue #1348 — civilian discovery by scan and rescue by
+# transporter, end to end.
+#
+# One rescuing hull (the Alliance Destroyer, which carries both the sensor suite
+# that discovers the life signs and the Engineering transporter that recovers
+# them) and one stranded lighter carrying four civilians, positioned close enough
+# to scan and to transport. There is no scripted scan and no scripted transport:
+# the destroyer is a backfilled player ship, so the headless test drives the
+# discovery through the ordinary admitted `ScanTarget` path and the rescue through
+# the ordinary admitted `TransportSelectContact` / `StartTransport` path — the
+# only way to prove both ride the same admission a console's own controls would.
+#
+# WHAT THIS WORLD PROVES:
+#
+#   1. THE COMPUTER ANNOUNCES LIFE SIGNS ONLY AFTER THE SCAN. The rescue objective
+#      and the "life signs detected" cue are chained off `scan.lighter.taken`, the
+#      flag `tick_scans` latches the first time a reading of the lighter lands, so
+#      neither can appear before the crew have actually looked.
+#
+#   2. THE TRANSPORTER RECOVERS THE CIVILIANS OVER TIME. Once discovered and in
+#      range, `StartTransport` recovers the lighter's four civilians at the
+#      authored rate; the rescue completes, `rescue.lighter.recovered` rises, and
+#      the objective and report row resolve off it.
+#
+#   3. A LOST CONTACT IS A CASUALTY. If the lighter is destroyed with civilians
+#      still aboard, `rescue.lighter.lost` rises and the report records the loss —
+#      the human-fire consequence, reached only by a human (Backfill Tactical
+#      excludes the civilian-carrying contact from its own fire).
+#
+# Nothing here is authored anywhere but the destroyer's own `[transporter]` /
+# `[scan]` tables and the lighter's `[civilian_rescue]` / `[infrastructure]`
+# tables — no scenario text, no hardcoded range, rate or count.
+
+[global]
+seed = 1348
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# The rescuing hull — the backfilled player ship, spawned at game start.
+[[entity]]
+template_path = "assets/entities/alliance_destroyer.toml"
+id = "player-ship"
+name = "world.probe_transporter.entity.destroyer.name"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# The stranded lighter — 100 units off, inside the destroyer's 120-unit detailed
+# scan band and well inside the transporter's 500-unit reach. Its authored
+# `[civilian_rescue]` count and `[infrastructure]` condition ride the template;
+# the world only places it. The `id` is what the discovery and rescue flags are
+# keyed on: `scan.lighter.taken`, `rescue.lighter.recovered`, `rescue.lighter.lost`.
+[[entity]]
+template_path = "assets/entities/stranded_lighter.toml"
+id = "lighter"
+transform = { position = [100.0, 0.0, 0.0] }
+
+[script]
+setup = """
+on_flag_set("scan.lighter.taken", "on_civilians_discovered");
+on_flag_set("rescue.lighter.recovered", "on_rescue_complete");
+on_flag_set("rescue.lighter.lost", "on_civilians_lost");
+
+// Discovery: posts ONLY after the scan flag latches, which is the whole "the
+// computer announces life signs only after the revealing scan" claim. The
+// objective carries a Rescue directive so a backfilled Engineering seat serves
+// it through the same transporter commands a human would send.
+fn on_civilians_discovered(ctx) {
+    ctx.effects.show_message(
+        "world.probe_transporter.cue.life_signs",
+        "world.probe_transporter.cue.life_signs",
+        "advisory",
+        8
+    );
+    ctx.effects.add_objective(#{
+        id: "obj-rescue-civilians",
+        text: "world.probe_transporter.objective.rescue.text",
+        mandatory: true,
+        source: "mission",
+        base_priority: 60,
+        directive_kind: "Rescue",
+        target: "world.probe_transporter.entity.lighter.name",
+        targets: ["world.probe_transporter.entity.lighter.name"],
+    });
+}
+
+// Completion: the transporter raises `rescue.lighter.recovered` the tick the
+// last civilian is aboard, and the objective and the saved report row resolve
+// off that fact — the scenario, not the engine, decides the consequence.
+fn on_rescue_complete(ctx) {
+    ctx.effects.complete_objective("obj-rescue-civilians");
+    ctx.effects.show_message(
+        "world.probe_transporter.cue.rescue_complete",
+        "world.probe_transporter.cue.rescue_complete",
+        "info",
+        8
+    );
+    ctx.effects.report_row(#{
+        id: "civilians",
+        heading: "world.probe_transporter.report.civilians.heading",
+        outcome: "world.probe_transporter.report.civilians.saved",
+        state: "saved",
+        score: 6,
+    });
+}
+
+// Casualty: the transporter raises `rescue.lighter.lost` when the lighter is
+// destroyed with civilians still aboard, and the failed objective and lost
+// report row are this scenario's consequence for it.
+fn on_civilians_lost(ctx) {
+    ctx.effects.fail_objective("obj-rescue-civilians");
+    ctx.effects.show_message(
+        "world.probe_transporter.cue.civilians_lost",
+        "world.probe_transporter.cue.civilians_lost",
+        "critical",
+        8
+    );
+    ctx.effects.report_row(#{
+        id: "civilians",
+        heading: "world.probe_transporter.report.civilians.heading",
+        outcome: "world.probe_transporter.report.civilians.lost",
+        state: "lost",
+        score: -6,
+    });
+}
+"""

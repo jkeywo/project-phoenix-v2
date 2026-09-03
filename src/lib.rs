@@ -173,6 +173,11 @@ pub mod station_importance;
 /// Tactical's current lock and holds the derelict on the operator's rig. The
 /// umbilical, dock and external repair-dispatch slices copy this shape.
 pub mod tractor;
+/// The rescue transporter (issue #1348, PRD #1337): the pure, Bevy-free verdict
+/// and refusal vocabulary, and its Bevy adapter — the engineering-owned
+/// `[[system]]` that recovers the civilians a scan revealed aboard a discovered
+/// contact, over many ticks at an authored rate.
+pub mod transporter;
 /// The transfer umbilical (issue #1160), third slice of PRD #1143's coupling
 /// family: the pure, Bevy-free flow-arithmetic module and refusal vocabulary, and
 /// its Bevy adapter — the engineering-owned `[[system]]` that moves an authored

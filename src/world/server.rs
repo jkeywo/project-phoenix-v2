@@ -789,6 +789,13 @@ impl Plugin for WorldPlugin {
             // this plugin's own `WorldContentRuntime` store, so a scenario trigger
             // fires the tick the work lands.
             .add_plugins(crate::security::SecurityPlugin)
+            // The rescue transporter (issue #1348) stands beside them: what it
+            // recovers is the civilians an authored contact carries, its discovery
+            // reads the `scan.<id>.taken` flag on this plugin's own
+            // `WorldContentRuntime` store, and the completion/casualty facts it
+            // raises are flags on that same store, so an authored beat fires the
+            // tick the rescue lands or a carrier is lost.
+            .add_plugins(crate::transporter::server::TransporterPlugin)
             .add_plugins(crate::civilian::CivilianPlugin)
             // Dossiers (issue #1030) join them for the same reason: the
             // commitments a fact sheet lists are a field on

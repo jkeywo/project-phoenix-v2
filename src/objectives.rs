@@ -259,6 +259,12 @@ pub fn directive_relevance(directive: &AiDirective) -> Vec<SystemAffinity> {
         // Deliberately NOT a Helm or Weapons goal — a team crossing to a burning
         // compartment is not an acquisition.
         AiDirective::Secure { .. } => vec![SystemAffinity::Security],
+        // Rescue routes to Engineering, which owns the transporter (issue #1348).
+        // Deliberately NOT the Weapons Tactical selector like the tractor verbs:
+        // the transporter names its OWN discovered contact rather than resolving
+        // through the combat lock, so a rescue never pulls a weapons lock onto
+        // the civilians it is saving.
+        AiDirective::Rescue { .. } => vec![SystemAffinity::Engineering],
     }
 }
 
@@ -291,6 +297,19 @@ pub fn tractor_directive_target(directive: &AiDirective) -> Option<&str> {
         AiDirective::Tow { target }
         | AiDirective::Stabilise { target }
         | AiDirective::Escort { target } => Some(target.as_str()),
+        _ => None,
+    }
+}
+
+/// The target a `Rescue` directive names, or `None` for any other directive
+/// (issue #1348). The transporter host's `wanted` predicate, factored out so the
+/// host and its tests read one rule. Runs INDEPENDENTLY of
+/// [`tractor_directive_target`] on the shared Engineering seat: the tractor-
+/// versus-rescue priority the mission wants is decided by which objective the
+/// scored pool ranks higher, not by cross-referencing the two here.
+pub fn rescue_directive_target(directive: &AiDirective) -> Option<&str> {
+    match directive {
+        AiDirective::Rescue { target } => Some(target.as_str()),
         _ => None,
     }
 }

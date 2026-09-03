@@ -1507,6 +1507,16 @@ fn ai_target_selection(
     // runs this host must register it (`register_ai_host_env`) or fail loudly at
     // schedule build, so a bare `App` cannot silently diverge from production.
     ai_env: crate::ai::host::AiHostEnv,
+    // Contacts carrying unrecovered civilians (issue #1348). The Backfill target
+    // selector excludes these from its candidate pool: the ship's own AI never
+    // fires on a hull full of people it could rescue. A HUMAN Tactical operator
+    // is not subject to this filter — the human fire path is `SetTarget` /
+    // `FirePhaser`, untouched here — so a human may still fire, with the casualty
+    // consequences the transporter module records.
+    civilian_contacts: Query<(
+        &crate::entities::spawner::EntityUuid,
+        &crate::transporter::CivilianRescue,
+    )>,
 ) {
     // Restore the pre-#1185 locals so the body below is byte-for-byte unchanged.
     let TargetSelectionEnv {
@@ -1527,6 +1537,18 @@ fn ai_target_selection(
         .as_deref()
         .map(|r| &r.0)
         .unwrap_or(&registry_default);
+
+    // Contacts still carrying unrecovered civilians (issue #1348). Backfill
+    // Tactical excludes these from its candidate pool: the ship's AI never fires
+    // on people it could rescue. A fully-recovered carrier is NOT excluded — it
+    // is an ordinary hulk once its souls are aboard. A `BTreeSet` for a stable
+    // membership test; the filter decision it feeds is deterministic regardless
+    // of iteration order, but the ordered set keeps the walk itself reproducible.
+    let civilian_carrying: std::collections::BTreeSet<String> = civilian_contacts
+        .iter()
+        .filter(|(_, rescue)| rescue.remaining() > 0)
+        .map(|(uuid, _)| uuid.0.clone())
+        .collect();
 
     // World-space position of a targetable UUID, asteroid or entity. Tactical
     // radar deliberately projects this onto (x, z), while an operation's
@@ -1737,6 +1759,13 @@ fn ai_target_selection(
         // `detectable` is implied by passing the host's own range gate.
         let make_candidate =
             |uuid: &str, source_fact: &str| -> Option<crate::ai::selector::SelectorCandidate> {
+                // Backfill never fires on a contact carrying unrecovered
+                // civilians (issue #1348) — whatever source proposed it. The
+                // human fire path (`SetTarget`/`FirePhaser`) does not run through
+                // here, so a human operator is untouched by this exclusion.
+                if civilian_carrying.contains(uuid) {
+                    return None;
+                }
                 let (tx, ty, tz) = target_xyz(uuid)?;
                 // Acquisition remains bounded by Tactical radar. Once the
                 // tractor is actually holding the active operate target,

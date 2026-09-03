@@ -271,6 +271,8 @@ const SPAWN_SECTIONS: &[&dyn SpawnSection] = &[
     &UmbilicalSpawn,
     &SecuritySpawn,
     &SecurityTargetSpawn,
+    &TransporterSpawn,
+    &CivilianRescueSpawn,
     &ScanSpawn,
     &DebrisSpawn,
     &CivilianSpawn,
@@ -1532,6 +1534,44 @@ impl SpawnSection for TractorSpawn {
                     power_group,
                 ));
             }
+        }
+    }
+}
+
+struct TransporterSpawn;
+impl SpawnSection for TransporterSpawn {
+    fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
+        // The rescue transporter (issue #1348) — attach when `[transporter]` is
+        // present, the tractor's argument exactly. The power group is read from
+        // the transporter `[[system]]` block (its single authored source);
+        // `EntityConfig` validation already guaranteed the paired system with a
+        // power group exists, so the resolve below cannot silently drop it.
+        if let Some(transporter) = &config.transporter {
+            if let Some(power_group) = config.ship_config.as_ref().and_then(|sc| {
+                sc.systems
+                    .iter()
+                    .find(|s| s.kind == crate::ship::system_registry::TRANSPORTER_KIND)
+                    .and_then(|s| s.power_group.clone())
+            }) {
+                cmds.insert(crate::transporter::Transporter::new(
+                    transporter.clone(),
+                    power_group,
+                ));
+            }
+        }
+    }
+}
+
+struct CivilianRescueSpawn;
+impl SpawnSection for CivilianRescueSpawn {
+    fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
+        // The civilians a contact carries (issue #1348) — attach when
+        // `[civilian_rescue]` is present, on a TARGET entity. A contact that
+        // authors nothing carries no component and offers no rescue.
+        if let Some(civilian_rescue) = &config.civilian_rescue {
+            cmds.insert(crate::transporter::CivilianRescue::new(
+                civilian_rescue.count,
+            ));
         }
     }
 }

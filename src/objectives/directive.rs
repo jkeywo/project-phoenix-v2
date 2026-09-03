@@ -27,11 +27,14 @@ pub enum DirectiveKind {
     FieldRepair,
     /// Secure the named target with a Security team (issue #1346).
     Secure,
+    /// Rescue the civilians aboard the named target with the transporter (issue
+    /// #1348).
+    Rescue,
     Order,
 }
 
 impl DirectiveKind {
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::None,
         Self::Patrol,
         Self::Destroy,
@@ -46,6 +49,7 @@ impl DirectiveKind {
         Self::Transfer,
         Self::FieldRepair,
         Self::Secure,
+        Self::Rescue,
         Self::Order,
     ];
 
@@ -65,6 +69,7 @@ impl DirectiveKind {
             Self::Transfer => "Transfer",
             Self::FieldRepair => "FieldRepair",
             Self::Secure => "Secure",
+            Self::Rescue => "Rescue",
             Self::Order => "Order",
         }
     }
@@ -95,7 +100,8 @@ impl DirectiveKind {
             | Self::Escort
             | Self::Transfer
             | Self::FieldRepair
-            | Self::Secure => matches!(slot, DirectiveSlot::Target),
+            | Self::Secure
+            | Self::Rescue => matches!(slot, DirectiveSlot::Target),
         }
     }
 }
@@ -525,7 +531,8 @@ fn expected_field(
             | DirectiveKind::Escort
             | DirectiveKind::Transfer
             | DirectiveKind::FieldRepair
-            | DirectiveKind::Secure => DirectiveField::DoctrineOperateTarget,
+            | DirectiveKind::Secure
+            | DirectiveKind::Rescue => DirectiveField::DoctrineOperateTarget,
             DirectiveKind::Order => DirectiveField::DoctrineOrderTarget,
             _ => DirectiveField::DoctrineDestroyTarget,
         },
@@ -611,6 +618,9 @@ pub fn interpret(raw: &AuthoredDirective) -> Result<AiDirective, DirectiveError>
             target: values.target.expect("required above"),
         },
         DirectiveKind::Secure => AiDirective::Secure {
+            target: values.target.expect("required above"),
+        },
+        DirectiveKind::Rescue => AiDirective::Rescue {
             target: values.target.expect("required above"),
         },
         DirectiveKind::Order => AiDirective::Order {

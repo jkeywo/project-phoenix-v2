@@ -83,6 +83,14 @@ pub const TASK_VERB_UMBILICAL_FLOW: &str = "umbilical_flow";
 /// dispatch-and-claim shape Security's team assignments use.
 pub const TASK_VERB_EXTERNAL_REPAIR: &str = "external_repair";
 
+/// The verb a rescue transport's lifecycle is recorded under (issue #1348). The
+/// activation follows the transport actually RUNNING against a discovered,
+/// in-range contact with civilians left to recover — the transporter's analogue
+/// of the tractor's coupling — not the standing intent to transport, and it
+/// closes on range/target loss, cancellation, completion or mission end with the
+/// existing terminal reasons.
+pub const TASK_VERB_TRANSPORT: &str = "transport";
+
 /// The four ways a continuous task can end, as issue #1341's acceptance
 /// criterion names them.
 ///

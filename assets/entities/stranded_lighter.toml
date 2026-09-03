@@ -1,0 +1,55 @@
+# A stranded civilian lighter — a scannable derelict carrying trapped civilians
+# (issue #1348, PRD #1337).
+#
+# It is the mirror of the transporter on the rescuing hull: that hull authors a
+# `[transporter]` table saying what it can do the rescuing WITH, and this entity
+# authors a `[civilian_rescue]` table saying who is aboard to be rescued. The
+# life signs are DISCOVERED, not given: the count is authored here, but a crew
+# learns it only after Sensors complete a scan — the `[infrastructure]` condition
+# track below is what makes the lighter scannable at all, exactly as #1032's
+# depot is.
+#
+# It carries a `[hull]` so weapons can destroy it: the acceptance criteria want a
+# human Tactical operator to be ABLE to fire on it (the AI never will — Backfill
+# excludes a civilian-carrying contact), with the casualty recorded when they do.
+
+name = "world.probe_transporter.entity.lighter.name"
+tags = ["civilian", "infrastructure"]
+mass = 60000.0
+
+[target]
+tags = ["civilian"]
+threat_level = "none"
+description = "world.probe_transporter.entity.lighter.name"
+
+# What weapons destroy. A soft hull — a lighter is not a warship — so a Tactical
+# operator who chooses to fire on it can, and the destruction is what the
+# casualty attribution hangs off.
+[hull]
+hull_integrity = 60.0
+
+[collider]
+shape = "Cylinder"
+radius = 3.0
+half_height = 1.5
+length = 0.0
+
+[radar_appearance]
+colour = [0.4, 0.7, 0.85]
+size = 8.0
+icon = "station"
+
+# The condition track that makes the lighter scannable (issue #1032). A scan of a
+# hull with no readable condition is refused, so without this the life signs
+# could never be discovered — the `[infrastructure]` block is the door the scan
+# reads through, and `[civilian_rescue]` is what the discovery beat announces
+# once that reading lands.
+[infrastructure]
+condition_max = 100.0
+condition = 55.0
+hull_damage_share = 0.5
+
+# The civilians aboard (issue #1348). Authored here, discovered by scan, recovered
+# by the rescuing hull's transporter.
+[civilian_rescue]
+count = 4

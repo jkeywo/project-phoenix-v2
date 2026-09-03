@@ -1507,6 +1507,18 @@ kind = "dock"
 station = "helm"
 power_group = "helm"
 
+# The rescue transporter (issue #1348) — Engineering-owned, on the `helm` group
+# at `min_power_level = 2` like the tractor and umbilical it stands beside, for
+# the same reason spelled out above: a coupling family that adds no new resting
+# draw and takes down with the drive when a Power officer robs Helm. It recovers
+# the civilians a Sensors scan revealed aboard a discovered contact; the terms it
+# runs under are the `[transporter]` table further down.
+[[system]]
+id = "transporter"
+kind = "transporter"
+station = "engineering"
+power_group = "helm"
+
 # ── Security (issue #1346) ───────────────────────────────────────────────────
 #
 # TACTICAL owns the Security teams on this hull. That is an authoring decision
@@ -1894,4 +1906,15 @@ min_power_level = 2
 capacity = "reserve_fuel"
 rate = 20.0
 direction = "deliver"
+min_power_level = 2
+
+# TRANSPORTER (issue #1348) — the reach a discovered rescue contact must sit
+# within, how long recovering one civilian takes, and the lowest powered rung.
+# `range = 500` matches the tractor's reach: a rescue is a close-in act like a
+# tow. `seconds_per_civilian = 2` gives a full hold's worth of a dozen souls a
+# tuneable half-minute so the crew watch the recovery advance and can be pulled
+# off it by range, power or a more urgent tractor hold. [ai] Unratified.
+[transporter]
+range = 500.0
+seconds_per_civilian = 2.0
 min_power_level = 2

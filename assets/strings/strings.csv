@@ -1879,3 +1879,21 @@ component.scan.debris.closest,"Science scan readout — row label for how near a
 component.scan.debris.impact,"Science scan readout — row label for the projected time until a moving hazard reaches the asset under it (issue #1347)","[Time to impact]"
 world.probe_debris.entity.depot.name,assets/worlds/probe_debris.toml -> [[entity]] name,[Probe Transfer Depot]
 world.probe_debris.entity.mass.name,assets/worlds/probe_debris.toml -> [[entity]] name,[Probe Corridor Mass]
+transporter.refused.no_contact,"Transporter refusal — no rescue contact is selected (issue #1348)","[No contact selected.]"
+transporter.refused.not_discovered,"Transporter refusal — the selected contact has not been revealed by a completed scan (issue #1348)","[No life signs confirmed — scan the contact first.]"
+transporter.refused.no_civilians,"Transporter refusal — the selected contact carries no unrecovered civilians (issue #1348)","[Everyone is aboard.]"
+transporter.refused.out_of_range,"Transporter refusal — the selected contact is past the transporter's authored range (issue #1348)","[Out of range — close on the contact.]"
+transporter.refused.unpowered,"Transporter refusal — the transporter's power group is below its authored minimum level (issue #1348)","[Insufficient power allocated.]"
+transporter.refused.disabled,"Transporter refusal — the transporter system is damaged to Disabled (issue #1348)","[Transporter disabled.]"
+console.engineering.transporter,"Engineering console — Transporter panel heading (issue #1348)","[Transporter]"
+console.transporter.start,"Engineering console — Transporter start button (issue #1348)","[Beam Up]"
+console.transporter.stop,"Engineering console — Transporter stop button (issue #1348)","[Hold]"
+world.probe_transporter.entity.destroyer.name,assets/worlds/probe_transporter.toml -> [[entity]] name,[Probe Destroyer]
+world.probe_transporter.entity.lighter.name,assets/worlds/probe_transporter.toml -> [[entity]] name,[Stranded Lighter]
+world.probe_transporter.objective.rescue.text,assets/worlds/probe_transporter.toml -> rescue objective,[Recover the civilians aboard the Stranded Lighter.]
+world.probe_transporter.cue.life_signs,assets/worlds/probe_transporter.toml -> discovery cue,[Life signs detected aboard the Stranded Lighter. Transport available.]
+world.probe_transporter.cue.rescue_complete,assets/worlds/probe_transporter.toml -> rescue-complete cue,[All civilians recovered.]
+world.probe_transporter.cue.civilians_lost,assets/worlds/probe_transporter.toml -> casualty cue,[Contact lost with civilians still aboard.]
+world.probe_transporter.report.civilians.heading,assets/worlds/probe_transporter.toml -> report row heading,[Stranded Lighter]
+world.probe_transporter.report.civilians.saved,assets/worlds/probe_transporter.toml -> report row outcome (saved),[Civilians recovered by transporter.]
+world.probe_transporter.report.civilians.lost,assets/worlds/probe_transporter.toml -> report row outcome (lost),[Lost with civilians still aboard.]

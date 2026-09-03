@@ -432,6 +432,8 @@ mod tests {
             umbilical: None,
             security: None,
             security_target: None,
+            transporter: None,
+            civilian_rescue: None,
             civilian: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();

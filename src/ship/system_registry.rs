@@ -181,6 +181,21 @@ pub const DOCK_KIND: &str = "dock";
 pub const UMBILICAL_SYSTEM_ID: &str = "umbilical";
 pub const UMBILICAL_KIND: &str = "umbilical";
 
+/// Wire `SystemId` for the rescue transporter (issue #1348, PRD #1337).
+///
+/// An engineering-owned `[[system]]` that declares its own power group, carries
+/// a damage entry, is admission-gated (`TransportSelectContact` /
+/// `StartTransport` / `StopTransport`), and publishes its own blackboard.
+/// Running it recovers the civilians a completed scan revealed aboard a selected
+/// contact, at an authored rate over many ticks (the pure
+/// `crate::transporter::coupling` owns the verdict). Its terms — range,
+/// per-civilian duration, minimum power level — are authored in a hull's
+/// `[transporter]` table, so a hull that declares neither the system nor the
+/// table is unchanged in every way. Unlike the tractor it names its OWN
+/// discovered contact rather than coupling to the combat lock.
+pub const TRANSPORTER_SYSTEM_ID: &str = "transporter";
+pub const TRANSPORTER_KIND: &str = "transporter";
+
 /// Wire `SystemId` for the Security System (issue #1346, PRD #1337).
 ///
 /// A GENERIC station-owned `[[system]]`: which station owns it is the hull's
@@ -521,6 +536,11 @@ impl SystemKindRegistry {
         // hull's `station = ...` decision — exactly the split `ConsoleFamily`
         // exists to keep.
         registry.register_commandable(SECURITY_KIND, ConsoleFamily::Security)?;
+        // Rescue transporter (issue #1348). Engineering-owned like the tractor and
+        // umbilical, and drawn by its own presentation family for the same reason:
+        // a selected rescue contact, its life signs and the recovery progress are
+        // nothing like any other console's readout.
+        registry.register_commandable(TRANSPORTER_KIND, ConsoleFamily::Transporter)?;
         // Fine-grained Helm systems (issue #511)
         registry.register(HELM_JOYSTICK_KIND, ConsoleFamily::Helm)?;
         registry.register(HELM_ENGINE_KIND, ConsoleFamily::Helm)?;
@@ -762,6 +782,13 @@ pub fn umbilical_system_id() -> SystemId {
 /// under, and the damage entry its teams are taken off the board by.
 pub fn security_system_id() -> SystemId {
     SystemId(SECURITY_SYSTEM_ID.to_string())
+}
+
+/// The rescue transporter's wire `SystemId` (issue #1348). The admitted target
+/// for `TransportSelectContact` / `StartTransport` / `StopTransport` and the key
+/// its blackboard publishes under.
+pub fn transporter_system_id() -> SystemId {
+    SystemId(TRANSPORTER_SYSTEM_ID.to_string())
 }
 
 // ── Fine Helm system id helpers (issue #511) ──────────────────────────────────
@@ -1007,6 +1034,7 @@ mod tests {
             (DOCK_KIND, ConsoleFamily::Helm),
             (UMBILICAL_KIND, ConsoleFamily::Umbilical),
             (SECURITY_KIND, ConsoleFamily::Security),
+            (TRANSPORTER_KIND, ConsoleFamily::Transporter),
             (HELM_JOYSTICK_KIND, ConsoleFamily::Helm),
             (HELM_ENGINE_KIND, ConsoleFamily::Helm),
             (HELM_RADAR_KIND, ConsoleFamily::Helm),

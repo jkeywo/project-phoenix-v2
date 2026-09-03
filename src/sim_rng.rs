@@ -38,7 +38,7 @@
 //! [`vellum_rng::Pcg32`] (issue #897), not `rand`'s `SmallRng`. Two reasons,
 //! neither of them "PCG is a better generator":
 //!
-//! 1. **It is `Serialize`.** `SmallRng` is not, so the six stream positions
+//! 1. **It is `Serialize`.** `SmallRng` is not, so the stream positions
 //!    could not leave the process and a snapshot could only ever record the
 //!    master seed — which replays a run from the start, not from where it got
 //!    to. [`SimRngState`] is what a world snapshot carries (#862).
@@ -105,7 +105,18 @@ pub enum SimStream {
     /// A dialogue whose responses author no `ai_weight` TAKES NO DRAW AT ALL —
     /// the same discipline `BeamCycleJitter` follows for an unjittered bank. The
     /// stream's position does not move for any world but Falling Skyway, so no
-    /// existing world's sequence is perturbed by the mechanism merely existing.
+    /// existing world's *sequence* is perturbed by the mechanism merely existing.
+    ///
+    /// Its *digest* is, and that is not a contradiction — it is the cost of
+    /// declaring a stream, paid once. [`crate::sim_digest`] folds the whole
+    /// [`SimRngState`], whose `streams` vector is one entry per
+    /// [`SimStream::ALL`] entry, so adding a variant changes every world's
+    /// tick-0 digest including worlds that hold no conversation at all. That is
+    /// a widened fold and not a lost reproducibility: it re-blesses
+    /// `tests/fixtures/cross-target-ledger.json` (see the re-bless procedure in
+    /// `tests/cross_target_probe.rs`), exactly as #929 did when it added
+    /// [`Self::BeamCycleJitter`]. Anyone adding the ninth stream should expect
+    /// the same and not read it as a determinism regression.
     CommsBackfillChoice,
     /// **Retired, but deliberately still declared (issue #907).**
     ///

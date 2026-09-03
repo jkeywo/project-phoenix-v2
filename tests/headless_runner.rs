@@ -17859,6 +17859,92 @@ fn falling_skyway_a_picket_that_was_fired_on_is_not_recorded_as_never_addressed(
     );
 }
 
+/// **Issue #1349, the two endings a headless run cannot reach in the same
+/// mission.** Containment is AC1's headline non-destructive ending and
+/// destruction is the road it exists to avoid, and each has to write its own
+/// campaign key, its own corridor reading and its own report row.
+///
+/// The sim tests walk `withdrew` and `disabled`, and the sweep above covers
+/// `boarded`, `engaged`, `holding` and `unresolved`. These are the remaining two
+/// of the eight, and without them a mis-keyed `campaign.skyway.picket.contained`
+/// — the key the NEXT mission reads to know Havelock's boat was taken intact —
+/// would pass the whole suite.
+#[test]
+fn falling_skyway_containment_and_destruction_each_write_their_own_ending() {
+    let script = WindowScript::compile();
+    use project_phoenix::core::report::ReportRowState;
+
+    // Security took the boat and left her afloat. The corridor clears, because a
+    // contained picket is not picketing anything.
+    let mut contained = project_phoenix::world::flags::FlagStore::new();
+    contained.set_flag_value("havelock_enforcer_contained", 1);
+    assert_eq!(
+        picket_campaign_key(&script, &contained),
+        "campaign.skyway.picket.contained",
+        "AC1's non-destructive ending is a reading of its own, not a shade of \
+         `boarded`"
+    );
+    let contained_row = picket_row(&script, &contained);
+    assert_eq!(
+        contained_row.outcome_id,
+        "world.falling_skyway.report.picket.contained"
+    );
+    assert_eq!(
+        contained_row.state,
+        ReportRowState::Saved,
+        "nobody's boat was lost, so the epilogue does not colour this one as a loss"
+    );
+    assert_eq!(
+        window_flag_values(&script.call("write_the_picket_record", &contained))
+            .get("campaign.skyway.traffic.corridor_cleared")
+            .copied(),
+        Some(1),
+        "…and the lane behind her is open"
+    );
+
+    // The road AC1 exists to make avoidable. Same cleared lane, opposite verdict.
+    let mut destroyed = project_phoenix::world::flags::FlagStore::new();
+    destroyed.set_flag_value("havelock_enforcer_destroyed", 1);
+    assert_eq!(
+        picket_campaign_key(&script, &destroyed),
+        "campaign.skyway.picket.destroyed"
+    );
+    let destroyed_row = picket_row(&script, &destroyed);
+    assert_eq!(
+        destroyed_row.outcome_id,
+        "world.falling_skyway.report.picket.destroyed"
+    );
+    assert_eq!(
+        destroyed_row.state,
+        ReportRowState::Lost,
+        "a boat shot out of the lane is a loss however cleanly it cleared the lane"
+    );
+    assert!(
+        destroyed_row.score < contained_row.score,
+        "AC5: the two endings are ranked apart, and the destructive one is worse \
+         (contained {}, destroyed {})",
+        contained_row.score,
+        destroyed_row.score
+    );
+    assert_eq!(
+        window_flag_values(&script.call("write_the_picket_record", &destroyed))
+            .get("campaign.skyway.traffic.corridor_cleared")
+            .copied(),
+        Some(1),
+        "the corridor is clear either way — which is exactly why the picket key \
+         and the traffic key are two questions"
+    );
+
+    // Destruction outranks containment: a boat that was taken and then shot to
+    // pieces is recorded by what became of her, not by what was tried first.
+    let mut both = contained.clone();
+    both.set_flag_value("havelock_enforcer_destroyed", 1);
+    assert_eq!(
+        picket_campaign_key(&script, &both),
+        "campaign.skyway.picket.destroyed"
+    );
+}
+
 /// One reachable state of the berth scene's one-line ledger.
 ///
 /// The smaller, worse road: the chain delivers nothing, so `the_claimants_ask`
@@ -19330,7 +19416,7 @@ fn skyway_sheet_texts(app: &mut bevy::prelude::App, subject: &str) -> Vec<String
 ///
 /// Five of the eight families are EXCLUSIVE — a claimant is carried or is left,
 /// the strike ended one of three ways, the evidence is at one of three depths,
-/// the structure held or fell, the picket ended one of seven ways — and the
+/// the structure held or fell, the picket ended one of eight ways — and the
 /// promise this slice makes to whatever mission reads them next is that each
 /// says exactly one thing rather than leaving the reader to infer an absence.
 /// #1037 set that rule for the Lyra, #1040 kept it for the head and #1349
@@ -19381,10 +19467,12 @@ fn assert_the_campaign_record_is_complete(app: &bevy::prelude::App) {
                 "campaign.skyway.skyhook.lost",
             ],
         ),
-        // Issue #1349. Seven readings, exactly one of them written, and the
-        // last two are the pair the issue insists on keeping apart: a crew who
-        // opened the channel and chose to leave the boat alone are not the same
-        // neighbours as a crew who never called at all.
+        // Issue #1349. Eight readings, exactly one of them written, in
+        // `write_the_picket_record`'s own precedence. The last three are the
+        // trio the issue insists on keeping apart: a crew who fired on the boat
+        // and broke off short of the threshold, a crew who opened the channel
+        // and chose to leave her alone, and a crew who never called at all are
+        // three different sets of neighbours.
         (
             "the standoff",
             vec![
@@ -19393,6 +19481,7 @@ fn assert_the_campaign_record_is_complete(app: &bevy::prelude::App) {
                 "campaign.skyway.picket.disabled",
                 "campaign.skyway.picket.withdrew",
                 "campaign.skyway.picket.destroyed",
+                "campaign.skyway.picket.engaged",
                 "campaign.skyway.picket.holding",
                 "campaign.skyway.picket.unresolved",
             ],

@@ -1448,7 +1448,7 @@ describe('typed-code refusal', () => {
   });
 
   it('refuses a WHOLE crew code pasted into the fleet field', async () => {
-    // The five-letter case above was never the dangerous one: a bare suffix is
+    // The typed case above was never the dangerous one: a bare suffix is
     // composed under the field's own namespace, so it resolves the wrong
     // record or none. A FULL code carries its own project GUID, so the joiner
     // used to report the code's namespace instead of the field's — the asker
@@ -1500,7 +1500,7 @@ describe('typed-code refusal', () => {
     const stray = composeJoinCode({
       project: '00000000-0000-4000-8000-000000000000',
       version: versionGuid(DATA),
-      suffix: 'QUARK',
+      suffix: 'QUARKING',
     });
     const two = await memberOn(world, factories, stray);
     expect(two.refusals.map((r) => r.reason)).toContain('unknown-project');

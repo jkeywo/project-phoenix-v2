@@ -223,8 +223,23 @@ pub struct HostLobbyRevealResource(pub RevealState);
 pub struct HostLobbyJoinResource {
     /// See [`LocalHostLobby::join_base`].
     pub join_base: String,
-    /// The `--rendezvous` base, verbatim, or `None` for a host nobody can join.
+    /// The `--rendezvous` base, verbatim, or `None` for a host whose only
+    /// ingress is its own port.
     pub rendezvous: Option<String>,
+    /// The code this host minted for itself, when it accepts LAN joins directly
+    /// (issue #1353) — and, when it is `Some`, the only code the viewscreen's QR
+    /// will ever show.
+    ///
+    /// A host can run BOTH legs, and then two services have each issued it a
+    /// code: this process's own, and the cloud worker's. They are not
+    /// interchangeable, because the QR does not only carry a code — it carries
+    /// the PAGE, and the page a LAN phone loads is served by this host, so the
+    /// service it dials is this host (see `gui/join-url.js`'s origin rule).
+    /// Putting the worker's code on that QR would send every phone in
+    /// the room to a service that has never heard of them. The cloud code is
+    /// still printed to the operator's terminal, which is where somebody
+    /// arranging internet play reads it from.
+    pub direct: Option<crate::core::rendezvous::JoinCode>,
 }
 
 impl HostLobbyJoinResource {
@@ -233,12 +248,42 @@ impl HostLobbyJoinResource {
         Self {
             join_base: lobby.join_base.clone(),
             rendezvous: rendezvous.map(str::to_string),
+            direct: None,
         }
     }
 
+    /// …for a host that also accepts LAN joins itself (issue #1353).
+    pub fn with_direct_code(mut self, code: crate::core::rendezvous::JoinCode) -> Self {
+        self.direct = Some(code);
+        self
+    }
+
     /// The invitation an issued code makes.
+    ///
+    /// The `rendezvous` a directly-joinable host puts in the URL is `None`
+    /// deliberately, whatever `--rendezvous` says: the client's rule is that a
+    /// page not served from a known browser-game web origin dials the origin it
+    /// was served from, so the QR needs no parameter at all — which is also a
+    /// shorter QR and one fewer injection surface.
     pub fn invite(&self, code: &crate::core::rendezvous::JoinCode) -> JoinInvite {
-        JoinInvite::from_code(code, &self.join_base, self.rendezvous.as_deref())
+        let rendezvous = if self.direct.is_some() {
+            None
+        } else {
+            self.rendezvous.as_deref()
+        };
+        JoinInvite::from_code(code, &self.join_base, rendezvous)
+    }
+
+    /// The invitation for a code the relay legs have just issued — or `None`
+    /// when this code is not the one the viewscreen's QR belongs to.
+    pub fn viewscreen_invite(
+        &self,
+        code: &crate::core::rendezvous::JoinCode,
+    ) -> Option<JoinInvite> {
+        match &self.direct {
+            Some(direct) if direct.full != code.full => None,
+            _ => Some(self.invite(code)),
+        }
     }
 }
 
@@ -1219,6 +1264,46 @@ mod tests {
         assert!(pushed.contains("ABCDE"));
         assert!(pushed.contains("PHX-1-ABCDE"));
         assert!(pushed.contains("http://192.168.1.5:8080/"));
+    }
+
+    #[test]
+    fn a_directly_joinable_host_shows_its_own_code_and_not_the_clouds() {
+        // Issue #1353. A host running BOTH legs holds two codes, and they are
+        // not interchangeable: the QR carries the PAGE as well as the code, the
+        // page a LAN phone loads is served by this host, and so the service it
+        // dials is this host. The worker's letters on that QR would send every
+        // phone in the room to a service that never heard of them.
+        let lobby = LocalHostLobby::open("192.168.1.5:8080");
+        let mine = crate::core::rendezvous::JoinCode {
+            full: "PHX_1_ABCDE".to_string(),
+            suffix: "ABCDE".to_string(),
+            ..Default::default()
+        };
+        let cloud = crate::core::rendezvous::JoinCode {
+            full: "PHX_1_ZZZZZ".to_string(),
+            suffix: "ZZZZZ".to_string(),
+            ..Default::default()
+        };
+        let join = HostLobbyJoinResource::from_lobby(&lobby, Some("https://worker.example"))
+            .with_direct_code(mine.clone());
+        assert_eq!(join.viewscreen_invite(&cloud), None);
+        let invite = join.viewscreen_invite(&mine).expect("its own code shows");
+        // And with no `?rendezvous=` in it: the page dials the origin that
+        // served it, so naming a service would be both redundant and wrong.
+        assert_eq!(
+            invite,
+            JoinInvite::Code {
+                code: "ABCDE".to_string(),
+                full: "PHX_1_ABCDE".to_string(),
+                page_base: "http://192.168.1.5:8080/".to_string(),
+                rendezvous: None,
+            }
+        );
+
+        // A cloud-only host is unchanged: whatever the service issues goes up,
+        // with the service named for `gui/join-url.js` to judge.
+        let cloud_only = HostLobbyJoinResource::from_lobby(&lobby, Some("https://worker.example"));
+        assert!(cloud_only.viewscreen_invite(&cloud).is_some());
     }
 
     #[test]

@@ -85,7 +85,7 @@ import {
 // `import './relay.js'` #1113 added resolves to `/relay.js` at the site root —
 // a URL dist/ has no file for. The dynamic import rejected, the host page's
 // registry promise stayed rejected, every `callOwner` silently dropped, no host
-// socket ever reached the registry, no `hosted` frame, no five-letter code, and
+// socket ever reached the registry, no `hosted` frame, no typed code, and
 // EVERY spec timed out waiting for `__wasmReady`. One 404 on one sibling module
 // reads as seventeen unrelated failures with nothing in the logs connecting
 // them. So each worker-rendezvous module the registry pulls in is routed below,

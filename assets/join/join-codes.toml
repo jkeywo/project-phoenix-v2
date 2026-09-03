@@ -20,12 +20,26 @@
 format_version = 1
 
 [suffix]
-# Five typed letters. The alphabet deliberately EXCLUDES L, because L
+# Eight typed letters. The alphabet deliberately EXCLUDES L, because L
 # normalises to I — a letter that can never survive canonicalisation must never
 # be minted, or the printed code would not round-trip through the very
 # normalisation that makes it typeable. O and I stay in: they are the canonical
 # forms of 0 and 1. J stays distinct and is minted normally.
-length = 5
+#
+# WHY EIGHT AND NOT FIVE. The code is the ONLY secret in front of a game: the
+# join stamp is public (every host serves it), so anyone holding the code can
+# join, open a relay and act as a crew member. Five letters over this alphabet
+# is 25^5 ≈ 9.77e6 codes — 23.2 bits — and a native host accepting LAN joins
+# directly (issue #1353) was measured answering ~2,340 wrong guesses a second
+# to a single machine that reconnected between batches, which walks that
+# keyspace in about 35 MINUTES of expected search. Eight letters is 25^8 ≈
+# 1.526e11 — 37.15 bits — which is ~377 days of expected search at that same
+# unthrottled rate, before the per-source and global attempt limits in
+# src/native_host/direct_join.rs take the achievable rate down by another three
+# orders of magnitude. The cost is three more letters to read off a viewscreen;
+# the QR carries the whole code either way, and both worker and native legs
+# inherit the stronger scheme because all three readers read THIS file.
+length = 8
 alphabet = "ABCDEFGHIJKMNOPQRSTUVWXYZ"
 # Punctuation a player adds while reading a code aloud, dropped before the
 # comparison. `_` is here as well as being the separator inside a full code:
@@ -67,11 +81,18 @@ guid = "5c0a3e91-7b18-4f26-8d43-9e61af07c25b"
 # record normally dies with the socket; this is the sweep for the case where a
 # close event never arrives.
 record_ttl_seconds = 43200
-# Lookups (resolve + join) one socket may make before it is cut off. The suffix
-# space is 25^5 ≈ 9.8M and codes are private, so an unbounded socket could walk
-# the whole namespace.
+# Lookups (resolve + join) one socket may make before it is cut off. Codes are
+# private, so an unbounded socket could walk the namespace — but note that this
+# bound is charged to a SOCKET, which a guesser simply reconnects to reset. It
+# is the cheapest way to end one abusive connection, not the rate limit; the
+# limits that survive a reconnect are per-SOURCE and global, and they live in
+# src/native_host/direct_join.rs (AdmissionBudgets) because they are transport
+# plane rather than authored scheme.
 max_lookups_per_connection = 60
-# Joiners one host record may hold at once.
+# Joiners one host record may hold at once, counting only sockets that have
+# RESOLVED THE CODE. Sockets that upgraded and never joined have a budget of
+# their own (AdmissionBudgets::unjoined_total) so that silence cannot spend the
+# room's places.
 max_peers_per_record = 32
 # How many player-ship slots one fleet may hold, the owner's own included
 # (issue #1114). This is a DESIGN number — how big a fleet the game is meant to
@@ -170,8 +191,19 @@ max_relay_send_buffer_bytes = 262144
 # Words never minted and never accepted, in ordinary spelling: gui/join-code.js
 # canonicalises each entry before comparing, so one row refuses every
 # confusable spelling of the word (LOGIN also refuses IOGIN, HELLO also refuses
-# HE110). Every entry must be exactly `suffix.length` letters after
-# canonicalisation — tests/client/join-code.test.js checks that.
+# HE110).
+#
+# A word is matched ANYWHERE INSIDE a canonicalised suffix, not only as the
+# whole of it. That is what keeps this list meaningful now the suffix is longer
+# than the words on it: a code is refused for READING as one of these, and
+# `QRAPESVW` reads as one exactly as `RAPES` did. (At five letters the two
+# rules were the same rule; nothing about an entry's meaning changed.) The cost
+# to minting is negligible — ~36 words × 4 positions / 25^5 ≈ 1.5e-5 of draws
+# are redrawn — and the ceiling in mintSuffix bounds it regardless.
+#
+# Every entry must therefore be no LONGER than `suffix.length` after
+# canonicalisation, or it could never match — tests/client/join-code.test.js
+# checks that.
 #
 # `reason` is for the next person reading the list, not for the player: the
 # phone only ever says "that is not a code we hand out".

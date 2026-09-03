@@ -332,7 +332,7 @@ describe('which route a client page load is on', () => {
     });
   });
 
-  it('asks for five letters on a bare page load', () => {
+  it('asks for the code on a bare page load', () => {
     // No opt-in, no dead end: the rendezvous route is the only route since
     // #1112, so a client page with nothing in its fragment offers the field
     // rather than telling the guest there is no host id in the URL.
@@ -369,10 +369,10 @@ describe('which route a client page load is on', () => {
 // ── The tracer ──────────────────────────────────────────────────────────────
 
 describe('typed join', () => {
-  it('issues a five-letter code to the host', async () => {
+  it('issues a code of the authored length to the host', async () => {
     const world = makeWorld();
     const { code } = await hostOn(world);
-    expect(code.suffix).toHaveLength(5);
+    expect(code.suffix).toHaveLength(DATA.suffix.length);
     expect(code.namespace).toBe(NAMESPACE_CLIENT);
   });
 
@@ -508,7 +508,7 @@ describe('distinct failures', () => {
   it('says unknown for a suffix nobody holds', async () => {
     const world = makeWorld();
     const { factories } = await hostOn(world);
-    expect(await errorsFor('ZZZZZ', world, factories)).toContain('unknown');
+    expect(await errorsFor('ZZZZZZZZ', world, factories)).toContain('unknown');
   });
 
   it('says wrong-type for a code minted in the server namespace', async () => {
@@ -537,7 +537,7 @@ describe('distinct failures', () => {
     const world = makeWorld();
     const { factories } = await hostOn(world);
     const sent = vi.fn();
-    expect(await errorsFor('ADMIN', world, factories)).toContain('denied');
+    expect(await errorsFor('ADMINXYZ', world, factories)).toContain('denied');
     expect(sent).not.toHaveBeenCalled();
   });
 });
@@ -593,7 +593,7 @@ describe('host compatibility handshake', () => {
     // still perfectly healthy — that frame is a statement about the rendezvous
     // RECORD. The channel then closes with its host, the joiner re-resolves
     // the same code on its backoff, and the service gives the honest answer:
-    // nothing holds those five letters any more.
+    // nothing holds that code any more.
     vi.useFakeTimers();
     try {
       const world = makeWorld();
@@ -806,7 +806,7 @@ describe('a joiner that fails cleans up after itself', () => {
     const joiner = createRendezvousJoiner({
       base: 'https://rendezvous.test',
       data: DATA,
-      code: 'ZZZZZ',
+      code: 'ZZZZZZZZ',
       factories,
     });
     await settle();
@@ -1168,7 +1168,7 @@ describe('automatic reconnect', () => {
     // which made connectTimeoutMs's 8/16/30s ladder unreachable by the guest
     // it was added for — TURN-over-TCP allocation on a cellular network is a
     // first-join problem. The loop is bounded before acceptance, though: a
-    // guest who has never got in may be reading the wrong five letters, and a
+    // guest who has never got in may be reading the wrong code, and a
     // silent backoff would never say so.
     vi.useFakeTimers();
     try {

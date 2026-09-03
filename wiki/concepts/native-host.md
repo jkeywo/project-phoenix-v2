@@ -2,8 +2,8 @@
 title: Native Host
 type: concept
 tags: [native, viewscreen, lobby, scenario-selection, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile, saved-layouts, media-devices, camera, microphone, saves]
-sources: [src/native_host/mod.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/lobby/handler.rs, src/content_ledger.rs, tests/fixtures/scenario-arbiter-parity.json, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/layout_store.rs, src/native_host/layout_store_systems.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/delivery/args.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs, src/save_slots_store.rs]
-updated: 2026-09-01
+sources: [src/native_host/mod.rs, src/native_host/direct_join.rs, src/native_host/join_codes.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/lobby/handler.rs, src/content_ledger.rs, tests/fixtures/scenario-arbiter-parity.json, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/layout_store.rs, src/native_host/layout_store_systems.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs, src/delivery/args.rs, src/save_slots_store.rs]
+updated: 2026-09-02
 ---
 
 # Native Host
@@ -73,7 +73,7 @@ profile has:
 ## The world need not be known at boot
 
 ```bash
-./target/release/phoenix-host --client-dir dist --lobby --rendezvous <URL> --origin <URL>
+./target/release/phoenix-host --client-dir dist --lobby
 ```
 
 Issue #1326. The host opens its viewscreen on an **empty
@@ -294,7 +294,205 @@ participants, so it does not take that arm.
 
 Two transports on one host compose with `PairedTransport` — poll both, dispatch
 to both, neither told about the other's traffic. That is how #1112's network
-transport arrives beside the panes: an `insert_resource`, not a re-plumb.
+transport arrives beside the panes: an `insert_resource`, not a re-plumb. Since
+issue #1353 there are three possible legs (panes, direct LAN accept, the cloud
+relay), and `phoenix-host` folds whichever it has into one
+`Box<dyn NativeTransport>` rather than spelling out eight combinations.
+
+## The host is its own rendezvous (issue #1353)
+
+```bash
+./target/release/phoenix-host --client-dir dist --lobby     # …and that is all
+```
+
+A phone loads the client bundle from the host's delivery port. Since #1353 it
+opens its **game socket to that same port** as well: a request on `/v1/join`
+carrying a WebSocket upgrade is taken off the HTTP path and answered in process.
+A LAN game therefore needs **no external service at all** — no worker deployed,
+no `wrangler dev`, no internet.
+
+Both host types dialled out to a meet-in-the-middle relay before this, and that
+shape was inherited rather than chosen: a **browser** host cannot accept an
+inbound connection, so two browsers can only meet at a third party. A native
+process can accept — it is already accepting HTTP on that port — and #1121
+deferred exactly this leg.
+
+**The door.** `delivery::serve` grows one seam, a `ConnectionUpgrade` handler
+consulted before routing. Detection is pure and unit-tested
+(`websocket_upgrade`): a plain `GET /v1/join` gets the worker's own `426`, a
+malformed upgrade a clean `400`, and everything else routes as HTTP exactly as
+before. The handshake's `101` is written by `direct_join` itself with
+`tungstenite::handshake::derive_accept_key`, and the socket wrapped with
+`WebSocket::from_raw_socket` — because `serve` has *already read the request
+head* (that is how the path and the key were known), so there is no handshake
+left for `tungstenite::accept` to read and std cannot peek a socket portably.
+The head read also grew a timeout to go with its size cap: a connection thread
+must not be holdable for free.
+
+**Not a second host implementation.** `native_host::direct_join` is a
+`RelaySocket` — the same trait `relay_socket.rs` implements over a real
+`wss:` connection — so `RelayTransport` sits on top of it unchanged and
+registration, the in-band stamp handshake, the `Identify` gate, the
+reserved-token refusal, the duplicate-token sever, audience resolution and the
+shedding rule are all the same code on both legs. What the module adds is the
+**service** half: the single-game subset of `worker-rendezvous/src/registry.js`,
+with the same typed code lookup and its three distinct failures
+(`wrong-type` / `version-mismatch` / `unknown`), the same protocol-version
+refusal, the same per-connection lookup cap and peer bounds, and the same class
+contract — reliable ordered and never shed (a full queue ends that session),
+snapshot latest-wins. A phone cannot tell which leg answered it, which is the
+whole point.
+
+What collapses relative to the worker: no `/v1/host` socket (the host *is* this
+process), one record instead of a map, and no code rotation or reclaim grace — a
+record whose host has gone is a process that has exited. What does **not**
+collapse is any validation.
+
+**No `Origin` allow-list on this leg, deliberately.** The worker's gate is right
+there — a public multi-tenant service on a different origin from every page it
+serves — but here the page and the socket are the same origin by construction,
+so a list would have to name every address and hostname a phone might reach the
+machine by, and getting it wrong refuses the crew with nothing on screen saying
+why.
+
+What makes that decision sound is the gate that stands in its place, and it is
+**attempt-limiting, not an origin list**. A hostile page open in a crew member's
+browser dials this port with its own site's `Origin`, so a header list would
+never have stopped it; the join stamp is public, because this host serves it;
+and that leaves the code as the only secret between a stranger on the LAN and an
+acting participant. So the code is defended at the transport, in three layers
+(`AdmissionBudgets` in `direct_join.rs` carries the numbers and the arithmetic):
+
+1. **Budgets that survive reconnection.** `max_lookups_per_connection` is
+   charged to a socket, and a socket is exactly what a guesser throws away — an
+   unbudgeted door answered wrong codes in the high hundreds to a few thousand
+   per second, depending entirely on the machine the probe ran from. So the
+   failed-guess budget is keyed on the peer address read at accept and held by
+   the *record*: a token bucket, 20 wrong guesses burst and one refunded every
+   5 s, alongside a per-source cap on sockets that never join (4 of the 16 the
+   whole service allows — a quarter rather than a half, so that *two* addresses
+   cannot hold every slot, which IPv6 privacy addressing would make free). Only
+   **failed** lookups are charged, so a correct code costs nothing — a crew
+   behind one NAT address is spending a typo allowance, never a join allowance.
+2. **A global circuit-breaker.** Wrong guesses in a rolling minute ramp a delay
+   onto every lookup answer, correct ones included (answering a right code
+   faster during an attack would be a timing oracle), capped at 2 s — inside the
+   client's own 8 s first-connect timeout, so a guest caught in an attack waits
+   once and gets in. It is the layer that covers a guesser spread across more
+   addresses than the per-source table can hold, and it is *asserted* as a
+   composite: the whole service, driven from an address per guess, evaluates
+   **8.2 wrong codes a second** against a stated ceiling of
+   `unjoined_total / breaker_max + breaker_free / breaker_window` = 8.5, and
+   ~10.2/s through the ramp's own first window before it saturates.
+3. **Enough letters.** The authored suffix is eight, not five: 25^8 ≈ 1.5 × 10^11
+   (37.15 bits), about 377 days of expected search at the *old* unthrottled
+   rate, where five letters (25^5, 23.2 bits) fell in about 35 minutes. At the
+   composite rate the two layers above allow, it is **centuries**.
+
+Every refusal is **soft** and says so — a stated reason in band, a `Retry-After`
+on a refused upgrade, a bucket that refills on a clock — because a whole crew
+can share one address, and a lockout that did not lift would be a self-inflicted
+outage waiting for one clumsy typist. On top of all of it, the compatibility
+handshake and the reserved-token gate still decide what a joiner may *be*.
+
+**The residual, stated rather than defended against.** A guesser with many
+addresses is not slowed by layer 1 at all, and layer 2 answers it on the one
+resource that cannot be multiplied — the un-joined socket. What such a caller
+*can* still do is hold that budget, so a crew member's upgrade meets
+`join-sockets-busy` and a `Retry-After` for as long as the attack runs. That is
+lockout **pressure** during an active attack rather than a lockout: every slot
+is reclaimed within the 30 s join deadline whether the caller cooperates or not.
+The alternative — refusing addresses the source table cannot track — is a
+venue-NAT outage bought to defend a port that already serves the whole client
+bundle to anyone on the LAN who asks.
+
+**Silence has its own budget.** A socket that upgrades and never joins is
+counted against `AdmissionBudgets::unjoined_total`, not the authored
+`max_peers_per_record`: a hostile device holding thirty-two silent sockets used
+to refuse the room with `join-sockets-full`. The thread ceiling this leg can
+reach is therefore peers *plus* un-joined, and both directions of a joiner
+socket are time-bounded — the write timeout is what stops a joiner that stalls
+its own reads from parking a host thread inside `send` for as long as the OS
+will hold a full buffer. The socket's WebSocket config is sized from
+`max_relay_frame_bytes` too, rather than left at `tungstenite`'s 64 MiB message
+/ 16 MiB frame defaults, which were buffered and *decoded* before any budget was
+consulted.
+
+**Every state a socket can be in has a clock.** `JOIN_DEADLINE` is gated on
+`!joined`, so a socket that resolved the code used to be reaped by nothing at
+all: its read loop returned `WouldBlock` for ever and it held one of
+`max_peers_per_record`'s places until the process exited. Thirty-two such
+sockets fill the room. The three clocks now cover the whole life of a
+connection:
+
+| State | Clock | Value |
+| --- | --- | --- |
+| upgraded, not joined | `JOIN_DEADLINE` | 30 s |
+| joined, never opened its relay | `attach_deadline` | 30 s |
+| attached | WebSocket ping/pong | ping after 10 s quiet, detach after 30 s unanswered |
+
+A deadline cannot answer the attached case, because an attached console is
+legitimately silent for as long as its player is — so the host asks, with a
+WebSocket Ping that every client answers inside its library rather than in its
+own code. What that closes is the room's real failure: a phone dropping without
+a FIN (out of range, a venue AP losing the association, a battery gone
+mid-frame) leaves a **half-open** TCP, so the seat is held by nobody, and a bad
+night accumulates them until the game is locked out with nothing on screen
+saying why. Every reap goes down the ordinary departure path, so the seat flips
+to Backfill and a returning phone's own reconnect yields it straight back.
+
+**The client half is one rule**: `gui/join-url.js`'s
+`rendezvousBaseForOrigin` — *the service that served you the page is the service
+you dial*, unless the page came from one of the published browser-game origins
+(`KNOWN_WEB_ORIGINS`, the twin of `worker-rendezvous/wrangler.toml`'s
+`ALLOWED_ORIGIN`, pinned by a test that reads that file). Those are static hosts
+that cannot accept a socket, so they keep the cloud service. It is a default
+rather than a parameter, which supersedes #1336's `?rendezvous=` posture
+question for the served-by-a-host case: no link can point a guest's join
+anywhere. One caveat worth knowing, because `localhost:8080` is on that list as
+`trunk serve`: a browser opening a native host at `http://localhost:8080` dials
+the cloud service. Every phone gets the LAN address from the QR instead.
+
+**Where the code comes from.** `native_host::join_codes` reads
+`assets/join/join-codes.toml` — the authored table `gui/join-code.js` and the
+worker already read — and mints from it. `core::rendezvous` says plainly that a
+host does no minting and no parsing, and that stays true of the module: a host
+that is its own service is the party that mints, so the two operations live in
+the native-only module that needs them.
+
+**Composition.** `--rendezvous` still works and both legs run at once; peer ids
+this leg mints are prefixed so the namespaces cannot be confused, each leg keeps
+its own peer table, and a `Disconnected` routes back through the leg that saw the
+socket die. The viewscreen QR is the direct code — see [The join
+QR](#the-join-qr-issue-1329).
+
+`tests/native_direct_join.rs` drives a real `tungstenite` client through a bound
+host: handshake, code, attach, stamp verdict, `Identify`, both delivery classes,
+and the socket dying as exactly one `Disconnected`. It needs no service running,
+so unlike `tests/native_relay_live.rs` it is **not** `#[ignore]`d.
+
+It also runs the attack, rather than asserting that the limits exist. The same
+churned-connection probe fires wrong codes at two hosts differing only in their
+budgets, and the assertion is **relative** — a collapse to the burst plus what
+refilled, with the rest refused in band — precisely because the absolute figure
+is the prober's own machine talking: two runs on different hardware measured
+1,856 → 20 and 411 → 20, and both are the same result. A real crew member with
+the right code joins **from the same loopback address the guessing is coming
+from** while it is going on (a few hundred milliseconds, again machine-dependent
+— what is asserted is that it is inside the client's own 8 s connect timeout),
+which is the property the soft limits are for and the one an over-eager lockout
+would have quietly broken.
+
+Loopback is one address, though, so the real-socket tests can only prove layer 1
+plus the breaker's *shape*. The composite ceiling the design rests on is
+asserted at the pure layer instead, driving the real `Admissions` from a
+distinct synthetic source per guess with the sockets' waiting simulated
+(`the_composite_guess_rate_holds_however_many_addresses_it_is_spread_over`), and
+one real-socket test times the breaker's delay actually being taken out of a
+guesser's thread before an answer is written. The liveness clocks have their own
+three: a joined-then-silent hoard giving the room's places back, a peer that
+stops answering its pings being detached, and a quiet peer that *does* answer
+being left alone.
 
 ## Local Station panes (issue #1122)
 
@@ -417,7 +615,7 @@ The fragment is also the client page's **one join input**, and since #1112 there
 is no other route: `joinRouteFromLocation` reads any non-empty fragment as a
 code and hands it to `parseJoinCode`, which refuses `token=…&name=…` and drops
 the join-entry overlay over the console. So the pane's route is composed rather
-than dodged — the fragment leads with `document::PANE_JOIN_CODE`, a five-letter
+than dodged — the fragment leads with `document::PANE_JOIN_CODE`, a typed
 suffix the authored table in `assets/join/join-codes.toml` accepts, and
 `pane_boot.js` rewrites `location.hash` down to just that before any page code
 reads it. Two consequences worth naming: the page's URL is then
@@ -1101,9 +1299,20 @@ given; `0.0.0.0` takes the interface the machine would route out of (a UDP
 route it falls back to loopback and says so at the prompt. The URL itself is
 `gui/join-url.js`'s, shared with the browser host.
 
-With **no `--rendezvous`** (or `--solo`) the panel says joining is off, in words
-from the string table: there will never be a code, and a framed empty QR would
-have a crew scanning something that cannot work.
+**Which code it carries** is issue #1353's question, and it has one answer: the
+host's own. Since that issue a native host mints its code at bind and answers
+the join socket on its own port (see [The host is its own
+rendezvous](#the-host-is-its-own-rendezvous-issue-1353)), so the panel is live
+on a plain `--lobby` launch with no service anywhere. A host that *also* has
+`--rendezvous` holds two codes and shows the direct one, because the QR carries
+the **page** as well as the code and the page it opens is served from here — the
+cloud code goes to the operator's terminal for anybody joining from outside the
+LAN.
+
+Only a host with no way in at all — `--solo`, or one serving no client bundle —
+makes the panel say joining is off, in words from the string table: there will
+never be a code, and a framed empty QR would have a crew scanning something that
+cannot work.
 
 Three things move it: the phase (shown in the lobby, hidden at mission start,
 untouched in play), the surface's own `#host-lobby-qr-toggle` — this window has
@@ -1952,6 +2161,7 @@ its phones load the same public page the operator is on.
 | `tests/client/host-lobby-view.test.js` | The host lobby's pure view model, including the monitor row (#1330) and the per-station screen rows (#1331) — every case fed the law's verdict verbatim, so the page is proved to add no judgement of its own. **#1332:** a greyed `full` button names the consoles holding that screen (including a `--pane` participant, who has no station card anywhere), falls back to the bare marker when told nothing, never greys a screen the law called `eligible` however many consoles it can see on it, and un-greys a vacated screen on every other station's row. **#1332 fix round:** a screen one of whose consoles the lobby cannot free says so (`full_authored`), and one whose consoles can all be closed from here keeps the short marker |
 | `tests/client/host-lobby-render.test.js` | The extracted renderer, in jsdom, driven against `server.html`'s own `#lobby-panel` subtree: cards, avatars, chips, pills, the ready badge's `go` class, the countdown, a re-render replacing rather than appending — and the two documents, one with the AI-launch button and one (the native lobby's) without |
 | `tests/native_host_lobby_ultralight.rs` | The real lobby document in a real Ultralight view over this process's own HTTP: a real `LobbyStatePayload` fills the station grid through the shared modules, the chrome yields on mission start and comes back on the reveal flag with no reload, the surface rasterises, and (#1329) the vendored encoder loads from this process's own server and rasterises a join QR whose printed URL is the join URL a phone needs, which a phone's toggle and the surface's own control both hide and show, and which gives way to "joining is off" for a host nobody can join. **#1328:** a scenario payload builds the picker's buttons through the shared renderer, a real click queues the record on the queue *this* surface drains, and a loaded world closes the panel. **#1330:** the monitor row draws real `<button>`s through the shared renderer, a real click comes back as a `set-viewscreen` record over the same bridge and the same drain, and a refusal renders as a sentence the operator can read. **#1331:** a station card's screen row draws inside it, never offers the viewscreen's own display, and both its verbs — a screen press and the off button — come back as `assign-station` and `unassign-station` on that same one queue. `#[ignore]`d: needs the SDK and a `trunk build`ed `dist/`, which CI has neither of |
+| `tests/client/join-url.test.js` | Where a page sends its join socket (#1353): a page served by a native host dials that host (LAN address, name or loopback alike), the published web origins keep the built-in service (case and a trailing slash included), anything that is not an origin falls back to it, and `KNOWN_WEB_ORIGINS` is asserted equal to `worker-rendezvous/wrangler.toml`'s `ALLOWED_ORIGIN` read off disk. Plus `joinUrlForCode` carrying no `?rendezvous=` for the direct case and still naming a non-default service for the cloud-only one |
 | `tests/client/host-qr.test.js` + `tests/client/qr-encoder.test.js` | The shared join panel in jsdom against `server.html`'s own `#overlay` subtree — the visibility law (including the null that leaves a mid-mission QR alone), the draw, the native surface's link-less variant, the joining-off caption — plus the browser host's draw site pinned from `onCode` to the shared module (#1329 AC5), and the vendored encoder loaded from disk with no network and pinned to a known code |
 | `src/native_host/bridge_profile.rs` | The pure model: stable identity across a simulated OS-settings rearrange, identical-monitor disambiguation (including a TOML round-trip of a position-suffixed id), the one/two-pane geometry math (even and odd, side-by-side and stacked), the >2 density refusal, the one-viewscreen refusal (`ProfileError::MultipleViewscreens`, naming both monitors), the TOML round-trip (Windows backslash ids included), the missing/unassigned/changed-display reporting, and (#1125) the runtime loss/return detection — a lost Station names its panes, a lost viewscreen names none, a return is for explicit repair only. **#1331:** a station-bearing `PaneSlot` contributes NO label to `assigned_surfaces`, so the watcher's list is participants only and a lost screen names only the panes it really closes. **#1330:** `identify_stable` — nothing known is exactly `identify`, a known display keeps its short key when its twin arrives and its suffixed key when its twin leaves, a renegotiated mode is matched by name and place while the geometry follows, a display that only moved is still matched, one that moved *and* re-moded is honestly treated as new, a newcomer never takes a carried key, and an unplug still reads as an unplug. All feature-agnostic, run by the ordinary `cargo test` |
 | `src/native_host/bridge_display.rs` | A Bevy `Monitor` lifts into a `RawMonitor` and carries the documented identity; `--setup`'s exit code is clean only when a supplied profile both validates and resolves with no problems against the connected displays (`setup_profile_is_clean`); and (#1125) `watch_runtime_displays` itself — driven with *fake* `Monitor` entities spawned and despawned as bevy_winit does on hot-plug, so it runs in CI without a display — closes a lost Station's pane (→ Backfill) and no pane for a lost viewscreen. **#1330:** the whole apply-on-change loop on the same fake hardware — a no-`--profile` host gains a config and a layout and keeps its `Windowed` window on every later frame, a press moves the window once, an unplug rebuilds the row and the viewscreen follows its note; and the three roster changes that must move **nothing** (an identical twin plugged in, an identical twin unplugged with the viewscreen on the survivor, the viewscreen's own display renegotiating its resolution), plus the invariant that the viewscreen may not move onto an authored participant's console. **#1331:** the runtime open/close transitions on that same fake hardware — seating a station opens a Station window and a console pane on an ordinary token, unassigning closes it and shuts the window and frees the screen everywhere, a move keeps whoever claimed it (a rebuilt handle on the same token, queued for the pane host against the surfaces this pass rewrote), two consoles divide a screen with the first rebuilt at its new half and the survivor of a close grown back to fill it, a bridge nobody rearranged opens and closes nothing forever, a replugged monitor takes its console back on an explicit press, and a host with no pane bus declines rather than opening a black window; plus the #1330 tripwire split into its two halves — an unplug with no console on that screen closes no pane, and an unplug of a screen holding a runtime console closes exactly it. **#1331 fix round:** a surface is dropped only when the LAW stops naming its monitor — an unplug plus a lobby press inside the settle window leaves the console alone until the reconcile unseats it, and then closes it with one Disconnected; a frame reporting no monitors at all closes nothing; a re-seat afterwards gets a real slot and a queued view; an unplug of the screen an AUTHORED console has left does not touch it (the same handle, the same token, nobody disconnected); and the seat reconciler — a healthy console is never touched, a console with nowhere to be built is rebuilt on its own identity exactly MAX_RECREATIONS_PER_WINDOW times and then has its seat given back with a notice the row renders, and an injected view failure serviced through #1125's own fault path ends on an honest Backfill. **#1332:** a station seated beside a hand-authored `--pane` console TILES with it on the one Station window each takes half of, rather than covering it; the authored pane is rebuilt at its new half on its own session token; the console nobody asked to move earns a `ConsoleRetiling` notice on the row and the one the operator moved between screens earns none; moving a console off a shared screen regrows the survivor to the whole of it, keeps its token and un-greys the vacated slot; and the notice settles rather than rebuilding a console once a frame for the rest of the run. **#1332 fix round:** a pure boot frame draws the authored arrangement and re-tiles **nothing** — `[helm, Ada]` boots helm-left and stays there with the row owed no notice and the participant's own pane handle untouched, `[Ada, helm]` boots the other way round, and an authored `stacked` screen boots stacked and is not re-carved; a console rebuilt because its display renegotiated its resolution is told the screen changed **size**, not that the split changed; and the settled re-tile is exactly one notice, not "at most one" **#1333:** the placement rule asked of a *real* running bridge, every case handed a tempting primary-window tile under the console's own name — a crashed seated console is rebuilt on its own Station window on the same token with exactly one view queued; a crash landing in a move's gap leaves one open pane, one buildable view and the same token, on the screen it moved to; a seated console with no slot is `Nowhere(SeatedButUnplaced)` and is then repaired-or-surrendered rather than tiled; the one-frame interleaving that would strand it (the reconciler rebuilds and resets its strike counter, the drain finds no slot, the slot returns and the health check reads healthy over a black screen) ends in a retry rather than in that stuck state, because the answer is faulted rather than dropped; every hop of a bounded flap goes back to the same screen and the give-up surrenders the seat; an unplug queues *no* view at all and an operator's row press puts the console back on the replugged monitor; and a legacy tiled `--pane` still rebuilds on its own tile across the crash path |
@@ -1964,13 +2174,16 @@ its phones load the same public page the operator is on.
 | `src/delivery/args.rs` | `--setup` is a standalone diagnostic needing no world and refuses every simulation/crew flag (`--world`, `--ship`, `--seed`, `--solo`, `--pane`, `--log`, `--log-entity`, `--rendezvous`, `--origin`) rather than silently discarding them; `--profile` applies with a world or validates with `--setup`, and is refused alone |
 | `src/boot/tests.rs` | Four-profile parity; only the render-stack profiles take that path; a native host refuses a configless boot, including a hull declared only by a static child |
 | `src/native_host/transport.rs` | The seam's ingress/egress and the reserved-token refusal |
+| `src/native_host/join_codes.rs` | The authored table read in Rust (#1353): the shipped `assets/join/join-codes.toml` loads and a table from another `format_version` is refused rather than half-read; canonicalisation folds exactly what `gui/join-code.js` folds (`0`→`O`, `1`→`I`, `L`→`I`, `J` untouched, punctuation dropped); a denied word is refused in every confusable spelling and the mint never draws one however hard a scripted draw insists; a minted code is one the client's own parser would accept; the full form and the bare suffix resolve to the same record; and the registry's three typed failures stay three answers |
+| `src/native_host/direct_join_tests.rs` | The in-process rendezvous's protocol half, with no sockets (#1353): the `ready` that makes a host register and the `hosted` that carries the code this process minted; a joiner told the host answers only on the relay; the worker's own refusals (`unknown`, `unsupported-protocol` and its cut, `too-many-attempts`, `not-joined`, `not-relaying`, `relay-too-large`, `malformed`); the host told about an attachment *before* the joiner is; a game frame each way; the class contract (snapshot latest-wins at the authored depth, reliable ordered and its overflow ending the session, reliable draining first); `no-peer` as one refusal rather than a lost crew; an eviction stated in band before detaching; and the peer-id prefix that keeps two legs' namespaces apart |
+| `tests/native_direct_join.rs` | A real `tungstenite` client through a real bound host, **not** `#[ignore]`d because it needs no service (#1353): dial, code, relay attach, stamp verdict, `Identify` on the inbound bus, both delivery classes back down, and a socket dying as exactly one `Disconnected`; the reserved-token refusal at this ingress; a build the stamp check refuses; the code and protocol-version answers; and the accept-loop robustness — a plain `GET /v1/join` (426), an upgrade with no key or an old version (400), bundle delivery untouched and a real joiner still getting in afterwards |
 | `tests/native_host_sim.rs` | Shipped content boots and runs; the hull's own config reaches the client config; an uncached `--ship` is refused; a curating manifest narrows the default hull; a participant joins through the seam |
 | `tests/native_headless_digest.rs` | AC5's content half — native↔headless digest equivalence, both apps on a pinned single-threaded pool. **Scope:** the default run is `NativeRenderSurface::Contract`, so it covers the `render: true` *simulation* plugins and not the wgpu stack; the `#[ignore]`d `Offscreen` companion in the same file covers that on a real GPU |
 | `tests/native_host_snapshot.rs` | AC5's snapshot half — a native-host capture restores into a fresh native host at the same digest, and the duel continues byte-identically for 120 frames (Combat Test's continuation bound is the payload gap `tests/snapshot_resume.rs` measured, not a native one) |
 | `tests/native_viewscreen_render.rs` | The viewscreen draws a scene — not one flat colour, and lit — over the **middle 40%** of a real-GPU frame, so a live HUD over a dead 3-D scene cannot pass. `#[ignore]`d: CI is ubuntu-only with no display |
 | `tests/native_host.rs` | The delivery half, unchanged, plus the serving loop's shutdown path (polled to a deadline, so a stuck loop fails rather than wedging the run) |
 | `src/native_host/panes/*` | Identity's three refusals, the projection boundary, the outbound cap's reliable/snapshot split, the document assembly (against the repository's own `client.html`, not only a stub), the identity's absence from the served body, the wildcard-bind normalisation, and the per-frame loop's push budget and deferral of a failed push. **#1333:** `placement::home_for_pane`'s four-step rule — a live Station slot beats a stored tile, a console the law seats is `Nowhere(SeatedButUnplaced)` rather than tiled, a legacy tile still tiles, an authored participant's slot is a Station home like any other, a host with no display adapter still tiles, an unknown name is refused, and a station whose seat was surrendered may take a tile again — plus the retry decision per `Nowhere` reason, since a pending view is already drained when it is made: a seated console is faulted so something retries it, and a pane with no home at all (including the authored participant's console whose slot went away) is left as it is. All feature-**off**, so the ordinary `cargo test` CI runs them |
-| `src/delivery/serve.rs` | A hosted document is served to a loopback peer and to nothing else, while the bundle and the version-pin endpoints stay LAN-open; `peer_origin` classifies IPv4, IPv6, IPv4-mapped and "the OS would not say" |
+| `src/delivery/serve.rs` | A hosted document is served to a loopback peer and to nothing else, while the bundle and the version-pin endpoints stay LAN-open; `peer_origin` classifies IPv4, IPv6, IPv4-mapped and "the OS would not say". **#1353:** `websocket_upgrade` — a well-formed upgrade on a claimed path hands its key over, an `Upgrade` header on any other path is still just a file request, a plain `GET` of the join endpoint gets the worker's own 426, each malformed shape (no `Connection: upgrade`, version 8, no key, a short key, a POST) is a clean 400, and the header tokens are read the way browsers actually write them (`keep-alive, Upgrade`, mixed case) |
 | `tests/client/pane-scripts.test.js` | The two injected scripts, in jsdom, **driven through the real seam**: the boot script reads the identity out of the fragment, leaves a fragment `joinRouteFromLocation`/`parseJoinCode` accept (the literal is read out of `document.rs`, so the cross-language pin is checked), and caps the page's inbox; then the repository's own `createRendezvousJoiner` is run over the link's factories and asserted to produce the host-minted `Identify` on the page→host queue, to keep `JoinHandshake` off it, and to hand `onData` a `localiseTree`d message |
 | `tests/native_host_panes.rs` | A pane joins/claims/readies through the ordinary contracts; it is admitted for its own Station and refused another's by the real policy; it cannot read another pane's projection; a pane and a transport participant hold different Stations on the same running ship; a closed pane hands the lobby the disconnect a dropped phone would; and a pane's identity is in its URL, its document unenumerable, LAN-refused, and withdrawn on close. **#1125:** on a running ship, a view crash flips the seat to Backfill through the ordinary session path; no surviving pane inherits the failed pane's projection; recreating the pane reconnects on the same token and restores its held station out of Backfill with a Welcome; and a lost Station display disconnects its pane without recreating it |
 | `src/native_host/input_routing.rs` + `input_routing_tests.rs` | The pure input-routing model (issue #1124): coordinate transforms at scale 1.0/1.5/2.0 and at a non-zero monitor origin, the pane-boundary hit test (the shared seam belongs to one pane; side-by-side and stacked splits), mouse traversal across a boundary, per-window isolation, keyboard-focus cycling and the closed-focused-pane clear, seeded focus landing on the first *pane* (a lobby-surface-only ring seeds nothing, a mixed ring skips the surface at either end, and the surface is still reachable by Ctrl+Tab), and touch contact capture (pinned through drift, per-screen independence, duplicate-Started ignored, a closing pane releasing its contacts). All feature-agnostic, run by the ordinary `cargo test` |

@@ -640,7 +640,7 @@ fn the_native_lobby_renders_the_web_hosts_own_lobby_over_the_bridge() {
         )
         .as_deref(),
         Some("ABCDE"),
-        "…and the five letters beside it, for a camera that will not focus"
+        "…and the the code beside it, for a camera that will not focus"
     );
     assert_eq!(
         probe(

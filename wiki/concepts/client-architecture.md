@@ -8,7 +8,7 @@ updated: 2026-09-02
 
 ## Summary
 
-The client (`client.html`) is **pure HTML/CSS/JS — no WASM or Bevy**. It connects to the host over the Phoenix transport (a typed five-letter join code resolved through the rendezvous service, then two WebRTC DataChannels), folds `ServerMessage`s into a plain JS state object, and renders each console as a standalone HTML iframe. All logic lives in pure, Vitest-tested modules under `gui/`; `client.html` itself is thin wiring.
+The client (`client.html`) is **pure HTML/CSS/JS — no WASM or Bevy**. It connects to the host over the Phoenix transport (a typed join code resolved through the rendezvous service, then two WebRTC DataChannels), folds `ServerMessage`s into a plain JS state object, and renders each console as a standalone HTML iframe. All logic lives in pure, Vitest-tested modules under `gui/`; `client.html` itself is thin wiring.
 
 ## Data flow
 

@@ -188,7 +188,7 @@ impl RelayNotices {
 /// the host binary's own operator log beside the join code it prints.
 #[derive(Clone, Debug, PartialEq)]
 pub enum RelayNotice {
-    /// The service issued a join code. The five letters go on the viewscreen.
+    /// The service issued a join code. The code goes on the viewscreen.
     Coded(JoinCode),
     /// A joiner was refused by the compatibility handshake.
     Refused { peer: String, code: String },
@@ -221,6 +221,19 @@ impl RelayTransport {
     /// reads the issued join code and every fault out of.
     pub fn notices(&self) -> RelayNotices {
         self.notices.clone()
+    }
+
+    /// Report into `notices` rather than into this transport's own queue
+    /// (issue #1353).
+    ///
+    /// A host can now hold TWO of these — the cloud relay and the in-process
+    /// direct-accept service — while `NativeTransportLink` is one resource and
+    /// `RelayNotices` is one resource. That is not an accident of Bevy: the
+    /// queue is a channel to the OPERATOR, and there is one operator with one
+    /// terminal. Call this on the second leg, right after building it, so both
+    /// legs' codes, refusals and faults arrive in the order they happened.
+    pub fn share_notices(&mut self, notices: RelayNotices) {
+        self.notices = notices;
     }
 
     /// The join code the service issued, if it has yet.
@@ -447,7 +460,7 @@ impl RelayTransport {
                 // Only an ISSUED code, never a typed one: `code` carries both
                 // shapes on the wire (see `CodeField`), and a host that read a
                 // client's typed string as its own issued identifier would put
-                // somebody else's five letters on its viewscreen.
+                // somebody else's code on its viewscreen.
                 if let Some(code) = frame.code.as_ref().and_then(|c| c.issued()).cloned() {
                     self.code = Some(code.clone());
                     self.notices.push(RelayNotice::Coded(code));

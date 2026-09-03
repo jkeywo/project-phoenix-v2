@@ -127,7 +127,7 @@
   <!-- ICE/TURN server list, relay probe and the connect/backoff schedules the
        transport is tuned by (issues #603, #1226). -->
   <script type="module" src="gui/connection-manager.js"></script>
-  <!-- Typed five-letter join codes and the Phoenix crew transport (issues
+  <!-- Typed join codes and the Phoenix crew transport (issues
        #1111/#1112). THE route: every join goes through the rendezvous service,
        whether the code was typed, pasted or opened from a QR link. -->
   <script type="module" src="gui/join-code.js"></script>
@@ -204,7 +204,7 @@
     #gamepad-input-alert[hidden] { display: none; }
     /* Typed join entry (issue #1111). Shown only when this page was opened
        with no host in its fragment — the case that until now was a dead end
-       reading "no host id in URL". The field takes either the five letters
+       reading "no host id in URL". The field takes either the code
        read off the viewscreen or a whole pasted PROJECT_VERSION_CODE. */
     #join-entry { position: fixed; inset: 0; z-index: 30; display: none;
       flex-direction: column; align-items: center; justify-content: center; gap: 0.9rem;
@@ -1311,7 +1311,7 @@
 
   <!-- Typed join entry (issue #1111). Hidden while a join from the fragment is
        in flight; shown when there is nothing to join with, or when an attempt
-       came back with a reason. One field takes either the five letters a guest
+       came back with a reason. One field takes either the code a guest
        reads off the viewscreen or a whole pasted/QR'd PROJECT_VERSION_CODE —
        gui/join-code.js decides which it is, so there is no second control and
        no wrong box to type into. -->
@@ -1321,7 +1321,7 @@
            autocorrect="off" spellcheck="false" maxlength="96"
            data-i18n-attr="placeholder:client.join.code_placeholder,aria-label:client.join.code_label" />
     <button id="join-submit-btn" data-i18n="client.join.submit">Join</button>
-    <div id="join-entry-hint" data-i18n="client.join.hint">Five letters from the viewscreen.</div>
+    <div id="join-entry-hint" data-i18n="client.join.hint">Eight letters from the viewscreen.</div>
     <div id="join-entry-error"></div>
   </div>
 
@@ -3386,7 +3386,7 @@
       // tests/client/rendezvous-transport.test.js), not two ifs here:
       //   'rendezvous'  something in the fragment — a QR link, a pasted full
       //                 code, or a stale bookmark: join with it straight away
-      //   'entry'       nothing in the fragment: ask for the five letters
+      //   'entry'       nothing in the fragment: ask for the code
       // There is no third route since #1112 retired PeerJS, and no route flag:
       // a fragment that is not a valid code still comes here and gets a stated
       // reason in front of the entry field, because gui/join-code.js is the one
@@ -3742,7 +3742,7 @@
     // attempt() is only ever a NEW code being tried. Keeping an accepted link
     // alive across a dropped radio is the joiner's own job — it re-resolves the
     // same code on a backoff and re-sends Identify with the same session token
-    // (#1112 AC3) — so nothing here re-asks for five letters the guest already
+    // (#1112 AC3) — so nothing here re-asks for the code the guest already
     // typed.
     async function startPhoenixJoin(route, connectOptions) {
       const codes = window.joinCode;
@@ -3779,7 +3779,7 @@
       const submit = document.getElementById('join-submit-btn');
       const errorEl = document.getElementById('join-entry-error');
       let lastTyped = '';
-      // The joiner from the attempt in flight, if any. Mistyping five letters
+      // The joiner from the attempt in flight, if any. Mistyping the code
       // and retrying is the ordinary path through this screen, so each attempt
       // has to close the one before it: an orphaned joiner keeps its socket,
       // its registry connection and its RTCPeerConnection, and stays wired to

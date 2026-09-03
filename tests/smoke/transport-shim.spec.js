@@ -116,7 +116,7 @@ async function linkedPair(context) {
 }
 
 test.describe('phoenix transport shim', () => {
-  test('the host is issued a five-letter code in the client namespace', async ({ context }) => {
+  test('the host is issued a typed code in the client namespace', async ({ context }) => {
     const hostPage = await blankPage(context, 'shim-code');
     const code = await hostOn(hostPage);
     expect(code.suffix).toMatch(/^[A-Z]{5}$/);

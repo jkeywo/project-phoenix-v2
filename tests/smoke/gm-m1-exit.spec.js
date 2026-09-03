@@ -203,6 +203,15 @@ const REQUIRED_FEED_CATEGORIES = [
   'gm_action',
 ];
 
+// The crew join code's authored shape (issue #1353): its length and alphabet
+// come from assets/join/join-codes.json, the same table the host mints from, so
+// this wait cannot drift from the designer's table the way a pinned "five
+// letters" did. Kept as a regex SOURCE because it crosses into the page.
+const JOIN_CODE_SUFFIX = JSON.parse(
+  fs.readFileSync(path.resolve(__dirname, '../../assets/join/join-codes.json'), 'utf8'),
+).suffix;
+const JOIN_CODE_RE_SOURCE = `^[${JOIN_CODE_SUFFIX.alphabet}]{${JOIN_CODE_SUFFIX.length}}$`;
+
 async function installScenario(context) {
   await context.route('**/assets/worlds/default.toml', (route) =>
     route.fulfill({ contentType: 'text/plain', body: GM_M1_WORLD }));
@@ -223,8 +232,8 @@ async function bootHost(context) {
   await page.goto('/?scenario=assets/worlds/default.toml');
   await waitForWasmReady(page);
   await page.waitForFunction(
-    () => /^[A-Z]{5}$/.test(document.getElementById('join-code')?.textContent ?? ''),
-    undefined,
+    (source) => new RegExp(source).test(document.getElementById('join-code')?.textContent ?? ''),
+    JOIN_CODE_RE_SOURCE,
     { timeout: 30_000 },
   );
   return page;
@@ -269,8 +278,8 @@ async function openFleet(page) {
   await openFleetTab(page);
   await page.click('[data-control="fleet-open"]');
   await page.waitForFunction(
-    () => /^[A-Z]{5}$/.test(document.getElementById('fleet-code')?.textContent ?? ''),
-    undefined,
+    (source) => new RegExp(source).test(document.getElementById('fleet-code')?.textContent ?? ''),
+    JOIN_CODE_RE_SOURCE,
     { timeout: 30_000 },
   );
   const code = await page.locator('#fleet-code').textContent();

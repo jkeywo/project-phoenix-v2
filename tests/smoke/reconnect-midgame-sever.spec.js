@@ -20,7 +20,7 @@
 // pair, and the instrumented link is `window.phoenixLink` rather than
 // `window.connectionManager`. What is being proved is the #1112 reconnect AC
 // almost word for word — same code, same session token, station and projection
-// restored, and no five letters typed a second time.
+// restored, and no code typed a second time.
 
 import { test, expect, readHostPeerId, createServerPage } from './fixtures';
 

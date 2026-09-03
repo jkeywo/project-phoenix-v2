@@ -89,9 +89,9 @@ nothing else will and the problem is not the network.
 **Setup.** Host laptop and two phones on the same Wi-Fi.
 
 **Steps.**
-1. Open the host page and wait for the five-letter code.
+1. Open the host page and wait for the typed code.
 2. On phone A, scan the QR.
-3. On phone B, type the five letters instead.
+3. On phone B, type the code instead.
 4. Claim a station on each and start a mission.
 
 **The diagnostics must show.**
@@ -162,7 +162,7 @@ anyone noticing — until the one session where it is the only path.
    `https://pp-dev.kiwigamedesign.co.uk/?forceRelay=1`
 2. Join a phone with the same lever. Either append it to the QR link's query —
    `…/client/index.html?forceRelay=1#<code>` — or open
-   `…/client/?forceRelay=1` and type the five letters.
+   `…/client/?forceRelay=1` and type the code.
 3. Claim a station.
 
 **Why both ends.** ICE only negotiates a relayed pair when **both** ends offer
@@ -286,9 +286,9 @@ npx serve dist -p 3000
 
 The native host prints `phoenix-host: crew join code XXXXX (full: …)` at
 startup — it has no viewscreen panel to paint them on, so the terminal is where
-the five letters live. Open
+the code lives. Open
 `http://localhost:3000/client/?rendezvous=http://localhost:8788` and type those
-five letters. (`?rendezvous=` is honoured for loopback origins only, which is
+the code. (`?rendezvous=` is honoured for loopback origins only, which is
 what makes it safe to ship.) The phone should reach a console **without waiting
 out the direct ladder at all** — a native host advertises that the relay is the
 only way in, and the joiner skips straight to it.

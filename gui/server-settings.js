@@ -730,7 +730,7 @@ export function mountServerSettings(opts = {}) {
 
   /**
    * The crew join-code readout + rotate lever (issue #1115) — this ship's
-   * OWN five-letter code, mirrored from the viewscreen overlay onto the cog
+   * OWN typed code, mirrored from the viewscreen overlay onto the cog
    * so the operator can regenerate it without hunting for the QR panel.
    *
    * Built once and painted from `refresh()`, same discipline as the fleet
@@ -835,7 +835,7 @@ export function mountServerSettings(opts = {}) {
     });
     openRow.appendChild(controls.fleet.open);
 
-    // The typed route. A ship host reads five letters off another viewscreen
+    // The typed route. A ship host reads the code off another viewscreen
     // exactly as a phone does; the QR on that panel is the same code by camera.
     //
     // No `maxLength` literal. The OTHER route through this one field is a paste

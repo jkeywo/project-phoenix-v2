@@ -133,7 +133,7 @@ describe('drawing an invitation', () => {
     expect(document.getElementById('qr').style.display).toBe('block');
   });
 
-  it('shows the five letters a guest types instead of scanning', () => {
+  it('shows the code a guest types instead of scanning', () => {
     drawJoinQr(document, INVITE, recordingEncoder());
     expect(document.getElementById('join-code').textContent).toBe('ABCDE');
     expect(document.getElementById('join-code-row').style.display).toBe('');

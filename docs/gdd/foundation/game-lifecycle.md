@@ -72,7 +72,7 @@ Startup failures should name the failed stage and offer a useful recovery action
 
 ### Human-readable join codes
 
-T1 replaces raw PeerJS routing identifiers with typed human-readable codes. Client and server joining use separate project GUIDs, a shared compatible-release version GUID and separate five-letter suffixes. Ordinary players enter only the suffix or scan a QR code; the full `PROJECT_GUID_VERSION_GUID_CODE` form supports copying and diagnostics. Each ship host issues a private client code which no other host or simulation state sees. One privileged server code admits and recovers hosts in a multi-ship session.
+T1 replaces raw PeerJS routing identifiers with typed human-readable codes. Client and server joining use separate project GUIDs, a shared compatible-release version GUID and separate typed suffixes. Ordinary players enter only the suffix or scan a QR code; the full `PROJECT_GUID_VERSION_GUID_CODE` form supports copying and diagnostics. Each ship host issues a private client code which no other host or simulation state sees. One privileged server code admits and recovers hosts in a multi-ship session.
 
 The rendezvous layer distinguishes unknown, wrong-type and version-mismatched codes before transport setup. The eventual host handshake still refuses incompatible protocol/content stamps authoritatively. Codes survive reconnects and mission transitions. Rotation is explicit and restricted to periods when no mission is running.
 

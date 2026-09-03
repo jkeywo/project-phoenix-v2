@@ -618,15 +618,73 @@ fn main() {
     }
     app.add_systems(bevy::prelude::Update, report_save_outcomes);
 
-    // The crew path (issue #1113), and the answer to #1121's deferred "browser
-    // clients cannot join a native host": one outbound WebSocket to the
-    // rendezvous service, over which the service carries the game itself.
+    // ── The crew paths ───────────────────────────────────────────────────────
     //
+    // Two legs now, and a host may run either, both or neither:
+    //
+    //   direct  (issue #1353) crew reach this process on its OWN delivery port.
+    //           No flag, no service, no internet: a phone loads the bundle from
+    //           this host and opens its game socket back to the same origin.
+    //   cloud   (issue #1113) `--rendezvous`, one outbound socket to the shared
+    //           service, for play beyond one LAN.
+    //
+    // Both are `RelayTransport`s over the same frame vocabulary — the direct
+    // leg's "socket" is `native_host::direct_join`, this process standing in for
+    // the service — so everything about admission, projection and the delivery
+    // classes is the same code on both, and a phone cannot tell them apart.
+    let mut legs: Vec<Box<dyn project_phoenix::native_host::transport::NativeTransport>> =
+        Vec::new();
+    let mut relay_notices: Option<native_host::relay_transport::RelayNotices> = None;
+    let mut direct_code: Option<project_phoenix::core::rendezvous::JoinCode> = None;
+
+    // Direct accept is on whenever this host is BOTH serving a client bundle
+    // and expecting a crew. The bundle is the load-bearing half: the client
+    // rule is that a page dials the origin that served it
+    // (`gui/join-url.js`), so a host serving no page has nobody to be dialled
+    // BY — a phone would be reading the deployed bundle, which dials the cloud
+    // service. `--solo` is the other half, and it means what it has always
+    // meant: every station on Backfill, nobody joining.
+    if !sim.solo {
+        if let ClientSource::Bundled { .. } = &args.client {
+            let table_path =
+                std::path::Path::new(&bound.content_dir).join("assets/join/join-codes.toml");
+            match native_host::join_codes::JoinCodeTable::read(&table_path)
+                .and_then(native_host::direct_join::DirectJoinService::open)
+            {
+                Ok((service, code)) => {
+                    // The gate before the service moves into its transport: one
+                    // is the door on the delivery listener, the other is the
+                    // wire the simulation talks over, and they share a record.
+                    let gate = service.gate();
+                    let transport = native_host::relay_transport::RelayTransport::new(
+                        service,
+                        native_host::relay_transport::RelayHostConfig {
+                            namespace: "client".to_string(),
+                            version: None,
+                            stamp: content.manifest.stamp.clone(),
+                        },
+                    );
+                    relay_notices = Some(transport.notices());
+                    server.on_upgrade(std::sync::Arc::new(gate));
+                    legs.push(Box::new(transport));
+                    eprintln!(
+                        "phoenix-host: crew join code {} — phones join this host directly, no \
+                         service needed (full: {})",
+                        code.suffix, code.full
+                    );
+                    direct_code = Some(code);
+                }
+                Err(e) => eprintln!(
+                    "phoenix-host: LAN joining is off — {e}. Phones can still load the bundle; \
+                     pass --rendezvous <URL> --origin <URL> to take crew over the cloud service."
+                ),
+            }
+        }
+    }
+
     // Installed as a resource into the seam `NativeTransportPlugin` already
     // registered — an `insert_resource`, exactly as
-    // `native_host::transport`'s doc comment promised it would be. A host given
-    // no `--rendezvous` inserts nothing and runs exactly as it did before, which
-    // is what `--solo` is for.
+    // `native_host::transport`'s doc comment promised it would be.
     if let Some(base) = sim.rendezvous.as_deref() {
         let origin = sim
             .origin
@@ -634,7 +692,7 @@ fn main() {
             .expect("parse_args refuses --rendezvous without --origin");
         match native_host::relay_socket::WsRelaySocket::connect(base, origin) {
             Ok(socket) => {
-                let transport = native_host::relay_transport::RelayTransport::new(
+                let mut transport = native_host::relay_transport::RelayTransport::new(
                     socket,
                     native_host::relay_transport::RelayHostConfig {
                         namespace: "client".to_string(),
@@ -642,28 +700,13 @@ fn main() {
                         stamp: content.manifest.stamp.clone(),
                     },
                 );
-                app.insert_resource(transport.notices());
-                // PAIRED with the pane bus when there is one, never inserted on
-                // top of it. `NativeTransportLink` is one resource, so a plain
-                // insert here replaced the bus `build_native_host_app` had
-                // already installed — which left every local console on a host
-                // that crew could also join talking to nothing. `PairedTransport`
-                // is what that type exists for: poll the panes then the relay,
-                // dispatch to both, and let each decide whether the `Target`
-                // names anyone it knows.
-                let link = match &pane_bus {
-                    Some(bus) => project_phoenix::native_host::transport::NativeTransportLink::new(
-                        project_phoenix::native_host::transport::PairedTransport::new(
-                            bus.transport(),
-                            transport,
-                        ),
-                    ),
-                    None => {
-                        project_phoenix::native_host::transport::NativeTransportLink::new(transport)
-                    }
-                };
-                app.insert_resource(link);
-                app.add_systems(bevy::prelude::Update, report_relay_notices);
+                // One notice queue however many legs there are: it is a channel
+                // to the OPERATOR, and there is one operator with one terminal.
+                match &relay_notices {
+                    Some(shared) => transport.share_notices(shared.clone()),
+                    None => relay_notices = Some(transport.notices()),
+                }
+                legs.push(Box::new(transport));
                 eprintln!("phoenix-host: registering with {base} as {origin}");
             }
             Err(e) => {
@@ -674,29 +717,69 @@ fn main() {
                 std::process::exit(1);
             }
         }
-    } else if !sim.solo {
+    } else if !sim.solo && direct_code.is_none() {
         eprintln!(
-            "phoenix-host: no --rendezvous, so nobody can join this host — it will wait in the \
-             lobby forever. Pass --rendezvous <URL> --origin <URL> for a crew, or --solo \
-             to start with every station on Backfill."
+            "phoenix-host: nobody can join this host — it will wait in the lobby forever. Serve \
+             a client bundle with --client-dir <DIR> for LAN joins, pass --rendezvous <URL> \
+             --origin <URL> to take crew over the cloud service, or --solo to start with every \
+             station on Backfill."
         );
+    }
+
+    // Whatever legs there are, driven as one transport (issue #1122's
+    // `PairedTransport`, folded). PAIRED with the pane bus when there is one,
+    // never inserted on top of it: `NativeTransportLink` is one resource, so a
+    // plain insert would replace the bus `build_native_host_app` installed and
+    // leave every local console on a joinable host talking to nothing.
+    if !legs.is_empty() {
+        use project_phoenix::native_host::transport::{
+            NativeTransport, NativeTransportLink, PairedTransport,
+        };
+        let mut composed: Option<Box<dyn NativeTransport>> = pane_bus
+            .as_ref()
+            .map(|bus| Box::new(bus.transport()) as Box<dyn NativeTransport>);
+        for leg in legs {
+            composed = Some(match composed {
+                Some(existing) => Box::new(PairedTransport::new(existing, leg)),
+                None => leg,
+            });
+        }
+        if let Some(composed) = composed {
+            app.insert_resource(NativeTransportLink(composed));
+        }
+        if let Some(notices) = &relay_notices {
+            app.insert_resource(notices.clone());
+            app.add_systems(bevy::prelude::Update, report_relay_notices);
+        }
     }
 
     // The viewscreen's join panel (issue #1329). Here rather than beside the
     // surface itself, because half of what an invitation needs — which service
     // this host registered with — is only known once the block above has run.
     if let Some(lobby) = &host_lobby {
-        app.insert_resource(native_host::host_lobby::HostLobbyJoinResource::from_lobby(
+        let mut join = native_host::host_lobby::HostLobbyJoinResource::from_lobby(
             lobby,
             sim.rendezvous.as_deref(),
-        ));
-        if sim.rendezvous.is_none() {
-            // `--solo`, or no `--rendezvous` at all: there will never be a code.
-            // Said on the viewscreen in words, because a framed empty QR would
-            // have a crew stand in front of it scanning something that cannot
-            // work, and would look identical to a code that has not arrived yet.
+        );
+        if let Some(code) = &direct_code {
+            join = join.with_direct_code(code.clone());
+        }
+        app.insert_resource(join.clone());
+        if let Some(code) = &direct_code {
+            // Direct accept (issue #1353): the code exists at bind, so the QR
+            // goes up now rather than waiting on a service to answer. It is
+            // also the ONLY code this panel will show — see
+            // `HostLobbyJoinResource::direct`.
+            lobby.publish_join(&join.invite(code));
+        } else if sim.rendezvous.is_none() {
+            // No ingress at all: `--solo`, or a host serving no bundle and given
+            // no `--rendezvous`. There will never be a code, and that is said on
+            // the viewscreen in words — a framed empty QR would have a crew
+            // stand in front of it scanning something that cannot work, and
+            // would look identical to a code that has not arrived yet.
             lobby.publish_join(&native_host::host_lobby::JoinInvite::Off);
-        } else {
+        }
+        if direct_code.is_some() || sim.rendezvous.is_some() {
             eprintln!(
                 "phoenix-host: the join QR is on the viewscreen, pointing phones at {}",
                 lobby.join_base
@@ -718,22 +801,33 @@ fn main() {
                      --addr <ip>:<port> if this machine has one."
                 );
             }
-            // WHICH SERVICE it names: the client's `?rendezvous=` gate reads the
-            // parameter's own host, so a non-loopback override is swapped for
-            // the built-in service on arrival. The QR still scans, the phone
-            // still joins something, and it is not this host. Saying so is all
-            // this slice does — the gate itself is #1112's security posture and
-            // a follow-up issue's to revisit.
-            if sim.rendezvous.as_deref().is_some_and(|base| {
-                native_host::host_lobby::phone_rendezvous(base)
-                    == native_host::host_lobby::PhoneRendezvous::SilentlyIgnored
-            }) {
+            // WHICH SERVICE it names. With direct accept live there is no
+            // question left: the QR carries no service at all, and the page it
+            // opens dials the origin that served it — this host. The warning
+            // below is for the remaining CLOUD-ONLY case, where the client's
+            // `?rendezvous=` gate reads the parameter's own host and silently
+            // swaps a non-loopback override for the built-in service, so the
+            // phone joins something and it is not this host.
+            if direct_code.is_none()
+                && sim.rendezvous.as_deref().is_some_and(|base| {
+                    native_host::host_lobby::phone_rendezvous(base)
+                        == native_host::host_lobby::PhoneRendezvous::SilentlyIgnored
+                })
+            {
                 eprintln!(
                     "phoenix-host: …but a scanning phone will IGNORE the --rendezvous service in \
                      that QR and dial the client bundle's built-in one ({}) instead, so it will \
-                     not find this host. Use the built-in service, or reach this host from a \
-                     browser on this machine. A follow-up issue tracks the gate itself.",
+                     not find this host. Serve the bundle with --client-dir for direct LAN \
+                     joining, or use the built-in service.",
                     native_host::host_lobby::CLIENT_DEFAULT_RENDEZVOUS
+                );
+            }
+            if direct_code.is_some() && sim.rendezvous.is_some() {
+                eprintln!(
+                    "phoenix-host: …with the LAN code, not the cloud one: the QR carries the page \
+                     as well as the code, and a phone that loads the page from this host dials \
+                     this host. The cloud service's own code is printed above for anybody joining \
+                     from outside the LAN."
                 );
             }
         }
@@ -974,7 +1068,7 @@ fn describe_manual_save_refusal(
 ///
 /// A Bevy system rather than a callback because the transport is a resource the
 /// scheduler owns, and because the code has to reach the operator's terminal on
-/// the frame the service issues it: the five letters are how anybody joins, and
+/// the frame the service issues it: the code is how anybody joins, and
 /// a native host has no viewscreen panel to paint them on.
 #[cfg(not(target_arch = "wasm32"))]
 fn report_relay_notices(
@@ -1010,8 +1104,15 @@ fn report_relay_notices(
                 // a reclaim usually returns the very same letters, and blanking
                 // the wall for a reconnection that succeeds seconds later costs
                 // the room more than it tells them.
+                //
+                // …unless the QR belongs to the other leg. A host running both
+                // direct accept and `--rendezvous` is issued two codes, and
+                // only the one a page served BY this host can resolve may go on
+                // the wall (issue #1353).
                 if let (Some(join), Some(lobby)) = (&join, &lobby) {
-                    lobby.0.push_join(join.invite(&code).to_json());
+                    if let Some(invite) = join.viewscreen_invite(&code) {
+                        lobby.0.push_join(invite.to_json());
+                    }
                 }
             }
             RelayNotice::Refused { peer, code } => {

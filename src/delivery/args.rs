@@ -238,7 +238,7 @@ CREW (issue #1113)
     --rendezvous <URL>    Register with this rendezvous service so browser
                           clients can join, e.g.
                           https://phoenix-rendezvous.project-phoenix.workers.dev
-                          The five-letter code the service issues is printed at
+                          The typed code the service issues is printed at
                           startup. A native host has no WebRTC, so every crew
                           member is carried over the service's WebSocket game
                           relay; it registers saying so, and joiners skip the

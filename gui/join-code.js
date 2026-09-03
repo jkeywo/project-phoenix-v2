@@ -3,12 +3,12 @@
  *
  * A Phoenix join identifier is `PROJECT_GUID_VERSION_GUID_CODE`:
  *
- *     2f6b0a11-9c4e-4d7a-8f31-5b90c2d47e18_5c0a3e91-…-9e61af07c25b_QUART
+ *     2f6b0a11-9c4e-4d7a-8f31-5b90c2d47e18_5c0a3e91-…-9e61af07c25b_QUARKING
  *     └── project (which KIND of join) ──┘ └── compatible release ──┘ └ typed
  *
- * Normal entry types only the five-letter suffix; the page supplies its own
- * project and version GUIDs from local context. The full form exists for
- * pasting, QR fragments, diagnostics and launchers.
+ * Normal entry types only the suffix; the page supplies its own project and
+ * version GUIDs from local context. The full form exists for pasting, QR
+ * fragments, diagnostics and launchers.
  *
  * Everything here is pure — no DOM, no network, no transport — so the same
  * functions run in the phone, in the host page, in the Cloudflare rendezvous
@@ -134,14 +134,35 @@ export function deniedSuffixes(data) {
   for (const entry of d.deny || []) {
     const word = typeof entry === 'string' ? entry : entry && entry.word;
     if (!word) continue;
-    out.add(canonicaliseSuffix(word, d));
+    const canonical = canonicaliseSuffix(word, d);
+    // An empty entry would read as "every code is denied", which is a typo in
+    // the table rather than an instruction.
+    if (canonical) out.add(canonical);
   }
   return out;
 }
 
-/** True when a canonical suffix is on the authored deny-list. */
+/**
+ * Does an already-canonical suffix READ as one of `denied`?
+ *
+ * Containment, not equality, because the suffix is longer than the words on
+ * the list: the deny-list exists so a code is never a slur or a misleading
+ * instruction, and `QRAPESVW` carries one exactly as `RAPES` used to. While the
+ * suffix was the same length as every entry the two rules coincided, so nothing
+ * an authored entry MEANS has changed — see the deny-list note in
+ * assets/join/join-codes.toml, and its Rust twin `reads_as_denied`.
+ */
+function readsAsDenied(canonical, denied) {
+  for (const word of denied) {
+    if (canonical.includes(word)) return true;
+  }
+  return false;
+}
+
+/** True when a suffix reads as one of the authored denied words. */
 export function isDenied(suffix, data) {
-  return deniedSuffixes(data).has(canonicaliseSuffix(suffix, data));
+  const d = table(data);
+  return readsAsDenied(canonicaliseSuffix(suffix, d), deniedSuffixes(d));
 }
 
 /**
@@ -159,7 +180,7 @@ export function validateSuffix(raw, data) {
   for (const ch of suffix) {
     if (!alphabet.has(ch)) return { ok: false, reason: 'charset', suffix };
   }
-  if (deniedSuffixes(d).has(suffix)) return { ok: false, reason: 'denied', suffix };
+  if (readsAsDenied(suffix, deniedSuffixes(d))) return { ok: false, reason: 'denied', suffix };
   return { ok: true, suffix };
 }
 
@@ -218,20 +239,26 @@ export function joinCodeForSuffix(raw, namespace, data) {
 
 /**
  * Is this part of a split input one of a full code's two GUID heads, rather
- * than a piece of a five-letter suffix a player punctuated?
+ * than a piece of a suffix a player punctuated?
  *
  * Deliberately looser than a GUID regex — hosts and tests do register
- * identifier-shaped versions that are not canonical GUIDs — but long enough
- * that nothing a five-letter code can be broken into ever matches it.
+ * identifier-shaped versions that are not canonical GUIDs (`release-1` is the
+ * shortest in the project, at nine characters).
+ *
+ * The floor of NINE is coupled to the authored `suffix.length`: it must stay at
+ * least one longer than a whole suffix, or the letters a player typed would
+ * themselves read as an identifier head and a punctuated code would come back
+ * `malformed`. Raising the suffix past eight means raising this, here and in
+ * the Rust twin `is_code_head`.
  */
-const CODE_HEAD = /^[0-9a-z][0-9a-z-]{7,}$/i;
+const CODE_HEAD = /^[0-9a-z][0-9a-z-]{8,}$/i;
 
 /**
  * Parse a pasted/QR'd full code, or a bare suffix.
  *
  * The SHAPE is decided before any canonicalisation, because `_` is both the
  * part separator and an authored strip character: `QU_ARK` is a player spacing
- * out five letters, while `<guid>_<guid>_QUARK` is a pasted identifier, and
+ * out a suffix, while `<guid>_<guid>_QUARKING` is a pasted identifier, and
  * splitting first would report the former as malformed. So a three-part string
  * with two identifier-shaped heads is taken at its word — including a project
  * GUID this build does not recognise (reported as `unknown-project`, never
@@ -299,7 +326,7 @@ export function mintSuffix(data, isTaken, randomInt, maxAttempts = 64) {
     for (let i = 0; i < d.suffix.length; i += 1) {
       suffix += alphabet[randomInt(alphabet.length)];
     }
-    if (denied.has(suffix)) continue;
+    if (readsAsDenied(suffix, denied)) continue;
     if (isTaken && isTaken(suffix)) continue;
     return { ok: true, suffix };
   }
@@ -314,7 +341,7 @@ export function mintSuffix(data, isTaken, randomInt, maxAttempts = 64) {
  *
  * Three sources feed it, and all three must be covered or a real refusal
  * renders as the misleading `unknown` fallback — "No ship is using that code",
- * which sends a guest back to re-type five letters that were already right:
+ * which sends a guest back to re-type a code that was already right:
  *
  *   1. this module — `validateSuffix`, `parseJoinCode`;
  *   2. the rendezvous service's `error` frames (worker-rendezvous/src/registry.js).
@@ -416,7 +443,7 @@ export const SURFACE_SERVER = 'server';
  * closed fleet is described as a closed crew list nobody was joining.
  *
  * Only the reasons whose wording DEPENDS on the surface are listed. Everything
- * else ("Enter a code first.", "A join code is five letters.") says the same
+ * else ("Enter a code first.", "A join code is eight letters.") says the same
  * true thing on either screen and falls through to the one map, so there is no
  * second copy of it to drift.
  */

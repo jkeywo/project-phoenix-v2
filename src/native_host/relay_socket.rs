@@ -11,7 +11,7 @@
 //! A rendezvous socket dies for entirely routine reasons: a Durable Object
 //! eviction, a worker redeploy, an idle timeout, a laptop's Wi-Fi blip. The
 //! browser host answers that with `lostService()` — discard the socket,
-//! re-register on a backoff, repaint the new five letters — and states why: a
+//! re-register on a backoff, repaint the new code — and states why: a
 //! host that simply stopped would be unjoinable until somebody reloaded the
 //! viewscreen. A NATIVE host has no viewscreen to reload; it is a process
 //! running an authoritative mission, and losing this socket would end every

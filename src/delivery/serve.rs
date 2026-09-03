@@ -26,6 +26,20 @@ use crate::world::manifest::{
 /// a blank line cannot make the host read forever.
 const MAX_HEAD_BYTES: usize = 8 * 1024;
 
+/// How long one connection may take to finish sending its request head.
+///
+/// [`MAX_HEAD_BYTES`] bounds how MUCH a caller may send before being cut off,
+/// and until issue #1353 nothing bounded how LONG it could take to send it: a
+/// socket that opened, sent one byte a minute and never sent a blank line held
+/// a connection thread for as long as it liked. That is the slow-loris shape,
+/// and it became worth closing when this loop grew a second door
+/// ([`ConnectionUpgrade`]) that a phone on an untrusted LAN can knock on.
+///
+/// Generous rather than tight: this is not a rate limit and a head that arrives
+/// in three TCP segments over a bad Wi-Fi link is ordinary. Not a gameplay
+/// value — it is one socket's own patience (AGENTS.md rule 11).
+const HEAD_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// The scenario manifest a built client bundle carries, relative to its root.
 /// `scripts/build-client.mjs` and `trunk` both place the assets tree here, and
 /// `deploy-demo.yml` overwrites exactly this file with the curated manifest —
@@ -417,6 +431,127 @@ pub fn route(
     }
 }
 
+// ── The upgrade door (issue #1353) ──────────────────────────────────────────
+
+/// What a request asking to leave HTTP behind turned out to be.
+///
+/// Pure, so the rule is decided and tested here rather than inside whichever
+/// handler took the socket. The three answers are the three the rendezvous
+/// worker gives on the same paths (`worker-rendezvous/src/index.js`): serve the
+/// request as ordinary HTTP, refuse it with a stated status, or hand the socket
+/// over.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum UpgradeVerdict {
+    /// Not an upgrade at all — route it as HTTP.
+    Http,
+    /// It asked for a WebSocket and this is the client's `Sec-WebSocket-Key`,
+    /// verbatim. Whoever takes the socket derives the accept value from it.
+    WebSocket { key: String },
+    /// It asked for something this host will not do, with the status and the
+    /// machine reason to answer. `426` mirrors the worker's
+    /// `expected-websocket-upgrade`; `400` is a malformed WebSocket request.
+    Refused { status: u16, reason: &'static str },
+}
+
+/// Classify one parsed request's upgrade intent.
+///
+/// `claimed` says whether a handler serves this path, and it changes only the
+/// NEGATIVE answers: an ordinary bundle path that carries an `Upgrade` header
+/// is still just a bundle path (a proxy or a browser extension may add one),
+/// while `/v1/join` without a valid upgrade is a caller that has misunderstood
+/// the endpoint and is told so instead of being handed a 404 from the static
+/// tree.
+///
+/// The positive answer needs all four of RFC 6455's request conditions — GET,
+/// `Upgrade: websocket`, `Connection: upgrade`, `Sec-WebSocket-Version: 13` —
+/// plus a key. Missing any of them on a claimed path is a **clean 400**, never
+/// a socket handed to a handshake that will then sit waiting for bytes that
+/// will never come.
+pub fn websocket_upgrade(req: &Request, claimed: bool) -> UpgradeVerdict {
+    let header_has = |name: &str, token: &str| {
+        req.header(name)
+            .is_some_and(|v| v.to_ascii_lowercase().split(',').any(|p| p.trim() == token))
+    };
+    let asks_websocket = header_has("upgrade", "websocket");
+    if !claimed {
+        return UpgradeVerdict::Http;
+    }
+    if !asks_websocket {
+        // The worker's own answer for a plain GET of an upgrade endpoint.
+        return UpgradeVerdict::Refused {
+            status: 426,
+            reason: "expected-websocket-upgrade",
+        };
+    }
+    if req.method != "GET" {
+        return UpgradeVerdict::Refused {
+            status: 400,
+            reason: "upgrade-must-be-get",
+        };
+    }
+    if !header_has("connection", "upgrade") {
+        return UpgradeVerdict::Refused {
+            status: 400,
+            reason: "upgrade-without-connection-upgrade",
+        };
+    }
+    if req.header("sec-websocket-version").map(str::trim) != Some("13") {
+        return UpgradeVerdict::Refused {
+            status: 400,
+            reason: "unsupported-websocket-version",
+        };
+    }
+    // A base64 16-byte nonce is 24 characters. Checked for shape rather than
+    // decoded: this module owns no base64, and a key of the wrong length is the
+    // only malformation that reaches a handshake as an ambiguous stall.
+    match req.header("sec-websocket-key").map(str::trim) {
+        Some(key) if key.len() == 24 && !key.contains(char::is_whitespace) => {
+            UpgradeVerdict::WebSocket {
+                key: key.to_string(),
+            }
+        }
+        _ => UpgradeVerdict::Refused {
+            status: 400,
+            reason: "missing-websocket-key",
+        },
+    }
+}
+
+/// Something that takes a connection over when its request asked to upgrade.
+///
+/// The seam issue #1353 needs and the reason it is a TRAIT rather than a
+/// function: `delivery::serve` is compiled for every native build and must not
+/// name `tungstenite`, which is optional and behind the `host` feature. So this
+/// module owns the door — detection, the refusal answers, the timeouts — and
+/// [`crate::native_host::direct_join`] owns what is behind it.
+///
+/// An implementation is handed a stream on which **nothing but the request head
+/// has been read**, so it may write the `101` itself and then wrap the raw
+/// socket. It owns the connection from that moment: the serving loop neither
+/// writes to it nor closes it again.
+pub trait ConnectionUpgrade: Send + Sync + 'static {
+    /// Whether this handler serves `path`. Consulted before anything else, so a
+    /// host with a handler installed answers exactly one more path than one
+    /// without.
+    fn serves(&self, path: &str) -> bool;
+
+    /// Take the stream over. `key` is the validated `Sec-WebSocket-Key`.
+    ///
+    /// The connection is the handler's from this call onwards — it takes the
+    /// stream by value, so a refusal is the handler's to WRITE as well as to
+    /// decide. `Err` therefore reports a refusal that has already been answered
+    /// (or a client that had already gone); the serving loop only logs it.
+    fn accept(&self, stream: TcpStream, req: &Request, key: &str) -> Result<(), UpgradeRefusal>;
+}
+
+/// A handler's refusal of a connection it was offered, for the operator log.
+/// The handler has already answered the client — see [`ConnectionUpgrade::accept`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UpgradeRefusal {
+    pub status: u16,
+    pub reason: &'static str,
+}
+
 /// Something worth telling the operator about. The module itself never prints —
 /// `phoenix-host` renders these, so `serve` stays free of AGENTS.md's logging
 /// question and a test can assert on events instead of scraping stdout.
@@ -450,6 +585,12 @@ struct ServerState {
     client: ClientSource,
     client_root: Option<PathBuf>,
     documents: HostedDocuments,
+    /// The one handler that may take a connection off the HTTP path
+    /// (issue #1353). Behind a lock rather than a constructor argument because
+    /// it is installed AFTER the bind: the direct-join service needs the port
+    /// the listener actually took, which a `:0` bind does not know until then —
+    /// the same ordering constraint the panes and the lobby surface have.
+    upgrade: std::sync::RwLock<Option<Arc<dyn ConnectionUpgrade>>>,
 }
 
 impl HostServer {
@@ -500,8 +641,22 @@ impl HostServer {
                 client: args.client.clone(),
                 client_root,
                 documents: HostedDocuments::default(),
+                upgrade: std::sync::RwLock::new(None),
             }),
         })
+    }
+
+    /// Install the handler that takes upgraded connections (issue #1353).
+    ///
+    /// Idempotent in the sense that a second call replaces the first; there is
+    /// one door and one handler behind it. Safe to call while the loop is
+    /// running — connections already being served are unaffected.
+    pub fn on_upgrade(&self, handler: Arc<dyn ConnectionUpgrade>) {
+        *self
+            .state
+            .upgrade
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = Some(handler);
     }
 
     /// The host's own in-memory publications (issue #1122), for a caller that
@@ -674,6 +829,10 @@ fn handle_connection<F: Fn(HostEvent)>(mut stream: TcpStream, state: &ServerStat
     // connection's own origin is knowable, and `route` gates the host's
     // in-memory documents on it. See `PeerOrigin`.
     let peer = peer_origin(stream.peer_addr().ok());
+    // A caller gets [`HEAD_READ_TIMEOUT`] to finish its head and no longer. The
+    // timeout is CLEARED again before the stream is handed to an upgrade
+    // handler, which sets its own pumping cadence (issue #1353).
+    let _ = stream.set_read_timeout(Some(HEAD_READ_TIMEOUT));
     let head = match read_head(&mut stream) {
         Some(head) => head,
         None => {
@@ -708,6 +867,69 @@ fn handle_connection<F: Fn(HostEvent)>(mut stream: TcpStream, state: &ServerStat
         return;
     };
     let head_only = req.method == "HEAD";
+
+    // The upgrade door (issue #1353), BEFORE routing: a `/v1/join` upgrade is
+    // not a document request, and letting `route` answer it first would hand a
+    // WebSocket client a 404 out of the static tree. A host with no handler
+    // installed never reaches this branch at all.
+    let handler = state
+        .upgrade
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    let claimed = handler.as_ref().is_some_and(|h| h.serves(&req.path));
+    match websocket_upgrade(&req, claimed) {
+        UpgradeVerdict::Http => {}
+        UpgradeVerdict::WebSocket { key } => {
+            // The handler pumps on its own cadence and sets its own timeouts;
+            // ours would cut its first blocking read short.
+            let _ = stream.set_read_timeout(None);
+            let outcome = handler
+                .as_ref()
+                .expect("claimed implies a handler")
+                .accept(stream, &req, &key);
+            match outcome {
+                Ok(()) => on_event(HostEvent::Served {
+                    method: req.method.clone(),
+                    path: req.path.clone(),
+                    status: 101,
+                }),
+                // The handler owns the socket either way, so it has already
+                // answered the client; this is the operator's copy.
+                Err(refusal) => on_event(HostEvent::Refused {
+                    path: req.path.clone(),
+                    code: refusal.reason,
+                }),
+            }
+            return;
+        }
+        UpgradeVerdict::Refused { status, reason } => {
+            // A malformed or mis-addressed upgrade is answered as ordinary
+            // HTTP and the connection closes. Never a stall: nothing here waits
+            // for more bytes, and the accept loop was never blocked on it —
+            // this whole function runs on its own connection thread.
+            let body = reason.to_string();
+            let head = http::response_head(
+                status,
+                if status == 426 {
+                    "Upgrade Required"
+                } else {
+                    "Bad Request"
+                },
+                "text/plain; charset=utf-8",
+                CachePolicy::Revalidate,
+                body.len(),
+                &[],
+            );
+            write_all(&mut stream, &head, body.as_bytes());
+            on_event(HostEvent::Served {
+                method: req.method.clone(),
+                path: req.path.clone(),
+                status,
+            });
+            return;
+        }
+    }
 
     match route(&req, &state.content, &state.client, &state.documents, peer) {
         Route::Json {
@@ -930,6 +1152,149 @@ template_path = \"assets/entities/alliance_cruiser.toml\"
 
     fn request(head: &str) -> Request {
         http::parse_request(head).expect("well-formed head")
+    }
+
+    /// A well-formed WebSocket upgrade head, with `extra` lines spliced in.
+    fn upgrade_head(path: &str, lines: &[&str]) -> String {
+        let mut head = format!("GET {path} HTTP/1.1\r\nHost: 192.168.1.5:8080\r\n");
+        for line in lines {
+            head.push_str(line);
+            head.push_str("\r\n");
+        }
+        head.push_str("\r\n");
+        head
+    }
+
+    const WS_LINES: &[&str] = &[
+        "Upgrade: websocket",
+        "Connection: Upgrade",
+        "Sec-WebSocket-Version: 13",
+        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+    ];
+
+    #[test]
+    fn a_well_formed_upgrade_on_a_claimed_path_hands_the_key_over() {
+        let req = request(&upgrade_head("/v1/join", WS_LINES));
+        assert_eq!(
+            websocket_upgrade(&req, true),
+            UpgradeVerdict::WebSocket {
+                key: "dGhlIHNhbXBsZSBub25jZQ==".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn an_upgrade_header_on_an_unclaimed_path_is_still_just_a_file_request() {
+        // A proxy or a browser extension may add an `Upgrade` header to an
+        // ordinary GET. Nothing about the bundle changes because it did.
+        let req = request(&upgrade_head("/index.html", WS_LINES));
+        assert_eq!(websocket_upgrade(&req, false), UpgradeVerdict::Http);
+        // …and a host with no handler installed claims nothing at all, so even
+        // the join path routes as HTTP and 404s out of the static tree.
+        let req = request(&upgrade_head("/v1/join", WS_LINES));
+        assert_eq!(websocket_upgrade(&req, false), UpgradeVerdict::Http);
+    }
+
+    #[test]
+    fn a_plain_get_of_the_join_endpoint_is_told_what_it_is_for() {
+        // The worker's own 426 rather than a 404 out of the bundle: a caller
+        // that has misunderstood the endpoint learns which mistake it made.
+        let req = request("GET /v1/join HTTP/1.1\r\nHost: x\r\n\r\n");
+        assert_eq!(
+            websocket_upgrade(&req, true),
+            UpgradeVerdict::Refused {
+                status: 426,
+                reason: "expected-websocket-upgrade"
+            }
+        );
+    }
+
+    #[test]
+    fn a_malformed_upgrade_is_a_clean_400_and_never_a_handshake_that_stalls() {
+        // Each of these reached `tungstenite` would be a socket sitting waiting
+        // for bytes that are not coming, on a thread nothing reclaims. They are
+        // refused before the stream is handed anywhere.
+        let cases: [(&[&str], &str); 4] = [
+            (
+                &[
+                    "Upgrade: websocket",
+                    "Sec-WebSocket-Version: 13",
+                    "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+                ],
+                "upgrade-without-connection-upgrade",
+            ),
+            (
+                &[
+                    "Upgrade: websocket",
+                    "Connection: Upgrade",
+                    "Sec-WebSocket-Version: 8",
+                    "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+                ],
+                "unsupported-websocket-version",
+            ),
+            (
+                &[
+                    "Upgrade: websocket",
+                    "Connection: Upgrade",
+                    "Sec-WebSocket-Version: 13",
+                ],
+                "missing-websocket-key",
+            ),
+            (
+                &[
+                    "Upgrade: websocket",
+                    "Connection: Upgrade",
+                    "Sec-WebSocket-Version: 13",
+                    "Sec-WebSocket-Key: short",
+                ],
+                "missing-websocket-key",
+            ),
+        ];
+        for (lines, reason) in cases {
+            let req = request(&upgrade_head("/v1/join", lines));
+            assert_eq!(
+                websocket_upgrade(&req, true),
+                UpgradeVerdict::Refused {
+                    status: 400,
+                    reason
+                },
+                "{lines:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_header_tokens_are_read_the_way_browsers_write_them() {
+        // `Connection: keep-alive, Upgrade` is what a real browser sends, and a
+        // whole-value comparison would refuse every genuine client. Case is
+        // likewise not a browser's promise.
+        let req = request(&upgrade_head(
+            "/v1/join",
+            &[
+                "Upgrade: WebSocket",
+                "Connection: keep-alive, Upgrade",
+                "Sec-WebSocket-Version: 13",
+                "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+            ],
+        ));
+        assert!(matches!(
+            websocket_upgrade(&req, true),
+            UpgradeVerdict::WebSocket { .. }
+        ));
+    }
+
+    #[test]
+    fn an_upgrade_that_is_not_a_get_is_refused_rather_than_upgraded() {
+        let mut head = upgrade_head("/v1/join", WS_LINES);
+        head = head.replacen("GET", "POST", 1);
+        let req = request(&head);
+        assert_eq!(
+            websocket_upgrade(&req, true),
+            UpgradeVerdict::Refused {
+                status: 400,
+                reason: "upgrade-must-be-get"
+            }
+        );
     }
 
     fn matching_stamp_query() -> String {

@@ -408,6 +408,22 @@ struct RenderStackApplied;
 pub fn build(plan: BootPlan) -> Result<App, BootError> {
     let mut app = App::new();
 
+    // Command/system errors WARN rather than abort the process (Bevy 0.18's
+    // `DefaultErrorHandler`, set once here so every target — browser via
+    // `wasm_init`, native, headless — shares it). Bevy 0.18 made a class of
+    // command fatal that older Bevy silently ignored: a command applied to an
+    // entity another system despawned the same frame. The game shipped and
+    // played for years with those ignored, so panicking on them is a
+    // regression, not a new safety net — most visibly a native host crashing a
+    // few seconds into a mission on a combat despawn↔command race (the entity
+    // varies per run), which drops every joined phone. `warn` restores the
+    // intended semantics and, unlike `ignore`, LOGS each occurrence (with the
+    // caller under `track_location`), so a genuine logic error stays visible
+    // and fixable rather than hidden.
+    app.insert_resource(bevy::ecs::error::DefaultErrorHandler(
+        bevy::ecs::error::warn,
+    ));
+
     // Shared artifact metadata for the peer-local save lifecycle. This comes
     // from the same BootPlan on browser, native, and headless profiles; target
     // adapters therefore cannot disagree about which scenario a capture names.

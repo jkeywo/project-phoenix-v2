@@ -282,13 +282,6 @@ export function hailMessage(targetUuid) {
   };
 }
 
-export function selectCommsMessage(messageId) {
-  return {
-    type: 'ControlSystem',
-    data: { target: 'comms', payload: { type: 'SelectCommsMessage', data: { message_id: messageId } } },
-  };
-}
-
 export function respondToMessage(messageId, responseIndex) {
   return {
     type: 'ControlSystem',

@@ -132,6 +132,14 @@ pub struct TractorSaveState {
     pub coupled_target: Option<String>,
 }
 
+/// Transient correlation carried from the engage intent in `SimSet::Input` to
+/// the same tick's authoritative hold verdict in `SimSet::Modifiers`.
+#[derive(Message, Clone)]
+pub struct PendingTractorActionFeedback {
+    entity: Entity,
+    command: crate::core::messages::AdmittedCommand,
+}
+
 /// Marks a ship whose tractor is CURRENTLY engaged BY the backfill tractor host
 /// (issue #1162), not by a console. The host inserts it when it engages the beam
 /// to serve a directive and removes it when it releases; it releases a beam only
@@ -190,7 +198,8 @@ impl Plugin for TractorPlugin {
         app.register_admitted_consumer(ConsumerMatcher::exact(
             crate::ship::system_registry::TRACTOR_KIND,
             TRACTOR_SYSTEM_ID,
-        ));
+        ))
+        .add_message::<PendingTractorActionFeedback>();
         app.add_systems(
             FixedUpdate,
             (
@@ -206,6 +215,9 @@ impl Plugin for TractorPlugin {
                 // Decide whether the coupling holds this tick, from the live
                 // lock, range, power and damage.
                 tick_tractor.in_set(crate::sim_sets::SimSet::Modifiers),
+                finish_tractor_action_feedback
+                    .in_set(crate::sim_sets::SimSet::Modifiers)
+                    .after(tick_tractor),
                 // Then place the held target — after the tick that decided the
                 // hold, so a beam that dropped this tick moves nothing, exactly
                 // as any after-integration correction is ordered after the tick that decided it.
@@ -269,21 +281,34 @@ impl Plugin for TractorPlugin {
 pub fn handle_tractor_commands(
     mut lifecycle: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
     mut ships: Query<(
+        Entity,
         &crate::core::messages::AdmittedCommands,
         &mut TractorBeam,
         Option<&EntityUuid>,
     )>,
+    mut pending: Option<ResMut<Messages<PendingTractorActionFeedback>>>,
+    mut outbound: Option<ResMut<Messages<crate::lobby::OutboundMessage>>>,
 ) {
-    for (admitted, mut beam, uuid) in ships.iter_mut() {
+    for (entity, admitted, mut beam, uuid) in ships.iter_mut() {
         // The last engage/release in the tick wins — the same latest-command-
         // wins policy the helm axes take, so a stale-UI double tap is idempotent.
         for cmd in admitted.for_target(TRACTOR_SYSTEM_ID) {
             match &cmd.payload {
-                SystemControlPayload::EngageTractor if !beam.engaged => {
-                    beam.engaged = true;
-                    // Clear a stale refusal on a fresh engage; the tick will
-                    // repopulate it if this engage cannot hold.
-                    beam.last_refusal = None;
+                SystemControlPayload::EngageTractor => {
+                    if !beam.engaged {
+                        beam.engaged = true;
+                        // Clear a stale refusal on a fresh engage; the tick will
+                        // repopulate it if this engage cannot hold.
+                        beam.last_refusal = None;
+                    }
+                    if cmd.response_token.is_some() && cmd.feedback_correlation.is_some() {
+                        if let Some(messages) = pending.as_deref_mut() {
+                            messages.write(PendingTractorActionFeedback {
+                                entity,
+                                command: cmd.clone(),
+                            });
+                        }
+                    }
                 }
                 SystemControlPayload::ReleaseTractor => {
                     // Report the cancel BEFORE clearing the intent, so a
@@ -302,6 +327,11 @@ pub fn handle_tractor_commands(
                     beam.engaged = false;
                     beam.coupled_target = None;
                     beam.last_refusal = None;
+                    crate::command_admission::finish_admitted_action_feedback(
+                        &mut outbound,
+                        cmd,
+                        crate::core::messages::ActionFeedbackOutcome::Applied,
+                    );
                 }
                 _ => {}
             }
@@ -354,6 +384,30 @@ fn terminal_reason_for(refusal: TractorRefusal) -> TaskTerminalReason {
         TractorRefusal::OutOfRange => TaskTerminalReason::OutOfRange,
         TractorRefusal::Unpowered => TaskTerminalReason::Unpowered,
         TractorRefusal::Disabled => TaskTerminalReason::Disabled,
+    }
+}
+
+/// Complete engage feedback only after `tick_tractor` has resolved the live
+/// lock, range, power and damage gates. This keeps an admitted intent from
+/// being reported as applied when no coupling formed.
+fn finish_tractor_action_feedback(
+    mut pending: MessageReader<PendingTractorActionFeedback>,
+    beams: Query<&TractorBeam>,
+    mut outbound: Option<ResMut<Messages<crate::lobby::OutboundMessage>>>,
+) {
+    for action in pending.read() {
+        let applied = beams
+            .get(action.entity)
+            .is_ok_and(|beam| beam.engaged && beam.coupled_target.is_some());
+        crate::command_admission::finish_admitted_action_feedback(
+            &mut outbound,
+            &action.command,
+            if applied {
+                crate::core::messages::ActionFeedbackOutcome::Applied
+            } else {
+                crate::core::messages::ActionFeedbackOutcome::Refused
+            },
+        );
     }
 }
 
@@ -957,6 +1011,21 @@ pub fn tractor_blackboard_key() -> SystemId {
 mod tests {
     use super::*;
 
+    fn correlated_tractor_command(
+        correlation: &str,
+        payload: SystemControlPayload,
+    ) -> crate::core::messages::AdmittedCommand {
+        crate::core::messages::AdmittedCommand {
+            target: tractor_system_id(),
+            payload,
+            response_token: Some("engineering-holder".into()),
+            feedback_correlation: Some(
+                crate::core::messages::ActionCorrelationId::new(correlation)
+                    .expect("valid test correlation"),
+            ),
+        }
+    }
+
     fn beam() -> TractorBeam {
         TractorBeam::new(
             TractorConfig {
@@ -970,6 +1039,121 @@ mod tests {
             },
             PowerGroupId("tractor".into()),
         )
+    }
+
+    #[test]
+    fn tractor_feedback_waits_for_the_authoritative_hold_verdict() {
+        let mut app = App::new();
+        app.add_message::<PendingTractorActionFeedback>()
+            .add_message::<crate::lobby::OutboundMessage>()
+            .add_systems(
+                Update,
+                (
+                    handle_tractor_commands,
+                    tick_tractor,
+                    finish_tractor_action_feedback,
+                )
+                    .chain(),
+            );
+        let mut test_beam = beam();
+        test_beam.config.min_power_level = 0;
+        let operator = app
+            .world_mut()
+            .spawn((
+                crate::core::messages::AdmittedCommands(vec![correlated_tractor_command(
+                    "tractor-applied",
+                    SystemControlPayload::EngageTractor,
+                )]),
+                test_beam,
+                TacticalRadarSelection(Some("target-1".into())),
+                Transform::default(),
+            ))
+            .id();
+        app.world_mut().spawn((
+            EntityUuid("target-1".into()),
+            Transform::from_xyz(10.0, 0.0, 0.0),
+        ));
+        let mut cursor = app
+            .world()
+            .resource::<Messages<crate::lobby::OutboundMessage>>()
+            .get_cursor();
+        let feedback_count = |messages: &[crate::lobby::OutboundMessage], correlation, expected| {
+            messages
+                .iter()
+                .filter(|message| {
+                    matches!(
+                        (&message.target, &message.msg),
+                        (
+                            crate::lobby::Target::Token(token),
+                            crate::core::messages::ServerMessage::ActionFeedback {
+                                correlation: actual,
+                                outcome,
+                            }
+                        ) if token == "engineering-holder"
+                            && actual.as_str() == correlation
+                            && outcome == &expected
+                    )
+                })
+                .count()
+        };
+
+        app.update();
+        let messages = app
+            .world()
+            .resource::<Messages<crate::lobby::OutboundMessage>>();
+        let first: Vec<_> = cursor.read(messages).cloned().collect();
+        assert_eq!(
+            feedback_count(
+                &first,
+                "tractor-applied",
+                crate::core::messages::ActionFeedbackOutcome::Applied,
+            ),
+            1
+        );
+        assert!(app
+            .world()
+            .get::<TractorBeam>(operator)
+            .is_some_and(|beam| beam.coupled_target.as_deref() == Some("target-1")));
+
+        app.world_mut()
+            .entity_mut(operator)
+            .insert(crate::core::messages::AdmittedCommands(vec![
+                correlated_tractor_command("tractor-release", SystemControlPayload::ReleaseTractor),
+            ]));
+        app.update();
+        let messages = app
+            .world()
+            .resource::<Messages<crate::lobby::OutboundMessage>>();
+        let second: Vec<_> = cursor.read(messages).cloned().collect();
+        assert_eq!(
+            feedback_count(
+                &second,
+                "tractor-release",
+                crate::core::messages::ActionFeedbackOutcome::Applied,
+            ),
+            1
+        );
+
+        app.world_mut().entity_mut(operator).insert((
+            crate::core::messages::AdmittedCommands(vec![correlated_tractor_command(
+                "tractor-refused",
+                SystemControlPayload::EngageTractor,
+            )]),
+            TacticalRadarSelection(None),
+        ));
+        app.update();
+        let messages = app
+            .world()
+            .resource::<Messages<crate::lobby::OutboundMessage>>();
+        let third: Vec<_> = cursor.read(messages).cloned().collect();
+        assert_eq!(
+            feedback_count(
+                &third,
+                "tractor-refused",
+                crate::core::messages::ActionFeedbackOutcome::Refused,
+            ),
+            1
+        );
     }
 
     #[test]
@@ -1015,6 +1199,7 @@ mod tests {
                         target: tractor_system_id(),
                         payload: SystemControlPayload::EngageTractor,
                         response_token: None,
+                        feedback_correlation: None,
                     },
                 ]),
             ))

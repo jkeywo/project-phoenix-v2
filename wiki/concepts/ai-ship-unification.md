@@ -3,7 +3,7 @@ title: AI Ship Unification
 type: concept
 tags: [ai, npc, ship, ecs, components, control-source, backfill]
 sources: [src/entities/spawner.rs, src/ship/control_source.rs, src/ship/components.rs, src/ship_plugin.rs, src/ship/helm_ai/, src/console/helm/server.rs, src/console/weapons/server.rs, src/console/weapons/beam.rs, src/tractor/server.rs, src/console/navigation/server.rs, src/ai/server.rs, src/ai/host.rs]
-updated: 2026-08-27
+updated: 2026-09-01
 ---
 
 # AI Ship Unification
@@ -65,7 +65,12 @@ that Tractor-only retention.
 `AiHighFidelity` selects the full ship simulation path for nearby NPCs. Distant
 NPCs use the deterministic low-fidelity adapter in `src/ai/server.rs`; they
 retain authored objectives and cursors rather than becoming a separate class of
-entity. The LocalShip always runs the full authoritative path.
+entity. Every frozen-roster `FleetSlotOf` hull always runs the full authoritative
+path and projects the same implicit fidelity bubble on every peer. `LocalShip`
+only identifies the hull presented to this host's crew and never participates in
+the authoritative LOD decision, so a stationless GM computes the same fidelity
+set as both ship hosts. Authored `LodBubble` entities remain anchors even in a
+GM-only world with no fleet.
 
 ## Related
 

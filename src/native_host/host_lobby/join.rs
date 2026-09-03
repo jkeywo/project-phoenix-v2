@@ -52,7 +52,13 @@ use crate::core::rendezvous::JoinCode;
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum JoinInvite {
-    /// Nobody can join this host at all: `--solo`, or no `--rendezvous`.
+    /// Nobody can join this host at all.
+    ///
+    /// Since issue #1353 that is a narrow condition rather than the default: a
+    /// host serving a client bundle accepts LAN joins on its own port, so this
+    /// is `--solo` (nobody is meant to join), or a host serving no bundle and
+    /// given no `--rendezvous` (a phone would have no page to load and so no
+    /// origin to dial).
     ///
     /// The surface says so in words. A framed, empty QR would invite a crew to
     /// stand in front of the viewscreen scanning something that can never work,
@@ -61,13 +67,22 @@ pub enum JoinInvite {
     Off,
     /// The service issued this host a crew code.
     Code {
-        /// The five letters a guest types. `JoinCode::suffix`.
+        /// The code a guest types. `JoinCode::suffix`.
         code: String,
         /// The structured code a QR carries. `JoinCode::full`.
         full: String,
         /// The URL the client bundle sits beside — see the module note.
         page_base: String,
-        /// The rendezvous service this host registered with, verbatim.
+        /// The rendezvous service this host registered with, verbatim — and
+        /// `None` for the case that is now ordinary.
+        ///
+        /// **Issue #1353 made this field the exception rather than the rule.**
+        /// A host that accepts LAN joins itself sends `None`, because the
+        /// client's rule is that a page dials the origin that served it
+        /// (`gui/join-url.js`'s `rendezvousBaseForOrigin`) — so the QR carries
+        /// no service at all, which is both a shorter QR and no parameter for a
+        /// link to point somewhere else. Everything below is the cloud-only
+        /// host's remaining story.
         ///
         /// Passed through rather than compared here: `gui/join-url.js` owns the
         /// rule that only a NON-default service has to appear in the URL, and it

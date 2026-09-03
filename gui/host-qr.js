@@ -106,12 +106,12 @@ export function applyQrPhase(doc, action) {
 
 /**
  * Draw one join invitation into the panel: the code, the URL under it, and the
- * five letters beside them.
+ * the code beside them.
  *
  * @param {Document} doc the document holding the `#qr-panel` markup.
  * @param {{url: string, code?: string}} invite `url` is what the QR encodes and
  *   what the selectable text under it reads — one value, so the two can never
- *   disagree. `code` is the five-letter suffix a guest types instead; absent
+ *   disagree. `code` is the typed suffix a guest types instead; absent
  *   leaves that row alone.
  * @param {{toCanvas: Function}} encoder the vendored `QRCode`
  *   (`gui/vendor/qrcode.js`). Passed in rather than imported: it is a classic

@@ -1,7 +1,7 @@
-// Issues #1111/#1112 — the typed five-letter join, end to end in a browser.
+// Issues #1111/#1112 — the typed join, end to end in a browser.
 //
 // One host page registers with a rendezvous service and is issued a code; a
-// separate client page types those five letters, resolves the host, opens a
+// separate client page types that code, resolves the host, opens a
 // direct reliable channel and completes the ordinary Identify→Welcome flow.
 // The rendezvous service is tests/smoke/rendezvous-shim.js, which runs the
 // REAL worker-rendezvous registry in the host page over a fake socket, and
@@ -9,7 +9,7 @@
 // WebRTC and no deployed worker.
 //
 // Nothing here opts in any more. #1112 made this THE route: the host registers
-// on an ordinary page load and the client page asks for five letters with no
+// on an ordinary page load and the client page asks for the code with no
 // parameter set, which is exactly what these specs now exercise.
 
 import { test, expect, waitForWasmReady } from './fixtures';
@@ -45,7 +45,7 @@ const waitForConnected = (page) =>
 const errorText = (page) =>
   page.evaluate(() => document.getElementById('join-entry-error')?.textContent ?? '');
 
-test('the host shows five letters a guest can read across the room', async ({ context }) => {
+test('the host shows a code a guest can read across the room', async ({ context }) => {
   const host = await bootHost(context);
   const code = await joinCodeOn(host);
   expect(code).toMatch(/^[A-Z]{5}$/);
@@ -62,7 +62,7 @@ test('the host shows five letters a guest can read across the room', async ({ co
   expect(await host.evaluate(() => window.__qrDraws)).toContain(link);
 });
 
-test('typing the five letters reaches Welcome over a direct channel', async ({ context }) => {
+test('typing the code reaches Welcome over a direct channel', async ({ context }) => {
   const host = await bootHost(context);
   const code = await joinCodeOn(host);
 

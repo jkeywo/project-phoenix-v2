@@ -103,6 +103,15 @@ pub mod dossier;
 /// extracted from the `WorldContentRuntime` god-resource.
 pub mod effect_queue;
 pub mod entities;
+/// Minimal peer-local authoritative projection for the rendererless GM page.
+pub mod gm_action;
+pub mod gm_activity;
+pub mod gm_join;
+pub mod gm_projection;
+pub mod gm_puppet;
+/// Crew-public Game Master identities (issue #1289), kept separate from crew
+/// sessions and the player-ship fleet roster by construction.
+pub mod gm_roster;
 /// Infrastructure condition + capacity on authored world furniture (issue
 /// #1025): the pure degradation/repair track and its Bevy adapter.
 pub mod infrastructure;
@@ -162,6 +171,14 @@ pub mod sim_tick;
 /// math in simulation code (issue #908; enforced via clippy.toml).
 /// Re-exported from the `phoenix-math` workspace crate (issue #1184).
 pub use phoenix_math::simmath;
+/// Deterministic, peer-local save capture scheduling (issue #865). The pure
+/// state machine is shared by browser, native and headless adapters.
+pub mod save_slots;
+pub mod save_slots_lifecycle;
+/// Target-local persistence adapter for the save lifecycle (issue #865).
+/// Headless installs nothing by default; native/browser hosts choose their own
+/// private Store without moving storage into the fixed simulation schedule.
+pub mod save_slots_store;
 /// Cross-target vector battery proving native and wasm agree, bit for bit,
 /// on every `simmath` function (issue #909).
 pub mod simmath_vectors;

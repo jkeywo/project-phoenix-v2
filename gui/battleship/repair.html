@@ -70,6 +70,10 @@
     import '../components/ph-station-damage.js';
     import '../components/ph-repair-teams.js';
     import { initConsole } from '../console-core.js';
+    import {
+      EXTERNAL_REPAIR_TOGGLE_ACTION_ID,
+    } from '../stations/engineering-actions.js';
+    import { activateEngineeringAction } from '../stations/engineering-action-control.js';
     // The render lives in gui/battleship/repair.console.js (issue #1235): one
     // shared Repair renderer, this hull's variant. The vitest suite imports the
     // same `renderStation`. `s` is a flat RepairConsolePayload.
@@ -83,7 +87,12 @@
     // renderStation sets it fresh on every push, so it is never stale.
     document.getElementById('dispatch-btn').addEventListener('click', function() {
       var working = document.getElementById('dispatch-btn').classList.contains('working');
-      consoleHandle.sendAction(working ? 'recall_external_repair' : 'dispatch_external_repair');
+      activateEngineeringAction(
+        consoleHandle,
+        EXTERNAL_REPAIR_TOGGLE_ACTION_ID,
+        null,
+        working ? 'recall_external_repair' : 'dispatch_external_repair',
+      );
     });
   </script>
 </body>

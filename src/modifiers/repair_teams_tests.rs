@@ -1014,6 +1014,34 @@ fn priority_survives_the_sweep_hand_off() {
 // — where the team actually goes at the hand-off — plus the pin the
 // console highlights.
 
+#[test]
+fn prioritisable_systems_uses_the_same_group_and_occupancy_rule_as_apply() {
+    let mut teams = RepairTeams::new(1);
+    let mut hull = hull_at(&[
+        ("power-a", 10.0, 7.0),
+        ("power-b", 10.0, 4.0),
+        ("core", 10.0, 0.0),
+    ]);
+    let config = config_with(&[
+        ("power-a", Some("power")),
+        ("power-b", Some("power")),
+        ("core", None),
+    ]);
+    teams.dispatch(0, sid("power-a"), "Power A".to_string());
+    teams.tick(5.0, &mut hull, Some(&config));
+
+    assert_eq!(
+        teams.prioritisable_systems(&hull, &config),
+        vec![sid("power-b")],
+        "the current row and worse damage in another sweep group are not actionable"
+    );
+    assert_eq!(
+        teams.prioritise_system(&sid("power-b"), &hull, &config),
+        Some(0)
+    );
+    assert_eq!(teams.prioritise_system(&sid("core"), &hull, &config), None);
+}
+
 /// The headline: tapping the third-ranked job sends the team there next,
 /// with no ordinal anywhere near the caller.
 #[test]

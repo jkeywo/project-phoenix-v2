@@ -7,6 +7,10 @@ import { t } from '../strings.js';
 import { weaponReadinessView } from '../weapon-readiness.js';
 import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
 import { PhElement, phDefine } from './ph-element.js';
+import {
+    TACTICAL_BLASTER_CHARGE_ACTION_ID,
+} from '../stations/tactical-actions.js';
+import { activateTacticalAction } from '../stations/tactical-action-control.js';
 
 export class PhBlastersControls extends PhElement {
   #emptyEl = null;
@@ -115,67 +119,31 @@ export class PhBlastersControls extends PhElement {
         btn.className = 'btn';
         btn.innerHTML = '<span class="btn-bg"></span><span class="led"></span><span class="label">' + t('component.blasters.charge') + '</span>';
         btn.addEventListener('mousedown', () => {
-          if (!btn.disabled && this.sendAction) {
-            this.sendAction('charge_blaster_start', { bank: bank.id });
-          }
-        });
-        btn.addEventListener('mouseup', () => {
-          if (!btn.disabled && this.sendAction) {
-            this.sendAction('fire_blaster', { bank: bank.id });
-          }
-        });
-        btn.addEventListener('mouseleave', () => {
-          if (!btn.disabled && this.sendAction && bank.state === 'charging') {
-            this.sendAction('fire_blaster', { bank: bank.id });
+          if (!btn.disabled) {
+            activateTacticalAction(this, TACTICAL_BLASTER_CHARGE_ACTION_ID,
+              { bank: bank.id }, 'charge_blaster_start');
           }
         });
         btn.addEventListener('touchstart', (e) => {
           e.preventDefault();
-          if (!btn.disabled && this.sendAction) {
-            this.sendAction('charge_blaster_start', { bank: bank.id });
+          if (!btn.disabled) {
+            activateTacticalAction(this, TACTICAL_BLASTER_CHARGE_ACTION_ID,
+              { bank: bank.id }, 'charge_blaster_start');
           }
         }, { passive: false });
-        btn.addEventListener('touchend', (e) => {
-          e.preventDefault();
-          if (!btn.disabled && this.sendAction) {
-            this.sendAction('fire_blaster', { bank: bank.id });
-          }
-        }, { passive: false });
-        btn.addEventListener('touchcancel', () => {
-          if (!btn.disabled && this.sendAction && bank.state === 'charging') {
-            this.sendAction('fire_blaster', { bank: bank.id });
-          }
-        });
-        // Keyboard press = the same hold-to-fire the pointer does (issue
-        // #1170): Enter/Space down charges, the release fires. This mirrors
-        // mousedown/mouseup onto the SAME named actions — a blaster button
-        // takes no plain `click`, so without this it was the one control on
-        // the console the keyboard could reach but not operate. `repeat` is
-        // ignored so a held key does not re-charge every autorepeat tick.
+        // A charge start is the complete operation: instant banks fire from
+        // that one command and charged banks finish their accepted charge on
+        // the server. Pointer/key release must therefore send nothing — both
+        // legacy FireBlaster and ChargeBlasterStart are the same server action,
+        // so a release used to create a spurious second, refused lifecycle.
+        // `repeat` is ignored so a held key does not re-start the operation.
         btn.addEventListener('keydown', (e) => {
           if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
           e.preventDefault();
           if (e.repeat) return;
-          if (!btn.disabled && this.sendAction) {
-            this.sendAction('charge_blaster_start', { bank: bank.id });
-          }
-        });
-        btn.addEventListener('keyup', (e) => {
-          if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
-          e.preventDefault();
-          if (!btn.disabled && this.sendAction) {
-            this.sendAction('fire_blaster', { bank: bank.id });
-          }
-        });
-        // Focus-out releases a mid-charge, mirroring `mouseleave`/`touchcancel`
-        // for the pointer (issue #1170): hold Enter/Space to charge, then move
-        // focus before the keyup, and without this the charge sticks forever.
-        // Same guard, same action as `mouseleave` — it only fires while the bank
-        // is still charging, so the keyup path (which clears that state) cannot
-        // double-fire with it.
-        btn.addEventListener('blur', () => {
-          if (!btn.disabled && this.sendAction && bank.state === 'charging') {
-            this.sendAction('fire_blaster', { bank: bank.id });
+          if (!btn.disabled) {
+            activateTacticalAction(this, TACTICAL_BLASTER_CHARGE_ACTION_ID,
+              { bank: bank.id }, 'charge_blaster_start');
           }
         });
         top.appendChild(btn);
@@ -236,13 +204,13 @@ export class PhBlastersControls extends PhElement {
       if (rv.present) {
         status.textContent = rv.label;
         row.className = 'bank-row ' + (rv.unavailable ? 'unavailable' : rv.ready ? 'ready' : 'blocked');
-        // A charge in progress is a valid mid-fire state, not a block — keep the
-        // button live so mouseup/touchend can release the shot.
-        btn.disabled = !rv.ready && !isCharging;
+        // Charge start is itself the complete server operation; a live charge
+        // must not accept a second press while it finishes on the host.
+        btn.disabled = !rv.ready || isCharging;
       } else {
         status.textContent = '';
         row.className = 'bank-row';
-        btn.disabled = isCooling;
+        btn.disabled = isCooling || isCharging;
       }
       // charging → amber (tactical) pill, cooling → dimmed/disabled, else armed.
       btn.className = 'btn ' + (isCharging ? 'tactical' : btn.disabled ? 'disabled' : 'armed');

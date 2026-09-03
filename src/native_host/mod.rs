@@ -68,6 +68,14 @@ pub mod bridge_media;
 /// the ordinary `cargo test` CI runs. The winit adapter that opens real
 /// borderless-fullscreen windows from a resolved profile is [`bridge_display`].
 pub mod bridge_profile;
+/// The host as its own rendezvous (issue #1353): the in-process, single-game
+/// subset of the rendezvous service, so a phone on the LAN joins over the
+/// delivery port with no external service anywhere. Behind the `host` feature
+/// with [`relay_socket`], because it is the other thing here that needs
+/// `tungstenite`; the protocol logic it drives is [`relay_transport`]'s,
+/// unchanged.
+#[cfg(feature = "host")]
+pub mod direct_join;
 /// The native host's own lobby surface (issue #1325) — the crew lobby the
 /// browser host shows, composited onto the viewscreen window from an embedded
 /// web view over the SAME `gui/host-lobby-view.js` + `gui/host-lobby-render.js`
@@ -81,6 +89,26 @@ pub mod host_lobby;
 /// that feeds it real events is [`panes::ultralight`] behind `--features
 /// ultralight`.
 pub mod input_routing;
+/// The authored join-code table, read by a host that ISSUES codes
+/// (issue #1353). Pure and CI-tested: minting, canonicalisation and the typed
+/// lookup a direct-accept host answers a joiner's code with, all read out of
+/// `assets/join/join-codes.toml` rather than written down a second time.
+pub mod join_codes;
+/// The **saved bridge layouts** (issue #1334) — pure, Bevy-free, and its
+/// location injected. One TOML file per ship class under the operator's own
+/// settings directory (`%APPDATA%\ProjectPhoenix\bridge-layouts` on Windows),
+/// holding the arrangement they built in the lobby the last time they flew that
+/// hull: the class key, the atomic temp-then-rename write, and the
+/// load-parse-revalidate that hands [`bridge_layout`] a profile as untrusted as
+/// a hand-authored one. Its Bevy adapter — the pre-apply at the hull-known
+/// moment and the write on every accepted lobby change — is
+/// [`layout_store_systems`].
+pub mod layout_store;
+/// The Bevy adapter for [`layout_store`] (issue #1334): the two systems that
+/// pre-apply a class's remembered bridge once the hull is known and file every
+/// accepted lobby change back to it, both gated off for a run an operator gave
+/// an explicit `--profile`.
+pub mod layout_store_systems;
 pub mod panes;
 /// The real WebSocket behind [`relay_transport`]. Behind the `host` feature
 /// because it is the only thing here that needs `tungstenite`; the protocol it

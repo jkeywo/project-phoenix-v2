@@ -1,6 +1,6 @@
 use super::*;
 use crate::core::messages::*;
-use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage};
+use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, Target};
 use crate::server_app::{ShipImpulse, SimOutbox};
 use crate::ship::control_source::ControlSource;
 
@@ -135,6 +135,25 @@ fn tick(app: &mut App) -> Vec<OutboundMessage> {
     out
 }
 
+fn has_feedback(
+    messages: &[OutboundMessage],
+    token: &str,
+    correlation: &str,
+    outcome: ActionFeedbackOutcome,
+) -> bool {
+    messages.iter().any(|message| {
+        message.target == Target::Token(token.to_string())
+            && message.delivery == DeliveryClass::Reliable
+            && matches!(
+                &message.msg,
+                ServerMessage::ActionFeedback {
+                    correlation: actual,
+                    outcome: actual_outcome,
+                } if actual.as_str() == correlation && *actual_outcome == outcome
+            )
+    })
+}
+
 fn start_game_with_sensors_and_tactical(app: &mut App) {
     push(
         app,
@@ -201,7 +220,9 @@ fn sensors_set_science_target_enqueues_target_designation_for_tactical() {
     push(
         &mut app,
         "sensors",
-        ClientMessage::ControlSystem {
+        ClientMessage::ControlSystemCorrelated {
+            correlation: ActionCorrelationId::new("sensors-target-applied")
+                .expect("valid test correlation"),
             target: crate::core::messages::SystemId(
                 crate::ship::system_registry::SENSORS_SYSTEM_ID.to_string(),
             ),
@@ -210,7 +231,14 @@ fn sensors_set_science_target_enqueues_target_designation_for_tactical() {
             },
         },
     );
-    tick(&mut app);
+    let messages = tick(&mut app);
+
+    assert!(has_feedback(
+        &messages,
+        "sensors",
+        "sensors-target-applied",
+        ActionFeedbackOutcome::Applied,
+    ));
 
     let log = app.world().resource::<EnqueueLog>();
     let enqueued = log
@@ -255,7 +283,9 @@ fn non_sensors_player_cannot_send_science_target() {
     push(
         &mut app,
         "captain",
-        ClientMessage::ControlSystem {
+        ClientMessage::ControlSystemCorrelated {
+            correlation: ActionCorrelationId::new("sensors-target-refused")
+                .expect("valid test correlation"),
             target: crate::core::messages::SystemId(
                 crate::ship::system_registry::SENSORS_SYSTEM_ID.to_string(),
             ),
@@ -264,7 +294,14 @@ fn non_sensors_player_cannot_send_science_target() {
             },
         },
     );
-    tick(&mut app);
+    let messages = tick(&mut app);
+
+    assert!(has_feedback(
+        &messages,
+        "captain",
+        "sensors-target-refused",
+        ActionFeedbackOutcome::Refused,
+    ));
 
     let log = app.world().resource::<EnqueueLog>();
     assert!(

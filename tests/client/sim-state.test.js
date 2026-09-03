@@ -471,9 +471,10 @@ describe('apply Welcome', () => {
     expect(s.sensorsProjectionMarkerIntervalSecs).toBe(10.0);
   });
 
-  it('folds the complete System and reserved-blackboard Console Family projections', () => {
+  it('folds the complete System kind and Console Family projections', () => {
     const s = new ClientSimState();
     expect(s.systemConsoleFamilies).toEqual({});
+    expect(s.systemKinds).toEqual({});
     expect(s.blackboardConsoleFamilies).toEqual({});
     s.apply(welcome(null, {
       station_systems: { bridge: ['bridge-orders'], flight: ['berthing-clamps'] },
@@ -481,16 +482,25 @@ describe('apply Welcome', () => {
         'bridge-orders': 'command',
         'berthing-clamps': 'helm',
       },
+      system_kinds: {
+        'bridge-orders': 'captain',
+        'berthing-clamps': 'dock',
+      },
       blackboard_console_families: { helm: 'helm', scan: 'sensors' },
     }));
     expect(s.systemConsoleFamilies).toEqual({
       'bridge-orders': 'command',
       'berthing-clamps': 'helm',
     });
+    expect(s.systemKinds).toEqual({
+      'bridge-orders': 'captain',
+      'berthing-clamps': 'dock',
+    });
     expect(s.blackboardConsoleFamilies).toEqual({ helm: 'helm', scan: 'sensors' });
 
     s.apply(welcome(null, {}));
     expect(s.systemConsoleFamilies).toEqual({});
+    expect(s.systemKinds).toEqual({});
     expect(s.blackboardConsoleFamilies).toEqual({});
   });
 

@@ -65,7 +65,7 @@ The host page (`server.html`) runs the authoritative WebAssembly game simulation
 
 - **Star topology** — clients never talk to each other, only to the host.
 - **Session tokens** — 32 hex characters, held per tab in `sessionStorage` with a persistent `localStorage` copy the first tab adopts. Survives a page refresh; same token = same player, and an automatic reconnect re-sends it to restore the held station and the current projection.
-- **Join by five letters** — the host is issued a private code; the QR carries the full structured form of the same code, so scanning and typing land in the same place.
+- **Join by typing a code** — the host is issued a private code; the QR carries the full structured form of the same code, so scanning and typing land in the same place.
 - **Almost no backend** — the rendezvous service handles code lookup and the WebRTC handshake and then gets out of the way; all game data flows peer-to-peer.
 
 ---
@@ -125,7 +125,7 @@ The smoke suite covers:
 | Spec | What it tests |
 |---|---|
 | `transport-shim.spec.js` | BroadcastChannel transport stand-in (unit) |
-| `rendezvous-join.spec.js` | Typed five-letter join, QR link, distinct refusals |
+| `rendezvous-join.spec.js` | Typed join, QR link, distinct refusals |
 | `multi-client-crew.spec.js` | Four phones on one code, four seats |
 | `server-load.spec.js` | WASM initialises without JS errors |
 | `client-connect.spec.js` | Client page connects and receives Welcome |
@@ -239,7 +239,7 @@ assets/
 
 server.html           — host page: loads WASM, registers with the rendezvous
                         service, owns the per-token connection maps
-client.html           — client page: pure HTML/JS, joins by five-letter code
+client.html           — client page: pure HTML/JS, joins by typed code
 worker-rendezvous/    — the rendezvous service (Worker + Durable Object)
 Trunk.toml            — build config for server.html (server feature)
 client-trunk.toml     — build config for client.html (client feature)

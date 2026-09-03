@@ -21,7 +21,10 @@ use super::shared::{
     any_bank_accepts_human_input, any_bank_operates_ai, live_entity_xz, system_is_registered,
     BeamContext, DirectFireGeometry, ShooterState,
 };
-use super::{AsteroidDestroyedVfx, ShipDestroyedVfx, DEFAULT_SHIP_EXPLOSION_RADIUS};
+use super::{
+    AsteroidDestroyedVfx, ShipDestroyedVfx, WeaponActionRefusal, WeaponActionResult,
+    DEFAULT_SHIP_EXPLOSION_RADIUS,
+};
 
 // ── Beam constants ───────────────────────────────────────────────────────
 //
@@ -597,6 +600,9 @@ pub(crate) fn handle_set_target(
     content_runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entities::spawner::EntityUuid>>,
     entity_q: Query<(&crate::entities::spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    mut outbound: Option<
+        ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
+    >,
     targetable_q: Query<
         (
             &crate::entities::spawner::EntityUuid,
@@ -702,6 +708,15 @@ pub(crate) fn handle_set_target(
                     },
                 ));
             }
+            super::finish_action_feedback(
+                cmd,
+                &mut outbound,
+                if locked {
+                    WeaponActionResult::Applied
+                } else {
+                    WeaponActionResult::Refused(WeaponActionRefusal::MissingTarget)
+                },
+            );
         }
     }
 }
@@ -740,6 +755,9 @@ pub(crate) fn handle_fire_phaser(
     // `Option<Res<_>>` for the reason `sim_rng::with_stream` documents: a bare
     // `Res` fails Bevy parameter validation in every bare-`App` unit fixture.
     sim_rng: Option<Res<crate::sim_rng::SimRng>>,
+    mut outbound: Option<
+        ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
+    >,
 ) {
     use crate::entities::config::PhaserCombatConfig;
 
@@ -775,6 +793,11 @@ pub(crate) fn handle_fire_phaser(
                         .map(|_| b.id.clone())
                 })
             }) else {
+                super::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    WeaponActionResult::Refused(WeaponActionRefusal::UnknownMount),
+                );
                 continue;
             };
 
@@ -790,6 +813,11 @@ pub(crate) fn handle_fire_phaser(
             // Admission already gated the token. This is a system-state gate:
             // the bank must be operable (not Offline).
             if !policy.accept_human_input && !policy.operate_ai {
+                super::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    WeaponActionResult::Refused(WeaponActionRefusal::Offline),
+                );
                 continue;
             }
 
@@ -798,6 +826,11 @@ pub(crate) fn handle_fire_phaser(
             // .is_some()` — a ship-level lock that made overlapping arcs
             // unrepresentable.
             if cooldown.is_bank_active(&bank_id) || beam.is_bank_firing(&bank_id) {
+                super::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    WeaponActionResult::Refused(WeaponActionRefusal::ActiveOrCooling),
+                );
                 continue;
             }
 
@@ -809,9 +842,19 @@ pub(crate) fn handle_fire_phaser(
                 Some(SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
                 _ => None,
             }) else {
+                super::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    WeaponActionResult::Refused(WeaponActionRefusal::MissingCombatLock),
+                );
                 continue;
             };
             let Some((tx, tz)) = live_entity_xz(&target_uuid, &asteroid_q, &entity_q) else {
+                super::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    WeaponActionResult::Refused(WeaponActionRefusal::MissingTarget),
+                );
                 continue;
             };
 
@@ -856,6 +899,11 @@ pub(crate) fn handle_fire_phaser(
                     .unwrap_or(false)
             };
             if !bank_in_arc {
+                super::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    WeaponActionResult::Refused(WeaponActionRefusal::OutOfArc),
+                );
                 continue;
             }
 
@@ -929,6 +977,7 @@ pub(crate) fn handle_fire_phaser(
                 beam_duration_secs * factor,
                 cooldown_secs * factor,
             );
+            super::finish_action_feedback(cmd, &mut outbound, WeaponActionResult::Applied);
 
             commands.trigger(BeamStartedEvent {
                 bank: bank_id,
@@ -2389,17 +2438,30 @@ pub(crate) fn handle_set_phaser_mode(
         With<crate::server_app::LocalShip>,
     >,
     mut phaser_mode: ResMut<CurrentPhaserMode>,
+    mut outbound: Option<
+        ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
+    >,
 ) {
     let Some((admitted, control_sources, ship_config)) = ship_query.iter().next() else {
         return;
     };
     // Ship-level gate (issue #512, option c): any bank human-operable.
     if !any_bank_accepts_human_input(control_sources, &ship_config.0) {
+        for cmd in admitted.for_target(crate::ship::system_registry::PHASER_CONTROL_SYSTEM_ID) {
+            if matches!(cmd.payload, SystemControlPayload::SetPhaserMode { .. }) {
+                super::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    WeaponActionResult::Refused(WeaponActionRefusal::Offline),
+                );
+            }
+        }
         return;
     }
     for cmd in admitted.for_target(crate::ship::system_registry::PHASER_CONTROL_SYSTEM_ID) {
         if let SystemControlPayload::SetPhaserMode { mode } = &cmd.payload {
             phaser_mode.0 = *mode;
+            super::finish_action_feedback(cmd, &mut outbound, WeaponActionResult::Applied);
         }
     }
 }

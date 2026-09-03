@@ -55,14 +55,25 @@ use crate::lockstep::transfer::SnapshotChunk;
 /// adds [`HostLossFrame`] — one host telling the fleet that a ship host has
 /// vanished (issue #1119). `4` adds [`SlotClaimFrame`] — the owner announcing
 /// that a replacement machine has claimed a disconnected fixed slot, so the whole
-/// fleet resolves the same recovery (issue #1120). Bumped rather than
+/// fleet resolves the same recovery (issue #1120). `5` adds the host-mesh GM
+/// role and its public operator roster (issue #1289); a GM consumes no ship slot,
+/// so a revision-4 peer would otherwise silently disagree about membership.
+/// `6` added collective GM/crew start policy. `7` makes its immutable start
+/// grant carry the exact logical tick it applies on; a revision-6 peer would
+/// otherwise apply the grant on its next locally observed fixed step.
+/// `8` adds the paused-safe, typed and attributed GM action grant. `9` adds the
+/// visible first-time GM admission controls and Rust-owned paused transfer frame.
+/// `10` added the owner-sequenced restore-boundary clock. `11` distinguishes a
+/// known departed GM reconnect from a first-time admission while keeping both on
+/// that same paused transfer transaction.
+/// Bumped rather than
 /// extended-in-place because #1114's decoder refuses a frame whose `m` it does
 /// not recognise, which is precisely the behaviour that makes a mixed-build fleet
 /// fail loudly instead of half-understanding each other: a revision-3 build that
 /// silently DROPPED a slot-claim frame would keep the recovered ship on Backfill
 /// while the revision-4 hosts handed it back to the replacement — a split with no
 /// symptom but a divergence.
-pub const HOST_MESH_PROTOCOL: u32 = 4;
+pub const HOST_MESH_PROTOCOL: u32 = 11;
 
 /// One command a host admitted from its own crew, as it crosses to the fleet.
 ///
@@ -140,6 +151,11 @@ pub struct TickFrame {
     /// The commands this host admitted from its own crew since it last spoke,
     /// in its own order.
     pub commands: Vec<MeshCommand>,
+    /// One immutable fleet-wide start decision, carried only by the technical
+    /// owner's authenticated frame. Its `apply_tick` lies beyond this frame's
+    /// watermark, so receiving this frame becomes part of the same barrier that
+    /// must open before any participant can reach the decision tick.
+    pub start_grant: Option<crate::lobby::start_policy::StartGrant>,
 }
 
 /// One host's authoritative-state digest at one tick.
@@ -255,6 +271,11 @@ pub enum MeshFrame {
     /// A replacement machine has claimed a disconnected fixed slot; the fleet
     /// resolves the same recovery from it (issue #1120).
     SlotClaim(SlotClaimFrame),
+    /// A GM proposal or owner-sequenced terminal decision, independently
+    /// deliverable while `FixedUpdate` is starved by Pause (issue #1292).
+    GmAction(crate::gm_action::GmActionFrame),
+    /// First-time mid-session GM pause/transfer/admission protocol (#1293).
+    GmJoin(crate::gm_join::GmJoinFrame),
 }
 
 impl MeshFrame {
@@ -266,6 +287,8 @@ impl MeshFrame {
             MeshFrame::Snapshot(f) => f.from,
             MeshFrame::HostLoss(f) => f.from,
             MeshFrame::SlotClaim(f) => f.from,
+            MeshFrame::GmAction(f) => f.wire_from(),
+            MeshFrame::GmJoin(f) => f.wire_from(),
         }
     }
 
@@ -277,6 +300,8 @@ impl MeshFrame {
             MeshFrame::Snapshot(_) => TYPE_SNAPSHOT,
             MeshFrame::HostLoss(_) => TYPE_HOST_LOSS,
             MeshFrame::SlotClaim(_) => TYPE_SLOT_CLAIM,
+            MeshFrame::GmAction(_) => TYPE_GM_ACTION,
+            MeshFrame::GmJoin(_) => TYPE_GM_JOIN,
         }
     }
 }
@@ -291,6 +316,10 @@ pub const TYPE_SNAPSHOT: &str = "snapshot";
 pub const TYPE_HOST_LOSS: &str = "host-loss";
 /// The `t` value a [`MeshFrame::SlotClaim`] carries on the JS wire (issue #1120).
 pub const TYPE_SLOT_CLAIM: &str = "slot-claim";
+/// The `t` value a [`MeshFrame::GmAction`] carries on the JS wire.
+pub const TYPE_GM_ACTION: &str = "gm-action";
+/// The `t` value a [`MeshFrame::GmJoin`] carries on the JS wire.
+pub const TYPE_GM_JOIN: &str = "gm-join";
 
 #[cfg(test)]
 mod tests {
@@ -331,6 +360,7 @@ mod tests {
                 tick: 10,
                 ready_through: 16,
                 commands: vec![command(1, 0), command(1, 1)],
+                start_grant: None,
             }),
             MeshFrame::Digest(DigestFrame {
                 from: HostSlot(2),
@@ -358,6 +388,18 @@ mod tests {
                 claim_seq: 7,
                 tick: 512,
             }),
+            MeshFrame::GmAction(crate::gm_action::GmActionFrame::Granted(
+                crate::gm_action::GmActionGrant {
+                    from: HostSlot(2),
+                    sequenced_by: HostSlot(1),
+                    operator_id: "gm-1".into(),
+                    correlation: crate::gm_action::GmActionId::new("pause-1").unwrap(),
+                    recovery_generation: 0,
+                    apply_tick: 513,
+                    order: crate::gm_action::GmActionOrder::new(HostSlot(2), 1),
+                    action: crate::gm_action::GmAction::SetSessionPaused { active: true },
+                },
+            )),
         ];
         for frame in frames {
             let text = ron::ser::to_string(&frame).expect("a frame serialises");
@@ -378,7 +420,7 @@ mod tests {
     #[test]
     fn the_protocol_revision_is_pinned() {
         assert_eq!(
-            HOST_MESH_PROTOCOL, 4,
+            HOST_MESH_PROTOCOL, 11,
             "bumping this is a fleet-wide incompatible change: gui/host-mesh.js \
              refuses a frame whose `m` it does not know, so both halves and the \
              Vitest pin move together or a mixed fleet fails to agree a tick"

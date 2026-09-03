@@ -121,7 +121,7 @@
 //! field nobody is going to type into.
 //!
 //! So the pane's route is composed rather than dodged. The fragment leads with
-//! [`PANE_JOIN_CODE`], a five-letter suffix the authored table in
+//! [`PANE_JOIN_CODE`], a suffix the authored table in
 //! `assets/join/join-codes.toml` accepts, and [`PANE_BOOT_JS`] rewrites
 //! `location.hash` down to just that before any page code reads it. From that
 //! line on the page's URL is indistinguishable from a phone's that scanned a QR,
@@ -300,7 +300,7 @@ pub fn fragment_encode(raw: &str) -> String {
 
 /// The join code a pane's fragment leads with.
 ///
-/// A five-letter suffix in `assets/join/join-codes.toml`'s alphabet
+/// A suffix of the authored length in `assets/join/join-codes.toml`'s alphabet
 /// (`ABCDEFGHIJKMNOPQRSTUVWXYZ`) that is not on its deny list, so
 /// `gui/join-code.js`'s `parseJoinCode` composes it into a full identifier and
 /// `client.html`'s `startPhoenixJoin` takes its ordinary rendezvous route
@@ -311,7 +311,7 @@ pub fn fragment_encode(raw: &str) -> String {
 /// It resolves to nothing and is meant to: the pane's own socket stand-in
 /// answers `joined` to whatever it is handed, so this is a sentinel that gets
 /// the page onto its join route, not a code any service has heard of.
-pub const PANE_JOIN_CODE: &str = "PANES";
+pub const PANE_JOIN_CODE: &str = "PANESEAT";
 
 /// The URL a pane's view navigates to — **including its identity**.
 ///
@@ -703,7 +703,7 @@ mod tests {
         assert_eq!(
             pane_url("127.0.0.1:8080", PaneId(3), "abcd", &identity()),
             "http://127.0.0.1:8080/client/pane-3-abcd.html\
-             #PANES&token=3f1a6c2e-0a11-4b3c-9d55-000000000001&name=Ada"
+             #PANESEAT&token=3f1a6c2e-0a11-4b3c-9d55-000000000001&name=Ada"
         );
     }
 
@@ -743,12 +743,13 @@ mod tests {
     #[test]
     fn the_join_code_is_one_the_authored_table_accepts() {
         // The Rust half of a claim `tests/client/pane-scripts.test.js` makes
-        // against the real table: five letters, all in the authored alphabet,
+        // against the real table: the authored length, all in the authored
+        // alphabet,
         // none of them the confusables the canonicaliser rewrites. A code that
         // did not round-trip would compose into an identifier the page then
         // refuses, and the console would come up behind the join overlay.
         const ALPHABET: &str = "ABCDEFGHIJKMNOPQRSTUVWXYZ";
-        assert_eq!(PANE_JOIN_CODE.len(), 5);
+        assert_eq!(PANE_JOIN_CODE.len(), 8);
         assert!(
             PANE_JOIN_CODE.chars().all(|c| ALPHABET.contains(c)),
             "{PANE_JOIN_CODE} is not spelled in assets/join/join-codes.toml's alphabet"
@@ -871,6 +872,36 @@ mod tests {
              reason for this strip"
         );
         assert!(!build_pane_document(&client).unwrap().contains("<audio"));
+    }
+
+    #[test]
+    fn a_native_pane_declares_profile_capabilities_before_the_shared_adapter() {
+        // #1280 does not create a native profile, input sampler or
+        // Accessibility apply path. The first injected script declares only
+        // capability facts; the repository's ordinary profile and surface
+        // adapter then consume them. Keyboard still arrives through #1124 and
+        // OS defaults are still injected separately by #1127 below.
+        let client = std::fs::read_to_string("client.html").unwrap();
+        let html = build_pane_document(&client).unwrap();
+        let declaration = html
+            .find("window.PhoenixOperatorCapabilities =")
+            .expect("pane boot declares its operator capabilities");
+        let profile = html
+            .find("src=\"gui/operator-profile.js\"")
+            .expect("the ordinary versioned profile remains the schema owner");
+        let adapter = html
+            .find("src=\"gui/operator-surface-adapter.js\"")
+            .expect("the shared surface adapter remains in the pane document");
+        assert!(declaration < profile);
+        assert!(profile < adapter);
+        assert!(html.contains("surface: 'native-pane'"));
+        assert!(html.contains("gamepad: false"));
+        assert!(html.contains("vibration: false"));
+        assert_eq!(
+            html.matches("src=\"gui/operator-profile.js\"").count(),
+            1,
+            "a pane must not gain a competing native profile"
+        );
     }
 
     // ── OS accessibility default injection (issue #1127) ─────────────────────

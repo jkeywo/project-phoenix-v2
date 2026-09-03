@@ -6,7 +6,7 @@
 // suite pins the pieces that are pure DOM: the role + accessible name on every
 // composite, the single tab stop roving leaves, the glyph steppers' names, and
 // the two handlers that dispatch a named action straight from a key —
-// blasters' hold-to-fire and the radar's target cursor.
+// blasters' charge-start and the radar's target cursor.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { t } from '../../gui/strings.js';
 import { makeRadarCtx } from './radar-canvas-stub.js';
@@ -134,8 +134,8 @@ describe('glyph steppers carry an accessible name (AC #3)', () => {
   });
 });
 
-describe('blaster hold-to-fire from the keyboard (AC #2/#4)', () => {
-  it('Enter down charges and Enter up fires the SAME named actions as the pointer', () => {
+describe('blaster charge-start from the keyboard (AC #2/#4)', () => {
+  it('Enter down starts one operation and Enter up does not create a second alias action', () => {
     const el = mount('ph-blasters-controls');
     el.state = { banks: [{ id: 'port', label: 'Port', fire_ready: true }] };
     const btn = el.shadowRoot.querySelector('#banks .btn');
@@ -145,32 +145,27 @@ describe('blaster hold-to-fire from the keyboard (AC #2/#4)', () => {
     btn.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true, composed: true, cancelable: true }));
 
     const actions = window.sendAction.mock.calls.map((c) => c[0]);
-    expect(actions).toEqual(['charge_blaster_start', 'fire_blaster']);
+    expect(actions).toEqual(['charge_blaster_start']);
     expect(window.sendAction.mock.calls[0][1]).toEqual({ bank: 'port' });
   });
 
-  it('Space works the same way', () => {
+  it('Space uses the same one-operation contract', () => {
     const el = mount('ph-blasters-controls');
     el.state = { banks: [{ id: 'stbd', label: 'Stbd', fire_ready: true }] };
     const btn = el.shadowRoot.querySelector('#banks .btn');
     btn.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, composed: true, cancelable: true }));
     btn.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true, composed: true, cancelable: true }));
-    expect(window.sendAction.mock.calls.map((c) => c[0])).toEqual(['charge_blaster_start', 'fire_blaster']);
+    expect(window.sendAction.mock.calls.map((c) => c[0])).toEqual(['charge_blaster_start']);
   });
 
-  it('a mid-charge blur releases the charge once, mirroring pointer mouseleave', () => {
+  it('a mid-charge blur emits no second action', () => {
     const el = mount('ph-blasters-controls');
-    // The blur guard mirrors mouseleave: it fires only while the bank is charging.
-    el.state = { banks: [{ id: 'port', label: 'Port', fire_ready: true, state: 'charging' }] };
+    el.state = { banks: [{ id: 'port', label: 'Port', fire_ready: false, charge_progress: 0.5 }] };
     const btn = el.shadowRoot.querySelector('#banks .btn');
 
-    // Hold Enter to charge, then move focus away before the keyup ever lands.
-    btn.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, composed: true, cancelable: true }));
     btn.dispatchEvent(new FocusEvent('blur'));
 
-    const actions = window.sendAction.mock.calls.map((c) => c[0]);
-    expect(actions).toEqual(['charge_blaster_start', 'fire_blaster']); // released exactly once
-    expect(window.sendAction.mock.calls[1][1]).toEqual({ bank: 'port' });
+    expect(window.sendAction).not.toHaveBeenCalled();
   });
 
   it('a blur with no charge in progress is a no-op (no stray fire)', () => {

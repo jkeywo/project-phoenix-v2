@@ -198,6 +198,14 @@ fn client_message_table() -> Vec<(ClientMessageDiscriminants, ClientMessage)> {
             },
         ),
         (
+            ClientMessageDiscriminants::ControlSystemCorrelated,
+            ClientMessage::ControlSystemCorrelated {
+                correlation: ActionCorrelationId::new("feedback-1").unwrap(),
+                target: SystemId("red-alert".into()),
+                payload: SystemControlPayload::SetRedAlert { active: true },
+            },
+        ),
+        (
             ClientMessageDiscriminants::ControlSystem,
             ClientMessage::ControlSystem {
                 target: crate::ship::system_registry::helm_steering_system_id(),
@@ -300,6 +308,23 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
                 ship_stations: empty_ship_stations(),
                 ship_config: ShipClientConfig::default(),
                 station_ratings: HashMap::new(),
+                gms: vec![crate::gm_roster::GmOperator {
+                    id: "gm-1".into(),
+                    name: "Morgan".into(),
+                    connected: true,
+                    ready: true,
+                }],
+            },
+        ),
+        (
+            ServerMessageDiscriminants::GmRosterChanged,
+            ServerMessage::GmRosterChanged {
+                gms: vec![crate::gm_roster::GmOperator {
+                    id: "gm-1".into(),
+                    name: "Morgan".into(),
+                    connected: true,
+                    ready: true,
+                }],
             },
         ),
         (
@@ -339,6 +364,13 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
             ServerMessage::AfkChanged {
                 token: "tok".into(),
                 afk: true,
+            },
+        ),
+        (
+            ServerMessageDiscriminants::ActionFeedback,
+            ServerMessage::ActionFeedback {
+                correlation: ActionCorrelationId::new("feedback-1").unwrap(),
+                outcome: ActionFeedbackOutcome::Applied,
             },
         ),
         (
@@ -393,6 +425,16 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
                         (SystemId("navigation".into()), "Human".into()),
                         (SystemId("shields-system".into()), "Ai".into()),
                     ]),
+                    station_puppets: vec![StationPuppetSnapshot {
+                        station: StationId("navigation".into()),
+                        operators: vec!["gm-1".into()],
+                        latest_activity: Some(StationPuppetActivitySnapshot {
+                            tick: 44,
+                            operator_id: "gm-1".into(),
+                            target: SystemId("navigation".into()),
+                            action: "SetWaypoint".into(),
+                        }),
+                    }],
                 },
             },
         ),
@@ -966,6 +1008,178 @@ fn encode_chatter_wire_shape_matches_js_handler() {
     );
 }
 
+#[test]
+fn encode_gm_entity_projection_pins_the_local_host_channel_shape() {
+    let payload = crate::gm_projection::GmEntityProjectionPayload {
+        entities: vec![
+            crate::gm_projection::GmEntityProjection {
+                entity_id: "00000000-0000-0000-0000-000000000001".into(),
+                name: "Axiom".into(),
+                kind: crate::gm_projection::GmEntityKind::PlayerShip,
+                position: [12.0, 0.0, -8.0],
+                faction: Some(crate::gm_projection::GmEntityReference {
+                    entity_id: "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa".into(),
+                    name: "faction.alliance.display_name".into(),
+                }),
+                status: crate::gm_projection::GmEntityStatus {
+                    hull_percent: Some(73),
+                    condition_percent: None,
+                    destroyed: false,
+                },
+                current_target: Some(crate::gm_projection::GmEntityReference {
+                    entity_id: "00000000-0000-0000-0000-000000000002".into(),
+                    name: "Raider".into(),
+                }),
+                geometry: None,
+                radar: crate::gm_projection::GmRadarAppearance {
+                    icon: Some("playerShip".into()),
+                    colour: Some([0.2, 0.8, 1.0]),
+                    size: Some(4.0),
+                    region_colour: None,
+                },
+            },
+            crate::gm_projection::GmEntityProjection {
+                entity_id: "00000000-0000-0000-0000-000000000003".into(),
+                name: "entity.asteroid_belt.display_name".into(),
+                kind: crate::gm_projection::GmEntityKind::AsteroidField,
+                position: [100.0, 0.0, 200.0],
+                faction: None,
+                status: crate::gm_projection::GmEntityStatus {
+                    hull_percent: None,
+                    condition_percent: None,
+                    destroyed: false,
+                },
+                current_target: None,
+                geometry: Some(crate::regions::shape::RegionShape::Torus {
+                    inner_radius: 25.0,
+                    outer_radius: 125.0,
+                }),
+                radar: crate::gm_projection::GmRadarAppearance {
+                    icon: None,
+                    colour: None,
+                    size: None,
+                    region_colour: Some([0.4, 0.35, 0.3]),
+                },
+            },
+        ],
+    };
+    assert_eq!(
+        encode_gm_entity_projection(&payload).unwrap(),
+        r#"{"entities":[{"entity_id":"00000000-0000-0000-0000-000000000001","name":"Axiom","kind":"player_ship","position":[12.0,0.0,-8.0],"faction":{"entity_id":"aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa","name":"faction.alliance.display_name"},"status":{"hull_percent":73,"condition_percent":null,"destroyed":false},"current_target":{"entity_id":"00000000-0000-0000-0000-000000000002","name":"Raider"},"geometry":null,"radar":{"icon":"playerShip","colour":[0.2,0.8,1.0],"size":4.0,"region_colour":null}},{"entity_id":"00000000-0000-0000-0000-000000000003","name":"entity.asteroid_belt.display_name","kind":"asteroid_field","position":[100.0,0.0,200.0],"faction":null,"status":{"hull_percent":null,"condition_percent":null,"destroyed":false},"current_target":null,"geometry":{"type":"torus","inner_radius":25.0,"outer_radius":125.0},"radar":{"icon":null,"colour":null,"size":null,"region_colour":[0.4,0.35,0.3]}}]}"#
+    );
+}
+
+#[test]
+fn encode_gm_activity_feed_pins_the_local_host_channel_shape() {
+    use crate::gm_activity::{
+        GmActivityAction, GmActivityActionOutcome, GmActivityCategory, GmActivityConnection,
+        GmActivityConnectionRole, GmActivityConnectionState, GmActivityDamage, GmActivityDetail,
+        GmActivityEntry, GmActivityFeedPayload, GmActivityGmAction, GmActivityLink,
+        GmActivityLinkRole, GmActivityObjective, GmActivityObjectiveStatus,
+        GmActivityPublicIdentity, GmActivityRedAlert, GmActivityTrigger,
+    };
+    let ship = crate::gm_projection::GmEntityReference {
+        entity_id: "00000000-0000-4000-8000-000000000001".into(),
+        name: "entity.alliance_cruiser.display_name".into(),
+    };
+    let ship_link = GmActivityLink {
+        role: GmActivityLinkRole::Ship,
+        entity: ship.clone(),
+    };
+    let payload = GmActivityFeedPayload {
+        capacity: 128,
+        entries: vec![
+            GmActivityEntry {
+                tick: 42,
+                category: GmActivityCategory::Damage,
+                ships: vec![ship.clone()],
+                links: vec![ship_link.clone()],
+                detail: GmActivityDetail::Damage(GmActivityDamage {
+                    victim_kind: crate::core::balance::VictimKind::Ship,
+                    weapon: "region".into(),
+                    amount: 4.0,
+                    shield_absorbed: 1.0,
+                    hull_damage: 3.0,
+                    system_hit: None,
+                }),
+            },
+            GmActivityEntry {
+                tick: 42,
+                category: GmActivityCategory::Destruction,
+                ships: vec![ship.clone()],
+                links: vec![ship_link.clone()],
+                detail: GmActivityDetail::Destruction,
+            },
+            GmActivityEntry {
+                tick: 42,
+                category: GmActivityCategory::Objective,
+                ships: vec![],
+                links: vec![],
+                detail: GmActivityDetail::Objective(GmActivityObjective {
+                    objective_id: "reach_beacon".into(),
+                    status: GmActivityObjectiveStatus::Completed,
+                }),
+            },
+            GmActivityEntry {
+                tick: 42,
+                category: GmActivityCategory::Trigger,
+                ships: vec![],
+                links: vec![],
+                detail: GmActivityDetail::Trigger(GmActivityTrigger {
+                    trigger_id: "arrival".into(),
+                    origin: "world.rhai".into(),
+                }),
+            },
+            GmActivityEntry {
+                tick: 42,
+                category: GmActivityCategory::RedAlert,
+                ships: vec![ship.clone()],
+                links: vec![ship_link.clone()],
+                detail: GmActivityDetail::RedAlert(GmActivityRedAlert { active: true }),
+            },
+            GmActivityEntry {
+                tick: 42,
+                category: GmActivityCategory::Connection,
+                ships: vec![ship.clone()],
+                links: vec![ship_link],
+                detail: GmActivityDetail::Connection(GmActivityConnection {
+                    identity: GmActivityPublicIdentity {
+                        id: "crew-1".into(),
+                        name: "Ari".into(),
+                    },
+                    role: GmActivityConnectionRole::Crew,
+                    state: GmActivityConnectionState::Connected,
+                    ship: Some(ship),
+                }),
+            },
+            GmActivityEntry {
+                tick: 42,
+                category: GmActivityCategory::GmAction,
+                ships: vec![],
+                links: vec![],
+                detail: GmActivityDetail::GmAction(GmActivityGmAction {
+                    operator: GmActivityPublicIdentity {
+                        id: "gm-alpha".into(),
+                        name: "Morgan".into(),
+                    },
+                    correlation: "pause-1".into(),
+                    action: GmActivityAction::SetSessionPaused { active: true },
+                    outcome: GmActivityActionOutcome::Refused,
+                    reason: Some("wrong-phase".into()),
+                    order: Some(crate::gm_action::GmActionOrder::new(
+                        crate::command_admission::log::HostSlot(1),
+                        9,
+                    )),
+                }),
+            },
+        ],
+    };
+    assert_eq!(
+        encode_gm_activity_feed(&payload).unwrap(),
+        r#"{"capacity":128,"entries":[{"tick":42,"category":"damage","ships":[{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}],"links":[{"role":"ship","entity":{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}}],"detail":{"type":"damage","data":{"victim_kind":"ship","weapon":"region","amount":4.0,"shield_absorbed":1.0,"hull_damage":3.0,"system_hit":null}}},{"tick":42,"category":"destruction","ships":[{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}],"links":[{"role":"ship","entity":{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}}],"detail":{"type":"destruction"}},{"tick":42,"category":"objective","ships":[],"links":[],"detail":{"type":"objective","data":{"objective_id":"reach_beacon","status":"completed"}}},{"tick":42,"category":"trigger","ships":[],"links":[],"detail":{"type":"trigger","data":{"trigger_id":"arrival","origin":"world.rhai"}}},{"tick":42,"category":"red_alert","ships":[{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}],"links":[{"role":"ship","entity":{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}}],"detail":{"type":"red_alert","data":{"active":true}}},{"tick":42,"category":"connection","ships":[{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}],"links":[{"role":"ship","entity":{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}}],"detail":{"type":"connection","data":{"identity":{"id":"crew-1","name":"Ari"},"role":"crew","state":"connected","ship":{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}}}},{"tick":42,"category":"gm_action","ships":[],"links":[],"detail":{"type":"gm_action","data":{"operator":{"id":"gm-alpha","name":"Morgan"},"correlation":"pause-1","action":{"type":"set_session_paused","active":true},"outcome":"refused","reason":"wrong-phase","order":{"sequence":9,"origin":1}}}}]}"#
+    );
+}
+
 /// `encode_chatter` must JSON-escape quotes/backslashes in the labels and in
 /// any text carried inside the payload — the pre-#818 hand-rolled `format!`
 /// encoder did this by hand; serde now owns it. Round-trips through
@@ -1203,6 +1417,27 @@ fn set_station_stance_control_system_round_trips() {
         encoded,
         r#"{"type":"ControlSystem","data":{"target":"command","payload":{"type":"SetStationStance","data":{"station":"tactical","stance":"tactical-weapons-free"}}}}"#,
         "SetStationStance wire shape must match what action-map.js sends"
+    );
+}
+
+/// Server-authored crew-rating replication as a ControlSystem payload (#1119).
+#[test]
+fn assign_station_rating_control_system_round_trips() {
+    let msg = ClientMessage::ControlSystem {
+        target: SystemId("command".into()),
+        payload: SystemControlPayload::AssignStationRating {
+            station: StationId("captain".into()),
+            rating: "Human".into(),
+        },
+    };
+    assert_client_roundtrip(&JsonCodec, msg.clone());
+    assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+
+    let encoded = JsonCodec.encode_client(&msg).unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"type":"ControlSystem","data":{"target":"command","payload":{"type":"AssignStationRating","data":{"station":"captain","rating":"Human"}}}}"#,
+        "AssignStationRating wire shape stays stable for the fleet mesh replay"
     );
 }
 
@@ -2002,6 +2237,46 @@ fn set_red_alert_control_system_round_trips() {
     };
     assert_client_roundtrip(&JsonCodec, off.clone());
     assert_client_roundtrip(&PrettyJsonCodec, off);
+}
+
+/// The correlated Red Alert tracer has its own additive envelope.  The
+/// correlation is beside target/payload — never inside simulation semantics.
+#[test]
+fn correlated_red_alert_and_action_feedback_round_trip() {
+    let correlation = ActionCorrelationId::new("red-alert-4f4f").unwrap();
+    let request = ClientMessage::ControlSystemCorrelated {
+        correlation: correlation.clone(),
+        target: SystemId("red-alert".into()),
+        payload: SystemControlPayload::SetRedAlert { active: true },
+    };
+    let encoded = JsonCodec.encode_client(&request).unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"type":"ControlSystemCorrelated","data":{"correlation":"red-alert-4f4f","target":"red-alert","payload":{"type":"SetRedAlert","data":{"active":true}}}}"#,
+    );
+    assert_client_roundtrip(&JsonCodec, request);
+
+    let response = ServerMessage::ActionFeedback {
+        correlation,
+        outcome: ActionFeedbackOutcome::Refused,
+    };
+    assert_eq!(
+        JsonCodec.encode_server(&response).unwrap(),
+        r#"{"type":"ActionFeedback","data":{"correlation":"red-alert-4f4f","outcome":"Refused"}}"#,
+    );
+    assert_server_roundtrip(&JsonCodec, response);
+}
+
+#[test]
+fn action_correlation_rejects_empty_invisible_and_oversized_values() {
+    assert!(ActionCorrelationId::new("").is_err());
+    assert!(ActionCorrelationId::new("contains space").is_err());
+    assert!(ActionCorrelationId::new("x".repeat(MAX_ACTION_CORRELATION_BYTES + 1)).is_err());
+    assert!(JsonCodec
+        .decode_client(
+            r#"{"type":"ControlSystemCorrelated","data":{"correlation":"","target":"red-alert","payload":{"type":"SetRedAlert","data":{"active":true}}}}"#,
+        )
+        .is_err());
 }
 
 /// SetRepairPriority command round-trip (issue #739).
@@ -3669,6 +3944,33 @@ fn server_loading_progress_wire_format() {
 }
 
 #[test]
+fn host_lobby_payload_carries_exact_presentation_readiness_boolean() {
+    let payload = LobbyStatePayload {
+        phase: "Lobby".into(),
+        scenario_title: String::new(),
+        scenario_body: String::new(),
+        crew_count: 0,
+        max_players: 0,
+        all_stations_filled: false,
+        all_ready: false,
+        readiness: crate::lobby::start_policy::ReadinessTally::default(),
+        presentation_ready: true,
+        stations: Vec::new(),
+        spectators: Vec::new(),
+        gms: Vec::new(),
+        loading_progress: None,
+        countdown_secs: 0,
+    };
+
+    let encoded = encode_lobby_state(&payload).expect("encode host lobby state");
+    let json: serde_json::Value = serde_json::from_str(&encoded).expect("valid lobby JSON");
+    assert_eq!(
+        json.get("presentation_ready"),
+        Some(&serde_json::Value::Bool(true))
+    );
+}
+
+#[test]
 fn entity_snapshot_shield_fraction_is_present_as_a_number_on_the_wire() {
     // (#471) shield_fraction: Some(0.0..=1.0) must appear as a bare number
     // on the wire, not e.g. wrapped or stringified.
@@ -4591,6 +4893,7 @@ fn system_blackboard_repair_round_trips() {
             ),
         ],
         damageable_systems: vec![SystemId("core".into()), SystemId("helm-radar".into())],
+        priority_targets: vec![SystemId("core".into())],
         queue_depth: vec![
             QueueEntryPreview {
                 station_id: "core".into(),
@@ -4622,6 +4925,10 @@ fn system_blackboard_repair_round_trips() {
         json.contains("\"destroyed_hull_fraction\":0.2"),
         "got: {json}"
     );
+    assert!(
+        json.contains("\"priority_targets\":[\"core\"]"),
+        "got: {json}"
+    );
     let decoded: SystemBlackboard = serde_json::from_str(&json).unwrap();
     assert_eq!(bb, decoded);
 
@@ -4637,6 +4944,7 @@ fn system_blackboard_repair_round_trips() {
     };
     assert_eq!(legacy_bb.destroyed_hull_fraction, None);
     assert_eq!(legacy_bb.aggregate_hull_fraction, Some(0.75));
+    assert!(legacy_bb.priority_targets.is_empty());
 
     // ...and through the envelope it actually ships in. Post-#737 this is
     // sent per token (`Target::Token`), not broadcast, but the encoding is
@@ -5152,6 +5460,7 @@ fn ship_client_config_station_systems_round_trips() {
         ship_stations: empty_ship_stations(),
         ship_config: config.clone(),
         station_ratings: HashMap::new(),
+        gms: vec![],
     };
     assert_server_roundtrip(&JsonCodec, msg.clone());
     assert_server_roundtrip(&PrettyJsonCodec, msg.clone());
@@ -5177,8 +5486,16 @@ fn ship_client_config_console_families_round_trip_as_public_strings() {
         ("helm".to_string(), ConsoleFamily::Helm),
         ("scan".to_string(), ConsoleFamily::Sensors),
     ]);
+    let system_kinds = HashMap::from([
+        (
+            "port-flight-vector".to_string(),
+            "helm_steering".to_string(),
+        ),
+        ("berthing-clamps".to_string(), "dock".to_string()),
+    ]);
     let config = ShipClientConfig {
         system_console_families,
+        system_kinds,
         blackboard_console_families,
         ..ShipClientConfig::default()
     };
@@ -5187,6 +5504,7 @@ fn ship_client_config_console_families_round_trip_as_public_strings() {
         ship_stations: empty_ship_stations(),
         ship_config: config.clone(),
         station_ratings: HashMap::new(),
+        gms: vec![],
     };
 
     let json = JsonCodec.encode_server(&msg).unwrap();
@@ -5194,6 +5512,8 @@ fn ship_client_config_console_families_round_trip_as_public_strings() {
     assert!(json.contains("\"berthing-clamps\":\"helm\""));
     assert!(json.contains("\"main-drive\":\"helm\""));
     assert!(json.contains("\"scan\":\"sensors\""));
+    assert!(json.contains("\"port-flight-vector\":\"helm_steering\""));
+    assert!(json.contains("\"berthing-clamps\":\"dock\""));
     let decoded = JsonCodec.decode_server(&json).unwrap();
     if let ServerMessage::Welcome { ship_config, .. } = decoded {
         assert_eq!(
@@ -5204,6 +5524,7 @@ fn ship_client_config_console_families_round_trip_as_public_strings() {
             ship_config.blackboard_console_families,
             config.blackboard_console_families
         );
+        assert_eq!(ship_config.system_kinds, config.system_kinds);
     } else {
         panic!("expected Welcome");
     }
@@ -5216,6 +5537,7 @@ fn ship_client_config_console_families_default_empty_when_missing() {
         ship_stations: empty_ship_stations(),
         ship_config: ShipClientConfig::default(),
         station_ratings: HashMap::new(),
+        gms: vec![],
     };
     let json = JsonCodec.encode_server(&msg).unwrap();
     assert!(
@@ -5226,10 +5548,15 @@ fn ship_client_config_console_families_default_empty_when_missing() {
         !json.contains("blackboard_console_families"),
         "the empty blackboard projection is omitted from the public payload"
     );
+    assert!(
+        !json.contains("system_kinds"),
+        "the empty authored-kind projection is omitted from the public payload"
+    );
     let decoded = JsonCodec.decode_server(&json).unwrap();
     if let ServerMessage::Welcome { ship_config, .. } = decoded {
         assert!(ship_config.system_console_families.is_empty());
         assert!(ship_config.blackboard_console_families.is_empty());
+        assert!(ship_config.system_kinds.is_empty());
     } else {
         panic!("expected Welcome");
     }
@@ -5245,6 +5572,7 @@ fn ship_client_config_station_systems_defaults_empty_when_missing() {
         ship_stations: empty_ship_stations(),
         ship_config: ShipClientConfig::default(),
         station_ratings: HashMap::new(),
+        gms: vec![],
     };
     let full_json = JsonCodec.encode_server(&msg).unwrap();
     // Remove the station_systems entry to simulate an old server payload.
@@ -5280,6 +5608,7 @@ fn ship_client_config_helm_capability_round_trips() {
         ship_stations: empty_ship_stations(),
         ship_config: config.clone(),
         station_ratings: HashMap::new(),
+        gms: vec![],
     };
     assert_server_roundtrip(&JsonCodec, msg.clone());
     assert_server_roundtrip(&PrettyJsonCodec, msg.clone());
@@ -5351,6 +5680,7 @@ fn ship_client_config_station_tutorials_round_trip() {
         ship_stations: empty_ship_stations(),
         ship_config: config.clone(),
         station_ratings: HashMap::new(),
+        gms: vec![],
     };
     assert_server_roundtrip(&JsonCodec, msg.clone());
     assert_server_roundtrip(&PrettyJsonCodec, msg.clone());
@@ -5373,6 +5703,7 @@ fn ship_client_config_station_tutorials_default_empty_when_missing() {
         ship_stations: empty_ship_stations(),
         ship_config: ShipClientConfig::default(),
         station_ratings: HashMap::new(),
+        gms: vec![],
     };
     let json = JsonCodec.encode_server(&msg).unwrap();
     assert!(
@@ -5385,6 +5716,181 @@ fn ship_client_config_station_tutorials_default_empty_when_missing() {
     } else {
         panic!("expected Welcome");
     }
+}
+
+// ── Crew-public GM roster (issue #1289) ──────────────────────────────
+
+#[test]
+fn gm_roster_decoder_canonicalises_a_bounded_full_replacement() {
+    let roster = decode_gm_roster(
+        r#"[
+            {"id":"gm-2","name":"","connected":false,"ready":false},
+            {"id":"gm-1","name":"Morgan","connected":true,"ready":true}
+        ]"#,
+    )
+    .expect("valid public roster");
+
+    assert_eq!(
+        roster
+            .operators()
+            .iter()
+            .map(|operator| operator.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["gm-1", "gm-2"]
+    );
+    assert!(roster.operators()[0].connected);
+    assert!(!roster.operators()[1].connected);
+}
+
+#[test]
+fn gm_roster_decoder_rejects_duplicates_bounds_and_private_fields() {
+    assert!(decode_gm_roster(
+        r#"[
+            {"id":"gm-1","name":"One","connected":true,"ready":false},
+            {"id":"gm-1","name":"Two","connected":false,"ready":false}
+        ]"#
+    )
+    .is_none());
+
+    let too_many = serde_json::to_string(
+        &(0..=crate::gm_roster::MAX_GM_OPERATORS)
+            .map(|index| crate::gm_roster::GmOperator {
+                id: format!("gm-{index}"),
+                name: String::new(),
+                connected: true,
+                ready: false,
+            })
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    assert!(decode_gm_roster(&too_many).is_none());
+
+    for private_field in ["peer", "credential", "owner", "leader", "station"] {
+        let raw = format!(
+            r#"[{{"id":"gm-1","name":"Morgan","connected":true,"ready":false,"{private_field}":"secret"}}]"#
+        );
+        assert!(
+            decode_gm_roster(&raw).is_none(),
+            "private field {private_field} must be refused at the codec boundary"
+        );
+    }
+}
+
+#[test]
+fn gm_wire_rows_have_only_public_identity_name_presence_and_readiness() {
+    let message = ServerMessage::GmRosterChanged {
+        gms: vec![crate::gm_roster::GmOperator {
+            id: "gm-1".into(),
+            name: "Morgan".into(),
+            connected: true,
+            ready: true,
+        }],
+    };
+    let encoded = JsonCodec.encode_server(&message).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+    let row = &value["data"]["gms"][0];
+    assert_eq!(
+        row.as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>(),
+        ["connected", "id", "name", "ready"].into_iter().collect()
+    );
+}
+
+#[test]
+fn gm_roster_decoder_requires_the_exact_ready_field() {
+    assert!(decode_gm_roster(r#"[{"id":"gm-1","name":"Morgan","connected":true}]"#).is_none());
+    let roster =
+        decode_gm_roster(r#"[{"id":"gm-1","name":"Morgan","connected":true,"ready":false}]"#)
+            .unwrap();
+    assert!(!roster.operators()[0].ready);
+}
+
+#[test]
+fn start_grant_codec_enforces_exact_id_mode_and_attribution() {
+    let automatic =
+        decode_start_grant(r#"{"id":"start-1","mode":"automatic","operator_id":null}"#).unwrap();
+    assert_eq!(automatic.validate(), Ok(1));
+    assert_eq!(
+        automatic.apply_tick, 0,
+        "missing means an owner-edge proposal"
+    );
+    let scheduled = decode_start_grant(
+        r#"{"id":"start-2","mode":"forced","operator_id":"gm-1","apply_tick":42}"#,
+    )
+    .unwrap();
+    assert_eq!(scheduled.apply_tick, 42);
+    assert!(
+        decode_start_grant(r#"{"id":"start-3","mode":"automatic","operator_id":"gm-1"}"#).is_none()
+    );
+    assert!(decode_start_grant(r#"{"id":"start-4","mode":"forced","operator_id":null}"#).is_none());
+    assert!(decode_start_grant(
+        r#"{"id":"start-5","mode":"forced","operator_id":"gm-1","owner":true}"#
+    )
+    .is_none());
+    assert!(decode_start_grant(
+        r#"{"id":"start-6","mode":"automatic","operator_id":null,"apply_tick":9007199254740992}"#
+    )
+    .is_none());
+}
+
+#[test]
+fn start_grant_result_codec_preserves_the_fixed_source_tick() {
+    let encoded = encode_start_grant_result(&crate::lobby::start_policy::StartGrantResult {
+        tick: 41,
+        status: crate::lobby::start_policy::StartGrantStatus::Refused,
+        operator_id: Some("gm-1".into()),
+        reason: Some(crate::lobby::start_policy::StartGrantReason::MissedApplyTick),
+        grant_id: Some("start-7".into()),
+    })
+    .unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"tick":41,"status":"refused","operator_id":"gm-1","reason":"missed-apply-tick","grant_id":"start-7"}"#
+    );
+}
+
+#[test]
+fn fleet_join_status_codec_is_exact_and_generation_stamped() {
+    let encoded = encode_fleet_join_status(&crate::lockstep::FleetJoinStatus {
+        generation: 17,
+        status: crate::lockstep::FleetJoinStatusKind::Refused,
+        reason: Some("fleet-leave-not-lobby".into()),
+    })
+    .unwrap();
+    let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(
+        value
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>(),
+        ["generation", "reason", "status"]
+            .into_iter()
+            .map(str::to_string)
+            .collect()
+    );
+    assert_eq!(value["generation"], 17);
+    assert_eq!(value["status"], "refused");
+    assert_eq!(value["reason"], "fleet-leave-not-lobby");
+}
+
+#[test]
+fn welcome_gm_projection_defaults_empty_for_older_senders() {
+    let message = ServerMessage::Welcome {
+        state: state(),
+        ship_stations: empty_ship_stations(),
+        ship_config: ShipClientConfig::default(),
+        station_ratings: HashMap::new(),
+        gms: vec![],
+    };
+    let encoded = JsonCodec.encode_server(&message).unwrap();
+    assert!(!encoded.contains("\"gms\""));
+    let decoded = JsonCodec.decode_server(&encoded).unwrap();
+    assert!(matches!(decoded, ServerMessage::Welcome { gms, .. } if gms.is_empty()));
 }
 
 // ── The browser host's join-handshake verdict (issue #1111) ─────────────────

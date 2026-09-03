@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::core::messages::{
-    GamePhase, GameState, ServerMessage, ShipClientConfig, StationId, WorldData,
+    GamePhase, GameState, GmOperator, ServerMessage, ShipClientConfig, StationId, WorldData,
 };
 use crate::lobby::session::SessionManager;
 use crate::lobby::stations_config::{get_station, ShipStations};
@@ -80,12 +80,14 @@ pub(crate) fn welcome_message(
     ship_stations: &ShipStations,
     ship_config: &ShipClientConfig,
     station_ratings: &HashMap<StationId, String>,
+    gm_operators: &[GmOperator],
 ) -> ServerMessage {
     ServerMessage::Welcome {
         state: derive_game_state(sessions, phase, world),
         ship_stations: ship_stations.clone(),
         ship_config: ship_config.clone(),
         station_ratings: station_ratings.clone(),
+        gms: gm_operators.to_vec(),
     }
 }
 
@@ -124,6 +126,7 @@ pub(crate) fn handle_identify(
     ship_stations: &ShipStations,
     ship_config: &ShipClientConfig,
     station_ratings: &HashMap<StationId, String>,
+    gm_operators: &[GmOperator],
 ) -> LobbyHandlerResult {
     let mut outbound = Vec::new();
     let mut station_rating_update: Option<(StationId, String)> = None;
@@ -193,6 +196,7 @@ pub(crate) fn handle_identify(
                 ship_stations,
                 ship_config,
                 station_ratings,
+                gm_operators,
             ),
         ));
         outbound.push((

@@ -315,6 +315,7 @@ mod tests {
                     target: SystemId((*t).into()),
                     payload: SystemControlPayload::SetRedAlert { active: true },
                     response_token: None,
+                    feedback_correlation: None,
                 })
                 .collect(),
         )
@@ -491,6 +492,45 @@ mod tests {
                 "the shipped-hull census did not exercise commandable kind `{required}`"
             );
         }
+    }
+
+    #[test]
+    fn production_helm_consumers_route_canonical_and_authored_instance_ids_by_kind() {
+        use crate::ship::system_registry as sr;
+
+        let app = production_consumer_registry_app();
+        let consumers = app.world().resource::<AdmittedConsumerRegistry>();
+        let descriptors = sr::SystemKindRegistry::with_core_systems().expect("core descriptors");
+        let cases = [
+            (sr::HELM_THRUST_KIND, sr::HELM_THRUST_SYSTEM_ID),
+            (sr::HELM_STEERING_KIND, sr::HELM_STEERING_SYSTEM_ID),
+            (sr::HELM_IMPULSE_KIND, sr::HELM_IMPULSE_SYSTEM_ID),
+            (sr::LATERAL_THRUST_KIND, sr::LATERAL_THRUST_SYSTEM_ID),
+            (sr::VERTICAL_THRUST_KIND, sr::VERTICAL_THRUST_SYSTEM_ID),
+            (sr::HELM_BOOST_KIND, sr::HELM_BOOST_SYSTEM_ID),
+        ];
+
+        let mut systems = Vec::new();
+        for (kind, canonical_id) in cases {
+            systems.push(system(canonical_id, kind));
+            systems.push(system(&format!("alternate-{canonical_id}"), kind));
+        }
+        let config = ship_config(systems);
+        let targets: Vec<_> = config
+            .systems
+            .iter()
+            .map(|system| system.id.0.as_str())
+            .collect();
+        let commands = admitted(&targets);
+
+        assert!(
+            unrouted_command_targets(&commands, Some(&config), consumers).is_empty(),
+            "canonical and ship-authored Helm ids must resolve through their System kind"
+        );
+        assert!(
+            unrouted_commandable_systems(&config.systems, &descriptors, consumers).is_empty(),
+            "every canonical and ship-authored Helm instance must be claimed by production"
+        );
     }
 
     #[test]

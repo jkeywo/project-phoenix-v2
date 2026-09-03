@@ -9,6 +9,10 @@ import {
   SCOPE_CHROME_CSS, scopeChromeMarkup, updateScopeChrome,
 } from './ph-scope-chrome.js';
 import { PhElement, phDefine } from './ph-element.js';
+import {
+  SENSORS_TARGET_ACTION_ID,
+  SENSORS_VIEWSCREEN_ACTION_ID,
+} from '../stations/sensors-actions.js';
 
 export class PhSensorRadar extends PhElement {
   template() {
@@ -50,12 +54,19 @@ export class PhSensorRadar extends PhElement {
     super.connectedCallback();
     if (this.innerRadar) {
       this.innerRadar.sendAction = (_action, payload) => {
-        this.sendAction?.('set_sensors_target', { uuid: payload.uuid });
+        const activate = typeof window !== 'undefined' && window.activateSemanticAction;
+        if (typeof activate === 'function') {
+          activate(SENSORS_TARGET_ACTION_ID, {
+            source: 'control',
+            detail: { uuid: payload.uuid },
+          });
+        }
       };
     }
     this.shadowRoot.getElementById('on-screen-btn').addEventListener('click', () => {
-      if (this.sendAction) {
-        this.sendAction('set_view', { direction: 'SensorsRadar' });
+      const activate = typeof window !== 'undefined' && window.activateSemanticAction;
+      if (typeof activate === 'function') {
+        activate(SENSORS_VIEWSCREEN_ACTION_ID, { source: 'control' });
       }
     });
   }

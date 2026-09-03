@@ -9,7 +9,7 @@
  *
  * Two halves, both here because they are two ends of one frame vocabulary:
  *
- *   createRendezvousHost   server.html — registers, is issued a five-letter
+ *   createRendezvousHost   server.html — registers, is issued a typed
  *                          code, answers offers, and hands each admitted joiner
  *                          to the page as a connection object carrying both of
  *                          its channels, so the page's Identify gate and token
@@ -120,7 +120,12 @@ import {
   relayPeerStub,
 } from './rendezvous-relay.js';
 import { defaultTransportLevers } from './transport-levers.js';
-import { DEV_RENDEZVOUS_URL, joinUrlForCode } from './join-url.js';
+import {
+  DEV_RENDEZVOUS_URL,
+  KNOWN_WEB_ORIGINS,
+  joinUrlForCode,
+  rendezvousBaseForOrigin,
+} from './join-url.js';
 
 /** Re-exported so a consumer of this module needs only one import. */
 export { RENDEZVOUS_PROTOCOL };
@@ -136,7 +141,23 @@ export { RENDEZVOUS_PROTOCOL };
  * in Rust. Loading this whole module there, to concatenate a string, would have
  * been the wrong dependency in the wrong direction.
  */
-export { DEV_RENDEZVOUS_URL, joinUrlForCode };
+export { DEV_RENDEZVOUS_URL, KNOWN_WEB_ORIGINS, joinUrlForCode, rendezvousBaseForOrigin };
+
+/**
+ * The service THIS page should dial when nothing overrides it (issue #1353).
+ *
+ * A function rather than a constant because it is a fact about the page, and
+ * the two exported entry points below take it as a default-parameter
+ * expression — evaluated per call, so a test may drive them with an explicit
+ * base and a page never has to remember to pass one.
+ *
+ * Off a browser entirely (the Node test environment, a worker) there is no
+ * origin to have been served by, so the built-in service stands.
+ */
+function pageRendezvousBase() {
+  const origin = typeof location !== 'undefined' && location ? location.origin : '';
+  return rendezvousBaseForOrigin(origin);
+}
 
 /** Label of the reliable ordered channel: commands and reliable messages. */
 export const RELIABLE_CHANNEL = 'reliable';
@@ -204,7 +225,7 @@ export function isRetryableReason(reason) {
  * anyone who had not already got in once.
  *
  * Bounded rather than endless, though, because a guest who has never been
- * admitted may simply be reading the wrong five letters off the viewscreen,
+ * admitted may simply be reading the wrong code off the viewscreen,
  * and a silent backoff tells them nothing. Four attempts is roughly a minute
  * and a half of trying before the field comes back; after acceptance the loop
  * is unbounded, because the code is known good.
@@ -251,9 +272,16 @@ function isLoopbackHost(hostname) {
  * — an old `?rendezvous=on` bookmark must open the game, not try to dial a
  * service called "on" and throw building the socket URL.
  *
+ * The DEFAULT is no longer always the cloud service (issue #1353): a page
+ * served by a native host dials that host, which is
+ * {@link rendezvousBaseForOrigin}'s rule, read off this page's own origin. The
+ * parameter still wins where it is honoured — a `wrangler dev` on loopback is
+ * exactly the case a developer overrides FOR — and the rule needs no parameter
+ * of its own, so no link can point a guest's join anywhere.
+ *
  * @returns {string} base URL — never null, because there is no "off"
  */
-export function rendezvousBaseFromLocation(search, defaultBase = DEV_RENDEZVOUS_URL) {
+export function rendezvousBaseFromLocation(search, defaultBase = pageRendezvousBase()) {
   const value = (new URLSearchParams(search || '').get('rendezvous') || '').trim();
   if (!value) return defaultBase;
   try {
@@ -271,7 +299,7 @@ export function rendezvousBaseFromLocation(search, defaultBase = DEV_RENDEZVOUS_
  *
  *   `rendezvous`  something is in the fragment — a QR scan, a pasted full code,
  *                 or a stale bookmark: join with it straight away
- *   `entry`       nothing in the fragment: ask for five letters
+ *   `entry`       nothing in the fragment: ask for the code
  *
  * A fragment that is NOT a valid code is deliberately still `rendezvous`
  * rather than a third route. gui/join-code.js is the one place that decides
@@ -280,7 +308,7 @@ export function rendezvousBaseFromLocation(search, defaultBase = DEV_RENDEZVOUS_
  * a status line, and this function never needs to know what yesterday's links
  * looked like.
  */
-export function joinRouteFromLocation(search, hash, defaultBase = DEV_RENDEZVOUS_URL) {
+export function joinRouteFromLocation(search, hash, defaultBase = pageRendezvousBase()) {
   const base = rendezvousBaseFromLocation(search, defaultBase);
   const fragment = String(hash || '').replace(/^#/, '').trim();
   return fragment ? { route: 'rendezvous', base, code: fragment } : { route: 'entry', base };
@@ -1066,12 +1094,12 @@ export function createRendezvousHost(opts) {
  * has accepted this build yet: the joiner re-resolves THE SAME code, re-offers,
  * re-sends the compatibility handshake and re-sends `Identify` with the same
  * session token — so the host restores the held station and pushes the current
- * projection, and the guest is never asked for five letters a second time.
+ * projection, and the guest is never asked for the code a second time.
  * `retryNow()` short-circuits the wait for the page's "retry now" control.
  *
  * Once the host has accepted this build the loop is unbounded; BEFORE that it
  * runs {@link JOIN_ATTEMPTS_BEFORE_ENTRY} times, because a guest who has never
- * got in may simply be reading the wrong five letters. Either way, only a
+ * got in may simply be reading the wrong code. Either way, only a
  * refusal a retry cannot fix (see {@link isRetryableReason}) ends the loop
  * early, and the entry field comes back with its own sentence.
  */
@@ -1098,7 +1126,12 @@ export function createRendezvousJoiner(opts) {
     // Identify; it speaks its own vocabulary, so its frames carry no
     // localisable string ids and it encodes them itself. Three narrow hooks
     // rather than a second copy of the whole dance.
-    /** Called instead of sending `Identify` once the host accepts this build. */
+    /**
+     * Called instead of sending `Identify` once the host accepts this build.
+     * `generation` identifies the concrete transport attempt, so consumers can
+     * distinguish a real reconnect from a duplicate acceptance frame on the
+     * still-live channel.
+     */
     onAccepted = null,
     /** False for a peer whose frames are not ServerMessages. */
     localise = true,
@@ -1127,7 +1160,7 @@ export function createRendezvousJoiner(opts) {
   const parsed = parseJoinCode(code, namespace, data);
   if (!parsed.ok) return refusedJoiner(parsed.reason);
   // A structured code names its OWN namespace, from the project GUID inside it
-  // — `namespace` above is only the fallback a bare five-letter suffix is
+  // — `namespace` above is only the fallback a bare typed suffix is
   // composed under. So a full code pasted into the wrong field parses happily
   // and disagrees with the field it was typed into, and that disagreement is
   // exactly what "you typed the other kind of code" means. Refused here, before
@@ -1239,7 +1272,7 @@ export function createRendezvousJoiner(opts) {
     // and only by advancing `attemptIndex` here does `connectTimeoutMs`'s
     // 8/16/30 s ladder become reachable by the cellular guest it exists for.
     // Before acceptance the loop is BOUNDED (see JOIN_ATTEMPTS_BEFORE_ENTRY):
-    // a guest who has never got in may be reading the wrong five letters, and
+    // a guest who has never got in may be reading the wrong code, and
     // a silent backoff would never say so. After acceptance it is unbounded —
     // on whichever rung the escalation above left this joiner on.
     if (isRetryableReason(reason)
@@ -1332,7 +1365,7 @@ export function createRendezvousJoiner(opts) {
           // on every reconnect, for the same reason the crew path re-sends
           // Identify: the far end restores this peer's slot from what it says
           // here, not from a memory of a connection that has gone.
-          onAccepted();
+          onAccepted({ generation: gen });
           return;
         }
         // Re-sent on EVERY reconnect, not just the first: the host restores
@@ -1548,12 +1581,18 @@ export function createRendezvousJoiner(opts) {
 
   async function onSignal(gen, payload) {
     if (gen !== generation || !pc) return;
+    // This handler crosses browser promises.  Keep the concrete attempt's PC
+    // and candidate queue: teardown() replaces both globals, so an old SDP
+    // completion must never resume against the retry which replaced it.
+    const mine = pc;
+    const mineCandidates = pendingCandidates;
     if (payload && payload.sdp) {
-      await pc.setRemoteDescription(payload.sdp);
-      for (const c of pendingCandidates.splice(0)) await pc.addIceCandidate(c);
+      await mine.setRemoteDescription(payload.sdp);
+      if (gen !== generation || pc !== mine || pendingCandidates !== mineCandidates) return;
+      for (const c of mineCandidates.splice(0)) await mine.addIceCandidate(c);
     } else if (payload && payload.candidate) {
-      if (pc.remoteDescription) await pc.addIceCandidate(payload.candidate);
-      else pendingCandidates.push(payload.candidate);
+      if (mine.remoteDescription) await mine.addIceCandidate(payload.candidate);
+      else mineCandidates.push(payload.candidate);
     }
   }
 
@@ -1684,6 +1723,7 @@ if (typeof window !== 'undefined') {
     JOIN_ATTEMPTS_BEFORE_ENTRY,
     isRetryableReason,
     rendezvousBaseFromLocation,
+    rendezvousBaseForOrigin,
     joinRouteFromLocation,
     socketUrl,
     joinUrlForCode,

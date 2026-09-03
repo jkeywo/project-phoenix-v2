@@ -53,7 +53,7 @@ export function makeNavigationRender(variant) {
         el.state = {
           blips: s.blips || [], regions: s.regions || [], range: s.radar_range || 5000,
           ship_pos: { x: s.ship_x || 0, z: s.ship_z || 0 }, ship_heading: s.ship_heading || 0,
-          waypoint: s.waypoint || null,
+          waypoint: s.waypoint || null, auto: !!s.navigation_auto,
         };
       }
     }
@@ -67,7 +67,7 @@ export function makeNavigationRender(variant) {
     // refused look identical on a map.
     if (ids.civilianTraffic) {
       const el = doc.getElementById(ids.civilianTraffic);
-      if (el) el.state = { civilians: s.civilians || [] };
+      if (el) el.state = { civilians: s.civilians || [], auto: !!s.navigation_auto };
     }
     if (ids.stationDamage) {
       const el = doc.getElementById(ids.stationDamage);

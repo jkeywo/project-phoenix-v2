@@ -12,7 +12,7 @@ Related documents: [Game and Session Lifecycle](../foundation/game-lifecycle.md)
 
 ## Join-code model
 
-Phoenix uses human-readable structured join identifiers in the form `PROJECT_GUID_VERSION_GUID_CODE`, where `CODE` is five letters. Normal operators type only the five-letter suffix; a client or host setup screen supplies its own project and version GUIDs. The full form remains available for copying, QR codes, diagnostics and launchers.
+Phoenix uses human-readable structured join identifiers in the form `PROJECT_GUID_VERSION_GUID_CODE`, where `CODE` is eight letters. Normal operators type only the suffix; a client or host setup screen supplies its own project and version GUIDs. The full form remains available for copying, QR codes, diagnostics and launchers.
 
 Client joining and server joining use separate project GUIDs and therefore separate namespaces. A compatible release uses the same version GUID in both. Every player-ship host issues its own client code, which is transport metadata never shared with the simulation or other ship hosts. A multi-ship session has one privileged server code used to admit ship hosts and recover them.
 

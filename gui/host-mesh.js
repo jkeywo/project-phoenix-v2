@@ -64,8 +64,19 @@
  * types exist, refuses anything else, and ferries them — the same relationship
  * `gui/connection-manager.js` has with `ClientMessage`.
  *
- * Eight frames, and no more: a frame invented here that nothing sends would be
- * surface #1117–#1120 would have to keep.
+ * ## What revisions 6 and 7 add (issue #1290)
+ *
+ *   host → owner      start-state   role-local crew/GM readiness + validation
+ *   GM → owner        start-force   empty request; identity is the connection
+ *   owner → all       start-policy  one pure aggregate judgement
+ *                     force-result  attributed applied/no-op/refused feedback
+ *
+ * These are control frames, not simulation frames. JavaScript owns the fleet
+ * roster policy, but the resulting grant is delivered only to the owner's local
+ * Rust peer. Rust schedules it through the deterministic mesh; there is no
+ * asynchronous JavaScript `start-grant` broadcast for members to replay.
+ * Revision 7 also carries the connected technical participant slots separately
+ * from ship rows so a GM participates in lockstep without consuming a ship.
  *
  * ## What is pure, and why it matters
  *
@@ -95,8 +106,25 @@
  * replacement machine has reclaimed a disconnected fixed slot, so the whole fleet
  * recovers the same one. A revision-3 build that dropped it would keep the ship on
  * Backfill while the revision-4 hosts handed it back — the same silent split.
+ *
+ * `5` adds the host role and GM reconnect identity (issue #1289). A GM is a
+ * deterministic host-mesh peer but not a ship: it owns a private technical
+ * `slot-N` for frame authentication and a separate public `gm-N` operator id.
+ * A revision-4 host would otherwise silently turn that peer into a player ship.
+ *
+ * `6` added the collective GM/crew start policy (issue #1290). Crew readiness,
+ * GM readiness, validation and force requests are dedicated host-control
+ * frames. `7` removes the asynchronous JavaScript start-grant broadcast and
+ * adds the connected technical participant set to the frozen roster. A
+ * revision-6 host would omit GM peers from Rust's lockstep wait-set and could
+ * apply the decision before every deterministic peer reached its tick. `8`
+ * adds the paused-safe typed GM-action frame. `9` adds the visible first-time
+ * GM request/decision controls and the Rust-owned paused transfer frame. `10`
+ * adds its owner-sequenced restore clock. `11` carries the transaction kind so
+ * a known departed GM reconnect can reuse that transfer without being mistaken
+ * for a new public operator.
  */
-export const HOST_MESH_PROTOCOL = 4;
+export const HOST_MESH_PROTOCOL = 11;
 
 /** Frame types this revision speaks. */
 export const HOST_FRAME_HELLO = 'hello';
@@ -105,6 +133,14 @@ export const HOST_FRAME_REFUSED = 'refused';
 export const HOST_FRAME_SLOT = 'slot';
 export const HOST_FRAME_ROSTER = 'roster';
 export const HOST_FRAME_ADMISSION = 'admission';
+/** Revision 6 (#1290): one authenticated host's local readiness/validation. */
+export const HOST_FRAME_START_STATE = 'start-state';
+/** Revision 6 (#1290): the star owner's pure aggregate policy projection. */
+export const HOST_FRAME_START_POLICY = 'start-policy';
+/** Revision 6 (#1290): an authenticated GM asks to bypass readiness only. */
+export const HOST_FRAME_START_FORCE = 'start-force';
+/** Revision 6 (#1290): attributed applied/no-op/refused force feedback. */
+export const HOST_FRAME_FORCE_RESULT = 'force-result';
 /** Revision 2 (issue #1116): one host's input for a tick, and its watermark. */
 export const HOST_FRAME_TICK = 'tick';
 /** Revision 2 (issue #1116): a sampled authoritative fold, for agreement. */
@@ -131,6 +167,18 @@ export const HOST_FRAME_HOST_LOSS = 'host-loss';
  * module ferries it opaquely.
  */
 export const HOST_FRAME_SLOT_CLAIM = 'slot-claim';
+/** Revision 8 (#1292): one authenticated, attributed typed GM action. */
+export const HOST_FRAME_GM_ACTION = 'gm-action';
+/** Revision 9 (#1293): visible first-time GM request on every existing host. */
+export const HOST_FRAME_GM_JOIN_REQUEST = 'gm-join-request';
+/** Revision 9 (#1293): one existing peer's visible Accept/Reject answer. */
+export const HOST_FRAME_GM_JOIN_DECISION = 'gm-join-decision';
+/** Revision 9 (#1293): bounded transport progress, never roster authority. */
+export const HOST_FRAME_GM_JOIN_STATUS = 'gm-join-status';
+/** Revision 9 (#1293): candidate-only provisional identity/topology. */
+export const HOST_FRAME_GM_JOIN_PENDING = 'gm-join-pending';
+/** Revision 9 (#1293): Rust-owned pause/restore/digest/commit protocol. */
+export const HOST_FRAME_GM_JOIN = 'gm-join';
 
 /** Every type a receiver will accept. Read by the coverage tests. */
 export const HOST_FRAME_TYPES = [
@@ -140,11 +188,21 @@ export const HOST_FRAME_TYPES = [
   HOST_FRAME_SLOT,
   HOST_FRAME_ROSTER,
   HOST_FRAME_ADMISSION,
+  HOST_FRAME_START_STATE,
+  HOST_FRAME_START_POLICY,
+  HOST_FRAME_START_FORCE,
+  HOST_FRAME_FORCE_RESULT,
   HOST_FRAME_TICK,
   HOST_FRAME_DIGEST,
   HOST_FRAME_SNAPSHOT,
   HOST_FRAME_HOST_LOSS,
   HOST_FRAME_SLOT_CLAIM,
+  HOST_FRAME_GM_ACTION,
+  HOST_FRAME_GM_JOIN_REQUEST,
+  HOST_FRAME_GM_JOIN_DECISION,
+  HOST_FRAME_GM_JOIN_STATUS,
+  HOST_FRAME_GM_JOIN_PENDING,
+  HOST_FRAME_GM_JOIN,
 ];
 
 /**
@@ -164,6 +222,8 @@ export const HOST_SIMULATION_FRAME_TYPES = [
   HOST_FRAME_SNAPSHOT,
   HOST_FRAME_HOST_LOSS,
   HOST_FRAME_SLOT_CLAIM,
+  HOST_FRAME_GM_ACTION,
+  HOST_FRAME_GM_JOIN,
 ];
 
 /** True when this frame belongs to the running simulation rather than the lobby. */
@@ -174,6 +234,10 @@ export function isSimulationFrame(frame) {
 /** Admission states a fleet record can be in — the registry's own two words. */
 export const ADMISSION_OPEN = 'open';
 export const ADMISSION_CLOSED = 'closed';
+
+/** Host roles carried only by the privileged host-mesh hello. */
+export const HOST_ROLE_SHIP = 'ship';
+export const HOST_ROLE_GM = 'gm';
 
 // ── The envelope ────────────────────────────────────────────────────────────
 
@@ -263,9 +327,16 @@ export const REASON_RECOVERY_ONLY = 'recovery-only';
  * "Cannot displace a connected host" is exactly this reason for a live slot.
  */
 export const REASON_SLOT_TAKEN = 'slot-taken';
+export const REASON_JOIN_IN_PROGRESS = 'join-in-progress';
+export const REASON_GM_JOIN_REFUSED = 'gm-join-refused';
+export const GM_JOIN_FIRST_TIME = 'first-time';
+export const GM_JOIN_RECONNECT = 'reconnect';
 
 /** How a slot id is spelled. */
 const slotId = (seq) => `slot-${seq}`;
+
+/** How a public GM operator id is spelled. It conveys no ordering authority. */
+const gmId = (seq) => `gm-${seq}`;
 
 /**
  * The ordinal `N` in a `slot-N` id, or `null` for anything that is not one.
@@ -295,11 +366,67 @@ export function hostSlotOrdinal(id) {
  */
 const DEFAULT_MAX_NAME_LENGTH = 48;
 const DEFAULT_MAX_SHIP_PATH_LENGTH = 160;
+const MAX_RECONNECT_CREDENTIAL_LENGTH = 256;
+/** Protocol/memory ceiling matching one rendezvous record, not ship capacity. */
+export const MAX_GM_OPERATORS = 32;
+/** Matches Rust `ReadinessTally`'s u32 aggregate; protocol hygiene, not gameplay. */
+const MAX_READINESS_AGGREGATE = 0xffff_ffff;
 
 /** A bounded, plain string, or '' for anything that is not one. */
 function boundedText(value, limit) {
   if (typeof value !== 'string') return '';
   return value.slice(0, limit);
+}
+
+/** Only the two roles this protocol speaks; absence remains the legacy ship role. */
+function hostRole(value) {
+  return value === HOST_ROLE_GM ? HOST_ROLE_GM : HOST_ROLE_SHIP;
+}
+
+/**
+ * Mint an opaque reconnect capability. There is deliberately no predictable
+ * fallback: a runtime without cryptographic randomness may not issue a GM
+ * identity that another peer could guess.
+ */
+function secureReconnectCredential() {
+  const cryptoApi = typeof globalThis !== 'undefined' ? globalThis.crypto : null;
+  if (cryptoApi && typeof cryptoApi.randomUUID === 'function') {
+    return cryptoApi.randomUUID();
+  }
+  if (cryptoApi && typeof cryptoApi.getRandomValues === 'function') {
+    const bytes = new Uint8Array(24);
+    cryptoApi.getRandomValues(bytes);
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  }
+  throw new Error('secure randomness is required to mint a GM reconnect credential');
+}
+
+/** Reduce an untrusted reconnect claim to a bounded string before comparing it. */
+function reconnectClaim(value) {
+  if (typeof value !== 'string' || !value || value.length > MAX_RECONNECT_CREDENTIAL_LENGTH) {
+    return null;
+  }
+  return value;
+}
+
+/**
+ * A crew tally is produced by the authoritative Rust SessionManager on one
+ * ship host. Spectators have already been excluded there. Reduce the crossing
+ * to two safe non-negative integers and never permit `ready > connected`.
+ */
+function crewReadiness(value, maxSlots = 1) {
+  const source = value && typeof value === 'object' ? value : {};
+  // At most `maxSlots` ship tallies and MAX_GM_OPERATORS one-vote rows are
+  // aggregated. Dividing Rust's u32 aggregate ceiling across that authored/
+  // protocol-bounded population guarantees the final policy still fits the
+  // typed Rust contract even when an authenticated but faulty host sends an
+  // absurd tally.
+  const slots = Number.isSafeInteger(maxSlots) && maxSlots > 0 ? maxSlots : 1;
+  const cap = Math.floor(MAX_READINESS_AGGREGATE / (slots + MAX_GM_OPERATORS));
+  const count = (candidate) =>
+    Number.isSafeInteger(candidate) && candidate >= 0 ? Math.min(candidate, cap) : 0;
+  const connected = count(source.connected);
+  return { connected, ready: Math.min(count(source.ready), connected) };
 }
 
 /**
@@ -346,38 +473,80 @@ function boundedShip(value, fleet) {
 export function openFleet({
   ship = null,
   name = '',
+  role = HOST_ROLE_SHIP,
   maxSlots,
   maxNameLength = DEFAULT_MAX_NAME_LENGTH,
   maxShipPathLength = DEFAULT_MAX_SHIP_PATH_LENGTH,
+  credentialFactory = secureReconnectCredential,
 }) {
+  const ownerRole = hostRole(role);
   const fleet = {
+    // Technical star-centre identity. It is not a public GM leader marker.
     owner: slotId(1),
     nextSeq: 2,
+    nextGmSeq: 1,
     maxSlots,
     maxNameLength,
     maxShipPathLength,
+    credentialFactory,
     admission: ADMISSION_OPEN,
     frozen: false,
+    nextStartSeq: 1,
+    nextGmJoinSeq: 1,
+    startGrant: null,
+    // Private transport reservation only. `rosterOf` deliberately ignores it;
+    // a digest-proven Commit is the sole path into `gms`/`participants`.
+    pendingGmJoin: null,
     slots: [],
+    gms: [],
   };
-  fleet.slots.push({
-    id: slotId(1),
-    peer: null,
-    owner: true,
-    connected: true,
-    ready: false,
-    // The owner's own fields go through the same bound as a member's. It is
-    // this host's own page filling them in, so nothing hostile is expected —
-    // but one rule for what a slot may hold is easier to keep true than two.
-    name: boundedText(name, maxNameLength),
-    ship: boundedShip(ship, fleet),
-  });
+  if (ownerRole === HOST_ROLE_GM) {
+    fleet.gms.push({
+      id: gmId(fleet.nextGmSeq),
+      meshSlot: fleet.owner,
+      peer: null,
+      connected: true,
+      ready: false,
+      startValidation: false,
+      name: boundedText(name, maxNameLength),
+      credential: reconnectClaim(credentialFactory()),
+    });
+    if (!fleet.gms[0].credential) {
+      throw new Error('GM reconnect credential factory returned an unusable value');
+    }
+    fleet.nextGmSeq += 1;
+  } else {
+    fleet.slots.push({
+      id: slotId(1),
+      peer: null,
+      owner: true,
+      connected: true,
+      ready: false,
+      crew: crewReadiness(null, fleet.maxSlots),
+      startValidation: false,
+      // The owner's own fields go through the same bound as a member's. It is
+      // this host's own page filling them in, so nothing hostile is expected —
+      // but one rule for what a slot may hold is easier to keep true than two.
+      name: boundedText(name, maxNameLength),
+      ship: boundedShip(ship, fleet),
+    });
+  }
   return fleet;
 }
 
 /** The slot a rendezvous peer id holds, or null. */
 export function slotForPeer(fleet, peer) {
   return fleet.slots.find((s) => s.peer && s.peer === peer) || null;
+}
+
+/** The private GM record held by a rendezvous peer id, or null. */
+export function gmForPeer(fleet, peer) {
+  return (fleet.gms || []).find((gm) => gm.peer && gm.peer === peer) || null;
+}
+
+/** The private GM record for a public operator id, or null. */
+export function gmById(fleet, id) {
+  return (fleet.gms || []).find((gm) => gm.id === id) || null;
 }
 
 /** The slot with this id, or null. */
@@ -400,9 +569,112 @@ export function slotById(fleet, id) {
  * @returns {{ok: true, fleet: object, slot: object}
  *          |{ok: false, reason: string}}
  */
-export function admitHost(fleet, { peer, ship = null, name = '' }) {
+export function admitHost(fleet, {
+  peer,
+  ship = null,
+  name = '',
+  role = HOST_ROLE_SHIP,
+  reconnectCredential = null,
+}) {
   const held = slotForPeer(fleet, peer);
-  if (held) return { ok: true, fleet, slot: held };
+  if (held) {
+    return { ok: true, fleet, role: HOST_ROLE_SHIP, slot: held, meshSlot: held.id };
+  }
+  const heldGm = gmForPeer(fleet, peer);
+  if (heldGm) {
+    return {
+      ok: true,
+      fleet,
+      role: HOST_ROLE_GM,
+      gm: heldGm,
+      meshSlot: heldGm.meshSlot,
+      operatorId: heldGm.id,
+      reconnectCredential: heldGm.credential,
+    };
+  }
+
+  const nextRole = hostRole(role);
+  if (nextRole === HOST_ROLE_GM) {
+    const claim = reconnectClaim(reconnectCredential);
+    if (reconnectCredential != null) {
+      // A supplied credential is a recovery attempt, never permission to mint
+      // a second operator after a typo. One answer covers unknown credentials
+      // and attempts to displace a still-connected operator, so this boundary
+      // does not become a credential-validity oracle.
+      const known = claim
+        ? (fleet.gms || []).find((gm) => gm.credential === claim)
+        : null;
+      if (!known || known.connected) {
+        return { ok: false, reason: REASON_RECOVERY_ONLY };
+      }
+      // Once frozen the identity must traverse the same private paused restore
+      // as a first-time mid-session GM. Merely rebinding the socket would put a
+      // stale simulation back into the deterministic wait-set.
+      if (fleet.frozen) return requestGmReconnect(fleet, { peer, known });
+      const rebound = {
+        ...known,
+        peer,
+        connected: true,
+        // A disconnected participant never carries a ready vote or a stale
+        // local validation verdict into a new transport session.
+        ready: false,
+        startValidation: false,
+      };
+      const nextFleet = {
+        ...fleet,
+        gms: fleet.gms.map((gm) => (gm.id === known.id ? rebound : gm)),
+      };
+      return {
+        ok: true,
+        fleet: nextFleet,
+        role: HOST_ROLE_GM,
+        gm: rebound,
+        meshSlot: rebound.meshSlot,
+        operatorId: rebound.id,
+        reconnectCredential: rebound.credential,
+        reconnected: true,
+      };
+    }
+    if (fleet.frozen) {
+      return requestFirstTimeGmJoin(fleet, { peer, name });
+    }
+    if (fleet.admission !== ADMISSION_OPEN) {
+      return { ok: false, reason: REASON_ADMISSION_CLOSED };
+    }
+    if (fleet.gms.length >= MAX_GM_OPERATORS) {
+      return { ok: false, reason: REASON_FLEET_FULL };
+    }
+    const credential = reconnectClaim(fleet.credentialFactory());
+    if (!credential) throw new Error('GM reconnect credential factory returned an unusable value');
+    if (fleet.gms.some((gm) => gm.credential === credential)) {
+      throw new Error('GM reconnect credential factory returned a duplicate value');
+    }
+    const gm = {
+      id: gmId(fleet.nextGmSeq),
+      meshSlot: slotId(fleet.nextSeq),
+      peer,
+      connected: true,
+      ready: false,
+      startValidation: false,
+      name: boundedText(name, fleet.maxNameLength),
+      credential,
+    };
+    return {
+      ok: true,
+      role: HOST_ROLE_GM,
+      gm,
+      meshSlot: gm.meshSlot,
+      operatorId: gm.id,
+      reconnectCredential: gm.credential,
+      fleet: {
+        ...fleet,
+        nextSeq: fleet.nextSeq + 1,
+        nextGmSeq: fleet.nextGmSeq + 1,
+        gms: [...fleet.gms, gm],
+      },
+    };
+  }
+
   if (fleet.frozen) return { ok: false, reason: REASON_RECOVERY_ONLY };
   if (fleet.admission !== ADMISSION_OPEN) {
     return { ok: false, reason: REASON_ADMISSION_CLOSED };
@@ -416,6 +688,8 @@ export function admitHost(fleet, { peer, ship = null, name = '' }) {
     owner: false,
     connected: true,
     ready: false,
+    crew: crewReadiness(null, fleet.maxSlots),
+    startValidation: false,
     // Bounded and shape-checked at the door. `name` and `ship` are the only
     // two fields a member writes about itself, and they land in every other
     // host's roster on the next publish.
@@ -424,9 +698,223 @@ export function admitHost(fleet, { peer, ship = null, name = '' }) {
   };
   return {
     ok: true,
+    role: HOST_ROLE_SHIP,
     slot,
+    meshSlot: slot.id,
     fleet: { ...fleet, nextSeq: fleet.nextSeq + 1, slots: [...fleet.slots, slot] },
   };
+}
+
+/**
+ * Reserve one first-time GM identity without changing the public/live roster.
+ *
+ * The reservation is deliberately part of the private owner model: it binds
+ * the candidate socket to the technical slot Rust will authenticate, but
+ * `rosterOf(fleet)` is byte-identical before and after this call. A second
+ * candidate gets a visible bounded refusal rather than an unbounded queue.
+ */
+export function requestFirstTimeGmJoin(fleet, { peer, name = '' }) {
+  if (!fleet.frozen) return { ok: false, reason: REASON_RECOVERY_ONLY };
+  if (fleet.pendingGmJoin) return { ok: false, reason: REASON_JOIN_IN_PROGRESS };
+  if ((fleet.gms || []).length >= MAX_GM_OPERATORS) {
+    return { ok: false, reason: REASON_FLEET_FULL };
+  }
+  const credential = reconnectClaim(fleet.credentialFactory());
+  if (!credential) throw new Error('GM reconnect credential factory returned an unusable value');
+  if ((fleet.gms || []).some((gm) => gm.credential === credential)) {
+    throw new Error('GM reconnect credential factory returned a duplicate value');
+  }
+  const candidate = {
+    id: gmId(fleet.nextGmSeq),
+    meshSlot: slotId(fleet.nextSeq),
+    peer,
+    connected: true,
+    ready: false,
+    startValidation: false,
+    name: boundedText(name, fleet.maxNameLength),
+    credential,
+  };
+  const request = {
+    id: fleet.nextGmJoinSeq,
+    kind: GM_JOIN_FIRST_TIME,
+    candidate,
+    status: 'awaiting-decision',
+    approvedBy: null,
+  };
+  return {
+    ok: true,
+    pending: true,
+    request,
+    meshSlot: candidate.meshSlot,
+    operatorId: candidate.id,
+    reconnectCredential: credential,
+    fleet: {
+      ...fleet,
+      nextSeq: fleet.nextSeq + 1,
+      nextGmSeq: fleet.nextGmSeq + 1,
+      nextGmJoinSeq: fleet.nextGmJoinSeq + 1,
+      pendingGmJoin: request,
+    },
+  };
+}
+
+/**
+ * Reserve one known disconnected GM for divergence-safe reconnect.
+ *
+ * The frozen row itself remains byte-for-byte disconnected until Rust proves
+ * the candidate restored the canonical digest. An exact Hello retry on the
+ * winning socket replays the same reservation; a competing socket loses to the
+ * already owner-ordered transaction instead of displacing it.
+ */
+export function requestGmReconnect(fleet, { peer, known }) {
+  const existing = known && gmById(fleet, known.id);
+  if (!fleet.frozen || !existing || existing.connected
+      || existing.meshSlot !== known.meshSlot
+      || existing.credential !== known.credential) {
+    return { ok: false, reason: REASON_RECOVERY_ONLY };
+  }
+  known = existing;
+  const pending = fleet.pendingGmJoin;
+  if (pending) {
+    if (pending.kind === GM_JOIN_RECONNECT
+        && pending.candidate.id === known.id
+        && pending.candidate.meshSlot === known.meshSlot
+        && pending.candidate.credential === known.credential
+        && pending.candidate.peer === peer) {
+      return {
+        ok: true,
+        pending: true,
+        duplicate: true,
+        request: pending,
+        meshSlot: known.meshSlot,
+        operatorId: known.id,
+        reconnectCredential: known.credential,
+        fleet,
+      };
+    }
+    return { ok: false, reason: REASON_JOIN_IN_PROGRESS };
+  }
+  const candidate = { ...known, peer, connected: true };
+  const request = {
+    id: fleet.nextGmJoinSeq,
+    kind: GM_JOIN_RECONNECT,
+    candidate,
+    status: 'accepted',
+    approvedBy: fleet.owner,
+  };
+  return {
+    ok: true,
+    pending: true,
+    reconnect: true,
+    request,
+    meshSlot: known.meshSlot,
+    operatorId: known.id,
+    reconnectCredential: known.credential,
+    fleet: {
+      ...fleet,
+      nextGmJoinSeq: fleet.nextGmJoinSeq + 1,
+      pendingGmJoin: request,
+    },
+  };
+}
+
+/** Record the first visible answer without admitting the candidate. */
+export function decideFirstTimeGmJoin(fleet, id, accepted, approvedBy) {
+  const pending = fleet.pendingGmJoin;
+  if (!pending || pending.id !== id) return { ok: false, reason: 'unknown' };
+  if (pending.status !== 'awaiting-decision') {
+    return { ok: false, reason: REASON_JOIN_IN_PROGRESS };
+  }
+  if (!accepted) {
+    return {
+      ok: true,
+      accepted: false,
+      request: { ...pending, status: 'refused', approvedBy },
+      fleet: { ...fleet, pendingGmJoin: null },
+    };
+  }
+  const request = { ...pending, status: 'accepted', approvedBy };
+  return {
+    ok: true,
+    accepted: true,
+    request,
+    fleet: { ...fleet, pendingGmJoin: request },
+  };
+}
+
+/**
+ * Add or reconnect the candidate only after Rust reports a matching restored
+ * digest.
+ * Exact retries are inert; an approval or transfer-progress update cannot call
+ * this helper because it does not carry the terminal `committed` status.
+ */
+export function commitFirstTimeGmJoin(fleet, id) {
+  const pending = fleet.pendingGmJoin;
+  if (!pending || pending.id !== id || pending.status !== 'accepted') {
+    if (fleet.lastGmJoin && fleet.lastGmJoin.id === id) {
+      const existing = gmById(fleet, fleet.lastGmJoin.operatorId);
+      return existing ? { ok: true, fleet, gm: existing, duplicate: true }
+        : { ok: false, reason: 'unknown' };
+    }
+    const existing = (fleet.gms || []).find((gm) => gm.joinId === id);
+    return existing ? { ok: true, fleet, gm: existing, duplicate: true }
+      : { ok: false, reason: 'unknown' };
+  }
+  if (pending.kind === GM_JOIN_RECONNECT) {
+    const existing = gmById(fleet, pending.candidate.id);
+    if (!existing || existing.connected
+        || existing.meshSlot !== pending.candidate.meshSlot
+        || existing.credential !== pending.candidate.credential) {
+      return { ok: false, reason: REASON_RECOVERY_ONLY };
+    }
+    const gm = {
+      ...existing,
+      peer: pending.candidate.peer,
+      connected: true,
+    };
+    return {
+      ok: true,
+      gm,
+      fleet: {
+        ...fleet,
+        pendingGmJoin: null,
+        lastGmJoin: { id, kind: pending.kind, operatorId: gm.id },
+        gms: fleet.gms.map((candidate) => candidate.id === gm.id ? gm : candidate),
+      },
+    };
+  }
+  const gm = { ...pending.candidate, joinId: id };
+  return {
+    ok: true,
+    gm,
+    fleet: {
+      ...fleet,
+      pendingGmJoin: null,
+      lastGmJoin: { id, kind: pending.kind, operatorId: gm.id },
+      gms: [...(fleet.gms || []), gm],
+    },
+  };
+}
+
+/** Terminal transfer/ingress failure after a visible acceptance. */
+export function refuseFirstTimeGmJoin(fleet, id) {
+  const pending = fleet.pendingGmJoin;
+  if (!pending || pending.id !== id) return { ok: false, reason: 'unknown' };
+  return {
+    ok: true,
+    request: { ...pending, status: 'refused' },
+    fleet: { ...fleet, pendingGmJoin: null },
+  };
+}
+
+/** Candidate-private topology used only to bootstrap the incoming snapshot. */
+export function provisionalGmJoinRoster(fleet) {
+  const pending = fleet.pendingGmJoin;
+  if (!pending) return null;
+  const gms = pending.kind === GM_JOIN_RECONNECT
+    ? (fleet.gms || []).map((gm) => gm.id === pending.candidate.id ? pending.candidate : gm)
+    : [...(fleet.gms || []), pending.candidate];
+  return rosterOf({ ...fleet, gms });
 }
 
 /**
@@ -484,6 +972,175 @@ export function updateSlot(fleet, id, patch = {}) {
 }
 
 /**
+ * Replace one ship host's authoritative connected/ready PLAYER tally.
+ * `slot.ready` remains the loadout/content-ready bit introduced with the fleet
+ * lobby; this separate pair is the crew readiness #1290 aggregates.
+ */
+export function setCrewReadiness(fleet, id, tally = {}) {
+  const slot = slotById(fleet, id);
+  if (!slot || !slot.connected) return { ok: false, reason: 'unknown' };
+  if (fleet.frozen) return { ok: false, reason: REASON_RECOVERY_ONLY };
+  const next = { ...slot, crew: crewReadiness(tally, fleet.maxSlots) };
+  return {
+    ok: true,
+    fleet: { ...fleet, slots: fleet.slots.map((candidate) => candidate.id === id ? next : candidate) },
+  };
+}
+
+/** Set one connected GM's own ready vote; no ship slot is involved. */
+export function setGmReady(fleet, id, ready) {
+  const gm = gmById(fleet, id);
+  if (!gm || !gm.connected) return { ok: false, reason: 'unknown' };
+  if (fleet.frozen) return { ok: false, reason: REASON_RECOVERY_ONLY };
+  const next = { ...gm, ready: !!ready };
+  return {
+    ok: true,
+    fleet: { ...fleet, gms: fleet.gms.map((candidate) => candidate.id === id ? next : candidate) },
+  };
+}
+
+/**
+ * Set the local start-validation verdict for one authenticated technical mesh
+ * slot. Both product roles have one; the slot remains private on a GM row.
+ */
+export function setStartValidation(fleet, meshSlot, valid) {
+  if (fleet.frozen) return { ok: false, reason: REASON_RECOVERY_ONLY };
+  const slot = slotById(fleet, meshSlot);
+  if (slot && slot.connected) {
+    const next = { ...slot, startValidation: !!valid };
+    return {
+      ok: true,
+      fleet: {
+        ...fleet,
+        slots: fleet.slots.map((candidate) => candidate.id === meshSlot ? next : candidate),
+      },
+    };
+  }
+  const gm = (fleet.gms || []).find((candidate) => candidate.meshSlot === meshSlot);
+  if (gm && gm.connected) {
+    const next = { ...gm, startValidation: !!valid };
+    return {
+      ok: true,
+      fleet: {
+        ...fleet,
+        gms: fleet.gms.map((candidate) => candidate.id === gm.id ? next : candidate),
+      },
+    };
+  }
+  return { ok: false, reason: 'unknown' };
+}
+
+/**
+ * The one pure global start judgement. The star owner computes and broadcasts
+ * it because every member connects there, not because the owner has product
+ * authority. Connected player counts come from ship-local Rust tallies;
+ * connected GM rows contribute one vote each. A fleet needs at least one
+ * participant, every participant ready, every connected host validation true,
+ * and every ship loadout/content-ready bit true to autostart.
+ */
+export function startPolicyOf(fleet) {
+  const connectedSlots = fleet.slots.filter((slot) => slot.connected !== false);
+  const connectedGms = (fleet.gms || []).filter((gm) => gm.connected !== false);
+  const playerCounts = connectedSlots.reduce(
+    (sum, slot) => ({
+      connected: sum.connected + crewReadiness(slot.crew, fleet.maxSlots).connected,
+      ready: sum.ready + crewReadiness(slot.crew, fleet.maxSlots).ready,
+    }),
+    { connected: 0, ready: 0 },
+  );
+  const readyGms = connectedGms.filter((gm) => gm.ready).length;
+  const connectedTotal = playerCounts.connected + connectedGms.length;
+  const readyTotal = playerCounts.ready + readyGms;
+  const validationPassed =
+    connectedSlots.every((slot) => !!slot.ready && !!slot.startValidation)
+    && connectedGms.every((gm) => !!gm.startValidation);
+  const allReady = connectedTotal > 0 && readyTotal === connectedTotal;
+  const started = !!fleet.startGrant;
+  return {
+    connected_players: playerCounts.connected,
+    ready_players: playerCounts.ready,
+    connected_gms: connectedGms.length,
+    ready_gms: readyGms,
+    connected_total: connectedTotal,
+    ready_total: readyTotal,
+    all_ready: allReady,
+    validation_passed: validationPassed,
+    can_auto_start: !started && validationPassed && allReady,
+    started,
+  };
+}
+
+/** Create the fleet's single immutable start grant. Repeats return it unchanged. */
+export function grantFleetStart(fleet, { mode = 'automatic', operatorId = null } = {}) {
+  if (fleet.startGrant) return { fleet, grant: fleet.startGrant, created: false };
+  const forced = mode === 'forced';
+  const grant = {
+    id: `start-${fleet.nextStartSeq}`,
+    mode: forced ? 'forced' : 'automatic',
+    operator_id: forced ? operatorId : null,
+  };
+  return {
+    fleet: freezeFleet({
+      ...fleet,
+      nextStartSeq: fleet.nextStartSeq + 1,
+      startGrant: grant,
+    }),
+    grant,
+    created: true,
+  };
+}
+
+/**
+ * Judge a GM force request against current state. Identity is a stable GM id
+ * resolved from the authenticated connection by `fleet-session`, never trusted
+ * from the request body. Force skips readiness and nothing else.
+ */
+export function adjudicateForceStart(fleet, operatorId) {
+  const gm = gmById(fleet, operatorId);
+  if (!gm || !gm.connected) {
+    return { ok: false, fleet, result: null };
+  }
+  if (fleet.startGrant) {
+    return {
+      ok: true,
+      fleet,
+      grant: fleet.startGrant,
+      result: {
+        status: 'no-op',
+        operator_id: gm.id,
+        reason: 'already-started',
+        grant_id: fleet.startGrant.id,
+      },
+    };
+  }
+  if (!startPolicyOf(fleet).validation_passed) {
+    return {
+      ok: true,
+      fleet,
+      grant: null,
+      result: {
+        status: 'refused',
+        operator_id: gm.id,
+        reason: 'validation-failed',
+        grant_id: null,
+      },
+    };
+  }
+  const granted = grantFleetStart(fleet, { mode: 'forced', operatorId: gm.id });
+  return {
+    ok: true,
+    fleet: granted.fleet,
+    grant: granted.grant,
+    result: {
+      status: 'applied',
+      operator_id: gm.id,
+      reason: null,
+      grant_id: granted.grant.id,
+    },
+  };
+}
+
+/**
  * A member host's link ended.
  *
  * Before mission start the slot GOES: the topology is still mutable, and a
@@ -497,6 +1154,26 @@ export function updateSlot(fleet, id, patch = {}) {
  * fleet, and host migration is #1120's.
  */
 export function dropHost(fleet, peer) {
+  const gm = gmForPeer(fleet, peer);
+  if (gm) {
+    return {
+      ...fleet,
+      // GM identities survive every transport drop. The opaque credential is
+      // the only capability that may bind this public operator id to a new
+      // peer, whether ordinary admission is open or closed.
+      gms: fleet.gms.map((candidate) =>
+        candidate.id === gm.id
+          ? {
+              ...candidate,
+              connected: false,
+              peer: null,
+              ready: false,
+              startValidation: false,
+            }
+          : candidate,
+      ),
+    };
+  }
   const slot = slotForPeer(fleet, peer);
   if (!slot || slot.owner) return fleet;
   if (!fleet.frozen) {
@@ -505,7 +1182,15 @@ export function dropHost(fleet, peer) {
   return {
     ...fleet,
     slots: fleet.slots.map((s) =>
-      s.id === slot.id ? { ...s, connected: false, peer: null } : s,
+      s.id === slot.id
+        ? {
+            ...s,
+            connected: false,
+            peer: null,
+            crew: crewReadiness(null, fleet.maxSlots),
+            startValidation: false,
+          }
+        : s,
     ),
   };
 }
@@ -561,20 +1246,92 @@ export function claimSlot(fleet, { peer, slotId }) {
  * everything but the service itself.
  */
 export function rosterOf(fleet) {
+  const participants = [
+    ...fleet.slots
+      .filter((slot) => slot.connected !== false)
+      .map((slot) => slot.id),
+    ...(fleet.gms || [])
+      .filter((gm) => gm.connected !== false)
+      .map((gm) => gm.meshSlot),
+  ].filter((slot, index, all) => hostSlotOrdinal(slot) != null && all.indexOf(slot) === index)
+    .sort((left, right) => hostSlotOrdinal(left) - hostSlotOrdinal(right));
   return {
+    // `owner` is the host-mesh star centre used for deterministic routing. GM
+    // rows deliberately carry no corresponding owner/leader/permission bit.
     owner: fleet.owner,
     admission: fleet.admission,
     frozen: fleet.frozen,
     max_slots: fleet.maxSlots,
+    // Host-only deterministic topology. Public GM rows deliberately do not
+    // reveal which participant slot belongs to which operator identity.
+    participants,
+    // Private simulation-plane authentication. This outer field is consumed
+    // only by `simulationRosterOf`; crew/public GM rows below remain slot-free.
+    gm_bindings: (fleet.gms || [])
+      .filter((gm) => gm.connected !== false)
+      .map((gm) => ({ host: gm.meshSlot, operator_id: gm.id })),
     slots: fleet.slots.map((s) => ({
       id: s.id,
       owner: s.owner,
       connected: s.connected,
       ready: s.ready,
+      crew: crewReadiness(s.crew, fleet.maxSlots),
       name: s.name,
       ship: s.ship,
     })),
+    gms: (fleet.gms || []).map((gm) => ({
+      id: gm.id,
+      name: gm.name,
+      connected: gm.connected,
+      ready: !!gm.ready,
+    })),
   };
+}
+
+/**
+ * Convert the frozen host roster into the private numeric schema Rust adopts.
+ *
+ * Technical participants and player ships are separate on purpose: a GM is a
+ * full deterministic peer but owns no ship. Only connected rows are present in
+ * `roster.participants`, so every emitted ship host is also a participant.
+ * Returns `null` rather than inventing a slot when a foreign/malformed roster
+ * cannot name this peer or the star owner.
+ */
+export function simulationRosterOf(roster, mine) {
+  if (!roster || typeof roster !== 'object') return null;
+  const local = hostSlotOrdinal(mine);
+  const owner = hostSlotOrdinal(roster.owner);
+  const participants = Array.from(new Set(
+    (Array.isArray(roster.participants) ? roster.participants : [])
+      .map(hostSlotOrdinal)
+      .filter((slot) => Number.isSafeInteger(slot) && slot > 0),
+  )).sort((left, right) => left - right);
+  if (local == null || owner == null
+      || !participants.includes(local) || !participants.includes(owner)) return null;
+
+  const participantSet = new Set(participants);
+  const ships = (Array.isArray(roster.slots) ? roster.slots : [])
+    .filter((slot) => slot && slot.connected !== false)
+    .map((slot) => ({
+      host: hostSlotOrdinal(slot.id),
+      ship_path: slot.ship && typeof slot.ship.template_path === 'string'
+        ? slot.ship.template_path
+        : null,
+      crew: [],
+    }))
+    .filter((ship) => Number.isSafeInteger(ship.host) && participantSet.has(ship.host))
+    .sort((left, right) => left.host - right.host);
+
+  const gms = (Array.isArray(roster.gm_bindings) ? roster.gm_bindings : [])
+    .map((gm) => ({
+      host: hostSlotOrdinal(gm && gm.host),
+      operator_id: gm && typeof gm.operator_id === 'string' ? gm.operator_id : '',
+    }))
+    .filter((gm) => Number.isSafeInteger(gm.host)
+      && participantSet.has(gm.host) && gm.operator_id.length > 0)
+    .sort((left, right) => left.host - right.host);
+
+  return { local, owner, participants, ships, gms };
 }
 
 // ── Frame builders ──────────────────────────────────────────────────────────
@@ -591,14 +1348,40 @@ export function rosterOf(fleet) {
  * unvalidated, sitting in the frame a future reader reaches for first — is
  * precisely how a second, weaker check gets written by accident.
  */
-export const helloFrame = ({ ship = null, name = '', claim = null }) =>
+export const helloFrame = ({
+  ship = null,
+  name = '',
+  claim = null,
+  role = HOST_ROLE_SHIP,
+  reconnectCredential = null,
+}) => {
+  if (hostRole(role) === HOST_ROLE_GM) {
+    const body = { role: HOST_ROLE_GM, name };
+    if (reconnectCredential != null) body.reconnect_credential = reconnectCredential;
+    return hostFrame(HOST_FRAME_HELLO, body);
+  }
   // `claim` (issue #1120) is the slot id a replacement machine is reclaiming; it
   // is absent for an ordinary join and only acted on after the freeze. Kept off
   // the body entirely when null, so a pre-#1120 lead sees an unchanged hello.
-  hostFrame(HOST_FRAME_HELLO, claim ? { ship, name, claim } : { ship, name });
+  return hostFrame(HOST_FRAME_HELLO, claim ? { ship, name, claim } : { ship, name });
+};
 
-export const welcomeFrame = (slotIdent, roster) =>
-  hostFrame(HOST_FRAME_WELCOME, { slot: slotIdent, roster });
+export const welcomeFrame = (slotIdent, roster, {
+  role = HOST_ROLE_SHIP,
+  operatorId = null,
+  reconnectCredential = null,
+} = {}) => {
+  if (hostRole(role) === HOST_ROLE_GM) {
+    return hostFrame(HOST_FRAME_WELCOME, {
+      slot: slotIdent,
+      roster,
+      role: HOST_ROLE_GM,
+      operator_id: operatorId,
+      reconnect_credential: reconnectCredential,
+    });
+  }
+  return hostFrame(HOST_FRAME_WELCOME, { slot: slotIdent, roster });
+};
 
 /**
  * A refusal, and WHICH frame it answers.
@@ -621,7 +1404,52 @@ export const slotFrame = (patch) => hostFrame(HOST_FRAME_SLOT, patch);
 
 export const rosterFrame = (fleet) => hostFrame(HOST_FRAME_ROSTER, { roster: rosterOf(fleet) });
 
+const publicJoinRequest = (request) => ({
+  id: request.id,
+  kind: request.kind === GM_JOIN_RECONNECT ? GM_JOIN_RECONNECT : GM_JOIN_FIRST_TIME,
+  candidate: {
+    operator_id: request.candidate.id,
+    host: hostSlotOrdinal(request.candidate.meshSlot),
+    name: request.candidate.name || '',
+  },
+});
+
+export const gmJoinRequestFrame = (request) =>
+  hostFrame(HOST_FRAME_GM_JOIN_REQUEST, { request: publicJoinRequest(request) });
+
+export const gmJoinDecisionFrame = (id, accepted) =>
+  hostFrame(HOST_FRAME_GM_JOIN_DECISION, { id, accepted: !!accepted });
+
+export const gmJoinStatusFrame = (request, status, reason = null) =>
+  hostFrame(HOST_FRAME_GM_JOIN_STATUS, {
+    request: publicJoinRequest(request),
+    status,
+    reason,
+  });
+
+/** Candidate-only bootstrap. Private capability never reaches roster/status. */
+export const gmJoinPendingFrame = (request, roster) =>
+  hostFrame(HOST_FRAME_GM_JOIN_PENDING, {
+    request: publicJoinRequest(request),
+    slot: request.candidate.meshSlot,
+    operator_id: request.candidate.id,
+    reconnect_credential: request.candidate.credential,
+    roster,
+  });
+
 export const admissionFrame = (state) => hostFrame(HOST_FRAME_ADMISSION, { state });
+
+/** One authenticated host's partial local start state; role is inferred by owner. */
+export const startStateFrame = (state) => hostFrame(HOST_FRAME_START_STATE, state);
+
+/** The owner's pure aggregate projection. */
+export const startPolicyFrame = (policy) => hostFrame(HOST_FRAME_START_POLICY, { policy });
+
+/** No claimed operator travels here; the receiving owner resolves the connection. */
+export const startForceFrame = () => hostFrame(HOST_FRAME_START_FORCE, {});
+
+/** Attributed force feedback, separate from the idempotent fleet-wide grant. */
+export const forceResultFrame = (result) => hostFrame(HOST_FRAME_FORCE_RESULT, { result });
 
 /**
  * Wrap an already-encoded simulation frame body from the Rust side.
@@ -656,7 +1484,7 @@ export function simulationFrame(type, body, tick = null) {
  *
  * @param {object|null} roster
  * @param {{suffix?: string|null, mine?: string|null}} [opts] `suffix` is the
- *   five-letter server code (owner only); `mine` is this host's own slot id.
+ *   server code (owner only); `mine` is this host's own slot id.
  */
 export function fleetPanelViewModel(roster, { suffix = null, mine = null } = {}) {
   if (!roster) return { visible: false, rows: [], code: null, status: null };
@@ -705,15 +1533,29 @@ if (typeof window !== 'undefined') {
     HOST_FRAME_SNAPSHOT,
     HOST_FRAME_HOST_LOSS,
     HOST_FRAME_SLOT_CLAIM,
+    HOST_FRAME_START_STATE,
+    HOST_FRAME_START_POLICY,
+    HOST_FRAME_START_FORCE,
+    HOST_FRAME_FORCE_RESULT,
+    HOST_FRAME_GM_JOIN,
+    HOST_FRAME_GM_JOIN_REQUEST,
+    HOST_FRAME_GM_JOIN_DECISION,
+    HOST_FRAME_GM_JOIN_STATUS,
+    HOST_FRAME_GM_JOIN_PENDING,
     isSimulationFrame,
     simulationFrame,
     hostSlotOrdinal,
     ADMISSION_OPEN,
     ADMISSION_CLOSED,
+    HOST_ROLE_SHIP,
+    HOST_ROLE_GM,
+    MAX_GM_OPERATORS,
     REASON_ADMISSION_CLOSED,
     REASON_FLEET_FULL,
     REASON_RECOVERY_ONLY,
     REASON_SLOT_TAKEN,
+    REASON_JOIN_IN_PROGRESS,
+    REASON_GM_JOIN_REFUSED,
     claimSlot,
     hostFrame,
     encodeHostFrame,
@@ -722,19 +1564,37 @@ if (typeof window !== 'undefined') {
     isHostFrame,
     openFleet,
     slotForPeer,
+    gmForPeer,
+    gmById,
     slotById,
     admitHost,
+    requestFirstTimeGmJoin,
+    decideFirstTimeGmJoin,
+    commitFirstTimeGmJoin,
+    refuseFirstTimeGmJoin,
+    provisionalGmJoinRoster,
     setAdmission,
     freezeFleet,
     updateSlot,
+    setCrewReadiness,
+    setGmReady,
+    setStartValidation,
+    startPolicyOf,
+    grantFleetStart,
+    adjudicateForceStart,
     dropHost,
     rosterOf,
+    simulationRosterOf,
     helloFrame,
     welcomeFrame,
     refusedFrame,
     slotFrame,
     rosterFrame,
     admissionFrame,
+    startStateFrame,
+    startPolicyFrame,
+    startForceFrame,
+    forceResultFrame,
     fleetPanelViewModel,
   };
 }

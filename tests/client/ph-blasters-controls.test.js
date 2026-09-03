@@ -131,17 +131,24 @@ describe('PhBlastersControls', () => {
     expect(queryText(el, '.bar-label')).toBe('');
   });
 
-  it('dispatches charge_blaster_start on mousedown and fire_blaster on mouseup', () => {
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
+  it.each([
+    ['instant', false],
+    ['charged', true],
+  ])('uses one charge-start operation across a full press and release for a %s bank', (_kind, has_charge) => {
+    const activateSemanticAction = vi.fn();
+    window.activateSemanticAction = activateSemanticAction;
+    const { el } = setup();
     el.state = {
-      banks: [{ id: 'port', label: 'Port', on_cooldown: false, charge_progress: 0 }],
+      banks: [{ id: 'port', label: 'Port', on_cooldown: false, charge_progress: 0, has_charge }],
     };
     const btn = el.shadowRoot.querySelector('.btn');
     btn.dispatchEvent(new MouseEvent('mousedown'));
-    expect(sendAction).toHaveBeenCalledWith('charge_blaster_start', { bank: 'port' });
     btn.dispatchEvent(new MouseEvent('mouseup'));
-    expect(sendAction).toHaveBeenCalledWith('fire_blaster', { bank: 'port' });
+    expect(activateSemanticAction).toHaveBeenCalledTimes(1);
+    expect(activateSemanticAction).toHaveBeenCalledWith('tactical.blaster-charge', {
+      context: 'tactical', source: 'control', detail: { bank: 'port' },
+    });
+    delete window.activateSemanticAction;
   });
 
   it('does not dispatch when button is disabled', () => {

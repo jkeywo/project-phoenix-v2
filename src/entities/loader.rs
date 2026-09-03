@@ -142,7 +142,9 @@ impl TemplateLoader for FsTemplateLoader {
         // EVERY file in a directory, and recording there would turn the
         // digest into a repo-wide hash instead of "what this scenario used".
         crate::content_ledger::record(&resolved.path, &resolved.toml);
-        resolved.parse().ok()
+        let config = resolved.parse().ok()?;
+        crate::entities::model_markers::record_primary_sidecar_from_fs(&config);
+        Some(config)
     }
 
     /// The filesystem is authoritative: what it cannot serve does not exist.

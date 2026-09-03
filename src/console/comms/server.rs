@@ -18,6 +18,29 @@ use crate::entities::spawner::EntityUuid;
 use crate::world::content::WorldEvent;
 use crate::world::server::{EffectQueues, ShipModifiersParams, WorldLayerParams};
 
+/// Complete one correlated Comms action for the client that submitted it.
+/// The token is routing metadata only; all gameplay decisions are made before
+/// this helper is called and never branch on whether the source was human/AI.
+fn finish_action_feedback(
+    cmd: &crate::core::messages::AdmittedCommand,
+    outbox: &mut crate::server_app::SimOutbox,
+    outcome: crate::core::messages::ActionFeedbackOutcome,
+) {
+    let (Some(correlation), Some(token)) = (
+        cmd.feedback_correlation.as_ref(),
+        cmd.response_token.as_ref(),
+    ) else {
+        return;
+    };
+    outbox.push_reliable((
+        crate::lobby::Target::Token(token.clone()),
+        crate::core::messages::ServerMessage::ActionFeedback {
+            correlation: correlation.clone(),
+            outcome,
+        },
+    ));
+}
+
 pub struct CommsConsolePlugin;
 
 impl Plugin for CommsConsolePlugin {
@@ -208,6 +231,7 @@ pub(crate) fn handle_hail(
     ship_query: Query<&crate::core::messages::AdmittedCommands, With<crate::server_app::LocalShip>>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut comms: ResMut<CommsRuntime>,
+    mut outbox: Option<ResMut<crate::server_app::SimOutbox>>,
 ) {
     let Some(admitted) = ship_query.iter().next() else {
         return;
@@ -219,13 +243,22 @@ pub(crate) fn handle_hail(
         };
 
         // Server-side range gate: when range tracking is active, the target
-        // must be a known, in-range entity. Out-of-range hails are silently
-        // dropped (clients enforce the same gate UX-side; this defends
-        // against stale or malicious clients).
+        // must be a known, in-range entity. The command remains refused (the
+        // client gate is only UX); a correlated action gets an explicit
+        // terminal result without changing that reachability rule.
         if comms.range_active {
             match comms.range_flags.get(target_uuid).copied() {
                 Some(true) => {}
-                _ => continue,
+                _ => {
+                    if let Some(outbox) = outbox.as_deref_mut() {
+                        finish_action_feedback(
+                            cmd,
+                            outbox,
+                            crate::core::messages::ActionFeedbackOutcome::Refused,
+                        );
+                    }
+                    continue;
+                }
             }
         }
 
@@ -249,6 +282,13 @@ pub(crate) fn handle_hail(
         runtime.pending_world_events.push(WorldEvent::Hailed {
             target_uuid: target_uuid.clone(),
         });
+        if let Some(outbox) = outbox.as_deref_mut() {
+            finish_action_feedback(
+                cmd,
+                outbox,
+                crate::core::messages::ActionFeedbackOutcome::Applied,
+            );
+        }
     }
 }
 
@@ -471,7 +511,12 @@ pub(crate) fn handle_respond_to_message(
         .collect();
     // Every Comms submission in the fleet this tick: hull by hull in slot order,
     // and within a hull in the order admission queued them.
-    let submissions: Vec<(&RespondingHull<'_>, &String, &usize)> = hulls
+    let submissions: Vec<(
+        &RespondingHull<'_>,
+        &crate::core::messages::AdmittedCommand,
+        &String,
+        &usize,
+    )> = hulls
         .iter()
         .flat_map(|hull| {
             hull.admitted
@@ -480,16 +525,22 @@ pub(crate) fn handle_respond_to_message(
                     crate::core::messages::SystemControlPayload::RespondToMessage {
                         message_id,
                         response_index,
-                    } => Some((hull, message_id, response_index)),
+                    } => Some((hull, cmd, message_id, response_index)),
                     _ => None,
                 })
         })
         .collect();
 
-    for (hull, message_id, response_index) in submissions {
+    for (hull, cmd, message_id, response_index) in submissions {
         // Helper: push a `CommsResponseRejected` for the attempted control so the
         // client can flash it red. A no-op when no comms holder is seated here.
-        let reject = |outbox: &mut crate::server_app::SimOutbox, message_id: &str, idx: usize| {
+        // Also closes the correlated action-feedback loop (issue #761) as
+        // `Refused`, addressed to whoever submitted THIS command via its own
+        // `response_token` — independent of the per-hull rejection channel above.
+        let reject = |outbox: &mut crate::server_app::SimOutbox,
+                      cmd: &crate::core::messages::AdmittedCommand,
+                      message_id: &str,
+                      idx: usize| {
             if let Some(token) = hull.token.as_deref() {
                 outbox.push_reliable((
                     crate::lobby::Target::Token(token.to_string()),
@@ -499,6 +550,11 @@ pub(crate) fn handle_respond_to_message(
                     },
                 ));
             }
+            finish_action_feedback(
+                cmd,
+                outbox,
+                crate::core::messages::ActionFeedbackOutcome::Refused,
+            );
         };
 
         // Look up active dialogue for this message.
@@ -508,7 +564,7 @@ pub(crate) fn handle_respond_to_message(
                 // Stale submission: the message has no active dialogue (already
                 // responded to, cleared, or never existed). Reject so the
                 // client flashes the attempted control red (issue #761 AC3).
-                reject(&mut aux.outbox, message_id, *response_index);
+                reject(&mut aux.outbox, cmd, message_id, *response_index);
                 continue;
             }
         };
@@ -530,7 +586,7 @@ pub(crate) fn handle_respond_to_message(
         if comms.range_active {
             let sender_uuid = inbox.0.sender_uuid_for(message_id).unwrap_or_default();
             if !crate::comms::server::slot_may_answer_sender(&comms, hull.slot, &sender_uuid) {
-                reject(&mut aux.outbox, message_id, *response_index);
+                reject(&mut aux.outbox, cmd, message_id, *response_index);
                 continue;
             }
         }
@@ -538,7 +594,7 @@ pub(crate) fn handle_respond_to_message(
         let responses = &dialogue.current_node.responses;
         if *response_index >= responses.len() {
             // Out-of-bounds index (forced/stale client): reject.
-            reject(&mut aux.outbox, message_id, *response_index);
+            reject(&mut aux.outbox, cmd, message_id, *response_index);
             continue;
         }
 
@@ -636,7 +692,7 @@ pub(crate) fn handle_respond_to_message(
             // A scripted dialogue with no script runtime behind it is an
             // inconsistent state (a reload dropped the runtime under a live
             // thread). Refuse rather than silently doing nothing.
-            reject(&mut aux.outbox, message_id, *response_index);
+            reject(&mut aux.outbox, cmd, message_id, *response_index);
             continue;
         };
         // Reset the shared budget once per tick, `SimTick`-keyed and
@@ -662,14 +718,14 @@ pub(crate) fn handle_respond_to_message(
         // the stale, out-of-range and out-of-bounds refusals use, instead of
         // appearing to do nothing.
         if !sr.budget.can_admit() {
-            reject(&mut aux.outbox, message_id, *response_index);
+            reject(&mut aux.outbox, cmd, message_id, *response_index);
             continue;
         }
         // Parallel to the shown responses by construction (`project_node`),
         // so the bounds check above already covers this index; refused
         // rather than indexed, so a future drift cannot panic mid-mission.
         let Some(on_pick_fn) = sd.on_pick.get(*response_index).cloned() else {
-            reject(&mut aux.outbox, message_id, *response_index);
+            reject(&mut aux.outbox, cmd, message_id, *response_index);
             continue;
         };
 
@@ -720,11 +776,11 @@ pub(crate) fn handle_respond_to_message(
             }
             Some(Err(err)) => {
                 bevy::log::warn!("handle_respond_to_message: on_pick '{on_pick_fn}' {err}");
-                reject(&mut aux.outbox, message_id, *response_index);
+                reject(&mut aux.outbox, cmd, message_id, *response_index);
                 continue;
             }
             None => {
-                reject(&mut aux.outbox, message_id, *response_index);
+                reject(&mut aux.outbox, cmd, message_id, *response_index);
                 continue;
             }
         };
@@ -792,7 +848,7 @@ pub(crate) fn handle_respond_to_message(
         // The pick itself is refused: nothing recorded, no node injected.
         if let Some(message) = malformed {
             bevy::log::warn!("handle_respond_to_message: on_pick '{on_pick_fn}': {message}");
-            reject(&mut aux.outbox, message_id, *response_index);
+            reject(&mut aux.outbox, cmd, message_id, *response_index);
             continue;
         }
 
@@ -909,6 +965,15 @@ pub(crate) fn handle_respond_to_message(
                 },
             );
         }
+        // The pick was applied (issue #761): close the correlated action-feedback
+        // loop as `Applied`, addressed to this command's own submitter. Reached
+        // only on the fall-through success path — every refusal above `continue`s
+        // through `reject`, which reports `Refused` instead.
+        finish_action_feedback(
+            cmd,
+            &mut aux.outbox,
+            crate::core::messages::ActionFeedbackOutcome::Applied,
+        );
     }
 }
 
@@ -976,6 +1041,7 @@ pub(crate) fn handle_clear_comms(
     ship_query: Query<&crate::core::messages::AdmittedCommands, With<crate::server_app::Ship>>,
     mut inbox: ResMut<CommsInboxRes>,
     mut comms: ResMut<CommsRuntime>,
+    mut outbox: Option<ResMut<crate::server_app::SimOutbox>>,
 ) {
     for cmd in ship_query
         .iter()
@@ -995,6 +1061,13 @@ pub(crate) fn handle_clear_comms(
             inbox.0.clear();
             comms.open_hails.clear();
             comms.active_dialogues.clear();
+            if let Some(outbox) = outbox.as_deref_mut() {
+                finish_action_feedback(
+                    cmd,
+                    outbox,
+                    crate::core::messages::ActionFeedbackOutcome::Applied,
+                );
+            }
         }
     }
 }
@@ -1011,13 +1084,12 @@ pub(crate) fn handle_show_on_screen(
         &mut crate::ship::state::ShipViewMode,
         With<crate::server_app::LocalShip>,
     >,
+    mut outbox: Option<ResMut<crate::server_app::SimOutbox>>,
 ) {
     let Some(admitted) = ship_query.iter().next() else {
         return;
     };
-    let Some(mut vm) = view_mode_q.iter_mut().next() else {
-        return;
-    };
+    let mut vm = view_mode_q.iter_mut().next();
     for cmd in admitted.for_target(crate::ship::system_registry::COMMS_SYSTEM_ID) {
         let show_message_id: Option<&String> = match &cmd.payload {
             crate::core::messages::SystemControlPayload::ShowOnScreen { message_id } => {
@@ -1026,7 +1098,10 @@ pub(crate) fn handle_show_on_screen(
             _ => None,
         };
         if let Some(message_id) = show_message_id {
-            if let Some(msg) = inbox.0.messages().into_iter().find(|m| &m.id == message_id) {
+            let outcome = if let (Some(vm), Some(msg)) = (
+                vm.as_deref_mut(),
+                inbox.0.messages().into_iter().find(|m| &m.id == message_id),
+            ) {
                 let already_on_screen =
                     matches!(vm.view_mode, crate::core::messages::ViewMode::Comms)
                         && on_screen
@@ -1050,6 +1125,12 @@ pub(crate) fn handle_show_on_screen(
                         vm.show_view_mode(crate::core::messages::ViewMode::Comms);
                     }
                 }
+                crate::core::messages::ActionFeedbackOutcome::Applied
+            } else {
+                crate::core::messages::ActionFeedbackOutcome::Refused
+            };
+            if let Some(outbox) = outbox.as_deref_mut() {
+                finish_action_feedback(cmd, outbox, outcome);
             }
         }
     }

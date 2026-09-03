@@ -19,6 +19,15 @@
        TRUNK_BUILD_RELEASE, which the dev host also sets. -->
   <meta name="phoenix-build-demo" content="false" />
   <title data-i18n="server.doc_title">Project Phoenix — View Screen</title>
+  <script>
+    // Explicit production rendererless GM route (#1291). This is evaluated
+    // before boot and is independent of the WebDriver automation probe.
+    window.__phoenixGmPage = new URLSearchParams(location.search).get('gm') === '1';
+    if (window.__phoenixGmPage) {
+      document.documentElement.classList.add('phoenix-gm-page');
+      document.documentElement.dataset.phoenixBootRequest = 'browser-game-master';
+    }
+  </script>
   <link rel="icon" type="image/x-icon" href="assets/favicon.ico" />
 <!-- The shared design vocabulary (PRD #1023 module 1): colours, edges, ink,
      accents, space, the type ramp and its legibility floor, and the control
@@ -180,6 +189,127 @@
        gui/host-qr.css (issue #1329), linked above: the native host's lobby
        surface carries this same panel and needed the same rules. The fleet
        block below stayed, because that surface carries no fleet UI. */
+    #gm-console {
+      display: none; position: absolute; inset: 0; z-index: 80;
+      box-sizing: border-box;
+      padding: max(4rem, var(--settings-cog-keepout)) clamp(1rem, 4vw, 4rem) clamp(1.5rem, 4vh, 3rem);
+      color: var(--ink-primary); background: #05080d;
+      font-family: 'Chakra Petch', monospace;
+      flex-direction: column; gap: 1.25rem;
+      overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain;
+      scroll-padding-block: var(--settings-cog-keepout) 1.5rem;
+    }
+    html.phoenix-gm-page #gm-console { display: flex; }
+    /* The join/connection overlay is viewscreen chrome. Its absolute z-index is
+       deliberately above the ordinary canvas, but on the scrollable GM page it
+       can cover whichever real control has been brought to the viewport edge.
+       A GM joins through the dedicated fleet/session surface above, so remove
+       this sibling while that route is active rather than letting diagnostics
+       visually cover or intercept an authentic Station control. */
+    html.phoenix-gm-page #overlay { display: none !important; }
+    html.phoenix-gm-page #canvas,
+    html.phoenix-gm-page #hud-overlay { display: none; }
+    #gm-console h1, #gm-console h2, #gm-console h3 { margin: 0; }
+    #gm-session-controls {
+      max-width: 44rem; padding: 1.5rem; border: 1px solid var(--edge-control);
+      display: grid; gap: .9rem;
+    }
+    #gm-session-actions { display: flex; flex-wrap: wrap; gap: .75rem; }
+    #gm-session-actions button {
+      min-width: 8rem; padding: .65rem 1rem; color: var(--ink-primary);
+      background: var(--surface-panel-up); border: 1px solid var(--edge-control);
+      font: inherit; cursor: pointer;
+    }
+    #gm-session-actions button:disabled { opacity: .45; cursor: default; }
+    #gm-session-state[data-paused="true"] { color: var(--tactical-bright); }
+    #gm-session-feedback[data-state="Refused"] { color: var(--fire-bright); }
+    #gm-session-log { margin: 0; padding-left: 1.5rem; max-height: 12rem; overflow-y: auto; }
+    .gm-session-log-entry[data-outcome="pending"] { color: var(--ink-muted); }
+    .gm-session-log-entry[data-outcome="refused"],
+    .gm-session-log-entry[data-outcome="timed-out"] { color: var(--fire-bright); }
+    #gm-workspace {
+      display: grid; grid-template-columns: minmax(20rem, 2fr) minmax(18rem, 1fr);
+      gap: 1rem; min-height: 28rem;
+    }
+    #gm-map-panel, #gm-inspector, #gm-activity {
+      min-width: 0; padding: 1rem; border: 1px solid var(--edge-control);
+      background: var(--surface-panel-down); display: flex; flex-direction: column; gap: .75rem;
+    }
+    #gm-activity { grid-column: 1 / -1; }
+    #gm-activity-filters { display: flex; flex-wrap: wrap; gap: .75rem 1rem; }
+    .gm-activity-filter { display: grid; gap: .3rem; color: var(--ink-muted); }
+    .gm-activity-filter select {
+      min-width: 12rem; padding: .45rem .6rem; color: var(--ink-primary);
+      background: var(--surface-panel-up); border: 1px solid var(--edge-control); font: inherit;
+    }
+    #gm-activity-status, #gm-activity-empty { margin: 0; color: var(--ink-muted); }
+    #gm-activity-list {
+      margin: 0; padding: 0; list-style: none; max-height: 20rem; overflow-y: auto;
+      display: grid; gap: .45rem;
+    }
+    .gm-activity-entry { padding: .65rem .75rem; border-left: 3px solid var(--edge-control); background: var(--surface-panel-up); }
+    .gm-activity-entry[data-category="destruction"] { border-left-color: var(--fire-bright); }
+    .gm-activity-metadata, .gm-activity-involved { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+    .gm-activity-tick, .gm-activity-category, .gm-activity-detail, .gm-activity-system { color: var(--ink-muted); }
+    .gm-activity-category { text-transform: uppercase; letter-spacing: .08em; }
+    .gm-activity-link {
+      padding: .2rem .35rem; color: var(--ink-primary); background: transparent;
+      border: 1px solid var(--edge-control); font: inherit; cursor: pointer;
+    }
+    .gm-activity-link:disabled { border-color: transparent; color: var(--ink-muted); cursor: default; }
+    #gm-activity-clear-filters {
+      align-self: end; padding: .45rem .75rem; color: var(--ink-primary);
+      background: var(--surface-panel-up); border: 1px solid var(--edge-control); font: inherit;
+    }
+    #gm-entity-map {
+      display: block; width: 100%; height: clamp(22rem, 54vh, 46rem);
+      min-height: 22rem; border: 1px solid var(--edge-control); background: var(--surface-abyss);
+    }
+    #gm-entity-map[data-has-selection] { border-color: var(--gold); }
+    #gm-map-legend { color: var(--ink-muted); margin: 0; }
+    #gm-entity-card { padding: .5rem 0 0; }
+    #gm-entity-card dl { display: grid; grid-template-columns: max-content 1fr; gap: .75rem 1.5rem; }
+    #gm-entity-card dt { color: var(--ink-muted); }
+    #gm-entity-card dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+    #gm-entity-hull { width: 100%; }
+    #gm-entity-target {
+      color: var(--ink-primary); background: var(--surface-panel-up);
+      border: 1px solid var(--edge-control); font: inherit; text-align: left; cursor: pointer;
+    }
+    #gm-entity-target:disabled { border-color: transparent; background: transparent; cursor: default; }
+    @media (max-width: 880px) {
+      #gm-workspace { grid-template-columns: 1fr; }
+      #gm-entity-map { height: 24rem; }
+    }
+    #gm-station-controls {
+      width: min(76rem, 100%); min-height: 0; padding: 1.25rem;
+      box-sizing: border-box; border: 1px solid var(--edge-control);
+      display: grid; grid-template-columns: minmax(13rem, 20rem) 1fr;
+      grid-template-rows: auto auto auto auto;
+      gap: .75rem 1rem;
+    }
+    #gm-station-controls[hidden] { display: none; }
+    #gm-station-controls h2 { grid-column: 1 / -1; }
+    #gm-station-select, #gm-station-toggle {
+      min-height: 2.75rem; padding: .55rem .75rem; color: var(--ink-primary);
+      background: var(--surface-panel-up); border: 1px solid var(--edge-control);
+      font: inherit;
+    }
+    #gm-station-toggle { cursor: pointer; }
+    #gm-station-toggle:disabled { opacity: .45; cursor: default; }
+    #gm-station-status { grid-column: 1 / -1; margin: 0; color: var(--ink-muted); }
+    #gm-station-frame {
+      grid-column: 1 / -1; width: 100%; height: clamp(22rem, 58vh, 46rem);
+      border: 1px solid var(--edge-control); background: #000;
+    }
+    #gm-station-activity-heading, #gm-station-activity { grid-column: 1 / -1; }
+    #gm-station-activity { margin: 0; max-height: 10rem; overflow-y: auto; }
+    @media (max-height: 800px) {
+      #gm-console { gap: .9rem; }
+      #gm-session-controls, #gm-entity-card { padding: 1rem; }
+      #gm-station-controls { padding: 1rem; }
+      #gm-station-frame { height: clamp(20rem, 55vh, 32rem); }
+    }
     /* The fleet panel (issue #1114). Below the crew QR, deliberately quieter
        than it: the code above admits PLAYERS and is read across a room, this
        one admits other ship hosts and is read by one operator standing at a
@@ -235,6 +365,15 @@
     #fleet-slots .fleet-ready {
       color: var(--cyan-bright); letter-spacing: var(--tracking-wide);
     }
+    #fleet-gm-group[aria-hidden="true"] { display: none; }
+    #fleet-gm-group { margin-top: 6px; padding-top: 6px; border-top: 1px solid #334; }
+    #fleet-gm-heading {
+      color: var(--ink-faint); font-size: var(--text-xs);
+      text-transform: uppercase; letter-spacing: var(--tracking-wide);
+    }
+    #fleet-gms { display: flex; flex-direction: column; gap: 2px; margin-top: 3px; }
+    .fleet-gm { color: var(--cyan-bright); }
+    .fleet-gm.disconnected { color: var(--ink-faint); opacity: .65; }
     #fleet-status, #fleet-error {
       margin-top: 4px; text-align: center; font-size: var(--text-xs);
       color: var(--ink-faint);
@@ -285,6 +424,99 @@
     }
     #snapshot-import-status {
       font-size: 0.75rem; color: #9ab; white-space: normal; word-break: break-word;
+    }
+    /* Peer-local save catalogue (issue #865). It is a sibling of the ordinary
+       scenario picker, so starting a new session never disappears behind save
+       management and no control can imply live-session restore. */
+    #save-slots-panel {
+      margin-left: auto;
+      width: clamp(19rem, 31vw, 29rem);
+      min-width: 18rem;
+      box-sizing: border-box;
+      padding: var(--settings-cog-keepout) 1rem 1.5rem;
+      overflow-y: auto;
+      background: rgba(0,0,0,0.82);
+      border-left: 1px solid #334;
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+    }
+    .save-slots-heading { margin: 0; color: #cce; font-size: 1rem; letter-spacing: 0.06em; }
+    .save-slots-intro, .save-slots-hint {
+      margin: 0; color: #889; font-size: 0.72rem; line-height: 1.4;
+    }
+    .save-slots-create, .save-slots-actions {
+      display: grid; grid-template-columns: 1fr auto; gap: 0.4rem;
+    }
+    .save-slots-label { grid-column: 1 / -1; color: #9ab; font-size: 0.7rem; }
+    .save-slots-input {
+      min-width: 0; background: #08090d; color: #cde; border: 1px solid #334;
+      border-radius: 3px; padding: 0.42rem 0.5rem; font: inherit;
+    }
+    .save-slots-button {
+      background: #111; color: #aae; border: 1px solid #445; border-radius: 3px;
+      padding: 0.42rem 0.6rem; font: inherit; cursor: pointer;
+    }
+    .save-slots-button:hover:not(:disabled) { background: #223; border-color: #669; }
+    .save-slots-button.primary { border-color: #668; color: #ddf; }
+    .save-slots-button.danger { border-color: #733; color: #fbb; }
+    .save-slots-button:disabled, .save-slots-input:disabled { opacity: 0.45; cursor: default; }
+    .save-slots-button:focus-visible, .save-slots-input:focus-visible, .save-slot-select:focus-visible {
+      outline: 2px solid #9cf; outline-offset: 2px;
+    }
+    .save-slots-list {
+      list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem;
+    }
+    .save-slot-select {
+      width: 100%; display: flex; flex-direction: column; gap: 0.15rem;
+      background: #0b0c12; color: #cde; border: 1px solid #334; border-radius: 4px;
+      padding: 0.55rem; font: inherit; text-align: left; cursor: pointer;
+    }
+    .save-slot-select.selected { background: #18203a; border-color: #668; }
+    .save-slot-name { color: #eef; font-weight: 700; overflow-wrap: anywhere; }
+    .save-slot-detail, .save-slot-metadata { color: #899; font-size: 0.68rem; overflow-wrap: anywhere; }
+    .save-slot-compatibility { font-size: 0.68rem; }
+    .save-slot-compatibility.compatible { color: #7c9; }
+    .save-slot-compatibility.pending { color: #bc8; }
+    .save-slot-compatibility.incompatible, .save-slot-metadata { color: #d99; }
+    .save-slots-actions { border-top: 1px solid #223; padding-top: 0.65rem; }
+    .save-slots-confirm { border: 1px solid #733; background: #180d10; padding: 0.65rem; }
+    .save-slots-confirm p { margin: 0 0 0.55rem; color: #fbb; }
+    .save-slots-confirm button + button { margin-left: 0.4rem; }
+    .save-slots-status {
+      min-height: 1.2em; color: #9ab; font-size: 0.75rem; line-height: 1.4;
+      overflow-wrap: anywhere;
+    }
+    .save-slots-status.ok { color: #7c9; }
+    .save-slots-status.pending { color: #bc8; }
+    .save-slots-status.failed { color: #f99; }
+    .save-slots-empty { color: #889; font-size: 0.75rem; }
+    /* The named manual-save affordance belongs to running-session chrome, not
+       to the pre-scenario picker. Rust's lobby phase drives `[hidden]` below;
+       PhoenixReady is intentionally not a proxy for a capturable World. */
+    #manual-save-panel {
+      position: fixed;
+      top: 56px; right: 12px;
+      z-index: 170;
+      width: min(22rem, calc(100vw - 24px));
+      box-sizing: border-box;
+      padding: 0.7rem;
+      border: 1px solid #334;
+      border-radius: 4px;
+      background: rgba(4, 8, 13, 0.92);
+      color: #cde;
+      font-family: monospace;
+    }
+    #manual-save-panel[hidden] { display: none; }
+    #manual-save-panel .save-slots-heading { margin-bottom: 0.55rem; }
+    /* Portrait: the picker's and the docked join surface's own stacking rules
+       live with them (gui/host-scenarios.css, gui/host-qr.css); only the save
+       catalogue, which is this page's alone, is stacked here. */
+    @media (orientation: portrait), (max-width: 800px) {
+      #save-slots-panel {
+        width: 100%; max-width: none; min-width: 0; overflow: visible;
+        border-left: 0; border-top: 1px solid #334;
+      }
     }
     #mod-pack-status {
       font-size: 0.72rem; color: #889; white-space: normal; word-break: break-word;
@@ -721,6 +953,20 @@
     }
     #server-settings-btn:hover { background: #162131; color: #c9d8ea; }
     #server-settings-btn[aria-expanded="true"] { background: #1b2940; color: #cfe0f5; }
+    #host-action-feedback {
+      position: fixed;
+      top: 10px; left: 52px;
+      z-index: 210;
+      min-height: 34px; box-sizing: border-box;
+      display: flex; align-items: center;
+      padding: 6px 9px;
+      background: rgba(6, 11, 18, 0.9);
+      border: 1px solid #223246; border-radius: 4px;
+      color: #c9d8ea;
+      font-family: "Chakra Petch", system-ui, sans-serif;
+      font-size: 11px; letter-spacing: 0.06em;
+    }
+    #host-action-feedback:empty { display: none; }
     #server-settings-overlay {
       position: fixed;
       inset: 0;
@@ -791,14 +1037,48 @@
       opacity: 0.35; cursor: not-allowed;
       background: #10171f; border-color: #223246; color: #55697f;
     }
+    .server-settings-popup .settings-binding-row {
+      display: flex; gap: 6px; margin-bottom: 5px;
+    }
+    .server-settings-popup .settings-binding-label {
+      display: grid; grid-template-columns: minmax(62px, auto) minmax(120px, 1fr);
+      align-items: center; gap: 7px; width: 100%;
+      color: #8ca4c2; font-family: var(--font-mono, monospace); font-size: 11px;
+    }
+    .server-settings-popup .settings-binding-capture {
+      width: 100%; box-sizing: border-box; padding: 6px 9px;
+      background: #10171f; border: 1px solid #223246; color: #dbe8f7;
+      font: inherit; text-align: center; cursor: pointer;
+    }
+    .server-settings-popup .settings-binding-capture:focus {
+      border-color: #5a86bd; outline: 2px solid #5a86bd; outline-offset: 2px;
+    }
+    .server-settings-popup .settings-binding-feedback,
+    .server-settings-popup .settings-binding-conflict {
+      display: flex; flex-direction: column; gap: 5px;
+      padding: 7px; margin-bottom: 10px;
+      border: 1px solid #a77c45; background: #10171f; color: #d4aa71;
+      font-family: var(--font-mono, monospace); font-size: 11px;
+    }
+    .server-settings-popup .settings-binding-conflict-heading {
+      font-family: "Chakra Petch", system-ui, sans-serif;
+      font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+    }
+    .server-settings-popup .settings-binding-conflict-item { color: #c9d8ea; }
+    .server-settings-popup .settings-binding-conflict-actions {
+      display: flex; gap: 5px; flex-wrap: wrap;
+    }
     /* The one text field in this panel: the fleet code an operator types off
        another viewscreen (issue #1114). Monospaced and letter-spaced because
-       what goes in it is five letters read aloud across a room. */
+       what goes in it is a code read aloud across a room. */
     .server-settings-input {
       padding: 6px 9px; width: 8ch;
       background: #10171f; border: 1px solid #223246; color: #dbe8f7;
       font-family: var(--font-mono, monospace); font-size: 11px;
       letter-spacing: 0.15em; text-transform: uppercase;
+    }
+    .server-settings-role-group {
+      display: flex; flex-wrap: wrap; gap: 6px; width: 100%;
     }
     .server-settings-slider { flex: 1; min-width: 140px; }
     .server-settings-readout {
@@ -910,7 +1190,16 @@
       var ok = parts[0] === 'ok';
       // Only the message may contain a tab, so everything past the second one
       // is rejoined rather than dropped.
-      showSnapshotStatus(ok, parts.slice(2).join('\t'));
+      var message = parts.slice(2).join('\t');
+      showSnapshotStatus(ok, message);
+      if (parts[1] === 'save') {
+        if (window.phSaveSlotsController) {
+          window.phSaveSlotsController.reportOutcome(ok, message);
+        }
+        if (window.phManualSaveController) {
+          window.phManualSaveController.reportOutcome(ok, message);
+        }
+      }
       // Three sources now (issue #866 added `export`), so the mapping is a
       // table rather than a ternary: a fourth would otherwise land silently on
       // the resume button.
@@ -1059,6 +1348,7 @@
         <div id="snapshot-import-status"></div>
       </div>
     </div>
+    <aside id="save-slots-panel"></aside>
   </div>
 
   <!-- ── HTML Lobby Panel (issue #436) ──────────────────────────────────── -->
@@ -1101,6 +1391,22 @@
 
         <!-- Log rail: spectators + status -->
         <aside class="lobby-rail">
+          <!-- Privileged host-mesh controls. This region is exposed only after
+               this page has been admitted as a GM; phones never receive an
+               action capable of reaching these controls. -->
+          <section id="gm-start-controls" role="region" aria-labelledby="gm-start-heading" aria-hidden="true">
+            <div id="gm-start-heading" class="lobby-rail-label" data-i18n="server.gm.start.heading"></div>
+            <div class="gm-start-actions">
+              <button id="gm-ready-btn" type="button" data-i18n="server.gm.start.ready"></button>
+              <button id="gm-force-start-btn" type="button" data-i18n="server.gm.start.force"></button>
+            </div>
+            <div id="gm-start-policy" role="status" aria-live="polite"></div>
+            <div id="gm-start-result" role="status" aria-live="polite"></div>
+          </section>
+          <section id="lobby-gm-group" role="region" aria-labelledby="lobby-gm-heading" aria-hidden="true">
+            <div id="lobby-gm-heading" class="lobby-rail-label" data-i18n="lobby.gms.heading"></div>
+            <div id="lobby-gm-list" class="lobby-rail-section" role="list"></div>
+          </section>
           <div>
             <div class="lobby-rail-label" data-i18n="server.connected">Connected</div>
             <div id="lobby-spectator-list" class="lobby-rail-section"></div>
@@ -1127,6 +1433,19 @@
 
   <div id="server-shell">
     <div id="viewscreen-shell">
+      <!-- Visible on every host-class page during a first-time mid-session GM
+           admission. The candidate is not in the public roster until the
+           digest-proven Commit; this surface is the explicit human gate. -->
+      <section id="gm-join-controls" hidden role="region" aria-labelledby="gm-join-heading"
+        style="position:absolute;right:18px;top:18px;z-index:110;max-width:min(28rem,calc(100vw - 36px));padding:14px;background:rgba(4,12,22,.94);border:1px solid #6ea4c8;color:#d8edff;font-family:'Chakra Petch',monospace;box-shadow:0 8px 30px rgba(0,0,0,.55)">
+        <h2 id="gm-join-heading" data-i18n="server.gm.join.heading"></h2>
+        <p id="gm-join-state" role="status" aria-live="polite" aria-atomic="true"></p>
+        <p id="gm-join-pause-state" role="status" aria-live="polite" aria-atomic="true"></p>
+        <div id="gm-join-actions">
+          <button id="gm-join-accept" type="button" data-i18n="server.gm.join.accept"></button>
+          <button id="gm-join-reject" type="button" data-i18n="server.gm.join.reject"></button>
+        </div>
+      </section>
       <!-- Loading spinner shown until WASM is ready -->
       <div id="wasm-spinner">
         <div class="spinner-ring"></div>
@@ -1141,6 +1460,91 @@
 
       <!-- Bevy renders into the canvas that DefaultPlugins creates at startup -->
       <canvas id="canvas"></canvas>
+
+      <main id="gm-console" aria-labelledby="gm-console-title">
+        <header>
+          <h1 id="gm-console-title" data-i18n="server.gm.console.title"></h1>
+          <p data-i18n="server.gm.console.local_truth"></p>
+        </header>
+        <section id="gm-session-controls" role="region" aria-labelledby="gm-session-heading">
+          <h2 id="gm-session-heading" data-i18n="server.gm.session.heading"></h2>
+          <div id="gm-session-actions">
+            <button id="gm-session-pause" type="button"
+              data-i18n="semantic_action.gm.session_pause.label"></button>
+            <button id="gm-session-resume" type="button"
+              data-i18n="semantic_action.gm.session_resume.label"></button>
+          </div>
+          <p id="gm-session-state" role="status" aria-live="polite" aria-atomic="true"></p>
+          <p id="gm-session-feedback" role="status" aria-live="polite" aria-atomic="true"></p>
+          <h3 id="gm-session-log-heading" data-i18n="server.gm.session.log_heading"></h3>
+          <ol id="gm-session-log" role="log" aria-labelledby="gm-session-log-heading"
+            aria-live="polite" aria-relevant="additions text"></ol>
+        </section>
+        <div id="gm-workspace">
+          <section id="gm-map-panel" role="region" aria-labelledby="gm-map-heading">
+            <h2 id="gm-map-heading" data-i18n="server.gm.map.heading"></h2>
+            <p id="gm-entity-pending" role="status" data-i18n="server.gm.entity.pending"></p>
+            <ph-navigation-map id="gm-entity-map" hidden></ph-navigation-map>
+            <p id="gm-map-legend" data-i18n="server.gm.map.legend"></p>
+          </section>
+          <section id="gm-inspector" role="region" aria-labelledby="gm-inspector-heading">
+            <h2 id="gm-inspector-heading" data-i18n="server.gm.inspector.heading"></h2>
+            <p id="gm-inspector-empty" data-i18n="server.gm.inspector.empty"></p>
+            <article id="gm-entity-card" hidden aria-live="polite">
+              <h3 id="gm-entity-name"></h3>
+              <dl>
+                <dt data-i18n="server.gm.entity.identity"></dt><dd id="gm-entity-identity"></dd>
+                <dt data-i18n="server.gm.entity.kind"></dt><dd id="gm-entity-kind"></dd>
+                <dt data-i18n="server.gm.entity.position"></dt><dd id="gm-entity-position"></dd>
+                <dt data-i18n="server.gm.entity.faction"></dt><dd id="gm-entity-faction"></dd>
+                <dt id="gm-entity-status-label" data-i18n="server.gm.entity.status"></dt><dd id="gm-entity-status"></dd>
+                <dt data-i18n="server.gm.entity.target"></dt><dd><button id="gm-entity-target" type="button" disabled></button></dd>
+              </dl>
+              <meter id="gm-entity-hull" min="0" max="100" value="0"
+                aria-labelledby="gm-entity-status-label gm-entity-status"></meter>
+            </article>
+          </section>
+          <section id="gm-activity" role="region" aria-labelledby="gm-activity-heading">
+            <h2 id="gm-activity-heading" data-i18n="server.gm.activity.heading"></h2>
+            <div id="gm-activity-filters">
+              <label class="gm-activity-filter" for="gm-activity-category-filter">
+                <span data-i18n="server.gm.activity.filter.category"></span>
+                <select id="gm-activity-category-filter">
+                  <option value="all" data-i18n="server.gm.activity.filter.category_all"></option>
+                  <option value="damage" data-i18n="server.gm.activity.category.damage"></option>
+                  <option value="destruction" data-i18n="server.gm.activity.category.destruction"></option>
+                  <option value="objective" data-i18n="server.gm.activity.category.objective"></option>
+                  <option value="trigger" data-i18n="server.gm.activity.category.trigger"></option>
+                  <option value="red_alert" data-i18n="server.gm.activity.category.red_alert"></option>
+                  <option value="connection" data-i18n="server.gm.activity.category.connection"></option>
+                  <option value="gm_action" data-i18n="server.gm.activity.category.gm_action"></option>
+                </select>
+              </label>
+              <label class="gm-activity-filter" for="gm-activity-ship-filter">
+                <span data-i18n="server.gm.activity.filter.ship"></span>
+                <select id="gm-activity-ship-filter"></select>
+              </label>
+              <button id="gm-activity-clear-filters" type="button"
+                data-i18n="server.gm.activity.filter.clear"></button>
+            </div>
+            <p id="gm-activity-status" role="status" aria-live="polite" aria-atomic="true"></p>
+            <p id="gm-activity-empty" data-i18n="server.gm.activity.empty"></p>
+            <ol id="gm-activity-list" role="log" aria-labelledby="gm-activity-heading"
+              aria-live="polite" aria-relevant="additions text"></ol>
+          </section>
+        </div>
+        <p id="gm-station-pending" role="status" data-i18n="server.gm.station.pending"></p>
+        <section id="gm-station-controls" hidden role="region" aria-labelledby="gm-station-heading">
+          <h2 id="gm-station-heading" data-i18n="server.gm.station.heading"></h2>
+          <select id="gm-station-select" aria-labelledby="gm-station-heading"></select>
+          <button id="gm-station-toggle" type="button"></button>
+          <p id="gm-station-status" role="status" aria-live="polite" aria-atomic="true"></p>
+          <iframe id="gm-station-frame" title="" sandbox="allow-scripts allow-same-origin"></iframe>
+          <h3 id="gm-station-activity-heading" data-i18n="server.gm.station.activity_heading"></h3>
+          <ol id="gm-station-activity" role="log" aria-labelledby="gm-station-activity-heading"
+            aria-live="polite" aria-relevant="additions text"></ol>
+        </section>
+      </main>
 
       <!-- Game-over overlay: shown when GamePhase::GameOver via __updateHud.
            When the scenario authored a post-mission report (issue #1344) its
@@ -1208,7 +1612,7 @@
             <span id="qr-url-label" data-i18n="server.qr_url_label">or type this in</span>
             <span id="qr-url"></span>
           </div>
-          <!-- The five letters a guest reads across the room and types into
+          <!-- The code a guest reads across the room and types into
                their phone (issue #1111). Populated once the rendezvous service
                has issued this host a code, and cleared if that record is lost;
                the URL row above carries the same code inside the QR link. -->
@@ -1235,6 +1639,10 @@
             <span id="fleet-url"></span>
           </div>
           <ul id="fleet-slots"></ul>
+          <section id="fleet-gm-group" role="region" aria-labelledby="fleet-gm-heading" aria-hidden="true">
+            <div id="fleet-gm-heading" data-i18n="lobby.gms.heading"></div>
+            <div id="fleet-gms" role="list"></div>
+          </section>
           <div id="fleet-status"></div>
           <div id="fleet-error"></div>
         </div>
@@ -1275,6 +1683,11 @@
          panel: a resume that the version gate refused has to be readable on a
          page the host has only just loaded. -->
     <div id="snapshot-status" role="status" aria-live="polite"></div>
+
+    <!-- Persistent running-session save chrome (issue #865). The catalogue
+         remains on the pre-session panel; this compact surface owns only a
+         named fixed-tick capture and is shown from authoritative GamePhase. -->
+    <aside id="manual-save-panel" hidden></aside>
   </div>
 
   <!-- Trunk replaces this with the compiled WASM bundle. It fires
@@ -1315,6 +1728,104 @@
     // mechanics of both are in a module so vitest can reach them.
     import * as snapshotTransfer from './gui/snapshot-transfer.js';
     window.phSnapshotTransfer = snapshotTransfer;
+    import * as saveSlots from './gui/save-slots.js';
+    window.phSaveSlots = saveSlots;
+    // Peer-local Store identity is an async serialized claim (Web Lock first,
+    // SharedWorker fallback). Begin it as soon as this module island loads;
+    // startPhoenix awaits the same promise before any App can emit an autosave,
+    // and catalogue refresh awaits it before listing.
+    window.phSaveIdentityReady = saveSlots.prepareBrowserSaveIdentity(window);
+    window.__saveSlotsCaptureAvailable = false;
+    window.__setSaveSlotsPhase = function (phase) {
+      const capturable = saveSlots.captureAvailableForPhase(phase);
+      window.__saveSlotsCaptureAvailable = capturable;
+      const manualRoot = document.getElementById('manual-save-panel');
+      // Keep the disabled control and its refusal visible at GameOver. Lobby
+      // returns to the catalogue, where the adapter below mirrors a refusal.
+      if (manualRoot) manualRoot.hidden = phase !== 'InProgress' && phase !== 'GameOver';
+      if (window.phSaveSlotsController) {
+        window.phSaveSlotsController.setPhase(phase);
+      }
+      if (window.phManualSaveController) {
+        window.phManualSaveController.setPhase(phase);
+      }
+    };
+    window.__mountSaveSlots = function () {
+      const bindings = window.wasmBindings;
+      if (!bindings || typeof bindings.wasm_list_save_slots !== 'function') return null;
+      const api = {
+        list: function () { return Array.from(bindings.wasm_list_save_slots() || []); },
+        create: function (name) { return bindings.wasm_create_save_slot(name); },
+        rename: function (slotId, name) { return bindings.wasm_rename_save_slot(slotId, name); },
+        export: function (slotId) { return bindings.wasm_export_save_slot(slotId); },
+        takeExport: function () { return bindings.wasm_take_exported_snapshot(); },
+        exportName: function () { return bindings.wasm_export_file_name(); },
+        delete: function (slotId, confirmed) { return bindings.wasm_delete_save_slot(slotId, confirmed); },
+      };
+      if (!window.phSaveSlotsController) {
+        const root = document.getElementById('save-slots-panel');
+        if (root) {
+          window.phSaveSlotsController = saveSlots.mountSaveSlots({
+            root,
+            doc: document,
+            api,
+            mode: 'catalogue',
+            canCapture: function () { return false; },
+            download: snapshotTransfer.downloadArtifact,
+            onNewSession: function () {
+              saveSlots.clearPendingResume(window);
+              if (typeof window.__hostChooseNewSession === 'function') {
+                window.__hostChooseNewSession();
+              }
+              const first = document.querySelector('.scenario-entry');
+              const fallback = document.getElementById('world-list-label');
+              (first || fallback)?.focus();
+            },
+            onStart: async function (row) {
+              // Always reload. Even when this catalogue is re-shown after
+              // GameOver, a save starts a NEW App and never mutates the World.
+              const url = new URL(window.location.href);
+              url.searchParams.set('scenario', row.scenario);
+              url.searchParams.set('ship', row.selectedShip);
+              url.searchParams.set('resume', row.slotId);
+              if (!await saveSlots.armBrowserSaveIdentityHandoff(window)) return false;
+              window.location.href = url.toString();
+              return true;
+            },
+          });
+        }
+      } else {
+        window.phSaveSlotsController.refresh();
+      }
+      if (!window.phManualSaveController) {
+        const manualRoot = document.getElementById('manual-save-panel');
+        if (manualRoot) {
+          window.phManualSaveController = saveSlots.mountSaveSlots({
+            root: manualRoot,
+            doc: document,
+            api,
+            mode: 'manual',
+            idPrefix: 'in-session',
+            canCapture: function () { return window.__saveSlotsCaptureAvailable; },
+            // Lobby hides the in-session surface, so mirror its immediate
+            // fixed-boundary refusal into the still-usable catalogue. The
+            // existing snapshot-status adapter may later replace this with
+            // the bridge's exact failure (including queue capacity).
+            onPendingCaptureDropped: function (message) {
+              if (window.phSaveSlotsController) {
+                window.phSaveSlotsController.reportOutcome(false, message);
+              }
+            },
+          });
+        }
+      }
+      window.__setSaveSlotsPhase(window.__saveSlotsPhase || '');
+      return window.phSaveSlotsController;
+    };
+    // This module is deferred while the classic host script below installs
+    // the WASM-ready listener. Signal its half of the two-sided startup latch:
+    // either the module or Trunk may finish first, but mounting needs both.
+    window.dispatchEvent(new Event('PhoenixSaveSlotsModuleReady'));
   </script>
   <!-- Console-action dispatch table (issue #822): the host page routes its
        embedded console actions through the same gui/action-map.js →
@@ -1469,7 +1980,68 @@
        set_host_channel_callback further down for the other half of that. -->
   <script type="module">
     import { createHostChannel } from './gui/host-channel.js';
+    import './gui/components/ph-navigation-map.js';
+    import { createGmActivityFeed } from './gui/gm-activity-feed.js';
+    import { createGmLocalProjection } from './gui/gm-local-projection.js';
+    import { createGmSessionControls } from './gui/gm-session-controls.js';
+    import { createGmStationPuppet } from './gui/gm-station-puppet.js';
+    import {
+      ActionFeedbackLifecycle,
+      emitActionFeedbackTransition,
+    } from './gui/action-feedback.js';
+    import { createHostActionRegistry } from './gui/host-actions.js';
     import { t, has, localiseTree } from './gui/strings.js';
+    const gmProjection = createGmLocalProjection({ doc: document, t });
+    const gmActivity = createGmActivityFeed({
+      doc: document,
+      t,
+      containsEntity: (id) => gmProjection.contains(id),
+      selectEntity: (id) => gmProjection.select(id),
+    });
+    const hostActionFeedback = new ActionFeedbackLifecycle({
+      onTransition: (value) => emitActionFeedbackTransition(window, value),
+    });
+    const hostSemanticActions = createHostActionRegistry({
+      actionFeedback: hostActionFeedback,
+      // Resolve at activation time: the classic page seam binds after this
+      // module island, while the registry itself is page-scoped from boot.
+      toggleQrCode: () => typeof window.__hostToggleQrCode === 'function'
+        ? window.__hostToggleQrCode() : false,
+    });
+    const gmSessionControls = createGmSessionControls({
+      doc: document,
+      t,
+      actions: hostSemanticActions,
+      actionFeedback: hostActionFeedback,
+      submitSessionPaused: (active, correlation) =>
+        typeof window.__hostSetSessionPaused === 'function'
+          && window.__hostSetSessionPaused(active, correlation),
+      getOperator: () => typeof window.__hostLocalGm === 'function'
+        ? window.__hostLocalGm() : null,
+      getOperatorName: (id) => typeof window.__hostGmName === 'function'
+        ? window.__hostGmName(id) : id,
+    });
+    window.__hostGmSessionRefresh = gmSessionControls.refreshAdmission;
+    window.__hostGmSessionReset = gmSessionControls.reset;
+    window.__hostGmSessionState = gmSessionControls.state;
+    window.__hostGmActivityState = gmActivity.state;
+    const gmStationPuppet = createGmStationPuppet({
+      doc: document,
+      win: window,
+      t,
+      getOperator: () => typeof window.__hostLocalGm === 'function'
+        ? window.__hostLocalGm() : null,
+      submitStationPuppet: (request) =>
+        typeof window.__hostSetStationPuppet === 'function'
+          && window.__hostSetStationPuppet(request),
+      submitStationCommand: (request) =>
+        typeof window.__hostIssueStationCommand === 'function'
+          && window.__hostIssueStationCommand(request),
+    });
+    window.__hostGmStationRefresh = gmStationPuppet.refresh;
+    window.__hostGmStationState = gmStationPuppet.state;
+    window.__hostSemanticActions = hostSemanticActions;
+    window.__hostActionFeedback = hostActionFeedback;
     const hostChannelDispatch = createHostChannel({
       handlers: {
         hud:          function(p) { window.__updateHud(p); },
@@ -1479,6 +2051,12 @@
         audio_cue:    function(p) { window.__audioCue(p); },
         audio_level:  function(p) { window.__audioLevel(p); },
         shake:        function(p) { window.__applyShake(p[0], p[1]); },
+        gm_entity:    function(p) {
+          if (gmProjection.update(p)) gmActivity.reconcileAvailability();
+        },
+        gm_activity:  function(p) { gmActivity.update(p); },
+        gm_station:   function(p) { gmStationPuppet.update(p); },
+        gm_session:   function(p) { gmSessionControls.update(p); },
       },
       strings: { t, has, localiseTree },
     });
@@ -1498,7 +2076,7 @@
        bottom of this page, long after every module island here has loaded. -->
   <script type="module" src="gui/host-peer-routing.js"></script>
 
-  <!-- Typed five-letter join codes and the Phoenix crew transport (issues
+  <!-- Typed join codes and the Phoenix crew transport (issues
        #1111/#1112). Both publish onto window for the classic script below.
        Since #1112 this IS the transport — there is no PeerJS block and no flag
        choosing between routes; the host registers with the rendezvous service
@@ -1841,6 +2419,20 @@
   window.__updateLobby = function(json) {
     let s;
     try { s = JSON.parse(json); } catch (e) { console.warn('[Phoenix] bad lobby state json', e); return; }
+    // Entering authoritative Lobby is the GM activity run boundary. It is the
+    // only place local Pending rows are reset; a bounded absolute result window
+    // becoming empty is not enough evidence to invent a new run.
+    if (s.phase === 'Lobby' && _lobbyPrevPhase !== 'Lobby'
+        && typeof window.__hostGmSessionReset === 'function') {
+      window.__hostGmSessionReset();
+    }
+    // Manual capture is a running-World affordance. Drive it from Rust's
+    // authoritative phase before any optional view-model module can defer the
+    // rest of this paint; PhoenixReady fires before App::run and is too early.
+    window.__saveSlotsPhase = s.phase;
+    if (typeof window.__setSaveSlotsPhase === 'function') {
+      window.__setSaveSlotsPhase(s.phase);
+    }
 
     // Pure phase-transition / title / crew / ready-badge / countdown /
     // station-card / reserved-chip / spectator-pill / hint computation lives
@@ -1857,7 +2449,16 @@
     if (typeof window.hostLobbyViewModel !== 'function') return;
     if (!window.hostLobbyRender) return;
     if (!window.hostQr) return;
-    const vm = window.hostLobbyViewModel(s, _lobbyPrevPhase);
+    // In a fleet, the mesh owner has the complete participant set. Local
+    // `all_ready` still describes this ship's crew and is published below,
+    // while the badge/hint must describe the collective answer every host was
+    // given. Solo sessions retain the original local projection unchanged.
+    publishFleetLobbyState(s);
+    const lobbyProjection = fleetHandle && fleetStartPolicy
+      ? { ...s, all_ready: !!fleetStartPolicy.all_ready }
+      : s;
+    const vm = window.hostLobbyViewModel(lobbyProjection, _lobbyPrevPhase);
+    drainFleetStartResult();
     const tr = vm.transitions;
 
     // ── Loading overlay ────────────────────────────────────────────────
@@ -1939,6 +2540,44 @@
     // delivery after game start and breaks the smoke tests. The canvas must
     // stay in the render tree at all times.
     window.hostLobbyRender.renderHostLobby(document, vm, t);
+
+    // ── Equal Game Master presence ────────────────────────────────────
+    const gmGroup = document.getElementById('lobby-gm-group');
+    const gmHeading = document.getElementById('lobby-gm-heading');
+    const gmList = document.getElementById('lobby-gm-list');
+    if (gmGroup && gmList) {
+      gmGroup.setAttribute('aria-hidden', vm.gmGroup.visible ? 'false' : 'true');
+      if (gmHeading) gmHeading.textContent = t(vm.gmGroup.headingId);
+      gmList.innerHTML = '';
+      for (const gm of vm.gmGroup.pills) {
+        const pill = document.createElement('span');
+        pill.className = 'gm-pill' + (gm.connected ? '' : ' disconnected');
+        pill.setAttribute('role', 'listitem');
+        pill.dataset.gmId = gm.id;
+        pill.dataset.ready = gm.ready ? 'true' : 'false';
+        pill.textContent = t(gm.labelId, { name: gm.name || gm.id })
+          + ' · ' + t(gm.readinessLabelId);
+        gmList.appendChild(pill);
+      }
+    }
+
+    // ── Status hint ───────────────────────────────────────────────────
+    const hintEl = document.getElementById('lobby-status-hint');
+    if (hintEl) {
+      hintEl.textContent = t(vm.hint.id, vm.hint.params);
+      hintEl.style.color = vm.hint.color;
+    }
+
+    // ── AI-only launch button ─────────────────────────────────────────
+    const aiBtn = document.getElementById('ai-launch-btn');
+    if (aiBtn) {
+      // `wasm_force_start` is the legacy solo/AI launch. Once this page is a
+      // fleet peer—or is configured as a GM—the attributed mesh policy is the
+      // only start authority and the legacy shortcut must not masquerade as it.
+      aiBtn.style.display = vm.aiLaunchVisible && !fleetHandle && fleetRole !== 'gm'
+        ? ''
+        : 'none';
+    }
   };
 
   // ── Viewscreen AI chatter widget ────────────────────────────────────────
@@ -1997,7 +2636,7 @@
       const btn = document.getElementById('ai-launch-btn');
       if (btn) {
         btn.addEventListener('click', function() {
-          if (typeof wasm_force_start === 'function') {
+          if (!fleetHandle && fleetRole !== 'gm' && typeof wasm_force_start === 'function') {
             wasm_force_start();
           }
         });
@@ -2012,7 +2651,7 @@
     // ── Phoenix crew transport (issues #1111 / #1112) ──────────────────────
     //
     // This host registers with the rendezvous service, is issued a private
-    // five-letter code, and answers WebRTC offers from the phones that type it.
+    // typed code, and answers WebRTC offers from the phones that type it.
     // There is no second route any more: PeerJS, its public cloud broker and
     // the 32-hex peer id that used to be the join URL's fragment were retired
     // in #1112, and the fragment now carries the structured join code instead.
@@ -2039,7 +2678,7 @@
     // Recovering from a LOST service is the transport's own business — it
     // re-registers on a backoff and issues a fresh code through onCode.
     let rendezvousHost = null;
-    // Whether a five-letter code is currently on screen.
+    // Whether a typed code is currently on screen.
     let rendezvousCodeShown = false;
     // Set when the rendezvous service reports a failure, so renderConnDiag()
     // can tell the operator why no code appeared.
@@ -2202,7 +2841,7 @@
     let fleetHandle = null;
     /** The most recent roster body — the owner's own, or the lead's sync. */
     let fleetRoster = null;
-    /** The five letters on screen: this host's own code, or the one it typed. */
+    /** The code on screen: this host's own code, or the one it typed. */
     let fleetSuffix = null;
     /** A machine reason for why there is no fleet, already localisable. */
     let fleetFault = null;
@@ -2214,14 +2853,822 @@
      * deliberately does.
      */
     let fleetNotice = null;
+    /** Visible first-time GM request and its absolute transfer progress (#1293). */
+    let fleetGmJoinRequest = null;
+    let fleetGmJoinProgress = null;
+    let fleetGmJoinCompletedId = null;
     /** ICE servers, latched by initHostTransport so a fleet can reuse them. */
     let fleetIceServers = [];
+    /** Privileged host-mesh role chosen before open/join. Phones never set it. */
+    let fleetRole = window.__phoenixGmPage ? 'gm' : 'ship';
+    /** Distinguishes the default from an operator deliberately choosing ship. */
+    let fleetRoleExplicit = !!window.__phoenixGmPage;
+    /** Latest owner-computed collective readiness policy, identical on peers. */
+    let fleetStartPolicy = null;
+    /** Latest local lobby tally; Rust has already excluded spectators. */
+    let fleetLobbyReadiness = { connected: 0, ready: 0 };
+    let fleetLobbyPhase = 'Lobby';
+    /** Rust-owned render/preload terminal fact from the latest lobby payload. */
+    let fleetPresentationReady = false;
+    /** Accessible outcome of the most recent GM force request. */
+    let fleetStartResultView = null;
+    /** Last fixed-tick result, exposed read-only for operator diagnostics/tests. */
+    let fleetLastAppliedStartResult = null;
+    /** Last Rust lobby payload, used to repaint when the async mesh policy moves. */
+    let fleetLastLobbyPayload = null;
+    let fleetPolicyRepaintScheduled = false;
+    /** Suppress identical state frames; policy callbacks otherwise self-loop. */
+    let fleetLastPublishedStartState = null;
+    /** Fleet state can predate the WASM export assignment during page boot. */
+    let fleetManagedRequested = false;
+    /**
+     * The private, frozen technical participant roster accepted for this run.
+     * It is deliberately separate from `fleetRoster`: public GM rows do not
+     * expose mesh slots, while Rust needs every simulation participant in its
+     * lockstep wait-set before the owner may propose a start grant.
+     */
+    let fleetSimulationRosterKey = null;
+    let pendingFleetSimulationRoster = null;
+    /** Exact-generation Rust acknowledgement required before browser teardown. */
+    let pendingFleetLeave = null;
+    /** Invalidates every async adoption continuation when this fleet leaves. */
+    let fleetSimulationRosterEpoch = 0;
+    /** Ordered retries for the Rust bridge's bounded managed/validation FIFO. */
+    const pendingFleetLobbyInputs = [];
+    const MAX_PENDING_FLEET_LOBBY_INPUTS = 64;
+    const pendingFleetStartGrants = [];
+    /** One private GM reconnect capability, scoped to the fleet code that issued it. */
+    const FLEET_GM_IDENTITY_KEY = 'phoenix.fleet.gm-identity.v1';
+    let fleetIdentityStorage = null;
+    try { fleetIdentityStorage = window.localStorage; } catch (_) {}
     /**
      * The hull `wasm_select_ship` was last called with, as a fleet ship — see
      * `lockPlayerHull`. Held here rather than read back out of Rust because the
      * fleet needs it on paths where Bevy is not running yet.
      */
     let _selectedHull = null;
+    /** The selected hull whose authored stations passed the Rust validator. */
+    let _fleetValidatedHullPath = null;
+    /**
+     * True only at the final pre-wasm_init boundary, after world preload,
+     * hull/station validation, and save/content compatibility preparation.
+     */
+    let _fleetBootReady = false;
+
+    function normaliseFleetRole(role) {
+      return role === 'gm' ? 'gm' : 'ship';
+    }
+
+    /** The admitted local GM row, or null before/after authenticated presence. */
+    function localGm() {
+      if (!fleetHandle || normaliseFleetRole(fleetHandle.role || fleetRole) !== 'gm'
+          || !fleetHandle.operatorId || fleetHandle.gmJoinCandidate) return null;
+      const gms = fleetRoster && Array.isArray(fleetRoster.gms) ? fleetRoster.gms : [];
+      const row = gms.find(gm => gm && gm.id === fleetHandle.operatorId);
+      if (row && !row.connected) return null;
+      return row || {
+        id: fleetHandle.operatorId,
+        name: fleetHandle.operatorId,
+        connected: true,
+        ready: false,
+      };
+    }
+
+    function gmName(operatorId) {
+      const gms = fleetRoster && Array.isArray(fleetRoster.gms) ? fleetRoster.gms : [];
+      const row = gms.find(gm => gm && gm.id === operatorId);
+      return (row && (row.name || row.id)) || operatorId || '';
+    }
+
+    function gmJoinCandidateName() {
+      const candidate = fleetGmJoinRequest && fleetGmJoinRequest.candidate;
+      return (candidate && (candidate.name || candidate.operator_id)) || '';
+    }
+
+    function paintGmJoinControls() {
+      const panel = document.getElementById('gm-join-controls');
+      const state = document.getElementById('gm-join-state');
+      const pause = document.getElementById('gm-join-pause-state');
+      const accept = document.getElementById('gm-join-accept');
+      const reject = document.getElementById('gm-join-reject');
+      if (!panel || !state || !pause || !accept || !reject) return;
+      const progress = fleetGmJoinProgress;
+      const status = progress && progress.status
+        ? progress.status
+        : (fleetGmJoinRequest ? 'awaiting-decision' : 'idle');
+      panel.hidden = status === 'idle';
+      if (panel.hidden) return;
+      const name = gmJoinCandidateName();
+      const statusIds = {
+        'awaiting-decision': 'server.gm.join.awaiting_decision',
+        accepted: 'server.gm.join.accepted',
+        'awaiting-pause': 'server.gm.join.awaiting_pause',
+        transferring: 'server.gm.join.transferring',
+        committed: 'server.gm.join.committed',
+        refused: 'server.gm.join.refused',
+      };
+      const reason = progress && progress.reason != null
+        ? (typeof progress.reason === 'string'
+          ? progress.reason
+          : JSON.stringify(progress.reason))
+        : '';
+      state.textContent = t(statusIds[status] || 'server.gm.join.accepted', { name, reason });
+      let paused = false;
+      try {
+        paused = typeof window.wasm_is_paused === 'function' && window.wasm_is_paused();
+      } catch (_) {}
+      pause.textContent = t(paused
+        ? 'server.gm.join.pause_active'
+        : 'server.gm.join.pause_inactive');
+      const canAnswer = status === 'awaiting-decision'
+        && (!fleetGmJoinRequest || fleetGmJoinRequest.kind !== 'reconnect')
+        && !!fleetHandle && !!fleetHandle.canDecideGmJoin
+        && typeof fleetHandle.decideGmJoin === 'function';
+      accept.hidden = !canAnswer;
+      reject.hidden = !canAnswer;
+      accept.disabled = !canAnswer;
+      reject.disabled = !canAnswer;
+    }
+
+    function receiveFleetGmJoinRequest(request) {
+      if (!request || !Number.isSafeInteger(request.id)) return;
+      fleetGmJoinRequest = request;
+      fleetGmJoinProgress = { ...request, status: 'awaiting-decision', reason: null };
+      paintGmJoinControls();
+    }
+
+    function receiveFleetGmJoinStatus(progress) {
+      if (!progress || !Number.isSafeInteger(progress.id)) return;
+      if (progress.candidate) fleetGmJoinRequest = {
+        id: progress.id,
+        kind: progress.kind || 'first-time',
+        candidate: progress.candidate,
+      };
+      fleetGmJoinProgress = progress;
+      paintGmJoinControls();
+    }
+
+    function beginFleetGmJoin(request) {
+      if (!request || typeof window.wasm_begin_gm_join !== 'function') return false;
+      const scenario = typeof selectedScenario === 'string' ? selectedScenario : '';
+      try {
+        return window.wasm_begin_gm_join(
+          BigInt(request.id),
+          request.approvedBy,
+          request.candidateHost,
+          request.operatorId,
+          scenario,
+          request.kind || 'first-time',
+        ) !== false;
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function prepareFleetGmJoinCandidate(id, roster) {
+      if (!Number.isSafeInteger(id)
+          || !roster
+          || typeof window.wasm_prepare_gm_join_candidate !== 'function') return false;
+      let encoded;
+      try { encoded = JSON.stringify(roster); } catch (_) { return false; }
+      try { return window.wasm_prepare_gm_join_candidate(BigInt(id), encoded) !== false; }
+      catch (_) { return false; }
+    }
+
+    function refuseFleetGmJoin(id, reason) {
+      if (!Number.isSafeInteger(id) || typeof window.wasm_refuse_gm_join !== 'function') {
+        return false;
+      }
+      try { return window.wasm_refuse_gm_join(BigInt(id), reason) !== false; }
+      catch (_) { return false; }
+    }
+
+    function pollFleetGmJoin() {
+      if (!fleetHandle || typeof window.wasm_gm_join_status !== 'function') {
+        paintGmJoinControls();
+        return;
+      }
+      let progress;
+      try { progress = JSON.parse(window.wasm_gm_join_status()); } catch (_) { return; }
+      if (!progress || progress.status === 'idle') {
+        paintGmJoinControls();
+        return;
+      }
+      const approval = progress.approval || null;
+      const commit = progress.commit || null;
+      const id = (approval && approval.id) || (commit && commit.id) || progress.id;
+      const candidate = (approval && approval.candidate) || (commit && commit.candidate);
+      const kind = (approval && approval.kind) || (commit && commit.kind) || 'first-time';
+      if (Number.isSafeInteger(id) && candidate && !fleetGmJoinRequest) {
+        fleetGmJoinRequest = {
+          id,
+          kind,
+          candidate: {
+            operator_id: candidate.operator_id,
+            host: candidate.host,
+            name: candidate.operator_id,
+          },
+        };
+      }
+      fleetGmJoinProgress = { ...progress, id };
+      if ((progress.status === 'committed' || progress.status === 'refused')
+          && Number.isSafeInteger(id) && fleetHandle.isOwner
+          && fleetGmJoinCompletedId !== id
+          && typeof fleetHandle.completeGmJoin === 'function') {
+        if (fleetHandle.completeGmJoin(id, progress.status, progress.reason || null)) {
+          fleetGmJoinCompletedId = id;
+        }
+      }
+      paintGmJoinControls();
+    }
+
+    /** Read-only public operator projection for the pure GM controls module. */
+    window.__hostLocalGm = function() {
+      const gm = localGm();
+      return gm ? { id: gm.id, name: gm.name || gm.id } : null;
+    };
+    window.__hostGmName = gmName;
+
+    /**
+     * Submit one explicit, attributed GM session state command.
+     *
+     * This is intentionally not `wasm_toggle_pause`: the typed command carries
+     * the absolute state and crosses deterministic GM Admission in Rust.
+     */
+    window.__hostSetSessionPaused = function(active, correlation) {
+      const gm = localGm();
+      if (!gm || typeof correlation !== 'string' || correlation.length === 0
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      try {
+        return window.wasm_submit_gm_action(JSON.stringify({
+          operator_id: gm.id,
+          correlation,
+          action: 'set_session_paused',
+          active: !!active,
+        })) !== false;
+      } catch (_) {
+        return false;
+      }
+    };
+
+    /** Submit one absolute Station takeover membership assignment. */
+    window.__hostSetStationPuppet = function(request) {
+      const gm = localGm();
+      if (!gm || !request || typeof request !== 'object'
+          || typeof request.ship !== 'string' || !request.ship
+          || typeof request.station !== 'string' || !request.station
+          || typeof request.correlation !== 'string' || !request.correlation
+          || typeof request.active !== 'boolean'
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      try {
+        return window.wasm_submit_gm_action(JSON.stringify({
+          operator_id: gm.id,
+          correlation: request.correlation,
+          action: 'set_station_puppet',
+          ship: request.ship,
+          station: request.station,
+          active: request.active,
+        })) !== false;
+      } catch (_) {
+        return false;
+      }
+    };
+
+    /** Submit one existing Station System command through typed GM Admission. */
+    window.__hostIssueStationCommand = function(request) {
+      const gm = localGm();
+      if (!gm || !request || typeof request !== 'object'
+          || typeof request.ship !== 'string' || !request.ship
+          || typeof request.station !== 'string' || !request.station
+          || typeof request.target !== 'string' || !request.target
+          || !request.payload || typeof request.payload !== 'object'
+          || typeof request.correlation !== 'string' || !request.correlation
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      try {
+        return window.wasm_submit_gm_action(JSON.stringify({
+          operator_id: gm.id,
+          correlation: request.correlation,
+          action: 'issue_station_command',
+          ship: request.ship,
+          station: request.station,
+          target: request.target,
+          payload: request.payload,
+        })) !== false;
+      } catch (_) {
+        return false;
+      }
+    };
+
+    /** Local content/boot validation contributed to the collective policy. */
+    function fleetStartValidation() {
+      const evaluate = window.fleetStartValidationState;
+      return typeof evaluate === 'function' && evaluate({
+        role: fleetRole,
+        fleetLinked: !!fleetHandle,
+        wasmReady,
+        worldLoaded: _worldLoadedIntoBevy,
+        bootReady: _fleetBootReady,
+        selectedHull: _selectedHull,
+        validatedHullPath: _fleetValidatedHullPath,
+        presentationReady: fleetPresentationReady,
+      });
+    }
+
+    function flushFleetLobbyInputs() {
+      while (pendingFleetLobbyInputs.length > 0) {
+        const input = pendingFleetLobbyInputs[0];
+        const fn = input.kind === 'managed'
+          ? window.wasm_set_fleet_managed_lobby
+          : window.wasm_set_fleet_start_validation;
+        if (typeof fn !== 'function') return false;
+        let refusal;
+        try { refusal = fn(input.value); } catch (_) { return false; }
+        if (refusal) {
+          if (refusal !== 'fleet-lobby-input-queue-full') {
+            fleetFault = refusal;
+            paintFleetPanel();
+          }
+          return false;
+        }
+        pendingFleetLobbyInputs.shift();
+      }
+      return true;
+    }
+
+    function queueFleetLobbyInput(kind, value) {
+      const input = { kind, value: !!value };
+      const tail = pendingFleetLobbyInputs.at(-1);
+      if (tail && tail.kind === input.kind) {
+        // Validation is an absolute projection; only its newest consecutive
+        // value matters. Identical managed samples are idempotent, while a
+        // false→true generation edge remains two ordered entries.
+        if (kind === 'validation') tail.value = input.value;
+        else if (tail.value !== input.value) {
+          if (pendingFleetLobbyInputs.length >= MAX_PENDING_FLEET_LOBBY_INPUTS) {
+            fleetFault = 'fleet-lobby-input-queue-full';
+            paintFleetPanel();
+            return false;
+          }
+          pendingFleetLobbyInputs.push(input);
+        }
+      } else if (pendingFleetLobbyInputs.length < MAX_PENDING_FLEET_LOBBY_INPUTS) {
+        pendingFleetLobbyInputs.push(input);
+      } else {
+        fleetFault = 'fleet-lobby-input-queue-full';
+        paintFleetPanel();
+        return false;
+      }
+      flushFleetLobbyInputs();
+      return true;
+    }
+
+    function setFleetManagedLobby(enabled) {
+      fleetManagedRequested = !!enabled;
+      return queueFleetLobbyInput('managed', fleetManagedRequested);
+    }
+
+    /**
+     * Publish facts this page owns. Hull/content readiness remains the existing
+     * fleet slot field; this is the independent human-readiness + validation
+     * channel #1290 adds. No station or GM identity is supplied by a phone.
+     */
+    function publishFleetLobbyState(s) {
+      if (s) {
+        fleetLastLobbyPayload = s;
+        fleetLobbyPhase = s.phase || fleetLobbyPhase;
+        // Missing/old payloads are deliberately not treated as presentation
+        // complete. Only Rust's explicit terminal fact can open this latch.
+        fleetPresentationReady = s.presentation_ready === true;
+        const tally = s.readiness;
+        if (tally && Number.isInteger(tally.connected) && Number.isInteger(tally.ready)) {
+          fleetLobbyReadiness = {
+            connected: Math.max(0, tally.connected),
+            ready: Math.max(0, Math.min(tally.ready, tally.connected)),
+          };
+        } else {
+          // Boot-compatible fallback for one repaint while an older payload is
+          // still in flight. The new Rust payload replaces this immediately.
+          const connected = Math.max(0, Number(s.crew_count) || 0);
+          fleetLobbyReadiness = {
+            connected,
+            ready: s.all_ready ? connected : 0,
+          };
+        }
+      }
+      if (!fleetHandle) return;
+      const valid = fleetStartValidation();
+      const role = normaliseFleetRole(fleetHandle.role || fleetRole);
+      const stateKey = `${role}|${fleetLobbyReadiness.connected}|${fleetLobbyReadiness.ready}`
+        + `|${fleetPresentationReady}|${valid}`;
+      if (stateKey !== fleetLastPublishedStartState) {
+        // Both fleet setters synchronously publish a new roster, whose
+        // `onRoster` callback re-enters this function. Latch the projection
+        // before crossing that callback boundary or the same state recursively
+        // republishes until the browser stack is exhausted. Roll back on a real
+        // setter failure so the next lobby payload can retry it.
+        const previousStateKey = fleetLastPublishedStartState;
+        fleetLastPublishedStartState = stateKey;
+        try {
+          // Crew first, validation last. Validation is the final latch in the
+          // owner's policy; setting it first would briefly expose this ship's
+          // default zero-player tally and could auto-start before its real
+          // connected/unready crew count arrived.
+          if (role === 'ship') {
+            fleetHandle.setCrewReadiness(fleetLobbyReadiness);
+          }
+          fleetHandle.setStartValidation(valid);
+        } catch (e) {
+          fleetLastPublishedStartState = previousStateKey;
+          console.warn('[fleet] could not publish lobby start state', e);
+        }
+      }
+      queueFleetLobbyInput('validation', valid);
+      paintGmStartControls();
+    }
+
+    function receiveFleetStartPolicy(policy) {
+      fleetStartPolicy = policy || null;
+      paintGmStartControls();
+      // The host-channel payload changes when LOCAL crew changes, but a remote
+      // GM vote/presence change arrives only here. Repaint from the last Rust
+      // payload so the host ready badge immediately reflects the collective
+      // policy. State-frame dedup above prevents this repaint from re-publishing
+      // the same fact and recursively generating another policy.
+      if (fleetLastLobbyPayload && !fleetPolicyRepaintScheduled) {
+        fleetPolicyRepaintScheduled = true;
+        queueMicrotask(() => {
+          fleetPolicyRepaintScheduled = false;
+          if (fleetLastLobbyPayload) {
+            window.__updateLobby(JSON.stringify(fleetLastLobbyPayload));
+          }
+        });
+      }
+    }
+
+    /**
+     * Freeze the mesh's private participant topology into Rust before a grant.
+     *
+     * During early page boot the WASM seam does not exist yet, so retain the
+     * exact encoded roster. Once queued, the returned Promise stays pending
+     * until Bevy accepts/refuses that exact generation; fleet-session holds the
+     * frozen roster and grant, and buffers ordered member frames, behind it.
+     */
+    function settleFleetSimulationRoster(attempt, result) {
+      if (!attempt || attempt.settled) return;
+      attempt.settled = true;
+      attempt.resolve(result);
+    }
+
+    function queueFleetSimulationRoster(attempt) {
+      if (!attempt || attempt.epoch !== fleetSimulationRosterEpoch
+          || attempt.generation !== null
+          || typeof window.wasm_join_fleet !== 'function') {
+        return attempt ? attempt.promise : true;
+      }
+      let queued;
+      try {
+        queued = window.wasm_join_fleet(attempt.encoded);
+      } catch (e) {
+        fleetFault = 'fleet-roster-apply-failed';
+        paintFleetPanel();
+        console.warn('[fleet] could not queue simulation roster', e);
+        if (pendingFleetSimulationRoster === attempt) pendingFleetSimulationRoster = null;
+        settleFleetSimulationRoster(attempt, fleetFault);
+        return attempt.promise;
+      }
+      const generation = Number(queued);
+      if (!/^\d+$/.test(String(queued)) || !Number.isSafeInteger(generation) || generation < 1) {
+        const refusal = queued || 'fleet-roster-unreadable';
+        fleetFault = refusal;
+        paintFleetPanel();
+        if (pendingFleetSimulationRoster === attempt) pendingFleetSimulationRoster = null;
+        settleFleetSimulationRoster(attempt, refusal);
+        return attempt.promise;
+      }
+      attempt.generation = generation;
+      return attempt.promise;
+    }
+
+    function adoptFleetSimulationRoster(roster) {
+      let encoded;
+      try { encoded = JSON.stringify(roster); } catch (_) {
+        return 'fleet-roster-unreadable';
+      }
+      if (!encoded || encoded === 'null') return 'fleet-roster-unreadable';
+      if (encoded === fleetSimulationRosterKey) return true;
+      if (pendingFleetSimulationRoster) {
+        if (pendingFleetSimulationRoster.encoded === encoded) {
+          return pendingFleetSimulationRoster.promise;
+        }
+        // Only one frozen topology may be in flight. Refuse a conflicting
+        // replacement instead of letting its later status bless the first.
+        return 'fleet-roster-conflict';
+      }
+      let resolve;
+      const promise = new Promise((done) => { resolve = done; });
+      const attempt = {
+        encoded,
+        generation: null,
+        epoch: fleetSimulationRosterEpoch,
+        promise,
+        resolve,
+        settled: false,
+      };
+      pendingFleetSimulationRoster = attempt;
+      return queueFleetSimulationRoster(attempt);
+    }
+
+    function flushFleetSimulationRoster() {
+      if (!pendingFleetSimulationRoster) return true;
+      return queueFleetSimulationRoster(pendingFleetSimulationRoster);
+    }
+
+    /**
+     * Complete only the exact roster generation Rust says its Bevy World
+     * adopted. `wasm_join_fleet` merely queued it, so neither the frozen roster
+     * nor a grant may move while this remains pending.
+     */
+    function pollFleetSimulationRoster() {
+      const leave = pendingFleetLeave;
+      const attempt = pendingFleetSimulationRoster;
+      const pending = leave && leave.generation !== null ? leave : attempt;
+      if (!pending || pending.epoch !== fleetSimulationRosterEpoch
+          || pending.generation === null
+          || typeof window.wasm_fleet_join_status !== 'function') return false;
+      let status;
+      try {
+        status = JSON.parse(window.wasm_fleet_join_status());
+      } catch (_) {
+        return false;
+      }
+      if (!status || status.generation !== pending.generation) return false;
+      if (status.status === 'pending' || status.status === 'idle') return false;
+
+      if (pending === leave) {
+        pendingFleetLeave = null;
+        if (status.status === 'accepted') {
+          finalizeFleetLeave(leave.reason);
+        } else {
+          // Rust remains authoritative about whether this is still a fresh
+          // Lobby. A late phase transition refuses the request and the live
+          // transport, frozen roster, and simulation adoption all survive.
+          fleetFault = status.reason || 'fleet-leave-refused';
+          paintFleetPanel();
+          const adopted = pendingFleetSimulationRoster;
+          if (adopted && adopted.adopted === true) {
+            pendingFleetSimulationRoster = null;
+            settleFleetSimulationRoster(adopted, true);
+          }
+        }
+        return true;
+      }
+
+      if (status.status === 'accepted') {
+        fleetSimulationRosterKey = attempt.encoded;
+        fleetFault = null;
+        attempt.adopted = true;
+        if (!pendingFleetLeave) {
+          pendingFleetSimulationRoster = null;
+          settleFleetSimulationRoster(attempt, true);
+        }
+      } else {
+        pendingFleetSimulationRoster = null;
+        const refusal = status.reason || 'fleet-adoption-refused';
+        pendingFleetStartGrants.length = 0;
+        fleetFault = refusal;
+        paintFleetPanel();
+        settleFleetSimulationRoster(attempt, refusal);
+      }
+      if (pendingFleetLeave && pendingFleetLeave.generation === null) {
+        queueFleetLeave(pendingFleetLeave);
+      }
+      // Rust may already have sealed an initial TickFrame in the update that
+      // accepted the roster. Give the promise continuation one microtask to
+      // publish/accept the frozen topology before pumping that frame.
+      return true;
+    }
+
+    /** Pass the mesh grant unchanged through the typed Rust boundary. */
+    function applyFleetStartGrant(grant) {
+      if (!grant || typeof grant.id !== 'string') return true;
+      if (!fleetSimulationRosterKey || pendingFleetSimulationRoster
+          || typeof window.wasm_apply_start_grant !== 'function') {
+        if (!pendingFleetStartGrants.some(item => item.id === grant.id)) {
+          pendingFleetStartGrants.push(grant);
+        }
+        return false;
+      }
+      try {
+        const refusal = window.wasm_apply_start_grant(JSON.stringify(grant));
+        if (refusal) {
+          if (refusal === 'start-grant-queue-full') {
+            if (!pendingFleetStartGrants.some(item => item.id === grant.id)) {
+              pendingFleetStartGrants.push(grant);
+            }
+            return false;
+          }
+          fleetStartResultView = {
+            id: 'server.gm.start.apply_refused', params: {}, refused: true,
+          };
+          paintGmStartControls();
+          console.warn(`[fleet] start grant refused: ${refusal}`);
+        }
+      } catch (e) {
+        if (!pendingFleetStartGrants.some(item => item.id === grant.id)) {
+          pendingFleetStartGrants.push(grant);
+        }
+        fleetStartResultView = {
+          id: 'server.gm.start.apply_refused', params: {}, refused: true,
+        };
+        paintGmStartControls();
+        console.warn('[fleet] could not apply start grant', e);
+        return false;
+      }
+      return true;
+    }
+
+    function flushFleetStartGrants() {
+      while (pendingFleetStartGrants.length > 0
+          && !!fleetSimulationRosterKey
+          && !pendingFleetSimulationRoster
+          && typeof window.wasm_apply_start_grant === 'function') {
+        const grant = pendingFleetStartGrants.shift();
+        if (!applyFleetStartGrant(grant)) break;
+      }
+    }
+
+    function receiveFleetForceResult(result) {
+      if (!result) return;
+      const params = { name: gmName(result.operator_id) };
+      if (result.status === 'applied') {
+        fleetStartResultView = { id: 'server.gm.start.force_applied', params, refused: false };
+      } else if (result.status === 'no-op' || result.reason === 'already-started') {
+        fleetStartResultView = { id: 'server.gm.start.already_started', params: {}, refused: false };
+      } else if (result.reason === 'validation-failed') {
+        fleetStartResultView = { id: 'server.gm.start.validation_failed', params: {}, refused: true };
+      } else {
+        fleetStartResultView = { id: 'server.gm.start.force_refused', params: {}, refused: true };
+      }
+      paintGmStartControls();
+    }
+
+    /**
+     * Drain fixed-tick application. A mesh "applied" result means the equal-GM
+     * policy issued a grant; only this result says the local authoritative
+     * simulation accepted it. Keep those two statements distinct in the UI.
+     */
+    function drainFleetStartResult() {
+      if (typeof window.wasm_take_start_result !== 'function') return;
+      for (;;) {
+        let raw;
+        try { raw = window.wasm_take_start_result(); } catch (_) { return; }
+        if (!raw) return;
+        try {
+          const result = JSON.parse(raw);
+          fleetLastAppliedStartResult = result;
+          if (result.status === 'applied') {
+            fleetStartResultView = {
+              id: result.operator_id
+                ? 'server.gm.start.force_applied_locally'
+                : 'server.gm.start.applied_locally',
+              params: result.operator_id ? { name: gmName(result.operator_id) } : {},
+              refused: false,
+            };
+          } else if (result.status === 'no-op') {
+            fleetStartResultView = {
+              id: 'server.gm.start.already_started', params: {}, refused: false,
+            };
+          } else {
+            fleetStartResultView = {
+              id: result.reason === 'validation-failed'
+                ? 'server.gm.start.validation_failed'
+                : 'server.gm.start.apply_refused',
+              params: {},
+              refused: true,
+            };
+            console.warn(`[fleet] start grant ${result.grant_id || ''} refused: ${result.reason || 'unknown'}`);
+          }
+          paintGmStartControls();
+        } catch (e) {
+          console.warn('[fleet] unreadable start result', e);
+        }
+      }
+    }
+
+    /** Paint only after authenticated GM admission; every admitted GM is equal. */
+    function paintGmStartControls() {
+      const controls = document.getElementById('gm-start-controls');
+      const readyBtn = document.getElementById('gm-ready-btn');
+      const forceBtn = document.getElementById('gm-force-start-btn');
+      const policyEl = document.getElementById('gm-start-policy');
+      const resultEl = document.getElementById('gm-start-result');
+      if (typeof window.__hostGmSessionRefresh === 'function') {
+        window.__hostGmSessionRefresh();
+      }
+      if (typeof window.__hostGmStationRefresh === 'function') {
+        window.__hostGmStationRefresh();
+      }
+      if (!controls || !readyBtn || !forceBtn) return;
+      const gm = localGm();
+      controls.setAttribute('aria-hidden', gm ? 'false' : 'true');
+      if (!gm) return;
+      const ready = !!(gm.connected && gm.ready);
+      readyBtn.textContent = t(ready ? 'server.gm.start.unready' : 'server.gm.start.ready');
+      readyBtn.disabled = !!(fleetStartPolicy && fleetStartPolicy.started);
+      forceBtn.textContent = t('server.gm.start.force');
+      forceBtn.disabled = !!(fleetStartPolicy && fleetStartPolicy.started);
+      if (policyEl) {
+        policyEl.textContent = fleetStartPolicy
+          ? t('server.gm.start.summary', {
+              ready: fleetStartPolicy.ready_total || 0,
+              connected: fleetStartPolicy.connected_total || 0,
+            })
+          : t('server.gm.start.waiting_policy');
+      }
+      if (resultEl) {
+        resultEl.textContent = fleetStartResultView
+          ? t(fleetStartResultView.id, fleetStartResultView.params)
+          : '';
+        resultEl.classList.toggle('refused', !!(fleetStartResultView && fleetStartResultView.refused));
+      }
+    }
+
+    window.__hostGmStartState = function() {
+      const gm = localGm();
+      return {
+        admitted: !!gm,
+        operatorId: gm ? gm.id : null,
+        ready: !!(gm && gm.ready),
+        presentationReady: fleetPresentationReady,
+        localValidation: fleetStartValidation(),
+        policy: fleetStartPolicy,
+        fixedResult: fleetLastAppliedStartResult,
+      };
+    };
+
+    /** Public settings adapter. Role is immutable while a fleet link is live. */
+    window.__hostFleetRole = function() { return fleetRole; };
+    window.__hostSetFleetRole = function(role) {
+      const next = normaliseFleetRole(role);
+      if (fleetHandle || (role !== 'ship' && role !== 'gm')) return false;
+
+      // The role is a boot profile, not a mutable label on an already-booted
+      // simulation. Keep the role picker discoverable, but make its public UI
+      // route select that profile explicitly before a fleet can be opened or
+      // joined. The query parameter is also the copyable/bookmarkable route.
+      const wantsGmPage = next === 'gm';
+      if (wantsGmPage !== !!window.__phoenixGmPage) {
+        const target = new URL(window.location.href);
+        if (wantsGmPage) target.searchParams.set('gm', '1');
+        else target.searchParams.delete('gm');
+        window.location.assign(target.href);
+        return false;
+      }
+
+      fleetRole = next;
+      fleetRoleExplicit = true;
+      return true;
+    };
+
+    function storedGmIdentity(code) {
+      if (!fleetIdentityStorage || !code) return null;
+      try {
+        const value = JSON.parse(fleetIdentityStorage.getItem(FLEET_GM_IDENTITY_KEY) || 'null');
+        return value && value.code === String(code)
+          && typeof value.reconnectCredential === 'string'
+          && value.reconnectCredential
+          ? { ...value, rolePreset: null }
+          : null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function rememberGmIdentity(code, identity) {
+      if (!fleetIdentityStorage || !code || !identity || identity.role !== 'gm'
+          || typeof identity.reconnectCredential !== 'string'
+          || !identity.reconnectCredential) return;
+      try {
+        fleetIdentityStorage.setItem(FLEET_GM_IDENTITY_KEY, JSON.stringify({
+          code: String(code),
+          operatorId: identity.operatorId || null,
+          reconnectCredential: identity.reconnectCredential,
+          rolePreset: null,
+        }));
+      } catch (_) {}
+    }
+
+    /** Full crew-public replacement; private GM identity never crosses to Rust. */
+    function publishGmRoster(roster) {
+      if (typeof window.wasm_set_gm_roster !== 'function') return;
+      const gms = roster && Array.isArray(roster.gms) ? roster.gms : [];
+      try {
+        const refusal = window.wasm_set_gm_roster(JSON.stringify(gms));
+        if (refusal) console.warn(`[fleet] GM roster refused: ${refusal}`);
+      } catch (e) {
+        console.warn('[fleet] could not publish GM roster', e);
+      }
+    }
 
     /**
      * This host's own delivery stamp, in the field form the handshake reads.
@@ -2275,6 +3722,7 @@
      * during scenario selection has to show until the world loads.
      */
     function fleetShip() {
+      if (fleetRole === 'gm') return null;
       if (_selectedHull) return _selectedHull;
       const path = _preSelection && _preSelection.template_path;
       return path ? { template_path: path } : null;
@@ -2299,7 +3747,7 @@
      * inert when there is no fleet, which is the ordinary case.
      */
     function announceFleetSelection() {
-      if (!fleetHandle) return;
+      if (!fleetHandle || normaliseFleetRole(fleetHandle.role || fleetRole) === 'gm') return;
       try {
         fleetHandle.update({ ship: fleetShip(), ready: !!_selectedHull });
       } catch (e) {
@@ -2325,6 +3773,12 @@
      *   caller has one — its authored label is what the fleet panel reads.
      */
     function lockPlayerHull(templatePath, entry) {
+      // A selection is only a candidate. Revoke the previous validation before
+      // asking Rust to adopt it, so a failed fetch/parse/station gate can never
+      // leave the fleet seeing the previous host-ready answer.
+      _fleetValidatedHullPath = null;
+      _fleetBootReady = false;
+      publishFleetLobbyState();
       window.wasm_select_ship(templatePath);
       // The authored label when it resolves, the hull's own file name when it
       // does not — the same fallback ladder ph-ship-picker walks. A raw string
@@ -2337,12 +3791,22 @@
         : String(templatePath).split('/').pop().replace(/\.toml$/, '');
       _selectedHull = { template_path: templatePath, name };
       announceFleetSelection();
+      publishFleetLobbyState();
+    }
+
+    /** Record the exact selected hull only after Rust accepts its station map. */
+    function validatePlayerHull(templatePath, toml) {
+      window.wasm_validate_stations(templatePath, toml);
+      if (_selectedHull && _selectedHull.template_path === templatePath) {
+        _fleetValidatedHullPath = templatePath;
+      }
+      publishFleetLobbyState();
     }
 
     /**
      * The authored bound on a pasted fleet code, or null before the join table
      * has loaded. Read by the settings cog to size its one code field, so the
-     * five-letter route and the paste-the-whole-code route share a control
+     * typed-code route and the paste-the-whole-code route share a control
      * without either inventing a length.
      */
     window.__hostFleetCodeLimit = function() {
@@ -2507,6 +3971,28 @@
         }
       }
 
+      // GMs are a second, equal presence group — never fake ship rows.
+      const fleetGmGroup = document.getElementById('fleet-gm-group');
+      const fleetGmList = document.getElementById('fleet-gms');
+      const publicGms = fleetRoster && Array.isArray(fleetRoster.gms) ? fleetRoster.gms : [];
+      if (fleetGmGroup && fleetGmList) {
+        fleetGmGroup.setAttribute('aria-hidden', publicGms.length > 0 ? 'false' : 'true');
+        fleetGmList.innerHTML = '';
+        for (const gm of publicGms) {
+          const row = document.createElement('span');
+          row.className = 'fleet-gm' + (gm.connected ? '' : ' disconnected');
+          row.setAttribute('role', 'listitem');
+          row.dataset.gmId = gm.id || '';
+          const ready = !!(gm.connected && gm.ready);
+          row.dataset.ready = ready ? 'true' : 'false';
+          row.textContent = t(
+            gm.connected ? 'lobby.gms.connected' : 'lobby.gms.disconnected',
+            { name: gm.name || gm.id || '' },
+          ) + ' · ' + t(ready ? 'lobby.gms.ready' : 'lobby.gms.not_ready');
+          fleetGmList.appendChild(row);
+        }
+      }
+
       const status = document.getElementById('fleet-status');
       if (status) status.textContent = vm.status ? t(vm.status.id, vm.status.params) : '';
       const error = document.getElementById('fleet-error');
@@ -2542,16 +4028,88 @@
      * putting the operator back in front of the code field, while the panel
      * keeps saying why until they do something about it.
      */
-    function leaveFleet(reason = null) {
+    function finalizeFleetLeave(reason = null) {
+      const abandonedRoster = pendingFleetSimulationRoster;
+      pendingFleetLeave = null;
+      fleetSimulationRosterEpoch += 1;
+      pendingFleetSimulationRoster = null;
       if (fleetHandle) {
         try { fleetHandle.close(); } catch (e) { console.warn('[fleet] close failed', e); }
       }
+      setFleetManagedLobby(false);
       fleetHandle = null;
       fleetRoster = null;
       fleetSuffix = null;
       fleetFault = reason;
       fleetNotice = null;
+      fleetStartPolicy = null;
+      fleetStartResultView = null;
+      fleetLastAppliedStartResult = null;
+      fleetLastPublishedStartState = null;
+      fleetSimulationRosterKey = null;
+      pendingFleetStartGrants.length = 0;
+      settleFleetSimulationRoster(abandonedRoster, 'fleet-left');
+      publishGmRoster(null);
+      queueFleetLobbyInput('validation', false);
+      paintGmStartControls();
       paintFleetPanel();
+      return true;
+    }
+
+    function queueFleetLeave(request) {
+      if (!request || request !== pendingFleetLeave || request.generation !== null) {
+        return false;
+      }
+      if (typeof window.wasm_leave_fleet !== 'function') {
+        // Before WASM exists no Rust adoption can have completed, so there is
+        // no authoritative wait-set to acknowledge before closing the link.
+        return finalizeFleetLeave(request.reason);
+      }
+      try {
+        const queued = window.wasm_leave_fleet();
+        const generation = Number(queued);
+        if (!/^\d+$/.test(String(queued)) || !Number.isSafeInteger(generation) || generation < 1) {
+          pendingFleetLeave = null;
+          fleetFault = queued || 'fleet-leave-refused';
+          paintFleetPanel();
+          return false;
+        }
+        request.generation = generation;
+        paintFleetPanel();
+        return true;
+      } catch (e) {
+        pendingFleetLeave = null;
+        fleetFault = 'fleet-leave-refused';
+        paintFleetPanel();
+        console.warn('[fleet] simulation leave failed', e);
+        return false;
+      }
+    }
+
+    function leaveFleet(reason = null) {
+      if (pendingFleetLeave) return false;
+      // An accepted participant wait-set may be removed only from the fresh
+      // Lobby it was installed in. Mid-mission departure is the peer-loss and
+      // reconnect path; silently turning this world into a solo authority would
+      // fork it from every survivor.
+      if (fleetLobbyPhase !== 'Lobby') {
+        if (reason) fleetFault = reason;
+        paintFleetPanel();
+        return false;
+      }
+      const request = {
+        generation: null,
+        epoch: fleetSimulationRosterEpoch,
+        reason,
+      };
+      pendingFleetLeave = request;
+      // Do not eclipse an in-flight join status with a later generation. Once
+      // that exact adoption resolves, the poller queues this leave in order.
+      if (pendingFleetSimulationRoster) {
+        paintFleetPanel();
+        return true;
+      }
+      return queueFleetLeave(request);
     }
 
     /**
@@ -2565,7 +4123,12 @@
      */
     function adoptFleet(handle) {
       fleetHandle = handle;
+      fleetRole = normaliseFleetRole(handle && handle.role);
+      fleetLastPublishedStartState = null;
+      setFleetManagedLobby(true);
       announceFleetSelection();
+      publishFleetLobbyState();
+      paintGmStartControls();
       paintFleetPanel();
       return handle;
     }
@@ -2596,9 +4159,30 @@
         maxNameLength: data.limits.max_slot_name_length,
         maxShipPathLength: data.limits.max_slot_ship_path_length,
         checkStamp: checkHostStamp,
+        role: fleetRole,
+        name: fleetRole === 'gm' ? t('settings.fleet.role_gm') : '',
         ship: fleetShip(),
+        onIdentity: (identity) => {
+          fleetRole = normaliseFleetRole(identity && identity.role);
+          publishFleetLobbyState();
+          paintGmStartControls();
+        },
         onCode: (code) => { fleetSuffix = code.suffix; paintFleetPanel(); },
-        onRoster: (roster) => { fleetRoster = roster; paintFleetPanel(); },
+        onRoster: (roster) => {
+          fleetRoster = roster;
+          publishGmRoster(roster);
+          publishFleetLobbyState();
+          paintGmStartControls();
+          paintFleetPanel();
+        },
+        onSimulationRoster: adoptFleetSimulationRoster,
+        onStartPolicy: receiveFleetStartPolicy,
+        onStartGrant: applyFleetStartGrant,
+        onForceResult: receiveFleetForceResult,
+        onGmJoinRequest: receiveFleetGmJoinRequest,
+        onGmJoinStatus: receiveFleetGmJoinStatus,
+        onBeginGmJoin: beginFleetGmJoin,
+        onRefuseGmJoin: refuseFleetGmJoin,
         onSimulationFrame: receiveMeshFrame,
         // A member host dropped mid-mission (issue #1119). Tell the simulation
         // the slot; it agrees the disconnect tick from that host's own watermark
@@ -2635,6 +4219,17 @@
       fleetNotice = null;
       let handle = null;
       let refusal = null;
+      const parsedIdentityCode = window.joinCode.parseJoinCode(
+        code, window.joinCode.NAMESPACE_SERVER, data,
+      );
+      const identityCode = parsedIdentityCode.ok ? parsedIdentityCode.full : String(code);
+      // A stored capability also restores the role on a fragment-driven page
+      // reload, which otherwise auto-joins before the operator can reopen the
+      // Settings selector and choose GM again.
+      const priorIdentity = (!fleetRoleExplicit || fleetRole === 'gm')
+        ? storedGmIdentity(identityCode)
+        : null;
+      if (priorIdentity) fleetRole = 'gm';
       handle = window.fleetSession.createFleetMember({
         base: rendezvousBase,
         data,
@@ -2642,7 +4237,16 @@
         claim,
         stamp: hostStampField(),
         iceServers: fleetIceServers,
+        role: fleetRole,
+        name: fleetRole === 'gm' ? t('settings.fleet.role_gm') : '',
+        reconnectCredential: priorIdentity ? priorIdentity.reconnectCredential : null,
         ship: fleetShip(),
+        onIdentity: (identity) => {
+          fleetRole = normaliseFleetRole(identity && identity.role);
+          rememberGmIdentity(identityCode, identity);
+          publishFleetLobbyState();
+          paintGmStartControls();
+        },
         onWelcome: () => {
           fleetFault = null;
           fleetNotice = null;
@@ -2653,7 +4257,21 @@
           announceFleetSelection();
           paintFleetPanel();
         },
-        onRoster: (roster) => { fleetRoster = roster; fleetNotice = null; paintFleetPanel(); },
+        onRoster: (roster) => {
+          fleetRoster = roster;
+          fleetNotice = null;
+          publishGmRoster(roster);
+          publishFleetLobbyState();
+          paintGmStartControls();
+          paintFleetPanel();
+        },
+        onSimulationRoster: adoptFleetSimulationRoster,
+        onGmJoinBootstrap: prepareFleetGmJoinCandidate,
+        onStartPolicy: receiveFleetStartPolicy,
+        onForceResult: receiveFleetForceResult,
+        onGmJoinRequest: receiveFleetGmJoinRequest,
+        onGmJoinStatus: receiveFleetGmJoinStatus,
+        onGmJoinPending: ({ request }) => receiveFleetGmJoinRequest(request),
         onSimulationFrame: receiveMeshFrame,
         // The fleet declined a change this host asked for about its own slot.
         // It is still IN the fleet — reporting it is the whole answer, and
@@ -2674,6 +4292,12 @@
         return false;
       }
       adoptFleet(handle);
+      rememberGmIdentity(identityCode, {
+        role: handle.role,
+        operatorId: handle.operatorId,
+        reconnectCredential: handle.reconnectCredential,
+        rolePreset: null,
+      });
       fleetSuffix = handle.code ? handle.code.suffix : null;
       paintFleetPanel();
       return true;
@@ -2686,7 +4310,7 @@
     };
 
     /** The operator's "leave" — a deliberate exit, so it clears the reason too. */
-    window.__hostFleetLeave = function() { leaveFleet(); };
+    window.__hostFleetLeave = function() { return leaveFleet(); };
 
     /**
      * The operator's fleet-code rotate lever (issue #1115 AC2/AC3). Lead
@@ -2709,8 +4333,43 @@
         frozen: !!(fleetRoster && fleetRoster.frozen),
         suffix: fleetSuffix,
         reason: fleetFault,
+        role: fleetRole,
+        canLeave: fleetLobbyPhase === 'Lobby' && !pendingFleetLeave,
       };
     };
+
+    document.getElementById('gm-join-accept')?.addEventListener('click', () => {
+      if (!fleetHandle || !fleetGmJoinRequest
+          || typeof fleetHandle.decideGmJoin !== 'function') return;
+      fleetHandle.decideGmJoin(fleetGmJoinRequest.id, true);
+    });
+
+    document.getElementById('gm-join-reject')?.addEventListener('click', () => {
+      if (!fleetHandle || !fleetGmJoinRequest
+          || typeof fleetHandle.decideGmJoin !== 'function') return;
+      fleetHandle.decideGmJoin(fleetGmJoinRequest.id, false);
+    });
+
+    document.getElementById('gm-ready-btn')?.addEventListener('click', () => {
+      const gm = localGm();
+      if (!gm || !fleetHandle || typeof fleetHandle.setGmReady !== 'function') return;
+      if (!fleetHandle.setGmReady(!gm.ready)) {
+        fleetStartResultView = {
+          id: 'server.gm.start.force_refused', params: {}, refused: true,
+        };
+      }
+      paintGmStartControls();
+    });
+
+    document.getElementById('gm-force-start-btn')?.addEventListener('click', () => {
+      if (!localGm() || !fleetHandle || typeof fleetHandle.forceStart !== 'function'
+          || !fleetHandle.forceStart()) {
+        fleetStartResultView = {
+          id: 'server.gm.start.force_refused', params: {}, refused: true,
+        };
+        paintGmStartControls();
+      }
+    });
 
     /**
      * Mission start freezes the slot roster (issue #1114 AC5).
@@ -2752,7 +4411,16 @@
      * each frame carries its own tick, so nothing is lost by batching.
      */
     function pumpMeshFrames() {
-      if (!fleetHandle || !window.wasm_take_mesh_frames) return;
+      flushFleetLobbyInputs();
+      flushFleetStartGrants();
+      if (pollFleetSimulationRoster()) {
+        pollFleetGmJoin();
+        return;
+      }
+      if (!fleetHandle || !window.wasm_take_mesh_frames) {
+        pollFleetGmJoin();
+        return;
+      }
       let frames;
       try {
         frames = JSON.parse(window.wasm_take_mesh_frames());
@@ -2763,6 +4431,10 @@
         return;
       }
       for (const frame of frames) fleetHandle.broadcast(JSON.stringify(frame));
+      // A terminal join status can publish the public roster. Poll only after
+      // the Rust-owned Commit frame above left this host, so peers always see
+      // the deterministic proof before the browser projection that follows it.
+      pollFleetGmJoin();
     }
 
     /**
@@ -2790,8 +4462,11 @@
      * same Station Ratings. Answers `''` on success or a machine reason.
      */
     window.__hostMeshJoin = function(roster) {
-      if (!window.wasm_join_fleet) return 'wasm-not-ready';
-      return window.wasm_join_fleet(JSON.stringify(roster));
+      const result = adoptFleetSimulationRoster(roster);
+      if (result && typeof result.then === 'function') {
+        return Promise.resolve(result).then((settled) => settled === true ? '' : settled);
+      }
+      return result === true ? '' : result;
     };
 
     // ── ICE config latch (issue #1226) ─────────────────────────────────────
@@ -3267,28 +4942,58 @@
      *  reload and without re-running the one-shot preload. */
     let _worldLoadedIntoBevy = false;
 
+    // The module-owned New Session button calls this after consuming the URL's
+    // resume/scenario pair. Clear the classic script's matching pre-load state
+    // too, so a debug `?resume=autosave` cannot survive an explicit choice to
+    // begin fresh. The button is only visible before `_worldLoadStarted`.
+    window.__hostChooseNewSession = function() {
+      window.__phoenixPendingImport = null;
+      if (_worldLoadStarted) return;
+      selectedScenario = null;
+      _preSelection = { scenario_id: null, template_path: null };
+      _lockedShipTemplate = null;
+      _lockedCuratedShips = [];
+      const panel = document.getElementById('scenario-panel');
+      if (panel) panel.style.display = 'flex';
+      renderScenarioLockState();
+      showJoinQrOverPanel();
+    };
+
     function showLobbyPanel() {
       const panel = document.getElementById('lobby-panel');
       if (panel) panel.style.display = '';
     }
 
     // ── Pre-scenario join QR (issue #755, AC1) ────────────────────────────
-    // The #overlay QR lives over the Bevy canvas (z-index 190) and is hidden
-    // (display:none) until the Lobby phase — but that's AFTER world load. The
-    // full-screen #scenario-panel is z-index 200, so during scenario selection
-    // the overlay is both hidden and behind the panel. To make the join code
-    // visible while the host is still choosing a scenario, force the overlay
-    // visible and lift it ABOVE the panel. driveWorldLoad()/the confirm path
-    // revert the z-index so the normal Lobby-phase behaviour is untouched.
+    // The #overlay QR normally lives over the Bevy canvas and is hidden until
+    // Lobby — but that is AFTER world load. During scenario selection, dock the
+    // same live node into #scenario-panel's central flex slot. It remains fully
+    // visible without covering either the world picker or save catalogue, and
+    // moving the node preserves all transport state and event handlers.
     function showJoinQrOverPanel() {
       const qrOverlay = document.getElementById('overlay');
       if (!qrOverlay || !window.hostQr) return;
+      // Dock the live QR node into the scenario panel (before the save-slots
+      // catalogue) so it sits as a flex child during scenario selection —
+      // `#overlay.pre-scenario` styles it, and `resetJoinQrLayer` moves it back.
+      const scenarioPanel = document.getElementById('scenario-panel');
+      const saveSlotsPanel = document.getElementById('save-slots-panel');
+      if (scenarioPanel && qrOverlay.parentElement !== scenarioPanel) {
+        scenarioPanel.insertBefore(qrOverlay, saveSlotsPanel || null);
+      }
+      qrOverlay.classList.add('pre-scenario');
+      // Visibility state lives in gui/host-qr.js (there is no `qrVisible`).
       window.hostQr.setQrVisible(document, true);
-      qrOverlay.style.zIndex = '210'; // above #scenario-panel (z-index 200)
     }
     function resetJoinQrLayer() {
       const qrOverlay = document.getElementById('overlay');
-      if (qrOverlay) qrOverlay.style.zIndex = ''; // back to CSS default (190)
+      if (!qrOverlay) return;
+      const viewscreenShell = document.getElementById('viewscreen-shell');
+      const topBar = document.getElementById('top-bar');
+      if (viewscreenShell && qrOverlay.parentElement !== viewscreenShell) {
+        viewscreenShell.insertBefore(qrOverlay, topBar || null);
+      }
+      qrOverlay.classList.remove('pre-scenario');
     }
 
     // ── Pre-world phone messaging ─────────────────────────────────────────
@@ -3856,7 +5561,7 @@
     (function hoistQrToPageLoad() {
       if (new URLSearchParams(location.search).get('scenario')) return;
       initHostTransport();
-      // Lift the QR overlay above the scenario panel so the join code is
+      // Dock the live QR surface into the scenario layout so the join code is
       // visible DURING scenario selection, not just after world load (AC1).
       showJoinQrOverPanel();
       acquireWakeLock();
@@ -3975,16 +5680,23 @@ function handleConfigRequest(path) {
   
   // Complexity TOML files are loaded through wasm_load_complexity, not
   // wasm_load_config (they carry a [[preset]] array, not an [entity] schema).
+  // Primary model-rig sidecars discovered while those entity configs parse use
+  // the same callback but land in their persistent rig inbox. Their loader's
+  // boolean return joins the one-shot completion gate, so wasm_init cannot
+  // freeze the content digest before authoritative marker bytes arrive.
   const isComplexity = path.startsWith('assets/complexity/');
-  const loader = isComplexity ? wasm_load_complexity : wasm_load_config;
+  const isPrimaryRig = /^assets\/models\/.+\.toml$/.test(path);
+  const loader = isPrimaryRig
+    ? wasmBindings.wasm_push_sidecar_toml
+    : (isComplexity ? wasm_load_complexity : wasm_load_config);
 
   fetch(path)
     .then(response => response.ok ? response.text() : Promise.reject(new Error(`HTTP ${response.status}`)))
     .then(toml => {
       let complete = false;
       try {
-        // wasm_load_config / wasm_load_complexity returns true when the last
-        // pending config is loaded.
+        // Every preload loader returns true when the last entity, complexity,
+        // or authoritative primary-rig dependency is loaded.
         complete = loader(path, toml) === true;
       } catch (e) {
         console.error(`Failed to parse config at ${path}:`, e);
@@ -4023,6 +5735,8 @@ function finishInit() {
   window.wasm_receive_message = wasmBindings.wasm_receive_message;
   window.set_message_callback = wasmBindings.set_message_callback;
   window.wasm_validate_stations = wasmBindings.wasm_validate_stations;
+  window.wasm_prepare_game_master = wasmBindings.wasm_prepare_game_master;
+  window.wasm_boot_profile = wasmBindings.wasm_boot_profile;
   // Reduced motion (issue #1173): the viewscreen forwards the host's
   // `prefers-reduced-motion` preference to the renderer so hull-damage screen
   // shake and the shield-hit white flash honour it. The getter lets the
@@ -4053,6 +5767,14 @@ function finishInit() {
   window.wasm_snapshot_status = wasmBindings.wasm_snapshot_status;
   window.wasm_prepare_resume = wasmBindings.wasm_prepare_resume;
   window.wasm_resume_pending = wasmBindings.wasm_resume_pending;
+  // Peer-local save catalogue (issue #865). Starting a row still goes through
+  // the pre-init stage below; none of these exports receives a live World.
+  window.wasm_list_save_slots = wasmBindings.wasm_list_save_slots;
+  window.wasm_create_save_slot = wasmBindings.wasm_create_save_slot;
+  window.wasm_rename_save_slot = wasmBindings.wasm_rename_save_slot;
+  window.wasm_export_save_slot = wasmBindings.wasm_export_save_slot;
+  window.wasm_delete_save_slot = wasmBindings.wasm_delete_save_slot;
+  window.wasm_stage_save_slot = wasmBindings.wasm_stage_save_slot;
   // Portable saves (issue #866): export is a running-session action, import is
   // a pre-activation one, and both go through the same record as the slot above.
   window.wasm_export_snapshot = wasmBindings.wasm_export_snapshot;
@@ -4077,6 +5799,31 @@ function finishInit() {
   window.wasm_receive_mesh_frame = wasmBindings.wasm_receive_mesh_frame;
   window.wasm_take_mesh_frames = wasmBindings.wasm_take_mesh_frames;
   window.wasm_join_fleet = wasmBindings.wasm_join_fleet;
+  window.wasm_fleet_join_status = wasmBindings.wasm_fleet_join_status;
+  window.wasm_leave_fleet = wasmBindings.wasm_leave_fleet;
+  window.wasm_set_gm_roster = wasmBindings.wasm_set_gm_roster;
+  // First typed GM action tracer (#1292). The page supplies the admitted
+  // operator and semantic-action correlation; Rust owns admission and result.
+  window.wasm_submit_gm_action = wasmBindings.wasm_submit_gm_action;
+  // Visible first-time GM admission (#1293): Accept queues the one pause;
+  // progress releases transport/public roster admission only after digest proof.
+  window.wasm_begin_gm_join = wasmBindings.wasm_begin_gm_join;
+  window.wasm_prepare_gm_join_candidate = wasmBindings.wasm_prepare_gm_join_candidate;
+  window.wasm_refuse_gm_join = wasmBindings.wasm_refuse_gm_join;
+  window.wasm_gm_join_status = wasmBindings.wasm_gm_join_status;
+  // Collective lobby start coordination (#1290). The mesh decides one policy;
+  // Rust admits the resulting typed, attributed grant on a fixed tick.
+  window.wasm_set_fleet_managed_lobby = wasmBindings.wasm_set_fleet_managed_lobby;
+  window.wasm_set_fleet_start_validation = wasmBindings.wasm_set_fleet_start_validation;
+  window.wasm_apply_start_grant = wasmBindings.wasm_apply_start_grant;
+  window.wasm_take_start_result = wasmBindings.wasm_take_start_result;
+  setFleetManagedLobby(fleetManagedRequested);
+  publishFleetLobbyState();
+  flushFleetSimulationRoster();
+  if (fleetSimulationRosterKey) flushFleetStartGrants();
+  // A fleet can connect before the world finishes loading. Re-publish its
+  // latest full GM projection now that the Rust boundary exists.
+  publishGmRoster(fleetRoster);
   window.wasm_mesh_status = wasmBindings.wasm_mesh_status;
   // A peer ship host left the fleet (issue #1119): report its slot so the
   // simulation flips that ship to Backfill at an agreed tick.
@@ -4184,10 +5931,11 @@ function finishInit() {
     if (modStatus) modStatus.textContent = '';
     try { _scenarioCatalog = Array.from(wasmBindings.wasm_get_scenario_catalog() || []); } catch (_) {}
     renderScenarioLockState();
+    if (window.phSaveSlotsController) window.phSaveSlotsController.refresh();
     // Re-broadcast the (now-unlocked) catalog so already-connected phones
     // return to the shared pre-scenario picker for the next round (issue #756).
     broadcastScenarioCatalog();
-    // Re-lift the join QR above the freshly re-shown scenario panel (AC1).
+    // Re-dock the join QR in the freshly re-shown scenario panel (AC1).
     showJoinQrOverPanel();
     startMenuMusic();
   }
@@ -4242,7 +5990,33 @@ function finishInit() {
   window.wasm_get_available_ships = wasmBindings.wasm_get_available_ships;
   window.wasm_select_ship = wasmBindings.wasm_select_ship;
 
+  // The explicit GM profile owns no selected/local ship. It still follows the
+  // ordinary world preload and startServer path, including the runtime sidecar
+  // fetch callback installed there.
+  if (window.__phoenixGmPage) {
+    window.wasm_prepare_game_master();
+    startServer();
+    return;
+  }
+
   const ships = wasm_get_available_ships();
+
+  // A saved session owns its boot hull. The catalogue carries that canonical
+  // template path beside `scenario` so a multi-hull world does not stop at the
+  // ordinary picker — or, worse, let another choice build the wrong authored
+  // component set and only discover it when restore begins.
+  const resumeShip = new URLSearchParams(window.location.search).get('ship');
+  if (resumeShip) {
+    const offered = (ships || []).find(s => s.template_path === resumeShip);
+    if ((ships || []).length > 0 && !offered) {
+      showFatalError(t('server.fatal.load_failed', {
+        path: resumeShip,
+        detail: t('server.save_slots.hull_unavailable'),
+      }));
+      return;
+    }
+    _lockedShipTemplate = resumeShip;
+  }
 
   // QR-first flow (issue #755): the player ship was already locked pre-load by
   // the arbiter and validated against the selected scenario's catalog ships.
@@ -4258,7 +6032,7 @@ function finishInit() {
         // of the preloaded raw templates, and relative include references are
         // resolved against this path. Passing text alone would reject every
         // composed hull.
-        try { wasm_validate_stations(templatePath, toml); } catch (err) {
+        try { validatePlayerHull(templatePath, toml); } catch (err) {
           showFatalError(t('server.fatal.station_config', { detail: (err && err.message) ? err.message : String(err) }));
           return;
         }
@@ -4276,7 +6050,7 @@ function finishInit() {
       .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then(toml => {
         lockPlayerHull('assets/entities/alliance_cruiser.toml');
-        try { wasm_validate_stations('assets/entities/alliance_cruiser.toml', toml); } catch (err) {
+        try { validatePlayerHull('assets/entities/alliance_cruiser.toml', toml); } catch (err) {
           showFatalError(t('server.fatal.station_config', { detail: (err && err.message) ? err.message : String(err) }));
           return;
         }
@@ -4290,7 +6064,7 @@ function finishInit() {
     fetch(templatePath)
       .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then(toml => {
-        try { wasm_validate_stations(templatePath, toml); } catch (err) {
+        try { validatePlayerHull(templatePath, toml); } catch (err) {
           showFatalError(t('server.fatal.station_config', { detail: (err && err.message) ? err.message : String(err) }));
           return;
         }
@@ -4318,7 +6092,7 @@ function finishInit() {
         fetch(template_path)
           .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
           .then(toml => {
-            try { wasm_validate_stations(template_path, toml); } catch (err) {
+            try { validatePlayerHull(template_path, toml); } catch (err) {
               showFatalError(t('server.fatal.station_config', { detail: (err && err.message) ? err.message : String(err) }));
               return;
             }
@@ -4401,8 +6175,9 @@ async function startServer() {
   // Register the runtime fetch callback. The same callback serves three flows:
   //  - World TOMLs (e.g. patrol.toml) loaded additively by load_world effects.
   //  - Sibling Rhai scripts declared by those additive world TOMLs.
-  //  - Per-model rig sidecars under assets/models/*.toml, requested by the
-  //    renderer when spawning a GLB-backed entity.
+  //  - Later/generated model-rig sidecars under assets/models/*.toml. Primary
+  //    authoritative rigs already arrived through config preload before
+  //    wasm_init; this runtime route is the defensive path for later content.
   // Sidecar paths (assets/models/<stem>.<variant>.toml) are routed to
   // wasm_push_sidecar_toml; everything else uses the durable world/script
   // content cache. An
@@ -4466,21 +6241,35 @@ async function startServer() {
   try {
     var resumeSlot = new URLSearchParams(window.location.search).get('resume');
     if (resumeSlot && typeof wasm_prepare_resume === 'function') {
-      var refusal = wasm_prepare_resume(resumeSlot);
-      if (refusal) {
+      // #865's named catalogue route is the same fresh-app gate as #862's
+      // legacy autosave route. Prefer the explicit catalogue name when this
+      // build carries it; the fallback keeps old artifacts resumable.
+      var stageSlot = typeof wasm_stage_save_slot === 'function'
+        ? wasm_stage_save_slot
+        : wasm_prepare_resume;
+      var refusal = stageSlot(resumeSlot);
+      var startAnswer = window.phSaveSlots
+        ? window.phSaveSlots.startPreparationResult(refusal)
+        : { ok: !refusal, message: refusal };
+      if (!startAnswer.ok) {
         // `vellum_save::Moved`'s own sentence, verbatim — it names which
         // version dimension moved, which no phoenix-invented status would.
         // Shown, not logged: the host is about to play a session they think
         // they resumed, and a console.warn tells nobody who is not looking at
         // DevTools (issue #862 AC4).
-        showSnapshotStatus(false, refusal);
-        console.warn('[Phoenix] the saved session was refused: ' + refusal);
+        showSnapshotStatus(false, startAnswer.message);
+        console.warn('[Phoenix] the saved session was refused: ' + startAnswer.message);
       }
       // Strip the parameter either way. It has been consumed — a refused
       // resume must not be re-attempted on every subsequent reload, and an
       // accepted one must not be re-staged if the host reloads mid-session.
       var cleaned = new URL(window.location.href);
       cleaned.searchParams.delete('resume');
+      // The catalogue supplies `scenario` only so this fresh page can load the
+      // saved world's content before the gate. Once consumed it must not turn
+      // future reloads into a permanent picker bypass.
+      cleaned.searchParams.delete('scenario');
+      cleaned.searchParams.delete('ship');
       window.history.replaceState(null, '', cleaned.toString());
     }
   } catch (e) {
@@ -4513,6 +6302,13 @@ async function startServer() {
     showSnapshotStatus(false, 'the saved game could not be prepared: ' + e);
   }
 
+  // This is the first point at which every local prerequisite has succeeded:
+  // the WASM module and world are loaded, the selected hull's station map was
+  // accepted, and resume/import compatibility preparation has completed. A GM
+  // page follows the same rule as a ship page; fleet role is not a substitute
+  // for hosting a valid simulation.
+  _fleetBootReady = true;
+  publishFleetLobbyState();
   try { wasm_init(); } catch (_) {}
 
   // From here on, saves and the pending resume report themselves. Half a
@@ -4525,14 +6321,40 @@ async function startServer() {
 // Trunk fires TrunkApplicationStarted once the WASM binary is fully
 // instantiated and sets window.wasmBindings to the wasm-bindgen exports.
 
+let _startPhoenixPromise = null;
 function startPhoenix() {
-  preloadAndStart(selectedScenario, _lockedCuratedShips).catch(err => {
+  if (_startPhoenixPromise) return _startPhoenixPromise;
+  _startPhoenixPromise = Promise.resolve(window.phSaveIdentityReady).then(() =>
+    preloadAndStart(selectedScenario, _lockedCuratedShips)
+  ).catch(err => {
+    _startPhoenixPromise = null;
     console.error('Failed to start preload:', err);
   });
+  return _startPhoenixPromise;
 }
+
+let _mountSaveSlotsPromise = null;
+function mountSaveSlotsWhenReady() {
+  if (!wasmReady || typeof window.__mountSaveSlots !== 'function') return null;
+  if (_mountSaveSlotsPromise) return _mountSaveSlotsPromise;
+  // The Store namespace is claimed asynchronously through a browser lifecycle
+  // primitive. Mount only after both the module and WASM exports exist and that
+  // claim has settled, so neither startup ordering can leave an empty surface.
+  _mountSaveSlotsPromise = Promise.resolve(window.phSaveIdentityReady).then(() =>
+    window.__mountSaveSlots()
+  ).catch(e => {
+    _mountSaveSlotsPromise = null;
+    console.error('[Phoenix] local save catalogue mount failed:', e);
+    return null;
+  });
+  return _mountSaveSlotsPromise;
+}
+
+window.addEventListener('PhoenixSaveSlotsModuleReady', mountSaveSlotsWhenReady);
 
 window.addEventListener('TrunkApplicationStarted', () => {
   wasmReady = true;
+  mountSaveSlotsWhenReady();
   // The demo-build flag (issue #939) is bound here rather than in
   // finishInit()'s list: the settings cog can be opened long before a world is
   // loaded. This is the SECOND of the two answers gui/build-flags.js consults —

@@ -328,7 +328,7 @@ export function createRegistry({
       return { ok: false, reason: 'malformed' };
     }
     // The asked namespace is also the FALLBACK the parse composes a bare
-    // five-letter suffix around: five letters typed into the fleet field are a
+    // typed suffix around: the code typed into the fleet field are a
     // server code, and composing them under the crew project would resolve the
     // wrong record entirely rather than refuse.
     const parsed = parseJoinCode(code, expected, data);

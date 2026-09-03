@@ -272,11 +272,12 @@ pub fn write_scenario_detail_floor(
 /// at, while the host that crew is connected to writes `Human`. The two hosts
 /// then run different AI on the same hull, and diverge.
 ///
-/// In a **fleet**, every ship — this host's own included — answers from the
-/// roster's frozen crewing, which every host received identically, so both
-/// hosts derive identical control sources from tick zero. A **solo** host has
-/// no peer to diverge from, so it keeps answering from live `Sessions`, which
-/// is what lets a reconnecting single-player pilot re-take a seat within a tick.
+/// In an active **lockstep fleet**, every ship — this host's own included —
+/// answers from the roster's frozen crewing, which every host received
+/// identically, so both hosts derive identical control sources from tick zero.
+/// Without `FleetLockstep`, the local ship answers from live `Sessions`, which
+/// lets a solo or independently restored pilot re-take a seat within a tick;
+/// retained remote saved ships answer from their empty frozen crew.
 ///
 /// The freeze is why `is_afk` / `is_eligible` / the Station Rating — live
 /// per-session flags an ordinary in-mission player message can flip
@@ -330,6 +331,7 @@ pub fn resolve_human_seeking_hosts(
     )>,
     sessions: Res<Sessions>,
     roster: Option<Res<crate::lockstep::FleetRoster>>,
+    fleet_session: Option<Res<crate::lockstep::FleetLockstep>>,
 ) {
     let solo_roster = crate::lockstep::FleetRoster::default();
     let roster = roster.as_deref().unwrap_or(&solo_roster);
@@ -344,20 +346,14 @@ pub fn resolve_human_seeking_hosts(
         slot,
     ) in ships.iter_mut()
     {
-        // Whose crew this hull answers to. A SOLO host answers from live
-        // `Sessions` — so a reconnecting player re-takes a seat within a tick,
-        // which `tests/headless_runner.rs` pins, and with no peers there is
-        // nothing to diverge from. In a FLEET, EVERY ship — this host's own
-        // included — answers from the frozen roster, so both hosts derive the
-        // identical control sources from the identical frozen crewing. A live
-        // AFK / eligibility / rating toggle mid-mission is a fleet event that
-        // must apply on the same tick on every peer; that is #1119's
-        // tick-stamped host-loss transition, and freezing the local branch here
-        // is deliberately NOT an approximation of it — a re-seek each host
-        // performed on its own view of who is connected is precisely the
-        // "applied at different ticks on different peers" failure
-        // `p2p-delta-backfill-replaces-auto-crew` rules out (issue #1116).
-        let local_crew = roster.is_solo();
+        // Whose crew this hull answers to. Without FleetLockstep, the local ship
+        // follows live `Sessions` — for both ordinary solo play and an
+        // independently restored multi-ship save — while retained remote ships
+        // stay on their empty frozen crew. In active lockstep, EVERY ship uses
+        // the frozen roster so peers cannot derive different control sources
+        // from their machine-local session views (issue #1116).
+        let local_crew =
+            crate::lockstep::uses_live_sessions(roster, fleet_session.is_some(), slot.0);
         let frozen_crew = roster.crew_of(slot.0);
         let holder_of = |station: &crate::core::messages::StationId| -> Option<String> {
             if local_crew {

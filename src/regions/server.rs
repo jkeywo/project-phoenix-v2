@@ -166,8 +166,12 @@ pub(crate) fn update_region_membership(
 /// distributed uniformly across all shield facings (since regions have no
 /// bearing). Damaged regions are tracked per-ship via `RegionMembership`.
 ///
-/// Player-only side effects (`DamageTaken` UI messages, `ShipDestroyed`,
-/// `GameOver` transition, debug damage log) are gated on `Has<LocalShip>`.
+/// Fleet-authoritative destruction (`ShipDestroyed` and the `GameOver`
+/// transition) is gated on [`crate::lockstep::FleetSlotOf`], never
+/// [`LocalShip`]. `LocalShip` is only this host's presentation projection: a
+/// stationless GM peer has no local ship, but must retain the same destroyed
+/// fleet hull and enter the same phase as the crew host. Local-only damage UI,
+/// debug logging and God Mode still follow `LocalShip`.
 /// NPCs that die inside a damage zone follow the same path as beam-kill:
 /// emit `AiEntityDestroyed` + `EntityDespawned`, remove from `WorldResource`,
 /// then despawn the entity.
@@ -182,6 +186,7 @@ fn apply_damage_zone_damage(
             Option<&mut crate::server_app::ShipShields>,
             Option<&EntityUuid>,
             Has<LocalShip>,
+            Has<crate::lockstep::FleetSlotOf>,
             Option<&mut crate::entities::spawner::EntityShipArcHull>,
         ),
         With<Ship>,
@@ -227,7 +232,7 @@ fn apply_damage_zone_damage(
     let mut ship_order: Vec<((String, bevy::ecs::entity::EntityIndex), Entity)> = ship_query
         .iter()
         // Position 3 of the tuple below is the ship's `Option<&EntityUuid>`.
-        .map(|(entity, _, _, uuid, _, _)| {
+        .map(|(entity, _, _, uuid, _, _, _)| {
             (
                 (
                     uuid.map(|u| u.0.clone()).unwrap_or_default(),
@@ -240,8 +245,15 @@ fn apply_damage_zone_damage(
     ship_order.sort();
 
     for ship_entity in ship_order.into_iter().map(|(_, entity)| entity) {
-        let Ok((ship_entity, mut hull, mut shields_opt, ship_uuid, is_local, mut arc_hull_opt)) =
-            ship_query.get_mut(ship_entity)
+        let Ok((
+            ship_entity,
+            mut hull,
+            mut shields_opt,
+            ship_uuid,
+            is_local,
+            is_fleet_ship,
+            mut arc_hull_opt,
+        )) = ship_query.get_mut(ship_entity)
         else {
             continue;
         };
@@ -369,8 +381,7 @@ fn apply_damage_zone_damage(
                     }
                 }
 
-                // DamageTaken / ShipDestroyed / GameOver are player-facing UI
-                // events — only emit for the LocalShip.
+                // The continuous damage projection is local UI only.
                 if is_local {
                     if let Some(ref mut ob) = outbox {
                         ob.push_reliable((
@@ -381,41 +392,37 @@ fn apply_damage_zone_damage(
                             },
                         ));
                     }
-                    if ship_destroyed {
-                        if let Some(ref mut ob) = outbox {
-                            ob.push_reliable((Target::All, ServerMessage::ShipDestroyed));
-                        }
-                        if let Some(ref mut reason) = game_over_reason {
-                            if reason.0.is_none() {
-                                // Player-visible via the game-over overlays, so a
-                                // `strings.csv` id, not English (issue #977); the
-                                // HUD/GameOver paths resolve it client-side. All
-                                // built-in ship-death sites latch the same id.
-                                reason.0 = Some("server.game_over.ship_destroyed".into());
-                                // The LocalShip died → defeat (#843), latched
-                                // under the same first-write guard as the reason.
-                                reason.1 = Some(crate::core::balance::Outcome::Defeat);
-                                // EntityDestroyed for the player death, once
-                                // (guarded by the first reason write). A damage
-                                // zone has no shooter → no killer. Shares the
-                                // `GameOverReason` latch with a scenario's
-                                // `SetGameOverReason`; see the beam death site
-                                // for why that coupling is accepted.
-                                if let (Some(msgs), Some(uuid)) =
-                                    (balance_events.as_mut(), ship_uuid)
-                                {
-                                    msgs.write(
-                                        crate::core::balance::BalanceEvent::EntityDestroyed {
-                                            victim: uuid.0.clone(),
-                                            killer: None,
-                                        },
-                                    );
-                                }
+                }
+
+                // Fleet membership is the authoritative player-ship marker on
+                // every simulation peer. A remote GM has no `LocalShip`, so
+                // branching on that projection here would despawn the fleet
+                // hull as an NPC on one peer while the crew host retained it.
+                if is_fleet_ship && ship_destroyed {
+                    if let Some(ref mut ob) = outbox {
+                        ob.push_reliable((Target::All, ServerMessage::ShipDestroyed));
+                    }
+                    if let Some(ref mut reason) = game_over_reason {
+                        if reason.0.is_none() {
+                            // Player-visible via the game-over overlays, so a
+                            // `strings.csv` id, not English (issue #977); the
+                            // HUD/GameOver paths resolve it client-side. All
+                            // built-in ship-death sites latch the same id.
+                            reason.0 = Some("server.game_over.ship_destroyed".into());
+                            reason.1 = Some(crate::core::balance::Outcome::Defeat);
+                            // EntityDestroyed for the fleet ship death, once
+                            // (guarded by the first reason write). A damage zone
+                            // has no shooter → no killer.
+                            if let (Some(msgs), Some(uuid)) = (balance_events.as_mut(), ship_uuid) {
+                                msgs.write(crate::core::balance::BalanceEvent::EntityDestroyed {
+                                    victim: uuid.0.clone(),
+                                    killer: None,
+                                });
                             }
                         }
-                        if let Some(ref mut ns) = next_state {
-                            ns.set(GamePhase::GameOver);
-                        }
+                    }
+                    if let Some(ref mut ns) = next_state {
+                        ns.set(GamePhase::GameOver);
                     }
                 } else if ship_destroyed {
                     // NPC destruction: mirror the beam-kill path so downstream

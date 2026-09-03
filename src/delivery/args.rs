@@ -83,6 +83,15 @@ pub struct SimArgs {
     pub log_entity: String,
     /// Start the mission with nobody connected, every station on `Backfill`.
     pub solo: bool,
+    /// Private save-slot directory, resolved against the launch directory
+    /// before `--content-dir` re-roots an authoritative process.
+    pub save_dir: String,
+    /// One-shot native operator actions, applied in order after this scenario's
+    /// content ledger is loaded and the private Store is installed.
+    pub save_actions: Vec<SaveOperatorAction>,
+    /// A compatible local slot to stage into this newly constructed native App.
+    /// Resume is startup-only; there is deliberately no live-session restore.
+    pub resume_slot: Option<String>,
     /// Local Station panes to open, one per `--pane <NAME>`, in the order given
     /// (issue #1122).
     ///
@@ -113,6 +122,27 @@ pub struct SimArgs {
     pub origin: Option<String>,
 }
 
+/// A native operator's one-shot local catalogue action.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SaveOperatorAction {
+    List,
+    Create {
+        display_name: String,
+    },
+    Rename {
+        slot_id: String,
+        display_name: String,
+    },
+    Export {
+        slot_id: String,
+        path: String,
+    },
+    Delete {
+        slot_id: String,
+        confirmed: bool,
+    },
+}
+
 /// What `parse_args` decided.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ParseOutcome {
@@ -123,6 +153,7 @@ pub enum ParseOutcome {
 pub const DEFAULT_ADDR: &str = "0.0.0.0:8080";
 pub const DEFAULT_MANIFEST: &str = "assets/scenarios.toml";
 pub const DEFAULT_CONTENT_DIR: &str = ".";
+pub const DEFAULT_SAVE_DIR: &str = ".phoenix/saves";
 
 pub const HELP: &str = "\
 phoenix-host — serve the Phoenix client bundle, the content manifest and the
@@ -157,6 +188,24 @@ SIMULATION
                           With --lobby it starts on the tick the chosen world
                           lands, not at boot: there is nothing to fly until
                           someone has picked something.
+    --save-dir <PATH>     Private native save-slot directory, relative to the
+                          launch directory [default: .phoenix/saves]. Exactly
+                          one phoenix-host may claim it at a time; the claim is
+                          held for that authoritative process's lifetime, so
+                          concurrent native peers need distinct paths.
+    --save-list           Print this peer's local save catalogue, then run
+    --save-create <NAME>  Capture a named manual save at this new session's
+                          first deterministic in-progress tick; cannot be
+                          combined with --resume-save
+    --save-rename <SLOT> <NAME>
+                          Rename a local manual save (its Store key is unchanged)
+    --save-export <SLOT> <PATH>
+                          Export one local slot to a new file; never overwrites
+    --save-delete <SLOT> --confirm-delete
+                          Delete one local slot only with the explicit paired
+                          confirmation flag
+    --resume-save <SLOT>  Boot this --world as a NEW session from a compatible
+                          local slot; incompatible saves are refused before run
     --log <SPEC>          Log filter, e.g. info,ai=debug,admit=trace
     --log-entity <NAMES>  Restrict logging to these entity names
 
@@ -189,7 +238,7 @@ CREW (issue #1113)
     --rendezvous <URL>    Register with this rendezvous service so browser
                           clients can join, e.g.
                           https://phoenix-rendezvous.project-phoenix.workers.dev
-                          The five-letter code the service issues is printed at
+                          The typed code the service issues is printed at
                           startup. A native host has no WebRTC, so every crew
                           member is carried over the service's WebSocket game
                           relay; it registers saying so, and joiners skip the
@@ -252,6 +301,11 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
     let mut log_spec = String::new();
     let mut log_entity = String::new();
     let mut solo = false;
+    let mut save_dir = DEFAULT_SAVE_DIR.to_string();
+    let mut save_dir_given = false;
+    let mut save_actions = Vec::new();
+    let mut confirm_delete = false;
+    let mut resume_slot: Option<String> = None;
     let mut panes: Vec<String> = Vec::new();
     let mut setup = false;
     let mut profile: Option<String> = None;
@@ -281,12 +335,61 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
             "--log" => log_spec = value_for(&arg, &mut it)?,
             "--log-entity" => log_entity = value_for(&arg, &mut it)?,
             "--solo" => solo = true,
+            "--save-dir" => {
+                save_dir = value_for(&arg, &mut it)?;
+                save_dir_given = true;
+            }
+            "--save-list" => save_actions.push(SaveOperatorAction::List),
+            "--save-create" => save_actions.push(SaveOperatorAction::Create {
+                display_name: value_for(&arg, &mut it)?,
+            }),
+            "--save-rename" => save_actions.push(SaveOperatorAction::Rename {
+                slot_id: value_for(&arg, &mut it)?,
+                display_name: value_for(&arg, &mut it)?,
+            }),
+            "--save-export" => save_actions.push(SaveOperatorAction::Export {
+                slot_id: value_for(&arg, &mut it)?,
+                path: value_for(&arg, &mut it)?,
+            }),
+            "--save-delete" => save_actions.push(SaveOperatorAction::Delete {
+                slot_id: value_for(&arg, &mut it)?,
+                confirmed: false,
+            }),
+            "--confirm-delete" => confirm_delete = true,
+            "--resume-save" => resume_slot = Some(value_for(&arg, &mut it)?),
             "--pane" => panes.push(value_for(&arg, &mut it)?),
             "--rendezvous" => rendezvous = Some(value_for(&arg, &mut it)?),
             "--origin" => origin = Some(value_for(&arg, &mut it)?),
             other => return Err(format!("unknown argument {other:?}")),
         }
     }
+
+    let has_delete = save_actions
+        .iter()
+        .any(|action| matches!(action, SaveOperatorAction::Delete { .. }));
+    if has_delete && !confirm_delete {
+        return Err("--save-delete requires the explicit --confirm-delete flag".to_string());
+    }
+    if confirm_delete && !has_delete {
+        return Err("--confirm-delete requires --save-delete <SLOT>".to_string());
+    }
+    if confirm_delete {
+        for action in &mut save_actions {
+            if let SaveOperatorAction::Delete { confirmed, .. } = action {
+                *confirmed = true;
+            }
+        }
+    }
+    let has_create = save_actions
+        .iter()
+        .any(|action| matches!(action, SaveOperatorAction::Create { .. }));
+    if has_create && resume_slot.is_some() {
+        return Err(
+            "--save-create cannot be combined with --resume-save: choose a fresh-session capture or resume an existing slot"
+                .to_string(),
+        );
+    }
+    let save_operator_given = !save_actions.is_empty() || resume_slot.is_some();
 
     // `--setup` is a standalone enumerate-and-exit diagnostic (issue #1123): it
     // opens a hidden window purely to list monitors and exits before a world
@@ -299,6 +402,12 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
     // the one flag `--setup` itself consumes, to validate against the
     // connected displays.
     if setup {
+        if save_operator_given {
+            return Err(
+                "--setup is a standalone diagnostic and refuses save catalogue controls"
+                    .to_string(),
+            );
+        }
         for (flag, given) in [
             ("--world", world.is_some()),
             ("--lobby", lobby),
@@ -307,6 +416,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
             ("--log", !log_spec.is_empty()),
             ("--log-entity", !log_entity.is_empty()),
             ("--solo", solo),
+            ("--save-dir", save_dir_given),
             ("--pane", !panes.is_empty()),
             ("--rendezvous", rendezvous.is_some()),
             ("--origin", origin.is_some()),
@@ -367,6 +477,16 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
         );
     }
 
+    // The save-catalogue controls and --resume-save act on a concrete scenario
+    // at startup — before a --lobby host has picked one — so they need --world
+    // itself, not merely a lobby to choose from.
+    if save_operator_given && world.is_none() {
+        return Err(
+            "save catalogue controls need --world — they operate on an authoritative \
+             native peer's scenario at startup, which a --lobby host has not yet picked"
+                .to_string(),
+        );
+    }
     let sim = if world.is_some() || lobby {
         Some(SimArgs {
             world,
@@ -375,17 +495,24 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
             log_spec,
             log_entity,
             solo,
+            save_dir,
+            save_actions,
+            resume_slot,
             panes,
             rendezvous,
             origin,
         })
     } else {
+        // No world and not in lobby: this host serves delivery only, so every
+        // simulation-configuring flag is a mistake here (the save-catalogue
+        // controls were already refused above, since they need --world itself).
         for (flag, given) in [
             ("--ship", ship.is_some()),
             ("--seed", seed.is_some()),
             ("--log", !log_spec.is_empty()),
             ("--log-entity", !log_entity.is_empty()),
             ("--solo", solo),
+            ("--save-dir", save_dir_given),
             ("--pane", !panes.is_empty()),
             ("--rendezvous", rendezvous.is_some()),
             ("--origin", origin.is_some()),
@@ -467,6 +594,7 @@ mod tests {
         assert_eq!(sim.ship, None);
         assert_eq!(sim.seed, None);
         assert!(!sim.solo);
+        assert_eq!(sim.save_dir, DEFAULT_SAVE_DIR);
         // And it is still the same delivery host underneath.
         assert_eq!(
             a.client,
@@ -519,6 +647,21 @@ mod tests {
     }
 
     #[test]
+    fn native_save_directory_is_configurable_only_for_an_authoritative_host() {
+        let a = run(&[
+            "--world",
+            "assets/worlds/combat_test.toml",
+            "--save-dir",
+            "private/saves",
+        ]);
+        assert_eq!(a.sim.unwrap().save_dir, "private/saves");
+
+        let err = parse(&["--save-dir", "private/saves"]).unwrap_err();
+        assert!(err.contains("--save-dir"), "{err}");
+        assert!(err.contains("--world"), "{err}");
+    }
+
+    #[test]
     fn a_simulation_flag_alone_still_names_both_ways_in() {
         let err = err(&["--solo"]);
         assert!(err.contains("--world"), "{err}");
@@ -535,6 +678,108 @@ mod tests {
     fn a_bridge_profile_may_be_pinned_for_a_lobby_host() {
         let a = run(&["--lobby", "--profile", "bridge.toml"]);
         assert_eq!(a.profile.as_deref(), Some("bridge.toml"));
+    }
+
+    #[test]
+    fn help_documents_the_exclusive_native_save_directory_claim() {
+        assert!(HELP.contains("one phoenix-host may claim it at a time"));
+        assert!(HELP.contains("authoritative process's lifetime"));
+        assert!(HELP.contains("concurrent native peers need distinct paths"));
+    }
+
+    #[test]
+    fn native_save_operator_actions_preserve_order_and_values() {
+        let sim = run(&[
+            "--world",
+            "assets/worlds/combat_test.toml",
+            "--save-list",
+            "--save-create",
+            "Before Lyra",
+            "--save-rename",
+            "slot-a",
+            "After Lyra",
+            "--save-export",
+            "slot-a",
+            "exports/lyra.ron",
+            "--save-delete",
+            "slot-b",
+            "--confirm-delete",
+        ])
+        .sim
+        .expect("an authoritative simulation");
+
+        assert_eq!(
+            sim.save_actions,
+            vec![
+                SaveOperatorAction::List,
+                SaveOperatorAction::Create {
+                    display_name: "Before Lyra".into(),
+                },
+                SaveOperatorAction::Rename {
+                    slot_id: "slot-a".into(),
+                    display_name: "After Lyra".into(),
+                },
+                SaveOperatorAction::Export {
+                    slot_id: "slot-a".into(),
+                    path: "exports/lyra.ron".into(),
+                },
+                SaveOperatorAction::Delete {
+                    slot_id: "slot-b".into(),
+                    confirmed: true,
+                },
+            ]
+        );
+        assert_eq!(sim.resume_slot, None);
+    }
+
+    #[test]
+    fn native_save_create_and_resume_are_mutually_exclusive() {
+        for args in [
+            [
+                "--world",
+                "w.toml",
+                "--save-create",
+                "Fresh capture",
+                "--resume-save",
+                "slot-a",
+            ],
+            [
+                "--world",
+                "w.toml",
+                "--resume-save",
+                "slot-a",
+                "--save-create",
+                "Fresh capture",
+            ],
+        ] {
+            let error = parse(&args).unwrap_err();
+            assert!(error.contains("--save-create"), "{error}");
+            assert!(error.contains("--resume-save"), "{error}");
+            assert!(error.contains("cannot be combined"), "{error}");
+        }
+
+        let resumed = run(&["--world", "w.toml", "--resume-save", "slot-a"])
+            .sim
+            .expect("resume alone remains a valid native invocation");
+        assert_eq!(resumed.resume_slot.as_deref(), Some("slot-a"));
+    }
+
+    #[test]
+    fn native_delete_requires_an_explicit_confirmation_pair() {
+        let missing = parse(&["--world", "w.toml", "--save-delete", "slot-a"]).unwrap_err();
+        assert!(missing.contains("--confirm-delete"), "{missing}");
+
+        let orphan = parse(&["--world", "w.toml", "--confirm-delete"]).unwrap_err();
+        assert!(orphan.contains("--save-delete"), "{orphan}");
+    }
+
+    #[test]
+    fn native_catalogue_controls_require_a_world_and_setup_refuses_them() {
+        let delivery_only = parse(&["--save-list"]).unwrap_err();
+        assert!(delivery_only.contains("--world"), "{delivery_only}");
+
+        let setup = parse(&["--setup", "--save-list"]).unwrap_err();
+        assert!(setup.contains("--setup"), "{setup}");
     }
 
     #[test]

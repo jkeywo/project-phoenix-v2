@@ -33,10 +33,46 @@
  */
 
 /**
+ * Decide whether this simulation host may contribute a positive validation
+ * vote to the fleet's collective start policy.
+ *
+ * Selection and boot completion are necessary but not sufficient: the Rust
+ * lobby payload owns the final `presentationReady` fact, which moves only once
+ * this host's render preload is terminal. Keeping the fold pure makes the
+ * selected-but-still-preloading boundary directly testable.
+ */
+export function fleetStartValidationState({
+  role = 'ship',
+  fleetLinked = false,
+  wasmReady = false,
+  worldLoaded = false,
+  bootReady = false,
+  selectedHull = null,
+  validatedHullPath = null,
+  presentationReady = false,
+} = {}) {
+  const selectedPath = selectedHull && selectedHull.template_path;
+  const hullReady = role === 'gm' || (
+    typeof selectedPath === 'string'
+    && selectedPath.length > 0
+    && validatedHullPath === selectedPath
+  );
+  return !!(
+    fleetLinked
+    && wasmReady
+    && worldLoaded
+    && bootReady
+    && hullReady
+    && presentationReady
+  );
+}
+
+/**
  * @param {object} s  Parsed `LobbyStatePayload` — { phase, scenario_title,
  *                    scenario_body, crew_count, max_players, all_ready,
  *                    stations: [{ name, short_code, rank, holder_name,
  *                    preset_names, consoles? }], spectators: string[],
+ *                    gms: [{ id, name, connected, ready }],
  *                    loading_progress?: number, countdown_secs }.
  * @param {string} prevPhase  The phase seen on the previous call (server.html's
  *                    `_lobbyPrevPhase`), used to detect the Loading→InProgress
@@ -54,6 +90,7 @@ export function hostLobbyViewModel(s, prevPhase, layout) {
   const crewN = s.crew_count || 0;
   const stations = s.stations || [];
   const spectators = s.spectators || [];
+  const gms = Array.isArray(s.gms) ? s.gms : [];
   const countdownSecs = s.countdown_secs || 0;
 
   // ── Phase transitions (loading overlay, audio, panel/QR visibility) ────
@@ -188,6 +225,25 @@ export function hostLobbyViewModel(s, prevPhase, layout) {
     ? [{ kind: 'empty', id: 'server.no_players', params: {} }]
     : [...crewPills, ...waitingPills];
 
+  // Game Masters are peers of one another, not crew, spectators, Stations or
+  // player ships. Keep them in their own labelled group and do not feed them
+  // into any of the counts above. A disconnected GM remains visible so the
+  // room can distinguish an empty control surface from an operator reconnect.
+  const gmGroup = {
+    visible: gms.length > 0,
+    headingId: 'lobby.gms.heading',
+    pills: gms.map(gm => ({
+      id: gm && gm.id != null ? String(gm.id) : '',
+      name: gm && gm.name != null ? String(gm.name) : '',
+      connected: !!(gm && gm.connected),
+      ready: !!(gm && gm.connected && gm.ready),
+      labelId: gm && gm.connected ? 'lobby.gms.connected' : 'lobby.gms.disconnected',
+      readinessLabelId: gm && gm.connected && gm.ready
+        ? 'lobby.gms.ready'
+        : 'lobby.gms.not_ready',
+    })),
+  };
+
   // ── Status hint ──────────────────────────────────────────────────────────
   let hint;
   if (countdownSecs > 0) {
@@ -213,6 +269,7 @@ export function hostLobbyViewModel(s, prevPhase, layout) {
     cards,
     reservedChip,
     spectatorPills,
+    gmGroup,
     hint,
     aiLaunchVisible,
     monitorRow: hostLobbyMonitorRow(layout),
@@ -430,4 +487,5 @@ export function hostLobbyStationRows(layout) {
 // Expose for the classic (non-module) script in server.html.
 if (typeof window !== 'undefined') {
   window.hostLobbyViewModel = hostLobbyViewModel;
+  window.fleetStartValidationState = fleetStartValidationState;
 }

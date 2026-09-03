@@ -115,7 +115,7 @@ function makeWorld({ queued = false } = {}) {
  * reconnect path depends on: a host dropping a connection has to be observable
  * on the phone as a closed channel, not merely as a local state change.
  */
-function makePeerFactory() {
+function makePeerFactory({ configurePeer = () => {} } = {}) {
   const offerers = new Map();
   const channels = [];
   let n = 0;
@@ -191,6 +191,7 @@ function makePeerFactory() {
       async addIceCandidate() {},
       close() { for (const c of this._channels) c.close(); },
     };
+    configurePeer(pc);
     return pc;
   };
   factory.channels = channels;
@@ -331,7 +332,7 @@ describe('which route a client page load is on', () => {
     });
   });
 
-  it('asks for five letters on a bare page load', () => {
+  it('asks for the code on a bare page load', () => {
     // No opt-in, no dead end: the rendezvous route is the only route since
     // #1112, so a client page with nothing in its fragment offers the field
     // rather than telling the guest there is no host id in the URL.
@@ -368,10 +369,10 @@ describe('which route a client page load is on', () => {
 // ── The tracer ──────────────────────────────────────────────────────────────
 
 describe('typed join', () => {
-  it('issues a five-letter code to the host', async () => {
+  it('issues a code of the authored length to the host', async () => {
     const world = makeWorld();
     const { code } = await hostOn(world);
-    expect(code.suffix).toHaveLength(5);
+    expect(code.suffix).toHaveLength(DATA.suffix.length);
     expect(code.namespace).toBe(NAMESPACE_CLIENT);
   });
 
@@ -461,6 +462,33 @@ describe('typed join', () => {
     expect(received[0].data.text).not.toBe('client.status_connected');
     expect(received[0].data.text.length).toBeGreaterThan(0);
   });
+
+  it('preserves an ActionFeedback correlation that collides with a string id', async () => {
+    const world = makeWorld();
+    const received = [];
+    const correlation = 'client.status_connected';
+    const { code, factories } = await hostOn(world, {
+      onConnection: (conn) => {
+        conn.on('data', () => conn.send(JSON.stringify({
+          type: 'ActionFeedback',
+          data: { correlation, outcome: 'Applied' },
+        })));
+      },
+    });
+    createRendezvousJoiner({
+      base: 'https://rendezvous.test',
+      data: DATA,
+      code: code.suffix,
+      factories,
+      onData: (message) => received.push(message),
+    });
+    await settle();
+
+    expect(received).toEqual([{
+      type: 'ActionFeedback',
+      data: { correlation, outcome: 'Applied' },
+    }]);
+  });
 });
 
 describe('distinct failures', () => {
@@ -480,7 +508,7 @@ describe('distinct failures', () => {
   it('says unknown for a suffix nobody holds', async () => {
     const world = makeWorld();
     const { factories } = await hostOn(world);
-    expect(await errorsFor('ZZZZZ', world, factories)).toContain('unknown');
+    expect(await errorsFor('ZZZZZZZZ', world, factories)).toContain('unknown');
   });
 
   it('says wrong-type for a code minted in the server namespace', async () => {
@@ -509,7 +537,7 @@ describe('distinct failures', () => {
     const world = makeWorld();
     const { factories } = await hostOn(world);
     const sent = vi.fn();
-    expect(await errorsFor('ADMIN', world, factories)).toContain('denied');
+    expect(await errorsFor('ADMINXYZ', world, factories)).toContain('denied');
     expect(sent).not.toHaveBeenCalled();
   });
 });
@@ -565,7 +593,7 @@ describe('host compatibility handshake', () => {
     // still perfectly healthy — that frame is a statement about the rendezvous
     // RECORD. The channel then closes with its host, the joiner re-resolves
     // the same code on its backoff, and the service gives the honest answer:
-    // nothing holds those five letters any more.
+    // nothing holds that code any more.
     vi.useFakeTimers();
     try {
       const world = makeWorld();
@@ -778,7 +806,7 @@ describe('a joiner that fails cleans up after itself', () => {
     const joiner = createRendezvousJoiner({
       base: 'https://rendezvous.test',
       data: DATA,
-      code: 'ZZZZZ',
+      code: 'ZZZZZZZZ',
       factories,
     });
     await settle();
@@ -946,6 +974,82 @@ describe('the lossy snapshot channel', () => {
 });
 
 describe('automatic reconnect', () => {
+  it('does not let a stale SDP completion consume the retry candidate queue', async () => {
+    const gates = Array.from({ length: 2 }, () => {
+      let release;
+      const promise = new Promise((resolve) => { release = resolve; });
+      return { promise, release };
+    });
+    const answerPcs = [];
+    const peers = [];
+    const peer = makePeerFactory({
+      configurePeer(pc) {
+        peers.push(pc);
+        pc.addedCandidates = [];
+        const addIceCandidate = pc.addIceCandidate.bind(pc);
+        pc.addIceCandidate = async (candidate) => {
+          pc.addedCandidates.push(candidate);
+          return addIceCandidate(candidate);
+        };
+        const setRemoteDescription = pc.setRemoteDescription.bind(pc);
+        pc.setRemoteDescription = async (description) => {
+          if (description.type === 'answer' && answerPcs.length < gates.length) {
+            const gate = gates[answerPcs.length];
+            answerPcs.push(pc);
+            await gate.promise;
+          }
+          return setRemoteDescription(description);
+        };
+      },
+    });
+    const world = makeWorld();
+    const factories = { socket: world.socket, peer };
+    let host;
+    let joiner;
+    try {
+      const started = await hostOn(world, { factories });
+      host = started.host;
+      const { code } = started;
+      joiner = createRendezvousJoiner({
+        base: 'https://rendezvous.test',
+        data: DATA,
+        code: code.suffix,
+        factories,
+        getIdent: () => ({ token: 'tok-race', name: 'Epoch' }),
+      });
+      await settle();
+      expect(answerPcs).toHaveLength(1);
+
+      // Attempt N loses its channel while its answer SDP is still in flight.
+      // The manual retry starts N+1 before the old browser promise resolves.
+      answerPcs[0]._channels[0].close();
+      await settle();
+      joiner.retryNow();
+      await settle();
+      expect(answerPcs).toHaveLength(2);
+
+      const candidate = { candidate: 'candidate:retry-only', type: 'host' };
+      const secondHostPc = peers.filter((pc) => pc.remoteDescription?.type === 'offer').at(-1);
+      secondHostPc.onicecandidate({ candidate });
+      await settle();
+      expect(answerPcs[1].addedCandidates).toEqual([]);
+
+      // Releasing N must leave N+1's queue alone. Only N+1's own SDP
+      // completion may apply the candidate and finish the link.
+      gates[0].release();
+      await settle();
+      expect(answerPcs[1].addedCandidates).toEqual([]);
+      gates[1].release();
+      await settle();
+      expect(answerPcs[1].addedCandidates).toEqual([candidate]);
+      expect(joiner.connected).toBe(true);
+    } finally {
+      gates.forEach(({ release }) => release());
+      if (joiner) joiner.close();
+      if (host) host.close();
+    }
+  });
+
   it('re-resolves the same code and re-sends Identify with the same token', async () => {
     const world = makeWorld();
     const { code, inbound, announced, factories } = await hostOn(world);
@@ -1064,7 +1168,7 @@ describe('automatic reconnect', () => {
     // which made connectTimeoutMs's 8/16/30s ladder unreachable by the guest
     // it was added for — TURN-over-TCP allocation on a cellular network is a
     // first-join problem. The loop is bounded before acceptance, though: a
-    // guest who has never got in may be reading the wrong five letters, and a
+    // guest who has never got in may be reading the wrong code, and a
     // silent backoff would never say so.
     vi.useFakeTimers();
     try {

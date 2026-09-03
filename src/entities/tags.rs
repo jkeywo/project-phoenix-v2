@@ -23,6 +23,9 @@ pub enum EntityTag {
     /// parent body without its moons, or the other way round.
     Moon,
     Region,
+    /// A fixed authored installation that is not necessarily a crewed station
+    /// and need not carry infrastructure condition (for example a dock berth).
+    Structure,
     Station,
     /// The local player's ship. Distinct from `Ship` so radar filters can show
     /// the player dot without also showing all NPC vessels.
@@ -54,6 +57,7 @@ impl EntityTag {
             "planet" => Some(EntityTag::Planet),
             "moon" => Some(EntityTag::Moon),
             "region" => Some(EntityTag::Region),
+            "structure" => Some(EntityTag::Structure),
             "station" => Some(EntityTag::Station),
             "player" => Some(EntityTag::Player),
             "missile" | "torpedo" => Some(EntityTag::Missile),
@@ -73,6 +77,7 @@ impl EntityTag {
             EntityTag::Planet => "planet",
             EntityTag::Moon => "moon",
             EntityTag::Region => "region",
+            EntityTag::Structure => "structure",
             EntityTag::Station => "station",
             EntityTag::Player => "player",
             EntityTag::Missile => "missile",
@@ -113,6 +118,7 @@ mod tests {
             ("planet", EntityTag::Planet),
             ("moon", EntityTag::Moon),
             ("region", EntityTag::Region),
+            ("structure", EntityTag::Structure),
             ("station", EntityTag::Station),
             ("player", EntityTag::Player),
             ("missile", EntityTag::Missile),

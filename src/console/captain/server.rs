@@ -3,8 +3,9 @@ use bevy::prelude::*;
 use crate::authoritative::{DeclareState, StateClass};
 use crate::command_admission::ai_emit::emit_ai_command;
 use crate::core::messages::{
-    AdmittedCommands, CameraView, CaptainBlackboard, ObjectiveSnapshot, SystemBlackboard,
-    SystemControlPayload, SystemId, ViewMode,
+    ActionFeedbackOutcome, AdmittedCommand, AdmittedCommands, CameraView, CaptainBlackboard,
+    DeliveryClass, ObjectiveSnapshot, ServerMessage, SystemBlackboard, SystemControlPayload,
+    SystemId, ViewMode,
 };
 use crate::effect_queue::EffectQueue;
 use crate::objectives::WorldConditions;
@@ -41,9 +42,8 @@ impl Plugin for CaptainPlugin {
             crate::ship::system_registry::CAPTAIN_KIND,
             crate::ship::system_registry::CAPTAIN_SYSTEM_ID,
         ))
-        .register_admitted_consumer(ConsumerMatcher::exact(
+        .register_admitted_consumer(ConsumerMatcher::kind(
             crate::ship::system_registry::VIEWSCREEN_KIND,
-            crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID,
         ));
         app.init_resource::<crate::server_app::CaptainPriorityBoost>();
         // The scripted weapons-hold queue `apply_scripted_weapons_holds` drains
@@ -105,6 +105,30 @@ impl Plugin for CaptainPlugin {
 
 // ── Input handlers ───────────────────────────────────────────────────────────
 
+fn finish_action_feedback(
+    cmd: &AdmittedCommand,
+    outbound: &mut Option<
+        ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
+    >,
+    outcome: ActionFeedbackOutcome,
+) {
+    let (Some(correlation), Some(token), Some(messages)) = (
+        cmd.feedback_correlation.as_ref(),
+        cmd.response_token.as_ref(),
+        outbound.as_deref_mut(),
+    ) else {
+        return;
+    };
+    messages.write(crate::lobby::server::OutboundMessage {
+        target: crate::lobby::Target::Token(token.clone()),
+        msg: ServerMessage::ActionFeedback {
+            correlation: correlation.clone(),
+            outcome,
+        },
+        delivery: DeliveryClass::Reliable,
+    });
+}
+
 /// Applies `SetRedAlert { active }` commands from every ship's own
 /// `AdmittedCommands` to that ship's own `ShipRedAlert` (issue #748).
 ///
@@ -117,7 +141,7 @@ impl Plugin for CaptainPlugin {
 /// `SetRedAlert` into each ship's own `AdmittedCommands` when its Captain
 /// system is AI-controlled. Without per-entity dispatch, NPC captain-AI
 /// red-alert changes would be silently dropped.
-fn handle_set_red_alert(
+pub(crate) fn handle_set_red_alert(
     mut ship_query: Query<
         (
             &AdmittedCommands,
@@ -131,6 +155,9 @@ fn handle_set_red_alert(
     mut balance_events: Option<
         ResMut<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>,
     >,
+    mut outbound: Option<
+        ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
+    >,
 ) {
     for (admitted, mut ra, ship_uuid) in ship_query.iter_mut() {
         for cmd in admitted.for_target(crate::ship::system_registry::RED_ALERT_SYSTEM_ID) {
@@ -138,19 +165,23 @@ fn handle_set_red_alert(
                 // Assign, don't invert — the whole point of the set command
                 // (issue #748). Only emit the balance tracer when the value
                 // actually changes so idempotent retries don't spam telemetry.
-                if ra.0 == active {
-                    continue;
+                if ra.0 != active {
+                    ra.0 = active;
+                    // Balance tracer: every red-alert change, human or AI (both
+                    // route through this same command), on every ship. Skipped
+                    // for a ship with no uuid to key it on.
+                    if let (Some(msgs), Some(uuid)) = (balance_events.as_mut(), ship_uuid) {
+                        msgs.write(crate::core::balance::BalanceEvent::RedAlertChanged {
+                            ship: uuid.0.clone(),
+                            on: ra.0,
+                        });
+                    }
                 }
-                ra.0 = active;
-                // Balance tracer: every red-alert change, human or AI (both
-                // route through this same command), on every ship. Skipped
-                // for a ship with no uuid to key it on.
-                if let (Some(msgs), Some(uuid)) = (balance_events.as_mut(), ship_uuid) {
-                    msgs.write(crate::core::balance::BalanceEvent::RedAlertChanged {
-                        ship: uuid.0.clone(),
-                        on: ra.0,
-                    });
-                }
+                // Applied means this owning consumer actually consumed the due
+                // command, including an idempotent same-value assignment.  The
+                // normal Captain blackboard remains the only gameplay-state
+                // response and may arrive separately.
+                finish_action_feedback(cmd, &mut outbound, ActionFeedbackOutcome::Applied);
             }
         }
     }
@@ -176,11 +207,15 @@ fn handle_set_weapons_hold(
         (&AdmittedCommands, &mut crate::ship::state::ShipWeaponsHold),
         With<crate::server_app::Ship>,
     >,
+    mut outbound: Option<
+        ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
+    >,
 ) {
     for (admitted, mut hold) in ship_query.iter_mut() {
         for cmd in admitted.for_target(crate::ship::system_registry::RED_ALERT_SYSTEM_ID) {
             if let SystemControlPayload::SetWeaponsHold { held } = cmd.payload {
                 hold.0 = held;
+                finish_action_feedback(cmd, &mut outbound, ActionFeedbackOutcome::Applied);
             }
         }
     }
@@ -344,6 +379,7 @@ pub fn mirror_weapons_hold_flags(
 
 fn view_request_from_admitted(
     cmd: &crate::core::messages::AdmittedCommand,
+    ship_config: Option<&crate::ship_plugin::ShipConfigComponent>,
 ) -> Option<(SystemId, ViewMode)> {
     /// Map a "cinematic" marker name to the Cinematic view mode.
     fn resolve(mode: &ViewMode) -> ViewMode {
@@ -352,23 +388,46 @@ fn view_request_from_admitted(
             _ => mode.clone(),
         }
     }
-    match &cmd.payload {
-        // `SetView` arrives either on the viewscreen target or (legacy helm
-        // console path) on the `"helm"` station-id target — the coarse helm
-        // system is gone (#801), but the wire string is unchanged and resolves
-        // through the station-name admission fallback. Either way the
-        // requesting system is derived from the view mode itself.
-        SystemControlPayload::SetView { mode }
-            if cmd.target.0 == crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID
-                || cmd.target.0 == crate::ship::system_registry::HELM_STATION_ID =>
-        {
-            Some((
-                crate::ship::viewscreen::source_system_for_view_mode(mode),
-                resolve(mode),
-            ))
-        }
-        _ => None,
+    let config = ship_config.map(|config| &config.0);
+    let has_authored_viewscreen = config.is_some_and(|config| {
+        config
+            .systems
+            .iter()
+            .any(|system| system.kind == crate::ship::system_registry::VIEWSCREEN_KIND)
+    });
+    let target_is_viewscreen = config
+        .and_then(|config| config.system(&cmd.target))
+        .is_some_and(|system| system.kind == crate::ship::system_registry::VIEWSCREEN_KIND)
+        || (!has_authored_viewscreen
+            && cmd.target.0 == crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID);
+    let SystemControlPayload::SetView { mode } = &cmd.payload else {
+        return None;
+    };
+    if !target_is_viewscreen && cmd.target.0 != crate::ship::system_registry::HELM_STATION_ID {
+        return None;
     }
+
+    let source_kind = match mode {
+        ViewMode::Camera(_) | ViewMode::Cinematic => crate::ship::system_registry::CAPTAIN_KIND,
+        ViewMode::Radar => crate::ship::system_registry::HELM_RADAR_KIND,
+        ViewMode::ScienceRadar | ViewMode::SensorsRadar => {
+            crate::ship::system_registry::SENSORS_KIND
+        }
+        ViewMode::SystemChart | ViewMode::NavigationChart => {
+            crate::ship::system_registry::NAVIGATION_KIND
+        }
+        ViewMode::Comms => crate::ship::system_registry::COMMS_KIND,
+    };
+    let source = config
+        .and_then(|config| {
+            config
+                .systems
+                .iter()
+                .find(|system| system.kind == source_kind)
+        })
+        .map(|system| system.id.clone())
+        .unwrap_or_else(|| crate::ship::viewscreen::source_system_for_view_mode(mode));
+    Some((source, resolve(mode)))
 }
 
 /// Apply admitted viewscreen `SetView` requests to the local ship's
@@ -381,21 +440,34 @@ fn view_request_from_admitted(
 /// making the monotonic arbiter `sequence` an authoritative total order rather
 /// than depending on Bevy's ambiguous system-execution order.
 pub(crate) fn handle_set_view(
-    ship_query: Query<&AdmittedCommands, With<crate::server_app::LocalShip>>,
+    ship_query: Query<
+        (
+            &AdmittedCommands,
+            Option<&crate::ship_plugin::ShipConfigComponent>,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
     mut view_mode_q: Query<
         &mut crate::ship::state::ShipViewMode,
         With<crate::server_app::LocalShip>,
     >,
+    mut outbound: Option<
+        ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
+    >,
 ) {
-    let Some(admitted) = ship_query.iter().next() else {
+    let Some((admitted, ship_config)) = ship_query.iter().next() else {
         return;
     };
-    let Some(mut vm) = view_mode_q.iter_mut().next() else {
-        return;
-    };
+    let mut vm = view_mode_q.iter_mut().next();
     for cmd in admitted.0.iter() {
-        if let Some((source, mode)) = view_request_from_admitted(cmd) {
-            vm.request_view_mode_from(source, mode);
+        if let Some((source, mode)) = view_request_from_admitted(cmd, ship_config) {
+            let outcome = if let Some(view_mode) = vm.as_deref_mut() {
+                view_mode.request_view_mode_from(source, mode);
+                ActionFeedbackOutcome::Applied
+            } else {
+                ActionFeedbackOutcome::Refused
+            };
+            finish_action_feedback(cmd, &mut outbound, outcome);
         }
     }
 }
@@ -435,9 +507,17 @@ fn backfill_captain_prefers_cinematic_view(
         // system, not the viewscreen (`source_system_for_view_mode`,
         // `is_command_authorized`'s `effective_target` remap) — the viewscreen
         // itself has no seat to be human- or AI-operated, the Captain does.
-        let policy = control_sources
-            .0
-            .policy_for(&crate::ship::system_registry::captain_system_id());
+        let captain_system_id = ship_config
+            .and_then(|config| {
+                config
+                    .0
+                    .systems
+                    .iter()
+                    .find(|system| system.kind == crate::ship::system_registry::CAPTAIN_KIND)
+            })
+            .map(|system| system.id.clone())
+            .unwrap_or_else(crate::ship::system_registry::captain_system_id);
+        let policy = control_sources.0.policy_for(&captain_system_id);
         if !policy.operate_ai {
             continue;
         }
@@ -447,9 +527,19 @@ fn backfill_captain_prefers_cinematic_view(
             // admission is not spammed every tick.
             continue;
         }
+        let viewscreen_system_id = ship_config
+            .and_then(|config| {
+                config
+                    .0
+                    .systems
+                    .iter()
+                    .find(|system| system.kind == crate::ship::system_registry::VIEWSCREEN_KIND)
+            })
+            .map(|system| system.id.clone())
+            .unwrap_or_else(crate::ship::system_registry::viewscreen_system_id);
         emit_ai_command(
             entity_uuid,
-            crate::ship::system_registry::viewscreen_system_id(),
+            viewscreen_system_id,
             SystemControlPayload::SetView {
                 mode: ViewMode::Cinematic,
             },
@@ -472,6 +562,9 @@ fn handle_set_objective_priority(
         With<crate::server_app::LocalShip>,
     >,
     mut boost: ResMut<crate::server_app::CaptainPriorityBoost>,
+    mut outbound: Option<
+        ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
+    >,
 ) {
     let Some((admitted, uuid)) = ship_query.iter().next() else {
         return;
@@ -483,6 +576,7 @@ fn handle_set_objective_priority(
     for cmd in admitted.for_target(crate::ship::system_registry::CAPTAIN_SYSTEM_ID) {
         if let SystemControlPayload::SetObjectivePriority { id } = &cmd.payload {
             boost.toggle(&scope, id);
+            finish_action_feedback(cmd, &mut outbound, ActionFeedbackOutcome::Applied);
         }
     }
 }
@@ -776,6 +870,7 @@ fn publish_captain_blackboard(
             Option<&crate::ship::state::ShipViewMode>,
             Option<&crate::entities::spawner::EntitySystemHull>,
             Option<&crate::entities::spawner::EntityUuid>,
+            Option<&crate::ship_plugin::ShipConfigComponent>,
             bevy::ecs::query::Has<crate::server_app::LocalShip>,
             &mut crate::server_app::ShipSystemBlackboards,
         ),
@@ -789,6 +884,7 @@ fn publish_captain_blackboard(
         view_mode_comp,
         hull_opt,
         uuid_opt,
+        ship_config,
         is_local,
         mut bbs,
     ) in ship_query.iter_mut()
@@ -812,10 +908,18 @@ fn publish_captain_blackboard(
             .0
             .source_for(&crate::ship::system_registry::red_alert_system_id())
             == ControlSource::Ai;
-        let viewscreen_auto = control_sources
-            .0
-            .source_for(&crate::ship::system_registry::viewscreen_system_id())
-            == ControlSource::Ai;
+        let viewscreen_system_id = ship_config
+            .and_then(|config| {
+                config
+                    .0
+                    .systems
+                    .iter()
+                    .find(|system| system.kind == crate::ship::system_registry::VIEWSCREEN_KIND)
+            })
+            .map(|system| system.id.clone())
+            .unwrap_or_else(crate::ship::system_registry::viewscreen_system_id);
+        let viewscreen_auto =
+            control_sources.0.source_for(&viewscreen_system_id) == ControlSource::Ai;
 
         // ── Player-only fields (LocalShip) ────────────────────────────────────
         // View mode / camera list / objectives are player camera + doctrine
@@ -849,6 +953,11 @@ fn publish_captain_blackboard(
                         .collect()
                 })
                 .unwrap_or_default();
+            // `marker_names` walks a `HashMap`, whose order is process-local; this
+            // list rides the captain blackboard into the #862 snapshot, so sort it
+            // or two same-seed peers serialize the same cameras to different bytes.
+            // "cinematic" is appended after, keeping it last regardless.
+            camera_views.sort();
             let has_cinematic = cinematic_q.single().ok().is_some_and(|c| c.is_some());
             if has_cinematic {
                 camera_views.push("cinematic".to_string());
@@ -920,7 +1029,7 @@ fn publish_captain_blackboard(
             red_alert_system_id: crate::ship::system_registry::red_alert_system_id(),
             red_alert_auto,
             weapons_hold,
-            viewscreen_system_id: crate::ship::system_registry::viewscreen_system_id(),
+            viewscreen_system_id,
             viewscreen_auto,
             view_direction,
             view_mode,

@@ -257,7 +257,7 @@ export function hostDiagnosticsLines(state, t) {
     lines.push(t('server.transport_pinned', { mode: state.lever.mode }));
   }
 
-  // Why there is no five-letter code on screen. The operator's next move
+  // Why there is no typed code on screen. The operator's next move
   // differs by case. Three sentences, not two, since issue #1115: a lost
   // service that is retrying either has a code worth reclaiming (this host has
   // held one before — surfaced here as state.resuming, off rendezvousHost.
@@ -304,7 +304,7 @@ function selectedPairParams(pair, t) {
  * a GitHub comment by somebody standing in a car park, read by somebody else,
  * and it has to survive both. It carries no join code, no session token and no
  * peer id beyond the short prefixes already on screen — a diagnostics dump that
- * leaked the five letters would be a dump nobody could safely paste.
+ * leaked the code would be a dump nobody could safely paste.
  *
  * What is deliberately NOT in it: the network's name. Neither page has a field
  * for one and nothing could invent it, so the row was always omitted and the

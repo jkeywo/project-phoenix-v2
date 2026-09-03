@@ -50,6 +50,17 @@ impl Plugin for ShipPlugin {
         // with dozens of other entities in this plugin file.
         crate::console::helm::dispatch::register_helm_dispatch(app);
         app.init_resource::<BankConfigResource>()
+            .init_resource::<crate::gm_puppet::StationPuppets>()
+            .init_resource::<crate::gm_puppet::PreviousStationPuppetTargets>()
+            .init_resource::<crate::gm_puppet::PendingGmStationCommands>()
+            .init_resource::<crate::gm_puppet::PendingGmStationFeedbackRoutes>()
+            .init_resource::<crate::gm_puppet::StationPuppetActivity>()
+            .configure_sets(
+                FixedUpdate,
+                crate::gm_puppet::StationPuppetAdmissionSet
+                    .after(crate::command_admission::AdmissionSet)
+                    .before(crate::sim_sets::SimSet::Input),
+            )
             .add_message::<CoordinationEnqueue>()
             .init_resource::<CoordinationEnqueueCursor>()
             .add_message::<DeliveredCoordination>()
@@ -74,6 +85,10 @@ impl Plugin for ShipPlugin {
             app.declare_state::<CoordinationEnqueueCursor>(
                 StateClass::DeferredFold,
                 "coordination-enqueue-staging-state",
+            )
+            .declare_state::<crate::gm_puppet::PendingGmStationFeedbackRoutes>(
+                StateClass::ClearedAtFold,
+                "gm-action-state",
             )
             .declare_state::<HumanSeekingHosts>(
                 StateClass::Derived,
@@ -309,6 +324,33 @@ impl Plugin for ShipPlugin {
                 .after(crate::lobby::LobbySystemSet)
                 .after(handle_station_rating_change)
                 .before(crate::console::comms::server::handle_hail),
+        );
+        // A Station takeover is an overlay on its ordinary rating. Assert it
+        // once before Admission so GM commands use the existing Human policy,
+        // then again after every same-tick rating/seeking write so only that
+        // Station's AI remains suppressed for the rest of the tick.
+        app.add_systems(
+            FixedUpdate,
+            crate::gm_puppet::reconcile_station_puppet_control
+                .after(crate::lobby::LobbySystemSet)
+                .before(crate::command_admission::AdmissionSet),
+        )
+        .add_systems(
+            FixedUpdate,
+            crate::gm_puppet::admit_station_puppet_commands
+                .in_set(crate::gm_puppet::StationPuppetAdmissionSet),
+        )
+        .add_systems(
+            FixedUpdate,
+            crate::gm_puppet::enforce_station_puppet_control
+                .in_set(crate::sim_sets::SimSet::Input)
+                .after(handle_station_rating_change)
+                .after(resolve_human_seeking_hosts),
+        )
+        .add_systems(
+            FixedUpdate,
+            crate::gm_puppet::settle_station_puppet_feedback
+                .in_set(crate::sim_sets::SimSet::Broadcast),
         );
 
         // Intent narration (issue #879). Registered separately from the tuple

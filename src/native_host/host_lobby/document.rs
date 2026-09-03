@@ -62,6 +62,7 @@
 //! | `#host-lobby-qr-toggle` added (issue #1329) | a host page toggles the QR from its settings cog; this window has no cog, so the one decision that surface genuinely needs gets the one control it needs |
 //! | the page's `#scenario-panel` carried too (issue #1328) | an operator has to be able to pick the scenario and the hull from the viewscreen. Same rule as the lobby and the join panel: the page's own markup, so `gui/host-scenario-render.js` writes into the ids it expects |
 //! | that panel's `#mod-pack-upload` and `#snapshot-import` removed (issue #1328) | host TOOLING — file inputs with page-lifetime handlers this document does not carry, and which a demo build removes outright. A control that silently does nothing is worse than no control |
+//! | the lobby rail's `#gm-start-controls` buttons removed (issue #1300's Game Master, merged onto #1325) | the same rule: the GM Ready/Force Start buttons are wired by `server.html`'s GM session script, which this surface does not run, so on the viewscreen they would be dead controls. Their `<div class="gm-start-actions">` is stripped; the section's aria-hidden status regions carry no control and stay |
 //! | that panel starts `display: none` (issue #1328) | the page opens ON the picker, because a browser host always chooses at the prompt; a native host may have been given `--world`, and a picker covering the lobby of a host that has nothing to pick would be a viewscreen that never moves. It is shown by the first scenario push, which only a world-less host makes |
 //!
 //! The AI-launch `<button>` is **kept**, and was not always: #1325 stripped it,
@@ -335,18 +336,35 @@ const SCENARIO_PANEL_MARKER: &str = "<div id=\"scenario-panel\"";
 const SCENARIO_TOOLING_MARKERS: [&str; 2] =
     ["<div id=\"mod-pack-upload\"", "<div id=\"snapshot-import\""];
 
+/// The lobby rail's privileged GM start controls — the Ready/Unready and Force
+/// Start `<button>`s inside `#gm-start-controls` (the host-mesh Game Master of
+/// issue #1300) — which this document does not carry either, by #1325's rule.
+/// Their handlers live in `server.html`'s GM session script and this surface
+/// runs no GM session, so on the viewscreen they would be exactly the dead
+/// buttons the allowlist test forbids. Removed rather than hidden, for the same
+/// reason as the scenario tooling. The `<div>` holding the two buttons is the
+/// marker, not the enclosing `<section>`: [`extract_element`] counts `<div>`
+/// nesting only, and the section's aria-hidden status regions carry no control
+/// and may stay.
+const LOBBY_TOOLING_MARKERS: [&str; 1] = ["<div class=\"gm-start-actions\""];
+
 /// Assemble the lobby document from the host page's own `index.html`.
 ///
 /// Pure: bytes in, bytes out. Everything that makes this document different
 /// from the lobby a browser shows is decided here, so it is decided somewhere a
 /// unit test can read without an SDK, a GPU or an HTTP server.
 pub fn build_host_lobby_document(host_index_html: &str) -> Result<String, HostLobbyDocumentError> {
-    let panel = extract_element(
+    // The lobby, minus the GM start controls — see `LOBBY_TOOLING_MARKERS`.
+    let mut panel = extract_element(
         host_index_html,
         LOBBY_PANEL_MARKER,
         HostLobbyDocumentError::NoLobbyPanel,
         HostLobbyDocumentError::UnbalancedLobbyPanel,
-    )?;
+    )?
+    .to_string();
+    for marker in LOBBY_TOOLING_MARKERS {
+        panel = remove_element(&panel, marker);
+    }
 
     let join_panel = extract_element(
         host_index_html,
@@ -1059,6 +1077,14 @@ mod tests {
         assert!(!html.contains("id=\"mod-pack-upload\""));
         assert!(page.contains("id=\"snapshot-import\""));
         assert!(!html.contains("id=\"snapshot-import\""));
+        // …and minus the lobby rail's GM start controls (issue #1300's Game
+        // Master): wired only by the page's GM session script, which this
+        // surface never runs. The `<section>` shell stays; its buttons go.
+        assert!(page.contains("id=\"gm-ready-btn\""));
+        assert!(page.contains("id=\"gm-force-start-btn\""));
+        assert!(!html.contains("id=\"gm-ready-btn\""));
+        assert!(!html.contains("id=\"gm-force-start-btn\""));
+        assert!(html.contains("id=\"gm-start-controls\""));
         // The only control the surface carries out of the lobby markup is the
         // AI launch, which is now wired (issue #1328). Asserted as the whole
         // allowlist and not just those three ids, because THIS is the page that

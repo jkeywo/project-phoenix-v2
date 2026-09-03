@@ -217,6 +217,34 @@ describe('createFocusTrap — the background inert/aria-hidden matches the trap'
     expect(s.trigger.hasAttribute('inert')).toBe(false);
     trap.release();
   });
+
+  it('suspends and restores ancestor siblings around a nested confirmation', () => {
+    document.body.innerHTML = '';
+    const outside = document.createElement('section');
+    outside.setAttribute('aria-hidden', 'false');
+    const panel = document.createElement('aside');
+    const actions = document.createElement('div');
+    const trigger = document.createElement('button');
+    actions.appendChild(trigger);
+    const modal = document.createElement('div');
+    const cancel = document.createElement('button');
+    modal.appendChild(cancel);
+    panel.append(actions, modal);
+    document.body.append(outside, panel);
+    trigger.focus();
+    const trap = makeTrap(modal);
+
+    trap.activate();
+    expect(actions.hasAttribute('inert')).toBe(true);
+    expect(outside.hasAttribute('inert')).toBe(true);
+    expect(outside.getAttribute('aria-hidden')).toBe('true');
+
+    trap.release();
+    expect(actions.hasAttribute('inert')).toBe(false);
+    expect(outside.hasAttribute('inert')).toBe(false);
+    expect(outside.getAttribute('aria-hidden')).toBe('false');
+    expect(document.activeElement).toBe(trigger);
+  });
 });
 
 describe('activeElementOf', () => {

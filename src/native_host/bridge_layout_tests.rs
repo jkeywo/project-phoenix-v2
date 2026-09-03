@@ -636,13 +636,29 @@ fn the_written_profile_keys_each_pane_by_station_id() {
     assert!(text.contains("station = \"helm\""), "{text}");
     assert!(text.contains("station = \"weapons\""), "{text}");
 
-    // A one-console screen leaves `split` out — it is ignored for a pane that is
-    // the whole monitor, and an operator should not have to read past it.
+    // A one-console screen writes its `split` too (issue #1334's fix round),
+    // though nothing reads it while the screen holds one pane. Leaving it out
+    // was a SILENT DROP: the law carries a split for a one-console screen, and
+    // no `LayoutAction` can put one back, so an operator's authored `stacked`
+    // vanished from the file the first time a save caught the screen with one
+    // console on it.
     let single = assign(&bridge(), "helm", LEFT)
         .to_profile()
         .to_toml()
         .unwrap();
-    assert!(!single.contains("split ="), "{single}");
+    assert!(single.contains("split = \"side_by_side\""), "{single}");
+
+    // And what it writes is that screen's own axis, not the constant.
+    let stacked = bridge()
+        .adopt_profile(&authored(
+            Some(PaneSplit::Stacked),
+            vec![PaneSlot::for_station("helm")],
+        ))
+        .0
+        .to_profile()
+        .to_toml()
+        .unwrap();
+    assert!(stacked.contains("split = \"stacked\""), "{stacked}");
 }
 
 #[test]

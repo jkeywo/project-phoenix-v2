@@ -4480,6 +4480,15 @@ pub struct GlobalConfig {
     /// content error at load, not a quiet performance cliff.
     #[serde(default = "default_sim_tick_hz")]
     pub sim_tick_hz: f32,
+    /// Peer-local autosave cadence in simulation seconds (issue #865).
+    ///
+    /// Persistence is a local side effect, but every simulation peer schedules
+    /// its rolling autosave from this deterministic clock. The interval must
+    /// therefore convert to a positive whole number of [`Self::sim_tick_hz`]
+    /// ticks; `world::config::parse_world` rejects values that would require
+    /// rounding rather than letting peers choose their own boundary.
+    #[serde(default = "default_autosave_interval_secs")]
+    pub autosave_interval_secs: f32,
     /// Fixed rate (Hz) of the ONE shared AI decision tick (issue #889).
     ///
     /// Gates every AI policy host — the six per-axis helm systems, the seven
@@ -4556,6 +4565,17 @@ pub struct GlobalConfig {
     /// TOML authors the key, it IS the shipped tuning.
     #[serde(default = "default_trigger_fire_history_depth")]
     pub trigger_fire_history_depth: u32,
+    /// How many damage/destruction rows the browser GM activity feed retains
+    /// (issue #1297, PRD #930).
+    ///
+    /// The feed is a peer-local presentation projection over unconditional
+    /// balance events. This authored bound keeps a long-running facilitated
+    /// session from growing page or simulation memory without limit. The serde
+    /// default is the one sanctioned hardcoded copy (AGENTS.md #11); worlds
+    /// may tune the depth without changing the event stream or authoritative
+    /// reducer state.
+    #[serde(default = "default_gm_activity_history_depth")]
+    pub gm_activity_history_depth: u32,
     /// The lockstep input delay a FLEET playing this mission agrees on, in
     /// logical ticks (issue #1116).
     ///
@@ -4611,6 +4631,13 @@ fn default_station_activity_bucket_secs() -> f32 {
     15.0
 }
 
+/// Serde default for [`GlobalConfig::autosave_interval_secs`]: thirty
+/// simulation seconds (issue #865). The only sanctioned hardcoded copy of the
+/// shipped cadence (AGENTS.md #11) — a TOML-parse fallback.
+fn default_autosave_interval_secs() -> f32 {
+    30.0
+}
+
 /// Serde default for [`GlobalConfig::trigger_fire_history_depth`]: sixteen fires
 /// per trigger (issue #1151). The only sanctioned hardcoded copy of the shipped
 /// ring depth (AGENTS.md #11) — a TOML-parse fallback. Sixteen is deep enough to
@@ -4618,6 +4645,13 @@ fn default_station_activity_bucket_secs() -> f32 {
 /// records per trigger" bound.
 fn default_trigger_fire_history_depth() -> u32 {
     16
+}
+
+/// Serde default for [`GlobalConfig::gm_activity_history_depth`]: 128 rows
+/// (issue #1297). The only sanctioned hardcoded copy of the shipped GM feed
+/// bound (AGENTS.md #11) -- a TOML-parse fallback.
+fn default_gm_activity_history_depth() -> u32 {
+    128
 }
 
 /// Serde default for [`GlobalConfig::command_delay_ticks`]: six logical ticks
@@ -4654,18 +4688,44 @@ impl Default for GlobalConfig {
             title: None,
             description: None,
             sim_tick_hz: default_sim_tick_hz(),
+            autosave_interval_secs: default_autosave_interval_secs(),
             ai_tick_hz: default_ai_tick_hz(),
             ai_snapshot_hz: default_ai_snapshot_hz(),
             intent_break_off_hull_fraction: default_intent_break_off_hull_fraction(),
             attacked_memory_secs: default_attacked_memory_secs(),
             station_activity_bucket_secs: default_station_activity_bucket_secs(),
             trigger_fire_history_depth: default_trigger_fire_history_depth(),
+            gm_activity_history_depth: default_gm_activity_history_depth(),
             command_delay_ticks: default_command_delay_ticks(),
         }
     }
 }
 
 impl GlobalConfig {
+    /// Convert the authored autosave interval into exact logical ticks.
+    ///
+    /// `None` means the interval is non-finite, non-positive, too large for a
+    /// `u64`, or falls between tick boundaries. In particular this never rounds
+    /// an authored duration onto a nearby tick: that would let the declared
+    /// cadence and the deterministic capture boundary disagree.
+    pub fn checked_autosave_interval_ticks(&self) -> Option<u64> {
+        let tick_hz = f64::from(self.sim_tick_hz);
+        let interval_secs = f64::from(self.autosave_interval_secs);
+        if !(tick_hz.is_finite()
+            && tick_hz > 0.0
+            && interval_secs.is_finite()
+            && interval_secs > 0.0)
+        {
+            return None;
+        }
+
+        let ticks = tick_hz * interval_secs;
+        if !ticks.is_finite() || ticks < 1.0 || ticks.fract() != 0.0 || ticks >= u64::MAX as f64 {
+            return None;
+        }
+        Some(ticks as u64)
+    }
+
     /// The number of base AI ticks per slower snapshot tick.
     ///
     /// `None` when the authored pair is not a positive integer relationship —

@@ -10,13 +10,14 @@ function ps(token, name, station) {
   return { token, name, station, connected: true };
 }
 
-function welcome(state, shipStations, shipConfig) {
+function welcome(state, shipStations, shipConfig, gms) {
   return {
     type: 'Welcome',
     data: {
       state,
       ship_stations: shipStations || { stations: [] },
       ship_config: shipConfig || {},
+      gms: gms || [],
     },
   };
 }
@@ -32,6 +33,7 @@ const TWO_STATION_SHIP = {
 describe('semantic reducer results', () => {
   const cases = [
     { type: 'Welcome' },
+    { type: 'GmRosterChanged', data: { gms: [] } },
     { type: 'ScenarioCatalog' },
     { type: 'PlayerJoined', data: { player: ps('b', 'Bob', null) } },
     { type: 'PlayerLeft', data: { token: 'a' } },
@@ -69,6 +71,7 @@ describe('LobbyState defaults', () => {
     const s = new LobbyState();
     expect(s.phase).toBe('Lobby');
     expect(s.players).toEqual([]);
+    expect(s.gms).toEqual([]);
     expect(s.gameOverReason).toBeNull();
   });
 
@@ -120,6 +123,58 @@ describe('apply Welcome', () => {
       world: null,
     }, TWO_STATION_SHIP));
     expect(s.players[0].station).toBe('helm');
+  });
+
+  it('takes the full public GM projection without mixing it into players', () => {
+    const s = new LobbyState();
+    s.apply(welcome({
+      phase: 'Lobby',
+      players: [ps('a', 'Alice', 'helm')],
+      world: null,
+    }, null, null, [{ id: 7, name: 'Morgan', connected: 1, ready: true }]));
+    expect(s.players).toHaveLength(1);
+    expect(s.gms).toEqual([{ id: '7', name: 'Morgan', connected: true, ready: true }]);
+  });
+});
+
+describe('apply GmRosterChanged', () => {
+  it('full-replaces the equal GM list and requests a lobby render', () => {
+    const s = new LobbyState();
+    s.gms = [{ id: 'stale', name: 'Stale', connected: true }];
+    const result = s.apply({
+      type: 'GmRosterChanged',
+      data: {
+        gms: [
+          { id: 'gm-a', name: 'Ada', connected: true, ready: true },
+          { id: 'gm-b', name: 'Bo', connected: false, ready: true },
+        ],
+      },
+    });
+    expect(s.gms).toEqual([
+      { id: 'gm-a', name: 'Ada', connected: true, ready: true },
+      { id: 'gm-b', name: 'Bo', connected: false, ready: false },
+    ]);
+    expect(s.players).toEqual([]);
+    expect(result.changedDomains).toContain(CHANGE_DOMAINS.LOBBY);
+    expect(result.effects.map(effect => effect.effect)).toContain('request-render');
+  });
+
+  it('accepts an empty replacement and clears stale presence', () => {
+    const s = new LobbyState();
+    s.gms = [{ id: 'gm-a', name: 'Ada', connected: true }];
+    s.apply({ type: 'GmRosterChanged', data: { gms: [] } });
+    expect(s.gms).toEqual([]);
+  });
+
+  it('normalises a disconnected GM to not-ready even if a stale row says ready', () => {
+    const s = new LobbyState();
+    s.apply({
+      type: 'GmRosterChanged',
+      data: { gms: [{ id: 'gm-a', name: 'Ada', connected: false, ready: true }] },
+    });
+    expect(s.gms).toEqual([
+      { id: 'gm-a', name: 'Ada', connected: false, ready: false },
+    ]);
   });
 });
 

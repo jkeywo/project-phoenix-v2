@@ -2,8 +2,8 @@
 title: World Data
 type: entity
 tags: [world, scenario, transform, ambient_light, snapshot, includes]
-sources: [src/world/config.rs, src/world/server.rs, src/world/server_tests.rs, src/world/layers.rs, src/world/validate.rs, src/world/deadlines.rs, src/world/script/load.rs, src/world/script/schedule.rs, src/comms/scripted.rs, src/entities/config_cache.rs, src/snapshot.rs, src/server/bridge.rs, server.html, src/server/renderer.rs, src/entities/config.rs, src/entities/entity_override.rs, src/entities/include_resolve.rs, src/objectives/directive.rs, tests/snapshot_resume.rs, assets/worlds/default.toml]
-updated: 2026-08-28
+sources: [src/world/config.rs, src/world/server.rs, src/world/server_tests.rs, src/world/layers.rs, src/world/validate.rs, src/world/deadlines.rs, src/world/script/load.rs, src/world/script/schedule.rs, src/comms/scripted.rs, src/entities/config_cache.rs, src/snapshot.rs, src/gm_action.rs, src/sim_digest.rs, src/headless/replay.rs, src/server/bridge.rs, server.html, src/server/renderer.rs, src/entities/config.rs, src/entities/entity_override.rs, src/entities/include_resolve.rs, src/objectives/directive.rs, tests/snapshot_resume.rs, assets/worlds/default.toml]
+updated: 2026-09-01
 ---
 
 # World Data
@@ -86,15 +86,15 @@ may all author `window`; Captain presentation qualifies child ids while keeping
 the authored label. Child `due_secs` starts at the tick activation actually
 lands and uses the root simulation cadence. Unload runs before callback drain,
 removes owned rows and queued work, and releases a shared AST only after its
-last owner; reload starts a fresh activation-relative window. Snapshot format
-13 persists the ordered active composition, loader ownership, flags and
+last owner; reload starts a fresh activation-relative window. The snapshot
+payload persists the ordered active composition, loader ownership, flags and
 declared-layer entity identities. Resume removes bootstrap-only layers, loads
 missing dynamic layers in captured activation order, treats a desired failed
 sentinel as terminal rather than retrying, and only then restores callbacks,
 deadlines and Comms state. That preserves index-aligned handlers and prevents
 bootstrap duplicate arming.
 
-Snapshot format 14 also preserves the live Sensors→Shields continuation seam.
+The payload also preserves the live Sensors→Shields continuation seam.
 Each entity row carries Shields' recent per-arc damage with each record's exact
 authoritative `recorded_tick`, its previous-HP baseline and any one-shot pending
 threat bearing. It also carries Sensors' last warned threat identity, bearing,
@@ -105,7 +105,7 @@ travel in enqueue order with the number of future logical ticks until each
 becomes due; restore rebuilds those due ticks from the captured `SimTick` and
 replaces the bootstrap queue wholesale. A
 world-visible `CoordinationEnqueueCursor` also defines the exact unread suffix
-ahead of those attached queues. Format 14 projects that suffix in message order,
+ahead of those attached queues. The snapshot projects that suffix in message order,
 including an entry retained in Bevy's older message buffer, maps its source ship
 through `EntityUuid`, and replaces bootstrap staging so the Input handler reads
 each restored entry exactly once. The AI cadence latches are re-derived from the
@@ -123,7 +123,7 @@ down/restore notification latches. Component and resource presence is explicit:
 even a default memory or empty NPC timer map is stored as `Some(default)` and
 replaces the bootstrap value rather than being treated as absent.
 
-Format 14 also makes each ship's AI fidelity an explicit lifecycle state. A
+Each ship's AI fidelity is also an explicit snapshot lifecycle state. A
 row records High or Low for every `Ship`, plus the presence and fixed-clock age
 of its `LodTransitionTimer`. Restore reconciles the complete canonical
 `AiHighFidelityComponents` bundle before writing any member's continuation: a
@@ -141,6 +141,19 @@ logical-tick boundary and whether the first reconnect projection rewrites
 and Helm clearance latch are exact replacement state. Weapons' global phaser
 mode and each ship's arc-request debounce/pending request also preserve present
 defaults, so restore clears bootstrap-only requests rather than merging them.
+
+Current snapshot format 16 additionally records the pre-world `BootIdentity`:
+the selected hull, frozen fleet roster, and authored-order UUIDs of every
+`GameStart` entity that spawned. A fresh-session restore validates and stages
+that identity before the world is rebuilt; see [Peer-Local Save
+Catalogues](../concepts/save-catalogues.md).
+
+Format 16 also captures the authoritative session-pause bit, complete canonical
+GM action journal, and exact `applied_grants` reducer frontier. The whole
+journal is the idempotency record; the frontier identifies only the prefix that
+has reached current state and digest. Restoring a paused run retains the frozen
+logical-tick boundary and attributed action history needed for exact Resume and
+replay.
 
 ## TransformConfig (`src/world/config.rs`)
 

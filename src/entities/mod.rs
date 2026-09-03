@@ -28,6 +28,9 @@ pub mod loader;
 pub mod marker_validate;
 /// Triangle and pixel counting, shared by the perf pass and the model viewer.
 pub mod mesh_stats;
+/// Renderer-independent loading of authoritative marker/target geometry from
+/// each entity's primary authored model rig (issue #1291).
+pub mod model_markers;
 pub mod model_rig;
 pub mod planet;
 pub mod spawner;

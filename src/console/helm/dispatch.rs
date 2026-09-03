@@ -13,10 +13,11 @@
 //! by the command-admission layer — human tokens at the network gate, the
 //! per-axis helm AI's emissions through the same `validate_and_admit` seam — and
 //! placed into each ship's own `AdmittedCommands`. This function declares which
-//! per-axis wire targets that router consumes, so the admission dispatcher fans
-//! those systems' commands into `AdmittedCommands` every tick.
+//! per-axis System kinds that router consumes. `process_helm_inputs` resolves
+//! each kind to the owning ship's authored System id, so alternate ship-specific
+//! ids remain inside the same consumer address domain.
 
-/// Register the six per-axis Helm systems as admitted-command consumers
+/// Register the six per-axis Helm System kinds as admitted-command consumers
 /// (issue #833): `process_helm_inputs` applies all six in one applier — the
 /// four per-axis helm ids plus vertical thrust and, since issue #881,
 /// `helm-boost` (which the retired LocalShip-only `handle_boost_messages` used
@@ -28,28 +29,22 @@
 pub fn register_helm_dispatch(app: &mut bevy::prelude::App) {
     use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
 
-    app.register_admitted_consumer(ConsumerMatcher::exact(
+    app.register_admitted_consumer(ConsumerMatcher::kind(
         crate::ship::system_registry::HELM_THRUST_KIND,
-        crate::ship::system_registry::HELM_THRUST_SYSTEM_ID,
     ))
-    .register_admitted_consumer(ConsumerMatcher::exact(
+    .register_admitted_consumer(ConsumerMatcher::kind(
         crate::ship::system_registry::HELM_STEERING_KIND,
-        crate::ship::system_registry::HELM_STEERING_SYSTEM_ID,
     ))
-    .register_admitted_consumer(ConsumerMatcher::exact(
+    .register_admitted_consumer(ConsumerMatcher::kind(
         crate::ship::system_registry::HELM_IMPULSE_KIND,
-        crate::ship::system_registry::HELM_IMPULSE_SYSTEM_ID,
     ))
-    .register_admitted_consumer(ConsumerMatcher::exact(
+    .register_admitted_consumer(ConsumerMatcher::kind(
         crate::ship::system_registry::LATERAL_THRUST_KIND,
-        crate::ship::system_registry::LATERAL_THRUST_SYSTEM_ID,
     ))
-    .register_admitted_consumer(ConsumerMatcher::exact(
+    .register_admitted_consumer(ConsumerMatcher::kind(
         crate::ship::system_registry::VERTICAL_THRUST_KIND,
-        crate::ship::system_registry::VERTICAL_THRUST_SYSTEM_ID,
     ))
-    .register_admitted_consumer(ConsumerMatcher::exact(
+    .register_admitted_consumer(ConsumerMatcher::kind(
         crate::ship::system_registry::HELM_BOOST_KIND,
-        crate::ship::system_registry::HELM_BOOST_SYSTEM_ID,
     ));
 }

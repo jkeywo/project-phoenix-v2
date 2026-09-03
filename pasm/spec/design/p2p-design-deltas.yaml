@@ -111,7 +111,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: Typed Human-Readable Join Namespaces
-      summary: "Client and server joining use different stable project GUIDs, one shared compatible-release version GUID and independently issued five-letter suffixes. Normal entry supplies only the suffix from local project/version context; the full PROJECT_GUID_VERSION_GUID_CODE form is portable. Every ship host owns a client code invisible to simulation and other hosts, while the multi-ship session owns one privileged server code."
+      summary: "Client and server joining use different stable project GUIDs, one shared compatible-release version GUID and independently issued typed suffixes. Normal entry supplies only the suffix from local project/version context; the full PROJECT_GUID_VERSION_GUID_CODE form is portable. Every ship host owns a client code invisible to simulation and other hosts, while the multi-ship session owns one privileged server code."
       rationale:
         - "Suffix input is case-insensitive, normalises 0 to O and 1 or L to I, retains J as distinct, collision-checks within its typed namespace and refuses offensive/misleading results."
         - "Rendezvous reports unknown, wrong-type and version-mismatch failures precisely. The target host still performs the authoritative protocol/content stamp check."

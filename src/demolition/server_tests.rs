@@ -139,6 +139,7 @@ fn detonate(app: &mut App, operator: Entity, target: &str) {
                 target: target.to_string(),
             },
             response_token: None,
+            feedback_correlation: None,
         });
 }
 

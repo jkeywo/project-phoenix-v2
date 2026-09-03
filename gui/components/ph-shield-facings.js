@@ -7,6 +7,7 @@ import { t } from '../strings.js';
 import { phColor } from './ph-console-styles.js';
 import { rovingKeyTarget } from '../roving-tabindex.js';
 import { PhElement, phDefine } from './ph-element.js';
+import { SCIENCE_SHIELD_FOCUS_ACTION_ID } from '../stations/sensors-actions.js';
 
 export class PhShieldFacings extends PhElement {
   #facingGs = new Map();
@@ -154,9 +155,13 @@ export class PhShieldFacings extends PhElement {
       this.#showAutoHint();
       return;
     }
-    if (this.sendAction && arcId) {
+    const activate = typeof window !== 'undefined' && window.activateSemanticAction;
+    if (typeof activate === 'function' && arcId) {
       const isFocusedNow = cur.focused_facing === arcId || cur.focused_facing === arcLabel;
-      this.sendAction('set_shield_focus', { arc_id: arcId, focused: !isFocusedNow });
+      activate(SCIENCE_SHIELD_FOCUS_ACTION_ID, {
+        source: 'control',
+        detail: { arc_id: arcId, focused: !isFocusedNow },
+      });
     }
   }
 

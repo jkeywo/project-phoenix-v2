@@ -728,19 +728,40 @@ pub fn begin_asset_preload(
     // `Failed` as terminal. A failed parse no longer deadlocks the gate; it
     // just logs a warning and counts as "ready" so the rest of the world can
     // proceed.
-    let total_count = glb_handles.len() + icon_handles.len() + manifest.sidecars.len();
+    // Sidecars gate the preload only on wasm, where they are FETCHED over HTTP
+    // (`request_sidecar_fetch` queues a JS fetch and delivery lands in the
+    // inbox). On native `request_sidecar_fetch` is a deliberate no-op — sidecars
+    // are read from `std::fs` at spawn time — so nothing ever "delivers" them
+    // and `is_pending_sidecar_delivered` stays false forever. Counting them in
+    // the gate there left `pending_sidecars` un-drainable and hung a native
+    // mission in `GamePhase::Loading` the moment it entered the preload gate via
+    // a lobby force-start or crew ready-up (`--world --solo` never hit it: its
+    // `solo_auto_start` goes straight to `InProgress`). So on native the gate is
+    // GLBs + icons only; sidecar LOD ladders load lazily at render time, exactly
+    // as they already did on the boot path that discovered no sidecars.
+    #[cfg(target_arch = "wasm32")]
+    let sidecar_gate = manifest.sidecars.len();
+    #[cfg(not(target_arch = "wasm32"))]
+    let sidecar_gate = 0usize;
+    let total_count = glb_handles.len() + icon_handles.len() + sidecar_gate;
 
     bevy::log::info!(
-        "asset_preload: discovered {} GLBs, {} icons, {} sidecars, {} sub-worlds (gating total {})",
+        "asset_preload: discovered {} GLBs, {} icons, {} sidecars (gating {}), {} sub-worlds (gating total {})",
         glb_handles.len(),
         icon_handles.len(),
         manifest.sidecars.len(),
+        sidecar_gate,
         pending_worlds.len(),
         total_count,
     );
 
-    // Track pending sidecars and sub-worlds for the poll loop
+    // Track pending sidecars and sub-worlds for the poll loop. Native never
+    // gates on sidecars (see above), so its pending list stays empty; wasm
+    // carries the fetched set for the poll to drain.
+    #[cfg(target_arch = "wasm32")]
     let pending_sidecars = manifest.sidecars.clone();
+    #[cfg(not(target_arch = "wasm32"))]
+    let pending_sidecars: Vec<String> = Vec::new();
     let registered_sidecars: HashSet<String> = manifest.sidecars.iter().cloned().collect();
 
     let resource = AssetPreloadResource {

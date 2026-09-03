@@ -1,5 +1,6 @@
 import { PhTacticalRadar } from './ph-tactical-radar.js';
 import { phDefine } from './ph-element.js';
+import { SENSORS_TARGET_ACTION_ID } from '../stations/sensors-actions.js';
 
 /**
  * Courier pilot radar — one scope, one selection, two consumers.
@@ -25,7 +26,13 @@ export class PhCourierRadar extends PhTacticalRadar {
     if (inner) {
       inner.sendAction = (_action, payload) => {
         this.sendAction?.('set_target', { uuid: payload.uuid });
-        this.sendAction?.('set_sensors_target', { uuid: payload.uuid });
+        const activate = typeof window !== 'undefined' && window.activateSemanticAction;
+        if (typeof activate === 'function') {
+          activate(SENSORS_TARGET_ACTION_ID, {
+            source: 'control',
+            detail: { uuid: payload.uuid },
+          });
+        }
       };
     }
   }

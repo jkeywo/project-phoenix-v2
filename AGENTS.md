@@ -4,7 +4,7 @@
 
 ## TL;DR
 
-A browser-based spaceship bridge simulator. One browser tab shows a shared 3D view of space. Players join from phones by scanning a QR code, or by typing the five letters shown next to it — no installation. The host (view screen) runs Rust/Bevy compiled to WebAssembly and is the authoritative server; the client (phone console) is **pure HTML/CSS/JS** — no client-side WASM. Clients send inputs and receive state snapshots. Networking is the **Phoenix transport** (issue #1112) in a star topology: a Phoenix-owned rendezvous service (`worker-rendezvous/`, a Cloudflare Worker + Durable Object) carries typed join-code lookup and WebRTC signalling over a secure WebSocket, and the game traffic then runs over direct WebRTC DataChannels — a reliable ordered one for commands and reliable messages, and a lossy unordered one for the snapshot class. PeerJS and its public cloud broker were retired in #1112. When a network builds no direct link at all, the same rendezvous socket carries the game's own frames instead (issue #1113) — the two delivery classes preserved, the same admission gate, no second protocol — and that fallback is also how a browser client joins a **native** host, which has no WebRTC.
+A browser-based spaceship bridge simulator. One browser tab shows a shared 3D view of space. Players join from phones by scanning a QR code, or by typing the code shown next to it — no installation. The host (view screen) runs Rust/Bevy compiled to WebAssembly and is the authoritative server; the client (phone console) is **pure HTML/CSS/JS** — no client-side WASM. Clients send inputs and receive state snapshots. Networking is the **Phoenix transport** (issue #1112) in a star topology: a Phoenix-owned rendezvous service (`worker-rendezvous/`, a Cloudflare Worker + Durable Object) carries typed join-code lookup and WebRTC signalling over a secure WebSocket, and the game traffic then runs over direct WebRTC DataChannels — a reliable ordered one for commands and reliable messages, and a lossy unordered one for the snapshot class. PeerJS and its public cloud broker were retired in #1112. When a network builds no direct link at all, the same rendezvous socket carries the game's own frames instead (issue #1113) — the two delivery classes preserved, the same admission gate, no second protocol — and that fallback is also how a browser client joins a **native** host, which has no WebRTC.
 
 For the current feature set, read **[wiki/concepts/project-overview.md](./wiki/concepts/project-overview.md)** and the relevant PASM slice under [`pasm/spec/`](./pasm/spec/). Planned work lives on the GitHub issue tracker (label `PRD`). Domain vocabulary lives in **[CONTEXT.md](./CONTEXT.md)** — use those terms, don't invent synonyms.
 
@@ -112,9 +112,8 @@ node scripts/build-client.mjs                  # → dist/client/, then serve di
 # modes. With no --world it serves a built bundle, the content manifest, the
 # scenario catalogue and a version stamp from a native process instead of an
 # open browser tab: DELIVERY ONLY, the authoritative simulation is still
-# server.html or phoenix-headless, and crew signalling goes through the
-# rendezvous service exactly as it does in a browser. There is no TLS or auth
-# in either mode — LAN or behind something else, never a public address.
+# server.html or phoenix-headless. There is no TLS or auth in either mode — LAN
+# or behind something else, never a public address.
 cargo build --release --features host --bin phoenix-host
 ./target/release/phoenix-host --client-dir dist
 #   Binds 0.0.0.0:8080 by default — LAN-reachable out of the box; Windows
@@ -152,7 +151,10 @@ cargo build --release --features host --bin phoenix-host
 # longer wasm-gated, so a crew who are all on phones can be launched from the
 # viewscreen. Each flag still skips exactly the stage it decides — --world skips
 # the scenario stage, --world --ship skips both, --lobby --ship skips the hull.
-./target/release/phoenix-host --client-dir dist --lobby --rendezvous <URL> --origin <URL>
+./target/release/phoenix-host --client-dir dist --lobby
+#   …and that is the whole of a LAN game since issue #1353: the host takes crew
+#   on its own port. --rendezvous <URL> --origin <URL> adds the cloud leg for
+#   play beyond the LAN; both run at once.
 #   run-native.bat is the Windows wrapper for the two invocations above: no
 #   argument runs the delivery-only host, `run-native.bat lobby` adds --lobby.
 #   The default invocation is unchanged and the acceptance kits depend on it.
@@ -216,9 +218,12 @@ cargo build --release --features host --bin phoenix-host
 #     process serves itself, so a bridge machine with no internet still shows a
 #     code. Its URL points at the address the LISTENER bound, not the loopback
 #     one the surface loaded from — pass --addr <lan-ip>:<port> if the machine's
-#     routing cannot answer that (the boot log says when it could not). With no
-#     --rendezvous, or --solo, the panel says joining is off rather than framing
-#     a dead code. Shown in the lobby, hidden at mission start, and toggled in
+#     routing cannot answer that (the boot log says when it could not). The code
+#     in it is the host's OWN (issue #1353), minted at bind, so the panel is
+#     live on a plain --lobby launch; only --solo or a bundle-less host says
+#     joining is off rather than framing a dead code. A host that ALSO has
+#     --rendezvous holds two codes and shows the direct one: the QR carries the
+#     page as well as the code, and the page it opens is served from here. Shown in the lobby, hidden at mission start, and toggled in
 #     play from the surface's own control (after F9) or a phone's settings menu.
 #     THAT LOBBY CARRIES THE MONITOR ROW (issue #1330): one button per connected
 #     display, the current viewscreen marked, and pressing another moves the
@@ -351,6 +356,19 @@ cargo build --release --features host --bin phoenix-host
 #     budget is spent). Either frees a slot under an operator who pressed
 #     nothing and overlaps the console coming back. (The close+recreate "race"
 #     this once cited is not observable — both calls are one system body.)
+#     THE WHOLE OF THE ABOVE HAS A HUMAN HALF: docs/acceptance/1335-native-lobby.md
+#     (issue #1335) walks one operator through it on real monitors, end to end
+#     through `run-native.bat lobby` — the picks, the QR, the viewscreen move,
+#     consoles opened/moved/closed, two per screen judged by eye and the re-tile
+#     blink timed, an unplug mid-mission, arrange-quit-relaunch per class, and
+#     the keyboard pass. Its §9 PARKS what this rig cannot settle rather than
+#     dropping it: touch (no hardware, with #1124's leg), prefers-contrast /
+#     reduced-motion (panes::os_prefs::query_os_accessibility_prefs is a stub and
+#     Ultralight has no OS-backed matchMedia, so neither the surface's CSS nor
+#     the reticle's response can be driven from Windows today), and an OBSERVED
+#     view crash (not constructible by hand). Do not read those unticked boxes as
+#     a failed run, and do not add a kit step for behaviour the batch does not
+#     have.
 #   --manifest also narrows what this process FLIES, not only what it publishes:
 #     with a curating manifest in force the default hull is drawn from that
 #     manifest's allowlist (issue #917). An explicit --ship still wins.
@@ -365,15 +383,54 @@ cargo build --release --features host --bin phoenix-host
 #   plausible mission with the wrong numbers.
 #   src/entities/template_preload.rs is the one strict populate every native
 #   process shares.
-#   --rendezvous <URL> --origin <URL>  IS the crew path (issue #1113), and the
-#     answer to what #1121 deferred. The host registers with the rendezvous
-#     service, prints its five-letter code at startup, and every crew member
-#     reaches it over the service's WebSocket game relay — a native process has
-#     no WebRTC, so it registers saying `transports: ["ws-relay"]` and joiners
-#     skip the direct ladder instead of spending 90 s discovering that.
+#   THE CREW PATH IS TWO LEGS, and a host may run either or both.
+#   DIRECT LAN ACCEPT (issue #1353) is ON by default whenever the host serves a
+#     --client-dir bundle and is not --solo: THE HOST IS ITS OWN RENDEZVOUS.
+#     It mints its own code from assets/join/join-codes.toml, and a request on
+#     its delivery port asking to upgrade /v1/join is taken off the HTTP path
+#     (delivery::serve's ConnectionUpgrade door) and answered by
+#     native_host::direct_join — the single-game subset of
+#     worker-rendezvous/src/registry.js, in process. A phone loads the bundle
+#     from this host and opens its socket back to the same origin, so a LAN game
+#     needs NO external service: no worker, no wrangler, no internet. The client
+#     half of that rule is gui/join-url.js's rendezvousBaseForOrigin — a page
+#     dials the origin that served it unless that origin is one of the published
+#     web ones (KNOWN_WEB_ORIGINS, the twin of worker-rendezvous/wrangler.toml's
+#     ALLOWED_ORIGIN), which supersedes #1336's ?rendezvous= question.
+#     It is NOT a second host implementation: it is a RelaySocket, so
+#     relay_transport.rs's registration, stamp handshake, Identify gate,
+#     reserved-token refusal and shedding rule are the same code on both legs
+#     and a phone cannot tell them apart. tests/native_direct_join.rs drives a
+#     real WebSocket client through a bound host and is NOT #[ignore]d.
+#     There is deliberately NO Origin allow-list on that door (same origin by
+#     construction; a list of every name a machine answers to refuses crews for
+#     no defence). What gates a JOIN instead is attempt-limiting, because the
+#     stamp is public and the code is the only secret: direct_join.rs's
+#     AdmissionBudgets holds a per-source failed-guess bucket that survives
+#     reconnection, a per-source cap on sockets that never join, and a global
+#     circuit-breaker that ramps a delay onto every lookup answer. All of it is
+#     SOFT — the bucket refills, refusals carry Retry-After — because a whole
+#     crew can share one address. The authored suffix is EIGHT letters for the
+#     same reason (25^8 ≈ 1.5e11; five was walkable in ~35 min), and all three
+#     readers of assets/join/join-codes.toml inherit that. Every STATE a joiner
+#     socket can be in also has a clock, which is what stops a dropped phone
+#     holding a seat for the whole mission: un-joined on JOIN_DEADLINE, joined
+#     but never attached on attach_deadline, attached on WebSocket ping/pong.
+#     A half-open TCP (a phone out of range, no FIN) reads WouldBlock for ever,
+#     so nothing short of a ping detects it; every reap goes down the ordinary
+#     departure path, so the seat flips to Backfill and a reconnect yields it
+#     straight back.
+#   --rendezvous <URL> --origin <URL>  is the OTHER leg (issue #1113): play
+#     beyond one LAN. The host registers with the rendezvous service, prints its
+#     typed code at startup, and every crew member reaches it over the
+#     service's WebSocket game relay — a native process has no WebRTC, so it
+#     registers saying `transports: ["ws-relay"]` and joiners skip the direct
+#     ladder instead of spending 90 s discovering that.
 #     `--origin` is required and deliberately not defaulted: the service refuses
-#     an upgrade whose Origin is not on its deployed allowlist. Without these
-#     flags nobody can join and the host says so at boot — that is `--solo`.
+#     an upgrade whose Origin is not on its deployed allowlist. (The direct leg
+#     has no such gate, and must not grow one — see direct_join.rs's header.)
+#     With neither leg nobody can join and the host says so at boot — that is
+#     `--solo`, or a host serving no bundle.
 #     src/native_host/transport.rs is the seam; relay_transport.rs is what
 #     plugs into it and relay_socket.rs is the tungstenite half.
 #     The socket REDIALS on a backoff if it dies, the way the browser host's
@@ -612,10 +669,10 @@ Prerequisites: Rust stable + `rustup target add wasm32-unknown-unknown`, `cargo 
 server.html initHostTransport()          gui/rendezvous-transport.js
   ↓  wss:// to the rendezvous service, `host-open`
 worker-rendezvous registry               worker-rendezvous/src/registry.js
-  ↓  mints a private five-letter suffix, answers `hosted`
+  ↓  mints a private suffix, answers `hosted`
 server.html showJoinCode()
   ↓  paints the letters + a QR of client/index.html#<PROJECT_VERSION_CODE>
-client.html startPhoenixJoin()           five letters typed, pasted, or scanned
+client.html startPhoenixJoin()           a code typed, pasted, or scanned
   ↓  wss:// `join` with the full code → `joined` (unknown / wrong-type /
   ↓  version-mismatch are three distinct refusals)
   ↓  SDP + ICE relayed by the service; the JOINER creates BOTH channels:
@@ -631,7 +688,7 @@ client.html → Identify { token, name }   the ordinary crew protocol starts her
 The signalling socket is expendable once the DataChannels are up. A link that
 drops is re-resolved against the SAME code on a backoff, with the same session
 token re-sent as `Identify` — the host restores the held station and pushes the
-current projection, and nobody re-types five letters.
+current projection, and nobody re-types the code.
 
 ### Assembling a fleet (issue #1114)
 
@@ -721,7 +778,7 @@ gui/            — CLIENT: pure JS modules + one HTML file per console (iframe)
 assets/         — TOML configs: worlds/, entities/, factions/; models, shaders, sounds
 server.html     — Host page: loads server WASM, runs Bevy, registers with the
                   rendezvous service and owns the per-token connection maps
-client.html     — Client page: pure HTML/JS, joins by typed five-letter code or
+client.html     — Client page: pure HTML/JS, joins by typed code or
                   by the structured code a QR link puts in the URL fragment
 worker-rendezvous/ — The rendezvous service (Cloudflare Worker + Durable
                   Object): typed join codes, presence, WebRTC signalling relay,
@@ -735,7 +792,10 @@ gui/fleet-session.js — its two ends wired onto the transport. Separate from th
                   crew protocol by design; see "Assembling a fleet" above
 docs/acceptance/ — Step-by-step kits for the human half of a HITL issue, one
                   file per issue. `1113-networks.md` is the field script for
-                  connecting across real networks.
+                  connecting across real networks; `1335-native-lobby.md` is the
+                  one for the native bridge lobby on real monitors (run through
+                  `run-native.bat lobby`), and each kit parks what its rig cannot
+                  settle explicitly rather than dropping it.
 tests/client/   — Vitest tests for gui/*.js
 tests/smoke/    — Playwright smoke tests
 wiki/           — LLM-maintained knowledge base. Read SCHEMA.md first; update as you work.
@@ -879,7 +939,7 @@ ultralight = ["host", "vellum-ultralight/ultralight"]
 
 - Server: `https://pp-dev.kiwigamedesign.co.uk/`
 - Client: `https://pp-dev.kiwigamedesign.co.uk/client/`
-- Server QR encodes: `https://pp-dev.kiwigamedesign.co.uk/client/index.html#<PROJECT_GUID>_<VERSION_GUID>_<CODE>` — the same structured code whose five-letter suffix is printed beside it, so scanning and typing are one join by two routes.
+- Server QR encodes: `https://pp-dev.kiwigamedesign.co.uk/client/index.html#<PROJECT_GUID>_<VERSION_GUID>_<CODE>` — the same structured code whose typed suffix is printed beside it, so scanning and typing are one join by two routes.
 
 ---
 

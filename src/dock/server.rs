@@ -27,7 +27,8 @@ use bevy::prelude::*;
 use crate::command_admission::ai_emit::emit_ai_command;
 use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
 use crate::core::messages::{
-    DockBlackboard, PowerGroupId, SystemAffinity, SystemBlackboard, SystemControlPayload, SystemId,
+    ActionFeedbackOutcome, DockBlackboard, PowerGroupId, SystemAffinity, SystemBlackboard,
+    SystemControlPayload, SystemId,
 };
 use crate::core::task_lifecycle::{
     TaskLifecycleRequest, TaskSlot, TaskTerminalReason, TASK_VERB_DOCK_HOLD,
@@ -260,13 +261,16 @@ pub fn handle_dock_commands(
         &mut DockControl,
         Option<&EntityUuid>,
     )>,
+    mut outbound: Option<
+        ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
+    >,
 ) {
     for (admitted, transform, mut dock, uuid) in ships.iter_mut() {
         // Clone the resolved target string before mutating the component below.
         // The id itself remains authored topology, not a per-command decision.
         let system_id = dock.system_id.0.clone();
         for cmd in admitted.for_target(&system_id) {
-            match &cmd.payload {
+            let outcome = match &cmd.payload {
                 SystemControlPayload::Dock if !dock.engaged => {
                     match dock.available_target.clone() {
                         Some(target) => {
@@ -275,13 +279,17 @@ pub fn handle_dock_commands(
                             dock.docking_target = Some(target);
                             dock.undock_target = None;
                             dock.last_refusal = None;
+                            ActionFeedbackOutcome::Applied
                         }
                         // Nothing dockable in range — refuse by name rather than
                         // engaging a manoeuvre with no berth to reach. A hull that
                         // declares no dock markers of its own publishes no
                         // available target either, and `tick_dock` surfaces the
                         // sharper "no markers" reason for it while idle.
-                        None => dock.last_refusal = Some(DockRefusal::NoTarget),
+                        None => {
+                            dock.last_refusal = Some(DockRefusal::NoTarget);
+                            ActionFeedbackOutcome::Refused
+                        }
                     }
                 }
                 SystemControlPayload::Undock if dock.engaged || dock.docked => {
@@ -311,9 +319,14 @@ pub fn handle_dock_commands(
                     dock.docking_target = None;
                     dock.undock_target = Some(clear);
                     dock.last_refusal = None;
+                    ActionFeedbackOutcome::Applied
                 }
-                _ => {}
-            }
+                SystemControlPayload::Dock | SystemControlPayload::Undock => {
+                    ActionFeedbackOutcome::Refused
+                }
+                _ => continue,
+            };
+            crate::command_admission::finish_action_feedback(cmd, &mut outbound, outcome);
         }
     }
 }
@@ -996,7 +1009,11 @@ pub const DOCK_MARKER_PREFIX: &str = "dock";
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::messages::{
+        ActionCorrelationId, AdmittedCommand, DeliveryClass, ServerMessage,
+    };
     use crate::dock::mating::DockConfig;
+    use crate::lobby::{server::OutboundMessage, Target};
     use crate::ship::system_registry::DOCK_SYSTEM_ID;
 
     fn config() -> DockConfig {
@@ -1016,6 +1033,43 @@ mod tests {
 
     fn control() -> DockControl {
         control_with_id(DOCK_SYSTEM_ID)
+    }
+
+    fn correlated_dock_command(
+        payload: SystemControlPayload,
+        correlation: &str,
+    ) -> AdmittedCommand {
+        AdmittedCommand {
+            target: SystemId(DOCK_SYSTEM_ID.into()),
+            payload,
+            response_token: Some("helm".into()),
+            feedback_correlation: Some(
+                ActionCorrelationId::new(correlation).expect("valid test correlation"),
+            ),
+        }
+    }
+
+    fn feedback_outcomes(
+        messages: &[OutboundMessage],
+        correlation: &str,
+    ) -> Vec<ActionFeedbackOutcome> {
+        messages
+            .iter()
+            .filter_map(|message| {
+                if message.target != Target::Token("helm".into())
+                    || message.delivery != DeliveryClass::Reliable
+                {
+                    return None;
+                }
+                match &message.msg {
+                    ServerMessage::ActionFeedback {
+                        correlation: actual,
+                        outcome,
+                    } if actual.as_str() == correlation => Some(*outcome),
+                    _ => None,
+                }
+            })
+            .collect()
     }
 
     #[test]
@@ -1063,6 +1117,7 @@ mod tests {
                         target: SystemId("berthing-clamps".into()),
                         payload: SystemControlPayload::Dock,
                         response_token: None,
+                        feedback_correlation: None,
                     },
                 ]),
             ))
@@ -1073,6 +1128,78 @@ mod tests {
         let dock = app.world().entity(entity).get::<DockControl>().unwrap();
         assert!(dock.engaged, "the authored Dock SystemId must be consumed");
         assert_eq!(dock.docking_target.as_deref(), Some("berth-1"));
+    }
+
+    #[test]
+    fn dock_reports_one_applied_or_refused_terminal_outcome() {
+        for (correlation, available, expected) in [
+            (
+                "dock-applied",
+                Some("berth-1"),
+                ActionFeedbackOutcome::Applied,
+            ),
+            ("dock-refused", None, ActionFeedbackOutcome::Refused),
+        ] {
+            let mut app = App::new();
+            app.add_message::<OutboundMessage>()
+                .add_systems(Update, handle_dock_commands);
+            let mut dock = control();
+            dock.available_target = available.map(str::to_string);
+            app.world_mut().spawn((
+                dock,
+                Transform::default(),
+                crate::core::messages::AdmittedCommands(vec![correlated_dock_command(
+                    SystemControlPayload::Dock,
+                    correlation,
+                )]),
+            ));
+            let mut cursor = app
+                .world()
+                .resource::<Messages<OutboundMessage>>()
+                .get_cursor();
+
+            app.update();
+
+            let messages: Vec<_> = cursor
+                .read(app.world().resource::<Messages<OutboundMessage>>())
+                .cloned()
+                .collect();
+            assert_eq!(feedback_outcomes(&messages, correlation), vec![expected]);
+        }
+    }
+
+    #[test]
+    fn undock_reports_one_applied_or_refused_terminal_outcome() {
+        for (correlation, engaged, expected) in [
+            ("undock-applied", true, ActionFeedbackOutcome::Applied),
+            ("undock-refused", false, ActionFeedbackOutcome::Refused),
+        ] {
+            let mut app = App::new();
+            app.add_message::<OutboundMessage>()
+                .add_systems(Update, handle_dock_commands);
+            let mut dock = control();
+            dock.engaged = engaged;
+            app.world_mut().spawn((
+                dock,
+                Transform::default(),
+                crate::core::messages::AdmittedCommands(vec![correlated_dock_command(
+                    SystemControlPayload::Undock,
+                    correlation,
+                )]),
+            ));
+            let mut cursor = app
+                .world()
+                .resource::<Messages<OutboundMessage>>()
+                .get_cursor();
+
+            app.update();
+
+            let messages: Vec<_> = cursor
+                .read(app.world().resource::<Messages<OutboundMessage>>())
+                .cloned()
+                .collect();
+            assert_eq!(feedback_outcomes(&messages, correlation), vec![expected]);
+        }
     }
 
     #[test]
@@ -1268,6 +1395,7 @@ mod tests {
                 target: SystemId(DOCK_SYSTEM_ID.into()),
                 payload: SystemControlPayload::Undock,
                 response_token: None,
+                feedback_correlation: None,
             });
         app.update();
 

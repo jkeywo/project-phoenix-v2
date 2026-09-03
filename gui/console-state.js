@@ -891,6 +891,32 @@ function blackboardOfKind(state, kind, preferredIds = []) {
 }
 
 /**
+ * Resolve one exact authored System instance by System kind.
+ *
+ * Preferred ids preserve Station-authored order. The complete selected-ship
+ * projection follows in lexical order so cross-station capabilities such as
+ * Viewscreen remain available without making the instance id a convention.
+ * The map is optional on the wire; absence intentionally resolves to `null`.
+ *
+ * @param {{systemKinds?: Object<string,string>}} state
+ * @param {string} kind authored `[[system]].kind`
+ * @param {string[]} [preferredIds]
+ * @returns {string|null}
+ */
+function authoredSystemIdOfKind(state, kind, preferredIds = []) {
+  const kinds = state.systemKinds || {};
+  const seen = new Set();
+  for (const id of preferredIds) {
+    seen.add(id);
+    if (kinds[id] === kind) return id;
+  }
+  for (const id of Object.keys(kinds).filter(id => !seen.has(id)).sort()) {
+    if (kinds[id] === kind) return id;
+  }
+  return null;
+}
+
+/**
  * Command console. Returns JSON of {@link CommandConsolePayload}.
  *
  * Reads the `Command` blackboard variant under the authored instance id. It
@@ -982,6 +1008,9 @@ export function withCommandAdvice(consoleName, state, json) {
  *             z: number, yaw: number, impulse_charge_progress: number,
  *             on_screen: boolean, blips: RadarBlip[],
  *             waypoint: {x: number, z: number}|null,
+ *             thrust_system_id: string|null, steering_system_id: string|null,
+ *             lateral_system_id: string|null, impulse_system_id: string|null,
+ *             boost_system_id: string|null, viewscreen_system_id: string|null,
  *             own_hull: StationHullAggregate, boost_enabled: boolean,
  *             boost_battery: number, boost_active: boolean,
  *             helm_auto: boolean, engine_port_thrust: number,
@@ -1078,6 +1107,18 @@ export function buildHelmConsoleState(state, systemIds = []) {
     on_screen:               state.currentView === 'Radar',
     blips,
     waypoint:                state.navigationWaypoint || null,
+    // Exact command owners from the selected hull's authored System kinds.
+    // Instance ids are opaque: no canonical-id or prefix inference belongs on
+    // the client. A legacy server that omits the projection yields null, which
+    // lets older action paths retain their own compatibility fallback.
+    thrust_system_id:        authoredSystemIdOfKind(state, 'helm_thrust', systemIds),
+    steering_system_id:      authoredSystemIdOfKind(state, 'helm_steering', systemIds),
+    lateral_system_id:       authoredSystemIdOfKind(state, 'lateral_thrust', systemIds),
+    impulse_system_id:       authoredSystemIdOfKind(state, 'helm_impulse', systemIds),
+    boost_system_id:         authoredSystemIdOfKind(state, 'helm_boost', systemIds),
+    // Viewscreen is Captain-owned on shipped hulls, so it deliberately falls
+    // through from the preferred Helm ids to the complete selected-ship map.
+    viewscreen_system_id:    authoredSystemIdOfKind(state, 'viewscreen', systemIds),
     own_hull:                aggregateStationHull('helm', state.consoleHull, state.stationSystems),
     boost_enabled:           !!boostEnabled,
     boost_battery:           boostBattery,
@@ -1169,7 +1210,7 @@ export function buildHelmTowLoadView(state) {
  * is when the Dock control shows, `docked` when it becomes Undock, and `refusal`
  * is a `strings.csv` id the console resolves.
  *
- * @param {{ blackboards?, blackboardKinds?, systemConsoleFamilies? }} state
+ * @param {{ blackboards?, blackboardKinds?, systemConsoleFamilies?, systemKinds? }} state
  * @param {string[]} [systemIds] authored Helm-family ids for this Station
  * @returns {object|null}
  */
@@ -1179,7 +1220,14 @@ export function buildHelmDockView(state, systemIds = []) {
     : Object.entries(state.systemConsoleFamilies || {})
       .filter(([, family]) => family === 'helm')
       .map(([id]) => id);
-  const entry = blackboardOfKind(state, 'Dock', owned);
+  const projectedSystemId = authoredSystemIdOfKind(state, 'dock', owned);
+  const hasKindProjection = Object.keys(state.systemKinds || {}).length > 0;
+  const entry = projectedSystemId
+    && Object.prototype.hasOwnProperty.call(state.blackboards || {}, projectedSystemId)
+    ? { systemId: projectedSystemId, data: state.blackboards[projectedSystemId] }
+    // Pre-projection Welcome payloads remain readable through the typed
+    // blackboard discriminator. Once the authored map exists it is decisive.
+    : (!hasKindProjection ? blackboardOfKind(state, 'Dock', owned) : null);
   const systemId = entry?.systemId || null;
   const bb = entry?.data || null;
   if (!bb) return null;
@@ -1332,7 +1380,10 @@ const TIER_SEVERITY = { Operational: 0, Damaged: 1, Disabled: 2, Destroyed: 3 };
  * `system_id` and nothing else; the host decides whether any team can act on it.
  *
  * `prioritised` is a pure echo of the host's resolved pin, so a highlight can
- * only ever show a choice the server actually made.
+ * only ever show a choice the server actually made. `prioritisable` is the
+ * host's current reachability verdict from the same sweep predicate that will
+ * apply a named priority; the client cannot reconstruct station groups from
+ * this deliberately partial hull projection.
  *
  * The `current < max_hp` half of the filter mirrors the host's own candidate
  * guard rather than duplicating a rule for its own sake: a `max_hp = 0` row is
@@ -1345,10 +1396,12 @@ const TIER_SEVERITY = { Operational: 0, Damaged: 1, Disabled: 2, Destroyed: 3 };
  *
  * @param {Array<{system_id,display_name,current,max_hp,tier}>} systemHull
  * @param {Array<{status,system_id,priority_system_id}>} teams normalized slots
+ * @param {string[]} priorityTargets exact currently reachable SystemIds
  */
-export function repairDamagedSystems(systemHull, teams) {
+export function repairDamagedSystems(systemHull, teams, priorityTargets = []) {
   const rows = Array.isArray(systemHull) ? systemHull : [];
   const slots = Array.isArray(teams) ? teams : [];
+  const eligible = new Set(Array.isArray(priorityTargets) ? priorityTargets : []);
   const pinned = new Set(slots.map(s => s && s.priority_system_id).filter(Boolean));
   const onSite = new Set(
     slots.filter(s => s && s.status === 'repairing').map(s => s.system_id).filter(Boolean)
@@ -1369,6 +1422,7 @@ export function repairDamagedSystems(systemHull, teams) {
         damage_pct:   max > 0 ? 1 - current / max : 0,
         prioritised:  pinned.has(h.system_id),
         in_progress:  onSite.has(h.system_id),
+        prioritisable: eligible.has(h.system_id),
       };
     })
     .sort((a, b) =>
@@ -1390,7 +1444,7 @@ export function repairDamagedSystems(systemHull, teams) {
  *             damaged_systems: Array<{system_id: string, display_name: string,
  *               tier: string, current: number, max_hp: number,
  *               damage_pct: number, prioritised: boolean,
- *               in_progress: boolean}>,
+ *               in_progress: boolean, prioritisable: boolean}>,
  *             overall_hull: {current: number, max: number, pct: number,
  *                            destroyed_pct: number},
  *             core_systems: Array, dispatch_targets: Array<{id: string,
@@ -1427,7 +1481,11 @@ export function buildRepairConsoleState(state, systemIds = []) {
       damageable_systems:   damageableSystems,
       // Tap-to-prioritise list (issue #1015) — the visible rows that are
       // actually broken, worst-first.
-      damaged_systems:      repairDamagedSystems(systemHull, teams),
+      damaged_systems:      repairDamagedSystems(
+        systemHull,
+        teams,
+        bb.priority_targets ?? [],
+      ),
       // Authoritative ship-wide hull aggregate from the host — the only
       // whole-ship figures available now that `system_hull` is a projection,
       // and `destroyed_pct` is the share of it that is gone for good (#1014).
@@ -1493,7 +1551,8 @@ export function buildRepairConsoleState(state, systemIds = []) {
  *             battery_charge: number, battery_max: number, draining: boolean,
  *             charging: boolean,
  *             reactor_online: boolean, battery_online: boolean,
- *             own_hull: StationHullAggregate, power_auto: boolean,
+ *             own_hull: StationHullAggregate, system_id: string|null,
+ *             power_auto: boolean,
  *             station_rating: string }} PowerConsolePayload
  */
 
@@ -1540,6 +1599,9 @@ export function buildPowerConsoleState(state, systemIds = []) {
     locked:         bb.locked         || false,
     reactor_online: reactorOnline,
     battery_online: batteryOnline,
+    // The exact authored reactor instance owns allocation commands. Do not
+    // reconstruct it from a family name in the iframe/action map.
+    system_id:      reactorEntry?.systemId ?? null,
     own_hull:       aggregateStationHull('power', state.consoleHull, state.stationSystems),
     power_auto:     systemIds.length > 0
       ? systemIds.every(id => state.controlSources?.[id] === 'Ai')
@@ -2392,6 +2454,21 @@ export function withTutorialOverlay(consoleName, state, json) {
   }
 }
 
+/**
+ * Add the crew-public GM takeover projection to every authentic Station
+ * payload. The iframe remains the authored interface; console-core renders one
+ * shared status banner from this metadata without station-specific clones.
+ */
+export function withGmTakeover(consoleName, state, json) {
+  try {
+    const obj = JSON.parse(json);
+    obj.gm_takeover = (state.stationPuppets || {})[consoleName] || null;
+    return JSON.stringify(obj);
+  } catch (_) {
+    return json;
+  }
+}
+
 if (typeof window !== 'undefined') {
   // Station labels for the inline client.html script (lobby chips, console
   // title) — the tab-bar CONSOLE_LABEL map was deleted with the tab bar (#827).
@@ -2401,16 +2478,20 @@ if (typeof window !== 'undefined') {
     // Visiting systems are merged BEFORE the tutorial pass, so a station's
     // authored `state`-kind triggers can reference a sought system's view the
     // same way they reference an owned one.
-    return withTutorialOverlay(
+    return withGmTakeover(
       consoleName,
       state,
-      withStationDamage(
+      withTutorialOverlay(
         consoleName,
         state,
-        withCommandAdvice(
+        withStationDamage(
           consoleName,
           state,
-          withVisitingSystems(consoleName, state, inner),
+          withCommandAdvice(
+            consoleName,
+            state,
+            withVisitingSystems(consoleName, state, inner),
+          ),
         ),
       ),
     );

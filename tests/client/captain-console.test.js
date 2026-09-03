@@ -224,6 +224,8 @@ describe('courier captain renderStation', () => {
   it('filters the camera view list to fore + cinematic only', () => {
     courierRender(payload, document);
     expect(el('camera').state).toEqual({ views: ['camera_fore', 'cinematic'], current_view: 'cinematic', auto: false });
+    expect(rawCourierRender.availableCameraViews(withConsoleFamilyProjection(payload)))
+      .toEqual(el('camera').state.views);
   });
 
   it('drives objectives under the courier-specific id and station-damage', () => {
@@ -240,7 +242,10 @@ describe('courier captain renderStation', () => {
     expect(el('power').state).toEqual({ groups: [{ id: 'reactor' }], auto: true });
     expect(el('battery').state).toEqual({ level_pct: 40, charging: true, emergency_threshold_pct: 20 });
     expect(el('hull').state).toEqual({ total_pct: 0.7, destroyed_pct: 0.1 });
-    expect(el('repair').state).toEqual({ teams: [{ id: 't1' }], auto: false, targets: [{ id: 'x' }], damaged: [{ id: 'y' }] });
+    expect(el('repair').state).toEqual({
+      teams: [{ id: 't1' }], auto: false, targets: [{ id: 'x' }],
+      damaged: [{ id: 'y' }], externally_committed_teams: 0,
+    });
   });
 
   it('hides the threat-bearing readout when Sensors holds no threat', () => {
@@ -252,7 +257,7 @@ describe('courier captain renderStation', () => {
 
   it('drives the Nav overlay map and Comms overlay thread from the absorbed systems', () => {
     courierRender(payload, document);
-    expect(el('nav').state).toEqual({ blips: [{ uuid: 'n1' }], regions: [{ id: 'r1' }], range: 900, ship_pos: { x: 5, z: 6 }, ship_heading: 45, waypoint: { name: 'Beacon' } });
+    expect(el('nav').state).toEqual({ blips: [{ uuid: 'n1' }], regions: [{ id: 'r1' }], range: 900, ship_pos: { x: 5, z: 6 }, ship_heading: 45, waypoint: { name: 'Beacon' }, auto: false });
     expect(el('contacts').state).toEqual({ contacts: [{ id: 'c1' }] });
     expect(el('message').state).toEqual({ thread: { id: 'm2', is_read: false }, rejection: null });
   });

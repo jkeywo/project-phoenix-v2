@@ -5066,6 +5066,7 @@ direction = [0.0, 0.0, -1.0]
             target: crate::ship::system_registry::helm_thrust_system_id(),
             payload: crate::core::messages::SystemControlPayload::SetThrust { value: 1.0 },
             response_token: None,
+            feedback_correlation: None,
         }])
     }
 

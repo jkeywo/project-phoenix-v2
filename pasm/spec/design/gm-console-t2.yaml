@@ -1,0 +1,204 @@
+entities:
+  - decision: gm-t2-peer-and-admission-contract
+    core:
+      status: accepted
+      confidence: confirmed
+      title: T2 GM Peer, Admission, and Readiness Contract
+      summary: "A browser GM runs the same headless authoritative simulation as every other host-class peer and joins through T1's Phoenix transport. The privileged server code admits either an open player-ship slot or the GM role after rendezvous; a GM consumes no ship slot and a crew code cannot request GM. Connected GMs are mechanically equal, each has a ready state, and each counts toward collective autostart; spectators do not. Any GM may force-start past readiness only, never past validation. A GM-only roster starts when all connected GMs are ready or one force-starts."
+      rationale:
+        - "This keeps one deterministic simulation and command protocol instead of building a privileged state-streaming server for the GM surface."
+        - "Role presets filter presentation only. They never create permission tiers, locks, a leader, or ownership of GM actions."
+        - "T2 is designed against the final T1 host-admission, deterministic multi-host, record-transfer, and divergence-recovery contracts; it does not ship a temporary single-host compatibility topology."
+        - "PRD #930 was decomposed on 2026-08-29 into tracer-bullet issues #1289-#1320. M1 is #1289-#1300, M2 is #1301-#1316 (including shared confirmation tracer #1315 under PRD #1273), and M3 is #1317-#1320. The exits are evidence-producing issues #1300 (AFK), #1316 (AFK), and #1320 (HITL), not horizontal milestone trackers."
+    architecture:
+      kind: session-policy
+      authority: authoritative
+      coordinates: [gm-milestone-peer-tracer, roadmap-band-a2-native-network-foundation]
+      runs_in: [host-browser-runtime, headless-runtime]
+
+  - component: gm-operator-admission-and-presence
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Reconnectable Equal-GM Admission and Presence
+      summary: "The privileged fleet-host path admits either its existing player-ship role or a GM role. Each GM receives a stable public gm-N identity and a private reconnect capability, consumes no ship capacity, has no Station or leader bit, and remains visible in a separately projected roster. Crew admission has no GM request surface. Rust validates and full-replaces the bounded public {id, name, connected, ready} roster, then publishes it through Welcome, GmRosterChanged, and the host lobby projection without changing player ship-slot policy. A Lobby reconnect retains identity and clears readiness. After freeze, only the correct private capability for the exact disconnected operator and departed technical slot auto-pends a divergence-safe paused restore; matching-digest Commit preserves that row and rejoins its existing wait-set slot."
+      rationale:
+        - "The host-mesh technical slot still authenticates deterministic peer traffic, but it is deliberately absent from the public GM row and grants no operator precedence."
+        - "Keeping reconnect capability and rendezvous peer identity out of the authoritative public roster prevents transport bookkeeping from becoming simulation identity or crew-visible authority."
+        - "The nullable role preset placeholder is private browser identity metadata only; it never enters GmOperator, the frozen roster, snapshots, or digests."
+    architecture:
+      kind: session-identity-registry
+      authority: authoritative
+      coordinates: [gm-t2-peer-and-admission-contract, gm-milestone-peer-tracer]
+      runs_in: [host-browser-runtime, phone-browser-runtime]
+    implementation:
+      status: declared
+      paths: [gui/host-mesh.js, gui/fleet-session.js, src/gm_roster.rs, src/gm_join.rs, src/lockstep/mod.rs, src/lockstep/session.rs, src/core/messages.rs, src/lobby/server.rs, src/server/bridge.rs, gui/lobby-state.js, gui/host-lobby-view.js, gui/lobby-view.js, server.html, client.html]
+      symbols: [GmRoster, GmOperator, GmJoinKind, begin_reconnect, rejoin, wasm_set_gm_roster, createFleetOwner, createFleetMember, admitHost, requestGmReconnect]
+      tests: [cargo test, npx vitest run]
+
+  - component: gm-ready-and-force-start-policy
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Collective Crew and GM Start Policy
+      summary: "Each ship host publishes an exact bounded tally of connected non-Spectator crew and its ready subset; each connected GM publishes an independent ready flag. The authenticated mesh owner combines every cohort with every connected GM, requires all participants ready for automatic start, excludes disconnected participants and Spectators, and supports a GM-only roster. Any connected GM may request force-start past readiness, but neither automatic nor forced start bypasses successfully loaded world, hull, Station-map, compatibility, peer, or terminal presentation-preload validation. The browser proposal carries apply_tick 0; only Rust on the technical owner assigns a safe exact tick and embeds the immutable attributed grant in its authenticated TickFrame. Every peer applies that canonical grant once, enters InProgress directly, and returns an applied, no-op, or refused result. The mesh star centre decides ordering only and grants no product authority."
+      rationale:
+        - "One owner-ordered policy is required because independent per-host all-ready answers cannot represent crew and GM participants distributed across several authoritative peers."
+        - "Readiness, authenticated GM attribution, content compatibility, and presentation-preload completion are frozen when the technical owner seals the canonical grant. Re-reading peer-local readiness or frame-paced preload state at apply_tick could split peers when those values straddle local fixed-tick boundaries; Rust therefore revalidates only deterministic managed-mode, phase, generation, and canonical-grant state. There is no asynchronous JavaScript start-grant broadcast."
+        - "The private frozen topology separates owner and technical participants from player ships, so zero-ship GM simulations join the same wait-set without exposing their mesh slots in the public GM roster. Exact-generation asynchronous adoption must be accepted by Rust before JavaScript publishes that topology or releases buffered frames and grants; the pre-adoption frame FIFO and lobby/grant ingress queues are bounded, with absolute projections coalesced and generation edges retained."
+        - "Every multi-participant fresh-Lobby adoption rebases to activation tick 1, a zero-overstep fixed clock at one timestep, the authored world RNG seed, and the tick-1 WorldIdMint boundary before installing the wait-set. A multi-participant render frame may commit at most one whole fixed tick; whole catch-up debt is discarded after sealing while the fractional interpolation remainder survives. Returned-to-Lobby, resume-staged, or already-started worlds fail closed."
+        - "Fresh-Lobby Leave is also asynchronous: browser transport and adopted state remain live until Rust accepts the exact leave generation, while a phase-boundary refusal preserves the fleet. Raw host pause, instagib, and teleport/debug mutation paths are neutralised or refused while FleetLockstep is installed because they are not replicated inputs."
+        - "AssetPreloadResource remains presentation state and rendererless peers report that terminal gate ready. #1291 canonicalises primary authored ModelMarkers as simulation-owned weapon/target geometry: every authoritative profile binds the exact primary sidecar bytes into frozen content identity, resolves the same component before fixed consumers run, and lets renderer/LOD systems consume but never replace or remove it."
+        - "The legacy single-ship countdown and unattributed AI launch route remain available outside a managed fleet and are suppressed while the collective policy owns mission start."
+    architecture:
+      kind: session-policy
+      authority: authoritative
+      coordinates: [gm-t2-peer-and-admission-contract, gm-operator-admission-and-presence, gm-milestone-peer-tracer]
+      runs_in: [host-browser-runtime, headless-runtime, phone-browser-runtime]
+    implementation:
+      status: declared
+      paths: [gui/host-mesh.js, gui/fleet-session.js, src/lobby/start_policy.rs, src/gm_roster.rs, src/lobby/session.rs, src/lobby/server.rs, src/lockstep/mod.rs, src/server/bridge.rs, src/server/viewscreen_border.rs, src/server_app/registration.rs, src/debug_overlay.rs, src/regions/server.rs, src/core/codec.rs, src/core/messages.rs, gui/host-lobby-view.js, gui/lobby-state.js, gui/lobby-view.js, server.html, client.html]
+      symbols: [ReadinessTally, evaluate_start_policy, StartGrant, FleetManagedLobby, PendingStartGrants, StartGrantTracker, StartGrantResults, FleetJoinStatus, FLEET_ACTIVATION_TICK, join_fleet, leave_fleet, discard_multi_participant_overstep, local_presentation_ready, wasm_join_fleet, wasm_fleet_join_status, wasm_leave_fleet, wasm_set_fleet_managed_lobby, wasm_set_fleet_start_validation, wasm_apply_start_grant, wasm_take_start_result]
+      tests: [cargo test, npx vitest run, tests/smoke/fleet-start-policy.spec.js, tests/smoke/fleet-lockstep.spec.js]
+
+  - decision: gm-t2-join-pause-and-projection-contract
+    core:
+      status: accepted
+      confidence: confirmed
+      title: GM Join, Pause, and Local Projection Contract
+      summary: "A first-time mid-session GM join requires visible acceptance by an existing host or GM, then schedules one synchronized pause for snapshot/history transfer and roster admission. The session remains paused until an explicit attributed SetSessionPaused { active: false }; reconnecting the same GM may auto-accept but still surfaces the pause. Joining never silently pauses. GM maps, feeds, dossiers, knowledge views, and authentic Station interfaces read local deterministic projections over the Host Channel; only typed GM commands cross lockstep, and there is no privileged omniscient streaming API."
+      rationale:
+        - "SetSessionPaused is an idempotent state-setting command rather than a toggle, so simultaneous equal GMs converge under deterministic command ordering. It is separate from debug controls and the local host pause surface even when all three present the same authoritative pause state."
+        - "A synchronized paused transfer makes drop-in visible and safe without granting a joining browser a special replication path."
+        - "The join transaction owns a separate deterministic pause hold: acceptance schedules that hold exactly once, rejection before acceptance changes neither roster nor pause, and terminal admission does not release it. Only a newly applied, attributed SetSessionPaused { active: false } after the transaction's terminal result can resume the session, so protocol sequencing never fabricates a GM action."
+        - "The candidate remains a private transport participant until it restores the canonical #1117 run containing the snapshot, complete command history, and snapshotted GM journal and reports the matching digest. Its provisional topology is held only in GmJoinBootstrap: neither FleetRoster nor FleetLockstep exists on the candidate before GmJoinCommit. An authenticated owner-carried host loss received after capture is staged in non-authoritative GmJoinPendingHostLoss, leaving snapshot proof and admission unchanged; Commit drains it exactly once into PendingHostLoss and departs that slot in the newly installed wait-set before Resume. Successful restore engages the candidate's GmJoinPauseHold even when it restored from behind the pause boundary; that technical hold never rewrites the durable GM journal, and every peer adopts the same current-pause baseline when the first real typed grant is replicated. Only a matching digest installs the public GM roster and lockstep wait-set. Accepted disconnects and authenticated transfer/restore failures are owner-sequenced visible refusals; a disconnect racing an existing Commit preserves and re-emits that same terminal proof. Stalled not-ready restore is bounded by authenticated candidate requests and owner grants on the deterministic RestoreBoundary protocol clock; duplicate, stale, and render-only updates cannot advance it. A fresh reconnect Pause only freezes and arms the private receiver. After the canonical record passes its version/content/boot-identity gate, that receiver stages the saved authored-row UUID map through stage_resume_game_start_entity_uuids and then requests InProgress, so the stale process cannot mint competing GameStart identities. Its bounded clock starts only after GameStartEntityUuids proves the exact deferred spawn walked every authored row. Only the terminal authenticated owner grant may then enable the existing authored-row rebuild branch inside the same rollback-safe restore seam; a still-non-rebuildable world deterministically times out. Post-commit transport loss uses ordinary host-loss. The technical owner sequences this transaction but any existing admitted host or GM may visibly accept or reject it."
+        - "Issue #1292 makes SetSessionPaused the first complete typed GM action tracer, after shared semantic action and feedback issues #1274/#1276, so M1 does not grow temporary plumbing that M2 later replaces. First-time join #1293 depends on record transfer #1117; known-GM divergence-safe reconnect #1294 separately depends on #1118."
+    architecture:
+      kind: session-policy
+      authority: authoritative
+      coordinates: [gm-milestone-peer-tracer]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: confirmed
+      paths: [src/gm_action.rs, src/gm_join.rs, src/asteroids/lifecycle.rs, src/core/codec.rs, src/command_admission/log.rs, src/lockstep/frame.rs, src/lockstep/host_loss.rs, src/lockstep/mod.rs, src/lockstep/recovery.rs, src/lockstep/snapshot_relay.rs, src/server/bridge.rs, src/server_app/registration.rs, src/server_app/world_setup.rs, src/console_bridge.rs, src/snapshot.rs, src/sim_digest.rs, src/headless/replay.rs, gui/host-mesh.js, gui/fleet-session.js, gui/host-actions.js, gui/semantic-action-registry.js, gui/semantic-controls-remapper.js, gui/gamepad-input.js, gui/server-settings.js, gui/action-feedback.js, gui/gm-session-actions.js, gui/gm-session-controls.js, assets/strings/strings.csv, server.html, tests/lockstep_snapshot_transfer.rs, tests/smoke/gm-reconnect.spec.js, tests/client/host-mesh.test.js, tests/client/fleet-session.test.js, tests/client/gm-join-page.test.js]
+      symbols: [SimulationPaused, GmAction, GmActionId, GmActionRequest, GmActionProposal, GmActionOrder, GmActionGrant, GmActionRefusal, GmActionFrame, GmActionSubmission, GmActionJournal, GmActionLog, GmSessionProjection, GmJoinCoordinator, GmJoinApproval, GmJoinBootstrap, GmJoinKind, GmJoinPendingHostLoss, GmJoinCommit, GmJoinFrame, GmJoinPauseHold, GM_JOIN_RESTORE_TIMEOUT_BOUNDARY, MeshRestoreArm, GameStartEntityUuids, ResumeGameStartEntityUuids, stage_resume_game_start_entity_uuids, AsteroidWindow, ready_to_restore, prepare_candidate_bootstrap, begin_join, begin_reconnect, refuse_join, report_restored_join, report_restore_wait_boundary, apply_mesh_inbox, apply_host_loss_backfill, sequence_owner_proposal, validate_fleet_frame, applied_prefix, apply_through, submit_local, apply_due_actions, publish_session_projection, capture_join_run, requestFirstTimeGmJoin, requestGmReconnect, commitFirstTimeGmJoin, wasm_prepare_gm_join_candidate, wasm_begin_gm_join, wasm_refuse_gm_join, wasm_gm_join_status, GmSessionChanged, discard_gm_boundary_overstep, ReplayGmSeed, seed_replay_on_run_start, RecoveryDiagnostic, gm_action_window, wasm_submit_gm_action, HOST_ACTION_DEFINITIONS, createHostActionRegistry, GM_SESSION_ACTION_DEFINITIONS, registerGmSessionActions, createGmSessionControls, parseGmSessionPayload, createSemanticActionRegistry, createGamepadInputRuntime, mountServerSettings]
+      tests: [cargo test gm_join, cargo test --features headless --test lockstep_snapshot_transfer a_join_record_restores_full_command_and_gm_history, cargo test --features headless --test lockstep_snapshot_transfer first_time_gm_join_commits_three_apps_only_after_digest_then_typed_resume, cargo test --features headless --test lockstep_snapshot_transfer departed_gm_reconnect_restores_owner_history_and_digest_before_rejoin_and_resume, cargo test --features headless --test lockstep_snapshot_transfer corrupted_reconnect_record_rolls_back_without_admitting_the_candidate, cargo test --features headless --test lockstep_snapshot_transfer host_loss_during_join_transfer_is_staged_until_commit_and_does_not_stall_resume, cargo test --features headless --test lockstep_snapshot_transfer stalled_join_timeout_is_the_same_protocol_boundary_at_unequal_render_cadence, cargo test --features headless --test lockstep_snapshot_transfer a_corrupted_chunk_is_refused_and_does_not_commit, cargo test gm_action::tests, cargo test core::codec, cargo test lockstep, cargo test lockstep::recovery, cargo test sim_digest, cargo test snapshot::tests, cargo test server_app::mod_tests, cargo test --test replay_simulation, npx vitest run tests/client/host-mesh.test.js tests/client/fleet-session.test.js tests/client/gm-join-page.test.js, npx vitest run tests/client/gm-session-actions.test.js tests/client/gm-session-controls.test.js tests/client/gm-session-page.test.js tests/client/host-actions.test.js tests/client/semantic-action-registry.test.js tests/client/server-settings.test.js, npx playwright test gm-reconnect.spec.js --project=chromium]
+
+  - component: gm-t2-map-feed-and-inspector-shell
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Omniscient Map, Activity Feed, and Reusable Inspector Shell
+      summary: "M1 shows every player ship, NPC, structure, authored hazard and authored Region with stable identity, position, faction, broad health/status, and current target. Asteroid fields render as aggregate Regions, never as individual asteroids unless authored as named selectable entities. Selection opens a minimal reusable inspector shell. One bounded tick-stamped activity stream now carries Damage, Destruction, Objective lifecycle changes, actual trigger fires, Red Alert edges, safe public connection changes, and attributed terminal GM actions/results through a common {tick, category, ships, links, detail} contract. Category and semantic-ship filters compose as a strict AND, global rows appear only under All ships, and links return to live map selection. Detailed doctrine, damage, Comms, knowledge, and attention scoring wait for the milestones that own them."
+      rationale:
+        - "The map, selection, inspector, panels, capability adapters, and action adapters are T2 components designed for M6 reuse, not a disposable GM page."
+        - "The local projection classifies ships before structure substrate, treats StaticPointDefence as a structure, and projects authored RegionShape geometry plus narrowed radar appearance. Streamed Asteroid/AsteroidUuid lifecycle entities have no EntityUuid and therefore never become contacts; only asteroids named in the authored world identity table are selectable points, while each asteroid-field section is one aggregate torus Region."
+        - "Inspect mode partitions geometry rows from point blips, gives an overlapping point priority and then resolves by stable UUID, and lets touch and keyboard traverse only explicitly selectable Regions. Absolute removal clears selection and same-UUID layer reappearance does not resurrect it; ordinary Navigation remains point-selecting."
+        - "The feed consumes unconditional structured source facts rather than creating a parallel GM-only event bus. Fixed facts collect before SimTick advances; Objective changes emit only at actual Active/Completed/Failed transitions from the shared dispatcher and independent Helm-AI path, trigger facts emit at the real evaluator fire seam with authored id or stable script-path/function fallback, and Red Alert consumes actual edges. PostUpdate adds safe public presence and terminal operational results while paused, before the existing host bridge drains Force Start results. Canonical category order is Damage, Destruction, Objective, Trigger, Red Alert, Connection, GM Action; category-specific keys retain exact repeats in the authored global.gm_activity_history_depth ring (default 128)."
+        - "A presentation-only EntityUuid/AsteroidUuid name-and-Ship directory is captured before combat, then pruned to live identities plus those referenced by the bounded feed; Lobby clears it completely. Ship scope comes only from an actual Ship marker, never VictimKind or arbitrary EntityUuid. Removed identities therefore stay readable only while a retained row needs them, streamed asteroid UUID churn cannot grow metadata without bound, and a removed identity cannot become a stale map selection. Category and ship filters are strict AND; clearing resets both and a disappearing selected ship resets to All. Known String Table name ids localise at render time while literal mod-authored names remain literal."
+        - "Connection rows expose only public id, name, role, state, and optional ship. Session tokens, peer ids, mesh slots, and reconnect capabilities never enter the DTO. Pause/Resume and Force Start rows carry public operator identity, durable correlation, exact Applied/No-op/Refused outcome, reason, and canonical action order when one exists; restore/join rebases the observed action cursor. Fictional consequences remain ordinary world rows. M1 adds no attention score, priority, severity, workload, or ranking."
+    architecture:
+      kind: gm-presentation
+      authority: non-authoritative
+      coordinates: [gm-milestone-peer-tracer, gm-milestone-integrated-workshop]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: confirmed
+      paths: [src/gm_projection.rs, src/gm_activity.rs, src/objectives.rs, src/world/server.rs, src/ship/helm_ai/mod.rs, src/core/balance.rs, src/entities/config.rs, src/console_bridge.rs, src/core/codec.rs, src/lobby/server.rs, src/server/bridge.rs, gui/gm-local-projection.js, gui/gm-activity-feed.js, gui/host-channel.js, gui/entity-inspector.js, gui/components/ph-navigation-map.js, assets/strings/strings.csv, server.html]
+      symbols: [GmEntityProjectionPayload, GmEntityProjection, GmEntityKind, GmEntityStatus, GmRadarAppearance, GmEntityReference, GmActivityFeedPayload, GmActivityEntry, GmActivityDetail, GmActivityCategory, GmActivityHistory, GmActivityPlugin, ObjectiveManager, BalanceEvent, StartGrantResults, RegionShape, publish_local_projection, publish_frame_activity, project_balance_events, parseGmEntityProjection, buildGmMapState, createGmLocalProjection, parseGmActivityFeed, filterGmActivityEntries, createGmActivityFeed, createEntityInspector, PhNavigationMap]
+      tests: [cargo test gm_projection::tests, cargo test gm_activity, cargo test scripted_on_destroyed_completes_objective_through_the_live_pipeline, cargo test delayed_queue_dispatches_every_action_variant_in_queue_order, cargo test detect_reach_completion_emits_objective_completed_once, cargo test encode_gm_entity_projection_pins_the_local_host_channel_shape, cargo test encode_gm_activity_feed_pins_the_local_host_channel_shape, npx vitest run tests/client/gm-local-projection.test.js tests/client/gm-activity-feed.test.js tests/client/host-channel-localisation.test.js tests/client/ph-navigation-map.test.js, tests/smoke/gm-page.spec.js]
+
+  - decision: gm-t2-action-result-contract
+    core:
+      status: partially-implemented
+      confidence: confirmed
+      title: Typed, Attributed, Idempotent GM Actions
+      summary: "Every GM mutation is a named typed command carrying operator identity, idempotency key, stable target identities, and a structured applied/no-op/refused result. Targets and preconditions are revalidated at the agreed apply tick and simultaneous equal-GM actions use deterministic ordering. GM actions use the same scenario-authorable vocabulary where one exists and never expose raw ECS mutation, arbitrary components, teleportation, arbitrary asset paths, or a generic expected-version transaction in T2."
+      rationale:
+        - "The command log and GM activity feed always preserve attribution and exact result. Crew normally see only the fictional consequence; operational pause, force-start, and Station takeover identify the GM explicitly."
+        - "M6 may add optimistic-concurrency adapters for safe Live inspection; T2 commands need not pre-invent that broader transaction model."
+    architecture:
+      kind: command-admission-policy
+      authority: authoritative
+      coordinates: [gm-milestone-directing, gm-milestone-integrated-workshop]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/gm_action.rs, src/core/codec.rs, src/lockstep/frame.rs, src/lockstep/mod.rs, src/lockstep/recovery.rs, src/server/bridge.rs, src/server_app/registration.rs, src/snapshot.rs, src/sim_digest.rs, src/headless/replay.rs, gui/host-mesh.js, gui/host-actions.js, gui/semantic-action-registry.js, gui/semantic-controls-remapper.js, gui/gamepad-input.js, gui/server-settings.js, gui/action-feedback.js, gui/gm-session-actions.js, gui/gm-session-controls.js, assets/strings/strings.csv]
+      symbols: [SimulationPaused, GmActionProposal, GmActionOrder, GmActionGrant, GmActionRefusal, GmActionFrame, GmActionSubmission, GmActionOutcome, GmActionRefusalReason, LoggedGmAction, GmActionJournal, GmActionLog, GmSessionProjection, LocalGmActionRefusals, sequence_owner_proposal, validate_fleet_frame, applied_prefix, apply_through, publish_session_projection, discard_gm_boundary_overstep, ReplayGmSeed, seed_replay_on_run_start, RecoveryDiagnostic, gm_action_window, HOST_ACTION_DEFINITIONS, createHostActionRegistry, GM_SESSION_ACTION_DEFINITIONS, registerGmSessionActions, createGmSessionControls, parseGmSessionPayload, createSemanticActionRegistry, createGamepadInputRuntime, mountServerSettings]
+      tests: [cargo test gm_action::tests, cargo test core::codec, cargo test lockstep, cargo test lockstep::recovery, cargo test sim_digest, cargo test snapshot::tests, cargo test server_app::mod_tests, cargo test --test replay_simulation, npx vitest run tests/client/gm-session-actions.test.js tests/client/gm-session-controls.test.js tests/client/host-actions.test.js tests/client/semantic-action-registry.test.js tests/client/server-settings.test.js]
+
+  - mechanic: gm-t2-event-control-contract
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Explicit Fire, Pause, and Skip-Next Event Controls
+      summary: "An automatic authored event is GM-controllable only when it declares gm_controls metadata with a stable qualified id, String Table label/description, and any explicit subset of fire, pause, and skip. Missing controls are invisible and unavailable. Pause is a persistent manual toggle: while paused the automatic condition is not evaluated and no missed edge is captured; unpause resumes ordinary evaluation, so a GM must use Fire if the opportunity passed. Fire bypasses condition and pause and executes the ordinary handler/lifecycle. Skip arms only the next matching occurrence and advances lifecycle as if it fired: a repeating event enters cooldown and a once-only event is spent. An armed skip survives Pause; Fire does not consume it."
+      rationale:
+        - "gm_event(id, label, handler) is the manual-only shorthand and implies Fire without a redundant gm_controls declaration. It is one-shot by default; repeatable() makes it a reusable quick tool."
+        - "A scenario can therefore expose a pure GM control with only a Fire trigger, while authors retain complete control over which automatic events are operable."
+        - "Trigger identity and control state are layer-qualified and represented in snapshots, deterministic digests, history, and the command log."
+    architecture:
+      kind: scenario-trigger-policy
+      authority: authoritative
+      coordinates: [gm-milestone-directing]
+      runs_in: [host-browser-runtime, headless-runtime]
+
+  - mechanic: gm-t2-directed-world-actions
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Bounded Directing Vocabulary
+      summary: "M2 exposes typed scenario-authorable actions for palette spawn, safe despawn, authored doctrine/directive changes, authored Objective activation and active Objective completion/failure, reveal/conceal/normal knowledge overrides, direct damage, healing, System disable/restore, and Station puppeting. Spawn uses only scenario/mod palette templates; the GM always picks position on the map and drags for heading, and the command carries resolved world coordinates and heading rather than pixels. Safe despawn covers removable NPCs, structures, and spawned hazards while excluding player ships, GM peers, and foundational entities and clearing references."
+      rationale:
+        - "Objective activation can select only authored palette entries with String Table text, directive, scoring, and targets. T2 has no free-text Objective authoring, arbitrary score editing, deletion, or reopen."
+        - "Reveal and conceal are persistent per observing player ship and target. Reveal guarantees a basic contact but not protected classification; conceal suppresses normal sensors; Normal clears the override. Overrides survive reconnect/snapshot and disappear with either referenced entity. False contacts, delay, and degradation wait for M7."
+        - "Damage and healing accept arbitrary absolute HP amounts scoped to an Entity, Station, or System. They are direct/internal and bypass shields: Entity uses the existing deterministic weighted hull distribution (or an NPC scalar path), Station restricts that distribution to its owned damageable Systems, and System targets one System. Healing mirrors scope, clamps at maxima, and reports discarded overflow. Normal damage tiers, destruction, repair, events, and triggers still apply."
+        - "System disable is an explicit GM-disabled latch independent of HP. Restore removes only the latch and does not heal, so an otherwise damaged or destroyed System may remain offline."
+    architecture:
+      kind: scenario-action-vocabulary
+      authority: authoritative
+      coordinates: [gm-milestone-directing]
+      runs_in: [host-browser-runtime, headless-runtime]
+
+  - mechanic: gm-t2-station-puppeting
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Station-Scoped GM Puppeting Alongside Players
+      summary: "A GM may open an authentic Station interface and puppet a player or NPC ship when that ship defines the interface and corresponding command consumers. Takeover is Station-scoped: it suppresses AI/Backfill emissions for that Station but does not change seat ownership. Human commands and GM commands remain accepted together and resolve through deterministic Admission ordering. Releasing takeover restores AI only where the Station would ordinarily receive it. Multiple GMs remain equal and every command is attributed."
+      rationale:
+        - "The GM takes over AI and acts alongside players; puppeting is not exclusive possession of a human Station and does not create a second downstream human-versus-GM authority branch."
+    architecture:
+      kind: station-control-policy
+      authority: authoritative
+      coordinates: [gm-milestone-directing]
+      runs_in: [host-browser-runtime, headless-runtime]
+
+  - component: gm-t2-performing-surface
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Comms Studio, Crew-Knowledge Comparison, and Role Presets
+      summary: "M3 lets a GM send bounded free-form in-character text through the normal Comms path using an existing sender identity, selected recipient ships, and authored routing visibility; exact text is logged. Template quick picks and scripted hail initiation are optional accelerators, and T2 neither invents identities nor drafts replies. Per-ship knowledge panes show the contact picture, Objectives, and Comms from the same projections the crew receives, with local Truth, Crew Knowledge, and Difference views; Station-private detail remains protected unless the GM opens its authentic Station interface. Each GM chooses and may live-switch a scenario-authored role preset that filters contacts, panels, quick actions, and later attention, defaults to All, permits duplicates, and persists only with that reconnectable GM identity."
+      rationale:
+        - "Role presets are personal presentation, not authority. All GMs remain peers and simultaneous actions keep the same attributed deterministic result contract."
+    architecture:
+      kind: gm-presentation
+      authority: non-authoritative
+      coordinates: [gm-milestone-performing]
+      runs_in: [host-browser-runtime]
+
+  - decision: gm-t2-device-and-milestone-boundaries
+    core:
+      status: accepted
+      confidence: confirmed
+      title: T2 Device Floor and T3/T4 Boundary
+      summary: "T2 supports desktop keyboard/mouse and large landscape tablets with touch, zoom, scalable text, visible focus, and non-colour state; phone portrait is out of scope. T3 owns M4 attention assistance and M5 safety/recovery, including live-session restore and undo. T4 M6 owns native integration and the integrated Workshop/Live Inspector. At M6 one native simulation instance may carry one fixed player-ship slot alongside local GM operator identities, advertises both ship and gm capabilities, and contributes once to deterministic NPC ownership; browser GM remains GM-only. M7 owns false/ghost/degraded/delayed information and M8 owns in-sim presentation controls."
+      rationale:
+        - "The combined native instance is one simulation peer with multiple local operator roles, never two duplicate simulations. T2 browser delivery stays focused while its reusable map, selection, inspector, panel, capability, and action components become the M6 foundation."
+    architecture:
+      kind: scope-boundary
+      authority: non-authoritative
+      coordinates: [gm-milestone-performing, gm-milestone-integrated-workshop, gm-milestone-information-control, gm-milestone-presentation]

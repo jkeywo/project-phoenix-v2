@@ -740,6 +740,67 @@ fn npc_ship_in_damage_zone_takes_hull_damage() {
     );
 }
 
+/// A stationless GM peer has no `LocalShip`, but it simulates the same frozen
+/// fleet hulls as the crew host. Destroying one in a region must therefore keep
+/// the hull and enter GameOver on that peer, not despawn it through the NPC
+/// branch merely because the local presentation marker is absent.
+#[test]
+fn remote_gm_region_death_uses_fleet_membership_not_local_ship() {
+    use crate::command_admission::HostSlot;
+    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
+    use crate::ship::damage::SystemHull;
+
+    let mut app = damage_test_app();
+    let local = app
+        .world_mut()
+        .query_filtered::<Entity, With<LocalShip>>()
+        .single(app.world())
+        .unwrap();
+    app.world_mut().despawn(local);
+    if !app.is_plugin_added::<bevy::state::app::StatesPlugin>() {
+        app.add_plugins(bevy::state::app::StatesPlugin);
+    }
+    app.init_state::<GamePhase>();
+    crate::sim_tick::register_sim_tick(&mut app);
+    app.init_resource::<crate::server_app::GameOverReason>();
+    app.init_resource::<crate::server_app::SimOutbox>();
+
+    let fleet_ship = app
+        .world_mut()
+        .spawn((
+            crate::server_app::Ship,
+            crate::lockstep::FleetSlotOf(HostSlot(2)),
+            EntityUuid("fleet-ship-on-gm-peer".to_string()),
+            Transform::default(),
+            crate::ship::state::ShipPhysics::default(),
+            EntitySystemHull(SystemHull::from_config(&[(
+                crate::core::messages::SystemId("captain".into()),
+                1.0,
+            )])),
+            ShipModifiers::new(),
+        ))
+        .id();
+
+    spawn_damage_zone(&mut app, 0.0, 0.0, 50.0, 100.0);
+    tick_with_dt(&mut app, 1.0);
+
+    assert!(
+        app.world().get_entity(fleet_ship).is_ok(),
+        "a remote fleet ship remains authoritative world state after defeat"
+    );
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::GameOver
+    );
+    assert_eq!(
+        app.world()
+            .resource::<crate::server_app::GameOverReason>()
+            .0
+            .as_deref(),
+        Some("server.game_over.ship_destroyed")
+    );
+}
+
 // -- BlocksImpulse tests ------------------------------------------------
 
 // ── BlocksImpulse tests ─────────────────────────────────────────────

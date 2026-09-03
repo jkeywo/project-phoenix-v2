@@ -65,14 +65,22 @@ export const renderStation = makeCaptainRender({
     const hullEl = doc.getElementById('hull');
     if (hullEl) hullEl.state = { total_pct: repair.overall_hull?.pct ?? 1, destroyed_pct: repair.overall_hull?.destroyed_pct };
     const repairEl = doc.getElementById('repair');
-    if (repairEl) repairEl.state = { teams: repair.teams || [], auto: !!repair.repair_auto, targets: repair.dispatch_targets || [], damaged: repair.damaged_systems || [] };
+    if (repairEl) {
+      repairEl.state = {
+        teams: repair.teams || [],
+        auto: !!repair.repair_auto,
+        targets: repair.dispatch_targets || [],
+        damaged: repair.damaged_systems || [],
+        externally_committed_teams: repair.external_dispatch?.target != null ? 1 : 0,
+      };
+    }
 
     const navEl = doc.getElementById('nav');
     if (navEl) {
       navEl.state = {
         blips: nav.blips || [], regions: nav.regions || [], range: nav.radar_range || 800,
         ship_pos: { x: nav.ship_x || 0, z: nav.ship_z || 0 }, ship_heading: nav.ship_heading || 0,
-        waypoint: nav.waypoint || null,
+        waypoint: nav.waypoint || null, auto: !!nav.navigation_auto,
       };
     }
 

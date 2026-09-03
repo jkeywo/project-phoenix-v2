@@ -35,12 +35,27 @@
 // console. A pane is not exempt from that route and must not try to be — it
 // joins through the page's ordinary `startPhoenixJoin`, over the in-process
 // transport pane_link.js installs. So the fragment carries BOTH: a well-formed
-// five-letter join code first, then the identity fields. This script consumes
+// typed join code first, then the identity fields. This script consumes
 // the identity and leaves the code, and from that line on the page's URL is
 // indistinguishable from a phone's that was handed a code — which is exactly
 // what it then behaves like. It also means the pane's own session token has
 // stopped being readable from `location.hash` by the time any page code runs.
 (function () {
+  // Operator-profile capability declaration (issue #1280). The pane still
+  // loads the ordinary client page and its one versioned profile; this tells
+  // that shared adapter which retained settings can be active here. Keyboard
+  // input is delivered by #1124's focused native input route. Ultralight has no
+  // Gamepad API sampling or vibration backend, so neither gets a second native
+  // route. The profile keeps both choices for later export to a capable browser.
+  window.PhoenixOperatorCapabilities = Object.freeze({
+    surface: 'native-pane',
+    keyboard: true,
+    gamepad: false,
+    vibration: false,
+    semanticCues: true,
+    accessibility: true,
+  });
+
   // ── requestAnimationFrame, off a timer ─────────────────────────────────────
   //
   // NOT a nicety, and not about smoothness. An offscreen Ultralight view

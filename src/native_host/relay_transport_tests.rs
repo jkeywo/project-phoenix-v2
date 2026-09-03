@@ -186,7 +186,7 @@ fn it_registers_as_a_host_that_can_only_be_reached_over_the_relay() {
 #[test]
 fn a_second_ready_does_not_mint_a_second_code() {
     // The browser host guards the same way: a re-entered registration while
-    // one is live would leave two records and two sets of five letters, one of
+    // one is live would leave two records and two codes, one of
     // which nobody is reading.
     let (mut t, socket) = transport();
     socket.arrive(&frame("ready"));

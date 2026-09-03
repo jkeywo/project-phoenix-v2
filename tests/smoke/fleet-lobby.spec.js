@@ -160,7 +160,7 @@ test('two ship hosts assemble a fleet, and each crew star stays on its own host'
   expect(onLead.status).toBe(
     ts('server.fleet.open', { n: '2', max: String(MAX_FLEET_HOSTS) }),
   );
-  // Both hosts read out the same five letters — it is the fleet's code, and a
+  // Both hosts read out the same the code — it is the fleet's code, and a
   // member reading it aloud invites a third ship to the same lead. What only
   // the ISSUING host carries is the invitation link and its QR: a member
   // repainting one would be handing out a record it does not hold.
@@ -264,7 +264,7 @@ test('a code entered into the wrong typed field is refused as wrong-type', async
   expect(panel.slots).toEqual([]);
 
   // …and the whole crew code pasted into the same field, which is the case the
-  // five-letter one never covered: a full code carries its own project GUID.
+  // typed one never covered: a full code carries its own project GUID.
   // Cleared first, so what is waited for below is THIS refusal and not the one
   // still on screen from the last one.
   await second.evaluate(() => window.__hostFleetLeave());

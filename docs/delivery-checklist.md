@@ -348,7 +348,7 @@ State this in any release notes, because the gap is not obvious from the name:
 - Since issue #1113 it **can** carry a crew of its own: `--rendezvous <URL>
   --origin <URL>` registers it with the rendezvous service and browser clients
   join over the service's WebSocket game relay, because a native process has no
-  WebRTC. It prints the five-letter code at startup. A `--world` host can
+  WebRTC. It prints the typed code at startup. A `--world` host can
   therefore be crewed by phones over the relay, by `--solo` (all Backfill), or
   by local Ultralight panes (§4a) — and without the rendezvous flags nobody can
   join and the host says so at boot, which is what `--solo` is for.
@@ -359,7 +359,7 @@ State this in any release notes, because the gap is not obvious from the name:
   `assets/join/join-codes.toml` rather than assumed.
 - Its rendezvous socket **redials** if it dies (a Durable Object eviction, a
   worker redeploy, a Wi-Fi blip), on the same backoff the browser host uses.
-  Expect a **new five-letter code** on the operator log when it comes back: the
+  Expect a **new typed code** on the operator log when it comes back: the
   old record died with the socket, so the letters already read out across the
   room resolve to nothing. Anyone still connected is reported disconnected and
   their stations flip to Backfill until they re-join with the new code. Keeping

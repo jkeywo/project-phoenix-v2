@@ -93,7 +93,22 @@
        the issuing console's surface is next handed fresh state — both stamps on
        THIS device, so no cross-clock arithmetic is involved. -->
   <script type="module" src="gui/console-latency.js"></script>
+  <!-- Correlated Pressed/Pending/Applied-or-refused presentation.  This owns
+       only client-local lifecycle state and exact iframe routing; the normal
+       Captain blackboard remains the sole Red Alert gameplay state. -->
+  <script type="module" src="gui/action-feedback.js"></script>
   <script type="module" src="gui/action-map.js"></script>
+  <!-- One explicitly selected standard gamepad is sampled in this parent
+       realm. Logical bindings are copied to console iframes, but only the
+       action's owning iframe receives semantic activation. -->
+  <script type="module" src="gui/gamepad-input.js"></script>
+  <script type="module" src="gui/composite-action-routing.js"></script>
+  <!-- Parent-realm semantic action metadata + live private binding profile. The
+       active console iframe owns its own registry instance and receives this
+       profile through an explicit update seam. -->
+  <script type="module" src="gui/stations/captain-actions.js"></script>
+  <script type="module" src="gui/stations/helm-actions.js"></script>
+  <script type="module" src="gui/client-semantic-actions.js"></script>
   <!-- Pure JS client-state modules (issue #460). Each exposes a singleton
        (window.lobbyState / simState / commsState) with an apply(serverMessage)
        method returning a fresh semantic result; handleMessage() feeds every
@@ -112,7 +127,7 @@
   <!-- ICE/TURN server list, relay probe and the connect/backoff schedules the
        transport is tuned by (issues #603, #1226). -->
   <script type="module" src="gui/connection-manager.js"></script>
-  <!-- Typed five-letter join codes and the Phoenix crew transport (issues
+  <!-- Typed join codes and the Phoenix crew transport (issues
        #1111/#1112). THE route: every join goes through the rendezvous service,
        whether the code was typed, pasted or opened from a QR link. -->
   <script type="module" src="gui/join-code.js"></script>
@@ -130,6 +145,14 @@
        window.applyAccessibilityProfile / setAccessibilityPresentation for the
        inline script below. Never sent to the host — client-local. -->
   <script type="module" src="gui/accessibility-profile.js"></script>
+  <!-- One portable, private profile now owns Accessibility, semantic bindings,
+       gamepad preference/tuning, feedback preferences and future GM
+       confirmations. It never enters a ClientMessage or a session save. -->
+  <script type="module" src="gui/operator-profile.js"></script>
+  <!-- Projects that one unchanged profile onto the APIs this browser or native
+       pane actually has. Capability loss suppresses an output, never a saved
+       portable choice. -->
+  <script type="module" src="gui/operator-surface-adapter.js"></script>
   <style>
     /* The lobby's vocabulary is gui/tokens.css, linked above — it used to keep
        a parallel `:root` here whose `--edge` was a different colour from the
@@ -172,9 +195,16 @@
     #conn-diag-copy { pointer-events: auto; flex: 0 0 auto;
       font-size: var(--text-xs); color: var(--edge-strong); background: transparent;
       border: 1px solid var(--edge-strong); border-radius: 3px; padding: 0.1rem 0.4rem; }
+    #gamepad-input-alert { position: fixed; left: 50%; bottom: 3.5rem;
+      transform: translateX(-50%); z-index: 26; max-width: min(32rem, 88vw);
+      padding: 0.55rem 0.75rem; border: 1px solid var(--warning);
+      border-radius: 3px; background: var(--surface-panel); color: var(--warning);
+      font-family: 'JetBrains Mono', monospace; font-size: var(--text-sm);
+      line-height: 1.35; text-align: center; }
+    #gamepad-input-alert[hidden] { display: none; }
     /* Typed join entry (issue #1111). Shown only when this page was opened
        with no host in its fragment — the case that until now was a dead end
-       reading "no host id in URL". The field takes either the five letters
+       reading "no host id in URL". The field takes either the code
        read off the viewscreen or a whole pasted PROJECT_VERSION_CODE. */
     #join-entry { position: fixed; inset: 0; z-index: 30; display: none;
       flex-direction: column; align-items: center; justify-content: center; gap: 0.9rem;
@@ -703,6 +733,27 @@
     }
     #lobby-mods .mods-active-version { color: var(--ink-dim); margin-left: 6px; }
 
+    /* Crew-public equal GM presence. It is a sibling of the Station roster,
+       not a Station row: GMs never enter crew/spectator counts or controls. */
+    #gm-presence[aria-hidden="true"] { display: none; }
+    #gm-presence {
+      flex-shrink: 0; margin-top: 6px; padding: 7px 9px;
+      border: 1px solid var(--edge); border-radius: 5px;
+      background: var(--surface-panel);
+    }
+    #gm-presence-heading {
+      margin: 0 0 5px; color: var(--ink-dim); font-size: var(--text-xs);
+      letter-spacing: .08em; text-transform: uppercase;
+    }
+    #gm-presence-list { display: flex; flex-wrap: wrap; gap: 5px; }
+    .gm-presence-pill {
+      padding: 3px 7px; border: 1px solid var(--signal);
+      border-radius: 3px; color: var(--signal); font-size: var(--text-sm);
+    }
+    .gm-presence-pill.disconnected {
+      opacity: .6; border-style: dashed; color: var(--ink-dim);
+    }
+
 
     /* -- Lobby section: full-viewport when active ------------------------ */
     #lobby-ui.active {
@@ -1013,6 +1064,35 @@
       color: var(--signal);
     }
     .settings-rating-btn:active { background: var(--cyan-dim); }
+    .settings-binding-row { display: flex; gap: 0.5rem; }
+    .settings-binding-label {
+      display: grid; grid-template-columns: minmax(4.5rem, auto) minmax(8rem, 1fr);
+      align-items: center; gap: 0.6rem; width: 100%;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: var(--text-sm); color: var(--ink-faint);
+    }
+    .settings-binding-capture {
+      min-height: var(--control-hit-min); width: 100%; box-sizing: border-box;
+      border: 1px solid var(--edge); border-radius: 3px;
+      background: var(--surface-panel-up); color: var(--ink);
+      font: inherit; text-align: center; cursor: pointer;
+    }
+    .settings-binding-capture:focus {
+      border-color: var(--signal); outline: 2px solid var(--signal); outline-offset: 2px;
+    }
+    .settings-binding-feedback,
+    .settings-binding-conflict {
+      display: flex; flex-direction: column; gap: 0.45rem;
+      padding: 0.65rem; border: 1px solid var(--warning);
+      background: var(--surface-panel-up); color: var(--warning);
+      font-family: 'JetBrains Mono', monospace; font-size: var(--text-sm);
+    }
+    .settings-binding-conflict-heading {
+      font-family: 'Chakra Petch', sans-serif; font-weight: 700;
+      letter-spacing: 0.08em; text-transform: uppercase;
+    }
+    .settings-binding-conflict-item { color: var(--ink); }
+    .settings-binding-conflict-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
     .settings-vol-row {
       display: flex; align-items: center; gap: 0.6rem;
     }
@@ -1182,6 +1262,13 @@
         </label>
       </div>
 
+      <!-- Public Game Master presence, separate from every crew and Station
+           count. The heading labels the region for assistive technology. -->
+      <section id="gm-presence" role="region" aria-labelledby="gm-presence-heading" aria-hidden="true">
+        <h2 id="gm-presence-heading" data-i18n="lobby.gms.heading"></h2>
+        <div id="gm-presence-list" role="list"></div>
+      </section>
+
       <!-- Station list -->
       <div id="station-list"></div>
 
@@ -1254,6 +1341,10 @@
          continue to resolve. -->
   </div>
 
+  <!-- Client-level controller ownership warning. It remains outside Settings
+       so a lost selected pad is visible and announced while the modal is shut. -->
+  <div id="gamepad-input-alert" role="alert" aria-live="assertive"
+       aria-atomic="true" hidden></div>
   <div id="status" data-i18n="client.connecting">Connecting…</div>
   <!-- The readout and the control that copies it, in one left-anchored row so
        neither can reach the corner the lobby's READY button lives in. -->
@@ -1268,7 +1359,7 @@
 
   <!-- Typed join entry (issue #1111). Hidden while a join from the fragment is
        in flight; shown when there is nothing to join with, or when an attempt
-       came back with a reason. One field takes either the five letters a guest
+       came back with a reason. One field takes either the code a guest
        reads off the viewscreen or a whole pasted/QR'd PROJECT_VERSION_CODE —
        gui/join-code.js decides which it is, so there is no second control and
        no wrong box to type into. -->
@@ -1278,7 +1369,7 @@
            autocorrect="off" spellcheck="false" maxlength="96"
            data-i18n-attr="placeholder:client.join.code_placeholder,aria-label:client.join.code_label" />
     <button id="join-submit-btn" data-i18n="client.join.submit">Join</button>
-    <div id="join-entry-hint" data-i18n="client.join.hint">Five letters from the viewscreen.</div>
+    <div id="join-entry-hint" data-i18n="client.join.hint">Eight letters from the viewscreen.</div>
     <div id="join-entry-error"></div>
   </div>
 
@@ -1600,6 +1691,20 @@
     /// The mounted settings panel (issue #940), or null before the connection
     /// bootstrap runs. handleMessage repaints it when `DebugState` arrives.
     let settingsPanel = null;
+    /// Parent-owned, client-local semantic binding profile. The operator
+    /// profile persists it; console iframe module instances are separate
+    /// realms, so updates are explicitly copied
+    /// through __updateSemanticActionBindings instead of relying on a singleton.
+    let semanticActionRegistry = null;
+    let operatorProfile = null;
+    let preferredGamepadSlot = null;
+    let operatorSurfaceCapabilities = null;
+    let activeFeedbackPreferences = { vibration: true, semanticCues: true };
+    let _actionFeedbackRouter = null;
+    /// Parent-only gamepad sampler. Iframes never poll navigator.getGamepads(),
+    /// so an inactive or disconnected Station cannot receive controller input.
+    let gamepadInputRuntime = null;
+    let disposeGamepadInput = null;
     let pendingMidGameClaim = false;
     // #771 AC3: a mid-round station release is a two-step arm→confirm (imitates
     // ph-comms-current-message). First click arms + swaps the button to a
@@ -2340,7 +2445,13 @@
       // only writes DOM. Boot race: skip the paint until the module loads —
       // the next server message re-renders.
       if (typeof window.lobbyViewModel !== 'function') return;
-      const vm = window.lobbyViewModel(s, myToken, lobbyConsole, {
+      // The reducer owns the public GM list. It is deliberately not duplicated
+      // into the legacy shell mirror, so splice the current authoritative list
+      // into the pure view input at render time.
+      const lobbyProjection = window.lobbyState
+        ? { ...s, gms: window.lobbyState.gms }
+        : s;
+      const vm = window.lobbyViewModel(lobbyProjection, myToken, lobbyConsole, {
         labelFor: stationLabel,
         describeFor: stationDescription,
         stationRatings: window.simState ? window.simState.stationRatings : null,
@@ -2351,6 +2462,26 @@
       // the view model.
       lobbyConsole = vm.selectedConsole;
       const mine = myConsoles(s);
+
+      // Equal GM presence is crew-public but never a Station/spectator row.
+      const gmRegion = document.getElementById('gm-presence');
+      const gmHeading = document.getElementById('gm-presence-heading');
+      const gmList = document.getElementById('gm-presence-list');
+      if (gmRegion && gmList) {
+        gmRegion.setAttribute('aria-hidden', vm.gmGroup.visible ? 'false' : 'true');
+        if (gmHeading) gmHeading.textContent = t(vm.gmGroup.headingId);
+        gmList.innerHTML = '';
+        for (const gm of vm.gmGroup.entries) {
+          const row = document.createElement('span');
+          row.className = 'gm-presence-pill' + (gm.connected ? '' : ' disconnected');
+          row.setAttribute('role', 'listitem');
+          row.dataset.gmId = gm.id;
+          row.dataset.ready = gm.ready ? 'true' : 'false';
+          row.textContent = t(gm.labelId, { name: gm.name || gm.id })
+            + ' · ' + t(gm.readinessLabelId);
+          gmList.appendChild(row);
+        }
+      }
       // #771 AC3/AC4: the armed-release confirm only exists in-progress; leaving
       // InProgress (or never being in it) disarms so lobby release is immediate.
       const inProgress = s.phase === 'InProgress';
@@ -2636,6 +2767,27 @@
         ? window.iframeIdFor(name) : (name + '-iframe');
     }
 
+    function actionFeedbackRouter() {
+      if (_actionFeedbackRouter) return _actionFeedbackRouter;
+      if (typeof window.ActionFeedbackRouter !== 'function') return null;
+      _actionFeedbackRouter = new window.ActionFeedbackRouter({
+        deliver: (value) => {
+          const iframe = $(consoleIframeId(value.console));
+          try {
+            const update = iframe && iframe.contentWindow
+              && iframe.contentWindow.__updateActionFeedback;
+            if (typeof update === 'function') update(value);
+          } catch (_) { /* cross-origin/not-yet-loaded: the terminal state is safely dropped */ }
+          const meter = latencyMeter();
+          if (meter) {
+            if (value.state === 'TimedOut') meter.noteCorrelatedTimeout(value.correlation);
+            else meter.noteCorrelatedAck(value.correlation);
+          }
+        },
+      });
+      return _actionFeedbackRouter;
+    }
+
     // ── Console input-to-feedback latency (issue #1169, PRD #1144) ───────────
     // The phone measures its OWN round trip: `console-core.sendAction` stamps
     // the input event inside the console document, the dispatch below stamps the
@@ -2742,6 +2894,172 @@
       return $(consoleIframeId(activeConsole));
     }
 
+    function pushSemanticBindingsToIframe(iframeEl) {
+      if (!iframeEl || !semanticActionRegistry) return;
+      try {
+        const target = iframeEl.contentWindow;
+        const update = target
+          && iframeEl.contentWindow.__updateSemanticActionBindings;
+        if (typeof update === 'function') {
+          update(semanticActionRegistry.bindingProfile());
+        }
+        const updateFeedback = target && target.__updateActionFeedbackPreferences;
+        if (typeof updateFeedback === 'function') {
+          updateFeedback(activeFeedbackPreferences);
+        }
+      } catch (_) { /* a cross-origin or not-yet-loaded frame is retried on load */ }
+    }
+
+    function pushSemanticBindingsToConsoles() {
+      const stations = (uiState.shipStations && uiState.shipStations.stations) || [];
+      for (const station of stations) {
+        if (station && station.id) {
+          pushSemanticBindingsToIframe($(consoleIframeId(station.id)));
+        }
+      }
+    }
+
+    function operatorProfileStorage() {
+      try { return window.localStorage; } catch (_) { return null; }
+    }
+
+    function snapshotOperatorProfile() {
+      const api = window.OperatorProfile;
+      if (!api || typeof api.createOperatorProfileSnapshot !== 'function') return null;
+      operatorProfile = api.createOperatorProfileSnapshot({
+        accessibility: window.simState ? window.simState.accessibilityProfile : null,
+        bindings: semanticActionRegistry ? semanticActionRegistry.bindingProfile() : {},
+        preferredGamepadSlot,
+        tuning: semanticActionRegistry ? semanticActionRegistry.tuningProfile() : {},
+        feedback: operatorProfile && operatorProfile.feedback,
+        gmConfirmations: operatorProfile && operatorProfile.gmConfirmations,
+      });
+      return operatorProfile;
+    }
+
+    function persistOperatorProfile() {
+      const api = window.OperatorProfile;
+      const profile = snapshotOperatorProfile();
+      if (!api || !profile || typeof api.saveOperatorProfile !== 'function') {
+        return { status: 'rejected', code: 'profile-storage-write' };
+      }
+      return api.saveOperatorProfile(operatorProfileStorage(), profile);
+    }
+
+    // accessibility-profile.js calls this after either Accessibility reducer.
+    // Keeping the hook local avoids turning a private choice into a wire path.
+    window.persistOperatorProfile = persistOperatorProfile;
+
+    function applyPreparedOperatorProfile(prepared) {
+      const api = window.OperatorProfile;
+      const adapter = window.OperatorSurfaceAdapter;
+      if (!api || !adapter || !prepared || !prepared.profile || !semanticActionRegistry) {
+        return { status: 'rejected', code: 'profile-registry-unavailable' };
+      }
+      const applied = adapter.applyOperatorProfileToSurface(
+        prepared.profile,
+        semanticActionRegistry,
+        { root: window },
+      );
+      if (!applied || applied.status !== 'applied') return applied;
+      operatorProfile = applied.portableProfile;
+      operatorSurfaceCapabilities = applied.capabilities;
+      activeFeedbackPreferences = applied.active.feedback;
+      preferredGamepadSlot = operatorProfile.gamepad.preferredSlot;
+      if (window.simState && applied.active.accessibility) {
+        window.simState.accessibilityProfile = applied.active.accessibility;
+      }
+      if (gamepadInputRuntime
+          && typeof gamepadInputRuntime.restorePreferred === 'function') {
+        gamepadInputRuntime.restorePreferred(applied.active.preferredGamepadSlot);
+      }
+      pushSemanticBindingsToConsoles();
+      if (gamepadInputRuntime) gamepadInputRuntime.neutralize();
+      if (typeof window.applyAccessibilityProfile === 'function') {
+        window.applyAccessibilityProfile();
+      }
+      if (typeof window.onAccessibilityAssistanceChanged === 'function') {
+        try { window.onAccessibilityAssistanceChanged(); } catch (_) { /* best-effort */ }
+      }
+      return prepared;
+    }
+
+    function importOperatorProfileJson(text) {
+      const api = window.OperatorProfile;
+      if (!api || !semanticActionRegistry) {
+        return { status: 'rejected', code: 'profile-registry-unavailable' };
+      }
+      const prepared = api.prepareOperatorProfileImport(text, {
+        registry: semanticActionRegistry,
+      });
+      if (prepared.status === 'rejected') return prepared;
+      // Persist first. A quota/privacy-mode refusal leaves every live setting
+      // untouched rather than applying a profile that a reload immediately
+      // forgets.
+      const saved = api.saveOperatorProfile(operatorProfileStorage(), prepared.profile);
+      if (saved.status !== 'saved') return saved;
+      return applyPreparedOperatorProfile(prepared);
+    }
+
+    function exportOperatorProfileJson() {
+      const api = window.OperatorProfile;
+      const profile = snapshotOperatorProfile();
+      return api && profile ? api.serializeOperatorProfile(profile) : null;
+    }
+
+    function updateSemanticBinding(actionId, slot, binding, options) {
+      if (!semanticActionRegistry) return { status: 'unavailable' };
+      const result = semanticActionRegistry.setBinding(actionId, slot, binding, options);
+      if (result.status === 'applied') {
+        pushSemanticBindingsToConsoles();
+        if (gamepadInputRuntime) gamepadInputRuntime.neutralize();
+        persistOperatorProfile();
+      }
+      return result;
+    }
+
+    function resetSemanticAction(actionId) {
+      if (!semanticActionRegistry) return { status: 'unavailable' };
+      const result = semanticActionRegistry.resetAction(actionId);
+      if (result.status === 'applied') {
+        pushSemanticBindingsToConsoles();
+        if (gamepadInputRuntime) gamepadInputRuntime.neutralize();
+        persistOperatorProfile();
+      }
+      return result;
+    }
+
+    function resetAllSemanticActions() {
+      if (!semanticActionRegistry) return { status: 'unavailable' };
+      const result = semanticActionRegistry.resetAllBindings();
+      if (result.status === 'applied') {
+        pushSemanticBindingsToConsoles();
+        if (gamepadInputRuntime) gamepadInputRuntime.neutralize();
+        persistOperatorProfile();
+      }
+      return result;
+    }
+
+    function updateSemanticTuning(actionId, tuning) {
+      if (!semanticActionRegistry) return { status: 'unavailable' };
+      const result = semanticActionRegistry.setTuning(actionId, tuning);
+      if (result.status === 'applied' && gamepadInputRuntime) {
+        gamepadInputRuntime.neutralize();
+      }
+      if (result.status === 'applied') persistOperatorProfile();
+      return result;
+    }
+
+    function updateGamepadClientWarning(state) {
+      const warning = $('gamepad-input-alert');
+      if (!warning) return;
+      const disconnected = state && state.status === 'disconnected';
+      warning.textContent = disconnected
+        ? t('client.gamepad.disconnect_warning')
+        : '';
+      warning.hidden = !disconnected;
+    }
+
     // Send the host's key events to the active console, so helm's WASD/arrows,
     // Ctrl impulse and Shift boost keep working after a click on the tab bar or
     // any other host chrome moved focus out of the console iframe. Called from
@@ -2809,6 +3127,7 @@
         if (typeof window.applyAccessibilityProfile === 'function') {
           window.applyAccessibilityProfile({ iframes: [iframeEl] });
         }
+        pushSemanticBindingsToIframe(iframeEl);
       });
     }
 
@@ -2940,32 +3259,46 @@
         // outbound `ClientMessage` from named fields, so it never crosses the
         // wire.
         const meter = latencyMeter();
-        if (meter) meter.noteDispatch(action.action, action.console || activeConsole, action.__input_ms);
-        // Optimistic local patches (weaponsTarget / sensorsTarget) land on the
-        // one sim store; simState.weaponsTarget has a setter for this path.
+        const feedback = actionFeedbackRouter();
+        const correlated = feedback && feedback.track({
+          correlation: action.correlation,
+          actionId: action.semantic_action,
+          console: action.console || activeConsole,
+          inputMs: action.__input_ms,
+        });
+        if (meter) {
+          if (correlated) {
+            meter.noteCorrelatedDispatch(action.correlation, action.action, action.__input_ms);
+          } else {
+            meter.noteDispatch(action.action, action.console || activeConsole, action.__input_ms);
+          }
+        }
+        // Target selection is authoritative: neither Tactical nor Sensors
+        // paints optimistic gameplay state before the host projects it back.
         window.dispatchConsoleAction(action, send, (patch) => {
           if (window.simState) Object.assign(window.simState, patch);
         });
         return;
       }
       // Fallback for the rare race window before module scripts load.
-      // Only covers set_sensors_target (mutates local state); other actions
-      // are silently deferred (non-critical — they arrive after module load).
-      if (action.action === 'set_sensors_target' && action.uuid) {
-        if (window.simState) window.simState.sensorsTarget = action.uuid;
-        send('ControlSystem', {
-          target: 'sensors',
-          payload: { type: 'SetScienceTarget', data: { uuid: action.uuid } },
-        });
-      } else if (action.action === 'set_navigation_waypoint'
+      // Semantic actions deliberately have no direct-wire fallback: bypassing
+      // action-map would discard their correlation and feedback lifecycle.
+      // Console iframes mount after DOMContentLoaded, when deferred modules are
+      // ready; a synthetic pre-module semantic message is therefore ignored.
+      // These two older Navigation actions remain until their own migration.
+      if (action.action === 'set_navigation_waypoint'
           && Number.isFinite(action.x)
           && Number.isFinite(action.z)) {
-        send('ControlSystem', {
+        const correlation = typeof action.correlation === 'string' && action.correlation;
+        send(correlation ? 'ControlSystemCorrelated' : 'ControlSystem', {
+          ...(correlation ? { correlation: action.correlation } : {}),
           target: 'navigation',
           payload: { type: 'SetNavigationWaypoint', data: { x: action.x, z: action.z } },
         });
       } else if (action.action === 'clear_navigation_waypoint') {
-        send('ControlSystem', {
+        const correlation = typeof action.correlation === 'string' && action.correlation;
+        send(correlation ? 'ControlSystemCorrelated' : 'ControlSystem', {
+          ...(correlation ? { correlation: action.correlation } : {}),
           target: 'navigation',
           payload: { type: 'ClearNavigationWaypoint' },
         });
@@ -3005,6 +3338,15 @@
       // #1023 user story 15). Any message counts: the point is that the link
       // is carrying traffic, not which traffic.
       if (msg && !linkHasData) { linkHasData = true; scheduleRender(); }
+      // Targeted authoritative feedback settles only the exact originating
+      // correlation.  It is presentation/measurement, not simulation state,
+      // so it bypasses the reducers and never mutates Red Alert optimistically.
+      if (msg && msg.type === 'ActionFeedback') {
+        const router = actionFeedbackRouter();
+        if (router && msg.data) router.resolve(msg.data);
+        maybeReportConsoleLatency();
+        return;
+      }
       // JS state modules (issue #460) — every inbound ServerMessage is applied
       // to the pure state modules first. window.simState is the ONLY sim
       // store (issue #819): the console builders read it directly. Guards
@@ -3139,7 +3481,7 @@
       // tests/client/rendezvous-transport.test.js), not two ifs here:
       //   'rendezvous'  something in the fragment — a QR link, a pasted full
       //                 code, or a stale bookmark: join with it straight away
-      //   'entry'       nothing in the fragment: ask for the five letters
+      //   'entry'       nothing in the fragment: ask for the code
       // There is no third route since #1112 retired PeerJS, and no route flag:
       // a fragment that is not a valid code still comes here and gets a stated
       // reason in front of the entry field, because gui/join-code.js is the one
@@ -3188,6 +3530,85 @@
           })();
       console.log(`[client] session token ${myToken.slice(0, 8)}`);
 
+      semanticActionRegistry = typeof window.createClientSemanticActionRegistry === 'function'
+        ? window.createClientSemanticActionRegistry()
+        : null;
+
+      if (window.OperatorProfile && semanticActionRegistry) {
+        const loadedProfile = window.OperatorProfile.loadOperatorProfile(
+          operatorProfileStorage(),
+          { registry: semanticActionRegistry },
+        );
+        // Even a refused stored record supplies a fresh authored-default
+        // profile. Applying that result is safe and, critically, never falls
+        // back to a stale Accessibility-only record behind a corrupt current
+        // key.
+        applyPreparedOperatorProfile(loadedProfile);
+      }
+
+      gamepadInputRuntime = (!operatorSurfaceCapabilities || operatorSurfaceCapabilities.gamepad)
+        && typeof window.createGamepadInputRuntime === 'function'
+        ? window.createGamepadInputRuntime({
+            getContext: () => window.CompositeActionRouting
+              ? window.CompositeActionRouting.semanticContextForIframe(
+                  activeConsoleIframe(), activeConsole,
+                )
+              : activeConsole,
+            getActions: (context) => {
+              const actions = semanticActionRegistry
+                ? semanticActionRegistry.list(context)
+                : [];
+              return window.CompositeActionRouting
+                ? window.CompositeActionRouting.semanticActionsForIframe(
+                    actions,
+                    activeConsoleIframe(),
+                    context,
+                  )
+                : actions;
+            },
+            isTransportLive: () => !!(activeLink && activeLink.connected),
+            activate: (actionId, options) => {
+              // A safety neutral belongs to the context that emitted the last
+              // nonzero value, even when the operator has already switched
+              // tabs. Never redirect it into whichever iframe is active now.
+              const context = options && options.context;
+              const activeIframe = activeConsoleIframe();
+              const iframe = context && window.CompositeActionRouting
+                ? window.CompositeActionRouting.iframeForSemanticContext(
+                    context,
+                    activeIframe,
+                    (value) => $(consoleIframeId(value)),
+                  )
+                : context ? $(consoleIframeId(context)) : activeIframe;
+              try {
+                const activate = iframe && iframe.contentWindow
+                  && iframe.contentWindow.activateSemanticAction;
+                return typeof activate === 'function'
+                  ? activate(actionId, options)
+                  : false;
+              } catch (_) { return false; }
+            },
+            onCapture: (target, binding) => {
+              if (settingsPanel && typeof settingsPanel.proposeSemanticBinding === 'function') {
+                settingsPanel.proposeSemanticBinding(target.actionId, target.slot, binding);
+              } else {
+                updateSemanticBinding(target.actionId, target.slot, binding);
+              }
+            },
+            onStateChange: (state) => {
+              updateGamepadClientWarning(state);
+              if (settingsPanel
+                  && typeof settingsPanel.updateGamepadState === 'function') {
+                settingsPanel.updateGamepadState(state);
+              }
+            },
+          })
+        : null;
+      if (gamepadInputRuntime
+          && typeof gamepadInputRuntime.restorePreferred === 'function') {
+        gamepadInputRuntime.restorePreferred(preferredGamepadSlot);
+      }
+
       installConsoleKeyRelay();
 
       // Mount the settings panel (gear button + overlay) once state is ready.
@@ -3215,6 +3636,46 @@
               window.setAccessibilityPresentation(effect, value);
             }
           },
+          getSemanticActions: () => semanticActionRegistry
+            ? (typeof window.clientSettingsSemanticActions === 'function'
+                ? window.clientSettingsSemanticActions(semanticActionRegistry)
+                : semanticActionRegistry.list())
+            : [],
+          onSemanticBinding: (actionId, slot, binding, options) => {
+            return updateSemanticBinding(actionId, slot, binding, options);
+          },
+          onSemanticResetAction: (actionId) => resetSemanticAction(actionId),
+          onSemanticResetAll: () => resetAllSemanticActions(),
+          onSemanticTuning: (actionId, tuning) => {
+            return updateSemanticTuning(actionId, tuning);
+          },
+          getOperatorCapabilities: () => operatorSurfaceCapabilities,
+          getGamepadState: () => gamepadInputRuntime
+            ? gamepadInputRuntime.state()
+            : {
+                devices: [], selectedIndex: null,
+                retainedIndex: preferredGamepadSlot,
+                status: operatorSurfaceCapabilities
+                  && !operatorSurfaceCapabilities.gamepad ? 'unavailable' : 'none',
+                capturing: null,
+              },
+          onGamepadSelection: (index) => gamepadInputRuntime
+            ? (() => {
+                const result = gamepadInputRuntime.select(index);
+                if (result.status === 'selected' || result.status === 'none') {
+                  preferredGamepadSlot = result.status === 'selected' ? result.index : null;
+                  persistOperatorProfile();
+                }
+                return result;
+              })()
+            : { status: 'unavailable' },
+          onSemanticCapture: (actionId, slot, active) => {
+            if (!gamepadInputRuntime) return;
+            if (active) gamepadInputRuntime.beginCapture(actionId, slot);
+            else gamepadInputRuntime.endCapture(actionId, slot);
+          },
+          onOperatorProfileExport: () => exportOperatorProfileJson(),
+          onOperatorProfileImport: (json) => importOperatorProfileJson(json),
           // Every audio channel this page owns. Master volume scales each
           // element's own authored level rather than replacing it, so adding
           // a channel here needs no other change (issue #940).
@@ -3222,6 +3683,16 @@
           getManual: () => (window.simState ? window.simState.shipManual : null),
           myToken: myToken,
         });
+      }
+
+      if (gamepadInputRuntime) {
+        disposeGamepadInput = gamepadInputRuntime.start(window) || null;
+        window.addEventListener('pagehide', () => {
+          if (!disposeGamepadInput) return;
+          const dispose = disposeGamepadInput;
+          disposeGamepadInput = null;
+          dispose();
+        }, { once: true });
       }
 
       // Apply the private Accessibility profile to the shell at boot (issue
@@ -3366,7 +3837,7 @@
     // attempt() is only ever a NEW code being tried. Keeping an accepted link
     // alive across a dropped radio is the joiner's own job — it re-resolves the
     // same code on a backoff and re-sends Identify with the same session token
-    // (#1112 AC3) — so nothing here re-asks for five letters the guest already
+    // (#1112 AC3) — so nothing here re-asks for the code the guest already
     // typed.
     async function startPhoenixJoin(route, connectOptions) {
       const codes = window.joinCode;
@@ -3403,7 +3874,7 @@
       const submit = document.getElementById('join-submit-btn');
       const errorEl = document.getElementById('join-entry-error');
       let lastTyped = '';
-      // The joiner from the attempt in flight, if any. Mistyping five letters
+      // The joiner from the attempt in flight, if any. Mistyping the code
       // and retrying is the ordinary path through this screen, so each attempt
       // has to close the one before it: an orphaned joiner keeps its socket,
       // its registry connection and its RTCPeerConnection, and stays wired to

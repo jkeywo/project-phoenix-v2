@@ -42,6 +42,7 @@ pub(crate) fn comms_test_app() -> App {
         .init_resource::<WorldContentRuntime>()
         .init_resource::<CommsRuntime>()
         .init_resource::<CommsInboxRes>()
+        .init_resource::<OnScreenMessage>()
         .init_resource::<ObjectiveManagerRes>()
         .init_resource::<SimOutbox>()
         .init_resource::<Outbox>()
@@ -53,6 +54,7 @@ pub(crate) fn comms_test_app() -> App {
                 handle_hail.in_set(crate::sim_sets::SimSet::Input),
                 handle_respond_to_message.in_set(crate::sim_sets::SimSet::Input),
                 handle_clear_comms.in_set(crate::sim_sets::SimSet::Input),
+                handle_show_on_screen.in_set(crate::sim_sets::SimSet::Input),
                 handle_comms_channel2.in_set(crate::sim_sets::SimSet::Broadcast),
                 update_comms_range_flags.in_set(crate::sim_sets::SimSet::Broadcast),
                 broadcast_comms_state.in_set(crate::sim_sets::SimSet::Broadcast),
@@ -82,6 +84,7 @@ pub(crate) fn comms_test_app() -> App {
         crate::ship_plugin::ActiveStationRatings::default(),
         crate::ship_plugin::CoordinationQueue::default(),
         crate::core::messages::AdmittedCommands::default(),
+        crate::ship::state::ShipViewMode::default(),
         // The AUTHORED Comms console AI pair every shipped hull carries.
         // Since #885b stage 5d neither host has a synthesised fallback, so a
         // fixture whose subject is the AI answering (or being refused by)

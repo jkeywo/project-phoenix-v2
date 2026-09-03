@@ -91,11 +91,14 @@ export class PhTutorialOverlay extends PhElement {
     // onTemplate runs. connectedCallback runs again on every re-parent and
     // would stack duplicate listeners, which is why this is not there.
     this.$('dismiss').addEventListener('click', () => this.#dismiss());
-    this.hidden = true;
   }
 
   connectedCallback() {
     super.connectedCallback();
+    // Console-core creates this element lazily through document.createElement.
+    // Custom-element construction must leave host attributes untouched, so
+    // initialise visibility only after the element has connected.
+    this.hidden = !(this.state && this.state.active);
   }
 
   disconnectedCallback() {

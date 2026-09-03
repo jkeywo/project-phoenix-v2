@@ -129,6 +129,14 @@ pub struct BridgeDisplayConfig {
     /// of behaviour nobody asked for and the one thing issue #1330's second
     /// acceptance criterion forbids. So this decides whether the viewscreen is
     /// *placed* at boot or merely *recorded*.
+    ///
+    /// Since issue #1334 it decides a second thing, and that one is a data
+    /// guard rather than a placement question: it is the gate on the saved
+    /// per-ship-class layouts ([`super::layout_store_systems`]). An authored run
+    /// has nothing pre-applied over its profile and **writes nothing back** —
+    /// the operator's file wins for that run, and a save would silently drop its
+    /// `--pane` participant slots. See
+    /// [`BridgeLayout::reserved_on`](super::bridge_layout::BridgeLayout::reserved_on).
     pub authored: bool,
 }
 
@@ -251,7 +259,10 @@ impl BridgeStationSurfaces {
 /// Seeded by [`apply_bridge_profile`] the frame winit first reports its
 /// monitors, edited by the lobby's monitor row
 /// (`host_lobby::drain_surface_records`), rebuilt by
-/// [`watch_runtime_displays`] when a cable moves, and read by
+/// [`watch_runtime_displays`] when a cable moves, re-seated once from this ship
+/// class's remembered bridge the moment the hull becomes known
+/// ([`super::layout_store_systems`], issue #1334 — which also files every
+/// accepted change back to that class's saved layout), and read by
 /// [`follow_layout_viewscreen`] to decide whether a window has to move.
 ///
 /// It is the single place a live arrangement lives, so the row the operator is
@@ -329,6 +340,24 @@ pub struct BridgeDisplayApplied {
 /// stay as the belt to this braces.
 pub struct BridgeDisplayPlugin;
 
+/// Everything [`BridgeDisplayPlugin`] runs, as one ordering handle.
+///
+/// The chain inside is already total, so this exists for what is *outside* it:
+/// another plugin that reads or edits [`BridgeLayoutResource`] in `Update` needs
+/// to say where it stands relative to the whole adapter, and naming a private
+/// member of the chain is not something it can do.
+///
+/// [`super::layout_store_systems`] is the caller (issue #1334) and shows what
+/// the alternative costs: it takes `ResMut<BridgeLayoutResource>`, so Bevy would
+/// serialise it against [`follow_layout_stations`] and [`watch_runtime_displays`]
+/// in an order that is *arbitrary but silent* — the consoles a remembered layout
+/// seats would open on the seed frame or the one after it depending on how the
+/// executor felt, which is the kind of difference that shows up once on somebody
+/// else's machine. Ordering after this set makes it always the frame after, on
+/// purpose.
+#[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct BridgeDisplaySet;
+
 impl Plugin for BridgeDisplayPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
@@ -360,7 +389,8 @@ impl Plugin for BridgeDisplayPlugin {
                 // it true rather than merely tolerated.
                 reconcile_seated_consoles.run_if(resource_exists::<BridgeDisplayApplied>),
             )
-                .chain(),
+                .chain()
+                .in_set(BridgeDisplaySet),
         );
     }
 }

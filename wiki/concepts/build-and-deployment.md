@@ -15,7 +15,7 @@ updated: 2026-09-01
 | `TRUNK_BUILD_RELEASE=true trunk build --release` | `dist/index.html` (server.html → view screen) | Builds the Rust/Bevy WASM host with the default `server` feature and enables the release-only post-build optimisation hook. |
 | `node scripts/build-client.mjs` | `dist/client/index.html` plus GUI assets | First rejects a stale Rust-derived Debug Surface module, then copies the pure HTML/JS phone client; there is no client-side WASM feature. |
 
-The server is authoritative and runs the simulation. The client is a pure JS shell that joins the host by a typed five-letter code through the rendezvous service, connects over WebRTC DataChannels, and renders HTML console panels.
+The server is authoritative and runs the simulation. The client is a pure JS shell that joins the host by a typed code through the rendezvous service, connects over WebRTC DataChannels, and renders HTML console panels.
 
 ## Local dev
 
@@ -31,7 +31,7 @@ TRUNK_BUILD_RELEASE=true trunk build --release
 node scripts/build-client.mjs
 ```
 
-Outputs land in `dist/` with the client at `dist/client/`. The QR code on the view screen encodes `https://<host>/client/index.html#<PROJECT_GUID>_<VERSION_GUID>_<CODE>` so phones land on the right page already carrying the join code; the same code's five-letter suffix is printed beside it for guests who type instead of scanning.
+Outputs land in `dist/` with the client at `dist/client/`. The QR code on the view screen encodes `https://<host>/client/index.html#<PROJECT_GUID>_<VERSION_GUID>_<CODE>` so phones land on the right page already carrying the join code; the same code's typed suffix is printed beside it for guests who type instead of scanning.
 
 **Nothing in a built bundle fetches a script from a CDN.** The QR encoder is vendored at `gui/vendor/qrcode.js` (issue #1329) and carried into both bundles by Trunk's `copy-dir gui` link and `build-client.mjs`, so a host serving its own bundle — a native host on a bridge machine especially — draws a join code with no internet at all. Google Fonts is the one remaining external `<link>`, and it degrades to a fallback face rather than to no join code.
 

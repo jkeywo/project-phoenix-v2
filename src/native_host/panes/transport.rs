@@ -615,7 +615,9 @@ impl NativeTransport for PaneTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::messages::{DeliveryClass, ServerMessage};
+    use crate::core::messages::{
+        ActionCorrelationId, ActionFeedbackOutcome, DeliveryClass, ServerMessage,
+    };
     use crate::lobby::handler::Target;
 
     fn identity(n: u8) -> PaneIdentity {
@@ -715,6 +717,36 @@ mod tests {
         assert!(
             bus.take_outbound(comms).is_empty(),
             "a pane receives its own audience's projections and no others"
+        );
+    }
+
+    #[test]
+    fn correlated_action_feedback_matches_the_phone_transport_audience_and_codec() {
+        let bus = PaneBus::default();
+        let captain = bus.open(identity(1));
+        let other = bus.open(identity(2));
+        bus.mark_live(captain);
+        bus.mark_live(other);
+        let captain_token = bus.token_of(captain).unwrap();
+        let expected = ServerMessage::ActionFeedback {
+            correlation: ActionCorrelationId::new("native-pane-red-alert")
+                .expect("valid test correlation"),
+            outcome: ActionFeedbackOutcome::Applied,
+        };
+
+        bus.transport().dispatch(TransportDispatch {
+            target: &Target::Token(captain_token),
+            msg: &expected,
+            delivery: DeliveryClass::Reliable,
+        });
+
+        let queued = bus.take_outbound(captain);
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].delivery, DeliveryClass::Reliable);
+        assert_eq!(JsonCodec.decode_server(&queued[0].json).unwrap(), expected);
+        assert!(
+            bus.take_outbound(other).is_empty(),
+            "feedback is token-targeted, never broadcast to another pane"
         );
     }
 

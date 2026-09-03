@@ -66,8 +66,8 @@
 use bevy::prelude::*;
 
 use crate::core::messages::{
-    AdmittedCommands, InfrastructureSnapshot, PowerGroupId, ScanBlackboard, ScanReadingSnapshot,
-    SystemBlackboard, SystemControlPayload, SystemId,
+    ActionFeedbackOutcome, AdmittedCommand, AdmittedCommands, InfrastructureSnapshot, PowerGroupId,
+    ScanBlackboard, ScanReadingSnapshot, SystemBlackboard, SystemControlPayload, SystemId,
 };
 use crate::core::task_lifecycle::{
     TaskLifecycleRequest, TaskSlot, TaskTerminalReason, TASK_VERB_SCAN,
@@ -252,6 +252,12 @@ pub fn tick_scans(
     // power are — but the contact's authoritative threat state belongs on the
     // contact, and this system holds the subject query read-only.
     mut debris_assessed: Option<ResMut<EffectQueue<crate::debris::DebrisAssessed>>>,
+    // The correlated action-feedback seam (issue #761): the outbound message bus
+    // a `finish_action_feedback` reports Applied/Refused through, addressed to the
+    // command's own submitter. `Option` on the same terms as the queues above.
+    mut outbound: Option<
+        ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
+    >,
 ) {
     let now_tick = tick.map(|t| t.0).unwrap_or(0);
 
@@ -268,10 +274,13 @@ pub fn tick_scans(
         let Ok((entity, _, transform, admitted, power, record)) = ships.get_mut(entity) else {
             continue;
         };
-        let requested: Vec<String> = admitted
+        // Carry the whole admitted command (issue #761), not just its target
+        // uuid: the target still drives the reading and the task lifecycle, but
+        // the command is what the correlated action-feedback is addressed to.
+        let requested: Vec<AdmittedCommand> = admitted
             .for_target(crate::ship::system_registry::SENSORS_SYSTEM_ID)
             .filter_map(|cmd| match &cmd.payload {
-                SystemControlPayload::ScanTarget { uuid } => Some(uuid.clone()),
+                SystemControlPayload::ScanTarget { .. } => Some(cmd.clone()),
                 _ => None,
             })
             .collect();
@@ -294,12 +303,20 @@ pub fn tick_scans(
             // Each asked-for reading is still an activation that began and
             // ended (issue #1341) — a crew who asked a hull with no suite to
             // scan get an answer, and the timeline records the asking.
-            for target_uuid in requested {
+            for cmd in &requested {
+                let SystemControlPayload::ScanTarget { uuid: target_uuid } = &cmd.payload else {
+                    continue;
+                };
                 push_scan_lifecycle(
                     lifecycle.as_deref_mut(),
                     &scan_slot,
-                    &target_uuid,
+                    target_uuid,
                     TaskTerminalReason::NotCapable,
+                );
+                crate::command_admission::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    ActionFeedbackOutcome::Refused,
                 );
             }
             continue;
@@ -307,8 +324,13 @@ pub fn tick_scans(
         let effects = operator_region_effects(membership.as_deref(), &region_effects, entity);
         let ship_pos = transform.translation;
 
-        for target_uuid in requested {
-            let found = subjects.iter().find(|(uuid, ..)| uuid.0 == target_uuid);
+        for cmd in &requested {
+            let SystemControlPayload::ScanTarget { uuid: target_uuid } = &cmd.payload else {
+                continue;
+            };
+            let found = subjects
+                .iter()
+                .find(|(uuid, ..)| uuid.0.as_str() == target_uuid.as_str());
             let Some((_, subject_transform, name, condition, authored_id, mass, debris)) = found
             else {
                 record.last = None;
@@ -322,8 +344,13 @@ pub fn tick_scans(
                 push_scan_lifecycle(
                     lifecycle.as_deref_mut(),
                     &scan_slot,
-                    &target_uuid,
+                    target_uuid,
                     TaskTerminalReason::NoSuchTarget,
+                );
+                crate::command_admission::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    ActionFeedbackOutcome::Refused,
                 );
                 continue;
             };
@@ -382,8 +409,13 @@ pub fn tick_scans(
                     push_scan_lifecycle(
                         lifecycle.as_deref_mut(),
                         &scan_slot,
-                        &target_uuid,
+                        target_uuid,
                         TaskTerminalReason::Completed,
+                    );
+                    crate::command_admission::finish_action_feedback(
+                        cmd,
+                        &mut outbound,
+                        ActionFeedbackOutcome::Applied,
                     );
                 }
                 Err(refusal) => {
@@ -399,8 +431,13 @@ pub fn tick_scans(
                     push_scan_lifecycle(
                         lifecycle.as_deref_mut(),
                         &scan_slot,
-                        &target_uuid,
+                        target_uuid,
                         terminal_reason_for(refusal),
+                    );
+                    crate::command_admission::finish_action_feedback(
+                        cmd,
+                        &mut outbound,
+                        ActionFeedbackOutcome::Refused,
                     );
                 }
             }
@@ -752,7 +789,8 @@ mod tests {
     /// depot 200 units away.
     fn app_with(config: ScanConfig, condition: f32, depot_x: f32) -> (App, Entity) {
         let mut app = App::new();
-        app.add_systems(Update, (tick_scans, publish_scan_blackboard).chain());
+        app.add_message::<crate::lobby::server::OutboundMessage>()
+            .add_systems(Update, (tick_scans, publish_scan_blackboard).chain());
         // The world's flag store, so the mirror (issue #1038) has somewhere to
         // land. Every test in this module reads it or ignores it; the one below
         // that builds its own bare `App` deliberately leaves it out, which is
@@ -794,7 +832,51 @@ mod tests {
                     uuid: uuid.to_string(),
                 },
                 response_token: None,
+                feedback_correlation: None,
             });
+    }
+
+    fn ask_for_correlated_scan(
+        app: &mut App,
+        ship: Entity,
+        uuid: &str,
+        token: &str,
+        correlation: &str,
+    ) {
+        app.world_mut()
+            .get_mut::<AdmittedCommands>(ship)
+            .expect("the ship has an admitted set")
+            .0
+            .push(crate::core::messages::AdmittedCommand {
+                target: SystemId(crate::ship::system_registry::SENSORS_SYSTEM_ID.to_string()),
+                payload: SystemControlPayload::ScanTarget {
+                    uuid: uuid.to_string(),
+                },
+                response_token: Some(token.to_string()),
+                feedback_correlation: Some(
+                    crate::core::messages::ActionCorrelationId::new(correlation)
+                        .expect("valid test correlation"),
+                ),
+            });
+    }
+
+    fn has_feedback(
+        messages: &[crate::lobby::server::OutboundMessage],
+        token: &str,
+        correlation: &str,
+        outcome: ActionFeedbackOutcome,
+    ) -> bool {
+        messages.iter().any(|message| {
+            message.target == crate::lobby::Target::Token(token.to_string())
+                && message.delivery == crate::core::messages::DeliveryClass::Reliable
+                && matches!(
+                    &message.msg,
+                    crate::core::messages::ServerMessage::ActionFeedback {
+                        correlation: actual,
+                        outcome: actual_outcome,
+                    } if actual.as_str() == correlation && *actual_outcome == outcome
+                )
+        })
     }
 
     fn record(app: &App, ship: Entity) -> ShipScanRecord {
@@ -809,8 +891,26 @@ mod tests {
     #[test]
     fn an_admitted_scan_command_reads_the_targets_live_condition_track() {
         let (mut app, ship) = app_with(suite(), 62.0, 200.0);
-        ask_for_scan(&mut app, ship, DEPOT);
+        let mut cursor = app
+            .world()
+            .resource::<Messages<crate::lobby::server::OutboundMessage>>()
+            .get_cursor();
+        ask_for_correlated_scan(&mut app, ship, DEPOT, "science", "science-scan-applied");
         app.update();
+
+        let feedback: Vec<_> = cursor
+            .read(
+                app.world()
+                    .resource::<Messages<crate::lobby::server::OutboundMessage>>(),
+            )
+            .cloned()
+            .collect();
+        assert!(has_feedback(
+            &feedback,
+            "science",
+            "science-scan-applied",
+            ActionFeedbackOutcome::Applied,
+        ));
 
         let reading = record(&app, ship).last.expect("a reading came back");
         assert_eq!(reading.subject_uuid, DEPOT);
@@ -975,8 +1075,31 @@ mod tests {
     #[test]
     fn scanning_a_uuid_no_entity_answers_to_is_refused_as_no_such_target() {
         let (mut app, ship) = app_with(suite(), 62.0, 200.0);
-        ask_for_scan(&mut app, ship, "not-in-this-world");
+        let mut cursor = app
+            .world()
+            .resource::<Messages<crate::lobby::server::OutboundMessage>>()
+            .get_cursor();
+        ask_for_correlated_scan(
+            &mut app,
+            ship,
+            "not-in-this-world",
+            "science",
+            "science-scan-refused",
+        );
         app.update();
+        let feedback: Vec<_> = cursor
+            .read(
+                app.world()
+                    .resource::<Messages<crate::lobby::server::OutboundMessage>>(),
+            )
+            .cloned()
+            .collect();
+        assert!(has_feedback(
+            &feedback,
+            "science",
+            "science-scan-refused",
+            ActionFeedbackOutcome::Refused,
+        ));
         assert_eq!(record(&app, ship).refusal, Some(ScanRefusal::NoSuchTarget));
     }
 

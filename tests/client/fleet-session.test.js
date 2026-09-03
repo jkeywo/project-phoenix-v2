@@ -19,10 +19,14 @@ import {
   ADMISSION_OPEN,
   HOST_FRAME_HOST_LOSS,
   HOST_FRAME_TICK,
+  HOST_ROLE_GM,
+  HOST_ROLE_SHIP,
   asHostFrame,
   encodeHostFrame,
   helloFrame,
+  hostFrame,
   simulationFrame,
+  startForceFrame,
 } from '../../gui/host-mesh.js';
 import {
   NAMESPACE_CLIENT,
@@ -32,7 +36,11 @@ import {
   versionGuid,
   composeJoinCode,
 } from '../../gui/join-code.js';
-import { createRendezvousHost, createRendezvousJoiner } from '../../gui/rendezvous-transport.js';
+import {
+  RELIABLE_CHANNEL,
+  createRendezvousHost,
+  createRendezvousJoiner,
+} from '../../gui/rendezvous-transport.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const DATA = JSON.parse(readFileSync(path.join(root, 'assets/join/join-codes.json'), 'utf8'));
@@ -43,6 +51,16 @@ const STAMP = '1/phoenix-base/1';
 const settle = async () => {
   for (let i = 0; i < 60; i += 1) await Promise.resolve();
 };
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((accepted, refused) => {
+    resolve = accepted;
+    reject = refused;
+  });
+  return { promise, resolve, reject };
+}
 
 // ── Fakes (same construction as the transport suite's) ──────────────────────
 
@@ -161,6 +179,12 @@ function makePeerFactory() {
 /** A fleet lead on a fresh world, plus everything a test wants to look at. */
 async function leadOn(world, factories, opts = {}) {
   const rosters = [];
+  const policies = [];
+  const grants = [];
+  const forceResults = [];
+  const simulationRosters = [];
+  const simulationFrames = [];
+  const events = [];
   let code = null;
   const fleet = createFleetOwner({
     base: 'https://rendezvous.test',
@@ -170,10 +194,34 @@ async function leadOn(world, factories, opts = {}) {
     name: 'Lead',
     onCode: (c) => { code = c; },
     onRoster: (r) => rosters.push(r),
+    onSimulationRoster: (roster) => {
+      simulationRosters.push(roster);
+      events.push({ type: 'simulation-roster', roster });
+    },
+    onStartPolicy: (policy) => policies.push(policy),
+    onStartGrant: (grant) => {
+      grants.push(grant);
+      events.push({ type: 'start-grant', grant });
+    },
+    onForceResult: (result) => forceResults.push(result),
+    onSimulationFrame: (raw, authSlot) => {
+      simulationFrames.push({ raw, authSlot });
+      events.push({ type: 'simulation-frame', raw, authSlot });
+    },
     ...opts,
   });
   await settle();
-  return { fleet, rosters, get code() { return code; } };
+  return {
+    fleet,
+    rosters,
+    policies,
+    grants,
+    forceResults,
+    simulationRosters,
+    simulationFrames,
+    events,
+    get code() { return code; },
+  };
 }
 
 /** A second ship host typing a fleet code. */
@@ -182,6 +230,13 @@ async function memberOn(world, factories, code, opts = {}) {
   const refusals = [];
   const notices = [];
   const statuses = [];
+  const policies = [];
+  const grants = [];
+  const forceResults = [];
+  const simulationRosters = [];
+  const gmBootstraps = [];
+  const simulationFrames = [];
+  const events = [];
   const member = createFleetMember({
     base: 'https://rendezvous.test',
     data: DATA,
@@ -190,13 +245,44 @@ async function memberOn(world, factories, code, opts = {}) {
     factories,
     name: 'Two',
     onRoster: (r) => rosters.push(r),
+    onSimulationRoster: (roster) => {
+      simulationRosters.push(roster);
+      events.push({ type: 'simulation-roster', roster });
+    },
+    onGmJoinBootstrap: (id, roster) => {
+      gmBootstraps.push({ id, roster });
+      events.push({ type: 'gm-join-bootstrap', id, roster });
+      return true;
+    },
     onError: (reason, detail) => refusals.push({ reason, detail }),
     onRefusedSlot: (reason, detail) => notices.push({ reason, detail }),
     onStatus: (s) => statuses.push(s),
+    onStartPolicy: (policy) => policies.push(policy),
+    // Deliberately still supplied as a tripwire: member handles no longer
+    // consume asynchronous JS start grants, so this array must stay empty.
+    onStartGrant: (grant) => grants.push(grant),
+    onForceResult: (result) => forceResults.push(result),
+    onSimulationFrame: (raw, authSlot) => {
+      simulationFrames.push({ raw, authSlot });
+      events.push({ type: 'simulation-frame', raw, authSlot });
+    },
     ...opts,
   });
   await settle();
-  return { member, rosters, refusals, notices, statuses };
+  return {
+    member,
+    rosters,
+    refusals,
+    notices,
+    statuses,
+    policies,
+    grants,
+    forceResults,
+    simulationRosters,
+    gmBootstraps,
+    simulationFrames,
+    events,
+  };
 }
 
 /** One world, one shared peer factory — both ends must see the same links. */
@@ -377,6 +463,968 @@ describe('admitting a second ship host', () => {
   });
 });
 
+describe('privileged GM host role and reconnect (issue #1289)', () => {
+  const credentialSequence = (...values) => {
+    let index = 0;
+    return () => values[index++];
+  };
+
+  it('admits a GM as a deterministic host peer without adding a ship row', async () => {
+    const identities = [];
+    const { factories, world, lead } = await fleetOf({
+      credentialFactory: credentialSequence('gm-one-private'),
+    });
+    const gm = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_GM,
+      name: 'Morgan',
+      ship: { template_path: 'must-not-be-a-ship.toml' },
+      onIdentity: (identity) => identities.push(identity),
+    });
+
+    expect(gm.refusals).toEqual([]);
+    expect(gm.member).toMatchObject({
+      role: HOST_ROLE_GM,
+      operatorId: 'gm-1',
+      reconnectCredential: 'gm-one-private',
+    });
+    // `slot-2` is the private technical mesh identity used to authenticate
+    // frames. It is deliberately absent from the public GM row.
+    expect(gm.member.slot).toBe('slot-2');
+    expect(identities).toEqual([{
+      role: HOST_ROLE_GM,
+      operatorId: 'gm-1',
+      reconnectCredential: 'gm-one-private',
+      rolePreset: null,
+    }]);
+    expect(lastRoster(lead).slots).toHaveLength(1);
+    expect(lastRoster(lead).gms).toEqual([
+      { id: 'gm-1', name: 'Morgan', connected: true, ready: false },
+    ]);
+    expect(lastRoster(lead).gms[0]).not.toHaveProperty('owner');
+    expect(lastRoster(lead).gms[0]).not.toHaveProperty('permissions');
+    expect(JSON.stringify(lastRoster(lead))).not.toContain('gm-one-private');
+
+    // A GM cannot accidentally create a ship record through the legacy member
+    // update surface; its controls arrive later as typed GM commands.
+    expect(gm.member.update({ ship: { template_path: 'still-not-a-ship.toml' } })).toBe(false);
+    await settle();
+    expect(lastRoster(lead).slots).toHaveLength(1);
+  });
+
+  it('keeps multiple GMs mechanically equal and outside ship capacity', async () => {
+    const { factories, world, lead } = await fleetOf({
+      credentialFactory: credentialSequence('secret-a', 'secret-b'),
+    });
+    const a = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_GM,
+      name: 'A',
+    });
+    const b = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_GM,
+      name: 'B',
+    });
+
+    expect([a.member.operatorId, b.member.operatorId]).toEqual(['gm-1', 'gm-2']);
+    const gmRows = lastRoster(lead).gms;
+    expect(gmRows).toEqual([
+      { id: 'gm-1', name: 'A', connected: true, ready: false },
+      { id: 'gm-2', name: 'B', connected: true, ready: false },
+    ]);
+    expect(gmRows.map((row) => Object.keys(row).sort()))
+      .toEqual([['connected', 'id', 'name', 'ready'], ['connected', 'id', 'name', 'ready']]);
+
+    // Each welcome is point-to-point. The roster broadcast an existing GM
+    // receives when another joins contains no sibling credential.
+    const ownerChannels = factories.peer.channels.filter((channel) => channel.origin === 'answer');
+    expect(JSON.stringify(ownerChannels[0].sent)).not.toContain('secret-b');
+    expect(JSON.stringify(ownerChannels[1].sent)).not.toContain('secret-a');
+
+    // Both GM simulations joined, but only the lead ship consumes capacity.
+    expect(lastRoster(lead).slots).toHaveLength(1);
+    for (let i = 0; i < MAX_SLOTS - 1; i += 1) {
+      const ship = await memberOn(world, factories, lead.code.suffix);
+      expect(ship.member.role).toBe(HOST_ROLE_SHIP);
+    }
+    expect(lastRoster(lead).slots).toHaveLength(MAX_SLOTS);
+    expect(lastRoster(lead).gms).toHaveLength(2);
+  });
+
+  it('reconnects the same GM from a new peer while new admission is closed', async () => {
+    const { factories, world, lead } = await fleetOf({
+      credentialFactory: credentialSequence('stable-private-capability'),
+    });
+    const first = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_GM,
+      name: 'Morgan',
+    });
+    const original = {
+      slot: first.member.slot,
+      operatorId: first.member.operatorId,
+      credential: first.member.reconnectCredential,
+    };
+    first.member.close();
+    await settle();
+    expect(lastRoster(lead).gms).toEqual([
+      { id: 'gm-1', name: 'Morgan', connected: false, ready: false },
+    ]);
+
+    lead.fleet.setAdmission(ADMISSION_CLOSED);
+    await settle();
+    expect(lastRoster(lead).admission).toBe(ADMISSION_CLOSED);
+    // The service remains reachable because only the later private hello can
+    // distinguish this known operator from a new peer.
+    expect(world.registry.snapshot()[0].admission).toBe(ADMISSION_OPEN);
+
+    const replacement = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_GM,
+      name: 'cannot rename a recovered identity',
+      reconnectCredential: original.credential,
+    });
+    expect(replacement.refusals).toEqual([]);
+    expect(replacement.member.slot).toBe(original.slot);
+    expect(replacement.member.operatorId).toBe(original.operatorId);
+    expect(replacement.member.reconnectCredential).toBe(original.credential);
+    expect(lastRoster(lead).gms).toEqual([
+      { id: 'gm-1', name: 'Morgan', connected: true, ready: false },
+    ]);
+  });
+
+  it('refuses an unknown credential without duplicating or taking over the operator', async () => {
+    const { factories, world, lead } = await fleetOf({
+      credentialFactory: credentialSequence('real-private-capability'),
+    });
+    const first = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_GM,
+      name: 'Morgan',
+    });
+    first.member.close();
+    await settle();
+    lead.fleet.setAdmission(ADMISSION_CLOSED);
+    await settle();
+
+    const attacker = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_GM,
+      reconnectCredential: 'wrong-private-capability',
+    });
+    expect(attacker.member.slot).toBeNull();
+    expect(attacker.refusals.map((entry) => entry.reason)).toContain('recovery-only');
+    expect(lastRoster(lead).gms).toEqual([
+      { id: 'gm-1', name: 'Morgan', connected: false, ready: false },
+    ]);
+  });
+
+  it('opens a GM-only owner with a private identity and no player ship', async () => {
+    const ownerIdentity = [];
+    const { lead } = await fleetOf({
+      role: HOST_ROLE_GM,
+      name: 'Morgan',
+      ship: { template_path: 'must-not-survive.toml' },
+      credentialFactory: credentialSequence('owner-private-capability'),
+      onIdentity: (identity) => ownerIdentity.push(identity),
+    });
+
+    expect(lead.fleet.role).toBe(HOST_ROLE_GM);
+    expect(lead.fleet.slot).toBe('slot-1'); // technical star-centre identity
+    expect(lead.fleet.operatorId).toBe('gm-1');
+    expect(lead.fleet.reconnectCredential).toBe('owner-private-capability');
+    expect(lead.fleet.gmJoinCandidate).toBe(false);
+    expect(ownerIdentity).toEqual([{
+      role: HOST_ROLE_GM,
+      operatorId: 'gm-1',
+      reconnectCredential: 'owner-private-capability',
+      rolePreset: null,
+    }]);
+    expect(lastRoster(lead).slots).toEqual([]);
+    expect(lastRoster(lead).gms).toEqual([
+      { id: 'gm-1', name: 'Morgan', connected: true, ready: false },
+    ]);
+  });
+});
+
+describe('visible first-time mid-session GM admission (issue #1293)', () => {
+  it('keeps the candidate private through Accept and publishes only after digest commit', async () => {
+    const ownerRequests = [];
+    const ownerStatuses = [];
+    const beginCalls = [];
+    const { factories, world, lead } = await fleetOf({
+      credentialFactory: (() => {
+        let n = 0;
+        return () => `join-secret-${++n}`;
+      })(),
+      onGmJoinRequest: (request) => ownerRequests.push(request),
+      onGmJoinStatus: (status) => ownerStatuses.push(status),
+      onBeginGmJoin: (request) => { beginCalls.push(request); return true; },
+    });
+    const peerRequests = [];
+    const existing = await memberOn(world, factories, lead.code.suffix, {
+      onGmJoinRequest: (request) => peerRequests.push(request),
+    });
+    lead.fleet.freeze();
+    await settle();
+    const before = lastRoster(lead);
+
+    const pending = [];
+    const candidateStatuses = [];
+    const candidate = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_GM,
+      name: 'Drop-in GM',
+      onGmJoinPending: (state) => pending.push(state),
+      onGmJoinStatus: (status) => candidateStatuses.push(status),
+    });
+    await settle();
+
+    expect(ownerRequests).toHaveLength(1);
+    expect(peerRequests).toEqual(ownerRequests);
+    expect(pending).toHaveLength(1);
+    expect(candidate.simulationRosters).toEqual([]);
+    expect(candidate.gmBootstraps).toHaveLength(1);
+    expect(candidate.member.pendingGmJoin).toBe(true);
+    expect(candidate.member.gmJoinCandidate).toBe(true);
+    expect(lead.fleet.gmJoinCandidate).toBe(false);
+    expect(candidate.gmBootstraps[0]).toMatchObject({
+      id: ownerRequests[0].id,
+      roster: { local: 3, owner: 1, participants: [1, 2, 3] },
+    });
+    expect(candidate.rosters).toEqual([]);
+    expect(lastRoster(lead)).toEqual(before);
+    expect(beginCalls).toEqual([]);
+
+    const request = ownerRequests[0];
+    expect(existing.member.decideGmJoin(request.id, true)).toBe(true);
+    await settle();
+    expect(beginCalls).toEqual([{
+      id: request.id,
+      kind: 'first-time',
+      approvedBy: 2,
+      candidateHost: 3,
+      operatorId: 'gm-1',
+    }]);
+    expect(lastRoster(lead)).toEqual(before);
+    expect(ownerStatuses.at(-1).status).toBe('accepted');
+    expect(candidateStatuses.at(-1).status).toBe('accepted');
+
+    // This call stands in for the Rust status mirror after matching restored
+    // digest. It is the only transport method capable of public admission.
+    expect(lead.fleet.completeGmJoin(request.id, 'committed')).toBe(true);
+    await settle();
+    expect(lastRoster(lead).gms).toEqual([
+      { id: 'gm-1', name: 'Drop-in GM', connected: true, ready: false },
+    ]);
+    expect(lastRoster(existing).gms).toEqual(lastRoster(lead).gms);
+    expect(lastRoster(candidate).gms).toEqual(lastRoster(lead).gms);
+    expect(candidate.member.operatorId).toBe('gm-1');
+    expect(candidate.member.reconnectCredential).toBe('join-secret-1');
+    expect(candidate.member.pendingGmJoin).toBe(false);
+    expect(candidate.member.gmJoinCandidate).toBe(false);
+    expect(lead.fleet.completeGmJoin(request.id, 'committed')).toBe(true);
+    expect(lastRoster(lead).gms).toHaveLength(1);
+  });
+
+  it('forwards an authenticated host loss to an accepted private candidate', async () => {
+    const requests = [];
+    const { factories, world, lead } = await fleetOf({
+      credentialFactory: () => 'loss-during-transfer-secret',
+      onGmJoinRequest: (request) => requests.push(request),
+      onBeginGmJoin: () => true,
+    });
+    const existing = await memberOn(world, factories, lead.code.suffix);
+    lead.fleet.freeze();
+    const candidate = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_GM,
+      name: 'Transfer Candidate',
+    });
+    expect(existing.member.decideGmJoin(requests[0].id, true)).toBe(true);
+    await settle();
+
+    const loss = encodeHostFrame(simulationFrame(HOST_FRAME_HOST_LOSS, {
+      from: 1,
+      lost: 2,
+      tick: 83,
+    }, 83));
+    lead.fleet.broadcast(loss);
+    await settle();
+
+    expect(candidate.simulationFrames).toEqual([{ raw: loss, authSlot: 1 }]);
+    expect(candidate.simulationRosters).toEqual([]);
+    expect(candidate.gmBootstraps).toHaveLength(1);
+  });
+
+  it('makes Reject terminal without beginning simulation admission or changing roster', async () => {
+    const requests = [];
+    const begins = [];
+    const { factories, world, lead } = await fleetOf({
+      credentialFactory: () => 'reject-secret',
+      onGmJoinRequest: (request) => requests.push(request),
+      onBeginGmJoin: (request) => { begins.push(request); return true; },
+    });
+    lead.fleet.freeze();
+    await settle();
+    const before = lastRoster(lead);
+    const candidate = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_GM,
+    });
+    await settle();
+    expect(lead.fleet.decideGmJoin(requests[0].id, false)).toBe(true);
+    await settle();
+    expect(begins).toEqual([]);
+    expect(lastRoster(lead)).toEqual(before);
+    expect(candidate.refusals.map(({ reason }) => reason)).toContain('gm-join-refused');
+  });
+
+  it('sequences an accepted candidate disconnect through Rust before clearing the request', async () => {
+    const requests = [];
+    const terminal = [];
+    const { factories, world, lead } = await fleetOf({
+      credentialFactory: () => 'disconnect-secret',
+      onGmJoinRequest: (request) => requests.push(request),
+      onBeginGmJoin: () => true,
+      onRefuseGmJoin: (id, reason) => { terminal.push({ id, reason }); return true; },
+    });
+    lead.fleet.freeze();
+    const before = lastRoster(lead);
+    const candidate = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_GM,
+    });
+    expect(lead.fleet.decideGmJoin(requests[0].id, true)).toBe(true);
+    await settle();
+
+    candidate.member.close();
+    await settle();
+    expect(terminal).toEqual([{
+      id: requests[0].id, reason: 'candidate-disconnected',
+    }]);
+    expect(lead.fleet.pendingGmJoin()).toMatchObject({ id: requests[0].id });
+    expect(lastRoster(lead)).toEqual(before);
+
+    expect(lead.fleet.completeGmJoin(
+      requests[0].id, 'refused', 'candidate-disconnected',
+    )).toBe(true);
+    expect(lead.fleet.pendingGmJoin()).toBeNull();
+    expect(lastRoster(lead)).toEqual(before);
+  });
+
+  it('turns a candidate lost in the Commit race into deterministic host loss', async () => {
+    const requests = [];
+    const losses = [];
+    const { factories, world, lead } = await fleetOf({
+      credentialFactory: () => 'commit-race-secret',
+      onGmJoinRequest: (request) => requests.push(request),
+      onBeginGmJoin: () => true,
+      onRefuseGmJoin: () => true,
+      onHostLost: (slot) => losses.push(slot),
+    });
+    lead.fleet.freeze();
+    const candidate = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_GM,
+    });
+    expect(lead.fleet.decideGmJoin(requests[0].id, true)).toBe(true);
+    candidate.member.close();
+    await settle();
+
+    expect(lead.fleet.completeGmJoin(requests[0].id, 'committed')).toBe(true);
+    expect(losses).toEqual([2]);
+    expect(lastRoster(lead).gms).toEqual([{
+      id: 'gm-1', name: 'Two', connected: false, ready: false,
+    }]);
+  });
+});
+
+describe('collective GM and crew start transport (issue #1290)', () => {
+  const credentialSequence = (...values) => {
+    let index = 0;
+    return () => values[index++];
+  };
+
+  it('autostarts only after every connected player and equal GM is ready and validated', async () => {
+    const { factories, world, lead } = await fleetOf({
+      ship: { template_path: 'lead.toml' },
+      credentialFactory: credentialSequence('gm-a', 'gm-b'),
+    });
+    const ship = await memberOn(world, factories, lead.code.suffix, {
+      ship: { template_path: 'two.toml' }, name: 'Two',
+    });
+    const gmA = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_GM, name: 'A',
+    });
+    const gmB = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_GM, name: 'B',
+    });
+
+    expect(lead.fleet.update({ ready: true })).toBe(true);
+    expect(ship.member.update({ ready: true })).toBe(true);
+    expect(lead.fleet.setCrewReadiness({ connected: 2, ready: 2 })).toBe(true);
+    expect(ship.member.setCrewReadiness({ connected: 1, ready: 1 })).toBe(true);
+    expect(lead.fleet.setStartValidation(true)).toBe(true);
+    expect(ship.member.setStartValidation(true)).toBe(true);
+    expect(gmA.member.setGmReady(true)).toBe(true);
+    expect(gmA.member.setStartValidation(true)).toBe(true);
+    expect(gmB.member.setGmReady(true)).toBe(true);
+    await settle();
+
+    expect(lead.grants).toEqual([]);
+    expect(lastRoster(lead).gms).toEqual([
+      { id: 'gm-1', name: 'A', connected: true, ready: true },
+      { id: 'gm-2', name: 'B', connected: true, ready: true },
+    ]);
+    expect(lead.policies.at(-1)).toMatchObject({
+      connected_players: 3,
+      ready_players: 3,
+      connected_gms: 2,
+      ready_gms: 2,
+      all_ready: true,
+      validation_passed: false,
+    });
+
+    expect(gmB.member.setStartValidation(true)).toBe(true);
+    await settle();
+    const grant = { id: 'start-1', mode: 'automatic', operator_id: null };
+    expect(lead.grants).toEqual([grant]);
+    expect(ship.grants).toEqual([]);
+    expect(gmA.grants).toEqual([]);
+    expect(gmB.grants).toEqual([]);
+    expect(lead.simulationRosters).toEqual([{
+      local: 1,
+      owner: 1,
+      participants: [1, 2, 3, 4],
+      gms: [
+        { host: 3, operator_id: 'gm-1' },
+        { host: 4, operator_id: 'gm-2' },
+      ],
+      ships: [
+        { host: 1, ship_path: 'lead.toml', crew: [] },
+        { host: 2, ship_path: 'two.toml', crew: [] },
+      ],
+    }]);
+    expect(ship.simulationRosters[0]).toMatchObject({
+      local: 2, owner: 1, participants: [1, 2, 3, 4],
+    });
+    expect(gmA.simulationRosters[0]).toMatchObject({ local: 3, ships: lead.simulationRosters[0].ships });
+    expect(gmB.simulationRosters[0]).toMatchObject({ local: 4, ships: lead.simulationRosters[0].ships });
+    expect(lead.events.map((event) => event.type).slice(-2))
+      .toEqual(['simulation-roster', 'start-grant']);
+
+    lead.fleet.broadcast(encodeHostFrame(simulationFrame(
+      HOST_FRAME_TICK, { from: 1, watermark: 1, commands: [] }, 1,
+    )));
+    await settle();
+    for (const member of [ship, gmA, gmB]) {
+      expect(member.events.findIndex((event) => event.type === 'simulation-roster'))
+        .toBeLessThan(member.events.findIndex((event) => event.type === 'simulation-frame'));
+    }
+    expect(lead.policies.at(-1)).toMatchObject({ started: true, can_auto_start: false });
+    expect(lastRoster(lead).frozen).toBe(true);
+  });
+
+  it('runs the same automatic rule for a GM-only fleet', async () => {
+    const { lead } = await fleetOf({
+      role: HOST_ROLE_GM,
+      name: 'Morgan',
+      credentialFactory: credentialSequence('owner'),
+    });
+    expect(lead.fleet.setStartValidation(true)).toBe(true);
+    expect(lead.fleet.setGmReady(true)).toBe(true);
+    expect(lead.grants).toEqual([
+      { id: 'start-1', mode: 'automatic', operator_id: null },
+    ]);
+    expect(lead.simulationRosters).toEqual([{
+      local: 1,
+      owner: 1,
+      participants: [1],
+      gms: [{ host: 1, operator_id: 'gm-1' }],
+      ships: [],
+    }]);
+    expect(lead.policies.at(-1)).toMatchObject({
+      connected_players: 0,
+      connected_gms: 1,
+      all_ready: true,
+      started: true,
+    });
+  });
+
+  it('fails closed before the owner grant when synchronous topology adoption refuses', async () => {
+    const faults = [];
+    const { factories, world, lead } = await fleetOf({
+      role: HOST_ROLE_GM,
+      credentialFactory: credentialSequence('owner', 'member'),
+      onSimulationRoster: () => 'fleet-roster-unreadable',
+      onError: (code, detail) => faults.push({ code, detail }),
+    });
+    const member = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_GM,
+      name: 'Second GM',
+    });
+    lead.fleet.setStartValidation(true);
+    lead.fleet.setGmReady(true);
+    member.member.setStartValidation(true);
+    member.member.setGmReady(true);
+    await settle();
+
+    expect(lead.grants).toEqual([]);
+    expect(faults).toEqual([{
+      code: 'simulation-roster-refused', detail: 'fleet-roster-unreadable',
+    }]);
+    // The owner checks its own deterministic boundary before distributing the
+    // frozen roster. A refusal cannot strand otherwise healthy members in a
+    // wait-set for a simulation the owner never joined.
+    expect(member.simulationRosters).toEqual([]);
+    expect(lastRoster(member).frozen).toBe(false);
+    expect(member.policies.at(-1)).toMatchObject({ started: false });
+  });
+
+  it('holds the frozen roster, policy, and grant until async owner adoption accepts', async () => {
+    const adoption = deferred();
+    const adopted = [];
+    const { factories, world, lead } = await fleetOf({
+      role: HOST_ROLE_GM,
+      credentialFactory: credentialSequence('owner', 'member'),
+      onSimulationRoster: (roster) => {
+        adopted.push(roster);
+        return adoption.promise;
+      },
+    });
+    const member = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_GM,
+      name: 'Second GM',
+    });
+    lead.fleet.setStartValidation(true);
+    lead.fleet.setGmReady(true);
+    member.member.setStartValidation(true);
+    member.member.setGmReady(true);
+    await settle();
+
+    expect(adopted).toHaveLength(1);
+    expect(lead.grants).toEqual([]);
+    expect(member.simulationRosters).toEqual([]);
+    expect(lastRoster(member).frozen).toBe(false);
+
+    adoption.resolve(true);
+    await settle();
+    expect(lead.grants).toEqual([
+      { id: 'start-1', mode: 'automatic', operator_id: null },
+    ]);
+    expect(member.simulationRosters).toHaveLength(1);
+    expect(lastRoster(member).frozen).toBe(true);
+    expect(member.policies.at(-1)).toMatchObject({ started: true });
+  });
+
+  it('publishes nothing from a frozen async owner topology that later refuses', async () => {
+    const adoption = deferred();
+    const faults = [];
+    const { factories, world, lead } = await fleetOf({
+      role: HOST_ROLE_GM,
+      credentialFactory: credentialSequence('owner', 'member'),
+      onSimulationRoster: () => adoption.promise,
+      onError: (code, detail) => faults.push({ code, detail }),
+    });
+    const member = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_GM,
+      name: 'Second GM',
+    });
+    lead.fleet.setStartValidation(true);
+    lead.fleet.setGmReady(true);
+    member.member.setStartValidation(true);
+    member.member.setGmReady(true);
+    await settle();
+
+    adoption.resolve('fleet-adoption-refused');
+    await settle();
+    expect(lead.grants).toEqual([]);
+    expect(member.simulationRosters).toEqual([]);
+    expect(lastRoster(member).frozen).toBe(false);
+    expect(faults).toEqual([{
+      code: 'simulation-roster-refused', detail: 'fleet-adoption-refused',
+    }]);
+  });
+
+  it('buffers ordered member TickFrames until async adoption accepts', async () => {
+    const adoption = deferred();
+    const forwarded = [];
+    const { factories, world, lead } = await fleetOf({
+      ship: { template_path: 'lead.toml' },
+    });
+    const member = await memberOn(world, factories, lead.code.suffix, {
+      ship: { template_path: 'two.toml' },
+      onSimulationRoster: () => adoption.promise,
+      onSimulationFrame: (raw, authSlot) => forwarded.push({ raw, authSlot }),
+    });
+    lead.fleet.update({ ready: true });
+    member.member.update({ ready: true });
+    lead.fleet.setCrewReadiness({ connected: 1, ready: 1 });
+    member.member.setCrewReadiness({ connected: 1, ready: 1 });
+    lead.fleet.setStartValidation(true);
+    member.member.setStartValidation(true);
+    await settle();
+
+    const first = encodeHostFrame(simulationFrame(
+      HOST_FRAME_TICK, { from: 1, watermark: 1, commands: [] }, 1,
+    ));
+    const second = encodeHostFrame(simulationFrame(
+      HOST_FRAME_TICK, { from: 1, watermark: 2, commands: [] }, 2,
+    ));
+    lead.fleet.broadcast(first);
+    lead.fleet.broadcast(second);
+    await settle();
+    expect(forwarded).toEqual([]);
+
+    adoption.resolve(true);
+    await settle();
+    expect(forwarded).toEqual([
+      { raw: first, authSlot: 1 },
+      { raw: second, authSlot: 1 },
+    ]);
+  });
+
+  it('drops buffered frames and closes when async member adoption refuses', async () => {
+    const adoption = deferred();
+    const faults = [];
+    const forwarded = [];
+    const { factories, world, lead } = await fleetOf({
+      ship: { template_path: 'lead.toml' },
+    });
+    const member = await memberOn(world, factories, lead.code.suffix, {
+      ship: { template_path: 'two.toml' },
+      onSimulationRoster: () => adoption.promise,
+      onSimulationFrame: (raw) => forwarded.push(raw),
+      onError: (code, detail) => faults.push({ code, detail }),
+    });
+    lead.fleet.update({ ready: true });
+    member.member.update({ ready: true });
+    lead.fleet.setCrewReadiness({ connected: 1, ready: 1 });
+    member.member.setCrewReadiness({ connected: 1, ready: 1 });
+    lead.fleet.setStartValidation(true);
+    member.member.setStartValidation(true);
+    await settle();
+
+    lead.fleet.broadcast(encodeHostFrame(simulationFrame(
+      HOST_FRAME_TICK, { from: 1, watermark: 1, commands: [] }, 1,
+    )));
+    await settle();
+    adoption.resolve(false);
+    await settle();
+
+    expect(forwarded).toEqual([]);
+    expect(faults).toEqual([{
+      code: 'simulation-roster-refused', detail: 'callback-returned-false',
+    }]);
+    expect(lastRoster(lead).slots[1]).toMatchObject({ connected: false });
+  });
+
+  it('fails closed when the pending member-frame cushion overflows', async () => {
+    const adoption = deferred();
+    const faults = [];
+    const forwarded = [];
+    const { factories, world, lead } = await fleetOf({
+      ship: { template_path: 'lead.toml' },
+    });
+    const member = await memberOn(world, factories, lead.code.suffix, {
+      ship: { template_path: 'two.toml' },
+      onSimulationRoster: () => adoption.promise,
+      onSimulationFrame: (raw) => forwarded.push(raw),
+      onError: (code, detail) => faults.push({ code, detail }),
+    });
+    lead.fleet.update({ ready: true });
+    member.member.update({ ready: true });
+    lead.fleet.setCrewReadiness({ connected: 1, ready: 1 });
+    member.member.setCrewReadiness({ connected: 1, ready: 1 });
+    lead.fleet.setStartValidation(true);
+    member.member.setStartValidation(true);
+    await settle();
+
+    for (let tick = 1; tick <= 65; tick += 1) {
+      lead.fleet.broadcast(encodeHostFrame(simulationFrame(
+        HOST_FRAME_TICK, { from: 1, watermark: tick, commands: [] }, tick,
+      )));
+    }
+    await settle();
+    adoption.resolve(true);
+    await settle();
+
+    expect(forwarded).toEqual([]);
+    expect(faults).toEqual([{
+      code: 'simulation-roster-refused', detail: 'pending-frame-overflow',
+    }]);
+  });
+
+  it('surfaces member adoption refusal and never forwards later simulation frames', async () => {
+    const faults = [];
+    const forwarded = [];
+    const { factories, world, lead } = await fleetOf({
+      ship: { template_path: 'lead.toml' },
+    });
+    const ship = await memberOn(world, factories, lead.code.suffix, {
+      ship: { template_path: 'two.toml' },
+      onSimulationRoster: () => false,
+      onSimulationFrame: (raw) => forwarded.push(raw),
+      onError: (code, detail) => faults.push({ code, detail }),
+    });
+    lead.fleet.update({ ready: true });
+    ship.member.update({ ready: true });
+    lead.fleet.setCrewReadiness({ connected: 1, ready: 1 });
+    ship.member.setCrewReadiness({ connected: 1, ready: 1 });
+    lead.fleet.setStartValidation(true);
+    ship.member.setStartValidation(true);
+    await settle();
+
+    expect(faults).toEqual([{
+      code: 'simulation-roster-refused', detail: 'callback-returned-false',
+    }]);
+    lead.fleet.broadcast(encodeHostFrame(simulationFrame(
+      HOST_FRAME_TICK, { from: 1, watermark: 1, commands: [] }, 1,
+    )));
+    await settle();
+    expect(forwarded).toEqual([]);
+  });
+
+  it('clears and excludes a disconnected GM readiness vote', async () => {
+    const { factories, world, lead } = await fleetOf({
+      credentialFactory: credentialSequence('member'),
+    });
+    const gm = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_GM, name: 'Morgan',
+    });
+    gm.member.setGmReady(true);
+    gm.member.setStartValidation(true);
+    await settle();
+    expect(lastRoster(lead).gms[0].ready).toBe(true);
+
+    gm.member.close();
+    await settle();
+    expect(lastRoster(lead).gms).toEqual([
+      { id: 'gm-1', name: 'Morgan', connected: false, ready: false },
+    ]);
+    expect(lead.policies.at(-1)).toMatchObject({ connected_gms: 0, ready_gms: 0 });
+  });
+
+  it('requires a new GM-ready click after the same member handle reconnects', async () => {
+    vi.useFakeTimers();
+    let lead;
+    let gm;
+    try {
+      const setup = await fleetOf({
+        credentialFactory: credentialSequence('member'),
+      });
+      ({ lead } = setup);
+      gm = await memberOn(setup.world, setup.factories, lead.code.suffix, {
+        role: HOST_ROLE_GM, name: 'Morgan',
+      });
+      gm.member.setGmReady(true);
+      await settle();
+      expect(lastRoster(lead).gms[0].ready).toBe(true);
+
+      const firstChannel = setup.factories.peer.channels.find((channel) =>
+        channel.origin === 'offer' && channel.label === RELIABLE_CHANNEL);
+      expect(firstChannel).toBeTruthy();
+
+      // A duplicated acceptance/Hello/Welcome on the same live transport
+      // generation is idempotent and must not erase an explicit current vote.
+      firstChannel.onmessage({
+        data: JSON.stringify({ type: 'JoinAccepted', data: {} }),
+      });
+      await settle();
+      expect(lastRoster(lead).gms[0].ready).toBe(true);
+
+      // A real link loss creates a new transport generation. The owner clears
+      // the disconnected row immediately; after automatic recovery the same
+      // member handle must flush false, not replay its cached pre-drop click.
+      firstChannel.close();
+      await settle();
+      expect(lastRoster(lead).gms[0]).toMatchObject({ connected: false, ready: false });
+      await vi.advanceTimersByTimeAsync(100);
+      await settle();
+      expect(lastRoster(lead).gms[0]).toMatchObject({ connected: true, ready: false });
+
+      gm.member.setGmReady(true);
+      await settle();
+      expect(lastRoster(lead).gms[0]).toMatchObject({ connected: true, ready: true });
+    } finally {
+      if (gm) gm.member.close();
+      if (lead) lead.fleet.close();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
+  it('authenticates force by connection and bypasses readiness but not validation', async () => {
+    const { factories, world, lead } = await fleetOf({
+      ship: { template_path: 'lead.toml' },
+      credentialFactory: credentialSequence('gm'),
+    });
+    const ship = await memberOn(world, factories, lead.code.suffix, {
+      ship: { template_path: 'two.toml' }, name: 'Two',
+    });
+    const gm = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_GM, name: 'Morgan',
+    });
+
+    lead.fleet.update({ ready: true });
+    ship.member.update({ ready: true });
+    lead.fleet.setStartValidation(true);
+    ship.member.setStartValidation(true);
+    await settle();
+
+    expect(ship.member.forceStart()).toBe(false);
+    // Even a hand-built request carrying a stolen operator id is judged as the
+    // authenticated ship connection and ignored.
+    ship.member.broadcast(encodeHostFrame(hostFrame('start-force', { operator_id: 'gm-1' })));
+    ship.member.broadcast(encodeHostFrame(hostFrame('start-state', {
+      role: HOST_ROLE_GM,
+      operator_id: 'gm-1',
+      gm_ready: true,
+    })));
+    gm.member.broadcast(encodeHostFrame(hostFrame('start-state', {
+      role: HOST_ROLE_SHIP,
+      crew: { connected: 999, ready: 999 },
+    })));
+    await settle();
+    expect(lead.grants).toEqual([]);
+    expect(lead.forceResults).toEqual([]);
+    expect(lead.policies.at(-1)).toMatchObject({
+      connected_players: 0,
+      ready_gms: 0,
+    });
+
+    // The real GM is still invalid, so force is attributed but refused.
+    expect(gm.member.forceStart()).toBe(true);
+    await settle();
+    const refused = {
+      status: 'refused',
+      operator_id: 'gm-1',
+      reason: 'validation-failed',
+      grant_id: null,
+    };
+    expect(lead.forceResults.at(-1)).toEqual(refused);
+    expect(gm.forceResults.at(-1)).toEqual(refused);
+    expect(lead.grants).toEqual([]);
+
+    gm.member.setStartValidation(true);
+    await settle();
+    expect(gm.member.forceStart()).toBe(true);
+    await settle();
+    const grant = { id: 'start-1', mode: 'forced', operator_id: 'gm-1' };
+    expect(lead.grants).toEqual([grant]);
+    expect(ship.grants).toEqual([]);
+    expect(gm.grants).toEqual([]);
+    expect(gm.forceResults.at(-1)).toEqual({
+      status: 'applied',
+      operator_id: 'gm-1',
+      reason: null,
+      grant_id: 'start-1',
+    });
+
+    expect(gm.member.forceStart()).toBe(true);
+    await settle();
+    expect(gm.forceResults.at(-1)).toEqual({
+      status: 'no-op',
+      operator_id: 'gm-1',
+      reason: 'already-started',
+      grant_id: 'start-1',
+    });
+    expect(lead.grants).toEqual([grant]);
+  });
+
+  it('makes a grant win an ordered late-withdrawal race without a JS member replay', async () => {
+    const { factories, world, lead } = await fleetOf({
+      ship: { template_path: 'lead.toml' },
+    });
+    const ship = await memberOn(world, factories, lead.code.suffix, {
+      ship: { template_path: 'two.toml' }, name: 'Two',
+    });
+    lead.fleet.update({ ready: true });
+    ship.member.update({ ready: true });
+    ship.member.setCrewReadiness({ connected: 1, ready: 0 });
+    lead.fleet.setCrewReadiness({ connected: 1, ready: 1 });
+    lead.fleet.setStartValidation(true);
+    ship.member.setStartValidation(true);
+    await settle();
+
+    // Reliable ordered channel: the ready vote reaches the owner, creates and
+    // freezes the topology, then the queued withdrawal arrives too late and is
+    // ignored. Only owner Rust receives the decision to schedule fleet-wide.
+    ship.member.setCrewReadiness({ connected: 1, ready: 1 });
+    ship.member.setCrewReadiness({ connected: 1, ready: 0 });
+    await settle();
+    const grant = { id: 'start-1', mode: 'automatic', operator_id: null };
+    expect(lead.grants).toEqual([grant]);
+    expect(ship.grants).toEqual([]);
+    expect(lastRoster(lead).slots[1].crew).toEqual({ connected: 1, ready: 1 });
+
+    // Duplicate presentation roster delivery cannot re-adopt the topology.
+    lead.fleet.broadcast(encodeHostFrame(hostFrame('roster', { roster: lead.fleet.roster() })));
+    await settle();
+    expect(lead.simulationRosters).toHaveLength(1);
+    expect(ship.simulationRosters).toHaveLength(1);
+    expect(ship.grants).toEqual([]);
+  });
+
+  it('restores a frozen GM privately without replaying the one-shot start grant', async () => {
+    const begins = [];
+    const { factories, world, lead } = await fleetOf({
+      ship: { template_path: 'lead.toml' },
+      credentialFactory: credentialSequence('gm-secret'),
+      onBeginGmJoin: (request) => { begins.push(request); return true; },
+    });
+    const gm = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_GM, name: 'Morgan',
+    });
+    lead.fleet.update({ ready: true });
+    lead.fleet.setCrewReadiness({ connected: 1, ready: 1 });
+    lead.fleet.setStartValidation(true);
+    gm.member.setGmReady(true);
+    gm.member.setStartValidation(true);
+    await settle();
+    expect(lead.grants).toHaveLength(1);
+
+    const reconnectCredential = gm.member.reconnectCredential;
+    gm.member.close();
+    await settle();
+    const replacement = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_GM,
+      reconnectCredential,
+    });
+    expect(replacement.refusals).toEqual([]);
+    expect(replacement.member.operatorId).toBe('gm-1');
+    expect(replacement.member.reconnectCredential).toBe(reconnectCredential);
+    expect(replacement.member.pendingGmJoin).toBe(true);
+    expect(replacement.simulationRosters).toEqual([]);
+    expect(replacement.gmBootstraps).toHaveLength(1);
+    expect(replacement.grants).toEqual([]);
+    expect(lead.grants).toHaveLength(1);
+    expect(begins).toEqual([{
+      id: lead.fleet.pendingGmJoin().id,
+      kind: 'reconnect',
+      approvedBy: 1,
+      candidateHost: 2,
+      operatorId: 'gm-1',
+    }]);
+    expect(lastRoster(lead).gms).toEqual([
+      { id: 'gm-1', name: 'Morgan', connected: false, ready: false },
+    ]);
+
+    expect(lead.fleet.completeGmJoin(begins[0].id, 'committed')).toBe(true);
+    await settle();
+    expect(lastRoster(lead).gms).toEqual([
+      { id: 'gm-1', name: 'Morgan', connected: true, ready: false },
+    ]);
+    expect(lastRoster(replacement).gms).toEqual(lastRoster(lead).gms);
+    expect(replacement.member.pendingGmJoin).toBe(false);
+    expect(replacement.grants).toEqual([]);
+    expect(lead.grants).toHaveLength(1);
+    expect(lead.fleet.completeGmJoin(begins[0].id, 'committed')).toBe(true);
+    expect(lastRoster(lead).gms).toHaveLength(1);
+  });
+
+  it('leaves an incompatible would-be GM unable to force', async () => {
+    const { factories, world, lead } = await fleetOf({
+      checkStamp: () => ({ ok: false, code: 'content-epoch-mismatch' }),
+    });
+    const gm = await memberOn(world, factories, lead.code.suffix, { role: HOST_ROLE_GM });
+    expect(gm.member.operatorId).toBeNull();
+    expect(gm.member.forceStart()).toBe(false);
+    expect(lead.grants).toEqual([]);
+    expect(lastRoster(lead).gms).toEqual([]);
+  });
+});
+
 describe('typed-code refusal', () => {
   /** A world holding one crew record and one fleet record, and both codes. */
   async function bothNamespaces() {
@@ -400,7 +1448,7 @@ describe('typed-code refusal', () => {
   });
 
   it('refuses a WHOLE crew code pasted into the fleet field', async () => {
-    // The five-letter case above was never the dangerous one: a bare suffix is
+    // The typed case above was never the dangerous one: a bare suffix is
     // composed under the field's own namespace, so it resolves the wrong
     // record or none. A FULL code carries its own project GUID, so the joiner
     // used to report the code's namespace instead of the field's — the asker
@@ -452,7 +1500,7 @@ describe('typed-code refusal', () => {
     const stray = composeJoinCode({
       project: '00000000-0000-4000-8000-000000000000',
       version: versionGuid(DATA),
-      suffix: 'QUARK',
+      suffix: 'QUARKING',
     });
     const two = await memberOn(world, factories, stray);
     expect(two.refusals.map((r) => r.reason)).toContain('unknown-project');
@@ -767,6 +1815,29 @@ describe('the running mission rides the same link (issue #1116)', () => {
       id: 'slot-2',
       connected: false,
     });
+  });
+
+  it('reports a frozen GM technical-peer loss even though it owns no ship', async () => {
+    const lost = [];
+    const { world, factories, lead } = await fleetOf({
+      credentialFactory: () => 'gm-private-capability',
+      onHostLost: (slot) => lost.push(slot),
+    });
+    const gm = await memberOn(world, factories, lead.code.suffix, {
+      role: HOST_ROLE_GM,
+      name: 'Morgan',
+    });
+    expect(gm.member.slot).toBe('slot-2');
+
+    lead.fleet.freeze();
+    await settle();
+    gm.member.close();
+    await settle();
+
+    expect(lost).toEqual([2]);
+    expect(lastRoster(lead).gms).toEqual([
+      { id: 'gm-1', name: 'Morgan', connected: false, ready: false },
+    ]);
   });
 
   it('does NOT report a host loss for a drop before the mission starts (#1119)', async () => {

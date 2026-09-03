@@ -87,3 +87,13 @@
 }
 .world-btn:hover { background: #223; border-color: #558; }
 .world-btn.active { background: #224; border-color: #66c; color: #ccf; }
+
+/* Portrait / narrow hosts (carried over in the GM platform merge, #1300): the
+   picker stacks its columns and lets the page scroll them in sequence. The join
+   surface docked between them (gui/host-qr.css's #overlay.pre-scenario) and
+   server.html's own #save-slots-panel take the same treatment beside it. Lives
+   here with the rest of the picker's rules rather than in server.html (#1328). */
+@media (orientation: portrait), (max-width: 800px) {
+  #scenario-panel { flex-direction: column; overflow-y: auto; }
+  #world-list { width: 100%; max-width: none; min-width: 0; overflow: visible; }
+}

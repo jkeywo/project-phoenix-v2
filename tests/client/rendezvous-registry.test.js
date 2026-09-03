@@ -76,7 +76,7 @@ const letters = (word) => [...word].map((c) => DATA.suffix.alphabet.indexOf(c));
 const OTHER_RELEASE = '11112222-3333-4444-5555-666677778888';
 
 describe('code issue', () => {
-  it('issues a five-letter code in the namespace the host asked for', () => {
+  it('issues a code of the authored length in the namespace the host asked for', () => {
     const h = harness();
     const code = openHost(h);
     expect(code.suffix).toHaveLength(DATA.suffix.length);
@@ -91,12 +91,12 @@ describe('code issue', () => {
     // never repeats leaves that branch uncovered while the assertion below
     // still passes, which is what this test used to do.
     let i = 0;
-    const script = [...letters('QUARK'), ...letters('QUARK'), ...letters('MOIST')];
+    const script = [...letters('QUARKING'), ...letters('QUARKING'), ...letters('MOISTURE')];
     const h = harness({ randomInt: () => script[i++] });
     const first = openHost(h, 'host-1');
     const second = openHost(h, 'host-2');
-    expect(first.suffix).toBe('QUARK');
-    expect(second.suffix).toBe('MOIST');
+    expect(first.suffix).toBe('QUARKING');
+    expect(second.suffix).toBe('MOISTURE');
     expect(i, 'the collision was never drawn, so the retry never ran').toBe(script.length);
     expect(h.reg.snapshot()).toHaveLength(2);
   });
@@ -134,12 +134,16 @@ describe('code issue', () => {
   });
 
   it('never issues a denied word', () => {
-    // Force the first draw onto ADMIN; the mint must skip it.
+    // Force the first whole draw onto a suffix READING as ADMIN; the mint
+    // must skip it (the deny rule is containment — see gui/join-code.js).
     const a = DATA.suffix.alphabet;
-    const script = [...[...'ADMIN'].map((c) => a.indexOf(c)), ...[...'QUARK'].map((c) => a.indexOf(c))];
+    const script = [
+      ...[...'ADMINXYZ'].map((c) => a.indexOf(c)),
+      ...[...'QUARKING'].map((c) => a.indexOf(c)),
+    ];
     let i = 0;
     const h = harness({ randomInt: () => script[i++ % script.length] });
-    expect(openHost(h).suffix).toBe('QUARK');
+    expect(openHost(h).suffix).toBe('QUARKING');
   });
 });
 
@@ -167,7 +171,7 @@ describe('typed lookup', () => {
     const h = harness();
     openHost(h);
     h.connect('phone', ROLE_CLIENT);
-    h.send('phone', { type: 'resolve', code: 'ZZZZZ' });
+    h.send('phone', { type: 'resolve', code: 'ZZZZZZZZ' });
     expect(h.last('phone', 'error')).toMatchObject({ request: 'resolve', reason: 'unknown' });
   });
 
@@ -203,7 +207,7 @@ describe('typed lookup', () => {
     const server = openHost(h, 'fleet-host', NAMESPACE_SERVER);
     const old = openHost(h, 'old-host', NAMESPACE_CLIENT, { version: OTHER_RELEASE });
     h.connect('phone', ROLE_CLIENT);
-    h.send('phone', { type: 'resolve', code: 'ZZZZZ' });
+    h.send('phone', { type: 'resolve', code: 'ZZZZZZZZ' });
     h.send('phone', { type: 'resolve', code: server.suffix });
     h.send('phone', {
       type: 'resolve',
@@ -216,14 +220,14 @@ describe('typed lookup', () => {
   it('refuses a denied suffix at lookup as well as at mint', () => {
     const h = harness();
     h.connect('phone', ROLE_CLIENT);
-    h.send('phone', { type: 'resolve', code: 'ADMIN' });
+    h.send('phone', { type: 'resolve', code: 'ADMINXYZ' });
     expect(h.last('phone', 'error')).toMatchObject({ reason: 'denied' });
   });
 
   it('refuses a frame from another protocol revision rather than guessing', () => {
     const h = harness();
     h.connect('phone', ROLE_CLIENT);
-    h.raw('phone', { v: RENDEZVOUS_PROTOCOL + 1, type: 'resolve', code: 'ZZZZZ' });
+    h.raw('phone', { v: RENDEZVOUS_PROTOCOL + 1, type: 'resolve', code: 'ZZZZZZZZ' });
     expect(h.last('phone', 'error')).toMatchObject({ reason: 'unsupported-protocol' });
   });
 });
@@ -319,23 +323,23 @@ describe('fleet joining (issue #1114)', () => {
     expect(h.last('fleet-lead', 'peer-joined')).toMatchObject({ peer: 'ship-2' });
   });
 
-  it('composes a bare five-letter fleet code under the SERVER project', () => {
+  it('composes a bare typed fleet code under the SERVER project', () => {
     // The sharpest case for the typed fallback: one suffix, two records, two
     // fields. Without a per-request namespace the fleet field would compose
     // the crew project and attach a ship host to a phone's ship.
-    const script = [...letters('QUARK'), ...letters('QUARK')];
+    const script = [...letters('QUARKING'), ...letters('QUARKING')];
     let i = 0;
     const h = harness({ randomInt: () => script[i++] });
     const crew = openHost(h, 'crew-host', NAMESPACE_CLIENT);
     const fleet = openHost(h, 'fleet-lead', NAMESPACE_SERVER);
     expect(crew.suffix).toBe(fleet.suffix);
 
-    fleetJoin(h, 'ship-2', 'quark');
+    fleetJoin(h, 'ship-2', 'quarking');
     expect(h.last('fleet-lead', 'peer-joined')).toMatchObject({ peer: 'ship-2' });
     expect(h.last('crew-host', 'peer-joined')).toBeNull();
 
     h.connect('phone', ROLE_CLIENT);
-    h.send('phone', { type: 'join', code: 'quark' });
+    h.send('phone', { type: 'join', code: 'quarking' });
     expect(h.last('crew-host', 'peer-joined')).toMatchObject({ peer: 'phone' });
   });
 
@@ -344,7 +348,7 @@ describe('fleet joining (issue #1114)', () => {
     const crew = openHost(h, 'crew-host', NAMESPACE_CLIENT);
     fleetJoin(h, 'ship-2', crew.suffix);
     expect(h.last('ship-2', 'error')).toMatchObject({ request: 'join', reason: 'wrong-type' });
-    // And the same answer for a whole pasted crew code, not only five letters.
+    // And the same answer for a whole pasted crew code, not only the letters.
     // The `namespace` on that frame is the FIELD's, which is what the shipped
     // joiner sends for either form — it used to send the namespace read out of
     // the code itself, so the asker echoed the record back at the service and
@@ -413,12 +417,12 @@ describe('registry bounds', () => {
     const h = harness();
     openHost(h);
     h.connect('scanner', ROLE_CLIENT);
-    for (let i = 0; i < cap; i += 1) h.send('scanner', { type: 'resolve', code: 'ZZZZZ' });
+    for (let i = 0; i < cap; i += 1) h.send('scanner', { type: 'resolve', code: 'ZZZZZZZZ' });
     expect(h.last('scanner', 'error')).toMatchObject({ reason: 'unknown' });
 
     // Past the cap the answer changes, and the frame tells the adapter to end
     // the socket rather than keep answering an enumeration.
-    const [refusal] = h.reg.receive('scanner', { v: RENDEZVOUS_PROTOCOL, type: 'resolve', code: 'ZZZZZ' });
+    const [refusal] = h.reg.receive('scanner', { v: RENDEZVOUS_PROTOCOL, type: 'resolve', code: 'ZZZZZZZZ' });
     expect(refusal.frame).toMatchObject({ type: 'error', reason: 'too-many-attempts' });
     expect(refusal.close).toBe(true);
   });
@@ -490,7 +494,7 @@ describe('registry bounds', () => {
 
     clock += DATA.limits.record_ttl_seconds * 1000 + 1;
     h.connect('phone', ROLE_CLIENT);
-    h.send('phone', { type: 'resolve', code: 'ZZZZZ' });
+    h.send('phone', { type: 'resolve', code: 'ZZZZZZZZ' });
 
     expect(h.reg.snapshot()).toHaveLength(0);
     // 'unreachable' is what createRendezvousHost's own socket.onerror/onclose
@@ -829,10 +833,11 @@ describe('code reclaim (issue #1115)', () => {
     h.send('host-1', {
       type: 'host-open',
       namespace: NAMESPACE_CLIENT,
-      resume: { suffix: 'ZZZZZ', secret: 'whatever-was-guessed-here-000000' },
+      resume: { suffix: 'ZZZZZZZZ', secret: 'whatever-was-guessed-here-000000' },
     });
     const minted = h.last('host-1', 'hosted');
-    expect(minted.code.suffix).toMatch(new RegExp(`^[${DATA.suffix.alphabet}]{5}$`));
+    expect(minted.code.suffix)
+      .toMatch(new RegExp(`^[${DATA.suffix.alphabet}]{${DATA.suffix.length}}$`));
   });
 
   it('charges each resume attempt, so repeated wrong-secret probes are capped (issue #1115)', () => {

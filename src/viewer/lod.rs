@@ -93,9 +93,11 @@ pub struct LadderState {
     /// The model's largest extent, from its rig sidecar. Sizes a procedural
     /// level that names no radius.
     pub extent: Option<f32>,
-    /// What a NON-near tier of this ladder folds onto the subject's transform —
+    /// The extra composition scale a NON-near tier of this ladder needs —
     /// [`resolve_tier_parent_scale`]'s answer for this model, resolved once when
-    /// the ladder is read. `None` only before a ladder has been read at all.
+    /// the ladder is read. The viewer puts it on its preview subject; the game
+    /// keeps it on a presentation-only tier root. `None` only before a ladder
+    /// has been read at all.
     ///
     /// The viewer needs this for the same reason the game does: a tier's own GLB
     /// resolves its OWN sidecar, so a hull ladder's generated tiers come back at
@@ -139,12 +141,12 @@ impl LadderState {
         self.extent.map(|e| e * 0.5).unwrap_or(1.0)
     }
 
-    /// The scale the tier at `index` folds onto the subject's transform.
+    /// The extra composition scale for the tier at `index`.
     ///
     /// The near tier is the model itself, so its child already carries the whole
-    /// `[base].scale` and the parent folds in nothing; every other tier takes
-    /// this ladder's [`Self::tier_scale`]. Identical to what `update_mesh_lod`
-    /// puts on the entity, because it is the same function.
+    /// `[base].scale` and needs nothing extra; every other tier takes this
+    /// ladder's [`Self::tier_scale`]. This is the same value `update_mesh_lod`
+    /// puts on the game's presentation-only tier root.
     ///
     /// The `Vec3::ONE` floor is unreachable in practice — `refresh_ladder` will
     /// not publish levels until it has resolved a tier scale — and means "fold
@@ -265,8 +267,9 @@ pub fn apply_lod_mode(
 /// `index` is the level's position in the ladder, which decides how much of the
 /// model's `[base].scale` this tier still owes — see [`LadderState::tier_base`].
 /// It is folded into the `scale` both level kinds carry, exactly as
-/// `update_mesh_lod` folds it into the entity's transform, so the viewer shows a
-/// model at ONE size across its whole ladder for either ladder convention.
+/// `update_mesh_lod` folds it into the game's presentation-only tier root, so
+/// the viewer shows a model at ONE size across its whole ladder for either
+/// ladder convention.
 fn showing_for(index: usize, level: &LodLevel, args: &ViewerArgs, ladder: &LadderState) -> Showing {
     let tier_base = ladder.tier_base(index);
     let scale = tier_base * level.scale.map(Vec3::from_array).unwrap_or(Vec3::ONE);

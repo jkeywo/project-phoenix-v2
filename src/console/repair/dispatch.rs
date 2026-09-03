@@ -89,6 +89,7 @@ pub fn handle_dispatch_repair_team(
         ),
         With<crate::server_app::Ship>,
     >,
+    mut outbound: Option<ResMut<Messages<crate::lobby::OutboundMessage>>>,
 ) {
     for (admitted, ship_config, mut teams, hull_opt, external_dispatch) in ship_query.iter_mut() {
         let committed = external_dispatch
@@ -121,8 +122,21 @@ pub fn handle_dispatch_repair_team(
                 // not recalled — which is the same nothing-happens a dispatch to
                 // an undamaged station has always produced.
                 let Some(sid) = resolve_repair_target(repair_target, ship_config, hull_ref) else {
+                    crate::command_admission::finish_admitted_action_feedback(
+                        &mut outbound,
+                        cmd,
+                        crate::core::messages::ActionFeedbackOutcome::Refused,
+                    );
                     continue;
                 };
+                if teams.0.slots().get(*team_idx as usize).is_none() {
+                    crate::command_admission::finish_admitted_action_feedback(
+                        &mut outbound,
+                        cmd,
+                        crate::core::messages::ActionFeedbackOutcome::Refused,
+                    );
+                    continue;
+                }
                 // A team held abroad by an external repair dispatch is not
                 // dispatchable, however the order was issued. Same nothing-
                 // happens as a dispatch to an undamaged station: the slot is
@@ -131,10 +145,20 @@ pub fn handle_dispatch_repair_team(
                     .0
                     .is_committed_to_operation(*team_idx as usize, committed)
                 {
+                    crate::command_admission::finish_admitted_action_feedback(
+                        &mut outbound,
+                        cmd,
+                        crate::core::messages::ActionFeedbackOutcome::Refused,
+                    );
                     continue;
                 }
                 let display = display_name_for(&sid);
                 teams.0.dispatch(*team_idx as usize, sid, display);
+                crate::command_admission::finish_admitted_action_feedback(
+                    &mut outbound,
+                    cmd,
+                    crate::core::messages::ActionFeedbackOutcome::Applied,
+                );
             }
         }
     }
@@ -190,14 +214,27 @@ pub fn handle_set_repair_target_priority(
         ),
         With<crate::server_app::Ship>,
     >,
+    mut outbound: Option<ResMut<Messages<crate::lobby::OutboundMessage>>>,
 ) {
     for (admitted, mut teams, hull_opt, config_opt) in ship_query.iter_mut() {
-        let (Some(hull), Some(config)) = (hull_opt, config_opt) else {
-            continue;
-        };
         for cmd in admitted.for_target(REPAIR_SYSTEM_ID) {
             if let SystemControlPayload::SetRepairTargetPriority { system_id } = &cmd.payload {
-                teams.0.prioritise_system(system_id, &hull.0, &config.0);
+                let applied = match (hull_opt, config_opt) {
+                    (Some(hull), Some(config)) => teams
+                        .0
+                        .prioritise_system(system_id, &hull.0, &config.0)
+                        .is_some(),
+                    _ => false,
+                };
+                crate::command_admission::finish_admitted_action_feedback(
+                    &mut outbound,
+                    cmd,
+                    if applied {
+                        crate::core::messages::ActionFeedbackOutcome::Applied
+                    } else {
+                        crate::core::messages::ActionFeedbackOutcome::Refused
+                    },
+                );
             }
         }
     }

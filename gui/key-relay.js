@@ -24,7 +24,15 @@ const RELAYED_TYPES = ['keydown', 'keyup'];
 function isTypingTarget(el) {
   if (!el) return false;
   const tag = el.tagName;
-  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable === true;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable === true) {
+    return true;
+  }
+  if (typeof el.getAttribute === 'function'
+      && el.getAttribute('data-semantic-binding-capture') != null) return true;
+  if (typeof el.closest === 'function') {
+    try { return !!el.closest('[data-semantic-binding-capture]'); } catch (_) { return false; }
+  }
+  return false;
 }
 
 /**

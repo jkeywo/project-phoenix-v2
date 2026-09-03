@@ -33,6 +33,7 @@ fn dispatch(
             ship_stations,
             ship_config,
             station_ratings,
+            &[],
         ),
         ClientMessage::SetName { name } => handle_set_name(token, name, sessions),
         ClientMessage::SelectStation { station } => {
@@ -79,6 +80,7 @@ fn dispatch(
         // not through a pure result-producing handler — so like the other
         // runtime variants it is a no-op on this dispatch path.
         ClientMessage::ControlSystem { .. }
+        | ClientMessage::ControlSystemCorrelated { .. }
         | ClientMessage::SendCoordination { .. }
         | ClientMessage::SelectScenario { .. }
         | ClientMessage::SelectPlayerShip { .. }
@@ -1936,6 +1938,7 @@ fn identify_refuses_reserved_host_runtime_tokens() {
             &default_stations(),
             &default_ship_config(),
             &HashMap::new(),
+            &[],
         );
 
         assert!(
@@ -1968,12 +1971,48 @@ fn identify_still_accepts_an_ordinary_peer_token() {
         &default_stations(),
         &default_ship_config(),
         &HashMap::new(),
+        &[],
     );
     assert_eq!(sessions.players().len(), 1);
     assert!(result
         .outbound
         .iter()
         .any(|(_, m)| matches!(m, ServerMessage::Welcome { .. })));
+}
+
+#[test]
+fn welcome_projects_gms_separately_from_players_and_ship_capacity() {
+    let mut sessions = SessionManager::new();
+    let gms = vec![crate::gm_roster::GmOperator {
+        id: "gm-1".into(),
+        name: "Morgan".into(),
+        connected: true,
+        ready: false,
+    }];
+    let result = handle_identify(
+        "t1",
+        "Alice",
+        &mut sessions,
+        GamePhase::Lobby,
+        None,
+        &default_stations(),
+        &default_ship_config(),
+        &HashMap::new(),
+        &gms,
+    );
+
+    let welcome_gms = result
+        .outbound
+        .iter()
+        .find_map(|(_, message)| match message {
+            ServerMessage::Welcome { state, gms, .. } => {
+                assert_eq!(state.players.len(), 1, "GM must not become a Player row");
+                Some(gms)
+            }
+            _ => None,
+        });
+    assert_eq!(welcome_gms, Some(&gms));
+    assert_eq!(sessions.players().len(), 1);
 }
 
 /// The host page's settings menu (issue #939) carries an "exit to lobby"
@@ -2220,6 +2259,7 @@ fn joining_after_all_claimable_stations_are_held_becomes_spectator_despite_auxil
         &stations,
         &default_ship_config(),
         &HashMap::new(),
+        &[],
     );
 
     assert!(result.outbound.iter().any(|(target, message)| {

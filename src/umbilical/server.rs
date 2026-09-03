@@ -806,5 +806,258 @@ mod tests {
         assert_eq!(u.carry, 0.0);
         assert_eq!(u.last_refusal, None);
         assert_eq!(u.operator_level, None);
+        assert_eq!(u.activation_target, None);
+    }
+
+    // ── The task lifecycle (issue #1345) ─────────────────────────────────────
+
+    use crate::dock::mating::DockConfig;
+    use crate::infrastructure::condition::{
+        CapacityConfig, InfrastructureConfig, InfrastructureState,
+    };
+
+    const OPERATOR: &str = "op-1";
+    const PARTNER: &str = "partner-1";
+
+    fn dock_config() -> DockConfig {
+        DockConfig {
+            range: 200.0,
+            engage_distance: 400.0,
+            approach_speed: 60.0,
+            mate_tolerance: 4.0,
+            undock_clear_distance: 120.0,
+            min_power_level: 1,
+        }
+    }
+
+    /// A docked control, mated to `PARTNER` (or idle when `docked_to` is
+    /// `None`) — the umbilical's own docking terms don't matter to these
+    /// tests, only `docked_partner()`'s answer.
+    fn dock(docked_to: Option<&str>) -> DockControl {
+        let mut d = DockControl::new(
+            SystemId(DOCK_SYSTEM_ID_FOR_TEST.into()),
+            dock_config(),
+            PowerGroupId("dock".into()),
+        );
+        if let Some(target) = docked_to {
+            d.docked = true;
+            d.docking_target = Some(target.into());
+        }
+        d
+    }
+
+    const DOCK_SYSTEM_ID_FOR_TEST: &str = "dock";
+
+    fn capacity(amount: i64, ceiling: i64) -> InfrastructureConfig {
+        InfrastructureConfig {
+            capacities: vec![CapacityConfig {
+                id: "fuel".into(),
+                amount,
+                ceiling: Some(ceiling),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    fn flow_config() -> UmbilicalConfig {
+        UmbilicalConfig {
+            capacity: "fuel".into(),
+            rate: 10.0,
+            direction: UmbilicalDirection::Deliver,
+            min_power_level: 0,
+        }
+    }
+
+    /// A docked pair — the operator delivering `fuel` to its partner — plus the
+    /// lifecycle queue, ready to run `handle_umbilical_commands` and `tick_
+    /// umbilical` chained.
+    fn docked_world() -> (App, Entity) {
+        let mut app = App::new();
+        app.init_resource::<EffectQueue<TaskLifecycleRequest>>();
+        let mut time = Time::<()>::default();
+        time.advance_by(std::time::Duration::from_secs(1));
+        app.insert_resource(time);
+        app.add_systems(Update, (handle_umbilical_commands, tick_umbilical).chain());
+
+        let operator = app
+            .world_mut()
+            .spawn((
+                EntityUuid(OPERATOR.into()),
+                umbilical_with(flow_config()),
+                dock(Some(PARTNER)),
+                InfrastructureCondition(InfrastructureState::from_config(&capacity(100, 200))),
+                crate::core::messages::AdmittedCommands::default(),
+            ))
+            .id();
+        app.world_mut().spawn((
+            EntityUuid(PARTNER.into()),
+            InfrastructureCondition(InfrastructureState::from_config(&capacity(0, 500))),
+        ));
+        (app, operator)
+    }
+
+    fn umbilical_with(config: UmbilicalConfig) -> TransferUmbilical {
+        TransferUmbilical::new(config, PowerGroupId("umbilical".into()))
+    }
+
+    fn admit_start(app: &mut App, operator: Entity) {
+        app.world_mut()
+            .entity_mut(operator)
+            .get_mut::<crate::core::messages::AdmittedCommands>()
+            .unwrap()
+            .0
+            .push(crate::core::messages::AdmittedCommand {
+                target: SystemId(UMBILICAL_SYSTEM_ID.into()),
+                payload: SystemControlPayload::StartTransfer,
+                response_token: None,
+            });
+    }
+
+    fn drain_lifecycle(app: &mut App) -> Vec<TaskLifecycleRequest> {
+        std::mem::take(
+            &mut app
+                .world_mut()
+                .resource_mut::<EffectQueue<TaskLifecycleRequest>>()
+                .0,
+        )
+    }
+
+    fn flow_slot_for_test() -> TaskSlot {
+        TaskSlot::new(OPERATOR, UMBILICAL_SYSTEM_ID, TASK_VERB_UMBILICAL_FLOW)
+    }
+
+    /// A start that actually moves capacity opens exactly one activation; an
+    /// unchanged, still-flowing tick afterwards reports nothing more.
+    #[test]
+    fn a_flow_that_moves_capacity_opens_one_activation_and_then_falls_silent() {
+        let (mut app, operator) = docked_world();
+        admit_start(&mut app, operator);
+        app.update();
+
+        assert!(
+            app.world()
+                .entity(operator)
+                .get::<TransferUmbilical>()
+                .unwrap()
+                .running
+        );
+        assert_eq!(
+            drain_lifecycle(&mut app),
+            vec![TaskLifecycleRequest::Start {
+                slot: flow_slot_for_test(),
+                target: Some(PARTNER.into()),
+            }]
+        );
+
+        app.update();
+        assert!(
+            drain_lifecycle(&mut app).is_empty(),
+            "a flow that simply continues reports nothing more"
+        );
+    }
+
+    /// `StopTransfer` on a live flow reports the cancel before clearing intent;
+    /// `tick_umbilical` — seeing the intent already cleared — reports nothing
+    /// further, so the activation gets exactly one terminal.
+    #[test]
+    fn stop_transfer_reports_released_exactly_once() {
+        let (mut app, operator) = docked_world();
+        admit_start(&mut app, operator);
+        app.update();
+        drain_lifecycle(&mut app);
+
+        app.world_mut()
+            .entity_mut(operator)
+            .get_mut::<crate::core::messages::AdmittedCommands>()
+            .unwrap()
+            .0
+            .push(crate::core::messages::AdmittedCommand {
+                target: SystemId(UMBILICAL_SYSTEM_ID.into()),
+                payload: SystemControlPayload::StopTransfer,
+                response_token: None,
+            });
+        app.update();
+
+        assert_eq!(
+            drain_lifecycle(&mut app),
+            vec![TaskLifecycleRequest::End {
+                slot: flow_slot_for_test(),
+                reason: TaskTerminalReason::Released,
+            }]
+        );
+        assert!(
+            !app.world()
+                .entity(operator)
+                .get::<TransferUmbilical>()
+                .unwrap()
+                .running
+        );
+    }
+
+    /// A start refused before it ever flows — nothing is docked to bridge to —
+    /// still gets a whole activation, opened and closed together, mirroring the
+    /// tractor's "refused before it couples" case.
+    #[test]
+    fn a_start_refused_before_it_ever_flows_still_opens_and_closes_one_activation() {
+        let mut app = App::new();
+        app.init_resource::<EffectQueue<TaskLifecycleRequest>>();
+        let mut time = Time::<()>::default();
+        time.advance_by(std::time::Duration::from_secs(1));
+        app.insert_resource(time);
+        app.add_systems(Update, (handle_umbilical_commands, tick_umbilical).chain());
+        let operator = app
+            .world_mut()
+            .spawn((
+                EntityUuid(OPERATOR.into()),
+                umbilical_with(flow_config()),
+                dock(None),
+                crate::core::messages::AdmittedCommands::default(),
+            ))
+            .id();
+        admit_start(&mut app, operator);
+        app.update();
+
+        let slot = flow_slot_for_test();
+        assert_eq!(
+            drain_lifecycle(&mut app),
+            vec![
+                TaskLifecycleRequest::Start {
+                    slot: slot.clone(),
+                    target: None,
+                },
+                TaskLifecycleRequest::End {
+                    slot,
+                    reason: TaskTerminalReason::TargetLost,
+                },
+            ]
+        );
+    }
+
+    /// A flow that WAS moving capacity and then loses its dock ends the
+    /// standing activation with the mapped reason — a close only, no re-opened
+    /// start.
+    #[test]
+    fn a_flow_that_loses_its_dock_ends_the_standing_activation() {
+        let (mut app, operator) = docked_world();
+        admit_start(&mut app, operator);
+        app.update();
+        drain_lifecycle(&mut app);
+
+        app.world_mut()
+            .entity_mut(operator)
+            .get_mut::<DockControl>()
+            .unwrap()
+            .docked = false;
+        app.update();
+
+        assert_eq!(
+            drain_lifecycle(&mut app),
+            vec![TaskLifecycleRequest::End {
+                slot: flow_slot_for_test(),
+                reason: TaskTerminalReason::TargetLost,
+            }],
+            "the standing activation closes; nothing new opens for a flow that was already live"
+        );
     }
 }

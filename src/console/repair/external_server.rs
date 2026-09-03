@@ -829,4 +829,193 @@ mod tests {
         assert_eq!(r.dispatched_target.as_deref(), Some("ally-2"));
         assert!(r.last_refusal.is_none());
     }
+
+    // ── The task lifecycle (issue #1345) ─────────────────────────────────────
+
+    use crate::modifiers::repair_teams::RepairTeams;
+    use crate::server_app::ShipSystemBlackboards;
+
+    const OPERATOR: &str = "operator-1";
+    const ALLY: &str = "ally-1";
+
+    fn app_with(target_at: Option<Vec3>, free_teams: usize) -> (App, Entity) {
+        let mut app = App::new();
+        app.init_resource::<EffectQueue<TaskLifecycleRequest>>();
+        app.add_systems(
+            Update,
+            (handle_external_repair_commands, tick_external_repair).chain(),
+        );
+        let operator = app
+            .world_mut()
+            .spawn((
+                EntityUuid(OPERATOR.into()),
+                Transform::from_translation(Vec3::ZERO),
+                TacticalRadarSelection(Some(ALLY.into())),
+                ShipRepairTeams(RepairTeams::new(free_teams)),
+                ExternalRepairDispatch::new(ExternalRepairConfig {
+                    range: 600.0,
+                    repair_rate: 8.0,
+                }),
+                AdmittedCommands::default(),
+                ShipSystemBlackboards::default(),
+            ))
+            .id();
+        if let Some(position) = target_at {
+            app.world_mut().spawn((
+                EntityUuid(ALLY.into()),
+                Transform::from_translation(position),
+            ));
+        }
+        (app, operator)
+    }
+
+    fn admit_dispatch(app: &mut App, operator: Entity) {
+        app.world_mut()
+            .entity_mut(operator)
+            .get_mut::<AdmittedCommands>()
+            .unwrap()
+            .0
+            .push(crate::core::messages::AdmittedCommand {
+                target: repair_system_id(),
+                payload: SystemControlPayload::DispatchExternalRepair,
+                response_token: None,
+            });
+    }
+
+    fn admit_recall(app: &mut App, operator: Entity) {
+        app.world_mut()
+            .entity_mut(operator)
+            .get_mut::<AdmittedCommands>()
+            .unwrap()
+            .0
+            .push(crate::core::messages::AdmittedCommand {
+                target: repair_system_id(),
+                payload: SystemControlPayload::RecallExternalRepair,
+                response_token: None,
+            });
+    }
+
+    fn drain_lifecycle(app: &mut App) -> Vec<TaskLifecycleRequest> {
+        std::mem::take(
+            &mut app
+                .world_mut()
+                .resource_mut::<EffectQueue<TaskLifecycleRequest>>()
+                .0,
+        )
+    }
+
+    fn dispatch_slot_for_test() -> TaskSlot {
+        TaskSlot::new(OPERATOR, REPAIR_SYSTEM_ID, TASK_VERB_EXTERNAL_REPAIR)
+    }
+
+    /// A dispatch that commits opens exactly one activation, named for the
+    /// designated ally.
+    #[test]
+    fn a_committed_dispatch_opens_one_activation() {
+        let (mut app, operator) = app_with(Some(Vec3::new(100.0, 0.0, 0.0)), 1);
+        admit_dispatch(&mut app, operator);
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .entity(operator)
+                .get::<ExternalRepairDispatch>()
+                .unwrap()
+                .dispatched_target
+                .as_deref(),
+            Some(ALLY)
+        );
+        assert_eq!(
+            drain_lifecycle(&mut app),
+            vec![TaskLifecycleRequest::Start {
+                slot: dispatch_slot_for_test(),
+                target: Some(ALLY.into()),
+            }]
+        );
+    }
+
+    /// A dispatch refused at commit time (no free team) opens nothing — the
+    /// same "a refusal at dispatch time opens nothing" rule Security's own
+    /// dispatch keeps, since no team was ever actually claimed.
+    #[test]
+    fn a_dispatch_refused_at_commit_time_opens_nothing() {
+        let (mut app, operator) = app_with(Some(Vec3::new(100.0, 0.0, 0.0)), 0);
+        admit_dispatch(&mut app, operator);
+        app.update();
+
+        assert!(app
+            .world()
+            .entity(operator)
+            .get::<ExternalRepairDispatch>()
+            .unwrap()
+            .dispatched_target
+            .is_none());
+        assert!(
+            drain_lifecycle(&mut app).is_empty(),
+            "nothing was ever committed for a refused dispatch to end"
+        );
+    }
+
+    /// A recall reports the cancel before clearing the claim, and a recall of
+    /// an idle dispatch (a stale-UI double tap) reports nothing at all.
+    #[test]
+    fn a_recall_reports_released_exactly_once_and_an_idle_recall_reports_nothing() {
+        let (mut app, operator) = app_with(Some(Vec3::new(100.0, 0.0, 0.0)), 1);
+        admit_dispatch(&mut app, operator);
+        app.update();
+        drain_lifecycle(&mut app);
+
+        admit_recall(&mut app, operator);
+        app.update();
+        assert_eq!(
+            drain_lifecycle(&mut app),
+            vec![TaskLifecycleRequest::End {
+                slot: dispatch_slot_for_test(),
+                reason: TaskTerminalReason::Released,
+            }]
+        );
+
+        // A second recall of the now-idle dispatch is a no-op.
+        admit_recall(&mut app, operator);
+        app.update();
+        assert!(drain_lifecycle(&mut app).is_empty());
+    }
+
+    /// A target that drifts past the authored range ends a live dispatch with
+    /// the mapped reason — `tick_external_repair` only ever CLOSES a dispatch,
+    /// so this never opens a fresh activation of its own.
+    #[test]
+    fn a_target_that_drifts_out_of_range_ends_the_live_dispatch() {
+        let (mut app, operator) = app_with(Some(Vec3::new(100.0, 0.0, 0.0)), 1);
+        admit_dispatch(&mut app, operator);
+        app.update();
+        drain_lifecycle(&mut app);
+
+        let target = app
+            .world_mut()
+            .query::<(Entity, &EntityUuid)>()
+            .iter(app.world())
+            .find(|(_, uuid)| uuid.0 == ALLY)
+            .map(|(e, _)| e)
+            .unwrap();
+        app.world_mut()
+            .entity_mut(target)
+            .insert(Transform::from_xyz(9000.0, 0.0, 0.0));
+        app.update();
+
+        assert_eq!(
+            drain_lifecycle(&mut app),
+            vec![TaskLifecycleRequest::End {
+                slot: dispatch_slot_for_test(),
+                reason: TaskTerminalReason::OutOfRange,
+            }]
+        );
+        assert!(app
+            .world()
+            .entity(operator)
+            .get::<ExternalRepairDispatch>()
+            .unwrap()
+            .dispatched_target
+            .is_none());
+    }
 }

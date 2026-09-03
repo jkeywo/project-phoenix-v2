@@ -1140,4 +1140,219 @@ mod tests {
         .expect("rig parses");
         assert!(resolve_dock_markers(&rig).is_empty());
     }
+
+    // ── The task lifecycle (issue #1345) ─────────────────────────────────────
+
+    const OPERATOR: &str = "operator-1";
+    const TARGET: &str = "target-1";
+
+    /// A config that needs no power, so the verdict turns on the mate geometry
+    /// and the range alone — the same trick `tractor::server`'s tests use.
+    fn unpowered_config() -> DockConfig {
+        DockConfig {
+            min_power_level: 0,
+            ..config()
+        }
+    }
+
+    fn own_marker() -> DockMarkers {
+        DockMarkers {
+            markers: vec![DockMarker {
+                position: Vec3::ZERO,
+                direction: Vec3::new(0.0, 0.0, -1.0),
+            }],
+        }
+    }
+
+    fn target_marker() -> DockMarkers {
+        DockMarkers {
+            markers: vec![DockMarker {
+                position: Vec3::ZERO,
+                direction: Vec3::new(0.0, 0.0, 1.0),
+            }],
+        }
+    }
+
+    /// An operator already ENGAGED and closing on `TARGET`, plus the target hull
+    /// itself, both coincident at `(100, 0, 0)` — the exact mate point for the
+    /// two markers above — so the very first `tick_dock` mates them.
+    fn engage_world() -> (App, Entity) {
+        let mut app = App::new();
+        app.init_resource::<EffectQueue<TaskLifecycleRequest>>();
+        let mut time = Time::<()>::default();
+        time.advance_by(std::time::Duration::from_secs(1));
+        app.insert_resource(time);
+        app.add_systems(Update, (handle_dock_commands, tick_dock).chain());
+
+        let operator = app
+            .world_mut()
+            .spawn((
+                EntityUuid(OPERATOR.into()),
+                Transform::from_xyz(100.0, 0.0, 0.0),
+                own_marker(),
+                DockControl {
+                    engaged: true,
+                    docked: false,
+                    docking_target: Some(TARGET.into()),
+                    ..control_with_id_config(DOCK_SYSTEM_ID, unpowered_config())
+                },
+                crate::core::messages::AdmittedCommands::default(),
+            ))
+            .id();
+        app.world_mut().spawn((
+            EntityUuid(TARGET.into()),
+            Transform::from_xyz(100.0, 0.0, 0.0),
+            target_marker(),
+        ));
+        (app, operator)
+    }
+
+    fn control_with_id_config(id: &str, cfg: DockConfig) -> DockControl {
+        DockControl::new(SystemId(id.into()), cfg, PowerGroupId("dock".into()))
+    }
+
+    fn drain_lifecycle(app: &mut App) -> Vec<TaskLifecycleRequest> {
+        std::mem::take(
+            &mut app
+                .world_mut()
+                .resource_mut::<EffectQueue<TaskLifecycleRequest>>()
+                .0,
+        )
+    }
+
+    /// Arrival opens exactly one activation, named for the berth the mate
+    /// actually formed on; an unchanged hold afterwards reports nothing.
+    #[test]
+    fn arrival_opens_one_activation_and_an_unchanged_hold_is_silent() {
+        let (mut app, operator) = engage_world();
+        app.update();
+
+        assert!(
+            app.world()
+                .entity(operator)
+                .get::<DockControl>()
+                .unwrap()
+                .docked,
+            "the two coincident markers must have mated on the first tick"
+        );
+        assert_eq!(
+            drain_lifecycle(&mut app),
+            vec![TaskLifecycleRequest::Start {
+                slot: TaskSlot::new(OPERATOR, DOCK_SYSTEM_ID, TASK_VERB_DOCK_HOLD),
+                target: Some(TARGET.into()),
+            }]
+        );
+
+        app.update();
+        assert!(
+            drain_lifecycle(&mut app).is_empty(),
+            "a hold that simply continues reports nothing more"
+        );
+    }
+
+    /// `Undock` on a mated dock reports the cancel before clearing intent, and
+    /// `tick_dock` — seeing the intent already cleared this same tick — reports
+    /// nothing further, so the activation gets exactly one terminal.
+    #[test]
+    fn undock_reports_released_exactly_once() {
+        let (mut app, operator) = engage_world();
+        app.update();
+        drain_lifecycle(&mut app);
+
+        app.world_mut()
+            .entity_mut(operator)
+            .get_mut::<crate::core::messages::AdmittedCommands>()
+            .unwrap()
+            .0
+            .push(crate::core::messages::AdmittedCommand {
+                target: SystemId(DOCK_SYSTEM_ID.into()),
+                payload: SystemControlPayload::Undock,
+                response_token: None,
+            });
+        app.update();
+
+        assert_eq!(
+            drain_lifecycle(&mut app),
+            vec![TaskLifecycleRequest::End {
+                slot: TaskSlot::new(OPERATOR, DOCK_SYSTEM_ID, TASK_VERB_DOCK_HOLD),
+                reason: TaskTerminalReason::Released,
+            }],
+            "exactly one terminal, and it is a cancellation, not a failure"
+        );
+        assert!(
+            !app.world()
+                .entity(operator)
+                .get::<DockControl>()
+                .unwrap()
+                .docked
+        );
+    }
+
+    /// An engage refused before it ever mates — the berth is out of the authored
+    /// range from the very first tick — still gets a whole activation: a start
+    /// and its own terminal, adjacent on one slot, mirroring the tractor's
+    /// "refused before it couples" case.
+    #[test]
+    fn a_dock_refused_before_it_mates_still_opens_and_closes_one_activation() {
+        let (mut app, operator) = engage_world();
+        // Move the operator far beyond the authored range before the first tick,
+        // so the mate never forms.
+        app.world_mut()
+            .entity_mut(operator)
+            .insert(Transform::from_xyz(9000.0, 0.0, 0.0));
+        app.update();
+
+        let slot = TaskSlot::new(OPERATOR, DOCK_SYSTEM_ID, TASK_VERB_DOCK_HOLD);
+        assert_eq!(
+            drain_lifecycle(&mut app),
+            vec![
+                TaskLifecycleRequest::Start {
+                    slot: slot.clone(),
+                    target: Some(TARGET.into()),
+                },
+                TaskLifecycleRequest::End {
+                    slot,
+                    reason: TaskTerminalReason::OutOfRange,
+                },
+            ]
+        );
+        assert!(
+            !app.world()
+                .entity(operator)
+                .get::<DockControl>()
+                .unwrap()
+                .engaged,
+            "a refused engage drops the intent with the (never-formed) mate"
+        );
+    }
+
+    /// A mate that drifts out of range AFTER forming ends the standing
+    /// activation with the mapped reason — a close only, no re-opened start.
+    #[test]
+    fn a_mate_that_drifts_out_of_range_ends_the_standing_activation() {
+        let (mut app, operator) = engage_world();
+        app.update();
+        drain_lifecycle(&mut app);
+        assert!(
+            app.world()
+                .entity(operator)
+                .get::<DockControl>()
+                .unwrap()
+                .docked
+        );
+
+        app.world_mut()
+            .entity_mut(operator)
+            .insert(Transform::from_xyz(9000.0, 0.0, 0.0));
+        app.update();
+
+        assert_eq!(
+            drain_lifecycle(&mut app),
+            vec![TaskLifecycleRequest::End {
+                slot: TaskSlot::new(OPERATOR, DOCK_SYSTEM_ID, TASK_VERB_DOCK_HOLD),
+                reason: TaskTerminalReason::OutOfRange,
+            }],
+            "the standing activation closes; nothing new opens for a hold that was already live"
+        );
+    }
 }

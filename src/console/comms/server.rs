@@ -12,9 +12,7 @@ use crate::core::messages::{CommsBlackboard, ObjectiveSnapshot, SystemBlackboard
 use crate::world::server::{ObjectiveManagerRes, WorldContentRuntime};
 
 use crate::comms::content::ActiveDialogue;
-use crate::comms::server::{
-    current_sender_in_range, CommsChannel2Event, CommsInboxRes, CommsRuntime, OnScreenMessage,
-};
+use crate::comms::server::{CommsChannel2Event, CommsInboxRes, CommsRuntime, OnScreenMessage};
 use crate::core::messages::{CommsMessage, GamePhase};
 use crate::entities::spawner::EntityUuid;
 use crate::world::content::WorldEvent;
@@ -301,6 +299,14 @@ struct RespondingHull<'a> {
     /// (issue #1338). `Option` because a bare-`App` fixture can put
     /// `AdmittedCommands` on a hull with no `EntityUuid`.
     uuid: Option<&'a EntityUuid>,
+    /// Which host flies this hull — the key its comms-range reading is taken
+    /// under (issue #1343). The server-side range gate below asks "can THIS hull
+    /// reach the sender", a question every host answers identically for every
+    /// slot; asking it of `CommsRuntime::range_flags` instead would answer it
+    /// from the hull this host projects, so a peer's crew's answer would be
+    /// admitted here and refused there. `None` only for a bare-`App` fixture
+    /// hull with no [`crate::lockstep::FleetSlotOf`].
+    slot: Option<crate::command_admission::HostSlot>,
     /// The Comms seat this hull actually resolved, or `None` when it resolved
     /// none — never a string-cast of the system id (AGENTS.md rule 6).
     station: Option<crate::core::messages::StationId>,
@@ -409,12 +415,18 @@ pub(crate) fn handle_respond_to_message(
     // detail, and two hulls answering in one tick run their `on_pick` effects —
     // id mints, flag writes, spawns — in whatever order this walk chooses.
     let mut fleet: Vec<_> = ship_query.iter().collect();
-    fleet.sort_by_key(|(_, slot, _, _, _, uuid)| {
-        (
-            slot.map(|s| s.0),
-            uuid.map(|u| u.0.clone()).unwrap_or_default(),
-        )
-    });
+    // `sort_by` over borrowed keys rather than `sort_by_key`: the uuid tiebreak
+    // is a `String`, and a key function returning one clones it on every
+    // comparison, every tick, for a value the sort only ever compares.
+    fleet.sort_by(
+        |(_, a_slot, _, _, _, a_uuid), (_, b_slot, _, _, _, b_uuid)| {
+            a_slot.map(|s| s.0).cmp(&b_slot.map(|s| s.0)).then_with(|| {
+                a_uuid
+                    .map(|u| u.0.as_str())
+                    .cmp(&b_uuid.map(|u| u.0.as_str()))
+            })
+        },
+    );
     // Resolve each hull's comms seat and rejection channel once: the channel
     // (issue #761) targets whoever currently holds THAT hull's Comms console —
     // the station `station_for_system` resolves for the comms SYSTEM, which is
@@ -430,7 +442,7 @@ pub(crate) fn handle_respond_to_message(
     let hulls: Vec<RespondingHull<'_>> = fleet
         .into_iter()
         .map(
-            |(admitted, _slot, is_local, ship_config, seeking_hosts, uuid)| {
+            |(admitted, slot, is_local, ship_config, seeking_hosts, uuid)| {
                 let station = ship_config.and_then(|c| {
                     crate::command_admission::station_for_system(
                         &c.0,
@@ -449,6 +461,7 @@ pub(crate) fn handle_respond_to_message(
                     .map(|t| t.to_string());
                 RespondingHull {
                     uuid,
+                    slot: slot.map(|s| s.0),
                     station,
                     token,
                     admitted,
@@ -500,18 +513,25 @@ pub(crate) fn handle_respond_to_message(
             }
         };
 
-        // Server-side range gate: if range tracking is active, the sender
-        // of this message must currently be in range. Out-of-range responses
-        // are rejected (issue #761): forced/stale submissions on a greyed
-        // response are refused and the attempted control flashes red.
+        // Server-side range gate: if range tracking is active, the sender of
+        // this message must currently be in range OF THE HULL ANSWERING IT.
+        // Out-of-range responses are rejected (issue #761): forced/stale
+        // submissions on a greyed response are refused and the attempted control
+        // flashes red.
+        //
+        // Per-hull since #1343, and it had to become so the moment this drain
+        // went fleet-wide: `range_flags` measures from `LocalShip`, so a peer
+        // crew's reply — replicated here, or emitted here for their Backfill —
+        // was gated on whether OUR ship could hear their sender. Two hosts then
+        // disagree about whether the same reply was admitted, which splits
+        // `selected_response`, the `on_pick`'s writes and the retired dialogue.
+        // `sender_in_range_for_slot` asks the same question of the hull that is
+        // actually answering, which every host answers identically.
         if comms.range_active {
             let sender_uuid = inbox.0.sender_uuid_for(message_id).unwrap_or_default();
-            match comms.range_flags.get(&sender_uuid).copied() {
-                Some(true) => {}
-                _ => {
-                    reject(&mut aux.outbox, message_id, *response_index);
-                    continue;
-                }
+            if !crate::comms::server::slot_may_answer_sender(&comms, hull.slot, &sender_uuid) {
+                reject(&mut aux.outbox, message_id, *response_index);
+                continue;
             }
         }
 
@@ -851,7 +871,16 @@ pub(crate) fn handle_respond_to_message(
                 aux.id_mint.as_deref(),
                 crate::world_id::IdNamespace::Message,
             );
-            let available = current_sender_in_range(&comms, &sender_uuid);
+            // The FLEET's reading, not this host's (issue #1343). The stamp is
+            // stored on the message for its whole life and `sim_digest` folds
+            // both it and the per-response `available` it drives, so measuring
+            // it from `LocalShip` writes a folded field two peers disagree
+            // about the moment their hulls are not equidistant from the sender.
+            // The inbox is one resource for the whole fleet, so "someone aboard
+            // can hear them" is the reading that matches what it describes; the
+            // per-hull gates above and in `operate_comms_response_ai` are what
+            // keep a hull that CANNOT reach the sender from answering.
+            let available = crate::comms::server::sender_in_range_for_fleet(&comms, &sender_uuid);
             let new_responses =
                 crate::comms::content::response_views(&wire_node.responses, available);
             let new_msg = CommsMessage::injected(
@@ -926,15 +955,32 @@ pub(crate) fn handle_respond_to_message(
 /// ever mutates or resurrects a cleared entry, so there is nothing to cancel
 /// and nothing selective to preserve — a full clear and a "prune only the
 /// entries with no pending effect" clear are the same operation here.
+///
+/// # Why it drains EVERY fleet hull (issue #1343's input audit)
+///
+/// It ran `With<LocalShip>` until the audit, which is the same hole
+/// [`handle_respond_to_message`] had and for a sharper reason: what this writes
+/// — the inbox, `active_dialogues`, `open_hails` — is folded by
+/// `sim_digest::fold_comms_scope`, and the inbox is ONE resource for the whole
+/// fleet. A human officer's `ClearComms` on a peer's bridge is a replicated
+/// command: it lands in THAT hull's `AdmittedCommands` on every host
+/// (`lockstep::apply_mesh_inbox` applies by `ShipKey`), so a drain that read
+/// only the hull this host projects applied the clear on the admitting host and
+/// nowhere else — two peers then disagree about the whole comms scope from that
+/// tick.
+///
+/// Order needs no tiebreak here, unlike the response drain: clearing is
+/// idempotent, mints no ids and writes no flags, so two hulls clearing on one
+/// tick reach the same state in either order.
 pub(crate) fn handle_clear_comms(
-    ship_query: Query<&crate::core::messages::AdmittedCommands, With<crate::server_app::LocalShip>>,
+    ship_query: Query<&crate::core::messages::AdmittedCommands, With<crate::server_app::Ship>>,
     mut inbox: ResMut<CommsInboxRes>,
     mut comms: ResMut<CommsRuntime>,
 ) {
-    let Some(admitted) = ship_query.iter().next() else {
-        return;
-    };
-    for cmd in admitted.for_target(crate::ship::system_registry::COMMS_SYSTEM_ID) {
+    for cmd in ship_query
+        .iter()
+        .flat_map(|admitted| admitted.for_target(crate::ship::system_registry::COMMS_SYSTEM_ID))
+    {
         if matches!(
             cmd.payload,
             crate::core::messages::SystemControlPayload::ClearComms
@@ -2026,6 +2072,21 @@ pub fn operate_comms_ai(
 /// entries are carried forward untouched, which is what keeps two hulls on
 /// different cadences from wiping each other's schedules.
 ///
+/// Every INPUT to that walk has to clear the same bar, which is the half a
+/// fleet-wide query does not buy on its own: reachability was still being read
+/// from [`CommsRuntime::range_flags`](crate::comms::server::CommsRuntime::range_flags),
+/// whose only writer measures from `LocalShip`. It reaches folded state three
+/// ways — an unreachable sender empties the pool, so no wait is carried into
+/// `pending_ai_responses`; it folds into the `response_set_fingerprint` the wait
+/// is armed against; and it decides whether the `CommsBackfillChoice` draw is
+/// taken at all — so a two-hull fleet answering a sender only one hull could
+/// hear diverged on all three. The sweep reads
+/// [`sender_in_range_for_slot`](crate::comms::server::sender_in_range_for_slot)
+/// against the hull being decided instead, which every host computes identically
+/// for every slot. The other inputs were audited alongside it and are listed in
+/// `pasm/spec/architecture/comms.yaml` under `comms-ai-operator`; nothing else
+/// here is `LocalShip`-gated or read from `ShipClientConfigResource`.
+///
 /// # AC4 — read-only scenario state
 ///
 /// Same structural guarantee as [`operate_comms_ai`]: `WorldContentRuntime` is a
@@ -2197,7 +2258,22 @@ pub fn operate_comms_response_ai(
                 continue;
             }
 
-            let sender_in_range = current_sender_in_range(comms, &message.sender_uuid);
+            // Reachability FROM THE HULL BEING DECIDED, never from the hull this
+            // host projects (issue #1343). `current_sender_in_range` reads
+            // `CommsRuntime::range_flags`, whose only writer measures from
+            // `LocalShip` — so on a two-hull fleet it answers "can MY crew's
+            // ship hear them", which is a different question on each host and a
+            // different answer once the hulls are not equidistant. This value is
+            // an input to three folded things: whether a wait is carried into
+            // `pending_ai_responses` at all (an empty pool cancels), the
+            // fingerprint it is armed against, and whether the
+            // `CommsBackfillChoice` draw is taken. All three would then be
+            // host-dependent, which is the GM `ship_power` incident's shape.
+            let sender_in_range = crate::comms::server::sender_in_range_for_slot(
+                comms,
+                Some(host),
+                &message.sender_uuid,
+            );
 
             // ── The weighted picker (issue #1343) ────────────────────────────
             //

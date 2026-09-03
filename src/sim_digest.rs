@@ -1207,11 +1207,23 @@ fn fold_scenario_records(world: &World, mut acc: u64) -> u64 {
 /// `open_hails` pruning, and touches no `CommsMessage` at all. The per-message
 /// stamping happens on CLONES — `broadcast_comms_state` stamps
 /// `CommsInbox::messages()`, and `publish_comms_blackboard` stamps its own copy
-/// — so the STORED reading is written once, at injection, by
-/// `current_sender_in_range`, and then carried unchanged for the life of the
-/// message. `CommsState::inbox` stores the whole `CommsMessage` verbatim, so a
-/// restore reproduces both fields exactly and folding them cannot break the
-/// at-restore digest equality `tests/snapshot_resume.rs` asserts.
+/// — so the STORED reading is written once, at injection, and then carried
+/// unchanged for the life of the message. `CommsState::inbox` stores the whole
+/// `CommsMessage` verbatim, so a restore reproduces both fields exactly and
+/// folding them cannot break the at-restore digest equality
+/// `tests/snapshot_resume.rs` asserts.
+///
+/// That they fold is exactly why the injection stamp may not be a `LocalShip`
+/// reading — and it was one until issue #1343. `current_sender_in_range`
+/// measures from the hull THIS host projects, so on a fleet whose hulls are not
+/// equidistant from the sender two peers stamped different values into a field
+/// folded verbatim, from the tick the message was injected. Both injection sites
+/// (`open_scripted_comms_threads`, and `handle_respond_to_message`'s follow-up
+/// node) now stamp
+/// [`crate::comms::server::sender_in_range_for_fleet`]: the union over every
+/// `FleetSlotOf` hull, which is the reading that matches a fleet-SHARED inbox and
+/// which every host computes identically. Whether a given hull may ANSWER stays
+/// a per-hull question, asked of `CommsRuntime::fleet_range_flags`.
 ///
 /// They are worth folding rather than merely safe to fold. A derelict under tow
 /// carries no `ShipPhysics`, so the entity namespace folds nothing about where
@@ -1222,8 +1234,10 @@ fn fold_scenario_records(world: &World, mut acc: u64) -> u64 {
 ///
 /// # What is still left out, and why
 ///
-/// `CommsRuntime`'s `contacts`, `range_flags` and `range_active` are genuinely
-/// re-derived: `update_comms_range_flags` rebuilds all three every tick from the
+/// `CommsRuntime`'s `contacts`, `range_flags` and `range_active` — and the
+/// per-fleet-slot `fleet_range_flags` / `fleet_range_active` #1343 added beside
+/// them — are genuinely
+/// re-derived: `update_comms_range_flags` rebuilds all five every tick from the
 /// live hailable entities and the ship and entity transforms the entity
 /// namespace already folds, which is the same call
 /// [`crate::snapshot::CommsState`] makes when it declines to carry them.

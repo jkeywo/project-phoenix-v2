@@ -1355,3 +1355,217 @@ fn a_node_without_metadata_writes_no_metadata() {
     );
     assert!(comms.pending_ai_responses.is_empty());
 }
+
+// ── Fleet-wide range flags (issue #1343) ─────────────────────────────────────
+
+/// A runtime with fleet range tracking live and two slots holding different
+/// readings of the same two senders — the shape a two-hull fleet has whenever
+/// its hulls are not equidistant from a contact.
+fn fleet_range_runtime() -> CommsRuntime {
+    use crate::command_admission::HostSlot;
+    let near = "11111111-1111-4111-8111-111111111111";
+    let far = "22222222-2222-4222-8222-222222222222";
+    let mut runtime = CommsRuntime {
+        range_active: true,
+        fleet_range_active: true,
+        ..Default::default()
+    };
+    // The LOCAL projection: this host projects slot 1, so it reads slot 1's
+    // distances. A site that reads this for slot 2 gets slot 1's answer.
+    runtime.range_flags.insert(near.into(), true);
+    runtime.range_flags.insert(far.into(), false);
+    runtime.fleet_range_flags.insert(
+        HostSlot(1),
+        [(near.to_string(), true), (far.to_string(), false)]
+            .into_iter()
+            .collect(),
+    );
+    runtime.fleet_range_flags.insert(
+        HostSlot(2),
+        [(near.to_string(), false), (far.to_string(), true)]
+            .into_iter()
+            .collect(),
+    );
+    runtime
+}
+
+/// The headline: each hull's reading is its OWN, and neither is the local
+/// projection's. This is the value that decides whether a Backfill wait arms,
+/// what fingerprint it arms against, and whether the `CommsBackfillChoice` draw
+/// is taken — all three folded — so reading it from `LocalShip` is what #1343's
+/// third review caught.
+#[test]
+fn sender_reachability_is_answered_per_fleet_slot() {
+    use crate::command_admission::HostSlot;
+    let near = "11111111-1111-4111-8111-111111111111";
+    let far = "22222222-2222-4222-8222-222222222222";
+    let runtime = fleet_range_runtime();
+
+    assert!(sender_in_range_for_slot(&runtime, Some(HostSlot(1)), near));
+    assert!(!sender_in_range_for_slot(&runtime, Some(HostSlot(1)), far));
+    assert!(!sender_in_range_for_slot(&runtime, Some(HostSlot(2)), near));
+    assert!(
+        sender_in_range_for_slot(&runtime, Some(HostSlot(2)), far),
+        "slot 2 can hear the far sender; a host projecting slot 1 must still \
+         answer that question the same way, or the two peers arm different waits"
+    );
+}
+
+/// A UUID no hull is tracking is out of range, and a synthetic sender (not a
+/// real UUID — `_self`, a named station) is always readable: the same two
+/// answers `current_sender_in_range` gives, kept so the move to a per-slot map
+/// is a relocation rather than a policy change.
+#[test]
+fn per_slot_reachability_keeps_the_untracked_and_synthetic_answers() {
+    use crate::command_admission::HostSlot;
+    let runtime = fleet_range_runtime();
+    assert!(!sender_in_range_for_slot(
+        &runtime,
+        Some(HostSlot(1)),
+        "33333333-3333-4333-8333-333333333333"
+    ));
+    assert!(sender_in_range_for_slot(
+        &runtime,
+        Some(HostSlot(1)),
+        "Starcorp Command"
+    ));
+}
+
+/// A slot the fleet pass no longer measures — its hull destroyed — reads out of
+/// range rather than falling back to the local map. `fleet_range_active` latches
+/// for exactly this: a lost hull must not re-open the gates it should have shut.
+#[test]
+fn a_slot_that_has_left_the_fleet_reads_out_of_range() {
+    use crate::command_admission::HostSlot;
+    let near = "11111111-1111-4111-8111-111111111111";
+    let runtime = fleet_range_runtime();
+    assert!(
+        !sender_in_range_for_slot(&runtime, Some(HostSlot(7)), near),
+        "an unmeasured slot must not inherit the local hull's reading"
+    );
+}
+
+/// Before any fleet hull exists — a bare-`App` fixture, or the lobby — both
+/// helpers defer to the local reading, which is the behaviour every
+/// pure-handler test in this file was written against.
+#[test]
+fn without_a_fleet_the_helpers_defer_to_the_local_reading() {
+    use crate::command_admission::HostSlot;
+    let near = "11111111-1111-4111-8111-111111111111";
+    let far = "22222222-2222-4222-8222-222222222222";
+    let mut runtime = fleet_range_runtime();
+    runtime.fleet_range_flags.clear();
+    runtime.fleet_range_active = false;
+
+    assert!(sender_in_range_for_slot(&runtime, Some(HostSlot(1)), near));
+    assert!(!sender_in_range_for_slot(&runtime, Some(HostSlot(2)), far));
+    assert!(sender_in_range_for_fleet(&runtime, near));
+    assert!(!sender_in_range_for_fleet(&runtime, far));
+}
+
+/// The fleet-SHARED inbox stamps the UNION: one resource for the whole fleet
+/// means "someone aboard can hear them", and `sim_digest` folds that stamp
+/// verbatim, so it has to be a number every host computes the same way.
+#[test]
+fn the_inbox_stamp_unions_over_every_hull() {
+    let near = "11111111-1111-4111-8111-111111111111";
+    let far = "22222222-2222-4222-8222-222222222222";
+    let unknown = "33333333-3333-4333-8333-333333333333";
+    let runtime = fleet_range_runtime();
+
+    assert!(
+        sender_in_range_for_fleet(&runtime, near),
+        "slot 1 can hear the near sender"
+    );
+    assert!(
+        sender_in_range_for_fleet(&runtime, far),
+        "and slot 2 the far one — the host projecting either hull stamps both \
+         the same, which is what keeps the folded field host-neutral"
+    );
+    assert!(!sender_in_range_for_fleet(&runtime, unknown));
+    assert!(sender_in_range_for_fleet(&runtime, "_self"));
+}
+
+/// The router's gate is per-hull too, and STRICTER than the decision's: an id
+/// the map does not hold is refused, synthetic senders included. That is the
+/// verdict the pre-#1343 `range_flags` match gave, kept exactly so this commit
+/// makes the gate host-neutral without also widening it.
+#[test]
+fn the_router_gate_is_per_slot_and_keeps_its_strictness() {
+    use crate::command_admission::HostSlot;
+    let near = "11111111-1111-4111-8111-111111111111";
+    let far = "22222222-2222-4222-8222-222222222222";
+    let runtime = fleet_range_runtime();
+
+    assert!(slot_may_answer_sender(&runtime, Some(HostSlot(1)), near));
+    assert!(!slot_may_answer_sender(&runtime, Some(HostSlot(1)), far));
+    assert!(slot_may_answer_sender(&runtime, Some(HostSlot(2)), far));
+    assert!(
+        !slot_may_answer_sender(&runtime, Some(HostSlot(1)), "Starcorp Command"),
+        "a synthetic sender was refused by the local-map match this replaces, \
+         and still is"
+    );
+    assert!(
+        slot_may_answer_sender(&runtime, None, near),
+        "a fixture hull with no fleet slot reads the local map exactly as before"
+    );
+}
+
+/// The system half: `update_comms_range_flags` measures every `FleetSlotOf`
+/// hull, not just the one this host projects. Two hulls at different distances
+/// from one contact must therefore end the tick with DIFFERENT flags for it —
+/// the reading the decision sweep and the response router consume.
+#[test]
+fn the_range_pass_measures_every_fleet_hull() {
+    use crate::command_admission::HostSlot;
+    use crate::comms::CommsRange;
+    use crate::entities::spawner::EntityUuid;
+    use crate::lockstep::FleetSlotOf;
+    use crate::server_app::Ship;
+
+    let station_uuid = "44444444-4444-4444-8444-444444444444";
+    let mut app = comms_test_app();
+    setup_game_with_comms(&mut app, station_uuid);
+
+    // Slot 1 — this host's own hull — sits within range of the contact; slot 2
+    // sits well outside its 500-unit range.
+    app.world_mut().spawn((
+        Ship,
+        crate::server_app::LocalShip,
+        FleetSlotOf(HostSlot(1)),
+        Transform::from_xyz(0.0, 0.0, 0.0),
+        CommsRange(500.0),
+    ));
+    app.world_mut().spawn((
+        Ship,
+        FleetSlotOf(HostSlot(2)),
+        Transform::from_xyz(5000.0, 0.0, 0.0),
+        CommsRange(500.0),
+    ));
+    app.world_mut().spawn((
+        EntityUuid(station_uuid.into()),
+        Transform::from_xyz(100.0, 0.0, 0.0),
+        CommsRange(500.0),
+    ));
+
+    tick(&mut app);
+
+    let comms = app.world().resource::<CommsRuntime>();
+    assert!(
+        comms.fleet_range_active,
+        "a world with fleet hulls must switch fleet range tracking on"
+    );
+    assert!(
+        sender_in_range_for_slot(comms, Some(HostSlot(1)), station_uuid),
+        "slot 1 is 100 units from the contact"
+    );
+    assert!(
+        !sender_in_range_for_slot(comms, Some(HostSlot(2)), station_uuid),
+        "slot 2 is 5000 units away — and this host projects slot 1, so a \
+         `LocalShip` reading would have said it was in range"
+    );
+    assert!(
+        sender_in_range_for_fleet(comms, station_uuid),
+        "one hull can hear it, so the fleet's shared inbox reads it as reachable"
+    );
+}

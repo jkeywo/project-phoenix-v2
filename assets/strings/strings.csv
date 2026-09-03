@@ -1850,3 +1850,4 @@ world.probe_fleet_comms_choice.comms.claim,"assets/worlds/probe_fleet_comms_choi
 world.probe_fleet_comms_choice.comms.stand_by,"assets/worlds/probe_fleet_comms_choice.toml -> response text, the hold an unmanned console may not take. [bracketed]: unapproved copy",[Stand by.]
 world.probe_fleet_comms_choice.comms.grant,"assets/worlds/probe_fleet_comms_choice.toml -> response text, the one weighted option. [bracketed]: unapproved copy",[The corridor is yours.]
 world.probe_fleet_comms_choice.comms.refuse,"assets/worlds/probe_fleet_comms_choice.toml -> response text, authored but unweighted. [bracketed]: unapproved copy",[The corridor stays closed.]
+world.probe_fleet_comms_choice.entity.claimant_far.name,"assets/worlds/probe_fleet_comms_choice.toml -> [[entity]] name, the party that calls the FAR hull — out of the near hull's comms range on purpose. [bracketed]: unapproved copy",[PROBE FAR CORRIDOR CLAIMANT]

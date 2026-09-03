@@ -70,16 +70,28 @@ const WORLD: &str = "assets/worlds/probe_fleet_duel.toml";
 /// different cell sets — the reason a revert of the fix fails this test.
 const ASTEROID_WORLD: &str = "assets/worlds/probe_fleet_asteroids.toml";
 
-/// A two-ship world that opens a WEIGHTED Comms decision (issue #1343).
+/// A two-ship world that opens two WEIGHTED Comms decisions (issue #1343).
 ///
 /// The class the two worlds above cannot cover: neither of them contains a
 /// single `open_comms` call, so `sim_digest::fold_comms_scope` takes its
 /// everything-empty arm on every tick and the comms half of the fold — the
 /// unmanned consoles' running weighted decisions included — was never entered by
-/// this guard at all. Its pool authors TWO equally-weighted options, the Falling
+/// this guard at all. Its pools author TWO equally-weighted options, the Falling
 /// Skyway lift shape, so the two hulls generally draw different answers and a
-/// host that applied only the hull it projects answers the corridor differently
+/// host that applied only the hull it projects answers a corridor differently
 /// from its peer.
+///
+/// Its geometry is ASYMMETRIC on purpose, and that is the second half of what it
+/// guards. Each of the two claimants sits 40 units from ONE fleet hull and 360
+/// from the other, and authors a 200-unit comms range (the effective range is
+/// `min(hull 1200, claimant 200)`), so each claimant is well inside one hull's
+/// range and well outside the other's — "can this console reach the sender?" has
+/// a different answer per hull. That is the only shape under which a reading
+/// taken from `LocalShip` (a different hull on each host) can be told apart from
+/// a host-neutral one. Equidistant hulls make every host compute the same
+/// reachability by accident and the guard sees nothing. The asymmetry is authored
+/// in comms RANGE rather than in distance so every entity stays inside one
+/// 600-unit LOD bubble of both hulls — see the world file for why that matters.
 const COMMS_CHOICE_WORLD: &str = "assets/worlds/probe_fleet_comms_choice.toml";
 
 /// Long enough that both fleet ships have acquired the hostile, manoeuvred and
@@ -325,7 +337,7 @@ struct CommsRun {
     /// Every fleet slot that held a running weighted wait at any point — the
     /// evidence that the walk really is fleet-wide rather than local-hull-only.
     waiting_slots: Vec<u32>,
-    /// How the corridor was answered, by the end. The pool is a coin flip
+    /// How the two corridors were answered, by the end. Each pool is a coin flip
     /// between `granted` and `refused`; `held` is the forbidden stand-by.
     granted: i64,
     refused: i64,
@@ -385,49 +397,72 @@ fn run_comms_host(local: HostSlot) -> CommsRun {
 /// one"), and a host that emitted for its own hull alone would apply only that
 /// hull's pick. With a one-option pool both hulls pick the same index and the
 /// hole is invisible; with two, they draw independently, and the two runs below
-/// would grant the corridor as slot 1 and refuse it as slot 2. So
+/// would grant a corridor as slot 1 and refuse it as slot 2. So
 /// `operate_comms_response_ai` emits for every hull and
 /// `handle_respond_to_message` drains every hull — the doctrine every other NPC
 /// AI host follows, that every host derives every NPC identically.
+///
+/// # And a fourth: the reachability the decision reads
+///
+/// Each hull's claimant is inside its own comms range and far outside the other
+/// hull's, so every reading of "can this console answer this sender?" differs
+/// between the two hulls. Three folded things consume that reading — the
+/// message's stored `sender_in_range` stamp (and the per-response `available`
+/// that tracks it), whether a hull's wait is carried in `pending_ai_responses`
+/// at all, and whether the `CommsBackfillChoice` draw is taken — plus the
+/// response router's own admission gate. Take any of them from
+/// `CommsRuntime::range_flags`, which is measured from `LocalShip`, and the host
+/// projecting slot 1 reads BOTH conversations as slot 1 sees them (near thread
+/// answerable, far thread dead) while its peer reads the mirror image: the two
+/// runs below then arm different consoles, take a different number of draws, and
+/// answer different threads. The fix is `range_flags`' host-neutral twin,
+/// `CommsRuntime::fleet_range_flags`, read through `sender_in_range_for_slot` —
+/// the same distance, measured from the hull being decided for, which every host
+/// computes identically for every slot.
 #[test]
 fn the_digest_does_not_care_which_ship_a_host_projects_through_a_backfill_decision() {
     let first = run_comms_host(SLOT_ONE);
     let second = run_comms_host(SLOT_TWO);
 
     // Anti-vacuity, and the sharp end of the claim: BOTH hulls must have held a
-    // wait of their own. One slot here means the walk saw one hull — which is
-    // the `LocalShip` gating this test exists to forbid.
+    // wait of their own — each on the claimant IT can reach. One slot here means
+    // either the walk saw one hull, or reachability was read from the local
+    // hull's range flags so one console found its thread dead. Both are the
+    // `LocalShip` gating this test exists to forbid.
     assert_eq!(
         first.waiting_slots,
         vec![SLOT_ONE.0, SLOT_TWO.0],
-        "every fleet hull's Comms console decides on every host; a schedule \
-         holding only one slot's wait was computed from `LocalShip`"
+        "every fleet hull's Comms console decides on every host, about the \
+         conversation ITS hull can reach; a schedule holding only one slot's \
+         wait was computed from `LocalShip`"
     );
     assert_eq!(
         first.waiting_slots, second.waiting_slots,
         "and the same two slots whichever hull this host projects"
     );
 
-    // …and the decision actually RESOLVED, so the comparison covers arm → fold →
-    // draw → admitted answer → `on_pick`, not just an armed wait.
+    // …and the decisions actually RESOLVED, so the comparison covers arm → fold →
+    // draw → admitted answer → `on_pick`, not just two armed waits.
     assert_eq!(
         (first.granted + first.refused, first.held),
-        (1, 0),
-        "the corridor must be answered exactly once and never held: index 0 is \
-         the stand-by and carries `ai_weight = 0`, so an unmanned bridge is \
+        (2, 0),
+        "both corridors must be answered exactly once and neither held: index 0 \
+         is the stand-by and carries `ai_weight = 0`, so an unmanned bridge is \
          forbidden it outright"
     );
     // The sharp end of THIS assertion: which of the two equally-weighted options
-    // landed. Both hulls decide, and with a two-option pool they generally decide
-    // differently, so a host that applied only the hull it projects records a
-    // different answer here from its peer.
+    // landed on each thread. Both hulls decide, and with a two-option pool they
+    // generally decide differently, so a host that applied only the hull it
+    // projects — or that gated the router on its own hull's range — records a
+    // different tally here from its peer.
     assert_eq!(
         (second.granted, second.refused, second.held),
         (first.granted, first.refused, first.held),
-        "the corridor must be answered the SAME way whichever hull this host \
+        "both corridors must be answered the SAME way whichever hull this host \
          projects. An admitted AI command is never logged and so never \
          replicates, so every host must apply every fleet hull's Backfill \
-         answer — see `handle_respond_to_message`'s fleet-wide drain"
+         answer — see `handle_respond_to_message`'s fleet-wide drain, and its \
+         per-hull range gate"
     );
 
     assert_eq!(

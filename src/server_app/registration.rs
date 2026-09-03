@@ -632,8 +632,10 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             // `CommsRuntime` is folded in HALF: `active_dialogues`,
             // `open_hails` and `pending_ai_responses` — the unmanned Comms
             // consoles' running weighted decisions, keyed fleet-slot-then-
-            // message-id (issue #1343) — are walked; `contacts`, `range_flags`
-            // and `range_active` are rebuilt every tick by
+            // message-id (issue #1343) — are walked; `contacts`, `range_flags`,
+            // `range_active` and their per-fleet-slot twins
+            // (`fleet_range_flags` / `fleet_range_active`, also #1343) are
+            // rebuilt every tick by
             // `update_comms_range_flags` from live entities and transforms the
             // entity namespace already folds, and `needs_broadcast` /
             // `last_broadcast_host` are broadcast bookkeeping (which peer was

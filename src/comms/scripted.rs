@@ -29,7 +29,7 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 use crate::comms::content::{response_views, ActiveDialogue, ScriptedDialogue};
-use crate::comms::server::{current_sender_in_range, CommsChannel2Event, CommsRuntime};
+use crate::comms::server::{CommsChannel2Event, CommsRuntime};
 use crate::core::messages::{CommsMessage, GamePhase};
 use crate::entities::spawner::EntityUuid;
 use crate::world::content::WorldEvent;
@@ -76,7 +76,8 @@ pub(crate) struct ScriptedCommsAux<'w> {
 ///    the deleted `inject_comms_templates` used, including the synthetic-sender
 ///    escape (an
 ///    unresolvable `from` falls through to itself, which
-///    [`current_sender_in_range`] treats as always-readable);
+///    [`crate::comms::server::sender_in_range_for_fleet`] treats as
+///    always-readable);
 /// 2. enter the root node under the tick's SHARED [`TickBudget`], gated on a
 ///    pre-flight [`can_admit`](TickBudget::can_admit) check;
 /// 3. route the call's `commands` through [`apply_script_commands`] with the
@@ -407,7 +408,14 @@ pub(crate) fn open_scripted_comms_threads(
             aux.id_mint.as_deref(),
             crate::world_id::IdNamespace::Message,
         );
-        let available = current_sender_in_range(&comms, &sender_uuid);
+        // The FLEET's reading, not this host's (issue #1343): this stamp is
+        // stored on the message for its whole life and folded by `sim_digest`
+        // (both `sender_in_range` and the per-response `available` it drives),
+        // so taking it from `LocalShip` — a different hull on each host — writes
+        // a folded field two peers disagree about. `CommsInboxRes` is one
+        // resource for the whole fleet, so the fleet-wide reading is the one
+        // that matches what is being stamped.
+        let available = crate::comms::server::sender_in_range_for_fleet(&comms, &sender_uuid);
         let responses = response_views(&wire_node.responses, available);
         let msg = CommsMessage::injected(
             msg_id.clone(),

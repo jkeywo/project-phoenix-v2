@@ -2155,11 +2155,13 @@ pub struct WorldEventRecord {
 ///
 /// # Honestly not covered
 ///
-/// `contacts`, `range_flags` and `range_active` are **derived**, not
+/// `contacts`, `range_flags` and `range_active` — and the per-fleet-slot
+/// `fleet_range_flags` / `fleet_range_active` beside them (issue #1343) — are
+/// **derived**, not
 /// progression: the hail roster is rebuilt every tick from the live entities
 /// that carry `[comms] hailable = true` (`update_comms_range_flags`), which also
-/// recomputes the range map from ship and entity transforms. A resumed world
-/// derives all three from state this payload *does* restore. `needs_broadcast`
+/// recomputes both range maps from ship and entity transforms. A resumed world
+/// derives all five from state this payload *does* restore. `needs_broadcast`
 /// is set true by the restore rather than carried, because after a restore it is
 /// unconditionally true.
 ///
@@ -5534,7 +5536,8 @@ fn restore_comms(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut Res
             .iter()
             .map(|(key, record)| (key.clone(), *record))
             .collect();
-        // `range_flags` / `range_active` / `contacts` are all recomputed by
+        // `range_flags` / `range_active` / `fleet_range_flags` /
+        // `fleet_range_active` / `contacts` are all recomputed by
         // `update_comms_range_flags` on the next tick; what they need is for the
         // resumed world to push a fresh `CommsState` to its clients.
         comms.needs_broadcast = true;

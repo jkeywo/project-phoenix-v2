@@ -346,10 +346,10 @@ pub fn operate_demolition_ai(
             if runtime.flags.flag(&row.config.detonated_flag) {
                 continue;
             }
-            if !team_clear(security.as_deref(), &row.uuid) {
+            if !team_clear(security, &row.uuid) {
                 continue;
             }
-            if row.config.stabilization_required && !stabilized(beam.as_deref(), &row.uuid) {
+            if row.config.stabilization_required && !stabilized(beam, &row.uuid) {
                 continue;
             }
             emit_ai_command(

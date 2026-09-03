@@ -1208,12 +1208,28 @@ fn the_alliance_destroyer_exposes_two_tactical_owned_security_teams() {
         system.power_group, None,
         "Security is people: no power group to brown out"
     );
+    // …and it does NOT buy the hull a damage compartment. `[[hull.system_hull]]`
+    // is the pool `SystemHull::apply_damage` spreads incoming hull damage across,
+    // so every box a hull authors is durability its combat ladder never priced —
+    // the caveat the destroyer's own hull table already records about its three
+    // coupling compartments. A fourth measurably moved a shipped balance run
+    // (`probe_aggressor`, seed 3: 105 extra ticks of engagement, all of them
+    // inside the cruiser's bow hold), so Security is authored the way `[repair]`
+    // is on this hull — teams, a reach, and no compartment of its own. Asserted
+    // rather than left silent because "no entry" is a DECISION here, and the next
+    // hand to add one should have to come past this line and re-measure.
+    //
+    // The lever stays available and data-driven: `security_disabled` reads
+    // `EntitySystemHull.tier_for("security")` for whatever hull DOES author a box,
+    // and `a_disabled_security_system_makes_every_team_unavailable_and_ends_the_work`
+    // proves the whole knocked-out path against one.
     assert!(
         entity
             .hull
             .as_ref()
-            .is_some_and(|hull| hull.system_hull.iter().any(|e| e.system_id.0 == "security")),
-        "the Security System carries a damage entry, so a hit can take the teams off the board"
+            .is_some_and(|hull| !hull.system_hull.iter().any(|e| e.system_id.0 == "security")),
+        "the destroyer's Security System must author no [[hull.system_hull]] box: a muster \
+         space is not armour, and adding one silently widens this hull's damage pool"
     );
 }
 

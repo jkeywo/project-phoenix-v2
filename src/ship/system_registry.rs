@@ -184,9 +184,14 @@ pub const UMBILICAL_KIND: &str = "umbilical";
 /// Wire `SystemId` for the Security System (issue #1346, PRD #1337).
 ///
 /// A GENERIC station-owned `[[system]]`: which station owns it is the hull's
-/// authoring decision, and on the Alliance Destroyer that is Tactical. It carries
-/// a damage entry, is admission-gated (`DispatchSecurityTeam` /
-/// `RecallSecurityTeam`) and publishes its own blackboard. Its terms — how many
+/// authoring decision, and on the Alliance Destroyer that is Tactical. It is
+/// admission-gated (`DispatchSecurityTeam` / `RecallSecurityTeam`), publishes its
+/// own blackboard, and MAY carry a `[[hull.system_hull]]` damage entry — a
+/// per-hull choice, not a property of the kind, because that table is the pool
+/// hull damage is spread across and a box is durability the hull pays for. The
+/// shipped destroyer authors none, exactly as its `[repair]` teams do.
+///
+/// Its terms — how many
 /// teams, how long they take to cross and return, how far they can reach — are
 /// authored in a hull's `[security]` table, and what a team may DO at a given
 /// target is authored on the TARGET's `[security_target]` table, so a hull that

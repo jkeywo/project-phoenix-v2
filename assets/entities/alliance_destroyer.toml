@@ -264,16 +264,33 @@ damaged_threshold_pct = 0.5
 disabled_threshold_pct = 0.15
 debuff_magnitude = 0.15
 
-# Security (issue #1346). The teams' own muster space and lockers: wreck it and
-# every team goes off the board (`unavailable`) and whatever they were doing ends
-# where it stands. [ai] Unratified; the same 30 HP the coupling systems carry,
-# because it is the same kind of thing — a compartment, not a weapon.
-[[hull.system_hull]]
-system_id = "security"
-max_hp = 30
-damaged_threshold_pct = 0.5
-disabled_threshold_pct = 0.15
-debuff_magnitude = 0.15
+# NO `[[hull.system_hull]]` ENTRY FOR SECURITY (issue #1346), and the reason is
+# the caveat written beside the three coupling compartments above rather than an
+# oversight. Those three already sit outside the 300-point combat ladder "in intent
+# even though the raw `is_destroyed` sum now includes them"; each one a hull
+# authors widens the pool `SystemHull::apply_damage` spreads incoming hull damage
+# across, so it buys durability the ladder never priced.
+#
+# A fourth was not free. Authored at the coupling systems' 30 HP it took this
+# hull's system pool from 390 to 420 and the measurement is on the record:
+# `probe_aggressor` at seed 3 — where a player Alliance cruiser kills a passive
+# one of these — ran 105 ticks longer, and every one of those ticks fell inside
+# the cruiser's torpedo-run bow hold, tipping
+# `headless_runner::the_composed_player_cruiser_rings_its_target_and_breaks_off_
+# to_bear_its_tubes` from 129 bow-hold ticks against 176 on the ring to 234
+# against the same 176. Dropping the entry restores that run tick for tick.
+#
+# So Security is authored the way `[repair]` is — the other people-and-teams
+# System on this hull, which musters two teams, dispatches them across the same
+# 400-unit reach, and carries no compartment of its own either. Twenty of this
+# hull's thirty-three `[[system]]` blocks author no damage entry; a box is what a
+# hull SPENDS on a system it wants knocked out, not a tax every system pays.
+#
+# The lever itself is untouched and stays data-driven: `security_disabled` reads
+# `EntitySystemHull.tier_for("security")`, so any hull that wants its muster
+# wreckable authors the entry and gets `unavailable` teams and a `Disabled`
+# terminal — proved by `security::server_tests::
+# a_disabled_security_system_makes_every_team_unavailable_and_ends_the_work`.
 
 [repair]
 repair_team_count = 2
@@ -1466,8 +1483,10 @@ power_group = "helm"
 # NO POWER GROUP, deliberately. Security is people: a Power officer who robs a
 # group does not stop a boarding party crossing, and hanging the teams off `helm`
 # with the couplings would have made "the drive is browned out" mean "nobody can
-# fight a fire". The damage entry below is the lever that DOES take them off the
-# board — the compartment they muster from being wrecked.
+# fight a fire". No `[[hull.system_hull]]` compartment either, for the reason
+# written out beside the hull table above — this hull's `[repair]` teams carry
+# none and neither do these, and the engine lever is there for a hull that wants
+# it.
 [[system]]
 id = "security"
 kind = "security"

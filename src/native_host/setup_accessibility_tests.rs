@@ -1,8 +1,7 @@
 //! Synthetic coverage for the pure setup/layout accessibility model (issue
 //! #1128, acceptance criterion 5): the reflow-headroom check at the supported
 //! scaling extremes for one- and two-pane layouts, the keyboard-focus order
-//! across monitors and split panes, the non-colour focus-reticle geometry and
-//! its contrast/reduced-motion response, and the setup-action reachability
+//! across monitors and split panes, and the setup-action reachability
 //! invariant — all with no hardware, which is the whole point of keeping the
 //! model Bevy-free. The real-monitor, real-text half is the ignored
 //! `tests/native_bridge_accessibility.rs` and the walkthrough in
@@ -309,75 +308,6 @@ fn a_bridge_with_no_stations_has_an_empty_focus_order() {
     assert!(bridge_focus_order(&b).is_empty());
     // Vacuously preserves — there is nothing to fail.
     assert!(bridge_preserves_all_consoles(&b));
-}
-
-// ── the non-colour focus indicator (acceptance criteria 3 & 4) ───────────────
-
-#[test]
-fn the_reticle_is_a_frame_plus_four_corner_brackets() {
-    // AC3: focus is shown by shape — a full frame AND four corner brackets — not
-    // by colour. The count is fixed at four corners.
-    assert_eq!(FocusReticle::BRACKET_CORNERS, 4);
-    let style = FocusReticleStyle::standard();
-    let r = FocusReticle::for_pane(0.0, 0.0, 1920.0, 1080.0, &style);
-    // The frame is inset on every side, and it is a real rectangle (a frame),
-    // distinct from the pane it sits in.
-    assert_eq!(r.frame.left, style.inset_px);
-    assert_eq!(r.frame.top, style.inset_px);
-    assert_eq!(r.frame.width, 1920.0 - 2.0 * style.inset_px);
-    assert_eq!(r.frame.height, 1080.0 - 2.0 * style.inset_px);
-    assert_eq!(r.bracket_px, FocusReticleStyle::BRACKET_PX);
-    assert!(r.thickness_px > 0.0);
-}
-
-#[test]
-fn a_tiny_pane_yields_a_non_negative_frame() {
-    // Smaller than twice the inset: the frame clamps to zero rather than going
-    // negative, matching the adapter's `.max(0.0)`.
-    let r = FocusReticle::for_pane(0.0, 0.0, 1.0, 1.0, &FocusReticleStyle::standard());
-    assert!(r.frame.width >= 0.0);
-    assert!(r.frame.height >= 0.0);
-}
-
-#[test]
-fn high_contrast_bolds_and_opaques_the_reticle_without_making_colour_load_bearing() {
-    // AC4: the contrast preference applies to host-drawn setup chrome — the
-    // reticle gets a thicker, fully opaque frame. Focus is STILL conveyed by the
-    // frame's presence, so the standard reticle remains a valid focus cue too.
-    let standard = FocusReticleStyle::for_prefs(false, false);
-    let contrast = FocusReticleStyle::for_prefs(true, false);
-    assert_eq!(
-        standard.thickness_px,
-        FocusReticleStyle::STANDARD_THICKNESS_PX
-    );
-    assert_eq!(standard.alpha, FocusReticleStyle::STANDARD_ALPHA);
-    assert!(contrast.thickness_px > standard.thickness_px);
-    assert_eq!(contrast.alpha, FocusReticleStyle::CONTRAST_ALPHA);
-    assert!(contrast.alpha >= standard.alpha);
-}
-
-#[test]
-fn the_reticle_never_animates_so_reduced_motion_is_satisfied_by_construction() {
-    // AC4: reduced motion applies to host-drawn setup chrome. The reticle is
-    // static — spawned/despawned as focus moves, no transition — so it satisfies
-    // reduced motion whether the preference is set or not. `for_prefs` consults
-    // the flag either way (no panic, same static result).
-    for reduced in [false, true] {
-        let style = FocusReticleStyle::for_prefs(false, reduced);
-        assert!(!style.animates());
-    }
-}
-
-#[test]
-fn the_reticle_style_reads_a_whole_os_prefs() {
-    let prefs = OsAccessibilityPrefs {
-        reduced_motion: true,
-        high_contrast: true,
-        text_scale: 1.25,
-    };
-    let style = FocusReticleStyle::for_os_prefs(&prefs);
-    assert_eq!(style.thickness_px, FocusReticleStyle::CONTRAST_THICKNESS_PX);
-    assert!(!style.animates());
 }
 
 // ── setup-action reachability (acceptance criterion 2) ───────────────────────

@@ -81,6 +81,12 @@ use vellum_ultralight::runtime::{
 };
 use vellum_ultralight::staging;
 
+use super::document::pane_drain_script;
+use super::placement::{home_for_pane, PaneHome, PaneTile};
+use super::recovery::{service_faults, PaneFault};
+use super::registry::PaneId;
+use super::surface::{pump_pane, PaneSurface, PaneSurfaceError};
+use super::PaneBusResource;
 use crate::logging::{LogCat, LogFilterConfig};
 use crate::native_host::bridge_display::{BridgeLayoutResource, BridgeStationSurfaces};
 use crate::native_host::bridge_layout::BridgeLayout;
@@ -93,43 +99,6 @@ use crate::native_host::input_routing::{
     pointer_follow_focus, ContactCaptureMap, FocusRing, MouseCapture, PaneHit, PanePlacement,
     PaneRouter, PointerMotion, WindowKey,
 };
-use crate::native_host::setup_accessibility::{FocusReticle, FocusReticleStyle};
-
-use super::document::pane_drain_script;
-use super::os_prefs;
-use super::placement::{home_for_pane, PaneHome, PaneTile};
-use super::recovery::{service_faults, PaneFault};
-use super::registry::PaneId;
-use super::surface::{pump_pane, PaneSurface, PaneSurfaceError};
-use super::PaneBusResource;
-
-// ── focus-indicator geometry (issue #1124 AC2; issue #1128 AC3/AC4) ──────────
-//
-// The keyboard-focus indicator is a full ring PLUS four corner brackets, drawn on
-// exactly the focused pane and on no other — so focus is shown by the PRESENCE of
-// that shape, not by a colour change (WCAG 1.4.1): a colour-blind operator, or
-// one reading a washed-out bridge display, sees a bracketed frame appear, not one
-// border changing hue.
-//
-// Its geometry and its contrast/reduced-motion response are the pure
-// `setup_accessibility::{FocusReticle, FocusReticleStyle}` (issue #1128), so the
-// shape and the accessibility behaviour are CI-tested rather than only provable
-// under the ignored GPU test; this adapter turns the descriptor into Bevy UI
-// nodes. High contrast bolds and fully opaques the frame; the reticle never
-// animates, which is the reduced-motion guarantee for host-drawn setup chrome.
-
-/// The near-opaque white the reticle is drawn in, at `alpha` from the style. The
-/// hue is never load-bearing — an unfocused pane has no ring at all, so no colour
-/// discrimination is required to tell focused from unfocused; white reads on the
-/// dark console chrome the same way the viewscreen HUD text does.
-fn focus_ring_color(alpha: f32) -> Color {
-    Color::srgba(1.0, 1.0, 1.0, alpha)
-}
-
-/// Marks an entity that is part of the keyboard-focus indicator, so the whole
-/// reticle can be despawned as one when focus moves.
-#[derive(Component)]
-struct FocusRingNode;
 
 /// Where the operator's panes are configured from, and where they load from.
 #[derive(Resource, Clone, Debug)]
@@ -371,10 +340,6 @@ struct PaneWindow {
     /// (viewscreen) window for the tiled single-window host, or a Station window
     /// for a composited one.
     window: Entity,
-    /// The 2-D camera that renders this pane's canvas onto its window, when that
-    /// is a Station window. `None` for a pane on the primary window, which uses
-    /// the game's own default UI camera.
-    station_camera: Option<Entity>,
     /// Top-left corner in physical pixels, within [`window`](Self::window).
     origin: (u32, u32),
     size: (u32, u32),
@@ -444,9 +409,6 @@ pub struct PaneHost {
     /// The spatial map from a physical coordinate to the pane under it. Rebuilt
     /// whenever a pane opens or closes.
     router: PaneRouter,
-    /// The focus indicator entity currently on screen and the pane it frames, so
-    /// it can be moved when focus moves and despawned when focus clears.
-    ring: Option<(PaneId, Entity)>,
     /// One 2-D camera per Station window, `(window, camera)` — spawned once and
     /// reused as panes are composited onto that window.
     station_cameras: Vec<(Entity, Entity)>,
@@ -572,7 +534,6 @@ impl Plugin for PaneDisplayPlugin {
                     route_touch_input,
                     traverse_focus_keys,
                     forward_keyboard_text,
-                    update_focus_indicator,
                 )
                     .chain()
                     .run_if(resource_exists::<ButtonInput<MouseButton>>),
@@ -923,7 +884,6 @@ fn init_pane_host(world: &mut World) {
             image: handle,
             canvas,
             window: seat.window,
-            station_camera,
             origin: seat.origin,
             size: seat.size,
             scale: seat.scale,
@@ -989,7 +949,6 @@ fn init_pane_host(world: &mut World) {
         mouse_capture: MouseCapture::new(),
         pointer_motion: PointerMotion::new(),
         router,
-        ring: None,
         station_cameras,
         lobby_present,
     });
@@ -1017,7 +976,6 @@ fn sync_host_lobby_presence(
     host: Option<NonSendMut<PaneHost>>,
     reveal: Option<Res<HostLobbyRevealResource>>,
     mut nodes: Query<&mut Node>,
-    mut commands: Commands,
 ) {
     let (Some(mut host), Some(reveal)) = (host, reveal) else {
         return;
@@ -1051,19 +1009,12 @@ fn sync_host_lobby_presence(
     // carrying it onto whatever now occupies that position.
     //
     // A reveal does NOT seed focus onto the surface. Same rule as
-    // `FocusRing::focused_on_first_pane`: the reticle is a promise that the next
-    // keystroke lands somewhere, and this surface has no control to land it in,
-    // so on a host with no `--pane` every reveal would otherwise redraw a
-    // full-window focus frame around chrome that accepts nothing. It stays in
-    // the focus order, so a deliberate Ctrl+Tab still reaches it.
+    // `FocusRing::focused_on_first_pane`: keyboard focus is a promise that the
+    // next keystroke lands somewhere, and this surface has no control to land it
+    // in, so seeding it would route input at chrome that accepts nothing. It
+    // stays in the focus order, so a deliberate Ctrl+Tab still reaches it.
     let previously_focused = host.focus.focused();
     host.rebuild_layout();
-    if host.focus.focused().is_none() && previously_focused.is_some() {
-        // Focus left with the surface; the reticle goes with it.
-        if let Some((_, entity)) = host.ring.take() {
-            commands.entity(entity).try_despawn();
-        }
-    }
     // Ultralight drops input into an unfocused view, so the views follow the
     // model rather than the other way round.
     let next = host.focus.focused();
@@ -1405,8 +1356,7 @@ fn route_touch_input(
 /// must stay the page's own field-to-field traversal. Ctrl+Tab is the
 /// long-standing convention for moving between panes or tabs and no console page
 /// binds it, so inter-pane focus and in-pane focus never fight over a key. The
-/// model cycles; [`update_focus_indicator`] draws the visible non-colour ring on
-/// wherever focus lands.
+/// model cycles; typed input then routes to whichever pane focus lands on.
 fn traverse_focus_keys(host: Option<NonSendMut<PaneHost>>, keys: Res<ButtonInput<KeyCode>>) {
     let Some(mut host) = host else {
         return;
@@ -1532,118 +1482,6 @@ fn forward_keyboard_text(
             _ => {}
         }
     }
-}
-
-/// Keep the visible focus indicator on the focused pane (acceptance criterion 2).
-///
-/// Draws nothing when no pane is focused, and moves the reticle by despawning it
-/// and respawning it over the newly-focused pane — which also re-homes it onto
-/// the right Station window's camera when focus crosses windows, without mutating
-/// a live component. The indicator is a ring plus four corner brackets: see the
-/// `FOCUS_RING_*` constants for why that shape is what makes focus legible
-/// without relying on colour.
-fn update_focus_indicator(host: Option<NonSendMut<PaneHost>>, mut commands: Commands) {
-    let Some(mut host) = host else {
-        return;
-    };
-    let focused = host.focus.focused();
-    let current = host.ring.map(|(pane, _)| pane);
-    if focused == current {
-        return;
-    }
-    if let Some((_, entity)) = host.ring.take() {
-        commands.entity(entity).try_despawn();
-    }
-    if let Some(pane) = focused {
-        if let Some(index) = host.index_of(pane) {
-            let window = &host.windows[index];
-            let entity = spawn_focus_ring(&mut commands, window);
-            host.ring = Some((pane, entity));
-        }
-    }
-}
-
-/// Spawn the focus reticle over one pane: a full ring and four corner brackets,
-/// on the pane's own window camera.
-///
-/// The geometry and the accessibility response come from the pure
-/// [`FocusReticle`] (issue #1128): the pane's physical origin/size are turned
-/// into a logical box, and [`FocusReticleStyle::for_os_prefs`] bolds and opaques
-/// the frame under `prefers-contrast: more`. The read is machine-wide and
-/// best-effort, matching the pane document's OS accessibility injection.
-fn spawn_focus_ring(commands: &mut Commands, window: &PaneWindow) -> Entity {
-    let scale = window.scale as f32;
-    let style = FocusReticleStyle::for_os_prefs(&os_prefs::query_os_accessibility_prefs());
-    let reticle = FocusReticle::for_pane(
-        window.origin.0 as f32 / scale,
-        window.origin.1 as f32 / scale,
-        window.size.0 as f32 / scale,
-        window.size.1 as f32 / scale,
-        &style,
-    );
-    let thickness = reticle.thickness_px;
-    let bracket = reticle.bracket_px;
-    let color = focus_ring_color(reticle.alpha);
-
-    let ring = commands
-        .spawn((
-            FocusRingNode,
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(reticle.frame.left),
-                top: Val::Px(reticle.frame.top),
-                width: Val::Px(reticle.frame.width),
-                height: Val::Px(reticle.frame.height),
-                border: UiRect::all(Val::Px(thickness)),
-                ..default()
-            },
-            BorderColor::all(color),
-            BackgroundColor(Color::NONE),
-            // Above the pane's own texture.
-            ZIndex(50),
-        ))
-        .id();
-
-    // The four corner brackets, each an L of two thick borders, so the reticle
-    // reads as a deliberate focus frame rather than a plain rectangle.
-    for (h_side, v_side) in [
-        (true, true),   // top-left
-        (false, true),  // top-right
-        (true, false),  // bottom-left
-        (false, false), // bottom-right
-    ] {
-        let mut node = Node {
-            position_type: PositionType::Absolute,
-            width: Val::Px(bracket),
-            height: Val::Px(bracket),
-            ..default()
-        };
-        let mut border = UiRect::default();
-        if v_side {
-            node.top = Val::Px(0.0);
-            border.top = Val::Px(thickness);
-        } else {
-            node.bottom = Val::Px(0.0);
-            border.bottom = Val::Px(thickness);
-        }
-        if h_side {
-            node.left = Val::Px(0.0);
-            border.left = Val::Px(thickness);
-        } else {
-            node.right = Val::Px(0.0);
-            border.right = Val::Px(thickness);
-        }
-        node.border = border;
-        let bracket_entity = commands
-            .spawn((FocusRingNode, node, BorderColor::all(color), ZIndex(51)))
-            .id();
-        commands.entity(ring).add_child(bracket_entity);
-    }
-
-    if let Some(cam) = window.station_camera {
-        commands.entity(ring).insert(UiTargetCamera(cam));
-    }
-    ring
 }
 
 /// One frame for every pane: service the library, move messages both ways,
@@ -2142,7 +1980,6 @@ fn make_pane_view(
         image: handle,
         canvas,
         window,
-        station_camera,
         origin,
         size,
         scale,
@@ -2201,15 +2038,9 @@ fn retire_closed_panes(
     });
 
     // A finger pinned to a pane that has gone must not stay captured by a view
-    // that no longer exists; and the focus indicator over a closed pane must go
-    // with it.
+    // that no longer exists.
     for pane in &closed {
         host.contacts.release_pane(*pane);
-        if host.ring.map(|(p, _)| p) == Some(*pane) {
-            if let Some((_, entity)) = host.ring.take() {
-                commands.entity(entity).try_despawn();
-            }
-        }
     }
     // A Station window whose every pane has closed no longer needs its 2-D
     // camera; despawn it so nothing keeps clearing an empty Station to black. The
@@ -2224,13 +2055,6 @@ fn retire_closed_panes(
 
     // Rebuild the router and reconcile the focus order. `sync_order` keeps the
     // focused pane if it survived and clears focus if it closed — never carrying
-    // one participant's focus onto another. If focus was cleared, the indicator
-    // is dropped on the next `update_focus_indicator` frame.
-    let previously_focused = host.focus.focused();
+    // one participant's focus onto another.
     host.rebuild_layout();
-    if host.focus.focused().is_none() && previously_focused.is_some() {
-        if let Some((_, entity)) = host.ring.take() {
-            commands.entity(entity).try_despawn();
-        }
-    }
 }

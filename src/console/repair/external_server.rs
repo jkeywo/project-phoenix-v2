@@ -252,24 +252,32 @@ pub fn handle_external_repair_commands(
             } => {
                 match dispatch_status(*has_free_team, lock.as_deref(), separation, *range) {
                     Ok(()) => {
-                        dispatch.dispatched_target = lock.clone();
-                        dispatch.last_refusal = None;
                         // The activation opens at COMMIT, not at every tick a
                         // team is still out there working (issue #1345) — the
                         // same dispatch-and-claim shape Security's team
-                        // assignment uses. A dispatch onto an already-live slot
-                        // (a stale double-send, or a fresh target while a team
-                        // is already abroad) is handled by the registry itself:
-                        // it closes the old activation as `Restarted` and opens
-                        // this one, so nothing here needs to check first.
-                        push_lifecycle(
-                            lifecycle.as_deref_mut(),
-                            uuid,
-                            TaskLifecycleRequest::Start {
-                                slot: dispatch_slot(uuid),
-                                target: lock.clone(),
-                            },
-                        );
+                        // assignment uses. A dispatch onto a FRESH target
+                        // while a team is already abroad still needs to
+                        // restart through the registry (it closes the old
+                        // activation as `Restarted` and opens this one), but a
+                        // re-dispatch onto the SAME target the ship is already
+                        // working (a stale-UI double tap) changes nothing in
+                        // the sim and must not report a phantom restart —
+                        // `SystemControlPayload::Dock if !dock.engaged`
+                        // (dock/server.rs) and `StartTransfer if
+                        // !umbilical.running` (umbilical/server.rs) guard the
+                        // same no-op at their own commit sites.
+                        if dispatch.dispatched_target.as_deref() != lock.as_deref() {
+                            push_lifecycle(
+                                lifecycle.as_deref_mut(),
+                                uuid,
+                                TaskLifecycleRequest::Start {
+                                    slot: dispatch_slot(uuid),
+                                    target: lock.clone(),
+                                },
+                            );
+                        }
+                        dispatch.dispatched_target = lock.clone();
+                        dispatch.last_refusal = None;
                     }
                     Err(refusal) => {
                         // A refused dispatch sends nobody: the target is left
@@ -979,6 +987,76 @@ mod tests {
         admit_recall(&mut app, operator);
         app.update();
         assert!(drain_lifecycle(&mut app).is_empty());
+    }
+
+    /// A repeat `DispatchExternalRepair` onto the SAME locked target is a sim
+    /// no-op (the commit re-assigns the identical value) and must drain an
+    /// empty lifecycle queue rather than reporting a phantom restart. A
+    /// dispatch onto a DIFFERENT target is a genuine change of claim and
+    /// still pushes a fresh `Start` (issue #1345).
+    #[test]
+    fn a_repeat_dispatch_onto_the_same_target_reports_nothing_but_a_new_target_still_starts() {
+        const ALLY_TWO: &str = "ally-2";
+
+        let (mut app, operator) = app_with(Some(Vec3::new(100.0, 0.0, 0.0)), 1);
+        admit_dispatch(&mut app, operator);
+        app.update();
+        assert_eq!(
+            drain_lifecycle(&mut app),
+            vec![TaskLifecycleRequest::Start {
+                slot: dispatch_slot_for_test(),
+                target: Some(ALLY.into()),
+            }]
+        );
+
+        // A stale-UI double tap on the same lock: nothing changed in the sim,
+        // so nothing should be reported.
+        admit_dispatch(&mut app, operator);
+        app.update();
+        assert!(
+            drain_lifecycle(&mut app).is_empty(),
+            "a repeat dispatch onto the same target must not report a phantom restart"
+        );
+        assert_eq!(
+            app.world()
+                .entity(operator)
+                .get::<ExternalRepairDispatch>()
+                .unwrap()
+                .dispatched_target
+                .as_deref(),
+            Some(ALLY)
+        );
+
+        // Re-lock onto a second ally: a genuinely different target still
+        // starts a fresh activation (the old one is closed as `Restarted` by
+        // the narrative emitter's own registry, downstream of this queue).
+        app.world_mut().spawn((
+            EntityUuid(ALLY_TWO.into()),
+            Transform::from_translation(Vec3::new(100.0, 0.0, 0.0)),
+        ));
+        app.world_mut()
+            .entity_mut(operator)
+            .get_mut::<TacticalRadarSelection>()
+            .unwrap()
+            .0 = Some(ALLY_TWO.into());
+        admit_dispatch(&mut app, operator);
+        app.update();
+        assert_eq!(
+            drain_lifecycle(&mut app),
+            vec![TaskLifecycleRequest::Start {
+                slot: dispatch_slot_for_test(),
+                target: Some(ALLY_TWO.into()),
+            }]
+        );
+        assert_eq!(
+            app.world()
+                .entity(operator)
+                .get::<ExternalRepairDispatch>()
+                .unwrap()
+                .dispatched_target
+                .as_deref(),
+            Some(ALLY_TWO)
+        );
     }
 
     /// A target that drifts past the authored range ends a live dispatch with

@@ -273,6 +273,7 @@ const SPAWN_SECTIONS: &[&dyn SpawnSection] = &[
     &SecurityTargetSpawn,
     &TransporterSpawn,
     &CivilianRescueSpawn,
+    &DemolitionTargetSpawn,
     &ScanSpawn,
     &DebrisSpawn,
     &CivilianSpawn,
@@ -1702,6 +1703,13 @@ impl SpawnSection for SecuritySpawn {
         // `EntityConfig` validation already guaranteed the paired system exists.
         if let Some(security) = &config.security {
             cmds.insert(crate::security::ShipSecurityTeams::new(security.clone()));
+            // A hull that musters Security teams is the one that fires the charges
+            // they place (issue #1350): `DetonateCharges` goes to the `security`
+            // system, so the demolition refusal projection rides the same hull.
+            // It holds no authoritative state — charged/detonated are world flags —
+            // so a hull with no demolition target in its world simply never has a
+            // refusal to show.
+            cmds.insert(crate::demolition::DemolitionControl::default());
         }
     }
 }
@@ -1714,6 +1722,19 @@ impl SpawnSection for SecurityTargetSpawn {
         // own, and a hull with teams need offer none.
         if let Some(target) = &config.security_target {
             cmds.insert(crate::security::SecurityTargetActions(target.clone()));
+        }
+    }
+}
+
+struct DemolitionTargetSpawn;
+impl SpawnSection for DemolitionTargetSpawn {
+    fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
+        // What a controlled demolition may do HERE (issue #1350). Independent of
+        // `[security_target]` above, though on the Falling Skyway obstruction the
+        // two ride the same entity: the `place_charges` action arms the charges,
+        // and this table says what detonating them clears.
+        if let Some(target) = &config.demolition_target {
+            cmds.insert(crate::demolition::DemolitionTarget(target.clone()));
         }
     }
 }

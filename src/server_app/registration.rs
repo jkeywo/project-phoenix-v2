@@ -567,6 +567,22 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 StateClass::DeferredFold,
                 "security-target-state",
             )
+            // Controlled demolition (issue #1350). The target-side table is
+            // authored and never written, so it is `DeferredFold` with zero folded
+            // fields exactly like `SecurityTargetActions` — authoritative, but
+            // `content_digest` already answers for every byte of it. The per-ship
+            // `DemolitionControl` carries only the last-refusal projection the next
+            // command re-derives, and the authoritative operation state (charged,
+            // detonated, each outcome) is WORLD FLAGS, already folded — so the
+            // control component is `Derived`, inert to `world_digest`.
+            .declare_state::<crate::demolition::DemolitionTarget>(
+                StateClass::DeferredFold,
+                "demolition-target-state",
+            )
+            .declare_state::<crate::demolition::DemolitionControl>(
+                StateClass::Derived,
+                "demolition-control-state",
+            )
             .declare_state::<AsteroidUuid>(StateClass::Folded, "digest-fold-order-policy")
             // ---- DeferredFold: authoritative, not yet walked by `world_digest`. ----
             .declare_state::<crate::ai::server::LodBubble>(

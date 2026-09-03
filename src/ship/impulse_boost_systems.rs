@@ -434,6 +434,7 @@ mod tests {
             security_target: None,
             transporter: None,
             civilian_rescue: None,
+            demolition_target: None,
             civilian: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();

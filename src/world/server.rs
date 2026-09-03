@@ -814,6 +814,13 @@ impl Plugin for WorldPlugin {
             // drifting rock to a confirmed threat is a scan, so the tick that
             // latches an assessment has to run after the tick that takes one.
             .add_plugins(crate::debris::DebrisPlugin)
+            // Controlled demolition (issue #1350) stands beside Security, whose
+            // command target it borrows and whose team states it reads: the
+            // obstruction it clears is world furniture spawned from a world file,
+            // and the four outcomes it decides raise flags on this plugin's own
+            // `WorldContentRuntime` store, so a scenario trigger fires the tick the
+            // charges go off.
+            .add_plugins(crate::demolition::DemolitionPlugin)
             .init_resource::<WorldContentRuntime>()
             .init_resource::<ObjectiveManagerRes>()
             .init_resource::<PendingScenarioLoad>()

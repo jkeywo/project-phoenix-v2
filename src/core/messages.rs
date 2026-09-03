@@ -2502,6 +2502,28 @@ pub enum SystemControlPayload {
         /// Which of the hull's authored teams to recall, 0-based.
         team_idx: u8,
     },
+    /// Detonate the charges a Security team has placed on a named obstruction
+    /// (issue #1350). Targets the `security` system — the same station-owned
+    /// system the team was dispatched from, so on the Alliance Destroyer the
+    /// Tactical holder fires it, the backfill host may emit it, and nobody else
+    /// is admitted. There is no Duty Officer gate.
+    ///
+    /// This is the FOURTH and final stage of a controlled demolition, and it is
+    /// deliberately its own explicit command rather than something a completed
+    /// charge placement triggers: completing placement starts the team home, it
+    /// never fires the charges. The obstruction is NAMED because a ship can be
+    /// running more than one demolition operation, and a single Tactical lock
+    /// cannot say which mass is meant.
+    ///
+    /// A detonation with no charges placed, or one already fired, is refused with
+    /// a reason the console shows. A detonation while the team has not yet
+    /// withdrawn is NOT refused — it is the premature outcome, with casualties —
+    /// so the console shows the team-safety state and leaves the choice to
+    /// Tactical.
+    DetonateCharges {
+        /// The obstruction entity's uuid.
+        target: String,
+    },
 }
 
 /// `ClientMessageDiscriminants` (from `strum::EnumDiscriminants`) is a
@@ -4394,6 +4416,16 @@ pub enum SystemBlackboard {
     /// a damage entry and is commanded and refused through the engineering
     /// console.
     Transporter(TransporterBlackboard),
+    /// The controlled-demolition operation readout (issue #1350). One per ship
+    /// that can fire charges, keyed by `demolition::DEMOLITION_BLACKBOARD_KEY` — a
+    /// reserved channel, not a real system id, because unlike Security or the
+    /// tractor an OPERATION is not a thing aboard the ship that can be damaged or
+    /// commanded on its own: what fires the charges is the `security` system, and
+    /// what holds the mass is the `tractor`. This channel carries the operation
+    /// STATE those two coordinate through — charged, team clear, stabilised,
+    /// detonated — so a Tactical seat can see it may not treat a completed
+    /// placement as an automatic detonation.
+    Demolition(DemolitionBlackboard),
 }
 
 /// Raw sim truth for a ship's rescue transporter, published each tick under its
@@ -4438,6 +4470,64 @@ pub struct TransporterBlackboard {
     /// stops again; `None` while the transporter is idle or running cleanly.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refusal: Option<String>,
+}
+
+/// Raw sim truth for a ship's controlled-demolition operations, published each
+/// tick under its reserved channel (issue #1350).
+///
+/// Additive on the wire in both directions: adding the `Demolition` variant
+/// leaves every other `SystemBlackboard` arm untouched, and every field here is
+/// `#[serde(default)]`, so a payload predating one decodes rather than being
+/// refused whole. No English crosses: names are world entity name ids, the
+/// outcome is a machine id, and `refusal` and `warning` are `strings.csv` ids the
+/// console resolves.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct DemolitionBlackboard {
+    /// Every obstruction in the world this ship could demolish, in uuid order,
+    /// with the live state of each operation.
+    #[serde(default)]
+    pub targets: Vec<DemolitionSlot>,
+    /// Why the last detonation was refused — a `strings.csv` id. `None` when
+    /// nothing has been refused since the last command.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal: Option<String>,
+}
+
+/// One demolition operation's live state, as the Tactical console shows it (issue
+/// #1350).
+///
+/// The three booleans the crew read before firing are the whole of what
+/// distinguishes the outcomes: `charged` says the detonate control is armed at
+/// all, `team_clear` is the team-safety state a completed placement must NOT be
+/// mistaken for, and `stabilized` against `stabilization_required` says whether
+/// the shot will be clean or messy. `detonated` marks a spent operation.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct DemolitionSlot {
+    /// The obstruction's uuid — the target a `DetonateCharges` command names.
+    #[serde(default)]
+    pub target: String,
+    /// The obstruction's authored world entity name id, resolved for display.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_name: Option<String>,
+    /// Whether charges have been placed — the detonate control is armed.
+    #[serde(default)]
+    pub charged: bool,
+    /// Whether no Security team is still committed to this target: the team has
+    /// withdrawn and a detonation now would not catch anyone.
+    #[serde(default)]
+    pub team_clear: bool,
+    /// Whether this mass needs a tractor hold to come apart cleanly (authored).
+    #[serde(default)]
+    pub stabilization_required: bool,
+    /// Whether the ship's tractor beam is currently holding this target.
+    #[serde(default)]
+    pub stabilized: bool,
+    /// Whether the charges have already been fired.
+    #[serde(default)]
+    pub detonated: bool,
+    /// A `strings.csv` id for the warning shown beside the detonate control.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
 }
 
 /// Raw sim truth for a ship's Security teams, published each tick under its

@@ -2309,6 +2309,27 @@ fn security_dispatch_and_recall_control_system_round_trip() {
     );
 }
 
+/// Detonate charges (issue #1350): the fourth stage of a controlled demolition
+/// round-trips and keeps its pinned wire shape. It targets the `security` system
+/// the team was dispatched from — the station that fires the charges — and NAMES
+/// its obstruction, because a ship can be running more than one demolition.
+#[test]
+fn detonate_charges_control_system_round_trips() {
+    let detonate = ClientMessage::ControlSystem {
+        target: SystemId(crate::ship::system_registry::SECURITY_SYSTEM_ID.into()),
+        payload: SystemControlPayload::DetonateCharges {
+            target: "00000000-0000-8000-8000-000000000042".into(),
+        },
+    };
+    assert_client_roundtrip(&JsonCodec, detonate.clone());
+    assert_client_roundtrip(&PrettyJsonCodec, detonate.clone());
+    assert_eq!(
+        JsonCodec.encode_client(&detonate).unwrap(),
+        r#"{"type":"ControlSystem","data":{"target":"security","payload":{"type":"DetonateCharges","data":{"target":"00000000-0000-8000-8000-000000000042"}}}}"#,
+        "DetonateCharges wire shape must stay pinned"
+    );
+}
+
 /// The Security blackboard (issue #1346) round-trips whole, and an idle muster
 /// pays for none of the optional fields — so a hull that musters teams and has
 /// used none of them puts a payload on the wire with no refusal and no

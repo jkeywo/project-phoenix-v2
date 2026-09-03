@@ -3200,6 +3200,20 @@ pub struct EntityConfig {
     /// `CivilianRescue` component and is unchanged in every way.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub civilian_rescue: Option<crate::transporter::CivilianRescueConfig>,
+    /// What a controlled demolition may do HERE (issue #1350) — the fourth stage
+    /// of the sequence Security's `place_charges` action opens. Present on an
+    /// obstruction that can be cleared by detonating placed charges; absent for
+    /// everything else, which carries no `DemolitionTarget` component and cannot
+    /// be detonated at all — which is why every shipped hull and every existing
+    /// world is untouched. It carries only flag names: the one whose set means
+    /// "charges placed" (authored to equal this entity's `place_charges`
+    /// `outcome_flag`), the one raised on any detonation, and the three the four
+    /// outcomes hang their consequences off. Nothing here needs a paired
+    /// `[[system]]`: `DetonateCharges` is fired through the `security` system the
+    /// team was dispatched from, and the operation is furniture in the world, not
+    /// a thing aboard a ship.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub demolition_target: Option<crate::demolition::DemolitionConfig>,
     /// The faint world-locked lattice drawn under this hull on the viewscreen.
     /// Present only on a hull meant to be FLOWN — the grid is a motion cue for
     /// the crew looking out of their own ship, and it is only ever read off the
@@ -3815,6 +3829,14 @@ impl EntityConfig {
         // dispatch names one action id and the first match answers).
         if let Some(ref security_target) = config.security_target {
             security_target.validate().map_err(SerdeError::custom)?;
+        }
+
+        // Validation: a [demolition_target] table has to name five distinct,
+        // non-blank world flags (issue #1350), so a detonation cannot silently
+        // fire the wrong outcome's consequence or hang off a flag that names
+        // nothing. Checked by `DemolitionConfig::validate`.
+        if let Some(ref demolition_target) = config.demolition_target {
+            demolition_target.validate().map_err(SerdeError::custom)?;
         }
 
         // Validation: a [reference_grid] table has to describe a lattice that

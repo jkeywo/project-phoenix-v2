@@ -86,6 +86,7 @@ fn spawn_region(app: &mut App, x: f32, z: f32, shape: RegionShape) -> Entity {
         security_target: None,
         transporter: None,
         civilian_rescue: None,
+        demolition_target: None,
         civilian: None,
         faction: None,
         behaviour: None,
@@ -404,6 +405,7 @@ fn spawn_blocks_impulse_region(app: &mut App, x: f32, z: f32, radius: f32) -> En
         security_target: None,
         transporter: None,
         civilian_rescue: None,
+        demolition_target: None,
         civilian: None,
     };
     let uuid = uuid::Uuid::new_v4().to_string();
@@ -490,6 +492,7 @@ fn spawn_damage_zone_with_pierce(
         security_target: None,
         transporter: None,
         civilian_rescue: None,
+        demolition_target: None,
         civilian: None,
     };
     let uuid = uuid::Uuid::new_v4().to_string();
@@ -950,6 +953,7 @@ fn spawn_radar_dampening_region(
         security_target: None,
         transporter: None,
         civilian_rescue: None,
+        demolition_target: None,
         civilian: None,
     };
     let uuid = uuid::Uuid::new_v4().to_string();
@@ -1133,6 +1137,7 @@ fn spawn_slow_zone(
         security_target: None,
         transporter: None,
         civilian_rescue: None,
+        demolition_target: None,
         civilian: None,
     };
     let uuid = uuid::Uuid::new_v4().to_string();
@@ -1509,6 +1514,7 @@ fn spawn_comms_jam_region(app: &mut App, x: f32, z: f32, radius: f32) -> Entity 
         security_target: None,
         transporter: None,
         civilian_rescue: None,
+        demolition_target: None,
         civilian: None,
     };
     let uuid = uuid::Uuid::new_v4().to_string();
@@ -1582,6 +1588,7 @@ fn spawn_sensor_blind_region(app: &mut App, x: f32, z: f32, radius: f32) -> Enti
         security_target: None,
         transporter: None,
         civilian_rescue: None,
+        demolition_target: None,
         civilian: None,
     };
     let uuid = uuid::Uuid::new_v4().to_string();

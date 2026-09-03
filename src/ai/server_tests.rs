@@ -1277,6 +1277,7 @@ fn weapons_console_section_attached_when_config_has_weapons_console() {
         security_target: None,
         transporter: None,
         civilian_rescue: None,
+        demolition_target: None,
         civilian: None,
         faction: None,
         hull: None,

@@ -4062,7 +4062,11 @@ fn on_file_evidence(ctx) {
 // trigger-level `when` does not consume the registration — the device the
 // committee and Havelock channels above already use.
 on_hailed("world.falling_skyway.entity.havelock_enforcer.name", "on_picket_hailed")
-    .when("counter(havelock_enforcer_resolved) < 1");
+    .when("counter(havelock_enforcer_resolved) < 1 and counter(havelock_enforcer_refused) < 1 and counter(havelock_enforcer_left_alone) < 1");
+on_hailed("world.falling_skyway.entity.havelock_enforcer.name", "on_picket_hailed")
+    .when("counter(havelock_enforcer_resolved) < 1 and counter(havelock_enforcer_refused) < 1 and counter(havelock_enforcer_left_alone) > 0");
+on_hailed("world.falling_skyway.entity.havelock_enforcer.name", "on_picket_hailed")
+    .when("counter(havelock_enforcer_resolved) < 1 and counter(havelock_enforcer_refused) > 0");
 on_hailed("world.falling_skyway.entity.havelock_enforcer.name", "on_picket_hailed")
     .when("counter(havelock_enforcer_resolved) > 0");
 
@@ -4189,6 +4193,23 @@ fn picket_standoff(ctx) {
     if ctx.flags.skyway_mission_finalized > 0 || picket_settled(ctx) {
         return #{ message: "world.falling_skyway.comms.picket_channel_closed", responses: [] };
     }
+    let body = "world.falling_skyway.comms.picket_holds_station";
+    if ctx.flags.havelock_enforcer_refused > 0 {
+        body = "world.falling_skyway.comms.picket_holds_station_refused";
+    } else if ctx.flags.havelock_enforcer_warned > 0 {
+        body = "world.falling_skyway.comms.picket_holds_station_warned";
+    }
+    picket_node(ctx, body)
+}
+
+// The response list, under whatever the boat has just said. Split from
+// `picket_standoff` because the CONVERSATION has to stay alive across a pick: a
+// refusal that closed the thread would make the authorisation it unlocks
+// reachable only by hailing again, and a hail trigger is single-shot. Every pick
+// that does not settle the standoff comes back through here with its own body
+// and the list rebuilt from the state that pick just wrote — the shape
+// `committee_terms` uses on the other channel.
+fn picket_node(ctx, body) {
     let responses = [];
     responses.push(#{
         text: "world.falling_skyway.comms.picket_leave_it",
@@ -4217,12 +4238,6 @@ fn picket_standoff(ctx) {
             on_pick: "on_picket_force_authorized",
             important: true,
         });
-    }
-    let body = "world.falling_skyway.comms.picket_holds_station";
-    if ctx.flags.havelock_enforcer_refused > 0 {
-        body = "world.falling_skyway.comms.picket_holds_station_refused";
-    } else if ctx.flags.havelock_enforcer_warned > 0 {
-        body = "world.falling_skyway.comms.picket_holds_station_warned";
     }
     #{ message: body, responses: responses }
 }
@@ -4265,7 +4280,11 @@ fn on_picket_asked_to_withdraw(ctx) {
         // captain cannot authorise force against a boat nobody has asked to
         // leave.
         ctx.flags.havelock_enforcer_refused = 1;
-        return #{ message: "world.falling_skyway.comms.picket_refuses", responses: [] };
+        // The thread STAYS OPEN under the refusal. It has to: the refusal is
+        // what unlocks the authorisation, and a closed thread would make that
+        // option reachable only by hailing again — which a single-shot hail
+        // trigger cannot promise.
+        return picket_node(ctx, "world.falling_skyway.comms.picket_refuses");
     }
     withdraw_the_picket(ctx);
     #{ message: "world.falling_skyway.comms.picket_stands_off", responses: [] }
@@ -4328,7 +4347,7 @@ fn on_picket_warned(ctx) {
         text:       "world.falling_skyway.evidence.picket_contract",
         provenance: "dialogue",
     });
-    picket_standoff(ctx)
+    picket_node(ctx, "world.falling_skyway.comms.picket_holds_station_warned")
 }
 
 // AUTHORISE FORCE. The scenario-side authorisation, and the ONLY thing in this

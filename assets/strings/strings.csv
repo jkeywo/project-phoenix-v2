@@ -1840,3 +1840,6 @@ world.falling_skyway.report.picket.holding,"Post-mission report row outcome — 
 world.falling_skyway.report.picket.unresolved,"Post-mission report row outcome — nobody ever addressed the standoff",[Never addressed. She was still on station when the shutters came down.]
 world.falling_skyway.comms.picket_leave_it,"Dialogue response — leave the Havelock picket where it is and close the channel, Falling Skyway",[Leave them. They are not the problem tonight.]
 world.falling_skyway.comms.picket_left_alone,"Dialogue body — the Havelock picket after the captain decides to leave it alone, Falling Skyway",[Then we will be right here. Mind the lane on your way past.]
+world.probe_picket.entity.picket.name,assets/worlds/probe_picket.toml -> [[entity]] name,[Probe Picket]
+world.probe_picket.entity.leaver.name,assets/worlds/probe_picket.toml -> [[entity]] name,[Probe Leaver]
+world.probe_picket.entity.brawler.name,assets/worlds/probe_picket.toml -> [[entity]] name,[Probe Brawler]

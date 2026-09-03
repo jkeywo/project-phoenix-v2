@@ -14188,6 +14188,17 @@ fn falling_skyway_picket_sits_there_until_somebody_starts_something() {
         "havelock_enforcer_destroyed",
         "restraint_shown",
         "havelock_saw_restraint",
+        // Issue #1349's four further endings, and the authorisation that is the
+        // only door to the destructive one. Every one of them is a consequence
+        // of a decision somebody made, so an Act 1 that reached any of them by
+        // itself would be authoring the choice rather than offering it.
+        "havelock_enforcer_contained",
+        "havelock_enforcer_boarded",
+        "havelock_enforcer_withdrawing",
+        "havelock_enforcer_withdrew",
+        "havelock_enforcer_force_authorized",
+        "havelock_enforcer_refused",
+        "havelock_enforcer_warned",
     ] {
         assert!(
             !restraint_flag(&app, untaken),
@@ -14200,6 +14211,623 @@ fn falling_skyway_picket_sits_there_until_somebody_starts_something() {
         last_shot_secs(&mut app, PICKET).is_none(),
         "and it has not fired a shot: the Harrow are neutral until provoked, which is \
          the premise the whole lever rests on"
+    );
+    // #1349 AC2: the boat OFFERS the non-destructive road from its first tick.
+    // Read off the live component rather than off the TOML text, because what
+    // the crew and the backfill host can both reach is what got attached.
+    let offered = picket_security_actions(&mut app, PICKET);
+    assert_eq!(
+        offered,
+        vec!["secure_contain".to_string(), "board".to_string()],
+        "the picket authors containment and boarding, in that priority order — the \
+         alternative to force exists before anybody has decided anything"
+    );
+    // …and #1338's mark, without which none of the standoff's five endings could
+    // state itself on the timeline.
+    assert!(
+        is_narrative_marked(&mut app, PICKET),
+        "the picket is a story hull: its fate is one of the things this mission is \
+         about, so it carries a NarrativeMark from spawn"
+    );
+}
+
+/// The snake_case ids of the Security actions the named entity offers, in
+/// authored order. `None` of them is the same answer as no `[security_target]`
+/// at all — an empty vec — which is what the assertion above would see if the
+/// authoring were dropped.
+fn picket_security_actions(app: &mut bevy::prelude::App, name: &str) -> Vec<String> {
+    app.world_mut()
+        .query::<(
+            &project_phoenix::entities::spawner::EntityName,
+            &project_phoenix::security::server::SecurityTargetActions,
+        )>()
+        .iter(app.world())
+        .find(|(entity_name, _)| entity_name.0 == name)
+        .map(|(_, actions)| {
+            actions
+                .0
+                .actions
+                .iter()
+                .map(|a| a.action.as_str().to_string())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn is_narrative_marked(app: &mut bevy::prelude::App, name: &str) -> bool {
+    app.world_mut()
+        .query::<&project_phoenix::core::narrative::NarrativeMark>()
+        .iter(app.world())
+        .any(|mark| mark.0 == name)
+}
+
+/// Station-keeping beside the picket's own authored anchor (`corporate_picket`,
+/// at 1330/250) — close enough for the channel, far enough that the fixture is
+/// not parking one hull inside another for the length of a conversation.
+const PICKET_STANDOFF_STATION: bevy::prelude::Vec3 = bevy::prelude::Vec3::new(1330.0, 0.0, 170.0);
+
+/// The seven readings of the standoff, and which of them this run wrote. The
+/// mission's promise is that the answer is always exactly one of them.
+fn picket_record_written(app: &bevy::prelude::App) -> Vec<String> {
+    [
+        "campaign.skyway.picket.contained",
+        "campaign.skyway.picket.boarded",
+        "campaign.skyway.picket.disabled",
+        "campaign.skyway.picket.withdrew",
+        "campaign.skyway.picket.destroyed",
+        "campaign.skyway.picket.holding",
+        "campaign.skyway.picket.unresolved",
+    ]
+    .into_iter()
+    .filter(|flag| skyway_flag(app, flag) > 0)
+    .map(str::to_string)
+    .collect()
+}
+
+const PICKET_LEAVE_IT: &str = "world.falling_skyway.comms.picket_leave_it";
+const PICKET_ASK_WITHDRAW: &str = "world.falling_skyway.comms.picket_ask_withdraw";
+const PICKET_WARN: &str = "world.falling_skyway.comms.picket_warn_boarders";
+const PICKET_AUTHORIZE_FORCE: &str = "world.falling_skyway.comms.picket_authorize_force";
+
+/// **Issue #1349, the negotiated road, end to end in the mission it was written
+/// for.** The standoff is opened, refused, warned, asked again, and the boat
+/// flies home — and every consequence family the issue names lands distinctly.
+///
+/// The response ORDER is asserted before anything else, because it is the safety
+/// catch: "leave them alone" is always first (so a backfilled Comms seat takes
+/// the benign pick), and the force authorisation is not on the list AT ALL until
+/// a stand-off request has actually been refused. A test that only checked the
+/// happy path would let a later edit quietly promote force to the opening menu.
+///
+/// The negotiation is answered off the operator's live disposition, so the two
+/// asks are a genuine before/after on one number rather than a coin: 55 refuses,
+/// and 55 plus the ten points a delivered warning is worth carries it.
+#[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_the_picket_can_be_talked_off_the_lane() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    const PICKET: &str = "world.falling_skyway.entity.havelock_enforcer.name";
+
+    let (mut app, ship) = skyway_at_act_two();
+    skyway_move(&mut app, ship, PICKET_STANDOFF_STATION);
+    run(&mut app, 4);
+
+    // The obstruction is on the crew's own list, as OPTIONAL Security work.
+    assert_eq!(
+        objective_status(&app, "obj-a1-picket"),
+        ObjectiveStatus::Active,
+        "the tether slip posts the standoff beside the head and the gallery"
+    );
+    assert_eq!(
+        objective_status_opt(&app, "obj-a1-picket-force"),
+        None,
+        "and force is not on the list: nothing has authorised it"
+    );
+
+    // ── The opening menu, and what is NOT on it ─────────────────────────────
+    skyway_hail(&mut app, PICKET);
+    assert_eq!(
+        skyway_options(&skyway_open_node(&app, PICKET)),
+        vec![
+            PICKET_LEAVE_IT.to_string(),
+            PICKET_ASK_WITHDRAW.to_string(),
+            PICKET_WARN.to_string(),
+        ],
+        "leaving them alone is FIRST — the pick a backfilled Comms seat takes — and \
+         authorising force is nowhere, because nobody has asked them to go yet"
+    );
+
+    // ── Asked cold: refused. 55 is under the line, and that is the point ────
+    skyway_pick(&mut app, PICKET, PICKET_ASK_WITHDRAW);
+    assert_eq!(skyway_flag(&app, "havelock_enforcer_refused"), 1);
+    assert_eq!(
+        skyway_last_said(&app, PICKET),
+        "world.falling_skyway.comms.picket_refuses"
+    );
+
+    // ── …and NOW force is offered, and only now ─────────────────────────────
+    //
+    // On the SAME thread. A refusal that closed the channel would leave the
+    // option it unlocks reachable only by hailing again, and a hail trigger is
+    // single-shot — so "earned" would have meant "lost" for half the crews who
+    // earned it.
+    let after_refusal = skyway_options(&skyway_open_node(&app, PICKET));
+    assert!(
+        after_refusal.contains(&PICKET_AUTHORIZE_FORCE.to_string()),
+        "a refusal is what opens the authorisation: {after_refusal:?}"
+    );
+    assert_eq!(
+        after_refusal.first(),
+        Some(&PICKET_LEAVE_IT.to_string()),
+        "…and it is still not what a backfilled seat would reach for first"
+    );
+    assert_eq!(
+        skyway_flag(&app, "havelock_enforcer_force_authorized"),
+        0,
+        "rendering the option is not authorising it"
+    );
+
+    // ── The warning: a promise made, and a line on somebody's file ──────────
+    skyway_pick(&mut app, PICKET, PICKET_WARN);
+    assert_eq!(skyway_flag(&app, "havelock_enforcer_warned"), 1);
+    assert_eq!(skyway_promise(&app, "skyway_picket_restraint"), "open");
+    assert!(
+        skyway_sheet_texts(&mut app, PICKET)
+            .contains(&"world.falling_skyway.evidence.picket_contract".to_string()),
+        "what they cited holding the lane is on the record, because it is the kind of \
+         thing this mission's other beat would want to read"
+    );
+
+    // ── Asked again, warned: they go ────────────────────────────────────────
+    skyway_pick(&mut app, PICKET, PICKET_ASK_WITHDRAW);
+    assert_eq!(skyway_flag(&app, "havelock_enforcer_withdrawing"), 1);
+    assert_eq!(
+        skyway_last_said(&app, PICKET),
+        "world.falling_skyway.comms.picket_stands_off"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a1-picket"),
+        ObjectiveStatus::Completed,
+        "the standoff row closes the moment the boat agrees, not when it is gone"
+    );
+    assert_eq!(
+        skyway_flag(&app, "skyway_picket_casualties"),
+        0,
+        "nobody was hurt by a conversation"
+    );
+
+    // The hull leaves twelve seconds later, under way rather than in pieces —
+    // and the destroyed branch is NOT taken by that removal.
+    let leaves_by = window_now(&app) + 20.0;
+    parley_run_to(&mut app, ship, leaves_by, PICKET_STANDOFF_STATION);
+    assert!(!is_in_world(&mut app, PICKET), "she flew home");
+    assert_eq!(skyway_flag(&app, "havelock_enforcer_withdrew"), 1);
+    assert_eq!(
+        skyway_flag(&app, "havelock_enforcer_destroyed"),
+        0,
+        "a boat that left is not a boat that died, and the guard on the destroyed \
+         handler is what keeps the two apart"
+    );
+
+    // ── The endings, and the eight families ─────────────────────────────────
+    // The endings, reached by pulling the authored window-close deadline onto
+    // the current tick rather than by flying the corridor for eighteen simulated
+    // minutes. What this test is about is the RECORD the standoff writes, and
+    // that record is written by `the_mission_closes` whenever the window shuts —
+    // the same authoritative callback queue, one re-key earlier.
+    skyway_pull_deadline_now(&mut app, "skyway_window_closes");
+    let closes_by = window_now(&app) + 40.0;
+    parley_run_to(&mut app, ship, closes_by, PICKET_STANDOFF_STATION);
+    assert_eq!(
+        skyway_flag(&app, "a3_endings_written"),
+        1,
+        "the mission resolved itself once, and the campaign record is frozen"
+    );
+
+    // The standoff's own two families, EXCLUSIVE. (`assert_the_campaign_record_
+    // _is_complete` asserts all eight across the full-mission runs; this run
+    // short-circuits Act 3, so it asserts the two families it actually earned.)
+    assert_eq!(
+        picket_record_written(&app),
+        vec!["campaign.skyway.picket.withdrew".to_string()],
+        "exactly one of the seven readings, and it is the one the crew talked \
+         their way to"
+    );
+    assert_eq!(
+        skyway_flag(&app, "campaign.skyway.traffic.corridor_cleared"),
+        1,
+        "the lane is open again, which is a traffic fact and not a casualty one"
+    );
+    assert_eq!(
+        skyway_flag(&app, "campaign.skyway.traffic.corridor_picketed"),
+        0,
+        "…and its opposite is not also written"
+    );
+    assert_eq!(skyway_flag(&app, "campaign.skyway.casualties.standoff"), 0);
+    assert_eq!(
+        skyway_promise(&app, "skyway_picket_restraint"),
+        "kept",
+        "the captain said the boat would not be shot, and it was not"
+    );
+}
+
+/// Degrade one structure's authored condition track by `points`, through the
+/// SAME `EffectQueue<ConditionAdjustment>` the script's own
+/// `damage_infrastructure` pushes onto — so the crossing this produces is the
+/// crossing gunfire produces, edge-detected by `tick_infrastructure_condition`
+/// and mirrored onto the world flag store by it.
+fn skyway_degrade(app: &mut bevy::prelude::App, name: &str, points: f32) {
+    use project_phoenix::effect_queue::EffectQueue;
+    use project_phoenix::infrastructure::ConditionAdjustment;
+
+    let uuid = scan_uuid_named(app, name);
+    app.world_mut()
+        .resource_mut::<EffectQueue<ConditionAdjustment>>()
+        .0
+        .push(ConditionAdjustment {
+            uuid,
+            delta: -points,
+        });
+    run(app, 4);
+}
+
+/// **Issue #1349, AC3 and AC4.** Force is authorised or it does not happen, and
+/// the authorisation ends at the authored threshold rather than at the hull.
+///
+/// Two halves, and both are the issue's own words. First, "Tactical force
+/// requires explicit scenario authorization": the `Destroy` objective that is
+/// the WHOLE of what hands a backfilled Tactical seat this boat does not exist
+/// until a captain picks it off the channel, and it cannot be picked until a
+/// stand-off request has been refused.
+///
+/// Second, "crossing the authored weapons-disable threshold ends the hostile
+/// directive without requiring hull destruction". The crossing is produced here
+/// through the same condition-adjustment queue gunfire drives, and what it has
+/// to end is not one flag but the whole authorisation: the objective goes green,
+/// the authorisation flag comes down, and the boat is still floating. A version
+/// that left the `Destroy` standing would keep a backfilled seat firing at a
+/// disarmed hull until there was no hull, which is the outcome this issue exists
+/// to make avoidable.
+#[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_authorised_force_stops_at_the_pickets_own_threshold() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    const PICKET: &str = "world.falling_skyway.entity.havelock_enforcer.name";
+
+    let (mut app, ship) = skyway_at_act_two();
+    skyway_move(&mut app, ship, PICKET_STANDOFF_STATION);
+    run(&mut app, 4);
+    skyway_hail(&mut app, PICKET);
+
+    // ── The gate ────────────────────────────────────────────────────────────
+    assert!(
+        !skyway_options(&skyway_open_node(&app, PICKET))
+            .contains(&PICKET_AUTHORIZE_FORCE.to_string()),
+        "force is not on an opening menu"
+    );
+    skyway_pick(&mut app, PICKET, PICKET_ASK_WITHDRAW);
+    assert_eq!(skyway_flag(&app, "havelock_enforcer_refused"), 1);
+
+    // ── The authorisation, and what it IS ───────────────────────────────────
+    skyway_pick(&mut app, PICKET, PICKET_AUTHORIZE_FORCE);
+    assert_eq!(skyway_flag(&app, "havelock_enforcer_force_authorized"), 1);
+    assert_eq!(
+        objective_status(&app, "obj-a1-picket-force"),
+        ObjectiveStatus::Active,
+        "the authorisation is a posted Destroy objective naming the boat — the one \
+         source the fleet's authored weapons selector ranks above everything else, \
+         and a thing the crew can read off their own list"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a1-picket"),
+        ObjectiveStatus::Active,
+        "…and the Security road is still open beside it. Authorising force does not \
+         withdraw the alternative"
+    );
+
+    // ── The crossing, and what it ENDS ──────────────────────────────────────
+    //
+    // Eighty points off a hundred puts the track under the authored 0.35 line
+    // that owns the gun mount, which is the only number this beat turns on.
+    skyway_degrade(&mut app, PICKET, 80.0);
+    assert_eq!(skyway_flag(&app, "havelock_enforcer_disabled"), 1);
+    assert!(
+        is_in_world(&mut app, PICKET),
+        "the boat is STILL THERE. That is the whole claim: out of the fight, and not \
+         wreckage"
+    );
+    assert!(
+        is_holding_fire(&mut app, PICKET),
+        "…and silenced through the restraint lever rather than a new combat state"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a1-picket-force"),
+        ObjectiveStatus::Completed,
+        "the hostile directive is RETRACTED by the crossing. A backfilled Tactical \
+         seat has nothing left to lock, so it stops here rather than at the hull"
+    );
+    assert_eq!(
+        skyway_flag(&app, "havelock_enforcer_force_authorized"),
+        0,
+        "…and the licence is spent with it: force was authorised for a job, and the \
+         job is done"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a1-picket"),
+        ObjectiveStatus::Completed,
+        "one standoff, one answer — the Security row closes on the same resolution"
+    );
+    assert_eq!(
+        skyway_flag(&app, "havelock_enforcer_destroyed"),
+        0,
+        "and nothing invented a death for a hull that is still on station"
+    );
+
+    // ── The record ──────────────────────────────────────────────────────────
+    skyway_pull_deadline_now(&mut app, "skyway_window_closes");
+    let closes_by = window_now(&app) + 40.0;
+    parley_run_to(&mut app, ship, closes_by, PICKET_STANDOFF_STATION);
+    assert_eq!(skyway_flag(&app, "a3_endings_written"), 1);
+    assert_eq!(
+        picket_record_written(&app),
+        vec!["campaign.skyway.picket.disabled".to_string()]
+    );
+    assert_eq!(
+        skyway_flag(&app, "campaign.skyway.traffic.corridor_cleared"),
+        1
+    );
+    assert_eq!(
+        skyway_flag(&app, "campaign.skyway.casualties.standoff"),
+        1,
+        "shooting the mounts off a crewed boat costs somebody, and the epilogue says \
+         so on its own key rather than on the labour picket's"
+    );
+    assert_eq!(
+        skyway_promise(&app, "skyway_picket_restraint"),
+        "unknown",
+        "no promise was ever made on this road — 'not yet' and 'failed' are different \
+         facts about a captain, and an unmade promise is neither"
+    );
+}
+
+// ── Issue #1349: the standoff's alternative resolutions ─────────────────────
+
+const PICKET_PROBE: &str = "assets/worlds/probe_picket.toml";
+
+const P_PICKET: &str = "world.probe_picket.entity.picket.name";
+const P_LEAVER: &str = "world.probe_picket.entity.leaver.name";
+const P_BRAWLER: &str = "world.probe_picket.entity.brawler.name";
+
+/// The destroyer, deliberately: it is the one shipped hull that authors a
+/// `[security]` table, so a run flying anything else would be testing an empty
+/// roster rather than a dispatch.
+fn picket_args(dt: f64, seconds: f64) -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: PICKET_PROBE.into(),
+        ship_path: "assets/entities/alliance_destroyer.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(seconds, dt),
+        deterministic: true,
+        seed: Some(1349),
+        ..test_args()
+    }
+}
+
+/// The sim time of the LOCAL ship's last shot, or `None` if the crew have never
+/// fired. The named-hull reader beside it cannot answer this: a game-start ship
+/// is spawned by its own path and carries no authored reference name.
+fn local_last_shot_secs(app: &mut bevy::prelude::App) -> Option<f32> {
+    app.world_mut()
+        .query_filtered::<&project_phoenix::ship::combat_activity::RecentCombatActivity, With<LocalShip>>()
+        .iter(app.world())
+        .next()
+        .and_then(|activity| activity.last_weapon_fired)
+}
+
+/// **Issue #1349, AC2 and AC4 in one window.** A backfilled bridge resolves an
+/// armed obstruction with Security teams and never fires a shot doing it.
+///
+/// Nobody dispatches anything in this test. The picket authors two Security
+/// actions, the #1346 backfill host sees them in reach, and it commits both
+/// teams through the same admitted `DispatchSecurityTeam` a human at Tactical
+/// emits — so what is proved is that the non-destructive road is reachable
+/// through ORDINARY controls, by whoever is holding the seat.
+///
+/// The second half of the claim is measured on the same window and is the
+/// stronger one: the crew's own guns stay cold throughout. A neutral, armed hull
+/// three hundred units away that is carrying work a backfilled seat actively
+/// wants to do is still not a hull a backfilled seat shoots at. The picket's
+/// authored `guns_online` threshold is the control on that — a "containment"
+/// that had quietly been a gunnery kill would have dropped it on the way.
+#[test]
+fn security_teams_take_a_neutral_picket_without_a_shot_being_fired() {
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&picket_args(dt, 17.5)).expect("app should build");
+    run(&mut app, ticks_for_sim_seconds(17.5, dt));
+
+    // ── The two jobs landed, each on its own authored flag ───────────────────
+    assert!(
+        restraint_flag(&app, "probe_picket_contained"),
+        "the containment completed and raised its authored outcome flag"
+    );
+    assert!(
+        restraint_flag(&app, "probe_picket_boarded"),
+        "…and so did the boarding, on the SECOND team. Two teams, two actions, one \
+         target, at once — which is what the muster is for"
+    );
+    assert!(
+        restraint_flag(&app, "picket_contained") && restraint_flag(&app, "picket_boarded"),
+        "both scenario handlers chained off the flags, so the consequence path a \
+         mission hangs its beat on is the ordinary world flag store"
+    );
+    assert!(
+        restraint_flag(&app, "restraint_shown"),
+        "the campaign's answer to 'how did you take it out?' is written by the \
+         containment, not only by the two gunnery endings"
+    );
+
+    // ── …and it is still there, whole, and silenced ─────────────────────────
+    assert!(
+        is_in_world(&mut app, P_PICKET),
+        "the picket is alive. That is the whole point of the road: the obstruction \
+         is answered and the boat is not wreckage"
+    );
+    assert!(
+        is_holding_fire(&mut app, P_PICKET),
+        "…and silenced through the restraint lever rather than through a new combat \
+         state"
+    );
+    assert!(
+        restraint_flag(&app, "probe_picket_guns_online"),
+        "its condition track never crossed the threshold that owns its mount — so \
+         nothing shot it, and the containment is not a gunnery kill wearing a \
+         different flag's name"
+    );
+
+    // ── The invariant: nobody opened fire ───────────────────────────────────
+    assert!(
+        local_last_shot_secs(&mut app).is_none(),
+        "the crew's own guns are cold. Tactical Backfill had an armed neutral hull \
+         in its world and a Security host actively working that same hull, and it \
+         still did not fire — 'must not open fire merely because the picket exists'"
+    );
+    assert!(
+        last_shot_secs(&mut app, P_PICKET).is_none(),
+        "and neither did the picket: boarding it is not provocation the engine \
+         invents on the target's behalf"
+    );
+    assert!(
+        last_shot_secs(&mut app, P_BRAWLER).is_none(),
+        "nor the always-armed hull forty units off the bow, which is the control — \
+         nothing in this world is hostile to anything yet"
+    );
+}
+
+/// **Issue #1349, the mechanism under AC3.** A hostility declared from script
+/// can be WITHDRAWN from script, and the engagement it licensed ends with both
+/// hulls still floating.
+///
+/// This is the lever the mission's "crossing the authored weapons threshold ends
+/// the hostile directive without requiring hull destruction" is built out of.
+/// Without it, a disabled picket stays a hostile contact, and a backfilled
+/// Tactical seat flying the fleet's standing untargeted `Destroy` doctrine goes
+/// on shooting it until there is no picket — which is precisely the outcome the
+/// issue exists to make avoidable.
+///
+/// A BEFORE and an AFTER on one hull with nothing else moving: both ships stay
+/// where they are, both stay armed, both stay in range. One relationship is
+/// withdrawn. The target is authored absurdly heavy on purpose — a hull that
+/// died mid-window would satisfy "it stopped shooting" for the wrong reason.
+#[test]
+fn withdrawing_a_hostility_ends_the_engagement_it_licensed() {
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&picket_args(dt, 36.0)).expect("app should build");
+
+    // ── Before: the enmity is declared at t=18 and the destroyer engages ─────
+    run(&mut app, ticks_for_sim_seconds(27.5, dt));
+    assert!(restraint_flag(&app, "enmity_declared"));
+    assert!(
+        !restraint_flag(&app, "enmity_withdrawn"),
+        "precondition: the withdrawal has not landed yet"
+    );
+    let while_hostile = local_last_shot_secs(&mut app)
+        .expect("a backfilled destroyer engages a hostile that is inside its beam");
+    assert!(
+        is_in_world(&mut app, P_BRAWLER),
+        "the target is still there, which is what makes the next sample mean \
+         something"
+    );
+
+    // ── The withdrawal lands at t=28 ────────────────────────────────────────
+    run(&mut app, ticks_for_sim_seconds(2.0, dt));
+    assert!(restraint_flag(&app, "enmity_withdrawn"));
+    let at_withdrawal = local_last_shot_secs(&mut app).expect("it was firing a moment ago");
+    assert!(
+        at_withdrawal >= while_hostile,
+        "sanity: the shooting was still going on up to the withdrawal"
+    );
+
+    // ── After: nothing since ────────────────────────────────────────────────
+    run(&mut app, ticks_for_sim_seconds(6.5, dt));
+    assert_eq!(
+        local_last_shot_secs(&mut app),
+        Some(at_withdrawal),
+        "nothing has been discharged since the enmity ended — the applier's own \
+         AI-target re-validation dropped the lock the hostility had licensed, \
+         through `remove_faction_enemy` and no new targeting vocabulary"
+    );
+    assert!(
+        is_in_world(&mut app, P_BRAWLER),
+        "…and it stopped with the target still floating, which is the only reading \
+         of 'the engagement ended' this issue accepts"
+    );
+    assert!(
+        is_in_world(&mut app, P_PICKET),
+        "the contained picket rode the whole hostile window out untouched: it was \
+         three hundred units away and nothing went looking for it"
+    );
+}
+
+/// **Issue #1349, the timeline (#1338).** A hull the scenario removes after
+/// stating an outcome is `escaped`, not `destroyed`.
+///
+/// This is how the mission says a picket flew home rather than died, and it is
+/// the one claim the withdrawal ending cannot make with flags alone: an
+/// after-action reading that recorded a death for every despawn would report a
+/// crew who talked a boat off a lane exactly as it reports a crew who killed
+/// one. The ordering is the contract — the authored outcome goes in BEFORE the
+/// removal, in the same call — so this test is also the guard on that ordering.
+#[test]
+fn a_withdrawing_hull_is_recorded_as_escaped_and_not_as_a_death() {
+    let dt = 1.0 / 60.0;
+    let args = picket_args(dt, 17.5);
+    let mut app = build_headless_app(&args).expect("app should build");
+
+    // Before its timer: on station, and no outcome recorded for anybody.
+    run(&mut app, ticks_for_sim_seconds(8.0, dt));
+    assert!(is_in_world(&mut app, P_LEAVER));
+    assert!(!restraint_flag(&app, "leaver_withdrew"));
+
+    run(&mut app, ticks_for_sim_seconds(9.5, dt));
+    assert!(restraint_flag(&app, "leaver_withdrew"));
+    assert!(
+        !is_in_world(&mut app, P_LEAVER),
+        "it left the corridor: the withdrawal is a real change to the world and not \
+         a flag standing in for one"
+    );
+
+    let report = build_report(&mut app, &args, 0.0);
+    let escaped: Vec<String> = report
+        .narrative
+        .events
+        .iter()
+        .filter(|e| e.event.kind.as_str() == "marked_entity_escaped")
+        .map(|e| e.event.id.clone())
+        .collect();
+    assert_eq!(
+        escaped,
+        vec![P_LEAVER.to_string()],
+        "the boat that left is recorded as having left, by name"
+    );
+    assert_eq!(
+        report
+            .narrative
+            .counts_by_kind
+            .get("marked_entity_destroyed")
+            .copied()
+            .unwrap_or(0),
+        0,
+        "and NO death was recorded for it. The authored outcome landed before the \
+         removal and in the same call, which is what suppresses the automatic beat \
+         — record it a tick later and the timeline says the crew killed her"
     );
 }
 // ── Falling Skyway, Act 3: the collapse and the epilogue (issue #1040) ───────
@@ -18244,14 +18872,15 @@ fn skyway_sheet_texts(app: &mut bevy::prelude::App, subject: &str) -> Vec<String
 
 /// **The invariant every run has to satisfy, whatever the crew did.**
 ///
-/// Four of the seven families are EXCLUSIVE — a claimant is carried or is left,
+/// Five of the eight families are EXCLUSIVE — a claimant is carried or is left,
 /// the strike ended one of three ways, the evidence is at one of three depths,
-/// the structure held or fell — and the promise this slice makes to whatever
-/// mission reads them next is that each says exactly one thing rather than
-/// leaving the reader to infer an absence. #1037 set that rule for the Lyra and
-/// #1040 kept it for the head; this asserts it across the whole handoff.
+/// the structure held or fell, the picket ended one of seven ways — and the
+/// promise this slice makes to whatever mission reads them next is that each
+/// says exactly one thing rather than leaving the reader to infer an absence.
+/// #1037 set that rule for the Lyra, #1040 kept it for the head and #1349
+/// widened it to the standoff; this asserts it across the whole handoff.
 fn assert_the_campaign_record_is_complete(app: &bevy::prelude::App) {
-    let exclusive: [(&str, Vec<&str>); 6] = [
+    let exclusive: [(&str, Vec<&str>); 8] = [
         (
             "the workers",
             vec![
@@ -18296,6 +18925,32 @@ fn assert_the_campaign_record_is_complete(app: &bevy::prelude::App) {
                 "campaign.skyway.skyhook.lost",
             ],
         ),
+        // Issue #1349. Seven readings, exactly one of them written, and the
+        // last two are the pair the issue insists on keeping apart: a crew who
+        // opened the channel and chose to leave the boat alone are not the same
+        // neighbours as a crew who never called at all.
+        (
+            "the standoff",
+            vec![
+                "campaign.skyway.picket.contained",
+                "campaign.skyway.picket.boarded",
+                "campaign.skyway.picket.disabled",
+                "campaign.skyway.picket.withdrew",
+                "campaign.skyway.picket.destroyed",
+                "campaign.skyway.picket.holding",
+                "campaign.skyway.picket.unresolved",
+            ],
+        ),
+        // …and the lane it leaves behind, which is a different question with a
+        // different answer: containment and destruction both clear the corridor,
+        // and being hailed does not.
+        (
+            "the corridor",
+            vec![
+                "campaign.skyway.traffic.corridor_cleared",
+                "campaign.skyway.traffic.corridor_picketed",
+            ],
+        ),
     ];
     for (family, members) in exclusive {
         let set: Vec<&str> = members
@@ -18315,9 +18970,12 @@ fn assert_the_campaign_record_is_complete(app: &bevy::prelude::App) {
     assert_eq!(
         total,
         skyway_flag(app, "campaign.skyway.casualties.picket")
+            + skyway_flag(app, "campaign.skyway.casualties.standoff")
             + skyway_flag(app, "campaign.skyway.casualties.head")
             + skyway_flag(app, "campaign.skyway.casualties.storm"),
-        "the itemised casualties have to add up to the number a debrief reads"
+        "the itemised casualties have to add up to the number a debrief reads. \
+         `picket` is the LABOUR picket on Ladder B and `standoff` is the Havelock \
+         boat (#1349) — one word, two sets of people, never summed into each other"
     );
     assert_eq!(
         skyway_flag(app, "campaign.skyway.casualties.none"),

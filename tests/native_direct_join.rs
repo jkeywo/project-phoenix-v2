@@ -208,6 +208,15 @@ impl Host {
             });
     }
 
+    /// Bytes the service is holding, un-written, across every peer — so a test
+    /// can watch the reliable-backpressure ceiling hold under a stalled peer.
+    fn buffered_bytes(&self) -> usize {
+        self.transport
+            .lock()
+            .expect("transport poisoned")
+            .buffered_bytes()
+    }
+
     fn handshake_payload(&self) -> String {
         encode_handshake_frame(&HandshakeFrame {
             kind: JOIN_HANDSHAKE.to_string(),
@@ -1437,5 +1446,251 @@ fn a_joiner_that_stops_reading_is_detached_rather_than_parking_a_thread() {
         },
         "the stalled peer is detached, not left holding a thread"
     );
+    drop(joiner);
+}
+
+// ── The reliable class: a transient burst versus a peer that stopped reading ─
+//
+// Issue #1354. At mission start the host dispatches a one-tick burst of RELIABLE
+// frames — `GameStarted`, the single `WorldSetup`, and one `AsteroidSpawned` per
+// asteroid — that far exceeds the old instantaneous queue bound and that the
+// NEXT pump clears in full. The old check severed on that depth alone and
+// dropped the phone back to the lobby with `relay-overflow`. The fix severs only
+// on SUSTAINED backpressure: a buffer over the soft bound across the grace
+// window, or one that blows the hard byte ceiling. The three tests below are the
+// transient-survives case, the stalled-still-severed case (the DoS guard), and
+// the memory-ceiling case.
+
+#[test]
+fn a_mission_start_reliable_burst_is_delivered_rather_than_severed() {
+    // The bug, live: a burst of reliable frames far past the old count bound,
+    // pushed in one tick by the host and drained by the next pump, must reach
+    // the joiner in full rather than severing it. On tip 8e003154 this test
+    // FAILS — the joiner is severed with `relay-overflow` partway through the
+    // burst and its socket dies waiting for the rest.
+    let host = Host::start_with(AdmissionBudgets {
+        // A soft bound the burst genuinely crosses (so the grace clock is
+        // exercised, not sidestepped), a generous grace, and a hard ceiling far
+        // above the burst. The write timeout is left at its default: the peer is
+        // draining throughout, which is the whole distinction being drawn.
+        reliable_soft_bytes: 1024,
+        reliable_grace: Duration::from_secs(5),
+        reliable_hard_bytes: 8 * 1024 * 1024,
+        ..AdmissionBudgets::default()
+    });
+    let mut joiner = Joiner::admitted(&host);
+    joiner.relay(
+        JsonCodec
+            .encode_client(&ClientMessage::Identify {
+                token: "burst".to_string(),
+                name: "Ada".to_string(),
+            })
+            .expect("encodable"),
+    );
+    host.events_until(1);
+
+    // Comfortably past the old 256-frame instantaneous bound. Each frame carries
+    // its own index so the delivery can be checked for order, not just count.
+    const N: usize = 1000;
+    std::thread::scope(|s| {
+        // The host pushing a whole tick's worth of reliable frames as fast as it
+        // can, while this thread reads them off the wire — the producer/consumer
+        // split the defect lives in.
+        s.spawn(|| {
+            for i in 0..N {
+                host.dispatch(
+                    &Target::Token("burst".to_string()),
+                    &ServerMessage::NameChanged {
+                        token: "burst".to_string(),
+                        name: i.to_string(),
+                    },
+                    DeliveryClass::Reliable,
+                );
+            }
+        });
+        let mut got: Vec<String> = Vec::new();
+        while got.len() < N {
+            let frame = joiner.wait_for("relay");
+            if let ServerMessage::NameChanged { name, .. } = JsonCodec
+                .decode_server(frame.payload.as_deref().unwrap_or_default())
+                .expect("a decodable ServerMessage")
+            {
+                got.push(name);
+            }
+        }
+        assert_eq!(
+            got,
+            (0..N).map(|i| i.to_string()).collect::<Vec<_>>(),
+            "every reliable frame in the burst arrives, in order"
+        );
+    });
+
+    // The peer is still there — not severed, not dropped to the lobby — and
+    // still an acting participant that receives what the host sends next.
+    assert_eq!(
+        host.events.lock().unwrap().len(),
+        1,
+        "the burst did not sever the peer: no Disconnected followed it"
+    );
+    host.dispatch(
+        &Target::Token("burst".to_string()),
+        &ServerMessage::GameStarted,
+        DeliveryClass::Reliable,
+    );
+    assert_eq!(
+        JsonCodec
+            .decode_server(
+                joiner
+                    .wait_for("relay")
+                    .payload
+                    .as_deref()
+                    .unwrap_or_default()
+            )
+            .expect("a decodable ServerMessage"),
+        ServerMessage::GameStarted,
+        "and it keeps receiving after the burst"
+    );
+}
+
+#[test]
+fn a_peer_that_stops_reading_is_still_severed_within_the_grace_window() {
+    // The DoS guard the fix must keep. A peer that genuinely stops draining
+    // accumulates a reliable backlog the host cannot shed, and is severed for
+    // it — only now on SUSTAINED backpressure (over the soft bound across the
+    // grace) rather than on a transient burst's instantaneous depth. The hard
+    // ceiling is set far above what accrues in the window, so it is the GRACE
+    // that severs here, and the write timeout is set long so the sever is the
+    // backpressure guard rather than a blocked write.
+    let grace = Duration::from_millis(400);
+    let host = Host::start_with(AdmissionBudgets {
+        reliable_soft_bytes: 1024,
+        reliable_grace: grace,
+        reliable_hard_bytes: 64 * 1024 * 1024,
+        write_timeout: Duration::from_secs(30),
+        ..AdmissionBudgets::default()
+    });
+    let mut joiner = Joiner::admitted(&host);
+    joiner.relay(
+        JsonCodec
+            .encode_client(&ClientMessage::Identify {
+                token: "stopped".to_string(),
+                name: "Ada".to_string(),
+            })
+            .expect("encodable"),
+    );
+    host.events_until(1);
+
+    // From here the joiner reads NOTHING. The host keeps producing reliable
+    // frames — a stopped reader, not a slow one — and the backpressure clock
+    // runs out on it.
+    let started = Instant::now();
+    let severed_by = started + Duration::from_secs(10);
+    loop {
+        host.dispatch(
+            &Target::Token("stopped".to_string()),
+            &ServerMessage::NameChanged {
+                token: "stopped".to_string(),
+                name: "x".repeat(4096),
+            },
+            DeliveryClass::Reliable,
+        );
+        if host.events.lock().unwrap().len() >= 2 {
+            break;
+        }
+        assert!(
+            Instant::now() < severed_by,
+            "the stalled peer was never severed: {:?}",
+            host.events.lock().unwrap()
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let took = started.elapsed();
+    let events = host.events.lock().unwrap().clone();
+    assert_eq!(
+        events[1],
+        TransportEvent::Disconnected {
+            token: "stopped".to_string()
+        },
+        "the peer that stopped reading is detached"
+    );
+    // Within a BOUNDED window — the grace plus the pump/dispatch slack, not the
+    // OS's minutes-long send patience.
+    assert!(
+        took < Duration::from_secs(5),
+        "and within a bounded window of the grace, not eventually: {took:?} \
+         against a {grace:?} grace"
+    );
+    drop(joiner);
+}
+
+#[test]
+fn host_memory_stays_bounded_under_a_stalled_peer() {
+    // The memory backstop, live. With the grace set long (so it does not fire)
+    // and a modest hard ceiling, a peer that stops reading is severed by the
+    // absolute byte ceiling — and the host's buffered bytes never climb past it,
+    // which is the property that keeps a non-draining peer from growing the
+    // host's memory without bound. The write timeout is long so the ceiling, not
+    // a blocked write, is what is being measured.
+    let hard = 512 * 1024;
+    let host = Host::start_with(AdmissionBudgets {
+        reliable_soft_bytes: 1024,
+        reliable_grace: Duration::from_secs(600),
+        reliable_hard_bytes: hard,
+        write_timeout: Duration::from_secs(30),
+        ..AdmissionBudgets::default()
+    });
+    let mut joiner = Joiner::admitted(&host);
+    joiner.relay(
+        JsonCodec
+            .encode_client(&ClientMessage::Identify {
+                token: "hoarder".to_string(),
+                name: "Ada".to_string(),
+            })
+            .expect("encodable"),
+    );
+    host.events_until(1);
+
+    // A frame big enough that a handful crosses the ceiling, so the guard is
+    // reached quickly and the peak buffer is a small multiple of one frame.
+    let frame_bytes = 64 * 1024;
+    let started = Instant::now();
+    let severed_by = started + Duration::from_secs(10);
+    let mut peak = 0usize;
+    loop {
+        host.dispatch(
+            &Target::Token("hoarder".to_string()),
+            &ServerMessage::NameChanged {
+                token: "hoarder".to_string(),
+                name: "y".repeat(frame_bytes),
+            },
+            DeliveryClass::Reliable,
+        );
+        peak = peak.max(host.buffered_bytes());
+        if host.events.lock().unwrap().len() >= 2 {
+            break;
+        }
+        assert!(
+            Instant::now() < severed_by,
+            "the hard ceiling never severed the stalled peer"
+        );
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let events = host.events.lock().unwrap().clone();
+    assert_eq!(
+        events[1],
+        TransportEvent::Disconnected {
+            token: "hoarder".to_string()
+        },
+        "the hard ceiling severs the stalled peer"
+    );
+    // The buffer never grew unbounded: it is held to the ceiling plus at most
+    // the one frame whose push crossed it (a frame the socket may already have
+    // pulled into its own write, plus loopback send-buffer slack).
+    assert!(
+        peak <= hard + 4 * frame_bytes,
+        "host memory stayed bounded under the stalled peer: peak {peak} bytes \
+         against a {hard}-byte ceiling"
+    );
+    println!("stalled-peer buffer peaked at {peak} bytes (ceiling {hard})");
     drop(joiner);
 }

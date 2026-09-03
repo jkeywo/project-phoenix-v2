@@ -373,7 +373,21 @@ The registration fns mirror the `TriggerCondition` vocabulary one for one:
 | `on_entered_region(entity, handler)` / `on_exited_region(entity, handler)` | region entity | |
 | `on_waypoint_reached(entity, handler)` | | Fires on arrival at any waypoint of that ship's route; "reached" means within that entity's `[behaviour] waypoint_arrival_radius`. |
 
-A registration is single-shot: each fires at most once per session.
+A registration is single-shot: each fires at most once per session. Two
+modifiers chain onto it, in either order:
+
+| Modifier | Notes |
+|---|---|
+| `.when(predicate)` | A trigger-level flag gate: `on_all_destroyed("hostiles", "h").when("counter(waves) >= 8")`. A `false` reading suppresses the firing *without* consuming the registration, so it stays armed for a later moment — which an `if` at the top of the handler cannot do, because by then the trigger is already spent. |
+| `.repeat()` | `on_hailed(e, h).repeat()` fires every time the condition occurs instead of once. |
+
+Reach for `.repeat()` whenever the thing being watched is something the crew can
+do more than once — a hail on a channel they may open, clear and open again. Do
+NOT try to approximate it by registering the same handler once per world state
+with a different `.when` on each: a `when` keeps an *unfired* registration
+armed, so the moment a path through the scene leaves the state key unchanged,
+the one registration matching that state is already spent and the trigger goes
+dead with the situation still live.
 
 #### Effects
 

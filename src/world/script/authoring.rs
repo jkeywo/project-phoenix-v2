@@ -218,7 +218,8 @@ mod tests {
     /// former mirror's `(receiver, name, params)`, so this doubles as the
     /// "same set unchanged" proof the derivation had to preserve.
     const EXPECTED_EXPOSED: &[(&str, &str, &[&str])] = &[
-        // Loading engine: `on` + one per TriggerCondition variant, then `when`.
+        // Loading engine: `on` + one per TriggerCondition variant, then the two
+        // trigger-level modifiers.
         ("", "on", &["event", "handler"]),
         ("", "on_destroyed", &["entity", "handler"]),
         ("", "on_all_destroyed", &["group", "handler"]),
@@ -233,6 +234,7 @@ mod tests {
         ("", "on_waypoint_reached", &["entity", "handler"]),
         ("", "on_hull_below", &["entity", "threshold", "handler"]),
         ("trigger", "when", &["predicate"]),
+        ("trigger", "repeat", &[]),
         // ctx.flags.*
         ("flags", "increment", &["name", "by"]),
         // ctx.effects.*

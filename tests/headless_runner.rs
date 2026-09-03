@@ -14598,6 +14598,145 @@ fn falling_skyway_authorised_force_stops_at_the_pickets_own_threshold() {
     );
 }
 
+/// **Issue #1349, the channel's liveness.** The picket answers its channel every
+/// time it is hailed, for as long as the standoff is open.
+///
+/// This is a regression guard with a specific bug behind it. The standoff was
+/// once registered as four single-shot `on_hailed` triggers partitioned across
+/// the resolution counters, on the theory that a `when` keeps a registration
+/// armed. It does — but only a registration that has never FIRED. A partition
+/// like that therefore survives a re-hail only if every path through the scene
+/// moves one of the keys it partitions on, and two paths do not: warning the
+/// boat moves none of them, and opening the channel and clearing it without
+/// picking anything moves nothing at all. Either one spent the one registration
+/// matching the state the crew were in and left the boat unhailable with the
+/// lane still blocked — losing the negotiated withdrawal, which is the road the
+/// warning exists to unlock.
+///
+/// So the shape here is deliberate: hail, dismiss, hail, WARN, dismiss, hail —
+/// and the third hail has to find the boat still willing to talk and still
+/// willing to be talked off the lane.
+#[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_the_picket_answers_its_channel_every_time_it_is_hailed() {
+    const PICKET: &str = "world.falling_skyway.entity.havelock_enforcer.name";
+
+    let (mut app, ship) = skyway_at_act_two();
+    skyway_move(&mut app, ship, PICKET_STANDOFF_STATION);
+    run(&mut app, 4);
+
+    // ── Hailed and dismissed without picking anything ───────────────────────
+    skyway_hail(&mut app, PICKET);
+    assert!(
+        skyway_options(&skyway_open_node(&app, PICKET)).contains(&PICKET_ASK_WITHDRAW.to_string()),
+        "the opening menu offers the ask"
+    );
+    skyway_clear_comms(&mut app);
+
+    // ── Hailed again, warned, dismissed again ───────────────────────────────
+    //
+    // The warning is the pick that moves NONE of `resolved` / `refused` /
+    // `left_alone`, which is exactly what the old partition could not survive.
+    skyway_hail(&mut app, PICKET);
+    skyway_pick(&mut app, PICKET, PICKET_WARN);
+    assert_eq!(skyway_flag(&app, "havelock_enforcer_warned"), 1);
+    assert_eq!(skyway_promise(&app, "skyway_picket_restraint"), "open");
+    skyway_clear_comms(&mut app);
+
+    // ── …and the boat is still there and still talking ──────────────────────
+    skyway_hail(&mut app, PICKET);
+    let third_hail = skyway_options(&skyway_open_node(&app, PICKET));
+    assert!(
+        third_hail.contains(&PICKET_ASK_WITHDRAW.to_string()),
+        "a third hail finds the standoff still open and the ask still on the list: \
+         {third_hail:?}"
+    );
+
+    // ── …which is the whole return on the warning ───────────────────────────
+    skyway_pick(&mut app, PICKET, PICKET_ASK_WITHDRAW);
+    assert_eq!(
+        skyway_flag(&app, "havelock_enforcer_withdrawing"),
+        1,
+        "55 refuses and 55 plus the warning's ten carries — a road that only exists \
+         while the channel keeps answering"
+    );
+}
+
+/// **Issue #1349, AC5's commitment column.** Shooting a boat's mounts off breaks
+/// the promise not to shoot it.
+///
+/// The promise is authored in words, twice, and both readings say the same
+/// thing: the response is "we will come aboard you. We will not shoot you", and
+/// the terms the ledger carries read "the picket will be taken by boarding party
+/// and not by weapons fire". The gunnery road is weapons fire — the boat's crew
+/// living through it is what makes the ending better than the kill, not what
+/// makes the captain's word good.
+///
+/// It is also what keeps AC5's "distinct commitment consequences" true. If
+/// disablement kept the promise, containment, boarding and gunnery disablement
+/// would all resolve identically in the ledger, and the one promise this mission
+/// makes to somebody the crew could have shot would separate nothing.
+#[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_shooting_the_pickets_mounts_off_breaks_the_promise_not_to() {
+    const PICKET: &str = "world.falling_skyway.entity.havelock_enforcer.name";
+
+    let (mut app, ship) = skyway_at_act_two();
+    skyway_move(&mut app, ship, PICKET_STANDOFF_STATION);
+    run(&mut app, 4);
+
+    // ── Refused, then promised, then authorised ─────────────────────────────
+    skyway_hail(&mut app, PICKET);
+    skyway_pick(&mut app, PICKET, PICKET_ASK_WITHDRAW);
+    assert_eq!(skyway_flag(&app, "havelock_enforcer_refused"), 1);
+    skyway_pick(&mut app, PICKET, PICKET_WARN);
+    assert_eq!(
+        skyway_promise(&app, "skyway_picket_restraint"),
+        "open",
+        "the word is given and the ledger is holding it"
+    );
+    skyway_pick(&mut app, PICKET, PICKET_AUTHORIZE_FORCE);
+    assert_eq!(skyway_flag(&app, "havelock_enforcer_force_authorized"), 1);
+
+    // ── …and then the mounts come off ───────────────────────────────────────
+    skyway_degrade(&mut app, PICKET, 80.0);
+    assert_eq!(skyway_flag(&app, "havelock_enforcer_disabled"), 1);
+    assert!(
+        is_in_world(&mut app, PICKET),
+        "the boat lived, which is the good half of this ending and is not the same \
+         question as whether the promise held"
+    );
+
+    // ── The record ──────────────────────────────────────────────────────────
+    skyway_pull_deadline_now(&mut app, "skyway_window_closes");
+    let closes_by = window_now(&app) + 40.0;
+    parley_run_to(&mut app, ship, closes_by, PICKET_STANDOFF_STATION);
+    assert_eq!(skyway_flag(&app, "a3_endings_written"), 1);
+    assert_eq!(
+        picket_record_written(&app),
+        vec!["campaign.skyway.picket.disabled".to_string()]
+    );
+    assert_eq!(
+        skyway_promise(&app, "skyway_picket_restraint"),
+        "broken",
+        "the captain said the boat would be taken by boarding party and not by \
+         weapons fire, and then took it by weapons fire"
+    );
+    assert_eq!(
+        skyway_flag(&app, "campaign.skyway.casualties.standoff"),
+        0,
+        "…and the warning still bought the boat's crew the bracing it was worth: the \
+         promise and the casualty ladder are two different consequences of it, which \
+         is the point of settling each against its own fact"
+    );
+}
+
 // ── Issue #1349: the standoff's alternative resolutions ─────────────────────
 
 const PICKET_PROBE: &str = "assets/worlds/probe_picket.toml";
@@ -14630,6 +14769,43 @@ fn local_last_shot_secs(app: &mut bevy::prelude::App) -> Option<f32> {
         .iter(app.world())
         .next()
         .and_then(|activity| activity.last_weapon_fired)
+}
+
+/// The sim time of EVERY discharge the local ship has been recorded making, in
+/// order, read off the run's own balance ledger (`BalanceEvent::WeaponFired` —
+/// one row per beam opening, one per torpedo away).
+///
+/// Why a log rather than the timestamp above. `RecentCombatActivity::
+/// last_weapon_fired` is only ever assigned the CURRENT sim time, so it is
+/// monotonically non-decreasing by construction: `later >= earlier` between two
+/// samples of it holds even when the interval between them was completely
+/// silent, and an assertion shaped that way proves nothing about whether
+/// anything fired. A count of rows is a positive number on both halves of a
+/// before/after, and each row carries the moment it landed — which is what lets
+/// a test say "it was still mid-cycle when the hostility ended" instead of
+/// hoping.
+fn local_shot_times(app: &mut bevy::prelude::App) -> Vec<f64> {
+    use project_phoenix::core::balance::BalanceEvent;
+
+    let uuid = app
+        .world_mut()
+        .query_filtered::<&project_phoenix::entities::spawner::EntityUuid, With<LocalShip>>()
+        .iter(app.world())
+        .next()
+        .map(|u| u.0.clone())
+        .expect("the crew's hull carries a uuid");
+    app.world()
+        .resource::<project_phoenix::core::telemetry::RunTelemetry>()
+        .balance_events
+        .iter()
+        .filter(|stamped| {
+            matches!(
+                &stamped.event,
+                BalanceEvent::WeaponFired { shooter: Some(s), .. } if *s == uuid
+            )
+        })
+        .map(|stamped| stamped.sim_t)
+        .collect()
 }
 
 /// **Issue #1349, AC2 and AC4 in one window.** A backfilled bridge resolves an
@@ -14726,10 +14902,27 @@ fn security_teams_take_a_neutral_picket_without_a_shot_being_fired() {
 /// where they are, both stay armed, both stay in range. One relationship is
 /// withdrawn. The target is authored absurdly heavy on purpose — a hull that
 /// died mid-window would satisfy "it stopped shooting" for the wrong reason.
+///
+/// BOTH HALVES ARE COUNTED, off the run's own `WeaponFired` ledger, and both are
+/// sized against the destroyer's authored weapon cycle. The before half has to
+/// show the cycle actually turning — at least two discharges, the second of them
+/// inside the last cycle before the withdrawal, so "it was still shooting when
+/// the relationship ended" is something the run demonstrates rather than
+/// something the timeline assumes. The after half then has to be silent for
+/// longer than a full cycle, so a regression that left the hostility standing
+/// cannot hide in a gap between two beams.
 #[test]
 fn withdrawing_a_hostility_ends_the_engagement_it_licensed() {
+    // The omni bank's authored cycle, `assets/entities/alliance_destroyer.toml`:
+    // `beam_duration_secs = 4` + `cooldown_secs = 4`. Every window below is
+    // measured in these, because a window shorter than one of them proves
+    // nothing in either direction.
+    const WEAPON_CYCLE_SECS: f64 = 8.0;
+    // `probe_picket.toml`'s two authored timers.
+    const ENMITY_WITHDRAWN_AT: f64 = 28.0;
+
     let dt = 1.0 / 60.0;
-    let mut app = build_headless_app(&picket_args(dt, 36.0)).expect("app should build");
+    let mut app = build_headless_app(&picket_args(dt, 42.0)).expect("app should build");
 
     // ── Before: the enmity is declared at t=18 and the destroyer engages ─────
     run(&mut app, ticks_for_sim_seconds(27.5, dt));
@@ -14738,31 +14931,49 @@ fn withdrawing_a_hostility_ends_the_engagement_it_licensed() {
         !restraint_flag(&app, "enmity_withdrawn"),
         "precondition: the withdrawal has not landed yet"
     );
-    let while_hostile = local_last_shot_secs(&mut app)
-        .expect("a backfilled destroyer engages a hostile that is inside its beam");
     assert!(
         is_in_world(&mut app, P_BRAWLER),
         "the target is still there, which is what makes the next sample mean \
          something"
     );
 
-    // ── The withdrawal lands at t=28 ────────────────────────────────────────
-    run(&mut app, ticks_for_sim_seconds(2.0, dt));
-    assert!(restraint_flag(&app, "enmity_withdrawn"));
-    let at_withdrawal = local_last_shot_secs(&mut app).expect("it was firing a moment ago");
+    // Sampled BEFORE the withdrawal, so every row in it was fired under the
+    // hostility this test is about.
+    let while_hostile = local_shot_times(&mut app);
     assert!(
-        at_withdrawal >= while_hostile,
-        "sanity: the shooting was still going on up to the withdrawal"
+        while_hostile.len() >= 2,
+        "a backfilled destroyer engages a hostile inside its beam, and its weapon \
+         cycle comes round again while the hostility stands: {while_hostile:?}"
+    );
+    let last_shot = *while_hostile.last().expect("at least two discharges");
+    assert!(
+        last_shot >= ENMITY_WITHDRAWN_AT - WEAPON_CYCLE_SECS,
+        "the shooting was still going on up to the withdrawal — the last beam opened \
+         at {last_shot:.2}s, inside the final cycle before the enmity ends at \
+         {ENMITY_WITHDRAWN_AT}s. Without this the after-window below would be \
+         measuring a fight that had already petered out for its own reasons"
     );
 
-    // ── After: nothing since ────────────────────────────────────────────────
-    run(&mut app, ticks_for_sim_seconds(6.5, dt));
+    // ── The withdrawal lands at t=28 ────────────────────────────────────────
+    //
+    // The straddling two seconds are excluded from both halves on purpose: a
+    // beam that opened at t=27.9 is neither evidence of the engagement nor of
+    // the stand-down, so the silence below is measured from whatever the ledger
+    // holds once the relationship is definitely gone.
+    run(&mut app, ticks_for_sim_seconds(2.0, dt));
+    assert!(restraint_flag(&app, "enmity_withdrawn"));
+    let at_withdrawal = local_shot_times(&mut app);
+
+    // ── After: nothing since, across more than one full cycle ───────────────
+    run(&mut app, ticks_for_sim_seconds(1.5 * WEAPON_CYCLE_SECS, dt));
     assert_eq!(
-        local_last_shot_secs(&mut app),
-        Some(at_withdrawal),
-        "nothing has been discharged since the enmity ended — the applier's own \
-         AI-target re-validation dropped the lock the hostility had licensed, \
-         through `remove_faction_enemy` and no new targeting vocabulary"
+        local_shot_times(&mut app),
+        at_withdrawal,
+        "nothing has been discharged in the twelve seconds since the enmity ended — \
+         one and a half of this hull's authored weapon cycles, so silence here is a \
+         stand-down and not a cooldown. The applier's own AI-target re-validation \
+         dropped the lock the hostility had licensed, through `remove_faction_enemy` \
+         and no new targeting vocabulary"
     );
     assert!(
         is_in_world(&mut app, P_BRAWLER),

@@ -4056,19 +4056,28 @@ fn on_file_evidence(ctx) {
 // the channel. A run in which nobody chooses anything reaches none of these
 // handlers and is indistinguishable from one with no picket in it.
 
-// THE STANDOFF CHANNEL. Registered per resolution state rather than once,
-// because a hail trigger is single-shot and a crew who open the channel, clear
-// it and come back must find the boat still willing to talk. A false
-// trigger-level `when` does not consume the registration — the device the
-// committee and Havelock channels above already use.
-on_hailed("world.falling_skyway.entity.havelock_enforcer.name", "on_picket_hailed")
-    .when("counter(havelock_enforcer_resolved) < 1 and counter(havelock_enforcer_refused) < 1 and counter(havelock_enforcer_left_alone) < 1");
-on_hailed("world.falling_skyway.entity.havelock_enforcer.name", "on_picket_hailed")
-    .when("counter(havelock_enforcer_resolved) < 1 and counter(havelock_enforcer_refused) < 1 and counter(havelock_enforcer_left_alone) > 0");
-on_hailed("world.falling_skyway.entity.havelock_enforcer.name", "on_picket_hailed")
-    .when("counter(havelock_enforcer_resolved) < 1 and counter(havelock_enforcer_refused) > 0");
-on_hailed("world.falling_skyway.entity.havelock_enforcer.name", "on_picket_hailed")
-    .when("counter(havelock_enforcer_resolved) > 0");
+// THE STANDOFF CHANNEL, and it is REPEATABLE rather than registered once per
+// resolution state.
+//
+// The per-state partition this used to be was wrong, and the way it was wrong is
+// worth writing down because the committee channel above is still built that
+// way. A single-shot registration is spent by its FIRST firing, and a `when` only
+// keeps an UNFIRED one armed — so a partition on the standoff's counters can
+// only survive a re-hail if every path through the scene moves one of the keys it
+// partitions on. Two do not: warning the picket sets `havelock_enforcer_warned`
+// and moves none of `resolved` / `refused` / `left_alone`, and a crew who open
+// the channel and dismiss the thread without picking anything move nothing at
+// all. Either one left the boat permanently unhailable with the lane still
+// blocked — which loses the negotiated withdrawal, the one road the warning
+// exists to unlock.
+//
+// `.repeat()` is the honest answer and it is one line: the boat answers its
+// channel for as long as there is a channel to answer. Everything that decides
+// whether there is anything left to say already lives in `picket_standoff`,
+// which reads `skyway_mission_finalized` and `picket_settled` at the top and
+// hands back the closed-channel line — so a settled standoff says so, in words,
+// rather than by a hail that silently does nothing.
+on_hailed("world.falling_skyway.entity.havelock_enforcer.name", "on_picket_hailed").repeat();
 
 // Provocation. Until this fires the Harrow and the Federation are not enemies
 // and the picket does nothing at all — which is what makes what follows a
@@ -4141,11 +4150,32 @@ fn stand_the_picket_down(ctx) {
 // number on every road but one. That is the whole return on hailing first: not
 // permission, which nobody needs, but people who were braced.
 //
+// A HIGH-WATER MARK, NOT AN ASSIGNMENT, and that is load-bearing rather than
+// defensive. More than one of these endings can land on a single run, because
+// the picket authors `secure_contain` AND `board` on the same target and the
+// destroyer musters two teams — so both can be working the boat at once, which
+// is what `probe_picket.toml`'s timeline demonstrates. Their finishing order is
+// not fixed: a boarding lands 83 s after it is committed (8 s across, 75 s of
+// work) and a containment 63 s after its own commit, so a boarding sent first
+// and a containment sent half a minute behind it finish in that order.
+//
+// An assignment would then let the containment overwrite the boarding's casualty
+// with its own 0, and the epilogue would print `report.picket.boarded` ("One of
+// theirs hurt getting there") over a standoff toll of zero — contradicting its
+// own ledger, with the record's sum check agreeing on the wrong number.
+//
+// Taking the maximum rather than summing is the other half of the same care: a
+// boat that was disabled and then destroyed did not hurt its crew twice over,
+// and these figures are the same four people counted by the worst thing that
+// happened to them.
+//
 // [ai] Every number unratified.
 fn bank_picket_casualties(ctx, base) {
     let hurt = base;
     if ctx.flags.havelock_enforcer_warned > 0 && hurt > 0 { hurt -= 1; }
-    ctx.flags.skyway_picket_casualties = hurt;
+    if hurt > ctx.flags.skyway_picket_casualties {
+        ctx.flags.skyway_picket_casualties = hurt;
+    }
     hurt
 }
 
@@ -4323,9 +4353,12 @@ fn the_picket_leaves(ctx) {
 }
 
 // WARN THEM. The promise this beat can make, and the only one: we are coming
-// aboard, and we are not shooting. Kept by every ending but the kill, which is
-// the whole of what a promise like that means — and settled in the ledger at
-// finalisation beside the other three, off facts rather than off a mood.
+// aboard, and we are not shooting. It is kept by every ending the crew reach
+// WITHOUT USING GUNS — talked off the lane, contained, boarded, or left standing
+// — and broken by every ending they shoot their way to, the disablement
+// included: taking a boat's mounts off it is weapons fire, whatever the boat's
+// crew survive. Settled in the ledger at finalisation beside the other three,
+// off facts rather than off a mood (`resolve_the_promises`).
 fn on_picket_warned(ctx) {
     if ctx.flags.skyway_mission_finalized > 0 || picket_settled(ctx) {
         return #{ message: "world.falling_skyway.comms.picket_channel_closed", responses: [] };
@@ -6959,12 +6992,31 @@ fn resolve_the_promises(ctx) {
         }
     }
     // The picket's, and the only one in this ledger made to somebody the crew
-    // could have shot (#1349). It is broken by exactly one thing — the kill —
-    // because that is the whole of what "we are coming aboard, not opening fire"
-    // undertakes. Left standing, talked off the lane, contained, boarded or shot
-    // out of its mounts, the captain's word held.
+    // could have shot (#1349). SETTLED AGAINST THE WORDS THAT WERE ACTUALLY
+    // SAID, which are on the record twice and say the same thing both times:
+    // the response is "we will come aboard you. We will not shoot you", and the
+    // terms the ledger shows read "the picket will be taken by boarding party
+    // and not by weapons fire".
+    //
+    // So the thing that breaks it is WEAPONS FIRE, not death. Three facts each
+    // mean the crew used guns on that boat, and any one of them is enough:
+    //
+    //   destroyed        the plainest case.
+    //   disabled         the mounts were shot off. The boat lived, which is the
+    //                    outcome the beat is proud of and is still not what the
+    //                    captain undertook — a promise that survived being shot
+    //                    at would make containment, boarding and gunnery
+    //                    disablement one commitment outcome wearing three
+    //                    names, and AC5 asks for them to be distinct.
+    //   picket_engaged   the crew opened on it at all, whatever it was that
+    //                    finally settled the standoff.
+    //
+    // Everything else keeps it. Talked off the lane, contained from outside,
+    // boarded without a shot, or left standing where it was: the word held.
     if ctx.commitments.state("skyway_picket_restraint") == "open" {
-        if ctx.flags.havelock_enforcer_destroyed > 0 {
+        if ctx.flags.havelock_enforcer_destroyed > 0 ||
+           ctx.flags.havelock_enforcer_disabled > 0 ||
+           ctx.flags.picket_engaged > 0 {
             ctx.commitments.break_promise("skyway_picket_restraint");
         } else {
             ctx.commitments.keep("skyway_picket_restraint");

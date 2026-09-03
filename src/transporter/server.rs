@@ -1123,6 +1123,81 @@ mod tests {
     }
 
     #[test]
+    fn destroying_a_carrier_with_civilians_aboard_raises_the_lost_flag() {
+        use crate::ai::server::AiEntityDestroyed;
+        use bevy::ecs::message::Messages;
+
+        let mut world = World::new();
+        world.init_resource::<CivilianRescueLedger>();
+        world.init_resource::<WorldContentRuntime>();
+        world.init_resource::<Messages<AiEntityDestroyed>>();
+        // A carrier with two of its four civilians still aboard.
+        let mut rescue = CivilianRescue::new(4);
+        rescue.recovered = 2;
+        world.spawn((
+            EntityUuid("uuid-lighter".into()),
+            EntityId("lighter".into()),
+            rescue,
+        ));
+        // Fire destroys it — the balance/AI death event both combat paths write.
+        world
+            .resource_mut::<Messages<AiEntityDestroyed>>()
+            .write(AiEntityDestroyed {
+                entity_uuid: "uuid-lighter".into(),
+            });
+
+        world
+            .run_system_once(record_civilian_casualties)
+            .expect("the casualty system runs");
+
+        assert!(
+            world
+                .resource::<WorldContentRuntime>()
+                .flags
+                .counter(&rescue_lost_flag("lighter"))
+                > 0,
+            "a carrier lost with civilians aboard raises rescue.<id>.lost"
+        );
+    }
+
+    #[test]
+    fn destroying_a_fully_recovered_carrier_raises_no_casualty() {
+        use crate::ai::server::AiEntityDestroyed;
+        use bevy::ecs::message::Messages;
+
+        let mut world = World::new();
+        world.init_resource::<CivilianRescueLedger>();
+        world.init_resource::<WorldContentRuntime>();
+        world.init_resource::<Messages<AiEntityDestroyed>>();
+        // Everyone already aboard.
+        let mut rescue = CivilianRescue::new(3);
+        rescue.recovered = 3;
+        world.spawn((
+            EntityUuid("uuid-lighter".into()),
+            EntityId("lighter".into()),
+            rescue,
+        ));
+        world
+            .resource_mut::<Messages<AiEntityDestroyed>>()
+            .write(AiEntityDestroyed {
+                entity_uuid: "uuid-lighter".into(),
+            });
+
+        world
+            .run_system_once(record_civilian_casualties)
+            .expect("the casualty system runs");
+
+        assert_eq!(
+            world
+                .resource::<WorldContentRuntime>()
+                .flags
+                .counter(&rescue_lost_flag("lighter")),
+            0,
+            "an empty hulk is not a casualty — everyone was already recovered"
+        );
+    }
+
+    #[test]
     fn selecting_a_contact_resets_progress_and_intent() {
         let mut world = World::new();
         world.init_resource::<EffectQueue<TaskLifecycleRequest>>();

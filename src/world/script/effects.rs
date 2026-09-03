@@ -798,6 +798,34 @@ pub(crate) fn register_effects(engine: &mut HostRegistry) {
         },
     );
     engine.register_fn(
+        "remove_faction_enemy",
+        |sink: &mut EffectSink, faction: ImmutableString, enemy: ImmutableString| {
+            // The counterpart to `add_faction_enemy` (issue #1349), buffered the
+            // same way and for the same reason: no `FactionRegistry` is in scope
+            // at this boundary, so the name→UUID resolution is the applier's.
+            //
+            // TWO verbs rather than one setter, the rule `hold_fire`/
+            // `release_fire` and `call_strike`/`settle_strike` already keep: the
+            // direction lives in the name, so a scenario cannot make peace with
+            // somebody it meant to declare war on by getting a boolean the wrong
+            // way round.
+            //
+            // Nothing downstream of here is new. The declarative
+            // `remove_faction_enemy` action, its `dispatch_state_action` arm and
+            // its applier all predate this; what the applier does on a SUCCESSFUL
+            // removal is the reason a scenario wants it (issue #710): it
+            // re-validates every AI controller's target, so ending a hostility
+            // also drops the locks that hostility licensed. That is what lets a
+            // mission stop a fight it started without having to destroy the hull
+            // it started it with — issue #1349's "the threshold ends the hostile
+            // directive without requiring hull destruction".
+            sink.push_action(TriggerAction::RemoveFactionEnemy {
+                faction: faction.to_string(),
+                enemy: enemy.to_string(),
+            });
+        },
+    );
+    engine.register_fn(
         "destroy_entity",
         |sink: &mut EffectSink, entity: ImmutableString| -> Result<(), Box<EvalAltResult>> {
             // The counterpart to `spawn_entity` (issue #1033), and buffered for the
@@ -1840,6 +1868,58 @@ mod tests {
                 faction: "Harrow".to_string(),
                 enemy: "Federation".to_string(),
             })]
+        );
+    }
+
+    /// `remove_faction_enemy(f, e)` is `add_faction_enemy`'s mirror (issue
+    /// #1349): the same deferred DECLARATIVE action, the opposite direction, and
+    /// the opposite direction ONLY — a scenario that ends a hostility must get
+    /// back exactly the action its TOML twin would have produced, because the
+    /// applier's target re-validation (issue #710) hangs off that one variant.
+    #[test]
+    fn remove_faction_enemy_matches_toml() {
+        let effs = run_buffered(
+            r#"fn f(ctx) { ctx.effects.remove_faction_enemy("Harrow", "Federation"); }"#,
+            "f",
+        );
+        let toml = toml_action(
+            "type = \"remove_faction_enemy\"\nfaction = \"Harrow\"\nenemy = \"Federation\"",
+        );
+        assert_eq!(effs, vec![BufferedEffect::Action(toml)]);
+        assert_eq!(
+            effs,
+            vec![BufferedEffect::Action(TriggerAction::RemoveFactionEnemy {
+                faction: "Harrow".to_string(),
+                enemy: "Federation".to_string(),
+            })]
+        );
+    }
+
+    /// The pair, in one call and in authored order. The buffer is ONE ordered
+    /// `Vec`, so a scenario that declares a hostility and later ends it applies
+    /// them in the sequence it wrote — and a direction that had been folded into
+    /// a single boolean setter could not have been ordered at all.
+    #[test]
+    fn the_faction_verbs_keep_their_authored_order() {
+        let effs = run_buffered(
+            r#"fn f(ctx) {
+                ctx.effects.add_faction_enemy("Harrow", "Federation");
+                ctx.effects.remove_faction_enemy("Federation", "Harrow");
+            }"#,
+            "f",
+        );
+        assert_eq!(
+            effs,
+            vec![
+                BufferedEffect::Action(TriggerAction::AddFactionEnemy {
+                    faction: "Harrow".to_string(),
+                    enemy: "Federation".to_string(),
+                }),
+                BufferedEffect::Action(TriggerAction::RemoveFactionEnemy {
+                    faction: "Federation".to_string(),
+                    enemy: "Harrow".to_string(),
+                }),
+            ]
         );
     }
 

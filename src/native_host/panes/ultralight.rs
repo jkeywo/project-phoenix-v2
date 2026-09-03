@@ -87,6 +87,8 @@ use super::recovery::{service_faults, PaneFault};
 use super::registry::PaneId;
 use super::surface::{pump_pane, PaneSurface, PaneSurfaceError};
 use super::PaneBusResource;
+use crate::console_bridge::HudStateChanged;
+use crate::core::messages::GamePhase;
 use crate::logging::{LogCat, LogFilterConfig};
 use crate::native_host::bridge_display::{BridgeLayoutResource, BridgeStationSurfaces};
 use crate::native_host::bridge_layout::BridgeLayout;
@@ -140,6 +142,31 @@ pub struct PaneDisplayEntry {
 pub struct HostLobbyDisplayConfig {
     pub url: String,
 }
+
+/// The viewscreen HUD-overlay surface's display config (issue #422's
+/// `#hud-overlay`, ported to the native path). Like [`HostLobbyDisplayConfig`] it
+/// carries only the URL the surface's view loads; the surface itself is
+/// composited and driven by [`PaneHost`] — a TRANSPARENT surface on the
+/// viewscreen window, drawn over the 3-D scene, shown only in-game.
+#[derive(Resource, Clone, Debug)]
+pub struct ViewscreenHudDisplayConfig {
+    pub url: String,
+}
+
+/// The latest HUD state pushed to the viewscreen overlay, cached so a state that
+/// arrives before the surface has finished loading still reaches it, and so the
+/// overlay always reflects the newest state each frame it is drawn.
+#[derive(Resource, Clone, Debug, Default)]
+struct ViewscreenHudLatest {
+    json: Option<String>,
+}
+
+/// The viewscreen HUD-overlay surface's reserved id. Like
+/// [`HOST_LOBBY_SURFACE_ID`](crate::native_host::host_lobby::HOST_LOBBY_SURFACE_ID)
+/// (`u32::MAX`) it sits at the top of the `PaneId` space the registry — which
+/// mints from `0` upward and never reuses — cannot reach, so it can never collide
+/// with a participant pane.
+pub const VIEWSCREEN_HUD_SURFACE_ID: PaneId = PaneId(u32::MAX - 1);
 
 /// Copy the Ultralight SDK's shared libraries beside this executable and its
 /// `resources/` into the working directory.
@@ -367,6 +394,15 @@ impl PaneWindow {
     fn is_host_lobby(&self) -> bool {
         self.id == HOST_LOBBY_SURFACE_ID
     }
+
+    /// Whether this is the viewscreen HUD-overlay surface (issue #422, native
+    /// port) rather than a participant's pane or the lobby. Like the lobby it has
+    /// no pane-bus entry; unlike the lobby it is a passive `pointer-events:none`
+    /// overlay, so it is also kept out of the input router. See
+    /// [`VIEWSCREEN_HUD_SURFACE_ID`].
+    fn is_hud_overlay(&self) -> bool {
+        self.id == VIEWSCREEN_HUD_SURFACE_ID
+    }
 }
 
 /// The Ultralight runtime and every pane hanging off it.
@@ -475,7 +511,11 @@ fn build_router(windows: &[PaneWindow], lobby_present: bool) -> PaneRouter {
     PaneRouter::new(
         windows
             .iter()
-            .filter(|w| lobby_present || !w.is_host_lobby())
+            // The HUD overlay (issue #422, native port) is never routed — it is a
+            // passive `pointer-events:none` frame over the live viewscreen, so a
+            // pointer or touch over it must reach the game beneath, exactly as an
+            // un-placed lobby surface does.
+            .filter(|w| (lobby_present || !w.is_host_lobby()) && !w.is_hud_overlay())
             .map(|w| PanePlacement {
                 pane: w.id,
                 window: WindowKey(w.window.to_bits()),
@@ -517,6 +557,7 @@ pub struct PaneDisplayPlugin;
 
 impl Plugin for PaneDisplayPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<ViewscreenHudLatest>();
         app.add_systems(PreUpdate, init_pane_host).add_systems(
             Update,
             (
@@ -537,6 +578,15 @@ impl Plugin for PaneDisplayPlugin {
                 )
                     .chain()
                     .run_if(resource_exists::<ButtonInput<MouseButton>>),
+                // Reveal the HUD overlay only in-game, and cache the newest HUD
+                // state (issue #422, native port) — both BEFORE `drive_panes`, so
+                // the frame it draws this tick shows the right presence and the
+                // newest readout. `cache_hud_state` is gated on the host actually
+                // registering `HudStateChanged`, so the rendererless Contract test
+                // (which has no server plugins) stands the pane host up without it.
+                sync_viewscreen_hud_presence,
+                cache_hud_state
+                    .run_if(resource_exists::<bevy::ecs::message::Messages<HudStateChanged>>),
                 drive_panes.run_if(resource_exists::<Assets<Image>>),
             )
                 .chain(),
@@ -591,6 +641,7 @@ fn init_pane_host(world: &mut World) {
         .cloned()
         .unwrap_or(PaneDisplayConfig { panes: Vec::new() });
     let lobby_config = world.get_resource::<HostLobbyDisplayConfig>().cloned();
+    let hud_config = world.get_resource::<ViewscreenHudDisplayConfig>().cloned();
     if config.panes.is_empty() && lobby_config.is_none() {
         world.insert_resource(PaneHostFailed);
         return;
@@ -639,6 +690,10 @@ fn init_pane_host(world: &mut World) {
         station: bool,
         /// The host-lobby surface rather than a participant's pane (#1325).
         lobby: bool,
+        /// The viewscreen HUD-overlay surface (issue #422, native port) — a
+        /// transparent frame over the 3-D viewscreen, shown in-game only and
+        /// never routed input.
+        hud: bool,
     }
     let mut seats: Vec<Seat> = Vec::new();
     let mut tiled: Vec<PaneDisplayEntry> = Vec::new();
@@ -657,6 +712,7 @@ fn init_pane_host(world: &mut World) {
                     window_origin: (surface.geometry.position_x, surface.geometry.position_y),
                     station: true,
                     lobby: false,
+                    hud: false,
                 })
         });
         match seat {
@@ -679,6 +735,7 @@ fn init_pane_host(world: &mut World) {
                 window_origin: (0, 0),
                 station: false,
                 lobby: false,
+                hud: false,
             });
         }
     }
@@ -702,6 +759,30 @@ fn init_pane_host(world: &mut World) {
             window_origin: (0, 0),
             station: false,
             lobby: true,
+            hud: false,
+        });
+    }
+    // The viewscreen HUD overlay (issue #422, native port) also takes the whole
+    // primary window, TRANSPARENT, so it frames the 3-D viewscreen the way
+    // `server.html` frames its canvas. It never enters the input router (a
+    // passive `pointer-events:none` overlay) and is shown only in-game
+    // (`sync_viewscreen_hud_presence`), so it never fights the lobby for the
+    // window: one is drawn while the other is hidden by phase.
+    if let Some(hud) = &hud_config {
+        seats.push(Seat {
+            entry: PaneDisplayEntry {
+                id: VIEWSCREEN_HUD_SURFACE_ID,
+                url: hud.url.clone(),
+                label: String::new(),
+            },
+            window: primary_entity,
+            origin: (0, 0),
+            size: (primary_width, primary_height),
+            scale: primary_scale,
+            window_origin: (0, 0),
+            station: false,
+            lobby: false,
+            hud: true,
         });
     }
 
@@ -791,7 +872,10 @@ fn init_pane_host(world: &mut World) {
             width: seat.size.0,
             height: seat.size.1,
             device_scale: seat.scale,
-            transparent: false,
+            // The HUD overlay (issue #422, native port) renders with alpha so the
+            // 3-D viewscreen shows through everywhere its frame does not paint;
+            // every other surface is opaque console chrome.
+            transparent: seat.hud,
             // One storage session per pane, named after the pane and never
             // written to disk. Without it every pane lands in Ultralight's
             // single persistent default session, and since every pane document
@@ -830,6 +914,14 @@ fn init_pane_host(world: &mut World) {
             world.insert_resource(PaneHostFailed);
             return;
         }
+        // The transparent HUD overlay starts fully clear so the one frame before
+        // its first copy shows the 3-D scene, not a black fill; opaque surfaces
+        // start black.
+        let fill: [u8; 4] = if seat.hud {
+            [0, 0, 0, 0]
+        } else {
+            [0, 0, 0, 255]
+        };
         let image = Image::new_fill(
             Extent3d {
                 width: seat.size.0,
@@ -837,7 +929,7 @@ fn init_pane_host(world: &mut World) {
                 depth_or_array_layers: 1,
             },
             TextureDimension::D2,
-            &[0, 0, 0, 255],
+            &fill,
             TextureFormat::Rgba8UnormSrgb,
             RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
         );
@@ -853,8 +945,11 @@ fn init_pane_host(world: &mut World) {
                     // The lobby surface's INVISIBLE half (issue #1325). The
                     // view stays alive and keeps being pushed to; it simply is
                     // not drawn, which is what makes "the chrome yielded"
-                    // different from "the surface was torn down".
-                    display: if seat.lobby && !lobby_present {
+                    // different from "the surface was torn down". The HUD overlay
+                    // (issue #422, native port) starts hidden too — the host boots
+                    // into the lobby, and `sync_viewscreen_hud_presence` reveals
+                    // the frame once the mission is InProgress.
+                    display: if (seat.lobby && !lobby_present) || seat.hud {
                         Display::None
                     } else {
                         Display::DEFAULT
@@ -877,6 +972,13 @@ fn init_pane_host(world: &mut World) {
         // draws over the 3-D viewscreen, which is the point of the surface.
         if seat.lobby {
             world.entity_mut(canvas).insert(ZIndex(-1));
+        }
+        // The HUD overlay (issue #422, native port) draws OVER the 3-D viewscreen
+        // and above any other UI on the window — the lobby sits at -1, and a
+        // running mission has no panes tiled on the viewscreen. A positive index
+        // keeps the frame on top wherever it is shown.
+        if seat.hud {
+            world.entity_mut(canvas).insert(ZIndex(20));
         }
         windows.push(PaneWindow {
             id,
@@ -1019,6 +1121,61 @@ fn sync_host_lobby_presence(
     // model rather than the other way round.
     let next = host.focus.focused();
     host.focus_view(previously_focused, next);
+}
+
+/// Cache the newest viewscreen HUD state (issue #422's `#hud-overlay`, ported to
+/// the native path) from the host's `HudStateChanged`.
+///
+/// The host emits `HudStateChanged` only on a real change (heading, hull,
+/// condition, red alert). Caching the latest — rather than pushing it straight
+/// through — lets [`drive_panes`] hand it to the overlay every frame it draws,
+/// so a state that arrived while the transparent surface was still loading, and
+/// the very first frame after it finishes loading, both reach it.
+fn cache_hud_state(
+    mut latest: ResMut<ViewscreenHudLatest>,
+    mut events: MessageReader<HudStateChanged>,
+) {
+    for event in events.read() {
+        latest.json = Some(event.json.clone());
+    }
+}
+
+/// Show the viewscreen HUD overlay (issue #422, native port) only while a mission
+/// is `InProgress`, and hide it otherwise.
+///
+/// The host boots into `Lobby` with the crew-lobby surface on the viewscreen; the
+/// HUD frame belongs over the LIVE 3-D scene, so it and the lobby take the same
+/// window but are never drawn at once — one is hidden by phase while the other
+/// shows, the same mutual exclusion `server.html` gets for free by swapping which
+/// element it displays.
+fn sync_viewscreen_hud_presence(
+    host: Option<NonSend<PaneHost>>,
+    phase: Option<Res<State<GamePhase>>>,
+    mut nodes: Query<&mut Node>,
+) {
+    let (Some(host), Some(phase)) = (host, phase) else {
+        return;
+    };
+    let Some(canvas) = host
+        .windows
+        .iter()
+        .find(|w| w.is_hud_overlay())
+        .map(|w| w.canvas)
+    else {
+        return;
+    };
+    let want = if *phase.get() == GamePhase::InProgress {
+        Display::DEFAULT
+    } else {
+        Display::None
+    };
+    if let Ok(mut node) = nodes.get_mut(canvas) {
+        // Write only on a real change so an unchanged phase does not dirty the UI
+        // layout every frame.
+        if node.display != want {
+            node.display = want;
+        }
+    }
 }
 
 /// Follow each OS window's size: resize every surface's Ultralight view and its
@@ -1503,6 +1660,10 @@ fn drive_panes(
     // never rebuilt over the viewscreen, even in the frames where that screen
     // has no slot to offer — see `super::placement`.
     bridge: Option<Res<BridgeLayoutResource>>,
+    // The latest viewscreen HUD state (issue #422, native port), cached from
+    // `HudStateChanged` by `cache_hud_state`. Read here so the newest reaches the
+    // overlay every frame it draws, including the first frame after it loads.
+    hud_latest: Res<ViewscreenHudLatest>,
     mut images: ResMut<Assets<Image>>,
     mut commands: Commands,
     log: Option<Res<LogFilterConfig>>,
@@ -1548,12 +1709,33 @@ fn drive_panes(
                 log,
                 LogCat::Lobby,
                 "pane host: {} finished loading",
-                if pane.is_host_lobby() {
+                if pane.is_hud_overlay() {
+                    "the viewscreen HUD".to_string()
+                } else if pane.is_host_lobby() {
                     "the host lobby".to_string()
                 } else {
                     format!("{} console", pane.id)
                 }
             );
+        }
+        // The HUD overlay (issue #422, native port) is driven by the host's
+        // `HudStateChanged`, cached in `ViewscreenHudLatest` so a state that
+        // arrived before the page loaded still reaches it. Push the newest each
+        // frame it is drawn — one idempotent `__updateHud` on an already-
+        // repainting transparent surface, evaluated here so the DOM change is
+        // picked up by the render below.
+        if pane.is_hud_overlay() {
+            if let (Some(json), true) = (&hud_latest.json, pane.surface.is_ready()) {
+                let arg = serde_json::to_string(json).unwrap_or_else(|_| "\"{}\"".into());
+                if pane
+                    .surface
+                    .push(&format!("window.__updateHud({arg})"))
+                    .is_ok()
+                {
+                    pushed_this_frame[index] = true;
+                }
+            }
+            continue;
         }
         // The lobby surface rides its OWN bridge, over the same `PaneSurface`.
         // Nothing it says is a `ClientMessage` and nothing it hears is a
@@ -1620,8 +1802,13 @@ fn drive_panes(
                 // PERMANENT (issue #1325) — closing it would be the one thing
                 // every later slice is told it may assume never happens. A dead
                 // lobby view is a warning per frame and a blank surface, which
-                // is honest and recoverable by restarting the host.
-                if pane.copy_failures >= VIEW_CRASH_COPY_FAILURES && !pane.is_host_lobby() {
+                // is honest and recoverable by restarting the host. The HUD
+                // overlay (issue #422, native port) is the same: no station, no
+                // bus entry, so it cannot ride the Backfill path either.
+                if pane.copy_failures >= VIEW_CRASH_COPY_FAILURES
+                    && !pane.is_host_lobby()
+                    && !pane.is_hud_overlay()
+                {
                     if let Some(bus) = &bus {
                         bus.0.fault(pane.id, PaneFault::ViewCrashed);
                     }

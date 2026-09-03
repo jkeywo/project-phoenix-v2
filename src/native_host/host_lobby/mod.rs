@@ -344,6 +344,14 @@ impl LocalHostLobby {
         document::host_lobby_url(&self.host_addr, &self.nonce)
     }
 
+    /// The URL the viewscreen HUD-overlay surface navigates to (issue #422's
+    /// `#hud-overlay`, ported to the native path). Served from the same host at
+    /// `/gui/viewscreen-hud.html`, dialled at the same connectable address the
+    /// lobby surface uses.
+    pub fn viewscreen_hud_url(&self) -> String {
+        document::viewscreen_hud_url(&self.host_addr)
+    }
+
     /// Where the document is published, relative to the served root.
     pub fn path(&self) -> String {
         document::host_lobby_document_path(&self.nonce)

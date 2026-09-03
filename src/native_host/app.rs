@@ -787,9 +787,20 @@ pub fn build_native_host_app(
         ));
         app.add_plugins(crate::native_host::host_lobby::HostLobbyPlugin);
         #[cfg(feature = "ultralight")]
-        app.insert_resource(
-            crate::native_host::panes::ultralight::HostLobbyDisplayConfig { url: lobby.url() },
-        );
+        {
+            app.insert_resource(
+                crate::native_host::panes::ultralight::HostLobbyDisplayConfig { url: lobby.url() },
+            );
+            // The viewscreen HUD overlay (issue #422's `#hud-overlay`, ported to
+            // the native path): a transparent Ultralight surface on the viewscreen
+            // window that frames the 3-D scene the same way `server.html` frames
+            // its canvas. Composited by the same `PaneHost`, shown in-game only.
+            app.insert_resource(
+                crate::native_host::panes::ultralight::ViewscreenHudDisplayConfig {
+                    url: lobby.viewscreen_hud_url(),
+                },
+            );
+        }
     }
 
     // One display host for both kinds of surface — Ultralight allows one

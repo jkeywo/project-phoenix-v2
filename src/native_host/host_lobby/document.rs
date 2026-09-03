@@ -310,6 +310,18 @@ pub fn host_lobby_url(host_addr: &str, nonce: &str) -> String {
     format!("http://{host_addr}{}", host_lobby_document_path(nonce))
 }
 
+/// Where the viewscreen HUD-overlay page is served, relative to the served root.
+/// A static file under the bundle's `gui/` (issue #422's `#hud-overlay`, ported
+/// to the native path), unlike the lobby document which is minted per run.
+pub const VIEWSCREEN_HUD_PATH: &str = "/gui/viewscreen-hud.html";
+
+/// The URL the viewscreen HUD-overlay surface's view navigates to — the static
+/// `gui/viewscreen-hud.html` on the host's own HTTP surface, dialled at the same
+/// connectable address the lobby surface uses.
+pub fn viewscreen_hud_url(host_addr: &str) -> String {
+    format!("http://{host_addr}{VIEWSCREEN_HUD_PATH}")
+}
+
 /// The element the lobby markup hangs off, in the host page.
 const LOBBY_PANEL_MARKER: &str = "<div id=\"lobby-panel\"";
 

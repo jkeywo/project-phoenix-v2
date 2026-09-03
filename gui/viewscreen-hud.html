@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Phoenix Viewscreen HUD</title>
+  <!--
+    The native host's viewscreen HUD overlay (issue #422's HTML overlay, ported
+    to the native path). server.html renders this same #hud-overlay above its
+    <canvas>; the native host has no HTML canvas, so this page is composited by a
+    TRANSPARENT Ultralight surface over the 3-D viewscreen (panes/ultralight.rs).
+    The frame pieces, the readout and the red-alert vignette are lifted verbatim
+    from server.html so the native viewscreen frames the same as the web one.
+    Border assets are served from /gui/borders/ — this page lives at
+    /gui/viewscreen-hud.html, so it references them relative as "borders/…".
+    Driven from Rust by window.__updateHud(stateJson) (see the HUD-state push in
+    src/native_host/panes/ultralight.rs).
+  -->
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    /* The page itself paints nothing — only the frame pieces below do, so the
+       3-D viewscreen shows through everywhere else (the surface is transparent). */
+    html, body {
+      margin: 0; padding: 0; width: 100%; height: 100%;
+      background: transparent; overflow: hidden;
+    }
+
+    /* ── HTML viewscreen HUD overlay (issue #422) ───────────────────────── */
+    #hud-overlay {
+      position: absolute; inset: 0; z-index: 15;
+      pointer-events: none;
+      --signal: #5fd8e8;
+      --alert: #ff3344;
+      --t: 44px;
+      --vs-signal: #5fd8e8;
+      --vs-alert: #ff3344;
+      --vs-text: #b8c0c8;
+    }
+    /* Red-alert inner glow — full-screen vignette, pulsing. */
+    #hud-vignette {
+      position: absolute; inset: 0;
+      pointer-events: none;
+      box-shadow: inset 0 0 0 1px var(--alert),
+                  inset 0 0 32px 4px rgba(255, 51, 68, 0.55),
+                  inset 0 0 80px 0 rgba(255, 51, 68, 0.18);
+      opacity: 0;
+      transition: opacity .25s ease;
+    }
+    #hud-overlay.alert-on #hud-vignette {
+      opacity: 1;
+      animation: hud-pulse 1.3s ease-in-out infinite;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #hud-overlay.alert-on #hud-vignette { animation: none; opacity: 1; }
+    }
+    @keyframes hud-pulse {
+      0%, 100% { opacity: 0.55; }
+      50%      { opacity: 1; }
+    }
+
+    /* ─── Viewscreen border frame (raw/gui/borders/demo.html) ──────────────── */
+    /* All frame pieces are absolute children of #hud-overlay (inset:0) */
+    .vs-piece, .vs-edge {
+      position: absolute;
+      pointer-events: none;
+    }
+    /* Tiled edges */
+    .vs-edge { background-repeat: repeat; image-rendering: pixelated; }
+    .vs-edge.top {
+      top: 0; left: 240px; right: 240px;
+      height: var(--t);
+      background-image: url("borders/edge-top.png");
+      background-size: 64px 44px;
+    }
+    .vs-edge.bottom {
+      bottom: 0; left: 240px; right: 240px;
+      height: var(--t);
+      background-image: url("borders/edge-bottom.png");
+      background-size: 64px 44px;
+    }
+    .vs-edge.left {
+      left: 0; top: 140px; bottom: 140px;
+      width: var(--t);
+      background-image: url("borders/edge-left.png");
+      background-size: 44px 64px;
+    }
+    .vs-edge.right {
+      right: 0; top: 140px; bottom: 140px;
+      width: var(--t);
+      background-image: url("borders/edge-right.png");
+      background-size: 44px 64px;
+    }
+    /* Corners (240×140 px) */
+    .vs-corner {
+      width: 240px; height: 140px;
+      background-repeat: no-repeat; background-size: contain;
+      image-rendering: pixelated;
+    }
+    .vs-corner.tl { top: 0; left: 0;     background-image: url("borders/corner-tl.png"); }
+    .vs-corner.tr { top: 0; right: 0;    background-image: url("borders/corner-tr.png"); }
+    .vs-corner.bl { bottom: 0; left: 0;  background-image: url("borders/corner-bl.png"); }
+    .vs-corner.br { bottom: 0; right: 0; background-image: url("borders/corner-br.png"); }
+    /* Caps (centred top/bottom) */
+    .vs-cap {
+      background-repeat: no-repeat; background-size: contain;
+      image-rendering: pixelated;
+    }
+    .vs-cap.top {
+      top: 0; left: 50%; transform: translateX(-50%);
+      width: 320px; height: 56px;
+      background-image: url("borders/cap-top.png");
+    }
+    .vs-cap.bottom {
+      bottom: 0; left: 50%; transform: translateX(-50%);
+      width: 520px; height: 56px;
+      background-image: url("borders/cap-bottom.png");
+    }
+    /* Red alert — swap PNG assets */
+    #hud-overlay.alert-on .vs-edge.top    { background-image: url("borders/edge-top-alert.png"); }
+    #hud-overlay.alert-on .vs-edge.bottom { background-image: url("borders/edge-bottom-alert.png"); }
+    #hud-overlay.alert-on .vs-edge.left   { background-image: url("borders/edge-left-alert.png"); }
+    #hud-overlay.alert-on .vs-edge.right  { background-image: url("borders/edge-right-alert.png"); }
+    #hud-overlay.alert-on .vs-corner.tl   { background-image: url("borders/corner-tl-alert.png"); }
+    #hud-overlay.alert-on .vs-corner.tr   { background-image: url("borders/corner-tr-alert.png"); }
+    #hud-overlay.alert-on .vs-corner.bl   { background-image: url("borders/corner-bl-alert.png"); }
+    #hud-overlay.alert-on .vs-corner.br   { background-image: url("borders/corner-br-alert.png"); }
+    #hud-overlay.alert-on .vs-cap.top     { background-image: url("borders/cap-top-alert.png"); }
+    #hud-overlay.alert-on .vs-cap.bottom  { background-image: url("borders/cap-bottom-alert.png"); }
+    /* Ship designation text (top-centre, over cap-top) */
+    .vs-designation {
+      position: absolute;
+      top: 18px; left: 50%; transform: translateX(-50%);
+      z-index: 5;
+      font-family: "Chakra Petch", system-ui, sans-serif;
+      font-size: 9px; font-weight: 600;
+      letter-spacing: 0.5em;
+      color: var(--vs-signal);
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    #hud-overlay.alert-on .vs-designation { color: var(--vs-alert); }
+    /* 4-slot status strip (bottom-centre, over cap-bottom) */
+    .vs-status-strip {
+      position: absolute;
+      bottom: 8px; left: 50%; transform: translateX(-50%);
+      width: 408px; height: 36px;
+      z-index: 5;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      padding: 0 12px;
+      pointer-events: none;
+    }
+    .vs-status-slot {
+      display: flex; flex-direction: column;
+      justify-content: center;
+      padding-left: 18px;
+    }
+    .vs-slot-label {
+      font-family: "Chakra Petch", system-ui, sans-serif; font-weight: 600;
+      font-size: 8px; letter-spacing: 0.32em;
+      color: var(--vs-text);
+      text-transform: uppercase;
+    }
+    .vs-slot-value {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 9px; color: var(--vs-signal);
+      margin-top: 2px; letter-spacing: 0.06em;
+    }
+    #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
+  </style>
+</head>
+<body>
+  <div id="hud-overlay">
+    <div id="hud-vignette"></div>
+
+    <!-- Viewscreen border frame (tiled edges) -->
+    <div class="vs-edge top"></div>
+    <div class="vs-edge bottom"></div>
+    <div class="vs-edge left"></div>
+    <div class="vs-edge right"></div>
+    <!-- Corners -->
+    <div class="vs-piece vs-corner tl"></div>
+    <div class="vs-piece vs-corner tr"></div>
+    <div class="vs-piece vs-corner bl"></div>
+    <div class="vs-piece vs-corner br"></div>
+    <!-- Caps (centred top/bottom) -->
+    <div class="vs-piece vs-cap top"></div>
+    <div class="vs-piece vs-cap bottom"></div>
+    <!-- Ship designation (top-centre, above cap) -->
+    <div class="vs-designation" id="hud-designation">PHOENIX</div>
+    <!-- 4-slot status strip (bottom-centre, inside cap-bottom) -->
+    <div class="vs-status-strip">
+      <div class="vs-status-slot"><div class="vs-slot-label">Nav</div><div class="vs-slot-value" id="v-nav">—</div></div>
+      <div class="vs-status-slot"><div class="vs-slot-label">Tac</div><div class="vs-slot-value" id="v-tac">—</div></div>
+      <div class="vs-status-slot"><div class="vs-slot-label">Eng</div><div class="vs-slot-value" id="v-eng">—</div></div>
+      <div class="vs-status-slot"><div class="vs-slot-label">Sys</div><div class="vs-slot-value" id="v-sys">—</div></div>
+    </div>
+  </div>
+
+  <script>
+    // Rust's ViewscreenHudState sends `condition` as a strings.csv id; the web
+    // host resolves it through localiseTree. The native overlay has no string
+    // table, so map the two ids the host emits and fall back to the raw value.
+    var HUD_CONDITION = {
+      'server.hud_nominal': 'NOMINAL',
+      'server.hud_alert': 'ALERT',
+    };
+
+    function setText(id, value) {
+      var el = document.getElementById(id);
+      if (el) el.textContent = value;
+    }
+
+    // The one entry point Rust drives (see the HUD-state push in
+    // panes/ultralight.rs): a JSON ViewscreenHudState string.
+    window.__updateHud = function (json) {
+      var s;
+      try { s = JSON.parse(json); } catch (e) { return; }
+      var overlay = document.getElementById('hud-overlay');
+      if (overlay) overlay.classList.toggle('alert-on', !!s.red_alert);
+      if (typeof s.heading === 'number') {
+        setText('v-nav', 'HDG ' + String(s.heading).padStart(3, '0'));
+      }
+      setText('v-tac', s.red_alert ? 'WEAPONS HOT' : 'CLEAR');
+      if (typeof s.hull_pct === 'number') {
+        setText('v-eng', 'HULL ' + s.hull_pct + '%');
+      }
+      if (typeof s.condition === 'string') {
+        setText('v-sys', HUD_CONDITION[s.condition] || s.condition);
+      }
+      if (s.ship_name) {
+        setText('hud-designation', s.ship_name);
+      }
+    };
+  </script>
+</body>
+</html>

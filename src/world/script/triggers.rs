@@ -393,6 +393,12 @@ pub(crate) fn register_trigger_builders(
     // Parsed through the SAME `parse_predicate` the declarative `when =` field
     // uses, and refused the same bounded-history atoms, so the two front-ends
     // build the identical `Predicate`.
+    //
+    // Hands the handle BACK rather than unit, for the reason `repeat` below
+    // does: the two trigger-level modifiers are orthogonal fields of one
+    // `Trigger`, so an author writing them in the other order
+    // (`on_hailed(e, h).when("flag(x)").repeat()`) is saying the same sentence
+    // and must not meet a function-not-found error on a Rhai unit value.
     let s = state.clone();
     host_fn!(
         engine,
@@ -402,10 +408,11 @@ pub(crate) fn register_trigger_builders(
         params = ["predicate"],
         summary = "Gate the registration just authored on a flag predicate: \
                   `on_all_destroyed(g, h).when(\"counter(x) >= 8\")`. A false \
-                  reading suppresses the firing WITHOUT consuming the trigger.",
+                  reading suppresses the firing WITHOUT consuming the trigger. \
+                  Chains with `.repeat()`, in either order.",
         move |handle: &mut TriggerHandle,
               predicate: ImmutableString|
-              -> Result<(), Box<EvalAltResult>> {
+              -> Result<TriggerHandle, Box<EvalAltResult>> {
             let pred = crate::world::flags::parse_predicate(&predicate)
                 .map_err(|e| raise(format!("Trigger 'when' predicate parse error: {e}")))?;
             reject_world_history(&pred, "Trigger 'when' predicate").map_err(raise)?;
@@ -414,7 +421,7 @@ pub(crate) fn register_trigger_builders(
             match st.script_triggers.get_mut(index) {
                 Some(t) => {
                     t.trigger.when = Some(pred);
-                    Ok(())
+                    Ok(*handle)
                 }
                 // Unreachable through the front-end: a handle is only ever minted
                 // by `push_trigger`, and nothing removes from `script_triggers`.
@@ -803,9 +810,11 @@ mod tests {
             on_hailed("x", "a");
             on_hailed("x", "b").repeat();
             on_hailed("x", "c").repeat().when("flag(armed)");
+            on_hailed("x", "d").when("flag(armed)").repeat();
             fn a(ctx) { }
             fn b(ctx) { }
             fn c(ctx) { }
+            fn d(ctx) { }
             "#,
         );
         let repeating: Vec<&str> = regs
@@ -813,7 +822,7 @@ mod tests {
             .filter(|r| r.trigger.repeat)
             .map(|r| r.handler.as_str())
             .collect();
-        assert_eq!(repeating, vec!["b", "c"]);
+        assert_eq!(repeating, vec!["b", "c", "d"]);
         let guarded: Vec<&str> = regs
             .iter()
             .filter(|r| r.trigger.when.is_some())
@@ -821,9 +830,11 @@ mod tests {
             .collect();
         assert_eq!(
             guarded,
-            vec!["c"],
-            "`.repeat()` hands the handle straight back, so a `when` chained after it \
-             still lands on the same registration"
+            vec!["c", "d"],
+            "both modifiers hand the handle straight back, so the two compose in \
+             EITHER order and both land on the same registration — the guide, the \
+             spec and this front-end's own summaries all promise that, and `d` is \
+             the order the promise used to break in"
         );
         assert_eq!(
             regs.iter()

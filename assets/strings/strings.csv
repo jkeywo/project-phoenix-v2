@@ -1832,10 +1832,12 @@ world.falling_skyway.commitment.picket_restraint.resolves,"Commitment resolution
 world.falling_skyway.evidence.picket_contract,"Dossier line — the lane-hold contract the Havelock picket reads out when it is warned, Falling Skyway","[Picket crew cited a lane-hold clause paid by Havelock operations, not by the depot.]"
 world.falling_skyway.report.picket.heading,"Post-mission report row heading (issue #1349) — names the standoff the row is about",[Havelock Picket]
 world.falling_skyway.report.picket.contained,"Post-mission report row outcome — a Security team locked the picket's mounts out from outside",[Mounts locked out from outside. Her crew walked away from it.]
-world.falling_skyway.report.picket.boarded,"Post-mission report row outcome — a Security team went aboard and took the picket",[Taken by boarding party. One of theirs hurt getting there.]
+world.falling_skyway.report.picket.boarded,"Post-mission report row outcome — a Security team went aboard and took the picket, and somebody aboard her was hurt",[Taken by boarding party. One of theirs hurt getting there.]
+world.falling_skyway.report.picket.boarded_clean,"Post-mission report row outcome — a Security team went aboard and took the picket after a warning on the channel, and nobody was hurt","[Taken by boarding party. They were warned, and nobody was hurt.]"
 world.falling_skyway.report.picket.disabled,"Post-mission report row outcome — the picket's guns were shot off and the engagement ended there",[Guns shot off her and the shooting stopped. She is still floating.]
 world.falling_skyway.report.picket.withdrew,"Post-mission report row outcome — the picket was talked off the lane and left under its own power",[Talked off the lane. She flew home whole.]
 world.falling_skyway.report.picket.destroyed,"Post-mission report row outcome — the picket was destroyed",[Destroyed with her crew aboard.]
+world.falling_skyway.report.picket.engaged,"Post-mission report row outcome — the crew opened fire on the picket, settled nothing and left her on station","[Fired on and left standing. The lane stayed hers, and she has the holes to show for it.]"
 world.falling_skyway.report.picket.holding,"Post-mission report row outcome — the crew opened the channel and left the picket where it was",[Hailed and left standing. The lane stayed hers.]
 world.falling_skyway.report.picket.unresolved,"Post-mission report row outcome — nobody ever addressed the standoff",[Never addressed. She was still on station when the shutters came down.]
 world.falling_skyway.comms.picket_leave_it,"Dialogue response — leave the Havelock picket where it is and close the channel, Falling Skyway",[Leave them. They are not the problem tonight.]

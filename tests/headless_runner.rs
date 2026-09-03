@@ -14266,7 +14266,7 @@ fn is_narrative_marked(app: &mut bevy::prelude::App, name: &str) -> bool {
 /// not parking one hull inside another for the length of a conversation.
 const PICKET_STANDOFF_STATION: bevy::prelude::Vec3 = bevy::prelude::Vec3::new(1330.0, 0.0, 170.0);
 
-/// The seven readings of the standoff, and which of them this run wrote. The
+/// The eight readings of the standoff, and which of them this run wrote. The
 /// mission's promise is that the answer is always exactly one of them.
 fn picket_record_written(app: &bevy::prelude::App) -> Vec<String> {
     [
@@ -14275,6 +14275,7 @@ fn picket_record_written(app: &bevy::prelude::App) -> Vec<String> {
         "campaign.skyway.picket.disabled",
         "campaign.skyway.picket.withdrew",
         "campaign.skyway.picket.destroyed",
+        "campaign.skyway.picket.engaged",
         "campaign.skyway.picket.holding",
         "campaign.skyway.picket.unresolved",
     ]
@@ -17611,6 +17612,250 @@ fn falling_skyway_a_convoy_lost_mid_window_leaves_no_claim_unanswered() {
         values.get("skyway_claims_asked").copied(),
         Some(3),
         "…and the refusal is still one of the requests the bridge was scored on"
+    );
+}
+
+// ── Issue #1349: the standoff's record, over every road that reaches it ─────
+//
+// The same device #1340's sweep uses, pointed at the picket: the epilogue's
+// eight-way reading and the two banks feeding it are properties of EVERY road
+// through the beat, and a headless run can only walk one of them. Compiling the
+// mission's own script and calling the handlers in the orders the beat actually
+// produces is what covers the rest — in particular the two orders a Security
+// muster can finish its pair of jobs in, which no single sim run can show both
+// halves of.
+
+/// The report rows a call buffered, in the order the script wrote them.
+fn window_report_rows(
+    effects: &project_phoenix::world::script::schedule::CallEffects,
+) -> Vec<project_phoenix::core::report::ReportRow> {
+    use project_phoenix::world::dispatch::ActionCmd;
+    use project_phoenix::world::script::effects::BufferedEffect;
+    effects
+        .commands
+        .iter()
+        .filter_map(|effect| match effect {
+            BufferedEffect::Cmd(ActionCmd::SetReportRow(row)) => Some(row.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The standoff's one row, as `write_the_picket_record` wrote it for `flags`.
+fn picket_row(
+    script: &WindowScript,
+    flags: &project_phoenix::world::flags::FlagStore,
+) -> project_phoenix::core::report::ReportRow {
+    let effects = script.call("write_the_picket_record", flags);
+    let rows = window_report_rows(&effects);
+    assert_eq!(
+        rows.len(),
+        1,
+        "the standoff writes exactly one row on every road: {rows:?}"
+    );
+    assert_eq!(rows[0].id, "picket");
+    rows[0].clone()
+}
+
+/// The `campaign.skyway.picket.*` key a road wrote, and the promise that it is
+/// always exactly one.
+fn picket_campaign_key(
+    script: &WindowScript,
+    flags: &project_phoenix::world::flags::FlagStore,
+) -> String {
+    let effects = script.call("write_the_picket_record", flags);
+    let written: Vec<String> = window_flag_values(&effects)
+        .into_iter()
+        .filter(|(name, value)| name.starts_with("campaign.skyway.picket.") && *value > 0)
+        .map(|(name, _)| name)
+        .collect();
+    assert_eq!(
+        written.len(),
+        1,
+        "exactly one reading of the standoff is written: {written:?}"
+    );
+    written[0].clone()
+}
+
+/// **Issue #1349, AC5's casualty column against its narrative one.** The report
+/// row for a boarding is chosen off what the boarding actually cost, not off the
+/// fact that a boarding happened.
+///
+/// The warning on the channel discounts the toll by one — that is the whole
+/// return on hailing first — so the reachable, explicitly-designed-for road
+/// "warn them, then send the party" banks a standoff toll of NOUGHT. A single
+/// unconditional row saying "one of theirs hurt getting there" would then print
+/// over a ledger that says nobody was, which is the epilogue contradicting its
+/// own arithmetic in the one row of the eight that makes a claim about people.
+#[test]
+fn falling_skyway_the_boarding_row_never_claims_a_casualty_the_ledger_denies() {
+    let script = WindowScript::compile();
+
+    // A boarding the boat's crew were warned about.
+    let mut warned = project_phoenix::world::flags::FlagStore::new();
+    warned.set_flag_value("havelock_enforcer_warned", 1);
+    warned.set_flag_value("havelock_enforcer_channel_opened", 1);
+    window_apply_flags(&script.call("on_picket_boarded", &warned), &mut warned);
+    warned.set_flag_value("havelock_enforcer_boarded", 1);
+    assert_eq!(
+        warned.counter("skyway_picket_casualties"),
+        0,
+        "precondition: the warning bought the boarding party a braced crew"
+    );
+    assert_eq!(
+        picket_row(&script, &warned).outcome_id,
+        "world.falling_skyway.report.picket.boarded_clean",
+        "…so the row says nobody was hurt, because nobody was"
+    );
+
+    // The same act with no warning ahead of it.
+    let mut unwarned = project_phoenix::world::flags::FlagStore::new();
+    window_apply_flags(&script.call("on_picket_boarded", &unwarned), &mut unwarned);
+    unwarned.set_flag_value("havelock_enforcer_boarded", 1);
+    assert_eq!(
+        unwarned.counter("skyway_picket_casualties"),
+        1,
+        "precondition: unannounced, going through the hatch costs somebody"
+    );
+    assert_eq!(
+        picket_row(&script, &unwarned).outcome_id,
+        "world.falling_skyway.report.picket.boarded",
+        "…and the row that claims a casualty is the one with a casualty behind it"
+    );
+    assert_eq!(
+        picket_campaign_key(&script, &unwarned),
+        picket_campaign_key(&script, &warned),
+        "both are still `boarded`: the split is in the words, not in the fact the \
+         next mission reads"
+    );
+}
+
+/// **Issue #1349, AC5's labour column.** Containment and boarding produce
+/// DISTINCT labour consequences, and the one the operator is left holding
+/// belongs to the ending the record names.
+///
+/// Both can land on one run — the picket authors `secure_contain` AND `board`
+/// on the same target and the destroyer musters two teams — and their finishing
+/// order is not fixed: a boarding takes 83 s from its commit and a containment
+/// 63 s, so either can be last. A bare assignment would hand the number to
+/// whichever finished last, and the record ranks `boarded` above `contained`,
+/// so a run recorded as a boarding would end on the containment's goodwill.
+#[test]
+fn falling_skyway_a_boarding_and_a_containment_together_end_on_the_boardings_number() {
+    let script = WindowScript::compile();
+    const DISPOSITION: &str = "workforce.havelock_operations.disposition";
+
+    /// Both endings, landed in the given order.
+    fn both(script: &WindowScript, first: &str, second: &str) -> (String, i64) {
+        let mut flags = project_phoenix::world::flags::FlagStore::new();
+        window_apply_flags(&script.call(first, &flags), &mut flags);
+        window_apply_flags(&script.call(second, &flags), &mut flags);
+        flags.set_flag_value("havelock_enforcer_contained", 1);
+        flags.set_flag_value("havelock_enforcer_boarded", 1);
+        (
+            picket_campaign_key(script, &flags),
+            flags.counter(DISPOSITION),
+        )
+    }
+
+    // Each alone, for the two numbers the pair is judged against.
+    let mut contained = project_phoenix::world::flags::FlagStore::new();
+    window_apply_flags(
+        &script.call("on_picket_contained", &contained),
+        &mut contained,
+    );
+    let mut boarded = project_phoenix::world::flags::FlagStore::new();
+    window_apply_flags(&script.call("on_picket_boarded", &boarded), &mut boarded);
+    let contained_alone = contained.counter(DISPOSITION);
+    let boarded_alone = boarded.counter(DISPOSITION);
+    assert!(
+        boarded_alone < contained_alone,
+        "AC5: the two roads cost Havelock different amounts of goodwill — a \
+         containment leaves them their boat and a boarding does not \
+         (contained {contained_alone}, boarded {boarded_alone})"
+    );
+
+    for (first, second) in [
+        ("on_picket_boarded", "on_picket_contained"),
+        ("on_picket_contained", "on_picket_boarded"),
+    ] {
+        let (key, disposition) = both(&script, first, second);
+        assert_eq!(
+            key, "campaign.skyway.picket.boarded",
+            "the record ranks the bigger act first whichever finished last ({first} \
+             then {second})"
+        );
+        assert_eq!(
+            disposition, boarded_alone,
+            "…and the labour consequence is that ending's, not the other's: a \
+             containment landing half a minute behind a boarding must not hand the \
+             operator the containment's opinion of a crew who came through the hatch \
+             ({first} then {second})"
+        );
+    }
+}
+
+/// **Issue #1349, the reading of a standoff nobody settled.** A crew who opened
+/// fire on the picket and then broke off are not a crew who left her alone, and
+/// the record must not say they were.
+///
+/// The weapons threshold is 65 hull points wide, so stopping short of it is an
+/// ordinary thing for a bridge to do. Without its own branch that run falls
+/// through to `holding` ("hailed and left standing") or `unresolved` ("never
+/// addressed"), and a later mission reading either key concludes the crew never
+/// touched her — when in fact she and they exchanged fire.
+#[test]
+fn falling_skyway_a_picket_that_was_fired_on_is_not_recorded_as_never_addressed() {
+    let script = WindowScript::compile();
+
+    let mut engaged = project_phoenix::world::flags::FlagStore::new();
+    engaged.set_flag_value("picket_engaged", 1);
+    assert_eq!(
+        picket_campaign_key(&script, &engaged),
+        "campaign.skyway.picket.engaged",
+        "guns came out, nothing was settled, and the boat is still sitting there"
+    );
+    let row = picket_row(&script, &engaged);
+    assert_eq!(row.outcome_id, "world.falling_skyway.report.picket.engaged");
+    assert!(
+        row.score < 0,
+        "the lane is blocked AND a neutral contract crew were shot at for it, which \
+         is worse than leaving them alone: score {}",
+        row.score
+    );
+
+    // …and it outranks `holding`, because shooting at somebody is not a
+    // non-intervention.
+    let mut engaged_and_hailed = engaged.clone();
+    engaged_and_hailed.set_flag_value("havelock_enforcer_channel_opened", 1);
+    assert_eq!(
+        picket_campaign_key(&script, &engaged_and_hailed),
+        "campaign.skyway.picket.engaged"
+    );
+
+    // The two controls: the readings this branch is carved out of still mean
+    // what they say.
+    let mut hailed_only = project_phoenix::world::flags::FlagStore::new();
+    hailed_only.set_flag_value("havelock_enforcer_channel_opened", 1);
+    assert_eq!(
+        picket_campaign_key(&script, &hailed_only),
+        "campaign.skyway.picket.holding",
+        "a crew who called her and never fired did leave her standing"
+    );
+    assert_eq!(
+        picket_campaign_key(&script, &project_phoenix::world::flags::FlagStore::new()),
+        "campaign.skyway.picket.unresolved",
+        "and a crew who did neither never addressed her at all"
+    );
+
+    // A settled ending still wins over the fact she was shot at on the way to
+    // it: the branch is for standoffs that ended in nothing, not for every run
+    // that fired a shot.
+    let mut engaged_then_disabled = engaged.clone();
+    engaged_then_disabled.set_flag_value("havelock_enforcer_disabled", 1);
+    assert_eq!(
+        picket_campaign_key(&script, &engaged_then_disabled),
+        "campaign.skyway.picket.disabled"
     );
 }
 

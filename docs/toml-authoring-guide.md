@@ -374,7 +374,9 @@ The registration fns mirror the `TriggerCondition` vocabulary one for one:
 | `on_waypoint_reached(entity, handler)` | | Fires on arrival at any waypoint of that ship's route; "reached" means within that entity's `[behaviour] waypoint_arrival_radius`. |
 
 A registration is single-shot: each fires at most once per session. Two
-modifiers chain onto it, in either order:
+modifiers chain onto it, in either order — each hands the registration back, so
+`on_hailed(e, h).repeat().when("flag(x)")` and
+`on_hailed(e, h).when("flag(x)").repeat()` build the same trigger:
 
 | Modifier | Notes |
 |---|---|

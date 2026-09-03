@@ -24196,12 +24196,20 @@ fn falling_skyway_the_corridor_sheds_three_masses_and_names_none_of_them() {
         );
     }
 
-    // ── AC3, negatively: no lock has been handed to anybody ────────────────
-    assert_eq!(
-        shed_lock(&app, ship),
-        None,
-        "the scenario reached into Tactical and set a target"
-    );
+    // ── AC3, negatively: nothing has handed Tactical an unread rock ────────
+    //
+    // Stated against the three contacts rather than against `None`, because
+    // Tactical is Backfilled here and is entitled to be holding anything else in
+    // the world on its own account. The claim is about THESE masses.
+    let lock = shed_lock(&app, ship);
+    for name in [SHED_LEAD, SHED_TRAIL, SHED_STRAY] {
+        let uuid = scan_uuid_named(&mut app, name);
+        assert_ne!(
+            lock.as_deref(),
+            Some(uuid.as_str()),
+            "{name} is under Tactical's lock and nobody has read it"
+        );
+    }
 
     // ── AC3: the cue says what is true and not which one matters ───────────
     let (id, severity, station) = shed_message(&app);

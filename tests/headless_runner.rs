@@ -11049,6 +11049,68 @@ fn assert_lyra_report_row(app: &bevy::prelude::App, outcome_id: &str, state: &st
         "the hidden diagnostic score, which no player surface ever receives"
     );
 }
+
+/// Assert one narrative report row (issue #1351) on the authoritative
+/// `MissionReport`, by its stable id — the generic form of
+/// `assert_lyra_report_row`, used to pin the survey/labour/traffic/skyhook/
+/// lifts/civilians/commitments rows the campaign close writes.
+///
+/// Checked on the resource and not the wire for the same reason the Lyra helper
+/// is: the SCORE lives only here, filtered out of every player projection, so
+/// the PRD #1337 diagnostic is only pinnable against the report the headless
+/// run reads.
+fn assert_report_row(
+    app: &bevy::prelude::App,
+    id: &str,
+    heading_id: &str,
+    outcome_id: &str,
+    state: &str,
+    score: i32,
+) {
+    let report = app
+        .world()
+        .resource::<project_phoenix::core::report::MissionReport>();
+    let rows: Vec<&project_phoenix::core::report::ReportRow> =
+        report.rows().iter().filter(|row| row.id == id).collect();
+    assert_eq!(rows.len(), 1, "exactly one '{id}' row: {:?}", report.rows());
+    assert_eq!(rows[0].heading_id, heading_id, "'{id}' heading");
+    assert_eq!(rows[0].outcome_id, outcome_id, "'{id}' outcome");
+    assert_eq!(rows[0].state.as_str(), state, "'{id}' state");
+    assert_eq!(rows[0].score, score, "'{id}' hidden diagnostic score");
+}
+
+/// Assert the report has NO row with `id` — the omission half of AC1, for a row
+/// whose fate the run never reached (a civilians row on a held-head run, say).
+fn assert_no_report_row(app: &bevy::prelude::App, id: &str) {
+    let report = app
+        .world()
+        .resource::<project_phoenix::core::report::MissionReport>();
+    assert!(
+        !report.rows().iter().any(|row| row.id == id),
+        "the '{id}' row must be omitted when it does not apply: {:?}",
+        report.rows()
+    );
+}
+
+/// The report's total, and the invariant AC2 asks for end to end: the headless
+/// total is exactly the sum of the visible rows' scores.
+fn assert_report_total_is_the_sum(app: &bevy::prelude::App) -> i32 {
+    let report = app
+        .world()
+        .resource::<project_phoenix::core::report::MissionReport>();
+    let sum: i32 = report
+        .rows()
+        .iter()
+        .fold(0i32, |acc, row| acc.saturating_add(row.score));
+    assert_eq!(
+        report.total(),
+        sum,
+        "the headless total must equal the sum of the visible rows: {:?}",
+        report.rows()
+    );
+    sum
+}
+
 /// The three craft the sweep schedule actually moves. `shuttle_wick` works the
 /// depot ladder east of the corridor and is deliberately left alone.
 const SKYWAY_CORRIDOR_TRAFFIC: [&str; 3] = [
@@ -18136,6 +18198,365 @@ fn falling_skyway_containment_and_destruction_each_write_their_own_ending() {
     assert_eq!(
         picket_campaign_key(&script, &both),
         "campaign.skyway.picket.destroyed"
+    );
+}
+
+// ── Issue #1351: the narrative report, one category at a time ────────────────
+//
+// The `write_the_picket_record` harness above, pointed at the six close-time
+// helpers and the two event-timed ones. Each is a pure reader of flags, so a
+// synthetic `FlagStore` and one `script.call` pin the exact PRD #1337 score,
+// state and outcome String Id a road produces — every combination a single sim
+// run could only walk one of.
+
+/// The one report row a helper wrote for `flags`, asserting it wrote exactly
+/// one and it carries the id the caller expects.
+fn one_report_row(
+    script: &WindowScript,
+    fn_name: &str,
+    flags: &project_phoenix::world::flags::FlagStore,
+    id: &str,
+) -> project_phoenix::core::report::ReportRow {
+    let rows = window_report_rows(&script.call(fn_name, flags));
+    assert_eq!(
+        rows.len(),
+        1,
+        "{fn_name} must write exactly one row for this state: {rows:?}"
+    );
+    assert_eq!(rows[0].id, id, "{fn_name} wrote the wrong row id");
+    rows[0].clone()
+}
+
+/// A flag store with one flag set — the common shape of these one-fact cases.
+fn flags_with(pairs: &[(&str, i64)]) -> project_phoenix::world::flags::FlagStore {
+    let mut flags = project_phoenix::world::flags::FlagStore::new();
+    for (name, value) in pairs {
+        flags.set_flag_value(name, *value);
+    }
+    flags
+}
+
+/// **Issue #1351, AC3 — the survey/evidence row sums PRD #1337's five facts.**
+/// Filed +2 (missed -2), the depot discrepancy +1, a worker on the record +2,
+/// and the bundle filed with Control +3 — summed, because one investigation did
+/// several separate things, and the outcome names the deepest of them.
+#[test]
+fn falling_skyway_the_survey_row_sums_the_five_evidence_facts() {
+    let script = WindowScript::compile();
+
+    // Everything: filed, discrepancy, corroboration, records. +2+1+2+3 = +8.
+    let all = flags_with(&[
+        ("skyway_survey_reported", 1),
+        ("skyway_records_diff_found", 1),
+        ("skyway_worker_corroboration_obtained", 1),
+        ("skyway_records_put", 1),
+    ]);
+    let row = one_report_row(&script, "survey_report_row", &all, "survey");
+    assert_eq!(row.score, 8);
+    assert_eq!(
+        row.outcome_id,
+        "world.falling_skyway.report.survey.corroborated"
+    );
+    assert_eq!(row.state.as_str(), "saved");
+
+    // Nothing: no survey ever filed, no evidence held. -2, and the row says so.
+    let none = project_phoenix::world::flags::FlagStore::new();
+    let row = one_report_row(&script, "survey_report_row", &none, "survey");
+    assert_eq!(row.score, -2);
+    assert_eq!(row.outcome_id, "world.falling_skyway.report.survey.missed");
+    assert_eq!(row.state.as_str(), "lost");
+
+    // Filed, but nothing on the record to hang a case on. +2, neutral.
+    let filed = flags_with(&[("skyway_survey_reported", 1)]);
+    let row = one_report_row(&script, "survey_report_row", &filed, "survey");
+    assert_eq!(row.score, 2);
+    assert_eq!(row.outcome_id, "world.falling_skyway.report.survey.filed");
+    assert_eq!(row.state.as_str(), "neutral");
+
+    // The depot record on paper but no living witness: filed +2, discrepancy
+    // +1 = +3, and the headline is `records`, not `corroborated`.
+    let records = flags_with(&[
+        ("skyway_survey_reported", 1),
+        ("skyway_records_diff_found", 1),
+    ]);
+    let row = one_report_row(&script, "survey_report_row", &records, "survey");
+    assert_eq!(row.score, 3);
+    assert_eq!(row.outcome_id, "world.falling_skyway.report.survey.records");
+    assert_eq!(row.state.as_str(), "partial");
+}
+
+/// **Issue #1351, AC3 — the labour row scores the three-way strike.** Talked to
+/// a vote +4, forced open over their heads 0, left stopped -3.
+#[test]
+fn falling_skyway_the_labour_row_scores_the_three_way_strike() {
+    let script = WindowScript::compile();
+    for (flag, score, outcome, state) in [
+        (
+            "skyway_settled_by_negotiation",
+            4,
+            "world.falling_skyway.report.labour.negotiated",
+            "saved",
+        ),
+        (
+            "skyway_forced_open",
+            0,
+            "world.falling_skyway.report.labour.forced",
+            "neutral",
+        ),
+    ] {
+        let row = one_report_row(
+            &script,
+            "labour_report_row",
+            &flags_with(&[(flag, 1)]),
+            "labour",
+        );
+        assert_eq!(row.score, score, "{flag}");
+        assert_eq!(row.outcome_id, outcome);
+        assert_eq!(row.state.as_str(), state);
+    }
+    // Neither settled: the strike was left stopped, and that is a real reading.
+    let none = project_phoenix::world::flags::FlagStore::new();
+    let row = one_report_row(&script, "labour_report_row", &none, "labour");
+    assert_eq!(row.score, -3);
+    assert_eq!(
+        row.outcome_id,
+        "world.falling_skyway.report.labour.unresolved"
+    );
+    assert_eq!(row.state.as_str(), "lost");
+}
+
+/// **Issue #1351, AC3/AC4 — the traffic row scores each of the four craft.**
+/// +1 for every corridor hull still flying, -3 for every one the sweep took,
+/// counted one at a time so the score is the exact tally.
+#[test]
+fn falling_skyway_the_traffic_row_scores_each_of_the_four_craft() {
+    let script = WindowScript::compile();
+
+    // All four came through: +4, clear.
+    let none = project_phoenix::world::flags::FlagStore::new();
+    let row = one_report_row(&script, "traffic_report_row", &none, "traffic");
+    assert_eq!(row.score, 4);
+    assert_eq!(row.outcome_id, "world.falling_skyway.report.traffic.clear");
+    assert_eq!(row.state.as_str(), "saved");
+
+    // One lost: three survived (+3), one taken (-3) = 0, thinned.
+    let one = flags_with(&[("skyway_traffic_lost_lark", 1)]);
+    let row = one_report_row(&script, "traffic_report_row", &one, "traffic");
+    assert_eq!(row.score, 0);
+    assert_eq!(
+        row.outcome_id,
+        "world.falling_skyway.report.traffic.thinned"
+    );
+    assert_eq!(row.state.as_str(), "partial");
+
+    // All four gone: -12, scattered.
+    let all = flags_with(&[
+        ("skyway_traffic_lost_meridian", 1),
+        ("skyway_traffic_lost_lark", 1),
+        ("skyway_traffic_lost_pell", 1),
+        ("skyway_traffic_lost_wick", 1),
+    ]);
+    let row = one_report_row(&script, "traffic_report_row", &all, "traffic");
+    assert_eq!(row.score, -12);
+    assert_eq!(
+        row.outcome_id,
+        "world.falling_skyway.report.traffic.scattered"
+    );
+    assert_eq!(row.state.as_str(), "lost");
+}
+
+/// **Issue #1351, AC3 — the skyhook row is plus or minus four, and omitted when
+/// the run reached neither fate.**
+#[test]
+fn falling_skyway_the_skyhook_row_is_plus_or_minus_four() {
+    let script = WindowScript::compile();
+    let held = flags_with(&[("skyway_skyhook_held", 1)]);
+    let row = one_report_row(&script, "skyhook_report_row", &held, "skyhook");
+    assert_eq!(row.score, 4);
+    assert_eq!(row.outcome_id, "world.falling_skyway.report.skyhook.held");
+    assert_eq!(row.state.as_str(), "saved");
+
+    let lost = flags_with(&[("skyway_skyhook_lost", 1)]);
+    let row = one_report_row(&script, "skyhook_report_row", &lost, "skyhook");
+    assert_eq!(row.score, -4);
+    assert_eq!(row.outcome_id, "world.falling_skyway.report.skyhook.lost");
+    assert_eq!(row.state.as_str(), "lost");
+
+    // Neither: no row at all — the section-5 defensiveness, not an invented fate.
+    let neither = project_phoenix::world::flags::FlagStore::new();
+    assert!(
+        window_report_rows(&script.call("skyhook_report_row", &neither)).is_empty(),
+        "a run that reached neither skyhook fate writes no skyhook row"
+    );
+}
+
+/// **Issue #1351, AC3 — the lifts row pays two per claimant carried and docks
+/// one per request never answered; a refusal to their face scores nothing.**
+#[test]
+fn falling_skyway_the_lifts_row_pays_two_a_lift_less_one_unanswered() {
+    let script = WindowScript::compile();
+
+    // Two carried clear, all requests answered: +4, full.
+    let two = flags_with(&[
+        ("skyway_window_served_committee", 1),
+        ("skyway_window_served_convoy", 1),
+    ]);
+    let row = one_report_row(&script, "lifts_report_row", &two, "lifts");
+    assert_eq!(row.score, 4);
+    assert_eq!(row.outcome_id, "world.falling_skyway.report.lifts.full");
+    assert_eq!(row.state.as_str(), "saved");
+
+    // One carried, one request left unanswered: +2 -1 = +1, some.
+    let one = flags_with(&[
+        ("skyway_window_served_committee", 1),
+        ("skyway_claims_unanswered", 1),
+    ]);
+    let row = one_report_row(&script, "lifts_report_row", &one, "lifts");
+    assert_eq!(row.score, 1);
+    assert_eq!(row.outcome_id, "world.falling_skyway.report.lifts.some");
+    assert_eq!(row.state.as_str(), "partial");
+
+    // Nobody carried, two requests unanswered: -2, none.
+    let none = flags_with(&[("skyway_claims_unanswered", 2)]);
+    let row = one_report_row(&script, "lifts_report_row", &none, "lifts");
+    assert_eq!(row.score, -2);
+    assert_eq!(row.outcome_id, "world.falling_skyway.report.lifts.none");
+    assert_eq!(row.state.as_str(), "lost");
+}
+
+/// **Issue #1351, AC3 — the commitments row reads the counts section 6 settled,
+/// and a run that made no promises has no row.**
+#[test]
+fn falling_skyway_the_commitments_row_reads_the_settled_counts() {
+    let script = WindowScript::compile();
+
+    let clean = flags_with(&[("campaign.skyway.commitments.kept", 3)]);
+    let row = one_report_row(&script, "commitments_report_row", &clean, "commitments");
+    assert_eq!(row.score, 9);
+    assert_eq!(
+        row.outcome_id,
+        "world.falling_skyway.report.commitments.kept"
+    );
+    assert_eq!(row.state.as_str(), "saved");
+
+    let mixed = flags_with(&[
+        ("campaign.skyway.commitments.kept", 1),
+        ("campaign.skyway.commitments.broken", 1),
+    ]);
+    let row = one_report_row(&script, "commitments_report_row", &mixed, "commitments");
+    assert_eq!(row.score, -1);
+    assert_eq!(
+        row.outcome_id,
+        "world.falling_skyway.report.commitments.mixed"
+    );
+    assert_eq!(row.state.as_str(), "partial");
+
+    let broken = flags_with(&[("campaign.skyway.commitments.broken", 2)]);
+    let row = one_report_row(&script, "commitments_report_row", &broken, "commitments");
+    assert_eq!(row.score, -8);
+    assert_eq!(
+        row.outcome_id,
+        "world.falling_skyway.report.commitments.broken"
+    );
+    assert_eq!(row.state.as_str(), "lost");
+
+    // No promises on the books: no row.
+    let none = project_phoenix::world::flags::FlagStore::new();
+    assert!(
+        window_report_rows(&script.call("commitments_report_row", &none)).is_empty(),
+        "a run that made no promises reports no commitments row"
+    );
+}
+
+/// **Issue #1351, AC3 — the civilians row scores the head's survivors, and is
+/// only ever written when the head fell and there were survivors to find.**
+#[test]
+fn falling_skyway_the_civilians_row_scores_the_head_survivors() {
+    let script = WindowScript::compile();
+
+    // Both brought in: +2, all.
+    let both = flags_with(&[("skyway_survivors_recovered", 2)]);
+    let row = one_report_row(&script, "civilians_report_row", &both, "civilians");
+    assert_eq!(row.score, 2);
+    assert_eq!(row.outcome_id, "world.falling_skyway.report.civilians.all");
+    assert_eq!(row.state.as_str(), "saved");
+
+    // One in, one lost: +1 -2 = -1, some.
+    let one = flags_with(&[
+        ("skyway_survivors_recovered", 1),
+        ("skyway_survivors_lost", 1),
+    ]);
+    let row = one_report_row(&script, "civilians_report_row", &one, "civilians");
+    assert_eq!(row.score, -1);
+    assert_eq!(row.outcome_id, "world.falling_skyway.report.civilians.some");
+    assert_eq!(row.state.as_str(), "partial");
+
+    // Both lost: -4, none.
+    let none = flags_with(&[("skyway_survivors_lost", 2)]);
+    let row = one_report_row(&script, "civilians_report_row", &none, "civilians");
+    assert_eq!(row.score, -4);
+    assert_eq!(row.outcome_id, "world.falling_skyway.report.civilians.none");
+    assert_eq!(row.state.as_str(), "lost");
+
+    // The head held: no epilogue, no survivors, no row.
+    let held = project_phoenix::world::flags::FlagStore::new();
+    assert!(
+        window_report_rows(&script.call("civilians_report_row", &held)).is_empty(),
+        "a run that held the head reports no civilians row"
+    );
+}
+
+/// **Issue #1351, AC5 — the catastrophic Lark collision still files a report.**
+///
+/// The collision ends the mission in Act 1/2, before the campaign close ever
+/// runs. Left bare it would reach `game_over` with an empty report and stay a
+/// verdict with the reasoning thrown away; `classify()` upgrades any GameOver
+/// carrying rows, so the fix is that `on_lark_collision` writes the rows it can
+/// know — the head lost, Lark down in the throat, and whatever survey the run
+/// had filed by then — before it declares the defeat.
+#[test]
+fn falling_skyway_the_lark_collision_still_files_a_report() {
+    let script = WindowScript::compile();
+
+    // A run that had filed nothing when Lark went into the throat.
+    let flags = project_phoenix::world::flags::FlagStore::new();
+    let rows = window_report_rows(&script.call("on_lark_collision", &flags));
+    let by_id: std::collections::BTreeMap<String, project_phoenix::core::report::ReportRow> =
+        rows.iter().map(|r| (r.id.clone(), r.clone())).collect();
+
+    let skyhook = by_id
+        .get("skyhook")
+        .expect("the catastrophe records the head it just took");
+    assert_eq!(
+        skyhook.outcome_id,
+        "world.falling_skyway.report.skyhook.lost"
+    );
+    assert_eq!(skyhook.score, -4);
+
+    let traffic = by_id
+        .get("traffic")
+        .expect("the catastrophe records the corridor it just thinned");
+    assert_eq!(
+        traffic.outcome_id,
+        "world.falling_skyway.report.traffic.thinned"
+    );
+    assert_eq!(
+        traffic.score, 0,
+        "Lark is one of the four gone, the other three still flying: 3 - 3 = 0"
+    );
+
+    let survey = by_id
+        .get("survey")
+        .expect("the catastrophe records the survey the run had, or had not, filed");
+    assert_eq!(
+        survey.outcome_id,
+        "world.falling_skyway.report.survey.missed"
+    );
+
+    assert!(
+        !rows.is_empty(),
+        "a non-empty report is the whole point: it is what makes classify() call \
+         this catastrophe REPORTED rather than a bare defeat"
     );
 }
 

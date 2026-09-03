@@ -2740,6 +2740,27 @@ fn on_lark_collision(ctx) {
     });
     ctx.effects.destroy_entity("world.falling_skyway.entity.hauler_lark.name");
     ctx.effects.destroy_entity("world.falling_skyway.entity.skyhook.name");
+
+    // The report a catastrophe still owes (issue #1351, AC5). This ending fires
+    // in Act 1/2, long before `write_the_campaign_record` — so left as it was it
+    // would reach `game_over` carrying NO rows, and `classify()` would leave it
+    // a bare `defeat` with the reasoning thrown away. A catastrophic ending is a
+    // REPORTED ending: it still has an account to give of what it cost.
+    //
+    // Freeze the two facts the collision has just settled — the head is gone and
+    // Lark is wreckage in the throat — then write the rows that are knowable at
+    // this beat off the frozen flags, using the SAME helpers the clean close
+    // does so there is no second copy of the scoring. The destroys above route
+    // their own `on_head_lost` / `on_lark_traffic_lost` a tick from now, but a
+    // buffered destroy has not run yet, so set the flags the rows read here.
+    ctx.flags.skyway_skyhook_lost = 1;
+    if ctx.flags.skyway_traffic_lost_lark == 0 {
+        ctx.flags.skyway_traffic_lost_lark = 1;
+        ctx.flags.increment("a2_traffic_lost", 1);
+    }
+    survey_report_row(ctx);
+    traffic_report_row(ctx);
+    skyhook_report_row(ctx);
     ctx.effects.game_over("world.falling_skyway.game_over.lark_collision", "defeat");
 }
 
@@ -5182,6 +5203,11 @@ fn head_epilogue_resolves(ctx) {
     ctx.flags.skyway_survivors_recovered = saved;
     ctx.flags.skyway_survivors_lost = 2 - saved;
 
+    // The civilians row (issue #1351), written HERE — the tick the survivors'
+    // fate is decided, the Lyra rule — and never at the close, because a run
+    // that held the head never reaches this epilogue and reports no such row.
+    civilians_report_row(ctx);
+
     if saved > 0 {
         ctx.effects.complete_objective("obj-a3-survivors");
     } else {
@@ -7524,6 +7550,242 @@ fn write_the_campaign_record(ctx) {
     // finished, whatever else this mission achieved — and it is a TRAFFIC fact
     // rather than a casualty one, which is the split section 7 already makes.
     write_the_picket_record(ctx);
+
+    // ── THE NARRATIVE REPORT (issue #1351) ──────────────────────────────────
+    //
+    // Six of the report's rows, written here at the one finalisation chokepoint
+    // and in the authored narrative order the report reads top to bottom, each
+    // off the frozen campaign facts the seven sections above just settled. This
+    // block REGISTERS NO NEW STATE — it reads the same flags the handoff does.
+    //
+    // The other three rows ride the same `MissionReport` Vec in write order,
+    // written at the tick each one's fate is actually decided rather than here:
+    // the Lyra row in Act 2 (#1344), the civilians row when the head's
+    // survivors are recovered (#1338's epilogue), and the picket row just
+    // above. So a full run's rows come out [lyra, civilians?, picket, survey,
+    // labour, traffic, skyhook, lifts, commitments] — the six below are in the
+    // issue's order among themselves, and the three event-timed rows sit where
+    // their own beats put them, which is the property #1344 chose deliberately.
+    survey_report_row(ctx);
+    labour_report_row(ctx);
+    traffic_report_row(ctx);
+    skyhook_report_row(ctx);
+    lifts_report_row(ctx);
+    commitments_report_row(ctx);
+}
+
+// ── The report-row helpers (issue #1351, PRD #1337) ─────────────────────────
+//
+// One helper per narrative category, each the `lyra`/`picket` shape: one stable
+// row id, one heading String Id, one outcome String Id chosen off the frozen
+// facts, one ReportRowState a player surface styles on, and one SIGNED score no
+// player ever sees. The score is the diagnostic PRD #1337 ratified; lives and
+// promises dominate it, which is why the traffic, civilian and commitment rows
+// carry the heaviest swings. The outcome/state prose is [ai] unratified.
+//
+// Every helper reads flags and nothing else, so each is callable on its own —
+// from `write_the_campaign_record` above, from `on_lark_collision`'s
+// catastrophic ending, and from a headless unit test that hands it a flag store.
+// Writing the same id twice UPDATES the one row in place (the report's own
+// rule), so a fate that is re-stated never double-counts.
+
+// SURVEY / EVIDENCE. The five numbers PRD #1337 lists for this row, summed
+// because they are separate things one investigation did: the survey filed
+// (+2) or missed (-2), the depot discrepancy found (+1), a worker put on the
+// record (+2), and the bundle filed with Control (+3). The outcome names the
+// deepest thing the crew came away holding; the score carries the rest.
+fn survey_report_row(ctx) {
+    let score = 0;
+    let filed = ctx.flags.skyway_survey_reported > 0;
+    if filed { score += 2; } else { score -= 2; }
+    if ctx.flags.skyway_records_diff_found > 0 { score += 1; }
+    if ctx.flags.skyway_worker_corroboration_obtained > 0 { score += 2; }
+    if ctx.flags.skyway_records_put > 0 { score += 3; }
+
+    let outcome = "world.falling_skyway.report.survey.missed";
+    let state = "lost";
+    if ctx.flags.skyway_worker_corroboration_obtained > 0 {
+        outcome = "world.falling_skyway.report.survey.corroborated";
+        state = "saved";
+    } else if ctx.flags.skyway_records_put > 0 || ctx.flags.skyway_records_diff_found > 0 {
+        outcome = "world.falling_skyway.report.survey.records";
+        state = "partial";
+    } else if filed {
+        outcome = "world.falling_skyway.report.survey.filed";
+        state = "neutral";
+    }
+    ctx.effects.report_row(#{
+        id: "survey",
+        heading: "world.falling_skyway.report.survey.heading",
+        outcome: outcome,
+        state: state,
+        score: score,
+    });
+}
+
+// LABOUR SETTLEMENT. The three-way strike reading section 2 already made,
+// scored: talked to a vote (+4), forced open over their heads (0), or left
+// stopped (-3).
+fn labour_report_row(ctx) {
+    let outcome = "world.falling_skyway.report.labour.unresolved";
+    let state = "lost";
+    let score = -3;
+    if ctx.flags.skyway_settled_by_negotiation > 0 {
+        outcome = "world.falling_skyway.report.labour.negotiated";
+        state = "saved";
+        score = 4;
+    } else if ctx.flags.skyway_forced_open > 0 {
+        outcome = "world.falling_skyway.report.labour.forced";
+        state = "neutral";
+        score = 0;
+    }
+    ctx.effects.report_row(#{
+        id: "labour",
+        heading: "world.falling_skyway.report.labour.heading",
+        outcome: outcome,
+        state: state,
+        score: score,
+    });
+}
+
+// SURVIVING TRAFFIC. +1 for each corridor craft still flying, -3 for each one
+// the sweep took — the four the campaign record itemises, read one at a time so
+// the score is the exact tally and not a band. A capacity fact, kept apart from
+// the human casualty tolls for the reason section 7 states.
+fn traffic_report_row(ctx) {
+    let score = 0;
+    let lost = 0;
+    if ctx.flags.skyway_traffic_lost_meridian > 0 { score -= 3; lost += 1; } else { score += 1; }
+    if ctx.flags.skyway_traffic_lost_lark > 0     { score -= 3; lost += 1; } else { score += 1; }
+    if ctx.flags.skyway_traffic_lost_pell > 0     { score -= 3; lost += 1; } else { score += 1; }
+    if ctx.flags.skyway_traffic_lost_wick > 0     { score -= 3; lost += 1; } else { score += 1; }
+
+    let outcome = "world.falling_skyway.report.traffic.clear";
+    let state = "saved";
+    if lost >= 4 {
+        outcome = "world.falling_skyway.report.traffic.scattered";
+        state = "lost";
+    } else if lost > 0 {
+        outcome = "world.falling_skyway.report.traffic.thinned";
+        state = "partial";
+    }
+    ctx.effects.report_row(#{
+        id: "traffic",
+        heading: "world.falling_skyway.report.traffic.heading",
+        outcome: outcome,
+        state: state,
+        score: score,
+    });
+}
+
+// THE SKYHOOK. The pair section 5 mirrors, scored: held (+4) or lost (-4). If a
+// run somehow reached neither the row is omitted rather than inventing a fate,
+// the same defensiveness section 5 writes as two tests rather than an if/else.
+fn skyhook_report_row(ctx) {
+    if ctx.flags.skyway_skyhook_lost > 0 {
+        ctx.effects.report_row(#{
+            id: "skyhook",
+            heading: "world.falling_skyway.report.skyhook.heading",
+            outcome: "world.falling_skyway.report.skyhook.lost",
+            state: "lost",
+            score: -4,
+        });
+    } else if ctx.flags.skyway_skyhook_held > 0 {
+        ctx.effects.report_row(#{
+            id: "skyhook",
+            heading: "world.falling_skyway.report.skyhook.heading",
+            outcome: "world.falling_skyway.report.skyhook.held",
+            state: "saved",
+            score: 4,
+        });
+    }
+}
+
+// LIFT ALLOCATION. +2 for each claimant carried or berthed clear, -1 for each
+// request the captain never answered; a refusal to somebody's face scores
+// nothing, because it is a decision the mission records everywhere else and not
+// a silence. `lifted_count` and `skyway_claims_unanswered` are both settled by
+// `resolve_the_choice`, which the mission runs before this record.
+fn lifts_report_row(ctx) {
+    let lifted = lifted_count(ctx);
+    let unanswered = ctx.flags.skyway_claims_unanswered;
+    let score = lifted * 2 - unanswered;
+
+    let outcome = "world.falling_skyway.report.lifts.none";
+    let state = "lost";
+    if lifted >= 2 {
+        outcome = "world.falling_skyway.report.lifts.full";
+        state = "saved";
+    } else if lifted == 1 {
+        outcome = "world.falling_skyway.report.lifts.some";
+        state = "partial";
+    }
+    ctx.effects.report_row(#{
+        id: "lifts",
+        heading: "world.falling_skyway.report.lifts.heading",
+        outcome: outcome,
+        state: state,
+        score: score,
+    });
+}
+
+// THE CAPTAIN'S WORD. +3 for each promise kept, -4 for each broken, read off
+// the counts section 6 settled onto the campaign flags. A run that made no
+// promises has no row — an absence is a real answer, so nothing is written.
+fn commitments_report_row(ctx) {
+    let kept = ctx.flags["campaign.skyway.commitments.kept"];
+    let broken = ctx.flags["campaign.skyway.commitments.broken"];
+    if kept + broken == 0 { return; }
+    let score = kept * 3 - broken * 4;
+
+    let outcome = "world.falling_skyway.report.commitments.broken";
+    let state = "lost";
+    if broken == 0 {
+        outcome = "world.falling_skyway.report.commitments.kept";
+        state = "saved";
+    } else if kept > 0 {
+        outcome = "world.falling_skyway.report.commitments.mixed";
+        state = "partial";
+    }
+    ctx.effects.report_row(#{
+        id: "commitments",
+        heading: "world.falling_skyway.report.commitments.heading",
+        outcome: outcome,
+        state: state,
+        score: score,
+    });
+}
+
+// CIVILIANS. The survivors the falling head shed, newly discovered adrift in the
+// debris and brought in by the tractor (#1338's epilogue). +1 for each one
+// recovered, -2 for each one the debris took. Written from `head_epilogue_resolves`
+// at the tick their fate is decided, and only ever then: a run that held the head
+// never opened the epilogue, so it reports no civilians row at all — a genuinely
+// inapplicable row, omitted. This is the mission's "newly discovered civilian"
+// population; it is a DIFFERENT rescue mechanic from #1348's Engineering
+// transporter, which this mission does not place, and the two never share a row.
+fn civilians_report_row(ctx) {
+    let saved = ctx.flags.skyway_survivors_recovered;
+    let lost = ctx.flags.skyway_survivors_lost;
+    if saved + lost == 0 { return; }
+    let score = saved - lost * 2;
+
+    let outcome = "world.falling_skyway.report.civilians.none";
+    let state = "lost";
+    if lost == 0 {
+        outcome = "world.falling_skyway.report.civilians.all";
+        state = "saved";
+    } else if saved > 0 {
+        outcome = "world.falling_skyway.report.civilians.some";
+        state = "partial";
+    }
+    ctx.effects.report_row(#{
+        id: "civilians",
+        heading: "world.falling_skyway.report.civilians.heading",
+        outcome: outcome,
+        state: state,
+        score: score,
+    });
 }
 
 // ── 8. THE STANDOFF (#1349) ─────────────────────────────────────────────────

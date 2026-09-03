@@ -21,6 +21,12 @@
 //! through the identical `Dock`/`Undock`, `StartTransfer`/`StopTransfer` and
 //! `DispatchExternalRepair`/`RecallExternalRepair` admitted-command paths, with
 //! the assertions aimed at the narrative timeline instead.
+//!
+//! **AC4** ("existing behavior remains unchanged") is proved the same way
+//! `task_lifecycle_narrative.rs` proves it for the tracer workflows: each of
+//! the three workflows gets an identical-seeds `world_digest` comparison and a
+//! JSON-vs-NDJSON `world_digest` comparison, so the timeline claims above are
+//! backed by authoritative-state evidence, not narrative equality alone.
 
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 
@@ -38,6 +44,7 @@ use project_phoenix::ship::state::ShipPhysics;
 use project_phoenix::ship::system_registry::{
     DOCK_SYSTEM_ID, REPAIR_SYSTEM_ID, UMBILICAL_SYSTEM_ID,
 };
+use project_phoenix::sim_digest::world_digest;
 
 // ── Shared plumbing ───────────────────────────────────────────────────────────
 
@@ -239,8 +246,11 @@ fn send_dock(app: &mut App, payload: SystemControlPayload) {
 }
 
 /// One driven dock run: commit, cancel, drift out of range, lose the target,
-/// and leave a fourth hold running when the mission ends.
-fn driven_dock_run(format: project_phoenix::headless::args::ReportFormat) -> (RunReport, App) {
+/// and leave a fourth hold running when the mission ends. Returns the
+/// authoritative-state digest taken just before the report is built, so
+/// callers can prove the lifecycle capture changed nothing (mirrors
+/// `tests/task_lifecycle_narrative.rs::driven_run`).
+fn driven_dock_run(format: project_phoenix::headless::args::ReportFormat) -> (RunReport, u64, App) {
     let args = dock_args(format);
     let mut app = build_headless_app(&args).expect("probe_dock world should build");
     run(&mut app, 60);
@@ -274,14 +284,15 @@ fn driven_dock_run(format: project_phoenix::headless::args::ReportFormat) -> (Ru
     despawn(&mut app, berth);
     run(&mut app, 3);
 
-    (build_report(&mut app, &args, 0.0), app)
+    let digest = world_digest(app.world());
+    (build_report(&mut app, &args, 0.0), digest, app)
 }
 
 #[test]
 fn dock_hold_lifecycle_records_cancel_range_loss_and_target_destruction() {
     use project_phoenix::headless::args::ReportFormat;
 
-    let (report, _app) = driven_dock_run(ReportFormat::Json);
+    let (report, _digest, _app) = driven_dock_run(ReportFormat::Json);
     let rows = lifecycle_rows(&report);
     assert!(
         !rows.is_empty(),
@@ -346,12 +357,15 @@ fn dock_hold_still_running_closes_as_mission_ended_at_the_report_boundary() {
     assert_eq!(rows[1].3, "mission_ended");
 }
 
+/// **AC4**, first half, for the dock workflow: the timeline is a pure
+/// function of the seeded run, and so is the authoritative state underneath
+/// it (mirrors `task_lifecycle_narrative::identical_seeds_produce_equivalent_task_timelines`).
 #[test]
 fn identical_seeds_produce_equivalent_dock_lifecycle_timelines() {
     use project_phoenix::headless::args::ReportFormat;
 
-    let (first, _) = driven_dock_run(ReportFormat::Json);
-    let (second, _) = driven_dock_run(ReportFormat::Json);
+    let (first, first_digest, _) = driven_dock_run(ReportFormat::Json);
+    let (second, second_digest, _) = driven_dock_run(ReportFormat::Json);
     assert!(
         !first.narrative.events.is_empty(),
         "an empty timeline would make this comparison vacuous"
@@ -359,6 +373,37 @@ fn identical_seeds_produce_equivalent_dock_lifecycle_timelines() {
     assert_eq!(
         first.narrative, second.narrative,
         "two runs of the same seed produced different dock lifecycle timelines"
+    );
+    assert_eq!(
+        first_digest, second_digest,
+        "two runs of the same seed produced different authoritative state for the dock workflow"
+    );
+}
+
+/// **AC4**, second half, for the dock workflow: lifecycle capture is a
+/// read-only projection. Turning the ndjson stream on moves neither the
+/// authoritative digest nor any line of the report (mirrors
+/// `task_lifecycle_narrative::capturing_the_lifecycle_leaves_the_simulation_identical`).
+#[test]
+fn capturing_the_dock_lifecycle_leaves_the_simulation_identical() {
+    use project_phoenix::headless::args::ReportFormat;
+
+    let (json_report, json_digest, _) = driven_dock_run(ReportFormat::Json);
+    let (ndjson_report, ndjson_digest, _) = driven_dock_run(ReportFormat::Ndjson);
+
+    assert_eq!(
+        json_digest, ndjson_digest,
+        "enabling stream capture moved the authoritative-state digest for the dock workflow — \
+         lifecycle capture must not change task timing, authority or state"
+    );
+    assert_eq!(
+        json_report.to_json(),
+        ndjson_report.to_json(),
+        "the dock run report must not depend on whether stream capture was on"
+    );
+    assert!(
+        !json_report.narrative.events.is_empty(),
+        "an empty timeline would make this comparison vacuous"
     );
 }
 
@@ -451,6 +496,34 @@ fn send_umbilical_flow(app: &mut App, payload: SystemControlPayload) {
         SystemId(UMBILICAL_SYSTEM_ID.into()),
         payload,
     );
+}
+
+/// One driven umbilical run: dock, run a flow inside the hold, stop the flow,
+/// then undock — the same simultaneity drive as
+/// `a_dock_hold_and_an_umbilical_flow_run_simultaneously_and_close_independently`,
+/// factored out so the digest tests below can run it twice under the same
+/// seed. Returns the authoritative-state digest taken just before the report
+/// is built (mirrors `tests/task_lifecycle_narrative.rs::driven_run`).
+fn driven_umbilical_run(format: project_phoenix::headless::args::ReportFormat) -> (RunReport, u64) {
+    let args = umbilical_args(format);
+    let mut app = build_headless_app(&args).expect("probe_umbilical world should build");
+    run(&mut app, 60);
+    let depot = named_entity(&mut app, DEPOT);
+    place_operator(&mut app, Vec3::ZERO);
+    move_entity(&mut app, depot, Vec3::new(100.0, 0.0, 0.0));
+    run(&mut app, 2);
+
+    send_umbilical_dock(&mut app, SystemControlPayload::Dock);
+    run(&mut app, 160);
+    send_umbilical_flow(&mut app, SystemControlPayload::StartTransfer);
+    run(&mut app, 90);
+    send_umbilical_flow(&mut app, SystemControlPayload::StopTransfer);
+    run(&mut app, 3);
+    send_umbilical_dock(&mut app, SystemControlPayload::Undock);
+    run(&mut app, 200);
+
+    let digest = world_digest(app.world());
+    (build_report(&mut app, &args, 0.0), digest)
 }
 
 /// **AC3's simultaneity claim, for #1345's own pair**: a dock hold and an
@@ -558,6 +631,52 @@ fn undocking_mid_flow_ends_the_flow_as_target_lost_and_the_dock_as_released() {
     );
 }
 
+/// **AC4**, first half, for the umbilical workflow.
+#[test]
+fn identical_seeds_produce_equivalent_umbilical_lifecycle_timelines() {
+    use project_phoenix::headless::args::ReportFormat;
+
+    let (first, first_digest) = driven_umbilical_run(ReportFormat::Json);
+    let (second, second_digest) = driven_umbilical_run(ReportFormat::Json);
+    assert!(
+        !first.narrative.events.is_empty(),
+        "an empty timeline would make this comparison vacuous"
+    );
+    assert_eq!(
+        first.narrative, second.narrative,
+        "two runs of the same seed produced different umbilical lifecycle timelines"
+    );
+    assert_eq!(
+        first_digest, second_digest,
+        "two runs of the same seed produced different authoritative state for the umbilical workflow"
+    );
+}
+
+/// **AC4**, second half, for the umbilical workflow: lifecycle capture is a
+/// read-only projection over the dock+flow simultaneity drive.
+#[test]
+fn capturing_the_umbilical_lifecycle_leaves_the_simulation_identical() {
+    use project_phoenix::headless::args::ReportFormat;
+
+    let (json_report, json_digest) = driven_umbilical_run(ReportFormat::Json);
+    let (ndjson_report, ndjson_digest) = driven_umbilical_run(ReportFormat::Ndjson);
+
+    assert_eq!(
+        json_digest, ndjson_digest,
+        "enabling stream capture moved the authoritative-state digest for the umbilical \
+         workflow — lifecycle capture must not change task timing, authority or state"
+    );
+    assert_eq!(
+        json_report.to_json(),
+        ndjson_report.to_json(),
+        "the umbilical run report must not depend on whether stream capture was on"
+    );
+    assert!(
+        !json_report.narrative.events.is_empty(),
+        "an empty timeline would make this comparison vacuous"
+    );
+}
+
 // ── #1161 external repair: dispatch, recall, range loss, mission end ───────
 
 const ALLY: &str = "world.probe_external_repair.entity.ally.name";
@@ -600,6 +719,28 @@ fn ally_uuid(app: &mut App) -> String {
         .find(|(n, _)| n.0 == ALLY)
         .map(|(_, uuid)| uuid.0.clone())
         .expect("the probe world spawns the ally")
+}
+
+/// One driven external-repair run: dispatch, then an explicit recall.
+/// Returns the authoritative-state digest taken just before the report is
+/// built (mirrors `tests/task_lifecycle_narrative.rs::driven_run`).
+fn driven_external_repair_run(
+    format: project_phoenix::headless::args::ReportFormat,
+) -> (RunReport, u64) {
+    let args = external_repair_args(format);
+    let mut app = build_headless_app(&args).expect("probe_external_repair world should build");
+    run(&mut app, 60);
+    let ally = ally_uuid(&mut app);
+    place_operator(&mut app, Vec3::ZERO);
+    set_repair_lock(&mut app, Some(ally));
+    run(&mut app, 1);
+    send_repair(&mut app, SystemControlPayload::DispatchExternalRepair);
+    run(&mut app, 2);
+    send_repair(&mut app, SystemControlPayload::RecallExternalRepair);
+    run(&mut app, 4);
+
+    let digest = world_digest(app.world());
+    (build_report(&mut app, &args, 0.0), digest)
 }
 
 #[test]
@@ -655,27 +796,13 @@ fn external_repair_lifecycle_records_dispatch_recall_and_range_loss() {
     );
 }
 
+/// **AC4**, first half, for the external-repair workflow.
 #[test]
 fn identical_seeds_produce_equivalent_external_repair_lifecycle_timelines() {
     use project_phoenix::headless::args::ReportFormat;
 
-    fn driven(format: project_phoenix::headless::args::ReportFormat) -> RunReport {
-        let args = external_repair_args(format);
-        let mut app = build_headless_app(&args).expect("probe_external_repair world should build");
-        run(&mut app, 60);
-        let ally = ally_uuid(&mut app);
-        place_operator(&mut app, Vec3::ZERO);
-        set_repair_lock(&mut app, Some(ally));
-        run(&mut app, 1);
-        send_repair(&mut app, SystemControlPayload::DispatchExternalRepair);
-        run(&mut app, 2);
-        send_repair(&mut app, SystemControlPayload::RecallExternalRepair);
-        run(&mut app, 4);
-        build_report(&mut app, &args, 0.0)
-    }
-
-    let first = driven(ReportFormat::Json);
-    let second = driven(ReportFormat::Json);
+    let (first, first_digest) = driven_external_repair_run(ReportFormat::Json);
+    let (second, second_digest) = driven_external_repair_run(ReportFormat::Json);
     assert!(
         !first.narrative.events.is_empty(),
         "an empty timeline would make this comparison vacuous"
@@ -683,5 +810,36 @@ fn identical_seeds_produce_equivalent_external_repair_lifecycle_timelines() {
     assert_eq!(
         first.narrative, second.narrative,
         "two runs of the same seed produced different external-repair lifecycle timelines"
+    );
+    assert_eq!(
+        first_digest, second_digest,
+        "two runs of the same seed produced different authoritative state for the \
+         external-repair workflow"
+    );
+}
+
+/// **AC4**, second half, for the external-repair workflow: lifecycle capture
+/// is a read-only projection.
+#[test]
+fn capturing_the_external_repair_lifecycle_leaves_the_simulation_identical() {
+    use project_phoenix::headless::args::ReportFormat;
+
+    let (json_report, json_digest) = driven_external_repair_run(ReportFormat::Json);
+    let (ndjson_report, ndjson_digest) = driven_external_repair_run(ReportFormat::Ndjson);
+
+    assert_eq!(
+        json_digest, ndjson_digest,
+        "enabling stream capture moved the authoritative-state digest for the \
+         external-repair workflow — lifecycle capture must not change task timing, \
+         authority or state"
+    );
+    assert_eq!(
+        json_report.to_json(),
+        ndjson_report.to_json(),
+        "the external-repair run report must not depend on whether stream capture was on"
+    );
+    assert!(
+        !json_report.narrative.events.is_empty(),
+        "an empty timeline would make this comparison vacuous"
     );
 }

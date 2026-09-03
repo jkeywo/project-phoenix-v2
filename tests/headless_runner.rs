@@ -24599,6 +24599,111 @@ fn falling_skyway_a_mass_nobody_stops_lands_on_the_rung_it_was_aimed_at() {
     );
 }
 
+/// **AC4's three outcomes stay three.** A mass that lands is not destroyed by
+/// landing — the drift freezes and the rock stays in the world, targetable and
+/// carrying the condition track Tactical was shooting at — so a crew who break
+/// up the wreckage afterwards fire the interception ending on a contact the
+/// strike ending has already accounted for.
+///
+/// Ungoverned, that rung is recorded harmed AND saved, its objective is failed
+/// and then completed, and the shared counter reaches 2 off one mass — declaring
+/// the corridor clear with the other rock still inbound. The three outcomes stop
+/// being three distinct records, which is the whole of what AC4 asks for.
+///
+/// FIRST TERMINAL EVENT WINS, and this is the case that says so.
+#[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_breaking_up_a_landed_mass_is_not_an_interception() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    let (mut app, ship) = shed_app_crewed();
+    shed_scan(&mut app, ship, SHED_LEAD);
+
+    // Land it, exactly as the miss test does.
+    let inside = lead_impact_radius(&mut app) * 0.5;
+    let ladder_a = skyway_position(&mut app, SHED_LADDER_A);
+    shed_place(
+        &mut app,
+        SHED_LEAD,
+        bevy::prelude::Vec3::new(ladder_a.x, ladder_a.y, ladder_a.z - inside),
+    );
+    run(&mut app, 4);
+    assert_eq!(
+        skyway_flag(&app, "skyway_debris_lead_struck"),
+        1,
+        "precondition: the mass has landed"
+    );
+    assert_eq!(skyway_flag(&app, "skyway_ladder_a_debris_harmed"), 1);
+    let struck_condition = skyway_condition(&mut app, SHED_LADDER_A);
+
+    // Now shoot the wreckage. The rock is still there to be shot at, which is
+    // why this is reachable at all rather than hypothetical.
+    assert!(
+        shed_threat_opt(&mut app, SHED_LEAD).is_some(),
+        "precondition: a struck mass is still in the world"
+    );
+    shed_destroy(&mut app, SHED_LEAD);
+
+    assert_eq!(
+        skyway_flag(&app, "skyway_ladder_a_debris_saved"),
+        0,
+        "a rung that already took the mass was not saved from it by the wreckage \
+         being broken up afterwards"
+    );
+    assert_eq!(
+        skyway_flag(&app, "skyway_ladder_a_debris_late"),
+        0,
+        "nor was it a late interception"
+    );
+    assert_eq!(
+        skyway_flag(&app, "skyway_ladder_a_debris_harmed"),
+        1,
+        "the harmed record stands: the first terminal event wins"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a3-debris-lead"),
+        ObjectiveStatus::Failed,
+        "an objective failed by the strike must not be completed by the clean-up"
+    );
+    assert_eq!(
+        skyway_condition(&mut app, SHED_LADDER_A),
+        struck_condition,
+        "the rung takes the strike once"
+    );
+    assert_eq!(
+        skyway_flag(&app, "skyway_debris_resolved"),
+        1,
+        "ONE mass has resolved. A second count off the same rock would declare \
+         the corridor clear with the trailing mass still inbound"
+    );
+
+    let report = build_report(&mut app, &shed_args(), 0.0);
+    let beats: Vec<String> = report
+        .narrative
+        .events
+        .iter()
+        .filter(|e| e.event.kind.as_str() == "beat_fired")
+        .map(|e| e.event.id.clone())
+        .collect();
+    assert!(
+        beats.iter().any(|b| b == "skyway_debris_struck_lead"),
+        "the strike is the record this contact leaves: {beats:?}"
+    );
+    for absent in ["skyway_debris_cleared_lead", "skyway_debris_late_lead"] {
+        assert!(
+            !beats.iter().any(|b| b == absent),
+            "'{absent}' must not appear beside the strike for one contact: {beats:?}"
+        );
+    }
+    assert!(
+        !beats.iter().any(|b| b == "skyway_corridor_clear"),
+        "the corridor is not clear while the trailing mass is live: {beats:?}"
+    );
+}
+
 /// **AC5, first half, end to end.** The three Scan objectives the shed posts are
 /// what makes a Backfilled Sensors seat go and look — and it works DOWN the
 /// field rather than staring at the first contact: with the hull inside the

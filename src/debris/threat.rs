@@ -229,6 +229,59 @@ pub struct DebrisAssessment {
     pub seconds_to_impact: Option<f32>,
 }
 
+/// The half of a debris contact a save has to carry (issue #1347).
+///
+/// A PROJECTION of `DebrisThreat`, not the whole component, for the reason
+/// `TractorSaveState` and `ScanSaveState` are: the authored `[debris]` table is
+/// content, re-derived from the entity template at spawn, and writing it into a
+/// save would put content into the one artefact `content_digest` is answerable
+/// for. What travels is this run's history of the contact — where the rock has
+/// got to, what the crew read, and the four latches that history raised.
+///
+/// # Why the position rides HERE and nowhere else
+///
+/// A rock carries no `ShipPhysics`, so `EntityState::physics` — which is what
+/// puts a resumed ship back where it flew to — is `None` for every debris
+/// contact, and `SpawnOrigin::position` is where the mass was SHED rather than
+/// where it has drifted to. `tick_debris_drift` is the only writer of a debris
+/// `Transform` in the whole simulation, so this module owns that number and a
+/// save that omitted it would hand a joining peer the corridor as it stood
+/// hundreds of seconds ago: rocks back at the top of their runs, deadlines the
+/// host had already spent.
+///
+/// # What is deliberately NOT here
+///
+/// `DebrisThreat::reckoned_secs_to_impact` is republished every tick by
+/// `tick_debris_state` from `assessment` and `assessed_at_tick` against the
+/// live `SimTick`, so it is derived state that a restore re-derives on its first
+/// tick. Saving it would be a second copy of an answer this record already
+/// holds, and the two could only ever disagree.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct DebrisSaveState {
+    /// Where the mass has drifted to, world units — see the type note above.
+    pub translation: [f32; 3],
+    /// The last assessment taken of this contact, whole. `None` until somebody
+    /// looks, which is the state the whole beat turns on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assessment: Option<DebrisAssessment>,
+    /// The `SimTick` that assessment was taken on, so a resumed consumer dead-
+    /// reckons the crew's own number forward from the moment they took it.
+    #[serde(default)]
+    pub assessed_at_tick: u64,
+    /// Whether anybody has ever read this contact.
+    #[serde(default)]
+    pub assessed: bool,
+    /// Whether a reading said this contact is on course to strike its asset.
+    #[serde(default)]
+    pub confirmed: bool,
+    /// Whether a confirmed contact has crossed inside its urgency window.
+    #[serde(default)]
+    pub urgent: bool,
+    /// Whether this contact has already landed.
+    #[serde(default)]
+    pub struck: bool,
+}
+
 /// Project one debris contact against the asset it is drifting toward.
 ///
 /// Deterministic and total: the same separation and the same closing velocity

@@ -39,7 +39,7 @@ use crate::logging::LogFilterConfig;
 use crate::world::content::WorldEvent;
 use crate::world::server::WorldContentRuntime;
 
-use super::threat::{DebrisAssessment, DebrisConfig};
+use super::threat::{DebrisAssessment, DebrisConfig, DebrisSaveState};
 
 /// One assessment, resolved by `science::server::tick_scans` and applied here
 /// (issue #1347).
@@ -90,6 +90,10 @@ pub struct DebrisThreat {
     pub urgent: bool,
     /// Whether this contact has reached its protected asset. Latches, and stops
     /// the drift: a rock that has arrived does not arrive twice.
+    ///
+    /// Also the record a scenario's terminal handlers separate on: a mass that
+    /// has landed was not intercepted, however it is broken up afterwards — see
+    /// `debris_pending` in `assets/worlds/falling_skyway.toml`.
     pub struck: bool,
     /// The crew's own seconds-to-impact, carried forward to THIS tick.
     ///
@@ -109,6 +113,48 @@ impl DebrisThreat {
             config,
             ..Default::default()
         }
+    }
+
+    /// The half of this contact a save carries — see [`DebrisSaveState`].
+    ///
+    /// The `translation` is passed in rather than read off the component
+    /// because it lives on the entity's `Transform`, which is where
+    /// [`tick_debris_drift`] writes it; this method is the one place that says
+    /// which fields of the pair travel, and the caller supplies the half it can
+    /// see.
+    pub fn save_state(&self, translation: Vec3) -> DebrisSaveState {
+        DebrisSaveState {
+            translation: [translation.x, translation.y, translation.z],
+            assessment: self.assessment.clone(),
+            assessed_at_tick: self.assessed_at_tick,
+            assessed: self.assessed,
+            confirmed: self.confirmed,
+            urgent: self.urgent,
+            struck: self.struck,
+        }
+    }
+
+    /// Put a saved contact back, latches and all.
+    ///
+    /// The authored `config` is deliberately untouched — it was re-derived from
+    /// the entity template when the restore respawned the mass, and a save that
+    /// carried it would be carrying content. `reckoned_secs_to_impact` is left
+    /// for [`tick_debris_state`] to republish on the first tick after the
+    /// resume, for the same reason it is not saved: it is derived, and this
+    /// record holds everything it is derived from.
+    ///
+    /// The **`Transform`** is not written here. A component's restore cannot
+    /// reach its entity's other components, so `snapshot::restore` writes the
+    /// translation beside this call, exactly as it writes a resumed ship's
+    /// transform beside its `ShipPhysics`.
+    pub fn restore(&mut self, state: &DebrisSaveState) {
+        self.assessment = state.assessment.clone();
+        self.assessed_at_tick = state.assessed_at_tick;
+        self.assessed = state.assessed;
+        self.confirmed = state.confirmed;
+        self.urgent = state.urgent;
+        self.struck = state.struck;
+        self.reckoned_secs_to_impact = None;
     }
 
     /// Whether this contact is worth pointing an instrument at right now
@@ -178,9 +224,17 @@ impl Plugin for DebrisPlugin {
         app.init_resource::<EffectQueue<DebrisAssessed>>();
         {
             use crate::authoritative::{DeclareState, StateClass};
+            // `digest-exclusion-classes`
+            // (`pasm/spec/architecture/deterministic-simulation.yaml`) is the
+            // entity that records the cleared-at-fold reason class, and it is
+            // what every sibling drained queue points at — see
+            // `civilian::server` and `console::captain::server`. The debris
+            // slice's OWN authoritative record is `debris-threat-state`, which
+            // `DebrisThreat` names; this queue is not that state, it is the
+            // one-tick pipe into it.
             app.declare_state::<EffectQueue<DebrisAssessed>>(
                 StateClass::ClearedAtFold,
-                "falling-skyway-debris",
+                "digest-exclusion-classes",
             );
         }
         app.add_systems(
@@ -294,11 +348,7 @@ pub fn tick_debris_state(
         // reading the same rock on one tick is an ordinary thing for a fleet to
         // do, and the queue is already in a deterministic order because
         // `tick_scans` walks its ships in UUID order.
-        if let Some(record) = assessed
-            .iter()
-            .filter(|a| a.subject_uuid == uuid)
-            .next_back()
-        {
+        if let Some(record) = assessed.iter().rfind(|a| a.subject_uuid == uuid) {
             threat.assessment = Some(record.assessment.clone());
             threat.assessed_at_tick = record.taken_at_tick;
             if !threat.assessed {

@@ -848,6 +848,71 @@ entities:
         - ScanReadingSnapshot
       tests: [cargo test, npx vitest run]
 
+  - component: debris-hazard-tracker
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Debris Hazard Tracker
+      summary: Drifts each authored debris contact along its [debris] velocity, latches onto it the assessment the science scan deriver took, and raises the four world flags a scenario hangs the beat on - read, confirmed, urgent, struck. Applies no damage, posts no objective, despawns nothing; every consequence is the world file's.
+      rationale:
+        - "[ai] THE CONFIRMATION COMES FROM THE SCAN, NEVER FROM THE GEOMETRY. This module knows every tick which masses are on course and deliberately does not act on it: confirmed rises only when an assessment somebody actually took says so. A Backfilled Tactical that engaged rocks the simulation privately knew about would make the Sensors seat decorative, and a human Tactical who locks an unread contact must not have the AI agree for reasons the crew were never told."
+        - "[ai] SPLIT THE WAY THE TRACTOR IS (rule 10): debris::threat is the pure, Bevy-free half - the authored table and the closest-point-of-approach projection - and debris::server is the adapter that knows about entities, transforms and the flag store."
+        - "[ai] THE IMPACT TEST IS THE SIMULATION'S OWN TRUTH, not the crew's: a rock arrives whether anybody was watching or not. URGENCY is the opposite - it is read off the crew's dead-reckoned number, because urgency is a statement about the firing problem and there is no firing problem until somebody has posed one."
+        - "[ai] A STRUCK MASS IS NOT DESTROYED BY LANDING. tick_debris_state sets struck and freezes the drift; the rock stays in the world, targetable, carrying its own condition track. That is what makes the scenario's two terminal handlers - the struck flag and the entity's destruction - both reachable for one contact, and why the world file claims each contact through a per-contact resolved flag before either writes a record."
+        - "[ai] CONTACTS ARE WALKED IN UUID ORDER, never archetype order, in both systems: two hosts must move the same rock the same distance in the same sequence, and raised flags must land in the same order however the assessment queue arrived."
+    architecture:
+      kind: subsystem
+      authority: authoritative
+      owns: [debris-threat-state]
+      reads: [science-scan-state, world-configuration-state]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/debris/threat.rs
+        - src/debris/server.rs
+      symbols:
+        - DebrisConfig
+        - DebrisSubject
+        - DebrisAssessment
+        - assess
+        - DebrisPlugin
+        - DebrisThreat
+        - DebrisAssessed
+        - DebrisSaveState
+        - tick_debris_drift
+        - tick_debris_state
+      tests: [cargo test]
+
+  - state: debris-threat-state
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Debris Threat State
+      summary: "Per-contact: the authored [debris] table as spawned (drift, protected target, impact radius, urgency and reassessment windows, the four flag names), and the live half - the last assessment taken, the tick it was taken on, and the read / confirmed / urgent / struck latches. Authoritative: a host that thought a mass was unread disagrees about what its crew are allowed to act on."
+      rationale:
+        - "[ai] DEFERRED FOLD. sim_digest::world_digest walks no field of it - there is no debris namespace in the fold - so the declaration is DeferredFold with the split named at the site: none folded, all snapshotted. Declaring Folded for a type the digest never reaches is the explicit-and-wrong claim the declaration registry exists to prevent."
+        - "[ai] SNAPSHOTTED, and the latches are the reason. assessed / confirmed / urgent / struck are the record of what a crew found out, and the whole beat is the difference between a mass the simulation knows is on course and a mass somebody has READ. A peer joining by snapshot transfer that restored the geometry alone would come back with every contact unread: its Backfilled Tactical drops the confirmed lock (the candidate source filters on confirmed) and its Sensors seat re-scans a field the host had already worked - the same shape of local-state leak the GM digest failure was."
+        - "[ai] THE DRIFTED POSITION RIDES ON THIS RECORD and nowhere else. A rock carries no ShipPhysics, so the entity namespace never folds or saves its position, and SpawnOrigin deliberately holds where the mass was SHED rather than where it has since travelled. tick_debris_drift is the only writer of a debris Transform in the simulation, so this state owns that number; a save that omitted it would hand a joining peer the corridor as it stood hundreds of seconds ago."
+        - "[ai] SNAPSHOTTED AS A PROJECTION rather than whole, for the tractor's reason: the authored [debris] table is content, re-derived from the entity template at spawn, and writing it into a save would put content into the one artefact content_digest is answerable for. reckoned_secs_to_impact is not saved either - tick_debris_state republishes it every tick from the assessment and its tick, so a stored copy could only ever disagree with the record it is derived from."
+        - "[ai] It did not bump SNAPSHOT_FORMAT, for the civilian-traffic argument: a world gains debris by gaining a [debris] table on an entity template and the scenario script that sheds it, both of which move content_digest and get an older save refused as content-moved long before the field is read."
+    architecture:
+      classification: authoritative
+      owner: debris-hazard-tracker
+      writers: [debris-hazard-tracker]
+    implementation:
+      status: declared
+      paths:
+        - src/debris/threat.rs
+        - src/debris/server.rs
+        - src/snapshot.rs
+      symbols:
+        - DebrisThreat
+        - DebrisSaveState
+      tests: [cargo test]
+
   - component: world-trigger-evaluator
     core:
       status: implemented

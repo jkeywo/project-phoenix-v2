@@ -44,4 +44,4 @@ pub mod server;
 pub use server::{
     tick_debris_drift, tick_debris_state, DebrisAssessed, DebrisPlugin, DebrisThreat,
 };
-pub use threat::{assess, DebrisAssessment, DebrisConfig, DebrisSubject};
+pub use threat::{assess, DebrisAssessment, DebrisConfig, DebrisSaveState, DebrisSubject};

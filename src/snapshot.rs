@@ -936,6 +936,42 @@ pub struct EntityState {
     /// long before this field is read. The format stays at 5.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub civilian: Option<crate::civilian::CivilianState>,
+    /// The entity's debris-contact state (issue #1347) — where the mass has
+    /// drifted to, and what the crew have established about it.
+    ///
+    /// # Why a rock's POSITION is in this field and not in [`Self::physics`]
+    ///
+    /// Every other moving thing in a save comes back where it was because it
+    /// carries `ShipPhysics` and `physics` restores it. Debris carries none: a
+    /// rock is not a hull, it has no helm and no integrator, and
+    /// `debris::server::tick_debris_drift` is the only writer of its
+    /// `Transform` in the simulation. The other candidate — `SpawnOrigin` — is
+    /// where the mass was SHED, deliberately (see that type's own note: the
+    /// position a spawn consumed, never where the thing has since travelled).
+    /// So without this field a resumed corridor puts every mass back at the top
+    /// of its run with its deadline reset, and the host's clock and the joiner's
+    /// disagree by however long the beat had been running.
+    ///
+    /// # Why the LATCHES are authoritative and not re-derivable
+    ///
+    /// `assessed` / `confirmed` / `urgent` / `struck` are the record of what a
+    /// crew found out, and the beat turns on the difference between a rock the
+    /// simulation knows is on course and a rock somebody has READ. A joiner
+    /// that restored the geometry alone would come back with every contact
+    /// unread: its Backfilled Tactical would drop the confirmed lock (the
+    /// candidate source filters on `confirmed`) and its Sensors seat would
+    /// re-scan a field the host had already worked — the same shape of
+    /// local-state leak the #1300 GM digest failure was.
+    ///
+    /// # Why this did not bump [`SNAPSHOT_FORMAT`]
+    ///
+    /// Exactly the [`EntityState::civilian`] argument. A world gains debris by
+    /// gaining a `[debris]` table on an entity template and the scenario script
+    /// that sheds it, both of which move `content_digest` and get an older save
+    /// refused as content-moved long before this field is read. The format stays
+    /// at 5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debris: Option<crate::debris::DebrisSaveState>,
     /// `ObjectiveCursors` as `(objective id, waypoint index, settled)`.
     ///
     /// Where a patrolling ship is *around its route*, which is not derivable
@@ -3769,6 +3805,26 @@ fn capture_civilians(world: &World) -> Vec<(String, crate::civilian::CivilianSta
         .collect()
 }
 
+/// The debris contacts, in a query of their own, joined by uuid — see
+/// [`EntityState::debris`]. Only entities that authored `[debris]` carry one, so
+/// every world but the one that sheds a corridor captures an empty list.
+///
+/// Unlike its siblings there is no "idle row captures nothing" filter, and the
+/// reason is the `Transform` this row carries: an unread mass that has drifted
+/// two hundred units is not in its default state, and dropping the row because
+/// no latch had risen yet would put it back where it was shed.
+fn capture_debris(world: &World) -> Vec<(String, crate::debris::DebrisSaveState)> {
+    let Some(mut query) =
+        world.try_query::<(&EntityUuid, &Transform, &crate::debris::DebrisThreat)>()
+    else {
+        return Vec::new();
+    };
+    query
+        .iter(world)
+        .map(|(uuid, transform, threat)| (uuid.0.clone(), threat.save_state(transform.translation)))
+        .collect()
+}
+
 /// Shields AI continuation state, in a query of its own and joined by uuid.
 ///
 /// Damage records are stamped with the authoritative logical tick. Persisting
@@ -4188,6 +4244,7 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
     let securities = capture_security(world);
     let scans = capture_scans(world);
     let civilians = capture_civilians(world);
+    let debris = capture_debris(world);
     let spawn_origins = capture_spawn_origins(world);
     let Some(mut query) = world.try_query::<(
         &EntityUuid,
@@ -4332,6 +4389,10 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
                     .find(|(id, _)| id == &uuid.0)
                     .map(|(_, state)| state.clone()),
                 civilian: civilians
+                    .iter()
+                    .find(|(id, _)| id == &uuid.0)
+                    .map(|(_, state)| state.clone()),
+                debris: debris
                     .iter()
                     .find(|(id, _)| id == &uuid.0)
                     .map(|(_, state)| state.clone()),
@@ -6038,6 +6099,25 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
         if let Some(civilian) = &row.civilian {
             if let Some(mut traffic) = entity_mut.get_mut::<crate::civilian::CivilianTraffic>() {
                 traffic.0 = civilian.clone();
+            }
+        }
+        if let Some(debris) = &row.debris {
+            if let Some(mut threat) = entity_mut.get_mut::<crate::debris::DebrisThreat>() {
+                threat.restore(debris);
+            }
+            // The drifted position, written beside the latches for the same
+            // reason a resumed ship's `Transform` is written beside its
+            // `ShipPhysics` above: `DebrisThreat::restore` cannot reach its own
+            // entity's other components, and a rock carries no physics record
+            // for the transform to be a projection of. The rotation and scale
+            // are left alone — `tick_debris_drift` never touches either, so what
+            // the respawn put there is still right.
+            if let Some(mut transform) = entity_mut.get_mut::<Transform>() {
+                transform.translation = Vec3::new(
+                    debris.translation[0],
+                    debris.translation[1],
+                    debris.translation[2],
+                );
             }
         }
         if !row.patrol_cursors.is_empty() {

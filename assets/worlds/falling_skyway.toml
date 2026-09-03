@@ -7923,7 +7923,36 @@ fn on_debris_stray_read(ctx) {
 //               pumping line and stop delivering into the window — the loss
 //               arrives as arithmetic through the ladder the crew already know,
 //               not as a scripted announcement.
+//
+// ── ONE CONTACT, ONE ENDING ─────────────────────────────────────────────────
+//
+// The two terminal handlers below are NOT mutually exclusive by construction,
+// and the mission's own "late" band is what makes the overlap reachable. A mass
+// that lands is not destroyed by landing: `tick_debris_state` sets `struck`,
+// freezes the drift and leaves the rock in the world, still targetable, still
+// carrying the condition track Tactical was shooting at. So a crew who break up
+// the wreckage afterwards — or who land the killing shot on the very tick it
+// crosses the impact radius, which is the last-instant interception this beat
+// invites — fire `on_destroyed` for a contact `on_flag_set(..._struck)` has
+// already accounted for.
+//
+// Ungoverned, that rung is recorded harmed AND saved, its objective is failed
+// and then completed, and the shared counter reaches 2 off one mass — so the
+// corridor is declared clear with the other rock still inbound, and AC4's three
+// outcomes stop being three distinct records. FIRST TERMINAL EVENT WINS: each
+// handler claims the contact through `debris_pending` before it writes anything,
+// and closes it with `debris_resolved` after.
+fn debris_pending(ctx, key) {
+    ctx.flags["skyway_debris_" + key + "_resolved"] < 1
+}
+
 fn clear_one(ctx, key, objective, saved_flag, late_flag) {
+    // A mass that has ALREADY LANDED was not intercepted. Breaking up the
+    // wreckage is a reasonable thing for a crew to do and the rock is still
+    // there to be shot at; what it is not is a save, and the rung's record must
+    // not say otherwise.
+    if ctx.flags["skyway_debris_" + key + "_struck"] > 0 { return; }
+    if !debris_pending(ctx, key) { return; }
     // Late is judged off the URGENCY flag rather than off a second clock: the
     // engine already decided when this contact entered its authored window, and
     // asking the same question twice is how two answers start disagreeing.
@@ -7937,7 +7966,7 @@ fn clear_one(ctx, key, objective, saved_flag, late_flag) {
     ctx.effects.complete_objective(objective);
     ctx.effects.narrative_outcome(
         "world.falling_skyway.entity.debris_" + key + ".name", "destroyed");
-    debris_resolved(ctx);
+    debris_resolved(ctx, key);
 }
 
 fn on_debris_lead_cleared(ctx) {
@@ -7976,6 +8005,12 @@ fn on_debris_trail_cleared(ctx) {
 //
 // [ai] 12 unratified.
 fn strike_one(ctx, key, objective, depot, harmed_flag) {
+    // Claimed before anything is written, the same way `clear_one` claims it.
+    // The struck flag rises once, so this guard only ever bites in the
+    // same-tick race — a killing shot that lands on the tick the mass crosses
+    // its impact radius — and there it decides the tie in favour of whichever
+    // handler the engine ran first, rather than letting both write.
+    if !debris_pending(ctx, key) { return; }
     ctx.flags[harmed_flag] = 1;
     ctx.effects.fail_objective(objective);
     ctx.effects.damage_infrastructure(depot, 12);
@@ -7991,7 +8026,7 @@ fn strike_one(ctx, key, objective, depot, harmed_flag) {
         text:       "world.falling_skyway.evidence.debris_strike",
         provenance: "scan",
     });
-    debris_resolved(ctx);
+    debris_resolved(ctx, key);
 }
 
 fn on_debris_lead_struck(ctx) {
@@ -8007,13 +8042,20 @@ fn on_debris_trail_struck(ctx) {
 }
 
 // CORRIDOR CLEAR. Counted rather than tested against the two contacts by name,
-// so it stays right if a later slice sheds a third: every terminal handler above
-// calls this exactly once, whichever way its contact ended.
+// so it stays right if a later slice sheds a third.
+//
+// The count is only trustworthy because the contribution is PER CONTACT: this
+// closes `skyway_debris_<key>_resolved` first, which is the flag both terminal
+// handlers claimed the contact through, so a second terminal event for a mass
+// that has already ended never reaches here and the counter can never run ahead
+// of the number of masses actually settled. A bare increment would let one rock
+// count twice and declare the corridor clear with the other still inbound.
 //
 // Only the two aimed masses are counted. The stray resolves nothing because it
 // was never a threat, and a corridor-clear cue that waited for it would be
 // waiting on a rock that is simply leaving.
-fn debris_resolved(ctx) {
+fn debris_resolved(ctx, key) {
+    ctx.flags["skyway_debris_" + key + "_resolved"] = 1;
     ctx.flags.increment("skyway_debris_resolved", 1);
     if ctx.flags.skyway_debris_resolved < 2 { return; }
     ctx.effects.show_message(

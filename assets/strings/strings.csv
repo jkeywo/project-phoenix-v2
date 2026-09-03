@@ -1878,3 +1878,5 @@ component.scan.debris.protected,"Science scan readout — row label naming the a
 component.scan.debris.clear,"Science scan readout — value shown when a moving hazard is on no collision course, which is a finding rather than an absence (issue #1347)","[No collision course]"
 component.scan.debris.closest,"Science scan readout — row label for how near a moving hazard comes to the asset under it, world units (issue #1347)","[Closest approach]"
 component.scan.debris.impact,"Science scan readout — row label for the projected time until a moving hazard reaches the asset under it (issue #1347)","[Time to impact]"
+world.probe_debris.entity.depot.name,assets/worlds/probe_debris.toml -> [[entity]] name,[Probe Transfer Depot]
+world.probe_debris.entity.mass.name,assets/worlds/probe_debris.toml -> [[entity]] name,[Probe Corridor Mass]

@@ -739,6 +739,23 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             .declare_state::<crate::science::server::ShipScanRecord>(
                 StateClass::DeferredFold,
                 "science-scan-state",
+            )
+            // Debris contacts (issue #1347). `DeferredFold` for exactly
+            // `ShipScanRecord`'s reason, one consumer along: `sim_digest::
+            // world_digest` walks NO field of `DebrisThreat` — there is no
+            // debris namespace in the fold — while `src/snapshot.rs`
+            // (`capture_debris` / the `EntityState::debris` restore) carries the
+            // whole runtime half, so the split is "none folded, all
+            // snapshotted". It is authoritative and not a projection: the read /
+            // confirmed / urgent / struck latches are what the Sensors seat has
+            // established and what a Backfilled Tactical filters on, and the
+            // drifted translation is a number only `tick_debris_drift` writes
+            // (a rock carries no `ShipPhysics`, so the entity namespace never
+            // folds its position). A peer that came back with every read rock
+            // unread would re-scan a corridor the host had already worked.
+            .declare_state::<crate::debris::server::DebrisThreat>(
+                StateClass::DeferredFold,
+                "debris-threat-state",
             );
         // `AssetPreloadResource` is a presentation resource (`crate::server::
         // asset_preload`), init'd only in the `#[cfg(feature = "server")] if

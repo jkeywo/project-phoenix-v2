@@ -6504,6 +6504,202 @@ fn a_world_with_no_survey_suite_writes_no_scan_state() {
     );
 }
 
+// ── Issue #1347: a read rock stays read, and stays where it drifted to ───────
+
+/// The debris probe: one destroyer, one depot, one mass aimed at the depot.
+const DEBRIS: &str = "assets/worlds/probe_debris.toml";
+
+/// Frames to run before the debris capture.
+///
+/// It only has to be far enough in that the game is InProgress, the stations are
+/// backfilled and the mass has visibly MOVED — the rock closes at 4 units a
+/// second and takes about 142 seconds to arrive, so any capture in this range is
+/// taken mid-flight. The preconditions below assert both rather than trusting
+/// the number.
+const DEBRIS_CAPTURE_AT: u64 = 90;
+
+/// Where `probe_debris.toml` authors the mass. A fresh boot puts it here, and a
+/// restore that dropped the position would leave it here — which is exactly what
+/// the control below looks for.
+const DEBRIS_AUTHORED_X: f32 = 600.0;
+
+fn debris_args() -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: DEBRIS.into(),
+        ship_path: "assets/entities/alliance_destroyer.toml".into(),
+        max_ticks: 600,
+        deterministic: true,
+        seed: Some(1347),
+        ..Default::default()
+    }
+}
+
+/// Fly the destroyer alongside the drifting mass and read it through the
+/// ordinary admitted `ScanTarget` path — the same path `take_a_reading` uses on
+/// the depot, pointed at a rock.
+fn read_the_mass(app: &mut bevy::prelude::App) {
+    use project_phoenix::core::messages::{ClientMessage, SystemControlPayload};
+    use project_phoenix::entities::spawner::{EntityName, EntityUuid};
+    use project_phoenix::lobby::InboundMessage;
+    use project_phoenix::server_app::LocalShip;
+    use project_phoenix::ship::state::ShipPhysics;
+
+    let (mass, mass_x) = {
+        let mut q = app
+            .world_mut()
+            .query::<(&EntityName, &EntityUuid, &bevy::prelude::Transform)>();
+        let found = q
+            .iter(app.world())
+            .find(|(n, _, _)| n.0 == "world.probe_debris.entity.mass.name")
+            .map(|(_, uuid, tf)| (uuid.0.clone(), tf.translation.x));
+        found.expect("the probe world spawns the mass")
+    };
+    let ship = {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<bevy::prelude::Entity, bevy::prelude::With<LocalShip>>();
+        let found = q.iter(app.world()).next();
+        found.expect("the probe world spawns a local ship")
+    };
+    // Inside the destroyer's finest authored band, measured off where the rock
+    // actually is rather than off where it was authored — the whole point of the
+    // fixture is that those two have parted company by now.
+    app.world_mut()
+        .get_mut::<ShipPhysics>(ship)
+        .expect("the local ship is a ship")
+        .x = mass_x - 80.0;
+    app.world_mut()
+        .resource_mut::<bevy::ecs::message::Messages<InboundMessage>>()
+        .write(InboundMessage {
+            token: "ai:debris-resume-probe".into(),
+            msg: ClientMessage::ControlSystem {
+                target: project_phoenix::ship::system_registry::sensors_system_id(),
+                payload: SystemControlPayload::ScanTarget { uuid: mass },
+            },
+        });
+    step(app, 3);
+}
+
+/// **Issue #1347.** A save taken over a debris corridor comes back with the
+/// corridor the crew were actually working: the masses where they had drifted
+/// to, and the ones that had been read still read.
+///
+/// Both halves are states nothing else in a save can recover. A rock carries no
+/// `ShipPhysics`, so `EntityState::physics` is `None` for one and `SpawnOrigin`
+/// holds where it was SHED — a restore that dropped this field puts every mass
+/// back at the top of its run with its deadline reset. And `confirmed` is what a
+/// crew ESTABLISHED: a joiner that came back with it clear would have its
+/// Backfilled Tactical drop the lock (the candidate source filters on exactly
+/// that field) and its Sensors seat re-scan a field the host had already worked.
+///
+/// The control below reads the freshly booted world first, so an inert restore
+/// is visible rather than hidden behind a value that happened to match.
+#[test]
+fn the_resumed_world_keeps_a_read_rock_read_and_where_it_drifted_to() {
+    use project_phoenix::debris::DebrisThreat;
+
+    let mut live = boot(&debris_args());
+    step(&mut live, DEBRIS_CAPTURE_AT);
+    read_the_mass(&mut live);
+
+    let payload = capture(live.world());
+    let captured: Vec<_> = payload
+        .entities
+        .iter()
+        .filter_map(|e| e.debris.as_ref().map(|d| (&e.uuid, d)))
+        .collect();
+    assert_eq!(
+        captured.len(),
+        1,
+        "the probe world carries exactly one entity with a [debris] table"
+    );
+    let (uuid, state) = captured[0];
+    assert!(
+        state.assessed && state.confirmed,
+        "precondition: the capture must be taken after a reading came back saying \
+         this mass is on course — an unread rock would round-trip identically even \
+         if restore dropped the whole field: {state:?}"
+    );
+    assert!(
+        state.translation[0] < DEBRIS_AUTHORED_X,
+        "precondition: and after the mass has drifted off its authored position \
+         ({} vs {DEBRIS_AUTHORED_X})",
+        state.translation[0]
+    );
+    assert!(
+        !state.struck,
+        "precondition: it is still in flight, so the save is of a live problem"
+    );
+
+    let mut resumed = boot_to_restore_point(&debris_args(), &payload);
+    let before_restore = resumed
+        .world_mut()
+        .query::<(&DebrisThreat, &bevy::prelude::Transform)>()
+        .iter(resumed.world())
+        .next()
+        .map(|(threat, tf)| (threat.clone(), tf.translation))
+        .expect("the fresh world spawned the mass from its template");
+    assert!(
+        !before_restore.0.assessed && !before_restore.0.confirmed,
+        "control: a freshly booted crew have read nothing, so an inert restore \
+         would be visible here rather than hidden behind a value that matched"
+    );
+    assert_eq!(
+        before_restore.1.x, DEBRIS_AUTHORED_X,
+        "control: …and the fresh mass is at its authored start, which is precisely \
+         what a restore that dropped the position would leave it at"
+    );
+    assert_eq!(
+        before_restore.0.config.impact_radius, 30.0,
+        "…and it carries its authored [debris] table, which the save deliberately \
+         does NOT: that is content, re-derived from the template on spawn"
+    );
+
+    restore(resumed.world_mut(), &payload);
+    let after = capture(resumed.world());
+    let restored = after
+        .entities
+        .iter()
+        .find(|e| &e.uuid == uuid)
+        .and_then(|e| e.debris.as_ref())
+        .unwrap_or_else(|| panic!("mass {uuid} came back without its debris state"));
+    assert_eq!(
+        restored, state,
+        "mass {uuid}: where it had drifted to, the reading the crew took, the tick \
+         they took it on and all four latches must come back exactly as captured"
+    );
+
+    let live_config = resumed
+        .world_mut()
+        .query::<&DebrisThreat>()
+        .iter(resumed.world())
+        .next()
+        .map(|threat| threat.config.clone())
+        .expect("the component is still attached");
+    assert_eq!(
+        live_config, before_restore.0.config,
+        "and the restore left the authored table alone — it restores the mutable \
+         half of the contact, not the content half"
+    );
+}
+
+/// **Issue #1347.** A world with no debris writes nothing debris-shaped into its
+/// save.
+///
+/// Every shipped world but the corridor mission is in this arm, and none of them
+/// should pay a byte for a hazard they never field.
+#[test]
+fn a_world_with_no_debris_writes_no_debris_state() {
+    let mut live = boot(&args(DUEL, ("cruiser", "cruiser")));
+    step(&mut live, 120);
+    let payload = capture(live.world());
+    assert!(
+        payload.entities.iter().all(|e| e.debris.is_none()),
+        "an entity with no [debris] table carries no threat component and writes \
+         no debris state"
+    );
+}
+
 // ── Issue #1041: an order to hold fire survives the save ─────────────────────
 
 const RESTRAINT: &str = "assets/worlds/probe_restraint.toml";

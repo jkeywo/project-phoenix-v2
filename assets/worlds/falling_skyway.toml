@@ -7950,13 +7950,35 @@ fn on_debris_trail_cleared(ctx) {
         "skyway_ladder_b_debris_saved", "skyway_ladder_b_debris_late");
 }
 
-// The rung takes it. [ai] 30 points unratified — it is the number that decides
-// whether a struck rung merely reads worse or actually stops pumping, since
-// Ladder A sits at 78 against a 40 % line and Ladder B at 34 against the same.
+// The rung takes it.
+//
+// THE SIZE OF THIS NUMBER IS A CONSTRAINT, NOT A TASTE. A struck rung must read
+// worse and must NOT, on its own, stop pumping.
+//
+// Act 3 already has a supply chain — the head's lift certification and the two
+// rungs' pumping lines meet at one number in the transfer window — and the
+// debris beat is a PARALLEL track laid beside it, not a lever on it. At 30
+// points this silently became a lever: an unread mass landing on Ladder A took
+// it from 62 to 32 through a 40 % line, so a crew who never went and looked lost
+// the window's supply for a reason the window was never about, and the act's own
+// isolation ("the working rung went on working, which is what makes this a fact
+// about the HEAD") stopped being true. Three of the window's outcome tests said
+// so.
+//
+// 12 keeps the whole of the beat — the objective goes red, the asset is recorded
+// harmed, the computer says so, the strike is filed against the rung — while
+// leaving a rung that was pumping when it was hit still pumping afterwards. A
+// rung already run down by something ELSE can still be pushed under by this,
+// which is the honest reading: the mass is the last straw rather than the whole
+// of the failure. `a_mass_nobody_stops_lands_on_the_rung_it_was_aimed_at` asserts
+// that both halves of this hold, so the constraint is checkable rather than a
+// paragraph.
+//
+// [ai] 12 unratified.
 fn strike_one(ctx, key, objective, depot, harmed_flag) {
     ctx.flags[harmed_flag] = 1;
     ctx.effects.fail_objective(objective);
-    ctx.effects.damage_infrastructure(depot, 30);
+    ctx.effects.damage_infrastructure(depot, 12);
     ctx.effects.show_message(
         "skyway_debris_struck_" + key,
         "world.falling_skyway.computer_message.debris_struck_" + key,

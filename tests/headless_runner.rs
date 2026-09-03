@@ -24560,6 +24560,23 @@ fn falling_skyway_a_mass_nobody_stops_lands_on_the_rung_it_was_aimed_at() {
         after < before,
         "the strike must land on the rung's own condition track ({before} -> {after})"
     );
+    // …and lands there WITHOUT switching the rung off. The authored damage is
+    // sized against this: Act 3's supply chain is a parallel track, and a beat
+    // laid beside it must not silently decide it. At 30 points a mass nobody
+    // read took Ladder A from 62 through its 40 % line, and the window's own
+    // outcome tests went red for a reason the window was never about.
+    //
+    // The pairing is the whole claim — real damage on the track the mission
+    // already reads its thresholds off, and not enough of it to be the failure
+    // by itself. A rung already run down by something else can still be pushed
+    // under, which is the honest version: the mass is the last straw.
+    assert_eq!(
+        skyway_flag(&app, "depot_a_pumping"),
+        1,
+        "a rung that was pumping when it was hit must still be pumping \
+         afterwards ({before} -> {after}); the authored strike damage has grown \
+         past the margin its own comment in falling_skyway.toml is written to"
+    );
     let (id, severity, _) = shed_message(&app);
     assert_eq!(id, "skyway_debris_struck_lead");
     assert_eq!(severity, ComputerMessageSeverity::Critical);

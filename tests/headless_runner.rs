@@ -20475,6 +20475,62 @@ fn falling_skyway_clean_ledger_benchmark_lifts_exactly_two_of_three() {
         "all three were answered — two carried and one told to its face"
     );
 
+    // ── AC1/AC2/AC3 (issue #1351): the full narrative report, end to end ─────
+    // Every applicable row present in the authored order, each carrying PRD
+    // #1337's signed score, and the headless total exactly their sum. The head
+    // held, so there is no civilians row — the omission half of AC1.
+    assert_report_row(
+        &app,
+        "survey",
+        "world.falling_skyway.report.survey.heading",
+        "world.falling_skyway.report.survey.corroborated",
+        "saved",
+        8,
+    );
+    assert_report_row(
+        &app,
+        "labour",
+        "world.falling_skyway.report.labour.heading",
+        "world.falling_skyway.report.labour.negotiated",
+        "saved",
+        4,
+    );
+    assert_report_row(
+        &app,
+        "traffic",
+        "world.falling_skyway.report.traffic.heading",
+        "world.falling_skyway.report.traffic.clear",
+        "saved",
+        4,
+    );
+    assert_lyra_report_row(&app, "world.falling_skyway.report.lyra.saved", "saved", 6);
+    assert_report_row(
+        &app,
+        "skyhook",
+        "world.falling_skyway.report.skyhook.heading",
+        "world.falling_skyway.report.skyhook.held",
+        "saved",
+        4,
+    );
+    assert_report_row(
+        &app,
+        "lifts",
+        "world.falling_skyway.report.lifts.heading",
+        "world.falling_skyway.report.lifts.full",
+        "saved",
+        4,
+    );
+    assert_report_row(
+        &app,
+        "commitments",
+        "world.falling_skyway.report.commitments.heading",
+        "world.falling_skyway.report.commitments.kept",
+        "saved",
+        9,
+    );
+    assert_no_report_row(&app, "civilians");
+    assert_report_total_is_the_sum(&app);
+
     // ── AC6: the seven families ─────────────────────────────────────────────
     assert_the_campaign_record_is_complete(&app);
     assert_eq!(skyway_flag(&app, "campaign.skyway.passage.committee"), 1);

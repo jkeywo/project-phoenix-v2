@@ -283,12 +283,12 @@ pub fn handle_transporter_commands(
     for (admitted, mut transporter, uuid) in ships.iter_mut() {
         for cmd in admitted.for_target(TRANSPORTER_SYSTEM_ID) {
             match &cmd.payload {
-                SystemControlPayload::TransportSelectContact { uuid: selected } => {
+                SystemControlPayload::TransportSelectContact { uuid: selected }
                     // A fresh selection ends any running transport of the old
                     // contact (the operator turned the beam elsewhere) and resets
                     // the recovery accrual. Selecting the SAME contact again is
                     // idempotent — it does not restart a running transport.
-                    if transporter.selected_contact.as_deref() != Some(selected.as_str()) {
+                    if transporter.selected_contact.as_deref() != Some(selected.as_str()) => {
                         if transporter.active_contact.is_some() {
                             push_lifecycle(
                                 lifecycle.as_deref_mut(),
@@ -305,7 +305,6 @@ pub fn handle_transporter_commands(
                         transporter.progress = 0.0;
                         transporter.last_refusal = None;
                     }
-                }
                 SystemControlPayload::StartTransport => {
                     transporter.transporting = true;
                     transporter.last_refusal = None;
@@ -574,7 +573,7 @@ pub fn tick_transport(
                     },
                     progress,
                     refusal: None,
-                    recover: (recovered_now > 0).then(|| (contact, recovered_now)),
+                    recover: (recovered_now > 0).then_some((contact, recovered_now)),
                     completed_id: completed.then(|| facts.entity_id.clone()).flatten(),
                 });
             }
@@ -937,7 +936,6 @@ mod tests {
     use super::*;
     use crate::core::messages::{AdmittedCommand, AdmittedCommands};
     use bevy::ecs::system::RunSystemOnce;
-    use bevy::prelude::*;
 
     fn transporter() -> Transporter {
         Transporter::new(

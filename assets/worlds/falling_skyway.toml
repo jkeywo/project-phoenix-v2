@@ -1558,16 +1558,92 @@ overrides = { comms = { hailable = true } }
 # Havelock cutter above uses and for the same reason — left on the template's
 # Ironveil patrol anchors, this world would have to declare two anchors named
 # after somebody else's border.
+#
+# `narrative = true` (issue #1338, wired here by #1349) puts the standoff on the
+# mission timeline. She is the second hull in this mission whose FATE is story
+# rather than bookkeeping, and unlike the Lyra there are FIVE endings for it to
+# record — so every one of them states its outcome outright through
+# `narrative_outcome`, and the automatic death beat is reached only by the one
+# ending that really is a death.
+#
+# The overrides are sectioned rather than inline from #1349 on, for the plain
+# TOML reason: `[entity.overrides.security_target]` is a sub-table, and TOML
+# forbids extending an inline table with one. Nothing about the values moved.
 [[entity]]
 template_path = "assets/entities/ship_harrow_patrol.toml"
 id = "havelock_enforcer"
 name = "world.falling_skyway.entity.havelock_enforcer.name"
+narrative = true
 transform = { anchor = "corporate_picket" }
-overrides = { comms = { hailable = true }, infrastructure = { publish = false, condition = 100.0, condition_max = 100.0, threshold = [
-  { flag = "havelock_enforcer_guns_online", fails_below = 0.35 },
-] }, behaviour = { doctrine = [
+
+[entity.overrides]
+comms = { hailable = true }
+behaviour = { doctrine = [
   { id = "patrol-ironveil", directive_kind = "Reach", directive_anchors = [], directive_loop = false, directive_anchor = "corporate_picket" },
-] } }
+] }
+
+[entity.overrides.infrastructure]
+publish = false
+condition = 100.0
+condition_max = 100.0
+
+[[entity.overrides.infrastructure.threshold]]
+flag = "havelock_enforcer_guns_online"
+fails_below = 0.35
+
+# ── WHAT SECURITY CAN DO ABOUT THE PICKET (issue #1349) ──────────────────────
+#
+# The non-destructive half of the standoff, and the reason #1349 is not a
+# gunnery beat with extra flags. The obstruction is a crewed boat holding a lane
+# under contract; Havelock's people are not hostile and are not the enemy, and
+# a mission that could only answer them with a beam would be teaching the wrong
+# lesson about the Alliance.
+#
+# TWO actions, and they are genuinely different jobs rather than one job at two
+# prices:
+#
+#   secure_contain   From outside. A team crosses, gets the mounts locked out and
+#                    the boat's own crew stood down, and comes home. Shorter and
+#                    safer, because nobody has to go through a hatch somebody
+#                    else controls — and it is `threat_containment`, the same
+#                    class as the Ladder B gallery fire, because that is what it
+#                    is: an armed thing made un-armed.
+#
+#   board            Onto the boat, and the boat is Havelock's afterwards only in
+#                    the sense that the paperwork says so. Longer, more
+#                    dangerous, and `optional` — the LOWEST class, deliberately.
+#                    A backfilled hull must never choose to put a party through
+#                    somebody's hatch while there is a fire or an evacuation
+#                    anywhere in reach; boarding is what a Security seat does
+#                    when it has run out of better things to do, or what a human
+#                    orders on purpose.
+#
+# Neither is gated on the picket being hostile first. `dispatch_status` has no
+# faction test and this file adds none: Security is the path that does NOT
+# require the crew to start a fight, and gating it behind one would delete the
+# whole point of the beat. What the crew get for hailing first is a cheaper
+# ending, not permission — see `on_picket_warned`.
+#
+# [ai] All six numbers unratified. The pair is sized against #1346's two: longer
+# than the head's 45-second evacuation because this is a contested transfer, and
+# `board` is a third longer again than `secure_contain` at half the risk over.
+[entity.overrides.security_target]
+
+[[entity.overrides.security_target.action]]
+action = "secure_contain"
+duration_secs = 55.0
+risk = 0.5
+priority = "threat_containment"
+outcome_flag = "havelock_enforcer_contained"
+warning = "world.falling_skyway.security.warning.picket_containment"
+
+[[entity.overrides.security_target.action]]
+action = "board"
+duration_secs = 75.0
+risk = 0.75
+priority = "optional"
+outcome_flag = "havelock_enforcer_boarded"
+warning = "world.falling_skyway.security.warning.picket_boarding"
 
 # ── Act 1's clock ────────────────────────────────────────────────────────────
 #
@@ -2325,6 +2401,30 @@ fn post_security_objectives(ctx) {
         target: "world.falling_skyway.entity.depot_ladder_b.name",
         targets: ["world.falling_skyway.entity.depot_ladder_b.name"],
     }, "depot_b_gallery_contained");
+    // THE PICKET (#1349), and the third `Secure` in this list rather than a
+    // fourth kind of thing. The obstruction in the lane is Security work before
+    // it is gunnery work, and saying so HERE is what makes it gunnery work last:
+    // a `Secure` directive naming the boat promotes its authored containment to
+    // the Objective class in the backfill's ranking, while Tactical is handed
+    // nothing at all until a captain authorises it on the channel.
+    //
+    // Priority 40 — under the head's 70 because people on a failing structure
+    // outrank a blocked lane, over the gallery's 30 because a lane nothing can
+    // move down is what the rest of Act 3 is waiting on.
+    //
+    // The completion memory is the RESOLUTION COUNTER rather than one outcome
+    // flag: five different endings close this row, and a crew who talked the
+    // boat off the lane before the slip must see it post already green.
+    post_remembered_objective(ctx, #{
+        id: "obj-a1-picket",
+        text: "world.falling_skyway.objective.picket.text",
+        mandatory: false,
+        source: "mission",
+        base_priority: 40,
+        directive_kind: "Secure",
+        target: "world.falling_skyway.entity.havelock_enforcer.name",
+        targets: ["world.falling_skyway.entity.havelock_enforcer.name"],
+    }, "havelock_enforcer_resolved");
 }
 
 // The people are off the head. Recorded as a counter rather than a bare flag for
@@ -3928,28 +4028,122 @@ fn on_file_evidence(ctx) {
     control_evidence_filing(ctx)
 }
 
-// ── THE RESTRAINT INTERACTION (#1041) ────────────────────────────────────────
+// ── THE PICKET STANDOFF (#1041, completed by #1349) ──────────────────────────
 //
-// One target, two ways to take it out of the fight, and a different set of
-// campaign flags for each. Nothing below starts a fight: the picket is neutral
-// until the crew shoot at it, and a run where nobody does reaches none of these
-// handlers.
+// One obstruction, SIX endings, and a different set of campaign flags for each.
+// #1041 built two of them — disabled and destroyed — because two is what a
+// restraint LEVER needs to be a lever. #1349 builds the rest of the beat around
+// it, and the shape it is built to is the issue's own: a standoff a crew can
+// resolve without a shot, and a Backfill that will not fire on its own.
+//
+//   holding       the crew opened the standoff and left the boat standing.
+//   contained     a Security team locked its mounts out from outside.
+//   boarded       a Security team went aboard and took it.
+//   disabled      its guns were shot off and the fight ended there.
+//   withdrawing   it left the lane under its own power.
+//   destroyed     it did not.
+//   unresolved    nobody ever addressed it.
+//
+// EXACTLY ONE of those is written to the campaign, at finalisation, by
+// `write_the_picket_record` — the `campaign.skyway.strike.*` device pointed at a
+// second question. Everything below writes the live facts that reading is made
+// of, and each of them is a real chain rather than a timer.
+//
+// THE ONE INVARIANT THIS BAND KEEPS. Nothing here starts a fight. The Harrow are
+// neutral until somebody makes them otherwise, the destroyer's own standing
+// doctrine only engages what is already hostile, and the ONLY thing that hands
+// Tactical Backfill a picket to shoot at is an authorisation a captain gave on
+// the channel. A run in which nobody chooses anything reaches none of these
+// handlers and is indistinguishable from one with no picket in it.
+
+// THE STANDOFF CHANNEL. Registered per resolution state rather than once,
+// because a hail trigger is single-shot and a crew who open the channel, clear
+// it and come back must find the boat still willing to talk. A false
+// trigger-level `when` does not consume the registration — the device the
+// committee and Havelock channels above already use.
+on_hailed("world.falling_skyway.entity.havelock_enforcer.name", "on_picket_hailed")
+    .when("counter(havelock_enforcer_resolved) < 1");
+on_hailed("world.falling_skyway.entity.havelock_enforcer.name", "on_picket_hailed")
+    .when("counter(havelock_enforcer_resolved) > 0");
 
 // Provocation. Until this fires the Harrow and the Federation are not enemies
 // and the picket does nothing at all — which is what makes what follows a
 // CHOICE the crew made rather than an ambush the mission sprang.
 on_attacked("world.falling_skyway.entity.havelock_enforcer.name", "on_picket_attacked");
 
-// The two outcomes. Both are real chains rather than timers: a condition
+// The gunnery outcomes. Both are real chains rather than timers: a condition
 // crossing raises and drops its own flag through the infrastructure tick, and a
 // kill emits `Destroyed` whether it came from a beam or from a script.
 on_flag_cleared("havelock_enforcer_guns_online", "on_picket_disabled");
 on_destroyed("world.falling_skyway.entity.havelock_enforcer.name", "on_picket_destroyed");
 
+// THE SECURITY OUTCOMES (#1346's seam, #1349's targets). A boarding party
+// finishing its authored work raises that action's authored `outcome_flag` on
+// the ordinary world store, so a containment arrives here exactly as the gallery
+// fire and the head evacuation do — off a flag, not off a wire into the Security
+// System. Nothing in the engine knows what either of these means.
+on_flag_set("havelock_enforcer_contained", "on_picket_contained");
+on_flag_set("havelock_enforcer_boarded", "on_picket_boarded");
+
 // Havelock's operations staff watching the corridor notice that the destroyer
 // has not gone weapons-free. Read off the MIRROR flag, exactly as a condition
 // reads `workforce.<id>.on_strike` — the scenario never touches ship state.
 on_flag_set("weapons_hold.own_ship", "on_crew_holds_fire");
+
+// ── The standoff's shared reads ─────────────────────────────────────────────
+
+// Whether the obstruction has been answered, by any of the five roads out of it.
+// Read at the top of every response and by the campaign record, so the beat has
+// ONE definition of "settled" rather than five handlers each guessing at it.
+fn picket_settled(ctx) {
+    ctx.flags.havelock_enforcer_contained > 0 ||
+    ctx.flags.havelock_enforcer_boarded > 0 ||
+    ctx.flags.havelock_enforcer_disabled > 0 ||
+    ctx.flags.havelock_enforcer_withdrawing > 0 ||
+    ctx.flags.havelock_enforcer_destroyed > 0
+}
+
+// THE CLOSURE EVERY ENDING TAKES, and the half of this beat that makes AC3 true.
+//
+// `remove_faction_enemy` is the load-bearing call. A picket that shot back is
+// hostile, and a hostile contact is exactly what the destroyer's standing
+// untargeted `Destroy` doctrine engages — so WITHOUT this, a hull whose Tactical
+// seat is backfilled would go on firing at a boat that had already lost its guns
+// until there was no boat. Ending the hostility drops the locks the hostility
+// licensed (the applier re-validates every AI target on a successful removal,
+// issue #710), which is what lets the authored threshold end the engagement
+// instead of the hull failing.
+//
+// The authorisation is withdrawn in the same breath, and the objective it posted
+// is completed rather than left open: force was licensed for a job, and the job
+// is done. Backfill is back to having nothing it is allowed to shoot.
+fn stand_the_picket_down(ctx) {
+    ctx.flags.increment("havelock_enforcer_resolved", 1);
+    ctx.flags.havelock_enforcer_force_authorized = 0;
+    ctx.effects.remove_faction_enemy("Harrow", "Federation");
+    ctx.effects.remove_faction_enemy("Federation", "Harrow");
+    ctx.effects.complete_objective("obj-a1-picket");
+    if ctx.flags.havelock_enforcer_force_posted > 0 {
+        ctx.effects.complete_objective("obj-a1-picket-force");
+    }
+}
+
+// What an ending costs in people. READ, NEVER ROLLED, and decided at the moment
+// the ending lands rather than at the epilogue — the `force_the_picket` rule,
+// for the same reason: it is what the situation WAS, and it has to survive a
+// save between the act and the report.
+//
+// A crew who said on the channel what they were about to do get the cheaper
+// number on every road but one. That is the whole return on hailing first: not
+// permission, which nobody needs, but people who were braced.
+//
+// [ai] Every number unratified.
+fn bank_picket_casualties(ctx, base) {
+    let hurt = base;
+    if ctx.flags.havelock_enforcer_warned > 0 && hurt > 0 { hurt -= 1; }
+    ctx.flags.skyway_picket_casualties = hurt;
+    hurt
+}
 
 fn on_picket_attacked(ctx) {
     if ctx.flags.picket_engaged == 1 {
@@ -3964,30 +4158,313 @@ fn on_picket_attacked(ctx) {
     ctx.effects.set_workforce_disposition("havelock_operations", 43);
 }
 
+// ── The channel ─────────────────────────────────────────────────────────────
+
+fn on_picket_hailed(ctx) {
+    ctx.flags.havelock_enforcer_channel_opened = 1;
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.havelock_enforcer.name",
+        node_fn: "picket_standoff",
+    });
+}
+
+// The standoff node. Four things a captain can say, and their ORDER is a safety
+// catch rather than a presentation choice — the same one #1036's force scene
+// keeps, for the same reason and with the same note attached.
+//
+// A headless or short-crewed bridge runs Comms on Backfill, and Backfill takes
+// the FIRST response. So the first response here is always "leave them where
+// they are": a thread this scene opens on an empty bridge closes benignly,
+// having changed nothing, and the destructive end of this beat stays a thing a
+// person decided. Switching Comms Backfill off for this hull is not the fix — it
+// would strand every other thread in the mission — and until an Objective can
+// say "this decision wants a human", response order is the narrow per-decision
+// guard the scene needs.
+//
+// The authorisation is not merely LAST. It is not rendered at all until a
+// stand-off request has been made and turned down: force against a neutral
+// contract crew is a decision this mission makes the crew earn, not one it
+// leaves lying on the list from the opening tick.
+fn picket_standoff(ctx) {
+    if ctx.flags.skyway_mission_finalized > 0 || picket_settled(ctx) {
+        return #{ message: "world.falling_skyway.comms.picket_channel_closed", responses: [] };
+    }
+    let responses = [];
+    responses.push(#{
+        text: "world.falling_skyway.comms.picket_leave_it",
+        on_pick: "on_picket_left_alone",
+    });
+    // Asking twice is asking twice. The request is offered while it has not been
+    // refused, and once more after a warning has been delivered — because the
+    // warning is the one thing that moves the answer. A third identical ask
+    // would be a loop rather than a conversation.
+    if ctx.flags.havelock_enforcer_refused == 0 ||
+       (ctx.flags.havelock_enforcer_warned > 0 && ctx.flags.havelock_enforcer_asked_warned == 0) {
+        responses.push(#{
+            text: "world.falling_skyway.comms.picket_ask_withdraw",
+            on_pick: "on_picket_asked_to_withdraw",
+        });
+    }
+    if ctx.flags.havelock_enforcer_warned == 0 {
+        responses.push(#{
+            text: "world.falling_skyway.comms.picket_warn_boarders",
+            on_pick: "on_picket_warned",
+        });
+    }
+    if ctx.flags.havelock_enforcer_refused > 0 {
+        responses.push(#{
+            text: "world.falling_skyway.comms.picket_authorize_force",
+            on_pick: "on_picket_force_authorized",
+            important: true,
+        });
+    }
+    let body = "world.falling_skyway.comms.picket_holds_station";
+    if ctx.flags.havelock_enforcer_refused > 0 {
+        body = "world.falling_skyway.comms.picket_holds_station_refused";
+    } else if ctx.flags.havelock_enforcer_warned > 0 {
+        body = "world.falling_skyway.comms.picket_holds_station_warned";
+    }
+    #{ message: body, responses: responses }
+}
+
+// LEAVE IT. Not an outcome and not a refusal — it closes the channel and changes
+// nothing, which is exactly what it should do. What makes it READABLE at the
+// epilogue is the fact it shares with every other pick on this thread: the
+// channel was opened. A crew who talked to the boat and walked away are
+// `holding`; a crew who never called are `unresolved`.
+fn on_picket_left_alone(ctx) {
+    ctx.flags.increment("havelock_enforcer_left_alone", 1);
+    #{ message: "world.falling_skyway.comms.picket_left_alone", responses: [] }
+}
+
+// ASK THEM TO GO. Answered against the operator's live disposition, which is a
+// number three earlier beats of this mission have already moved: shooting at
+// them took it to 43, coming to the depot with cold guns took it to 60, and a
+// warning delivered on this channel is worth ten more. Nothing is rolled and
+// nothing is hidden — a crew who have been civil can talk the boat off the lane,
+// and a crew who opened on it cannot.
+//
+// [ai] The 60 line and the warning's ten points are unratified. They are chosen
+// so the OPENING position (55) is a refusal: the peaceful road exists and it
+// still has to be walked.
+fn on_picket_asked_to_withdraw(ctx) {
+    // Re-read at admission. Rendering is not authority: a containment, a
+    // disablement or the mission's close can all land while this response is
+    // still sitting in an inbox.
+    if ctx.flags.skyway_mission_finalized > 0 || picket_settled(ctx) {
+        return #{ message: "world.falling_skyway.comms.picket_channel_closed", responses: [] };
+    }
+    ctx.flags.increment("havelock_enforcer_asked", 1);
+    if ctx.flags.havelock_enforcer_warned > 0 {
+        ctx.flags.havelock_enforcer_asked_warned = 1;
+    }
+    let mood = ctx.flags["workforce.havelock_operations.disposition"];
+    if ctx.flags.havelock_enforcer_warned > 0 { mood += 10; }
+    if mood < 60 {
+        // REFUSED — and this is the one flag that opens the force option. A
+        // captain cannot authorise force against a boat nobody has asked to
+        // leave.
+        ctx.flags.havelock_enforcer_refused = 1;
+        return #{ message: "world.falling_skyway.comms.picket_refuses", responses: [] };
+    }
+    withdraw_the_picket(ctx);
+    #{ message: "world.falling_skyway.comms.picket_stands_off", responses: [] }
+}
+
+// WITHDRAWING. The state is authoritative the instant the boat agrees; the hull
+// leaves twelve seconds later, under way rather than in pieces.
+//
+// The outcome is recorded BEFORE the removal and in the same call, which is the
+// engine's own contract for saying a scripted despawn was not a death (see
+// `NarrativeKind::MarkedEntityDestroyed`): the authored `escaped` then stands
+// alone and no `marked_entity_destroyed` is invented for a boat that flew home.
+//
+// A crew who shoot it in the back during those twelve seconds have destroyed it,
+// and the timeline says so — which is why `on_picket_destroyed` guards on
+// `havelock_enforcer_withdrew`, written by the callback, and not on
+// `havelock_enforcer_withdrawing`, written here.
+fn withdraw_the_picket(ctx) {
+    ctx.flags.havelock_enforcer_withdrawing = 1;
+    ctx.flags.restraint_shown = 1;
+    bank_picket_casualties(ctx, 0);
+    // [ai] Unratified: an operator whose boat came home whole, on their own
+    // orders, thinks better of the crew than one whose boat was taken off them.
+    ctx.effects.set_workforce_disposition("havelock_operations", 65);
+    stand_the_picket_down(ctx);
+    ctx.schedule.after(12, |ctx| { the_picket_leaves(ctx); });
+}
+
+fn the_picket_leaves(ctx) {
+    if ctx.flags.havelock_enforcer_destroyed > 0 || ctx.flags.havelock_enforcer_withdrew > 0 {
+        return;
+    }
+    ctx.flags.havelock_enforcer_withdrew = 1;
+    ctx.effects.narrative_outcome("world.falling_skyway.entity.havelock_enforcer.name", "escaped");
+    ctx.effects.destroy_entity("world.falling_skyway.entity.havelock_enforcer.name");
+}
+
+// WARN THEM. The promise this beat can make, and the only one: we are coming
+// aboard, and we are not shooting. Kept by every ending but the kill, which is
+// the whole of what a promise like that means — and settled in the ledger at
+// finalisation beside the other three, off facts rather than off a mood.
+fn on_picket_warned(ctx) {
+    if ctx.flags.skyway_mission_finalized > 0 || picket_settled(ctx) {
+        return #{ message: "world.falling_skyway.comms.picket_channel_closed", responses: [] };
+    }
+    if ctx.flags.havelock_enforcer_warned > 0 { return picket_standoff(ctx); }
+    ctx.flags.havelock_enforcer_warned = 1;
+    if ctx.commitments.state("skyway_picket_restraint") == "unknown" {
+        ctx.commitments.record(#{
+            id: "skyway_picket_restraint",
+            made_to: "world.falling_skyway.entity.havelock_enforcer.name",
+            terms: "world.falling_skyway.commitment.picket_restraint.terms",
+            resolves_when: "world.falling_skyway.commitment.picket_restraint.resolves",
+        });
+    }
+    // What they say back is on the record, because the contract they are holding
+    // the lane under is the thing #1039's confrontation would want to read.
+    ctx.dossier.append(#{
+        subject:    "world.falling_skyway.entity.havelock_enforcer.name",
+        text:       "world.falling_skyway.evidence.picket_contract",
+        provenance: "dialogue",
+    });
+    picket_standoff(ctx)
+}
+
+// AUTHORISE FORCE. The scenario-side authorisation, and the ONLY thing in this
+// mission that gives Tactical Backfill the picket to work on.
+//
+// It is a posted `Destroy` objective and nothing else — no new targeting
+// vocabulary, no Rust. The objective source is the top tier of the fleet's
+// authored weapons selector, so the moment it exists a backfilled Tactical seat
+// locks the boat, and the moment `stand_the_picket_down` completes it the lock
+// is gone. Authorisation is therefore a thing the crew can SEE on their own
+// objective list and a thing the mission can take back, rather than a mood.
+//
+// PRIORITY 55: under the head evacuation's 70, because getting people off a
+// failing structure outranks clearing a lane, and over the gallery fire's 30.
+fn on_picket_force_authorized(ctx) {
+    if ctx.flags.skyway_mission_finalized > 0 || picket_settled(ctx) {
+        return #{ message: "world.falling_skyway.comms.picket_channel_closed", responses: [] };
+    }
+    if ctx.flags.havelock_enforcer_refused == 0 {
+        return picket_standoff(ctx);
+    }
+    if ctx.flags.havelock_enforcer_force_authorized > 0 {
+        return #{ message: "world.falling_skyway.comms.picket_force_standing", responses: [] };
+    }
+    ctx.flags.havelock_enforcer_force_authorized = 1;
+    ctx.flags.havelock_enforcer_force_posted = 1;
+    ctx.effects.add_objective(#{
+        id: "obj-a1-picket-force",
+        text: "world.falling_skyway.objective.picket_force.text",
+        mandatory: false,
+        source: "mission",
+        base_priority: 55,
+        directive_kind: "Destroy",
+        target: "world.falling_skyway.entity.havelock_enforcer.name",
+        targets: ["world.falling_skyway.entity.havelock_enforcer.name"],
+    });
+    #{ message: "world.falling_skyway.comms.picket_force_authorized", responses: [] }
+}
+
+// ── The five endings ────────────────────────────────────────────────────────
+
+// CONTAINED. A team crossed, locked the mounts out and came home. Nobody went
+// through a hatch, nobody was hurt, and the boat is Havelock's afterwards — the
+// cheapest ending this beat has, and the one the Security backfill reaches for
+// first because it is the higher-priority of the two actions the picket offers.
+fn on_picket_contained(ctx) {
+    ctx.effects.hold_fire("world.falling_skyway.entity.havelock_enforcer.name");
+    ctx.flags.restraint_shown = 1;
+    bank_picket_casualties(ctx, 0);
+    // [ai] Unratified. Below the withdrawal's 65: their boat was made safe for
+    // them rather than by them.
+    ctx.effects.set_workforce_disposition("havelock_operations", 55);
+    ctx.effects.narrative_outcome("world.falling_skyway.entity.havelock_enforcer.name", "disabled");
+    stand_the_picket_down(ctx);
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.havelock_cutter.name",
+        node_fn: "picket_contained_report",
+        urgent: true,
+    });
+}
+
+// BOARDED. The same boat, taken rather than talked down. It costs somebody — one
+// person, or nobody if the crew said on the channel that they were coming — and
+// it costs Havelock more of their goodwill than a containment, because a
+// containment leaves them their boat and this does not.
+fn on_picket_boarded(ctx) {
+    ctx.effects.hold_fire("world.falling_skyway.entity.havelock_enforcer.name");
+    ctx.flags.restraint_shown = 1;
+    bank_picket_casualties(ctx, 1);
+    // [ai] Unratified.
+    ctx.effects.set_workforce_disposition("havelock_operations", 45);
+    ctx.effects.narrative_outcome("world.falling_skyway.entity.havelock_enforcer.name", "disabled");
+    stand_the_picket_down(ctx);
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.havelock_cutter.name",
+        node_fn: "picket_boarded_report",
+        urgent: true,
+    });
+}
+
 // DISABLED. The mount is gone, the boat is not: the picket is held to its own
-// weapons hold — this issue's own lever, applied to an NPC through the same
-// state a captain's console writes — and everyone aboard it lives. Repairable,
-// in principle, which is the difference the flags are recording.
+// weapons hold — #1041's own lever, applied to an NPC through the same state a
+// captain's console writes — and everyone aboard it lives. Repairable, in
+// principle, which is the difference the flags are recording.
+//
+// AC3 LANDS HERE. Nothing about this handler requires the hull to fail: the
+// authored threshold clears its flag at 35 % of the condition track, and
+// `stand_the_picket_down` ends the hostility and retracts the authorisation on
+// that crossing — so a backfilled Tactical seat stops at a disabled boat rather
+// than finishing it.
 fn on_picket_disabled(ctx) {
     ctx.effects.hold_fire("world.falling_skyway.entity.havelock_enforcer.name");
     ctx.flags.havelock_enforcer_disabled = 1;
     ctx.flags.restraint_shown = 1;
+    bank_picket_casualties(ctx, 1);
     // [ai] Unratified: an operator whose people came home is an operator with
     // something left to lose, and the negotiation reads this number.
     ctx.effects.set_workforce_disposition("havelock_operations", 50);
+    ctx.effects.narrative_outcome("world.falling_skyway.entity.havelock_enforcer.name", "disabled");
+    stand_the_picket_down(ctx);
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.havelock_cutter.name",
+        node_fn: "picket_disabled_report",
+        urgent: true,
+    });
 }
 
 // DESTROYED. The same threat removed, and a crew who removed it the other way.
-// `restraint_shown` is written by BOTH handlers because it is one question with
-// two answers, not two unrelated facts — and killing a picket that had already
-// been disabled is still a kill, which is why this handler assigns rather than
-// checking what the other one wrote.
+// `restraint_shown` is written by EVERY ending because it is one question with
+// two answers, not several unrelated facts — and killing a picket that had
+// already been disabled, contained or boarded is still a kill, which is why this
+// handler assigns rather than checking what the others wrote.
+//
+// No authored outcome: this one really is a death, so the automatic
+// `marked_entity_destroyed` beat is the honest timeline entry and nothing here
+// suppresses it. The guard is for the boat that had already flown home — its
+// removal was `the_picket_leaves`, and an `escaped` was recorded for it first.
 fn on_picket_destroyed(ctx) {
+    if ctx.flags.havelock_enforcer_withdrew > 0 { return; }
     ctx.flags.havelock_enforcer_destroyed = 1;
     ctx.flags.restraint_shown = 0;
+    bank_picket_casualties(ctx, 3);
     // [ai] Unratified.
     ctx.effects.set_workforce_disposition("havelock_operations", 10);
+    stand_the_picket_down(ctx);
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.havelock_cutter.name",
+        node_fn: "picket_destroyed_report",
+        urgent: true,
+    });
 }
+
+fn picket_contained_report(ctx) { #{ message: "world.falling_skyway.comms.picket_contained_report", responses: [] } }
+fn picket_boarded_report(ctx)   { #{ message: "world.falling_skyway.comms.picket_boarded_report", responses: [] } }
+fn picket_disabled_report(ctx)  { #{ message: "world.falling_skyway.comms.picket_disabled_report", responses: [] } }
+fn picket_destroyed_report(ctx) { #{ message: "world.falling_skyway.comms.picket_destroyed_report", responses: [] } }
 
 fn on_crew_holds_fire(ctx) {
     ctx.flags.havelock_saw_restraint = 1;
@@ -6454,6 +6931,18 @@ fn resolve_the_promises(ctx) {
             ctx.commitments.keep("skyway_protect_witness");
         }
     }
+    // The picket's, and the only one in this ledger made to somebody the crew
+    // could have shot (#1349). It is broken by exactly one thing — the kill —
+    // because that is the whole of what "we are coming aboard, not opening fire"
+    // undertakes. Left standing, talked off the lane, contained, boarded or shot
+    // out of its mounts, the captain's word held.
+    if ctx.commitments.state("skyway_picket_restraint") == "open" {
+        if ctx.flags.havelock_enforcer_destroyed > 0 {
+            ctx.commitments.break_promise("skyway_picket_restraint");
+        } else {
+            ctx.commitments.keep("skyway_picket_restraint");
+        }
+    }
 }
 
 // ── What riding it out costs, and who says so ───────────────────────────────
@@ -6483,10 +6972,30 @@ fn storm_cost(ctx, claimant) {
         else if ctx.flags.skyway_settled_by_negotiation > 0 { hurt -= 1; }
     }
     if claimant == "havelock" {
-        // The cutter and the picket are two hulls with power on them. Take one
-        // out of the world and that is one fewer place to put people.
-        if ctx.flags.havelock_enforcer_destroyed > 0 { hurt += 1; }
-        else if ctx.flags.picket_engaged == 0 { hurt -= 1; }
+        // The cutter and the picket are two hulls with power on them, and what
+        // the standoff did to the second one is the LATER LIFT CONDITION this
+        // beat feeds (#1349). Read as a ladder, worst first, because exactly one
+        // of these is true of any run:
+        //
+        //   destroyed   the boat is wreckage. One fewer place to put people, and
+        //               the crew who could have been in it are not.
+        //   withdrawing it flew home — out of this corridor, and out of reach of
+        //               anybody sheltering in it tonight. The same missing hull,
+        //               without the bodies.
+        //   boarded     it is still here and still powered, but it is under
+        //               somebody else's flag and its own people are not aboard
+        //               it. No help and no harm.
+        //   contained / it is exactly where it was, with its mounts locked out —
+        //   untouched   a warm hull with a hatch and its own crew in it, which
+        //               is all a shelter is.
+        //   disabled    the same hull, and a crew who have just been shot at.
+        //               No bonus, because `picket_engaged` is up.
+        if ctx.flags.havelock_enforcer_destroyed > 0 ||
+           ctx.flags.havelock_enforcer_withdrawing > 0 {
+            hurt += 1;
+        } else if ctx.flags.picket_engaged == 0 && ctx.flags.havelock_enforcer_boarded == 0 {
+            hurt -= 1;
+        }
     }
     if claimant == "convoy" {
         // They are the only claimant with no ground of their own, so the
@@ -6645,10 +7154,20 @@ fn write_the_campaign_record(ctx) {
     // 4. THE CASUALTIES, itemised and summed. Three separate beats of this
     // mission can hurt somebody and the campaign wants both readings: which beat
     // it was, and how many people it came to.
+    //
+    // FOUR beats now, not three (#1349). `campaign.skyway.casualties.picket` is
+    // an OLDER key than the picket boat is and it does not mean her: it is what
+    // forcing the labour picket on Ladder B cost, written by
+    // `force_the_picket`. The standoff's own count goes under `standoff`, and
+    // the two are never added into one another — a later mission reading this
+    // record is asking two different questions about two different sets of
+    // people who happen to share a word.
     let total = ctx.flags.skyway_force_casualties
+        + ctx.flags.skyway_picket_casualties
         + ctx.flags.skyway_head_casualties
         + ctx.flags.skyway_storm_casualties;
     ctx.flags["campaign.skyway.casualties.picket"] = ctx.flags.skyway_force_casualties;
+    ctx.flags["campaign.skyway.casualties.standoff"] = ctx.flags.skyway_picket_casualties;
     ctx.flags["campaign.skyway.casualties.head"] = ctx.flags.skyway_head_casualties;
     ctx.flags["campaign.skyway.casualties.storm"] = ctx.flags.skyway_storm_casualties;
     ctx.flags["campaign.skyway.casualties.total"] = total;
@@ -6672,6 +7191,8 @@ fn write_the_campaign_record(ctx) {
     if ctx.commitments.state("skyway_surface_records") == "broken" { broken += 1; }
     if ctx.commitments.state("skyway_protect_witness") == "kept" { kept += 1; }
     if ctx.commitments.state("skyway_protect_witness") == "broken" { broken += 1; }
+    if ctx.commitments.state("skyway_picket_restraint") == "kept" { kept += 1; }
+    if ctx.commitments.state("skyway_picket_restraint") == "broken" { broken += 1; }
     ctx.flags["campaign.skyway.commitments.kept"] = kept;
     ctx.flags["campaign.skyway.commitments.broken"] = broken;
     if kept + broken == 0 {
@@ -6689,6 +7210,94 @@ fn write_the_campaign_record(ctx) {
     if ctx.flags.skyway_traffic_lost_lark > 0     { ctx.flags["campaign.skyway.traffic.lark"] = 1; }
     if ctx.flags.skyway_traffic_lost_pell > 0     { ctx.flags["campaign.skyway.traffic.pell"] = 1; }
     if ctx.flags.skyway_traffic_lost_wick > 0     { ctx.flags["campaign.skyway.traffic.wick"] = 1; }
+    // The lane itself, as the next crew through here inherits it. A corridor
+    // with an armed boat still sitting across it is a corridor that is not
+    // finished, whatever else this mission achieved — and it is a TRAFFIC fact
+    // rather than a casualty one, which is the split section 7 already makes.
+    write_the_picket_record(ctx);
+}
+
+// ── 8. THE STANDOFF (#1349) ─────────────────────────────────────────────────
+//
+// EXACTLY ONE of seven, in one place, read at finalisation — the shape section
+// 2's three-way strike reading already has, widened to the number of endings
+// this beat actually has. A later mission reads a fact about the picket rather
+// than an absence, whichever road the crew took.
+//
+// THE ORDER IS THE PRECEDENCE, and it is not arbitrary:
+//
+//   destroyed    a kill is a kill. A boat that was contained, boarded or
+//                disabled first and then finished is recorded as finished, for
+//                the reason `restraint_shown` is assigned rather than tested.
+//   withdrew     the only other ending that takes the hull out of the corridor.
+//   boarded      before contained: going through the hatch is the bigger act,
+//                and a run that did both did the bigger one.
+//   disabled     before holding: shooting the mounts off is an answer.
+//   holding      the crew OPENED the channel and left the boat standing. A
+//                deliberate non-intervention, which is a decision.
+//   unresolved   nobody ever addressed it. The reading section 2's own third
+//                branch is: not a failure, an absence, and the two are
+//                different facts about a captain.
+// Every campaign key here is a LITERAL, and the branch it sits in is the one
+// place it is written — no composed `"campaign.skyway.picket." + state`, so the
+// seven flags a later mission will read are greppable from this file exactly as
+// the other seven families' are.
+//
+// [ai] Every score unratified. The spread is deliberately narrow and centred on
+// nothing: this beat is a way the crew WERE, not the mission's result, and the
+// report already has a claimant tally to be its verdict.
+fn write_the_picket_record(ctx) {
+    if ctx.flags.havelock_enforcer_destroyed > 0 {
+        ctx.flags["campaign.skyway.picket.destroyed"] = 1;
+        ctx.flags["campaign.skyway.traffic.corridor_cleared"] = 1;
+        picket_report_row(ctx, "world.falling_skyway.report.picket.destroyed", "lost", -5);
+    } else if ctx.flags.havelock_enforcer_withdrawing > 0 {
+        ctx.flags["campaign.skyway.picket.withdrew"] = 1;
+        ctx.flags["campaign.skyway.traffic.corridor_cleared"] = 1;
+        picket_report_row(ctx, "world.falling_skyway.report.picket.withdrew", "saved", 5);
+    } else if ctx.flags.havelock_enforcer_boarded > 0 {
+        ctx.flags["campaign.skyway.picket.boarded"] = 1;
+        ctx.flags["campaign.skyway.traffic.corridor_cleared"] = 1;
+        picket_report_row(ctx, "world.falling_skyway.report.picket.boarded", "saved", 3);
+    } else if ctx.flags.havelock_enforcer_contained > 0 {
+        ctx.flags["campaign.skyway.picket.contained"] = 1;
+        ctx.flags["campaign.skyway.traffic.corridor_cleared"] = 1;
+        picket_report_row(ctx, "world.falling_skyway.report.picket.contained", "saved", 4);
+    } else if ctx.flags.havelock_enforcer_disabled > 0 {
+        ctx.flags["campaign.skyway.picket.disabled"] = 1;
+        ctx.flags["campaign.skyway.traffic.corridor_cleared"] = 1;
+        picket_report_row(ctx, "world.falling_skyway.report.picket.disabled", "partial", 1);
+    } else if ctx.flags.havelock_enforcer_channel_opened > 0 {
+        // THE LANE IS STILL BLOCKED. A boat the captain chose to leave alone and
+        // one nobody ever called block the corridor identically — which is why
+        // the traffic key does not split where the picket key does.
+        ctx.flags["campaign.skyway.picket.holding"] = 1;
+        ctx.flags["campaign.skyway.traffic.corridor_picketed"] = 1;
+        picket_report_row(ctx, "world.falling_skyway.report.picket.holding", "neutral", 0);
+        // The story's own punctuation for the two endings that are not a fate
+        // (issue #1338). `narrative_outcome` has five words and none of them
+        // means "still there"; a beat does, and a beat is what this is — the
+        // author saying that a standoff ended by not ending.
+        ctx.effects.narrative_beat("skyway_picket_left_standing");
+    } else {
+        ctx.flags["campaign.skyway.picket.unresolved"] = 1;
+        ctx.flags["campaign.skyway.traffic.corridor_picketed"] = 1;
+        picket_report_row(ctx, "world.falling_skyway.report.picket.unresolved", "neutral", 0);
+        ctx.effects.narrative_beat("skyway_picket_unaddressed");
+    }
+}
+
+// One row id for all seven endings, the `lyra` rule: two ids would let a run
+// that disabled the boat and then killed it report the standoff twice, in two
+// moods.
+fn picket_report_row(ctx, outcome_id, state, score) {
+    ctx.effects.report_row(#{
+        id: "picket",
+        heading: "world.falling_skyway.report.picket.heading",
+        outcome: outcome_id,
+        state: state,
+        score: score,
+    });
 }
 
 // ── The debrief ─────────────────────────────────────────────────────────────

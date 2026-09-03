@@ -7687,6 +7687,8 @@ on_flag_set("skyway_debris_trail_urgent", "on_debris_trail_urgent");
 on_flag_set("skyway_debris_lead_struck", "on_debris_lead_struck");
 on_flag_set("skyway_debris_trail_struck", "on_debris_trail_struck");
 on_flag_set("skyway_debris_stray_read", "on_debris_stray_read");
+on_flag_set("skyway_debris_lead_read", "on_debris_lead_read");
+on_flag_set("skyway_debris_trail_read", "on_debris_trail_read");
 
 on_destroyed("world.falling_skyway.entity.debris_lead.name", "on_debris_lead_cleared");
 on_destroyed("world.falling_skyway.entity.debris_trail.name", "on_debris_trail_cleared");
@@ -7837,7 +7839,20 @@ fn shed_the_corridor(ctx) {
 // it — the same way it hears about any other named target — and a human Tactical
 // reads the same objective off the same list.
 fn confirm_one(ctx, id, text, target, priority, key) {
-    ctx.effects.complete_objective("obj-a3-debris-scan-" + key);
+    // FIRST TERMINAL EVENT WINS applies here too, and this was the one handler
+    // in the beat standing outside it.
+    //
+    // A mass that has already LANDED is not a threat left to confirm. The engine
+    // will not latch `confirmed` after `struck` (see `tick_debris_state`), and on
+    // the one tick where both can be true at once — a reading that lands on the
+    // very tick the rock crosses its impact radius — both flags are already in
+    // the store by the time this runs, so the strike takes the contact. Without
+    // these two lines that reading posts a MANDATORY interception order for a
+    // rock that is already down and that nothing can ever resolve — `clear_one`
+    // returns early on the impact flag, `strike_one` on the spent claim — and
+    // shows the collision and impact-imminent cues AFTER the impact cue.
+    if ctx.flags["skyway_debris_" + key + "_struck"] > 0 { return; }
+    if !debris_pending(ctx, key) { return; }
     ctx.effects.add_objective(#{
         id: id,
         text: text,
@@ -7904,6 +7919,27 @@ fn on_debris_stray_read(ctx) {
     ctx.effects.narrative_beat("skyway_debris_ruled_out");
 }
 
+// ── Reading one of the aimed masses ─────────────────────────────────────────
+//
+// The Scan objective ends on the READING, not on what the reading turned out to
+// say. A crew who looked have done the job the panel gave them whether the
+// answer was "on course for Ladder A" or "going nowhere at all", and the stray
+// has been closed that way since this beat was written — these two make the
+// aimed masses agree with it instead of hanging their Scan objective off the
+// confirmation, which is a different question and one a reading may answer no to.
+//
+// Ending it on the flag rather than inside `confirm_one` is also what keeps the
+// Backfilled Sensors seat honest. The Scan directive is live for exactly as long
+// as its objective is Active, so a contact that has been read — or that has
+// ENDED unread, which is what the two terminal handlers below now close — stops
+// being re-requested on every AI snapshot.
+fn read_one(ctx, key) {
+    ctx.effects.complete_objective("obj-a3-debris-scan-" + key);
+}
+
+fn on_debris_lead_read(ctx)  { read_one(ctx, "lead"); }
+fn on_debris_trail_read(ctx) { read_one(ctx, "trail"); }
+
 // ── The three endings, per protected asset ──────────────────────────────────
 //
 // Which rung was saved or harmed is recorded as its own durable flag, so a
@@ -7942,6 +7978,15 @@ fn on_debris_stray_read(ctx) {
 // outcomes stop being three distinct records. FIRST TERMINAL EVENT WINS: each
 // handler claims the contact through `debris_pending` before it writes anything,
 // and closes it with `debris_resolved` after.
+//
+// `confirm_one` reads the same claim from the other side. A confirmation is not
+// an ending, so it takes nothing and closes nothing — but it refuses to post an
+// interception order for a contact whose ending has already been claimed, which
+// is the case a reading taken after the impact would otherwise create.
+//
+// And an ending closes EVERY task the contact was the subject of: both handlers
+// end its Scan objective as well as its interception one, so nothing on the
+// crew's panel — or in a Backfilled seat's directive pool — outlives the rock.
 fn debris_pending(ctx, key) {
     ctx.flags["skyway_debris_" + key + "_resolved"] < 1
 }
@@ -7966,6 +8011,20 @@ fn clear_one(ctx, key, objective, saved_flag, late_flag) {
     ctx.effects.complete_objective(objective);
     ctx.effects.narrative_outcome(
         "world.falling_skyway.entity.debris_" + key + ".name", "destroyed");
+    // A contact that ENDS closes every task it was the subject of, not just the
+    // one about shooting it.
+    //
+    // A human Tactical is free to lock and break up an unread mass — the file's
+    // own header calls that legitimate — and when they do, the Scan objective
+    // that named this contact would otherwise sit Active on the crew's panel for
+    // the rest of the mission, pointing at an entity that no longer exists and
+    // keeping a Backfilled Sensors seat asking for a reading of a name nothing
+    // can resolve. Failed rather than completed, because for an unread contact
+    // the honest record is that nobody ever looked; a mass that WAS read has
+    // already completed this objective on its `_read` flag and
+    // `ObjectiveManager::fail` moves `Active` records only, so this is a no-op
+    // there rather than a downgrade.
+    ctx.effects.fail_objective("obj-a3-debris-scan-" + key);
     debris_resolved(ctx, key);
 }
 
@@ -8026,6 +8085,10 @@ fn strike_one(ctx, key, objective, depot, harmed_flag) {
         text:       "world.falling_skyway.evidence.debris_strike",
         provenance: "scan",
     });
+    // The same closure `clear_one` makes, for the other ending: a mass nobody
+    // read and nobody stopped has still ENDED, and the task that asked for a
+    // reading of it ends with it rather than outliving the rock on the panel.
+    ctx.effects.fail_objective("obj-a3-debris-scan-" + key);
     debris_resolved(ctx, key);
 }
 

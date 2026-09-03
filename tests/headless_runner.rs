@@ -24765,3 +24765,266 @@ fn falling_skyway_backfilled_sensors_works_down_the_shed_masses_unprompted() {
         "a Backfilled Tactical must take up the confirmed mass beside it"
     );
 }
+
+/// Every Scan target the crew hull's Sensors host would act on this tick, read
+/// off the frozen viewscreen pool the host itself resolves against.
+///
+/// This is the mechanism rather than a proxy for it: `operate_sensors_ai` picks
+/// the top positive Sensors-affined `Scan` directive out of exactly this slice
+/// and emits the admitted `ScanTarget` for it, so a name that is still in here is
+/// a name the seat is still going back for.
+fn shed_scan_directive_targets(app: &mut bevy::prelude::App) -> Vec<String> {
+    use project_phoenix::core::messages::{SystemAffinity, SystemBlackboard};
+
+    let mut ships = app
+        .world_mut()
+        .query_filtered::<&project_phoenix::server_app::ShipSystemBlackboards, With<LocalShip>>();
+    let blackboards = ships
+        .single(app.world())
+        .expect("the crew's hull must publish blackboards");
+    let scored = match blackboards
+        .0
+        .get(&project_phoenix::ship::system_registry::viewscreen_system_id())
+        .expect("the crew's hull must publish a viewscreen blackboard")
+    {
+        SystemBlackboard::Viewscreen(view) => view.scored_objectives.clone(),
+        other => panic!("expected viewscreen blackboard, got {other:?}"),
+    };
+    scored
+        .iter()
+        .filter(|objective| {
+            objective.score > 0.0 && objective.relevance.contains(&SystemAffinity::Sensors)
+        })
+        .filter_map(|objective| {
+            project_phoenix::objectives::scan_directive_target(&objective.directive)
+                .map(str::to_owned)
+        })
+        .collect()
+}
+
+/// **AC4, and the beat's own FIRST TERMINAL EVENT WINS rule applied to the one
+/// handler that used to stand outside it.** The crew ignore the lead mass, it
+/// lands on Ladder A, and only afterwards does anybody go and read the wreckage.
+///
+/// That reading is geometrically on a collision course and always will be — the
+/// rock is frozen inside the very radius the arrival test uses, so `assess`
+/// answers `on_collision_course` with nought seconds to run. Ungoverned it
+/// latches `confirmed` AFTER `struck`, and the scenario posts a MANDATORY
+/// interception order for a mass that is already down: `clear_one` returns early
+/// on the impact flag and `strike_one` on the spent claim, so nothing in the
+/// mission can ever resolve it, and the collision and impact-imminent cues arrive
+/// after the impact cue. One contact would record both a strike and a live firing
+/// order, which is AC4's three distinct consequences collapsing into one.
+///
+/// The reading itself is still taken and still lands — looking at a rock that has
+/// already hit something is a reasonable thing to do and tells the crew what it
+/// was. What it is not is a threat to intercept.
+#[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_a_mass_read_after_it_lands_is_never_confirmed_as_a_threat() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    let (mut app, ship) = shed_app_crewed();
+    assert_eq!(
+        skyway_flag(&app, "skyway_debris_lead_read"),
+        0,
+        "precondition: nobody has looked at the lead mass"
+    );
+
+    // Nobody stops it. Landed exactly the way the miss test lands it.
+    let inside = lead_impact_radius(&mut app) * 0.5;
+    let ladder_a = skyway_position(&mut app, SHED_LADDER_A);
+    shed_place(
+        &mut app,
+        SHED_LEAD,
+        bevy::prelude::Vec3::new(ladder_a.x, ladder_a.y, ladder_a.z - inside),
+    );
+    run(&mut app, 4);
+    assert_eq!(
+        skyway_flag(&app, "skyway_debris_lead_struck"),
+        1,
+        "precondition: the unread mass has arrived"
+    );
+    assert_eq!(skyway_flag(&app, "skyway_ladder_a_debris_harmed"), 1);
+    let (struck_cue, _, _) = shed_message(&app);
+    assert_eq!(
+        struck_cue, "skyway_debris_struck_lead",
+        "the impact cue is the last thing the crew were told before they looked"
+    );
+
+    // NOW they look. Through the ordinary admitted `ScanTarget` path, from
+    // inside the suite's reach, exactly as every other reading in this group.
+    shed_scan(&mut app, ship, SHED_LEAD);
+    assert_eq!(
+        skyway_flag(&app, "skyway_debris_lead_read"),
+        1,
+        "the reading must actually have landed, or this test proves nothing"
+    );
+
+    // Anti-vacuity, and the reason the guard is load-bearing rather than
+    // defensive: the reading really did come back on a collision course.
+    let reading = shed_last_reading(&mut app, ship);
+    let assessment = reading
+        .debris
+        .expect("a reading of a shed mass projects it against what is under it");
+    assert!(
+        assessment.on_collision_course,
+        "the frozen rock sits inside its own impact radius, so the projection \
+         says 'on course' — which is what the terminal guard has to survive: \
+         {assessment:?}"
+    );
+
+    // ── The claim ───────────────────────────────────────────────────────────
+    assert_eq!(
+        skyway_flag(&app, "skyway_debris_lead_confirmed"),
+        0,
+        "a mass that has already arrived is not a threat left to confirm"
+    );
+    assert_eq!(
+        skyway_flag(&app, "skyway_debris_lead_urgent"),
+        0,
+        "and nothing that hangs off the confirmation may follow it"
+    );
+    assert!(
+        objective_status_opt(&app, "obj-a3-debris-lead").is_none(),
+        "an interception order posted for a rock that is already down, and \
+         nothing in the mission could ever resolve it"
+    );
+
+    // No cue after the impact cue. The computer's last word on this contact is
+    // that it hit the rung, not that it is about to.
+    let (id, _, _) = shed_message(&app);
+    assert_eq!(
+        id, "skyway_debris_struck_lead",
+        "a cue was shown after the impact cue for a mass that had already landed"
+    );
+
+    // The Scan task ends with the contact, and a reading taken afterwards does
+    // not put it back: `complete_objective` moves `Active` records only.
+    assert_eq!(
+        objective_status(&app, "obj-a3-debris-scan-lead"),
+        ObjectiveStatus::Failed,
+        "the reading was never taken in time; the strike closed the task"
+    );
+
+    let report = build_report(&mut app, &shed_args(), 0.0);
+    let beats: Vec<String> = report
+        .narrative
+        .events
+        .iter()
+        .filter(|e| e.event.kind.as_str() == "beat_fired")
+        .map(|e| e.event.id.clone())
+        .collect();
+    assert!(
+        beats.iter().any(|b| b == "skyway_debris_struck_lead"),
+        "the strike is the record this contact leaves: {beats:?}"
+    );
+    assert!(
+        !beats.iter().any(|b| b == "skyway_debris_confirmed_lead"),
+        "a confirmation was recorded for a contact that had already ended: {beats:?}"
+    );
+}
+
+/// **AC5, the other end of the same rule.** A human Tactical locks and breaks up
+/// the trailing mass before anybody has read it — behaviour the beat's own header
+/// calls legitimate, because a person may back their own judgement where the
+/// Backfilled seat may not.
+///
+/// The contact ENDS there. What must end with it is every task it was the subject
+/// of, not just the one about shooting it: left Active, `obj-a3-debris-scan-trail`
+/// sits on the crew's panel for the rest of the mission naming an entity that no
+/// longer exists, and — because the Scan directive is live for exactly as long as
+/// its objective is — a Backfilled Sensors seat goes back for a reading of that
+/// name on every AI snapshot, for ever, against a name nothing can resolve.
+///
+/// This drives the Backfilled seat, so the second half of the claim is checked
+/// where the seat actually reads it: the frozen viewscreen pool
+/// `operate_sensors_ai` resolves its `ScanTarget` out of.
+#[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_breaking_up_an_unread_mass_ends_the_reading_it_was_the_subject_of() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    let (mut app, ship) = shed_app();
+    assert_eq!(
+        skyway_flag(&app, "skyway_debris_trail_read"),
+        0,
+        "precondition: nobody has read the trailing mass"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a3-debris-scan-trail"),
+        ObjectiveStatus::Active
+    );
+    // Precondition, and the thing that makes the assertion after the destroy
+    // mean something: the seat IS being asked for this reading right now.
+    run(&mut app, ticks_for_sim_seconds(2.0, SKYWAY_DT));
+    let before = shed_scan_directive_targets(&mut app);
+    assert!(
+        before.iter().any(|target| target == SHED_TRAIL),
+        "the Backfilled Sensors seat must be carrying a live Scan directive for \
+         the trailing mass before it is broken up: {before:?}"
+    );
+
+    shed_destroy(&mut app, SHED_TRAIL);
+    assert_eq!(
+        skyway_flag(&app, "skyway_ladder_b_debris_saved"),
+        1,
+        "precondition: this went down the interception ending"
+    );
+    assert_eq!(
+        skyway_flag(&app, "skyway_debris_trail_read"),
+        0,
+        "and it went down it UNREAD, which is the case under test"
+    );
+
+    // ── The claim ───────────────────────────────────────────────────────────
+    assert_ne!(
+        objective_status(&app, "obj-a3-debris-scan-trail"),
+        ObjectiveStatus::Active,
+        "the reading task outlived the rock it named"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a3-debris-scan-trail"),
+        ObjectiveStatus::Failed,
+        "nobody ever looked at this mass, which is the honest record of it"
+    );
+
+    // …and the seat stops going back for it.
+    run(&mut app, ticks_for_sim_seconds(10.0, SKYWAY_DT));
+    let targets = shed_scan_directive_targets(&mut app);
+    assert!(
+        !targets.iter().any(|target| target == SHED_TRAIL),
+        "the Backfilled Sensors seat is still asking for a reading of a contact \
+         that no longer exists: {targets:?}"
+    );
+
+    // Not stuck, either: the seat gets on with the rest of the field. Without
+    // this the assertion above would also pass for a seat that had simply
+    // stopped working.
+    let lead = skyway_position(&mut app, SHED_LEAD);
+    skyway_move(
+        &mut app,
+        ship,
+        lead + bevy::prelude::Vec3::new(60.0, 0.0, 0.0),
+    );
+    skyway_run_until_flag(&mut app, "skyway_debris_lead_read", 1, 60.0);
+    assert_eq!(
+        skyway_flag(&app, "skyway_debris_lead_read"),
+        1,
+        "a seat that had merely stopped would never reach the remaining mass"
+    );
+    // The flag is the engine's; the handler that consumes it runs when the world
+    // event it queued is dispatched, on the following tick.
+    run(&mut app, 4);
+    assert_eq!(
+        objective_status(&app, "obj-a3-debris-scan-lead"),
+        ObjectiveStatus::Completed,
+        "and a mass that WAS read completes its reading task rather than failing it"
+    );
+}

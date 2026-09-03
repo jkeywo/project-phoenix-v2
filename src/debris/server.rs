@@ -367,7 +367,25 @@ pub fn tick_debris_state(
                 threat.assessed = true;
                 raise.push((uuid.clone(), "read", threat.config.assessed_flag.clone()));
             }
-            if record.assessment.on_collision_course && !threat.confirmed {
+            // A mass that has ALREADY ARRIVED is not a threat left to confirm.
+            //
+            // Without the `struck` test this latch fires off a reading taken
+            // AFTER the impact: the rock is frozen inside the very radius the
+            // arrival test uses, so `assess` answers `on_collision_course` with
+            // `seconds_to_impact = Some(0.0)` — geometrically true and
+            // operationally meaningless — and the scenario is handed a
+            // confirmation for a contact its own strike ending has already
+            // closed, out of order, after the impact cue.
+            //
+            // This is the engine's half of the beat's FIRST TERMINAL EVENT WINS
+            // rule; the scenario keeps guards of its own because it owns the
+            // objectives and this system does not. `struck` is read as it stood
+            // when this tick began — the arrival test below is what sets it —
+            // so on the ONE tick where a reading and an arrival coincide both
+            // flags are raised together and the flag store already holds the
+            // impact flag by the time the confirmation handler runs, which is
+            // where that tie is decided.
+            if record.assessment.on_collision_course && !threat.confirmed && !threat.struck {
                 threat.confirmed = true;
                 raise.push((
                     uuid.clone(),

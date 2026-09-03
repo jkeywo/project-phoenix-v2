@@ -249,6 +249,45 @@ fn a_struck_contact_stops_drifting_and_does_not_arrive_twice() {
 }
 
 #[test]
+fn a_contact_that_has_already_arrived_is_never_confirmed_by_a_later_reading() {
+    // The rock lands unread on the first step, and only THEN does somebody scan
+    // it. That reading is on a collision course and always will be: the mass is
+    // frozen inside the very radius the arrival test uses, so the projection
+    // answers `on_collision_course` with nought seconds to run — geometrically
+    // true and operationally meaningless.
+    //
+    // Latching `confirmed` off it hands the scenario a threat to intercept for a
+    // contact its own strike ending has already closed, out of order, after the
+    // impact. A mass that has arrived is not a threat left to confirm.
+    let (mut app, rock) = app_with(25.0);
+    step(&mut app);
+    assert!(
+        threat(&mut app, rock).struck,
+        "precondition: the unread mass has arrived"
+    );
+
+    push_assessment(&mut app, Some(0.0), true);
+    step(&mut app);
+
+    let t = threat(&mut app, rock);
+    assert!(
+        t.assessed,
+        "the reading still lands — they looked, and they know"
+    );
+    assert!(flag(&app, "probe_rock_read"));
+    assert!(
+        !t.confirmed,
+        "but what they read is a rock that is already down, not a threat"
+    );
+    assert!(!flag(&app, "probe_rock_confirmed"));
+    assert!(
+        !t.urgent,
+        "and nothing that hangs off the confirmation follows"
+    );
+    assert!(!flag(&app, "probe_rock_urgent"));
+}
+
+#[test]
 fn a_contact_whose_protected_asset_left_the_world_can_no_longer_strike() {
     let (mut app, _rock) = app_with(25.0);
     // The depot is gone — destroyed, or never spawned. There is nothing there

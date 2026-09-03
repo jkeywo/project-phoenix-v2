@@ -803,6 +803,12 @@ corridor_north = [0.0, 0.0, -1100.0]
 corridor_gate = [0.0, 0.0, -260.0]
 corridor_south = [0.0, 0.0, 1000.0]
 
+# Where a slab of the shed ribbon has come down across the throat and wedged
+# (issue #1350). Off the traffic lane and inside the destroyer's Security reach
+# from station-keeping, so a team can cross to it to place charges. The Act 3
+# controlled-demolition beat clears it.
+corridor_obstruction = [80.0, 0.0, -60.0]
+
 # The fuel-depot ladder, and the transit leg between its two rungs.
 #
 # FOUR anchors for two rungs, because a berth and a hull are not the same place
@@ -2151,6 +2157,85 @@ id = "skyway_window_closes"
 label = "world.falling_skyway.deadline.window_closes.label"
 due_secs = 1800
 visible = true
+
+# ═══ THE CORRIDOR OBSTRUCTION (issue #1350) ══════════════════════════════════
+#
+# A slab of the shed ribbon has come down across the throat and wedged. Unlike
+# the drifting debris of #1347 — which Tactical breaks up with gunnery — this one
+# is lodged, and breaking it up in place with weapons scatters the WORST debris
+# pattern of all. The controlled way to clear it is the four-stage act #1350
+# names: Tactical dispatches Security to PLACE CHARGES on it, Engineering holds
+# the mass with the TRACTOR while the charges are set, Security WITHDRAWS, and
+# then Tactical DETONATES.
+#
+# ── Who owns what ───────────────────────────────────────────────────────────
+#
+# The ENGINE owns the four stages. `[[security_target.action]] place_charges`
+# (issue #1346) is stage one and raises `skyway_obstruction_charges_placed` when
+# the team's work completes — which ARMS the detonation, because the
+# `[demolition_target]` below reads that same flag as "charges placed". The
+# tractor (issue #1156) is stage two, engaged on this mass by Engineering or its
+# Backfill. `DetonateCharges` (issue #1350) is stage four, fired through the
+# `security` system Tactical owns; the engine decides the OUTCOME from the live
+# team and tractor state and raises exactly one of three flags.
+#
+# THIS FILE owns every consequence, off those flags, exactly as the #1347 debris
+# band owns its strikes: nothing below is a special case in Rust.
+#
+#   SAFE         (charges + team clear + held)  → limited debris, mass cleared.
+#   UNSUPPORTED  (charges + team clear + UNHELD) → heavier debris, mass cleared.
+#   PREMATURE    (charges + team STILL ON IT)   → casualties, mass cleared.
+#   WEAPONS      (no charges — killed by fire)  → worst debris (`on_destroyed`).
+#
+# Placement completing must NEVER detonate on its own: `place_charges` starts the
+# team home, and firing is a separate explicit `DetonateCharges`. That is the
+# engine's contract; this file only reacts to the flags it raises.
+[[entity]]
+template_path = "assets/entities/asteroid_common_1_large.toml"
+id = "corridor_obstruction"
+name = "world.falling_skyway.entity.corridor_obstruction.name"
+transform = { anchor = "corridor_obstruction" }
+
+# The wedged mass sits still and heavy. A big collider and a still position: it is
+# not going anywhere until the charges clear it.
+[entity.overrides]
+mass = 900.0
+
+# ── WHAT SECURITY CAN DO ON THE OBSTRUCTION (issue #1346) ────────────────────
+#
+# One action: place charges. It is authored `urgent_objective` so a Backfilled
+# Tactical, working its Objective pool, will commit a team to it — but below the
+# head's `life_safety`, so the tether emergency still comes first. `outcome_flag`
+# is the seam to #1350: raising it is "charges are placed", which is what the
+# `[demolition_target]` below reads to arm the detonate control.
+#
+# [ai] All three numbers unratified. 30 seconds of exposure on an unstable mass,
+# against the ~8-second crossing the destroyer's teams take.
+[entity.overrides.security_target]
+
+[[entity.overrides.security_target.action]]
+action = "place_charges"
+duration_secs = 30.0
+risk = 0.55
+priority = "urgent_objective"
+outcome_flag = "skyway_obstruction_charges_placed"
+warning = "world.falling_skyway.security.warning.obstruction_charges"
+
+# ── WHAT DETONATING THE CHARGES DOES (issue #1350) ───────────────────────────
+#
+# Five flag names, nothing else. The engine reads `charges_flag` to know the
+# detonate control is armed, raises `detonated_flag` on any shot to mark it spent
+# and carry the generic beat, and raises exactly one of the three outcome flags
+# the four-outcome decision picks. `stabilization_required` says this mass needs
+# the tractor: fire it unheld and the outcome is UNSUPPORTED rather than SAFE.
+[entity.overrides.demolition_target]
+charges_flag = "skyway_obstruction_charges_placed"
+detonated_flag = "skyway_obstruction_detonated"
+safe_flag = "skyway_obstruction_cleared_safe"
+unsupported_flag = "skyway_obstruction_cleared_unsupported"
+premature_flag = "skyway_obstruction_premature"
+stabilization_required = true
+warning = "world.falling_skyway.demolition.warning.obstruction"
 
 # ── Act 1 ────────────────────────────────────────────────────────────────────
 
@@ -8191,4 +8276,162 @@ fn debrief_one(ctx)                  { #{ message: "world.falling_skyway.comms.d
 fn debrief_none(ctx)                 { #{ message: "world.falling_skyway.comms.debrief_none", responses: [] } }
 fn debrief_berth(ctx)                { #{ message: "world.falling_skyway.comms.debrief_berth", responses: [] } }
 fn debrief_berth_none(ctx)           { #{ message: "world.falling_skyway.comms.debrief_berth_none", responses: [] } }
+
+// ═══ THE CORRIDOR OBSTRUCTION — CONSEQUENCES (issue #1350) ═══════════════════
+//
+// The ENGINE ran the four stages and raised the flags (see the [[entity]]
+// corridor_obstruction block above). This is every consequence, hung off those
+// flags exactly as the #1347 debris band hangs its strikes — nothing here is a
+// special case in Rust.
+//
+//   skyway_obstruction_charges_placed  → the team's work landed. A quiet beat,
+//                                         and the arming of the detonate control
+//                                         (the [demolition_target] reads it).
+//   skyway_obstruction_detonated       → any shot fired. The generic beat.
+//   skyway_obstruction_cleared_safe    → charges + team clear + HELD.  SAFE.
+//   skyway_obstruction_cleared_unsupp. → charges + team clear + UNHELD. UNSUPPORTED.
+//   skyway_obstruction_premature       → charges + team STILL ON IT.  CASUALTIES.
+//   on_destroyed(corridor_obstruction) → no charges, killed by gunnery. WEAPONS.
+//
+// ── ONE OBSTRUCTION, ONE ENDING ─────────────────────────────────────────────
+//
+// The four terminal handlers are not mutually exclusive by construction: a SAFE
+// detonation `destroy_entity`s the mass, which fires `on_destroyed` on the same
+// tick's next chaining pass — the weapons handler. FIRST TERMINAL EVENT WINS:
+// every handler claims the obstruction through `skyway_obstruction_resolved`
+// BEFORE it writes or destroys anything, so the `on_destroyed` a detonation
+// causes finds the mass already resolved and does nothing. The debris band's
+// `debris_pending` idiom, one obstruction instead of three contacts.
+
+on_flag_set("skyway_obstruction_charges_placed", "on_obstruction_charged");
+on_flag_set("skyway_obstruction_detonated", "on_obstruction_detonated");
+on_flag_set("skyway_obstruction_cleared_safe", "on_obstruction_safe");
+on_flag_set("skyway_obstruction_cleared_unsupported", "on_obstruction_unsupported");
+on_flag_set("skyway_obstruction_premature", "on_obstruction_premature");
+on_destroyed("world.falling_skyway.entity.corridor_obstruction.name", "on_obstruction_weapons_fire");
+
+fn obstruction_pending(ctx) {
+    ctx.flags["skyway_obstruction_resolved"] < 1
+}
+
+// One drifting fragment of the shed slab, spawned at an authored offset from the
+// wedge so the pieces do not stack on one point. Count is what differs between
+// the outcomes — a limited scatter, a heavy one, or the worst — so this is one
+// call the endings spend a different number of times.
+fn obstruction_fragment(ctx, pos) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/asteroid_common_1_large.toml",
+        position: pos,
+        groups: ["skyway_obstruction_debris"],
+        overrides: #{ mass: 40 },
+    });
+}
+
+// Stage-one telemetry: the charges are SET. A beat only — the detonate control is
+// now armed, but placement completing must never fire it. That the crew now have
+// to WITHDRAW and DETONATE as two further deliberate acts is the whole point of
+// the beat, and the engine enforces it; this just records that stage one landed.
+fn on_obstruction_charged(ctx) {
+    ctx.effects.narrative_beat("skyway_obstruction_charges_set");
+}
+
+// The generic "the charges went off" beat, raised on ANY shot before the specific
+// outcome handler runs. So a headless after-action reading carries the detonation
+// as an authored beat regardless of how it turned out.
+fn on_obstruction_detonated(ctx) {
+    ctx.effects.narrative_beat("skyway_obstruction_detonation");
+}
+
+// SAFE: charges placed, the team clear, and the mass held. It comes apart into a
+// LIMITED, drifting debris field and the corridor is clear.
+fn on_obstruction_safe(ctx) {
+    if !obstruction_pending(ctx) { return; }
+    ctx.flags["skyway_obstruction_resolved"] = 1;
+    ctx.flags["skyway_obstruction_cleared"] = 1;
+    obstruction_fragment(ctx, [95, 0, -45]);
+    ctx.effects.show_message(
+        "skyway_obstruction_cleared",
+        "world.falling_skyway.computer_message.obstruction_cleared",
+        "info",
+        10,
+    );
+    ctx.effects.narrative_beat("skyway_obstruction_safe");
+    ctx.effects.narrative_outcome(
+        "world.falling_skyway.entity.corridor_obstruction.name", "destroyed");
+    ctx.effects.destroy_entity("world.falling_skyway.entity.corridor_obstruction.name");
+}
+
+// UNSUPPORTED: charges placed and the team clear, but the mass was NOT held when
+// it went off. It clears — but into a HEAVIER, wider debris field than a held
+// shot leaves.
+fn on_obstruction_unsupported(ctx) {
+    if !obstruction_pending(ctx) { return; }
+    ctx.flags["skyway_obstruction_resolved"] = 1;
+    ctx.flags["skyway_obstruction_cleared"] = 1;
+    ctx.flags["skyway_obstruction_unsupported_scatter"] = 1;
+    obstruction_fragment(ctx, [95, 0, -45]);
+    obstruction_fragment(ctx, [60, 10, -80]);
+    obstruction_fragment(ctx, [110, -10, -30]);
+    ctx.effects.show_message(
+        "skyway_obstruction_unsupported",
+        "world.falling_skyway.computer_message.obstruction_unsupported",
+        "warning",
+        14,
+    );
+    ctx.effects.narrative_beat("skyway_obstruction_unsupported");
+    ctx.effects.narrative_outcome(
+        "world.falling_skyway.entity.corridor_obstruction.name", "destroyed");
+    ctx.effects.destroy_entity("world.falling_skyway.entity.corridor_obstruction.name");
+}
+
+// PREMATURE: the charges were fired with a Security team still on the mass. It
+// clears — but the team is caught. A durable casualty record and a critical cue,
+// the honest cost of not waiting for the team to withdraw. (The engine also ends
+// that team's task with `TargetLost` the tick the mass is destroyed, so the
+// interruption reaches the shared task-lifecycle telemetry for free.)
+fn on_obstruction_premature(ctx) {
+    if !obstruction_pending(ctx) { return; }
+    ctx.flags["skyway_obstruction_resolved"] = 1;
+    ctx.flags["skyway_obstruction_cleared"] = 1;
+    ctx.flags["skyway_obstruction_casualties"] = 1;
+    obstruction_fragment(ctx, [95, 0, -45]);
+    obstruction_fragment(ctx, [70, 5, -75]);
+    ctx.effects.show_message(
+        "skyway_obstruction_premature",
+        "world.falling_skyway.computer_message.obstruction_premature",
+        "critical",
+        18,
+    );
+    ctx.effects.narrative_beat("skyway_obstruction_premature");
+    ctx.effects.narrative_outcome(
+        "world.falling_skyway.entity.corridor_obstruction.name", "destroyed");
+    ctx.effects.destroy_entity("world.falling_skyway.entity.corridor_obstruction.name");
+}
+
+// WEAPONS: nobody placed charges — a crew who reached for gunnery broke the
+// wedged slab up in place. It clears, but into the WORST, least-controlled debris
+// field of the four, scattered across the lane. This is the `on_destroyed` the
+// weapons kill fires; it claims the obstruction like the others, so a detonation
+// that `destroy_entity`s the mass finds it already resolved here and this is a
+// no-op — only a genuine gunnery kill with no prior ending reaches the writes.
+fn on_obstruction_weapons_fire(ctx) {
+    if !obstruction_pending(ctx) { return; }
+    ctx.flags["skyway_obstruction_resolved"] = 1;
+    ctx.flags["skyway_obstruction_cleared"] = 1;
+    ctx.flags["skyway_obstruction_weapons_scatter"] = 1;
+    obstruction_fragment(ctx, [95, 0, -45]);
+    obstruction_fragment(ctx, [55, 15, -85]);
+    obstruction_fragment(ctx, [115, -12, -25]);
+    obstruction_fragment(ctx, [45, -8, -35]);
+    obstruction_fragment(ctx, [125, 8, -70]);
+    ctx.effects.show_message(
+        "skyway_obstruction_weapons",
+        "world.falling_skyway.computer_message.obstruction_weapons",
+        "warning",
+        14,
+    );
+    ctx.effects.narrative_beat("skyway_obstruction_weapons");
+    // No `destroy_entity` and no `narrative_outcome` here: the weapons kill that
+    // fired this handler already destroyed the mass and recorded its outcome.
+}
 """

@@ -111,20 +111,6 @@ impl DebrisThreat {
         }
     }
 
-    /// The crew's own seconds-to-impact, carried forward to `now_tick` at the
-    /// authored tick rate (issue #1347).
-    ///
-    /// **Dead reckoning, not a fresh reading.** The number a consumer gets is
-    /// the one the crew took, minus the time that has passed since they took it
-    /// — which is what a tactical plot has always shown, and what makes an old
-    /// assessment visibly old rather than silently wrong. `None` when nobody has
-    /// looked, or when the reading said this contact never arrives.
-    ///
-    /// `secs_per_tick` is the caller's fixed-step length rather than a constant,
-    /// because the tick rate is authored (`[global] sim_tick_hz`) and a hard
-    /// 30 Hz here would quietly disagree with a scenario that authored anything
-    /// else. Every caller passes `Time::delta_secs()` read inside `FixedUpdate`,
-    /// which IS that step.
     /// Whether this contact is worth pointing an instrument at right now
     /// (issue #1347) — the test the Sensors seat works a debris field by.
     ///
@@ -156,6 +142,20 @@ impl DebrisThreat {
         age >= cadence
     }
 
+    /// The crew's own seconds-to-impact, carried forward to `now_tick` at the
+    /// authored tick rate (issue #1347).
+    ///
+    /// **Dead reckoning, not a fresh reading.** The number a consumer gets is
+    /// the one the crew took, minus the time that has passed since they took it
+    /// — which is what a tactical plot has always shown, and what makes an old
+    /// assessment visibly old rather than silently wrong. `None` when nobody has
+    /// looked, or when the reading said this contact never arrives.
+    ///
+    /// `secs_per_tick` is the caller's fixed-step length rather than a constant,
+    /// because the tick rate is authored (`[global] sim_tick_hz`) and a hard
+    /// 30 Hz here would quietly disagree with a scenario that authored anything
+    /// else. Every caller passes `Time::delta_secs()` read inside `FixedUpdate`,
+    /// which IS that step.
     pub fn seconds_to_impact_at(&self, now_tick: u64, secs_per_tick: f32) -> Option<f32> {
         let assessment = self.assessment.as_ref()?;
         let held = assessment.seconds_to_impact?;

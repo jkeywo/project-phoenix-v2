@@ -30,6 +30,9 @@ use crate::core::messages::{
     PowerGroupId, SystemAffinity, SystemBlackboard, SystemControlPayload, SystemId,
     UmbilicalBlackboard,
 };
+use crate::core::task_lifecycle::{
+    TaskLifecycleRequest, TaskSlot, TaskTerminalReason, TASK_VERB_UMBILICAL_FLOW,
+};
 use crate::dock::DockControl;
 use crate::effect_queue::EffectQueue;
 use crate::entities::spawner::{EntitySystemHull, EntityUuid};
@@ -86,6 +89,16 @@ pub struct TransferUmbilical {
     /// This tick's partner-end level for the console, or `None` when there is no
     /// docked partner or it carries no such capacity. A projection, not saved.
     pub partner_level: Option<i64>,
+    /// The docked-partner uuid a live task-lifecycle activation (issue #1345) is
+    /// currently open against, `None` while idle or refused. Set the moment
+    /// `tick_umbilical` sees the flow actually move (or fail to, on the very
+    /// first attempt), so a later refusal or stop knows whether an activation is
+    /// there to close — the umbilical's analogue of the tractor's
+    /// `coupled_target`. A projection `tick_umbilical` re-derives every tick, not
+    /// the running intent itself: never folded, never saved, and reset on
+    /// restore, so a resumed flow simply opens a fresh activation the next time
+    /// it moves anything.
+    pub activation_target: Option<String>,
 }
 
 impl TransferUmbilical {
@@ -100,6 +113,7 @@ impl TransferUmbilical {
             last_refusal: None,
             operator_level: None,
             partner_level: None,
+            activation_target: None,
         }
     }
 
@@ -125,6 +139,7 @@ impl TransferUmbilical {
         self.last_refusal = None;
         self.operator_level = None;
         self.partner_level = None;
+        self.activation_target = None;
     }
 }
 
@@ -206,12 +221,14 @@ impl Plugin for UmbilicalPlugin {
 /// AI through the same `validate_and_admit` seam) and stripped the source, so
 /// nothing here asks who sent the command (AGENTS.md rule 6).
 pub fn handle_umbilical_commands(
+    mut lifecycle: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
     mut ships: Query<(
         &crate::core::messages::AdmittedCommands,
         &mut TransferUmbilical,
+        Option<&EntityUuid>,
     )>,
 ) {
-    for (admitted, mut umbilical) in ships.iter_mut() {
+    for (admitted, mut umbilical, uuid) in ships.iter_mut() {
         for cmd in admitted.for_target(UMBILICAL_SYSTEM_ID) {
             match &cmd.payload {
                 SystemControlPayload::StartTransfer if !umbilical.running => {
@@ -222,13 +239,70 @@ pub fn handle_umbilical_commands(
                     umbilical.carry = 0.0;
                 }
                 SystemControlPayload::StopTransfer => {
+                    // Report the cancel BEFORE clearing intent, so a stop of an
+                    // idle umbilical (a stale-UI double tap) reports nothing at
+                    // all (issue #1345). Gated on the standing intent, exactly
+                    // as the tractor's release is — a stop that never actually
+                    // flowed finds nothing live in the registry and this report
+                    // is dropped harmlessly.
+                    if umbilical.running {
+                        if let Some(uuid) = uuid {
+                            push_lifecycle(
+                                lifecycle.as_deref_mut(),
+                                TaskLifecycleRequest::End {
+                                    slot: flow_slot(&uuid.0),
+                                    reason: TaskTerminalReason::Released,
+                                },
+                            );
+                        }
+                    }
                     umbilical.running = false;
                     umbilical.last_refusal = None;
                     umbilical.carry = 0.0;
+                    umbilical.activation_target = None;
                 }
                 _ => {}
             }
         }
+    }
+}
+
+/// The lifecycle slot a hull's umbilical flow occupies (issue #1345) — its
+/// uuid, the umbilical system, and the flow verb.
+fn flow_slot(uuid: &str) -> TaskSlot {
+    TaskSlot::new(uuid, UMBILICAL_SYSTEM_ID, TASK_VERB_UMBILICAL_FLOW)
+}
+
+/// Queue one lifecycle report, if there is a queue (issue #1345). `Option` so a
+/// reduced fixture that runs these systems without the narrative plugin behaves
+/// exactly as it did before this existed — the same guard Security's `push_
+/// lifecycle` keeps.
+fn push_lifecycle(
+    queue: Option<&mut EffectQueue<TaskLifecycleRequest>>,
+    request: TaskLifecycleRequest,
+) {
+    if let Some(queue) = queue {
+        queue.0.push(request);
+    }
+}
+
+/// The terminal reason a dropped (or never-formed) flow reports, from the
+/// refusal the pure flow module returned (issue #1345).
+///
+/// `Undocked` is the connection breaking — the dock the flow depends on let go
+/// — so it reads as `TargetLost`, the same reason the tractor gives a hold whose
+/// lock went away. `Unpowered`/`Disabled` are the flow's own preconditions
+/// failing. `NoCapacity` — one or both docked ends declare no capacity under the
+/// authored id at all — is a structural incapability of the pairing, never a
+/// depleted source (`plan_flow`'s arithmetic clamps a depleted source or a full
+/// destination to moving nothing THIS tick without refusing; the flow keeps
+/// running), so it reads as `NotCapable` rather than `Completed`.
+fn terminal_reason_for(refusal: UmbilicalRefusal) -> TaskTerminalReason {
+    match refusal {
+        UmbilicalRefusal::Undocked => TaskTerminalReason::TargetLost,
+        UmbilicalRefusal::Unpowered => TaskTerminalReason::Unpowered,
+        UmbilicalRefusal::Disabled => TaskTerminalReason::Disabled,
+        UmbilicalRefusal::NoCapacity => TaskTerminalReason::NotCapable,
     }
 }
 
@@ -257,6 +331,7 @@ pub struct UmbilicalAiRunning;
 pub fn operate_umbilical_ai(
     mut commands: Commands,
     sessions: Res<crate::lobby::Sessions>,
+    mut lifecycle: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
     mut ships: Query<(
         Entity,
         Option<&EntityUuid>,
@@ -302,6 +377,20 @@ pub fn operate_umbilical_ai(
             // No transfer order: stop a flow THIS HOST started — never one a
             // console started on the same AI-operated system.
             commands.entity(entity).remove::<UmbilicalAiRunning>();
+            // The scenario closing the task, not the operator changing their
+            // mind (issue #1345). Reported HERE, ahead of the `StopTransfer`
+            // this emits and this system's own ordering ahead of `handle_
+            // umbilical_commands`, so the withdrawn order is the terminal the
+            // timeline records.
+            if let Some(uuid) = uuid {
+                push_lifecycle(
+                    lifecycle.as_deref_mut(),
+                    TaskLifecycleRequest::End {
+                        slot: flow_slot(&uuid.0),
+                        reason: TaskTerminalReason::OrderWithdrawn,
+                    },
+                );
+            }
             Some(SystemControlPayload::StopTransfer)
         } else {
             None
@@ -331,6 +420,9 @@ struct Outcome {
     last_refusal: Option<UmbilicalRefusal>,
     operator_level: Option<i64>,
     partner_level: Option<i64>,
+    /// The task-lifecycle activation's subject once this tick's verdict is
+    /// applied (issue #1345) — the mirror of the tractor's `coupled_target`.
+    activation_target: Option<String>,
     /// The two capacity moves to queue this tick:
     /// `(capacity_id, operator_uuid, partner_uuid, operator_delta, partner_delta)`.
     /// `None` on a tick that moved nothing.
@@ -348,6 +440,9 @@ struct OperatorRow {
     disabled: bool,
     config: UmbilicalConfig,
     carry: f32,
+    /// The task-lifecycle activation this slot has open going into this tick
+    /// (issue #1345), or `None` while idle or refused.
+    activation_target: Option<String>,
 }
 
 /// Move each running umbilical's authored capacity between the two docked hulls'
@@ -368,6 +463,7 @@ pub fn tick_umbilical(
     // so a reduced test app that runs the umbilical systems without
     // `InfrastructurePlugin` is a no-op rather than a panic.
     capacity_queue: Option<ResMut<EffectQueue<CapacityAdjustment>>>,
+    mut lifecycle: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
     time: Res<Time>,
     mut set: ParamSet<(
         // Operator rows: everything the verdict needs off the umbilical's own hull.
@@ -413,6 +509,7 @@ pub fn tick_umbilical(
                 disabled,
                 config: umbilical.config.clone(),
                 carry: umbilical.carry,
+                activation_target: umbilical.activation_target.clone(),
             }
         })
         .collect();
@@ -448,7 +545,8 @@ pub fn tick_umbilical(
             let partner_level = partner_end.map(|e| e.level);
 
             // Not running: keep the projections fresh, keep any retained refusal,
-            // move nothing.
+            // move nothing. No activation is open — a stop already closed it in
+            // `handle_umbilical_commands`.
             if !row.running {
                 outcomes.push(Outcome {
                     entity: row.entity,
@@ -457,6 +555,7 @@ pub fn tick_umbilical(
                     last_refusal: None, // retained on the component by leaving it; see apply
                     operator_level,
                     partner_level,
+                    activation_target: None,
                     queue: None,
                 });
                 continue;
@@ -474,20 +573,74 @@ pub fn tick_umbilical(
                 partner: partner_end,
             };
             match plan_flow(&row.config, &ends, &ctx) {
-                FlowVerdict::Refused(refusal) => outcomes.push(Outcome {
-                    entity: row.entity,
-                    running: false,
-                    carry: 0.0,
-                    last_refusal: Some(refusal),
-                    operator_level,
-                    partner_level,
-                    queue: None,
-                }),
+                FlowVerdict::Refused(refusal) => {
+                    // The task activation follows the flow actually moving
+                    // capacity, never the standing intent (issue #1345) —
+                    // mirroring `tick_tractor`'s "the activation follows the
+                    // coupling" rule. A start that never once flowed still gets
+                    // a whole activation, opened and closed together here, so
+                    // the attempt is a beat rather than a silence — the same
+                    // "an engage refused before it couples still opens and
+                    // closes one activation" the tractor keeps. A flow that WAS
+                    // moving capacity and just broke only needs the close.
+                    if row.activation_target.is_none() {
+                        push_lifecycle(
+                            lifecycle.as_deref_mut(),
+                            TaskLifecycleRequest::Start {
+                                slot: flow_slot(&row.uuid),
+                                target: row.partner.clone(),
+                            },
+                        );
+                    }
+                    push_lifecycle(
+                        lifecycle.as_deref_mut(),
+                        TaskLifecycleRequest::End {
+                            slot: flow_slot(&row.uuid),
+                            reason: terminal_reason_for(refusal),
+                        },
+                    );
+                    outcomes.push(Outcome {
+                        entity: row.entity,
+                        running: false,
+                        carry: 0.0,
+                        last_refusal: Some(refusal),
+                        operator_level,
+                        partner_level,
+                        activation_target: None,
+                        queue: None,
+                    });
+                }
                 FlowVerdict::Flowing {
                     operator_delta,
                     partner_delta,
                     carry,
                 } => {
+                    // Flowing always implies a docked partner (the `docked` gate
+                    // above is the only way to reach here), so `row.partner` is
+                    // always `Some`. Open the activation the moment it starts
+                    // moving anything, and re-open it if the partner ever
+                    // changed under a live flow — unreachable today (a partner
+                    // change requires an undock, which refuses the flow first),
+                    // but kept symmetric with the tractor's own re-designation
+                    // handling rather than assumed away.
+                    if row.activation_target.as_deref() != row.partner.as_deref() {
+                        if row.activation_target.is_some() {
+                            push_lifecycle(
+                                lifecycle.as_deref_mut(),
+                                TaskLifecycleRequest::End {
+                                    slot: flow_slot(&row.uuid),
+                                    reason: TaskTerminalReason::TargetLost,
+                                },
+                            );
+                        }
+                        push_lifecycle(
+                            lifecycle.as_deref_mut(),
+                            TaskLifecycleRequest::Start {
+                                slot: flow_slot(&row.uuid),
+                                target: row.partner.clone(),
+                            },
+                        );
+                    }
                     // A move only reaches the queue when it is non-zero and there
                     // is a partner to move it to — a depleted source or a full
                     // destination keeps the flow running but queues nothing.
@@ -508,6 +661,7 @@ pub fn tick_umbilical(
                         last_refusal: None,
                         operator_level,
                         partner_level,
+                        activation_target: row.partner.clone(),
                         queue,
                     });
                 }
@@ -545,6 +699,7 @@ pub fn tick_umbilical(
             umbilical.carry = out.carry;
             umbilical.operator_level = out.operator_level;
             umbilical.partner_level = out.partner_level;
+            umbilical.activation_target = out.activation_target.clone();
             // A stop-through-refusal records the reason; an idle tick leaves the
             // retained refusal alone (it clears on the next start/stop command).
             if let Some(refusal) = out.last_refusal {

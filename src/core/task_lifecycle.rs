@@ -66,6 +66,23 @@ pub const TASK_VERB_SCAN: &str = "scan";
 /// The verb a tractor hold's lifecycle is recorded under (issue #1341).
 pub const TASK_VERB_TRACTOR_HOLD: &str = "tractor_hold";
 
+/// The verb a docking hold's lifecycle is recorded under (issue #1345). The
+/// activation follows the MATE forming (`DockControl::docked` becoming true),
+/// not the intent to approach — the dock's analogue of the tractor's coupling.
+pub const TASK_VERB_DOCK_HOLD: &str = "dock_hold";
+
+/// The verb a transfer-umbilical flow's lifecycle is recorded under (issue
+/// #1345). The activation follows the flow actually moving capacity, not the
+/// standing `running` intent — the umbilical's analogue of the tractor's
+/// coupling.
+pub const TASK_VERB_UMBILICAL_FLOW: &str = "umbilical_flow";
+
+/// The verb an external repair-team dispatch's lifecycle is recorded under
+/// (issue #1345). The activation follows the dispatch COMMIT
+/// (`ExternalRepairDispatch::dispatched_target` being set), the same
+/// dispatch-and-claim shape Security's team assignments use.
+pub const TASK_VERB_EXTERNAL_REPAIR: &str = "external_repair";
+
 /// The four ways a continuous task can end, as issue #1341's acceptance
 /// criterion names them.
 ///

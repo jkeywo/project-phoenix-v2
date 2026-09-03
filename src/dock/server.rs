@@ -29,7 +29,11 @@ use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
 use crate::core::messages::{
     DockBlackboard, PowerGroupId, SystemAffinity, SystemBlackboard, SystemControlPayload, SystemId,
 };
+use crate::core::task_lifecycle::{
+    TaskLifecycleRequest, TaskSlot, TaskTerminalReason, TASK_VERB_DOCK_HOLD,
+};
 use crate::dock::mating::{nearest_viable_pair, DockConfig, DockMarker, DockRefusal, Pose};
+use crate::effect_queue::EffectQueue;
 use crate::entities::spawner::{EntityName, EntitySystemHull, EntityUuid};
 use crate::ship::damage::DamageTier;
 use crate::ship::power::{power_level_for, ShipPowerSystem};
@@ -247,14 +251,17 @@ impl Plugin for DockPlugin {
 /// speak and stripped the source, so nothing here asks who sent the command
 /// (AGENTS.md rule 6). `Dock` latches the nearest available target `tick_dock`
 /// published last tick; `Undock` ends the mate and starts the backing manoeuvre.
+#[allow(clippy::type_complexity)]
 pub fn handle_dock_commands(
+    mut lifecycle: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
     mut ships: Query<(
         &crate::core::messages::AdmittedCommands,
         &Transform,
         &mut DockControl,
+        Option<&EntityUuid>,
     )>,
 ) {
-    for (admitted, transform, mut dock) in ships.iter_mut() {
+    for (admitted, transform, mut dock, uuid) in ships.iter_mut() {
         // Clone the resolved target string before mutating the component below.
         // The id itself remains authored topology, not a per-command decision.
         let system_id = dock.system_id.0.clone();
@@ -278,6 +285,21 @@ pub fn handle_dock_commands(
                     }
                 }
                 SystemControlPayload::Undock if dock.engaged || dock.docked => {
+                    // Report the cancel BEFORE clearing intent, so a release of an
+                    // idle dock (a stale-UI double tap) reports nothing at all
+                    // (issue #1345). A live activation exists only once
+                    // `tick_dock` has seen the mate form (`docked` becomes true);
+                    // an undock of a still-approaching dock finds nothing live in
+                    // the registry and this report is dropped harmlessly — the
+                    // same "exactly one terminal" rule the tractor relies on.
+                    push_lifecycle(
+                        lifecycle.as_deref_mut(),
+                        uuid,
+                        TaskLifecycleRequest::End {
+                            slot: hold_slot(&dock.system_id, uuid),
+                            reason: TaskTerminalReason::Released,
+                        },
+                    );
                     // Back straight out along the ship's own heading, away from
                     // the berth, then return to ordinary flight. The clear pose is
                     // fixed now, while the ship still sits on the mate, so the
@@ -293,6 +315,56 @@ pub fn handle_dock_commands(
                 _ => {}
             }
         }
+    }
+}
+
+/// The lifecycle slot a hull's dock hold occupies (issue #1345) — its uuid, the
+/// dock's own authored System identity (never a literal `"dock"`, since a hull
+/// may author any instance id), and the dock-hold verb.
+fn hold_slot(system_id: &SystemId, uuid: Option<&EntityUuid>) -> TaskSlot {
+    TaskSlot::new(
+        uuid.map(|u| u.0.clone()).unwrap_or_default(),
+        system_id.0.clone(),
+        TASK_VERB_DOCK_HOLD,
+    )
+}
+
+/// Queue one lifecycle report, if there is a queue and the hull has a uuid to be
+/// identified by (issue #1345). Mirrors `tractor::server::push_lifecycle`: a
+/// hull with no [`EntityUuid`] reports nothing and behaves exactly as it did
+/// before this existed.
+fn push_lifecycle(
+    queue: Option<&mut EffectQueue<TaskLifecycleRequest>>,
+    uuid: Option<&EntityUuid>,
+    request: TaskLifecycleRequest,
+) {
+    if uuid.is_none() {
+        return;
+    }
+    if let Some(queue) = queue {
+        queue.0.push(request);
+    }
+}
+
+/// The terminal reason a dropped (or never-formed) dock reports, from the
+/// refusal the pure mating module returned (issue #1345).
+///
+/// The refusal vocabularies line up closely with the tractor's: `TargetLost` is
+/// the berth vanishing under a live mate, `OutOfRange`/`Unpowered`/`Disabled` are
+/// the dock's own preconditions failing. `NoDockMarkers` — a hull that can never
+/// mate at all — is `NotCapable`, the same reason a hull with no marker family
+/// reports for any other capability it lacks. `NoTarget` only fires while
+/// `decide_dock` is `engaged` with no `docking_target`, a state `handle_dock_
+/// commands` never allows (`Dock` sets both together) — mapped defensively so
+/// the match stays exhaustive, never expected to reach the timeline.
+fn terminal_reason_for(refusal: DockRefusal) -> TaskTerminalReason {
+    match refusal {
+        DockRefusal::NoDockMarkers => TaskTerminalReason::NotCapable,
+        DockRefusal::NoTarget => TaskTerminalReason::NoSuchTarget,
+        DockRefusal::OutOfRange => TaskTerminalReason::OutOfRange,
+        DockRefusal::Unpowered => TaskTerminalReason::Unpowered,
+        DockRefusal::Disabled => TaskTerminalReason::Disabled,
+        DockRefusal::TargetLost => TaskTerminalReason::TargetLost,
     }
 }
 
@@ -328,6 +400,7 @@ pub fn operate_dock_ai(
     mut commands: Commands,
     sessions: Res<crate::lobby::Sessions>,
     runtime: Option<Res<WorldContentRuntime>>,
+    mut lifecycle: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
     mut ships: Query<(
         Entity,
         Option<&EntityUuid>,
@@ -381,6 +454,20 @@ pub fn operate_dock_ai(
             None => {
                 if (dock.engaged || dock.docked) && host_engaged {
                     commands.entity(entity).remove::<DockAiEngaged>();
+                    // The scenario closing the task, not the operator changing
+                    // their mind (issue #1345). Reported HERE, ahead of the
+                    // `Undock` this emits and this system's own ordering ahead of
+                    // `handle_dock_commands`, so the withdrawn order — not the
+                    // handler's own `Released` for the same hold — is the first
+                    // (and therefore recorded) terminal report.
+                    push_lifecycle(
+                        lifecycle.as_deref_mut(),
+                        uuid,
+                        TaskLifecycleRequest::End {
+                            slot: hold_slot(&dock.system_id, uuid),
+                            reason: TaskTerminalReason::OrderWithdrawn,
+                        },
+                    );
                     Some(SystemControlPayload::Undock)
                 } else {
                     None
@@ -439,6 +526,7 @@ struct DockOutcome {
 #[allow(clippy::type_complexity)]
 pub fn tick_dock(
     time: Res<Time>,
+    mut lifecycle: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
     mut set: ParamSet<(
         // Own-ship rows: everything the verdict needs off the docker itself.
         Query<(
@@ -453,7 +541,12 @@ pub fn tick_dock(
         // Every hull carrying dock markers, to resolve candidates and targets.
         Query<(&EntityUuid, &Transform, &DockMarkers)>,
         // Apply the verdict and any placement.
-        Query<(&mut DockControl, &mut Transform, Option<&mut ShipPhysics>)>,
+        Query<(
+            &mut DockControl,
+            &mut Transform,
+            Option<&mut ShipPhysics>,
+            &EntityUuid,
+        )>,
     )>,
 ) {
     let dt = time.delta_secs();
@@ -509,9 +602,65 @@ pub fn tick_dock(
     // Apply.
     let mut writes = set.p2();
     for out in outcomes {
-        let Ok((mut dock, mut transform, physics)) = writes.get_mut(out.entity) else {
+        let Ok((mut dock, mut transform, physics, uuid)) = writes.get_mut(out.entity) else {
             continue;
         };
+        // The task activation follows the MATE forming, never the intent (issue
+        // #1345) — mirroring `tick_tractor`'s "the activation follows the
+        // coupling" rule, because the mate is the only thing that knows what the
+        // dock actually gripped. Considered only for a row that was actually
+        // trying (`engaged`) or holding (`docked`); an idle dock merely
+        // publishing "no markers" or "nothing in range" is not an attempt and
+        // opens nothing.
+        if dock.engaged || dock.docked {
+            match (dock.docked, out.docked, out.last_refusal) {
+                // Arrival: the two hulls have mated. The subject is whatever the
+                // manoeuvre actually closed on, `out.docking_target`.
+                (false, true, _) => push_lifecycle(
+                    lifecycle.as_deref_mut(),
+                    Some(uuid),
+                    TaskLifecycleRequest::Start {
+                        slot: hold_slot(&dock.system_id, Some(uuid)),
+                        target: out.docking_target.clone(),
+                    },
+                ),
+                // Refused before it ever mated: a whole activation opens and
+                // closes at once, mirroring the tractor's "an engage refused
+                // before it couples still opens and closes one activation" —
+                // the attempt is a beat, not a silence. The subject is the
+                // berth the approach was closing on, `dock.docking_target`
+                // (the PRIOR value; the outcome has already cleared it).
+                (false, false, Some(refusal)) => {
+                    push_lifecycle(
+                        lifecycle.as_deref_mut(),
+                        Some(uuid),
+                        TaskLifecycleRequest::Start {
+                            slot: hold_slot(&dock.system_id, Some(uuid)),
+                            target: dock.docking_target.clone(),
+                        },
+                    );
+                    push_lifecycle(
+                        lifecycle.as_deref_mut(),
+                        Some(uuid),
+                        TaskLifecycleRequest::End {
+                            slot: hold_slot(&dock.system_id, Some(uuid)),
+                            reason: terminal_reason_for(refusal),
+                        },
+                    );
+                }
+                // Was mated; the mate broke this tick.
+                (true, false, Some(refusal)) => push_lifecycle(
+                    lifecycle.as_deref_mut(),
+                    Some(uuid),
+                    TaskLifecycleRequest::End {
+                        slot: hold_slot(&dock.system_id, Some(uuid)),
+                        reason: terminal_reason_for(refusal),
+                    },
+                ),
+                // Still approaching, or holding unchanged: nothing to report.
+                _ => {}
+            }
+        }
         dock.engaged = out.engaged;
         dock.docked = out.docked;
         dock.docking_target = out.docking_target;

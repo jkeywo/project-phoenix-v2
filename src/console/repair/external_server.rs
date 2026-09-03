@@ -28,6 +28,9 @@ use crate::console::weapons::beam::TacticalRadarSelection;
 use crate::core::messages::{
     AdmittedCommands, SystemAffinity, SystemBlackboard, SystemControlPayload,
 };
+use crate::core::task_lifecycle::{
+    TaskLifecycleRequest, TaskSlot, TaskTerminalReason, TASK_VERB_EXTERNAL_REPAIR,
+};
 use crate::effect_queue::EffectQueue;
 use crate::entities::spawner::EntityUuid;
 use crate::infrastructure::condition::ConditionAdjustment;
@@ -146,6 +149,7 @@ pub struct ExternalRepairSaveState {
 /// admissible from the repair console and reads the same availability answer the
 /// AI dispatcher does.
 pub fn handle_external_repair_commands(
+    mut lifecycle: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
     mut set: ParamSet<(
         // Gather: everything the dispatch verdict needs off each operator.
         Query<(
@@ -159,7 +163,7 @@ pub fn handle_external_repair_commands(
         // Every entity's position, to resolve the designated target's separation.
         Query<(&EntityUuid, &Transform)>,
         // Apply the verdict.
-        Query<&mut ExternalRepairDispatch>,
+        Query<(&mut ExternalRepairDispatch, Option<&EntityUuid>)>,
     )>,
 ) {
     // One request per operator this tick — the latest command wins, the same
@@ -236,7 +240,7 @@ pub fn handle_external_repair_commands(
     // Apply.
     let mut dispatches = set.p2();
     for ((entity, request), separation) in requests.iter().zip(separations) {
-        let Ok(mut dispatch) = dispatches.get_mut(*entity) else {
+        let Ok((mut dispatch, uuid)) = dispatches.get_mut(*entity) else {
             continue;
         };
         match request {
@@ -250,15 +254,47 @@ pub fn handle_external_repair_commands(
                     Ok(()) => {
                         dispatch.dispatched_target = lock.clone();
                         dispatch.last_refusal = None;
+                        // The activation opens at COMMIT, not at every tick a
+                        // team is still out there working (issue #1345) — the
+                        // same dispatch-and-claim shape Security's team
+                        // assignment uses. A dispatch onto an already-live slot
+                        // (a stale double-send, or a fresh target while a team
+                        // is already abroad) is handled by the registry itself:
+                        // it closes the old activation as `Restarted` and opens
+                        // this one, so nothing here needs to check first.
+                        push_lifecycle(
+                            lifecycle.as_deref_mut(),
+                            uuid,
+                            TaskLifecycleRequest::Start {
+                                slot: dispatch_slot(uuid),
+                                target: lock.clone(),
+                            },
+                        );
                     }
                     Err(refusal) => {
                         // A refused dispatch sends nobody: the target is left
                         // untouched and the reason is retained for the console.
+                        // No lifecycle report — nothing was ever committed, the
+                        // same "a refusal at dispatch time opens nothing" rule
+                        // Security's own dispatch keeps.
                         dispatch.last_refusal = Some(refusal);
                     }
                 }
             }
             Request::Recall => {
+                // Report the cancel BEFORE clearing the claim, so a recall of an
+                // idle dispatch (a stale-UI double tap) reports nothing at all
+                // (issue #1345).
+                if dispatch.dispatched_target.is_some() {
+                    push_lifecycle(
+                        lifecycle.as_deref_mut(),
+                        uuid,
+                        TaskLifecycleRequest::End {
+                            slot: dispatch_slot(uuid),
+                            reason: TaskTerminalReason::Released,
+                        },
+                    );
+                }
                 // Recall brings the team home and stops the work, leaving what it
                 // already did on the target. A deliberate recall is not a
                 // refusal, so the reason clears.
@@ -283,10 +319,11 @@ pub fn handle_external_repair_commands(
 /// the instant `dispatched_target` clears, exactly as releasing a tractor stops
 /// its arrest.
 pub fn tick_external_repair(
+    mut lifecycle: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
     mut set: ParamSet<(
         Query<(Entity, &ExternalRepairDispatch, &Transform)>,
         Query<(&EntityUuid, &Transform)>,
-        Query<&mut ExternalRepairDispatch>,
+        Query<(&mut ExternalRepairDispatch, Option<&EntityUuid>)>,
     )>,
 ) {
     struct Row {
@@ -329,12 +366,70 @@ pub fn tick_external_repair(
         if let Err(refusal) =
             dispatch_status(true, Some(row.target.as_str()), separation, row.range)
         {
-            let Ok(mut dispatch) = dispatches.get_mut(row.entity) else {
+            let Ok((mut dispatch, uuid)) = dispatches.get_mut(row.entity) else {
                 continue;
             };
             dispatch.dispatched_target = None;
             dispatch.last_refusal = Some(refusal);
+            // This system only ever CLOSES a dispatch (it never opens one — that
+            // is `handle_external_repair_commands`' job at commit time), so every
+            // row it walks was live and the terminal is unconditional (issue
+            // #1345). `refusal` is always `OutOfRange` here — the range
+            // maintenance calls the pure verdict with a team already claimed and
+            // a target already present, so only drift (or the target vanishing,
+            // which reads identically) can fail it — but mapped through the same
+            // table `handle_external_repair_commands` would use for hygiene.
+            push_lifecycle(
+                lifecycle.as_deref_mut(),
+                uuid,
+                TaskLifecycleRequest::End {
+                    slot: dispatch_slot(uuid),
+                    reason: terminal_reason_for(refusal),
+                },
+            );
         }
+    }
+}
+
+/// The lifecycle slot a hull's external repair-team dispatch occupies (issue
+/// #1345) — its uuid, the repair system, and the external-repair verb.
+fn dispatch_slot(uuid: Option<&EntityUuid>) -> TaskSlot {
+    TaskSlot::new(
+        uuid.map(|u| u.0.clone()).unwrap_or_default(),
+        REPAIR_SYSTEM_ID,
+        TASK_VERB_EXTERNAL_REPAIR,
+    )
+}
+
+/// Queue one lifecycle report, if there is a queue and the hull has a uuid to be
+/// identified by (issue #1345). Mirrors `tractor::server::push_lifecycle`.
+fn push_lifecycle(
+    queue: Option<&mut EffectQueue<TaskLifecycleRequest>>,
+    uuid: Option<&EntityUuid>,
+    request: TaskLifecycleRequest,
+) {
+    if uuid.is_none() {
+        return;
+    }
+    if let Some(queue) = queue {
+        queue.0.push(request);
+    }
+}
+
+/// The terminal reason a dropped external-repair dispatch reports, from the
+/// refusal the pure dispatch verdict returned (issue #1345).
+///
+/// Only [`ExternalRepairRefusal::OutOfRange`] is reachable from `tick_external_
+/// repair` (the only site that ever CLOSES a dispatch); `NoFreeTeam` and
+/// `NoTarget` are refusals `handle_external_repair_commands` shows the console
+/// at dispatch time and never turns into a lifecycle event, because nothing was
+/// ever committed for them to end. Mapped exhaustively anyway, matching the
+/// dock's and tractor's own defensive style.
+fn terminal_reason_for(refusal: ExternalRepairRefusal) -> TaskTerminalReason {
+    match refusal {
+        ExternalRepairRefusal::NoFreeTeam => TaskTerminalReason::NotCapable,
+        ExternalRepairRefusal::NoTarget => TaskTerminalReason::NoSuchTarget,
+        ExternalRepairRefusal::OutOfRange => TaskTerminalReason::OutOfRange,
     }
 }
 
@@ -471,6 +566,7 @@ pub fn operate_external_repair_ai(
     mut commands: Commands,
     sessions: Res<crate::lobby::Sessions>,
     runtime: Option<Res<WorldContentRuntime>>,
+    mut lifecycle: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
     mut ships: Query<(
         Entity,
         Option<&EntityUuid>,
@@ -553,6 +649,19 @@ pub fn operate_external_repair_ai(
                     commands
                         .entity(entity)
                         .remove::<ExternalRepairAiDispatched>();
+                    // The scenario closing the task, not the operator changing
+                    // their mind (issue #1345). Reported HERE, ahead of the
+                    // `RecallExternalRepair` this emits and this system's own
+                    // ordering ahead of `handle_external_repair_commands`, so the
+                    // withdrawn order is the terminal the timeline records.
+                    push_lifecycle(
+                        lifecycle.as_deref_mut(),
+                        uuid,
+                        TaskLifecycleRequest::End {
+                            slot: dispatch_slot(uuid),
+                            reason: TaskTerminalReason::OrderWithdrawn,
+                        },
+                    );
                     Some(SystemControlPayload::RecallExternalRepair)
                 } else {
                     None

@@ -4403,7 +4403,7 @@ fn on_picket_contained(ctx) {
     ctx.effects.narrative_outcome("world.falling_skyway.entity.havelock_enforcer.name", "disabled");
     stand_the_picket_down(ctx);
     ctx.effects.open_comms(#{
-        from: "world.falling_skyway.entity.havelock_cutter.name",
+        from: "world.falling_skyway.entity.havelock_enforcer.name",
         node_fn: "picket_contained_report",
         urgent: true,
     });
@@ -4422,7 +4422,7 @@ fn on_picket_boarded(ctx) {
     ctx.effects.narrative_outcome("world.falling_skyway.entity.havelock_enforcer.name", "disabled");
     stand_the_picket_down(ctx);
     ctx.effects.open_comms(#{
-        from: "world.falling_skyway.entity.havelock_cutter.name",
+        from: "world.falling_skyway.entity.havelock_enforcer.name",
         node_fn: "picket_boarded_report",
         urgent: true,
     });
@@ -4449,7 +4449,7 @@ fn on_picket_disabled(ctx) {
     ctx.effects.narrative_outcome("world.falling_skyway.entity.havelock_enforcer.name", "disabled");
     stand_the_picket_down(ctx);
     ctx.effects.open_comms(#{
-        from: "world.falling_skyway.entity.havelock_cutter.name",
+        from: "world.falling_skyway.entity.havelock_enforcer.name",
         node_fn: "picket_disabled_report",
         urgent: true,
     });
@@ -4480,6 +4480,14 @@ fn on_picket_destroyed(ctx) {
     });
 }
 
+// WHO REPORTS. Three of the four endings are answered by the BOAT, on the
+// channel the crew have been talking to it on: its people are alive and aboard,
+// and it is their own ending to describe. Only the kill is the operator's,
+// because the one hull that cannot report a destruction is the destroyed one.
+//
+// That split is also what keeps this beat off the cutter's thread. The cutter is
+// the strike negotiation's voice (#1036), and a containment landing mid-parley
+// would have put an unrelated report at the bottom of that conversation.
 fn picket_contained_report(ctx) { #{ message: "world.falling_skyway.comms.picket_contained_report", responses: [] } }
 fn picket_boarded_report(ctx)   { #{ message: "world.falling_skyway.comms.picket_boarded_report", responses: [] } }
 fn picket_disabled_report(ctx)  { #{ message: "world.falling_skyway.comms.picket_disabled_report", responses: [] } }

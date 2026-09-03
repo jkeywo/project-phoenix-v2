@@ -1775,7 +1775,6 @@ world.probe_task_lifecycle.entity.derelict.name,assets/worlds/probe_task_lifecyc
 world.probe_task_lifecycle.entity.depot.name,assets/worlds/probe_task_lifecycle.toml -> [[entity]] name,[Skyway Transfer Depot]
 world.probe_task_lifecycle.capacity.berths.label,assets/worlds/probe_task_lifecycle.toml -> [[entity.overrides.infrastructure.capacity]] label,[Berths]
 world.probe_task_lifecycle.threshold.transfer_capable.label,assets/worlds/probe_task_lifecycle.toml -> [[entity.overrides.infrastructure.threshold]] label,[Transfer Arm]
-<<<<<<< HEAD
 security.dispatch.refused.disabled,"Security dispatch refusal — the Security System is damaged out, so no team can be sent anywhere (issue #1346)","[Security offline — no team can be sent.]"
 security.dispatch.refused.no_such_team,"Security dispatch refusal — the command named a team this hull does not muster (issue #1346)","[No such Security team.]"
 security.dispatch.refused.team_busy,"Security dispatch refusal — that team already holds an assignment; one team, one job (issue #1346)","[Team already assigned — recall it first.]"

@@ -138,7 +138,9 @@ describe('lobbyViewModel — has-station / detail panel', () => {
     const vm = lobbyViewModel(seated(), MY, null);
     expect(vm.hasStation).toBe(true);
     expect(vm.detail.active).toBe(true);
-    expect(vm.detail.consoles).toEqual(['helm']);
+    // Each chip carries its resolved label and its own selected flag, so the
+    // renderer never looks a string up or recomputes the selection (#1369).
+    expect(vm.detail.consoles).toEqual([{ id: 'helm', label: 'helm', selected: true }]);
     expect(vm.selectedConsole).toBe('helm');
   });
 
@@ -153,7 +155,13 @@ describe('lobbyViewModel — has-station / detail panel', () => {
     const vm = lobbyViewModel(seated(), MY, null, {
       stationRatings: { helm: 'Simplified' },
     });
-    expect(vm.detail.ratings).toEqual({ list: ['Std', 'Simplified'], active: 'Simplified' });
+    expect(vm.detail.ratings).toEqual({
+      list: [
+        { name: 'Std', label: 'STD', active: false },
+        { name: 'Simplified', label: 'SIMPLIFIED', active: true },
+      ],
+      active: 'Simplified',
+    });
   });
 
   it('single-rating stations omit the ratings block; first rating is the default active', () => {
@@ -177,24 +185,43 @@ describe('lobbyViewModel — ready button', () => {
     expect(vm.readyBtn.visible).toBe(false);
   });
 
+  // Each mode carries the class and label it wears as well as what it sends.
+  // Issue #1369 moved that choice off the DOM writer: client.html used to
+  // branch on `mode` a second time to pick between four string ids, which is a
+  // decision, and a decision inside a renderer cannot be asserted without a
+  // document.
   it('ready mode when seated and not ready — pressing sends ready:true', () => {
     const vm = lobbyViewModel(seated(), MY, null);
-    expect(vm.readyBtn).toEqual({ visible: true, mode: 'ready', sendReady: true });
+    expect(vm.readyBtn).toEqual({
+      visible: true, mode: 'ready', sendReady: true,
+      className: 'armed', label: { id: 'client.ready' },
+    });
   });
 
   it('ready-confirmed mode when ready — pressing un-readies', () => {
     const vm = lobbyViewModel(seated({ ready: true }), MY, null);
-    expect(vm.readyBtn).toEqual({ visible: true, mode: 'ready-confirmed', sendReady: false });
+    expect(vm.readyBtn).toEqual({
+      visible: true, mode: 'ready-confirmed', sendReady: false,
+      className: 'armed glow', label: { id: 'client.ready_confirmed' },
+    });
   });
 
   it('countdown mode wins over ready state and carries the seconds', () => {
     const vm = lobbyViewModel(seated({ ready: true }, { countdownSecs: 5 }), MY, null);
-    expect(vm.readyBtn).toEqual({ visible: true, mode: 'countdown', secs: 5, sendReady: false });
+    // The countdown is the one label that is DATA rather than a table lookup,
+    // so it arrives as `{ text }` and the writer resolves neither.
+    expect(vm.readyBtn).toEqual({
+      visible: true, mode: 'countdown', secs: 5, sendReady: false,
+      className: 'armed glow', label: { text: '5s' },
+    });
   });
 
   it('take-station mode in-progress — same SetReady{true} hand-off (#771 AC1/AC2)', () => {
     const vm = lobbyViewModel(seated({}, { phase: 'InProgress' }), MY, null);
-    expect(vm.readyBtn).toEqual({ visible: true, mode: 'take-station', sendReady: true });
+    expect(vm.readyBtn).toEqual({
+      visible: true, mode: 'take-station', sendReady: true,
+      className: 'armed', label: { id: 'client.take_station' },
+    });
   });
 
   it('lobby keeps plain ready mode (not take-station)', () => {
@@ -208,14 +235,20 @@ describe('lobbyViewModel — spectate toggle (issue #1105)', () => {
     const s = uiState({ players: [{ token: MY, name: 'Ada' }], stations: [helmRow()] });
     const vm = lobbyViewModel(s, MY, null);
     expect(vm.isSpectator).toBe(false);
-    expect(vm.spectateBtn).toEqual({ visible: true, mode: 'spectate' });
+    expect(vm.spectateBtn).toEqual({
+      visible: true, mode: 'spectate',
+      label: { id: 'client.spectator.spectate' }, sendSpectator: true,
+    });
   });
 
   it('offers Join for an explicit spectator, and hides the ready button', () => {
     const s = uiState({ players: [{ token: MY, name: 'Ada', spectator: true }], stations: [helmRow()] });
     const vm = lobbyViewModel(s, MY, null);
     expect(vm.isSpectator).toBe(true);
-    expect(vm.spectateBtn).toEqual({ visible: true, mode: 'join' });
+    expect(vm.spectateBtn).toEqual({
+      visible: true, mode: 'join',
+      label: { id: 'client.spectator.join' }, sendSpectator: false,
+    });
     expect(vm.readyBtn.visible).toBe(false);
   });
 
@@ -316,11 +349,13 @@ describe('lobbyViewModel — crew counter', () => {
   });
 
   it('ships a read-only labelled crew-lobby region and no fleet-role control', () => {
+    // The MARKUP stays in the page; the writes moved to the renderer in issue
+    // #1369, and the assertions moved with them —
+    // tests/client/client-lobby-render.test.js renders the region and reads
+    // the listitem role, the readiness attribute and the separator back off
+    // real elements, which is stronger than matching the source text.
     expect(CLIENT_HTML).toContain('id="gm-presence" role="region" aria-labelledby="gm-presence-heading"');
     expect(CLIENT_HTML).toContain('id="gm-presence-list" role="list"');
-    expect(CLIENT_HTML).toContain("row.setAttribute('role', 'listitem')");
-    expect(CLIENT_HTML).toContain("row.dataset.ready = gm.ready ? 'true' : 'false'");
-    expect(CLIENT_HTML).toContain("+ ' · ' + t(gm.readinessLabelId)");
     expect(CLIENT_HTML).not.toContain('fleet-role-gm');
     expect(CLIENT_HTML).not.toContain('__hostSetFleetRole');
     expect(CLIENT_HTML).not.toContain('gm-force-start-btn');

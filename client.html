@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -61,6 +61,11 @@
   <script type="module" src="gui/station-roster.js"></script>
   <script type="module" src="gui/client-router.js"></script>
   <script type="module" src="gui/lobby-view.js"></script>
+  <!-- The lobby's DOM writer (issue #1369). Pairs with gui/lobby-view.js the
+       way gui/host-lobby-render.js pairs with gui/host-lobby-view.js: the view
+       model decides, this writes, and the page keeps only the state the
+       controls mutate. -->
+  <script type="module" src="gui/client-lobby-render.js"></script>
   <!-- Crew-public Spectator summary surface (issue #1105). Depends on
        gui/hero-bar.js for the shared health/importance classifiers. -->
   <script type="module" src="gui/spectator-view.js"></script>
@@ -814,25 +819,96 @@
       color: var(--ink); border: 1px solid var(--edge-strong); font-family: 'Chakra Petch', sans-serif;
       letter-spacing: .06em; }
 
-    /* Ship header */
-    #lobby-header { display: flex; align-items: center; justify-content: space-between;
-      padding: 4px 0 8px; border-bottom: 1px solid var(--edge); flex-shrink: 0; }
-    #ship-info { display: flex; flex-direction: column; gap: 1px; }
-    #ship-name { font-size: var(--text-lg); font-weight: 600; color: var(--ink); letter-spacing: .06em; }
-    #ship-mission { font-size: var(--text-xs); color: var(--ink-faint); letter-spacing: .04em; }
-    #crew-ready { display: flex; align-items: center; gap: 8px; }
-    #crew-display { font-family: 'JetBrains Mono', monospace; font-size: var(--text-sm); color: var(--ink-faint); }
-    #ready-pill { padding: 2px 10px; border-radius: 10px; font-size: var(--text-xs);
-      font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
-      background: var(--reloading-deep); color: var(--reloading); border: 1px solid var(--reloading);
-      transition: all .3s ease; }
-    #ready-pill.go { background: var(--surface-panel-up); color: var(--signal); border-color: var(--signal);
+    /* ── Ship header ─────────────────────────────────────────────────────
+       The client lobby's command bar, drawn to the "Client lobby — portrait
+       frame" artboard (PRD #1355, issue #1369). The artboard is authored in
+       raw hex; every value below is the rung issue #1357's mapping table gives
+       for the ROLE, not the nearest colour by eye:
+
+         bar fill      linear-gradient(#14171c 92% → #0a0c10 40%)
+                       → rgba(--rgb-panel) over rgba(--rgb-base)
+         bar rule      #1b1f26 → --edge-faint, a content divider
+         ship name     #d8e2ff → --ink (the vocabulary's brightest ink; the
+                       artboard's near-white has no rung, and inventing one
+                       would be a palette change this slice does not make)
+         eyebrow       #6a727b → --ink-faint. NOT --edge-strong, which is what
+                       that hex maps to as a STROKE: as 11px text it has to
+                       clear the 4.5 floor, and --ink-faint is the rung derived
+                       for exactly that (see gui/tokens.css).
+         badge rest    border #2a2f38 → --surface-ridge, the chamfer stroke
+         badge go      #5fd8e8 on #0a2830 → --signal on --cyan-dim
+
+       Written full-bleed — the negative margin cancels #lobby-ui.active's
+       12px gutter, which is --space-5 exactly — because a command bar that
+       stops short of the screen edge reads as a card, and the bar is the one
+       thing on this surface that is chrome rather than content. It comes
+       straight back as the bar's own inset, at the artboard's slightly wider
+       --space-6, and that extra 4px is doing a second job: the settings cog is
+       44px of THUMB at a 0.5rem inset (the touch floor raised it past the 2rem
+       box its own rule declares), so it reaches down over the bar's top-left
+       corner exactly as the artboard draws it, and the wider inset is what
+       keeps it off the ship name's first characters. The TOP padding on
+       #lobby-ui.active is untouched — it is that same clearance, and
+       tests/client/settings-panel.test.js measures it. */
+    #lobby-header {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: var(--space-5);
+      margin: 0 calc(-1 * var(--space-5));
+      padding: 0 var(--space-6);
+      min-height: 60px;
+      border-bottom: 1px solid var(--edge-faint);
+      background: linear-gradient(
+        to bottom,
+        rgba(var(--rgb-panel), 0.92),
+        rgba(var(--rgb-base), 0.4));
+      flex-shrink: 0;
+    }
+    #ship-info { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+    #ship-name {
+      font-family: var(--font-display);
+      font-size: var(--text-lg); font-weight: 700;
+      letter-spacing: var(--tracking); text-transform: uppercase;
+      color: var(--ink);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    /* The artboard's eyebrow. Its 0.24em sits between --tracking-wide and
+       --tracking-widest; the narrower rung is taken because a mission line is
+       authored prose of unknown length and this is a 390px-wide bar. */
+    #ship-mission {
+      font-family: var(--font-mono);
+      font-size: var(--text-xs); font-weight: 600;
+      letter-spacing: var(--tracking-wide); text-transform: uppercase;
+      color: var(--ink-faint);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    #crew-ready { display: flex; align-items: center; gap: var(--space-4); flex: 0 0 auto; }
+    #crew-display {
+      font-family: var(--font-mono);
+      font-size: var(--text-sm); font-weight: 700;
+      letter-spacing: var(--tracking-tight);
+      color: var(--ink);
+    }
+    /* A chamfered badge rather than a rounded pill — the artboard cuts the same
+       5px corner on every small status block. `clip-path` clips an OUTER
+       box-shadow, so the ready glow below is drawn inset. */
+    #ready-pill {
+      padding: var(--space-3) var(--space-5);
+      font-family: var(--font-mono);
+      font-size: var(--text-xs); font-weight: 700;
+      letter-spacing: var(--tracking-wide); text-transform: uppercase;
+      color: var(--ink-faint); background: transparent;
+      border: 1px solid var(--surface-ridge); border-radius: 0;
+      clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px),
+        calc(100% - 5px) 100%, 0 100%, 0 5px);
+      transition: color .3s ease, background .3s ease, border-color .3s ease;
+    }
+    #ready-pill.go { background: var(--cyan-dim); color: var(--signal); border-color: var(--signal);
       animation: pill-pulse 1.5s ease-in-out infinite; }
      @keyframes spin { to { transform: rotate(360deg); } }
 
      @keyframes pill-pulse {
-        0%, 100%{ box-shadow: 0 0 4px rgba(var(--rgb-signal), 0.2); }
-       50%      { box-shadow: 0 0 12px rgba(var(--rgb-signal), 0.5); }
+        0%, 100%{ box-shadow: inset 0 0 4px rgba(var(--rgb-signal), 0.2); }
+       50%      { box-shadow: inset 0 0 12px rgba(var(--rgb-signal), 0.5); }
     }
 
     /* Name input row */
@@ -1236,7 +1312,9 @@
        so the ready state is still the brightest thing in the footer. */
     :root[data-reduced-motion="reduce"] #ready-pill.go {
       animation: none;
-      box-shadow: 0 0 12px rgba(var(--rgb-signal), 0.5);
+      /* Inset, like the loop it holds: the badge's chamfer (issue #1369) is a
+         clip-path, and a clip-path clips an outer glow away to nothing. */
+      box-shadow: inset 0 0 12px rgba(var(--rgb-signal), 0.5);
     }
     :root[data-reduced-motion="reduce"] #ready-btn.armed.glow {
       animation: none;
@@ -2464,36 +2542,12 @@
     // from the station list so it survives the boot-race guard below — a mid-
     // round spectator still sees what mods the session is running.
     function renderActiveMods() {
-      const el = document.getElementById('lobby-mods');
-      if (!el) return;
+      const render = window.clientLobbyRender;
+      if (!render) return;   // boot race: the next server message repaints
       const rows = (typeof window.activePacksView === 'function')
         ? window.activePacksView(window.lobbyState && window.lobbyState.activePacks)
         : [];
-      el.innerHTML = '';
-      if (rows.length === 0) {
-        el.setAttribute('aria-hidden', 'true');
-        return;
-      }
-      el.setAttribute('aria-hidden', 'false');
-      const heading = document.createElement('div');
-      heading.className = 'mods-active-heading';
-      heading.textContent = t('client.mods_active');
-      el.appendChild(heading);
-      for (const row of rows) {
-        const rowEl = document.createElement('div');
-        rowEl.className = 'mods-active-row';
-        const nameEl = document.createElement('span');
-        nameEl.className = 'mods-active-name';
-        nameEl.textContent = row.name;
-        rowEl.appendChild(nameEl);
-        if (row.version) {
-          const verEl = document.createElement('span');
-          verEl.className = 'mods-active-version';
-          verEl.textContent = t('client.mods_active_version', { version: row.version });
-          rowEl.appendChild(verEl);
-        }
-        el.appendChild(rowEl);
-      }
+      render.renderClientMods(document, rows, t);
     }
 
     // ── Anonymous accessibility eligibility (issue #1103) ─────────────────
@@ -2557,285 +2611,83 @@
     // fired by gui/accessibility-profile.js after it persists the change).
     window.onAccessibilityAssistanceChanged = computeAndSendEligibility;
 
+    /**
+     * Paint the lobby.
+     *
+     * Two pure modules and one renderer, and what is left here is what could
+     * not move (issue #1369): the projection this page splices together, and
+     * the six actions that mutate page-local state or reach the live transport.
+     * `gui/lobby-view.js` decides everything the lobby SAYS — including the
+     * string ids the arm→confirm swap and the ready button's four modes used
+     * to pick inline — and `gui/client-lobby-render.js` writes it.
+     */
     function renderLobby(s) {
       renderActiveMods();
-      const list = document.getElementById('station-list');
-      if (!list) return;
-      // Pure selectors live in gui/lobby-view.js (issue #827); this function
-      // only writes DOM. Boot race: skip the paint until the module loads —
-      // the next server message re-renders.
+      // Boot race: both modules load as ES modules in <head> while the page
+      // may already be painting. Skip until they land — the next server
+      // message re-renders.
       if (typeof window.lobbyViewModel !== 'function') return;
+      const render = window.clientLobbyRender;
+      if (!render) return;
+
       // The reducer owns the public GM list. It is deliberately not duplicated
       // into the legacy shell mirror, so splice the current authoritative list
       // into the pure view input at render time.
       const lobbyProjection = window.lobbyState
         ? { ...s, gms: window.lobbyState.gms }
         : s;
+
+      // #771 AC3/AC4: the armed-release confirm only exists in-progress; leaving
+      // InProgress (or never being in it) disarms so lobby release is immediate.
+      if (s.phase !== 'InProgress') releaseArmed = false;
+
       const vm = window.lobbyViewModel(lobbyProjection, myToken, lobbyConsole, {
         labelFor: stationLabel,
         describeFor: stationDescription,
+        consoleLabelFor: consoleLabel,
+        ratingLabelFor: (r) => wireText('station.rating.' + r.toLowerCase() + '.name', r.toUpperCase()),
         stationRatings: window.simState ? window.simState.stationRatings : null,
         // Anonymous accessibility eligibility per row (issue #1103 AC1).
         eligibilityFor: stationEligibility,
+        // Which label the release controls wear. The latch itself stays here:
+        // it is page state the handler below mutates.
+        releaseArmed,
       });
       // Detail-panel console auto-select (and clear on release) is part of
       // the view model.
       lobbyConsole = vm.selectedConsole;
-      const mine = myConsoles(s);
 
-      // Equal GM presence is crew-public but never a Station/spectator row.
-      const gmRegion = document.getElementById('gm-presence');
-      const gmHeading = document.getElementById('gm-presence-heading');
-      const gmList = document.getElementById('gm-presence-list');
-      if (gmRegion && gmList) {
-        gmRegion.setAttribute('aria-hidden', vm.gmGroup.visible ? 'false' : 'true');
-        if (gmHeading) gmHeading.textContent = t(vm.gmGroup.headingId);
-        gmList.innerHTML = '';
-        for (const gm of vm.gmGroup.entries) {
-          const row = document.createElement('span');
-          row.className = 'gm-presence-pill' + (gm.connected ? '' : ' disconnected');
-          row.setAttribute('role', 'listitem');
-          row.dataset.gmId = gm.id;
-          row.dataset.ready = gm.ready ? 'true' : 'false';
-          row.textContent = t(gm.labelId, { name: gm.name || gm.id })
-            + ' · ' + t(gm.readinessLabelId);
-          gmList.appendChild(row);
-        }
-      }
-      // #771 AC3/AC4: the armed-release confirm only exists in-progress; leaving
-      // InProgress (or never being in it) disarms so lobby release is immediate.
-      const inProgress = s.phase === 'InProgress';
-      if (!inProgress) releaseArmed = false;
-      // Shared by the row RELEASE and detail LEAVE controls. In-progress: first
-      // click arms (re-render swaps to the confirm label), second click sends.
-      // Lobby: immediate send. Preserves the pendingMidGameClaim reset either way.
-      const releaseStation = () => {
-        const step = window.releaseConfirmStep(s.phase, releaseArmed);
-        releaseArmed = step.armed;
-        if (!step.send) {
-          scheduleRender();
-          return;
-        }
-        pendingMidGameClaim = false;
-        send('ReleaseStation');
-      };
-
-      // Station help lives in Settings; keep the lobby roster visible.
-      list.style.display = '';
-
-      list.innerHTML = '';
-      for (const row of vm.rows) {
-        const rowEl = document.createElement('div');
-        rowEl.className = row.rowClass;
-
-        const glyph = document.createElement('div');
-        glyph.className = 'glyph';
-        glyph.textContent = row.glyph;
-        rowEl.appendChild(glyph);
-
-        const info = document.createElement('div');
-        info.className = 'info';
-        const nameEl = document.createElement('div');
-        nameEl.className = 'name';
-        nameEl.textContent = row.label;
-        info.appendChild(nameEl);
-        const meta = document.createElement('div');
-        meta.className = 'meta';
-        if (row.rank) {
-          const rankEl = document.createElement('span');
-          rankEl.textContent = row.rank;
-          meta.appendChild(rankEl);
-        }
-        // Post issue #619 a station carries a single (lowercase) id — the
-        // station itself is the "console" for chip-rendering purposes.
-        if (row.chipId) {
-          const chip = document.createElement('span');
-          chip.className = 'cons';
-          chip.textContent = consoleLabel(row.chipId);
-          meta.appendChild(chip);
-        }
-        info.appendChild(meta);
-        // The job, before the claim (PRD #1023 module 4). Rendered for every
-        // row kind — free, taken and mine — so the roster reads as a crew
-        // manifest rather than a list of buttons.
-        if (row.description) {
-          const desc = document.createElement('div');
-          desc.className = 'desc';
-          desc.textContent = row.description;
-          info.appendChild(desc);
-        }
-        if (row.occupant) {
-          const occ = document.createElement('div');
-          occ.className = 'occupant';
-          occ.textContent = row.occupant;
-          info.appendChild(occ);
-        }
-        rowEl.appendChild(info);
-
-        // A free seat this player is INELIGIBLE for (issue #1103 AC1): explain
-        // privately, in functional terms, right on the row. The reason is
-        // local-only — it is never sent to the host or another player.
-        if (row.button === 'ineligible' && row.ineligibleReason) {
-          const why = document.createElement('div');
-          why.className = 'ineligible-reason';
-          const fns = (row.ineligibleReason.functions || [])
-            .map(f => t('client.assist_function.' + f))
-            .join(', ');
-          why.textContent = t('client.station_ineligible_reason', { functions: fns });
-          info.appendChild(why);
-        }
-
-        const action = document.createElement('div');
-        action.className = 'action';
-        const btn = document.createElement('button');
-        if (row.button === 'release') {
-          btn.className = 'mine-btn';
-          btn.textContent = inProgress && releaseArmed ? t('client.release_confirm') : t('client.release');
-          btn.addEventListener('click', () => releaseStation());
-        } else if (row.button === 'taken') {
-          btn.className = 'taken-btn';
-          btn.textContent = t('client.taken');
-          btn.disabled = true;
-        } else if (row.button === 'ineligible') {
-          // Blocked direct claim: the disabled control never sends SelectStation.
-          btn.className = 'ineligible-btn';
-          btn.textContent = t('client.station_ineligible');
-          btn.disabled = true;
-        } else {
-          btn.className = 'claim-btn';
-          btn.textContent = t('client.claim');
-          btn.addEventListener('click', () => {
-            if (uiState.phase === 'InProgress') pendingMidGameClaim = true;
-            send('SelectStation', { station: row.name });
+      render.renderClientLobby(document, vm, t, {
+        // Shared by the row RELEASE and detail LEAVE controls. In-progress:
+        // first click arms (the re-render swaps to the confirm label), second
+        // click sends. Lobby: immediate send. Preserves the
+        // pendingMidGameClaim reset either way.
+        release: () => {
+          const step = window.releaseConfirmStep(s.phase, releaseArmed);
+          releaseArmed = step.armed;
+          if (!step.send) {
             scheduleRender();
-          });
-        }
-        action.appendChild(btn);
-        rowEl.appendChild(action);
-        list.appendChild(rowEl);
-      }
-
-      // Detail panel
-      const detail = document.getElementById('detail-panel');
-      if (detail) {
-        const detailHeader = detail.querySelector('.detail-header');
-        if (vm.detail.active) {
-          detail.className = 'active';
-          detailHeader.innerHTML = '';
-          const nameSpan = document.createElement('span');
-          nameSpan.className = 'detail-station-name';
-          nameSpan.textContent = vm.detail.stationName;
-          detailHeader.appendChild(nameSpan);
-          const releaseBtn = document.createElement('button');
-          releaseBtn.className = 'detail-release-btn';
-          releaseBtn.textContent = inProgress && releaseArmed ? t('client.release_confirm') : t('client.leave');
-          releaseBtn.addEventListener('click', () => releaseStation());
-          detailHeader.appendChild(releaseBtn);
-          // The same authored line the row carried, restated where the player
-          // now sits (PRD #1023 module 4).
-          const descEl = detail.querySelector('.detail-station-desc');
-          if (descEl) descEl.textContent = vm.detail.stationDescription || '';
-          const consolesArea = detail.querySelector('.detail-consoles');
-          consolesArea.innerHTML = '';
-          for (const c of vm.detail.consoles) {
-            const chip = document.createElement('span');
-            chip.className = 'chip' + (c === lobbyConsole ? ' selected' : '');
-            chip.textContent = consoleLabel(c);
-            chip.addEventListener('click', () => {
-              lobbyConsole = c;
-              scheduleRender();
-            });
-            consolesArea.appendChild(chip);
+            return;
           }
-
-          // Complexity toggle: purely data-driven off the station's declared
-          // ratings (the view model omits it when the station only has its
-          // base rating).
-          const ratingsArea = detail.querySelector('.detail-ratings');
-          ratingsArea.innerHTML = '';
-          if (vm.detail.ratings) {
-            const activeRating = vm.detail.ratings.active;
-            for (const r of vm.detail.ratings.list) {
-              const ratingBtn = document.createElement('button');
-              ratingBtn.className = 'rating-btn' + (r === activeRating ? ' active' : '');
-              ratingBtn.textContent = wireText('station.rating.' + r.toLowerCase() + '.name', r.toUpperCase());
-              ratingBtn.addEventListener('click', () => {
-                if (r !== activeRating) send('SetStationRating', { rating_name: r });
-              });
-              ratingsArea.appendChild(ratingBtn);
-            }
-          }
-        } else {
-          detail.className = 'idle';
-          detailHeader.innerHTML = '';
-          const nameSpan = document.createElement('span');
-          nameSpan.className = 'detail-station-name';
-          nameSpan.textContent = t('client.no_station');
-          detailHeader.appendChild(nameSpan);
-          const idleDesc = detail.querySelector('.detail-station-desc');
-          if (idleDesc) idleDesc.textContent = '';
-          detail.querySelector('.detail-consoles').innerHTML = '';
-          detail.querySelector('.detail-ratings').innerHTML = '';
-        }
-      }
-
-      // Header
-      const crewEl = document.getElementById('crew-display');
-      if (crewEl) crewEl.textContent = vm.crew.filled + '/' + vm.crew.max;
-      const pill = document.getElementById('ready-pill');
-      if (pill) {
-        if (vm.allReady) { pill.textContent = t('client.all_crew_ready'); pill.className = 'go'; }
-        else { pill.textContent = t('client.awaiting_crew'); pill.className = ''; }
-      }
-
-      // Ready button (per-player, replaces captain-only Engage)
-      const readyBtn = document.getElementById('ready-btn');
-      if (readyBtn) {
-        if (vm.readyBtn.visible) {
-          readyBtn.style.display = 'block';
-          readyBtn.disabled = false;
-          if (vm.readyBtn.mode === 'countdown') {
-            // Countdown active — keep button in ready state, show timer.
-            readyBtn.textContent = vm.readyBtn.secs + 's';
-            readyBtn.className = 'armed glow';
-          } else if (vm.readyBtn.mode === 'ready-confirmed') {
-            readyBtn.textContent = t('client.ready_confirmed');
-            readyBtn.className = 'armed glow';
-          } else if (vm.readyBtn.mode === 'take-station') {
-            // In-progress claiming: same SetReady{true} hand-off, relabelled
-            // as Take Station (#771 AC1/AC2 — text only, sendReady unchanged).
-            readyBtn.textContent = t('client.take_station');
-            readyBtn.className = 'armed';
-          } else {
-            readyBtn.textContent = t('client.ready');
-            readyBtn.className = 'armed';
-          }
-          readyBtn.onclick = () => send('SetReady', { ready: vm.readyBtn.sendReady });
-        } else {
-          readyBtn.style.display = 'none';
-        }
-      }
-
-      // Spectate toggle (issue #1105): opt into / out of the explicit Spectator
-      // role. 'spectate' sends SetSpectator{true} (vacate seat + unready on the
-      // server); 'join' sends SetSpectator{false} to rejoin the crew.
-      const spectateBtn = document.getElementById('spectate-btn');
-      if (spectateBtn) {
-        if (vm.spectateBtn && vm.spectateBtn.visible) {
-          spectateBtn.style.display = 'block';
-          const joining = vm.spectateBtn.mode === 'join';
-          spectateBtn.textContent = joining ? t('client.spectator.join') : t('client.spectator.spectate');
-          spectateBtn.onclick = () => send('SetSpectator', { spectator: !joining });
-        } else {
-          spectateBtn.style.display = 'none';
-        }
-      }
-
-      // Status line
-      const statusLine = document.getElementById('status-line');
-      if (statusLine) {
-        statusLine.textContent = t(vm.statusLine.id, vm.statusLine.params);
-      }
+          pendingMidGameClaim = false;
+          send('ReleaseStation');
+        },
+        claim: (row) => {
+          if (uiState.phase === 'InProgress') pendingMidGameClaim = true;
+          send('SelectStation', { station: row.name });
+          scheduleRender();
+        },
+        selectConsole: (id) => {
+          lobbyConsole = id;
+          scheduleRender();
+        },
+        selectRating: (rating) => send('SetStationRating', { rating_name: rating }),
+        setReady: (ready) => send('SetReady', { ready }),
+        // Spectate toggle (issue #1105): 'spectate' sends SetSpectator{true}
+        // (vacate seat + unready on the server); 'join' sends false to rejoin
+        // the crew. Which way round is the view model's call.
+        setSpectator: (spectator) => send('SetSpectator', { spectator }),
+      });
     }
 
     function rebuildStations() {

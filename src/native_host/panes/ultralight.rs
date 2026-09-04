@@ -1220,12 +1220,28 @@ fn resize_pane_surfaces(
         };
         let pw = window.physical_width().max(1);
         let ph = window.physical_height().max(1);
-        if idxs.len() == 1 {
-            targets[idxs[0]] = Some(((0, 0), (pw, ph)));
-        } else {
-            let count = idxs.len() as u32;
+        // The host-lobby surface (issue #1325) and the HUD overlay (issue #422,
+        // native port) are FULL-WINDOW overlays, not tiled consoles: each fills
+        // the whole window and they stack by ZIndex (the lobby beneath, the HUD
+        // above, shown one at a time by phase). Only genuine console panes tile
+        // among themselves — counting the overlays in the tile split is what
+        // squeezed the HUD into half the viewscreen.
+        let tiled: Vec<usize> = idxs
+            .iter()
+            .copied()
+            .filter(|&i| !host.windows[i].is_host_lobby() && !host.windows[i].is_hud_overlay())
+            .collect();
+        for &i in idxs {
+            if host.windows[i].is_host_lobby() || host.windows[i].is_hud_overlay() {
+                targets[i] = Some(((0, 0), (pw, ph)));
+            }
+        }
+        if tiled.len() == 1 {
+            targets[tiled[0]] = Some(((0, 0), (pw, ph)));
+        } else if tiled.len() > 1 {
+            let count = tiled.len() as u32;
             let tile_w = (pw / count).max(1);
-            for (slot, &i) in idxs.iter().enumerate() {
+            for (slot, &i) in tiled.iter().enumerate() {
                 targets[i] = Some(((tile_w * slot as u32, 0), (tile_w, ph)));
             }
         }
@@ -2200,10 +2216,13 @@ fn retire_closed_panes(
         return;
     }
     let open = bus.0.open_pane_ids();
-    // The host-lobby surface is never in `open_pane_ids` — it is not a
-    // participant and has no registry entry — and it is PERMANENT (issue
-    // #1325), so it is not a candidate for retirement in either test below.
-    let survives = |w: &PaneWindow| open.contains(&w.id) || w.is_host_lobby();
+    // The host-lobby surface (issue #1325) and the viewscreen HUD overlay (issue
+    // #422, native port) are never in `open_pane_ids` — neither is a participant
+    // and neither has a registry entry — and both are PERMANENT, composited for
+    // the life of the host, so neither is a candidate for retirement in either
+    // test below. Missing the HUD here retired it the instant the bus went active
+    // at InProgress, which is exactly when its frame should appear.
+    let survives = |w: &PaneWindow| open.contains(&w.id) || w.is_host_lobby() || w.is_hud_overlay();
     if host.windows.iter().all(survives) {
         return;
     }

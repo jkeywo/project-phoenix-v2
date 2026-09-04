@@ -16,7 +16,14 @@
     Driven from Rust by window.__updateHud(stateJson) (see the HUD-state push in
     src/native_host/panes/ultralight.rs).
   -->
-  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <!--
+    No external font stylesheet: the native host is offline/LAN, and a
+    `<link rel="stylesheet">` to fonts.googleapis.com is RENDER-BLOCKING — the
+    Ultralight view would stall waiting for a sheet it can never fetch, so the
+    frame never lays out or paints. The type below falls back to the system
+    faces, which is the right call for an offline viewscreen anyway; server.html
+    keeps the web font because it is online.
+  -->
   <style>
     /* The page itself paints nothing — only the frame pieces below do, so the
        3-D viewscreen shows through everywhere else (the surface is transparent). */

@@ -27,6 +27,7 @@ use bevy::prelude::Resource;
 use std::collections::BTreeMap;
 
 use crate::core::balance::StampedBalanceEvent;
+use crate::core::narrative::StampedNarrativeEvent;
 
 /// Accumulates everything the exit summary needs, tick by tick.
 ///
@@ -50,6 +51,19 @@ pub struct RunTelemetry {
     /// Always captured — unlike `stream` this is bounded by combat, not by
     /// broadcast rate, and the per-ship ledgers are built from it.
     pub balance_events: Vec<StampedBalanceEvent>,
+    /// Every authored mission-timeline event the run produced (issue #1338),
+    /// stamped with its monotonic sequence, fixed sim tick and derived time at
+    /// collection. Always captured, like `balance_events` and for the same
+    /// reason: it is bounded by what the scenario authored, not by broadcast
+    /// rate, and the report's timeline projection is built from it.
+    ///
+    /// **Nothing authoritative reads this.** `crate::sim_digest` folds this
+    /// resource's collision attribution and nothing else, and no fold stage
+    /// walks this vector — see `crate::core::narrative`'s determinism note.
+    /// Adding one here would make an after-action surface part of the
+    /// authoritative digest, which is exactly what issue #1338's third
+    /// acceptance criterion forbids.
+    pub narrative_events: Vec<StampedNarrativeEvent>,
     /// uuid → raw `EntityName`, snapshotted as events arrive. Recorded here
     /// rather than looked up at report time because a destroyed NPC is gone
     /// from the world long before the summary is built. Stored verbatim — for

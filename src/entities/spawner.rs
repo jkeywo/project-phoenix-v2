@@ -270,7 +270,13 @@ const SPAWN_SECTIONS: &[&dyn SpawnSection] = &[
     &HeldResponseSpawn,
     &DockSpawn,
     &UmbilicalSpawn,
+    &SecuritySpawn,
+    &SecurityTargetSpawn,
+    &TransporterSpawn,
+    &CivilianRescueSpawn,
+    &DemolitionTargetSpawn,
     &ScanSpawn,
+    &DebrisSpawn,
     &CivilianSpawn,
     &HullSpawn,
 ];
@@ -1534,6 +1540,44 @@ impl SpawnSection for TractorSpawn {
     }
 }
 
+struct TransporterSpawn;
+impl SpawnSection for TransporterSpawn {
+    fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
+        // The rescue transporter (issue #1348) — attach when `[transporter]` is
+        // present, the tractor's argument exactly. The power group is read from
+        // the transporter `[[system]]` block (its single authored source);
+        // `EntityConfig` validation already guaranteed the paired system with a
+        // power group exists, so the resolve below cannot silently drop it.
+        if let Some(transporter) = &config.transporter {
+            if let Some(power_group) = config.ship_config.as_ref().and_then(|sc| {
+                sc.systems
+                    .iter()
+                    .find(|s| s.kind == crate::ship::system_registry::TRANSPORTER_KIND)
+                    .and_then(|s| s.power_group.clone())
+            }) {
+                cmds.insert(crate::transporter::Transporter::new(
+                    transporter.clone(),
+                    power_group,
+                ));
+            }
+        }
+    }
+}
+
+struct CivilianRescueSpawn;
+impl SpawnSection for CivilianRescueSpawn {
+    fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
+        // The civilians a contact carries (issue #1348) — attach when
+        // `[civilian_rescue]` is present, on a TARGET entity. A contact that
+        // authors nothing carries no component and offers no rescue.
+        if let Some(civilian_rescue) = &config.civilian_rescue {
+            cmds.insert(crate::transporter::CivilianRescue::new(
+                civilian_rescue.count,
+            ));
+        }
+    }
+}
+
 struct ExternalRepairDispatchSpawn;
 impl SpawnSection for ExternalRepairDispatchSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
@@ -1650,6 +1694,52 @@ impl SpawnSection for UmbilicalSpawn {
     }
 }
 
+struct SecuritySpawn;
+impl SpawnSection for SecuritySpawn {
+    fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
+        // Security teams (issue #1346) — attach the muster when `[security]` is
+        // present, on the same argument as the umbilical. Which STATION owns the
+        // system rides the `[[system]]` block and is read by admission, not by the
+        // component, so nothing about the teams themselves needs it here.
+        // `EntityConfig` validation already guaranteed the paired system exists.
+        if let Some(security) = &config.security {
+            cmds.insert(crate::security::ShipSecurityTeams::new(security.clone()));
+            // A hull that musters Security teams is the one that fires the charges
+            // they place (issue #1350): `DetonateCharges` goes to the `security`
+            // system, so the demolition refusal projection rides the same hull.
+            // It holds no authoritative state — charged/detonated are world flags —
+            // so a hull with no demolition target in its world simply never has a
+            // refusal to show.
+            cmds.insert(crate::demolition::DemolitionControl::default());
+        }
+    }
+}
+
+struct SecurityTargetSpawn;
+impl SpawnSection for SecurityTargetSpawn {
+    fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
+        // What a Security team may be sent HERE to do (issue #1346). Independent
+        // of `[security]` above: an entity that offers work needs no teams of its
+        // own, and a hull with teams need offer none.
+        if let Some(target) = &config.security_target {
+            cmds.insert(crate::security::SecurityTargetActions(target.clone()));
+        }
+    }
+}
+
+struct DemolitionTargetSpawn;
+impl SpawnSection for DemolitionTargetSpawn {
+    fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
+        // What a controlled demolition may do HERE (issue #1350). Independent of
+        // `[security_target]` above, though on the Falling Skyway obstruction the
+        // two ride the same entity: the `place_charges` action arms the charges,
+        // and this table says what detonating them clears.
+        if let Some(target) = &config.demolition_target {
+            cmds.insert(crate::demolition::DemolitionTarget(target.clone()));
+        }
+    }
+}
+
 struct ScanSpawn;
 impl SpawnSection for ScanSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
@@ -1662,6 +1752,20 @@ impl SpawnSection for ScanSpawn {
                 config: scan.clone(),
                 ..Default::default()
             });
+        }
+    }
+}
+
+struct DebrisSpawn;
+impl SpawnSection for DebrisSpawn {
+    fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
+        // The moving hazard (issue #1347) — attach the contact when `[debris]` is
+        // present, on the same argument as the scan record above. The component
+        // carries the authored table AND this run's history of the contact: it
+        // starts drifting, unread, and unconfirmed, which is the whole point —
+        // a rock is not a threat until somebody has been and looked at it.
+        if let Some(debris) = &config.debris {
+            cmds.insert(crate::debris::DebrisThreat::new(debris.clone()));
         }
     }
 }

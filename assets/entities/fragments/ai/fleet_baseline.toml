@@ -397,6 +397,18 @@ level = 2
 
 [comms_console.ai]
 
+# THE FALLBACK, and only the fallback, since #1343. Answering by INDEX is the
+# right thing for a hail acknowledgement and the wrong thing for a decision:
+# the option a person reaches for while they think goes first, so a rule that
+# always picks index 0 stands by for ever on a conversation that was asking for
+# an answer. A node whose responses author `ai_weight` is therefore decided by
+# the weighted picker instead (`comms::ai_choice`) and never reaches this rule;
+# a node that authors none — which is every conversation but Falling Skyway's
+# lift band — keeps exactly the behaviour it has always had.
+#
+# This block still has to be here for BOTH mechanisms: strict AI declaration
+# (#885) means a fine system with no `[comms_console.ai]` at all takes no action
+# of any kind, weighted or otherwise.
 [[comms_console.ai.rule]]
 priority = 0
 channel = "comms_respond"
@@ -405,10 +417,16 @@ verb = "respond_to_message"
 response_index = 0
 
 [sensors_console.selector]
-sources = ["combat-lock", "objective-destroy", "radar-contacts"]
+sources = ["combat-lock", "objective-destroy", "radar-contacts", "debris-assessment"]
 horizon = 1e9
 switch_margin = 0.0
-eligibility = "candidate_fact(detectable) > 0 and candidate_fact(hostile) > 0"
+# The `source_debris_assess` disjunct (issue #1347) is what lets a NON-hostile
+# contact reach this seat at all. Everything else here is something the ship
+# means to shoot, and is gated on `hostile`; a rock has no faction and no
+# opinion, so that test refuses it. The honest reason it is eligible is not that
+# it is an enemy but that it is a thing this instrument can still learn something
+# about, and the marker says exactly that.
+eligibility = "candidate_fact(detectable) > 0 and (candidate_fact(hostile) > 0 or candidate_fact(source_debris_assess) > 0)"
 
 [[sensors_console.selector.score]]
 when = "candidate_fact(source_combat_lock) > 0"
@@ -417,6 +435,38 @@ weight = 1000.0
 [[sensors_console.selector.score]]
 when = "candidate_fact(source_objective) > 0"
 weight = 100.0
+
+# ── WORKING DOWN A DEBRIS FIELD (issue #1347) ────────────────────────────────
+#
+# The mission's own ladder is "objective-critical scans, then possible
+# collisions, then keep assessing", and these three terms are the last two rungs
+# of it. A hazard outranks an incidental radar hostile (1) — a rock about to
+# land on a depot is worth more of this seat's attention than the nearest
+# unfriendly ship — but never a named objective (100), which is the mission
+# telling the crew what matters more.
+#
+# The `debris_unassessed` bonus is the part that makes the seat WORK: an unread
+# rock scores 40, a rock already read scores 10, so the instrument goes to the
+# next unknown rather than admiring the one it just finished. Once a contact's
+# authored `reassess_secs` elapses it re-enters the top tier by itself and the
+# plot Tactical is prioritising on gets refreshed.
+#
+# `debris_confirmed` adds a little back to a rock already known to be on course,
+# so between two contacts both wanting a re-read the seat refreshes the one that
+# is actually going to hit something first. It is small on purpose: it must not
+# add up past an unread contact, because an unknown rock is a worse thing to
+# have than a known one. 10 + 15 = 25 < 40.
+[[sensors_console.selector.score]]
+when = "candidate_fact(source_debris_assess) > 0"
+weight = 10.0
+
+[[sensors_console.selector.score]]
+when = "candidate_fact(debris_unassessed) > 0"
+weight = 30.0
+
+[[sensors_console.selector.score]]
+when = "candidate_fact(debris_confirmed) > 0"
+weight = 15.0
 
 [[sensors_console.selector.score]]
 when = "candidate_fact(source_radar) > 0"
@@ -480,16 +530,37 @@ verb = "bring_torpedoes_to_bear"
 #
 # PRECEDENCE INVARIANT — terms are additive and one candidate can carry several
 # markers at once, so the weights are sized to beat the maximum non-objective
-# stack by more than `switch_margin`: 500 + 200 + 100 + 1 = 801 < 1000 - 50.
+# stack by more than `switch_margin`. Two stacks have to clear that bar, because
+# no candidate can carry both sets of markers:
+#
+#   a warship   500 + 200 + 100 +   1                     = 801 < 1000 - 50
+#   a rock      500 + 200 + 120 + (60 + 60)               = 940 < 1000 - 50
+#
 # A named Destroy objective therefore always wins AND survives hysteresis
 # retention, while `retained` still exceeds `last_attacker` so an established
-# engagement is not broken off by a fresh attacker. Retune against that
-# inequality, not term by term.
+# engagement is not broken off by a fresh attacker. Retune against those two
+# inequalities, not term by term.
+#
+# The second stack is debris (issue #1347) and it is a SEPARATE line because a
+# rock cannot carry the warship markers: it has no faction, so `source_radar`
+# (nearest faction-hostile) never fires on it, and it does not shoot, so
+# `source_last_attacker` never fires either. What it can carry is a Sensors
+# designation and the retained lock, which is why those two appear in both sums.
 
 [weapons_console.selector]
-sources = ["sensors-designation", "objective-destroy", "last-attacker", "radar-contacts", "objective-operate"]
+sources = ["sensors-designation", "objective-destroy", "last-attacker", "radar-contacts", "objective-operate", "confirmed-debris-threat"]
 horizon = 1e9
 switch_margin = 50.0
+# The two urgency bands below are read against these, in seconds of dead-reckoned
+# time-to-impact. They are doctrine, not physics: how much room THIS fleet thinks
+# it needs to solve a firing problem on a drifting mass. Widen them and Tactical
+# commits to rocks earlier; narrow them and it holds its lock on the warship
+# longer. An inline table rather than a `[weapons_console.selector.param]`
+# header, because a sub-table opened here would swallow every sibling key below
+# it — `eligibility` included — and the selector would parse as paramless.
+#
+# [ai] Both numbers are unratified.
+param = { debris_pressing_secs = 60.0, debris_urgent_secs = 25.0 }
 # Independent revalidation: `detectable` is required of everything, and beyond
 # that a candidate is engageable either because the host already vetted it
 # (objective order / last attacker / retained lock) OR because it is
@@ -505,7 +576,14 @@ switch_margin = 50.0
 # candidate carries `source_operate` — so combat auto-lock is unchanged and
 # radar/scan auto-lock stays hostile-gated (`source_radar` still requires
 # `hostile`, unaffected here).
-eligibility = "candidate_fact(detectable) > 0 and (candidate_fact(source_objective) > 0 or candidate_fact(source_last_attacker) > 0 or candidate_fact(source_retained) > 0 or candidate_fact(hostile) > 0 or candidate_fact(source_operate) > 0)"
+#
+# The `source_debris_threat` disjunct (issue #1347) is ASSESSMENT-GATED at the
+# host: that marker is only ever attached to a contact whose threat state a scan
+# taken through the ordinary lifecycle actually raised. So a rock nobody has read
+# fails this guard at any distance and on any course, and Backfill cannot open
+# fire on something the crew were never told about. A human Tactical is
+# untouched — this selector does not run at all while the seat is crewed.
+eligibility = "candidate_fact(detectable) > 0 and (candidate_fact(source_objective) > 0 or candidate_fact(source_last_attacker) > 0 or candidate_fact(source_retained) > 0 or candidate_fact(hostile) > 0 or candidate_fact(source_operate) > 0 or candidate_fact(source_debris_threat) > 0)"
 
 [[weapons_console.selector.score]]
 when = "candidate_fact(source_objective) > 0"
@@ -536,6 +614,47 @@ weight = 1.0
 [[weapons_console.selector.score]]
 when = "candidate_fact(source_operate) > 0"
 weight = 1000.0
+
+# ── CONFIRMED DEBRIS, RANKED BY DEADLINE (issue #1347) ───────────────────────
+#
+# Three additive terms, and the split is the doctrine. The FIRST says a confirmed
+# rock outranks the ordinary fight: 120 beats `last_attacker` (100) and any
+# incidental radar hostile (1), which is the mission's own priority ladder —
+# confirmed threats to a protected asset first, then threats to the ship, then
+# ordinary hostiles. It does NOT beat a named Destroy objective, so a mission
+# that has ordered a specific kill keeps it.
+#
+# The other two rank several confirmed rocks AGAINST EACH OTHER, which is the
+# part that actually matters once the corridor comes down: with three contacts
+# eligible at once, the one arriving soonest carries both bands and wins by 120,
+# far outside the 50-point hysteresis margin, so Tactical works the queue
+# earliest-deadline-first instead of holding whichever rock it happened to see
+# first. The bands stack deliberately — inside `debris_urgent_secs` is also
+# inside `debris_pressing_secs`.
+#
+# `impact_secs` is the CREW's number: dead-reckoned forward from the last
+# assessment Sensors actually took, not the simulation's private truth. A stale
+# assessment therefore produces a stale priority, which is what makes going back
+# and re-reading a rock worth a seat's time.
+#
+# Both bands are additionally guarded on `debris_deadline_known`, and that guard
+# is load-bearing rather than decorative. An absent fact reads as 0, and 0 is a
+# real reading here — "arriving now" — so the two cases have to be told apart by
+# something other than the number. A contact CONFIRMED earlier and since shoved
+# off course keeps its confirmation (that is a thing that happened) but has no
+# arrival any more, and without this guard its missing deadline would read as
+# zero seconds and rank it above every rock that really is about to land.
+[[weapons_console.selector.score]]
+when = "candidate_fact(source_debris_threat) > 0"
+weight = 120.0
+
+[[weapons_console.selector.score]]
+when = "candidate_fact(debris_deadline_known) > 0 and candidate_fact(impact_secs) < param(debris_pressing_secs)"
+weight = 60.0
+
+[[weapons_console.selector.score]]
+when = "candidate_fact(debris_deadline_known) > 0 and candidate_fact(impact_secs) < param(debris_urgent_secs)"
+weight = 60.0
 
 # Navigation — rank destinations into the shared Waypoint. Only the objective
 # source marks its resolved destination `reachable`, so this policy drives the

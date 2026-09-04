@@ -257,8 +257,53 @@ describe('mergeReports — tallying', () => {
       { matchup: 'a_vs_b', seed: 4, report: report({ outcome: 'timeout', playerDealt: 50, enemyDealt: 55, deaths: [null] }) },
     ];
     const s = mergeReports(runs).matchups.a_vs_b;
-    expect(s).toMatchObject({ total: 4, completed: 4, wins: 1, losses: 1, draws: 1, timeouts: 1, failures: 0 });
-    expect(s.winRate).toBeCloseTo(0.25); // 1 win / 4 completed
+    expect(s).toMatchObject({
+      total: 4, completed: 4, decided: 4, wins: 1, losses: 1, draws: 1, timeouts: 1, reported: 0, failures: 0,
+    });
+    expect(s.winRate).toBeCloseTo(0.25); // 1 win / 4 decided
+  });
+
+  // Issue #1344. `reported` is the fifth outcome a report-bearing ending
+  // classifies as, and it ships with the Falling Skyway sweep — which this
+  // script explicitly supports — so a missing arm here is a live miscount, not a
+  // hypothetical one. Before this test the value fell through `default` and was
+  // silently tallied as a TIMEOUT.
+  it('tallies a report-bearing ending in its own column, never as a timeout', () => {
+    const runs = [
+      { matchup: 'skyway', seed: 1, report: report({ outcome: 'reported', playerDealt: 0, enemyDealt: 0, deaths: [null] }) },
+      { matchup: 'skyway', seed: 2, report: report({ outcome: 'reported', playerDealt: 0, enemyDealt: 0, deaths: [null] }) },
+    ];
+    const summary = mergeReports(runs);
+    const s = summary.matchups.skyway;
+    expect(s).toMatchObject({ total: 2, completed: 2, reported: 2, timeouts: 0, wins: 0, losses: 0, draws: 0 });
+    expect(summary.totals.reported).toBe(2);
+    expect(summary.totals.timeouts).toBe(0);
+    // Outside the victory/defeat frame entirely: no decided runs, so no rate —
+    // `—`, not a 0% that would read as two straight losses.
+    expect(s.decided).toBe(0);
+    expect(s.winRate).toBeNull();
+  });
+
+  it('keeps reported runs out of the win-rate denominator while still counting them completed', () => {
+    const runs = [
+      { matchup: 'mixed', seed: 1, report: report({ outcome: 'victory', playerDealt: 0, enemyDealt: 0, deaths: [null] }) },
+      { matchup: 'mixed', seed: 2, report: report({ outcome: 'defeat', playerDealt: 0, enemyDealt: 0, deaths: [null] }) },
+      { matchup: 'mixed', seed: 3, report: report({ outcome: 'reported', playerDealt: 0, enemyDealt: 0, deaths: [null] }) },
+    ];
+    const s = mergeReports(runs).matchups.mixed;
+    expect(s.completed).toBe(3); // every run produced a report
+    expect(s.decided).toBe(2); // only two of them declared a verdict
+    expect(s.winRate).toBeCloseTo(0.5); // 1 win / 2 decided, not 1/3
+  });
+
+  it('still buckets a genuinely unknown outcome string with timeout', () => {
+    const runs = [
+      { matchup: 'weird', seed: 1, report: report({ outcome: 'not_a_real_outcome', playerDealt: 0, enemyDealt: 0, deaths: [null] }) },
+    ];
+    const s = mergeReports(runs).matchups.weird;
+    expect(s.timeouts).toBe(1);
+    expect(s.reported).toBe(0);
+    expect(s.completed).toBe(1);
   });
 });
 
@@ -1123,8 +1168,21 @@ describe('formatMarkdown', () => {
     ]);
     const md = formatMarkdown(summary);
     expect(md).toContain('| Mandatory set complete |');
-    expect(md).toContain('| zero | 2 | 0% | 0/0/0/2 | 0 | 0/2 (0%) |');
-    expect(md).toContain('| no_data | 1 | 0% | 0/0/0/1 | 0 | 0/0 (no data; 1 no mandatory objectives) |');
+    expect(md).toContain('| zero | 2 | 0% | 0/0/0/2/0 | 0 | 0/2 (0%) |');
+    expect(md).toContain('| no_data | 1 | 0% | 0/0/0/1/0 | 0 | 0/0 (no data; 1 no mandatory objectives) |');
+  });
+
+  // Issue #1344: the outcome column carries a fifth number, and a wholly
+  // report-bearing sweep renders `—` for Win% rather than a false 0%.
+  it('renders report-bearing endings in their own W/L/D/T/R slot with no win rate', () => {
+    const summary = mergeReports([
+      { matchup: 'skyway', seed: 1, report: report({ outcome: 'reported', playerDealt: 0, enemyDealt: 0, deaths: [null] }) },
+      { matchup: 'skyway', seed: 2, report: report({ outcome: 'reported', playerDealt: 0, enemyDealt: 0, deaths: [null] }) },
+    ]);
+    const md = formatMarkdown(summary);
+    expect(md).toContain('| W/L/D/T/R |');
+    expect(md).toContain('| skyway | 2 | — | 0/0/0/0/2 |');
+    expect(md).toContain('0W / 0L / 0D / 0T / 2R');
   });
 
   it('renders the configured spine as a deterministic per-objective status table', () => {

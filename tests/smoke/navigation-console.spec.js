@@ -14,11 +14,23 @@ test('navigation console: tapping the map alone never sends a waypoint action', 
   expect(sent).toHaveLength(0);
 });
 
-test('navigation console: Set Waypoint pick mode places a free waypoint on tap', async ({ page }) => {
+test('navigation console: Set Waypoint pick mode places a free waypoint on tap', { tag: '@core' }, async ({ page }) => {
   await page.goto(CONSOLE_URL);
   await page.evaluate(() => {
     window.__sent = [];
     window.__sendAction = (json) => window.__sent.push(json);
+    // #1287 routes the placement through the shared semantic action, whose
+    // handler resolves its view from console state and refuses outright when
+    // there is none — so a spec that never pushed a payload silently sends
+    // nothing. The sibling clear-waypoint test has always done this.
+    window.__updateConsole('navigation', JSON.stringify({
+      blips: [],
+      ship_x: 0,
+      ship_z: 0,
+      ship_heading: 0,
+      ship_speed: 0,
+      radar_range: 5000,
+    }));
   });
   await page.locator('ph-navigation-map').locator('#btn-set-waypoint').click();
   await page.locator('ph-navigation-map').locator('canvas').click();

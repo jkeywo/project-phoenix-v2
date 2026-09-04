@@ -103,7 +103,7 @@ async function tabToHost(page, tag, max = 30) {
   return false;
 }
 
-test('Combat family: fire a weapon, adjust shields, order a repair — all from the keyboard, no pointer', async ({ page }) => {
+test('Combat family: fire a weapon, adjust shields, order a repair — all from the keyboard, no pointer', { tag: '@core' }, async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 1000 });
 
   // ── Weapon: the Tactical console (AC — fires a weapon) ───────────────────────

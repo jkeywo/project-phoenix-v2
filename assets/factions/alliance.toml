@@ -1,14 +1,14 @@
-# Federation is hostile to Pirates by default, but neutral to Harrow.
+# Alliance is hostile to Pirates by default, but neutral to Harrow.
 # Combat-style scenarios (assets/worlds/combat_test.toml) flip the
-# Federation<->Harrow relationship at runtime via the `add_faction_enemy`
+# Alliance<->Harrow relationship at runtime via the `add_faction_enemy`
 # world trigger action; non-combat scenarios (Starbase Alpha, Before the
 # Fire) leave the Harrow as a non-engaging neighbour the player must
 # choose to provoke.
 uuid = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
-name = "Federation"
+name = "Alliance"
 # Crew-facing label (issue #1030). `name` above is the reference key world
 # triggers use; this is the only string a player ever sees.
-display_name = "faction.federation.display_name"
+display_name = "faction.alliance.display_name"
 enemies = [
     "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb", # Pirate
 ]

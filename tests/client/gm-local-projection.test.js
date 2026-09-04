@@ -325,7 +325,7 @@ describe('GM omniscient local projection', () => {
       name: 'entity.alliance_destroyer.display_name',
       faction: {
         entity_id: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
-        name: 'faction.federation.display_name',
+        name: 'faction.alliance.display_name',
       },
       current_target: { entity_id: NPC_ID, name: targetName },
     });
@@ -336,7 +336,7 @@ describe('GM omniscient local projection', () => {
     expect(document.getElementById('gm-entity-name').textContent)
       .toBe(t('entity.alliance_destroyer.display_name'));
     expect(document.getElementById('gm-entity-faction').textContent)
-      .toBe(t('faction.federation.display_name'));
+      .toBe(t('faction.alliance.display_name'));
     const target = document.getElementById('gm-entity-target');
     expect(target.textContent).toBe(t(targetName));
     expect(target.dataset.targetId).toBe(NPC_ID);

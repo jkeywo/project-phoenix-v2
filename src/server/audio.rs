@@ -15,6 +15,10 @@
 //!   are in the ship TOML, which only Rust parses.
 //! - **Positional cues** — [`push_blaster_cues`] rotates each blaster report
 //!   into the listener's frame so JS can hand it straight to a `PannerNode`.
+//! - **Ship's-computer tone** (issue #1342) — [`push_computer_message_cue`]
+//!   fires a non-positional [`crate::audio_config::AudioCue::computer_message`]
+//!   every time the narrative stream reports a message shown, keyed by
+//!   severity through `[audio.computer_message]`.
 //!
 //! Both damage and blaster fire are observed by reading [`OutboundMessage`]
 //! after `SimSet::Broadcast`, the same sanctioned route
@@ -33,6 +37,7 @@ use crate::audio_config::{
 use crate::console_bridge::{AudioConfigChanged, AudioCueEvent};
 use crate::core::codec;
 use crate::core::messages::{GamePhase, ServerMessage};
+use crate::core::narrative::{NarrativeEvent, NarrativeKind};
 use crate::entities::spawner::ShipAudioSection;
 use crate::lobby::OutboundMessage;
 use crate::server_app::LocalShip;
@@ -83,6 +88,14 @@ impl Plugin for ServerAudioPlugin {
                     // volume forever. With no LocalShip (lobby) it early-returns.
                     drive_forcefield_level.after(process_forcefield_damage),
                     push_blaster_cues,
+                    // Ship's-computer tone (issue #1342). Reads the narrative
+                    // stream — written in `FixedUpdate`, already settled for
+                    // the frame — rather than a `Changed<ActiveComputerMessage>`
+                    // so a replacement at the SAME severity still fires a
+                    // fresh cue: a `ComputerMessagePosted` event is written on
+                    // every `show`, never suppressed by "nothing looks
+                    // different".
+                    push_computer_message_cue,
                 ),
             );
     }
@@ -208,6 +221,49 @@ fn push_blaster_cues(
                 writer.write(AudioCueEvent { json });
             }
             Err(e) => warn!("failed to encode blaster cue: {e}"),
+        }
+    }
+}
+
+/// Emits a non-positional [`AudioCue::computer_message`] every time a message
+/// is shown (issue #1342) — including a replacement at the same severity,
+/// since a fresh `ComputerMessagePosted` narrative event is written on every
+/// `show`, never suppressed by "the severity didn't change".
+///
+/// Reads [`NarrativeEvent`] rather than the `ActiveComputerMessage` resource
+/// directly: the event already carries the severity as a plain string
+/// (`NarrativeKind::ComputerMessagePosted`'s `severity` detail), so this needs
+/// no second lookup into narrative's detail-encoding, and it naturally skips
+/// silent when the ship has no `[audio.computer_message]` section configured
+/// for that severity at all — "missing configuration is silent" (AC4).
+fn push_computer_message_cue(
+    mut events: MessageReader<NarrativeEvent>,
+    ship_q: Query<&ShipAudioSection, With<LocalShip>>,
+    mut writer: MessageWriter<AudioCueEvent>,
+) {
+    let Ok(section) = ship_q.single() else {
+        return;
+    };
+    let Some(cfg) = section.0.computer_message.as_ref() else {
+        return;
+    };
+    for event in events.read() {
+        if event.kind != NarrativeKind::ComputerMessagePosted {
+            continue;
+        }
+        let Some(crate::core::narrative::NarrativeValue::Text(severity)) =
+            event.detail.get("severity")
+        else {
+            continue;
+        };
+        if cfg.for_severity(severity).is_none() {
+            continue;
+        }
+        match codec::encode_audio_cue(&AudioCue::computer_message(severity)) {
+            Ok(json) => {
+                writer.write(AudioCueEvent { json });
+            }
+            Err(e) => warn!("failed to encode computer-message cue: {e}"),
         }
     }
 }
@@ -486,5 +542,132 @@ mod tests {
             0,
             "inaudible shot should not allocate a JS audio node"
         );
+    }
+
+    // ── Ship's-computer tone (issue #1342) ─────────────────────────────
+
+    fn app_with_computer_message_audio(cfg: crate::audio_config::ComputerMessageAudio) -> App {
+        let mut app = App::new();
+        app.add_message::<NarrativeEvent>()
+            .add_message::<AudioCueEvent>()
+            .add_systems(Update, push_computer_message_cue);
+        app.world_mut().spawn((
+            LocalShip,
+            ShipAudioSection(ShipAudioConfig {
+                computer_message: Some(cfg),
+                ..Default::default()
+            }),
+        ));
+        app
+    }
+
+    fn write_posted(app: &mut App, severity: &str) {
+        app.world_mut()
+            .resource_mut::<Messages<NarrativeEvent>>()
+            .write(
+                NarrativeEvent::new(NarrativeKind::ComputerMessagePosted, "hail_debris")
+                    .text("text", "world.probe.computer_message.text")
+                    .text("severity", severity),
+            );
+    }
+
+    fn sent_cues(app: &App) -> Vec<AudioCue> {
+        let cues = app.world().resource::<Messages<AudioCueEvent>>();
+        let mut cursor = cues.get_cursor();
+        cursor
+            .read(cues)
+            .map(|c| serde_json::from_str(&c.json).expect("valid cue JSON"))
+            .collect()
+    }
+
+    #[test]
+    fn a_posted_message_with_a_configured_severity_fires_a_cue() {
+        let mut app = app_with_computer_message_audio(crate::audio_config::ComputerMessageAudio {
+            critical: Some(crate::audio_config::ComputerMessageCue {
+                file: "assets/sounds/ComputerCritical.mp3".into(),
+                volume: 0.8,
+            }),
+            ..Default::default()
+        });
+        write_posted(&mut app, "critical");
+        app.update();
+
+        let cues = sent_cues(&app);
+        assert_eq!(cues.len(), 1, "{cues:?}");
+        assert_eq!(cues[0].kind, "computer_message");
+        assert_eq!(cues[0].severity.as_deref(), Some("critical"));
+        // Not positional.
+        assert_eq!(cues[0].x, 0.0);
+        assert_eq!(cues[0].y, 0.0);
+        assert_eq!(cues[0].z, 0.0);
+    }
+
+    #[test]
+    fn missing_configuration_for_the_severity_is_silent() {
+        // AC4: a severity with no configured tone plays nothing — not a
+        // fallback to some other severity's file.
+        let mut app = app_with_computer_message_audio(crate::audio_config::ComputerMessageAudio {
+            critical: Some(crate::audio_config::ComputerMessageCue {
+                file: "assets/sounds/ComputerCritical.mp3".into(),
+                volume: 0.8,
+            }),
+            ..Default::default()
+        });
+        write_posted(&mut app, "advisory");
+        app.update();
+        assert!(sent_cues(&app).is_empty());
+    }
+
+    #[test]
+    fn a_ship_with_no_computer_message_config_is_entirely_silent() {
+        let mut app = App::new();
+        app.add_message::<NarrativeEvent>()
+            .add_message::<AudioCueEvent>()
+            .add_systems(Update, push_computer_message_cue);
+        app.world_mut().spawn((
+            LocalShip,
+            ShipAudioSection(ShipAudioConfig::default()), // no [audio.computer_message]
+        ));
+        write_posted(&mut app, "critical");
+        app.update();
+        assert!(sent_cues(&app).is_empty());
+    }
+
+    #[test]
+    fn a_replacement_at_the_same_severity_still_fires_a_fresh_cue() {
+        // "Replacement plays the new tone even at the same severity" — the
+        // issue's own wording. Two `ComputerMessagePosted` events at the same
+        // severity in the same batch must yield two cues, not one suppressed
+        // by "nothing changed".
+        let mut app = app_with_computer_message_audio(crate::audio_config::ComputerMessageAudio {
+            advisory: Some(crate::audio_config::ComputerMessageCue {
+                file: "assets/sounds/ComputerAdvisory.mp3".into(),
+                volume: 0.5,
+            }),
+            ..Default::default()
+        });
+        write_posted(&mut app, "advisory");
+        write_posted(&mut app, "advisory");
+        app.update();
+        assert_eq!(sent_cues(&app).len(), 2);
+    }
+
+    #[test]
+    fn other_narrative_kinds_do_not_fire_a_cue() {
+        let mut app = app_with_computer_message_audio(crate::audio_config::ComputerMessageAudio {
+            info: Some(crate::audio_config::ComputerMessageCue {
+                file: "assets/sounds/ComputerInfo.mp3".into(),
+                volume: 0.3,
+            }),
+            ..Default::default()
+        });
+        app.world_mut()
+            .resource_mut::<Messages<NarrativeEvent>>()
+            .write(NarrativeEvent::new(
+                NarrativeKind::ComputerMessageCleared,
+                "hail_debris",
+            ));
+        app.update();
+        assert!(sent_cues(&app).is_empty());
     }
 }

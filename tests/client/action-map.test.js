@@ -17,6 +17,7 @@ describe('ACTION_MAP', () => {
       'clear_navigation_waypoint',
       'dispatch_external_repair',
       'dispatch_repair_team',
+      'dispatch_security_team',
       'dock',
       'engage_tractor',
       'fire_blaster',
@@ -27,6 +28,7 @@ describe('ACTION_MAP', () => {
       'load_tube',
       'order_civilian',
       'recall_external_repair',
+      'recall_security_team',
       'release_tractor',
       'respond_to_message',
       'return_to_lobby',
@@ -664,6 +666,55 @@ describe('authored Helm owner routing', () => {
       'berthing-clamps',
       'berthing-clamps',
     ]);
+  });
+});
+
+describe('security teams (issue #1346)', () => {
+  it('refuses a verb the engine has never heard of rather than sending it', () => {
+    const send = mkSend();
+    expect(() =>
+      ACTION_MAP.dispatch_security_team(
+        {
+          action: 'vent_the_deck',
+          team_idx: 1,
+          target: '00000000-0000-8000-8000-000000000042',
+        },
+        send,
+      ),
+    ).toThrow(TypeError);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('sends a ControlSystem envelope targeting the security system', () => {
+    const send = mkSend();
+    ACTION_MAP.dispatch_security_team(
+      {
+        team_idx: 1,
+        target: '00000000-0000-8000-8000-000000000042',
+        action: 'assist_evacuation',
+      },
+      send,
+    );
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'security',
+      payload: {
+        type: 'DispatchSecurityTeam',
+        data: {
+          team_idx: 1,
+          target: '00000000-0000-8000-8000-000000000042',
+          action: 'assist_evacuation',
+        },
+      },
+    });
+  });
+
+  it('recall_security_team names only the team', () => {
+    const send = mkSend();
+    ACTION_MAP.recall_security_team({ action: 'recall_security_team', team_idx: 0 }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'security',
+      payload: { type: 'RecallSecurityTeam', data: { team_idx: 0 } },
+    });
   });
 });
 

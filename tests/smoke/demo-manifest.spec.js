@@ -69,7 +69,7 @@ function hullTemplateRequests(context) {
   return requested;
 }
 
-test('demo manifest (?manifest=assets/scenarios.demo.toml): host offers its two curated hulls and loads the chosen Destroyer', async ({ context }) => {
+test('demo manifest (?manifest=assets/scenarios.demo.toml): host offers its two curated hulls and loads the chosen Destroyer', { tag: '@core' }, async ({ context }) => {
   // Fail loudly rather than silently testing a different public roster if the
   // shipped demo manifest is ever re-curated. Order is part of this contract:
   // the Destroyer remains the first/default card, followed by the Cruiser.

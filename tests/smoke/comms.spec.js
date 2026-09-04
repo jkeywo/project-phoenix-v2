@@ -16,7 +16,7 @@ async function waitForStation(client, timeout = 8_000) {
   );
 }
 
-test('comms — hail contact, respond, get ObjectiveSummary', async ({ context }) => {
+test('comms — hail contact, respond, get ObjectiveSummary', { tag: '@core' }, async ({ context }) => {
   // ── Boot server ────────────────────────────────────────────────────────────
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml');

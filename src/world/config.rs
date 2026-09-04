@@ -578,6 +578,39 @@ pub struct WorldEntity {
     /// data, not a code string — no `strings.csv` entry required.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
+    /// Opt this entity into the authored mission timeline (issue #1338).
+    ///
+    /// A scenario author sets `narrative = true` to say "this hull is part of
+    /// the story": the spawner then attaches a
+    /// [`crate::core::narrative::NarrativeMark`] carrying the entity's authored
+    /// [`name`](Self::name), and the run report records when it entered the
+    /// world and when it died. Everything else — escaped, rescued, abandoned,
+    /// disabled — is judged by the author through
+    /// `ctx.effects.narrative_outcome(..)`.
+    ///
+    /// Both spawn timings mark: `spawn_on = "immediate"` marks in
+    /// `world::server::spawn_immediate_entities_internal`, and `spawn_on =
+    /// "game_start"` in `server_app::world_setup::spawn_game_start_entities`.
+    /// The flag says nothing about WHEN the hull enters the world, so a story
+    /// hull the world holds back until the game starts is marked exactly as an
+    /// immediate one is.
+    ///
+    /// Default `false`, and deliberately: PRD #1337's rule is that a story
+    /// event is authored, never inferred, so an unmarked hull produces no
+    /// timeline entry however violently it dies. Only NAMED entities can be
+    /// marked — the mark's payload IS the name — so a row carrying the flag
+    /// without a [`name`](Self::name) records nothing, and
+    /// `world::validate::validate_entity_identity` raises a
+    /// `narrative-mark-needs-name` warning at load rather than dropping the
+    /// flag in silence.
+    ///
+    /// This field marks *declared* `[[entity]]` rows only. A hull a script
+    /// spawns mid-run (`ctx.effects.spawn_entity(..)`) has no `[[entity]]` row
+    /// to carry the flag and takes no mark: an author records its story through
+    /// `ctx.effects.narrative_outcome("name", "spawned" | "destroyed" | …)`
+    /// instead, which is the same vocabulary and reaches the same timeline.
+    #[serde(default)]
+    pub narrative: bool,
     /// Positioning, rotation and scale.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transform: Option<TransformConfig>,
@@ -748,7 +781,8 @@ pub(crate) struct RawActionEntry {
     // ── add_objective extended fields (issue #571) ─────────────────────────
     /// Directive kind: `"Patrol"`, `"Destroy"`, `"Reach"`, `"Retreat"`,
     /// `"Hail"`, `"Scan"`, `"Dock"`, `"Tow"`, `"Stabilise"`, `"Escort"`,
-    /// `"Transfer"`, `"FieldRepair"`, `"Order"`, or omit for `None`.
+    /// `"Transfer"`, `"FieldRepair"`, `"Secure"`, `"Order"`, or omit for
+    /// `None`.
     #[serde(default)]
     pub(crate) directive_kind: Option<String>,
     /// Anchor names for a `Patrol` directive.
@@ -1082,7 +1116,7 @@ pub enum TriggerAction {
     },
     /// Add `enemy` to `faction`'s enemies list in the live
     /// `FactionRegistry`. Both fields are faction `name` strings
-    /// (e.g. `"Harrow"`, `"Federation"`) and are resolved to UUIDs via
+    /// (e.g. `"Harrow"`, `"Alliance"`) and are resolved to UUIDs via
     /// `FactionRegistry::uuid_by_name` at dispatch time.
     ///
     /// `is_enemy(a, b)` is asymmetric, so flipping a relationship in both
@@ -1092,7 +1126,7 @@ pub enum TriggerAction {
     ///
     /// Used by scenarios that need to make an otherwise-neutral faction
     /// hostile (e.g. `assets/worlds/combat_test.toml` arms the
-    /// Federation<->Harrow rivalry on world load).
+    /// Alliance<->Harrow rivalry on world load).
     AddFactionEnemy {
         faction: String,
         enemy: String,

@@ -70,7 +70,7 @@ test('shields console: threat indicator hidden when no target', async ({ page })
   await expect(page.locator('#threat-row')).not.toHaveClass(/active/);
 });
 
-test('shields console: shield segment click sends set_shield_focus with arc_id', async ({ page }) => {
+test('shields console: shield segment click sends set_shield_focus with arc_id', { tag: '@core' }, async ({ page }) => {
   await page.goto(CONSOLE_URL);
   await page.evaluate((s) => window.__updateConsole('shields', JSON.stringify(s)), NOMINAL_STATE);
   await page.evaluate(() => {

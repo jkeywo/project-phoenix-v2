@@ -975,7 +975,7 @@ fn provenance_names_the_fragment_that_authored_each_field() {
             ("e/base.toml", "class = \"escort\"\nhull_id = \"BASE\"\n"),
             (
                 "e/hull.toml",
-                "includes = [\"base.toml\"]\nhull_id = \"NCC-1\"\n",
+                "includes = [\"base.toml\"]\nhull_id = \"AEV-1\"\n",
             ),
         ],
     );

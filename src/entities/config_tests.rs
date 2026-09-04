@@ -1857,15 +1857,15 @@ fn faction_field_defaults_to_none_when_absent() {
 }
 
 #[test]
-fn battleship_toml_parses_with_federation_faction() {
+fn battleship_toml_parses_with_alliance_faction() {
     let config = shipped_hull("alliance_battleship");
     let faction = config
         .faction
         .expect("alliance_battleship must declare a faction");
-    // Must match the Federation UUID in assets/factions/federation.toml
-    let fed_toml = include_str!("../../assets/factions/federation.toml");
+    // Must match the Alliance UUID in assets/factions/alliance.toml
+    let fed_toml = include_str!("../../assets/factions/alliance.toml");
     let fed = crate::ai::faction::parse_faction_config(fed_toml).unwrap();
-    assert_eq!(faction, fed.uuid, "battleship faction must be Federation");
+    assert_eq!(faction, fed.uuid, "battleship faction must be Alliance");
 }
 
 // ── Behaviour block tests ─────────────────────────────────────────────
@@ -2051,7 +2051,7 @@ base_priority = 35.0
 #[test]
 fn harrow_destroyer_template_parses_with_harrow_faction() {
     // (#472) The enemy destroyer is Harrow-factioned so the player ship's
-    // auto-fire (Federation faction) engages it.
+    // auto-fire (Alliance faction) engages it.
     let toml_str = &resolved_text("ship_harrow_destroyer");
     let config = EntityConfig::from_toml(toml_str).expect("ship_harrow_destroyer.toml must parse");
     let faction = config
@@ -8399,7 +8399,10 @@ fn default_sensors_selector_is_valid_and_resolves() {
     let cfg = crate::entities::authored_ai_pins::shipped_selector_toml("sensors");
     assert!(validate_fine_system_ai_selector(&cfg, SENSORS_SELECTOR_SOURCES).is_ok());
     let resolved = cfg.to_selector().expect("default selector resolves");
-    assert_eq!(resolved.score.len(), 3);
+    // combat-lock, objective, radar, and the issue-#1347 debris trio: the
+    // source marker, the unread bonus that makes the seat work down a field,
+    // and the confirmed nudge that decides which read rock is refreshed first.
+    assert_eq!(resolved.score.len(), 6);
 }
 
 #[test]
@@ -8561,9 +8564,10 @@ fn default_tactical_selector_is_valid_and_resolves() {
     let cfg = crate::entities::authored_ai_pins::shipped_selector_toml("tactical");
     assert!(validate_fine_system_ai_selector(&cfg, TACTICAL_SELECTOR_SOURCES).is_ok());
     let resolved = cfg.to_selector().expect("default selector resolves");
-    // objective, sensors-designation, retained, last-attacker, radar, and
-    // the issue-#1162 operate order.
-    assert_eq!(resolved.score.len(), 6);
+    // objective, sensors-designation, retained, last-attacker, radar, the
+    // issue-#1162 operate order, and the issue-#1347 debris trio: the source
+    // marker plus two urgency bands that rank confirmed rocks by deadline.
+    assert_eq!(resolved.score.len(), 9);
 }
 
 /// The precedence invariant that prevents the #777 additive-stacking bug:
@@ -8603,6 +8607,46 @@ fn shipped_tactical_selector_objective_dominates_max_non_objective_stack() {
         weight("source_retained") > weight("source_last_attacker"),
         "retention must still outrank a fresh last attacker so an established \
              engagement is not broken off (the retired tier-2 > tier-3 ordering)."
+    );
+
+    // The SECOND stack (issue #1347). Debris gets its own inequality rather
+    // than joining the one above because no candidate can carry both sets of
+    // markers: a rock has no faction, so `source_radar` (nearest
+    // faction-hostile) never fires on it, and it does not shoot, so
+    // `source_last_attacker` never does either. What it CAN carry is a Sensors
+    // designation and the retained lock, so those two appear in both sums.
+    let band = |threshold: &str| {
+        cfg.score
+            .iter()
+            .find(|t| t.when.contains(threshold))
+            .unwrap_or_else(|| panic!("the authored Tactical selector bands `{threshold}`"))
+            .weight
+    };
+    let max_debris_stack = weight("source_debris_threat")
+        + band("debris_pressing_secs")
+        + band("debris_urgent_secs")
+        + weight("source_sensors_designation")
+        + weight("source_retained");
+    assert!(
+        max_debris_stack < weight("source_objective") - cfg.switch_margin,
+        "a confirmed, urgent, designated and retained debris contact must still \
+             lose to an explicit Destroy objective — otherwise a mission that \
+             named a kill silently loses its lock to a rock (#1347)."
+    );
+    assert!(
+        weight("source_debris_threat") > weight("source_last_attacker"),
+        "a confirmed threat to a protected asset outranks a threat to the ship, \
+             which is the mission's own priority ladder (#1347)."
+    );
+    // The bands have to be worth more than the hysteresis margin TOGETHER, or
+    // "earliest deadline first" would be a preference the switch margin eats:
+    // Tactical would keep the rock it locked first while a nearer deadline sat
+    // one band above it and never took the lock.
+    assert!(
+        band("debris_pressing_secs") + band("debris_urgent_secs") > cfg.switch_margin,
+        "the two urgency bands must together clear the switch margin, or the \
+             most urgent confirmed rock cannot take the lock from a less urgent \
+             one already held (#1347)."
     );
 }
 

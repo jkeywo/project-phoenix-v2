@@ -168,7 +168,7 @@ test('Engineering player can change helm allocation', async ({ context }) => {
   await c4.close();
 });
 
-test('Engineering player can dispatch a repair team', async ({ context }) => {
+test('Engineering player can dispatch a repair team', { tag: '@core' }, async ({ context }) => {
   const serverPage = await createServerPage(context);
   const hostId = await readHostPeerId(serverPage);
 

@@ -31,6 +31,17 @@ export const renderStation = makeTacticalRender({
     const dossierEl = doc.getElementById('dossier-panel');
     if (dossierEl) dossierEl.state = { dossiers: s.dossiers || [] };
 
+    // Security teams (issue #1346). Tactical OWNS the Security System on this
+    // hull, so its view arrives under this station's payload — but reached
+    // through the Security console family rather than a station-role key,
+    // exactly as the engineering console reaches the tractor and the umbilical.
+    // Another hull may give the same system to Command or Engineering and this
+    // line is the only thing that would move. Nothing is filtered or re-derived
+    // here: the panel renders what the server published, including which targets
+    // are in reach.
+    const securityEl = doc.getElementById('security-teams');
+    if (securityEl) securityEl.state = familyView(s, 'security');
+
     // Non-binding Command intent advice (issue #1108): present only while
     // Command directs this Station and a human holds it. The label is a
     // strings id resolved here; falls back to the raw stance id.

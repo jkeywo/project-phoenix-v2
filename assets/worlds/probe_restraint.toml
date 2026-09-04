@@ -26,7 +26,7 @@
 #
 # ── Timeline (60 Hz), in mission seconds ────────────────────────────────────
 #
-#   t=0    the Harrow and the Federation are made mutually hostile. The
+#   t=0    the Harrow and the Alliance are made mutually hostile. The
 #          enforcer is always-armed and in range; it opens fire on its own.
 #   t=4    `hold_fire` on the enforcer. Its guns stop. Nothing else about the
 #          world changes — it is still hostile, still in range, still at
@@ -197,8 +197,8 @@ on_destroyed("world.probe_restraint.entity.claimant_destroyed.name", "on_claiman
 on_flag_set("weapons_hold.own_ship", "on_crew_restraint_noticed");
 
 fn on_load(ctx) {
-    ctx.effects.add_faction_enemy("Harrow", "Federation");
-    ctx.effects.add_faction_enemy("Federation", "Harrow");
+    ctx.effects.add_faction_enemy("Harrow", "Alliance");
+    ctx.effects.add_faction_enemy("Alliance", "Harrow");
 }
 
 fn on_hold_the_enforcer(ctx) {

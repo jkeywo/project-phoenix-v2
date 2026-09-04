@@ -65,6 +65,67 @@ name = "outpost"
     assert_eq!(f.source.line, Some(4));
 }
 
+// ── narrative mark needs a name (issue #1338) ────────────────────────────
+
+/// The mark's payload IS the `name`, so a nameless row cannot be marked. The
+/// author has to be told: a silently-dropped flag leaves them believing the
+/// hull is on the timeline when the run report simply has no entry for it.
+#[test]
+fn narrative_flag_without_a_name_is_a_source_located_warning() {
+    let toml = r#"
+[[entity]]
+template_path = "assets/entities/shuttle_lyra.toml"
+narrative = true
+position = [10.0, 0.0, 0.0]
+"#;
+    let c = cfg(toml);
+    let findings = validate_entity_identity("root.toml", toml, &c.entities);
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    let f = &findings[0];
+    assert!(!f.is_error(), "the world is still playable: {f:?}");
+    assert_eq!(f.category, "narrative-mark-needs-name");
+    assert_eq!(f.source.file, "root.toml");
+    // Located on the row's template path — the only spelling a nameless
+    // entity has.
+    assert_eq!(f.source.line, Some(3));
+    assert!(f.message.contains("narrative = true"), "{}", f.message);
+}
+
+/// A named row carrying the flag is exactly what the field is for — no
+/// finding, at either spawn timing.
+#[test]
+fn narrative_flag_with_a_name_is_clean_at_both_spawn_timings() {
+    let toml = r#"
+[[entity]]
+template_path = "assets/entities/shuttle_lyra.toml"
+name = "lyra"
+narrative = true
+
+[[entity]]
+template_path = "assets/entities/ship_destroyer.toml"
+name = "aphelion"
+narrative = true
+spawn_on = "game_start"
+"#;
+    let c = cfg(toml);
+    let findings = validate_entity_identity("root.toml", toml, &c.entities);
+    assert!(findings.is_empty(), "{findings:?}");
+}
+
+/// An unmarked nameless row says nothing — the check is about the FLAG, not
+/// about anonymity, which every asteroid-field row has.
+#[test]
+fn an_unmarked_nameless_entity_is_not_warned_about() {
+    let toml = r#"
+[[entity]]
+template_path = "assets/entities/asteroid_field.toml"
+position = [0.0, 0.0, 0.0]
+"#;
+    let c = cfg(toml);
+    let findings = validate_entity_identity("root.toml", toml, &c.entities);
+    assert!(findings.is_empty(), "{findings:?}");
+}
+
 // ── invalid qualified reference (AC2) ────────────────────────────────────
 
 #[test]

@@ -532,11 +532,27 @@ pub const SELECTOR_SOURCE_OBJECTIVE_DESTROY: &str = "objective-destroy";
 /// Candidate source: faction-hostile radar contacts inside the ship's horizon.
 pub const SELECTOR_SOURCE_RADAR_CONTACTS: &str = "radar-contacts";
 
+/// Candidate source: a moving `[debris]` hazard inside this ship's own sensor
+/// horizon (issue #1347) — the contacts this seat can still learn something
+/// about by pointing an instrument at them.
+///
+/// The ONLY Sensors source that surfaces a NON-hostile contact, which is why an
+/// authored eligibility guard has to name it explicitly to let one through: a
+/// rock has no faction, so the ordinary `candidate_fact(hostile) > 0` test that
+/// gates every other source refuses it.
+///
+/// Offers read and unread contacts alike, distinguished by `debris_unassessed`
+/// (and `debris_confirmed`), so doctrine decides whether a seat works down the
+/// field to the next unknown or stays on a confirmed rock keeping its plot
+/// fresh. A struck contact is never offered — there is nothing left to learn.
+pub const SELECTOR_SOURCE_DEBRIS_ASSESS: &str = "debris-assessment";
+
 /// The registered candidate sources the Sensors target selector may union.
 pub const SENSORS_SELECTOR_SOURCES: &[&str] = &[
     SELECTOR_SOURCE_COMBAT_LOCK,
     SELECTOR_SOURCE_OBJECTIVE_DESTROY,
     SELECTOR_SOURCE_RADAR_CONTACTS,
+    SELECTOR_SOURCE_DEBRIS_ASSESS,
 ];
 
 /// Candidate source: the ship's advisory **Science Target** — the Sensors
@@ -557,6 +573,20 @@ pub const SELECTOR_SOURCE_LAST_ATTACKER: &str = "last-attacker";
 /// hull opts into it by adding `... or candidate_fact(source_operate) > 0` to
 /// its `[weapons_console.selector]` eligibility (fleet_baseline authors it).
 pub const SELECTOR_SOURCE_OBJECTIVE_OPERATE: &str = "objective-operate";
+/// Candidate source: a **confirmed** debris threat (issue #1347) — a moving
+/// hazard some crew's scan has said is on course to strike a protected asset.
+///
+/// Tagged `source_debris_threat` and carrying `impact_secs`, the crew's own
+/// deadline dead-reckoned forward, so an authored urgency band can rank several
+/// confirmed rocks by which one arrives first.
+///
+/// **Assessment-gated, and that is the whole point.** A contact nobody has
+/// assessed is not a candidate from this source at any distance, on any course,
+/// so Backfill cannot open fire on a rock the crew were never told about. A
+/// HUMAN Tactical is unaffected — this system does not run at all while the
+/// radar is human-operated, so an operator remains free to lock an unread
+/// contact and shoot it on their own judgement.
+pub const SELECTOR_SOURCE_DEBRIS_THREAT: &str = "confirmed-debris-threat";
 
 /// The registered candidate sources the Tactical target selector may union
 /// (issue #777). `combat-lock` is intentionally absent: it is Tactical's own
@@ -569,6 +599,7 @@ pub const TACTICAL_SELECTOR_SOURCES: &[&str] = &[
     SELECTOR_SOURCE_LAST_ATTACKER,
     SELECTOR_SOURCE_RADAR_CONTACTS,
     SELECTOR_SOURCE_OBJECTIVE_OPERATE,
+    SELECTOR_SOURCE_DEBRIS_THREAT,
 ];
 
 /// Candidate source: positive, Navigation-relevant (Helm-affinity) objective

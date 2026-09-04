@@ -113,7 +113,7 @@ fn variant_name(msg: &ServerMessage) -> String {
 /// The worlds worth measuring, and why each earns its place.
 ///
 /// `falling_skyway` authors the most `[[entity]]` blocks of any shipped world
-/// (17), so it is the biggest `WorldSetup` the game can produce — the class the
+/// (19), so it is the biggest `WorldSetup` the game can produce — the class the
 /// TOML comment used to reason about. `combat_test` is the asteroid-heavy one,
 /// so it is the biggest per-tick snapshot — the class that ACTUALLY approaches
 /// the bound, and the one the comment did not mention.

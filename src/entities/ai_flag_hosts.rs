@@ -613,6 +613,12 @@ pub const SOURCE_SENSORS_DESIGNATION: FactId = FactId("source_sensors_designatio
 pub const SOURCE_OPERATE: FactId = FactId("source_operate");
 pub const SOURCE_LAST_ATTACKER: FactId = FactId("source_last_attacker");
 pub const SOURCE_RETAINED: FactId = FactId("source_retained");
+pub const SOURCE_DEBRIS_THREAT: FactId = FactId("source_debris_threat");
+pub const IMPACT_SECS: FactId = FactId("impact_secs");
+pub const DEBRIS_DEADLINE_KNOWN: FactId = FactId("debris_deadline_known");
+pub const SOURCE_DEBRIS_ASSESS: FactId = FactId("source_debris_assess");
+pub const DEBRIS_UNASSESSED: FactId = FactId("debris_unassessed");
+pub const DEBRIS_CONFIRMED: FactId = FactId("debris_confirmed");
 pub const REACHABLE: FactId = FactId("reachable");
 pub const SOURCE_NAV_OBJECTIVE: FactId = FactId("source_nav_objective");
 pub const OBJECTIVE_SCORE: FactId = FactId("objective_score");
@@ -723,6 +729,12 @@ pub const FACT_CATALOGUE: &[FactId] = &[
     SOURCE_OPERATE,
     SOURCE_LAST_ATTACKER,
     SOURCE_RETAINED,
+    SOURCE_DEBRIS_THREAT,
+    IMPACT_SECS,
+    DEBRIS_DEADLINE_KNOWN,
+    SOURCE_DEBRIS_ASSESS,
+    DEBRIS_UNASSESSED,
+    DEBRIS_CONFIRMED,
     REACHABLE,
     SOURCE_NAV_OBJECTIVE,
     OBJECTIVE_SCORE,
@@ -1457,6 +1469,38 @@ const SENSORS_SELECTOR_FACTS: &[FactDescriptor] = &[
         "false — not that source",
         "ship::sensors::operate_sensors_ai",
     ),
+    cand(
+        SOURCE_DEBRIS_ASSESS,
+        "sensors selector",
+        "1.0 when the candidate is a moving hazard worth a look (issue #1347) — \
+         a `[debris]` contact that has not struck yet, read or unread, inside \
+         BOTH this ship's radar horizon and its own [scan] suite's reach, \
+         because a rock this hull could never take a reading of is not a thing \
+         this instrument can learn anything about. This is the ONE source that \
+         surfaces a non-hostile contact to this seat, which is why the authored \
+         eligibility names it",
+        "false — not that source, which is every contact carrying no [debris]",
+        "ship::sensors::operate_sensors_ai",
+    ),
+    cand(
+        DEBRIS_UNASSESSED,
+        "sensors selector",
+        "1.0 when nobody has read this hazard yet, or the crew's reading has \
+         aged past its authored `reassess_secs` (issue #1347) — what makes the \
+         seat work down a field of rocks instead of staring at the first one",
+        "false — the reading is current, or the contact is not debris",
+        "ship::sensors::operate_sensors_ai",
+    ),
+    cand(
+        DEBRIS_CONFIRMED,
+        "sensors selector",
+        "1.0 when a scan has said this hazard is on course to strike its \
+         protected asset (issue #1347) — the same authoritative threat state \
+         Tactical reads, offered here so doctrine can keep the plot on a \
+         confirmed rock fresh while Tactical works it",
+        "false — unread, or read and found harmless",
+        "ship::sensors::operate_sensors_ai",
+    ),
     ship(
         POWER_RATING,
         "sensors selector",
@@ -1521,6 +1565,35 @@ const TACTICAL_SELECTOR_FACTS: &[FactDescriptor] = &[
         "tactical selector",
         "1.0 when the candidate came from radar",
         "false — not that source",
+        "console::weapons::ai_target_selection",
+    ),
+    cand(
+        SOURCE_DEBRIS_THREAT,
+        "tactical selector",
+        "1.0 when the candidate is a CONFIRMED debris threat — a moving hazard a \
+         scan has said is on course to strike a protected asset (issue #1347)",
+        "false — not that source, which includes every rock nobody has assessed",
+        "console::weapons::ai_target_selection",
+    ),
+    cand(
+        IMPACT_SECS,
+        "tactical selector",
+        "seconds until a confirmed debris contact reaches its protected asset, \
+         dead-reckoned from the crew's OWN last assessment (issue #1347) — the \
+         reading an authored urgency band is written against",
+        "false — no assessed deadline, which is every non-debris candidate",
+        "console::weapons::ai_target_selection",
+    ),
+    cand(
+        DEBRIS_DEADLINE_KNOWN,
+        "tactical selector",
+        "1.0 when `impact_secs` carries a real reading (issue #1347). An urgency \
+         band has to be guarded on this rather than on the number, because an \
+         ABSENT fact reads as 0 and 0 is a real answer here — 'arriving now'. A \
+         contact confirmed earlier and since shoved off course keeps its \
+         confirmation but has no arrival, and must not out-rank a rock that is \
+         genuinely about to land",
+        "false — nothing assessed a deadline for this candidate",
         "console::weapons::ai_target_selection",
     ),
     ship(

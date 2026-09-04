@@ -43,7 +43,8 @@ pub struct DoctrineObjective {
     pub mandatory: bool,
     /// Directive kind: `"Patrol"`, `"Destroy"`, `"Reach"`, `"Retreat"`,
     /// `"Hail"`, `"Scan"`, `"Dock"`, `"Tow"`, `"Stabilise"`, `"Escort"`,
-    /// `"Transfer"`, `"FieldRepair"`, `"Order"`, or absent for `None`.
+    /// `"Transfer"`, `"FieldRepair"`, `"Secure"`, `"Order"`, or absent for
+    /// `None`.
     #[serde(default)]
     pub directive_kind: Option<String>,
     /// Anchor names for `Patrol` directives.
@@ -74,8 +75,9 @@ pub struct DoctrineObjective {
     /// load rather than silently resolving to no scan subject.
     #[serde(default)]
     pub directive_scan_target: Option<String>,
-    /// Named target for the issue-#1162 operate verbs — `Tow`, `Stabilise`,
-    /// `Escort`, `Transfer` and `FieldRepair`. One shared field for all five,
+    /// Named target for the operate verbs — `Tow`, `Stabilise`, `Escort`,
+    /// `Transfer` and `FieldRepair` (issue #1162), plus `Secure` (issue #1346).
+    /// One shared field for all six,
     /// the way `Reach`/`Retreat` share `directive_anchor`: each verb names a
     /// target the owning seat operates on, resolved to a live UUID the same way
     /// a `Destroy`/`Dock` target is.
@@ -2972,6 +2974,12 @@ pub struct SensorsConsoleConfig {
     /// [`default_sensors_target_selector_config`] is synthesised at spawn.
     #[serde(default)]
     pub selector: Option<FineSystemAiSelectorToml>,
+    /// Selected-contact trajectory projection tuning (issue #1339). Loaded
+    /// from `[sensors_console.projection]`; absent ⇒ the 60s/10s defaults in
+    /// [`SensorsProjectionConfig::default`] apply, so every hull that omits
+    /// this table still gets a working projection.
+    #[serde(default)]
+    pub projection: Option<SensorsProjectionConfig>,
 }
 
 /// AI tuning parameters for the Sensors frequency-hint controller
@@ -2989,6 +2997,42 @@ pub struct SensorsAiConfigToml {
 
 fn default_sensors_ai_frequency_hint_delay_secs() -> f32 {
     3.0
+}
+
+/// Selected-contact trajectory projection tuning for the Sensors radar
+/// (issue #1339).
+///
+/// Loaded from `[sensors_console.projection]` in the ship entity TOML. Purely
+/// a presentation tunable — it controls how far ahead and how densely the
+/// client draws the Science Target's projected relative path when its
+/// velocity is known; it does not touch Science Target or Combat Lock
+/// authority.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SensorsProjectionConfig {
+    /// How far into the future the projection extends, in seconds.
+    #[serde(default = "default_sensors_projection_horizon_secs")]
+    pub horizon_secs: f32,
+    /// Spacing between successive projection markers, in seconds.
+    #[serde(default = "default_sensors_projection_marker_interval_secs")]
+    pub marker_interval_secs: f32,
+}
+
+impl Default for SensorsProjectionConfig {
+    fn default() -> Self {
+        Self {
+            horizon_secs: default_sensors_projection_horizon_secs(),
+            marker_interval_secs: default_sensors_projection_marker_interval_secs(),
+        }
+    }
+}
+
+pub fn default_sensors_projection_horizon_secs() -> f32 {
+    60.0
+}
+
+pub fn default_sensors_projection_marker_interval_secs() -> f32 {
+    10.0
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -3071,6 +3115,17 @@ pub struct EntityConfig {
     /// to* an entity, this one says what an entity can *read*.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scan: Option<crate::science::ScanConfig>,
+    /// The moving-hazard table (issue #1347): a drift, the asset this contact is
+    /// on course for, the radius inside which it strikes, and the four world
+    /// flags a scenario hangs its beat on. Present on debris; absent for
+    /// everything else, which carries no `DebrisThreat` component, never drifts
+    /// and can never be confirmed as a threat.
+    ///
+    /// A third relative of `infrastructure` and `scan`: those say what can be
+    /// *done to* an entity and what an entity can *read*, and this one says what
+    /// it is going to *do* if nobody stops it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debris: Option<crate::debris::DebrisConfig>,
     /// The tractor beam's coupling terms (issue #1156) — range, rig offset and
     /// minimum power level. Present on a hull whose engineering seat can take a
     /// derelict under tow; absent for everything else, which carries no
@@ -3110,6 +3165,55 @@ pub struct EntityConfig {
     /// under the umbilical's `capacity` id for anything to move.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub umbilical: Option<crate::umbilical::UmbilicalConfig>,
+    /// The Security-team terms (issue #1346) — how many teams the hull musters,
+    /// how long they take to cross and come back, and how far they can reach.
+    /// Present on a hull whose crew can send teams across; absent for everything
+    /// else, which carries no `ShipSecurityTeams` component and is unchanged in
+    /// every way. The `[[system]] kind = "security"` block declares the system's
+    /// identity (which STATION owns it, its damage entry); this table carries what
+    /// the teams themselves are, and a hull that authors one without the other is
+    /// refused by name at load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security: Option<crate::security::SecurityConfig>,
+    /// What a Security team may be sent HERE to do (issue #1346) — the mirror of
+    /// `security`: that table says what a hull can do the work with, this one says
+    /// what work this entity offers, how long each action takes, how risky and how
+    /// urgent it is, and the world flag its success raises. Absent for every entity
+    /// that authors nothing, which cannot be dispatched to at all — which is why
+    /// every shipped hull and every existing world is untouched by this slice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security_target: Option<crate::security::SecurityTargetConfig>,
+    /// The rescue transporter's terms (issue #1348) — range, per-civilian
+    /// duration and minimum power level. Present on a hull whose engineering seat
+    /// can recover civilians from a discovered contact; absent for everything
+    /// else, which carries no `Transporter` component and is unchanged in every
+    /// way. The `[[system]] kind = "transporter"` block declares the system's
+    /// identity (power group, station, damage entry); this table carries what the
+    /// transporter itself is, and a hull that authors one without the other is
+    /// refused by name at load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transporter: Option<crate::transporter::TransporterConfig>,
+    /// The civilians this entity carries, to be discovered by scan and recovered
+    /// by transporter (issue #1348) — the mirror of `transporter`: that table
+    /// says what a hull can do the rescuing with, this one says what a contact
+    /// offers. Absent for every entity that authors nothing, which carries no
+    /// `CivilianRescue` component and is unchanged in every way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub civilian_rescue: Option<crate::transporter::CivilianRescueConfig>,
+    /// What a controlled demolition may do HERE (issue #1350) — the fourth stage
+    /// of the sequence Security's `place_charges` action opens. Present on an
+    /// obstruction that can be cleared by detonating placed charges; absent for
+    /// everything else, which carries no `DemolitionTarget` component and cannot
+    /// be detonated at all — which is why every shipped hull and every existing
+    /// world is untouched. It carries only flag names: the one whose set means
+    /// "charges placed" (authored to equal this entity's `place_charges`
+    /// `outcome_flag`), the one raised on any detonation, and the three the four
+    /// outcomes hang their consequences off. Nothing here needs a paired
+    /// `[[system]]`: `DetonateCharges` is fired through the `security` system the
+    /// team was dispatched from, and the operation is furniture in the world, not
+    /// a thing aboard a ship.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub demolition_target: Option<crate::demolition::DemolitionConfig>,
     /// The faint world-locked lattice drawn under this hull on the viewscreen.
     /// Present only on a hull meant to be FLOWN — the grid is a motion cue for
     /// the crew looking out of their own ship, and it is only ever read off the
@@ -3160,7 +3264,7 @@ pub struct EntityConfig {
     /// top-level TOML `class` field.
     #[serde(default)]
     pub class: Option<String>,
-    /// Unique hull identifier/registry number (e.g. "NCC-1701"). Sourced from
+    /// Unique hull identifier/registry number (e.g. "AEV-1864"). Sourced from
     /// top-level TOML `hull_id` field.
     #[serde(default)]
     pub hull_id: Option<String>,
@@ -3506,6 +3610,16 @@ impl EntityConfig {
             scan.validate().map_err(SerdeError::custom)?;
         }
 
+        // Validation: a [debris] table has to describe a hazard that can arrive
+        // (issue #1347). A non-finite drift, a negative radius, or a contact
+        // that names a protected asset without a radius to reach it by are all
+        // author mistakes whose only other symptom would be a rock that drifts
+        // through a depot forever with nothing ever happening — the silently
+        // inert hazard the [scan] check above is written against the mirror of.
+        if let Some(ref debris) = config.debris {
+            debris.validate().map_err(SerdeError::custom)?;
+        }
+
         // Validation: a [tractor] table has to describe a beam that can hold
         // (issue #1156), and it has to be paired with the system that gives it
         // its identity. A zero range or zero minimum power is caught by
@@ -3536,6 +3650,43 @@ impl EntityConfig {
                      tractor's power allocation is what an interruption checks",
                 ));
             }
+        }
+
+        // Validation: a [transporter] table has to describe a transporter that
+        // can recover (issue #1348), paired with the system that gives it its
+        // identity — the tractor's shape exactly. A zero range, per-civilian
+        // duration or minimum power is caught by `TransporterConfig::validate`;
+        // the pairing is checked here because the terms live in a table and the
+        // power group, station and damage entry live on a `[[system]] kind =
+        // "transporter"` block.
+        if let Some(ref transporter) = config.transporter {
+            transporter.validate().map_err(SerdeError::custom)?;
+            let system = config
+                .ship_config
+                .as_ref()
+                .and_then(|sc| {
+                    sc.systems
+                        .iter()
+                        .find(|s| s.kind == crate::ship::system_registry::TRANSPORTER_KIND)
+                })
+                .ok_or_else(|| {
+                    SerdeError::custom(
+                        "a [transporter] table needs a matching [[system]] kind = \"transporter\" \
+                         block to declare its power group, station and damage entry",
+                    )
+                })?;
+            if system.power_group.is_none() {
+                return Err(SerdeError::custom(
+                    "the [[system]] kind = \"transporter\" block must declare a power_group — the \
+                     transporter's power allocation is what an interruption checks",
+                ));
+            }
+        }
+
+        // Validation: a [civilian_rescue] table has to carry someone (issue
+        // #1348).
+        if let Some(ref civilian_rescue) = config.civilian_rescue {
+            civilian_rescue.validate().map_err(SerdeError::custom)?;
         }
 
         // Validation: a [held_response] table has to match its own kind (issue
@@ -3621,6 +3772,71 @@ impl EntityConfig {
                      umbilical's power allocation is what an interruption checks",
                 ));
             }
+        }
+
+        // Validation: a [security] table has to describe a capability that can
+        // do something (issue #1346), and it has to be paired with the system
+        // that gives it its identity. A teamless muster, a negative crossing time
+        // or a zero reach is caught by `SecurityConfig::validate`; the pairing is
+        // checked here for the umbilical's reason — the team terms live in a table
+        // and the owning station and damage entry live on a `[[system]] kind =
+        // "security"` block, so a hull that authored one without the other would
+        // carry a console control that dispatches nobody, or a system with terms
+        // nobody reads. No `power_group` is required: Security is people, not an
+        // allocation, and a hull that wants its teams to fail with the lights may
+        // still declare one.
+        if let Some(ref security) = config.security {
+            security.validate().map_err(SerdeError::custom)?;
+            config
+                .ship_config
+                .as_ref()
+                .and_then(|sc| {
+                    sc.systems
+                        .iter()
+                        .find(|s| s.kind == crate::ship::system_registry::SECURITY_KIND)
+                })
+                .ok_or_else(|| {
+                    SerdeError::custom(
+                        "a [security] table needs a matching [[system]] kind = \"security\" block \
+                         to declare which station owns the teams and its damage entry",
+                    )
+                })?;
+        }
+        if let Some(system) = config.ship_config.as_ref().and_then(|sc| {
+            sc.systems
+                .iter()
+                .find(|s| s.kind == crate::ship::system_registry::SECURITY_KIND)
+        }) {
+            if config.security.is_none() {
+                return Err(SerdeError::custom(
+                    "a [[system]] kind = \"security\" block needs a matching [security] table to \
+                     declare its team count, crossing times and reach",
+                ));
+            }
+            if system.station.is_none() {
+                return Err(SerdeError::custom(
+                    "the [[system]] kind = \"security\" block must declare a station — Security is \
+                     assigned through ship configuration, and a system nobody owns can be \
+                     commanded by nobody",
+                ));
+            }
+        }
+
+        // Validation: a [security_target] table has to offer work a team could
+        // actually be sent to do (issue #1346) — at least one action, each with a
+        // positive duration, a risk inside the band the console renders, and no
+        // verb authored twice (the second could never be reached, because a
+        // dispatch names one action id and the first match answers).
+        if let Some(ref security_target) = config.security_target {
+            security_target.validate().map_err(SerdeError::custom)?;
+        }
+
+        // Validation: a [demolition_target] table has to name five distinct,
+        // non-blank world flags (issue #1350), so a detonation cannot silently
+        // fire the wrong outcome's consequence or hang off a flag that names
+        // nothing. Checked by `DemolitionConfig::validate`.
+        if let Some(ref demolition_target) = config.demolition_target {
+            demolition_target.validate().map_err(SerdeError::custom)?;
         }
 
         // Validation: a [reference_grid] table has to describe a lattice that

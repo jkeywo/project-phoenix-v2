@@ -50,17 +50,66 @@ pub struct CommsRuntime {
     /// `broadcast_comms_state` knows to push a fresh snapshot even if the
     /// inbox itself hasn't changed.
     pub needs_broadcast: bool,
-    /// Per-entity-UUID snapshot of comms-range flags. Populated by
-    /// `update_comms_range_flags` each tick from ship + entity transforms +
+    /// Per-entity-UUID snapshot of comms-range flags measured from the hull
+    /// THIS host projects. Populated by `update_comms_range_flags` each tick
+    /// from the [`crate::server_app::LocalShip`] transform + entity transforms +
     /// `CommsRange` components. UUIDs absent from the map default to true at
     /// stamp time *only when `range_active == false`* (backward compat for
     /// pure-handler tests and lobby phase). When `range_active == true`,
     /// missing UUIDs are treated as `sender_in_range = false`.
+    ///
+    /// # This map is a LOCAL PROJECTION and may not reach folded state
+    ///
+    /// It is measured from `LocalShip`, which is a DIFFERENT hull on each host
+    /// of a fleet, so every reading taken from it is a value two peers disagree
+    /// about by construction. That is why `sim_digest` and
+    /// [`crate::snapshot::CommsState`] both leave it out — and it is equally why
+    /// nothing that feeds authoritative state may read it. Its legitimate
+    /// consumers are the ones whose output IS this host's own screen: the
+    /// `CommsState` broadcast stamp, the local comms blackboard, and the
+    /// `LocalShip`-gated hail host. Anything deciding for a hull — the response
+    /// router's range gate, the Backfill decision sweep, an inbox injection that
+    /// folds — reads [`Self::fleet_range_flags`] through
+    /// [`sender_in_range_for_slot`] / [`sender_in_range_for_fleet`] instead
+    /// (issue #1343).
     pub range_flags: HashMap<String, bool>,
     /// `true` once `update_comms_range_flags` has located a player `Ship`
     /// and is maintaining `range_flags`. While `false`, range gating is
     /// fully bypassed (preserves lobby + pure-handler tests).
     pub range_active: bool,
+    /// The HOST-NEUTRAL half of the same reading: per-fleet-slot comms-range
+    /// flags, one inner map per [`crate::lockstep::FleetSlotOf`] hull, measured
+    /// from THAT hull's own transform and `CommsRange` (issue #1343).
+    ///
+    /// Every host spawns a hull per roster slot and folds every hull's
+    /// transform, so slot 2's distance to a contact is a number both peers
+    /// compute identically — unlike [`Self::range_flags`], which answers "how
+    /// far is it from the hull whose crew is on THIS machine". Reachability is
+    /// an INPUT to three things the digest folds — whether a Backfill wait arms
+    /// at all, the fingerprint it arms against, and whether the
+    /// `CommsBackfillChoice` draw is taken — and an input to whether the
+    /// response router accepts a hull's answer, so those sites read this map and
+    /// not the local one.
+    ///
+    /// Rebuilt whole every tick by `update_comms_range_flags` from live
+    /// transforms, exactly as `range_flags` is, and left out of the fold and the
+    /// snapshot for exactly that reason (it is re-derived from state both
+    /// already carry). A `BTreeMap` on the outside because it is ITERATED —
+    /// [`sender_in_range_for_fleet`] unions over it — and slot order is the
+    /// fleet's own order on every host.
+    pub fleet_range_flags:
+        std::collections::BTreeMap<crate::command_admission::HostSlot, HashMap<String, bool>>,
+    /// `true` once `update_comms_range_flags` has seen at least one
+    /// [`crate::lockstep::FleetSlotOf`] hull and is maintaining
+    /// [`Self::fleet_range_flags`]. `range_active`'s twin, and it latches for
+    /// the same reason: once fleet range tracking is live, a slot MISSING from
+    /// the map (its hull destroyed) reads out of range rather than falling back
+    /// to a local reading, so a lost hull cannot re-open the gates it should
+    /// have closed. While `false` — a bare-`App` fixture, or the lobby before
+    /// any hull exists — both helpers defer to
+    /// [`current_sender_in_range`], which is the behaviour every pure-handler
+    /// test was written against.
+    pub fleet_range_active: bool,
     /// Entity UUIDs this ship has HAILED and not yet cleared (issue #786).
     ///
     /// Authoritative comms state, not AI memory: `handle_hail` records EVERY
@@ -92,6 +141,97 @@ pub struct CommsRuntime {
     /// dirty tick. `None` until the first broadcast (or after a tick with no
     /// resolvable host).
     pub last_broadcast_host: Option<String>,
+    /// Backfill Comms's running weighted decisions, keyed by the FLEET SLOT
+    /// whose console is waiting and the CommsMessage it is waiting on
+    /// (issue #1343).
+    ///
+    /// Authoritative simulation state, not AI memory, and it lives in this
+    /// struct for the same reason `open_hails` does: two lockstep peers that
+    /// disagree about WHEN an unmanned console answers have diverged, so this
+    /// schedule is folded by `sim_digest` and carried by a snapshot exactly as
+    /// the dialogues it points at are.
+    ///
+    /// # Why the key carries a slot (the #1116 rule)
+    ///
+    /// The inbox is fleet-wide but a Comms console is not: whether a wait runs
+    /// is decided from PER-SHIP components (the ship's Control Sources, its
+    /// `[comms_console.ai]` policy, its evaluate cadence), and in a two-hull
+    /// fleet those differ between the hulls. Keying on the message alone would
+    /// make one hull's wait overwrite the other's, and the surviving entry would
+    /// depend on which hull was walked last — so the map has to name the slot it
+    /// belongs to. [`crate::lockstep::FleetSlotOf`] is the host-stable name for
+    /// that ship: `server_app::components::LocalShip` says "the ship whose crew
+    /// is on THIS machine" and is a different hull on each host, so nothing this
+    /// map holds may be derived from it.
+    ///
+    /// A `BTreeMap` rather than a `HashMap` — unlike `active_dialogues` this map
+    /// is ITERATED (to retire cancelled entries), and an unordered iteration
+    /// feeding authoritative state is precisely the determinism hazard
+    /// AGENTS.md names. The key sorts by slot first, so the iteration order is
+    /// the fleet's own order on every host.
+    ///
+    /// Entries are armed, re-armed and retired by
+    /// [`crate::console::comms::server::operate_comms_response_ai`]; nothing
+    /// else writes them. One exists only while a live, unanswered, AI-operated
+    /// dialogue node is waiting out its authored pause.
+    pub pending_ai_responses: std::collections::BTreeMap<PendingAiResponseKey, PendingAiResponse>,
+}
+
+/// Which fleet console is waiting on which conversation (issue #1343).
+///
+/// Ordered slot-first so the map's iteration — which the digest fold and the
+/// snapshot both walk — is the roster's order rather than a string order that
+/// interleaves two hulls' waits.
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    Default,
+)]
+pub struct PendingAiResponseKey {
+    /// The fleet slot whose Comms console is waiting, read from that ship's
+    /// [`crate::lockstep::FleetSlotOf`]. Host-stable by construction: the fleet
+    /// owner mints the ordinals and every host reads the same frozen roster.
+    pub host: crate::command_admission::HostSlot,
+    /// The [`crate::console::comms::CommsMessage`] id the wait is on.
+    pub message_id: String,
+}
+
+impl PendingAiResponseKey {
+    /// The key one ship's wait on one message is filed under.
+    pub fn new(host: crate::command_admission::HostSlot, message_id: impl Into<String>) -> Self {
+        Self {
+            host,
+            message_id: message_id.into(),
+        }
+    }
+}
+
+/// One unmanned console's running wait on one open dialogue (issue #1343).
+///
+/// Two numbers and no captured choice, deliberately: the response is sampled at
+/// the moment the wait expires, from the options that are on the screen THEN.
+/// Storing a pre-drawn answer would make a repriced node answer with the pick it
+/// made against the old one, which is the failure this record's fingerprint
+/// exists to prevent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PendingAiResponse {
+    /// The sim tick at or after which the choice is sampled and submitted.
+    /// Absolute, computed once at arm time from the authored seconds and the
+    /// world's `sim_tick_hz` — the same seconds→ticks conversion (and the same
+    /// rounding) `world::deadlines` uses, so a delay is never a wall-clock read.
+    pub due_tick: u64,
+    /// The response set this wait was armed against
+    /// ([`crate::comms::ai_choice::response_set_fingerprint`]). When the live
+    /// node no longer fingerprints to this, the wait is cancelled and re-armed
+    /// so the choice is resampled from the current options.
+    pub response_fingerprint: u64,
 }
 
 /// Bevy resource wrapping the server-side comms inbox.
@@ -395,6 +535,97 @@ pub(crate) fn current_sender_in_range(comms: &CommsRuntime, sender_uuid: &str) -
     }
 }
 
+/// Whether the hull in fleet slot `host` can currently reach `sender_uuid` —
+/// the HOST-NEUTRAL reading of [`current_sender_in_range`] (issue #1343).
+///
+/// Same three answers, measured from a named hull rather than from whichever one
+/// this host projects: a synthetic sender (not a real UUID — `_self`, a named
+/// station) has no entity to range-check and is always readable, a tracked UUID
+/// answers with its flag, and an untracked one is out of range once fleet range
+/// tracking is live.
+///
+/// `host` is `None` only for a fixture hull with no [`crate::lockstep::FleetSlotOf`];
+/// production inserts the component on every fleet ship at spawn. That case, and
+/// the pre-fleet case (`fleet_range_active == false`), both defer to the local
+/// reading, which is what those fixtures were written against.
+///
+/// Read this — never `range_flags` — anywhere the answer decides something the
+/// digest folds or the router admits. See [`CommsRuntime::range_flags`] for the
+/// rule and [`CommsRuntime::fleet_range_flags`] for why this one is safe.
+pub(crate) fn sender_in_range_for_slot(
+    comms: &CommsRuntime,
+    host: Option<crate::command_admission::HostSlot>,
+    sender_uuid: &str,
+) -> bool {
+    if uuid::Uuid::parse_str(sender_uuid).is_err() {
+        return true;
+    }
+    let Some(host) = host else {
+        return current_sender_in_range(comms, sender_uuid);
+    };
+    match comms.fleet_range_flags.get(&host) {
+        Some(flags) => flags.get(sender_uuid).copied().unwrap_or(false),
+        // Fleet tracking is live and this slot is not in it: the hull is gone.
+        // Closed gates, never a local fallback — the reason
+        // `fleet_range_active` latches at all.
+        None if comms.fleet_range_active => false,
+        None => current_sender_in_range(comms, sender_uuid),
+    }
+}
+
+/// The response router's own range gate, per hull (issue #1343).
+///
+/// STRICTER than [`sender_in_range_for_slot`] on purpose: it is a relocation of
+/// the exact `match … { Some(true) => {} , _ => reject }` the router ran against
+/// `range_flags`, moved onto the hull that is answering. An id the map does not
+/// hold is refused — a synthetic sender included, which
+/// [`current_sender_in_range`] would wave through — because widening what the
+/// router admits is a separate change from making it host-neutral, and this
+/// commit is only the second.
+///
+/// A hull with no [`crate::lockstep::FleetSlotOf`] (bare-`App` fixtures) reads
+/// the local map exactly as it did before, so no fixture's verdict moves.
+pub(crate) fn slot_may_answer_sender(
+    comms: &CommsRuntime,
+    host: Option<crate::command_admission::HostSlot>,
+    sender_uuid: &str,
+) -> bool {
+    let flags = match host.and_then(|host| comms.fleet_range_flags.get(&host)) {
+        Some(flags) => flags,
+        None if comms.fleet_range_active && host.is_some() => return false,
+        None => &comms.range_flags,
+    };
+    flags.get(sender_uuid).copied() == Some(true)
+}
+
+/// Whether ANY hull in the fleet can currently reach `sender_uuid`
+/// (issue #1343).
+///
+/// The reading for the fleet-SHARED inbox: `CommsInboxRes` is one resource for
+/// the whole fleet, so a message's stored `sender_in_range` (and the
+/// per-response `available` that tracks it) is a fact about the fleet rather
+/// than about any one hull — and both are folded by `sim_digest`, so they may
+/// not be stamped from `LocalShip`. "Someone aboard can hear them" is the
+/// host-neutral reading of a shared screen, and it collapses to exactly the old
+/// answer for the single-hull worlds every shipped mission is today.
+///
+/// The per-hull gates stay per-hull: a hull that cannot reach the sender still
+/// cannot answer it — the Backfill sweep reads [`sender_in_range_for_slot`] and
+/// the response router [`slot_may_answer_sender`] — so a union here widens no
+/// authority.
+pub(crate) fn sender_in_range_for_fleet(comms: &CommsRuntime, sender_uuid: &str) -> bool {
+    if uuid::Uuid::parse_str(sender_uuid).is_err() {
+        return true;
+    }
+    if !comms.fleet_range_active {
+        return current_sender_in_range(comms, sender_uuid);
+    }
+    comms
+        .fleet_range_flags
+        .values()
+        .any(|flags| flags.get(sender_uuid).copied().unwrap_or(false))
+}
+
 // -- Update systems ----------------------------------------------------------
 
 /// Auto-clear `OnScreenMessage` when the displayed message is no longer valid.
@@ -471,6 +702,16 @@ pub(crate) fn update_comms_range_flags(
         (&Transform, Option<&crate::comms::CommsRange>),
         With<crate::server_app::LocalShip>,
     >,
+    // Every hull the frozen roster put in the world, for the host-neutral half
+    // of the same measurement (issue #1343). Read-only, like the two queries
+    // beside it, and deliberately a SECOND pass rather than a widening of
+    // `ship_q`: the local pass below owns the roster, the open-hail prune and
+    // the broadcast stamp, all of which are this host's own screen.
+    fleet_q: Query<(
+        &crate::lockstep::FleetSlotOf,
+        &Transform,
+        Option<&crate::comms::CommsRange>,
+    )>,
     entity_q: Query<(
         &crate::entities::spawner::EntityUuid,
         &Transform,
@@ -479,6 +720,41 @@ pub(crate) fn update_comms_range_flags(
         Option<&crate::entities::spawner::EntityName>,
     )>,
 ) {
+    // ── The fleet-wide half (issue #1343) ────────────────────────────────────
+    //
+    // Before the local pass and before its early return: a host whose own hull
+    // has been destroyed must still measure its peers', because their consoles
+    // keep deciding and the answers fold. Rebuilt whole every tick from the same
+    // pure `in_range` the local pass uses, so the two agree wherever they
+    // overlap.
+    let mut fleet_next: std::collections::BTreeMap<
+        crate::command_admission::HostSlot,
+        HashMap<String, bool>,
+    > = std::collections::BTreeMap::new();
+    for (slot, hull_tf, hull_range) in fleet_q.iter() {
+        let hull_range = hull_range.map(|r| r.0).unwrap_or(0.0);
+        let hull_pos = hull_tf.translation;
+        let flags: HashMap<String, bool> = entity_q
+            .iter()
+            .map(|(uuid, tf, range, _, _)| {
+                (
+                    uuid.0.clone(),
+                    crate::comms::in_range(hull_pos.distance(tf.translation), hull_range, range.0),
+                )
+            })
+            .collect();
+        fleet_next.insert(slot.0, flags);
+    }
+    if !fleet_next.is_empty() && !comms.fleet_range_active {
+        comms.fleet_range_active = true;
+    }
+    // Compared before assigning for the reason `operate_comms_response_ai`
+    // compares its schedule: a steady-state tick should not flip the resource's
+    // change tick for a map identical to the one already there.
+    if comms.fleet_range_flags != fleet_next {
+        comms.fleet_range_flags = fleet_next;
+    }
+
     let Some((ship_tf, ship_range_opt)) = ship_q.iter().next() else {
         // No ship: either lobby/pure-handler tests (range tracking never
         // activated — preserve default-true semantics) or the ship was

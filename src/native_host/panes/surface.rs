@@ -273,6 +273,7 @@ mod tests {
             ServerMessage::GameOver {
                 reason: String::new(),
                 outcome: None,
+                report: Vec::new(),
             },
         );
         let mut surface = RecordingSurface::ready();

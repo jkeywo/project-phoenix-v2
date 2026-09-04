@@ -70,6 +70,30 @@ const WORLD: &str = "assets/worlds/probe_fleet_duel.toml";
 /// different cell sets — the reason a revert of the fix fails this test.
 const ASTEROID_WORLD: &str = "assets/worlds/probe_fleet_asteroids.toml";
 
+/// A two-ship world that opens two WEIGHTED Comms decisions (issue #1343).
+///
+/// The class the two worlds above cannot cover: neither of them contains a
+/// single `open_comms` call, so `sim_digest::fold_comms_scope` takes its
+/// everything-empty arm on every tick and the comms half of the fold — the
+/// unmanned consoles' running weighted decisions included — was never entered by
+/// this guard at all. Its pools author TWO equally-weighted options, the Falling
+/// Skyway lift shape, so the two hulls generally draw different answers and a
+/// host that applied only the hull it projects answers a corridor differently
+/// from its peer.
+///
+/// Its geometry is ASYMMETRIC on purpose, and that is the second half of what it
+/// guards. Each of the two claimants sits 40 units from ONE fleet hull and 360
+/// from the other, and authors a 200-unit comms range (the effective range is
+/// `min(hull 1200, claimant 200)`), so each claimant is well inside one hull's
+/// range and well outside the other's — "can this console reach the sender?" has
+/// a different answer per hull. That is the only shape under which a reading
+/// taken from `LocalShip` (a different hull on each host) can be told apart from
+/// a host-neutral one. Equidistant hulls make every host compute the same
+/// reachability by accident and the guard sees nothing. The asymmetry is authored
+/// in comms RANGE rather than in distance so every entity stays inside one
+/// 600-unit LOD bubble of both hulls — see the world file for why that matters.
+const COMMS_CHOICE_WORLD: &str = "assets/worlds/probe_fleet_comms_choice.toml";
+
 /// Long enough that both fleet ships have acquired the hostile, manoeuvred and
 /// traded fire, so the comparison covers per-victim RNG draws and mid-run
 /// projectile mints rather than two hulls coasting.
@@ -457,4 +481,166 @@ fn the_digest_does_not_care_which_ship_a_host_projects_on_an_asteroid_world() {
          is not simulating anything worth comparing",
         distinct.len()
     );
+}
+
+// ── The Comms class (issue #1343) ────────────────────────────────────────────
+
+/// What one run of [`COMMS_CHOICE_WORLD`] did, beyond its per-tick digests.
+struct CommsRun {
+    digests: Vec<(u64, u64)>,
+    /// Every fleet slot that held a running weighted wait at any point — the
+    /// evidence that the walk really is fleet-wide rather than local-hull-only.
+    waiting_slots: Vec<u32>,
+    /// How the two corridors were answered, by the end. Each pool is a coin flip
+    /// between `granted` and `refused`; `held` is the forbidden stand-by.
+    granted: i64,
+    refused: i64,
+    held: i64,
+}
+
+/// Run the comms probe with `local` as this host's ship, sampling the fold and
+/// the unmanned consoles' schedule after every tick.
+fn run_comms_host(local: HostSlot) -> CommsRun {
+    use project_phoenix::comms::server::CommsRuntime;
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let args = args_for(COMMS_CHOICE_WORLD);
+    let mut app = build_headless_app(&args).expect("app should build");
+    app.insert_resource(roster(local));
+
+    let mut digests = Vec::with_capacity(TICKS as usize);
+    let mut waiting_slots = std::collections::BTreeSet::new();
+    for _ in 0..TICKS {
+        run(&mut app, 1);
+        let tick = app.world().resource::<SimTick>().0;
+        digests.push((tick, world_digest(app.world())));
+        for key in app
+            .world()
+            .resource::<CommsRuntime>()
+            .pending_ai_responses
+            .keys()
+        {
+            waiting_slots.insert(key.host.0);
+        }
+    }
+
+    let flags = &app.world().resource::<WorldContentRuntime>().flags;
+    CommsRun {
+        digests,
+        waiting_slots: waiting_slots.into_iter().collect(),
+        granted: flags.counter("corridor_granted"),
+        refused: flags.counter("corridor_refused"),
+        held: flags.counter("corridor_held"),
+    }
+}
+
+/// **The Comms class.** The same neutrality claim on a world that opens a
+/// WEIGHTED Backfill decision — the scope neither probe above reaches.
+///
+/// Two folded things #1343 added hang on this: `CommsRuntime::pending_ai_responses`
+/// (walked by `sim_digest::fold_comms_scope`) and the position of
+/// `SimStream::CommsBackfillChoice` (`SimRngState` is folded whole). Both used to
+/// be written by a `With<LocalShip>` host, which is a different hull on each host
+/// of a fleet — so the schedule a peer folded, and the number of draws it had
+/// taken, depended on which crew was sitting where.
+///
+/// And a third thing, which is what the world's TWO equally-weighted options are
+/// for. Making the schedule fleet-wide while still EMITTING only for the local
+/// hull fixes nothing on its own: an admitted AI command is never logged, so it
+/// never crosses the mesh (`lockstep::frame` — "an AI decision never crosses
+/// one"), and a host that emitted for its own hull alone would apply only that
+/// hull's pick. With a one-option pool both hulls pick the same index and the
+/// hole is invisible; with two, they draw independently, and the two runs below
+/// would grant a corridor as slot 1 and refuse it as slot 2. So
+/// `operate_comms_response_ai` emits for every hull and
+/// `handle_respond_to_message` drains every hull — the doctrine every other NPC
+/// AI host follows, that every host derives every NPC identically.
+///
+/// # And a fourth: the reachability the decision reads
+///
+/// Each hull's claimant is inside its own comms range and far outside the other
+/// hull's, so every reading of "can this console answer this sender?" differs
+/// between the two hulls. Three folded things consume that reading — the
+/// message's stored `sender_in_range` stamp (and the per-response `available`
+/// that tracks it), whether a hull's wait is carried in `pending_ai_responses`
+/// at all, and whether the `CommsBackfillChoice` draw is taken — plus the
+/// response router's own admission gate. Take any of them from
+/// `CommsRuntime::range_flags`, which is measured from `LocalShip`, and the host
+/// projecting slot 1 reads BOTH conversations as slot 1 sees them (near thread
+/// answerable, far thread dead) while its peer reads the mirror image: the two
+/// runs below then arm different consoles, take a different number of draws, and
+/// answer different threads. The fix is `range_flags`' host-neutral twin,
+/// `CommsRuntime::fleet_range_flags`, read through `sender_in_range_for_slot` —
+/// the same distance, measured from the hull being decided for, which every host
+/// computes identically for every slot.
+#[test]
+fn the_digest_does_not_care_which_ship_a_host_projects_through_a_backfill_decision() {
+    let first = run_comms_host(SLOT_ONE);
+    let second = run_comms_host(SLOT_TWO);
+
+    // Anti-vacuity, and the sharp end of the claim: BOTH hulls must have held a
+    // wait of their own — each on the claimant IT can reach. One slot here means
+    // either the walk saw one hull, or reachability was read from the local
+    // hull's range flags so one console found its thread dead. Both are the
+    // `LocalShip` gating this test exists to forbid.
+    assert_eq!(
+        first.waiting_slots,
+        vec![SLOT_ONE.0, SLOT_TWO.0],
+        "every fleet hull's Comms console decides on every host, about the \
+         conversation ITS hull can reach; a schedule holding only one slot's \
+         wait was computed from `LocalShip`"
+    );
+    assert_eq!(
+        first.waiting_slots, second.waiting_slots,
+        "and the same two slots whichever hull this host projects"
+    );
+
+    // …and the decisions actually RESOLVED, so the comparison covers arm → fold →
+    // draw → admitted answer → `on_pick`, not just two armed waits.
+    assert_eq!(
+        (first.granted + first.refused, first.held),
+        (2, 0),
+        "both corridors must be answered exactly once and neither held: index 0 \
+         is the stand-by and carries `ai_weight = 0`, so an unmanned bridge is \
+         forbidden it outright"
+    );
+    // The sharp end of THIS assertion: which of the two equally-weighted options
+    // landed on each thread. Both hulls decide, and with a two-option pool they
+    // generally decide differently, so a host that applied only the hull it
+    // projects — or that gated the router on its own hull's range — records a
+    // different tally here from its peer.
+    assert_eq!(
+        (second.granted, second.refused, second.held),
+        (first.granted, first.refused, first.held),
+        "both corridors must be answered the SAME way whichever hull this host \
+         projects. An admitted AI command is never logged and so never \
+         replicates, so every host must apply every fleet hull's Backfill \
+         answer — see `handle_respond_to_message`'s fleet-wide drain, and its \
+         per-hull range gate"
+    );
+
+    assert_eq!(
+        first.digests.len(),
+        TICKS as usize,
+        "precondition: the run must reach the end rather than stopping early"
+    );
+    if let Some((tick, mine, theirs)) = first
+        .digests
+        .iter()
+        .zip(second.digests.iter())
+        .find(|((_, a), (_, b))| a != b)
+        .map(|((tick, a), (_, b))| (*tick, *a, *b))
+    {
+        panic!(
+            "the authoritative digest diverged at tick {tick} on a world holding \
+             a WEIGHTED Comms decision: the host projecting slot 1 folds \
+             {mine:#018x}, the host projecting slot 2 folds {theirs:#018x}.\n\n\
+             `CommsRuntime::pending_ai_responses` and the `CommsBackfillChoice` \
+             stream's position are both folded, so the walk that writes them must \
+             run over every `FleetSlotOf` hull in slot order — never \
+             `With<LocalShip>`. Only the EMISSION of the admitted \
+             `RespondToMessage` is this host's business. See \
+             `console::comms::server::operate_comms_response_ai`."
+        );
+    }
 }

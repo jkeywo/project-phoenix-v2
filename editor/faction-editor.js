@@ -59,11 +59,11 @@ export function stringifyFactionToml(faction) {
  * Usage:
  *   const editor = new FactionEditor();
  *   editor.loadAll([
- *     { path: 'assets/factions/federation.toml', content: '...' },
+ *     { path: 'assets/factions/alliance.toml', content: '...' },
  *     ...
  *   ]);
- *   editor.openFile('assets/factions/federation.toml');
- *   editor.setName('New Federation');
+ *   editor.openFile('assets/factions/alliance.toml');
+ *   editor.setName('New Alliance');
  *   editor.setEnemies(['bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb']);
  *   const toml = editor.serialize();
  */

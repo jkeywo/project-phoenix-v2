@@ -14,6 +14,12 @@ use crate::core::balance::{
 };
 use crate::core::codec::{JsonCodec, MessageCodec};
 use crate::core::messages::{GamePhase, ServerMessage, ServerMessageDiscriminants};
+use crate::core::narrative::{
+    fold_narrative, NarrativeEvent, NarrativeTimeline, StampedNarrativeEvent,
+};
+use crate::core::task_lifecycle::{
+    repeats_event, terminal_event, TaskLifecycles, TaskTerminalReason,
+};
 use crate::debug::payload::StationActivityPayload;
 use crate::entities::spawner::{EntityName, EntitySystemHull, EntityUuid, FactionComponent};
 use crate::lobby::OutboundMessage;
@@ -164,6 +170,48 @@ pub fn collect_balance_events(
     }
 }
 
+/// Records every authored mission-timeline event (issue #1338), stamping it
+/// with its monotonic sequence, the fixed `SimTick` and the derived sim time.
+///
+/// The twin of [`collect_balance_events`], deliberately: same schedule (`Last`,
+/// because the emitters are spread across several `SimSet`s), same `SimTick`
+/// stamp for the same reason, same "always fold, filter only the stream" split.
+/// It is a SECOND collector rather than an extra arm of the first because PRD
+/// #1337 keeps narrative telemetry separate from the combat ledger — the
+/// ledgers are folded from `balance_events` alone, and nothing here can change
+/// them.
+///
+/// `seq` is assigned here, from the length of the vector, so it is a true
+/// run-scoped monotonic order across every emitter: two events written by
+/// different systems on the same tick still have a total order, and it is the
+/// order the simulation produced them in.
+pub fn collect_narrative_events(
+    mut telemetry: ResMut<RunTelemetry>,
+    mut reader: MessageReader<NarrativeEvent>,
+    time: Res<Time>,
+    sim_tick: Res<crate::sim_tick::SimTick>,
+) {
+    let tick = sim_tick.0;
+    let sim_t = time.elapsed_secs_f64();
+    for event in reader.read() {
+        let stamped = StampedNarrativeEvent {
+            seq: telemetry.narrative_events.len() as u64,
+            tick,
+            sim_t,
+            event: event.clone(),
+        };
+        // The report's timeline sees every event; the ndjson stream sees only
+        // the kinds that read as beats rather than as a rate
+        // (`NarrativeKind::in_timeline_stream`) — the same split
+        // `collect_balance_events` makes above.
+        if telemetry.capture_stream && stamped.event.in_timeline_stream() {
+            let line = stamped.to_stream_json();
+            telemetry.stream.push(line);
+        }
+        telemetry.narrative_events.push(stamped);
+    }
+}
+
 /// Final state of the player ship.
 #[derive(Debug, Clone, Default)]
 pub struct ShipSummary {
@@ -199,6 +247,16 @@ pub struct RunReport {
     /// log rather than from the world, so ships destroyed mid-run still
     /// appear.
     pub damage_by_ship: BTreeMap<String, DamageLedger>,
+    /// The authored mission timeline (issue #1338, PRD #1337): every Objective,
+    /// deadline, beat, Comms choice and marked-entity outcome the run produced,
+    /// in monotonic sequence order, plus a per-kind census.
+    ///
+    /// Present in *every* report with no debug flag, exactly like
+    /// `damage_by_ship` and `station_activity` — a run with nothing authored
+    /// reports `count: 0`, which says "the scenario told no story" without a
+    /// reader having to know whether a flag was on. Only the inline *ndjson
+    /// stream* is format-gated, the same way the balance timeline is.
+    pub narrative: NarrativeTimeline,
     /// The classified run outcome (victory | defeat | draw | timeout) plus the
     /// per-side margins (#843). Present in *every* report (AC1); draw/timeout
     /// lean on the margins (AC2).
@@ -327,6 +385,11 @@ impl RunReport {
             "  \"damage_by_ship\": {{{}}},\n",
             ledgers_to_json(&self.damage_by_ship)
         ));
+        // The authored mission timeline (issue #1338). Hand-encoded like the
+        // balance ledgers beside it — `serde_json` stays confined to
+        // `codec.rs`, and the event bodies are already hand-rolled in
+        // `core::narrative` for the same reason.
+        s.push_str(&format!("  \"narrative\": {},\n", self.narrative.to_json()));
         // The AI doctrine-pool surface (issue #1149). Already a JSON object
         // (`codec::encode_ai_doctrine`), so it slots in verbatim; an empty string
         // (a test constructor that ran no projection) renders as `null` so the
@@ -400,8 +463,75 @@ fn reported_wall_seconds(seed_source: &str, wall_seconds: f64) -> f64 {
     }
 }
 
+/// Close every continuous task still running when the run stopped, and report
+/// the polled attempts nothing has reported yet (issue #1341).
+///
+/// # Why this is not a system
+///
+/// `crate::narrative::emit_task_lifecycle_narrative` already closes live
+/// activations when the mission reaches `GamePhase::GameOver`, because that is a
+/// transition the schedule can observe. The OTHER way a run stops — reaching
+/// `max_ticks` — is not a transition at all: `run()` simply stops calling
+/// `update()`, and no further tick exists for any system to notice on. A hold
+/// that was still holding at that moment would leave the timeline with a start
+/// and no terminal, which is precisely the invariant issue #1341 exists to
+/// guarantee. So the LAST terminal events of a run are written here, at the
+/// report boundary, from the registry the emitter keeps.
+///
+/// Stamped exactly as [`collect_narrative_events`] stamps its own: the run's
+/// final tick and sim-time, the next sequence numbers, and the same ndjson line
+/// when stream capture is on — so the stream and the report's timeline still
+/// agree event for event.
+///
+/// A standing order that was still being re-issued when the run stopped is the
+/// same problem one step along: its repeats were counted rather than written, so
+/// the census beat that makes them identifiable (issue #1341's AC3) has nowhere
+/// else to be emitted from either. Those go first — they describe attempts made
+/// DURING the run — and the mission-ended terminals follow.
+///
+/// Idempotent: the registry is emptied and the repeat counters drained, so a
+/// second call adds nothing.
+pub fn finalize_task_lifecycles(app: &mut App) {
+    let tick = app.world().resource::<crate::sim_tick::SimTick>().0;
+    let sim_t = app.world().resource::<Time>().elapsed_secs_f64();
+    let Some(mut lifecycles) = app.world_mut().get_resource_mut::<TaskLifecycles>() else {
+        return;
+    };
+    // Slot order, from the registry's own `BTreeMap`s — never the order the
+    // tasks happened to open in.
+    let repeats = lifecycles.take_all_repeats();
+    let dangling = lifecycles.take_all();
+    if repeats.is_empty() && dangling.is_empty() {
+        return;
+    }
+    let events =
+        repeats
+            .into_iter()
+            .map(|(activation, reason, count)| repeats_event(&activation, reason, count))
+            .chain(dangling.into_iter().map(|activation| {
+                terminal_event(&activation, TaskTerminalReason::MissionEnded, tick)
+            }));
+    let mut telemetry = app.world_mut().resource_mut::<RunTelemetry>();
+    for event in events {
+        let stamped = StampedNarrativeEvent {
+            seq: telemetry.narrative_events.len() as u64,
+            tick,
+            sim_t,
+            event,
+        };
+        if telemetry.capture_stream && stamped.event.in_timeline_stream() {
+            let line = stamped.to_stream_json();
+            telemetry.stream.push(line);
+        }
+        telemetry.narrative_events.push(stamped);
+    }
+}
+
 /// Read the finished world and produce the summary.
 pub fn build_report(app: &mut App, args: &HeadlessArgs, wall_seconds: f64) -> RunReport {
+    // Before anything reads the telemetry: give every task that was still
+    // running when the run stopped its one terminal event (issue #1341).
+    finalize_task_lifecycles(app);
     let telemetry = app.world().resource::<RunTelemetry>();
     let message_counts = telemetry.message_counts.clone();
     let final_sim_t = app.world().resource::<Time>().elapsed_secs_f64();
@@ -414,6 +544,11 @@ pub fn build_report(app: &mut App, args: &HeadlessArgs, wall_seconds: f64) -> Ru
         &telemetry.entity_names,
         final_sim_t,
     );
+    // The second pure fold (issue #1338): the authored mission timeline, from
+    // the stamped narrative log and nothing else. Deliberately NOT folded into
+    // `damage_by_ship` or the outcome classification — PRD #1337 keeps the
+    // story surface beside the combat ledger, never inside it.
+    let narrative = fold_narrative(&telemetry.narrative_events);
 
     // The logical sim-tick count (issue #895 re-review): this used to be
     // `RunTelemetry`'s own per-`update()` frame counter, but a headless run's
@@ -445,6 +580,14 @@ pub fn build_report(app: &mut App, args: &HeadlessArgs, wall_seconds: f64) -> Ru
     // site, whatever a scenario declared, or `None` for an undeclared scripted
     // end (the classifier defaults that to victory).
     let outcome_flag = game_over_res.1;
+    // The structured post-mission report (issue #1344), read off the resource
+    // after the run exactly as the outcome flag is. Cloned rather than borrowed
+    // because `build_outcome_report` below takes `&mut App`.
+    let mission_report = app
+        .world()
+        .get_resource::<crate::core::report::MissionReport>()
+        .cloned()
+        .unwrap_or_default();
     let entity_count = app.world().entities().len() as usize;
 
     // Closing-window landed-damage rates per attacker uuid, and a snapshot of
@@ -492,6 +635,7 @@ pub fn build_report(app: &mut App, args: &HeadlessArgs, wall_seconds: f64) -> Ru
         &damage_by_ship,
         &closing_rates,
         &entity_factions,
+        mission_report,
     );
 
     // The AI doctrine-pool surface (issue #1149): a one-shot read-only projection
@@ -562,6 +706,7 @@ pub fn build_report(app: &mut App, args: &HeadlessArgs, wall_seconds: f64) -> Ru
         ship,
         message_counts,
         damage_by_ship,
+        narrative,
         outcome_report,
         ai_doctrine,
         station_activity,
@@ -653,6 +798,10 @@ fn build_outcome_report(
     damage_by_ship: &BTreeMap<String, DamageLedger>,
     closing_rates: &BTreeMap<String, f32>,
     entity_factions: &BTreeMap<String, String>,
+    // The run's post-mission report (issue #1344), read off `MissionReport` by
+    // the caller. Moved through to `classify`, which reclassifies a
+    // report-bearing ending as `reported` and carries the rows onto the result.
+    mission_report: crate::core::report::MissionReport,
 ) -> OutcomeReport {
     use uuid::Uuid;
 
@@ -743,7 +892,7 @@ fn build_outcome_report(
 
     let player = SideMargins::new(p_hull, p_hull_max, p_dealt, p_taken, p_closing);
     let enemy = SideMargins::new(e_hull, e_hull_max, e_dealt, e_taken, e_closing);
-    classify(is_game_over, outcome_flag, player, enemy)
+    classify(is_game_over, outcome_flag, player, enemy, mission_report)
 }
 
 impl RunReport {
@@ -839,10 +988,12 @@ mod tests {
                 None,
                 SideMargins::new(90.0, 100.0, 200.0, 40.0, 3.0),
                 SideMargins::new(0.0, 100.0, 40.0, 200.0, 1.0),
+                crate::core::report::MissionReport::default(),
             ),
             ai_doctrine: String::new(),
             station_activity: StationActivityPayload::default(),
             scenario: None,
+            narrative: Default::default(),
             console_latency: Default::default(),
         };
         let json = report.to_json();
@@ -887,10 +1038,12 @@ mod tests {
                 Some(crate::core::balance::Outcome::Defeat),
                 SideMargins::default(),
                 SideMargins::default(),
+                crate::core::report::MissionReport::default(),
             ),
             ai_doctrine: String::new(),
             station_activity: StationActivityPayload::default(),
             scenario: None,
+            narrative: Default::default(),
             console_latency: Default::default(),
         };
         let parsed: serde_json::Value = serde_json::from_str(&report.to_json()).unwrap();
@@ -947,10 +1100,12 @@ mod tests {
                 None,
                 SideMargins::default(),
                 SideMargins::default(),
+                crate::core::report::MissionReport::default(),
             ),
             ai_doctrine: String::new(),
             station_activity: StationActivityPayload::default(),
             scenario: None,
+            narrative: Default::default(),
             console_latency: Default::default(),
         };
         let json = report.to_json();
@@ -1014,10 +1169,12 @@ mod tests {
                 None,
                 SideMargins::default(),
                 SideMargins::default(),
+                crate::core::report::MissionReport::default(),
             ),
             ai_doctrine: String::new(),
             station_activity: payload,
             scenario: None,
+            narrative: Default::default(),
             console_latency: Default::default(),
         };
         let json = report.to_json();
@@ -1036,6 +1193,131 @@ mod tests {
         assert_eq!(stations[1]["station"], "weapons");
         assert_eq!(stations[1]["ai"], 21);
         assert_eq!(stations[1]["human"], 0);
+    }
+
+    /// The authored mission timeline (issue #1338) reaches the report JSON with
+    /// its sequence, fixed tick, derived time, semantic ids and String Ids — and
+    /// the per-kind census beside it, so a reader gets the shape of the story
+    /// without re-walking the array.
+    #[test]
+    fn report_json_carries_the_narrative_timeline() {
+        use crate::core::narrative::{
+            fold_narrative, NarrativeEvent, NarrativeKind, NarrativeValue, StampedNarrativeEvent,
+        };
+
+        let events = vec![
+            StampedNarrativeEvent {
+                seq: 0,
+                tick: 60,
+                sim_t: 1.0,
+                event: NarrativeEvent::new(NarrativeKind::ObjectivePosted, "hold_the_channel")
+                    .text("text", "world.probe_narrative.objective.hold_the_channel")
+                    .detail("mandatory", NarrativeValue::Flag(true)),
+            },
+            StampedNarrativeEvent {
+                seq: 1,
+                tick: 240,
+                sim_t: 4.0,
+                event: NarrativeEvent::new(NarrativeKind::ObjectiveCompleted, "hold_the_channel"),
+            },
+            StampedNarrativeEvent {
+                seq: 2,
+                tick: 360,
+                sim_t: 6.0,
+                event: NarrativeEvent::new(NarrativeKind::BeatFired, "probe_deadline_beat"),
+            },
+        ];
+
+        let report = RunReport {
+            ticks: 360,
+            sim_seconds: 6.0,
+            seed: 1338,
+            seed_source: SeedSource::Cli.as_str().to_string(),
+            wall_seconds: 0.0,
+            ticks_per_second: 0.0,
+            final_phase: "InProgress".into(),
+            game_over_reason: None,
+            entity_count: 2,
+            ship: None,
+            message_counts: BTreeMap::new(),
+            damage_by_ship: BTreeMap::new(),
+            narrative: fold_narrative(&events),
+            outcome_report: crate::core::balance::classify(
+                false,
+                None,
+                SideMargins::default(),
+                SideMargins::default(),
+                crate::core::report::MissionReport::default(),
+            ),
+            ai_doctrine: String::new(),
+            station_activity: StationActivityPayload::default(),
+            scenario: None,
+            console_latency: Default::default(),
+        };
+        let json = report.to_json();
+        let parsed: serde_json::Value = serde_json::from_str(&json)
+            .unwrap_or_else(|e| panic!("report is not valid JSON: {e}\n{json}"));
+
+        let narrative = &parsed["narrative"];
+        assert_eq!(narrative["count"], 3);
+        assert_eq!(narrative["counts_by_kind"]["objective_posted"], 1);
+        assert_eq!(narrative["counts_by_kind"]["objective_completed"], 1);
+        assert_eq!(narrative["counts_by_kind"]["beat_fired"], 1);
+
+        let first = &narrative["events"][0];
+        assert_eq!(first["seq"], 0);
+        assert_eq!(first["tick"], 60);
+        assert_eq!(first["sim_t"], 1.0);
+        assert_eq!(first["kind"], "objective_posted");
+        assert_eq!(first["id"], "hold_the_channel");
+        // The String Id, never the rendered English.
+        assert_eq!(
+            first["detail"]["text"],
+            "world.probe_narrative.objective.hold_the_channel"
+        );
+        assert_eq!(first["detail"]["mandatory"], true);
+        assert!(first["source"].is_null());
+        assert!(first["target"].is_null());
+
+        assert_eq!(narrative["events"][2]["kind"], "beat_fired");
+        assert_eq!(narrative["events"][2]["id"], "probe_deadline_beat");
+    }
+
+    /// A run that authored no story still reports the field, with an explicit
+    /// zero — so a consumer never has to distinguish "absent" from "nothing
+    /// happened", the same contract `station_activity` carries.
+    #[test]
+    fn report_json_carries_an_empty_narrative_timeline() {
+        let report = RunReport {
+            ticks: 1,
+            sim_seconds: 0.0,
+            seed: 0,
+            seed_source: "absent".into(),
+            wall_seconds: 0.0,
+            ticks_per_second: 0.0,
+            final_phase: "InProgress".into(),
+            game_over_reason: None,
+            entity_count: 0,
+            ship: None,
+            message_counts: BTreeMap::new(),
+            damage_by_ship: BTreeMap::new(),
+            narrative: Default::default(),
+            outcome_report: crate::core::balance::classify(
+                false,
+                None,
+                SideMargins::default(),
+                SideMargins::default(),
+                crate::core::report::MissionReport::default(),
+            ),
+            ai_doctrine: String::new(),
+            station_activity: StationActivityPayload::default(),
+            scenario: None,
+            console_latency: Default::default(),
+        };
+        let parsed: serde_json::Value = serde_json::from_str(&report.to_json())
+            .unwrap_or_else(|e| panic!("report is not valid JSON: {e}"));
+        assert_eq!(parsed["narrative"]["count"], 0);
+        assert!(parsed["narrative"]["events"].as_array().unwrap().is_empty());
     }
 
     /// The console-latency surface (issue #1169) reaches the report JSON with
@@ -1068,10 +1350,12 @@ mod tests {
                 None,
                 SideMargins::default(),
                 SideMargins::default(),
+                crate::core::report::MissionReport::default(),
             ),
             ai_doctrine: String::new(),
             station_activity: StationActivityPayload::default(),
             scenario: None,
+            narrative: Default::default(),
             console_latency: Default::default(),
         };
 

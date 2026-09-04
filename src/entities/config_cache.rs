@@ -1038,14 +1038,14 @@ pub fn wasm_load_faction(_path: String, toml_str: String) -> Result<JsValue, JsV
 /// Pre-populates from compile-time includes if the thread-local is still
 /// empty (e.g. when `wasm_load_faction` was never called from JS due to
 /// missing wiring).  This ensures the registry always contains the four
-/// built-in factions — Federation, Pirate, Harrow, Requiem — on every
+/// built-in factions — Alliance, Pirate, Harrow, Requiem — on every
 /// target, WASM included.
 #[cfg(target_arch = "wasm32")]
 pub fn get_faction_registry() -> crate::ai::faction::FactionRegistry {
     FACTION_REGISTRY.with(|reg| {
         if reg.borrow().is_empty() {
             for toml_str in &[
-                include_str!("../../assets/factions/federation.toml"),
+                include_str!("../../assets/factions/alliance.toml"),
                 include_str!("../../assets/factions/pirate.toml"),
                 include_str!("../../assets/factions/harrow.toml"),
                 include_str!("../../assets/factions/requiem.toml"),
@@ -1302,7 +1302,7 @@ pub fn wasm_load_faction(_path: String, _toml_str: String) -> Result<JsValue, Js
 pub fn get_faction_registry() -> crate::ai::faction::FactionRegistry {
     let mut registry = crate::ai::faction::FactionRegistry::new();
     for toml_str in &[
-        include_str!("../../assets/factions/federation.toml"),
+        include_str!("../../assets/factions/alliance.toml"),
         include_str!("../../assets/factions/pirate.toml"),
         include_str!("../../assets/factions/harrow.toml"),
         include_str!("../../assets/factions/requiem.toml"),

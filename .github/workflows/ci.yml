@@ -1,13 +1,40 @@
 name: CI
 
+# WHAT RUNS WHEN
+#
+# This workflow fires on exactly two events in normal use: a PR against main,
+# and a push to main. There is no branch-push run.
+#
+#   PR / push to main   the fast gates (pasm, test, editor-test, viewer-test,
+#                       boundary), the WASM build, and the @core smoke tier.
+#                       This is the loop an agent iterates in, and nothing in it
+#                       exists to measure performance.
+#   nightly (03:17 UTC) all of the above with the FULL smoke suite, plus
+#                       `native-build`, `perf` and `balance` — the three jobs
+#                       that cost ~30 min of runner time to measure things that
+#                       move on the order of days. None of them was ever on the
+#                       critical path (balance finished 10 min before the run
+#                       ended; perf took 1 min), so taking them off every push
+#                       cost no wall clock at all — only compute.
+#   workflow_dispatch   same as nightly, on demand, on any branch.
+#
+# A PR that needs the deep smoke specs carries the `smoke-full` label; a PR that
+# needs perf or balance numbers gets them from a workflow_dispatch run.
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    # 03:17 UTC — off the hour, where the runner queue is shortest.
+    - cron: '17 3 * * *'
+  workflow_dispatch:
 
+# Keyed on the event as well as the ref: without it the nightly `schedule` run
+# and a push to main share a group, and whichever starts second cancels the
+# first — which would silently drop the only run that measures perf and balance.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
@@ -435,9 +462,60 @@ jobs:
         run: node scripts/build-mod-pack-fixtures.mjs --check
 
   # ── Smoke tests ───────────────────────────────────────────────────────────────
+  #
+  # TWO TIERS, ONE SUITE. Every spec lives here all the time; what changes is how
+  # many of them a given run selects.
+  #
+  #   @core — one breadth test per feature area (44 of 241), tagged in the spec
+  #           itself with `{ tag: '@core' }`. Boot, join, seats, one action
+  #           envelope per console, the sim reaching a crew, both transport
+  #           paths, saves, mod packs, fleet, GM, keyboard, and the one test that
+  #           draws a frame. If a feature exists, @core touches it once, so a
+  #           change that breaks a whole feature cannot pass this tier.
+  #   full  — all 241, including every edge, refusal and per-arc variant. What
+  #           @core cannot catch is a regression confined to one variant of a
+  #           feature whose breadth test still passes; the nightly is the net.
+  #
+  # @core is the default for both events this workflow fires on (PRs and pushes
+  # to main). The full suite runs on the nightly schedule, on workflow_dispatch,
+  # and on any PR carrying the `smoke-full` label — that label is the escape
+  # hatch for a branch working one feature's deep specs, and the right habit
+  # while doing so is to run that feature's own spec locally by name:
+  #
+  #     npx playwright test comms-visiting-station
+  #
+  # `deploy` gates on this job, so a main push publishes to Pages on a @core
+  # pass. That is a deliberate trade — Pages is the dev host, the demo deploy
+  # (deploy-demo.yml) has its own gates, and the nightly full run is never more
+  # than a day behind. Tighten it by adding the main-push arm back to SMOKE_GREP.
+  #
+  # SHARDED THREE WAYS. `workers: 1` in playwright.config.js is load-bearing —
+  # parallel WASM hosts OOM a runner — so the parallelism has to come from
+  # separate runners instead. Playwright shards by file, so a shard that draws
+  # none of the expensive session specs finishes early; the job's wall clock is
+  # the slowest shard, not the sum.
   smoke:
     needs: build
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+
+    env:
+      # WHICH TIER. Empty selects everything.
+      #
+      # Written as `<is core> && '--grep @core' || ''` and NOT as the more
+      # natural `<is full> && '' || '--grep @core'`: an empty string is falsy in
+      # a GitHub expression, so the `&& ''` arm always falls through to the `||`
+      # and that spelling silently selects @core for every event. The condition
+      # has to be the one whose true-arm is the non-empty string.
+      SMOKE_GREP: >-
+        ${{ (github.event_name != 'schedule'
+             && github.event_name != 'workflow_dispatch'
+             && !contains(github.event.pull_request.labels.*.name, 'smoke-full'))
+            && '--grep @core' || '' }}
 
     steps:
       - name: Checkout
@@ -472,44 +550,53 @@ jobs:
 
       - name: Run smoke tests
         working-directory: tests/smoke
-        run: npx playwright test
+        # SMOKE_GREP is unquoted on purpose: it is either empty (full tier) or
+        # the two words `--grep @core`.
+        run: npx playwright test $SMOKE_GREP --shard=${{ matrix.shard }}/3
 
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.shard }}
           path: tests/smoke/playwright-report/
           retention-days: 7
 
       # Issue #1300's peer-tracer is a stable, sanitized index of the complete
       # GM M1 exit run: seed/roster/actions plus snapshot framing and digests,
       # never snapshot RON or the private reconnect capability.
+      #
+      # gm-m1-exit.spec.js is a full-tier spec and lands in exactly ONE shard, so
+      # every other job here legitimately has no file to upload and a bare
+      # `if-no-files-found: error` would redden them. The existence check moved
+      # onto the step instead; `error` still stands underneath it, so the shard
+      # that DID run the spec cannot upload a truncated or missing report. The
+      # spec's own assertions, not this upload, are what prove the run happened.
       - name: Upload GM M1 exit report
-        if: always()
+        if: always() && hashFiles('target/gm-m1-exit/report.json') != ''
         uses: actions/upload-artifact@v4
         with:
-          name: gm-m1-exit-report
+          name: gm-m1-exit-report-${{ matrix.shard }}
           path: target/gm-m1-exit/report.json
           if-no-files-found: error
           retention-days: 14
 
       # Handed to the perf job, which has the Rust toolchain that owns the
-      # comparison (issue #868).
+      # comparison (issue #868). One shard produces it; perf merges the pattern.
       - name: Upload browser perf capture
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: perf-browser-capture
+          name: perf-browser-capture-${{ matrix.shard }}
           path: target/perf/browser-capture.json
-          if-no-files-found: warn
+          if-no-files-found: ignore
           retention-days: 14
 
       - name: Publish results to job summary
         if: always()
         working-directory: tests/smoke
         run: |
-          echo "## Smoke Test Results" >> $GITHUB_STEP_SUMMARY
+          TIER="${SMOKE_GREP:+@core}"; echo "## Smoke Test Results — shard ${{ matrix.shard }}/3 (${TIER:-full})" >> $GITHUB_STEP_SUMMARY
           node - <<'NODE' >> "$GITHUB_STEP_SUMMARY"
           const fs = require('fs');
           const path = '../../target/playwright-results.json';
@@ -575,6 +662,12 @@ jobs:
   # and could shift the balance batch's per-run wall-clock. Identical binary,
   # identical numbers, zero baseline churn.
   native-build:
+    # NIGHTLY ONLY (see the schedule at the top of this file). This job is not
+    # on the critical path of a run — it finishes long before deploy does — so
+    # skipping it on branches and PRs buys no wall clock, only runner minutes.
+    # That is the whole reason: it costs ~30 min of compute per push to measure
+    # something that changes on the order of days.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
     steps:
@@ -637,6 +730,12 @@ jobs:
   # Still not in `deploy`'s `needs`.
   perf:
     needs: [test, smoke, native-build]
+    # NIGHTLY ONLY (see the schedule at the top of this file). This job is not
+    # on the critical path of a run — it finishes long before deploy does — so
+    # skipping it on branches and PRs buys no wall clock, only runner minutes.
+    # That is the whole reason: it costs ~30 min of compute per push to measure
+    # something that changes on the order of days.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     # contents: write to commit a bootstrapped baseline; issues: write to file
     # the adverse-drift record. Both use the default GITHUB_TOKEN.
@@ -710,10 +809,15 @@ jobs:
             > target/perf/mesh-report.txt
           cat target/perf/mesh-report.txt
 
+      # perf-browser.spec.js runs in one smoke shard, so the capture arrives
+      # under a shard-suffixed name; merge-multiple flattens whichever one has it
+      # into target/perf/. Still best-effort — a smoke tier that did not run the
+      # spec leaves no capture and perf reports the rest.
       - name: Download browser capture
         uses: actions/download-artifact@v4
         with:
-          name: perf-browser-capture
+          pattern: perf-browser-capture-*
+          merge-multiple: true
           path: target/perf/
         continue-on-error: true
 
@@ -855,6 +959,12 @@ jobs:
   # threshold is missed; its source AARs are uploaded with the report.
   balance:
     needs: [test, native-build]
+    # NIGHTLY ONLY (see the schedule at the top of this file). This job is not
+    # on the critical path of a run — it finishes long before deploy does — so
+    # skipping it on branches and PRs buys no wall clock, only runner minutes.
+    # That is the whole reason: it costs ~30 min of compute per push to measure
+    # something that changes on the order of days.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
     steps:

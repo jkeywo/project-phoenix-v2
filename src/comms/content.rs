@@ -36,7 +36,7 @@ use crate::core::messages::{CommsPriority, CommsResponseView};
 /// response is a name (`on_pick`, parallel in [`ScriptedDialogue::on_pick`]) and
 /// the fn behind it supplies both when the player picks it. Issue #985 deleted
 /// the two fields with the parser that was their only writer.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CommsResponse {
     /// Player-facing button text.
     pub text: String,
@@ -45,6 +45,42 @@ pub struct CommsResponse {
     /// authored `text` stays authored content, and this flag rides the wire in
     /// `CommsResponseView`.
     pub important: bool,
+    /// What an UNMANNED Comms console does with this option (issue #1343).
+    ///
+    /// Server-side decision metadata, deliberately absent from
+    /// `CommsResponseView`: it changes what a backfilled console reaches for and
+    /// nothing about what a human sees, so the client has no use for it and no
+    /// business knowing the odds. Empty on every response but Falling Skyway's
+    /// lift band, and an empty one leaves the node to the legacy first-response
+    /// policy - see [`crate::comms::ai_choice`].
+    pub ai: CommsResponseAi,
+}
+
+/// Per-response Backfill choice metadata (issue #1343).
+///
+/// Both fields are authored on the response map in Rhai (`ai_weight`,
+/// `ai_delay_seconds`) and both are `Option`, because ABSENT and ZERO are
+/// different instructions: an absent weight is "this node is not a weighted
+/// decision at all", a zero weight is "this node IS one and this option is
+/// forbidden to an unmanned console". The distinction is the whole of
+/// [`node_authors_ai_choice`](crate::comms::ai_choice::node_authors_ai_choice).
+///
+/// Integers, not floats. Rhai is built `no_float` here, so an authored
+/// fractional weight would need the `flt("…")` marker machinery
+/// `add_objective`'s modifiers use, and nothing in the mission needs one:
+/// relative odds between a handful of options are exactly what small integers
+/// express. Keeping them integral also keeps [`CommsResponse`]'s `Eq`, which the
+/// snapshot round-trip and the digest fold both lean on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommsResponseAi {
+    /// Relative odds of an unmanned console picking this response. `Some(0)`
+    /// forbids it; `None` means this response was never offered to one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weight: Option<u32>,
+    /// Whole simulation seconds an unmanned console waits on this node before
+    /// answering. `None` reads as zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delay_seconds: Option<u32>,
 }
 
 /// The dialogue node currently being shown for one message.

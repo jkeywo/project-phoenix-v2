@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "test": "playwright test",
+    "test:core": "playwright test --grep @core",
     "test:headed": "playwright test --headed",
     "test:ui": "playwright test --ui"
   },

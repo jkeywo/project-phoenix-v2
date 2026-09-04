@@ -137,7 +137,7 @@ test('command console: an uncrewed Command shows the AI stance, and a human taki
   });
 });
 
-test('command console: clicking a stance emits set_station_stance for that station', async ({ page }) => {
+test('command console: clicking a stance emits set_station_stance for that station', { tag: '@core' }, async ({ page }) => {
   await page.goto(CONSOLE_URL);
   await page.evaluate(() => {
     window.__sent = [];

@@ -31,7 +31,7 @@ test('Welcome includes ship_stations', async ({ context }) => {
   await client.close();
 });
 
-test('SelectStation for empty station claims it and broadcasts StationAssigned', async ({ context }) => {
+test('SelectStation for empty station claims it and broadcasts StationAssigned', { tag: '@core' }, async ({ context }) => {
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
   await waitForWasmReady(serverPage);

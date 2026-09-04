@@ -85,8 +85,8 @@ describe('InvalidationBus', () => {
       const bus = new InvalidationBus();
       const calls = [];
       bus.onFactionSaved((path) => calls.push(path));
-      bus.fireFactionSaved('assets/factions/federation.toml');
-      expect(calls).toEqual(['assets/factions/federation.toml']);
+      bus.fireFactionSaved('assets/factions/alliance.toml');
+      expect(calls).toEqual(['assets/factions/alliance.toml']);
     });
 
     it('onFactionSaved returns unsubscribe handle that stops events', () => {

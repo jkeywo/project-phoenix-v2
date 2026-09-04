@@ -355,13 +355,17 @@ pub fn build_headless_app_with(
         capture_stream: args.report_format == super::args::ReportFormat::Ndjson,
         ..Default::default()
     })
-    // Chained so an ndjson tick reads message-traffic-then-balance rather than in
-    // whatever order the executor happened to pick.
+    // Chained so an ndjson tick reads message-traffic-then-balance-then-story
+    // rather than in whatever order the executor happened to pick. Narrative
+    // last (issue #1338) so the beat a tick's damage caused prints after the
+    // damage that caused it, and so the monotonic `seq` this collector assigns
+    // is a fixed function of the tick rather than of executor order.
     .add_systems(
         Last,
         (
             super::report::collect_outbound,
             super::report::collect_balance_events,
+            super::report::collect_narrative_events,
         )
             .chain(),
     );

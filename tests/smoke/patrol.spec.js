@@ -60,7 +60,7 @@ spawn_on      = "game_start"
 overrides     = { tags = ["ship", "npc"] }
 `;
 
-test('a world-authored NPC appears in WorldSetup after game start', async ({ context }) => {
+test('a world-authored NPC appears in WorldSetup after game start', { tag: '@core' }, async ({ context }) => {
   // Intercept the default world fetch and serve the fixture instead.
   await context.route('**/assets/worlds/default.toml', (route) =>
     route.fulfill({ contentType: 'text/plain', body: PATROL_TEST_WORLD }),

@@ -218,7 +218,8 @@ mod tests {
     /// former mirror's `(receiver, name, params)`, so this doubles as the
     /// "same set unchanged" proof the derivation had to preserve.
     const EXPECTED_EXPOSED: &[(&str, &str, &[&str])] = &[
-        // Loading engine: `on` + one per TriggerCondition variant, then `when`.
+        // Loading engine: `on` + one per TriggerCondition variant, then the two
+        // trigger-level modifiers.
         ("", "on", &["event", "handler"]),
         ("", "on_destroyed", &["entity", "handler"]),
         ("", "on_all_destroyed", &["group", "handler"]),
@@ -233,11 +234,21 @@ mod tests {
         ("", "on_waypoint_reached", &["entity", "handler"]),
         ("", "on_hull_below", &["entity", "threshold", "handler"]),
         ("trigger", "when", &["predicate"]),
+        ("trigger", "repeat", &[]),
         // ctx.flags.*
         ("flags", "increment", &["name", "by"]),
         // ctx.effects.*
         ("effects", "complete_objective", &["id"]),
         ("effects", "fail_objective", &["id"]),
+        // The mission-timeline vocabulary (issue #1338). Deliberately exposed:
+        // marking a beat and judging a marked entity's outcome are things only
+        // a scenario author can do, so they belong in the autocomplete set.
+        ("effects", "narrative_beat", &["id"]),
+        ("effects", "narrative_outcome", &["entity", "outcome"]),
+        // The post-mission report (issue #1344). Exposed for the same reason:
+        // deciding what a mission was ABOUT, and what each of those things
+        // ended in, is the author's judgement and nobody else's.
+        ("effects", "report_row", &["spec"]),
         ("effects", "reset_trigger", &["id"]),
         ("effects", "load_world", &["path"]),
         ("effects", "unload_world", &["path"]),
@@ -249,6 +260,14 @@ mod tests {
         ("effects", "order_divert_anchor", &["entity", "anchor"]),
         ("effects", "order_dock", &["entity", "structure"]),
         ("effects", "open_comms", &["spec"]),
+        // The Viewscreen computer-message vocabulary (issue #1342): a scenario
+        // author schedules a timed, severity-graded message the same way they
+        // author any other effect.
+        (
+            "effects",
+            "show_message",
+            &["id", "text", "severity", "duration_secs"],
+        ),
         // ctx.schedule.* and the in_seconds(n).<verb> delay builder.
         ("schedule", "in_seconds", &["secs"]),
         ("schedule", "after", &["secs", "callback"]),

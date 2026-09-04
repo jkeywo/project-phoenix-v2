@@ -94,7 +94,7 @@ export class ComponentCard {
  * Usage:
  *   const mode = new EntityModeShell();
  *   mode.setFileList(['assets/entities/player_ship.toml', ...]);
- *   mode.setFactionMap(new Map([['uuid1', 'Federation'], ...]));
+ *   mode.setFactionMap(new Map([['uuid1', 'Alliance'], ...]));
  *   mode.setComplexityPaths(['assets/complexity/tactical.toml', ...]);
  *   mode.openFile('assets/entities/player_ship.toml', tomlText);
  *   const cards = mode.getComponentCards();

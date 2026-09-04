@@ -301,12 +301,13 @@ map — see the field notes below.
 |---|---|---|---|
 | `template_path` | string | **required** | Path to entity template (e.g. `"assets/entities/star_sun.toml"`). |
 | `id` | string | none | Stable instance ID for cross-reference. Also accepted as a `relative_to` target. |
-| `name` | string | none | When set, the unified pipeline assigns a UUID and registers `name → uuid` in `WorldConfig.name_to_uuid` and `WorldContentRuntime.name_to_uuid`. Triggers and comms resolve names through this map. |
+| `name` | string | none | When set, the unified pipeline assigns a UUID and registers `name → uuid` in `WorldConfig.name_to_uuid` and `WorldContentRuntime.name_to_uuid`. Triggers and comms resolve names through this map. Both spawn timings spawn under the REGISTERED UUID — a named `spawn_on = "game_start"` row uses the same UUID its name resolves to, exactly as an immediate one does — so `name → uuid` is single-sourced whenever the hull enters the world. |
 | `position` | `[f32; 3]` | `[0,0,0]` | World position. |
 | `anchor` | string | none | Named entry from `[anchors]`; resolved to `[x,y,z]` at spawn time. |
 | `relative_to` | string | none | Another `[[entity]]` **in the same file** to position relative to, named by its `id` **or** its `name` (a `name` wins if the two collide). Used with `offset`. Order does not matter — the target may be declared before or after. The target must use `anchor` or `position`, not another `relative_to` (no chains). Resolved against the entity list directly, *not* through `name_to_uuid`. A `relative_to` that does not resolve fails world validation and blocks the whole world from spawning (issue #969) — before, it cost exactly the one entity, silently. |
 | `offset` | `[f32; 3]` | `[0,0,0]` | Offset added to the `relative_to` entity's resolved position. |
 | `spawn_on` | `"immediate"` \| `"game_start"` | `"immediate"` | `"immediate"` spawns at world load (lobby phase); `"game_start"` spawns when phase enters `InProgress`. |
+| `narrative` | bool | `false` | Opt this entity into the authored mission timeline (issue #1338). The headless run report then records when it entered the world and when it died, under its `name`. Works with either `spawn_on` value — `"immediate"` and `"game_start"` both mark. Requires a `name` — the mark's payload *is* the name — and a row that sets the flag without one raises a `narrative-mark-needs-name` validation warning instead of being marked. **Death is recorded on both removal paths**: a combat kill, and a script calling `ctx.effects.destroy_entity(name)` (or its `ctx.schedule.in_seconds(n)` form). Everything else (escaped, rescued, abandoned, disabled) is your judgement, through `ctx.effects.narrative_outcome(..)` — and if you remove a marked hull to mean one of those, record the outcome **before, or on the same tick as, the destroy**: the authored outcome then stands alone and no death is recorded. A tick later is too late. Declared `[[entity]]` rows only: a hull a script spawns mid-run with `ctx.effects.spawn_entity(..)` has no row to carry the flag, so record its story with `ctx.effects.narrative_outcome("name", "spawned")` and `…("name", "destroyed")` instead — same vocabulary, same timeline. An unmarked hull produces no timeline entry however violently it dies: a story event is authored, never inferred. |
 | `overrides` | inline table | none | TOML overrides merged on top of the template (per-instance field tweaks). |
 
 Position precedence (when more than one is supplied): `relative_to` >
@@ -372,7 +373,23 @@ The registration fns mirror the `TriggerCondition` vocabulary one for one:
 | `on_entered_region(entity, handler)` / `on_exited_region(entity, handler)` | region entity | |
 | `on_waypoint_reached(entity, handler)` | | Fires on arrival at any waypoint of that ship's route; "reached" means within that entity's `[behaviour] waypoint_arrival_radius`. |
 
-A registration is single-shot: each fires at most once per session.
+A registration is single-shot: each fires at most once per session. Two
+modifiers chain onto it, in either order — each hands the registration back, so
+`on_hailed(e, h).repeat().when("flag(x)")` and
+`on_hailed(e, h).when("flag(x)").repeat()` build the same trigger:
+
+| Modifier | Notes |
+|---|---|
+| `.when(predicate)` | A trigger-level flag gate: `on_all_destroyed("hostiles", "h").when("counter(waves) >= 8")`. A `false` reading suppresses the firing *without* consuming the registration, so it stays armed for a later moment — which an `if` at the top of the handler cannot do, because by then the trigger is already spent. |
+| `.repeat()` | `on_hailed(e, h).repeat()` fires every time the condition occurs instead of once. |
+
+Reach for `.repeat()` whenever the thing being watched is something the crew can
+do more than once — a hail on a channel they may open, clear and open again. Do
+NOT try to approximate it by registering the same handler once per world state
+with a different `.when` on each: a `when` keeps an *unfired* registration
+armed, so the moment a path through the scene leaves the state key unchanged,
+the one registration matching that state is already spent and the trigger goes
+dead with the situation still live.
 
 #### Effects
 
@@ -382,8 +399,10 @@ A handler fn takes `ctx` and calls `ctx.effects.*` / `ctx.flags.*` / `ctx.schedu
 |---|---|
 | `ctx.effects.add_objective(#{ id, text, mandatory?, targets?, source?, base_priority?, directive_kind?, … })` | Add to the objectives list, with its AI directive and utility scoring. |
 | `ctx.effects.complete_objective(id)` / `fail_objective(id)` | |
+| `ctx.effects.narrative_beat(id)` | Record an authored story beat on the mission timeline (issue #1338). Changes nothing in the world — it is the scenario's own punctuation, so an after-action reading carries the beats *you* considered beats. Objective, deadline and Comms transitions are recorded automatically; you do not mark those. |
+| `ctx.effects.narrative_outcome(entity, outcome)` | Record a marked entity's outcome: `"spawned"`, `"disabled"`, `"destroyed"`, `"escaped"`, `"rescued"` or `"abandoned"`. Any other word raises. Spawning and dying are recorded automatically for any `[[entity]]` carrying `narrative = true` — dying on both removal paths, the combat kill and `destroy_entity` — so this is the door for the outcomes only you can judge, and the way to say a scripted removal was *not* a death. Call it before, or on the same tick as, the `destroy_entity`; the automatic death is then suppressed for that entity for the rest of the run. |
 | `ctx.effects.spawn_entity(#{ template_path, name, position?/anchor?, rotation?, scale?, overrides? })` | `template_path` string literals are scanned statically for asset preload. |
-| `ctx.effects.destroy_entity(name)` | The counterpart to `spawn_entity`: removes the named entity. It CHAINS — `on_destroyed` and `on_all_destroyed` fire off it in the same tick, exactly as they do off a combat kill, which is what lets a scripted collapse drive mission state. An unknown name warns and does nothing. Reusing a destroyed entity's name in a later `spawn_entity` is fine. Also available deferred: `ctx.schedule.in_seconds(n).destroy_entity(name)`. |
+| `ctx.effects.destroy_entity(name)` | The counterpart to `spawn_entity`: removes the named entity. It CHAINS — `on_destroyed` and `on_all_destroyed` fire off it in the same tick, exactly as they do off a combat kill, which is what lets a scripted collapse drive mission state. An unknown name warns and does nothing. Reusing a destroyed entity's name in a later `spawn_entity` is fine. Also available deferred: `ctx.schedule.in_seconds(n).destroy_entity(name)`. If the entity is marked `narrative = true`, removing it records `marked_entity_destroyed` unless you already recorded an outcome for it with `ctx.effects.narrative_outcome(..)` — see that row. It writes nothing to the combat ledger either way: a scripted removal is never a kill. |
 | `ctx.effects.load_world(path)` / `unload_world(path)` | Runtime composition of sub-world layers. |
 | `ctx.effects.apply_modifier(…)` / `remove_modifier(…)` | `slot` ∈ {`MaxSpeed`, `MaxYawRate`, `RadarRange`, `PhaserDamage`, `HullDamageTaken`, `RepairRate`}. |
 | `ctx.effects.apply_int_modifier(…)` / `remove_int_modifier(…)` | `slot` ∈ {`RepairTeams`}. |
@@ -1850,11 +1869,11 @@ radius = 150.0
 Factionless entities (no `faction` field on the entity) are neither
 enemies nor targets.
 
-### Example — `assets/factions/federation.toml`
+### Example — `assets/factions/alliance.toml`
 
 ```toml
 uuid = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
-name = "Federation"
+name = "Alliance"
 enemies = ["bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb"]
 ```
 

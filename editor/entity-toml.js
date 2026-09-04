@@ -40,7 +40,7 @@ export function validateEntityToml(obj) {
  * Parse every faction TOML string and return a map of uuid → name.
  *
  * @param {Array<{name: string, content: string}>} factionFiles
- *   Each element is { name: 'federation.toml', content: '<toml text>' }.
+ *   Each element is { name: 'alliance.toml', content: '<toml text>' }.
  * @returns {Map<string, string>} uuid → faction name
  */
 export function buildFactionMap(factionFiles) {

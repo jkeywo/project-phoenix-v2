@@ -21,12 +21,20 @@ function repairState(overrides = {}) {
       travel_duration_secs: 5.0,
       repair_auto: false,
       // Issue #1015: the tap-to-prioritise list. Worst-first, as the host folds
-      // it; `prioritised` is the host's own resolved pin.
+      // it; `prioritised` is the host's own resolved pin, and `prioritisable`
+      // is projected from the owner's candidate predicate — the component
+      // treats it as the SOLE enablement fact, so a row without it renders
+      // disabled and its tap resolves to nothing.
       damaged_systems: [
-        { system_id: 'aux-sensor', display_name: 'Auxiliary Sensor', tier: 'Destroyed', current: 0, max_hp: 10, damage_pct: 1.0, prioritised: false, in_progress: false },
-        { system_id: 'hull-plating', display_name: 'Hull Plating', tier: 'Disabled', current: 2, max_hp: 20, damage_pct: 0.9, prioritised: false, in_progress: true },
-        { system_id: 'core', display_name: 'Core', tier: 'Damaged', current: 12, max_hp: 20, damage_pct: 0.4, prioritised: true, in_progress: false },
+        { system_id: 'aux-sensor', display_name: 'Auxiliary Sensor', tier: 'Destroyed', current: 0, max_hp: 10, damage_pct: 1.0, prioritised: false, in_progress: false, prioritisable: true },
+        { system_id: 'hull-plating', display_name: 'Hull Plating', tier: 'Disabled', current: 2, max_hp: 20, damage_pct: 0.9, prioritised: false, in_progress: true, prioritisable: false },
+        { system_id: 'core', display_name: 'Core', tier: 'Damaged', current: 12, max_hp: 20, damage_pct: 0.4, prioritised: true, in_progress: false, prioritisable: true },
       ],
+      // #1287 moved dispatch and prioritise onto shared semantic actions, whose
+      // handlers resolve a control_system_id from this projection and REFUSE
+      // the action without it — a payload missing it sends nothing at all.
+      systems: { damage_control: {} },
+      system_families: { damage_control: 'repair' },
     },
     overrides,
   );
@@ -59,7 +67,7 @@ test('repair console: Core bar shows and pops up damaged core systems when click
   await expect(coreBar.locator('ph-damage-detail .row')).toHaveCount(1);
 });
 
-test('repair console: dispatch buttons call __sendAction with correct envelope', async ({ page }) => {
+test('repair console: dispatch buttons call __sendAction with correct envelope', { tag: '@core' }, async ({ page }) => {
   await page.goto(CONSOLE_URL);
   await page.evaluate(() => {
     window.__sent = [];

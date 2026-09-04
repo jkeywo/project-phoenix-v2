@@ -1542,14 +1542,39 @@ fn comms_ai_response_app_with(comms_source: ControlSource) -> App {
     .insert_resource(CommsInboxRes(crate::console::comms::CommsInbox::new()))
     .add_systems(Update, operate_comms_response_ai);
 
+    spawn_response_ai_hull(
+        &mut app,
+        crate::command_admission::HostSlot::SOLO,
+        true,
+        comms_source,
+    );
+    app
+}
+
+/// Spawn one fleet hull the response host can walk: the roster slot it flies
+/// for, whether THIS host projects it to its own crew, and who holds Comms.
+///
+/// Factored out for the two-hull fixtures below (issue #1343): the neutrality
+/// claim is about a fleet, and a fleet needs a second hull that is identical in
+/// every respect except its slot and its marker.
+fn spawn_response_ai_hull(
+    app: &mut App,
+    slot: crate::command_admission::HostSlot,
+    local: bool,
+    comms_source: ControlSource,
+) -> Entity {
     let mut resolver = ControlSourceResolver::new();
     resolver.set(
         crate::ship::system_registry::comms_system_id(),
         comms_source,
     );
-    app.world_mut().spawn((
+    let mut hull = app.world_mut().spawn((
         crate::server_app::Ship,
-        crate::server_app::LocalShip,
+        // The host-neutral fleet identity `operate_comms_response_ai` walks by
+        // and keys its waits on since #1343. Production inserts it on every ship
+        // the frozen roster spawns (`world_setup::spawn_game_start_entities`), so
+        // a fixture hull without one is a hull the host cannot see at all.
+        crate::lockstep::FleetSlotOf(slot),
         ShipSystemControlSources(resolver),
         crate::ship_plugin::ShipConfigComponent::default(),
         AdmittedCommands::default(),
@@ -1570,7 +1595,10 @@ fn comms_ai_response_app_with(comms_source: ControlSource) -> App {
             power_rating: None,
         },
     ));
-    app
+    if local {
+        hull.insert(crate::server_app::LocalShip);
+    }
+    hull.id()
 }
 
 /// Seat one open dialogue: an un-answered inbox message from `sender_uuid`
@@ -1597,6 +1625,7 @@ fn seat_ai_dialogue(app: &mut App, sender_uuid: &str) -> (String, String) {
                     responses: vec![CommsResponse {
                         text: "Acknowledge.".into(),
                         important: false,
+                        ai: Default::default(),
                     }],
                 },
                 thread_id: id.clone(),
@@ -1966,10 +1995,12 @@ fn an_authored_comms_response_policy_beats_the_canonical_default() {
                 CommsResponse {
                     text: "Acknowledge.".into(),
                     important: false,
+                    ai: Default::default(),
                 },
                 CommsResponse {
                     text: "Stand by.".into(),
                     important: false,
+                    ai: Default::default(),
                 },
             ],
         };
@@ -2006,6 +2037,772 @@ response_index = 1
         "the AUTHORED `[comms_console.ai]` rule must decide the answer — the \
          canonical default answers with index 0, so index 1 can only come \
          from the authored policy actually reaching the host"
+    );
+}
+
+// ── The delayed weighted picker (issue #1343) ────────────────────────────────
+//
+// Falling Skyway's lift conversation in miniature: a stand-by at index 0 a
+// backfilled console must never reach for, and a grant and a refusal behind it
+// with equal weight, all three authoring the same five-second pause. Every test
+// below is that node, because it is the shape the acceptance criteria are
+// written against.
+
+/// The five authored seconds, in ticks at the rate the host converts against
+/// when no world is loaded. Derived rather than written as a literal, so these
+/// tests still say what they mean if the canonical rate ever moves.
+fn skyway_delay_ticks() -> u64 {
+    crate::world::script::schedule::seconds_to_ticks(
+        5,
+        crate::world::script::schedule::SchedClock::ZERO.tick_hz,
+    )
+}
+
+/// The three-option lift node, in the shape `falling_skyway.toml` authors it.
+fn lift_responses() -> Vec<crate::comms::content::CommsResponse> {
+    use crate::comms::content::{CommsResponse, CommsResponseAi};
+    let authored = |text: &str, weight: u32| CommsResponse {
+        text: text.into(),
+        important: weight > 0,
+        ai: CommsResponseAi {
+            weight: Some(weight),
+            delay_seconds: Some(5),
+        },
+    };
+    vec![
+        authored("stand_by", 0),
+        authored("lift", 1),
+        authored("deny", 1),
+    ]
+}
+
+/// The response-AI fixture plus the two resources the weighted picker needs:
+/// the sim clock its wait is measured in, and the seeded RNG its draw comes off.
+fn weighted_response_app(seed: u64) -> App {
+    let mut app = comms_ai_response_app();
+    app.insert_resource(crate::sim_tick::SimTick(0));
+    app.insert_resource(crate::sim_rng::SimRng::new(
+        seed,
+        crate::sim_rng::SeedSource::Cli,
+    ));
+    app
+}
+
+/// Seat one open dialogue carrying `responses`, on `thread_id`.
+fn seat_weighted_dialogue(
+    app: &mut App,
+    message_id: &str,
+    thread_id: &str,
+    sender_uuid: &str,
+    responses: Vec<crate::comms::content::CommsResponse>,
+) {
+    use crate::comms::content::{ActiveDialogue, CommsDialogueNode};
+    let mut message = msg(message_id);
+    message.sender_uuid = sender_uuid.to_string();
+    message.thread_id = thread_id.to_string();
+    let on_pick = responses
+        .iter()
+        .map(|r| format!("on_{}", r.text))
+        .collect::<Vec<_>>();
+    app.world_mut()
+        .resource_mut::<CommsInboxRes>()
+        .0
+        .inject(message);
+    app.world_mut()
+        .resource_mut::<CommsRuntime>()
+        .active_dialogues
+        .insert(
+            message_id.to_string(),
+            ActiveDialogue {
+                current_node: CommsDialogueNode {
+                    body: "Who gets the corridor?".into(),
+                    body_params: Default::default(),
+                    responses,
+                },
+                thread_id: thread_id.to_string(),
+                script: crate::comms::content::ScriptedDialogue {
+                    script_path: crate::comms::scripted::tests::PATH.to_string(),
+                    origin_layer: None,
+                    node_fn: "lift_node".to_string(),
+                    on_pick,
+                },
+            },
+        );
+}
+
+/// Set the sim clock and run one evaluation.
+fn tick_to(app: &mut App, tick: u64) {
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = tick;
+    app.update();
+}
+
+/// Every response index the ship has admitted so far.
+fn admitted_response_indices(app: &mut App) -> Vec<usize> {
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&AdmittedCommands, With<crate::server_app::LocalShip>>();
+    q.single(app.world())
+        .unwrap()
+        .for_target(crate::ship::system_registry::COMMS_SYSTEM_ID)
+        .filter_map(|cmd| match &cmd.payload {
+            SystemControlPayload::RespondToMessage { response_index, .. } => Some(*response_index),
+            _ => None,
+        })
+        .collect()
+}
+
+fn pending_wait(app: &App, message_id: &str) -> Option<crate::comms::server::PendingAiResponse> {
+    pending_wait_of(app, crate::command_admission::HostSlot::SOLO, message_id)
+}
+
+/// The wait one FLEET SLOT's console is holding on `message_id` — the shape the
+/// map really has since #1343, and what the two-hull tests below read.
+fn pending_wait_of(
+    app: &App,
+    host: crate::command_admission::HostSlot,
+    message_id: &str,
+) -> Option<crate::comms::server::PendingAiResponse> {
+    app.world()
+        .resource::<CommsRuntime>()
+        .pending_ai_responses
+        .get(&crate::comms::server::PendingAiResponseKey::new(
+            host, message_id,
+        ))
+        .copied()
+}
+
+/// AC2 + AC5 — the console waits the authored five seconds in SIMULATION time
+/// and then answers, and the wait is measured against the tick counter rather
+/// than against how many times the host happened to be evaluated.
+#[test]
+fn a_weighted_node_is_answered_only_after_the_authored_delay() {
+    let mut app = weighted_response_app(11);
+    seat_weighted_dialogue(
+        &mut app,
+        "lift-1",
+        "committee",
+        "sender-uuid",
+        lift_responses(),
+    );
+
+    tick_to(&mut app, 0);
+    assert_eq!(
+        admitted_response_indices(&mut app),
+        Vec::<usize>::new(),
+        "the console must not answer a decision on sight"
+    );
+    assert_eq!(
+        pending_wait(&app, "lift-1").map(|w| w.due_tick),
+        Some(skyway_delay_ticks()),
+        "the wait is armed against an absolute tick computed from the authored seconds"
+    );
+
+    // One tick short of due, after several evaluations: the pause is elapsed
+    // simulation time, not a countdown of decision ticks.
+    tick_to(&mut app, skyway_delay_ticks() - 1);
+    assert_eq!(admitted_response_indices(&mut app), Vec::<usize>::new());
+
+    tick_to(&mut app, skyway_delay_ticks());
+    assert_eq!(
+        admitted_response_indices(&mut app).len(),
+        1,
+        "the decision lands on the tick the authored pause expires"
+    );
+    assert!(
+        pending_wait(&app, "lift-1").is_none(),
+        "an answered decision leaves no wait behind"
+    );
+}
+
+/// AC1 + AC5 — a zero-weight response is never selected, whatever the seed, and
+/// the two weight-1 options really do share the draw range.
+#[test]
+fn the_weighted_draw_never_lands_on_the_stand_by() {
+    let mut seen = std::collections::BTreeSet::new();
+    for seed in 0..40u64 {
+        let mut app = weighted_response_app(seed);
+        seat_weighted_dialogue(
+            &mut app,
+            "lift-1",
+            "committee",
+            "sender-uuid",
+            lift_responses(),
+        );
+        tick_to(&mut app, 0);
+        tick_to(&mut app, skyway_delay_ticks());
+        let indices = admitted_response_indices(&mut app);
+        assert_eq!(
+            indices.len(),
+            1,
+            "seed {seed} must produce exactly one answer"
+        );
+        assert_ne!(
+            indices[0], 0,
+            "seed {seed} reached for the stand-by, which is authored weight 0"
+        );
+        seen.insert(indices[0]);
+    }
+    assert_eq!(
+        seen,
+        [1usize, 2].into_iter().collect(),
+        "grant and refuse carry equal weight, so both must be reachable"
+    );
+}
+
+/// AC2 — the same seed and the same state make the same choice. This is the
+/// property lockstep peers depend on; nothing about it may be a function of
+/// wall-clock time or of iteration order.
+#[test]
+fn one_seed_and_one_state_make_one_choice() {
+    let answer_for = |seed: u64| {
+        let mut app = weighted_response_app(seed);
+        seat_weighted_dialogue(
+            &mut app,
+            "lift-1",
+            "committee",
+            "sender-uuid",
+            lift_responses(),
+        );
+        tick_to(&mut app, 0);
+        tick_to(&mut app, skyway_delay_ticks());
+        admitted_response_indices(&mut app)
+    };
+    for seed in 0..8u64 {
+        assert_eq!(
+            answer_for(seed),
+            answer_for(seed),
+            "seed {seed} must replay"
+        );
+    }
+}
+
+/// AC3 — closing the conversation cancels the pending choice. The wait belongs
+/// to a live dialogue, and there is no hook to remember it by: the pass simply
+/// does not re-arm what it no longer walks.
+#[test]
+fn closing_the_conversation_cancels_the_pending_choice() {
+    let mut app = weighted_response_app(3);
+    seat_weighted_dialogue(
+        &mut app,
+        "lift-1",
+        "committee",
+        "sender-uuid",
+        lift_responses(),
+    );
+    tick_to(&mut app, 0);
+    assert!(pending_wait(&app, "lift-1").is_some());
+
+    app.world_mut()
+        .resource_mut::<CommsRuntime>()
+        .active_dialogues
+        .remove("lift-1");
+    tick_to(&mut app, 1);
+    assert!(
+        pending_wait(&app, "lift-1").is_none(),
+        "a retired dialogue must not leave a wait armed against it"
+    );
+
+    tick_to(&mut app, skyway_delay_ticks());
+    assert_eq!(
+        admitted_response_indices(&mut app),
+        Vec::<usize>::new(),
+        "a closed conversation is never answered"
+    );
+}
+
+/// AC3 — human takeover cancels the pending choice, and handing the console
+/// back arms a FRESH pause rather than resuming the one the officer interrupted.
+#[test]
+fn a_human_taking_the_console_cancels_the_pending_choice() {
+    let mut app = weighted_response_app(3);
+    seat_weighted_dialogue(
+        &mut app,
+        "lift-1",
+        "committee",
+        "sender-uuid",
+        lift_responses(),
+    );
+    tick_to(&mut app, 0);
+    assert!(pending_wait(&app, "lift-1").is_some());
+
+    let set_source = |app: &mut App, source: ControlSource| {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut ShipSystemControlSources, With<crate::server_app::LocalShip>>();
+        q.single_mut(app.world_mut())
+            .unwrap()
+            .0
+            .set(crate::ship::system_registry::comms_system_id(), source);
+    };
+
+    set_source(&mut app, ControlSource::Human);
+    tick_to(&mut app, 1);
+    assert!(
+        pending_wait(&app, "lift-1").is_none(),
+        "an officer at the console decides their own conversations"
+    );
+    tick_to(&mut app, skyway_delay_ticks());
+    assert_eq!(admitted_response_indices(&mut app), Vec::<usize>::new());
+
+    // Handed back: a new pause, timed from now.
+    let handback = skyway_delay_ticks() + 10;
+    set_source(&mut app, ControlSource::Ai);
+    tick_to(&mut app, handback);
+    assert_eq!(
+        pending_wait(&app, "lift-1").map(|w| w.due_tick),
+        Some(handback + skyway_delay_ticks()),
+        "the console does not answer the instant it is handed a conversation it \
+         never sat with"
+    );
+}
+
+/// AC3, the repricing case — a repriced claim opens a NEW message on the same
+/// thread and the old one stays answerable. The wait follows the current screen:
+/// the superseded message's is cancelled and the new message arms its own.
+///
+/// The shared thread id below is not a convenience of the fixture: it is the
+/// shape the shipped mission authors, because `open_comms` mints a FRESH thread
+/// whenever `thread_id` is omitted and a repricing on a fresh thread supersedes
+/// nothing. `falling_skyway_reprices_a_claim_on_the_thread_it_was_claimed_on` in
+/// `tests/headless_runner.rs` is what keeps the world honest to it, so this test
+/// and the world cannot drift apart silently.
+#[test]
+fn repricing_a_claim_moves_the_wait_to_the_new_message() {
+    let mut app = weighted_response_app(5);
+    seat_weighted_dialogue(
+        &mut app,
+        "lift-1",
+        "committee",
+        "sender-uuid",
+        lift_responses(),
+    );
+    tick_to(&mut app, 0);
+    assert!(pending_wait(&app, "lift-1").is_some());
+
+    // The board moved: `reprice_the_other_claims` opens a second message on the
+    // same thread, and this one no longer offers the lift.
+    let repriced = vec![lift_responses()[0].clone(), lift_responses()[2].clone()];
+    seat_weighted_dialogue(&mut app, "lift-2", "committee", "sender-uuid", repriced);
+
+    let reprice_tick = 30;
+    tick_to(&mut app, reprice_tick);
+    assert!(
+        pending_wait(&app, "lift-1").is_none(),
+        "the wait on the board that has moved is cancelled, not answered"
+    );
+    assert_eq!(
+        pending_wait(&app, "lift-2").map(|w| w.due_tick),
+        Some(reprice_tick + skyway_delay_ticks()),
+        "the current screen gets its own full pause"
+    );
+
+    // At the ORIGINAL due tick the superseded message is still not answered.
+    tick_to(&mut app, skyway_delay_ticks());
+    assert_eq!(admitted_response_indices(&mut app), Vec::<usize>::new());
+
+    tick_to(&mut app, reprice_tick + skyway_delay_ticks());
+    assert_eq!(
+        admitted_response_indices(&mut app),
+        vec![1],
+        "only the refusal is left on the repriced node"
+    );
+}
+
+/// The other side of supersession: two conversations that are NOT one.
+///
+/// Threadless messages are their own threads — the fallback the inbox's
+/// live-thread reading and the client's grouping both apply — so two of them
+/// must not cancel each other, and neither must two different threads. Both get
+/// their own pause and both get answered; anything else would leave a live
+/// conversation unanswered for ever because an unrelated one arrived after it.
+#[test]
+fn separate_conversations_do_not_supersede_one_another() {
+    let mut app = weighted_response_app(5);
+    // No thread at all on either, and the same sender on both: neither identity
+    // makes these one conversation.
+    seat_weighted_dialogue(&mut app, "lift-1", "", "sender-uuid", lift_responses());
+    seat_weighted_dialogue(&mut app, "lift-2", "", "sender-uuid", lift_responses());
+    // And a third on a thread of its own, from that same sender.
+    seat_weighted_dialogue(
+        &mut app,
+        "lift-3",
+        "another-claim",
+        "sender-uuid",
+        lift_responses(),
+    );
+
+    tick_to(&mut app, 0);
+    for id in ["lift-1", "lift-2", "lift-3"] {
+        assert!(
+            pending_wait(&app, id).is_some(),
+            "{id} is its own decision and must arm its own wait"
+        );
+    }
+
+    tick_to(&mut app, skyway_delay_ticks());
+    assert_eq!(
+        admitted_response_indices(&mut app).len(),
+        3,
+        "three separate conversations get three answers"
+    );
+}
+
+/// AC3, the replacement case — options that move UNDER a running wait restart
+/// it, so the choice is always sampled from the node as it now stands.
+#[test]
+fn replacing_the_responses_restarts_the_wait() {
+    let mut app = weighted_response_app(5);
+    seat_weighted_dialogue(
+        &mut app,
+        "lift-1",
+        "committee",
+        "sender-uuid",
+        lift_responses(),
+    );
+    tick_to(&mut app, 0);
+    let armed = pending_wait(&app, "lift-1").expect("armed");
+
+    // The lift comes off the node without the message being replaced.
+    {
+        let mut comms = app.world_mut().resource_mut::<CommsRuntime>();
+        let dialogue = comms.active_dialogues.get_mut("lift-1").unwrap();
+        dialogue.current_node.responses.remove(1);
+    }
+    let moved_at = 20;
+    tick_to(&mut app, moved_at);
+    let rearmed = pending_wait(&app, "lift-1").expect("re-armed");
+    assert_ne!(
+        rearmed.response_fingerprint, armed.response_fingerprint,
+        "a changed response set must not be answered by a wait armed against the old one"
+    );
+    assert_eq!(rearmed.due_tick, moved_at + skyway_delay_ticks());
+}
+
+/// AC1 — an unreachable sender empties the pool, so the wait is cancelled and
+/// the conversation is left open rather than answered with whatever is left.
+#[test]
+fn an_out_of_range_sender_cancels_the_pending_choice() {
+    let sender = "a1b2c3d4-e5f6-4789-abcd-ef0123456099";
+    let mut app = weighted_response_app(5);
+    seat_weighted_dialogue(&mut app, "lift-1", "committee", sender, lift_responses());
+    tick_to(&mut app, 0);
+    assert!(pending_wait(&app, "lift-1").is_some());
+
+    {
+        let mut comms = app.world_mut().resource_mut::<CommsRuntime>();
+        comms.range_active = true;
+        comms.range_flags.insert(sender.to_string(), false);
+    }
+    tick_to(&mut app, 1);
+    assert!(pending_wait(&app, "lift-1").is_none());
+    tick_to(&mut app, skyway_delay_ticks());
+    assert_eq!(admitted_response_indices(&mut app), Vec::<usize>::new());
+}
+
+/// A node whose only weighted option is forbidden holds the conversation open
+/// rather than falling back to the first response — which is the whole bug.
+/// Havelock's node after its claim is decided is exactly this: a stand-by at
+/// weight 0 and two confrontations that author nothing at all.
+#[test]
+fn a_node_with_nothing_selectable_is_never_answered() {
+    use crate::comms::content::{CommsResponse, CommsResponseAi};
+    let mut app = weighted_response_app(5);
+    seat_weighted_dialogue(
+        &mut app,
+        "lift-1",
+        "havelock",
+        "sender-uuid",
+        vec![
+            CommsResponse {
+                text: "stand_by".into(),
+                important: false,
+                ai: CommsResponseAi {
+                    weight: Some(0),
+                    delay_seconds: Some(5),
+                },
+            },
+            CommsResponse {
+                text: "confront".into(),
+                important: true,
+                ai: Default::default(),
+            },
+        ],
+    );
+    tick_to(&mut app, 0);
+    tick_to(&mut app, skyway_delay_ticks() * 4);
+    assert_eq!(
+        admitted_response_indices(&mut app),
+        Vec::<usize>::new(),
+        "an unmanned console must not be able to reach a confrontation, nor \
+         fall back to the stand-by its author forbade"
+    );
+    assert!(pending_wait(&app, "lift-1").is_none());
+}
+
+/// A tick the ship's own cadence multiplier makes it SIT OUT is not a
+/// cancellation. The retirement rule is "every wait this pass did not re-arm is
+/// gone", and a pass that walked nothing re-armed nothing — so a hull authoring
+/// `evaluate_every_ticks = 4` would have had its waits wiped on three ticks in
+/// four, and would never have answered anything at all.
+#[test]
+fn a_cadence_tick_the_ship_sits_out_does_not_cancel_its_waits() {
+    let mut app = weighted_response_app(3);
+    seat_weighted_dialogue(
+        &mut app,
+        "lift-1",
+        "committee",
+        "sender-uuid",
+        lift_responses(),
+    );
+    let entity = {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::server_app::LocalShip>>();
+        q.single(app.world()).unwrap()
+    };
+    app.world_mut()
+        .entity_mut(entity)
+        .insert(CommsResponseAiCadence(4));
+
+    tick_to(&mut app, 0);
+    let armed = pending_wait(&app, "lift-1").expect("armed on an evaluated tick");
+
+    // Ticks 1..4 are not multiples of 4, so the ship never walks its inbox.
+    for tick in 1..4 {
+        tick_to(&mut app, tick);
+        assert_eq!(
+            pending_wait(&app, "lift-1"),
+            Some(armed),
+            "tick {tick}: a wait must survive a tick the ship never looked at"
+        );
+    }
+
+    tick_to(&mut app, skyway_delay_ticks());
+    assert_eq!(
+        admitted_response_indices(&mut app).len(),
+        1,
+        "the decision still lands on the first evaluated tick at or past its due tick"
+    );
+}
+
+/// AC4 — a conversation with no metadata keeps the legacy first-response
+/// behaviour EXACTLY, and takes no draw at all: the new stream's position must
+/// be untouched, or every existing seeded run's sequence would shift under it.
+#[test]
+fn a_node_without_metadata_answers_first_and_moves_no_stream() {
+    let mut app = weighted_response_app(9);
+    seat_ai_dialogue(&mut app, "sender-uuid");
+    let before = app.world().resource::<crate::sim_rng::SimRng>().state();
+
+    tick_to(&mut app, 0);
+    assert_eq!(
+        admitted_response_indices(&mut app),
+        vec![0],
+        "an unweighted node keeps the authored first-response policy"
+    );
+    assert!(
+        app.world()
+            .resource::<CommsRuntime>()
+            .pending_ai_responses
+            .is_empty(),
+        "the legacy path arms no wait"
+    );
+    assert_eq!(
+        app.world().resource::<crate::sim_rng::SimRng>().state(),
+        before,
+        "a world that authors no weights must not move ANY stream — the \
+         weighted picker exists without being paid for"
+    );
+}
+
+// ── The fleet half: compute everywhere, emit locally (issues #1343 + #1116) ──
+//
+// `CommsRuntime::pending_ai_responses` is folded into the authoritative digest
+// and the weighted draw moves a SHARED `SimRng` stream, so neither may be
+// decided from `LocalShip` — that marker names a different hull on each host of
+// a fleet. These three tests are the unit-level statement of what
+// `tests/local_ship_neutrality.rs` asserts end-to-end.
+
+/// The two roster slots the fixture fleet flies for.
+const FLEET_SLOT_ONE: crate::command_admission::HostSlot = crate::command_admission::HostSlot(1);
+const FLEET_SLOT_TWO: crate::command_admission::HostSlot = crate::command_admission::HostSlot(2);
+
+/// A TWO-hull fleet with one open weighted conversation, projecting `local`.
+///
+/// The only difference between the two calls this fixture is made for is which
+/// hull carries `LocalShip` — the same single variable
+/// `tests/local_ship_neutrality.rs` isolates.
+fn weighted_fleet_app(seed: u64, local: crate::command_admission::HostSlot) -> App {
+    let mut app = App::new();
+    crate::ai::host::register_ai_host_env(&mut app);
+    app.insert_resource(crate::lobby::Sessions(
+        crate::lobby::session::SessionManager::new(),
+    ))
+    .insert_resource(WorldContentRuntime::default())
+    .insert_resource(CommsRuntime::default())
+    .insert_resource(CommsInboxRes(crate::console::comms::CommsInbox::new()))
+    .insert_resource(crate::sim_tick::SimTick(0))
+    .insert_resource(crate::sim_rng::SimRng::new(
+        seed,
+        crate::sim_rng::SeedSource::Cli,
+    ))
+    .add_systems(Update, operate_comms_response_ai);
+
+    for slot in [FLEET_SLOT_ONE, FLEET_SLOT_TWO] {
+        spawn_response_ai_hull(&mut app, slot, slot == local, ControlSource::Ai);
+    }
+    seat_weighted_dialogue(
+        &mut app,
+        "lift-1",
+        "committee",
+        "sender-uuid",
+        lift_responses(),
+    );
+    app
+}
+
+/// Every response index each fleet hull has admitted, keyed by its slot.
+fn fleet_admitted_indices(app: &mut App) -> Vec<(crate::command_admission::HostSlot, Vec<usize>)> {
+    let mut q = app
+        .world_mut()
+        .query::<(&crate::lockstep::FleetSlotOf, &AdmittedCommands)>();
+    let mut rows: Vec<_> = q
+        .iter(app.world())
+        .map(|(slot, admitted)| {
+            (
+                slot.0,
+                admitted
+                    .for_target(crate::ship::system_registry::COMMS_SYSTEM_ID)
+                    .filter_map(|cmd| match &cmd.payload {
+                        SystemControlPayload::RespondToMessage { response_index, .. } => {
+                            Some(*response_index)
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect();
+    rows.sort_by_key(|(slot, _)| slot.0);
+    rows
+}
+
+/// **The headline.** Both hulls' waits are armed, and armed IDENTICALLY,
+/// whichever of them this host happens to project.
+///
+/// The wait map is folded by `sim_digest::fold_comms_scope`, so a schedule that
+/// depended on `LocalShip` would put two peers of one fleet on different
+/// authoritative digests from the tick the first conversation opened.
+#[test]
+fn both_fleet_hulls_arm_the_same_waits_whichever_one_this_host_projects() {
+    let mut projecting_one = weighted_fleet_app(11, FLEET_SLOT_ONE);
+    let mut projecting_two = weighted_fleet_app(11, FLEET_SLOT_TWO);
+    tick_to(&mut projecting_one, 0);
+    tick_to(&mut projecting_two, 0);
+
+    let waits = |app: &App| {
+        app.world()
+            .resource::<CommsRuntime>()
+            .pending_ai_responses
+            .clone()
+    };
+    assert_eq!(
+        waits(&projecting_one).len(),
+        2,
+        "a fleet of two AI-backfilled Comms consoles holds TWO waits on one \
+         shared conversation — one per hull, keyed by its slot"
+    );
+    assert_eq!(
+        waits(&projecting_one),
+        waits(&projecting_two),
+        "the wait schedule is authoritative state and must not depend on which \
+         hull this host projects — see `server_app::components::LocalShip`"
+    );
+    assert!(
+        pending_wait_of(&projecting_one, FLEET_SLOT_TWO, "lift-1").is_some(),
+        "the PEER's hull must be given its own wait by this host too, or the \
+         two peers disagree the moment it expires"
+    );
+}
+
+/// The randomness half of the same rule: `SimRngState` is folded whole, so a
+/// draw taken on one host and not the other diverges the fleet even when both
+/// end up picking the same option.
+#[test]
+fn the_backfill_draw_advances_the_shared_stream_the_same_way_on_both_hosts() {
+    let mut projecting_one = weighted_fleet_app(11, FLEET_SLOT_ONE);
+    let mut projecting_two = weighted_fleet_app(11, FLEET_SLOT_TWO);
+    let armed = projecting_one
+        .world()
+        .resource::<crate::sim_rng::SimRng>()
+        .state();
+
+    for app in [&mut projecting_one, &mut projecting_two] {
+        tick_to(app, 0);
+        tick_to(app, skyway_delay_ticks());
+    }
+
+    let rng_of = |app: &App| app.world().resource::<crate::sim_rng::SimRng>().state();
+    assert_ne!(
+        rng_of(&projecting_one),
+        armed,
+        "precondition: the pause expired and the fleet actually drew"
+    );
+    assert_eq!(
+        rng_of(&projecting_one),
+        rng_of(&projecting_two),
+        "both hulls draw on EVERY host, in roster order — a draw taken only for \
+         the locally-projected hull leaves the shared stream in two different \
+         places"
+    );
+}
+
+/// …and the EMISSION half, which is fleet-wide for the same reason the draw is.
+///
+/// This test used to assert the opposite — that only the projected hull
+/// submits, "because a peer's hull is answered by the peer and replicated
+/// here". That is true of a human press and false of an AI one:
+/// `lockstep::frame` states that a `MeshCommand` deliberately carries no AI
+/// emission, and `command_admission::ai_emit::emit_ai_command` pushes into
+/// `AdmittedCommands` without ever building a `LoggedCommand` to replicate. So
+/// there is no peer copy to arrive, and a host that emitted only for its own
+/// hull applied only its own hull's pick — which with a weighted pool is a
+/// different index per hull, and so a straight divergence.
+#[test]
+fn every_fleet_hull_submits_its_backfill_answer_on_every_host() {
+    let mut rows_by_projection = Vec::new();
+    for local in [FLEET_SLOT_ONE, FLEET_SLOT_TWO] {
+        let mut app = weighted_fleet_app(11, local);
+        tick_to(&mut app, 0);
+        tick_to(&mut app, skyway_delay_ticks());
+
+        let rows = fleet_admitted_indices(&mut app);
+        assert_eq!(
+            rows.len(),
+            2,
+            "precondition: the fixture fleet is two hulls"
+        );
+        for (slot, indices) in &rows {
+            assert_eq!(
+                indices.len(),
+                1,
+                "slot {} must answer through the ordinary admitted path on \
+                 EVERY host: an AI response never crosses the mesh, so a host \
+                 that skipped it would simply never apply that hull's pick",
+                slot.0
+            );
+            assert!(
+                indices[0] > 0,
+                "and never with the zero-weight stand-by at index 0"
+            );
+        }
+        rows_by_projection.push(rows);
+    }
+    assert_eq!(
+        rows_by_projection[0], rows_by_projection[1],
+        "and the same hulls answer with the same indices whichever hull this \
+         host projects — `LocalShip` reaches nothing this system decides or \
+         emits"
     );
 }
 
@@ -2403,6 +3200,7 @@ fn seat_scripted_dialogue(
         .map(|(i, _)| CommsResponse {
             text: format!("Response {i}"),
             important: false,
+            ai: Default::default(),
         })
         .collect();
     let mut message = msg(&id);

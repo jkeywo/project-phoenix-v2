@@ -51,6 +51,23 @@ cargo build --release --features ultralight --bin phoenix-host || (echo [ERROR] 
 echo [run-native] building the phone-client bundle...
 node scripts\build-client.mjs || (echo [ERROR] client build failed & exit /b 1)
 
+REM Backstop for the build.rs staging. `ul-next-sys` declares no `links` key, so
+REM Cargo is free to run its SDK *download* alongside our build script instead of
+REM before it; on a cold checkout build.rs can look for the DLLs a moment too
+REM early and warn instead of copying. By here the build is finished, so the SDK
+REM is certainly on disk - copy anything still missing beside the exe, or the
+REM host dies at load with a silent STATUS_DLL_NOT_FOUND.
+for /d %%d in ("target\release\build\ul-next-sys-*") do (
+    if exist "%%~fd\out\ul-sdk\bin\Ultralight.dll" (
+        for %%f in ("%%~fd\out\ul-sdk\bin\*.dll") do (
+            if not exist "target\release\%%~nxf" (
+                echo [run-native] staging %%~nxf beside the exe
+                copy /y "%%f" "target\release\" >nul
+            )
+        )
+    )
+)
+
 if not exist "%HOST%" (
     echo [ERROR] %HOST% not found after the build.
     exit /b 1

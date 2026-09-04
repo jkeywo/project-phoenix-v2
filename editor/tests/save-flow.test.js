@@ -366,9 +366,9 @@ describe('SaveFlow', () => {
     it('dispatches to the `definitions` stringifier when provided', async () => {
       const modeShell = new ModeShell();
       modeShell.switchMode('Definitions');
-      modeShell.setOpenFiles('Definitions', ['assets/factions/federation.toml']);
-      modeShell.setActiveFile('Definitions', 'assets/factions/federation.toml');
-      modeShell.markDirty('Definitions', 'assets/factions/federation.toml', true);
+      modeShell.setOpenFiles('Definitions', ['assets/factions/alliance.toml']);
+      modeShell.setActiveFile('Definitions', 'assets/factions/alliance.toml');
+      modeShell.markDirty('Definitions', 'assets/factions/alliance.toml', true);
 
       const writeFile = vi.fn(async () => {});
       const defStringify = vi.fn(() => 'DEFINITIONS_CONTENT');
@@ -379,7 +379,7 @@ describe('SaveFlow', () => {
       };
 
       const saveFlow = new SaveFlow(modeShell, stringifyFns, writeFile, noopBus);
-      saveFlow.setContent('Definitions', 'assets/factions/federation.toml', {
+      saveFlow.setContent('Definitions', 'assets/factions/alliance.toml', {
         kind: 'faction',
         data: { uuid: 'x', name: 'X', enemies: [] },
       });
@@ -391,7 +391,7 @@ describe('SaveFlow', () => {
         kind: 'faction',
         data: { uuid: 'x', name: 'X', enemies: [] },
       });
-      expect(writeFile).toHaveBeenCalledWith('assets/factions/federation.toml', 'DEFINITIONS_CONTENT');
+      expect(writeFile).toHaveBeenCalledWith('assets/factions/alliance.toml', 'DEFINITIONS_CONTENT');
     });
 
     it('fires fireFactionSaved when saving a faction path in Definitions mode', async () => {
@@ -449,14 +449,14 @@ describe('SaveFlow', () => {
     it('backward-compat: falls back to `entity` stringifier when `definitions` is missing', async () => {
       const modeShell = new ModeShell();
       modeShell.switchMode('Definitions');
-      modeShell.setOpenFiles('Definitions', ['assets/factions/federation.toml']);
-      modeShell.setActiveFile('Definitions', 'assets/factions/federation.toml');
-      modeShell.markDirty('Definitions', 'assets/factions/federation.toml', true);
+      modeShell.setOpenFiles('Definitions', ['assets/factions/alliance.toml']);
+      modeShell.setActiveFile('Definitions', 'assets/factions/alliance.toml');
+      modeShell.markDirty('Definitions', 'assets/factions/alliance.toml', true);
 
       const entityStringify = vi.fn(() => 'FALLBACK');
       const stringifyFns = { world: () => '', entity: entityStringify };
       const saveFlow = new SaveFlow(modeShell, stringifyFns, noopWriter, noopBus);
-      saveFlow.setContent('Definitions', 'assets/factions/federation.toml', { foo: 'bar' });
+      saveFlow.setContent('Definitions', 'assets/factions/alliance.toml', { foo: 'bar' });
 
       const result = await saveFlow.saveActive();
       expect(result.ok).toBe(true);

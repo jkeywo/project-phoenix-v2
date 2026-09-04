@@ -71,6 +71,11 @@
   <script type="module" src="gui/scenario-pick.js"></script>
   <script type="module" src="gui/game-over-view.js"></script>
   <script type="module" src="gui/link-state.js"></script>
+  <!-- The ONE decision behind every full-screen surface that can precede play —
+       the preload overlay, the scenario picker, the waiting overlay and the
+       join field (issue #1359). Before it, the only thing stopping two of them
+       showing contradictory things at once was their z-index order. -->
+  <script type="module" src="gui/pre-play-view.js"></script>
   <script type="module" src="gui/coordination-popup.js"></script>
   <!-- Per-tab session identity (issue: multiple clients on one desktop).
        localStorage is shared across all tabs of an origin, so every console
@@ -557,12 +562,60 @@
     #game-over-overlay[data-outcome="ended"] .game-over-headline {
       color: var(--ink); border-bottom-color: var(--edge-strong);
     }
+    /* A reported ending wears the neutral accent on purpose (issue #1344): the
+       rows below are the result, and tinting the headline green or red would
+       reintroduce exactly the win/loss verdict the report exists to replace. */
+    #game-over-overlay[data-outcome="reported"] .game-over-headline {
+      color: var(--ink); border-bottom-color: var(--edge-strong);
+    }
     #game-over-overlay .game-over-message {
       font-size: var(--text-lg);
       white-space: pre-wrap;
       line-height: 1.7;
       max-width: 64ch;
       letter-spacing: 0.03em;
+    }
+    /* The post-mission report (issue #1344): heading on the left, outcome on
+       the right, one grid row per report row, in the author's order. No score
+       column, no total row and no grade — the wire carries none of them. */
+    #game-over-overlay .game-over-report {
+      display: none;
+      grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+      gap: 10px 24px;
+      margin: 28px 0 0;
+      padding: 0;
+      max-width: 64ch;
+      text-align: left;
+    }
+    #game-over-overlay .game-over-report dt {
+      font-size: var(--text-md);
+      letter-spacing: var(--tracking-wide);
+      text-transform: uppercase;
+      color: var(--ink-dim);
+      white-space: nowrap;
+    }
+    #game-over-overlay .game-over-report dd {
+      margin: 0;
+      font-size: var(--text-md);
+      line-height: 1.6;
+      color: var(--ink);
+    }
+    /* The row's semantic state is the ONLY thing that varies per row, and it
+       varies by accent alone: every row gets identical weight and layout, so
+       none of them reads as the "real" result. */
+    #game-over-overlay .game-over-report dt[data-state="saved"] { color: var(--loaded); }
+    #game-over-overlay .game-over-report dt[data-state="lost"] { color: var(--fire); }
+    #game-over-overlay .game-over-report dt[data-state="partial"] { color: var(--gold); }
+    #game-over-overlay .game-over-report dt[data-state="neutral"] { color: var(--ink-dim); }
+    @media (max-width: 600px) {
+      /* On a phone the two columns stack: the same rows, the same order, and
+         the heading still reads as the label of the line under it. */
+      #game-over-overlay .game-over-report {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 4px;
+      }
+      #game-over-overlay .game-over-report dt { white-space: normal; }
+      #game-over-overlay .game-over-report dt + dd { margin-bottom: 12px; }
     }
     #game-over-overlay .game-over-return-btn {
       margin-top: 32px;
@@ -1340,11 +1393,15 @@
   </div>
 
   <!-- Game-over overlay: shown when GamePhase::GameOver. Displays either
-       "Ship Destroyed" (hull death) or the scenario's game_over message. -->
+       "Ship Destroyed" (hull death) or the scenario's game_over message, and —
+       when the scenario authored one (issue #1344) — the post-mission report
+       rows underneath it, in the order the author wrote them. The rows carry no
+       score, no total and no grade: see gui/game-over-view.js. -->
   <div id="game-over-overlay">
     <div class="game-over-scenario" id="game-over-scenario"></div>
     <div class="game-over-headline" id="game-over-headline"></div>
     <div class="game-over-message" id="game-over-message"></div>
+    <dl class="game-over-report" id="game-over-report"></dl>
     <button id="return-to-lobby-btn" class="game-over-return-btn" data-i18n="client.return_to_lobby">Return to Lobby</button>
   </div>
 
@@ -1564,6 +1621,100 @@
       // that drives every LATER transition repaints instead.
       if (state !== 'ready') linkHasData = false;
       chromeSetConnectionStatus(state);
+      // No applyPrePlaySurfaces() here: which pre-play surface is up does not
+      // depend on the link state (issue #1359 — priority is the whole rule),
+      // and every input that DOES move it re-applies the decision itself.
+    }
+
+    // -- Pre-play surfaces (issue #1359) -------------------------------------
+    // Four full-screen surfaces can precede play — #asset-loading,
+    // #scenario-picker-overlay, #waiting-overlay and #join-entry — and each of
+    // them used to set its own display from its own call site. Nothing but
+    // their z-index order stopped two being displayed at once: a catalogue
+    // arriving over the waiting overlay left BOTH up (render() returns early on
+    // the picker branch, above the line that hid the waiting overlay), and a
+    // refused join opened the code field UNDERNEATH either of them.
+    //
+    // gui/pre-play-view.js now makes the one decision from whether the page is
+    // asking for a join code, the lobby state and the preload fraction, and
+    // this is its only consumer: every site below records its input and calls
+    // applyPrePlaySurfaces(), which shows exactly one surface and hides the
+    // rest. #game-over-overlay is deliberately NOT in the set — it is the
+    // post-play surface and gui/game-over-view.js is already the one pure
+    // decision behind it.
+    //
+    // The lead lines are NOT written from here. Every one of these four
+    // surfaces carries its own data-i18n, and gui/strings.js's applyToDom()
+    // already renders it; the decision's `headline` says what the surface
+    // leads with (and the test pins it to the markup) without being a second
+    // writer of the same string.
+    //
+    // These two are the whole of the shell state the decision needs that is
+    // not already on window.lobbyState.
+    /// Asset preload progress in [0,1] while the host is pre-caching, else null.
+    let preloadFraction = null;
+    /// True while the page is asking the guest for a join code.
+    let joinPromptOpen = false;
+
+    // The surfaces, highest z-index first — the same list gui/pre-play-view.js
+    // exports, kept here for the module-absent case below. The z-index order
+    // in the stylesheet, this list and PRE_PLAY_SURFACES are asserted equal by
+    // tests/client/pre-play-view.test.js.
+    const PRE_PLAY_SURFACE_IDS = [
+      'asset-loading', 'scenario-picker-overlay', 'waiting-overlay', 'join-entry',
+    ];
+
+    // The same priority ladder, inline, for the case where the module is not
+    // there at all. Nothing here may return early: #join-entry is the page's
+    // ONLY input for a join code, and before #1359 showEntry() opened it from
+    // this classic script with no dependency on anything. A bail-out would
+    // mean a 404 or a parse error on one gui/ module leaving a guest on a
+    // permanently blank phone with no way to join — the module race that
+    // motivated it is only the first frame, but a load failure is every frame.
+    // Same shape as the sectionVisibility fallback in render().
+    function localPrePlayView(conn, lob, fraction) {
+      const n = Number(fraction);
+      const absent = fraction === null || fraction === undefined || fraction === ''
+        || !Number.isFinite(n);
+      const pct = absent ? null : Math.round(Math.min(1, Math.max(0, n)) * 100);
+      const surface = !absent ? 'asset-loading'
+        : lob.pickingScenario ? 'scenario-picker-overlay'
+        : lob.waitingForScenario ? 'waiting-overlay'
+        : conn.joinPrompt ? 'join-entry'
+        : null;
+      return { surface, headline: null, measurable: !absent, pct };
+    }
+
+    function applyPrePlaySurfaces() {
+      const decide = (typeof window.prePlayView === 'function')
+        ? window.prePlayView : localPrePlayView;
+      const ids = Array.isArray(window.PRE_PLAY_SURFACES)
+        ? window.PRE_PLAY_SURFACES : PRE_PLAY_SURFACE_IDS;
+      const ls = window.lobbyState;
+      const view = decide(
+        { joinPrompt: joinPromptOpen },
+        {
+          pickingScenario: !!(ls && ls.showScenarioPicker()),
+          waitingForScenario: !!(ls && ls.waitingForScenario),
+        },
+        preloadFraction,
+      );
+      for (const id of ids) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        const shown = id === view.surface;
+        // #join-entry keeps its own `.open` class — both its hidden base rule
+        // and the flex it opens into live in the stylesheet. The other three
+        // are the plain display toggles they always were.
+        if (id === 'join-entry') el.classList.toggle('open', shown);
+        else el.style.display = shown ? 'flex' : 'none';
+      }
+      // Only the preload has a number, so only it writes one.
+      if (view.measurable) {
+        const pctEl = document.getElementById('asset-loading-pct');
+        if (pctEl) pctEl.textContent = String(view.pct);
+      }
+      return view;
     }
 
     // -- Return to Lobby (GameOver overlay button) ---------------------------
@@ -1957,9 +2108,14 @@
       // QR-first pre-scenario picker (issue #755): before any world loads, the
       // host delivers the catalog and this phone can make the first valid
       // selection. Short-circuit the normal lobby/game render while active.
-      const pickerEl = document.getElementById('scenario-picker-overlay');
+      // Which pre-play surface is up — picker, waiting overlay, asset preload
+      // or the join field — is one decision now (issue #1359), taken here for
+      // every one of them rather than per surface at four call sites. The
+      // short-circuit below still turns on the raw lobby fact: the picker's
+      // CONTENT has to be built whenever the catalogue is live, even on the
+      // frame an opaque asset-preload overlay is covering it.
+      applyPrePlaySurfaces();
       const pickingScenario = !!(window.lobbyState && window.lobbyState.showScenarioPicker());
-      if (pickerEl) pickerEl.style.display = pickingScenario ? 'flex' : 'none';
       if (pickingScenario) {
         $('lobby-ui').className = '';
         const bezel0 = $('phone-bezel');
@@ -2080,6 +2236,10 @@
           // ending that declared no side, which the view frames as ENDED.
           outcome: ls ? ls.gameOverOutcome : null,
           scenarioTitle: ls ? ls.scenarioTitle : '',
+          // The post-mission report (issue #1344). Empty for every scenario
+          // that has not authored one, which is what keeps their endings
+          // exactly as they were.
+          report: ls ? ls.gameOverReport : [],
         });
         if (gv.visible) {
           gameOverEl.dataset.outcome = gv.outcome;
@@ -2088,18 +2248,55 @@
           const headlineEl = document.getElementById('game-over-headline');
           if (headlineEl) headlineEl.textContent = t(gv.headlineId);
           gameOverMsgEl.textContent = gv.bodyId ? t(gv.bodyId) : wireText(gv.bodyText);
+          // The report rows, in the author's order. Rebuilt rather than diffed:
+          // this runs once, on an overlay that has just appeared. The row's
+          // state rides a data attribute so the accent is CSS's decision and
+          // not a second vocabulary in here.
+          //
+          // `wireText` and NOT `t`, for the same reason the scenario name and
+          // the closing line above it use it: these are wire-borne fields, and
+          // a phone resolves the whole decoded `ServerMessage` through
+          // `localiseTree` at ingress (gui/rendezvous-transport.js), so by the
+          // time a row reaches here its two ids are already the prose they name.
+          // `t()` on already-resolved prose is a table MISS, which renders
+          // ⟨Lyra Ascending⟩ and warns once per row. `wireText` passes a
+          // resolved value through and still resolves an id that arrived raw,
+          // so a host that never learned the ids — or any future ingress that
+          // stops resolving them — still renders prose here.
+          //
+          // This overlay is the PHONE's alone. The Viewscreen (server.html) has
+          // its own, because its rows arrive on the HUD payload rather than on
+          // a `GameOver` message and are resolved by `localiseHostPayload`
+          // before they get there. What the two surfaces genuinely share is the
+          // row NORMALISATION — `gv.rows` came out of the same exported
+          // `reportRows` server.html calls — which is the part that decides
+          // what the report says, as opposed to how it is painted.
+          const reportEl = document.getElementById('game-over-report');
+          if (reportEl) {
+            reportEl.replaceChildren();
+            for (const row of gv.rows) {
+              const heading = document.createElement('dt');
+              heading.textContent = wireText(row.headingId);
+              const outcome = document.createElement('dd');
+              outcome.textContent = wireText(row.outcomeId);
+              if (row.state) {
+                heading.dataset.state = row.state;
+                outcome.dataset.state = row.state;
+              }
+              reportEl.append(heading, outcome);
+            }
+            reportEl.style.display = gv.rows.length ? 'grid' : 'none';
+          }
           gameOverEl.style.display = 'flex';
         } else {
           gameOverEl.style.display = 'none';
         }
       }
 
-      // Waiting-for-scenario overlay: shown after ReturnToLobby while the
-      // host selects a scenario from the server scenario-selection panel.
-      const waitingEl = document.getElementById('waiting-overlay');
-      if (waitingEl) {
-        waitingEl.style.display = (window.lobbyState && window.lobbyState.waitingForScenario) ? 'flex' : 'none';
-      }
+      // The waiting-for-scenario overlay used to be toggled here, below a
+      // branch that had already returned whenever the picker was up — which is
+      // how both came to be displayed at once. It is decided with the rest of
+      // the pre-play surfaces at the top of this function now (issue #1359).
 
       if (spectating) {
         renderSpectator(s);
@@ -3325,18 +3522,18 @@
         case 'status':
           setStatus(t(fx.id));
           break;
-        case 'hide-loading': {
-          const loadingEl = document.getElementById('asset-loading');
-          if (loadingEl) loadingEl.style.display = 'none';
+        // The two preload effects record the fraction and let the one pre-play
+        // decision raise or drop the overlay (issue #1359) — this is the only
+        // input of the three that carries a measurable quantity, and the only
+        // surface allowed to put a number on the screen.
+        case 'hide-loading':
+          preloadFraction = null;
+          applyPrePlaySurfaces();
           break;
-        }
-        case 'show-loading': {
-          const pctEl = document.getElementById('asset-loading-pct');
-          const assetEl = document.getElementById('asset-loading');
-          if (assetEl) assetEl.style.display = 'flex';
-          if (pctEl) pctEl.textContent = String(fx.pct);
+        case 'show-loading':
+          preloadFraction = fx.pct / 100;
+          applyPrePlaySurfaces();
           break;
-        }
         case 'bezel-alert':
           applyBezelAlert(fx.on);
           break;
@@ -3774,7 +3971,6 @@
       const stampMeta = document.querySelector('meta[name="phoenix-client-stamp"]');
       const stamp = (stampMeta && stampMeta.content) || '';
 
-      const panel = document.getElementById('join-entry');
       const input = document.getElementById('join-code-input');
       const submit = document.getElementById('join-submit-btn');
       const errorEl = document.getElementById('join-entry-error');
@@ -3804,9 +4000,14 @@
       };
       window.phoenixLink = activeLink;
 
+      // The panel is no longer opened and closed from here (issue #1359):
+      // these two record whether the page is asking for a code, and the one
+      // pre-play decision puts the field on the screen — so a refusal can no
+      // longer open it underneath an overlay the guest cannot dismiss.
       function showEntry(reason) {
         if (errorEl) errorEl.textContent = reason ? t(codes.reasonStringId(reason)) : '';
-        if (panel) panel.classList.add('open');
+        joinPromptOpen = true;
+        applyPrePlaySurfaces();
         if (input) { input.focus(); input.select(); }
       }
 
@@ -3816,7 +4017,8 @@
         const parsed = codes.parseJoinCode(typed, codes.NAMESPACE_CLIENT, data);
         if (!parsed.ok) { showEntry(parsed.reason); return; }
         if (errorEl) errorEl.textContent = '';
-        if (panel) panel.classList.remove('open');
+        joinPromptOpen = false;
+        applyPrePlaySurfaces();
         setStatus(t('client.status_connecting_host'));
 
         joiner = transport.createRendezvousJoiner({

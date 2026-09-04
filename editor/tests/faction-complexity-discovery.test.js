@@ -156,7 +156,7 @@ describe('discoverFactionsAndComplexity', () => {
       readFile: async (path) => factionContent[path],
     });
     expect(result.factionMap.size).toBeGreaterThan(0);
-    expect(result.factionMap.get('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa')).toBe('Federation');
+    expect(result.factionMap.get('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa')).toBe('Alliance');
     expect(result.complexityPaths.length).toBe(
       complexityEntries.filter((f) => f.endsWith('.toml')).length,
     );

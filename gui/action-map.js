@@ -16,6 +16,7 @@
  */
 
 import { dispatchRepairTeam, setRepairPriority, setRepairTargetPriority } from './repair-dispatch.js';
+import { dispatchSecurityTeam, recallSecurityTeam } from './security-dispatch.js';
 import {
   sendHelmInput,
   sendThrust,
@@ -466,6 +467,28 @@ export const ACTION_MAP = Object.freeze({
       ? (_type, data) => send('ControlSystemCorrelated', { correlation: a.correlation, ...data })
       : send;
     dispatchRepairTeam(a.team_idx, a.target, route, controlSystemId(a, 'repair'));
+  },
+
+  /**
+   * Send one Security team to a named target for a named action (issue #1346).
+   *
+   * All three parts are named because none can be resolved server-side from
+   * context: a hull musters several teams working several places at once, so a
+   * single Tactical lock cannot say which team, which target, or which of that
+   * target's authored actions is meant. `a.target` is an entity uuid as the
+   * Security blackboard carries it; `a.action` is one of the four generic action
+   * ids. The server still owns every rule and refuses with a `strings.csv` id.
+   */
+  dispatch_security_team: (a, send) => {
+    dispatchSecurityTeam(a.team_idx, a.target, a.action, send);
+  },
+
+  /**
+   * Bring one Security team home (issue #1346), ending whatever it was doing
+   * where it stands. Names its team for the same reason the dispatch does.
+   */
+  recall_security_team: (a, send) => {
+    recallSecurityTeam(a.team_idx, send);
   },
 
   /**

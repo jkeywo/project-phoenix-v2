@@ -969,7 +969,7 @@ fn human_locks_a_non_hostile_ally_ship() {
     set_tactical_radar_range(&mut app, 300.0);
     // An allied courier — same faction as the crew, so never a threat. Still a
     // valid designation for a human hand on the radar.
-    setup_harrow_ship_hostile_to_federation(&mut app);
+    setup_harrow_ship_hostile_to_alliance(&mut app);
     spawn_lockable_contact(&mut app, "ally-courier", 0.0, -30.0, Some(harrow_faction()));
 
     let out = push_human_set_target(&mut app, "ally-courier");
@@ -1025,16 +1025,16 @@ fn combat_lock_is_mutually_exclusive_between_a_hostile_and_a_non_hostile() {
     let mut app = test_app();
     start_game_with_weapons(&mut app);
     set_tactical_radar_range(&mut app, 300.0);
-    setup_harrow_ship_hostile_to_federation(&mut app);
+    setup_harrow_ship_hostile_to_alliance(&mut app);
     // One non-hostile (a factionless derelict) and one genuine hostile
-    // (Federation, an enemy of the crew's Harrow faction), both in radar range.
+    // (Alliance, an enemy of the crew's Harrow faction), both in radar range.
     spawn_lockable_contact(&mut app, "derelict-hulk", 0.0, -30.0, None);
     spawn_lockable_contact(
         &mut app,
         "hostile-raider",
         0.0,
         -40.0,
-        Some(federation_faction()),
+        Some(alliance_faction()),
     );
 
     // Lock the derelict → the one slot holds it.
@@ -1126,7 +1126,7 @@ fn backfilled_tactical_does_not_lock_a_non_objective_named_derelict() {
     let derelict = uuid::Uuid::new_v4().to_string();
 
     set_tactical_radar_range(&mut app, 100.0);
-    setup_harrow_ship_hostile_to_federation(&mut app);
+    setup_harrow_ship_hostile_to_alliance(&mut app);
     set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
 
     // A drifting hulk right next to us — a `Ship` (so it is ON the AI's scan
@@ -1149,6 +1149,167 @@ fn backfilled_tactical_does_not_lock_a_non_objective_named_derelict() {
         get_weapons_target(&mut app).is_none(),
         "a backfilled Tactical must not auto-lock a non-hostile derelict that no \
          objective has named — the AI's eligibility gate stays hostile-only"
+    );
+}
+
+// ── Confirmed debris threats (issue #1347) ─────────────────────────────
+//
+// The engine can tell every tick which rocks are on course. Tactical Backfill
+// deliberately cannot: the candidate source is gated on `DebrisThreat::
+// confirmed`, which only an assessment somebody took ever raises. These tests
+// pin that gate, and the deadline ordering it lets through.
+
+/// Spawn a moving hazard the Tactical selector can see.
+///
+/// Not a `Ship` and with no faction — a rock is neither — so the ONLY way it can
+/// become a candidate is the assessment-gated debris source. That is what makes
+/// "an unassessed rock is invisible to Backfill" a real claim here rather than an
+/// accident of which scan surface it was spawned onto.
+fn spawn_debris_contact(
+    app: &mut App,
+    uuid: &str,
+    x: f32,
+    z: f32,
+    confirmed: bool,
+    secs_to_impact: Option<f32>,
+) -> Entity {
+    let mut threat = crate::debris::DebrisThreat::new(crate::debris::DebrisConfig {
+        protected_target: "the-depot".into(),
+        impact_radius: 40.0,
+        ..Default::default()
+    });
+    threat.assessed = confirmed;
+    threat.confirmed = confirmed;
+    threat.reckoned_secs_to_impact = secs_to_impact;
+    app.world_mut()
+        .spawn((
+            crate::entities::spawner::EntityUuid(uuid.into()),
+            Transform::from_xyz(x, 0.0, z),
+            threat,
+        ))
+        .id()
+}
+
+/// The shared arrangement: a Backfilled Tactical actively scanning, with the
+/// hostile registry present so the ordinary sources are live alongside debris.
+fn backfilled_tactical_looking_for_targets(app: &mut App) {
+    set_tactical_radar_range(app, 100.0);
+    setup_harrow_ship_hostile_to_alliance(app);
+    set_tactical_control_source(app, crate::ship::control_source::ControlSource::Ai);
+    insert_untargeted_destroy_objective(app, 35.0);
+    set_local_last_attacker(app, None);
+}
+
+#[test]
+fn backfilled_tactical_ignores_a_rock_nobody_has_assessed() {
+    // THE GATE, and the whole reason the Sensors seat is load-bearing. This rock
+    // is close aboard and — as far as the simulation privately knows — about to
+    // arrive. Nobody has looked at it, so Tactical must not see it at all.
+    let mut app = test_app();
+    let rock = uuid::Uuid::new_v4().to_string();
+    backfilled_tactical_looking_for_targets(&mut app);
+    spawn_debris_contact(&mut app, &rock, 0.0, -10.0, false, Some(5.0));
+
+    tick(&mut app);
+
+    assert!(
+        get_weapons_target(&mut app).is_none(),
+        "a backfilled Tactical must not lock a hazard no assessment has confirmed \
+         — engaging rocks the crew were never told about would make the Sensors \
+         seat decorative"
+    );
+}
+
+#[test]
+fn backfilled_tactical_locks_a_confirmed_rock() {
+    // The other half of the gate: once an assessment HAS said so, the same
+    // contact in the same place becomes a candidate. Only the threat state
+    // differs from the test above.
+    let mut app = test_app();
+    let rock = uuid::Uuid::new_v4().to_string();
+    backfilled_tactical_looking_for_targets(&mut app);
+    spawn_debris_contact(&mut app, &rock, 0.0, -10.0, true, Some(120.0));
+
+    tick(&mut app);
+
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some(rock.as_str()),
+        "a confirmed threat to a protected asset is an eligible Tactical target"
+    );
+}
+
+#[test]
+fn backfilled_tactical_takes_the_nearest_deadline_first() {
+    // The prioritisation the issue asks for, and the reason the urgency bands
+    // exist. Two confirmed rocks, equally eligible — the ONLY thing separating
+    // them is when each arrives. Both sit inside the authored
+    // `debris_pressing_secs`; only one is inside `debris_urgent_secs`, and that
+    // single band has to beat the 50-point switch margin for the pick to move.
+    let mut app = test_app();
+    let patient = "11111111-1111-4111-8111-111111111111";
+    let urgent = "99999999-9999-4999-8999-999999999999";
+    backfilled_tactical_looking_for_targets(&mut app);
+    // The patient rock carries the SMALLER uuid, so the selector's tie-break
+    // (smallest uuid wins) would pick it if the deadline terms did nothing. The
+    // assertion therefore fails loudly if the bands are dropped or misguarded.
+    spawn_debris_contact(&mut app, patient, 0.0, -12.0, true, Some(50.0));
+    spawn_debris_contact(&mut app, urgent, 0.0, -10.0, true, Some(10.0));
+
+    tick(&mut app);
+
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some(urgent),
+        "with two confirmed rocks eligible, Tactical works the queue \
+         earliest-deadline-first"
+    );
+}
+
+#[test]
+fn backfilled_tactical_prefers_a_rock_with_a_real_deadline_to_one_with_none() {
+    // `impact_secs` is ABSENT on a contact confirmed earlier and since shoved off
+    // course, and an absent fact reads as 0 — which is a real answer here,
+    // "arriving now". Without the separate `debris_deadline_known` marker the
+    // deadline-less rock would read as maximally urgent and out-rank one that
+    // genuinely is about to land. It carries the smaller uuid, so the tie-break
+    // favours it too.
+    let mut app = test_app();
+    let no_deadline = "11111111-1111-4111-8111-111111111111";
+    let arriving = "99999999-9999-4999-8999-999999999999";
+    backfilled_tactical_looking_for_targets(&mut app);
+    spawn_debris_contact(&mut app, no_deadline, 0.0, -12.0, true, None);
+    spawn_debris_contact(&mut app, arriving, 0.0, -10.0, true, Some(8.0));
+
+    tick(&mut app);
+
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some(arriving),
+        "a missing deadline must not read as zero seconds and beat a rock that \
+         really is arriving"
+    );
+}
+
+#[test]
+fn backfilled_tactical_drops_a_rock_that_has_already_landed() {
+    // Nothing left to intercept. Leaving a struck contact in the source would
+    // hold the lock on a rock that has already done its damage while a live one
+    // went unengaged.
+    let mut app = test_app();
+    let landed = uuid::Uuid::new_v4().to_string();
+    backfilled_tactical_looking_for_targets(&mut app);
+    let entity = spawn_debris_contact(&mut app, &landed, 0.0, -10.0, true, Some(0.0));
+    app.world_mut()
+        .get_mut::<crate::debris::DebrisThreat>(entity)
+        .expect("the contact carries its threat state")
+        .struck = true;
+
+    tick(&mut app);
+
+    assert!(
+        get_weapons_target(&mut app).is_none(),
+        "a contact that has already reached its protected asset is not a target"
     );
 }
 
@@ -6884,12 +7045,12 @@ fn hostile_with_torpedo_tubes_is_torpedo_armed_before_it_fires() {
     let contact = "cc000000-0000-0000-0000-000000000957";
     setup_ship_contact_world(&mut app, contact, 0.0, -50.0);
     start_game(&mut app);
-    setup_harrow_ship_hostile_to_federation(&mut app);
+    setup_harrow_ship_hostile_to_alliance(&mut app);
     app.world_mut().spawn((
         crate::server_app::Ship,
         crate::entities::spawner::EntityUuid(contact.into()),
         Transform::from_xyz(0.0, 0.0, -50.0),
-        FactionComponent(federation_faction()),
+        FactionComponent(alliance_faction()),
         cold_torpedo_system(),
     ));
     tick(&mut app);
@@ -6908,13 +7069,13 @@ fn hostile_without_torpedo_tubes_is_not_torpedo_armed() {
     let contact = "cc000000-0000-0000-0000-000000000958";
     setup_ship_contact_world(&mut app, contact, 0.0, -50.0);
     start_game(&mut app);
-    setup_harrow_ship_hostile_to_federation(&mut app);
+    setup_harrow_ship_hostile_to_alliance(&mut app);
     // A phaser-only escort carries no TorpedoSystemResource at all.
     app.world_mut().spawn((
         crate::server_app::Ship,
         crate::entities::spawner::EntityUuid(contact.into()),
         Transform::from_xyz(0.0, 0.0, -50.0),
-        FactionComponent(federation_faction()),
+        FactionComponent(alliance_faction()),
     ));
     tick(&mut app);
 
@@ -6931,7 +7092,7 @@ fn a_non_hostile_torpedo_boat_is_not_torpedo_armed() {
     let contact = "cc000000-0000-0000-0000-000000000959";
     setup_ship_contact_world(&mut app, contact, 0.0, -50.0);
     start_game(&mut app);
-    setup_harrow_ship_hostile_to_federation(&mut app);
+    setup_harrow_ship_hostile_to_alliance(&mut app);
     // Same faction as the observing ship: torpedo tubes, but not a threat.
     app.world_mut().spawn((
         crate::server_app::Ship,
@@ -7008,12 +7169,12 @@ fn spawn_entity_target_xyz(app: &mut App, uuid: &str, x: f32, y: f32, z: f32) {
 // ── Nearest-hostile acquisition fixtures (issue #703) ──────────────────
 
 /// Faction UUIDs for the nearest-hostile tests. Mirrors combat_test.toml:
-/// Harrow lists Federation as an enemy.
+/// Harrow lists Alliance as an enemy.
 fn harrow_faction() -> uuid::Uuid {
     uuid::Uuid::parse_str("cccccccc-3333-4333-8333-cccccccccccc").unwrap()
 }
 
-fn federation_faction() -> uuid::Uuid {
+fn alliance_faction() -> uuid::Uuid {
     uuid::Uuid::parse_str("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa").unwrap()
 }
 
@@ -7047,9 +7208,9 @@ fn set_tactical_radar_range(app: &mut App, range: f32) {
 }
 
 /// Put the LocalShip in the Harrow faction and load a registry in which
-/// Harrow is hostile to Federation — the same shape `combat_test.toml`
+/// Harrow is hostile to Alliance — the same shape `combat_test.toml`
 /// builds via `add_faction_enemy`.
-fn setup_harrow_ship_hostile_to_federation(app: &mut App) {
+fn setup_harrow_ship_hostile_to_alliance(app: &mut App) {
     use crate::ai::faction::{FactionConfig, FactionRegistry};
 
     let mut registry = FactionRegistry::new();
@@ -7057,13 +7218,13 @@ fn setup_harrow_ship_hostile_to_federation(app: &mut App) {
         display_name: None,
         uuid: harrow_faction(),
         name: "Harrow".into(),
-        enemies: vec![federation_faction()],
+        enemies: vec![alliance_faction()],
         compliance: None,
     });
     registry.insert(FactionConfig {
         display_name: None,
-        uuid: federation_faction(),
-        name: "Federation".into(),
+        uuid: alliance_faction(),
+        name: "Alliance".into(),
         enemies: vec![],
         compliance: None,
     });
@@ -7277,11 +7438,11 @@ fn tactical_ai_acquires_nearest_hostile_without_being_shot_first() {
     let hostile_uuid = uuid::Uuid::new_v4().to_string();
 
     set_tactical_radar_range(&mut app, 100.0);
-    setup_harrow_ship_hostile_to_federation(&mut app);
+    setup_harrow_ship_hostile_to_alliance(&mut app);
     set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
 
-    // A Federation ship well inside the 100-unit radar horizon.
-    spawn_factioned_target(&mut app, &hostile_uuid, 0.0, -50.0, federation_faction());
+    // A Alliance ship well inside the 100-unit radar horizon.
+    spawn_factioned_target(&mut app, &hostile_uuid, 0.0, -50.0, alliance_faction());
     insert_untargeted_destroy_objective(&mut app, 35.0);
 
     // Nobody has shot us: no LastShipAttacker, and the objective names
@@ -7307,13 +7468,13 @@ fn tactical_ai_acquires_the_nearest_of_several_hostiles() {
     let far_uuid = uuid::Uuid::new_v4().to_string();
 
     set_tactical_radar_range(&mut app, 100.0);
-    setup_harrow_ship_hostile_to_federation(&mut app);
+    setup_harrow_ship_hostile_to_alliance(&mut app);
     set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
 
     // Both in range; spawn the far one first so the result cannot be an
     // artefact of iteration order.
-    spawn_factioned_target(&mut app, &far_uuid, 0.0, -90.0, federation_faction());
-    spawn_factioned_target(&mut app, &near_uuid, 0.0, -20.0, federation_faction());
+    spawn_factioned_target(&mut app, &far_uuid, 0.0, -90.0, alliance_faction());
+    spawn_factioned_target(&mut app, &near_uuid, 0.0, -20.0, alliance_faction());
     insert_untargeted_destroy_objective(&mut app, 35.0);
     set_local_last_attacker(&mut app, None);
 
@@ -7335,11 +7496,11 @@ fn tactical_ai_does_not_acquire_a_hostile_beyond_radar_range() {
     let hostile_uuid = uuid::Uuid::new_v4().to_string();
 
     set_tactical_radar_range(&mut app, 100.0);
-    setup_harrow_ship_hostile_to_federation(&mut app);
+    setup_harrow_ship_hostile_to_alliance(&mut app);
     set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
 
     // Hostile at 500 units — far beyond the 100-unit radar horizon.
-    spawn_factioned_target(&mut app, &hostile_uuid, 0.0, -500.0, federation_faction());
+    spawn_factioned_target(&mut app, &hostile_uuid, 0.0, -500.0, alliance_faction());
     insert_untargeted_destroy_objective(&mut app, 35.0);
     set_local_last_attacker(&mut app, None);
 
@@ -7360,7 +7521,7 @@ fn tactical_ai_does_not_acquire_a_non_hostile() {
     let friendly_uuid = uuid::Uuid::new_v4().to_string();
 
     set_tactical_radar_range(&mut app, 100.0);
-    setup_harrow_ship_hostile_to_federation(&mut app);
+    setup_harrow_ship_hostile_to_alliance(&mut app);
     set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
 
     // Another Harrow ship — our own faction — right next to us.
@@ -7386,13 +7547,13 @@ fn explicit_destroy_target_takes_precedence_over_a_nearer_hostile() {
     let nearer_uuid = uuid::Uuid::new_v4().to_string();
 
     set_tactical_radar_range(&mut app, 100.0);
-    setup_harrow_ship_hostile_to_federation(&mut app);
+    setup_harrow_ship_hostile_to_alliance(&mut app);
     set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
 
     // The named target is further away than an unnamed hostile. Both are
-    // Federation, both in radar range.
-    spawn_factioned_target(&mut app, &named_uuid, 0.0, -80.0, federation_faction());
-    spawn_factioned_target(&mut app, &nearer_uuid, 0.0, -10.0, federation_faction());
+    // Alliance, both in radar range.
+    spawn_factioned_target(&mut app, &named_uuid, 0.0, -80.0, alliance_faction());
+    spawn_factioned_target(&mut app, &nearer_uuid, 0.0, -10.0, alliance_faction());
     app.world_mut()
         .resource_mut::<crate::world::server::WorldContentRuntime>()
         .name_to_uuid
@@ -7419,12 +7580,12 @@ fn last_attacker_takes_precedence_over_a_nearer_hostile() {
     let nearer_uuid = uuid::Uuid::new_v4().to_string();
 
     set_tactical_radar_range(&mut app, 100.0);
-    setup_harrow_ship_hostile_to_federation(&mut app);
+    setup_harrow_ship_hostile_to_alliance(&mut app);
     set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
 
     // The attacker is further away than an unengaged hostile.
-    spawn_factioned_target(&mut app, &attacker_uuid, 0.0, -80.0, federation_faction());
-    spawn_factioned_target(&mut app, &nearer_uuid, 0.0, -10.0, federation_faction());
+    spawn_factioned_target(&mut app, &attacker_uuid, 0.0, -80.0, alliance_faction());
+    spawn_factioned_target(&mut app, &nearer_uuid, 0.0, -10.0, alliance_faction());
     insert_untargeted_destroy_objective(&mut app, 35.0);
     set_local_last_attacker(&mut app, Some(attacker_uuid.clone()));
 
@@ -7455,10 +7616,10 @@ fn an_established_lock_is_retained_when_a_nearer_hostile_appears() {
     let nearer_uuid = uuid::Uuid::new_v4().to_string();
 
     set_tactical_radar_range(&mut app, 100.0);
-    setup_harrow_ship_hostile_to_federation(&mut app);
+    setup_harrow_ship_hostile_to_alliance(&mut app);
     set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
 
-    spawn_factioned_target(&mut app, &engaged_uuid, 0.0, -60.0, federation_faction());
+    spawn_factioned_target(&mut app, &engaged_uuid, 0.0, -60.0, alliance_faction());
     insert_untargeted_destroy_objective(&mut app, 35.0);
     set_local_last_attacker(&mut app, None);
 
@@ -7471,7 +7632,7 @@ fn an_established_lock_is_retained_when_a_nearer_hostile_appears() {
     );
 
     // B arrives, closer than A, and equally hostile.
-    spawn_factioned_target(&mut app, &nearer_uuid, 0.0, -10.0, federation_faction());
+    spawn_factioned_target(&mut app, &nearer_uuid, 0.0, -10.0, alliance_faction());
     tick(&mut app);
 
     assert_eq!(
@@ -7492,11 +7653,11 @@ fn the_lock_is_rescanned_when_the_current_target_dies() {
     let other_uuid = uuid::Uuid::new_v4().to_string();
 
     set_tactical_radar_range(&mut app, 100.0);
-    setup_harrow_ship_hostile_to_federation(&mut app);
+    setup_harrow_ship_hostile_to_alliance(&mut app);
     set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
 
-    let engaged = spawn_factioned_target(&mut app, &engaged_uuid, 0.0, -60.0, federation_faction());
-    spawn_factioned_target(&mut app, &other_uuid, 0.0, -90.0, federation_faction());
+    let engaged = spawn_factioned_target(&mut app, &engaged_uuid, 0.0, -60.0, alliance_faction());
+    spawn_factioned_target(&mut app, &other_uuid, 0.0, -90.0, alliance_faction());
     insert_untargeted_destroy_objective(&mut app, 35.0);
     set_local_last_attacker(&mut app, None);
 
@@ -7534,11 +7695,11 @@ fn the_lock_is_rescanned_when_the_current_target_dies_with_no_radar_horizon() {
 
     // Deliberately no set_tactical_radar_range: no WeaponsConsoleSection
     // means a base range of 0, which the system reads as "unbounded".
-    setup_harrow_ship_hostile_to_federation(&mut app);
+    setup_harrow_ship_hostile_to_alliance(&mut app);
     set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
 
-    let engaged = spawn_factioned_target(&mut app, &engaged_uuid, 0.0, -60.0, federation_faction());
-    spawn_factioned_target(&mut app, &other_uuid, 0.0, -90.0, federation_faction());
+    let engaged = spawn_factioned_target(&mut app, &engaged_uuid, 0.0, -60.0, alliance_faction());
+    spawn_factioned_target(&mut app, &other_uuid, 0.0, -90.0, alliance_faction());
     insert_untargeted_destroy_objective(&mut app, 35.0);
     set_local_last_attacker(&mut app, None);
 
@@ -7570,11 +7731,11 @@ fn the_lock_is_rescanned_when_the_current_target_leaves_radar_range() {
     let other_uuid = uuid::Uuid::new_v4().to_string();
 
     set_tactical_radar_range(&mut app, 100.0);
-    setup_harrow_ship_hostile_to_federation(&mut app);
+    setup_harrow_ship_hostile_to_alliance(&mut app);
     set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
 
-    let fleeing = spawn_factioned_target(&mut app, &fleeing_uuid, 0.0, -60.0, federation_faction());
-    spawn_factioned_target(&mut app, &other_uuid, 0.0, -90.0, federation_faction());
+    let fleeing = spawn_factioned_target(&mut app, &fleeing_uuid, 0.0, -60.0, alliance_faction());
+    spawn_factioned_target(&mut app, &other_uuid, 0.0, -90.0, alliance_faction());
     insert_untargeted_destroy_objective(&mut app, 35.0);
     set_local_last_attacker(&mut app, None);
 
@@ -7609,11 +7770,11 @@ fn an_established_lock_outranks_a_new_last_attacker() {
     let attacker_uuid = uuid::Uuid::new_v4().to_string();
 
     set_tactical_radar_range(&mut app, 100.0);
-    setup_harrow_ship_hostile_to_federation(&mut app);
+    setup_harrow_ship_hostile_to_alliance(&mut app);
     set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
 
-    spawn_factioned_target(&mut app, &engaged_uuid, 0.0, -60.0, federation_faction());
-    spawn_factioned_target(&mut app, &attacker_uuid, 0.0, -90.0, federation_faction());
+    spawn_factioned_target(&mut app, &engaged_uuid, 0.0, -60.0, alliance_faction());
+    spawn_factioned_target(&mut app, &attacker_uuid, 0.0, -90.0, alliance_faction());
     insert_untargeted_destroy_objective(&mut app, 35.0);
     set_local_last_attacker(&mut app, None);
 
@@ -7650,10 +7811,10 @@ fn combat_doctrine_drops_a_retained_factionless_assault_lock() {
     let hostile_uuid = uuid::Uuid::new_v4().to_string();
 
     set_tactical_radar_range(&mut app, 100.0);
-    setup_harrow_ship_hostile_to_federation(&mut app);
+    setup_harrow_ship_hostile_to_alliance(&mut app);
     set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
     spawn_entity_target(&mut app, &starbase_uuid, 0.0, -40.0);
-    spawn_factioned_target(&mut app, &hostile_uuid, 0.0, -60.0, federation_faction());
+    spawn_factioned_target(&mut app, &hostile_uuid, 0.0, -60.0, alliance_faction());
     insert_untargeted_destroy_objective(&mut app, 35.0);
     set_weapons_target(&mut app, Some(starbase_uuid));
 
@@ -7678,7 +7839,7 @@ fn tier_four_does_not_acquire_a_factioned_non_ship() {
     let station_uuid = uuid::Uuid::new_v4().to_string();
 
     set_tactical_radar_range(&mut app, 100.0);
-    setup_harrow_ship_hostile_to_federation(&mut app);
+    setup_harrow_ship_hostile_to_alliance(&mut app);
     set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
 
     // A hostile-factioned entity that is neither a ship nor a
@@ -7687,7 +7848,7 @@ fn tier_four_does_not_acquire_a_factioned_non_ship() {
     app.world_mut().spawn((
         crate::entities::spawner::EntityUuid(station_uuid),
         Transform::from_xyz(0.0, 0.0, -10.0),
-        FactionComponent(federation_faction()),
+        FactionComponent(alliance_faction()),
     ));
     insert_untargeted_destroy_objective(&mut app, 35.0);
     set_local_last_attacker(&mut app, None);
@@ -7751,7 +7912,7 @@ fn tactical_ai_acquires_a_factioned_static_point_defence_station() {
     let station_uuid = uuid::Uuid::new_v4().to_string();
 
     set_tactical_radar_range(&mut app, 100.0);
-    setup_harrow_ship_hostile_to_federation(&mut app);
+    setup_harrow_ship_hostile_to_alliance(&mut app);
     set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
 
     // A factioned starbase-shaped station well inside the radar horizon —
@@ -7764,7 +7925,7 @@ fn tactical_ai_acquires_a_factioned_static_point_defence_station() {
         &station_uuid,
         0.0,
         -50.0,
-        federation_faction(),
+        alliance_faction(),
     );
     insert_untargeted_destroy_objective(&mut app, 35.0);
     set_local_last_attacker(&mut app, None);
@@ -7792,7 +7953,7 @@ fn tactical_ai_does_not_acquire_an_unfactioned_static_point_defence_station() {
     let station_uuid = uuid::Uuid::new_v4().to_string();
 
     set_tactical_radar_range(&mut app, 100.0);
-    setup_harrow_ship_hostile_to_federation(&mut app);
+    setup_harrow_ship_hostile_to_alliance(&mut app);
     set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
 
     // Same shape as station_axiom.toml, but no faction — an ownerless
@@ -7835,7 +7996,7 @@ fn tactical_ai_acquires_station_axiom_spawned_via_spawn_entity() {
     let mut app = test_app();
 
     set_tactical_radar_range(&mut app, 100.0);
-    setup_harrow_ship_hostile_to_federation(&mut app);
+    setup_harrow_ship_hostile_to_alliance(&mut app);
     set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
 
     let config = crate::entities::config::EntityConfig::from_toml(include_str!(
@@ -7845,8 +8006,8 @@ fn tactical_ai_acquires_station_axiom_spawned_via_spawn_entity() {
     let station_uuid = uuid::Uuid::new_v4().to_string();
     let mut cmds = app.world_mut().commands();
     // station_axiom.toml's own `faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"`
-    // is `federation_faction()`, the same faction
-    // `setup_harrow_ship_hostile_to_federation` makes the Harrow LocalShip
+    // is `alliance_faction()`, the same faction
+    // `setup_harrow_ship_hostile_to_alliance` makes the Harrow LocalShip
     // hostile to — no per-test faction override needed.
     crate::entities::spawner::spawn_entity(
         &mut cmds,
@@ -7908,7 +8069,7 @@ fn harrow_beam_fire_damages_a_factioned_static_point_defence_station() {
     let station_uuid = uuid::Uuid::new_v4().to_string();
 
     set_tactical_radar_range(&mut app, 100.0);
-    setup_harrow_ship_hostile_to_federation(&mut app);
+    setup_harrow_ship_hostile_to_alliance(&mut app);
     set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
     set_phaser_bank_control_source(
         &mut app,
@@ -7924,7 +8085,7 @@ fn harrow_beam_fire_damages_a_factioned_static_point_defence_station() {
         &station_uuid,
         0.0,
         -25.0,
-        federation_faction(),
+        alliance_faction(),
     );
     app.world_mut()
         .entity_mut(station)
@@ -7995,19 +8156,13 @@ fn tactical_copies_the_advisory_sensors_designation_when_it_wins_scoring() {
     let nearer_uuid = uuid::Uuid::new_v4().to_string();
 
     set_tactical_radar_range(&mut app, 200.0);
-    setup_harrow_ship_hostile_to_federation(&mut app);
+    setup_harrow_ship_hostile_to_alliance(&mut app);
     set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
 
     // The designated hostile is FURTHER than an unnamed hostile the radar
     // source would pick — so a plain nearest scan would choose the nearer one.
-    spawn_factioned_target(
-        &mut app,
-        &designated_uuid,
-        0.0,
-        -120.0,
-        federation_faction(),
-    );
-    spawn_factioned_target(&mut app, &nearer_uuid, 0.0, -20.0, federation_faction());
+    spawn_factioned_target(&mut app, &designated_uuid, 0.0, -120.0, alliance_faction());
+    spawn_factioned_target(&mut app, &nearer_uuid, 0.0, -20.0, alliance_faction());
     insert_untargeted_destroy_objective(&mut app, 35.0);
     set_local_last_attacker(&mut app, None);
     set_science_designation(&mut app, Some(designated_uuid.clone()));
@@ -8033,13 +8188,13 @@ fn tactical_refuses_a_friendly_sensors_designation_and_picks_its_own_hostile() {
     let hostile_uuid = uuid::Uuid::new_v4().to_string();
 
     set_tactical_radar_range(&mut app, 200.0);
-    setup_harrow_ship_hostile_to_federation(&mut app);
+    setup_harrow_ship_hostile_to_alliance(&mut app);
     set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
 
     // Sensors designates a same-faction (Harrow) ship right next to us; the only
     // opposing ship is further away.
     spawn_factioned_target(&mut app, &friendly_uuid, 0.0, -20.0, harrow_faction());
-    spawn_factioned_target(&mut app, &hostile_uuid, 0.0, -100.0, federation_faction());
+    spawn_factioned_target(&mut app, &hostile_uuid, 0.0, -100.0, alliance_faction());
     insert_untargeted_destroy_objective(&mut app, 35.0);
     set_local_last_attacker(&mut app, None);
     set_science_designation(&mut app, Some(friendly_uuid.clone()));
@@ -8064,7 +8219,7 @@ fn sensors_designation_alone_does_not_mutate_the_weapons_target() {
     let friendly_uuid = uuid::Uuid::new_v4().to_string();
 
     set_tactical_radar_range(&mut app, 200.0);
-    setup_harrow_ship_hostile_to_federation(&mut app);
+    setup_harrow_ship_hostile_to_alliance(&mut app);
     set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
 
     // Only a friendly ship exists, and Sensors designates it. No objective, no
@@ -8103,13 +8258,13 @@ fn objective_beats_a_lock_that_coincides_with_the_sensors_designation() {
     let objective_uuid = uuid::Uuid::new_v4().to_string();
 
     set_tactical_radar_range(&mut app, 300.0);
-    setup_harrow_ship_hostile_to_federation(&mut app);
+    setup_harrow_ship_hostile_to_alliance(&mut app);
     set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
 
     // The current lock is a hostile that the ship's own Sensors radar ALSO
     // designates — so as a candidate it carries BOTH `source_retained` and
     // `source_sensors_designation`, the double-source stack the finding names.
-    spawn_factioned_target(&mut app, &designated_uuid, 0.0, -20.0, federation_faction());
+    spawn_factioned_target(&mut app, &designated_uuid, 0.0, -20.0, alliance_faction());
     set_weapons_target(&mut app, Some(designated_uuid.clone()));
     set_science_designation(&mut app, Some(designated_uuid.clone()));
 
@@ -8370,6 +8525,90 @@ fn ai_target_selection_locks_a_nonhostile_only_via_an_operate_directive() {
         Some(derelict_uuid.as_str()),
         "an active Tow directive naming a non-hostile must lock it through the directive-gated \
          `source_operate` eligibility disjunct (issue #1162 D2)"
+    );
+}
+
+/// Attach a [`CivilianRescue`](crate::transporter::CivilianRescue) to a
+/// previously-spawned target: `count` souls authored, `recovered` already
+/// aboard, so `remaining() == count - recovered` decides carrier membership.
+fn attach_civilian_rescue(app: &mut App, uuid: &str, count: u32, recovered: u32) {
+    let mut q = app
+        .world_mut()
+        .query::<(Entity, &crate::entities::spawner::EntityUuid)>();
+    let target = q
+        .iter(app.world())
+        .find(|(_, u)| u.0 == uuid)
+        .map(|(e, _)| e)
+        .expect("the civilian carrier must be spawned before its rescue is attached");
+    let mut rescue = crate::transporter::CivilianRescue::new(count);
+    rescue.recovered = recovered;
+    rescue.revealed = true;
+    app.world_mut().entity_mut(target).insert(rescue);
+}
+
+/// Tactical Backfill excludes a contact still carrying unrecovered civilians
+/// (issue #1348, acceptance criterion #5): even the operate-directive path that
+/// WOULD lock the same non-hostile derelict (proved by
+/// [`ai_target_selection_locks_a_nonhostile_only_via_an_operate_directive`])
+/// must find no candidate once souls are aboard — the AI never fires on people
+/// it could rescue.
+#[test]
+fn ai_target_selection_excludes_a_contact_with_unrecovered_civilians() {
+    let mut app = test_app();
+    let carrier_uuid = uuid::Uuid::new_v4().to_string();
+
+    set_tactical_radar_range(&mut app, 200.0);
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+    spawn_entity_target(&mut app, &carrier_uuid, 0.0, -30.0);
+    // Four authored, one recovered → three souls still aboard.
+    attach_civilian_rescue(&mut app, &carrier_uuid, 4, 1);
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .name_to_uuid
+        .insert("hulk".into(), carrier_uuid.clone());
+    // The very Tow directive that locks a bare derelict above.
+    insert_operate_objective_blackboard(&mut app, "hulk", 80.0);
+    set_local_last_attacker(&mut app, None);
+
+    tick(&mut app);
+
+    assert!(
+        get_weapons_target(&mut app).is_none(),
+        "a contact carrying unrecovered civilians must be excluded from AI target selection, even \
+         under an operate directive that would otherwise lock it"
+    );
+}
+
+/// The other side of the same distinction: a FULLY-recovered carrier
+/// (`remaining() == 0`) is an ordinary hulk again and remains targetable through
+/// the operate-directive path — so the exclusion turns strictly on souls still
+/// aboard, not on ever having carried any.
+#[test]
+fn ai_target_selection_locks_a_fully_recovered_carrier() {
+    let mut app = test_app();
+    let carrier_uuid = uuid::Uuid::new_v4().to_string();
+
+    set_tactical_radar_range(&mut app, 200.0);
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+    spawn_entity_target(&mut app, &carrier_uuid, 0.0, -30.0);
+    // Three authored, all three recovered → nobody left aboard.
+    attach_civilian_rescue(&mut app, &carrier_uuid, 3, 3);
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .name_to_uuid
+        .insert("hulk".into(), carrier_uuid.clone());
+    insert_operate_objective_blackboard(&mut app, "hulk", 80.0);
+    set_local_last_attacker(&mut app, None);
+
+    tick(&mut app);
+
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some(carrier_uuid.as_str()),
+        "a fully-recovered carrier is an ordinary hulk once its souls are aboard and remains \
+         lockable through the operate directive — the civilian exclusion is not sticky"
     );
 }
 
@@ -9087,9 +9326,9 @@ fn human_set_target_survives_the_tick_on_a_mixed_rating_ship() {
     // A live untargeted Destroy objective plus a hostile the selector would
     // happily acquire: if the AI ran on this ship at all, it would take the lock.
     insert_untargeted_destroy_objective(&mut app, 35.0);
-    setup_harrow_ship_hostile_to_federation(&mut app);
+    setup_harrow_ship_hostile_to_alliance(&mut app);
     let poacher = uuid::Uuid::new_v4().to_string();
-    spawn_factioned_target(&mut app, &poacher, 0.0, -10.0, federation_faction());
+    spawn_factioned_target(&mut app, &poacher, 0.0, -10.0, alliance_faction());
 
     push(
         &mut app,
@@ -12964,7 +13203,7 @@ fn spawn_hostile_hull(app: &mut App, uuid: &str, x: f32, z: f32) -> Entity {
                 )]),
             ),
             Transform::from_xyz(x, 0.0, z),
-            FactionComponent(federation_faction()),
+            FactionComponent(alliance_faction()),
         ))
         .id()
 }
@@ -12984,7 +13223,7 @@ fn hull_current(app: &App, entity: Entity) -> f32 {
 fn setup_two_arc_ai_shooter(app: &mut App) -> (Entity, Entity, String, String) {
     use crate::ship::control_source::ControlSource;
 
-    setup_harrow_ship_hostile_to_federation(app);
+    setup_harrow_ship_hostile_to_alliance(app);
     insert_untargeted_destroy_objective(app, 45.0);
     for sysid in [
         crate::ship::system_registry::tactical_radar_system_id(),
@@ -13942,7 +14181,7 @@ fn los_enemy_blocker_redirects_damage_away_from_target() {
     reg.insert(crate::ai::faction::FactionConfig {
         display_name: None,
         uuid: shooter_faction,
-        name: "Federation".into(),
+        name: "Alliance".into(),
         enemies: vec![enemy_faction],
         compliance: None,
     });
@@ -14018,7 +14257,7 @@ fn los_friendly_blocker_absorbs_beam_with_no_damage() {
     reg.insert(crate::ai::faction::FactionConfig {
         display_name: None,
         uuid: faction_uuid,
-        name: "Federation".into(),
+        name: "Alliance".into(),
         enemies: vec![],
         compliance: None,
     });

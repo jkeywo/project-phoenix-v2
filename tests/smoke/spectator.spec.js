@@ -36,7 +36,7 @@ async function becomeSpectator(client) {
   );
 }
 
-test('AC1 — join explicitly as a spectator (SpectatorChanged broadcast)', async ({ context }) => {
+test('AC1 — join explicitly as a spectator (SpectatorChanged broadcast)', { tag: '@core' }, async ({ context }) => {
   const hostId = await bootServer(context);
 
   const spec = await createTestClient(context, hostId, { name: 'Watcher' });

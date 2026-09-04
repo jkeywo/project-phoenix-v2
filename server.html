@@ -155,6 +155,42 @@
 
 
   <style>
+    /* WHY THERE IS STILL RAW HEX IN THIS BLOCK (issue #1356). gui/tokens.css is
+       linked above, and every literal here that has an EXACT token now names it:
+       --surface-void for the black page and canvas ground, rgba(var(--rgb-void), …)
+       for the panel scrims, --signal for the viewscreen accent (including
+       --vs-signal, the alias that used to restate its hex; the dead
+       --signal-cyan declaration beside it is deleted rather than aliased, since
+       nothing read it), rgba(var(--rgb-signal), …) for the chatter bubble's
+       edge, --text-min for the 11px readouts, and the two dead literal
+       fallbacks on --line-faint and --ink-dim are gone.
+
+       What remains — #cde, #6a86a0, #223246, #10171f, the settings popup's whole
+       blue-grey set, the debug panel's #0f0, the 8/9/10/12px readouts — has no
+       token that resolves to it. Naming the nearest rung instead would move the
+       host page's colours, and the retint is PRD #1355's own slice, from
+       gui/tokens.css and not from here.
+
+       They stay, but they are not unguarded: server.html IS in
+       design-tokens.test.js's SURFACES list, with every surviving literal named
+       in that suite's KNOWN_LITERALS allowlist. A new hex anywhere in this file
+       fails the suite; a literal #1355 retires must leave the allowlist too. Two
+       things to know about "anywhere in this file": the scan reads the whole
+       document rather than this <style> block, so the game-over accent table in
+       the script below and the `style=` attributes on the GM join panel, the
+       asset-loading overlay and the game-over overlay are on the list as well,
+       and they need lifting into a stylesheet on their own account — no palette
+       change reaches them.
+
+       THE 0.75rem/1rem SWAPS ARE NOT AN IDENTITY. #conn-label,
+       #snapshot-import-status, .save-slots-status and .save-slots-empty now read
+       --text-sm (`max(12px, 0.75rem)`) and .save-slots-heading reads --text-lg
+       (`max(15px, 1rem)`). Nothing sets a root font-size on this page, so those
+       equal what they replaced only at a 16px default; below it they hold the
+       ramp's floor instead of shrinking with the root. That is the floor's
+       purpose and the one deliberate visual change here. `font: 600 11px` →
+       `var(--text-min)` and the other 11px readouts ARE exact: --text-min is
+       11px flat. */
     :root {
       /* Corner reserved for the settings cog (issue #939).
          The cog is `position: fixed` at top/left 10px and 34px square, so it
@@ -167,13 +203,13 @@
          clearing it under a smaller root font-size. */
       --settings-cog-keepout: 56px;
     }
-    html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: var(--surface-void); overflow: hidden; }
     body { font-family: monospace; }
     #server-shell {
       display: flex;
       width: 100vw;
       height: 100vh;
-      background: #000;
+      background: var(--surface-void);
       overflow: hidden;
     }
     #viewscreen-shell {
@@ -181,10 +217,10 @@
       flex: 1 1 auto;
       min-width: 0;
       height: 100%;
-      background: #000 url('assets/logo.png') center center / contain no-repeat;
+      background: var(--surface-void) url('assets/logo.png') center center / contain no-repeat;
       overflow: hidden;
     }
-    #canvas { display: block; width: 100%; height: 100%; background: #000; }
+    #canvas { display: block; width: 100%; height: 100%; background: var(--surface-void); }
     /* #overlay, #qr-panel and the join code's own rules moved to
        gui/host-qr.css (issue #1329), linked above: the native host's lobby
        surface carries this same panel and needed the same rules. The fleet
@@ -300,7 +336,7 @@
     #gm-station-status { grid-column: 1 / -1; margin: 0; color: var(--ink-muted); }
     #gm-station-frame {
       grid-column: 1 / -1; width: 100%; height: clamp(22rem, 58vh, 46rem);
-      border: 1px solid var(--edge-control); background: #000;
+      border: 1px solid var(--edge-control); background: var(--surface-void);
     }
     #gm-station-activity-heading, #gm-station-activity { grid-column: 1 / -1; }
     #gm-station-activity { margin: 0; max-height: 10rem; overflow-y: auto; }
@@ -317,8 +353,8 @@
        ship, and an empty roster on every viewscreen would be clutter. */
     #fleet-panel {
       display: none; margin-top: 10px; padding: 8px 10px;
-      border: 1px solid var(--line-faint, #334); border-radius: 4px;
-      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid var(--line-faint); border-radius: 4px;
+      background: rgba(var(--rgb-void), 0.35);
       font-family: var(--font-mono); font-size: var(--text-sm);
       min-width: 232px; max-width: 320px;
     }
@@ -353,7 +389,7 @@
     #fleet-slots { list-style: none; margin: 6px 0 0; padding: 0; }
     #fleet-slots li {
       display: flex; justify-content: space-between; gap: 8px;
-      padding: 2px 0; color: var(--ink-dim, #99a);
+      padding: 2px 0; color: var(--ink-dim);
     }
     #fleet-slots li.mine { color: var(--gold-bright); }
     #fleet-slots li.gone { opacity: 0.55; }
@@ -384,7 +420,7 @@
       display: flex; flex-direction: column; align-items: flex-end; gap: 0.35rem; font-family: monospace;
     }
     #top-bar-row { display: flex; align-items: center; gap: 0.5rem; }
-    #conn-label { font-size: 0.75rem; color: #f44; }
+    #conn-label { font-size: var(--text-sm); color: #f44; }
     #conn-dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: #4c4; flex-shrink: 0; }
     #fullscreen-btn {
       background: none; border: none; color: #cce; font-size: 1.1rem;
@@ -392,7 +428,7 @@
     }
     #wasm-spinner {
       position: absolute; inset: 0; z-index: 100;
-      background: #000 url('assets/logo.png') center 40% / min(55vw, 55vh) auto no-repeat;
+      background: var(--surface-void) url('assets/logo.png') center 40% / min(55vw, 55vh) auto no-repeat;
       display: flex; flex-direction: column;
       align-items: center; justify-content: center;
       color: #aae; font-family: monospace; font-size: 0.9rem;
@@ -423,7 +459,7 @@
       margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.3rem;
     }
     #snapshot-import-status {
-      font-size: 0.75rem; color: #9ab; white-space: normal; word-break: break-word;
+      font-size: var(--text-sm); color: #9ab; white-space: normal; word-break: break-word;
     }
     /* Peer-local save catalogue (issue #865). It is a sibling of the ordinary
        scenario picker, so starting a new session never disappears behind save
@@ -435,13 +471,13 @@
       box-sizing: border-box;
       padding: var(--settings-cog-keepout) 1rem 1.5rem;
       overflow-y: auto;
-      background: rgba(0,0,0,0.82);
+      background: rgba(var(--rgb-void), 0.82);
       border-left: 1px solid #334;
       display: flex;
       flex-direction: column;
       gap: 0.65rem;
     }
-    .save-slots-heading { margin: 0; color: #cce; font-size: 1rem; letter-spacing: 0.06em; }
+    .save-slots-heading { margin: 0; color: #cce; font-size: var(--text-lg); letter-spacing: 0.06em; }
     .save-slots-intro, .save-slots-hint {
       margin: 0; color: #889; font-size: 0.72rem; line-height: 1.4;
     }
@@ -484,13 +520,13 @@
     .save-slots-confirm p { margin: 0 0 0.55rem; color: #fbb; }
     .save-slots-confirm button + button { margin-left: 0.4rem; }
     .save-slots-status {
-      min-height: 1.2em; color: #9ab; font-size: 0.75rem; line-height: 1.4;
+      min-height: 1.2em; color: #9ab; font-size: var(--text-sm); line-height: 1.4;
       overflow-wrap: anywhere;
     }
     .save-slots-status.ok { color: #7c9; }
     .save-slots-status.pending { color: #bc8; }
     .save-slots-status.failed { color: #f99; }
-    .save-slots-empty { color: #889; font-size: 0.75rem; }
+    .save-slots-empty { color: #889; font-size: var(--text-sm); }
     /* The named manual-save affordance belongs to running-session chrome, not
        to the pre-scenario picker. Rust's lobby phase drives `[hidden]` below;
        PhoenixReady is intentionally not a proxy for a capturable World. */
@@ -548,7 +584,6 @@
     #hud-overlay {
       position: absolute; inset: 0; z-index: 15;
       pointer-events: none;
-      --signal-cyan: #5fd8e8;
       --alert: #ff3344;
     }
     /* Red-alert inner glow — full-screen vignette, pulsing. Ported from
@@ -587,7 +622,7 @@
     }
     .hud-cell { display: flex; flex-direction: column; align-items: center; gap: 0.15rem; }
     .hud-label {
-      font: 600 11px/1 "Chakra Petch", system-ui, sans-serif;
+      font: 600 var(--text-min)/1 "Chakra Petch", system-ui, sans-serif;
       letter-spacing: 0.14em; color: #b8c0c8;
     }
     .hud-value {
@@ -599,7 +634,7 @@
     /* ─── Viewscreen border frame (raw/gui/borders/demo.html) ──────────────── */
     #hud-overlay {
       --t: 44px;
-      --vs-signal: #5fd8e8;
+      --vs-signal: var(--signal);
       --vs-alert: #ff3344;
       --vs-text: #b8c0c8;
     }
@@ -712,6 +747,47 @@
     }
     #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
 
+    /* ── Ship's-computer message banner (issue #1342) ────────────────────
+       Top-centre, below the existing cap-top frame (56px tall) and clear of
+       the bottom status strip and #game-over-overlay. z-index 6: above the
+       border pieces (5), below the frame's own overlay (15). */
+    .vs-computer-message {
+      position: absolute;
+      top: 64px; left: 50%; transform: translateX(-50%);
+      z-index: 6;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      max-width: min(560px, 70vw);
+      padding: 7px 20px;
+      background: rgba(6, 12, 16, 0.78);
+      border: 1px solid var(--vs-signal);
+      border-radius: 2px;
+      pointer-events: none;
+      text-align: center;
+    }
+    .vs-computer-message.shown { display: flex; }
+    .vs-computer-message-source {
+      font-family: "Chakra Petch", system-ui, sans-serif;
+      font-size: 8px; font-weight: 600;
+      letter-spacing: 0.26em;
+      text-transform: uppercase;
+      color: var(--vs-text);
+    }
+    .vs-computer-message-text {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 12px; line-height: 1.45;
+      color: var(--vs-signal);
+    }
+    /* Severity treatment — border + text tint, one word per severity. */
+    .vs-computer-message.sev-advisory { border-color: #d8c85f; }
+    .vs-computer-message.sev-advisory .vs-computer-message-text { color: #d8c85f; }
+    .vs-computer-message.sev-warning { border-color: #ff9a3d; }
+    .vs-computer-message.sev-warning .vs-computer-message-text { color: #ff9a3d; }
+    .vs-computer-message.sev-critical { border-color: var(--vs-alert); }
+    .vs-computer-message.sev-critical .vs-computer-message-text { color: var(--vs-alert); }
+
     /* ── AI chatter widget (bottom-left) ──────────────────────── */
     #chatter-container {
       position: absolute;
@@ -731,7 +807,7 @@
       line-height: 1.4;
       color: #b8c0c8;
       background: rgba(10, 14, 20, 0.75);
-      border: 1px solid rgba(95, 216, 232, 0.25);
+      border: 1px solid rgba(var(--rgb-signal), 0.25);
       border-radius: 3px;
       padding: 4px 8px;
       white-space: normal;
@@ -741,7 +817,7 @@
       transition: opacity 0.3s ease;
     }
     .chatter-bubble .chatter-from {
-      color: #5fd8e8;
+      color: var(--signal);
       font-weight: 600;
     }
     .chatter-bubble .chatter-arrow {
@@ -783,13 +859,13 @@
       width: 100%;
       height: 100%;
       z-index: 1;
-      background: rgba(0,0,0,0.88);
+      background: rgba(var(--rgb-void), 0.88);
       border-left: 0;
       display: flex;
       flex-direction: column;
       font-family: monospace;
       color: #0f0;
-      font-size: 11px;
+      font-size: var(--text-min);
       touch-action: pan-y;
     }
     /* Save/resume outcome on the button itself (issue #862). A save is a
@@ -844,7 +920,7 @@
     .sa-bar-ai { fill: #ffb347; }
     .sa-station-label { fill: #cde; font-size: 10px; font-family: monospace; }
     .sa-svg { max-width: 100%; height: auto; }
-    .sa-empty { color: #6a86a0; font-size: 11px; }
+    .sa-empty { color: #6a86a0; font-size: var(--text-min); }
     /* Scenario-state panel (issue #1148) — the second structured-JSON debug
        output. Like the station-activity chart it opts out of the monospace text
        styling the four legacy overlays share, and lays its surfaces out as
@@ -866,7 +942,7 @@
     .ss-trigger-when[data-holds="false"] { color: #ffb347; }
     .ss-trigger-status[data-state="fired"] { color: #4f8f6a; }
     .ss-trigger-status[data-state="waiting"] { color: #ffb347; }
-    .ss-empty { color: #6a86a0; font-size: 11px; }
+    .ss-empty { color: #6a86a0; font-size: var(--text-min); }
 
     /* AI doctrine-pool panel (issue #1149) — the second structured-JSON debug
        output: per AI ship, its scored-objective pool as a candidate table with
@@ -875,7 +951,7 @@
     .ad-title { font-size: 12px; color: #9fd; margin-bottom: 2px; }
     .ad-caption { font-size: 10px; color: #6a86a0; margin-bottom: 6px; }
     .ad-ship { margin-bottom: 10px; }
-    .ad-ship-header { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; margin-bottom: 2px; }
+    .ad-ship-header { display: flex; justify-content: space-between; gap: 8px; font-size: var(--text-min); margin-bottom: 2px; }
     .ad-ship-name { color: #9fd; font-weight: bold; }
     .ad-chosen { color: #ffb347; }
     .ad-chosen-none { color: #6a86a0; }
@@ -885,7 +961,7 @@
     .ad-candidate.chosen { color: #ffd; background: rgba(255, 179, 71, 0.12); }
     .ad-candidate.mandatory .ad-c-objective::after { content: " *"; color: #ff6b6b; }
     .ad-c-score { text-align: right; }
-    .ad-empty { color: #6a86a0; font-size: 11px; }
+    .ad-empty { color: #6a86a0; font-size: var(--text-min); }
 
     /* ── Settings cog (issue #939) ───────────────────────────────
        Top-left, over the viewscreen. Fixed rather than docked: the shell is a
@@ -923,7 +999,7 @@
       border: 1px solid #223246; border-radius: 4px;
       color: #c9d8ea;
       font-family: "Chakra Petch", system-ui, sans-serif;
-      font-size: 11px; letter-spacing: 0.06em;
+      font-size: var(--text-min); letter-spacing: 0.06em;
     }
     #host-action-feedback:empty { display: none; }
     #server-settings-overlay {
@@ -960,7 +1036,7 @@
       flex: 1; padding: 6px 4px;
       background: #10171f; border: 1px solid #223246;
       color: #7f93ab; cursor: pointer;
-      font-family: inherit; font-size: 11px;
+      font-family: inherit; font-size: var(--text-min);
       letter-spacing: 0.06em;
       -webkit-tap-highlight-color: transparent;
     }
@@ -984,7 +1060,7 @@
       padding: 6px 9px;
       background: #10171f; border: 1px solid #223246;
       color: #8ca4c2; cursor: pointer;
-      font-family: inherit; font-size: 11px;
+      font-family: inherit; font-size: var(--text-min);
       -webkit-tap-highlight-color: transparent;
     }
     .server-settings-control:hover { background: #182434; color: #c9d8ea; }
@@ -1002,7 +1078,7 @@
     .server-settings-popup .settings-binding-label {
       display: grid; grid-template-columns: minmax(62px, auto) minmax(120px, 1fr);
       align-items: center; gap: 7px; width: 100%;
-      color: #8ca4c2; font-family: var(--font-mono, monospace); font-size: 11px;
+      color: #8ca4c2; font-family: var(--font-mono, monospace); font-size: var(--text-min);
     }
     .server-settings-popup .settings-binding-capture {
       width: 100%; box-sizing: border-box; padding: 6px 9px;
@@ -1017,7 +1093,7 @@
       display: flex; flex-direction: column; gap: 5px;
       padding: 7px; margin-bottom: 10px;
       border: 1px solid #a77c45; background: #10171f; color: #d4aa71;
-      font-family: var(--font-mono, monospace); font-size: 11px;
+      font-family: var(--font-mono, monospace); font-size: var(--text-min);
     }
     .server-settings-popup .settings-binding-conflict-heading {
       font-family: "Chakra Petch", system-ui, sans-serif;
@@ -1033,7 +1109,7 @@
     .server-settings-input {
       padding: 6px 9px; width: 8ch;
       background: #10171f; border: 1px solid #223246; color: #dbe8f7;
-      font-family: var(--font-mono, monospace); font-size: 11px;
+      font-family: var(--font-mono, monospace); font-size: var(--text-min);
       letter-spacing: 0.15em; text-transform: uppercase;
     }
     .server-settings-role-group {
@@ -1042,7 +1118,7 @@
     .server-settings-slider { flex: 1; min-width: 140px; }
     .server-settings-readout {
       min-width: 4ch; text-align: right;
-      font-size: 11px; color: #8ca4c2;
+      font-size: var(--text-min); color: #8ca4c2;
     }
 
     /* Portrait: keep the output panel inline by docking it below the viewscreen. */
@@ -1505,9 +1581,13 @@
         </section>
       </main>
 
-      <!-- Game-over overlay: shown when GamePhase::GameOver via __updateHud. -->
+      <!-- Game-over overlay: shown when GamePhase::GameOver via __updateHud.
+           When the scenario authored a post-mission report (issue #1344) its
+           rows render under the closing message, in the author's order, with no
+           score, total or grade — the HUD payload carries none. -->
       <div id="game-over-overlay" style="display:none;position:absolute;inset:0;z-index:85;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,0.88);color:#cde;font-family:'Chakra Petch',monospace;text-align:center;padding:32px;">
         <div id="game-over-message" style="font-size:clamp(0.95rem,2.5vw,1.15rem);white-space:pre-wrap;line-height:1.7;max-width:64ch;letter-spacing:0.03em;"></div>
+        <dl id="game-over-report" style="display:none;grid-template-columns:minmax(0,auto) minmax(0,1fr);gap:10px 24px;margin:28px 0 0;padding:0;max-width:64ch;text-align:left;font-size:clamp(0.85rem,2vw,1rem);"></dl>
         <button id="return-to-lobby-btn" style="margin-top:32px;padding:12px 32px;font-family:'Chakra Petch',monospace;font-size:1rem;letter-spacing:0.08em;text-transform:uppercase;color:#cde;background:rgba(140,180,220,0.12);border:1px solid #8ac;border-radius:2px;cursor:pointer;" data-i18n="client.return_to_lobby">Return to Lobby</button>
       </div>
 
@@ -1534,6 +1614,12 @@
         <div class="vs-piece vs-cap bottom"></div>
         <!-- Ship designation (top-centre, above cap) -->
         <div class="vs-designation" id="hud-designation" data-i18n="server.hud_designation">PHOENIX</div>
+        <!-- Ship's-computer message banner (issue #1342): shown/hidden and
+             styled by severity from window.__updateHud's s.computer_message. -->
+        <div class="vs-computer-message" id="hud-computer-message">
+          <div class="vs-computer-message-source"><span data-i18n="server.computer_message.label">SHIP'S COMPUTER</span><span id="hud-computer-message-severity"></span><span id="hud-computer-message-station"></span></div>
+          <div class="vs-computer-message-text" id="hud-computer-message-text"></div>
+        </div>
         <!-- 4-slot status strip (bottom-centre, inside cap-bottom) -->
         <div class="vs-status-strip">
           <div class="vs-status-slot"><div class="vs-slot-label" data-i18n="server.hud_nav">Nav</div><div class="vs-slot-value" id="v-nav">—</div></div>
@@ -1838,6 +1924,18 @@
        right now" gate (issue #1115 AC2: rotatable in Lobby/GameOver, refused
        in Loading/InProgress). Self-registers window.codesRotatable. -->
   <script type="module" src="gui/phase-toggle.js"></script>
+  <!-- Post-mission report rows (issue #1344). The SAME module client.html
+       loads: the phone calls its gameOverView() for the whole game-over frame,
+       and __updateHud's overlay below calls its reportRows() for the rows. The
+       Viewscreen gets those rows on the HUD payload rather than on a GameOver
+       message, so it needs only the row half — but "which row is renderable"
+       and "which state words style" are the two rules that must not exist
+       twice, and a second copy of them here is exactly what a review of #1344
+       found rendering blank lines a phone dropped. Self-registers
+       window.gameOverReportRows, the same load-order-tolerant pattern as the
+       view models above; __updateHud fires from a WASM push long after this
+       module graph has run. -->
+  <script type="module" src="gui/game-over-view.js"></script>
   <!-- Host lobby view-model (issue #1229): the pure phase-transition, title/
        crew/ready-badge/countdown/station-card/reserved-chip/spectator-pill/
        hint computation behind __updateLobby's station-grid renderer lives in
@@ -2141,6 +2239,14 @@
       return window.phStrings ? window.phStrings.t(id, params) : id;
     }
 
+    // Whether a string id exists in the table — the local mirror of `t()`
+    // above, for call sites (like the computer-message Station badge below)
+    // that need to fall back gracefully instead of showing t()'s ⟨missing⟩
+    // marker for a free-form value that is only SOMETIMES a known id.
+    function has(id) {
+      return !!(window.phStrings && window.phStrings.has(id));
+    }
+
     // Resolve a string id that came from authored DATA rather than from this
     // page's own markup — an `[[available_ships]] label`, a `[[scenario]]
     // label`. Phones get those already resolved, because every peer message
@@ -2244,6 +2350,47 @@
       const desig = document.getElementById('hud-designation');
       if (desig) desig.textContent = s.ship_name;
     }
+    // ── Ship's-computer message banner (issue #1342) ────────────────────────
+    // `s.computer_message.text` has already crossed localiseTree() in the
+    // host-channel dispatcher (issue #949) — it is the resolved display
+    // string here, exactly like `game_over_message` below, because both ride
+    // the same "hud" channel payload. `severity` and `station` are bare wire
+    // words (never string ids themselves) and are resolved with t() here.
+    //
+    // `severity` is a closed Rust enum (`info`/`advisory`/`warning`/
+    // `critical`) with a strings.csv row authored for every variant, so it is
+    // always safe to resolve directly with t(). `station`, by contrast, is a
+    // free-form Rhai-authored cue that `show_message` deliberately does NOT
+    // validate against the ship's roster (src/core/computer_message.rs) — an
+    // unrecognised or mistyped id must degrade to no badge rather than show
+    // t()'s ⟨station.xxx.name⟩ miss marker on the live Viewscreen (issue
+    // #949's stationLabel() in client.html sets the precedent), so that one
+    // goes through has() first.
+    const cmBanner   = document.getElementById('hud-computer-message');
+    const cmText     = document.getElementById('hud-computer-message-text');
+    const cmSeverity = document.getElementById('hud-computer-message-severity');
+    const cmStation  = document.getElementById('hud-computer-message-station');
+    if (cmBanner && cmText) {
+      const cm = s.computer_message;
+      if (cm) {
+        cmText.textContent = cm.text;
+        cmBanner.className = 'vs-computer-message shown sev-' + cm.severity;
+        if (cmSeverity) {
+          cmSeverity.textContent = ' · ' + t('server.computer_message.severity.' + cm.severity);
+        }
+        if (cmStation) {
+          const stationId = 'station.' + cm.station + '.name';
+          cmStation.textContent = cm.station && has(stationId)
+            ? (' · ' + t(stationId))
+            : '';
+        }
+      } else {
+        cmBanner.className = 'vs-computer-message';
+        cmText.textContent = '';
+        if (cmSeverity) cmSeverity.textContent = '';
+        if (cmStation) cmStation.textContent = '';
+      }
+    }
     // ── Game-over overlay ───────────────────────────────────────────────────
     // The message is the scenario's `[[trigger.action]] message`, authored as a
     // string id; it arrives resolved via localiseHostPayload (issue #949).
@@ -2256,6 +2403,44 @@
       } else {
         goOverlay.style.display = 'none';
       }
+    }
+    // ── Post-mission report rows (issue #1344) ─────────────────────────────
+    // The same rows a phone renders, in the same order, arriving already
+    // localised through localiseHostPayload like every other id in this
+    // payload. `state` is a machine label and drives the accent only; there is
+    // no score in the payload to leak, by construction (see
+    // core::messages::GameOverReportRow — the wire shape has no score field).
+    //
+    // Normalised by gui/game-over-view.js's reportRows(), the SAME function
+    // client.html's overlay runs its rows through. That is the point of the
+    // call and not a convenience: the rules it applies — drop a row missing
+    // either of its two texts, and lower-case `state` before styling on it —
+    // are what makes the phone and the Viewscreen agree about what the report
+    // says. This block used to apply neither, so an empty heading rendered here
+    // as a blank dt/dd pair and did not render at all on a phone.
+    //
+    // The typeof guard is defensive only: the module tag above is deferred and
+    // so has run before DOMContentLoaded, while every call to __updateHud comes
+    // from a WASM push that boots later. Showing no rows beats showing
+    // unfiltered ones, which is why the fallback is [] and not the raw array.
+    const goReport = document.getElementById('game-over-report');
+    if (goReport) {
+      const rows = typeof window.gameOverReportRows === 'function'
+        ? window.gameOverReportRows(s.game_over_report)
+        : [];
+      goReport.replaceChildren();
+      const accent = { saved: '#7ad48f', lost: '#e8705a', partial: '#e0c060', neutral: '#8a98c4' };
+      for (const row of rows) {
+        const dt = document.createElement('dt');
+        dt.textContent = row.headingId;
+        dt.style.cssText = 'letter-spacing:0.18em;text-transform:uppercase;white-space:nowrap;color:'
+          + (accent[row.state] || '#8a98c4') + ';';
+        const dd = document.createElement('dd');
+        dd.textContent = row.outcomeId;
+        dd.style.cssText = 'margin:0;line-height:1.6;color:#cde;';
+        goReport.append(dt, dd);
+      }
+      goReport.style.display = rows.length ? 'grid' : 'none';
     }
   };
 

@@ -38,7 +38,7 @@
 //! [`vellum_rng::Pcg32`] (issue #897), not `rand`'s `SmallRng`. Two reasons,
 //! neither of them "PCG is a better generator":
 //!
-//! 1. **It is `Serialize`.** `SmallRng` is not, so the six stream positions
+//! 1. **It is `Serialize`.** `SmallRng` is not, so the stream positions
 //!    could not leave the process and a snapshot could only ever record the
 //!    master seed — which replays a run from the start, not from where it got
 //!    to. [`SimRngState`] is what a world snapshot carries (#862).
@@ -92,6 +92,32 @@ pub enum SimStream {
     /// per landing tick and jitter once per cycle, so sharing would make the
     /// damage distribution a function of how often banks happened to relight.
     BeamCycleJitter,
+    /// `console::comms::server::operate_comms_response_ai` — which live
+    /// response an unmanned Comms console picks when its authored wait expires
+    /// (issue #1343).
+    ///
+    /// Its own stream for the reason every stream here is separate, and with a
+    /// sharper edge than most: a comms decision is drawn at most once per open
+    /// dialogue per mission, while damage is drawn per landing tick, so sharing
+    /// would make the damage distribution of a whole battle a function of how
+    /// many conversations the crew happened to leave unanswered.
+    ///
+    /// A dialogue whose responses author no `ai_weight` TAKES NO DRAW AT ALL —
+    /// the same discipline `BeamCycleJitter` follows for an unjittered bank. The
+    /// stream's position does not move for any world but Falling Skyway, so no
+    /// existing world's *sequence* is perturbed by the mechanism merely existing.
+    ///
+    /// Its *digest* is, and that is not a contradiction — it is the cost of
+    /// declaring a stream, paid once. [`crate::sim_digest`] folds the whole
+    /// [`SimRngState`], whose `streams` vector is one entry per
+    /// [`SimStream::ALL`] entry, so adding a variant changes every world's
+    /// tick-0 digest including worlds that hold no conversation at all. That is
+    /// a widened fold and not a lost reproducibility: it re-blesses
+    /// `tests/fixtures/cross-target-ledger.json` (see the re-bless procedure in
+    /// `tests/cross_target_probe.rs`), exactly as #929 did when it added
+    /// [`Self::BeamCycleJitter`]. Anyone adding the ninth stream should expect
+    /// the same and not read it as a determinism regression.
+    CommsBackfillChoice,
     /// **Retired, but deliberately still declared (issue #907).**
     ///
     /// This stream used to allocate entity UUIDs. Nothing draws from it any
@@ -102,8 +128,8 @@ pub enum SimStream {
     /// stable-world-id-order fold could not survive.
     ///
     /// It stays in the enum rather than being deleted because retiring it is
-    /// not free and buys nothing. [`SimStream::ALL`] is six long and
-    /// [`SimRngState`] serialises one generator per entry, with
+    /// not free and buys nothing. [`SimRngState`] serialises one generator per
+    /// [`SimStream::ALL`] entry, with
     /// [`SimRng::from_state`] *rejecting* a snapshot whose length disagrees;
     /// dropping the variant would invalidate every recorded snapshot and shift
     /// the fingerprint's `rng_positions`, for the sake of one unused mutex. An
@@ -116,13 +142,14 @@ pub enum SimStream {
 
 impl SimStream {
     /// Every stream, in declaration order. Used to build the resource.
-    pub const ALL: [SimStream; 7] = [
+    pub const ALL: [SimStream; 8] = [
         SimStream::CollisionDamage,
         SimStream::RegionDamage,
         SimStream::BeamDamage,
         SimStream::TorpedoDamage,
         SimStream::BlasterDamage,
         SimStream::BeamCycleJitter,
+        SimStream::CommsBackfillChoice,
         SimStream::EntityUuid,
     ];
 
@@ -138,6 +165,7 @@ impl SimStream {
             SimStream::TorpedoDamage => "torpedo-damage",
             SimStream::BlasterDamage => "blaster-damage",
             SimStream::BeamCycleJitter => "beam-cycle-jitter",
+            SimStream::CommsBackfillChoice => "comms-backfill-choice",
             SimStream::EntityUuid => "entity-uuid",
         }
     }
@@ -465,6 +493,7 @@ mod tests {
             (SimStream::TorpedoDamage, "torpedo-damage"),
             (SimStream::BlasterDamage, "blaster-damage"),
             (SimStream::BeamCycleJitter, "beam-cycle-jitter"),
+            (SimStream::CommsBackfillChoice, "comms-backfill-choice"),
             (SimStream::EntityUuid, "entity-uuid"),
         ] {
             assert_eq!(
@@ -477,7 +506,7 @@ mod tests {
         // variant would go unpinned and be free to be renamed later.
         assert_eq!(
             SimStream::ALL.len(),
-            7,
+            8,
             "a stream was added — pin its name above too"
         );
     }

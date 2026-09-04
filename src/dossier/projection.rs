@@ -340,7 +340,7 @@ mod tests {
     #[test]
     fn facts_fold_in_a_fixed_editorial_order() {
         let mut s = subject();
-        s.faction_label = Some("faction.federation.display_name".into());
+        s.faction_label = Some("faction.alliance.display_name".into());
         s.comms_in_range = Some(true);
         s.condition = Some(SubjectCondition {
             condition_fraction: 0.42,
@@ -511,7 +511,7 @@ mod tests {
     #[test]
     fn evidence_projects_into_its_own_list_in_gather_order_and_never_into_the_facts() {
         let mut s = subject();
-        s.faction_label = Some("faction.federation.display_name".into());
+        s.faction_label = Some("faction.alliance.display_name".into());
         s.evidence = vec![
             finding(
                 "world.probe.evidence.brief",

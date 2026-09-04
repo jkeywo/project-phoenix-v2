@@ -39,7 +39,7 @@ The crew cannot prevent the war. They can only choose how it starts.
 | `assets/entities/ship_requiem_courier.toml` | Requiem courier — idle, flees if attacked |
 | `assets/entities/region_kaleth_nebula.toml` | Nebula: radar_dampening + damage_zone |
 | `assets/entities/region_radiation_zone.toml` | Weapon heat: heavy damage_zone (dynamic) |
-| `assets/factions/harrow.toml` | Harrow faction (enemy of Alliance/Federation) |
+| `assets/factions/harrow.toml` | Harrow faction (enemy of Alliance/Alliance) |
 | `assets/factions/requiem.toml` | Requiem faction (neutral) |
 
 ---

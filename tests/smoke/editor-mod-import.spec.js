@@ -114,7 +114,7 @@ async function openEditor(context, page) {
   expect(bootError).toBeNull();
 }
 
-test('MOD golden tracer imports, edits, validates, remaps, and exports a valid archive', async ({
+test('MOD golden tracer imports, edits, validates, remaps, and exports a valid archive', { tag: '@core' }, async ({
   context,
   page,
 }) => {

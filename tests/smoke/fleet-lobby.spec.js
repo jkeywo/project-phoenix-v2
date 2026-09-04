@@ -15,7 +15,7 @@
 
 import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
-import { test, expect, waitForWasmReady, createTestClient, readHostPeerId } from './fixtures';
+import { test, expect, waitForWasmReady, createTestClient, readHostPeerId, waitForJoinCode, JOIN_CODE_PATTERN } from './fixtures';
 import { ts } from './strings';
 
 /** The authored fleet capacity, read rather than pinned. */
@@ -55,10 +55,7 @@ async function bootHost(context, fragment = '', prepare = null) {
   if (prepare) await prepare(page);
   await page.goto(`/?scenario=assets/worlds/default.toml${fragment}`);
   await waitForWasmReady(page);
-  await page.waitForFunction(
-    () => /^[A-Z]{5}$/.test(document.getElementById('join-code')?.textContent ?? ''),
-    { timeout: 30_000 },
-  );
+  await waitForJoinCode(page, 'join-code', 30_000);
   return page;
 }
 
@@ -77,10 +74,7 @@ const closeCog = (page) => page.keyboard.press('Escape');
 async function openFleet(page) {
   await openFleetTab(page);
   await page.click('[data-control="fleet-open"]');
-  await page.waitForFunction(
-    () => /^[A-Z]{5}$/.test(document.getElementById('fleet-code')?.textContent ?? ''),
-    { timeout: 30_000 },
-  );
+  await waitForJoinCode(page, 'fleet-code', 30_000);
   await closeCog(page);
   return page.evaluate(() => ({
     suffix: document.getElementById('fleet-code').textContent,
@@ -132,11 +126,11 @@ const waitForFleetError = (page) =>
 // stand up the same fleet again is two more WASM boots for one more assertion.
 const FLEET_TIMEOUT = 240_000;
 
-test('two ship hosts assemble a fleet, and each crew star stays on its own host', async ({ context }) => {
+test('two ship hosts assemble a fleet, and each crew star stays on its own host', { tag: '@core' }, async ({ context }) => {
   test.setTimeout(FLEET_TIMEOUT);
   const lead = await bootHost(context);
   const fleet = await openFleet(lead);
-  expect(fleet.suffix).toMatch(/^[A-Z]{5}$/);
+  expect(fleet.suffix).toMatch(JOIN_CODE_PATTERN);
   // The fleet code is NOT the crew code: two namespaces, two records, and the
   // link the second operator opens is this page, not client/index.html.
   const crew = await readHostPeerId(lead);

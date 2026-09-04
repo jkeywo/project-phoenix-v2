@@ -29,7 +29,7 @@ test('comms console: renders contacts and the most recent unread thread', async 
   await expect(page.locator('#footer-target')).toHaveText('Outpost Theta');
 });
 
-test('comms console: response buttons send respond_to_message for the active thread', async ({ page }) => {
+test('comms console: response buttons send respond_to_message for the active thread', { tag: '@core' }, async ({ page }) => {
   await page.goto(CONSOLE_URL);
   await page.evaluate(() => {
     window.__sent = [];

@@ -111,12 +111,16 @@ test('sensors console: cancel impulse button visible when charging', async ({ pa
   await expect(page.locator('#btn-cancel-impulse')).not.toHaveCSS('display', 'none');
 });
 
-test('sensors console: on-screen button calls __sendAction with set_view', async ({ page }) => {
+test('sensors console: on-screen button calls __sendAction with set_view', { tag: '@core' }, async ({ page }) => {
   await page.goto(CONSOLE_URL);
   await page.evaluate(() => {
     window.__sent = [];
     window.__sendAction = (json) => window.__sent.push(json);
   });
+  // #1287 routes this through the shared semantic action, and the handler
+  // resolves its view from console state — with no payload pushed it refuses
+  // and sends nothing at all.
+  await page.evaluate((s) => window.__updateConsole('sensors', JSON.stringify(s)), NOMINAL_STATE);
   await page.locator('ph-sensor-radar').locator('#on-screen-btn').click();
   const sent = await page.evaluate(() => window.__sent);
   expect(sent).toHaveLength(1);

@@ -1,14 +1,14 @@
 name = "entity.station_axiom.name"
 tags = [ "station", "comms_contact", "allied" ]
 
-# The Federation (issue #936). This station is tagged `allied` in every world
+# The Alliance (issue #936). This station is tagged `allied` in every world
 # that fields it, and until now it belonged to nobody: a factionless entity is
 # never `hostile` to anything and never `friendly` to anything either, so
 # "Starbase Alpha" in `assets/worlds/combat_test.toml` was a defence objective
 # the defenders had no relationship with. Authoring the faction here rather than
 # as a per-world override is deliberate — an allied station is allied in both
 # worlds that spawn it (`combat_test`, `default`), and the Harrow are neutral to
-# the Federation in the other one, so nothing outside the combat scenario changes
+# the Alliance in the other one, so nothing outside the combat scenario changes
 # hostility as a result.
 #
 # Since issue #1011, this DOES make the station auto-acquirable as an enemy

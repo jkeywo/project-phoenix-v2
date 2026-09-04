@@ -5,7 +5,7 @@
 // socket and the RTCPeerConnection are faked (tests/smoke/rendezvous-shim.js),
 // because CI has no WebRTC and no deployed worker.
 
-import { test, expect, waitForWasmReady } from './fixtures';
+import { test, expect, waitForWasmReady, waitForJoinCode } from './fixtures';
 import { ts } from './strings';
 
 /** A ship host, booted straight into its lobby, with its crew code on screen. */
@@ -13,10 +13,7 @@ async function bootHost(context) {
   const page = await context.newPage();
   await page.goto('/?scenario=assets/worlds/default.toml');
   await waitForWasmReady(page);
-  await page.waitForFunction(
-    () => /^[A-Z]{5}$/.test(document.getElementById('join-code')?.textContent ?? ''),
-    { timeout: 30_000 },
-  );
+  await waitForJoinCode(page, 'join-code', 30_000);
   return page;
 }
 
@@ -87,10 +84,7 @@ test('rotating the fleet code leaves the crew code untouched, and vice versa (AC
 
   await openGameplayTab(host);
   await host.click('[data-control="fleet-open"]');
-  await host.waitForFunction(
-    () => /^[A-Z]{5}$/.test(document.getElementById('fleet-code')?.textContent ?? ''),
-    { timeout: 30_000 },
-  );
+  await waitForJoinCode(host, 'fleet-code', 30_000);
   const fleetBefore = await host.evaluate(() => document.getElementById('fleet-code').textContent);
   await expect(host.locator('[data-control="fleet-rotate"]')).toBeEnabled();
 

@@ -105,4 +105,4 @@ The fleet should preserve a consistent mental model across these layouts. A syst
 - `assets/entities/alliance_destroyer.toml`
 - `assets/entities/alliance_cruiser.toml`
 - `assets/entities/alliance_battleship.toml`
-- `assets/factions/federation.toml`
+- `assets/factions/alliance.toml`

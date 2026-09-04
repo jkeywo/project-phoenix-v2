@@ -140,7 +140,7 @@ async function startGameWithTactical(context) {
   return { helm, tactical, serverPage, serverCrashes };
 }
 
-test('tactical fire-flow: BeamStarted received after locking NPC and firing', async ({ context }) => {
+test('tactical fire-flow: BeamStarted received after locking NPC and firing', { tag: '@core' }, async ({ context }) => {
   test.setTimeout(45_000);
   const { helm, tactical, serverCrashes } = await startGameWithTactical(context);
 

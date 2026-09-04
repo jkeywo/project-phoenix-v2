@@ -42,7 +42,7 @@ function fixtureFamily(id) {
   if (id.startsWith('helm-') || id === 'dock') return 'helm';
   if (id === 'tactical-radar' || id.startsWith('phaser-') || id.startsWith('blaster-') || id.startsWith('torpedo-')) return 'tactical';
   if (id === 'sensors' || id === 'sensor-radar') return 'sensors';
-  if (id === 'navigation' || id === 'comms' || id === 'repair' || id === 'command' || id === 'tractor' || id === 'umbilical') return id;
+  if (id === 'navigation' || id === 'comms' || id === 'repair' || id === 'command' || id === 'tractor' || id === 'umbilical' || id === 'security') return id;
   if (id === 'shields-system' || id.startsWith('shield-arc-')) return 'shields';
   if (id.startsWith('power-')) return 'power';
   return null;
@@ -56,7 +56,7 @@ function fixtureBlackboardKind(id) {
     'tactical-radar': 'TacticalRadar', 'sensor-radar': 'SensorRadar',
     'torpedo-magazine': 'TorpedoMagazine', 'power-reactor': 'PowerReactor',
     'power-battery': 'PowerBattery', dossiers: 'Dossiers', scan: 'Scan',
-    tractor: 'Tractor', umbilical: 'Umbilical', dock: 'Dock',
+    tractor: 'Tractor', umbilical: 'Umbilical', dock: 'Dock', security: 'Security',
     'helm-lateral-thrust': 'HelmLateralThrust',
   };
   if (exact[id]) return exact[id];
@@ -279,7 +279,7 @@ describe('buildBlips', () => {
     const blips = buildBlips(
       [
         { uuid: 'hostile', x: 1, z: 0, tags: ['ship'], target_tags: ['ship'], faction: 'harrow', radar_icon: 'ship' },
-        { uuid: 'ally', x: 2, z: 0, tags: ['ship'], target_tags: ['ship'], faction: 'federation', radar_icon: 'ship' },
+        { uuid: 'ally', x: 2, z: 0, tags: ['ship'], target_tags: ['ship'], faction: 'alliance', radar_icon: 'ship' },
         { uuid: 'derelict', x: 3, z: 0, tags: ['ship'], target_tags: ['ship'], radar_icon: 'ship' },
         { uuid: 'structure', x: 4, z: 0, tags: ['station'], target_tags: ['station'], radar_icon: 'station' },
       ],
@@ -2181,6 +2181,139 @@ describe('buildSensorsConsoleState', () => {
     };
     expect(parse(buildSensorsConsoleState(state)).target_alert).toBeNull();
   });
+
+  // ── target_projection (#1339) — trajectory projection geometry ────────────
+
+  it('target_projection is null when there is no selection', () => {
+    const state = { shipX: 0, shipZ: 0, shipYaw: 0 };
+    expect(parse(buildSensorsConsoleState(state)).target_projection).toBeNull();
+  });
+
+  it('target_projection is null when the blackboard omits relative velocity (unknown)', () => {
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsTarget: 'a1',
+      asteroids: [{ uuid: 'a1', x: 50, z: 0, tags: ['asteroid'] }],
+      blackboards: { 'sensor-radar': { selected_target: 'a1' } },
+    };
+    expect(parse(buildSensorsConsoleState(state)).target_projection).toBeNull();
+  });
+
+  it('target_projection is null for a non-ship contact even if somehow selected', () => {
+    // Structural eligibility, not a scenario branch: a stationary/non-ship
+    // contact never carries relative velocity on the wire, so it never
+    // projects — same no-leak shape as target_alert above.
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsTarget: 'station-1',
+      asteroids: [{ uuid: 'station-1', x: 50, z: 0, tags: ['station'] }],
+      blackboards: { 'sensor-radar': { selected_target: 'station-1' } },
+    };
+    expect(parse(buildSensorsConsoleState(state)).target_projection).toBeNull();
+  });
+
+  it('target_projection renders markers at the authored default horizon/spacing (60s/10s)', () => {
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsTarget: 'e1',
+      asteroids: [{ uuid: 'e1', x: 100, z: 0, tags: ['ship'] }],
+      blackboards: {
+        'sensor-radar': { selected_target: 'e1', selected_target_relative_velocity: [0, -20] },
+      },
+    };
+    const markers = parse(buildSensorsConsoleState(state)).target_projection;
+    // Default horizon 60s / marker interval 10s → 6 markers (t = 10..60).
+    expect(markers).toHaveLength(6);
+    // range defaults to SENSORS_RADAR_RANGE (500) with no Sensors blackboard.
+    // dx(t) = 100 (vx=0); dz(t) = -20*t. At yaw 0: radar_x = dx/range,
+    // radar_y = -dz/range.
+    expect(markers[0].radar_x).toBeCloseTo(100 / SENSORS_RADAR_RANGE, 6);
+    expect(markers[0].radar_y).toBeCloseTo(200 / SENSORS_RADAR_RANGE, 6);
+    expect(markers[5].radar_x).toBeCloseTo(100 / SENSORS_RADAR_RANGE, 6);
+    expect(markers[5].radar_y).toBeCloseTo(1200 / SENSORS_RADAR_RANGE, 6);
+  });
+
+  it('target_projection respects an authored non-default horizon and marker spacing', () => {
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsProjectionHorizonSecs: 20,
+      sensorsProjectionMarkerIntervalSecs: 5,
+      sensorsTarget: 'e1',
+      asteroids: [{ uuid: 'e1', x: 0, z: 0, tags: ['ship'] }],
+      blackboards: {
+        'sensor-radar': { selected_target: 'e1', selected_target_relative_velocity: [10, 0] },
+      },
+    };
+    const markers = parse(buildSensorsConsoleState(state)).target_projection;
+    // 20s horizon / 5s spacing → 4 markers (t = 5, 10, 15, 20).
+    expect(markers).toHaveLength(4);
+    expect(markers.map(m => m.t)).toEqual([5, 10, 15, 20]);
+  });
+
+  it('target_projection is relative to ship yaw, matching the shared blip rotation', () => {
+    // Ship facing +90deg (PI/2): the same rotation buildBlips/buildTargetBlip
+    // use. A target directly ahead in world +X with no relative velocity
+    // motion in X should still rotate consistently with a live blip at the
+    // same offset.
+    const shipYaw = Math.PI / 2;
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw,
+      sensorsTarget: 'e1',
+      asteroids: [{ uuid: 'e1', x: 100, z: 0, tags: ['ship'] }],
+      blackboards: {
+        'sensor-radar': { selected_target: 'e1', selected_target_relative_velocity: [0, 0] },
+      },
+    };
+    const result = parse(buildSensorsConsoleState(state));
+    const marker = result.target_projection[0];
+    const liveBlip = buildTargetBlip('e1', state.asteroids, 0, 0, shipYaw, SENSORS_RADAR_RANGE);
+    // Zero relative velocity → every marker sits exactly on the live position.
+    expect(marker.radar_x).toBeCloseTo(liveBlip.radar_x, 6);
+    expect(marker.radar_y).toBeCloseTo(liveBlip.radar_y, 6);
+  });
+
+  it('target_projection clears when the Science Target selection changes to an unknown-velocity contact', () => {
+    const withVelocity = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsTarget: 'e1',
+      asteroids: [
+        { uuid: 'e1', x: 100, z: 0, tags: ['ship'] },
+        { uuid: 'a1', x: 50, z: 0, tags: ['asteroid'] },
+      ],
+      blackboards: {
+        'sensor-radar': { selected_target: 'e1', selected_target_relative_velocity: [0, -20] },
+      },
+    };
+    expect(parse(buildSensorsConsoleState(withVelocity)).target_projection).not.toBeNull();
+
+    const afterReselect = {
+      ...withVelocity,
+      sensorsTarget: 'a1',
+      blackboards: { 'sensor-radar': { selected_target: 'a1' } },
+    };
+    expect(parse(buildSensorsConsoleState(afterReselect)).target_projection).toBeNull();
+  });
+
+  it('target_projection does not disturb existing target_* payload fields (payload compatibility)', () => {
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsTarget: 'e1',
+      asteroids: [{ uuid: 'e1', x: 100, z: 0, tags: ['ship'], name: 'Raider' }],
+      blackboards: {
+        'sensor-radar': {
+          selected_target: 'e1',
+          selected_target_alert: true,
+          selected_target_relative_velocity: [0, -20],
+        },
+      },
+    };
+    const result = parse(buildSensorsConsoleState(state));
+    expect(result.target_name).toBe('Raider');
+    expect(result.target_kind).toBe('ship');
+    expect(result.target_alert).toBe(true);
+    expect(result.target_range).toBe(100);
+    expect(Array.isArray(result.target_projection)).toBe(true);
+  });
 });
 
 // ── science station (generic system-id-keyed payload, issue #825) ─────────────
@@ -2288,6 +2421,72 @@ describe('umbilical via buildSystemStationConsoleState (issue #1160)', () => {
       blackboards: { umbilical: {} },
     }));
     expect(s.systems['umbilical'].umbilical_auto).toBe(true);
+  });
+});
+
+describe('security via buildSystemStationConsoleState (issue #1346)', () => {
+  // The Alliance Destroyer's Tactical station owns the Security System. The
+  // family is Security's own, not Tactical's, so a hull that hangs the same
+  // system off Command or Engineering reaches it exactly the same way.
+  const TAC_SYSTEMS = { tactical: ['tactical-radar', 'phaser-omni', 'security'] };
+  const BLACKBOARD = {
+    range: 400,
+    teams: [
+      { state: 'working', target: 'u-1', target_name: 'world.x.name', action: 'assist_evacuation', progress: 0.5, risk: 0.65 },
+      { state: 'available' },
+    ],
+    targets: [
+      {
+        uuid: 'u-1',
+        name: 'world.x.name',
+        separation: 180,
+        in_range: true,
+        actions: [{ action: 'assist_evacuation', duration_secs: 45, risk: 0.65, priority: 'life_safety', warning: 'world.x.warning' }],
+      },
+    ],
+    refusal: null,
+  };
+
+  it('exposes the team list, the eligible targets and their authored actions', () => {
+    const s = parse(buildSystemStationConsoleState('tactical', {
+      stationSystems: TAC_SYSTEMS,
+      blackboards: { security: BLACKBOARD },
+    }));
+    const view = s.systems['security'];
+    expect(view).toBeTruthy();
+    expect(view.range).toBe(400);
+    expect(view.teams).toHaveLength(2);
+    expect(view.teams[0].action).toBe('assist_evacuation');
+    expect(view.teams[0].progress).toBe(0.5);
+    expect(view.targets[0].in_range).toBe(true);
+    expect(view.targets[0].actions[0].priority).toBe('life_safety');
+    // The Tactical weapons view is a separate family and is untouched by it.
+    expect(s.systems['tactical-radar']).not.toBe(view);
+  });
+
+  it('surfaces the refusal string id the console shows, never English', () => {
+    const s = parse(buildSystemStationConsoleState('tactical', {
+      stationSystems: TAC_SYSTEMS,
+      blackboards: { security: { refusal: 'security.dispatch.refused.team_busy' } },
+    }));
+    expect(s.systems['security'].refusal).toBe('security.dispatch.refused.team_busy');
+  });
+
+  it('a station that owns no security system gets no security view — a hull without teams is unchanged', () => {
+    const s = parse(buildSystemStationConsoleState('tactical', {
+      stationSystems: { tactical: ['tactical-radar'] },
+      blackboards: { security: BLACKBOARD },
+    }));
+    expect(s.systems).not.toHaveProperty('security');
+  });
+
+  it('an empty muster renders as empty arrays rather than throwing', () => {
+    const s = parse(buildSystemStationConsoleState('tactical', {
+      stationSystems: TAC_SYSTEMS,
+      blackboards: {},
+    }));
+    expect(s.systems['security'].teams).toEqual([]);
+    expect(s.systems['security'].targets).toEqual([]);
   });
 });
 

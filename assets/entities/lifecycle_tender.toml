@@ -1,0 +1,133 @@
+# Lifecycle tender — the probe-world operator for the continuous-task lifecycle
+# (issue #1341, PRD #1337).
+#
+# `tractor_tug.toml` proves one mechanism; this hull exists to prove that TWO
+# unrelated continuous workflows record the same lifecycle. It is the tug plus a
+# survey suite: an engineering-owned `kind = "tractor"` system with its own power
+# group and coupling terms, AND a `kind = "sensors"` system with its own power
+# group and `[scan]` ladder, so one hull can hold a hulk and read a structure at
+# the same moment — which is what makes "simultaneous tasks stay separately
+# identifiable" testable at all.
+#
+# Kept OUT of `tractor_tug.toml` and out of every shipped combat hull on purpose:
+# adding a survey suite to a hull a committed world flies would move that world's
+# content digest for a slice that changes no gameplay. Nothing here is new
+# mechanism — every table is one the tug or the destroyer already authors.
+#
+# It flies nothing: the probe drives the operator's position and its Tactical
+# lock from the test, and both workflows through the ordinary admitted-command
+# path, so the tender needs no helm, weapons or AI policy of its own.
+
+tags = ["ship"]
+faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
+mass = 12000.0
+
+[mesh]
+model = "assets/models/alliance_courier.glb"
+shape = "sphere"
+colour = []
+
+[collider]
+shape = "Capsule"
+radius = 0.6
+length = 1.5
+# No helm capability, so per the movable/helm invariant this stays the
+# static-terrain default rather than claiming to be a flyable hull.
+movable = false
+
+[radar_appearance]
+colour = [0.2, 0.8, 0.9]
+size = 5.0
+icon = "ship"
+
+# ── Power ────────────────────────────────────────────────────────────────────
+# No `[power]` block, so the reactor takes the default 100-unit capacity /
+# resting-total-6 profile. The two small groups below draw 4 between them, well
+# under it, so both rest at nominal without the probe having to nurse them.
+
+[power_groups.tractor]
+label = "entity.lifecycle_tender.power_groups.tractor.label"
+default_level = 2
+min_level = 1
+max_level = 4
+
+[power_groups.survey]
+label = "entity.lifecycle_tender.power_groups.survey.label"
+default_level = 2
+min_level = 1
+max_level = 4
+
+# ── Damage entries ───────────────────────────────────────────────────────────
+# So either system can be knocked out — the interruption the probe drives by
+# damaging one of them.
+[[hull.system_hull]]
+system_id = "tractor"
+max_hp = 30
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
+debuff_magnitude = 0.15
+
+[[hull.system_hull]]
+system_id = "sensors"
+max_hp = 30
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
+debuff_magnitude = 0.15
+
+# ── One station owns both systems ────────────────────────────────────────────
+# A lean fixture, not a crewing statement: what matters to the lifecycle is that
+# each system RESOLVES a station, so a task's start beat can name the station a
+# human would be sitting at.
+[[station]]
+id = "engineering"
+name = "Engineering"
+description = "entity.lifecycle_tender.station.engineering.description"
+rank = "Ltn."
+short_code = "ENG"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[system]]
+id = "tractor"
+kind = "tractor"
+station = "engineering"
+power_group = "tractor"
+
+[[system]]
+id = "sensors"
+kind = "sensors"
+station = "engineering"
+power_group = "survey"
+
+# ── The coupling terms ───────────────────────────────────────────────────────
+[tractor]
+range = 600.0
+coupling_offset = [0.0, 0.0, -120.0]
+min_power_level = 2
+
+[tractor.tow_load]
+half_penalty_mass = 10000.0
+max_penalty = 0.8
+
+# ── The survey suite ─────────────────────────────────────────────────────────
+# The scan bus rides its own `survey` group so the probe can starve the suite
+# without touching the beam, and vice versa — two workflows whose failures are
+# genuinely independent.
+[scan]
+power_group = "survey"
+min_power_level = 2
+
+[[scan.band]]
+id = "detailed"
+label = "entity.lifecycle_tender.scan.band.detailed.label"
+max_range = 200.0
+condition_step = 0.01
+
+[[scan.band]]
+id = "coarse"
+label = "entity.lifecycle_tender.scan.band.coarse.label"
+max_range = 400.0
+condition_step = 0.25
+report_capacities = false

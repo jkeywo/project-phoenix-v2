@@ -348,6 +348,67 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 StateClass::ClearedAtFold,
                 "inter-system-message-state",
             )
+            // The authored-beat / scripted-removal queue (issue #1338): pushed
+            // by the shared dispatch applier, drained in full every tick by
+            // `narrative::emit_authored_and_marked_entity_narrative`, so it is
+            // empty at every fold/snapshot boundary — the same `ClearedAtFold`
+            // contract every other `EffectQueue<T>` carries.
+            .declare_state::<
+                crate::effect_queue::EffectQueue<crate::core::narrative::NarrativeRequest>,
+            >(StateClass::ClearedAtFold, "digest-exclusion-classes")
+            // The post-mission report-row queue (issue #1344): same shape and
+            // same contract as the narrative queue above — pushed by the shared
+            // dispatch applier, drained in full every tick by
+            // `mission_report::apply_report_rows`, so it is empty at every
+            // fold/snapshot boundary. The REPORT it drains into is authoritative
+            // and declared `Folded` below; the queue between them is not.
+            .declare_state::<crate::effect_queue::EffectQueue<crate::core::report::ReportRow>>(
+                StateClass::ClearedAtFold,
+                "digest-exclusion-classes",
+            )
+            // Presentation: the authored narrative mark (issue #1338). Scenario
+            // data that decides only what the after-action timeline SHOWS —
+            // nothing in the fixed tick branches on it, and neither
+            // `sim_digest` nor `snapshot` walks it.
+            .declare_state::<crate::core::narrative::NarrativeMark>(
+                StateClass::Presentation,
+                "narrative-event-stream",
+            )
+            // The `show_message(..)` request queue (issue #1342): pushed by the
+            // shared dispatch applier, drained in full every tick by
+            // `narrative::tick_computer_message` — the same `ClearedAtFold`
+            // contract every other `EffectQueue<T>` carries.
+            .declare_state::<
+                crate::effect_queue::EffectQueue<
+                    crate::core::computer_message::ComputerMessageRequest,
+                >,
+            >(StateClass::ClearedAtFold, "digest-exclusion-classes")
+            // Presentation: the authoritative "one message at a time" state
+            // (issue #1342). Viewscreen-only and presentation-only by the
+            // issue's own contract — nothing in the fixed tick branches on a
+            // message's text or severity, and neither `sim_digest` nor
+            // `snapshot` walks it.
+            .declare_state::<crate::core::computer_message::ActiveComputerMessage>(
+                StateClass::Presentation,
+                "computer-message-state",
+            )
+            // The continuous-task lifecycle queue (issue #1341): pushed by the
+            // tractor and scan sites, drained in full every tick by
+            // `narrative::emit_task_lifecycle_narrative`, so it is empty at every
+            // fold/snapshot boundary — the same `ClearedAtFold` contract every
+            // other `EffectQueue<T>` carries.
+            .declare_state::<
+                crate::effect_queue::EffectQueue<crate::core::task_lifecycle::TaskLifecycleRequest>,
+            >(StateClass::ClearedAtFold, "digest-exclusion-classes")
+            // Presentation: the live task-activation registry (issue #1341). It
+            // decides only what the after-action timeline SHOWS — nothing in the
+            // fixed tick reads it, and neither `sim_digest` nor `snapshot` walks
+            // it. A resource rather than a `Local` on the emitter so the report
+            // boundary can close whatever was still running when the run stopped.
+            .declare_state::<crate::core::task_lifecycle::TaskLifecycles>(
+                StateClass::Presentation,
+                "task-lifecycle-registry",
+            )
             // Presentation: the host per-Station attention surface (issue #1101);
             // it drives which tab asks for attention, never what the tick computes.
             .declare_state::<StationImportanceRes>(
@@ -445,6 +506,17 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             )
             .declare_state::<GamePhase>(StateClass::Folded, "game-phase-state")
             .declare_state::<GameOverReason>(StateClass::Folded, "game-over-reason-state")
+            // The structured post-mission report (issue #1344). Authoritative,
+            // not presentation: a scenario SCRIPT writes it, so two instances on
+            // the same seed must hold the same rows in the same order or they
+            // have diverged. `Folded` and not `DeferredFold` because
+            // `fold_run_scope` walks EVERY field of every row — id, both String
+            // Ids, the state label and the hidden score — and `snapshot` captures
+            // and restores all of them.
+            .declare_state::<crate::core::report::MissionReport>(
+                StateClass::Folded,
+                "post-mission-report-state",
+            )
             .declare_state::<CaptainPriorityBoost>(
                 StateClass::Folded,
                 "captain-objective-priority-state",
@@ -498,6 +570,43 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             .declare_state::<crate::umbilical::server::TransferUmbilical>(
                 StateClass::Folded,
                 "umbilical-flow-state",
+            )
+            // Security teams (issue #1346), the umbilical's shape exactly: what
+            // `fold_security_namespace` walks is the authoritative half — which
+            // teams are out, in what state, against which target — while the
+            // authored `[security]` terms are content `content_digest` answers
+            // for and the risk/elapsed/last-refusal fields are projections the
+            // next tick re-derives.
+            .declare_state::<crate::security::ShipSecurityTeams>(
+                StateClass::Folded,
+                "security-team-state",
+            )
+            // The target-side authored table is `DeferredFold` with ZERO folded
+            // fields, which is the honest reading of that class: it is
+            // authoritative — a host that thought a compartment offered a
+            // different action would dispatch differently — but every byte of it
+            // came out of the entity template and nothing ever writes it, so
+            // `content_digest` already answers for it and `world_digest` walks
+            // none of it.
+            .declare_state::<crate::security::SecurityTargetActions>(
+                StateClass::DeferredFold,
+                "security-target-state",
+            )
+            // Controlled demolition (issue #1350). The target-side table is
+            // authored and never written, so it is `DeferredFold` with zero folded
+            // fields exactly like `SecurityTargetActions` — authoritative, but
+            // `content_digest` already answers for every byte of it. The per-ship
+            // `DemolitionControl` carries only the last-refusal projection the next
+            // command re-derives, and the authoritative operation state (charged,
+            // detonated, each outcome) is WORLD FLAGS, already folded — so the
+            // control component is `Derived`, inert to `world_digest`.
+            .declare_state::<crate::demolition::DemolitionTarget>(
+                StateClass::DeferredFold,
+                "demolition-target-state",
+            )
+            .declare_state::<crate::demolition::DemolitionControl>(
+                StateClass::Derived,
+                "demolition-control-state",
             )
             .declare_state::<AsteroidUuid>(StateClass::Folded, "digest-fold-order-policy")
             // ---- DeferredFold: authoritative, not yet walked by `world_digest`. ----
@@ -561,9 +670,13 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 StateClass::DeferredFold,
                 "comms-inbox-state",
             )
-            // `CommsRuntime` is folded in HALF: `active_dialogues` and
-            // `open_hails` are walked; `contacts`, `range_flags` and
-            // `range_active` are rebuilt every tick by
+            // `CommsRuntime` is folded in HALF: `active_dialogues`,
+            // `open_hails` and `pending_ai_responses` — the unmanned Comms
+            // consoles' running weighted decisions, keyed fleet-slot-then-
+            // message-id (issue #1343) — are walked; `contacts`, `range_flags`,
+            // `range_active` and their per-fleet-slot twins
+            // (`fleet_range_flags` / `fleet_range_active`, also #1343) are
+            // rebuilt every tick by
             // `update_comms_range_flags` from live entities and transforms the
             // entity namespace already folds, and `needs_broadcast` /
             // `last_broadcast_host` are broadcast bookkeeping (which peer was
@@ -667,6 +780,23 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             .declare_state::<crate::science::server::ShipScanRecord>(
                 StateClass::DeferredFold,
                 "science-scan-state",
+            )
+            // Debris contacts (issue #1347). `DeferredFold` for exactly
+            // `ShipScanRecord`'s reason, one consumer along: `sim_digest::
+            // world_digest` walks NO field of `DebrisThreat` — there is no
+            // debris namespace in the fold — while `src/snapshot.rs`
+            // (`capture_debris` / the `EntityState::debris` restore) carries the
+            // whole runtime half, so the split is "none folded, all
+            // snapshotted". It is authoritative and not a projection: the read /
+            // confirmed / urgent / struck latches are what the Sensors seat has
+            // established and what a Backfilled Tactical filters on, and the
+            // drifted translation is a number only `tick_debris_drift` writes
+            // (a rock carries no `ShipPhysics`, so the entity namespace never
+            // folds its position). A peer that came back with every read rock
+            // unread would re-scan a corridor the host had already worked.
+            .declare_state::<crate::debris::server::DebrisThreat>(
+                StateClass::DeferredFold,
+                "debris-threat-state",
             );
         // `AssetPreloadResource` is a presentation resource (`crate::server::
         // asset_preload`), init'd only in the `#[cfg(feature = "server")] if
@@ -810,6 +940,46 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         // chokepoints can emit unconditionally — only the *collection* is
         // headless-only.
         .add_message::<crate::core::balance::BalanceEvent>()
+        // Narrative telemetry (issue #1338, PRD #1337). Registered beside the
+        // balance message and for the same reason: the emitters run on every
+        // target so a beat is produced whether or not anyone is collecting, and
+        // only the *collection* (`headless::report::collect_narrative_events`)
+        // is headless-only. Kept a SEPARATE message from `BalanceEvent` because
+        // the PRD keeps the story surface beside the combat ledger rather than
+        // inside it — the per-ship ledgers must stay a fold of the balance
+        // stream alone.
+        .add_message::<crate::core::narrative::NarrativeEvent>()
+        // The authored-beat / authored-entity-outcome / scripted-removal queue
+        // the shared dispatch applier pushes onto (issue #1223's pattern, issue
+        // #1338's payload).
+        .init_resource::<
+            crate::effect_queue::EffectQueue<crate::core::narrative::NarrativeRequest>,
+        >()
+        // The ship's-computer message state and its request queue (issue
+        // #1342). Registered unconditionally for the same reason the
+        // narrative queue above is: the emitter runs on every target, and
+        // only the headless collection of its narrative events is
+        // conditional.
+        .init_resource::<crate::core::computer_message::ActiveComputerMessage>()
+        .init_resource::<
+            crate::effect_queue::EffectQueue<
+                crate::core::computer_message::ComputerMessageRequest,
+            >,
+        >()
+        // The continuous-task lifecycle queue and its activation registry (issue
+        // #1341): the tractor and scan sites push start/end reports, and the
+        // emitter turns them into the paired timeline beats.
+        .init_resource::<
+            crate::effect_queue::EffectQueue<crate::core::task_lifecycle::TaskLifecycleRequest>,
+        >()
+        .init_resource::<crate::core::task_lifecycle::TaskLifecycles>()
+        // The post-mission report (issue #1344) and the script-boundary queue
+        // that feeds it. `insert_resource` of the default rather than
+        // `init_resource` for the report itself, matching `GameOverReason`
+        // below: a run starts with no rows, and that is a stated fact rather
+        // than a type default nobody wrote down.
+        .init_resource::<crate::effect_queue::EffectQueue<crate::core::report::ReportRow>>()
+        .insert_resource(crate::core::report::MissionReport::default())
         .init_resource::<CaptainPriorityBoost>()
         // The sim's one source of randomness. `init_resource` draws an OS seed, so
         // an unconfigured app (browser host, unit tests) behaves as it always did;
@@ -902,6 +1072,13 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 // kind of thing — per-run state that a multi-game session has to
                 // hand back.
                 crate::command_admission::reset_command_log,
+                // The run boundary for the post-mission report (issue #1344),
+                // beside the command log's and for exactly the same reason: the
+                // report is per-run state, and a second round reached through
+                // `ReturnToLobby` must not inherit the first round's rows —
+                // least of all into a scenario that authored no report and has
+                // to keep its ordinary victory/defeat ending (AC5).
+                crate::mission_report::reset_mission_report,
                 crate::gm_action::reset,
                 reset_broadcast_caches_on_start,
                 crate::world::server::seed_ship_power_counter,
@@ -916,6 +1093,52 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         // In the fixed schedule so its events land in tick order with the rest of
         // the balance stream.
         .add_systems(FixedUpdate, emit_phase_change_balance_events)
+        // The authored mission timeline (issue #1338). Chained and ordered after
+        // `SimSet::Broadcast` — the last set of the tick — so every emitter sees
+        // the state this tick finished with: the Objective the trigger pipeline
+        // just completed, the deadline the callback drain just fired, the
+        // `EntityDestroyed` the damage set just wrote, and the beat a script
+        // queued anywhere in between. Chained among themselves so the monotonic
+        // sequence `collect_narrative_events` assigns is a fixed function of the
+        // tick rather than of executor order.
+        .add_systems(
+            FixedUpdate,
+            (
+                crate::narrative::emit_scenario_narrative,
+                crate::narrative::emit_authored_and_marked_entity_narrative,
+                // The ship's-computer message (issue #1342): applies this
+                // tick's `show_message(..)` requests, checks the active
+                // message's simulation-time expiry, and emits the
+                // shown/superseded/expired narrative trio. Chained after the
+                // other two so a message authored by the SAME trigger that
+                // also posts a beat this tick reports in a stable order.
+                crate::narrative::tick_computer_message,
+                // Last of the narrative emitters (issue #1341): a task's
+                // terminal beat reads as the consequence of the tick, so it
+                // sequences after the Objective, deadline and entity beats that
+                // share it.
+                crate::narrative::emit_task_lifecycle_narrative,
+                // The report accumulator (issue #1344) joins the same chain, and
+                // last of all: a row a script wrote this tick lands after the
+                // beats that caused it, so an after-action reading sees the
+                // story move before it sees the report move.
+                crate::mission_report::apply_report_rows,
+            )
+                .chain()
+                .after(crate::sim_sets::SimSet::Broadcast),
+        )
+        // Clear the active ship's-computer message on the two transitions the
+        // issue names: mission end and a return to the lobby. Not a narrative
+        // beat — the shown/superseded/expired trio is the whole of AC5,
+        // and this is neither.
+        .add_systems(
+            OnEnter(GamePhase::GameOver),
+            crate::narrative::clear_active_computer_message,
+        )
+        .add_systems(
+            OnEnter(GamePhase::Lobby),
+            crate::narrative::clear_active_computer_message,
+        )
         .insert_resource(GameOverReason(None, None))
         .add_systems(
             FixedUpdate,

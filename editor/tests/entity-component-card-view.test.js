@@ -105,7 +105,7 @@ describe('renderEntityComponentCard', () => {
     return {
       edits,
       deps: {
-        getFactionOptions: () => [{ uuid: 'f-1', name: 'Federation' }],
+        getFactionOptions: () => [{ uuid: 'f-1', name: 'Alliance' }],
         getComplexityPaths: () => ['assets/complexity/tactical.toml'],
         onEdit: (section, data) => edits.push({ section, data }),
         onDelete: (section) => edits.push({ section, deleted: true }),
@@ -217,7 +217,7 @@ describe('renderEntityComponentCard', () => {
 
     const sel = host.querySelectorAll('select').find((s) => s.classList.contains('entity-card-input-faction'));
     expect(sel).toBeDefined();
-    // 1 blank + 1 federation option.
+    // 1 blank + 1 alliance option.
     expect(sel.children.length).toBe(2);
     expect(sel.value).toBe('f-1');
 

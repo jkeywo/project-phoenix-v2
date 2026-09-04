@@ -581,7 +581,9 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     //
     // #1086's three partly-folded types are held to that rule in
     // `server_app::registration`, each with its own naming comment:
-    // `comms::server::CommsRuntime` (dialogues and hails walked; contacts, range
+    // `comms::server::CommsRuntime` (dialogues, hails and the unmanned consoles'
+    // running weighted decisions — `pending_ai_responses`, keyed
+    // fleet-slot-then-message-id since #1343 — walked; contacts, range
     // flags, range_active and the broadcast bookkeeping not),
     // `comms::server::CommsInboxRes` (the inbox's `records` walked; its `dirty`
     // broadcast flag not — see the registration comment for why demoting it

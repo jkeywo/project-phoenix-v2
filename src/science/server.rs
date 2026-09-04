@@ -69,7 +69,11 @@ use crate::core::messages::{
     ActionFeedbackOutcome, AdmittedCommand, AdmittedCommands, InfrastructureSnapshot, PowerGroupId,
     ScanBlackboard, ScanReadingSnapshot, SystemBlackboard, SystemControlPayload, SystemId,
 };
+use crate::core::task_lifecycle::{
+    TaskLifecycleRequest, TaskSlot, TaskTerminalReason, TASK_VERB_SCAN,
+};
 use crate::dossier::SubjectCondition;
+use crate::effect_queue::EffectQueue;
 use crate::entities::spawner::{EntityName, EntityUuid};
 use crate::infrastructure::InfrastructureCondition;
 use crate::logging::LogFilterConfig;
@@ -231,10 +235,26 @@ pub fn tick_scans(
         // those back to the same documented default a bare TOML gets — never
         // to zero.
         Option<&crate::entities::spawner::EntityMass>,
+        // The subject's `[debris]` table (issue #1347), when it is a moving
+        // hazard. `Option` like everything else here: a subject that is not
+        // debris reads exactly as it did before this existed.
+        Option<&crate::debris::DebrisThreat>,
     )>,
     region_effects: Query<&crate::entities::spawner::RegionEffectsSection>,
     mut commands: Commands,
     log: Option<Res<LogFilterConfig>>,
+    // The continuous-task lifecycle queue (issue #1341). `Option` so a reduced
+    // fixture that runs this system without the narrative plugin scans exactly
+    // as it did before this existed.
+    mut lifecycle: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
+    // The debris-assessment queue (issue #1347), on `lifecycle`'s exact terms:
+    // the reading is composed HERE — this is where the suite, the range and the
+    // power are — but the contact's authoritative threat state belongs on the
+    // contact, and this system holds the subject query read-only.
+    mut debris_assessed: Option<ResMut<EffectQueue<crate::debris::DebrisAssessed>>>,
+    // The correlated action-feedback seam (issue #761): the outbound message bus
+    // a `finish_action_feedback` reports Applied/Refused through, addressed to the
+    // command's own submitter. `Option` on the same terms as the queues above.
     mut outbound: Option<
         ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
     >,
@@ -250,10 +270,13 @@ pub fn tick_scans(
         .collect();
     rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.index().cmp(&b.1.index())));
 
-    for (_, entity) in rows {
+    for (operator_uuid, entity) in rows {
         let Ok((entity, _, transform, admitted, power, record)) = ships.get_mut(entity) else {
             continue;
         };
+        // Carry the whole admitted command (issue #761), not just its target
+        // uuid: the target still drives the reading and the task lifecycle, but
+        // the command is what the correlated action-feedback is addressed to.
         let requested: Vec<AdmittedCommand> = admitted
             .for_target(crate::ship::system_registry::SENSORS_SYSTEM_ID)
             .filter_map(|cmd| match &cmd.payload {
@@ -264,6 +287,11 @@ pub fn tick_scans(
         if requested.is_empty() {
             continue;
         }
+        let scan_slot = TaskSlot::new(
+            operator_uuid.clone(),
+            crate::ship::system_registry::SENSORS_SYSTEM_ID,
+            TASK_VERB_SCAN,
+        );
         let Some(mut record) = record else {
             // No `[scan]` table at all. Insert the record holding the refusal
             // rather than saying nothing; it lands a tick later, which no
@@ -272,7 +300,19 @@ pub fn tick_scans(
                 refusal: Some(ScanRefusal::NotCapable),
                 ..Default::default()
             });
+            // Each asked-for reading is still an activation that began and
+            // ended (issue #1341) — a crew who asked a hull with no suite to
+            // scan get an answer, and the timeline records the asking.
             for cmd in &requested {
+                let SystemControlPayload::ScanTarget { uuid: target_uuid } = &cmd.payload else {
+                    continue;
+                };
+                push_scan_lifecycle(
+                    lifecycle.as_deref_mut(),
+                    &scan_slot,
+                    target_uuid,
+                    TaskTerminalReason::NotCapable,
+                );
                 crate::command_admission::finish_action_feedback(
                     cmd,
                     &mut outbound,
@@ -291,7 +331,8 @@ pub fn tick_scans(
             let found = subjects
                 .iter()
                 .find(|(uuid, ..)| uuid.0.as_str() == target_uuid.as_str());
-            let Some((_, subject_transform, name, condition, authored_id, mass)) = found else {
+            let Some((_, subject_transform, name, condition, authored_id, mass, debris)) = found
+            else {
                 record.last = None;
                 record.refusal = Some(ScanRefusal::NoSuchTarget);
                 crate::pwarn!(
@@ -299,6 +340,12 @@ pub fn tick_scans(
                     crate::logging::LogCat::Sensors,
                     entity = entity,
                     "scan refused: no entity in this world answers to '{target_uuid}'"
+                );
+                push_scan_lifecycle(
+                    lifecycle.as_deref_mut(),
+                    &scan_slot,
+                    target_uuid,
+                    TaskTerminalReason::NoSuchTarget,
                 );
                 crate::command_admission::finish_action_feedback(
                     cmd,
@@ -312,6 +359,7 @@ pub fn tick_scans(
                 name: name.map(|n| n.0.clone()).unwrap_or_default(),
                 condition: subject_condition(condition),
                 mass: subject_mass(mass),
+                debris: debris_subject(debris, subject_transform, &subjects),
             };
             let conditions = ScanConditions {
                 distance: ship_pos.distance(subject_transform.translation),
@@ -329,7 +377,7 @@ pub fn tick_scans(
                 region_effects: effects.clone(),
             };
 
-            let outcome = match derive(&record.config, &subject, &conditions, now_tick) {
+            match derive(&record.config, &subject, &conditions, now_tick) {
                 Ok(reading) => {
                     crate::pdebug!(
                         log,
@@ -339,12 +387,36 @@ pub fn tick_scans(
                         reading.band,
                         conditions.distance
                     );
+                    // The debris half of the reading goes to the contact it
+                    // names (issue #1347), before the reading is moved onto the
+                    // record. Queued rather than written: `debris::server::
+                    // tick_debris_state` is the one owner of a contact's
+                    // authoritative threat state, and it runs after this system.
+                    if let (Some(assessment), Some(queue)) =
+                        (reading.debris.clone(), debris_assessed.as_deref_mut())
+                    {
+                        queue.0.push(crate::debris::DebrisAssessed {
+                            subject_uuid: target_uuid.clone(),
+                            taken_at_tick: reading.taken_at_tick,
+                            assessment,
+                        });
+                    }
                     record.last = Some(reading);
                     record.refusal = None;
                     if let Some(authored_id) = authored_id {
                         mirror_scanned(runtime.as_deref_mut(), &authored_id.0, &log);
                     }
-                    ActionFeedbackOutcome::Applied
+                    push_scan_lifecycle(
+                        lifecycle.as_deref_mut(),
+                        &scan_slot,
+                        target_uuid,
+                        TaskTerminalReason::Completed,
+                    );
+                    crate::command_admission::finish_action_feedback(
+                        cmd,
+                        &mut outbound,
+                        ActionFeedbackOutcome::Applied,
+                    );
                 }
                 Err(refusal) => {
                     crate::pdebug!(
@@ -356,11 +428,67 @@ pub fn tick_scans(
                     );
                     record.last = None;
                     record.refusal = Some(refusal);
-                    ActionFeedbackOutcome::Refused
+                    push_scan_lifecycle(
+                        lifecycle.as_deref_mut(),
+                        &scan_slot,
+                        target_uuid,
+                        terminal_reason_for(refusal),
+                    );
+                    crate::command_admission::finish_action_feedback(
+                        cmd,
+                        &mut outbound,
+                        ActionFeedbackOutcome::Refused,
+                    );
                 }
-            };
-            crate::command_admission::finish_action_feedback(cmd, &mut outbound, outcome);
+            }
         }
+    }
+}
+
+/// Record one asked-for reading as a whole task lifecycle (issue #1341).
+///
+/// A scan is INSTANTANEOUS — there is no hold to open on one tick and close on
+/// the next — so its start and its terminal moment land on the same fixed tick,
+/// in that order. They are still two events, because the lifecycle contract is
+/// what a later mechanic reuses and because "the crew asked" and "this is what
+/// came back" are two different facts about the run: a request that was refused
+/// is not the same as a request nobody made.
+///
+/// Both are queued together here, so a scan can never leave a start unmatched.
+fn push_scan_lifecycle(
+    queue: Option<&mut EffectQueue<TaskLifecycleRequest>>,
+    slot: &TaskSlot,
+    target_uuid: &str,
+    reason: TaskTerminalReason,
+) {
+    let Some(queue) = queue else {
+        return;
+    };
+    queue.0.push(TaskLifecycleRequest::Start {
+        slot: slot.clone(),
+        target: Some(target_uuid.to_string()),
+    });
+    queue.0.push(TaskLifecycleRequest::End {
+        slot: slot.clone(),
+        reason,
+    });
+}
+
+/// The terminal reason a refused reading reports, from the refusal the pure
+/// derivation returned (issue #1341).
+///
+/// Every scan refusal is a FAILURE class: the suite could not do the work asked
+/// of it. The cancelled/interrupted classes belong to tasks that have a
+/// duration to be interrupted during, which is why the tractor's mapping is the
+/// richer one.
+fn terminal_reason_for(refusal: ScanRefusal) -> TaskTerminalReason {
+    match refusal {
+        ScanRefusal::NotCapable => TaskTerminalReason::NotCapable,
+        ScanRefusal::NoSuchTarget => TaskTerminalReason::NoSuchTarget,
+        ScanRefusal::NoReadableCondition => TaskTerminalReason::Unreadable,
+        ScanRefusal::OutOfRange => TaskTerminalReason::OutOfRange,
+        ScanRefusal::Underpowered => TaskTerminalReason::Unpowered,
+        ScanRefusal::Blinded => TaskTerminalReason::Blinded,
     }
 }
 
@@ -430,6 +558,87 @@ fn subject_condition(condition: Option<&InfrastructureCondition>) -> Option<Subj
                 .and_then(|c| c.label.clone())
         },
     ))
+}
+
+/// The subject's raw debris geometry (issue #1347), stated relative to the asset
+/// its `[debris]` table names — **and the only path a hazard reaches a scan by**.
+///
+/// `None` only for a subject that carries no `[debris]` table at all: every
+/// moving hazard a crew can point an instrument at answers, because being read
+/// is what makes a rock *read*. `ScanReading::debris` says as much in its own
+/// doc — `None` for every subject that is not debris — and the whole beat turns
+/// on a contact the crew RULED OUT being distinguishable from one nobody has
+/// been to yet.
+///
+/// Two of those answers carry no asset to project against, and both are stated
+/// the same way: separation `[0.0, 0.0]` against an empty `protected_name`, so
+/// [`assess`](crate::debris::assess) reports a course, no collision course and
+/// no impact — which is exactly the finding, and exactly what its own
+/// `an_unprotected_contact_is_never_on_a_collision_course` describes.
+///
+/// * A table that names **nothing** — a field of harmless wreckage the crew have
+///   to rule out. Authored, and the reason ruling one in matters.
+/// * A table naming an asset **no longer in the world**. A rock aimed at a depot
+///   that has already been destroyed has nothing left to hit, and the honest
+///   reading is that it is on course for nothing rather than that there is no
+///   reading to be had.
+///
+/// Lifted out as its own function for `subject_condition`'s reason: the gate is
+/// then one readable line inside the tick rather than a clause in the middle of
+/// it, and the name lookup is visibly the SAME one the objective and comms
+/// vocabularies resolve an authored entity reference by.
+fn debris_subject(
+    threat: Option<&crate::debris::DebrisThreat>,
+    subject_transform: &Transform,
+    subjects: &Query<(
+        &EntityUuid,
+        &Transform,
+        Option<&EntityName>,
+        Option<&InfrastructureCondition>,
+        Option<&crate::entities::spawner::EntityId>,
+        Option<&crate::entities::spawner::EntityMass>,
+        Option<&crate::debris::DebrisThreat>,
+    )>,
+) -> Option<crate::debris::DebrisSubject> {
+    let threat = threat?;
+    let protected = &threat.config.protected_target;
+    let asset = if protected.is_empty() {
+        None
+    } else {
+        subjects
+            .iter()
+            .find(|(_, _, name, ..)| name.is_some_and(|n| n.0 == *protected))
+            .map(|(_, tf, ..)| tf.translation)
+    };
+    // The course is the authored drift either way: what a contact is DOING is a
+    // fact about the contact, and only what it is doing *to something* needs an
+    // asset to be stated against.
+    //
+    // The protected asset is world furniture — a depot, a rung, a control tower
+    // — and the rock is the only thing moving, so the authored drift IS the
+    // relative velocity. The day a scenario protects something that moves, this
+    // is the one line that subtracts.
+    let relative_velocity = [threat.config.drift[0], threat.config.drift[2]];
+    let Some(asset) = asset else {
+        return Some(crate::debris::DebrisSubject {
+            relative_position: [0.0, 0.0],
+            relative_velocity,
+            protected_name: String::new(),
+            // No radius, so `assess` can never confirm this contact however near
+            // it passes to anything — which is the authored point of a mass aimed
+            // at nothing.
+            impact_radius: 0.0,
+        });
+    };
+    Some(crate::debris::DebrisSubject {
+        relative_position: [
+            subject_transform.translation.x - asset.x,
+            subject_transform.translation.z - asset.z,
+        ],
+        relative_velocity,
+        protected_name: protected.clone(),
+        impact_radius: threat.config.impact_radius,
+    })
 }
 
 /// The subject's authored mass (issue #1154), off its `EntityMass` component.
@@ -548,6 +757,7 @@ mod tests {
             ],
             degraded_by: Vec::new(),
             interference_bands: 1,
+            mass_classes: Vec::new(),
         }
     }
 

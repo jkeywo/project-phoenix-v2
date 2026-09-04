@@ -68,6 +68,8 @@ pub fn directive_label(directive: &AiDirective) -> String {
         AiDirective::Escort { target } => format!("Escort({target})"),
         AiDirective::Transfer { target } => format!("Transfer({target})"),
         AiDirective::FieldRepair { target } => format!("FieldRepair({target})"),
+        AiDirective::Secure { target } => format!("Secure({target})"),
+        AiDirective::Rescue { target } => format!("Rescue({target})"),
     }
 }
 
@@ -87,7 +89,9 @@ pub fn directive_target(directive: &AiDirective) -> Option<&str> {
         | AiDirective::Stabilise { target }
         | AiDirective::Escort { target }
         | AiDirective::Transfer { target }
-        | AiDirective::FieldRepair { target } => Some(target.as_str()),
+        | AiDirective::FieldRepair { target }
+        | AiDirective::Secure { target }
+        | AiDirective::Rescue { target } => Some(target.as_str()),
         AiDirective::Order { target, .. } => Some(target.as_str()),
         AiDirective::Reach { anchor } | AiDirective::Retreat { anchor } => Some(anchor.as_str()),
         AiDirective::Patrol { anchors, .. } => anchors.first().map(String::as_str),

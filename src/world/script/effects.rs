@@ -320,6 +320,135 @@ pub(crate) fn register_effects(engine: &mut HostRegistry) {
     );
     host_fn!(
         engine,
+        "narrative_beat",
+        receiver = "effects",
+        category = "effect",
+        params = ["id"],
+        summary = "Record an authored story beat on the mission timeline.",
+        |sink: &mut EffectSink, id: ImmutableString| {
+            // Issue #1338. Nothing in the world moves — this is the scenario's
+            // own punctuation, and it exists so a headless after-action reading
+            // carries the beats the AUTHOR considered beats rather than every
+            // event the simulation happened to produce.
+            sink.push(ActionCmd::NarrativeBeat { id: id.to_string() });
+        },
+    );
+    host_fn!(
+        engine,
+        "narrative_outcome",
+        receiver = "effects",
+        category = "effect",
+        params = ["entity", "outcome"],
+        summary = "Record a marked entity's authored outcome: spawned, disabled, \
+                   destroyed, escaped, rescued or abandoned.",
+        |sink: &mut EffectSink,
+         entity: ImmutableString,
+         outcome: ImmutableString|
+         -> Result<(), Box<EvalAltResult>> {
+            // Validated at the boundary through the SAME parser the vocabulary
+            // defines, exactly as `game_over`'s outcome is: a typo raises,
+            // discarding this call's effects (settled decision 10), rather than
+            // recording a silently different beat.
+            let kind =
+                crate::core::narrative::NarrativeKind::parse_outcome(&outcome).map_err(raise)?;
+            sink.push(ActionCmd::NarrativeOutcome {
+                entity: entity.to_string(),
+                outcome: kind,
+            });
+            Ok(())
+        },
+    );
+    host_fn!(
+        engine,
+        "show_message",
+        receiver = "effects",
+        category = "effect",
+        params = ["id", "text", "severity", "duration_secs"],
+        summary = "Show a timed ship's-computer message on the Viewscreen: \
+                   severity is info, advisory, warning or critical, and \
+                   duration_secs must be positive.",
+        |sink: &mut EffectSink,
+         id: ImmutableString,
+         text: ImmutableString,
+         severity: ImmutableString,
+         duration_secs: i64|
+         -> Result<(), Box<EvalAltResult>> {
+            // Issue #1342. Validated at the boundary, exactly as
+            // `narrative_outcome`'s outcome word is: an unknown severity or a
+            // non-positive duration raises HERE, discarding this call's
+            // effects (settled decision 10), rather than reaching the
+            // authoritative `ActiveComputerMessage` as a silently different
+            // message.
+            let severity = crate::core::computer_message::ComputerMessageSeverity::parse(&severity)
+                .map_err(raise)?;
+            if duration_secs <= 0 {
+                return Err(raise(format!(
+                    "show_message(\"{id}\"): duration_secs must be positive, got {duration_secs}"
+                )));
+            }
+            sink.push(ActionCmd::ShowComputerMessage {
+                id: id.to_string(),
+                text: text.to_string(),
+                severity,
+                duration_secs,
+                station: None,
+            });
+            Ok(())
+        },
+    );
+    // The Station-cue overload is not a separate editor entry — one
+    // descriptor per callable name — so a bare registration, mirroring
+    // `game_over`'s outcome-declaring overload below.
+    engine.register_fn(
+        "show_message",
+        |sink: &mut EffectSink,
+         id: ImmutableString,
+         text: ImmutableString,
+         severity: ImmutableString,
+         duration_secs: i64,
+         station: ImmutableString|
+         -> Result<(), Box<EvalAltResult>> {
+            let severity = crate::core::computer_message::ComputerMessageSeverity::parse(&severity)
+                .map_err(raise)?;
+            if duration_secs <= 0 {
+                return Err(raise(format!(
+                    "show_message(\"{id}\"): duration_secs must be positive, got {duration_secs}"
+                )));
+            }
+            sink.push(ActionCmd::ShowComputerMessage {
+                id: id.to_string(),
+                text: text.to_string(),
+                severity,
+                duration_secs,
+                station: Some(crate::core::messages::StationId(station.to_string())),
+            });
+            Ok(())
+        },
+    );
+    host_fn!(
+        engine,
+        "report_row",
+        receiver = "effects",
+        category = "effect",
+        params = ["spec"],
+        summary = "Write one post-mission report row: `#{id, heading, outcome, state, \
+                   score?}`. `state` is saved, lost, partial or neutral; `score` is the \
+                   hidden signed diagnostic value players never see. Writing the same \
+                   `id` again updates the row in place.",
+        |sink: &mut EffectSink, spec: Map| -> Result<(), Box<EvalAltResult>> {
+            // Issue #1344. A map rather than five positional arguments: the row
+            // is a record, and a five-string call is a row four of whose fields
+            // can be swapped without anything noticing. Every required key is
+            // checked here so a malformed row raises at the boundary —
+            // discarding this call's effects (settled decision 10) — rather than
+            // reaching a player surface half-built.
+            let row = report_row(&spec).map_err(raise)?;
+            sink.push(ActionCmd::SetReportRow(row));
+            Ok(())
+        },
+    );
+    host_fn!(
+        engine,
         "reset_trigger",
         receiver = "effects",
         category = "effect",
@@ -663,6 +792,34 @@ pub(crate) fn register_effects(engine: &mut HostRegistry) {
             // resolution is deferred to the applier's `dispatch_action`, exactly
             // as the declarative `add_faction_enemy` action resolves it (#984 M6).
             sink.push_action(TriggerAction::AddFactionEnemy {
+                faction: faction.to_string(),
+                enemy: enemy.to_string(),
+            });
+        },
+    );
+    engine.register_fn(
+        "remove_faction_enemy",
+        |sink: &mut EffectSink, faction: ImmutableString, enemy: ImmutableString| {
+            // The counterpart to `add_faction_enemy` (issue #1349), buffered the
+            // same way and for the same reason: no `FactionRegistry` is in scope
+            // at this boundary, so the name→UUID resolution is the applier's.
+            //
+            // TWO verbs rather than one setter, the rule `hold_fire`/
+            // `release_fire` and `call_strike`/`settle_strike` already keep: the
+            // direction lives in the name, so a scenario cannot make peace with
+            // somebody it meant to declare war on by getting a boolean the wrong
+            // way round.
+            //
+            // Nothing downstream of here is new. The declarative
+            // `remove_faction_enemy` action, its `dispatch_state_action` arm and
+            // its applier all predate this; what the applier does on a SUCCESSFUL
+            // removal is the reason a scenario wants it (issue #710): it
+            // re-validates every AI controller's target, so ending a hostility
+            // also drops the locks that hostility licensed. That is what lets a
+            // mission stop a fight it started without having to destroy the hull
+            // it started it with — issue #1349's "the threshold ends the hostile
+            // directive without requiring hull destruction".
+            sink.push_action(TriggerAction::RemoveFactionEnemy {
                 faction: faction.to_string(),
                 enemy: enemy.to_string(),
             });
@@ -1172,6 +1329,82 @@ pub(super) fn destroy_entity_action(entity: &str) -> Result<TriggerAction, Strin
     parse_action_entry(&raw)
 }
 
+/// Build a [`ReportRow`](crate::core::report::ReportRow) from a `report_row`
+/// script map (issue #1344).
+///
+/// ```rhai
+/// ctx.effects.report_row(#{
+///     id: "lyra",                                            // required: stable row id
+///     heading: "world.x.report.lyra.heading",                // required: String Id
+///     outcome: "world.x.report.lyra.saved",                  // required: String Id
+///     state: "saved",                                        // required: saved|lost|partial|neutral
+///     score: 6,                                              // optional, default 0
+/// });
+/// ```
+///
+/// All four text keys are REQUIRED, and `id` / `heading` / `outcome` must each
+/// be NON-BLANK — missing and present-but-empty raise the same way, unlike
+/// `open_comms`'s optional metadata. That is the point of the check and not
+/// belt-and-braces: `heading: ""` is a string, so a presence-only test admits
+/// it, and the row it builds then disagrees with itself across the two player
+/// surfaces. `gui/game-over-view.js`'s `reportRows` drops a row with an empty
+/// heading or outcome (a blank line says less than no line), so the phone and
+/// the Viewscreen never show it — while the headless report still carries it
+/// and still folds its score into `MissionReport::total`. The total would then
+/// count a row no player surface displays, which is precisely the invariant
+/// issue #1344 states as "a total equal to the visible report rows' hidden
+/// scores". Enforcing it HERE, at the authoring boundary, is what makes that a
+/// property of the report rather than a coincidence of the renderers.
+///
+/// `score` is optional and defaults to 0 — a row that is purely a statement of
+/// fact, with no diagnostic weight, should not have to spell out a zero.
+///
+/// `state` is validated through
+/// [`ReportRowState::parse`](crate::core::report::ReportRowState::parse), the
+/// same parser the vocabulary defines, exactly as `narrative_outcome`'s word
+/// and `game_over`'s outcome are.
+fn report_row(spec: &Map) -> Result<crate::core::report::ReportRow, String> {
+    /// Read a required, non-blank text key. Absent and blank raise the SAME
+    /// error, so an author who typed `heading: ""` is told the same thing as
+    /// one who forgot the key — which is the same mistake wearing two faces.
+    fn required_text(spec: &Map, key: &str, what: &str) -> Result<String, String> {
+        match map_str(spec, key) {
+            Some(value) if !value.trim().is_empty() => Ok(value),
+            _ => Err(format!(
+                "report_row requires a non-empty string `{key}` ({what})"
+            )),
+        }
+    }
+    let id = required_text(spec, "id", "the stable row id")?;
+    let heading_id = required_text(spec, "heading", "the row's heading String Id")?;
+    let outcome_id = required_text(spec, "outcome", "the row's outcome String Id")?;
+    let state = map_str(spec, "state")
+        .ok_or_else(|| "report_row requires a string `state`".to_string())
+        .and_then(|s| {
+            crate::core::report::ReportRowState::parse(&s).map_err(|e| format!("report_row: {e}"))
+        })?;
+    // `no_float`: a score is whole by construction, so this is an INT and there
+    // is no `flt("…")` route — a fractional diagnostic score would be a number
+    // nobody could total in their head, which is the only thing it is for.
+    let score = match spec.get("score") {
+        Some(d) => {
+            let raw = d
+                .as_int()
+                .map_err(|_| "report_row `score` must be a whole number".to_string())?;
+            i32::try_from(raw)
+                .map_err(|_| format!("report_row `score` is out of range for an i32: {raw}"))?
+        }
+        None => 0,
+    };
+    Ok(crate::core::report::ReportRow {
+        id,
+        heading_id,
+        outcome_id,
+        state,
+        score,
+    })
+}
+
 /// Build an [`OpenCommsRequest`] from an `open_comms` script map.
 ///
 /// ```rhai
@@ -1451,25 +1684,367 @@ mod tests {
         assert!(err.to_string().contains("outcome"), "{err}");
     }
 
+    // ── report_row (issue #1344) ─────────────────────────────────────────────
+
+    /// The whole row reaches the queue as a RESOLVED command: nothing about a
+    /// report row needs name resolution, so it buffers as a `Cmd` and not an
+    /// `Action` — the opposite claim `destroy_entity_buffers_an_action_not_a_
+    /// resolved_command` makes about its own verb, and for the same reason:
+    /// which buffer a verb lands in IS its architecture.
+    #[test]
+    fn report_row_buffers_the_whole_row_as_a_resolved_command() {
+        let cmds = run(
+            r#"fn f(ctx) {
+                ctx.effects.report_row(#{
+                    id: "lyra",
+                    heading: "world.x.report.lyra.heading",
+                    outcome: "world.x.report.lyra.saved",
+                    state: "saved",
+                    score: 6,
+                });
+            }"#,
+            "f",
+        );
+        assert_eq!(
+            cmds,
+            vec![ActionCmd::SetReportRow(crate::core::report::ReportRow {
+                id: "lyra".to_string(),
+                heading_id: "world.x.report.lyra.heading".to_string(),
+                outcome_id: "world.x.report.lyra.saved".to_string(),
+                state: crate::core::report::ReportRowState::Saved,
+                score: 6,
+            })]
+        );
+    }
+
+    /// A negative score is the whole point of a SIGNED diagnostic — Lyra lost is
+    /// `-6` — so the int route must carry the sign through unchanged.
+    #[test]
+    fn report_row_carries_a_negative_score() {
+        let cmds = run(
+            r#"fn f(ctx) {
+                ctx.effects.report_row(#{
+                    id: "lyra", heading: "h", outcome: "o", state: "lost", score: -6,
+                });
+            }"#,
+            "f",
+        );
+        match &cmds[0] {
+            ActionCmd::SetReportRow(row) => {
+                assert_eq!(row.score, -6);
+                assert_eq!(row.state, crate::core::report::ReportRowState::Lost);
+            }
+            other => panic!("expected SetReportRow, got {other:?}"),
+        }
+    }
+
+    /// `score` is the one optional key: a row that is purely a statement of
+    /// fact should not have to spell out a zero.
+    #[test]
+    fn report_row_defaults_its_score_to_zero() {
+        let cmds = run(
+            r#"fn f(ctx) {
+                ctx.effects.report_row(#{
+                    id: "records", heading: "h", outcome: "o", state: "neutral",
+                });
+            }"#,
+            "f",
+        );
+        match &cmds[0] {
+            ActionCmd::SetReportRow(row) => assert_eq!(row.score, 0),
+            other => panic!("expected SetReportRow, got {other:?}"),
+        }
+    }
+
+    /// A bad state word raises at the boundary — discarding the call's effects
+    /// (settled decision 10) — through the SAME parser the vocabulary defines,
+    /// exactly as a bad `narrative_outcome` word does.
+    #[test]
+    fn report_row_rejects_an_unknown_state() {
+        let err = run_result(
+            r#"fn f(ctx) {
+                ctx.effects.report_row(#{
+                    id: "lyra", heading: "h", outcome: "o", state: "rescued",
+                });
+            }"#,
+            "f",
+        )
+        .expect_err("an unknown state must raise");
+        assert!(err.to_string().contains("state"), "{err}");
+    }
+
+    /// Every text key is required, and PRESENT-BUT-EMPTY raises exactly as
+    /// missing does. A row with no heading or no outcome id renders as a blank
+    /// line on the crew's screen, which is worse than the call failing loudly —
+    /// and `heading: ""` is a string, so a presence-only check would have let
+    /// one through. It would then be dropped by `reportRows`
+    /// (gui/game-over-view.js) on both player surfaces while still contributing
+    /// its score to `MissionReport::total`, breaking the #1344 invariant that
+    /// the total equals the visible rows' hidden scores.
+    #[test]
+    fn report_row_requires_every_text_key() {
+        for (missing, source) in [
+            (
+                "id",
+                r#"fn f(ctx) { ctx.effects.report_row(#{ heading: "h", outcome: "o", state: "saved" }); }"#,
+            ),
+            (
+                "heading",
+                r#"fn f(ctx) { ctx.effects.report_row(#{ id: "r", outcome: "o", state: "saved" }); }"#,
+            ),
+            (
+                "outcome",
+                r#"fn f(ctx) { ctx.effects.report_row(#{ id: "r", heading: "h", state: "saved" }); }"#,
+            ),
+            (
+                "state",
+                r#"fn f(ctx) { ctx.effects.report_row(#{ id: "r", heading: "h", outcome: "o" }); }"#,
+            ),
+            // The empty-string arms. Same key, same raise, same message.
+            (
+                "id",
+                r#"fn f(ctx) { ctx.effects.report_row(#{ id: "", heading: "h", outcome: "o", state: "saved" }); }"#,
+            ),
+            (
+                "heading",
+                r#"fn f(ctx) { ctx.effects.report_row(#{ id: "r", heading: "", outcome: "o", state: "saved" }); }"#,
+            ),
+            (
+                "outcome",
+                r#"fn f(ctx) { ctx.effects.report_row(#{ id: "r", heading: "h", outcome: "", state: "saved" }); }"#,
+            ),
+            // Whitespace is not content either: " " would render a blank line
+            // just as "" does, and the JS filter tests emptiness after nothing.
+            (
+                "heading",
+                r#"fn f(ctx) { ctx.effects.report_row(#{ id: "r", heading: "   ", outcome: "o", state: "saved" }); }"#,
+            ),
+            (
+                "state",
+                r#"fn f(ctx) { ctx.effects.report_row(#{ id: "r", heading: "h", outcome: "o", state: "" }); }"#,
+            ),
+        ] {
+            let err = run_result(source, "f")
+                .err()
+                .unwrap_or_else(|| panic!("a row with a missing or empty `{missing}` must raise"));
+            assert!(
+                err.to_string().contains(missing),
+                "the error must name the offending key `{missing}`: {err}"
+            );
+        }
+    }
+
+    /// The failure policy, stated where it can fail: a raised `report_row`
+    /// discards the WHOLE call's buffer, so a half-built row can never reach a
+    /// player surface beside the effects that were meant to accompany it.
+    #[test]
+    fn a_bad_report_row_discards_the_calls_other_effects() {
+        let err = run_result(
+            r#"fn f(ctx) {
+                ctx.effects.narrative_beat("before");
+                ctx.effects.report_row(#{ id: "r", heading: "h", outcome: "o", state: "nope" });
+            }"#,
+            "f",
+        )
+        .expect_err("an unknown state must raise");
+        assert!(err.to_string().contains("state"), "{err}");
+    }
+
     /// `add_faction_enemy(f, e)` buffers the DECLARATIVE `AddFactionEnemy` (faction
     /// names, unresolved) — identical to the TOML action before UUID resolution.
     #[test]
     fn add_faction_enemy_matches_toml() {
         let effs = run_buffered(
-            r#"fn f(ctx) { ctx.effects.add_faction_enemy("Harrow", "Federation"); }"#,
+            r#"fn f(ctx) { ctx.effects.add_faction_enemy("Harrow", "Alliance"); }"#,
             "f",
         );
-        let toml = toml_action(
-            "type = \"add_faction_enemy\"\nfaction = \"Harrow\"\nenemy = \"Federation\"",
-        );
+        let toml =
+            toml_action("type = \"add_faction_enemy\"\nfaction = \"Harrow\"\nenemy = \"Alliance\"");
         assert_eq!(effs, vec![BufferedEffect::Action(toml)]);
         assert_eq!(
             effs,
             vec![BufferedEffect::Action(TriggerAction::AddFactionEnemy {
                 faction: "Harrow".to_string(),
-                enemy: "Federation".to_string(),
+                enemy: "Alliance".to_string(),
             })]
         );
+    }
+
+    /// `remove_faction_enemy(f, e)` is `add_faction_enemy`'s mirror (issue
+    /// #1349): the same deferred DECLARATIVE action, the opposite direction, and
+    /// the opposite direction ONLY — a scenario that ends a hostility must get
+    /// back exactly the action its TOML twin would have produced, because the
+    /// applier's target re-validation (issue #710) hangs off that one variant.
+    #[test]
+    fn remove_faction_enemy_matches_toml() {
+        let effs = run_buffered(
+            r#"fn f(ctx) { ctx.effects.remove_faction_enemy("Harrow", "Alliance"); }"#,
+            "f",
+        );
+        let toml = toml_action(
+            "type = \"remove_faction_enemy\"\nfaction = \"Harrow\"\nenemy = \"Alliance\"",
+        );
+        assert_eq!(effs, vec![BufferedEffect::Action(toml)]);
+        assert_eq!(
+            effs,
+            vec![BufferedEffect::Action(TriggerAction::RemoveFactionEnemy {
+                faction: "Harrow".to_string(),
+                enemy: "Alliance".to_string(),
+            })]
+        );
+    }
+
+    /// The pair, in one call and in authored order. The buffer is ONE ordered
+    /// `Vec`, so a scenario that declares a hostility and later ends it applies
+    /// them in the sequence it wrote — and a direction that had been folded into
+    /// a single boolean setter could not have been ordered at all.
+    #[test]
+    fn the_faction_verbs_keep_their_authored_order() {
+        let effs = run_buffered(
+            r#"fn f(ctx) {
+                ctx.effects.add_faction_enemy("Harrow", "Alliance");
+                ctx.effects.remove_faction_enemy("Alliance", "Harrow");
+            }"#,
+            "f",
+        );
+        assert_eq!(
+            effs,
+            vec![
+                BufferedEffect::Action(TriggerAction::AddFactionEnemy {
+                    faction: "Harrow".to_string(),
+                    enemy: "Alliance".to_string(),
+                }),
+                BufferedEffect::Action(TriggerAction::RemoveFactionEnemy {
+                    faction: "Alliance".to_string(),
+                    enemy: "Harrow".to_string(),
+                }),
+            ]
+        );
+    }
+
+    // ── show_message (issue #1342) ────────────────────────────────────────────
+
+    #[test]
+    fn show_message_drains_to_action_cmd() {
+        let cmds = run(
+            r#"fn on_x(ctx) {
+                ctx.effects.show_message("hail_debris", "world.probe.computer_message.text", "advisory", 10);
+            }"#,
+            "on_x",
+        );
+        assert_eq!(
+            cmds,
+            vec![ActionCmd::ShowComputerMessage {
+                id: "hail_debris".to_string(),
+                text: "world.probe.computer_message.text".to_string(),
+                severity: crate::core::computer_message::ComputerMessageSeverity::Advisory,
+                duration_secs: 10,
+                station: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn show_message_accepts_an_optional_station_cue() {
+        let cmds = run(
+            r#"fn on_x(ctx) {
+                ctx.effects.show_message("charge_ready", "world.probe.computer_message.charge", "critical", 8, "tactical");
+            }"#,
+            "on_x",
+        );
+        assert_eq!(
+            cmds,
+            vec![ActionCmd::ShowComputerMessage {
+                id: "charge_ready".to_string(),
+                text: "world.probe.computer_message.charge".to_string(),
+                severity: crate::core::computer_message::ComputerMessageSeverity::Critical,
+                duration_secs: 8,
+                station: Some(crate::core::messages::StationId("tactical".to_string())),
+            }]
+        );
+    }
+
+    /// Every severity word parses, case-insensitively — the same boundary
+    /// `ComputerMessageSeverity::parse` unit-tests directly, proven here
+    /// through the real host fn.
+    #[test]
+    fn show_message_accepts_every_severity() {
+        for (word, expected) in [
+            (
+                "info",
+                crate::core::computer_message::ComputerMessageSeverity::Info,
+            ),
+            (
+                "ADVISORY",
+                crate::core::computer_message::ComputerMessageSeverity::Advisory,
+            ),
+            (
+                "Warning",
+                crate::core::computer_message::ComputerMessageSeverity::Warning,
+            ),
+            (
+                "critical",
+                crate::core::computer_message::ComputerMessageSeverity::Critical,
+            ),
+        ] {
+            let cmds = run(
+                &format!(
+                    r#"fn on_x(ctx) {{ ctx.effects.show_message("id", "text.id", "{word}", 5); }}"#
+                ),
+                "on_x",
+            );
+            match &cmds[0] {
+                ActionCmd::ShowComputerMessage { severity, .. } => {
+                    assert_eq!(*severity, expected, "word {word:?}")
+                }
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+    }
+
+    /// An unknown severity raises at the script boundary — discarding the
+    /// call's effects (settled decision 10) — exactly as `narrative_outcome`'s
+    /// outcome word does.
+    #[test]
+    fn show_message_rejects_an_unknown_severity() {
+        let err = run_result(
+            r#"fn on_x(ctx) { ctx.effects.show_message("id", "text.id", "urgent", 5); }"#,
+            "on_x",
+        )
+        .expect_err("an unknown severity must raise");
+        assert!(err.to_string().contains("severity"), "{err}");
+    }
+
+    /// A non-positive duration raises too — "positive simulation-time
+    /// duration" is AC1's own wording.
+    #[test]
+    fn show_message_rejects_a_non_positive_duration() {
+        for bad in [0, -5] {
+            let err = run_result(
+                &format!(
+                    r#"fn on_x(ctx) {{ ctx.effects.show_message("id", "text.id", "info", {bad}); }}"#
+                ),
+                "on_x",
+            )
+            .expect_err("a non-positive duration must raise");
+            assert!(err.to_string().contains("duration_secs"), "{err}");
+        }
+    }
+
+    /// A validation failure discards the WHOLE call's effects — the buffer
+    /// carries nothing from an earlier effect in the same handler either
+    /// (settled decision 10, same contract every other validated verb here
+    /// holds).
+    #[test]
+    fn show_message_failure_discards_earlier_effects_in_the_same_call() {
+        let result = run_result(
+            r#"fn on_x(ctx) {
+                ctx.effects.narrative_beat("before");
+                ctx.effects.show_message("id", "text.id", "not-a-severity", 5);
+            }"#,
+            "on_x",
+        );
+        assert!(result.is_err());
     }
 
     // ── destroy_entity (issue #1033) ─────────────────────────────────────────
@@ -2090,7 +2665,7 @@ mod tests {
         let effs = run_buffered(
             r#"fn f(ctx) {
                 ctx.effects.complete_objective("first");
-                ctx.effects.add_faction_enemy("Harrow", "Federation");
+                ctx.effects.add_faction_enemy("Harrow", "Alliance");
                 ctx.effects.fail_objective("last");
             }"#,
             "f",
@@ -2103,7 +2678,7 @@ mod tests {
                 }),
                 BufferedEffect::Action(TriggerAction::AddFactionEnemy {
                     faction: "Harrow".to_string(),
-                    enemy: "Federation".to_string(),
+                    enemy: "Alliance".to_string(),
                 }),
                 BufferedEffect::Cmd(ActionCmd::FailObjective {
                     id: "last".to_string()
@@ -2239,7 +2814,7 @@ mod tests {
             r#"fn f(ctx) {
                 ctx.effects.complete_objective("first");
                 ctx.effects.open_comms(#{ from: "axiom", node_fn: "hail" });
-                ctx.effects.add_faction_enemy("Harrow", "Federation");
+                ctx.effects.add_faction_enemy("Harrow", "Alliance");
                 ctx.effects.fail_objective("last");
             }"#,
             "f",
@@ -2252,7 +2827,7 @@ mod tests {
                 }),
                 BufferedEffect::Action(TriggerAction::AddFactionEnemy {
                     faction: "Harrow".to_string(),
-                    enemy: "Federation".to_string(),
+                    enemy: "Alliance".to_string(),
                 }),
                 BufferedEffect::Cmd(ActionCmd::FailObjective {
                     id: "last".to_string()

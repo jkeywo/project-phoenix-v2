@@ -783,6 +783,19 @@ impl Plugin for WorldPlugin {
             // docked state) and before the infrastructure tick (so the capacity it
             // queues moves the same tick), the ordering the tractor's arrest keeps.
             .add_plugins(crate::umbilical::server::UmbilicalPlugin)
+            // Security teams (issue #1346) stand beside them for the same reason:
+            // the targets a team crosses to are world furniture spawned from world
+            // files, and the consequence a completed action raises is a flag on
+            // this plugin's own `WorldContentRuntime` store, so a scenario trigger
+            // fires the tick the work lands.
+            .add_plugins(crate::security::SecurityPlugin)
+            // The rescue transporter (issue #1348) stands beside them: what it
+            // recovers is the civilians an authored contact carries, its discovery
+            // reads the `scan.<id>.taken` flag on this plugin's own
+            // `WorldContentRuntime` store, and the completion/casualty facts it
+            // raises are flags on that same store, so an authored beat fires the
+            // tick the rescue lands or a carrier is lost.
+            .add_plugins(crate::transporter::server::TransporterPlugin)
             .add_plugins(crate::civilian::CivilianPlugin)
             // Dossiers (issue #1030) join them for the same reason: the
             // commitments a fact sheet lists are a field on
@@ -796,6 +809,18 @@ impl Plugin for WorldPlugin {
             // ordered AFTER `InfrastructurePlugin`'s, so a scan taken on the
             // tick a repair lands reads the repaired number.
             .add_plugins(crate::science::SciencePlugin)
+            // Debris hazards (issue #1347) stand beside the science plugin, and
+            // are ordered after it inside `SimSet::Modifiers`: what promotes a
+            // drifting rock to a confirmed threat is a scan, so the tick that
+            // latches an assessment has to run after the tick that takes one.
+            .add_plugins(crate::debris::DebrisPlugin)
+            // Controlled demolition (issue #1350) stands beside Security, whose
+            // command target it borrows and whose team states it reads: the
+            // obstruction it clears is world furniture spawned from a world file,
+            // and the four outcomes it decides raise flags on this plugin's own
+            // `WorldContentRuntime` store, so a scenario trigger fires the tick the
+            // charges go off.
+            .add_plugins(crate::demolition::DemolitionPlugin)
             .init_resource::<WorldContentRuntime>()
             .init_resource::<ObjectiveManagerRes>()
             .init_resource::<PendingScenarioLoad>()
@@ -1568,6 +1593,17 @@ pub fn spawn_immediate_entities_internal(
             uuid,
             entity_inst.id.clone(),
         );
+        // The authored narrative mark (issue #1338). Attached here rather than
+        // in a `SpawnSection` because the payload is the WORLD's authored
+        // `name` — the unique reference id triggers, comms and objectives all
+        // address this instance by — and the entity template knows nothing
+        // about it. Only this named branch can mark: an anonymous or
+        // asteroid-field instance has no name to carry.
+        if entity_inst.narrative {
+            commands
+                .entity(entity)
+                .insert(crate::core::narrative::NarrativeMark(name.clone()));
+        }
         spawned.push(entity);
     }
 
@@ -3013,12 +3049,12 @@ pub(crate) fn apply_script_commands(
     }
 }
 
-/// The four transient per-tick effect queues an applied dispatch can enqueue
+/// The transient per-tick effect queues an applied dispatch can enqueue
 /// (issue #1223), borrowed as plain `&mut Vec<T>` so [`apply_dispatch_result`]
 /// and [`apply_script_commands`] stay Bevy-agnostic — the same shape their
 /// `runtime: &mut WorldContentRuntime` parameter already has. An effect-applying
-/// SYSTEM holds the four `EffectQueue<T>` resources (via [`EffectQueues`]) and
-/// lends them here with [`EffectQueues::out`]; a bare-`App` test lends four local
+/// SYSTEM holds the `EffectQueue<T>` resources (via [`EffectQueues`]) and
+/// lends them here with [`EffectQueues::out`]; a bare-`App` test lends local
 /// `Vec`s instead.
 pub(crate) struct EffectQueuesOut<'a> {
     /// Drained by `crate::infrastructure::tick_infrastructure_condition`.
@@ -3030,11 +3066,26 @@ pub(crate) struct EffectQueuesOut<'a> {
     /// Drained by `crate::console::captain::server::apply_scripted_weapons_holds`,
     /// as `(ship uuid, held)`.
     pub weapons_holds: &'a mut Vec<(String, bool)>,
+    /// Drained by `crate::narrative::emit_authored_and_marked_entity_narrative`
+    /// (issue #1338): the authored beats and marked-entity outcomes a script
+    /// declared this tick, plus the scripted-removal signal every
+    /// `DestroyEntity` leaves behind, on their way to
+    /// `Messages<NarrativeEvent>`.
+    pub narrative: &'a mut Vec<crate::core::narrative::NarrativeRequest>,
+    /// Drained by `crate::narrative::tick_computer_message` (issue #1342): a
+    /// scenario's `ctx.effects.show_message(..)`, already validated at the
+    /// script boundary, on its way to becoming the authoritative
+    /// `ActiveComputerMessage` and a `shown`/`superseded` narrative pair.
+    pub computer_message: &'a mut Vec<crate::core::computer_message::ComputerMessageRequest>,
+    /// Drained by `crate::mission_report::apply_report_rows` (issue #1344): the
+    /// post-mission report rows a script wrote this tick, on their way to the
+    /// `MissionReport` accumulator.
+    pub report_rows: &'a mut Vec<crate::core::report::ReportRow>,
 }
 
-/// The four per-owner [`EffectQueue`] resources an effect-applying SYSTEM needs,
+/// The per-owner [`EffectQueue`] resources an effect-applying SYSTEM needs,
 /// bundled as one `SystemParam` (issue #1223) so a dispatch system gains one
-/// parameter rather than four. Each resource is registered and declared
+/// parameter rather than one each. Each resource is registered and declared
 /// `ClearedAtFold` by its OWNING plugin (Infrastructure / Civilian / captain);
 /// this bundle only borrows them at the push site.
 ///
@@ -3050,14 +3101,22 @@ pub(crate) struct EffectQueues<'w, 's> {
     capacity: Option<ResMut<'w, EffectQueue<crate::infrastructure::CapacityAdjustment>>>,
     civilian_orders: Option<ResMut<'w, EffectQueue<crate::civilian::PendingCivilianOrder>>>,
     weapons_holds: Option<ResMut<'w, EffectQueue<(String, bool)>>>,
+    narrative: Option<ResMut<'w, EffectQueue<crate::core::narrative::NarrativeRequest>>>,
+    computer_message:
+        Option<ResMut<'w, EffectQueue<crate::core::computer_message::ComputerMessageRequest>>>,
+    report_rows: Option<ResMut<'w, EffectQueue<crate::core::report::ReportRow>>>,
     condition_fallback: Local<'s, Vec<crate::infrastructure::ConditionAdjustment>>,
     capacity_fallback: Local<'s, Vec<crate::infrastructure::CapacityAdjustment>>,
     civilian_orders_fallback: Local<'s, Vec<crate::civilian::PendingCivilianOrder>>,
     weapons_holds_fallback: Local<'s, Vec<(String, bool)>>,
+    narrative_fallback: Local<'s, Vec<crate::core::narrative::NarrativeRequest>>,
+    computer_message_fallback:
+        Local<'s, Vec<crate::core::computer_message::ComputerMessageRequest>>,
+    report_rows_fallback: Local<'s, Vec<crate::core::report::ReportRow>>,
 }
 
 impl EffectQueues<'_, '_> {
-    /// Borrow the four queues as an [`EffectQueuesOut`] to lend to the applier,
+    /// Borrow every queue as an [`EffectQueuesOut`] to lend to the applier,
     /// falling back to the per-queue `Local` sink when the resource is absent.
     pub(crate) fn out(&mut self) -> EffectQueuesOut<'_> {
         EffectQueuesOut {
@@ -3076,6 +3135,18 @@ impl EffectQueues<'_, '_> {
             weapons_holds: match &mut self.weapons_holds {
                 Some(q) => &mut q.0,
                 None => &mut self.weapons_holds_fallback,
+            },
+            narrative: match &mut self.narrative {
+                Some(q) => &mut q.0,
+                None => &mut self.narrative_fallback,
+            },
+            computer_message: match &mut self.computer_message {
+                Some(q) => &mut q.0,
+                None => &mut self.computer_message_fallback,
+            },
+            report_rows: match &mut self.report_rows {
+                Some(q) => &mut q.0,
+                None => &mut self.report_rows_fallback,
             },
         }
     }
@@ -3128,10 +3199,11 @@ pub(crate) fn apply_dispatch_result(
     mut balance_events: Option<
         &mut bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>,
     >,
-    // The four transient effect queues a name-resolved command lands on (issue
+    // The transient effect queues a name-resolved command lands on (issue
     // #1223): condition/capacity adjustments, civilian orders and weapons holds
     // used to be `pending_*` fields on `runtime`; each is now its owning plugin's
-    // `EffectQueue<T>` resource, lent here as plain `&mut Vec<T>`.
+    // `EffectQueue<T>` resource, lent here as plain `&mut Vec<T>`. The narrative
+    // queue (issue #1338) joined them last.
     effects: &mut EffectQueuesOut,
 ) {
     let DispatchResult {
@@ -3243,6 +3315,66 @@ pub(crate) fn apply_dispatch_result(
                 }
             }
 
+            // ── The authored mission timeline (issue #1338) ──────────────────
+            //
+            // Both arms only BUFFER. Nothing in the world moves, no state is
+            // read back, and no message is written here — the applier holds no
+            // message writers, and the three systems that call it are at Bevy's
+            // parameter limit, which is exactly what the #1223 effect-queue
+            // pattern exists for.
+            // `narrative::emit_authored_and_marked_entity_narrative` turns each
+            // request into its event on the same tick.
+            ActionCmd::NarrativeBeat { id } => {
+                effects
+                    .narrative
+                    .push(crate::core::narrative::NarrativeRequest::Authored {
+                        kind: crate::core::narrative::NarrativeKind::BeatFired,
+                        id,
+                        entity_uuid: None,
+                    });
+            }
+
+            ActionCmd::NarrativeOutcome { entity, outcome } => {
+                // Resolved by NAME against the runtime's map, like every other
+                // name-carrying command here. An unresolvable name is still
+                // recorded — the authored id is the timeline's identity, and a
+                // beat about an entity that has already despawned is precisely
+                // the case an "escaped"/"destroyed" outcome is authored for.
+                let entity_uuid = runtime.name_to_uuid.get(&entity).cloned();
+                effects
+                    .narrative
+                    .push(crate::core::narrative::NarrativeRequest::Authored {
+                        kind: outcome,
+                        id: entity,
+                        entity_uuid,
+                    });
+            }
+
+            // Buffered exactly like the two arms above, and for the same
+            // reason: no name resolution needed (a Station id is not an
+            // entity name), and the applier holds no message writer to log
+            // the shown/superseded pair itself.
+            // `crate::narrative::tick_computer_message` turns this into the
+            // authoritative `ActiveComputerMessage` state and its narrative
+            // events on the same tick.
+            ActionCmd::ShowComputerMessage {
+                id,
+                text,
+                severity,
+                duration_secs,
+                station,
+            } => {
+                effects.computer_message.push(
+                    crate::core::computer_message::ComputerMessageRequest {
+                        id,
+                        text,
+                        severity,
+                        duration_secs,
+                        station,
+                    },
+                );
+            }
+
             ActionCmd::ApplyModifier {
                 uuid,
                 tag,
@@ -3329,6 +3461,13 @@ pub(crate) fn apply_dispatch_result(
                     continue;
                 };
                 mods.remove_int(&world_modifier_source(tag), &slot);
+            }
+
+            // Buffered, never written here: the applier holds no resources
+            // (issue #1223). `mission_report::apply_report_rows` drains the
+            // queue into `MissionReport` in queue order on the same tick.
+            ActionCmd::SetReportRow(row) => {
+                effects.report_rows.push(row);
             }
 
             // Always applied before `SetNextState` below —
@@ -3610,6 +3749,23 @@ pub(crate) fn apply_dispatch_result(
 
             ActionCmd::DestroyEntity { uuid } => {
                 let target_entity = uuid_to_entity.get(&uuid).copied();
+                // The mission timeline's no-silent-vanish signal (issue #1338).
+                // Queued for EVERY scripted removal because this applier cannot
+                // see a `NarrativeMark` — it is lent plain `&mut Vec<_>` sinks
+                // and no component query — so the mark gate lives in
+                // `narrative::emit_authored_and_marked_entity_narrative`, which
+                // already remembers every marked uuid it has seen and drops an
+                // unmarked one. Deliberately NOT a `BalanceEvent`: a scripted
+                // removal is an authorial act, and a rescue-by-despawn must
+                // never count as a destruction in the combat ledger (PRD
+                // #1337's "supplements the ledger, never changes it"). The
+                // emitter turns it into `marked_entity_destroyed` only when the
+                // author recorded no outcome of their own for that entity.
+                effects
+                    .narrative
+                    .push(crate::core::narrative::NarrativeRequest::ScriptedRemoval {
+                        entity_uuid: uuid.clone(),
+                    });
                 // The matching `WorldEvent::Destroyed` is already in
                 // `events_out` so chained `on_destroyed` triggers fire.
                 //

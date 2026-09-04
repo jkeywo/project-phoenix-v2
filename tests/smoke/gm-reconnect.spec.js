@@ -4,7 +4,10 @@
 // Rust's matching-digest Commit and still requires an explicit typed Resume.
 
 import {
-  test, expect, waitForWasmReady,
+  test,
+  expect,
+  waitForWasmReady,
+  waitForJoinCode,
 } from './fixtures';
 
 const GM_IDENTITY_KEY = 'phoenix.fleet.gm-identity.v1';
@@ -13,11 +16,7 @@ async function bootRunningHost(context) {
   const page = await context.newPage();
   await page.goto('/?scenario=assets/worlds/default.toml');
   await waitForWasmReady(page);
-  await page.waitForFunction(
-    () => /^[A-Z]{5}$/.test(document.getElementById('join-code')?.textContent ?? ''),
-    undefined,
-    { timeout: 30_000 },
-  );
+  await waitForJoinCode(page, 'join-code', 30_000);
   return page;
 }
 
@@ -40,11 +39,7 @@ async function selectGmProfile(page) {
 async function openFleet(owner) {
   await openFleetTab(owner);
   await owner.click('[data-control="fleet-open"]');
-  await owner.waitForFunction(
-    () => /^[A-Z]{5}$/.test(document.getElementById('fleet-code')?.textContent ?? ''),
-    undefined,
-    { timeout: 30_000 },
-  );
+  await waitForJoinCode(owner, 'fleet-code', 30_000);
   return owner.evaluate(() => document.getElementById('fleet-code').textContent);
 }
 

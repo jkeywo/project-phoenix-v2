@@ -881,6 +881,24 @@ pub struct EntityState {
     /// build that predates this vocabulary refuses the template outright.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub umbilical: Option<crate::umbilical::UmbilicalSaveState>,
+    /// The ship's Security-team assignments (issue #1346) — which teams are out,
+    /// where, doing what, and how far through.
+    ///
+    /// A **projection**, not the whole [`crate::security::ShipSecurityTeams`]
+    /// component, for `umbilical`'s reason: the authored `[security]` terms ride
+    /// the component and are re-derived from the template on spawn. What travels
+    /// is the one thing the fold cannot otherwise recover — a team's live
+    /// assignment and its position in it, which a resume would otherwise drop,
+    /// bringing every team home mid-job and losing the work already done. The last
+    /// refusal is deliberately not persisted: it is a projection the next tick
+    /// re-derives.
+    ///
+    /// Did not bump [`SNAPSHOT_FORMAT`] for `umbilical`'s reason: a world gains
+    /// Security by its hull TOML gaining a `[security]` table (and a `kind =
+    /// "security"` system), and `EntityConfig` sets `deny_unknown_fields`, so a
+    /// build that predates this vocabulary refuses the template outright.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security: Option<crate::security::SecuritySaveState>,
     /// The ship's scan record (issue #1032) — the last reading its sensor suite
     /// took, or why the last scan returned nothing.
     ///
@@ -959,6 +977,42 @@ pub struct EntityState {
     /// long before this field is read. The format stays at 5.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub civilian: Option<crate::civilian::CivilianState>,
+    /// The entity's debris-contact state (issue #1347) — where the mass has
+    /// drifted to, and what the crew have established about it.
+    ///
+    /// # Why a rock's POSITION is in this field and not in [`Self::physics`]
+    ///
+    /// Every other moving thing in a save comes back where it was because it
+    /// carries `ShipPhysics` and `physics` restores it. Debris carries none: a
+    /// rock is not a hull, it has no helm and no integrator, and
+    /// `debris::server::tick_debris_drift` is the only writer of its
+    /// `Transform` in the simulation. The other candidate — `SpawnOrigin` — is
+    /// where the mass was SHED, deliberately (see that type's own note: the
+    /// position a spawn consumed, never where the thing has since travelled).
+    /// So without this field a resumed corridor puts every mass back at the top
+    /// of its run with its deadline reset, and the host's clock and the joiner's
+    /// disagree by however long the beat had been running.
+    ///
+    /// # Why the LATCHES are authoritative and not re-derivable
+    ///
+    /// `assessed` / `confirmed` / `urgent` / `struck` are the record of what a
+    /// crew found out, and the beat turns on the difference between a rock the
+    /// simulation knows is on course and a rock somebody has READ. A joiner
+    /// that restored the geometry alone would come back with every contact
+    /// unread: its Backfilled Tactical would drop the confirmed lock (the
+    /// candidate source filters on `confirmed`) and its Sensors seat would
+    /// re-scan a field the host had already worked — the same shape of
+    /// local-state leak the #1300 GM digest failure was.
+    ///
+    /// # Why this did not bump [`SNAPSHOT_FORMAT`]
+    ///
+    /// Exactly the [`EntityState::civilian`] argument. A world gains debris by
+    /// gaining a `[debris]` table on an entity template and the scenario script
+    /// that sheds it, both of which move `content_digest` and get an older save
+    /// refused as content-moved long before this field is read. The format stays
+    /// at 5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debris: Option<crate::debris::DebrisSaveState>,
     /// `ObjectiveCursors` as `(objective id, waypoint index, settled)`.
     ///
     /// Where a patrolling ship is *around its route*, which is not derivable
@@ -2178,11 +2232,13 @@ pub struct WorldEventRecord {
 ///
 /// # Honestly not covered
 ///
-/// `contacts`, `range_flags` and `range_active` are **derived**, not
+/// `contacts`, `range_flags` and `range_active` — and the per-fleet-slot
+/// `fleet_range_flags` / `fleet_range_active` beside them (issue #1343) — are
+/// **derived**, not
 /// progression: the hail roster is rebuilt every tick from the live entities
 /// that carry `[comms] hailable = true` (`update_comms_range_flags`), which also
-/// recomputes the range map from ship and entity transforms. A resumed world
-/// derives all three from state this payload *does* restore. `needs_broadcast`
+/// recomputes both range maps from ship and entity transforms. A resumed world
+/// derives all five from state this payload *does* restore. `needs_broadcast`
 /// is set true by the restore rather than carried, because after a restore it is
 /// unconditionally true.
 ///
@@ -2229,6 +2285,29 @@ pub struct CommsState {
     /// there is nothing to normalise away.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_opens: Vec<OpenCommsRequest>,
+    /// `CommsRuntime::pending_ai_responses` as `(key, record)`, already ordered
+    /// (a `BTreeMap`, slot-first) — every unmanned Comms console's running waits
+    /// on the weighted decisions it has been left holding (issue #1343).
+    ///
+    /// The key carries the FLEET SLOT as well as the message id, because a fleet
+    /// has one inbox but a Comms console per hull: a save that flattened the two
+    /// hulls' waits together would resume a mission whose second hull had
+    /// silently adopted the first one's schedule.
+    ///
+    /// It travels for the reason `open_hails` does: it is a record of where the
+    /// run got to, not something a resumed world can re-derive. Dropping it
+    /// would restart every wait from zero on a resume, so a save taken four
+    /// seconds into a five-second pause would come back with nine seconds still
+    /// to run — a save silently changing the mission's timing, which is the same
+    /// failure re-hailing a cleared contact was.
+    ///
+    /// The due ticks are absolute and the tick counter is itself restored, so
+    /// they mean the same thing on the way back in.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_ai_responses: Vec<(
+        crate::comms::server::PendingAiResponseKey,
+        crate::comms::server::PendingAiResponse,
+    )>,
 }
 
 /// One live dialogue - see [`CommsState`] for why every one of them travels.
@@ -2262,6 +2341,23 @@ pub struct DialogueState {
     /// - the index a `RespondToMessage` submits.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub responses: Vec<(String, bool)>,
+    /// The Backfill choice metadata of each shown response (issue #1343),
+    /// PARALLEL to `responses` and empty when the node authors none — which is
+    /// every node but Falling Skyway's lift band.
+    ///
+    /// A parallel vector rather than a third slot in the tuple above, so a save
+    /// written before this existed reads back through the same code unchanged: a
+    /// short or absent vector reads as "no metadata", which is exactly what such
+    /// a save meant.
+    ///
+    /// It travels because a restored node is NOT rebuilt from the script — it is
+    /// restored from this payload. A resume that dropped the weights would hand
+    /// the conversation back to the legacy first-response policy, so an unmanned
+    /// console would answer Falling Skyway's lift decisions with the stand-by
+    /// for ever and the act would never resolve: a behaviour change across a
+    /// save, which is the one thing this module exists to prevent.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub response_ai: Vec<crate::comms::content::CommsResponseAi>,
     /// The Rhai tree that answers this dialogue.
     ///
     /// It was `Option` while declarative threads existed; issue #985 made it
@@ -2302,8 +2398,33 @@ fn reduce_dialogue_node(message_id: &str, dialogue: &ActiveDialogue) -> Dialogue
             .iter()
             .map(|r| (r.text.clone(), r.important))
             .collect(),
+        // Skipped entirely for a node that authors none, so no existing world's
+        // payload gains a field it has no use for.
+        response_ai: if node.responses.iter().any(|r| r.ai != Default::default()) {
+            node.responses.iter().map(|r| r.ai).collect()
+        } else {
+            Vec::new()
+        },
         script: dialogue.script.clone(),
     }
+}
+
+/// One captured post-mission report row (issue #1344).
+///
+/// A stored mirror of [`crate::core::report::ReportRow`] rather than the type
+/// itself, for the same reason `game_over` stores its outcome as a LABEL: the
+/// live type carries a `ReportRowState` enum, and deriving `Serialize` on it
+/// would make that enum's variant order pinned save-file surface for no gain.
+/// `state` is [`crate::core::report::ReportRowState::as_str`], which is already
+/// this project's report vocabulary, and an unrecognised label on restore drops
+/// the row rather than guessing at a fate.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SnapshotReportRow {
+    pub id: String,
+    pub heading: String,
+    pub outcome: String,
+    pub state: String,
+    pub score: i32,
 }
 
 /// One authored `GameStart` row's stable identity.
@@ -2388,6 +2509,13 @@ pub struct PhoenixSnapshot {
     /// enum's variant order becomes stored surface.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub game_over: Option<(Option<String>, Option<String>)>,
+    /// The structured post-mission report's rows, in authored order (issue
+    /// #1344). Order is content here, not presentation — see `MissionReport` —
+    /// so it is stored as a `Vec` and restored verbatim. Empty for a run that
+    /// authored no report, which is the overwhelming majority, hence
+    /// `skip_serializing_if`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mission_report: Vec<SnapshotReportRow>,
     /// `(scope, objective)` pairs in sorted key order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub captain_boosts: Vec<(String, String)>,
@@ -2546,6 +2674,22 @@ pub fn capture(world: &World) -> PhoenixSnapshot {
         game_over: world
             .get_resource::<GameOverReason>()
             .map(|reason| (reason.0.clone(), reason.1.map(|o| o.as_str().to_string()))),
+        mission_report: world
+            .get_resource::<crate::core::report::MissionReport>()
+            .map(|report| {
+                report
+                    .rows()
+                    .iter()
+                    .map(|row| SnapshotReportRow {
+                        id: row.id.clone(),
+                        heading: row.heading_id.clone(),
+                        outcome: row.outcome_id.clone(),
+                        state: row.state.as_str().to_string(),
+                        score: row.score,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
         ai_world: world
             .get_resource::<crate::ai::server::WorldSnapshot>()
             .map(|snapshot| snapshot.entities.clone()),
@@ -2829,6 +2973,12 @@ fn capture_comms(world: &World) -> Option<CommsState> {
             .get_resource::<WorldScriptRuntime>()
             .map(|script| script.pending_comms_opens.clone())
             .unwrap_or_default(),
+        // Already in fleet-slot-then-message-id order — it is a `BTreeMap`.
+        pending_ai_responses: comms
+            .pending_ai_responses
+            .iter()
+            .map(|(key, record)| (key.clone(), *record))
+            .collect(),
     })
 }
 
@@ -3715,6 +3865,23 @@ fn capture_umbilicals(world: &World) -> Vec<(String, crate::umbilical::Umbilical
         .collect()
 }
 
+/// The Security-team assignments, in a query of their own, joined by uuid — see
+/// [`EntityState::security`]. Only hulls that authored a `[security]` table carry
+/// one, so most worlds capture an empty list. A muster with every team home
+/// captures nothing, the same reading `fold_security_namespace` takes.
+fn capture_security(world: &World) -> Vec<(String, crate::security::SecuritySaveState)> {
+    let Some(mut query) = world.try_query::<(&EntityUuid, &crate::security::ShipSecurityTeams)>()
+    else {
+        return Vec::new();
+    };
+    let idle = crate::security::SecuritySaveState::default();
+    query
+        .iter(world)
+        .map(|(uuid, security)| (uuid.0.clone(), security.save_state()))
+        .filter(|(_, state)| *state != idle)
+        .collect()
+}
+
 /// The scan records, in a query of their own, joined by uuid — see
 /// [`EntityState::scan`]. Only hulls that authored `[scan]` carry one, so most
 /// worlds capture an empty list.
@@ -3761,6 +3928,26 @@ fn capture_civilians(world: &World) -> Vec<(String, crate::civilian::CivilianSta
     query
         .iter(world)
         .map(|(uuid, traffic)| (uuid.0.clone(), traffic.0.clone()))
+        .collect()
+}
+
+/// The debris contacts, in a query of their own, joined by uuid — see
+/// [`EntityState::debris`]. Only entities that authored `[debris]` carry one, so
+/// every world but the one that sheds a corridor captures an empty list.
+///
+/// Unlike its siblings there is no "idle row captures nothing" filter, and the
+/// reason is the `Transform` this row carries: an unread mass that has drifted
+/// two hundred units is not in its default state, and dropping the row because
+/// no latch had risen yet would put it back where it was shed.
+fn capture_debris(world: &World) -> Vec<(String, crate::debris::DebrisSaveState)> {
+    let Some(mut query) =
+        world.try_query::<(&EntityUuid, &Transform, &crate::debris::DebrisThreat)>()
+    else {
+        return Vec::new();
+    };
+    query
+        .iter(world)
+        .map(|(uuid, transform, threat)| (uuid.0.clone(), threat.save_state(transform.translation)))
         .collect()
 }
 
@@ -4180,8 +4367,10 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
     let docks = capture_docks(world);
     let external_repair = capture_external_repair(world);
     let umbilicals = capture_umbilicals(world);
+    let securities = capture_security(world);
     let scans = capture_scans(world);
     let civilians = capture_civilians(world);
+    let debris = capture_debris(world);
     let spawn_origins = capture_spawn_origins(world);
     let Some(mut query) = world.try_query::<(
         &EntityUuid,
@@ -4317,11 +4506,19 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
                     .iter()
                     .find(|(id, _)| id == &uuid.0)
                     .map(|(_, state)| state.clone()),
+                security: securities
+                    .iter()
+                    .find(|(id, _)| id == &uuid.0)
+                    .map(|(_, state)| state.clone()),
                 scan: scans
                     .iter()
                     .find(|(id, _)| id == &uuid.0)
                     .map(|(_, state)| state.clone()),
                 civilian: civilians
+                    .iter()
+                    .find(|(id, _)| id == &uuid.0)
+                    .map(|(_, state)| state.clone()),
+                debris: debris
                     .iter()
                     .find(|(id, _)| id == &uuid.0)
                     .map(|(_, state)| state.clone()),
@@ -5441,6 +5638,31 @@ fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut
         world.insert_resource(GameOverReason(reason, outcome));
     }
 
+    // The post-mission report (issue #1344). Written unconditionally, unlike
+    // the blocks either side of it: an EMPTY report is a real state — "this run
+    // has recorded nothing yet" — and leaving a stale resource in place when
+    // resuming into it would resurrect rows the captured tick did not have.
+    // Order is restored verbatim, because order is content here.
+    {
+        let rows = snapshot
+            .mission_report
+            .iter()
+            .filter_map(|row| {
+                // An unrecognised state label drops the row rather than guessing
+                // a fate — the same refusal `Outcome::parse` makes just above.
+                let state = crate::core::report::ReportRowState::parse(&row.state).ok()?;
+                Some(crate::core::report::ReportRow {
+                    id: row.id.clone(),
+                    heading_id: row.heading.clone(),
+                    outcome_id: row.outcome.clone(),
+                    state,
+                    score: row.score,
+                })
+            })
+            .collect();
+        world.insert_resource(crate::core::report::MissionReport::from_rows(rows));
+    }
+
     if !snapshot.captain_boosts.is_empty() {
         // `toggle` on an empty store inserts; there is no bulk setter and this
         // needs none — `CaptainPriorityBoost::default()` is empty by
@@ -5708,9 +5930,13 @@ fn restore_comms(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut Res
                             responses: row
                                 .responses
                                 .iter()
-                                .map(|(text, important)| CommsResponse {
+                                .enumerate()
+                                .map(|(i, (text, important))| CommsResponse {
                                     text: text.clone(),
                                     important: *important,
+                                    // A short or absent parallel vector reads as
+                                    // "no metadata" — see `DialogueState`.
+                                    ai: row.response_ai.get(i).copied().unwrap_or_default(),
                                 })
                                 .collect(),
                         },
@@ -5722,7 +5948,15 @@ fn restore_comms(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut Res
             .collect();
 
         comms.open_hails = stored.open_hails.iter().cloned().collect();
-        // `range_flags` / `range_active` / `contacts` are all recomputed by
+        // The unmanned console's running waits resume where they were, rather
+        // than restarting — see `CommsState::pending_ai_responses`.
+        comms.pending_ai_responses = stored
+            .pending_ai_responses
+            .iter()
+            .map(|(key, record)| (key.clone(), *record))
+            .collect();
+        // `range_flags` / `range_active` / `fleet_range_flags` /
+        // `fleet_range_active` / `contacts` are all recomputed by
         // `update_comms_range_flags` on the next tick; what they need is for the
         // resumed world to push a fresh `CommsState` to its clients.
         comms.needs_broadcast = true;
@@ -5766,13 +6000,39 @@ fn restore_comms(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut Res
 /// (`server_app.rs`) and `push_game_over_hud_state`
 /// (`server/viewscreen_border.rs`) to run, or the host never emits the
 /// `GameOver` message and the HUD never leaves its live state. Both are
-/// audited safe to re-run: they only *read* `GameOverReason` (restored above,
-/// before this call) and *write* an outbox message / HUD resource — neither
-/// spawns, despawns, or resets anything the rest of this restore depends on.
-/// Run via `OnEnter(GameOver)` itself rather than by naming the two systems,
-/// so a future addition to that schedule is covered by construction — but that
-/// also means a system landing in `OnEnter(GameOver)` later needs this same
-/// audit before it can be trusted here.
+/// audited safe to re-run: they only *read* `GameOverReason` and
+/// `MissionReport` — both restored above, before this call — and *write* an
+/// outbox message, a HUD resource, and one `ReportFinalized` narrative beat.
+/// None of the three spawns, despawns, or resets anything the rest of this
+/// restore depends on.
+///
+/// That third effect is issue #1344's, and it is REPRODUCED on purpose rather
+/// than suppressed. `on_game_over_enter` writes
+/// `NarrativeKind::ReportFinalized` when the report holds rows, and a restored
+/// report-bearing `GameOver` comes back holding exactly those rows — so
+/// `core::balance::classify` still calls the resumed run `reported`. A resumed
+/// timeline with no `report_finalized` in it would then contradict the outcome
+/// printed beside it in the very same exit report. The beat is the ending's
+/// observable effect on the after-action surface in precisely the way the
+/// `GameOver` message is its effect on the wire, and putting those back is this
+/// function's whole job.
+///
+/// It is also inert with respect to the continuation claim this module exists
+/// to make: nothing authoritative reads `RunTelemetry::narrative_events` — no
+/// digest stage folds it (see the note on that field) — so re-emitting the beat
+/// cannot move a resumed run's simulation off the live one's. What it does NOT
+/// do is reconstruct the *captured* run's timeline: the snapshot carries no
+/// narrative telemetry at all, by the same design that keeps it out of the
+/// digest. A resumed run's timeline is therefore what the resumed process
+/// itself observed, ending beat included, and `tests/snapshot_resume.rs` pins
+/// that count at exactly one.
+///
+/// Run via `OnEnter(GameOver)` itself rather than by naming the systems, so a
+/// future addition to that schedule is covered by construction — but that also
+/// means a system landing in `OnEnter(GameOver)` later needs this same audit
+/// before it can be trusted here. #1344's `ReportFinalized` write is what that
+/// sentence looks like when it comes due, and the paragraphs above are the
+/// audit it asked for.
 fn run_restored_phase_entry_effects(world: &mut World, phase: GamePhase) {
     if phase == GamePhase::GameOver {
         let _ = world.try_run_schedule(OnEnter(GamePhase::GameOver));
@@ -6184,6 +6444,11 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
                 control.restore(umbilical);
             }
         }
+        if let Some(security) = &row.security {
+            if let Some(mut teams) = entity_mut.get_mut::<crate::security::ShipSecurityTeams>() {
+                teams.restore(security);
+            }
+        }
         if let Some(scan) = &row.scan {
             if let Some(mut record) = entity_mut.get_mut::<crate::science::ShipScanRecord>() {
                 record.restore(scan);
@@ -6192,6 +6457,25 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
         if let Some(civilian) = &row.civilian {
             if let Some(mut traffic) = entity_mut.get_mut::<crate::civilian::CivilianTraffic>() {
                 traffic.0 = civilian.clone();
+            }
+        }
+        if let Some(debris) = &row.debris {
+            if let Some(mut threat) = entity_mut.get_mut::<crate::debris::DebrisThreat>() {
+                threat.restore(debris);
+            }
+            // The drifted position, written beside the latches for the same
+            // reason a resumed ship's `Transform` is written beside its
+            // `ShipPhysics` above: `DebrisThreat::restore` cannot reach its own
+            // entity's other components, and a rock carries no physics record
+            // for the transform to be a projection of. The rotation and scale
+            // are left alone — `tick_debris_drift` never touches either, so what
+            // the respawn put there is still right.
+            if let Some(mut transform) = entity_mut.get_mut::<Transform>() {
+                transform.translation = Vec3::new(
+                    debris.translation[0],
+                    debris.translation[1],
+                    debris.translation[2],
+                );
             }
         }
         if !row.patrol_cursors.is_empty() {

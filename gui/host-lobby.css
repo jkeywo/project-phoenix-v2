@@ -20,6 +20,32 @@
  * referenced here WITH a fallback, which is this sheet saying the property may
  * legitimately be absent - it is, on the native lobby surface, which has no
  * cog to clear.
+ *
+ * WHY THERE IS STILL RAW HEX BELOW (issue #1356). Every literal here that has
+ * an EXACT token now names it: --signal for the lobby accent, --surface-void
+ * for the black ground, rgba(var(--rgb-white), …) and rgba(var(--rgb-signal), …)
+ * for the translucent layers, and --focus-ring-contrast for the high-contrast
+ * ring. The rest — #cce ink, the #0e0e14 card, the #2a8a96 claimed border, the
+ * 0.6/0.65/0.7/0.8rem sizes — are the pre-graphite lobby palette, and
+ * gui/tokens.css names none of those values. Rounding them onto the nearest
+ * rung would retint the lobby, which is PRD #1355's next slice to decide and
+ * not this one's to do quietly.
+ *
+ * They stay, but they are not unguarded. This sheet IS in
+ * design-tokens.test.js's SURFACES list, and every literal it still carries is
+ * named in that suite's KNOWN_LITERALS allowlist: a new hex here fails the
+ * suite, and a literal #1355 retires has to leave the allowlist too. The list
+ * can only shrink.
+ *
+ * THE TYPE RUNGS ARE NOT AN IDENTITY. The seven 0.75rem labels now read
+ * --text-sm, which is `max(12px, 0.75rem)` — equal to what it replaced only at
+ * a 16px root. Nothing sets a root font-size on this surface (neither
+ * server.html nor src/native_host/host_lobby/document.rs does; gui/console.css
+ * sizes the console iframes, not this), so the root is the browser's
+ * user-configurable default, and a reader who has shrunk theirs to 14px now
+ * gets 12px labels here rather than 10.5px. Holding that floor is the whole
+ * reason the ramp is written as a max(), so the change is wanted — but it is a
+ * change, and the rest of this slice moves nothing.
  */
 
 /* ── Lobby panel (issue #436) ────────────────────────────────────────── */
@@ -33,7 +59,7 @@
 .lobby-bg {
   position: absolute;
   inset: 0;
-  background: rgb(0, 0, 0);
+  background: var(--surface-void);
 }
 .lobby-panel-wrap {
   position: relative;
@@ -74,7 +100,7 @@
 }
 .station-card.empty {
   opacity: 0.5; border-style: dashed;
-  background: repeating-linear-gradient(45deg,transparent,transparent 6px,rgba(255,255,255,0.02) 6px,rgba(255,255,255,0.02) 12px);
+  background: repeating-linear-gradient(45deg,transparent,transparent 6px,rgba(var(--rgb-white), 0.02) 6px,rgba(var(--rgb-white), 0.02) 12px);
 }
 .station-card .card-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -82,8 +108,8 @@
 .station-card .card-avatar {
   width: 32px; height: 32px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  font-size: 0.75rem; font-weight: bold; background: #191e28;
-  color: #5fd8e8; border: 1px solid #2a3a48;
+  font-size: var(--text-sm); font-weight: bold; background: #191e28;
+  color: var(--signal); border: 1px solid #2a3a48;
 }
 .station-card .card-name {
   font-size: 0.9rem; font-weight: 600; color: #cce;
@@ -161,7 +187,7 @@
 .station-card .station-screen-button.selected {
   border-color: #2a8a96;
   background: #101a1d;
-  color: #5fd8e8;
+  color: var(--signal);
 }
 .station-card .station-screen-button:disabled {
   cursor: default;
@@ -186,15 +212,15 @@
   background: #2a2d3a; border: 1px solid #3a3d4a;
   transition: background .2s, border-color .2s;
 }
-.crew-dot.filled { background: #5fd8e8; border-color: #5fd8e8; }
+.crew-dot.filled { background: var(--signal); border-color: var(--signal); }
 /* Ready badge states */
 #lobby-ready-badge.go {
-  background: #0a2830; color: #5fd8e8; border-color: #5fd8e8;
+  background: #0a2830; color: var(--signal); border-color: var(--signal);
   animation: ready-pulse 1.5s ease-in-out infinite;
 }
 @keyframes ready-pulse {
-  0%, 100% { box-shadow: 0 0 4px rgba(95,216,232,0.3); }
-  50% { box-shadow: 0 0 14px rgba(95,216,232,0.6); }
+  0%, 100% { box-shadow: 0 0 4px rgba(var(--rgb-signal), 0.3); }
+  50% { box-shadow: 0 0 14px rgba(var(--rgb-signal), 0.6); }
 }
 
 /* Lobby responsive layout */
@@ -233,7 +259,7 @@
 }
 .lobby-rail-spacer { flex: 1; }
 .lobby-status-hint {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: #667;
   text-align: right;
   padding-top: 0.5rem;
@@ -262,7 +288,7 @@
   background: #181e2a;
   color: #aac;
   border: 1px solid #2a3a48;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   white-space: nowrap;
   align-self: flex-start;
 }
@@ -283,8 +309,8 @@
   padding: 6px 12px;
   border-radius: 4px;
   border: 1px dashed #2a2d3a;
-  background: repeating-linear-gradient(45deg,transparent,transparent 6px,rgba(255,255,255,0.02) 6px,rgba(255,255,255,0.02) 12px);
-  font-size: 0.75rem;
+  background: repeating-linear-gradient(45deg,transparent,transparent 6px,rgba(var(--rgb-white), 0.02) 6px,rgba(var(--rgb-white), 0.02) 12px);
+  font-size: var(--text-sm);
   color: #667;
   text-align: center;
   letter-spacing: .04em;
@@ -315,7 +341,7 @@
   gap: 0.5rem;
 }
 .lobby-crew-label {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: #889;
   text-transform: uppercase;
   letter-spacing: .06em;
@@ -363,11 +389,11 @@
   left: 1.5rem;
   padding: 8px 16px;
   background: #0a1a20;
-  color: #5fd8e8;
+  color: var(--signal);
   border: 1px solid #2a8a96;
   border-radius: 4px;
   font-family: 'Chakra Petch', system-ui, monospace;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   font-weight: 600;
   letter-spacing: .1em;
   text-transform: uppercase;
@@ -377,8 +403,8 @@
 }
 #ai-launch-btn:hover {
   background: #0d2830;
-  border-color: #5fd8e8;
-  box-shadow: 0 0 8px rgba(95,216,232,0.25);
+  border-color: var(--signal);
+  box-shadow: 0 0 8px rgba(var(--rgb-signal), 0.25);
 }
 
 /* Compact form: portrait OR narrow landscape */
@@ -461,7 +487,7 @@
   background: #0e0e14;
   color: #cce;
   font-family: 'Chakra Petch', system-ui, monospace;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   letter-spacing: .04em;
   text-align: left;
   cursor: pointer;
@@ -485,7 +511,7 @@
   text-transform: uppercase;
   letter-spacing: .1em;
 }
-.monitor-button.viewscreen .monitor-button-mark { color: #5fd8e8; }
+.monitor-button.viewscreen .monitor-button-mark { color: var(--signal); }
 .monitor-button:focus,
 .monitor-button:focus-visible {
   outline: 2px solid #cfe8ff;
@@ -505,21 +531,21 @@
    high-contrast theme reaches an embedded view as `custom`. */
 @media (prefers-contrast: more), (prefers-contrast: custom) {
   .monitor-button {
-    border-color: #ffffff;
-    color: #ffffff;
-    background: #000000;
+    border-color: rgb(var(--rgb-white));
+    color: rgb(var(--rgb-white));
+    background: var(--surface-void);
   }
   .monitor-button.viewscreen {
     border-width: 2px;
-    border-color: #5fd8e8;
+    border-color: var(--signal);
   }
   .monitor-button .monitor-button-mark,
-  .monitor-button .monitor-button-stations { color: #ffffff; }
+  .monitor-button .monitor-button-stations { color: rgb(var(--rgb-white)); }
   .monitor-button:focus,
   .monitor-button:focus-visible {
-    outline: 3px solid #ffffff;
+    outline: 3px solid var(--focus-ring-contrast);
   }
-  .monitor-row-notice { color: #ffffff; }
+  .monitor-row-notice { color: rgb(var(--rgb-white)); }
 
   /* The station screen rows (issue #1331) get the same treatment, because they
      are the other thing on this surface somebody OPERATES — and a full screen's
@@ -527,22 +553,22 @@
      "offered" and "not offered" stay distinguishable without a colour
      judgement. */
   .station-card .station-screen-button {
-    border-color: #ffffff;
-    color: #ffffff;
-    background: #000000;
+    border-color: rgb(var(--rgb-white));
+    color: rgb(var(--rgb-white));
+    background: var(--surface-void);
   }
   .station-card .station-screen-button.selected {
     border-width: 2px;
-    border-color: #5fd8e8;
-    color: #ffffff;
+    border-color: var(--signal);
+    color: rgb(var(--rgb-white));
   }
   .station-card .station-screen-button:disabled { border-style: dashed; }
   .station-card .station-screens-label,
   .station-card .station-screens-message,
-  .station-card .station-screen-reason { color: #ffffff; }
+  .station-card .station-screen-reason { color: rgb(var(--rgb-white)); }
   .station-card .station-screen-button:focus,
   .station-card .station-screen-button:focus-visible {
-    outline: 3px solid #ffffff;
+    outline: 3px solid var(--focus-ring-contrast);
   }
 }
 
@@ -555,6 +581,6 @@
 @media (prefers-reduced-motion: reduce) {
   #lobby-ready-badge.go {
     animation: none;
-    box-shadow: 0 0 14px rgba(95,216,232,0.6);
+    box-shadow: 0 0 14px rgba(var(--rgb-signal), 0.6);
   }
 }

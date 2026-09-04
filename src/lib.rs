@@ -71,12 +71,24 @@ pub mod core;
 /// world both a native test and the browser drive, under deliberately
 /// different frame pacing, folding the canonical digest at shared ticks.
 pub mod cross_target_probe;
+/// Debris hazards (issue #1347): the pure closest-approach projection that turns
+/// a drifting mass into an assessed threat, and the Bevy adapter that drifts it,
+/// latches what a scan found, and raises the flags a scenario hangs its beat on.
+/// Owns no consequence — a strike's damage, its objective and its computer cue
+/// are the world file's.
+pub mod debris;
 /// Delivery (PRD #855): how a host — browser tab or native `phoenix-host`
 /// process — publishes its client bundle, its content manifest, its scenario
 /// catalogue and its version pin. Compiles on both targets on purpose: the
 /// catalogue field list and the pin are shared code, and only the socket loop
 /// (`delivery::serve`) is native-only.
 pub mod delivery;
+/// Controlled demolition (issue #1350): the pure detonation verdict and
+/// four-outcome decision, and the adapter that fires `DetonateCharges` on the
+/// `security` target it borrows. Reads Security and the tractor, owns an
+/// operation not a system, and hands every consequence to the world file through
+/// the authored flags it raises.
+pub mod demolition;
 /// Helm docking (issue #1159): the pure marker-mating module and its Bevy
 /// adapter. A hull with a `[dock]` table and dock markers in its rig sidecar can
 /// dock with, or be docked by, another hull carrying dock markers; the docked
@@ -110,7 +122,16 @@ pub mod lobby;
 /// no socket — a transport fills its inbox and drains its outbox — so every
 /// decision it makes is testable on native with no networking at all.
 pub mod lockstep;
+/// The post-mission report accumulator (issue #1344, PRD #1337): the one system
+/// that drains the script boundary's report-row queue into
+/// `core::report::MissionReport` and beats each real change onto the narrative
+/// timeline.
+pub mod mission_report;
 pub mod modifiers;
+/// The authored mission-timeline emitters (issue #1338, PRD #1337): the systems
+/// that turn Objective / deadline / beat / Comms / marked-entity transitions
+/// into `core::narrative::NarrativeEvent`s for the headless run report.
+pub mod narrative;
 pub mod objectives;
 pub mod radar;
 pub mod radar_config;
@@ -125,6 +146,12 @@ pub mod regions;
 /// adapter. There is no authored scan text anywhere behind it — see
 /// `pasm/spec/design/simulation-differentiation.yaml`.
 pub mod science;
+/// The Security System (issue #1346, PRD #1337): the pure team state machine,
+/// action vocabulary, dispatch verdict and backfill priority selection, and its
+/// Bevy adapter. A generic station-owned `[[system]]` — Tactical's on the Alliance
+/// Destroyer — whose teams cross to authored targets to contain, evacuate, board
+/// or place charges. What each target offers is the target's TOML, never Rust.
+pub mod security;
 pub mod server_app;
 /// The render half lifted out of `server_app` (issue #1195): the Bevy mesh
 /// cache, material factory, LOD swapper, and light spawners. Registered from
@@ -169,6 +196,11 @@ pub mod station_importance;
 /// Tactical's current lock and holds the derelict on the operator's rig. The
 /// umbilical, dock and external repair-dispatch slices copy this shape.
 pub mod tractor;
+/// The rescue transporter (issue #1348, PRD #1337): the pure, Bevy-free verdict
+/// and refusal vocabulary, and its Bevy adapter — the engineering-owned
+/// `[[system]]` that recovers the civilians a scan revealed aboard a discovered
+/// contact, over many ticks at an authored rate.
+pub mod transporter;
 /// The transfer umbilical (issue #1160), third slice of PRD #1143's coupling
 /// family: the pure, Bevy-free flow-arithmetic module and refusal vocabulary, and
 /// its Bevy adapter — the engineering-owned `[[system]]` that moves an authored

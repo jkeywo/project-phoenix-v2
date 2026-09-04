@@ -9,16 +9,16 @@ describe('renderDefinitionsFileListView', () => {
     const host = new FakeElement('div');
     const modeShell = new ModeShell();
     renderDefinitionsFileListView(host, {
-      paths: ['assets/factions/federation.toml', 'assets/factions/pirate.toml'],
+      paths: ['assets/factions/alliance.toml', 'assets/factions/pirate.toml'],
       activePath: null,
       modeShell,
       onSelect: () => {},
     });
     const rows = host.querySelectorAll('.definitions-file-list-row');
     expect(rows.length).toBe(2);
-    expect(rows[0].dataset.path).toBe('assets/factions/federation.toml');
+    expect(rows[0].dataset.path).toBe('assets/factions/alliance.toml');
     const label = rows[0].querySelector('.definitions-file-list-label');
-    expect(label.textContent).toBe('federation.toml');
+    expect(label.textContent).toBe('alliance.toml');
   });
 
   it('marks the active row with the active class', () => {
@@ -40,11 +40,11 @@ describe('renderDefinitionsFileListView', () => {
     installDom();
     const host = new FakeElement('div');
     const modeShell = new ModeShell();
-    modeShell.markDirty('Definitions', 'assets/factions/federation.toml', true);
+    modeShell.markDirty('Definitions', 'assets/factions/alliance.toml', true);
 
     const selected = [];
     renderDefinitionsFileListView(host, {
-      paths: ['assets/factions/federation.toml', 'assets/factions/pirate.toml'],
+      paths: ['assets/factions/alliance.toml', 'assets/factions/pirate.toml'],
       activePath: null,
       modeShell,
       onSelect: (p) => selected.push(p),

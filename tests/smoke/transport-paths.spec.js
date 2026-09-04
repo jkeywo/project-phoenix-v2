@@ -35,17 +35,14 @@
 //              in tests/client/rendezvous-transport.test.js under fake timers,
 //              because at real speed it is ninety seconds of waiting.
 
-import { test, expect, waitForWasmReady } from './fixtures';
+import { test, expect, waitForWasmReady, waitForJoinCode } from './fixtures';
 import { ts } from './strings';
 
 async function bootHost(context, search = '?scenario=assets/worlds/default.toml') {
   const page = await context.newPage();
   await page.goto(`/${search}`);
   await waitForWasmReady(page);
-  await page.waitForFunction(
-    () => /^[A-Z]{5}$/.test(document.getElementById('join-code')?.textContent ?? ''),
-    { timeout: 30_000 },
-  );
+  await waitForJoinCode(page, 'join-code', 30_000);
   return page;
 }
 
@@ -84,7 +81,7 @@ const peerConfigsOn = (page) => page.evaluate(() => window.__transportShim.peerC
  */
 const WS_RELAY_LINE = ts('server.client_ws_relay', { id: 'PEERID' }).split('PEERID').pop();
 
-test('a direct join negotiates both channels and never reaches for a fallback', async ({ context }) => {
+test('a direct join negotiates both channels and never reaches for a fallback', { tag: '@core' }, async ({ context }) => {
   // PINNED to direct on both ends, which is what makes this the direct-path
   // spec rather than "whatever the shim happened to build". `?transport=direct`
   // withholds the STUN/TURN list from the peer connection — the only spelling

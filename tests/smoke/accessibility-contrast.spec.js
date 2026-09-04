@@ -44,7 +44,7 @@ async function readPalette(page) {
   });
 }
 
-test('contrast setting round-trip: data-contrast="more" swaps in a visibly different palette', async ({ context }) => {
+test('contrast setting round-trip: data-contrast="more" swaps in a visibly different palette', { tag: '@core' }, async ({ context }) => {
   const page = await context.newPage();
   // Bare client shell: gui/tokens.css is linked and the accessibility module
   // exposes the write path at load — no host hash needed for the palette seam.
@@ -72,9 +72,18 @@ test('contrast setting round-trip: data-contrast="more" swaps in a visibly diffe
   expect(more.edgeFaint).not.toBe(standard.edgeFaint);  // the divider is now drawn
 
   // The change is a genuine round-trip: it persisted to the private profile.
+  // Since #1279 that home is the enclosing OPERATOR profile, which nests the
+  // record under `accessibility` — the Accessibility-only
+  // `phoenix-accessibility-v1` key is now just the migration/old-shell
+  // fallback and stays absent here. Accept either home so this keeps proving
+  // persistence rather than one storage layout.
   const persisted = await page.evaluate(() => {
-    try { return JSON.parse(localStorage.getItem('phoenix-accessibility-v1')); }
-    catch (_) { return null; }
+    const read = (key) => {
+      try { return JSON.parse(localStorage.getItem(key)); }
+      catch (_) { return null; }
+    };
+    const operator = read('phoenix-operator-profile-v1');
+    return (operator && operator.accessibility) || read('phoenix-accessibility-v1');
   });
   expect(persisted && persisted.presentation && persisted.presentation.contrast).toBe('on');
 

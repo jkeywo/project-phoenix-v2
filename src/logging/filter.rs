@@ -154,6 +154,22 @@ impl AsLogFilter for Option<LogFilterConfig> {
     }
 }
 
+/// The shape a HELPER called out of a system has the config in.
+///
+/// A system holding `Option<Res<LogFilterConfig>>` hands a helper
+/// `log.as_deref()` rather than the `Res` itself, because the helper has no
+/// business naming a Bevy type to log a line. Same `None` semantics as the two
+/// impls above — warn-level, no entity filtering — so a helper's logging cannot
+/// drift from its caller's.
+impl AsLogFilter for Option<&LogFilterConfig> {
+    fn log_filter(&self) -> &LogFilterConfig {
+        match self {
+            Some(cfg) => cfg,
+            None => fallback(),
+        }
+    }
+}
+
 /// Keeps [`EntityFilter::allowed`] in sync with the world.
 ///
 /// Driven by `Added<EntityName>` and `RemovedComponents<EntityName>`, so it is

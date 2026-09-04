@@ -9,9 +9,13 @@
  * closing message, never both, so blowing up threw away the world's own
  * account of the defeat.
  */
-import { describe, it, expect } from 'vitest';
-import { gameOverView } from '../../gui/game-over-view.js';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { gameOverView, reportRows } from '../../gui/game-over-view.js';
 import { LobbyState } from '../../gui/lobby-state.js';
+import { localiseTree, setTable, getTable, wireText } from '../../gui/strings.js';
 
 describe('gameOverView — visibility', () => {
   it('is visible only in the GameOver phase', () => {
@@ -159,5 +163,321 @@ describe('gameOverView — fed from the wire', () => {
     s.apply({ type: 'ReturnedToLobby' });
     expect(s.gameOverOutcome).toBeNull();
     expect(gameOverView({ phase: s.phase, outcome: s.gameOverOutcome }).visible).toBe(false);
+  });
+});
+
+// ── The post-mission report (issue #1344) ──────────────────────────────────
+
+/**
+ * A mission that saved the stricken hauler and lost the skyway is not
+ * describable in one word, so a report-bearing ending stops trying: the rows
+ * become the result and the win/loss frame steps aside.
+ */
+const lyraSaved = {
+  id: 'lyra',
+  heading: 'world.falling_skyway.report.lyra.heading',
+  outcome: 'world.falling_skyway.report.lyra.saved',
+  state: 'saved',
+};
+const lyraLost = {
+  id: 'lyra',
+  heading: 'world.falling_skyway.report.lyra.heading',
+  outcome: 'world.falling_skyway.report.lyra.lost',
+  state: 'lost',
+};
+const trafficPartial = {
+  id: 'traffic',
+  heading: 'world.falling_skyway.report.traffic.heading',
+  outcome: 'world.falling_skyway.report.traffic.partial',
+  state: 'partial',
+};
+
+describe('gameOverView — a report-bearing ending', () => {
+  it('is classified reported and headlined as a report, not a verdict', () => {
+    const vm = gameOverView({ phase: 'GameOver', report: [lyraSaved] });
+    expect(vm.outcome).toBe('reported');
+    expect(vm.headlineId).toBe('client.game_over_reported');
+  });
+
+  // AC2's catastrophic half. The Lark took the skyway down and the server
+  // declared a defeat; the crew still pulled Lyra clear, and the ending has to
+  // say so.
+  it('outranks a declared defeat and a hull death alike', () => {
+    expect(
+      gameOverView({ phase: 'GameOver', outcome: 'defeat', report: [lyraSaved] }).outcome,
+    ).toBe('reported');
+    expect(
+      gameOverView({ phase: 'GameOver', shipDestroyed: true, report: [lyraSaved] }).outcome,
+    ).toBe('reported');
+    expect(
+      gameOverView({ phase: 'GameOver', outcome: 'victory', report: [lyraLost] }).outcome,
+    ).toBe('reported');
+  });
+
+  it('preserves the authored row order', () => {
+    const vm = gameOverView({ phase: 'GameOver', report: [lyraSaved, trafficPartial] });
+    expect(vm.rows.map((r) => r.id)).toEqual(['lyra', 'traffic']);
+  });
+
+  it('hands the caller String Ids to resolve, never prose', () => {
+    const [row] = gameOverView({ phase: 'GameOver', report: [lyraSaved] }).rows;
+    expect(row.headingId).toBe('world.falling_skyway.report.lyra.heading');
+    expect(row.outcomeId).toBe('world.falling_skyway.report.lyra.saved');
+    expect(row.state).toBe('saved');
+  });
+
+  // AC3, stated where it can fail. The server keeps a signed score per row and
+  // a hidden total; neither has any business on a crew's screen, and neither
+  // has a field to arrive in.
+  it('exposes no score, total, grade or win/loss label', () => {
+    const vm = gameOverView({
+      phase: 'GameOver',
+      outcome: 'defeat',
+      report: [{ ...lyraSaved, score: 6 }, { ...trafficPartial, score: -4 }],
+    });
+    const serialised = JSON.stringify(vm);
+    expect(serialised).not.toContain('score');
+    expect(serialised).not.toContain('total');
+    expect(serialised).not.toContain('grade');
+    for (const row of vm.rows) {
+      expect(Object.keys(row).sort()).toEqual(['headingId', 'id', 'outcomeId', 'state']);
+    }
+    // And the frame itself carries no verdict word.
+    expect(vm.headlineId).not.toBe('client.game_over_defeat');
+    expect(vm.headlineId).not.toBe('client.game_over_victory');
+  });
+
+  it("keeps the world's own closing prose beside the rows", () => {
+    const vm = gameOverView({
+      phase: 'GameOver',
+      reason: 'The transfer window has closed.',
+      report: [lyraSaved],
+    });
+    expect(vm.bodyText).toBe('The transfer window has closed.');
+    expect(vm.rows).toHaveLength(1);
+  });
+});
+
+describe('gameOverView — what is NOT a report', () => {
+  // AC5. Every scenario that has not authored a report keeps the ending it
+  // always had, and the three shapes an absent report can arrive in all mean
+  // the same thing.
+  it('leaves an unreported ending exactly as it was', () => {
+    for (const report of [undefined, [], null, 'nonsense']) {
+      expect(gameOverView({ phase: 'GameOver', outcome: 'victory', report }).outcome)
+        .toBe('victory');
+      expect(gameOverView({ phase: 'GameOver', shipDestroyed: true, report }).outcome)
+        .toBe('defeat');
+      expect(gameOverView({ phase: 'GameOver', report }).outcome).toBe('ended');
+      expect(gameOverView({ phase: 'GameOver', report }).rows).toEqual([]);
+    }
+  });
+
+  // A row missing either String Id would render as a blank line, which says
+  // less than not showing the row.
+  it('drops a row that could not render', () => {
+    const vm = gameOverView({
+      phase: 'GameOver',
+      report: [{ id: 'a', heading: 'h.a', state: 'saved' }, { id: 'b', outcome: 'o.b' }, null],
+    });
+    expect(vm.rows).toEqual([]);
+    expect(vm.outcome).toBe('ended');
+  });
+
+  // An unknown state still says what happened through its two ids; only the
+  // accent is withheld, so a surface styling on it falls back to neutral.
+  it('keeps a row whose state it does not recognise, unstyled', () => {
+    const vm = gameOverView({
+      phase: 'GameOver',
+      report: [{ ...lyraSaved, state: 'triumphant' }],
+    });
+    expect(vm.rows).toHaveLength(1);
+    expect(vm.rows[0].state).toBe('');
+    expect(vm.outcome).toBe('reported');
+  });
+});
+
+// ── End to end: the wire message → lobby-state → the reported ending ───────
+
+describe('gameOverView — the report, fed from the wire', () => {
+  const view = (msg) => {
+    const s = new LobbyState();
+    s.apply(msg);
+    return gameOverView({
+      phase: s.phase,
+      reason: s.gameOverReason,
+      outcome: s.gameOverOutcome,
+      report: s.gameOverReport,
+      scenarioTitle: 'Falling Skyway',
+    });
+  };
+
+  it('lights up the report frame from a real GameOver message', () => {
+    const vm = view({
+      type: 'GameOver',
+      data: {
+        reason: 'world.falling_skyway.game_over.lark_collision',
+        outcome: 'defeat',
+        report: [lyraSaved],
+      },
+    });
+    expect(vm.visible).toBe(true);
+    expect(vm.outcome).toBe('reported');
+    expect(vm.rows).toHaveLength(1);
+    expect(vm.scenarioName).toBe('Falling Skyway');
+  });
+
+  // A host still sending the pre-#1344 shape.
+  it('stays with the declared frame when the message carries no report field', () => {
+    const vm = view({ type: 'GameOver', data: { reason: 'r', outcome: 'victory' } });
+    expect(vm.outcome).toBe('victory');
+    expect(vm.rows).toEqual([]);
+  });
+
+  it('clears the report on the way back to the lobby', () => {
+    const s = new LobbyState();
+    s.apply({ type: 'GameOver', data: { reason: 'r', outcome: 'defeat', report: [lyraLost] } });
+    expect(s.gameOverReport).toHaveLength(1);
+    s.apply({ type: 'ReturnedToLobby' });
+    expect(s.gameOverReport).toEqual([]);
+  });
+});
+
+// ── The phone's real ingress: localiseTree runs BEFORE lobby-state ─────────
+//
+// A phone does not receive String Ids. `gui/rendezvous-transport.js` resolves
+// the whole decoded `ServerMessage` through `localiseTree` the moment it
+// arrives, so every id the table holds — the report's included, since #1344
+// added them to strings.csv — is already prose by the time `LobbyState.apply`
+// stores it. The tests above feed `LobbyState` raw ids directly and therefore
+// skip that step; this block puts it back, because skipping it is exactly how
+// the double-localisation bug (rows rendering as ⟨Lyra Ascending⟩) got in.
+describe('the report through the phone ingress', () => {
+  const HEADING = 'Lyra Ascending';
+  const SAVED = 'Pulled clear of the lane before the band closed.';
+
+  const fixture = () =>
+    new Map([
+      ['world.falling_skyway.report.lyra.heading', HEADING],
+      ['world.falling_skyway.report.lyra.saved', SAVED],
+      ['client.game_over_reported', 'MISSION REPORT'],
+    ]);
+
+  let saved;
+  beforeEach(() => {
+    saved = getTable();
+    setTable(fixture());
+  });
+  afterEach(() => setTable(saved));
+
+  /** The row text exactly as client.html's overlay composes it. */
+  const rendered = (vm) =>
+    vm.rows.map((row) => [wireText(row.headingId), wireText(row.outcomeId)]);
+
+  it('renders the prose, not a doubly-resolved miss', () => {
+    const wire = localiseTree({
+      type: 'GameOver',
+      data: {
+        reason: 'world.falling_skyway.game_over.lark_collision',
+        outcome: 'defeat',
+        report: [lyraSaved],
+      },
+    });
+    // The ingress already did the resolving; the ids are gone from the payload.
+    expect(wire.data.report[0].heading).toBe(HEADING);
+
+    const s = new LobbyState();
+    s.apply(wire);
+    const vm = gameOverView({
+      phase: s.phase,
+      reason: s.gameOverReason,
+      outcome: s.gameOverOutcome,
+      report: s.gameOverReport,
+      scenarioTitle: 'Falling Skyway',
+    });
+
+    expect(vm.outcome).toBe('reported');
+    expect(rendered(vm)).toEqual([[HEADING, SAVED]]);
+    for (const cell of rendered(vm).flat()) expect(cell).not.toMatch(/^⟨/);
+  });
+
+  // The Viewscreen's own resolver (localiseHostPayload) and a host that never
+  // learned the ids both hand this surface a still-raw id. One render site has
+  // to cover both, so the same call must also resolve.
+  it('still resolves a row that arrived unresolved', () => {
+    const vm = gameOverView({ phase: 'GameOver', report: [lyraSaved] });
+    expect(rendered(vm)).toEqual([[HEADING, SAVED]]);
+  });
+
+  // The render site itself, pinned in the page source: `t()` here is the bug,
+  // and no view-model test can see which function client.html calls.
+  it('is what client.html actually calls on the row fields', () => {
+    const page = readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), '../../client.html'),
+      'utf8',
+    );
+    expect(page).toMatch(/heading\.textContent\s*=\s*wireText\(row\.headingId\)/);
+    expect(page).toMatch(/outcome\.textContent\s*=\s*wireText\(row\.outcomeId\)/);
+  });
+});
+
+// ── The OTHER player surface: the Viewscreen (server.html) ────────────────────
+//
+// The rows reach server.html on the HUD payload (`ViewscreenHudState.
+// game_over_report`) rather than on a `GameOver` message, so it renders its own
+// overlay and does not call `gameOverView`. What it must NOT do is normalise the
+// rows itself: until this issue's review it looped the raw array, which meant a
+// row a phone dropped rendered here as a pair of blank lines, and a `state` of
+// "SAVED" styled on a phone and not here. Those two rules live in `reportRows`,
+// and the page source is the only place that can say which function runs.
+describe('the report on the Viewscreen', () => {
+  const serverPage = () =>
+    readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), '../../server.html'),
+      'utf8',
+    );
+
+  it('loads the shared module rather than carrying a second row renderer', () => {
+    expect(serverPage()).toMatch(
+      /<script type="module" src="gui\/game-over-view\.js"><\/script>/,
+    );
+  });
+
+  it('normalises its HUD rows through reportRows and renders what it returns', () => {
+    const page = serverPage();
+    expect(page).toMatch(/window\.gameOverReportRows\(s\.game_over_report\)/);
+    expect(page).toMatch(/dt\.textContent\s*=\s*row\.headingId/);
+    expect(page).toMatch(/dd\.textContent\s*=\s*row\.outcomeId/);
+    // The two rules must not be re-implemented beside the call: no second
+    // filter on the raw wire field names, and no second state vocabulary.
+    expect(page).not.toMatch(/row\.heading\s*!=\s*null/);
+    expect(page).not.toMatch(/row\.outcome\s*!=\s*null/);
+  });
+
+  // What the module the page now loads actually enforces, asserted directly so
+  // the scrape above is pinned to behaviour and not just to a spelling.
+  it('drops an unrenderable row and lower-cases the state it styles on', () => {
+    const rows = reportRows([
+      { id: 'lyra', heading: 'h.lyra', outcome: 'o.lyra', state: 'SAVED' },
+      // An empty heading is what `report_row`'s boundary now refuses to author
+      // (src/world/script/effects.rs); a host that predates that check can
+      // still send one, and both surfaces must drop it rather than draw a
+      // blank line.
+      { id: 'blank', heading: '', outcome: 'o.blank', state: 'lost' },
+      { id: 'noOutcome', heading: 'h.noOutcome', state: 'lost' },
+      null,
+    ]);
+    expect(rows).toEqual([
+      { id: 'lyra', headingId: 'h.lyra', outcomeId: 'o.lyra', state: 'saved' },
+    ]);
+  });
+
+  // One function, two surfaces: the window global server.html reaches for is
+  // the very export client.html's view model runs its rows through.
+  it('exposes the same function the phone path uses', async () => {
+    const mod = await import('../../gui/game-over-view.js');
+    expect(globalThis.window?.gameOverReportRows ?? mod.reportRows).toBe(reportRows);
+    const vm = gameOverView({ phase: 'GameOver', report: [{ ...lyraSaved, state: 'SAVED' }] });
+    expect(vm.rows).toEqual(reportRows([{ ...lyraSaved, state: 'SAVED' }]));
   });
 });

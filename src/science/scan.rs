@@ -147,6 +147,17 @@ pub struct ScanConfig {
     /// Past the coarsest band the scan returns nothing at all.
     #[serde(default = "default_interference_bands")]
     pub interference_bands: u8,
+    /// How this suite reports a contact's bulk (issue #1347), **lightest
+    /// first**: a reading resolves to the first class whose `max_mass` still
+    /// covers the subject.
+    ///
+    /// On the SUITE and not on the subject, exactly as the fidelity ladder is:
+    /// "heavy" is a thing an instrument says, not a thing a rock is, and a
+    /// scenario that wanted a rock to *be* heavy would be authoring the result
+    /// rather than the state. A hull authoring no ladder reports no class,
+    /// which is what every hull shipped before this did.
+    #[serde(default, rename = "mass_class", skip_serializing_if = "Vec::is_empty")]
+    pub mass_classes: Vec<ScanMassClassConfig>,
 }
 
 impl Default for ScanConfig {
@@ -159,8 +170,32 @@ impl Default for ScanConfig {
             bands: Vec::new(),
             degraded_by: Vec::new(),
             interference_bands: default_interference_bands(),
+            mass_classes: Vec::new(),
         }
     }
+}
+
+/// One `[[scan.mass_class]]` block (issue #1347): a bulk band this suite reports
+/// a contact in.
+///
+/// The same shape as [`ScanBandConfig`] and for the same reason — a machine code
+/// the wire and the tests name it by, a `strings.csv` id the console shows, and
+/// the number that decides which one answers. Unlike a fidelity band it does not
+/// coarsen with range: `mass` is content identity, so which class a contact
+/// falls in is the same answer from any distance.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScanMassClassConfig {
+    /// Machine name for the class (`"light"`, `"heavy"`). Never display text.
+    pub id: String,
+    /// `strings.csv` id for the crew-facing class name. Required, on
+    /// [`ScanBandConfig::label`]'s argument: a class the console cannot name is
+    /// a reading the crew cannot act on.
+    pub label: String,
+    /// The heaviest subject this class still covers, in the game's own mass
+    /// unit. The last class in the ladder is the open top — anything heavier
+    /// than every authored class reports the heaviest one.
+    pub max_mass: f32,
 }
 
 /// One `[[scan.band]]` block: how good a reading is, and how far out it holds.
@@ -250,7 +285,70 @@ impl ScanConfig {
                 ));
             }
         }
+        self.validate_mass_classes()?;
         Ok(())
+    }
+
+    /// Refuse an unusable `[[scan.mass_class]]` ladder (issue #1347).
+    ///
+    /// Lifted out rather than inlined above so the two ladders' rules read side
+    /// by side without either one's loop swallowing the other. The rules are the
+    /// band ladder's, transposed: named, uniquely, in strictly increasing order,
+    /// because a class at or inside the previous one could never be reached.
+    fn validate_mass_classes(&self) -> Result<(), String> {
+        let mut seen: Vec<&str> = Vec::new();
+        let mut previous_mass = 0.0_f32;
+        for class in &self.mass_classes {
+            if class.id.trim().is_empty() {
+                return Err("[[scan.mass_class]] has an empty id".to_string());
+            }
+            if class.label.trim().is_empty() {
+                return Err(format!(
+                    "[[scan.mass_class]] '{}' has an empty label — a class the console cannot \
+                     name is a reading the crew cannot act on",
+                    class.id
+                ));
+            }
+            if seen.contains(&class.id.as_str()) {
+                return Err(format!(
+                    "[[scan.mass_class]] '{}' is declared twice — the first would always win and \
+                     the second would never be reachable",
+                    class.id
+                ));
+            }
+            seen.push(&class.id);
+            if !positive(class.max_mass) {
+                return Err(format!(
+                    "[[scan.mass_class]] '{}' authors max_mass = {} — a class covering nothing \
+                     can never answer",
+                    class.id, class.max_mass
+                ));
+            }
+            if class.max_mass <= previous_mass {
+                return Err(format!(
+                    "[[scan.mass_class]] '{}' authors max_mass = {} at or inside the previous \
+                     class's {} — classes are authored LIGHTEST FIRST and their ceilings must \
+                     strictly increase, or the class behind this one could never be reached",
+                    class.id, class.max_mass, previous_mass
+                ));
+            }
+            previous_mass = class.max_mass;
+        }
+        Ok(())
+    }
+
+    /// The class that answers for `mass`, or `None` when this suite authors no
+    /// ladder at all.
+    ///
+    /// Lightest first, so the first class that still covers the mass is the
+    /// right one. A subject heavier than every authored ceiling reports the
+    /// heaviest class rather than nothing: a ladder's top rung is open, because
+    /// "heavier than anything I have a word for" is still that word.
+    pub fn mass_class_for(&self, mass: f32) -> Option<&ScanMassClassConfig> {
+        self.mass_classes
+            .iter()
+            .find(|c| mass <= c.max_mass)
+            .or_else(|| self.mass_classes.last())
     }
 
     /// The band that answers at `distance`, as an index into [`Self::bands`],
@@ -302,6 +400,17 @@ pub struct ScanSubject {
     /// and never zero: every entity has one, whether an author chose it or it
     /// took the documented parse-time default.
     pub mass: f32,
+    /// The subject's raw debris geometry (issue #1347), when it is a moving
+    /// hazard: where it stands and how fast it is going RELATIVE to the asset
+    /// it was authored against, plus that asset's own name id and the authored
+    /// radius inside which it strikes.
+    ///
+    /// It does not bend the no-authored-results rule either, on `mass`'s
+    /// argument turned around: every field on it is a quantity the adapter read
+    /// off two transforms and one `[debris]` table this tick, and the type has
+    /// no field for a verdict. The verdict is [`crate::debris::assess`]'s, taken
+    /// below, from these numbers and nothing else.
+    pub debris: Option<crate::debris::DebrisSubject>,
 }
 
 /// This tick's real conditions, as the adapter reads them off the world.
@@ -419,6 +528,28 @@ pub struct ScanReading {
     /// refusing to load.
     #[serde(default)]
     pub mass: f32,
+    /// The machine code of the bulk class that answered for
+    /// [`mass`](Self::mass) (issue #1347), or empty when the suite authors no
+    /// `[[scan.mass_class]]` ladder — which is every hull shipped before it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub mass_class: String,
+    /// `strings.csv` id for that class's crew-facing name. Empty with the code.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub mass_class_label: String,
+    /// What this reading worked out about a moving hazard (issue #1347): what it
+    /// is closing on, how near it gets, and when. `None` for every subject that
+    /// is not debris.
+    ///
+    /// Carried at full precision rather than quantised to the answering band, on
+    /// [`mass`](Self::mass)'s argument turned around: a projection is arithmetic
+    /// over positions the radar is ALREADY showing the crew at full precision,
+    /// so coarsening it here would invent a second fidelity model that
+    /// disagreed with the plot beside it. What range and power still buy is
+    /// whether there is a reading AT ALL — the ladder refuses an out-of-range or
+    /// underpowered scan long before this field is reached, which is why a crew
+    /// who want to know what a rock is aimed at have to close on it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debris: Option<crate::debris::DebrisAssessment>,
     /// `(label id, held)` for each operational flag the subject authored a
     /// label for. Empty when the answering band does not resolve flags.
     #[serde(default)]
@@ -538,6 +669,11 @@ pub fn derive(
         return Err(ScanRefusal::Blinded);
     };
 
+    // The bulk class and the debris projection (issue #1347). Both are folded
+    // AFTER every gate above, so a refused scan reports neither: a crew who were
+    // told "out of range" have not learned what the rock is aimed at.
+    let mass_class = config.mass_class_for(subject.mass);
+
     Ok(ScanReading {
         subject_uuid: subject.uuid.clone(),
         subject_name: subject.name.clone(),
@@ -547,6 +683,9 @@ pub fn derive(
         condition_fraction: quantise(condition.condition_fraction, band.condition_step),
         condition_step: band.condition_step,
         mass: subject.mass,
+        mass_class: mass_class.map(|c| c.id.clone()).unwrap_or_default(),
+        mass_class_label: mass_class.map(|c| c.label.clone()).unwrap_or_default(),
+        debris: subject.debris.as_ref().map(crate::debris::assess),
         flags: if band.report_thresholds {
             condition.flags.clone()
         } else {
@@ -604,6 +743,32 @@ mod tests {
             ],
             degraded_by: vec![RegionEffectName::NebulaFog],
             interference_bands: 1,
+            mass_classes: Vec::new(),
+        }
+    }
+
+    /// The same suite with a three-rung bulk ladder (issue #1347), so a reading
+    /// reports a class as well as a number.
+    fn suite_with_mass_classes() -> ScanConfig {
+        ScanConfig {
+            mass_classes: vec![
+                ScanMassClassConfig {
+                    id: "light".into(),
+                    label: "world.probe.mass_class.light.label".into(),
+                    max_mass: 1_000.0,
+                },
+                ScanMassClassConfig {
+                    id: "medium".into(),
+                    label: "world.probe.mass_class.medium.label".into(),
+                    max_mass: 50_000.0,
+                },
+                ScanMassClassConfig {
+                    id: "heavy".into(),
+                    label: "world.probe.mass_class.heavy.label".into(),
+                    max_mass: 200_000.0,
+                },
+            ],
+            ..suite()
         }
     }
 
@@ -617,6 +782,7 @@ mod tests {
                 capacities: vec![("world.probe.capacity.berths.label".into(), 4)],
             }),
             mass: 180_000.0,
+            debris: None,
         }
     }
 
@@ -701,6 +867,174 @@ mod tests {
         );
     }
 
+    // ── The bulk ladder and the debris projection (issue #1347) ─────────────
+
+    /// A suite that authors no `[[scan.mass_class]]` ladder reports no class —
+    /// which is every hull shipped before #1347, so their readings are byte-for-
+    /// byte what they were.
+    #[test]
+    fn a_suite_with_no_bulk_ladder_reports_no_class_at_all() {
+        let reading = derive(&suite(), &depot(0.5), &at(400.0), 1).expect("a reading");
+        assert!(reading.mass_class.is_empty());
+        assert!(reading.mass_class_label.is_empty());
+    }
+
+    /// The class is a projection of the subject's own mass through the SUITE's
+    /// ladder — lightest first, first covering class wins.
+    #[test]
+    fn the_bulk_class_is_the_lightest_authored_class_that_still_covers_the_mass() {
+        let config = suite_with_mass_classes();
+        let reading = derive(&config, &depot(0.5), &at(400.0), 1).expect("a reading");
+        assert_eq!(
+            reading.mass_class, "heavy",
+            "180,000 is past medium's 50,000 ceiling and inside heavy's 200,000"
+        );
+        assert_eq!(
+            reading.mass_class_label,
+            "world.probe.mass_class.heavy.label"
+        );
+
+        let mut pebble = depot(0.5);
+        pebble.mass = 40.0;
+        assert_eq!(
+            derive(&config, &pebble, &at(400.0), 1)
+                .expect("a reading")
+                .mass_class,
+            "light"
+        );
+    }
+
+    /// The top rung is OPEN: something heavier than every authored ceiling is
+    /// still reported in the heaviest class the suite has a word for, rather
+    /// than falling out of the ladder into silence.
+    #[test]
+    fn a_subject_heavier_than_every_class_reports_the_heaviest_one() {
+        let config = suite_with_mass_classes();
+        let mut behemoth = depot(0.5);
+        behemoth.mass = 9_000_000.0;
+        assert_eq!(
+            derive(&config, &behemoth, &at(400.0), 1)
+                .expect("a reading")
+                .mass_class,
+            "heavy"
+        );
+    }
+
+    /// Like `mass`, the class does not coarsen with range: it is content
+    /// identity read through a fixed ladder, not a live measurement.
+    #[test]
+    fn the_bulk_class_is_the_same_answer_from_any_band() {
+        let config = suite_with_mass_classes();
+        let close = derive(&config, &depot(0.37), &at(400.0), 1).expect("a reading");
+        let far = derive(&config, &depot(0.37), &at(2_400.0), 1).expect("a reading");
+        assert_eq!(close.mass_class, far.mass_class);
+        assert_ne!(
+            close.condition_step, far.condition_step,
+            "…while the fidelity that DOES coarsen still did"
+        );
+    }
+
+    /// A bulk ladder whose ceilings do not strictly increase is refused at load,
+    /// on the band ladder's argument: the class behind the flat one could never
+    /// be reached.
+    #[test]
+    fn a_bulk_ladder_that_does_not_ascend_is_refused_at_load() {
+        let mut config = suite_with_mass_classes();
+        config.mass_classes[2].max_mass = 50_000.0;
+        let err = config.validate().expect_err("an unreachable class");
+        assert!(err.contains("LIGHTEST FIRST"), "got: {err}");
+    }
+
+    /// The debris projection rides the ordinary reading, and rides it only when
+    /// the subject IS debris (issue #1347).
+    #[test]
+    fn an_ordinary_subject_carries_no_debris_projection() {
+        let reading = derive(&suite(), &depot(0.5), &at(400.0), 1).expect("a reading");
+        assert!(
+            reading.debris.is_none(),
+            "a depot is not going to hit anything"
+        );
+    }
+
+    #[test]
+    fn a_debris_subject_folds_its_projection_into_the_ordinary_reading() {
+        let mut rock = depot(0.5);
+        rock.mass = 4_200.0;
+        rock.debris = Some(crate::debris::DebrisSubject {
+            relative_position: [100.0, 0.0],
+            relative_velocity: [-10.0, 0.0],
+            protected_name: "world.probe.entity.depot.name".into(),
+            impact_radius: 20.0,
+        });
+        let reading = derive(&suite(), &rock, &at(400.0), 1).expect("a reading");
+        let assessment = reading.debris.expect("a debris reading projects");
+        assert!(assessment.on_collision_course);
+        assert_eq!(assessment.seconds_to_impact, Some(8.0));
+        assert_eq!(
+            assessment.protected_name, "world.probe.entity.depot.name",
+            "the reading names what is UNDER the rock, and names it by the id the \
+             author wrote against the depot rather than against the threat"
+        );
+    }
+
+    /// A mass aimed at nothing still comes back a READING, and the reading is
+    /// what says so (issue #1347).
+    ///
+    /// This is the finding the whole beat turns on: "we looked and there is
+    /// nothing under it" has to be a different state from "nobody has been", and
+    /// the only thing that can carry the difference is a projection that answers.
+    /// A `None` here would leave a crew who ruled a contact out indistinguishable
+    /// from a crew who never went, and would leave the Sensors seat asking for
+    /// the same rock forever.
+    #[test]
+    fn a_mass_aimed_at_nothing_still_reads_as_a_finding() {
+        let mut rock = depot(0.5);
+        rock.debris = Some(crate::debris::DebrisSubject {
+            relative_position: [0.0, 0.0],
+            relative_velocity: [-2.2, 0.9],
+            protected_name: String::new(),
+            impact_radius: 0.0,
+        });
+        let reading = derive(&suite(), &rock, &at(400.0), 1).expect("a reading");
+        let assessment = reading
+            .debris
+            .expect("a hazard the crew read must come back with an answer");
+        assert!(
+            !assessment.on_collision_course,
+            "there is no radius to cross, so nothing to confirm"
+        );
+        assert_eq!(assessment.seconds_to_impact, None);
+        assert_eq!(
+            assessment.protected_name, "",
+            "and the reading names no asset, because there is none"
+        );
+        assert_eq!(
+            assessment.course,
+            [-2.2, 0.9],
+            "what it is DOING is a fact about the contact and survives having \
+             nothing to do it to"
+        );
+    }
+
+    /// A refused scan reveals nothing about a hazard. The gate that matters for
+    /// debris is RANGE, and it is the ladder's existing one: a crew told "out of
+    /// range" have not learned what the rock is aimed at.
+    #[test]
+    fn a_refused_scan_of_debris_reveals_no_projection() {
+        let mut rock = depot(0.5);
+        rock.debris = Some(crate::debris::DebrisSubject {
+            relative_position: [100.0, 0.0],
+            relative_velocity: [-10.0, 0.0],
+            protected_name: "world.probe.entity.depot.name".into(),
+            impact_radius: 20.0,
+        });
+        assert_eq!(
+            derive(&suite(), &rock, &at(9_000.0), 1),
+            Err(ScanRefusal::OutOfRange),
+            "and a refusal carries no reading to hide a projection inside"
+        );
+    }
+
     /// Past the coarsest band there is no reading at all — the ladder has an
     /// end, and it is the authored one.
     #[test]
@@ -724,6 +1058,7 @@ mod tests {
             name: String::new(),
             condition: None,
             mass: 500.0,
+            debris: None,
         };
         assert_eq!(
             derive(&suite(), &rock, &at(100.0), 1),
@@ -760,6 +1095,7 @@ mod tests {
                 .as_ref()
                 .map(|published| SubjectCondition::from_published(published, |_| None, |_| None)),
             mass: 90_000.0,
+            debris: None,
         };
         let refusal = derive(&suite(), &sealed, &at(100.0), 1).expect_err("no reading");
         assert_eq!(

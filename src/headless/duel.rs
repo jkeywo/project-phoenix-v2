@@ -136,15 +136,15 @@ use crate::logging::LogCat;
 /// output as unreachable authored text.
 pub const SLOT_MARKER: &str = "// duel:slots";
 
-/// Federation faction UUID — side A's own faction (the player's). Side-A NPC
+/// Alliance faction UUID — side A's own faction (the player's). Side-A NPC
 /// escorts are forced to it so they bucket as the player side in the report.
-/// A faction *identity* reference, matching `assets/factions/federation.toml`
+/// A faction *identity* reference, matching `assets/factions/alliance.toml`
 /// (mirrors how `probe_duel.toml` embeds the Harrow UUID inline) — not a
 /// tunable gameplay value.
-pub const FEDERATION_FACTION: &str = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa";
+pub const ALLIANCE_FACTION: &str = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa";
 
 /// Harrow faction UUID — side B's faction. Matches
-/// `assets/factions/harrow.toml`. Federation<->Harrow mutual hostility is
+/// `assets/factions/harrow.toml`. Alliance<->Harrow mutual hostility is
 /// armed by the pre-authored `add_faction_enemy` calls in `duel.toml`'s
 /// `on_world_loaded` handler, above the marker and so never regenerated.
 pub const HARROW_FACTION: &str = "cccccccc-3333-4333-8333-cccccccccccc";
@@ -386,7 +386,7 @@ fn slots_for(
         slots.push(Slot {
             name: format!("side_a_{}", i + 1),
             template: resolve(ship)?,
-            faction: FEDERATION_FACTION,
+            faction: ALLIANCE_FACTION,
             group: "side_a",
         });
     }
@@ -656,7 +656,7 @@ setup = """
 on_world_loaded("on_load");
 
 fn on_load(ctx) {
-    ctx.effects.add_faction_enemy("Federation", "Harrow");
+    ctx.effects.add_faction_enemy("Alliance", "Harrow");
 }
 
 fn spawn_slot(ctx, name, template, faction, group) {
@@ -791,7 +791,7 @@ seed = 1
 [script]
 setup = """
 on_world_loaded("on_load");
-fn on_load(ctx) { ctx.effects.add_faction_enemy("Federation", "Harrow"); }
+fn on_load(ctx) { ctx.effects.add_faction_enemy("Alliance", "Harrow"); }
 """
 "#;
         let err = apply_duel_sides(
@@ -859,11 +859,11 @@ fn on_load(ctx) { ctx.effects.add_faction_enemy("Federation", "Harrow"); }
         assert_eq!(
             drivers(&world),
             vec![
-                // side_a_2 from side_a[1] = courier, Federation faction.
+                // side_a_2 from side_a[1] = courier, Alliance faction.
                 (
                     "side_a_2".to_string(),
                     "assets/entities/courier.toml".to_string(),
-                    FEDERATION_FACTION.to_string(),
+                    ALLIANCE_FACTION.to_string(),
                     "side_a".to_string(),
                 ),
                 // side_b_1 / side_b_2 from side_b[0] / side_b[1], Harrow faction.

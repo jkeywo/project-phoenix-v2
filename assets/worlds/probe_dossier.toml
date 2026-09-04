@@ -7,7 +7,7 @@
 # deterministic tripwire for the projection rather than a fight that happens to
 # damage something.
 #
-#   skyway_control      a hailable starbase, Federation      -> affiliation + hailing range
+#   skyway_control      a hailable starbase, Alliance      -> affiliation + hailing range
 #   strike_committee    a hailable hull, Requiem, and the
 #                       party a promise is made to           -> affiliation + range + promise
 #   skyway_depot        a PUBLISHED structure, not hailable  -> condition + the LABELLED
@@ -83,7 +83,7 @@ spawn_on = "game_start"
 
 # ── Subject: a hailable starbase ─────────────────────────────────────────────
 # On the roster through the comms door, which `station_axiom.toml` opens at the
-# template level (`[comms] hailable = true`, issue #985). Federation, so its
+# template level (`[comms] hailable = true`, issue #985). Alliance, so its
 # affiliation row resolves through the faction's own authored `display_name`.
 [[entity]]
 template_path = "assets/entities/station_axiom.toml"

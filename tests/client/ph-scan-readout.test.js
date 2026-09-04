@@ -3,7 +3,12 @@ import { t } from '../../gui/strings.js';
 import {
   describe, it, expect, beforeEach, afterEach, vi,
 } from 'vitest';
-import { formatCondition, formatTolerance } from '../../gui/components/ph-scan-readout.js';
+import {
+  formatCondition,
+  formatDistance,
+  formatSeconds,
+  formatTolerance,
+} from '../../gui/components/ph-scan-readout.js';
 import '../../gui/components/ph-scan-readout.js';
 
 function setup() {
@@ -201,5 +206,136 @@ describe('scan readout formatting', () => {
     expect(formatTolerance(0.25)).toBe('±13%');
     expect(formatTolerance(0.05)).toBe('±3%');
     expect(formatTolerance(0.01)).toBe(null);
+  });
+});
+
+// ── The moving-hazard projection (issue #1347) ──────────────────────────────
+//
+// A reading of a rock carries what the ordinary reading carries PLUS what it is
+// closing on, and the panel is where a human crew actually learn it. Everything
+// below is the same `(label, value)` machinery the rest of the readout uses:
+// there is still no per-subject branch and still no authored prose, only the
+// server's own numbers and the `strings.csv` id the scenario wrote beside the
+// PROTECTED asset.
+
+const CONFIRMED_ROCK = {
+  subject_uuid: '00000000-0000-8000-8000-000000000091',
+  subject_name: 'world.falling_skyway.entity.debris_lead.name',
+  band: 'detailed',
+  band_label: 'entity.alliance_destroyer.scan.band.detailed.label',
+  taken_at_tick: 4200,
+  condition_fraction: 1,
+  condition_step: 0.01,
+  mass: 48000,
+  mass_class: 'heavy',
+  mass_class_label: 'entity.alliance_destroyer.scan.mass_class.heavy.label',
+  debris: {
+    protected_name: 'world.falling_skyway.entity.depot_ladder_a.name',
+    course: [0, 1.8],
+    closest_approach: 3.5,
+    seconds_to_closest_approach: 260,
+    on_collision_course: true,
+    seconds_to_impact: 244.4,
+  },
+  flags: [],
+  capacities: [],
+};
+
+const HARMLESS_ROCK = {
+  ...CONFIRMED_ROCK,
+  subject_name: 'world.falling_skyway.entity.debris_stray.name',
+  mass: 1200,
+  mass_class: 'light',
+  mass_class_label: 'entity.alliance_destroyer.scan.mass_class.light.label',
+  debris: {
+    protected_name: '',
+    course: [-2.2, 0.9],
+    closest_approach: 0,
+    seconds_to_closest_approach: 0,
+    on_collision_course: false,
+    seconds_to_impact: null,
+  },
+};
+
+describe('PhScanReadout hazard projection', () => {
+  beforeEach(() => { document.body.innerHTML = ''; });
+  afterEach(() => { document.body.innerHTML = ''; });
+
+  it('names what is under a confirmed rock, how near it gets and when', () => {
+    const el = setup();
+    el.state = panelState({
+      scan: { capable: true, reading: CONFIRMED_ROCK, refusal: null },
+    });
+    const shown = rows(el);
+    expect(shown).toContainEqual([
+      t('component.scan.debris.protected'),
+      t('world.falling_skyway.entity.depot_ladder_a.name'),
+    ]);
+    expect(shown).toContainEqual([t('component.scan.debris.closest'), '4']);
+    expect(shown).toContainEqual([t('component.scan.debris.impact'), '4:04']);
+  });
+
+  it('says a rock is on no collision course rather than saying nothing', () => {
+    // The finding the whole beat turns on: a crew who ruled a contact out have
+    // learned something, and a blank panel would leave them where they started.
+    const el = setup();
+    el.state = panelState({
+      scan: { capable: true, reading: HARMLESS_ROCK, refusal: null },
+    });
+    const shown = rows(el);
+    expect(shown).toContainEqual([
+      t('component.scan.debris.protected'),
+      t('component.scan.debris.clear'),
+    ]);
+    // And no arrival is quoted for a contact that never arrives.
+    expect(shown.map(([label]) => label))
+      .not.toContain(t('component.scan.debris.impact'));
+    expect(shown.map(([label]) => label))
+      .not.toContain(t('component.scan.debris.closest'));
+  });
+
+  it('says what the suite calls a mass that size, beside the number', () => {
+    const el = setup();
+    el.state = panelState({
+      scan: { capable: true, reading: CONFIRMED_ROCK, refusal: null },
+    });
+    expect(rows(el)).toContainEqual([
+      t('component.scan.mass'),
+      `48000 ${t('entity.alliance_destroyer.scan.mass_class.heavy.label')}`,
+    ]);
+  });
+
+  it('leaves an ordinary reading exactly as it was before hazards existed', () => {
+    // A hull authoring no bulk ladder, reading a subject that is not debris:
+    // no class on the mass line and no hazard rows at all.
+    const el = setup();
+    el.state = panelState();
+    const shown = rows(el);
+    expect(shown).toContainEqual([t('component.scan.mass'), '250000']);
+    expect(shown.map(([label]) => label))
+      .not.toContain(t('component.scan.debris.protected'));
+  });
+});
+
+describe('hazard formatting', () => {
+  it('rounds a projected separation to whole units', () => {
+    expect(formatDistance(3.5)).toBe('4');
+    expect(formatDistance(0)).toBe('0');
+    expect(formatDistance(undefined)).toBe('0');
+  });
+
+  it('renders a countdown as minutes and seconds', () => {
+    expect(formatSeconds(244.4)).toBe('4:04');
+    expect(formatSeconds(9)).toBe('0:09');
+    expect(formatSeconds(0)).toBe('0:00');
+  });
+
+  it('tells "no arrival" apart from "arriving now"', () => {
+    // Opposite readings, and a console that spelled both `0:00` would be the
+    // crew's own version of the bug `debris_deadline_known` prevents on the AI
+    // side of the same beat.
+    expect(formatSeconds(null)).toBe('--');
+    expect(formatSeconds(undefined)).toBe('--');
+    expect(formatSeconds(0)).toBe('0:00');
   });
 });

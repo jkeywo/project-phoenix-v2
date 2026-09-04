@@ -643,6 +643,13 @@ pub(crate) fn project_ship_client_config(
             .iter()
             .map(|t| t.as_str().to_string())
             .collect();
+        // Selected-contact trajectory projection tunables (issue #1339).
+        // `projection` is `Option` — a hull that omits the table keeps the
+        // 60s/10s parse defaults already on `ShipClientConfig`.
+        if let Some(projection) = &sc.projection {
+            next.sensors_projection_horizon_secs = projection.horizon_secs;
+            next.sensors_projection_marker_interval_secs = projection.marker_interval_secs;
+        }
     }
     if let Some(nc) = &ship_config.navigation_console {
         next.nav_chart_shows = nc
@@ -2816,7 +2823,7 @@ mod tests {
             ]
         );
         assert_eq!(projected.class.as_deref(), Some("cruiser"));
-        assert_eq!(projected.hull_id.as_deref(), Some("NCC-1864"));
+        assert_eq!(projected.hull_id.as_deref(), Some("AEV-1864"));
         assert_eq!(projected.power_rating, Some(90));
         assert_eq!(
             projected.ship_css.as_deref(),

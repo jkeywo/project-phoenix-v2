@@ -28,6 +28,9 @@ use crate::console::weapons::beam::TacticalRadarSelection;
 use crate::core::messages::{
     AdmittedCommands, SystemAffinity, SystemBlackboard, SystemControlPayload,
 };
+use crate::core::task_lifecycle::{
+    TaskLifecycleRequest, TaskSlot, TaskTerminalReason, TASK_VERB_EXTERNAL_REPAIR,
+};
 use crate::effect_queue::EffectQueue;
 use crate::entities::spawner::EntityUuid;
 use crate::infrastructure::condition::ConditionAdjustment;
@@ -146,6 +149,7 @@ pub struct ExternalRepairSaveState {
 /// admissible from the repair console and reads the same availability answer the
 /// AI dispatcher does.
 pub fn handle_external_repair_commands(
+    mut lifecycle: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
     mut set: ParamSet<(
         // Gather: everything the dispatch verdict needs off each operator.
         Query<(
@@ -159,7 +163,7 @@ pub fn handle_external_repair_commands(
         // Every entity's position, to resolve the designated target's separation.
         Query<(&EntityUuid, &Transform)>,
         // Apply the verdict.
-        Query<&mut ExternalRepairDispatch>,
+        Query<(&mut ExternalRepairDispatch, Option<&EntityUuid>)>,
     )>,
     mut outbound: Option<ResMut<Messages<crate::lobby::OutboundMessage>>>,
 ) {
@@ -285,7 +289,7 @@ pub fn handle_external_repair_commands(
     // Apply.
     let mut dispatches = set.p2();
     for ((entity, request), separation) in requests.iter().zip(separations) {
-        let Ok(mut dispatch) = dispatches.get_mut(*entity) else {
+        let Ok((mut dispatch, uuid)) = dispatches.get_mut(*entity) else {
             crate::command_admission::finish_admitted_action_feedback(
                 &mut outbound,
                 request.command(),
@@ -302,6 +306,30 @@ pub fn handle_external_repair_commands(
             } => {
                 match dispatch_status(*has_free_team, lock.as_deref(), separation, *range) {
                     Ok(()) => {
+                        // The activation opens at COMMIT, not at every tick a
+                        // team is still out there working (issue #1345) — the
+                        // same dispatch-and-claim shape Security's team
+                        // assignment uses. A dispatch onto a FRESH target
+                        // while a team is already abroad still needs to
+                        // restart through the registry (it closes the old
+                        // activation as `Restarted` and opens this one), but a
+                        // re-dispatch onto the SAME target the ship is already
+                        // working (a stale-UI double tap) changes nothing in
+                        // the sim and must not report a phantom restart —
+                        // `SystemControlPayload::Dock if !dock.engaged`
+                        // (dock/server.rs) and `StartTransfer if
+                        // !umbilical.running` (umbilical/server.rs) guard the
+                        // same no-op at their own commit sites.
+                        if dispatch.dispatched_target.as_deref() != lock.as_deref() {
+                            push_lifecycle(
+                                lifecycle.as_deref_mut(),
+                                uuid,
+                                TaskLifecycleRequest::Start {
+                                    slot: dispatch_slot(uuid),
+                                    target: lock.clone(),
+                                },
+                            );
+                        }
                         dispatch.dispatched_target = lock.clone();
                         dispatch.last_refusal = None;
                         crate::command_admission::finish_admitted_action_feedback(
@@ -313,6 +341,9 @@ pub fn handle_external_repair_commands(
                     Err(refusal) => {
                         // A refused dispatch sends nobody: the target is left
                         // untouched and the reason is retained for the console.
+                        // No lifecycle report — nothing was ever committed, the
+                        // same "a refusal at dispatch time opens nothing" rule
+                        // Security's own dispatch keeps.
                         dispatch.last_refusal = Some(refusal);
                         crate::command_admission::finish_admitted_action_feedback(
                             &mut outbound,
@@ -323,6 +354,19 @@ pub fn handle_external_repair_commands(
                 }
             }
             Request::Recall { .. } => {
+                // Report the cancel BEFORE clearing the claim, so a recall of an
+                // idle dispatch (a stale-UI double tap) reports nothing at all
+                // (issue #1345).
+                if dispatch.dispatched_target.is_some() {
+                    push_lifecycle(
+                        lifecycle.as_deref_mut(),
+                        uuid,
+                        TaskLifecycleRequest::End {
+                            slot: dispatch_slot(uuid),
+                            reason: TaskTerminalReason::Released,
+                        },
+                    );
+                }
                 // Recall brings the team home and stops the work, leaving what it
                 // already did on the target. A deliberate recall is not a
                 // refusal, so the reason clears.
@@ -361,10 +405,11 @@ pub fn handle_external_repair_commands(
 /// the instant `dispatched_target` clears, exactly as releasing a tractor stops
 /// its arrest.
 pub fn tick_external_repair(
+    mut lifecycle: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
     mut set: ParamSet<(
         Query<(Entity, &ExternalRepairDispatch, &Transform)>,
         Query<(&EntityUuid, &Transform)>,
-        Query<&mut ExternalRepairDispatch>,
+        Query<(&mut ExternalRepairDispatch, Option<&EntityUuid>)>,
     )>,
 ) {
     struct Row {
@@ -407,12 +452,70 @@ pub fn tick_external_repair(
         if let Err(refusal) =
             dispatch_status(true, Some(row.target.as_str()), separation, row.range)
         {
-            let Ok(mut dispatch) = dispatches.get_mut(row.entity) else {
+            let Ok((mut dispatch, uuid)) = dispatches.get_mut(row.entity) else {
                 continue;
             };
             dispatch.dispatched_target = None;
             dispatch.last_refusal = Some(refusal);
+            // This system only ever CLOSES a dispatch (it never opens one — that
+            // is `handle_external_repair_commands`' job at commit time), so every
+            // row it walks was live and the terminal is unconditional (issue
+            // #1345). `refusal` is always `OutOfRange` here — the range
+            // maintenance calls the pure verdict with a team already claimed and
+            // a target already present, so only drift (or the target vanishing,
+            // which reads identically) can fail it — but mapped through the same
+            // table `handle_external_repair_commands` would use for hygiene.
+            push_lifecycle(
+                lifecycle.as_deref_mut(),
+                uuid,
+                TaskLifecycleRequest::End {
+                    slot: dispatch_slot(uuid),
+                    reason: terminal_reason_for(refusal),
+                },
+            );
         }
+    }
+}
+
+/// The lifecycle slot a hull's external repair-team dispatch occupies (issue
+/// #1345) — its uuid, the repair system, and the external-repair verb.
+fn dispatch_slot(uuid: Option<&EntityUuid>) -> TaskSlot {
+    TaskSlot::new(
+        uuid.map(|u| u.0.clone()).unwrap_or_default(),
+        REPAIR_SYSTEM_ID,
+        TASK_VERB_EXTERNAL_REPAIR,
+    )
+}
+
+/// Queue one lifecycle report, if there is a queue and the hull has a uuid to be
+/// identified by (issue #1345). Mirrors `tractor::server::push_lifecycle`.
+fn push_lifecycle(
+    queue: Option<&mut EffectQueue<TaskLifecycleRequest>>,
+    uuid: Option<&EntityUuid>,
+    request: TaskLifecycleRequest,
+) {
+    if uuid.is_none() {
+        return;
+    }
+    if let Some(queue) = queue {
+        queue.0.push(request);
+    }
+}
+
+/// The terminal reason a dropped external-repair dispatch reports, from the
+/// refusal the pure dispatch verdict returned (issue #1345).
+///
+/// Only [`ExternalRepairRefusal::OutOfRange`] is reachable from `tick_external_
+/// repair` (the only site that ever CLOSES a dispatch); `NoFreeTeam` and
+/// `NoTarget` are refusals `handle_external_repair_commands` shows the console
+/// at dispatch time and never turns into a lifecycle event, because nothing was
+/// ever committed for them to end. Mapped exhaustively anyway, matching the
+/// dock's and tractor's own defensive style.
+fn terminal_reason_for(refusal: ExternalRepairRefusal) -> TaskTerminalReason {
+    match refusal {
+        ExternalRepairRefusal::NoFreeTeam => TaskTerminalReason::NotCapable,
+        ExternalRepairRefusal::NoTarget => TaskTerminalReason::NoSuchTarget,
+        ExternalRepairRefusal::OutOfRange => TaskTerminalReason::OutOfRange,
     }
 }
 
@@ -549,6 +652,7 @@ pub fn operate_external_repair_ai(
     mut commands: Commands,
     sessions: Res<crate::lobby::Sessions>,
     runtime: Option<Res<WorldContentRuntime>>,
+    mut lifecycle: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
     mut ships: Query<(
         Entity,
         Option<&EntityUuid>,
@@ -631,6 +735,19 @@ pub fn operate_external_repair_ai(
                     commands
                         .entity(entity)
                         .remove::<ExternalRepairAiDispatched>();
+                    // The scenario closing the task, not the operator changing
+                    // their mind (issue #1345). Reported HERE, ahead of the
+                    // `RecallExternalRepair` this emits and this system's own
+                    // ordering ahead of `handle_external_repair_commands`, so the
+                    // withdrawn order is the terminal the timeline records.
+                    push_lifecycle(
+                        lifecycle.as_deref_mut(),
+                        uuid,
+                        TaskLifecycleRequest::End {
+                            slot: dispatch_slot(uuid),
+                            reason: TaskTerminalReason::OrderWithdrawn,
+                        },
+                    );
                     Some(SystemControlPayload::RecallExternalRepair)
                 } else {
                     None
@@ -977,5 +1094,266 @@ mod tests {
         });
         assert_eq!(r.dispatched_target.as_deref(), Some("ally-2"));
         assert!(r.last_refusal.is_none());
+    }
+
+    // ── The task lifecycle (issue #1345) ─────────────────────────────────────
+
+    use crate::modifiers::repair_teams::RepairTeams;
+    use crate::server_app::ShipSystemBlackboards;
+
+    const OPERATOR: &str = "operator-1";
+    const ALLY: &str = "ally-1";
+
+    fn app_with(target_at: Option<Vec3>, free_teams: usize) -> (App, Entity) {
+        let mut app = App::new();
+        app.init_resource::<EffectQueue<TaskLifecycleRequest>>();
+        app.add_systems(
+            Update,
+            (handle_external_repair_commands, tick_external_repair).chain(),
+        );
+        let operator = app
+            .world_mut()
+            .spawn((
+                EntityUuid(OPERATOR.into()),
+                Transform::from_translation(Vec3::ZERO),
+                TacticalRadarSelection(Some(ALLY.into())),
+                ShipRepairTeams(RepairTeams::new(free_teams)),
+                ExternalRepairDispatch::new(ExternalRepairConfig {
+                    range: 600.0,
+                    repair_rate: 8.0,
+                }),
+                AdmittedCommands::default(),
+                ShipSystemBlackboards::default(),
+            ))
+            .id();
+        if let Some(position) = target_at {
+            app.world_mut().spawn((
+                EntityUuid(ALLY.into()),
+                Transform::from_translation(position),
+            ));
+        }
+        (app, operator)
+    }
+
+    fn admit_dispatch(app: &mut App, operator: Entity) {
+        app.world_mut()
+            .entity_mut(operator)
+            .get_mut::<AdmittedCommands>()
+            .unwrap()
+            .0
+            .push(crate::core::messages::AdmittedCommand {
+                target: repair_system_id(),
+                payload: SystemControlPayload::DispatchExternalRepair,
+                response_token: None,
+                feedback_correlation: None,
+            });
+    }
+
+    fn admit_recall(app: &mut App, operator: Entity) {
+        app.world_mut()
+            .entity_mut(operator)
+            .get_mut::<AdmittedCommands>()
+            .unwrap()
+            .0
+            .push(crate::core::messages::AdmittedCommand {
+                target: repair_system_id(),
+                payload: SystemControlPayload::RecallExternalRepair,
+                response_token: None,
+                feedback_correlation: None,
+            });
+    }
+
+    fn drain_lifecycle(app: &mut App) -> Vec<TaskLifecycleRequest> {
+        std::mem::take(
+            &mut app
+                .world_mut()
+                .resource_mut::<EffectQueue<TaskLifecycleRequest>>()
+                .0,
+        )
+    }
+
+    fn dispatch_slot_for_test() -> TaskSlot {
+        TaskSlot::new(OPERATOR, REPAIR_SYSTEM_ID, TASK_VERB_EXTERNAL_REPAIR)
+    }
+
+    /// A dispatch that commits opens exactly one activation, named for the
+    /// designated ally.
+    #[test]
+    fn a_committed_dispatch_opens_one_activation() {
+        let (mut app, operator) = app_with(Some(Vec3::new(100.0, 0.0, 0.0)), 1);
+        admit_dispatch(&mut app, operator);
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .entity(operator)
+                .get::<ExternalRepairDispatch>()
+                .unwrap()
+                .dispatched_target
+                .as_deref(),
+            Some(ALLY)
+        );
+        assert_eq!(
+            drain_lifecycle(&mut app),
+            vec![TaskLifecycleRequest::Start {
+                slot: dispatch_slot_for_test(),
+                target: Some(ALLY.into()),
+            }]
+        );
+    }
+
+    /// A dispatch refused at commit time (no free team) opens nothing — the
+    /// same "a refusal at dispatch time opens nothing" rule Security's own
+    /// dispatch keeps, since no team was ever actually claimed.
+    #[test]
+    fn a_dispatch_refused_at_commit_time_opens_nothing() {
+        let (mut app, operator) = app_with(Some(Vec3::new(100.0, 0.0, 0.0)), 0);
+        admit_dispatch(&mut app, operator);
+        app.update();
+
+        assert!(app
+            .world()
+            .entity(operator)
+            .get::<ExternalRepairDispatch>()
+            .unwrap()
+            .dispatched_target
+            .is_none());
+        assert!(
+            drain_lifecycle(&mut app).is_empty(),
+            "nothing was ever committed for a refused dispatch to end"
+        );
+    }
+
+    /// A recall reports the cancel before clearing the claim, and a recall of
+    /// an idle dispatch (a stale-UI double tap) reports nothing at all.
+    #[test]
+    fn a_recall_reports_released_exactly_once_and_an_idle_recall_reports_nothing() {
+        let (mut app, operator) = app_with(Some(Vec3::new(100.0, 0.0, 0.0)), 1);
+        admit_dispatch(&mut app, operator);
+        app.update();
+        drain_lifecycle(&mut app);
+
+        admit_recall(&mut app, operator);
+        app.update();
+        assert_eq!(
+            drain_lifecycle(&mut app),
+            vec![TaskLifecycleRequest::End {
+                slot: dispatch_slot_for_test(),
+                reason: TaskTerminalReason::Released,
+            }]
+        );
+
+        // A second recall of the now-idle dispatch is a no-op.
+        admit_recall(&mut app, operator);
+        app.update();
+        assert!(drain_lifecycle(&mut app).is_empty());
+    }
+
+    /// A repeat `DispatchExternalRepair` onto the SAME locked target is a sim
+    /// no-op (the commit re-assigns the identical value) and must drain an
+    /// empty lifecycle queue rather than reporting a phantom restart. A
+    /// dispatch onto a DIFFERENT target is a genuine change of claim and
+    /// still pushes a fresh `Start` (issue #1345).
+    #[test]
+    fn a_repeat_dispatch_onto_the_same_target_reports_nothing_but_a_new_target_still_starts() {
+        const ALLY_TWO: &str = "ally-2";
+
+        let (mut app, operator) = app_with(Some(Vec3::new(100.0, 0.0, 0.0)), 1);
+        admit_dispatch(&mut app, operator);
+        app.update();
+        assert_eq!(
+            drain_lifecycle(&mut app),
+            vec![TaskLifecycleRequest::Start {
+                slot: dispatch_slot_for_test(),
+                target: Some(ALLY.into()),
+            }]
+        );
+
+        // A stale-UI double tap on the same lock: nothing changed in the sim,
+        // so nothing should be reported.
+        admit_dispatch(&mut app, operator);
+        app.update();
+        assert!(
+            drain_lifecycle(&mut app).is_empty(),
+            "a repeat dispatch onto the same target must not report a phantom restart"
+        );
+        assert_eq!(
+            app.world()
+                .entity(operator)
+                .get::<ExternalRepairDispatch>()
+                .unwrap()
+                .dispatched_target
+                .as_deref(),
+            Some(ALLY)
+        );
+
+        // Re-lock onto a second ally: a genuinely different target still
+        // starts a fresh activation (the old one is closed as `Restarted` by
+        // the narrative emitter's own registry, downstream of this queue).
+        app.world_mut().spawn((
+            EntityUuid(ALLY_TWO.into()),
+            Transform::from_translation(Vec3::new(100.0, 0.0, 0.0)),
+        ));
+        app.world_mut()
+            .entity_mut(operator)
+            .get_mut::<TacticalRadarSelection>()
+            .unwrap()
+            .0 = Some(ALLY_TWO.into());
+        admit_dispatch(&mut app, operator);
+        app.update();
+        assert_eq!(
+            drain_lifecycle(&mut app),
+            vec![TaskLifecycleRequest::Start {
+                slot: dispatch_slot_for_test(),
+                target: Some(ALLY_TWO.into()),
+            }]
+        );
+        assert_eq!(
+            app.world()
+                .entity(operator)
+                .get::<ExternalRepairDispatch>()
+                .unwrap()
+                .dispatched_target
+                .as_deref(),
+            Some(ALLY_TWO)
+        );
+    }
+
+    /// A target that drifts past the authored range ends a live dispatch with
+    /// the mapped reason — `tick_external_repair` only ever CLOSES a dispatch,
+    /// so this never opens a fresh activation of its own.
+    #[test]
+    fn a_target_that_drifts_out_of_range_ends_the_live_dispatch() {
+        let (mut app, operator) = app_with(Some(Vec3::new(100.0, 0.0, 0.0)), 1);
+        admit_dispatch(&mut app, operator);
+        app.update();
+        drain_lifecycle(&mut app);
+
+        let target = app
+            .world_mut()
+            .query::<(Entity, &EntityUuid)>()
+            .iter(app.world())
+            .find(|(_, uuid)| uuid.0 == ALLY)
+            .map(|(e, _)| e)
+            .unwrap();
+        app.world_mut()
+            .entity_mut(target)
+            .insert(Transform::from_xyz(9000.0, 0.0, 0.0));
+        app.update();
+
+        assert_eq!(
+            drain_lifecycle(&mut app),
+            vec![TaskLifecycleRequest::End {
+                slot: dispatch_slot_for_test(),
+                reason: TaskTerminalReason::OutOfRange,
+            }]
+        );
+        assert!(app
+            .world()
+            .entity(operator)
+            .get::<ExternalRepairDispatch>()
+            .unwrap()
+            .dispatched_target
+            .is_none());
     }
 }

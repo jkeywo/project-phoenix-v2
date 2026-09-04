@@ -809,12 +809,15 @@ corridor_south = [0.0, 0.0, 1000.0]
 # controlled-demolition beat clears it.
 corridor_obstruction = [80.0, 0.0, -60.0]
 
-# Where a castaway lifeboat has drifted into the corridor throat, north of the
-# head (issue #1348 mechanism, T2 refinement). Off the x=0 traffic lane and well
-# inside the destroyer's 500-unit transporter reach; a Sensors sweep turns it up
-# and the Engineering transporter beams the civilians aboard off it. A discovered
-# contact, not a scripted one — the crew have to look. [ai] Unratified.
-corridor_castaway = [55.0, 0.0, -210.0]
+# Where a castaway lifeboat has drifted off the corridor throat, out to the east
+# flank near the head's latitude (issue #1348 mechanism, T2 refinement). Placed
+# CLEAR of the storm lane on purpose: the radiation bands are 260-unit-half-width
+# boxes centred on x=0, so a 60-integrity lifeboat sitting inside |x|<260 would be
+# scoured by a passing band; at x=340 it is 80 units east of the worst band and
+# survives to be found. Still well inside the destroyer's 500-unit transporter
+# reach from station-keeping. A discovered contact, not a scripted one — the crew
+# have to look. [ai] Unratified.
+corridor_castaway = [340.0, 0.0, -120.0]
 
 # The fuel-depot ladder, and the transit leg between its two rungs.
 #
@@ -8661,9 +8664,16 @@ fn obstruction_pending(ctx) {
 // wedge so the pieces do not stack on one point. Count is what differs between
 // the outcomes — a limited scatter, a heavy one, or the worst — so this is one
 // call the endings spend a different number of times.
-fn obstruction_fragment(ctx, pos) {
+//
+// Each fragment is NAMED: `spawn_entity` requires a name (issue #1033's required-
+// field check), so a fragment authored without one aborts the whole clearance with
+// a script error the moment the obstruction resolves. The endings are mutually
+// exclusive (first-terminal-event-wins), so at most one ending's fragments are ever
+// spawned in a run and the small per-ending name set never collides.
+fn obstruction_fragment(ctx, name, pos) {
     ctx.effects.spawn_entity(#{
         template_path: "assets/entities/asteroid_common_1_large.toml",
+        name: name,
         position: pos,
         groups: ["skyway_obstruction_debris"],
         overrides: #{ mass: 40 },
@@ -8691,7 +8701,7 @@ fn on_obstruction_safe(ctx) {
     if !obstruction_pending(ctx) { return; }
     ctx.flags["skyway_obstruction_resolved"] = 1;
     ctx.flags["skyway_obstruction_cleared"] = 1;
-    obstruction_fragment(ctx, [95, 0, -45]);
+    obstruction_fragment(ctx, "skyway_obstruction_debris_1", [95, 0, -45]);
     ctx.effects.show_message(
         "skyway_obstruction_cleared",
         "world.falling_skyway.computer_message.obstruction_cleared",
@@ -8712,9 +8722,9 @@ fn on_obstruction_unsupported(ctx) {
     ctx.flags["skyway_obstruction_resolved"] = 1;
     ctx.flags["skyway_obstruction_cleared"] = 1;
     ctx.flags["skyway_obstruction_unsupported_scatter"] = 1;
-    obstruction_fragment(ctx, [95, 0, -45]);
-    obstruction_fragment(ctx, [60, 10, -80]);
-    obstruction_fragment(ctx, [110, -10, -30]);
+    obstruction_fragment(ctx, "skyway_obstruction_debris_1", [95, 0, -45]);
+    obstruction_fragment(ctx, "skyway_obstruction_debris_2", [60, 10, -80]);
+    obstruction_fragment(ctx, "skyway_obstruction_debris_3", [110, -10, -30]);
     ctx.effects.show_message(
         "skyway_obstruction_unsupported",
         "world.falling_skyway.computer_message.obstruction_unsupported",
@@ -8737,8 +8747,8 @@ fn on_obstruction_premature(ctx) {
     ctx.flags["skyway_obstruction_resolved"] = 1;
     ctx.flags["skyway_obstruction_cleared"] = 1;
     ctx.flags["skyway_obstruction_casualties"] = 1;
-    obstruction_fragment(ctx, [95, 0, -45]);
-    obstruction_fragment(ctx, [70, 5, -75]);
+    obstruction_fragment(ctx, "skyway_obstruction_debris_1", [95, 0, -45]);
+    obstruction_fragment(ctx, "skyway_obstruction_debris_2", [70, 5, -75]);
     ctx.effects.show_message(
         "skyway_obstruction_premature",
         "world.falling_skyway.computer_message.obstruction_premature",
@@ -8762,11 +8772,11 @@ fn on_obstruction_weapons_fire(ctx) {
     ctx.flags["skyway_obstruction_resolved"] = 1;
     ctx.flags["skyway_obstruction_cleared"] = 1;
     ctx.flags["skyway_obstruction_weapons_scatter"] = 1;
-    obstruction_fragment(ctx, [95, 0, -45]);
-    obstruction_fragment(ctx, [55, 15, -85]);
-    obstruction_fragment(ctx, [115, -12, -25]);
-    obstruction_fragment(ctx, [45, -8, -35]);
-    obstruction_fragment(ctx, [125, 8, -70]);
+    obstruction_fragment(ctx, "skyway_obstruction_debris_1", [95, 0, -45]);
+    obstruction_fragment(ctx, "skyway_obstruction_debris_2", [55, 15, -85]);
+    obstruction_fragment(ctx, "skyway_obstruction_debris_3", [115, -12, -25]);
+    obstruction_fragment(ctx, "skyway_obstruction_debris_4", [45, -8, -35]);
+    obstruction_fragment(ctx, "skyway_obstruction_debris_5", [125, 8, -70]);
     ctx.effects.show_message(
         "skyway_obstruction_weapons",
         "world.falling_skyway.computer_message.obstruction_weapons",

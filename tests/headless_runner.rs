@@ -11049,6 +11049,11 @@ fn a_storm_band_is_survivable_to_cross_and_fatal_to_live_in() {
 // ── Falling Skyway, Act 2: the storm and the rescue (issue #1037) ────────────
 
 const SKYWAY_LYRA: &str = "world.falling_skyway.entity.lyra_ascending.name";
+/// The castaway lifeboat placed in the corridor (issue #1348 mechanism, T2
+/// refinement): a scannable civilian contact the Engineering transporter beams.
+const SKYWAY_CASTAWAY: &str = "world.falling_skyway.entity.castaway_lifeboat.name";
+/// The corridor obstruction the Act-3 controlled demolition clears (issue #1350).
+const SKYWAY_OBSTRUCTION: &str = "world.falling_skyway.entity.corridor_obstruction.name";
 
 /// Assert that Falling Skyway's post-mission report holds exactly one Lyra row,
 /// with the outcome String Id, semantic state and hidden score this fate should
@@ -15373,6 +15378,52 @@ fn skyway_engage_tractor(app: &mut bevy::prelude::App, ship: bevy::prelude::Enti
     );
 }
 
+/// The crew action that recovers civilians off a discovered rescue contact (issue
+/// #1348, placed in Falling Skyway for the T2 refinement): name the contact to the
+/// transporter, then start the beam. The transporter is Engineering-owned and
+/// AI-controlled in a headless run, so both commands take the same `ai:` admission
+/// the tractor's do — no seat is needed, and the target is NAMED rather than read
+/// off the Tactical lock, so this never opens fire on the civilian contact.
+fn skyway_beam_civilians(app: &mut bevy::prelude::App, target: &str) {
+    use project_phoenix::core::messages::SystemControlPayload;
+    let uuid = skyway_uuid(app, target);
+    skyway_system_cmd(
+        app,
+        project_phoenix::ship::system_registry::TRANSPORTER_SYSTEM_ID,
+        SystemControlPayload::TransportSelectContact { uuid },
+    );
+    skyway_system_cmd(
+        app,
+        project_phoenix::ship::system_registry::TRANSPORTER_SYSTEM_ID,
+        SystemControlPayload::StartTransport,
+    );
+}
+
+/// Read one active objective's authored `(base_priority, mandatory)`, or `None`
+/// when no objective by that id is posted — used to pin the Act-3 obstruction's
+/// deferral to the head-save (priority 45 < 55, non-mandatory) authored for the
+/// shared-tractor contention (T2 refinement).
+fn skyway_objective_priority(app: &bevy::prelude::App, id: &str) -> Option<(f32, bool)> {
+    app.world()
+        .resource::<project_phoenix::world::server::ObjectiveManagerRes>()
+        .0
+        .debug_views()
+        .find(|o| o.id == id)
+        .map(|o| (o.base_priority, o.mandatory))
+}
+
+/// Read the crew hull's ONE tractor beam's currently-coupled target uuid, or
+/// `None` when the beam holds nothing — the single `coupled_target` both the
+/// head's held-response and the demolition's `stabilized()` check key off, so it
+/// is where "the two Act-3 jobs share one beam" is proved (T2 refinement).
+fn skyway_tractor_coupled(app: &mut bevy::prelude::App) -> Option<String> {
+    app.world_mut()
+        .query_filtered::<&project_phoenix::tractor::TractorBeam, With<LocalShip>>()
+        .iter(app.world())
+        .next()
+        .and_then(|beam| beam.coupled_target.clone())
+}
+
 /// Stand the tractor hold down (issue #1165 S11b), so the crew can take the next
 /// craft on the line.
 fn skyway_release_tractor(app: &mut bevy::prelude::App) {
@@ -18570,6 +18621,445 @@ fn falling_skyway_the_civilians_row_scores_the_head_survivors() {
     );
 }
 
+/// **T2 refinement — the BEAMED civilians row scores the Engineering transporter
+/// rescue, as its OWN row distinct from the head-survivors "civilians" row (issue
+/// #1348 mechanism).** Three souls aboard the castaway lifeboat: +1 per civilian
+/// recovered, -2 per one lost, so a clean beam is +3 and losing the boat is -6.
+/// The row is `transporter_civilians`, NEVER `civilians` — the two are different
+/// populations that can both resolve in one run, so folding them would let one
+/// silently clobber the other. Read straight off the transporter's own world flags.
+#[test]
+fn falling_skyway_the_beamed_civilians_row_scores_the_transporter_rescue() {
+    let script = WindowScript::compile();
+
+    // Beamed aboard: +3, saved.
+    let saved = flags_with(&[("rescue.corridor_castaway.recovered", 1)]);
+    let row = one_report_row(
+        &script,
+        "castaway_report_row",
+        &saved,
+        "transporter_civilians",
+    );
+    assert_eq!(row.score, 3, "+1 per civilian, three aboard");
+    assert_eq!(
+        row.outcome_id,
+        "world.falling_skyway.report.transporter_civilians.saved"
+    );
+    assert_eq!(row.state.as_str(), "saved");
+    assert_eq!(
+        row.heading_id, "world.falling_skyway.report.transporter_civilians.heading",
+        "its own heading, so the report never confuses it with the head survivors"
+    );
+
+    // Lost with civilians still aboard: -6, lost.
+    let lost = flags_with(&[("rescue.corridor_castaway.lost", 1)]);
+    let row = one_report_row(
+        &script,
+        "castaway_report_row",
+        &lost,
+        "transporter_civilians",
+    );
+    assert_eq!(row.score, -6, "-2 per civilian, three aboard");
+    assert_eq!(
+        row.outcome_id,
+        "world.falling_skyway.report.transporter_civilians.lost"
+    );
+    assert_eq!(row.state.as_str(), "lost");
+
+    // Never discovered, never resolved: no row. The omission half — a run that
+    // never scanned the lifeboat reports nothing for it, exactly as the head
+    // survivors row is omitted on a held-head run.
+    let untouched = project_phoenix::world::flags::FlagStore::new();
+    assert!(
+        window_report_rows(&script.call("castaway_report_row", &untouched)).is_empty(),
+        "an unresolved castaway contact reports no beamed-civilians row"
+    );
+}
+
+/// **T2 refinement — the obstruction demolition is a NEW scored report row, one
+/// score per terminal outcome (issue #1350).** The four outcomes are graded by
+/// lives and by debris control: SAFE (held, clean) +3, UNSUPPORTED (unheld, more
+/// debris) -1, WEAPONS (gunnery, worst debris) -2, PREMATURE (team caught) -4.
+/// The row scores the OPERATION QUALITY off the frozen operation flags, never the
+/// casualties — `skyway_obstruction_casualties` is summed nowhere else, so there
+/// is no double-count. Omitted entirely when the obstruction was never touched.
+///
+/// [ai] Every score here is unratified — a first proposal surfaced for John. The
+/// flags themselves are proven raised by the demolition engine's own tests; this
+/// pins the scenario's SCORING of each frozen outcome.
+#[test]
+fn falling_skyway_the_demolition_row_scores_each_of_the_four_outcomes() {
+    let script = WindowScript::compile();
+
+    // SAFE: resolved, cleared safe, none of the worse flags. +3, saved.
+    let safe = flags_with(&[
+        ("skyway_obstruction_resolved", 1),
+        ("skyway_obstruction_cleared_safe", 1),
+    ]);
+    let row = one_report_row(&script, "write_the_demolition_record", &safe, "demolition");
+    assert_eq!(row.score, 3);
+    assert_eq!(
+        row.outcome_id,
+        "world.falling_skyway.report.demolition.safe"
+    );
+    assert_eq!(row.state.as_str(), "saved");
+    assert_eq!(
+        row.heading_id,
+        "world.falling_skyway.report.demolition.heading"
+    );
+
+    // UNSUPPORTED: resolved, cleared unsupported. -1, partial — cleared, but a
+    // heavier debris field; no lives lost.
+    let unsupported = flags_with(&[
+        ("skyway_obstruction_resolved", 1),
+        ("skyway_obstruction_cleared_unsupported", 1),
+    ]);
+    let row = one_report_row(
+        &script,
+        "write_the_demolition_record",
+        &unsupported,
+        "demolition",
+    );
+    assert_eq!(row.score, -1);
+    assert_eq!(
+        row.outcome_id,
+        "world.falling_skyway.report.demolition.unsupported"
+    );
+    assert_eq!(row.state.as_str(), "partial");
+
+    // WEAPONS: resolved by gunnery, the scenario's own scatter flag, none of the
+    // demolition engine flags. -2, lost — uncontrolled debris, no attempt at control.
+    let weapons = flags_with(&[
+        ("skyway_obstruction_resolved", 1),
+        ("skyway_obstruction_weapons_scatter", 1),
+    ]);
+    let row = one_report_row(
+        &script,
+        "write_the_demolition_record",
+        &weapons,
+        "demolition",
+    );
+    assert_eq!(row.score, -2);
+    assert_eq!(
+        row.outcome_id,
+        "world.falling_skyway.report.demolition.weapons"
+    );
+    assert_eq!(row.state.as_str(), "lost");
+
+    // PREMATURE: resolved with the team still on the mass — the only outcome that
+    // costs lives, so the steepest negative. -4, lost.
+    let premature = flags_with(&[
+        ("skyway_obstruction_resolved", 1),
+        ("skyway_obstruction_premature", 1),
+    ]);
+    let row = one_report_row(
+        &script,
+        "write_the_demolition_record",
+        &premature,
+        "demolition",
+    );
+    assert_eq!(row.score, -4);
+    assert_eq!(
+        row.outcome_id,
+        "world.falling_skyway.report.demolition.premature"
+    );
+    assert_eq!(row.state.as_str(), "lost");
+
+    // Never touched: no row. The omission half — an obstruction the crew never
+    // approached reports nothing, the skyhook/civilians convention.
+    let untouched = project_phoenix::world::flags::FlagStore::new();
+    assert!(
+        window_report_rows(&script.call("write_the_demolition_record", &untouched)).is_empty(),
+        "an untouched obstruction reports no demolition row"
+    );
+}
+
+/// Teleport the crew hull to `to` by writing its `ShipPhysics` — the field helm
+/// actually moves (a `Transform` write is undone by `sync_ship_position`). Used to
+/// stand the destroyer off a far contact without spending minutes of authored
+/// cruise on the trip; the crew still hold station by hand each tick afterwards.
+fn skyway_teleport(
+    app: &mut bevy::prelude::App,
+    ship: bevy::prelude::Entity,
+    to: bevy::prelude::Vec3,
+) {
+    if let Some(mut physics) = app.world_mut().get_mut::<ShipPhysics>(ship) {
+        physics.x = to.x;
+        physics.y = to.y;
+        physics.z = to.z;
+    }
+}
+
+/// **T2 refinement, Directive 1 — a scanned castaway is BEAMED aboard and scored.**
+/// End to end through the ordinary controls: the crew stand off the lifeboat, a
+/// Sensors scan discovers the life signs, and the Engineering transporter recovers
+/// the civilians. The beamed-civilians row lands +3 the tick the rescue completes,
+/// and it is its OWN row — the head-survivors "civilians" row is absent, because
+/// the head is standing and those are different people.
+#[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_a_scanned_castaway_is_beamed_aboard_and_scored() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    let dt = SKYWAY_DT;
+    let mut app = build_engaged_skyway_app(&skyway_args(dt, 60.0));
+    let (ship, _) = skyway_crew_hull(&mut app);
+
+    // Stand off the lifeboat: 70 units east of it, inside the destroyer's 120-unit
+    // detailed scan band and its 500-unit transporter reach. Teleported there, then
+    // held by hand, so the trip is not what this test spends its ticks on.
+    let castaway = position_of(&mut app, SKYWAY_CASTAWAY);
+    let station = castaway + bevy::prelude::Vec3::new(70.0, 0.0, 0.0);
+    skyway_teleport(&mut app, ship, station);
+    for _ in 0..4 {
+        skyway_move(&mut app, ship, station);
+        run(&mut app, 1);
+    }
+
+    // ── The scan discovers the life signs, and only then ─────────────────────
+    assert!(
+        objective_status_opt(&app, "obj-castaway").is_none(),
+        "precondition: nothing announces the civilians before the crew look"
+    );
+    let uuid = scan_uuid_named(&mut app, SKYWAY_CASTAWAY);
+    ask_for_scan(&mut app, &uuid);
+    run(&mut app, 6);
+    assert!(
+        skyway_flag(&app, "scan.corridor_castaway.taken") > 0,
+        "the Sensors reading latched the contact's scanned flag"
+    );
+    assert_eq!(
+        objective_status_opt(&app, "obj-castaway"),
+        Some(ObjectiveStatus::Active),
+        "discovery posts the Rescue-directive objective the beam serves"
+    );
+
+    // ── The transporter recovers the civilians over time ─────────────────────
+    skyway_beam_civilians(&mut app, SKYWAY_CASTAWAY);
+    let mut recovered = false;
+    for _ in 0..900 {
+        skyway_move(&mut app, ship, station);
+        run(&mut app, 1);
+        if skyway_flag(&app, "rescue.corridor_castaway.recovered") > 0 {
+            recovered = true;
+            break;
+        }
+    }
+    assert!(
+        recovered,
+        "the transporter must recover the lifeboat's civilians while the hull holds in range"
+    );
+    // The recovery flag and the `on_flag_set` handler it drives (which completes the
+    // objective and writes the row) settle over the next couple of ticks.
+    run(&mut app, 4);
+    assert_eq!(
+        objective_status_opt(&app, "obj-castaway"),
+        Some(ObjectiveStatus::Completed),
+        "the rescue objective resolves off the recovery flag"
+    );
+
+    // ── The beamed-civilians row, its own id, scored +3 ──────────────────────
+    assert_report_row(
+        &app,
+        "transporter_civilians",
+        "world.falling_skyway.report.transporter_civilians.heading",
+        "world.falling_skyway.report.transporter_civilians.saved",
+        "saved",
+        3,
+    );
+    // …and NOT the head-survivors row. The head is standing, so the epilogue never
+    // opened — the two civilian populations are disjoint and never share a row.
+    assert_no_report_row(&app, "civilians");
+    assert_report_total_is_the_sum(&app);
+}
+
+/// **T2 refinement, Directive 3 — the Act-3 head-save and the obstruction share
+/// the ONE tractor, beatable sequentially, never simultaneously.** The crew save
+/// the head with the beam, then bring the SAME beam to the obstruction: the single
+/// `coupled_target` moves from one to the other, and the head stays saved once its
+/// hold has landed. A crew ignoring the obstruction get exactly the prior head-save.
+#[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_act_3_head_and_obstruction_share_the_one_tractor() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    let dt = SKYWAY_DT;
+    let probe = build_headless_app(&skyway_args(dt, 1.0)).expect("the world must load");
+    let watch_at = skyway_deadline_secs(&probe, "storm_passed_due") as f64;
+    drop(probe);
+
+    let args = skyway_args(dt, watch_at + 120.0);
+    let mut app = build_engaged_skyway_app(&args);
+    let (ship, _) = skyway_crew_hull(&mut app);
+
+    // Run to Act 3 opening.
+    let mut opened = false;
+    for _ in 0..args.max_ticks {
+        run(&mut app, 1);
+        if skyway_flag(&app, "a3_watch_open") > 0 {
+            opened = true;
+            break;
+        }
+    }
+    assert!(opened, "Act 3 must open in this run");
+
+    // ── All three Act-3 objectives are posted, the obstruction alongside the head,
+    //    and the obstruction DEFERS to the head by its authored priority. ──────
+    assert_eq!(
+        objective_status_opt(&app, "obj-a3-head"),
+        Some(ObjectiveStatus::Active),
+        "the mandatory head-save is posted"
+    );
+    assert!(
+        objective_status_opt(&app, "obj-a3-standoff").is_some(),
+        "the approach is posted"
+    );
+    assert_eq!(
+        objective_status_opt(&app, "obj-a3-obstruction"),
+        Some(ObjectiveStatus::Active),
+        "the obstruction is surfaced in Act 3 alongside the head-save"
+    );
+    let (head_priority, head_mandatory) =
+        skyway_objective_priority(&app, "obj-a3-head").expect("the head objective is posted");
+    let (obstruction_priority, obstruction_mandatory) =
+        skyway_objective_priority(&app, "obj-a3-obstruction").expect("the obstruction is posted");
+    assert!(
+        head_mandatory && !obstruction_mandatory,
+        "the head-save is mandatory; the obstruction is bonus content and non-mandatory"
+    );
+    assert!(
+        obstruction_priority < head_priority,
+        "the obstruction (priority {obstruction_priority}) defers to the head-save (priority \
+         {head_priority}), so a Backfilled Engineering seat holds the head by default and the \
+         head-save is not regressed"
+    );
+
+    // ── ONE tractor, moving between the two jobs — never held on both ─────────
+    // The head and the obstruction both sit inside the 500-unit reach from
+    // station-keeping (247 and 250 units off), so the single beam can serve either.
+    // Engage the head, then re-engage the obstruction: the ONE `coupled_target`
+    // moves off the head onto the obstruction — you cannot hold both, which is the
+    // whole contention. Brief holds only: coupling is what this asserts, not a tow.
+    // (The head-save itself, and the timing window that makes "both, if quick"
+    // tight-but-possible, are proved and tuned by the Act-3 save tests and the
+    // playtest pass — the shared-beam MECHANIC is what this pins.)
+    let station = bevy::prelude::Vec3::new(180.0, 0.0, 170.0);
+    let head_uuid = skyway_uuid(&app, SKYWAY_HEAD);
+    let obstruction_uuid = skyway_uuid(&app, SKYWAY_OBSTRUCTION);
+    skyway_teleport(&mut app, ship, station);
+
+    skyway_engage_tractor(&mut app, ship, SKYWAY_HEAD);
+    let mut coupled_to_head = false;
+    for _ in 0..30 {
+        skyway_move(&mut app, ship, station);
+        skyway_set_lock(&mut app, ship, Some(head_uuid.clone()));
+        run(&mut app, 1);
+        if skyway_tractor_coupled(&mut app).as_deref() == Some(head_uuid.as_str()) {
+            coupled_to_head = true;
+            break;
+        }
+    }
+    assert!(
+        coupled_to_head,
+        "the one beam couples to the head — the crew are holding the skyhook"
+    );
+    assert_ne!(
+        skyway_tractor_coupled(&mut app).as_deref(),
+        Some(obstruction_uuid.as_str()),
+        "…and NOT the obstruction at the same time: one beam, one coupled target"
+    );
+
+    // Free the head and bring the SAME beam to the obstruction — the sequential
+    // path a quick crew take: do one, release, then the other.
+    skyway_release_tractor(&mut app);
+    skyway_engage_tractor(&mut app, ship, SKYWAY_OBSTRUCTION);
+    let mut coupled_to_obstruction = false;
+    for _ in 0..30 {
+        skyway_move(&mut app, ship, station);
+        skyway_set_lock(&mut app, ship, Some(obstruction_uuid.clone()));
+        run(&mut app, 1);
+        if skyway_tractor_coupled(&mut app).as_deref() == Some(obstruction_uuid.as_str()) {
+            coupled_to_obstruction = true;
+            break;
+        }
+    }
+    assert!(
+        coupled_to_obstruction,
+        "the one tractor, freed from the head, couples to the obstruction — the sequential path"
+    );
+
+    // ── The head-save is not regressed: the structure is untouched by the brief
+    //    hold and still in the world, ready to be saved exactly as before. ─────
+    assert!(
+        named_entity_present(&mut app, SKYWAY_HEAD),
+        "the head is still in the world — a crew who ignore the obstruction save it as before"
+    );
+}
+
+/// **T2 refinement, Directive 4 — the Lyra warp-out is DETERMINISTIC.** The save
+/// despawns her hull on the ordinary scripted-removal path, and same-seed runs
+/// despawn her on the same tick and end on the same world digest. Two independent
+/// runs, driven identically, are compared bit for bit.
+#[test]
+#[cfg_attr(
+    not(feature = "falling-skyway-sim-tests"),
+    ignore = "manual Falling Skyway simulation"
+)]
+fn falling_skyway_the_lyra_warp_out_is_deterministic() {
+    fn drive_warp_out(dt: f64) -> (bevy::prelude::App, Option<usize>) {
+        let args = skyway_args(dt, 30.0);
+        let mut app = build_engaged_skyway_app(&args);
+        let (ship, _) = skyway_crew_hull(&mut app);
+        let drift = position_of(&mut app, SKYWAY_LYRA);
+        let alongside = bevy::prelude::Vec3::new(drift.x + 40.0, drift.y, drift.z + 40.0);
+        let lyra_uuid = skyway_uuid(&app, SKYWAY_LYRA);
+        skyway_move(&mut app, ship, alongside);
+        skyway_engage_tractor(&mut app, ship, SKYWAY_LYRA);
+        let mut despawn_tick = None;
+        // A FIXED tick count, so two runs advance the sim identically regardless of
+        // when the recovery lands: the point is that they land it on the same tick.
+        for tick in 0..750 {
+            if named_entity_present(&mut app, SKYWAY_LYRA) {
+                skyway_move(&mut app, ship, alongside);
+                skyway_set_lock(&mut app, ship, Some(lyra_uuid.clone()));
+            }
+            run(&mut app, 1);
+            if despawn_tick.is_none() && !named_entity_present(&mut app, SKYWAY_LYRA) {
+                despawn_tick = Some(tick);
+            }
+        }
+        (app, despawn_tick)
+    }
+
+    let dt = SKYWAY_DT;
+    let (mut a, despawn_a) = drive_warp_out(dt);
+    let (mut b, despawn_b) = drive_warp_out(dt);
+
+    assert!(
+        !named_entity_present(&mut a, SKYWAY_LYRA) && !named_entity_present(&mut b, SKYWAY_LYRA),
+        "she warped out on the save in both runs"
+    );
+    assert!(
+        despawn_a.is_some(),
+        "the recovery landed and she warped out within the window"
+    );
+    assert_eq!(
+        despawn_a, despawn_b,
+        "same seed, same tick despawn — the warp-out is on the deterministic scripted path"
+    );
+    assert_eq!(
+        project_phoenix::sim_digest::world_digest(a.world()),
+        project_phoenix::sim_digest::world_digest(b.world()),
+        "two identical seeded runs end on the same world digest across the warp-out change"
+    );
+}
+
 /// **Issue #1351, AC5 — the catastrophic Lark collision still files a report.**
 ///
 /// The collision ends the mission in Act 1/2, before the campaign close ever
@@ -20567,7 +21057,14 @@ fn falling_skyway_clean_ledger_benchmark_lifts_exactly_two_of_three() {
         "saved",
         4,
     );
-    assert_lyra_report_row(&app, "world.falling_skyway.report.lyra.saved", "saved", 6);
+    // T2 refinement: her crew came off and she warped out, so the saved row is
+    // now the crew-rescued outcome. Still +6, the same row id.
+    assert_lyra_report_row(
+        &app,
+        "world.falling_skyway.report.lyra.crew_saved",
+        "saved",
+        6,
+    );
     assert_report_row(
         &app,
         "skyhook",

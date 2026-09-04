@@ -143,6 +143,37 @@ describe('lobbyViewModel eligibility annotation (AC1)', () => {
     expect(captain.button).toBe('claim'); // captain covers everything ⇒ claimable
     expect(captain.eligible).toBe(true);
     expect(captain.ineligibleReason).toBeNull();
+    // The renderer resolves these; they exist only on the BLOCKED FREE seat.
+    expect(helm.ineligibleReasonId).toBe('client.station_ineligible_reason');
+    expect(helm.ineligibleFunctionIds).toEqual(['client.assist_function.helm.course-keeping']);
+    expect(captain.ineligibleReasonId).toBeNull();
+  });
+
+  it('says nothing about why a seat somebody HOLDS is ineligible', () => {
+    // `eligible` is annotated on every row, because the anonymous set reported
+    // to the host (AC2) is a whole-roster fold. The private reason is not: a
+    // held seat is not a claim this player is being turned away from, so it
+    // carries no explanation — only a free seat blocked by the profile does.
+    const profile = requestCourseKeeping();
+    // Both seats project Helm's functions, so both are ineligible for this
+    // profile — the difference under test is who holds them, not what they do.
+    const eligibilityFor = () =>
+      deriveStationEligibility(profile, PROJECTION.helm, 'Std');
+    const held = {
+      ...s,
+      stations: [
+        { ...s.stations[0], holder_name: 'Bob', holder_token: 'other' },
+        { ...s.stations[0], id: 'helm2', name: 'Helm 2', holder_name: 'Me', holder_token: 'me' },
+      ],
+    };
+    const vm = lobbyViewModel(held, 'me', null, { eligibilityFor });
+
+    for (const row of vm.rows) {
+      expect(row.eligible).toBe(false);
+      expect(row.ineligibleReasonId).toBeNull();
+      expect(row.ineligibleFunctionIds).toEqual([]);
+    }
+    expect(vm.rows.map((r) => r.button)).toEqual(['taken', 'release']);
   });
 
   it('leaves every seat claimable when no assistance is requested', () => {

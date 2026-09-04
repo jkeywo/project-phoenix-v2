@@ -129,7 +129,7 @@ entities:
       runs_in: [phone-browser-runtime]
     implementation:
       status: declared
-      paths: [client.html, gui/client-router.js, gui/station-roster.js, gui/lobby-view.js, gui/coordination-popup.js, gui/mount-plan.js, gui/connection-manager.js, assets/phone_border]
+      paths: [client.html, gui/client-router.js, gui/station-roster.js, gui/lobby-view.js, gui/client-lobby-render.js, gui/coordination-popup.js, gui/mount-plan.js, gui/connection-manager.js, assets/phone_border]
       tests: [npx vitest run, tests/smoke]
 
   - component: client-settings-and-help-surface
@@ -309,6 +309,6 @@ entities:
       runs_in: [phone-browser-runtime]
     implementation:
       status: declared
-      paths: [client.html, gui/lobby-view.js, gui/client-router.js, assets/strings/strings.csv]
+      paths: [client.html, gui/lobby-view.js, gui/client-lobby-render.js, gui/client-router.js, assets/strings/strings.csv]
       messages: [SelectStation, ReleaseStation, SetReady]
       tests: [npx vitest run]

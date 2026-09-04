@@ -2,8 +2,8 @@
 title: Server HTML Lobby UI
 type: concept
 tags: [lobby, server, html, ui, bridge, responsive, accessibility, reduced-motion, native, gm]
-sources: [server.html, client.html, gui/host-lobby-view.js, gui/host-lobby-render.js, gui/host-lobby.css, gui/host-qr.js, gui/host-qr.css, gui/join-url.js, gui/lobby-view.js, gui/lobby-state.js, gui/fleet-session.js, src/server/viewscreen_border.rs, src/console_bridge.rs, src/server/bridge.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/join.rs, src/lockstep/mod.rs, src/core/messages.rs, src/gm_roster.rs, src/lobby/start_policy.rs]
-updated: 2026-09-01
+sources: [server.html, client.html, gui/host-lobby-view.js, gui/host-lobby-render.js, gui/host-lobby.css, gui/host-qr.js, gui/host-qr.css, gui/join-url.js, gui/lobby-view.js, gui/client-lobby-render.js, gui/lobby-state.js, gui/fleet-session.js, src/server/viewscreen_border.rs, src/console_bridge.rs, src/server/bridge.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/join.rs, src/lockstep/mod.rs, src/core/messages.rs, src/gm_roster.rs, src/lobby/start_policy.rs]
+updated: 2026-09-04
 ---
 
 # Server HTML Lobby UI
@@ -113,8 +113,10 @@ the join panel is `gui/host-qr.js` + `gui/host-qr.css` over the same view
 model's `qrOverlayAction` (issue #1329). The Game Master group is `server.html`'s
 own projection over that view model, rendered as a sibling region rather than
 folded into the Station list; the crew page receives the same public GM
-projection in `Welcome` and `GmRosterChanged`, and `gui/lobby-view.js` renders
-it likewise. Bevy publishes data but does not build a lobby UI tree — on either
+projection in `Welcome` and `GmRosterChanged`, which `gui/lobby-view.js` folds
+into the client lobby's view model and `gui/client-lobby-render.js` (issue
+#1369) writes out likewise — the same view-model-then-renderer split this
+panel uses. Bevy publishes data but does not build a lobby UI tree — on either
 surface.
 
 ## The join panel

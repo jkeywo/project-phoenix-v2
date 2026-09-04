@@ -155,6 +155,42 @@
 
 
   <style>
+    /* WHY THERE IS STILL RAW HEX IN THIS BLOCK (issue #1356). gui/tokens.css is
+       linked above, and every literal here that has an EXACT token now names it:
+       --surface-void for the black page and canvas ground, rgba(var(--rgb-void), …)
+       for the panel scrims, --signal for the viewscreen accent (including
+       --vs-signal, the alias that used to restate its hex; the dead
+       --signal-cyan declaration beside it is deleted rather than aliased, since
+       nothing read it), rgba(var(--rgb-signal), …) for the chatter bubble's
+       edge, --text-min for the 11px readouts, and the two dead literal
+       fallbacks on --line-faint and --ink-dim are gone.
+
+       What remains — #cde, #6a86a0, #223246, #10171f, the settings popup's whole
+       blue-grey set, the debug panel's #0f0, the 8/9/10/12px readouts — has no
+       token that resolves to it. Naming the nearest rung instead would move the
+       host page's colours, and the retint is PRD #1355's own slice, from
+       gui/tokens.css and not from here.
+
+       They stay, but they are not unguarded: server.html IS in
+       design-tokens.test.js's SURFACES list, with every surviving literal named
+       in that suite's KNOWN_LITERALS allowlist. A new hex anywhere in this file
+       fails the suite; a literal #1355 retires must leave the allowlist too. Two
+       things to know about "anywhere in this file": the scan reads the whole
+       document rather than this <style> block, so the game-over accent table in
+       the script below and the `style=` attributes on the GM join panel, the
+       asset-loading overlay and the game-over overlay are on the list as well,
+       and they need lifting into a stylesheet on their own account — no palette
+       change reaches them.
+
+       THE 0.75rem/1rem SWAPS ARE NOT AN IDENTITY. #conn-label,
+       #snapshot-import-status, .save-slots-status and .save-slots-empty now read
+       --text-sm (`max(12px, 0.75rem)`) and .save-slots-heading reads --text-lg
+       (`max(15px, 1rem)`). Nothing sets a root font-size on this page, so those
+       equal what they replaced only at a 16px default; below it they hold the
+       ramp's floor instead of shrinking with the root. That is the floor's
+       purpose and the one deliberate visual change here. `font: 600 11px` →
+       `var(--text-min)` and the other 11px readouts ARE exact: --text-min is
+       11px flat. */
     :root {
       /* Corner reserved for the settings cog (issue #939).
          The cog is `position: fixed` at top/left 10px and 34px square, so it
@@ -167,13 +203,13 @@
          clearing it under a smaller root font-size. */
       --settings-cog-keepout: 56px;
     }
-    html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: var(--surface-void); overflow: hidden; }
     body { font-family: monospace; }
     #server-shell {
       display: flex;
       width: 100vw;
       height: 100vh;
-      background: #000;
+      background: var(--surface-void);
       overflow: hidden;
     }
     #viewscreen-shell {
@@ -181,10 +217,10 @@
       flex: 1 1 auto;
       min-width: 0;
       height: 100%;
-      background: #000 url('assets/logo.png') center center / contain no-repeat;
+      background: var(--surface-void) url('assets/logo.png') center center / contain no-repeat;
       overflow: hidden;
     }
-    #canvas { display: block; width: 100%; height: 100%; background: #000; }
+    #canvas { display: block; width: 100%; height: 100%; background: var(--surface-void); }
     /* #overlay, #qr-panel and the join code's own rules moved to
        gui/host-qr.css (issue #1329), linked above: the native host's lobby
        surface carries this same panel and needed the same rules. The fleet
@@ -300,7 +336,7 @@
     #gm-station-status { grid-column: 1 / -1; margin: 0; color: var(--ink-muted); }
     #gm-station-frame {
       grid-column: 1 / -1; width: 100%; height: clamp(22rem, 58vh, 46rem);
-      border: 1px solid var(--edge-control); background: #000;
+      border: 1px solid var(--edge-control); background: var(--surface-void);
     }
     #gm-station-activity-heading, #gm-station-activity { grid-column: 1 / -1; }
     #gm-station-activity { margin: 0; max-height: 10rem; overflow-y: auto; }
@@ -317,8 +353,8 @@
        ship, and an empty roster on every viewscreen would be clutter. */
     #fleet-panel {
       display: none; margin-top: 10px; padding: 8px 10px;
-      border: 1px solid var(--line-faint, #334); border-radius: 4px;
-      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid var(--line-faint); border-radius: 4px;
+      background: rgba(var(--rgb-void), 0.35);
       font-family: var(--font-mono); font-size: var(--text-sm);
       min-width: 232px; max-width: 320px;
     }
@@ -353,7 +389,7 @@
     #fleet-slots { list-style: none; margin: 6px 0 0; padding: 0; }
     #fleet-slots li {
       display: flex; justify-content: space-between; gap: 8px;
-      padding: 2px 0; color: var(--ink-dim, #99a);
+      padding: 2px 0; color: var(--ink-dim);
     }
     #fleet-slots li.mine { color: var(--gold-bright); }
     #fleet-slots li.gone { opacity: 0.55; }
@@ -384,7 +420,7 @@
       display: flex; flex-direction: column; align-items: flex-end; gap: 0.35rem; font-family: monospace;
     }
     #top-bar-row { display: flex; align-items: center; gap: 0.5rem; }
-    #conn-label { font-size: 0.75rem; color: #f44; }
+    #conn-label { font-size: var(--text-sm); color: #f44; }
     #conn-dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: #4c4; flex-shrink: 0; }
     #fullscreen-btn {
       background: none; border: none; color: #cce; font-size: 1.1rem;
@@ -392,7 +428,7 @@
     }
     #wasm-spinner {
       position: absolute; inset: 0; z-index: 100;
-      background: #000 url('assets/logo.png') center 40% / min(55vw, 55vh) auto no-repeat;
+      background: var(--surface-void) url('assets/logo.png') center 40% / min(55vw, 55vh) auto no-repeat;
       display: flex; flex-direction: column;
       align-items: center; justify-content: center;
       color: #aae; font-family: monospace; font-size: 0.9rem;
@@ -423,7 +459,7 @@
       margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.3rem;
     }
     #snapshot-import-status {
-      font-size: 0.75rem; color: #9ab; white-space: normal; word-break: break-word;
+      font-size: var(--text-sm); color: #9ab; white-space: normal; word-break: break-word;
     }
     /* Peer-local save catalogue (issue #865). It is a sibling of the ordinary
        scenario picker, so starting a new session never disappears behind save
@@ -435,13 +471,13 @@
       box-sizing: border-box;
       padding: var(--settings-cog-keepout) 1rem 1.5rem;
       overflow-y: auto;
-      background: rgba(0,0,0,0.82);
+      background: rgba(var(--rgb-void), 0.82);
       border-left: 1px solid #334;
       display: flex;
       flex-direction: column;
       gap: 0.65rem;
     }
-    .save-slots-heading { margin: 0; color: #cce; font-size: 1rem; letter-spacing: 0.06em; }
+    .save-slots-heading { margin: 0; color: #cce; font-size: var(--text-lg); letter-spacing: 0.06em; }
     .save-slots-intro, .save-slots-hint {
       margin: 0; color: #889; font-size: 0.72rem; line-height: 1.4;
     }
@@ -484,13 +520,13 @@
     .save-slots-confirm p { margin: 0 0 0.55rem; color: #fbb; }
     .save-slots-confirm button + button { margin-left: 0.4rem; }
     .save-slots-status {
-      min-height: 1.2em; color: #9ab; font-size: 0.75rem; line-height: 1.4;
+      min-height: 1.2em; color: #9ab; font-size: var(--text-sm); line-height: 1.4;
       overflow-wrap: anywhere;
     }
     .save-slots-status.ok { color: #7c9; }
     .save-slots-status.pending { color: #bc8; }
     .save-slots-status.failed { color: #f99; }
-    .save-slots-empty { color: #889; font-size: 0.75rem; }
+    .save-slots-empty { color: #889; font-size: var(--text-sm); }
     /* The named manual-save affordance belongs to running-session chrome, not
        to the pre-scenario picker. Rust's lobby phase drives `[hidden]` below;
        PhoenixReady is intentionally not a proxy for a capturable World. */
@@ -548,7 +584,6 @@
     #hud-overlay {
       position: absolute; inset: 0; z-index: 15;
       pointer-events: none;
-      --signal-cyan: #5fd8e8;
       --alert: #ff3344;
     }
     /* Red-alert inner glow — full-screen vignette, pulsing. Ported from
@@ -587,7 +622,7 @@
     }
     .hud-cell { display: flex; flex-direction: column; align-items: center; gap: 0.15rem; }
     .hud-label {
-      font: 600 11px/1 "Chakra Petch", system-ui, sans-serif;
+      font: 600 var(--text-min)/1 "Chakra Petch", system-ui, sans-serif;
       letter-spacing: 0.14em; color: #b8c0c8;
     }
     .hud-value {
@@ -599,7 +634,7 @@
     /* ─── Viewscreen border frame (raw/gui/borders/demo.html) ──────────────── */
     #hud-overlay {
       --t: 44px;
-      --vs-signal: #5fd8e8;
+      --vs-signal: var(--signal);
       --vs-alert: #ff3344;
       --vs-text: #b8c0c8;
     }
@@ -772,7 +807,7 @@
       line-height: 1.4;
       color: #b8c0c8;
       background: rgba(10, 14, 20, 0.75);
-      border: 1px solid rgba(95, 216, 232, 0.25);
+      border: 1px solid rgba(var(--rgb-signal), 0.25);
       border-radius: 3px;
       padding: 4px 8px;
       white-space: normal;
@@ -782,7 +817,7 @@
       transition: opacity 0.3s ease;
     }
     .chatter-bubble .chatter-from {
-      color: #5fd8e8;
+      color: var(--signal);
       font-weight: 600;
     }
     .chatter-bubble .chatter-arrow {
@@ -824,13 +859,13 @@
       width: 100%;
       height: 100%;
       z-index: 1;
-      background: rgba(0,0,0,0.88);
+      background: rgba(var(--rgb-void), 0.88);
       border-left: 0;
       display: flex;
       flex-direction: column;
       font-family: monospace;
       color: #0f0;
-      font-size: 11px;
+      font-size: var(--text-min);
       touch-action: pan-y;
     }
     /* Save/resume outcome on the button itself (issue #862). A save is a
@@ -885,7 +920,7 @@
     .sa-bar-ai { fill: #ffb347; }
     .sa-station-label { fill: #cde; font-size: 10px; font-family: monospace; }
     .sa-svg { max-width: 100%; height: auto; }
-    .sa-empty { color: #6a86a0; font-size: 11px; }
+    .sa-empty { color: #6a86a0; font-size: var(--text-min); }
     /* Scenario-state panel (issue #1148) — the second structured-JSON debug
        output. Like the station-activity chart it opts out of the monospace text
        styling the four legacy overlays share, and lays its surfaces out as
@@ -907,7 +942,7 @@
     .ss-trigger-when[data-holds="false"] { color: #ffb347; }
     .ss-trigger-status[data-state="fired"] { color: #4f8f6a; }
     .ss-trigger-status[data-state="waiting"] { color: #ffb347; }
-    .ss-empty { color: #6a86a0; font-size: 11px; }
+    .ss-empty { color: #6a86a0; font-size: var(--text-min); }
 
     /* AI doctrine-pool panel (issue #1149) — the second structured-JSON debug
        output: per AI ship, its scored-objective pool as a candidate table with
@@ -916,7 +951,7 @@
     .ad-title { font-size: 12px; color: #9fd; margin-bottom: 2px; }
     .ad-caption { font-size: 10px; color: #6a86a0; margin-bottom: 6px; }
     .ad-ship { margin-bottom: 10px; }
-    .ad-ship-header { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; margin-bottom: 2px; }
+    .ad-ship-header { display: flex; justify-content: space-between; gap: 8px; font-size: var(--text-min); margin-bottom: 2px; }
     .ad-ship-name { color: #9fd; font-weight: bold; }
     .ad-chosen { color: #ffb347; }
     .ad-chosen-none { color: #6a86a0; }
@@ -926,7 +961,7 @@
     .ad-candidate.chosen { color: #ffd; background: rgba(255, 179, 71, 0.12); }
     .ad-candidate.mandatory .ad-c-objective::after { content: " *"; color: #ff6b6b; }
     .ad-c-score { text-align: right; }
-    .ad-empty { color: #6a86a0; font-size: 11px; }
+    .ad-empty { color: #6a86a0; font-size: var(--text-min); }
 
     /* ── Settings cog (issue #939) ───────────────────────────────
        Top-left, over the viewscreen. Fixed rather than docked: the shell is a
@@ -964,7 +999,7 @@
       border: 1px solid #223246; border-radius: 4px;
       color: #c9d8ea;
       font-family: "Chakra Petch", system-ui, sans-serif;
-      font-size: 11px; letter-spacing: 0.06em;
+      font-size: var(--text-min); letter-spacing: 0.06em;
     }
     #host-action-feedback:empty { display: none; }
     #server-settings-overlay {
@@ -1001,7 +1036,7 @@
       flex: 1; padding: 6px 4px;
       background: #10171f; border: 1px solid #223246;
       color: #7f93ab; cursor: pointer;
-      font-family: inherit; font-size: 11px;
+      font-family: inherit; font-size: var(--text-min);
       letter-spacing: 0.06em;
       -webkit-tap-highlight-color: transparent;
     }
@@ -1025,7 +1060,7 @@
       padding: 6px 9px;
       background: #10171f; border: 1px solid #223246;
       color: #8ca4c2; cursor: pointer;
-      font-family: inherit; font-size: 11px;
+      font-family: inherit; font-size: var(--text-min);
       -webkit-tap-highlight-color: transparent;
     }
     .server-settings-control:hover { background: #182434; color: #c9d8ea; }
@@ -1043,7 +1078,7 @@
     .server-settings-popup .settings-binding-label {
       display: grid; grid-template-columns: minmax(62px, auto) minmax(120px, 1fr);
       align-items: center; gap: 7px; width: 100%;
-      color: #8ca4c2; font-family: var(--font-mono, monospace); font-size: 11px;
+      color: #8ca4c2; font-family: var(--font-mono, monospace); font-size: var(--text-min);
     }
     .server-settings-popup .settings-binding-capture {
       width: 100%; box-sizing: border-box; padding: 6px 9px;
@@ -1058,7 +1093,7 @@
       display: flex; flex-direction: column; gap: 5px;
       padding: 7px; margin-bottom: 10px;
       border: 1px solid #a77c45; background: #10171f; color: #d4aa71;
-      font-family: var(--font-mono, monospace); font-size: 11px;
+      font-family: var(--font-mono, monospace); font-size: var(--text-min);
     }
     .server-settings-popup .settings-binding-conflict-heading {
       font-family: "Chakra Petch", system-ui, sans-serif;
@@ -1074,7 +1109,7 @@
     .server-settings-input {
       padding: 6px 9px; width: 8ch;
       background: #10171f; border: 1px solid #223246; color: #dbe8f7;
-      font-family: var(--font-mono, monospace); font-size: 11px;
+      font-family: var(--font-mono, monospace); font-size: var(--text-min);
       letter-spacing: 0.15em; text-transform: uppercase;
     }
     .server-settings-role-group {
@@ -1083,7 +1118,7 @@
     .server-settings-slider { flex: 1; min-width: 140px; }
     .server-settings-readout {
       min-width: 4ch; text-align: right;
-      font-size: 11px; color: #8ca4c2;
+      font-size: var(--text-min); color: #8ca4c2;
     }
 
     /* Portrait: keep the output panel inline by docking it below the viewscreen. */

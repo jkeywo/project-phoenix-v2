@@ -34,6 +34,10 @@
  *
  * gui/tokens.css itself, which is where the values are supposed to live, and
  * the exemptions named in EXEMPT below, each with its reason.
+ *
+ * A whole file is a blunt exemption, so rule 2 and rule 3 also take a per-VALUE
+ * one: KNOWN_LITERALS lists the literals a named surface is still allowed to
+ * carry, and can only shrink. See its comment for what that buys.
  */
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
@@ -50,6 +54,10 @@ const TOKENS = fs.readFileSync(TOKENS_CSS, 'utf8');
  *
  * A short list with a reason each, rather than a blanket rule, so that adding
  * to it is a visible decision.
+ *
+ * This excuses a whole FILE. KNOWN_LITERALS below excuses named VALUES inside
+ * one, which is what a surface part-way through a migration wants: the rule
+ * stays live over every other value in it.
  */
 const EXEMPT = new Set([
   // The vocabulary itself. This is where the values live.
@@ -329,20 +337,136 @@ describe('no custom property is defined in terms of itself', () => {
 
 // ── 4. No literals outside the token file ───────────────────────────────────
 
+/**
+ * The surfaces this rule is enforced over.
+ *
+ * All four host surfaces join the list in issue #1356. gui/host-qr.css joins
+ * clean: the join panel was already written against the vocabulary, so listing
+ * it is what stops it drifting back out. Its three siblings — gui/host-lobby.css,
+ * gui/host-scenarios.css and server.html's inline <style> — were lifted verbatim
+ * out of the host page and still carry the pre-graphite lobby palette, so they
+ * join with an allowlist instead. KNOWN_LITERALS below is that allowlist, and
+ * says why it is the useful shape.
+ */
 const SURFACES = [
   ...componentFiles(),
   ...consoleDocuments(),
   path.join(GUI, 'console.css'),
+  path.join(GUI, 'host-lobby.css'),
+  path.join(GUI, 'host-qr.css'),
+  path.join(GUI, 'host-scenarios.css'),
   path.join(REPO_ROOT, 'client.html'),
+  path.join(REPO_ROOT, 'server.html'),
 ];
+
+/**
+ * The literals a surface is still allowed to carry, named one by one.
+ *
+ * A RATCHET, not an exemption. The rule stays live over every OTHER value in
+ * these files, which is the whole point: plant a new hex in gui/host-lobby.css
+ * and this suite says so on the next run. The alternative considered — leave
+ * the three out of SURFACES until the palette lands — would have left the rule
+ * switched off exactly where #1356 did its work.
+ *
+ * What is listed is the pre-graphite lobby palette: #cce ink on #0e0e14 cards
+ * with #2a8a96 claimed borders, around a hundred distinct values between the
+ * three, and gui/tokens.css names almost none of them. #1356 swapped every
+ * literal that DOES have an exact token — --signal, --surface-void, the
+ * --rgb-* triplets, the type rungs — and stopped there. Rounding what is left
+ * onto the nearest rung would be a retint smuggled in under a slice whose whole
+ * claim is that nothing moves, and the retint is PRD #1355's own decision, made
+ * in the one file the vocabulary lives in.
+ *
+ * The list can only SHRINK: a value that leaves a file must leave here too,
+ * because the assertions below fail on a STALE entry as well as on a new
+ * literal. That turns #1355 into a list this suite watches empty out, rather
+ * than a SURFACES edit somebody has to remember to make.
+ *
+ * server.html needs more than the retint before its entry reaches `[]`.
+ * css-scan.js reads the WHOLE file, not the <style> block — there is no lexer
+ * that will hand back "the stylesheet" — and this page carries colour well
+ * outside it: the game-over accent table in JS (`const accent = { saved:
+ * '#7ad48f', … }`) and the `style=` attributes on the GM join panel, the
+ * asset-loading overlay and the game-over overlay. Those have to move into the
+ * stylesheet layer on their own account.
+ *
+ * To regenerate an entry, ask the scanner that enforces it:
+ *
+ *   node --input-type=module -e "import { readStripped, colourLiterals,  *     fontSizeLiterals } from './tests/client/css-scan.js'; const s =  *     readStripped('server.html'); console.log([...new Set(colourLiterals(s))],  *     [...new Set(fontSizeLiterals(s))])"
+ */
+const KNOWN_LITERALS = {
+  "gui/host-lobby.css": {
+    colours: [
+      "#cce", "#0e0e14", "#2a2d3a", "#2a8a96", "#191e28", "#2a3a48", "#778",
+      "#181e2a", "#7aa", "#1a3828", "#5fd88a", "#2a6850", "#8a8aa0",
+      "#131722", "#4a5570", "#101a1d", "#cfe8ff", "#3a3d4a", "#0a2830",
+      "#334", "#889", "#667", "#aac", "#556", "#aae", "#445", "#332", "#ca0",
+      "#0a1a20", "#0d2830", "#c9a86a", "rgba(42,138,150 …)",
+    ],
+    sizes: [
+      "font-size: 0.9rem", "font-size: 0.65rem", "font-size: 0.6rem",
+      "font-size: 0.8rem", "font-size: 0.7rem",
+      "font-size: clamp(0.85rem, 1vw, 1rem)",
+      "font-size: clamp(0.6rem, 0.7vw, 0.7rem)",
+      "font-size: clamp(0.55rem, 0.65vw, 0.65rem)",
+      "font-size: clamp(1.1rem, 2.5vw, 1.6rem)",
+      "font-size: clamp(1rem, 2vw, 1.4rem)",
+    ],
+  },
+  "gui/host-scenarios.css": {
+    colours: [
+      "#cce", "#334", "#889", "#111", "#aae", "#223", "#558", "#224", "#66c",
+      "#ccf",
+    ],
+    sizes: [
+      "font-size: 0.95rem",
+    ],
+  },
+  "server.html": {
+    colours: [
+      "#05080d", "#334", "#fa4", "#f44", "#4c4", "#cce", "#aae", "#223",
+      "#9ab", "#889", "#08090d", "#cde", "#111", "#445", "#669", "#668",
+      "#ddf", "#733", "#fbb", "#9cf", "#0b0c12", "#18203a", "#eef", "#899",
+      "#7c9", "#bc8", "#d99", "#180d10", "#f99", "#99a", "#bcd", "#558",
+      "#cb8", "#d88", "#ff3344", "#b8c0c8", "#d8c85f", "#ff9a3d", "#4a5a6a",
+      "#88b8c8", "#a0b8c8", "#1e2a39", "#0f0", "#4c8", "#8fc", "#c55", "#9fd",
+      "#6a86a0", "#4fd1ff", "#ffb347", "#24384c", "#4f8f6a", "#24405a",
+      "#ffd", "#ff6b6b", "#223246", "#8ca4c2", "#162131", "#c9d8ea",
+      "#1b2940", "#cfe0f5", "#10171f", "#7f93ab", "#182434", "#1d2c42",
+      "#3d577c", "#dbe8f7", "#63788f", "#55697f", "#5a86bd", "#a77c45",
+      "#d4aa71", "#0d0000", "#ff8888", "#ff4444", "#1a0000", "#550000",
+      "#888", "#6ea4c8", "#d8edff", "#000", "#8ac", "#8af", "#7ad48f",
+      "#e8705a", "#e0c060", "#8a98c4", "rgba(4, 8, 13 …)",
+      "rgba(255, 51, 68 …)", "rgba(6, 12, 16 …)", "rgba(10, 14, 20 …)",
+      "rgba(255, 179, 71 …)", "rgba(6, 11, 18 …)", "rgba(2, 5, 9 …)",
+      "rgba(4,12,22 …)", "rgba(0,0,0 …)", "rgba(140,180,220 …)",
+    ],
+    sizes: [
+      "font-size: 1.1rem", "font-size: 0.9rem", "font-size: 0.72rem",
+      "font-size: 0.7rem", "font-size: 0.68rem", "font-size: 0.62rem",
+      "font-size: 9px", "font-size: 8px", "font-size: 12px",
+      "font-size: 13.5px", "font-size: 10px", "font-size: 18px",
+      "font-size: 0.85rem", "font-size: clamp(0.95rem,2.5vw,1.15rem)",
+      "font-size: clamp(0.85rem,2vw,1rem)", "font-size: 1rem",
+      "font-size: 13px", "font-size: 16px", "font: … 18px",
+    ],
+  },
+};
+
+/** The listed literals for a surface, or none — an unlisted file allows zero. */
+const known = (name, kind) => KNOWN_LITERALS[name]?.[kind] ?? [];
 
 describe('no stylesheet hardcodes a colour', () => {
   for (const file of SURFACES) {
     const name = rel(file);
     if (EXEMPT.has(name)) continue;
     it(`${name} names tokens instead of colours`, () => {
-      const found = colourLiterals(readStripped(file));
-      expect([...new Set(found)]).toEqual([]);
+      const found = [...new Set(colourLiterals(readStripped(file)))];
+      const allowed = known(name, 'colours');
+      expect(found.filter((v) => !allowed.includes(v)),
+        `${name} grew a colour literal that is not in KNOWN_LITERALS`).toEqual([]);
+      expect(allowed.filter((v) => !found.includes(v)),
+        `${name} no longer has these; drop them from KNOWN_LITERALS`).toEqual([]);
     });
   }
 });
@@ -352,8 +476,12 @@ describe('no stylesheet hardcodes a type size', () => {
     const name = rel(file);
     if (EXEMPT.has(name)) continue;
     it(`${name} sizes text from the ramp`, () => {
-      const found = fontSizeLiterals(readStripped(file));
-      expect([...new Set(found)]).toEqual([]);
+      const found = [...new Set(fontSizeLiterals(readStripped(file)))];
+      const allowed = known(name, 'sizes');
+      expect(found.filter((v) => !allowed.includes(v)),
+        `${name} grew a type-size literal that is not in KNOWN_LITERALS`).toEqual([]);
+      expect(allowed.filter((v) => !found.includes(v)),
+        `${name} no longer has these; drop them from KNOWN_LITERALS`).toEqual([]);
     });
   }
 });

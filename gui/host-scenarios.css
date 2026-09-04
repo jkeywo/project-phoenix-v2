@@ -25,6 +25,25 @@
  * The logo is `../assets/logo.png`, not `assets/logo.png`: a URL in a
  * stylesheet resolves against the STYLESHEET, and this file sits one directory
  * down from the bundle root both surfaces load it from.
+ *
+ * WHY THERE IS STILL RAW HEX BELOW (issue #1356). The two literals with an
+ * EXACT token now name it: --surface-void behind the logo, and
+ * rgba(var(--rgb-void), 0.75) for the world column's scrim. #cce, #334, #889,
+ * #111, #aae, #223, #558, #224, #66c and #ccf are the pre-graphite picker
+ * palette and gui/tokens.css names none of them; picking a near rung for each
+ * would retint the first screen the host operator sees, which is PRD #1355's
+ * next slice to decide.
+ *
+ * They stay, but they are not unguarded. This sheet IS in
+ * design-tokens.test.js's SURFACES list, and each surviving literal is named in
+ * that suite's KNOWN_LITERALS allowlist — a new hex here fails, and a literal
+ * #1355 retires has to leave the allowlist too, so the list only shrinks.
+ *
+ * #world-list-label's 0.75rem became --text-sm, which is `max(12px, 0.75rem)`
+ * and therefore NOT an identity: no root font-size is set on this surface, so
+ * the label holds 12px on a browser whose default has been shrunk instead of
+ * following it down. That floor is what the ramp exists for, and it is the one
+ * deliberate visual change in a slice that otherwise moves nothing.
  */
 
 /* ── Scenario picker (issue #755) ─────────────────────────────────────── */
@@ -32,7 +51,7 @@
   position: fixed;
   inset: 0;
   z-index: 200;
-  background: #000 url('../assets/logo.png') center center / min(45vw, 45vh) auto no-repeat;
+  background: var(--surface-void) url('../assets/logo.png') center center / min(45vw, 45vh) auto no-repeat;
   display: flex;
   flex-direction: row;
   align-items: stretch;
@@ -58,12 +77,12 @@
   min-width: 12rem;
   max-width: 18rem;
   overflow-y: auto;
-  background: rgba(0, 0, 0, 0.75);
+  background: rgba(var(--rgb-void), 0.75);
   border-right: 1px solid #334;
   box-sizing: border-box;
 }
 #world-list-label {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: #889;
   letter-spacing: 0.06em;
   margin-bottom: 0.5rem;

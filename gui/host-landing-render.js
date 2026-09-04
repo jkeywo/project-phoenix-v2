@@ -117,17 +117,28 @@ function setText(doc, id, text) {
  *   view model's decision (`nextOpenEntry`) and not a second judgement made
  *   here. `toggleFullscreen` reaches `gui/page-chrome.js`'s one fullscreen
  *   implementation; absent, the control renders and does nothing.
- * @param {{dockPicker?: boolean}} [opts] `dockPicker: false` leaves
- *   `#scenario-panel` where it is. It is the sibling of
- *   `renderHostScenarios`'s `ownPanelVisibility`: on the host PAGE the World
- *   picker is a full-screen layer this renderer moves into its middle column
- *   and back, while a surface that composes the picker some other way (the
- *   native viewscreen, #1361) needs it left alone. `server.html` passes
- *   nothing and gets the docking.
+ * @param {{dockPicker?: boolean, ownPanelVisibility?: boolean}} [opts]
+ *   `dockPicker: false` leaves `#scenario-panel` where it is, for a surface
+ *   that composes the picker some other way. `server.html` passes nothing and
+ *   gets the docking; so does the native viewscreen (#1361), because the
+ *   picker it carries is the same borrowed `#scenario-panel` node and
+ *   `gui/host-landing.css`'s `.landing-docked` block is what unwinds it there
+ *   too — a second arrangement would be a second landing.
+ *
+ *   `ownPanelVisibility` makes this renderer show and hide `#landing-panel`
+ *   itself, from `vm.stage === 'dismissed'`. It is the exact sibling of
+ *   `renderHostScenarios`'s option of the same name and exists for the same
+ *   reason: on the host PAGE the landing's visibility is page lifecycle
+ *   (`hideLanding()` / `showLandingAtPicker()`) and is not driven by this
+ *   render at all, so `server.html` passes nothing and keeps the behaviour it
+ *   had. The native viewscreen has no page lifecycle to speak of — its host
+ *   is the only thing that knows a World has landed — so it asks this
+ *   renderer to own the panel and pushes `dismissed` in the view model.
  */
 export function renderHostLanding(doc, vm, t, hooks, opts) {
   const h = hooks || {};
   const dockPicker = !(opts && opts.dockPicker === false);
+  const ownPanelVisibility = !!(opts && opts.ownPanelVisibility);
 
   // ── The root says only WHICH stage is open ──────────────────────────
   //
@@ -139,6 +150,10 @@ export function renderHostLanding(doc, vm, t, hooks, opts) {
   // the class and the depth are all this writes.
   const root = doc.getElementById('landing-panel');
   if (root) {
+    // The panel's own show/hide, for the surface that asked to own it.
+    // Written before anything else so a frame that both dismisses the landing
+    // and rewrites its text paints once.
+    if (ownPanelVisibility) root.style.display = vm.stage === 'dismissed' ? 'none' : '';
     root.classList.remove('is-idle', 'is-open');
     root.classList.add(vm.rootClass);
     root.dataset.landingStage = vm.stage;

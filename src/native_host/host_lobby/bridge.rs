@@ -35,9 +35,9 @@
 //! state rather than an edge — so an older value has nothing to say that the
 //! newest one does not, and holding a backlog of them would only cost
 //! main-thread time inside a browser engine (see [`super::super::panes::surface`]'s
-//! note on why that time is the *simulation's*). Five latest-wins slots — the
-//! reveal, the join invitation, the picker, the monitor row and the lobby state
-//! — at most one push each a frame.
+//! note on why that time is the *simulation's*). Six latest-wins slots — the
+//! reveal, the join invitation, the landing screen, the picker, the monitor row
+//! and the lobby state — at most one push each a frame.
 //!
 //! The one exception is the QR toggle, which is an *edge* and is counted rather
 //! than collapsed — see [`HostLobbyBridge::push_qr_toggle`].
@@ -51,8 +51,9 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use super::document::{
-    host_lobby_apply_script, host_lobby_join_script, host_lobby_layout_script,
-    host_lobby_qr_toggle_script, host_lobby_reveal_script, host_lobby_scenario_script,
+    host_lobby_apply_script, host_lobby_join_script, host_lobby_landing_script,
+    host_lobby_layout_script, host_lobby_qr_toggle_script, host_lobby_reveal_script,
+    host_lobby_scenario_script,
 };
 use crate::native_host::panes::{PaneSurface, PaneSurfaceError};
 
@@ -95,6 +96,13 @@ struct Inner {
     /// the selection moved or a world arrived, exactly as `join` is pushed only
     /// when a code is issued.
     scenario: Option<String>,
+    /// The newest landing-screen state not yet handed to the page (issue
+    /// #1361).
+    ///
+    /// Latest-wins like the picker beside it, and carrying no dedupe for the
+    /// same reason: its feed pushes on the first frame and on the frame a World
+    /// lands, and nothing in between.
+    landing: Option<String>,
     /// QR toggles asked for but not yet applied (issue #1329).
     ///
     /// A COUNT, not a flag, because this is the one thing on this bridge that is
@@ -180,6 +188,13 @@ impl HostLobbyBridge {
         self.lock().scenario = Some(json.into());
     }
 
+    /// Hand the surface the landing screen's state
+    /// ([`super::landing::LandingPanelPayload`], already encoded) - issue
+    /// #1361.
+    pub fn push_landing(&self, json: impl Into<String>) {
+        self.lock().landing = Some(json.into());
+    }
+
     /// Somebody asked for the join QR to be flipped (issue #1329).
     ///
     /// A phone's `ClientMessage::ToggleQrCode`, arriving over the relay at a
@@ -216,6 +231,7 @@ impl HostLobbyBridge {
             || inner.reveal.is_some()
             || inner.join.is_some()
             || inner.scenario.is_some()
+            || inner.landing.is_some()
             || inner.layout.is_some()
             || inner.qr_toggles > 0
     }
@@ -258,6 +274,7 @@ impl HostLobbyBridge {
             reveal: inner.reveal.take(),
             join: inner.join.take(),
             scenario: inner.scenario.take(),
+            landing: inner.landing.take(),
             layout: inner.layout.take(),
             payload: inner.payload.take(),
             qr_toggles: std::mem::take(&mut inner.qr_toggles),
@@ -294,6 +311,13 @@ impl HostLobbyBridge {
         }
     }
 
+    fn restore_landing(&self, json: String) {
+        let mut inner = self.lock();
+        if inner.landing.is_none() {
+            inner.landing = Some(json);
+        }
+    }
+
     fn restore_layout(&self, json: String) {
         let mut inner = self.lock();
         if inner.layout.is_none() {
@@ -315,6 +339,7 @@ impl HostLobbyBridge {
 struct Pending {
     reveal: Option<bool>,
     join: Option<String>,
+    landing: Option<String>,
     scenario: Option<String>,
     layout: Option<String>,
     payload: Option<String>,
@@ -324,8 +349,9 @@ struct Pending {
 /// What one frame of [`pump_host_lobby`] did.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct HostLobbyPumpReport {
-    /// Scripts handed to the surface — the reveal, the invitation, the picker,
-    /// the monitor row and the lobby state, plus one for every QR toggle.
+    /// Scripts handed to the surface — the reveal, the invitation, the landing
+    /// screen, the picker, the monitor row and the lobby state, plus one for
+    /// every QR toggle.
     pub pushed: usize,
     /// Values put back because a push failed.
     pub deferred: usize,
@@ -349,17 +375,25 @@ pub struct HostLobbyPumpReport {
 ///    phase's answer and then correcting it;
 /// 2. **the join invitation**, before the state that decides whether the panel
 ///    carrying it is on screen;
-/// 3. **the scenario picker** (issue #1328), before the lobby it covers: the
+/// 3. **the landing screen** (issue #1361), before the picker it reveals: of
+///    the three panels that cover one another — lobby, then picker, then
+///    landing — it is the outermost, and the same "decide the covering first"
+///    rule that puts the picker before the lobby puts the front door before
+///    both. (The join overlay is a fourth panel and is not in that stack:
+///    `document::GROUND_CSS` lifts it clear of all three, so nothing in this
+///    order decides what covers it — which is why its push sits at 2 for an
+///    unrelated reason;)
+/// 4. **the scenario picker** (issue #1328), before the lobby it covers: the
 ///    picker is a full-screen panel over the crew lobby, so a frame that both
 ///    closes it and fills the lobby behind it decides the covering first. No
 ///    element is written by both renderers, so nothing here can clobber
 ///    anything — the order is fixed and stated so it stays that way;
-/// 4. **the monitor row** (issue #1330), for the same reason the three above it
+/// 5. **the monitor row** (issue #1330), for the same reason the four above it
 ///    go first: the state push is what repaints the whole lobby, so the row has
 ///    to be in place when it lands rather than corrected after it;
-/// 5. **the lobby state**, which carries the phase, and with it the join
+/// 6. **the lobby state**, which carries the phase, and with it the join
 ///    panel's show/hide law;
-/// 6. **QR toggles last**, because an operator's press is their answer to the
+/// 7. **QR toggles last**, because an operator's press is their answer to the
 ///    phase, not the other way round. Applied before the state, a toggle in the
 ///    same frame as a `Lobby` push would be silently overwritten by it.
 ///
@@ -409,6 +443,23 @@ pub fn pump_host_lobby(
                     report.push_failure = Some(e);
                     report.deferred += 1;
                     bridge.restore_join(json);
+                    failed = true;
+                }
+            }
+        }
+    }
+
+    if let Some(json) = pending.landing {
+        if failed {
+            report.deferred += 1;
+            bridge.restore_landing(json);
+        } else {
+            match surface.push(&host_lobby_landing_script(&json)) {
+                Ok(()) => report.pushed += 1,
+                Err(e) => {
+                    report.push_failure = Some(e);
+                    report.deferred += 1;
+                    bridge.restore_landing(json);
                     failed = true;
                 }
             }
@@ -888,27 +939,34 @@ mod tests {
         // asserted whole rather than pairwise, because the pairwise tests above
         // each leave the slots they do not mention free to drift.
         //
-        // All SIX, since the picker (issue #1328) joined the row (issue #1330)
-        // on this bridge: two slices adding a snapshot each is exactly the
-        // situation the stated rule exists for, and a five-slot assertion would
-        // have left the sixth to be placed by whichever one landed second.
+        // All SEVEN, since the picker (issue #1328) joined the row (issue
+        // #1330) and the landing (issue #1361) joined both: three slices adding
+        // a snapshot each is exactly the situation the stated rule exists for,
+        // and an assertion one slot short leaves the newest to be placed by
+        // whichever slice lands next. The landing goes with the snapshots and
+        // ahead of the picker it reveals, because of the three panels that
+        // cover one another — lobby, picker, landing — it is the outermost. The
+        // join overlay sits above all three (`document::GROUND_CSS`) and so is
+        // not placed by this order at all.
         let bridge = HostLobbyBridge::new();
         bridge.push_lobby_state(LOBBY);
         bridge.push_qr_toggle();
         bridge.push_layout(ROW);
         bridge.push_scenario(r#"{"scenarios":[],"locked":false}"#);
+        bridge.push_landing(r#"{"build":"0.1.0","dismissed":false}"#);
         bridge.push_join(r#"{"kind":"code","code":"ABCDE"}"#);
         bridge.push_reveal(true);
         let mut surface = RecordingSurface::ready();
 
         let report = pump_host_lobby(&bridge, &mut surface);
-        assert_eq!(report.pushed, 6);
+        assert_eq!(report.pushed, 7);
         assert!(surface.pushed[0].contains("__phoenixHostLobbyReveal('true')"));
         assert!(surface.pushed[1].contains("__phoenixHostLobbyJoin("));
-        assert!(surface.pushed[2].contains("__phoenixHostLobbyScenario("));
-        assert!(surface.pushed[3].contains("__phoenixHostLobbyLayout("));
-        assert!(surface.pushed[4].contains("__phoenixHostLobbyApply("));
-        assert_eq!(surface.pushed[5], "window.__phoenixHostLobbyQrToggle()");
+        assert!(surface.pushed[2].contains("__phoenixHostLobbyLanding("));
+        assert!(surface.pushed[3].contains("__phoenixHostLobbyScenario("));
+        assert!(surface.pushed[4].contains("__phoenixHostLobbyLayout("));
+        assert!(surface.pushed[5].contains("__phoenixHostLobbyApply("));
+        assert_eq!(surface.pushed[6], "window.__phoenixHostLobbyQrToggle()");
     }
 
     #[test]

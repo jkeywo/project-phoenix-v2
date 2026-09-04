@@ -20,6 +20,10 @@
 //                               (#1230)
 //   gui/host-scenario-render.js that stage -> the DOM inside #scenario-panel
 //                               (#1328)
+//   gui/host-landing-view.js    which routes the menu offers, and which one a
+//                               press opens or closes (#1360)
+//   gui/host-landing-render.js  that decision -> the DOM inside #landing-panel
+//                               (#1360)
 //
 // If this file ever grows a render decision of its own, that decision has
 // escaped the shared path and belongs back in one of those modules instead.
@@ -42,6 +46,8 @@ import { applyQrPhase, drawJoinQr, showJoiningOff, toggleQr } from './gui/host-q
 import { joinUrlForCode } from './gui/join-url.js';
 import { scenarioCatalogView } from './gui/host-scenarios.js';
 import { renderHostScenarios } from './gui/host-scenario-render.js';
+import { landingViewModel, nextOpenEntry } from './gui/host-landing-view.js';
+import { renderHostLanding } from './gui/host-landing-render.js';
 
 // The static `data-i18n` markup — "CREW", "CONNECTED", the awaiting-selection
 // badge, the join panel's caption, this surface's QR toggle, the picker's
@@ -131,10 +137,11 @@ window.__phoenixHostLobby.renderJoin = function (json, qrToggles) {
 // ── Page -> host (issues #1328/#1330/#1331) ─────────────────────────────────
 //
 // Unlike the renders above, this surface SENDS: a scenario, a hull, the AI
-// launch (issue #1328), a monitor for the viewscreen (issue #1330) and a screen
-// for a station's console — or none, closing it (issue #1331). All six go over
+// launch (issue #1328), a monitor for the viewscreen (issue #1330), a screen
+// for a station's console — or none, closing it (issue #1331) — and a route
+// opened or closed on the landing menu (issue #1361). All eight go over
 // the ONE page->host queue the boot script installed, as
-// native_host::host_lobby::HostLobbyRecord — six tags in one vocabulary, and
+// native_host::host_lobby::HostLobbyRecord — eight tags in one vocabulary, and
 // deliberately not ClientMessages, because this surface holds no session token
 // and is not a participant. The host drains that queue in one system and
 // dispatches on the tag; a second queue or a second record type would be a
@@ -207,6 +214,82 @@ window.__phoenixHostLobby.renderScenario = function (json) {
     // lifecycle it always had.
     { ownPanelVisibility: true },
   );
+};
+
+// ── The landing screen (issue #1361) ────────────────────────────────────────
+//
+// `_landingOpenEntry` is this document's own memory of which route is open, and
+// it lives here for the reason server.html's does: it is THIS surface's
+// lifecycle, and a module-level flag two documents shared would be a second
+// authority the moment either forgot to update it. WHAT an open entry means, and
+// whether a press opens anything at all, is `nextOpenEntry`'s — the same pure
+// function the host page calls, over the same shipped table. Nothing about the
+// menu is decided in this file; `platforms: ['web']` on the Connect-to-Host row
+// is why that entry is not on this surface, and it is said in the table.
+let landingOpenEntry = null;
+// The host's last word about the landing: which build this is, and whether a
+// World has taken the front door away. Held so a re-render driven by a click
+// carries the same facts the last push did.
+let landingState = { build: 'dev', dismissed: false };
+
+function drawLanding() {
+  renderHostLanding(
+    document,
+    landingViewModel({
+      openEntryId: landingOpenEntry,
+      // A fact about this document, not a decision about it: this file is
+      // loaded by exactly one surface, and that surface is the native one.
+      platform: 'native',
+      build: landingState.build,
+      dismissed: landingState.dismissed,
+    }),
+    t,
+    {
+      pick: (entryId) => {
+        const next = nextOpenEntry(landingOpenEntry, entryId);
+        // An entry whose slice has not landed returns the open entry unchanged,
+        // and the view model is a pure function of that memory - so re-rendering
+        // would rebuild the whole menu to produce byte-identical DOM, at the
+        // cost of the node a keyboard operator is standing on. Same reason
+        // server.html skips it.
+        if (next === landingOpenEntry) return;
+        landingOpenEntry = next;
+        send(next ? { kind: 'landing_open', entry: next } : { kind: 'landing_close' });
+        drawLanding();
+      },
+      // No fullscreen hook is handed over: the control it would drive is
+      // stripped from this document (native_host::host_lobby::document),
+      // because a native window's mode belongs to the host process and setting
+      // it is issue #1367. The renderer's hook is optional precisely so a
+      // surface can decline one.
+    },
+    // This document has no page lifecycle: its host is the only thing that
+    // knows a World has been committed, which is what `dismissed` carries and
+    // what `ownPanelVisibility` lets the shared renderer act on. server.html
+    // passes neither and keeps hideLanding()/showLandingAtPicker().
+    { ownPanelVisibility: true },
+  );
+}
+
+// Host -> page: the landing's two facts. Every render goes through
+// `drawLanding` so a push and a click cannot draw two different landings.
+window.__phoenixHostLobby.renderLanding = function (json) {
+  let payload;
+  try {
+    payload = JSON.parse(json);
+  } catch (e) {
+    console.warn('[host-lobby] bad landing json', e);
+    return;
+  }
+  landingState = {
+    build: payload.build || 'dev',
+    dismissed: !!payload.dismissed,
+  };
+  // A dismissed landing drops the open route with it, so a landing brought back
+  // later (a Game Over returning this host to selection) opens on its front
+  // door rather than on a stage nobody asked for.
+  if (landingState.dismissed) landingOpenEntry = null;
+  drawLanding();
 };
 
 // The lobby's AI-launch control (issue #1328). Visible exactly when the shared
@@ -292,3 +375,4 @@ document.addEventListener('click', (ev) => {
 window.__phoenixHostLobby.paint();
 window.__phoenixHostLobby.paintJoin();
 window.__phoenixHostLobby.paintScenario();
+window.__phoenixHostLobby.paintLanding();

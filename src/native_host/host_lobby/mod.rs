@@ -77,9 +77,10 @@
 //!
 //! | piece | what it decides |
 //! |---|---|
-//! | [`document`] | what the surface loads: the host page's own `#lobby-panel`, `#qr-panel` and `#scenario-panel`, assembled in memory and served at the host page's own depth |
+//! | [`document`] | what the surface loads: the host page's own `#lobby-panel`, `#qr-panel`, `#scenario-panel` and `#landing-panel`, assembled in memory and served at the host page's own depth |
 //! | [`bridge`] | what crosses, in both directions, and what a failed push costs |
 //! | [`join`] | what the join panel says, and where its QR points |
+//! | [`landing`] | what the front door is told about the process it is embedded in: which build, and whether a World has taken it away |
 //! | [`layout`] | the monitor row and the per-station screen rows: the roster and the law's eligibility out, and the layout action a press asks for |
 //! | [`reveal`] | when the surface is on screen, and when it has yielded |
 //! | [`scenario`] | what the picker is shown, and [`HostLobbyRecord`] — everything the surface may say back, the three layout presses included |
@@ -133,6 +134,7 @@
 pub mod bridge;
 pub mod document;
 pub mod join;
+pub mod landing;
 pub mod layout;
 pub mod reveal;
 pub mod scenario;
@@ -156,6 +158,7 @@ pub use join::{
     join_addr_reach, phone_rendezvous, JoinAddrReach, JoinInvite, PhoneRendezvous,
     CLIENT_DEFAULT_RENDEZVOUS,
 };
+pub use landing::{LandingPanelPayload, BUILD_ID};
 pub use layout::{
     assign_station_action, bridge_layout_payload, set_viewscreen_action, unassign_station_action,
     BridgeLayoutPayload, LayoutNotice, StationRowPayload, StationScreenPayload,
@@ -415,6 +418,7 @@ impl Plugin for HostLobbyPlugin {
                 Update,
                 (
                     feed_lobby_state,
+                    feed_landing_panel,
                     feed_scenario_panel,
                     observe_phase,
                     // `ButtonInput<KeyCode>` exists only where `InputPlugin`
@@ -524,12 +528,62 @@ fn feed_scenario_panel(
     bridge.0.push_scenario(payload.to_json());
 }
 
+/// Carry the landing screen's state to the surface (issue #1361).
+///
+/// The landing renders from `gui/host-landing-view.js` +
+/// `gui/host-landing-render.js` — the browser host's own two modules, written
+/// as shared ones in #1360 for exactly this — so what has to cross is only what
+/// the page cannot know for itself: which build this binary is, and whether a
+/// World has been committed. See [`landing`] for why those two and nothing
+/// else.
+///
+/// # When it pushes, and why that decides the whole feature
+///
+/// The same trigger set as [`feed_scenario_panel`], deliberately, because the
+/// landing and the picker answer the same question at two depths:
+///
+///  * the first frame, which is what puts the front door on the viewscreen at
+///    all — the document assembles `#landing-panel` at `display: none`;
+///  * the frame a [`WorldConfig`](crate::world::config::WorldConfig) lands,
+///    which dismisses it for good.
+///
+/// And, exactly as the picker's feed does, it requires a
+/// [`LobbyScenarioCatalog`] — a resource only a **world-less** host carries. So
+/// a `phoenix-host --world …` never pushes, never leaves `display: none`, and
+/// never shows a menu asking a question it was answered at the prompt. That is
+/// the acceptance criterion "the native Viewscreen shows the landing on a host
+/// started with no World", and it is the absence of a push rather than a check.
+///
+/// Nothing here has an opinion about which ENTRY is open. That is
+/// `nextOpenEntry`'s answer over the page's own memory, on both surfaces; a
+/// copy of it in Rust would be a second authority on a decision #1360 made pure
+/// so it could be tested without a document.
+fn feed_landing_panel(
+    bridge: Option<Res<HostLobbyBridgeResource>>,
+    catalog: Option<Res<LobbyScenarioCatalog>>,
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
+    mut published: Local<bool>,
+) {
+    let (Some(bridge), Some(_catalog)) = (bridge, catalog) else {
+        return;
+    };
+    let dismissed = world_config.is_some();
+    let moved = !*published || world_config.as_ref().is_some_and(|w| w.is_added());
+    if !moved {
+        return;
+    }
+    *published = true;
+    bridge
+        .0
+        .push_landing(landing::LandingPanelPayload::new(dismissed).to_json());
+}
+
 /// Carry what the operator pressed on the viewscreen back into the host.
 ///
 /// The other half of [`feed_scenario_panel`] and of [`publish_bridge_layout`],
 /// and the reason this surface stopped being read-only. Records arrive as
 /// [`HostLobbyRecord`] — a closed vocabulary, not `ClientMessage`s, because the
-/// surface holds no session token — and leave as three different things:
+/// surface holds no session token — and leave as four different things:
 ///
 ///  * a pick becomes an `InboundMessage` under
 ///    [`LOCAL_CONSOLE_TOKEN`](crate::console_bridge::LOCAL_CONSOLE_TOKEN), which
@@ -562,6 +616,19 @@ fn feed_scenario_panel(
 ///    indistinguishable from a broken button — so it goes back as a
 ///    [`LayoutNotice`] and `publish_bridge_layout` carries it in this same
 ///    frame.
+///
+///  * a landing-menu press (issue #1361) leaves as a LINE IN THE LOG, and that
+///    is the whole of it in this slice. It is worth saying why rather than
+///    leaving it to look unfinished: the one route the menu opens today is New
+///    Game, which reveals the `#scenario-panel` this surface already carries —
+///    so its picks reach [`crate::lobby::scenario_arbiter`] and
+///    `world_load::apply_pending_world_load` down exactly the path they took
+///    before the landing existed, and a host arm that "started a game" would be
+///    a second world-load path beside the one that works. What the record buys
+///    is that the process can say what its own viewscreen is showing, on a
+///    surface nobody can attach a console to, and that the entries which DO
+///    need a host answer — #1365's Exit to Desktop, #1366's mod packs, #1367's
+///    settings — extend one vocabulary instead of opening a second queue.
 ///
 /// **Nothing here opens a window or a pane.** An accepted press only moves the
 /// layout; `bridge_display::follow_layout_stations` is what notices the new
@@ -672,6 +739,14 @@ pub(crate) fn drain_surface_records(
                 if let Some(pending) = force_start.as_mut() {
                     pending.0 = true;
                 }
+                continue;
+            }
+            HostLobbyRecord::LandingOpen { entry } => {
+                crate::pinfo!(log, LogCat::Lobby, "host lobby: landing opened: {entry}");
+                continue;
+            }
+            HostLobbyRecord::LandingClose => {
+                crate::pinfo!(log, LogCat::Lobby, "host lobby: landing closed");
                 continue;
             }
             HostLobbyRecord::SetViewscreen { monitor } => layout::set_viewscreen_action(monitor),
@@ -1045,6 +1120,113 @@ mod tests {
             "no catalogue, no picker: {:?}",
             surface.pushed
         );
+    }
+
+    #[test]
+    fn a_host_with_no_catalogue_never_publishes_a_landing_either() {
+        // Issue #1361, and the same fact doing the same job one layer out: a
+        // `--world` host holds no `LobbyScenarioCatalog`, so it never pushes a
+        // landing and `#landing-panel` stays at the `display: none` the
+        // document assembled it with. An operator who was told what they are
+        // flying at the prompt is not shown a menu asking.
+        let (mut app, bridge) = app_with_lobby();
+        app.update();
+        let mut surface = crate::native_host::panes::RecordingSurface::ready();
+        pump_host_lobby(&bridge, &mut surface);
+        assert!(
+            !surface
+                .pushed
+                .iter()
+                .any(|s| s.contains("__phoenixHostLobbyLanding(")),
+            "no catalogue, no front door: {:?}",
+            surface.pushed
+        );
+    }
+
+    #[test]
+    fn a_world_less_host_puts_the_landing_on_screen_and_a_landed_world_takes_it_away() {
+        // The acceptance criterion, as the two pushes that make it true. The
+        // first frame reveals the front door; the frame a `WorldConfig` lands
+        // dismisses it, because the crew lobby underneath sits at z-index 180
+        // and a landing left up would cover the thing the room is watching.
+        let (mut app, bridge) = app_with_lobby();
+        app.insert_resource(LobbyScenarioCatalog::default());
+        app.insert_resource(LobbySelection::default());
+        app.update();
+
+        let mut surface = crate::native_host::panes::RecordingSurface::ready();
+        pump_host_lobby(&bridge, &mut surface);
+        let first = surface
+            .pushed
+            .iter()
+            .find(|s| s.contains("__phoenixHostLobbyLanding("))
+            .expect("a world-less host shows its front door")
+            .clone();
+        assert!(first.contains(r#""dismissed":false"#), "{first}");
+        assert!(
+            first.contains(landing::BUILD_ID),
+            "the status bar names THIS binary's build: {first}"
+        );
+
+        // Nothing moved: no second push, because the surface already has the
+        // answer and every push is main-thread time inside a browser engine.
+        surface.pushed.clear();
+        app.update();
+        pump_host_lobby(&bridge, &mut surface);
+        assert!(
+            !surface
+                .pushed
+                .iter()
+                .any(|s| s.contains("__phoenixHostLobbyLanding(")),
+            "an idle landing costs the simulation nothing: {:?}",
+            surface.pushed
+        );
+
+        // …and the world lands.
+        app.insert_resource(crate::world::config::WorldConfig::default());
+        app.update();
+        pump_host_lobby(&bridge, &mut surface);
+        let last = surface
+            .pushed
+            .iter()
+            .rev()
+            .find(|s| s.contains("__phoenixHostLobbyLanding("))
+            .expect("a committed world dismisses the landing")
+            .clone();
+        assert!(last.contains(r#""dismissed":true"#), "{last}");
+    }
+
+    #[test]
+    fn a_landing_press_is_drained_by_the_one_reader_and_reaches_no_message_bus() {
+        // Issue #1361. The menu's two records ride the same queue as the picks
+        // beside them — `take_records` is a drain with one reader, so a new
+        // control is a variant and never a second queue. What they must NOT do
+        // is reach the arbiter: opening a route on the front door is not a
+        // participant's command, and New Game's actual effect is the
+        // `#scenario-panel` this surface already carries, whose picks take the
+        // world-load path they always took.
+        let (mut app, bridge) = app_with_lobby();
+        let mut surface = crate::native_host::panes::RecordingSurface::ready();
+        surface.queue_record(r#"{"kind":"landing_open","entry":"new_game"}"#);
+        surface.queue_record(r#"{"kind":"landing_close"}"#);
+        surface.queue_record(r#"{"kind":"select_scenario","scenario_id":"combat_test"}"#);
+        pump_host_lobby(&bridge, &mut surface);
+
+        app.update();
+        let sent = inbound(&mut app);
+        assert_eq!(
+            sent.len(),
+            1,
+            "only the pick is a message; the two menu presses are not"
+        );
+        assert!(matches!(
+            &sent[0].msg,
+            crate::core::messages::ClientMessage::SelectScenario { scenario_id }
+                if scenario_id == "combat_test"
+        ));
+        // Drained rather than left on the queue: a record the host does not act
+        // on still has to be taken, or the surface sits on a growing backlog.
+        assert!(bridge.take_records().is_empty());
     }
 
     #[test]

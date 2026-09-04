@@ -189,3 +189,76 @@ describe('landingViewModel', () => {
       .toEqual(['load_game', 'join_peer', 'connect_host', 'load_mod_pack']);
   });
 });
+
+describe('the entries a native host is offered (issue #1361)', () => {
+  // The doctrine, said in the one place it can be said once: a control exists
+  // exactly when something behind it can answer it. The native surface renders
+  // from this same table through the same renderer, so an entry it cannot
+  // answer is kept off it by a FIELD ON A ROW and not by a build check in the
+  // renderer or an edit to the native document's markup.
+
+  it('does not offer Connect to Host, because a native host has no join leg', () => {
+    // A native host is always a host. Issue #1364 settles the web half —
+    // Connect to Host navigates to the client page with the code — and there is
+    // no such page and no such leg here.
+    const native = landingEntries('native', LANDING_ENTRIES).map((e) => e.id);
+    expect(native).not.toContain('connect_host');
+    expect(native).toEqual(['new_game', 'load_game', 'join_peer', 'load_mod_pack']);
+  });
+
+  it('still offers it on the web, so this is a curated menu and not a lost row', () => {
+    expect(landingEntries('web', LANDING_ENTRIES).map((e) => e.id)).toContain('connect_host');
+  });
+
+  it('offers New Game on both, because both reach a world-load path', () => {
+    // On the web it slides the picker into the middle column; on native the
+    // same renderer moves the same `#scenario-panel` node, whose picks reach
+    // the scenario arbiter and the native world load down the path they always
+    // took. One entry, one stage, two hosts.
+    for (const platform of ['web', 'native']) {
+      const vm = landingViewModel({ platform, openEntryId: 'new_game' });
+      expect(vm.stage).toBe('world-picker');
+      expect(vm.entries.find((e) => e.id === 'new_game').selected).toBe(true);
+    }
+  });
+
+  it('numbers a curated menu from one, so native has no gap where a row was', () => {
+    const vm = landingViewModel({ platform: 'native' });
+    expect(vm.entries.map((e) => e.ordinal)).toEqual(['01', '02', '03', '04']);
+  });
+});
+
+describe('landingViewModel — a dismissed landing', () => {
+  // The native surface has no page lifecycle: its host is the only thing that
+  // knows a World has been committed, so "the landing is past" is an input
+  // here rather than a `display` set by page script. It is the exact sibling
+  // of `scenarioCatalogView`'s `locked`.
+
+  it('collapses to a stage of its own that means "not on screen"', () => {
+    const vm = landingViewModel({ entries: TABLE, dismissed: true });
+    expect(vm.stage).toBe('dismissed');
+    expect(vm.dismissed).toBe(true);
+    expect(vm.depth).toBe(0);
+    expect(vm.rootClass).toBe('is-idle');
+  });
+
+  it('outranks a remembered open entry rather than reopening under it', () => {
+    // A landing brought back later — a Game Over returning a host to selection
+    // — opens on its front door, not on a stage nobody asked for.
+    const vm = landingViewModel({ entries: TABLE, openEntryId: 'alpha', dismissed: true });
+    expect(vm.stage).toBe('dismissed');
+    expect(vm.openEntryId).toBe(null);
+    expect(vm.entries.every((e) => !e.selected)).toBe(true);
+  });
+
+  it('is false by default, so the host page is unchanged by its existence', () => {
+    expect(landingViewModel({ entries: TABLE }).dismissed).toBe(false);
+    expect(landingViewModel().dismissed).toBe(false);
+    expect(landingViewModel().stage).toBe('idle');
+  });
+
+  it('still lists the menu, so a landing shown again needs no second decision', () => {
+    const vm = landingViewModel({ entries: TABLE, platform: 'native', dismissed: true });
+    expect(vm.entries.map((e) => e.id)).toEqual(['alpha', 'beta', 'gamma']);
+  });
+});

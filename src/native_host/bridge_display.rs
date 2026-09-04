@@ -360,6 +360,17 @@ pub struct BridgeDisplaySet;
 
 impl Plugin for BridgeDisplayPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<PendingConsoleClaims>();
+        // Native auto-claim: seat each console's station once its session
+        // registers. Gated on the lobby inbound stream so a host built without
+        // it (a bare display test) stands the plugin up without the writer
+        // panicking on a missing `Messages` resource.
+        app.add_systems(
+            Update,
+            apply_pending_console_claims.run_if(
+                resource_exists::<bevy::ecs::message::Messages<crate::lobby::InboundMessage>>,
+            ),
+        );
         app.add_systems(
             Update,
             (
@@ -393,6 +404,75 @@ impl Plugin for BridgeDisplayPlugin {
                 .in_set(BridgeDisplaySet),
         );
     }
+}
+
+/// Consoles opened on a screen that still owe their station a claim.
+///
+/// Putting a station on a screen should ALSO claim it (native), so an operator
+/// who assigns a console to their glass is seated without a second manual press.
+/// The console pane joins as an ordinary participant on a freshly minted token
+/// (`transport::PaneBus::open_console`), and a claim can only name a session the
+/// lobby has already registered — so [`reconcile_seated_consoles`] records the
+/// intent here at open, and [`apply_pending_console_claims`] emits the
+/// `SelectStation` the frame that session appears. Nothing here is a reserved
+/// token, so admission still cannot tell the console from a phone.
+#[derive(Resource, Default)]
+struct PendingConsoleClaims(Vec<PendingConsoleClaim>);
+
+struct PendingConsoleClaim {
+    /// The console pane's own session token.
+    token: String,
+    /// The station to claim — an id, which `lobby::stations_config::get_station`
+    /// resolves the same as a name.
+    station: String,
+    /// Frames waited for the session to register, bounded so a console whose page
+    /// never connected does not keep a claim pending for the life of the host.
+    waited: u32,
+}
+
+/// Frames a pending claim waits for its console's session before it is dropped —
+/// ~10s at 60 fps, generous for a slow page load and bounded so a failed pane
+/// stops being retried.
+const PENDING_CLAIM_MAX_FRAMES: u32 = 600;
+
+/// Claim each console's station the frame its participant's session registers,
+/// so putting a station on a screen seats it (native auto-claim).
+///
+/// Deferred rather than sent at open because the console's page has to connect
+/// and `Identify` first; until its token is a connected session the lobby
+/// handler would run against an unknown token and drop the claim. Sending it on
+/// the console's OWN token keeps the seat attributed to that console, exactly as
+/// a phone's claim is, and `handle_select_station` no-ops harmlessly if the seat
+/// was taken in the meantime.
+fn apply_pending_console_claims(
+    claims: Option<ResMut<PendingConsoleClaims>>,
+    sessions: Option<Res<crate::lobby::Sessions>>,
+    mut inbound: MessageWriter<crate::lobby::InboundMessage>,
+) {
+    let (Some(mut claims), Some(sessions)) = (claims, sessions) else {
+        return;
+    };
+    if claims.0.is_empty() {
+        return;
+    }
+    claims.0.retain_mut(|claim| {
+        let registered = sessions
+            .0
+            .players()
+            .iter()
+            .any(|p| p.connected && p.token == claim.token);
+        if registered {
+            inbound.write(crate::lobby::InboundMessage {
+                token: claim.token.clone(),
+                msg: crate::core::messages::ClientMessage::SelectStation {
+                    station: claim.station.clone(),
+                },
+            });
+            return false;
+        }
+        claim.waited += 1;
+        claim.waited < PENDING_CLAIM_MAX_FRAMES
+    });
 }
 
 /// Lift one Bevy [`Monitor`](bevy::window::Monitor) into a [`RawMonitor`].
@@ -1027,6 +1107,9 @@ fn follow_layout_stations(
     mut windows: Query<&mut Window>,
     mut commands: Commands,
     log: Option<Res<LogFilterConfig>>,
+    // A console opened here owes its station a claim (native auto-claim); the
+    // intent is recorded and applied once the console's session registers.
+    mut auto_claims: Option<ResMut<PendingConsoleClaims>>,
     // Station windows that emptied on an earlier pass, despawned on this one.
     //
     // One frame of grace, and it is not tidiness: the pane host tears a closed
@@ -1447,13 +1530,25 @@ fn follow_layout_stations(
             .monitor_of(station)
             .expect("a seated station is on one of this bridge's monitors");
         let (pane, _url) = bus.0.open_console(&station.0);
+        // Putting a station on a screen also CLAIMS it (native auto-claim):
+        // record the intent against this console's OWN freshly minted token, to
+        // be sent as a `SelectStation` once its session registers. Without this
+        // the console opens on the glass but sits in the lobby until the operator
+        // presses claim — a second step the physical bridge should not need.
+        if let (Some(claims), Some(token)) = (auto_claims.as_mut(), bus.0.token_of(pane)) {
+            claims.0.push(PendingConsoleClaim {
+                token,
+                station: station.0.clone(),
+                waited: 0,
+            });
+        }
         // The URL is NOT logged: it carries this console's session token in its
         // fragment, and an operator log is a file, a scrollback and a screenshot.
         crate::pinfo!(
             log,
             LogCat::Lobby,
             "bridge display: station {:?}'s console is opening on monitor {monitor} as {pane}; \
-             it joins and claims like any phone",
+             it joins and auto-claims its station",
             station.0
         );
     }

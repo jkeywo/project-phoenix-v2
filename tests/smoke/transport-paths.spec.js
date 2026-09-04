@@ -35,17 +35,14 @@
 //              in tests/client/rendezvous-transport.test.js under fake timers,
 //              because at real speed it is ninety seconds of waiting.
 
-import { test, expect, waitForWasmReady } from './fixtures';
+import { test, expect, waitForWasmReady, waitForJoinCode } from './fixtures';
 import { ts } from './strings';
 
 async function bootHost(context, search = '?scenario=assets/worlds/default.toml') {
   const page = await context.newPage();
   await page.goto(`/${search}`);
   await waitForWasmReady(page);
-  await page.waitForFunction(
-    () => /^[A-Z]{5}$/.test(document.getElementById('join-code')?.textContent ?? ''),
-    { timeout: 30_000 },
-  );
+  await waitForJoinCode(page, 'join-code', 30_000);
   return page;
 }
 

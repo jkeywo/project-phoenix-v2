@@ -12,17 +12,14 @@
 // on an ordinary page load and the client page asks for the code with no
 // parameter set, which is exactly what these specs now exercise.
 
-import { test, expect, waitForWasmReady } from './fixtures';
+import { test, expect, waitForWasmReady, waitForJoinCode, JOIN_CODE_PATTERN, JOIN_CODE_LENGTH } from './fixtures';
 import { ts } from './strings';
 
 async function bootHost(context) {
   const page = await context.newPage();
   await page.goto('/?scenario=assets/worlds/default.toml');
   await waitForWasmReady(page);
-  await page.waitForFunction(
-    () => /^[A-Z]{5}$/.test(document.getElementById('join-code')?.textContent ?? ''),
-    { timeout: 30_000 },
-  );
+  await waitForJoinCode(page, 'join-code', 30_000);
   return page;
 }
 
@@ -48,7 +45,7 @@ const errorText = (page) =>
 test('the host shows a code a guest can read across the room', async ({ context }) => {
   const host = await bootHost(context);
   const code = await joinCodeOn(host);
-  expect(code).toMatch(/^[A-Z]{5}$/);
+  expect(code).toMatch(JOIN_CODE_PATTERN);
   // The link the QR encodes carries the whole structured identifier, so a
   // camera scan and a typed suffix are the same join by two routes.
   const link = await joinLinkOn(host);
@@ -105,11 +102,21 @@ test('a QR link joins without anything being typed', async ({ context }) => {
   await expect(client.locator('#join-entry')).toBeHidden();
 });
 
+// Both codes below are built from the authored length, not typed out: at five
+// letters they were well-formed codes, but the suffix is eight now and a short
+// entry is refused for its LENGTH before the registry ever looks it up — which
+// silently turned both of these into a different test than the one they name.
+const UNKNOWN_CODE = 'Z'.repeat(JOIN_CODE_LENGTH);
+// A deny-list word is matched ANYWHERE INSIDE the canonicalised suffix
+// (assets/join/join-codes.toml says so), so padding keeps this a DENIED code
+// rather than an unknown one.
+const DENIED_CODE = ('ADMIN' + 'BCDEFGHIJK').slice(0, JOIN_CODE_LENGTH);
+
 test('an unknown code says so and leaves the guest in front of the field', async ({ context }) => {
   await bootHost(context);
   const client = await openClient(context);
 
-  await client.fill('#join-code-input', 'ZZZZZ');
+  await client.fill('#join-code-input', UNKNOWN_CODE);
   await client.click('#join-submit-btn');
 
   await expect(client.locator('#join-entry-error')).toHaveText(ts('client.join.error_unknown'), {
@@ -122,7 +129,7 @@ test('a refused word is refused with its own message, not as an unknown code', a
   await bootHost(context);
   const client = await openClient(context);
 
-  await client.fill('#join-code-input', 'ADMIN');
+  await client.fill('#join-code-input', DENIED_CODE);
   await client.click('#join-submit-btn');
 
   await expect(client.locator('#join-entry-error')).toHaveText(ts('client.join.error_denied'));

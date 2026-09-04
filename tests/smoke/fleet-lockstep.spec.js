@@ -41,7 +41,7 @@
 // that only asserted "the clock runs" would pass on a page that never joined a
 // fleet at all.
 
-import { test, expect, waitForWasmReady } from './fixtures';
+import { test, expect, waitForWasmReady, waitForJoinCode } from './fixtures';
 
 /** The two slots this fleet's hosts fly. Slot 1 is the lead's, as #1114 mints. */
 const SLOT_LEAD = 1;
@@ -60,10 +60,7 @@ async function bootHost(context) {
   const page = await context.newPage();
   await page.goto('/?scenario=assets/worlds/default.toml');
   await waitForWasmReady(page);
-  await page.waitForFunction(
-    () => /^[A-Z]{5}$/.test(document.getElementById('join-code')?.textContent ?? ''),
-    { timeout: 30_000 },
-  );
+  await waitForJoinCode(page, 'join-code', 30_000);
   return page;
 }
 
@@ -80,10 +77,7 @@ const closeCog = (page) => page.keyboard.press('Escape');
 async function openFleet(page) {
   await openFleetTab(page);
   await page.click('[data-control="fleet-open"]');
-  await page.waitForFunction(
-    () => /^[A-Z]{5}$/.test(document.getElementById('fleet-code')?.textContent ?? ''),
-    { timeout: 30_000 },
-  );
+  await waitForJoinCode(page, 'fleet-code', 30_000);
   await closeCog(page);
   return page.evaluate(() => document.getElementById('fleet-code').textContent);
 }

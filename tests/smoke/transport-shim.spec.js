@@ -13,7 +13,7 @@
 // or opens a "snapshot" channel that is really ordered and retransmitting,
 // would leave forty specs green while proving something the product does not do.
 
-import { test, expect, SMOKE_ORIGIN } from './fixtures';
+import { test, expect, SMOKE_ORIGIN, JOIN_CODE_PATTERN, JOIN_CODE_LENGTH } from './fixtures';
 
 // Blank pages must be on the served origin: BroadcastChannel is same-origin, and
 // null-origin pages cannot reach each other.
@@ -119,7 +119,7 @@ test.describe('phoenix transport shim', () => {
   test('the host is issued a typed code in the client namespace', async ({ context }) => {
     const hostPage = await blankPage(context, 'shim-code');
     const code = await hostOn(hostPage);
-    expect(code.suffix).toMatch(/^[A-Z]{5}$/);
+    expect(code.suffix).toMatch(JOIN_CODE_PATTERN);
     expect(code.namespace).toBe('client');
     expect(code.full).toContain(code.suffix);
   });
@@ -128,7 +128,11 @@ test.describe('phoenix transport shim', () => {
     const hostPage = await blankPage(context, 'shim-unknown-host');
     await hostOn(hostPage);
     const clientPage = await blankPage(context, 'shim-unknown-client');
-    const failure = await joinOn(clientPage, 'ZZZZZ').catch((e) => e.message);
+    // Well-formed but unregistered. Built from the authored length: a short
+    // code is refused for its LENGTH before the registry looks it up, which
+    // would prove something other than what this test claims.
+    const unknown = 'Z'.repeat(JOIN_CODE_LENGTH);
+    const failure = await joinOn(clientPage, unknown).catch((e) => e.message);
     expect(failure).toContain('unknown');
   });
 

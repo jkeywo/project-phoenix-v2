@@ -9,6 +9,7 @@ import {
   readHostPeerId,
   test,
   waitForWasmReady,
+  waitForJoinCode,
 } from './fixtures';
 
 const GM_FIELD_PATH = 'assets/entities/smoke_gm_asteroid_field.toml';
@@ -743,11 +744,7 @@ test('a GM reaches and operates a spatial Helm Station at 1280x720, then release
   await selectAndWait(science, 'Science');
 
   await ship.evaluate(() => window.__hostFleetOpen());
-  await ship.waitForFunction(
-    () => /^[A-Z]{5}$/.test(document.getElementById('fleet-code')?.textContent ?? ''),
-    undefined,
-    { timeout: 30_000 },
-  );
+  await waitForJoinCode(ship, 'fleet-code', 30_000);
   const fleetCode = await ship.locator('#fleet-code').textContent();
 
   const gm = await context.newPage();

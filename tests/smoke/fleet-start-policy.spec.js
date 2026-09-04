@@ -5,17 +5,20 @@
 // and hands the resulting grant back through the real WASM boundary.
 
 import {
-  test, expect, waitForWasmReady, readHostPeerId, createTestClient,
+  test,
+  expect,
+  waitForWasmReady,
+  readHostPeerId,
+  createTestClient,
+  waitForJoinCode,
+  JOIN_CODE_PATTERN_SOURCE,
 } from './fixtures';
 
 async function bootRunningHost(context) {
   const page = await context.newPage();
   await page.goto('/?scenario=assets/worlds/default.toml');
   await waitForWasmReady(page);
-  await page.waitForFunction(
-    () => /^[A-Z]{5}$/.test(document.getElementById('join-code')?.textContent ?? ''),
-    { timeout: 30_000 },
-  );
+  await waitForJoinCode(page, 'join-code', 30_000);
   return page;
 }
 
@@ -65,10 +68,7 @@ async function bootHostWithHeldLeaveStatus(context) {
   });
   await page.goto('/?scenario=assets/worlds/default.toml');
   await waitForWasmReady(page);
-  await page.waitForFunction(
-    () => /^[A-Z]{5}$/.test(document.getElementById('join-code')?.textContent ?? ''),
-    { timeout: 30_000 },
-  );
+  await waitForJoinCode(page, 'join-code', 30_000);
   return page;
 }
 
@@ -79,9 +79,10 @@ async function bootSelectingHost(context) {
   const page = await context.newPage();
   await page.goto('/');
   await page.waitForFunction(
-    () => typeof window.__hostFleetOpen === 'function'
+    (src) => typeof window.__hostFleetOpen === 'function'
       && !!window.wasmBindings?.wasm_delivery_stamp_field
-      && /^[A-Z]{5}$/.test(document.getElementById('join-code')?.textContent ?? ''),
+      && new RegExp(src).test(document.getElementById('join-code')?.textContent ?? ''),
+    JOIN_CODE_PATTERN_SOURCE,
     { timeout: 60_000 },
   );
   return page;
@@ -108,8 +109,9 @@ async function bootRejectedHullHost(context) {
   });
   await page.goto('/?scenario=assets/worlds/default.toml');
   await page.waitForFunction(
-    () => !!document.querySelector('#wasm-spinner strong')
-      && /^[A-Z]{5}$/.test(document.getElementById('join-code')?.textContent ?? ''),
+    (src) => !!document.querySelector('#wasm-spinner strong')
+      && new RegExp(src).test(document.getElementById('join-code')?.textContent ?? ''),
+    JOIN_CODE_PATTERN_SOURCE,
     { timeout: 60_000 },
   );
   return page;
@@ -143,19 +145,13 @@ async function openFleet(page, role = 'ship') {
   await openFleetTab(page);
   if (role === 'gm') await selectGmProfile(page);
   await page.click('[data-control="fleet-open"]');
-  await page.waitForFunction(
-    () => /^[A-Z]{5}$/.test(document.getElementById('fleet-code')?.textContent ?? ''),
-    { timeout: 30_000 },
-  );
+  await waitForJoinCode(page, 'fleet-code', 30_000);
   return page.evaluate(() => document.getElementById('fleet-code').textContent);
 }
 
 async function openFleetDirect(page) {
   await page.evaluate(() => window.__hostFleetOpen());
-  await page.waitForFunction(
-    () => /^[A-Z]{5}$/.test(document.getElementById('fleet-code')?.textContent ?? ''),
-    { timeout: 30_000 },
-  );
+  await waitForJoinCode(page, 'fleet-code', 30_000);
   return page.evaluate(() => document.getElementById('fleet-code').textContent);
 }
 

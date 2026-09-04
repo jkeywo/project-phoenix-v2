@@ -246,6 +246,42 @@ export { expect };
  */
 export const WASM_READY_TIMEOUT = 60_000;
 
+// ── The join code's shape comes from the authored table, never a literal ─────
+//
+// `assets/join/join-codes.toml` is what a designer edits and
+// `assets/join/join-codes.json` is its committed generated form (issue #1111).
+// The suffix length moved 5 → 8 in #1353 ("the join code stops being guessable
+// from a new socket") and every spec that had `/^[A-Z]{5}$/` inline started
+// timing out in `bootHost` — the host was issuing a perfectly good code that no
+// spec would accept. Reading the table is the same discipline AGENTS.md rule 11
+// asks of gameplay values: a designer changing the length must not redden the
+// suite.
+//
+// `JOIN_CODE_PATTERN_SOURCE` is a string because a RegExp cannot cross into
+// `page.evaluate` — pass it as an argument and rebuild it in the page.
+const JOIN_CODE_TABLE = JSON.parse(fs.readFileSync(
+  path.join(__dirname, '..', '..', 'assets', 'join', 'join-codes.json'),
+  'utf-8',
+));
+export const JOIN_CODE_LENGTH = JOIN_CODE_TABLE.suffix.length;
+export const JOIN_CODE_PATTERN_SOURCE =
+  `^[${JOIN_CODE_TABLE.suffix.alphabet}]{${JOIN_CODE_LENGTH}}$`;
+export const JOIN_CODE_PATTERN = new RegExp(JOIN_CODE_PATTERN_SOURCE);
+
+/**
+ * Wait until `elementId` holds a well-formed join code.
+ *
+ * @param {import('@playwright/test').Page} page
+ * @param {string} elementId `join-code` (crew) or `fleet-code` (fleet)
+ */
+export function waitForJoinCode(page, elementId = 'join-code', timeout = 30_000) {
+  return page.waitForFunction(
+    ([id, src]) => new RegExp(src).test(document.getElementById(id)?.textContent ?? ''),
+    [elementId, JOIN_CODE_PATTERN_SOURCE],
+    { timeout },
+  );
+}
+
 /** Bring a server page to front and wait for __wasmReady.
  *  Replaces the ad-hoc 3-line pattern spread across spec files.
  */

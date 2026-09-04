@@ -809,6 +809,13 @@ corridor_south = [0.0, 0.0, 1000.0]
 # controlled-demolition beat clears it.
 corridor_obstruction = [80.0, 0.0, -60.0]
 
+# Where a castaway lifeboat has drifted into the corridor throat, north of the
+# head (issue #1348 mechanism, T2 refinement). Off the x=0 traffic lane and well
+# inside the destroyer's 500-unit transporter reach; a Sensors sweep turns it up
+# and the Engineering transporter beams the civilians aboard off it. A discovered
+# contact, not a scripted one — the crew have to look. [ai] Unratified.
+corridor_castaway = [55.0, 0.0, -210.0]
+
 # The fuel-depot ladder, and the transit leg between its two rungs.
 #
 # FOUR anchors for two rungs, because a berth and a hull are not the same place
@@ -2237,6 +2244,22 @@ premature_flag = "skyway_obstruction_premature"
 stabilization_required = true
 warning = "world.falling_skyway.demolition.warning.obstruction"
 
+# ── THE CASTAWAY LIFEBOAT (issue #1348 mechanism, T2 refinement) ─────────────
+#
+# A small craft carrying three civilians, drifted into the corridor throat. The
+# whole rescue rides its own template: a `[hull]` so weapons can destroy it, an
+# `[infrastructure]` condition track so a scan can read it, and a
+# `[civilian_rescue]` count of who is aboard. The world only PLACES it; the id is
+# what the discovery and rescue flags key on — `scan.corridor_castaway.taken`,
+# `rescue.corridor_castaway.recovered`, `rescue.corridor_castaway.lost` — which
+# the castaway band at the end of the script reacts to. Nothing is scripted: the
+# crew scan it to discover the life signs, then beam them aboard with Engineering.
+[[entity]]
+template_path = "assets/entities/skyway_castaway_lifeboat.toml"
+id = "corridor_castaway"
+name = "world.falling_skyway.entity.castaway_lifeboat.name"
+transform = { anchor = "corridor_castaway" }
+
 # ── Act 1 ────────────────────────────────────────────────────────────────────
 
 [script]
@@ -3623,11 +3646,23 @@ fn on_lyra_recovered(ctx) {
     // for tidiness: a marked entity that already has an outcome never has a
     // death invented for it.
     ctx.effects.narrative_outcome("world.falling_skyway.entity.lyra_ascending.name", "rescued");
-    // The post-mission report row (issue #1344). She is the first complete row
-    // this mission writes, and she is deliberately not the mission's RESULT: +6
-    // is enough to be felt beside the other rows the report will grow, and not
-    // enough to be the whole verdict. Players never see the number.
-    lyra_report_row(ctx, "world.falling_skyway.report.lyra.saved", "saved", 6);
+    // SAVING LYRA IS GETTING HER CREW OFF, NOT SAVING HER HULL (John's model, T2
+    // refinement). The rescue is complete the moment the crew are recovered, so
+    // she WARPS OUT — the same authored `destroy_entity` the loss branch and the
+    // epilogue craft use, on the ordinary scripted-removal path, deterministic to
+    // the tick her recovery threshold crosses. Because `narrative_outcome`
+    // ("rescued") was recorded above (this tick, either order), the removal is
+    // read as a warp-out and NOT as a `marked_entity_destroyed`: it is a rescue,
+    // not a death. This fixes the t614 contradiction by construction — once she
+    // is saved she is gone from the world and can never be "destroyed later" with
+    // a stale saved row still standing.
+    ctx.effects.destroy_entity("world.falling_skyway.entity.lyra_ascending.name");
+    // The post-mission report row (issue #1344, re-framed for the T2 refinement).
+    // With her crew off she is a CREW-RESCUED outcome — the empty hull warping out
+    // is not the verdict, the people are. +6, deliberately felt beside the other
+    // rows but not the whole verdict. The hull-with-crew loss (-6) is written by
+    // the deadline branch, when she is destroyed with her crew still aboard.
+    lyra_report_row(ctx, "world.falling_skyway.report.lyra.crew_saved", "saved", 6);
 }
 
 // Both fates write the SAME row id, so whichever happens updates one row in
@@ -4811,6 +4846,46 @@ fn on_head_watch_opens(ctx) {
         target: "world.falling_skyway.entity.skyhook.name",
         targets: ["world.falling_skyway.entity.skyhook.name"],
     }, "skyhook_lift_capable");
+
+    // THE OBSTRUCTION SHARES THE ONE TRACTOR WITH THE HEAD-SAVE (John's ruling, T2
+    // refinement). The corridor obstruction's controlled demolition (#1350) needs
+    // the tractor to hold the mass while the charges fire — `demolition_target`
+    // authors `stabilization_required = true` — and the ship carries exactly ONE
+    // tractor, which Act 3 already needs for the skyhook-head Stabilise above. So
+    // the two jobs CONTEND for the one beam, and the intended play is sequential:
+    // save the head, release the tractor, then stabilise + fire the obstruction
+    // (or the reverse) — achievable only if the crew are quick.
+    //
+    // base_priority 45 sits BELOW obj-a3-head's 55, so a Backfilled Engineering
+    // seat defers to the head-save by default and holds THE HEAD, never the
+    // obstruction, while the head is unsaved — the head-save is not regressed, and
+    // a crew who ignore the obstruction get exactly the prior Act-3 behaviour. The
+    // AI never tries to hold both: the shared operate selector returns one
+    // directive for the one seat. A human is free to override the ranking and work
+    // the obstruction first — the demolition adapter reads the live tractor state
+    // with no objective gate, so a player-driven sequence works either way; this
+    // objective's only job is Act-3 visibility and AI-addressability.
+    //
+    // mandatory: false — this is bonus content layered onto an already-complete
+    // Act 3, not a required objective that would fail a crew who never reach it;
+    // the demolition report row (below) covers the unattempted case by omission.
+    // Completes off `skyway_obstruction_resolved`, which every terminal demolition
+    // outcome raises, so a crew who cleared it before Act 3 opens see it remembered.
+    // [ai] Unratified: the 45 priority and the sequencing window need a playtest
+    // pass (batch mean-fraction target 80-95%). The window is real — the head-save
+    // is threshold-driven off `tether_strain`, the obstruction's tractor dwell is
+    // an instantaneous check at `DetonateCharges`, and Security's 30s place-charges
+    // dispatch can be staged in parallel — but the exact tuning is playtest ground.
+    post_remembered_objective(ctx, #{
+        id: "obj-a3-obstruction",
+        text: "world.falling_skyway.objective.obstruction.text",
+        mandatory: false,
+        source: "mission",
+        base_priority: 45,
+        directive_kind: "Stabilise",
+        target: "world.falling_skyway.entity.corridor_obstruction.name",
+        targets: ["world.falling_skyway.entity.corridor_obstruction.name"],
+    }, "skyway_obstruction_resolved");
 
     // The head is actionable from Act 1. If the crew already restored its live
     // lift certification after the tether slip, the threshold is the
@@ -7550,6 +7625,12 @@ fn write_the_campaign_record(ctx) {
     // finished, whatever else this mission achieved — and it is a TRAFFIC fact
     // rather than a casualty one, which is the split section 7 already makes.
     write_the_picket_record(ctx);
+    // The corridor obstruction's controlled demolition (issue #1350, scored for
+    // the T2 refinement). A NEW scored category, read off the four operation-
+    // quality flags the demolition consequences band froze. Omitted entirely if
+    // the obstruction was never touched — an absence is a real answer, the same
+    // convention the skyhook and civilians rows keep.
+    write_the_demolition_record(ctx);
 
     // ── THE NARRATIVE REPORT (issue #1351) ──────────────────────────────────
     //
@@ -8695,5 +8776,160 @@ fn on_obstruction_weapons_fire(ctx) {
     ctx.effects.narrative_beat("skyway_obstruction_weapons");
     // No `destroy_entity` and no `narrative_outcome` here: the weapons kill that
     // fired this handler already destroyed the mass and recorded its outcome.
+}
+
+// ── THE OBSTRUCTION REPORT ROW (issue #1350, scored for the T2 refinement) ───
+//
+// A NEW scored report category, surfaced to John for ratification. The demolition
+// has FOUR terminal outcomes, graded by lives and by debris control in the PRD's
+// stated spirit ("lives and promises intentionally dominate"):
+//
+//   SAFE         charges placed, team clear, mass HELD → clean, limited debris.
+//                The only clean positive. +3.
+//   UNSUPPORTED  team clear but the mass UNHELD → cleared, but a heavier debris
+//                field. No lives lost, an infrastructure cost only. -1.
+//   WEAPONS      broken up by ordinary gunnery — no charges, no attempt at
+//                control → the worst, uncontrolled debris across the lane. -2.
+//   PREMATURE    fired with the Security team STILL ON THE MASS → team casualties.
+//                The ONLY outcome that costs lives, so the steepest negative. -4.
+//
+// DOUBLE-COUNT CHECK: this row scores the OPERATION QUALITY, never the deaths. The
+// premature outcome's `skyway_obstruction_casualties` flag is written nowhere else
+// and is NOT one of the four terms summed into `campaign.skyway.casualties.total`
+// (section 4), so no casualties line scores those bodies — this is the one place
+// the demolition is scored, and it scores the CHOICE to fire early, not a headcount.
+// If a later change ever folds the premature casualties into the casualties sum,
+// THAT is the moment to keep the two distinct; this row must stay operation-quality.
+//
+// Omitted entirely if `skyway_obstruction_resolved == 0` — the obstruction was
+// never touched, an absence that is a real answer, the skyhook/civilians rule.
+// [ai] Every score unratified — a first proposal for John.
+fn write_the_demolition_record(ctx) {
+    if ctx.flags.skyway_obstruction_resolved == 0 { return; }
+    // Exactly one terminal handler wins (first-terminal-event-wins, guarded on
+    // `skyway_obstruction_resolved`), so the four are mutually exclusive. The
+    // default is SAFE: resolved with none of the other three flags set is the
+    // clean, held detonation, which raises `skyway_obstruction_cleared_safe`.
+    let outcome = "world.falling_skyway.report.demolition.safe";
+    let state = "saved";
+    let score = 3;
+    if ctx.flags.skyway_obstruction_premature > 0 {
+        outcome = "world.falling_skyway.report.demolition.premature";
+        state = "lost";
+        score = -4;
+    } else if ctx.flags.skyway_obstruction_weapons_scatter > 0 {
+        outcome = "world.falling_skyway.report.demolition.weapons";
+        state = "lost";
+        score = -2;
+    } else if ctx.flags.skyway_obstruction_cleared_unsupported > 0 {
+        outcome = "world.falling_skyway.report.demolition.unsupported";
+        state = "partial";
+        score = -1;
+    }
+    ctx.effects.report_row(#{
+        id: "demolition",
+        heading: "world.falling_skyway.report.demolition.heading",
+        outcome: outcome,
+        state: state,
+        score: score,
+    });
+}
+
+// ── THE CASTAWAY LIFEBOAT (issue #1348 mechanism, T2 refinement) ─────────────
+//
+// The Engineering transporter's own rescue, scored as its OWN report row — never
+// folded into the head-survivors "civilians" row (#1351). The two are DIFFERENT
+// people: the head survivors exist only if the skyhook is lost and the epilogue
+// opens; these civilians can be beamed any time, independent of the head's fate,
+// so both can resolve in one run. Folding them into one id would let whichever
+// resolved last silently clobber the other's row — the double-jeopardy #1351 was
+// built to prevent, moved from double-counting into double-erasure. A separate,
+// independently-omitted row keeps both legible and the report total honest.
+//
+// Discovery requires a SCAN: `reveal_civilian_contacts` latches the contact once
+// `scan.corridor_castaway.taken` rises, so the life signs never announce before
+// the crew have looked. The Rescue-directive objective makes a Backfilled
+// Engineering seat serve the beam through the same transporter commands a human
+// sends — at base_priority 40, so a life-safety tractor Tow/Stabilise always
+// outscores it for the shared Engineering seat (the Lyra rescue in Act 2 is
+// priority 70) and the AI never robs a life-save to beam a lifeboat.
+
+on_flag_set("scan.corridor_castaway.taken", "on_castaway_discovered");
+on_flag_set("rescue.corridor_castaway.recovered", "on_castaway_recovered");
+on_flag_set("rescue.corridor_castaway.lost", "on_castaway_lost");
+
+fn on_castaway_discovered(ctx) {
+    ctx.flags.increment("castaway_discovered", 1);
+    ctx.effects.show_message(
+        "skyway_castaway_life_signs",
+        "world.falling_skyway.cue.castaway_life_signs",
+        "advisory",
+        8,
+    );
+    ctx.effects.add_objective(#{
+        id: "obj-castaway",
+        text: "world.falling_skyway.objective.castaway_rescue.text",
+        mandatory: false,
+        source: "mission",
+        base_priority: 40,
+        directive_kind: "Rescue",
+        target: "world.falling_skyway.entity.castaway_lifeboat.name",
+        targets: ["world.falling_skyway.entity.castaway_lifeboat.name"],
+    });
+}
+
+fn on_castaway_recovered(ctx) {
+    ctx.flags.increment("castaway_recovered", 1);
+    ctx.effects.complete_objective("obj-castaway");
+    ctx.effects.show_message(
+        "skyway_castaway_recovered",
+        "world.falling_skyway.cue.castaway_recovered",
+        "info",
+        8,
+    );
+    castaway_report_row(ctx);
+}
+
+fn on_castaway_lost(ctx) {
+    ctx.flags.increment("castaway_lost", 1);
+    ctx.effects.fail_objective("obj-castaway");
+    ctx.effects.show_message(
+        "skyway_castaway_lost",
+        "world.falling_skyway.cue.castaway_lost",
+        "critical",
+        8,
+    );
+    castaway_report_row(ctx);
+}
+
+// The transporter-civilians row. Its OWN id, never "civilians". Scored off the PRD
+// civilian figures: +1 per civilian recovered, -2 per one lost. Three souls aboard
+// (matches the lifeboat's authored [civilian_rescue] count), so a clean rescue is
+// +3 and losing the boat with all aboard is -6. Written at the tick the fate
+// resolves (the Lyra/civilians rule) and re-callable — writing the same id updates
+// the one row in place, so a run reports one coherent row. Omitted until a fate
+// lands: an undiscovered or never-resolved contact reports no row at all.
+fn castaway_report_row(ctx) {
+    let recovered = ctx.flags["rescue.corridor_castaway.recovered"];
+    let lost = ctx.flags["rescue.corridor_castaway.lost"];
+    if recovered + lost == 0 { return; }
+    // Three aboard — the lifeboat's authored count. [ai] Unratified; keep in step
+    // with skyway_castaway_lifeboat.toml's [civilian_rescue] count.
+    let aboard = 3;
+    let outcome = "world.falling_skyway.report.transporter_civilians.saved";
+    let state = "saved";
+    let score = aboard;
+    if recovered == 0 {
+        outcome = "world.falling_skyway.report.transporter_civilians.lost";
+        state = "lost";
+        score = -2 * aboard;
+    }
+    ctx.effects.report_row(#{
+        id: "transporter_civilians",
+        heading: "world.falling_skyway.report.transporter_civilians.heading",
+        outcome: outcome,
+        state: state,
+        score: score,
+    });
 }
 """

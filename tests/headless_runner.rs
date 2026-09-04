@@ -11900,6 +11900,12 @@ fn falling_skyway_act_2_rescue_lands_when_the_crew_start_before_the_band() {
     // draws the Lyra onto the rig, so a fixed berth keeps the whole thing out of
     // the bands rather than dragging her through them.
     let mut station: Option<bevy::prelude::Vec3> = None;
+    // The highest condition the Lyra reaches while she is still in the world. She
+    // WARPS OUT the tick her crew are recovered (the T2 refinement: saving her is
+    // getting her crew off, not saving her hull), so a live `condition_of` query
+    // after the rescue would panic on a despawned entity — the recovery is proven
+    // by the peak her arrest-decline carried her to before she left, sampled here.
+    let mut peak_lyra_condition = 0.0f32;
     for tick in 0..args.max_ticks {
         let sim_t = tick as f64 * dt;
         // Preserve the opening's protected human decision while this fixture
@@ -11954,6 +11960,15 @@ fn falling_skyway_act_2_rescue_lands_when_the_crew_start_before_the_band() {
         run(&mut app, 1);
         let sim_t = (tick + 1) as f64 * dt;
 
+        // Sample her recovery while she is still present. She despawns on rescue,
+        // so this is the only window the crossing can be read from a live query.
+        if named_entity_present(&mut app, SKYWAY_LYRA) {
+            let condition = condition_of(&mut app, SKYWAY_LYRA);
+            if condition > peak_lyra_condition {
+                peak_lyra_condition = condition;
+            }
+        }
+
         // What a completed hold LEAVES BEHIND is the recovered condition crossing
         // her own line — the flag rises off it exactly as it rose off the old
         // tow's payout, which is the only completion signal a scenario ever read.
@@ -11984,18 +11999,26 @@ fn falling_skyway_act_2_rescue_lands_when_the_crew_start_before_the_band() {
         "the rescue lands before its visible deadline ({recovered:.1} s against {clear_by} s)"
     );
     assert!(
-        condition_of(&mut app, SKYWAY_LYRA) > 50.0,
+        peak_lyra_condition > 50.0,
         "…because the tractor's arrest-decline recovered her from 30 back over her own \
          half-way line, which is what `skyway_lyra_under_control` means. The band does not \
          stop it: danger reaches the new systems as damage, not as a rate throttle, and no \
-         band sits on the beam this rescue is run inside"
+         band sits on the beam this rescue is run inside. Sampled at her peak before she \
+         warped out, since the save despawns her"
     );
 
-    // ── AC5/AC6: she is still there, and the record says so ──
+    // ── AC5/AC6: she WARPED OUT on the save, and the record says so ──
+    // The T2 refinement: saving the Lyra is getting her CREW off, and an empty
+    // hull warps out under its own power the tick the crew are recovered. The
+    // failure branch is still guarded on the recovery, not on the clock alone —
+    // the deadline that takes her when nobody tows has passed — but a crew who DID
+    // tow her leave no hull behind for a later act to destroy, which is the whole
+    // point of the change: the t614 "saved row over a destroyed hull" contradiction
+    // is gone by construction, because there is no hull to destroy after the save.
     assert!(
-        named_entity_present(&mut app, SKYWAY_LYRA),
-        "the deadline that takes her when nobody tows has passed, and she is still in the \
-         world: the failure branch is guarded on the recovery, not on the clock alone"
+        !named_entity_present(&mut app, SKYWAY_LYRA),
+        "once her crew are recovered she warps out — the deliberate scripted despawn on \
+         rescue — so she is no longer in the world to be destroyed later"
     );
     assert_eq!(
         objective_status(&app, "obj-a2-rescue"),
@@ -12015,9 +12038,15 @@ fn falling_skyway_act_2_rescue_lands_when_the_crew_start_before_the_band() {
         "exactly one of the two campaign flags is written, and it is the other one this \
          time"
     );
-    // ── Issue #1344: the rescue is the same row, the other way up ──
+    // ── Issue #1344 / T2 refinement: crew-rescued, the same row, the other way up ──
     // One row id for both fates, so a run cannot report her twice in two moods.
-    assert_lyra_report_row(&app, "world.falling_skyway.report.lyra.saved", "saved", 6);
+    // Saved is now the CREW-RESCUED outcome — the people, not the hull.
+    assert_lyra_report_row(
+        &app,
+        "world.falling_skyway.report.lyra.crew_saved",
+        "saved",
+        6,
+    );
 }
 
 /// **Issue #1135 — pre-emption memory, rescue side.** Lyra exists and is

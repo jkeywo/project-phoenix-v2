@@ -219,7 +219,11 @@ test('local save slots complete their browser lifecycle and restore only in a fr
     );
     return { parentId: join.parentElement?.id || '', overlaps };
   });
-  expect(catalogueLayout).toEqual({ parentId: 'scenario-panel', overlaps: false });
+  // The join overlay is VIEWSCREEN CHROME and lives in the viewscreen shell —
+  // server.html says so in as many words. It used to hang off #scenario-panel;
+  // the assertion that matters either way is the second half, that it does not
+  // sit on top of the saves panel.
+  expect(catalogueLayout).toEqual({ parentId: 'viewscreen-shell', overlaps: false });
 
   // The reserved internal Store key is never player-facing text.
   const autosave = catalogue.locator('[data-slot-id="autosave"] .save-slot-name');

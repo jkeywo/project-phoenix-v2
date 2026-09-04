@@ -80,6 +80,12 @@ test('power console: +/- buttons call __sendAction with correct envelopes', { ta
     battery_charge: 80.0,
     battery_max: 100.0,
     draining: false,
+    // The owning System has to be in the payload since #1287 moved these
+    // controls onto shared semantic actions: the handler resolves a
+    // control_system_id from it and REFUSES the action when it cannot, so a
+    // payload without this projection silently sends nothing at all.
+    systems: { main_reactor: {} },
+    system_families: { main_reactor: 'power' },
   };
 
   await page.evaluate((s) => window.__updateConsole('power', JSON.stringify(s)), state);

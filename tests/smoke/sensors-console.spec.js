@@ -117,6 +117,10 @@ test('sensors console: on-screen button calls __sendAction with set_view', { tag
     window.__sent = [];
     window.__sendAction = (json) => window.__sent.push(json);
   });
+  // #1287 routes this through the shared semantic action, and the handler
+  // resolves its view from console state — with no payload pushed it refuses
+  // and sends nothing at all.
+  await page.evaluate((s) => window.__updateConsole('sensors', JSON.stringify(s)), NOMINAL_STATE);
   await page.locator('ph-sensor-radar').locator('#on-screen-btn').click();
   const sent = await page.evaluate(() => window.__sent);
   expect(sent).toHaveLength(1);

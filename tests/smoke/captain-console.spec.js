@@ -91,10 +91,20 @@ test('captain console: camera-select and red alert call __sendAction with correc
     expect(Number.isFinite(envelope.__input_ms)).toBe(true);
     delete envelope.__input_ms;
   }
-  expect(sent[3].correlation).toMatch(/^[\x21-\x7e]{1,64}$/);
-  expect(sent[3].semantic_action).toBe('captain.red-alert');
-  delete sent[3].correlation;
-  delete sent[3].semantic_action;
+  // #1282 migrated the WHOLE captain surface onto shared semantic actions, so
+  // every envelope here now carries the correlation the feedback router settles
+  // on and the action id that produced it — not just Red Alert, which was the
+  // first one migrated and the only one this assertion used to strip.
+  const SEMANTIC_IDS = [
+    'captain.view', 'captain.view', 'captain.view',
+    'captain.red-alert', 'captain.weapons-hold',
+  ];
+  sent.forEach((envelope, i) => {
+    expect(envelope.correlation).toMatch(/^[\x21-\x7e]{1,64}$/);
+    expect(envelope.semantic_action).toBe(SEMANTIC_IDS[i]);
+    delete envelope.correlation;
+    delete envelope.semantic_action;
+  });
   expect(sent).toEqual([
     { action: 'set_view', console: 'captain', direction: 'Port' },
     { action: 'set_view', console: 'captain', direction: 'Starboard' },

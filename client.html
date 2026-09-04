@@ -1076,6 +1076,24 @@
       font-family: 'JetBrains Mono', monospace;
       font-size: var(--text-sm); color: var(--ink-faint);
     }
+    /* The gamepad <select> otherwise falls to the UA default, which on a dark
+       page renders the chosen device as dark text on a dark field — invisible.
+       Paint it from the panel tokens so the selection is legible, and colour
+       the drop-down list too (some engines need the option colours spelled
+       out or they inherit the OS default rather than the control's). */
+    .settings-binding-label select {
+      min-height: var(--control-hit-min); width: 100%; box-sizing: border-box;
+      border: 1px solid var(--edge); border-radius: 3px;
+      background: var(--surface-panel-up); color: var(--ink);
+      font: inherit; padding: 0.3rem 0.4rem; cursor: pointer;
+    }
+    .settings-binding-label select:focus {
+      border-color: var(--signal); outline: 2px solid var(--signal); outline-offset: 2px;
+    }
+    .settings-binding-label select:disabled { opacity: 0.6; cursor: default; }
+    .settings-binding-label select option {
+      background: var(--surface-panel-up); color: var(--ink);
+    }
     .settings-binding-capture {
       min-height: var(--control-hit-min); width: 100%; box-sizing: border-box;
       border: 1px solid var(--edge); border-radius: 3px;

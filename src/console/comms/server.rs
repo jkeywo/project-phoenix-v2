@@ -12,9 +12,7 @@ use crate::core::messages::{CommsBlackboard, ObjectiveSnapshot, SystemBlackboard
 use crate::world::server::{ObjectiveManagerRes, WorldContentRuntime};
 
 use crate::comms::content::ActiveDialogue;
-use crate::comms::server::{
-    current_sender_in_range, CommsChannel2Event, CommsInboxRes, CommsRuntime, OnScreenMessage,
-};
+use crate::comms::server::{CommsChannel2Event, CommsInboxRes, CommsRuntime, OnScreenMessage};
 use crate::core::messages::{CommsMessage, GamePhase};
 use crate::entities::spawner::EntityUuid;
 use crate::world::content::WorldEvent;
@@ -77,7 +75,7 @@ impl Plugin for CommsConsolePlugin {
                 // coin-flip.
                 // `.after(handle_hail)` closes the last unordered pair: without
                 // it these two conflict on `CommsRuntime`, `WorldContentRuntime`
-                // and the LocalShip's `AdmittedCommands` with no edge between
+                // and the player hulls' `AdmittedCommands` with no edge between
                 // them, so the documented order was not actually total. No
                 // cycle — `handle_hail` already precedes
                 // `handle_respond_to_message`.
@@ -311,6 +309,12 @@ pub(crate) struct CommsRespondAux<'w> {
     id_mint: Option<Res<'w, crate::world_id::WorldIdMint>>,
     balance_events:
         Option<ResMut<'w, bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>>,
+    /// The mission-timeline ledger (issue #1338). Bundled here for the same
+    /// reason `balance_events` is — the system is at Bevy's argument limit —
+    /// and `Option` for the same reason too: a bare-`App` fixture that never
+    /// registered the narrative message writes nothing rather than panicking.
+    narrative_events:
+        Option<ResMut<'w, bevy::ecs::message::Messages<crate::core::narrative::NarrativeEvent>>>,
     /// The Rhai runtime a scripted thread's `on_pick` fn runs on, plus the tick
     /// its deferred work is stamped against (issue #984). Bundled here rather
     /// than added as system params because the system is already at Bevy's
@@ -323,23 +327,99 @@ pub(crate) struct CommsRespondAux<'w> {
     time: Option<Res<'w, bevy::time::Time>>,
 }
 
+/// One hull's answering context for this tick — everything the router needs
+/// about the ship a `RespondToMessage` was admitted on, resolved once before the
+/// submissions are walked.
+///
+/// Exists because the walk is fleet-wide (see [`handle_respond_to_message`]) and
+/// the two things it used to read off "the local ship" — the narrative actor and
+/// the rejection channel — are per-hull facts, not per-tick ones.
+struct RespondingHull<'a> {
+    /// The hull's own uuid: the narrative SOURCE of every beat it answers
+    /// (issue #1338). `Option` because a bare-`App` fixture can put
+    /// `AdmittedCommands` on a hull with no `EntityUuid`.
+    uuid: Option<&'a EntityUuid>,
+    /// Which host flies this hull — the key its comms-range reading is taken
+    /// under (issue #1343). The server-side range gate below asks "can THIS hull
+    /// reach the sender", a question every host answers identically for every
+    /// slot; asking it of `CommsRuntime::range_flags` instead would answer it
+    /// from the hull this host projects, so a peer's crew's answer would be
+    /// admitted here and refused there. `None` only for a bare-`App` fixture
+    /// hull with no [`crate::lockstep::FleetSlotOf`].
+    slot: Option<crate::command_admission::HostSlot>,
+    /// The Comms seat this hull actually resolved, or `None` when it resolved
+    /// none — never a string-cast of the system id (AGENTS.md rule 6).
+    station: Option<crate::core::messages::StationId>,
+    /// The session token a refusal flashes red at, and the ONE thing here that
+    /// is deliberately local-only: `Sessions` is this host's own table, so a
+    /// peer's hull has no holder here and asking for one would address the
+    /// refusal at whoever sits in the same-named seat on THIS bridge. `None`
+    /// for a peer's hull, which simply gets no client feedback on this machine —
+    /// a presentation channel, folded into nothing.
+    token: Option<String>,
+    admitted: &'a crate::core::messages::AdmittedCommands,
+}
+
 /// Handle `RespondToMessage { message_id, response_index }` from Comms holders.
 ///
 /// Calls the picked response's `on_pick` fn, applies the effects it buffered,
 /// records the choice on the inbox message, and advances the dialogue to the
 /// follow-up node the fn returned (if any).
+///
+/// # Why it drains EVERY fleet hull, not just this host's (issue #1343)
+///
+/// This ran `With<LocalShip>` until #1343, on the reasoning that a peer's hull
+/// is answered by the peer and replicated here. That is true of a human press
+/// and false of an AI one, and the difference is not a detail:
+/// [`crate::lockstep::frame`] states that a `MeshCommand` deliberately carries no
+/// AI emission, and
+/// [`emit_ai_command`](crate::command_admission::ai_emit::emit_ai_command) pushes
+/// into `AdmittedCommands` without ever building a `LoggedCommand` to replicate.
+/// So a Backfill `RespondToMessage` never crosses the wire, and a
+/// `With<LocalShip>` drain applied only the hull this host happens to project —
+/// which with #1343's weighted picker is a DIFFERENT index per hull, and so a
+/// straight cross-host disagreement about `selected_response`, about whatever the
+/// `on_pick` wrote, and about which dialogue got retired.
+///
+/// The drain is therefore fleet-wide, and nothing is applied twice by it:
+///
+/// * an **AI** answer is emitted on every host by
+///   [`operate_comms_response_ai`] and reaches exactly one `AdmittedCommands`
+///   per host, so draining every hull applies it once per host — the doctrine
+///   `lockstep::frame` states, that every host derives every NPC from the same
+///   ticks and the same RNG streams; and
+/// * a **human** press keeps the replicated path it already had. It lands in its
+///   own ship's `AdmittedCommands` on the admitting host and, via
+///   `lockstep::apply_mesh_inbox`, in that same ship's queue on each peer —
+///   never twice on one host, because a host does not replay its own staged
+///   frames.
+///
+/// Hulls are walked in fleet-slot order (uuid as the tiebreak for a slotless
+/// fixture hull) rather than archetype order, because the `on_pick` effects two
+/// hulls answer with in one tick mint ids and write flags in the order they run.
 pub(crate) fn handle_respond_to_message(
     ship_query: Query<
         (
             &crate::core::messages::AdmittedCommands,
+            // The host-neutral fleet identity, and the sort key below. `Option`
+            // for the bare-`App` fixtures that spawn a bridge without a roster.
+            Option<&crate::lockstep::FleetSlotOf>,
+            // Whether THIS host projects this hull to its own crew. Reaches the
+            // rejection channel and nothing else — see `RespondingHull::token`.
+            bevy::ecs::query::Has<crate::server_app::LocalShip>,
             // The comms rejection channel is addressed to whoever is HOSTING
             // the comms system (issue #984), which on the destroyer is the
             // Tactical seat and on the courier the Captain's — resolved, never
             // string-cast from the system id.
             Option<&crate::ship_plugin::ShipConfigComponent>,
             Option<&crate::ship_plugin::HumanSeekingHosts>,
+            // The answering side of a Comms beat (issue #1338): a
+            // `comms_answered` event is produced by THIS crew, so this hull is
+            // its narrative source. `Option` because a bare-`App` fixture can
+            // put `AdmittedCommands` on a hull with no `EntityUuid`.
+            Option<&EntityUuid>,
         ),
-        With<crate::server_app::LocalShip>,
+        With<crate::server_app::Ship>,
     >,
     mut runtime: ResMut<WorldContentRuntime>,
     mut comms: ResMut<CommsRuntime>,
@@ -370,58 +450,111 @@ pub(crate) fn handle_respond_to_message(
     // the same sinks the trigger/callback paths use.
     mut effect_queues: EffectQueues,
 ) {
-    let Some((admitted, ship_config, seeking_hosts)) = ship_query.iter().next() else {
-        return;
-    };
-    // Resolve the submitting comms token once per tick: the rejection channel
-    // (issue #761) targets whoever currently holds the Comms console — the
-    // station `station_for_system` resolves for the comms SYSTEM, which is the
-    // sought human-seeking host when there is one and the hull's authored
+    // The fleet, in slot order. Sorted rather than walked in query order for the
+    // reason `operate_comms_response_ai` sorts: archetype order is an allocation
+    // detail, and two hulls answering in one tick run their `on_pick` effects —
+    // id mints, flag writes, spawns — in whatever order this walk chooses.
+    let mut fleet: Vec<_> = ship_query.iter().collect();
+    // `sort_by` over borrowed keys rather than `sort_by_key`: the uuid tiebreak
+    // is a `String`, and a key function returning one clones it on every
+    // comparison, every tick, for a value the sort only ever compares.
+    fleet.sort_by(
+        |(_, a_slot, _, _, _, a_uuid), (_, b_slot, _, _, _, b_uuid)| {
+            a_slot.map(|s| s.0).cmp(&b_slot.map(|s| s.0)).then_with(|| {
+                a_uuid
+                    .map(|u| u.0.as_str())
+                    .cmp(&b_uuid.map(|u| u.0.as_str()))
+            })
+        },
+    );
+    // Resolve each hull's comms seat and rejection channel once: the channel
+    // (issue #761) targets whoever currently holds THAT hull's Comms console —
+    // the station `station_for_system` resolves for the comms SYSTEM, which is
+    // the sought human-seeking host when there is one and the hull's authored
     // station otherwise.
-    let comms_station = ship_config
-        .and_then(|c| {
-            crate::command_admission::station_for_system(
-                &c.0,
-                seeking_hosts,
-                &crate::ship::system_registry::comms_system_id(),
-            )
+    //
+    // `station` is kept as an `Option` alongside the fallback because the
+    // narrative source below (issue #1338) may only name a station the hull
+    // ACTUALLY resolved: the `unwrap_or_else` arm is a string-cast of the system
+    // id, good enough to address a rejection at, and a lie if the timeline
+    // records it as the seat the crew answered from (AGENTS.md rule 6 — never
+    // string-cast a station).
+    let hulls: Vec<RespondingHull<'_>> = fleet
+        .into_iter()
+        .map(
+            |(admitted, slot, is_local, ship_config, seeking_hosts, uuid)| {
+                let station = ship_config.and_then(|c| {
+                    crate::command_admission::station_for_system(
+                        &c.0,
+                        seeking_hosts,
+                        &crate::ship::system_registry::comms_system_id(),
+                    )
+                });
+                let comms_station = station.clone().unwrap_or_else(|| {
+                    crate::core::messages::StationId(
+                        crate::ship::system_registry::COMMS_SYSTEM_ID.into(),
+                    )
+                });
+                let token = is_local
+                    .then(|| aux.sessions.0.holder_for_station(&comms_station))
+                    .flatten()
+                    .map(|t| t.to_string());
+                RespondingHull {
+                    uuid,
+                    slot: slot.map(|s| s.0),
+                    station,
+                    token,
+                    admitted,
+                }
+            },
+        )
+        .collect();
+    // Every Comms submission in the fleet this tick: hull by hull in slot order,
+    // and within a hull in the order admission queued them.
+    let submissions: Vec<(
+        &RespondingHull<'_>,
+        &crate::core::messages::AdmittedCommand,
+        &String,
+        &usize,
+    )> = hulls
+        .iter()
+        .flat_map(|hull| {
+            hull.admitted
+                .for_target(crate::ship::system_registry::COMMS_SYSTEM_ID)
+                .filter_map(move |cmd| match &cmd.payload {
+                    crate::core::messages::SystemControlPayload::RespondToMessage {
+                        message_id,
+                        response_index,
+                    } => Some((hull, cmd, message_id, response_index)),
+                    _ => None,
+                })
         })
-        .unwrap_or_else(|| {
-            crate::core::messages::StationId(crate::ship::system_registry::COMMS_SYSTEM_ID.into())
-        });
-    let comms_token = aux
-        .sessions
-        .0
-        .holder_for_station(&comms_station)
-        .map(|t| t.to_string());
-    // Helper: push a `CommsResponseRejected` for the attempted control so the
-    // client can flash it red. A no-op when no comms holder is seated.
-    let reject = |outbox: &mut crate::server_app::SimOutbox,
-                  cmd: &crate::core::messages::AdmittedCommand,
-                  message_id: &str,
-                  idx: usize| {
-        if let Some(token) = comms_token.as_deref() {
-            outbox.push_reliable((
-                crate::lobby::Target::Token(token.to_string()),
-                crate::core::messages::ServerMessage::CommsResponseRejected {
-                    message_id: message_id.to_string(),
-                    response_index: idx,
-                },
-            ));
-        }
-        finish_action_feedback(
-            cmd,
-            outbox,
-            crate::core::messages::ActionFeedbackOutcome::Refused,
-        );
-    };
-    for cmd in admitted.for_target(crate::ship::system_registry::COMMS_SYSTEM_ID) {
-        let (message_id, response_index) = match &cmd.payload {
-            crate::core::messages::SystemControlPayload::RespondToMessage {
-                message_id,
-                response_index,
-            } => (message_id, response_index),
-            _ => continue,
+        .collect();
+
+    for (hull, cmd, message_id, response_index) in submissions {
+        // Helper: push a `CommsResponseRejected` for the attempted control so the
+        // client can flash it red. A no-op when no comms holder is seated here.
+        // Also closes the correlated action-feedback loop (issue #761) as
+        // `Refused`, addressed to whoever submitted THIS command via its own
+        // `response_token` — independent of the per-hull rejection channel above.
+        let reject = |outbox: &mut crate::server_app::SimOutbox,
+                      cmd: &crate::core::messages::AdmittedCommand,
+                      message_id: &str,
+                      idx: usize| {
+            if let Some(token) = hull.token.as_deref() {
+                outbox.push_reliable((
+                    crate::lobby::Target::Token(token.to_string()),
+                    crate::core::messages::ServerMessage::CommsResponseRejected {
+                        message_id: message_id.to_string(),
+                        response_index: idx,
+                    },
+                ));
+            }
+            finish_action_feedback(
+                cmd,
+                outbox,
+                crate::core::messages::ActionFeedbackOutcome::Refused,
+            );
         };
 
         // Look up active dialogue for this message.
@@ -436,18 +569,25 @@ pub(crate) fn handle_respond_to_message(
             }
         };
 
-        // Server-side range gate: if range tracking is active, the sender
-        // of this message must currently be in range. Out-of-range responses
-        // are rejected (issue #761): forced/stale submissions on a greyed
-        // response are refused and the attempted control flashes red.
+        // Server-side range gate: if range tracking is active, the sender of
+        // this message must currently be in range OF THE HULL ANSWERING IT.
+        // Out-of-range responses are rejected (issue #761): forced/stale
+        // submissions on a greyed response are refused and the attempted control
+        // flashes red.
+        //
+        // Per-hull since #1343, and it had to become so the moment this drain
+        // went fleet-wide: `range_flags` measures from `LocalShip`, so a peer
+        // crew's reply — replicated here, or emitted here for their Backfill —
+        // was gated on whether OUR ship could hear their sender. Two hosts then
+        // disagree about whether the same reply was admitted, which splits
+        // `selected_response`, the `on_pick`'s writes and the retired dialogue.
+        // `sender_in_range_for_slot` asks the same question of the hull that is
+        // actually answering, which every host answers identically.
         if comms.range_active {
             let sender_uuid = inbox.0.sender_uuid_for(message_id).unwrap_or_default();
-            match comms.range_flags.get(&sender_uuid).copied() {
-                Some(true) => {}
-                _ => {
-                    reject(&mut aux.outbox, cmd, message_id, *response_index);
-                    continue;
-                }
+            if !crate::comms::server::slot_may_answer_sender(&comms, hull.slot, &sender_uuid) {
+                reject(&mut aux.outbox, cmd, message_id, *response_index);
+                continue;
             }
         }
 
@@ -715,6 +855,49 @@ pub(crate) fn handle_respond_to_message(
         // Record the chosen response on the inbox message (the tail both
         // arms share).
         inbox.0.record_response(message_id, *response_index);
+        // The mission timeline's Comms-choice beat (issue #1338), taken at this
+        // one chokepoint — past every refusal above, so the timeline records
+        // only answers that actually landed, and shared by human and AI alike
+        // because `operate_comms_response_ai` submits the same admitted
+        // `RespondToMessage` a console does.
+        //
+        // The event's DIRECTION is the crew's, not the hailer's. `source` is
+        // "who produced it" and this beat was produced by this ship, at this
+        // station, on the comms system — the one narrative kind whose actor is a
+        // station-side decision, and so the one place `NarrativeActor`'s
+        // station/system axes carry anything. `target` is the hailing entity,
+        // which is `comms_opened`'s `source`: opened-source == answered-target
+        // is what lets an analysis read the pair as one exchange without
+        // crediting the counterparty with the crew's choice.
+        //
+        // Each axis is named only when it is actually known: no `EntityUuid` on
+        // the answering hull (a bare fixture) leaves `entity` null, and a station
+        // that `station_for_system` could not resolve leaves `station` null
+        // rather than recording the system id cast to a station.
+        if let Some(msgs) = aux.narrative_events.as_deref_mut() {
+            let mut event = crate::core::narrative::NarrativeEvent::new(
+                crate::core::narrative::NarrativeKind::CommsAnswered,
+                dialogue.thread_id.clone(),
+            )
+            .from_actor(crate::core::narrative::NarrativeActor {
+                entity: hull.uuid.map(|uuid| uuid.0.clone()),
+                station: hull.station.as_ref().map(|s| s.0.clone()),
+                system: Some(crate::ship::system_registry::COMMS_SYSTEM_ID.to_string()),
+            })
+            .text("message_id", message_id.clone())
+            .detail(
+                "response_index",
+                crate::core::narrative::NarrativeValue::Int(*response_index as i64),
+            )
+            // The `on_pick` fn name is the author's own identifier for the
+            // branch the crew took — the closest thing a scripted thread has to
+            // a semantic id for a choice.
+            .text("on_pick", on_pick_fn.clone());
+            if let Some(sender) = &sender_uuid {
+                event = event.to_target(sender.clone());
+            }
+            msgs.write(event);
+        }
         // Issue #984 finding 9: retire the answered node's dialogue entry so a
         // duplicate submission on the same message id cannot re-run `on_pick` —
         // which for a spawning or objective-mutating response would apply its
@@ -744,7 +927,16 @@ pub(crate) fn handle_respond_to_message(
                 aux.id_mint.as_deref(),
                 crate::world_id::IdNamespace::Message,
             );
-            let available = current_sender_in_range(&comms, &sender_uuid);
+            // The FLEET's reading, not this host's (issue #1343). The stamp is
+            // stored on the message for its whole life and `sim_digest` folds
+            // both it and the per-response `available` it drives, so measuring
+            // it from `LocalShip` writes a folded field two peers disagree
+            // about the moment their hulls are not equidistant from the sender.
+            // The inbox is one resource for the whole fleet, so "someone aboard
+            // can hear them" is the reading that matches what it describes; the
+            // per-hull gates above and in `operate_comms_response_ai` are what
+            // keep a hull that CANNOT reach the sender from answering.
+            let available = crate::comms::server::sender_in_range_for_fleet(&comms, &sender_uuid);
             let new_responses =
                 crate::comms::content::response_views(&wire_node.responses, available);
             let new_msg = CommsMessage::injected(
@@ -773,6 +965,10 @@ pub(crate) fn handle_respond_to_message(
                 },
             );
         }
+        // The pick was applied (issue #761): close the correlated action-feedback
+        // loop as `Applied`, addressed to this command's own submitter. Reached
+        // only on the fall-through success path — every refusal above `continue`s
+        // through `reject`, which reports `Refused` instead.
         finish_action_feedback(
             cmd,
             &mut aux.outbox,
@@ -824,16 +1020,33 @@ pub(crate) fn handle_respond_to_message(
 /// ever mutates or resurrects a cleared entry, so there is nothing to cancel
 /// and nothing selective to preserve — a full clear and a "prune only the
 /// entries with no pending effect" clear are the same operation here.
+///
+/// # Why it drains EVERY fleet hull (issue #1343's input audit)
+///
+/// It ran `With<LocalShip>` until the audit, which is the same hole
+/// [`handle_respond_to_message`] had and for a sharper reason: what this writes
+/// — the inbox, `active_dialogues`, `open_hails` — is folded by
+/// `sim_digest::fold_comms_scope`, and the inbox is ONE resource for the whole
+/// fleet. A human officer's `ClearComms` on a peer's bridge is a replicated
+/// command: it lands in THAT hull's `AdmittedCommands` on every host
+/// (`lockstep::apply_mesh_inbox` applies by `ShipKey`), so a drain that read
+/// only the hull this host projects applied the clear on the admitting host and
+/// nowhere else — two peers then disagree about the whole comms scope from that
+/// tick.
+///
+/// Order needs no tiebreak here, unlike the response drain: clearing is
+/// idempotent, mints no ids and writes no flags, so two hulls clearing on one
+/// tick reach the same state in either order.
 pub(crate) fn handle_clear_comms(
-    ship_query: Query<&crate::core::messages::AdmittedCommands, With<crate::server_app::LocalShip>>,
+    ship_query: Query<&crate::core::messages::AdmittedCommands, With<crate::server_app::Ship>>,
     mut inbox: ResMut<CommsInboxRes>,
     mut comms: ResMut<CommsRuntime>,
     mut outbox: Option<ResMut<crate::server_app::SimOutbox>>,
 ) {
-    let Some(admitted) = ship_query.iter().next() else {
-        return;
-    };
-    for cmd in admitted.for_target(crate::ship::system_registry::COMMS_SYSTEM_ID) {
+    for cmd in ship_query
+        .iter()
+        .flat_map(|admitted| admitted.for_target(crate::ship::system_registry::COMMS_SYSTEM_ID))
+    {
         if matches!(
             cmd.payload,
             crate::core::messages::SystemControlPayload::ClearComms
@@ -948,10 +1161,27 @@ pub(crate) fn handle_show_on_screen(
 /// `RespondToMessage` for the SAME router a human's response traverses, so
 /// actions fire and follow-ups advance identically for both. This system no
 /// longer reads `ShipSystemControlSources` at all.
+///
+/// # The narrative tap (issue #1338)
+///
+/// This is the ONE place a comms message actually reaches the crew, whichever
+/// path authored it — a declarative `[[comms]]` template, a scripted
+/// `ctx.effects.open_comms(..)` thread, or a follow-up node advancing — so it is
+/// where `NarrativeKind::CommsOpened` is emitted. Emitted *after* the delivery
+/// gate above, deliberately: a message whose dialogue was retired before it
+/// landed never reached anybody, and the mission timeline must not claim a
+/// channel opened that the crew never saw.
 pub(crate) fn handle_comms_channel2(
     mut reader: MessageReader<CommsChannel2Event>,
     mut inbox: ResMut<CommsInboxRes>,
     comms: Res<CommsRuntime>,
+    // `Option<ResMut<Messages<_>>>` rather than a `MessageWriter`, matching the
+    // balance ledger's own shape: a bare-`App` fixture that runs this system
+    // without registering the narrative message gets `None` and writes nothing,
+    // instead of panicking on a missing resource.
+    mut narrative: Option<
+        ResMut<bevy::ecs::message::Messages<crate::core::narrative::NarrativeEvent>>,
+    >,
 ) {
     for ev in reader.read() {
         if ev.delivery == crate::comms::server::CommsChannel2Delivery::ScriptedDialogue
@@ -963,6 +1193,37 @@ pub(crate) fn handle_comms_channel2(
             // Messages buffer, which would mint new IDs and replay survivors to
             // readers that already consumed them.
             continue;
+        }
+        // The thread is the story's unit — an initial hail and its follow-ups
+        // share one `thread_id` — so it is the event's identity. A message with
+        // no thread is its own thread, the same fallback the client uses.
+        if let Some(msgs) = narrative.as_deref_mut() {
+            let thread_id = if ev.message.thread_id.is_empty() {
+                ev.message.id.clone()
+            } else {
+                ev.message.thread_id.clone()
+            };
+            msgs.write(
+                crate::core::narrative::NarrativeEvent::new(
+                    crate::core::narrative::NarrativeKind::CommsOpened,
+                    thread_id,
+                )
+                .from_actor(crate::core::narrative::NarrativeActor::entity(
+                    ev.message.sender_uuid.clone(),
+                ))
+                // `body` is the message's `strings.csv` id, carried verbatim —
+                // the rendered English never enters the timeline.
+                .text("body", ev.message.body.clone())
+                .text("message_id", ev.message.id.clone())
+                .detail(
+                    "responses",
+                    crate::core::narrative::NarrativeValue::Int(ev.message.responses.len() as i64),
+                )
+                .detail(
+                    "urgent",
+                    crate::core::narrative::NarrativeValue::Flag(ev.message.is_urgent),
+                ),
+            );
         }
         inbox.0.inject(ev.message.clone());
     }
@@ -1050,8 +1311,10 @@ pub struct CommsResponseAiCadence(pub u32);
 ///   * `server_app::spawn_game_start_entities` — the PLAYER ship, which never
 ///     goes through the spawner at all.
 ///
-/// Both `operate_comms_ai` and `operate_comms_response_ai` are filtered
-/// `With<LocalShip>`, i.e. they run ONLY on the player ship, so the second call
+/// `operate_comms_ai` is filtered `With<LocalShip>` and
+/// [`operate_comms_response_ai`] `With<FleetSlotOf>` (issue #1343 — see its own
+/// docs for why a folded schedule may not be gated on the local marker); either
+/// way both run only on PLAYER hulls, so the second call
 /// site is the one that actually matters: without it `[comms_console]` parses,
 /// validates, and is then silently ignored because the host's tick-local
 /// canonical default always wins — and `self_fact/fact(power_rating)` is
@@ -1369,23 +1632,32 @@ pub struct CommsAiContext<'w> {
     log: Option<Res<'w, crate::logging::LogFilterConfig>>,
 }
 
-/// The read-only comms context `operate_comms_response_ai` reads besides the
+/// The comms context `operate_comms_response_ai` reads besides the
 /// [`crate::ai::host::AiHostEnv`], bundled as one `SystemParam` (issue #1185):
 /// the comms runtime, the inbox, the session table, the log filter, and the
 /// shared AI base cadence (raw tick + interval).
 ///
-/// A signature grouping only — every field keeps its type and `Option` fallback
-/// (`comms` here is a plain `Res`, unlike [`CommsAiContext`]'s `ResMut`), so the
-/// access set is byte-for-byte unchanged; the system destructures it back to its
-/// original locals at entry.
+/// `comms` became a `ResMut` in issue #1343, joining [`CommsAiContext`]'s: the
+/// weighted picker's running waits (`CommsRuntime::pending_ai_responses`) are
+/// authoritative comms state and this host is their only writer. The ordering
+/// that made the old shared borrow safe is unchanged and already total — the
+/// console plugin pins this system `.after(operate_comms_ai).after(handle_hail)`
+/// and `.before(handle_respond_to_message)` — so the upgrade adds no unordered
+/// pair. The world config joins for one read, `[global] sim_tick_hz`, which is
+/// what turns an authored delay in seconds into an absolute due tick; `sim_rng`
+/// is the seeded stream the weighted draw comes off, `Option` like every other
+/// simulation system's (a bare `Res` fails parameter validation in every
+/// bare-`App` fixture in the crate).
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct CommsResponseContext<'w> {
-    comms: Option<Res<'w, CommsRuntime>>,
+    comms: Option<ResMut<'w, CommsRuntime>>,
     inbox: Option<Res<'w, CommsInboxRes>>,
     sessions: Res<'w, crate::lobby::Sessions>,
     log: Option<Res<'w, crate::logging::LogFilterConfig>>,
     tick: Option<Res<'w, crate::sim_tick::SimTick>>,
     base_interval: Option<Res<'w, crate::ai::cadence::AiBaseInterval>>,
+    world_config: Option<Res<'w, crate::world::config::WorldConfig>>,
+    sim_rng: Option<Res<'w, crate::sim_rng::SimRng>>,
 }
 
 /// Backfill Comms AI: rank and issue hails through the AUTHORED selector
@@ -1816,6 +2088,86 @@ pub fn operate_comms_ai(
 /// The policy itself is stateless, so there is nothing to reset when control
 /// flips between human and AI.
 ///
+/// # Two mechanisms, one switch (issue #1343)
+///
+/// The policy above answers by authored INDEX, and every shipped hull authors
+/// index 0. That is right for a hail acknowledgement and wrong for a decision,
+/// because the option a human reaches for while they think — "stand by" — is the
+/// one an author puts first. A node whose responses carry
+/// [`CommsResponseAi`](crate::comms::content::CommsResponseAi) metadata is
+/// therefore decided by the WEIGHTED picker instead: the console waits the
+/// authored number of simulation seconds and then draws among the options that
+/// carry a positive weight. [`node_authors_ai_choice`] is the whole switch, and
+/// it is exclusive in both directions — a weighted node never consults the
+/// policy, and a node with no weights never touches the RNG stream, so no
+/// existing world's seeded sequence moves.
+///
+/// The wait itself is [`CommsRuntime::pending_ai_responses`], armed here and
+/// retired here, and the retirement is the interesting half. Every entry not
+/// re-armed on a pass is dropped, which is what makes the cancellations fall out
+/// of one rule rather than four hand-written hooks: a conversation that closed
+/// (answered, or its dialogue retired) is no longer walked, a human taking the
+/// console fails the Control-Source gate, a sender leaving comms range empties
+/// the pool, and a reprice supersedes the old message in its thread. The one
+/// cancellation that needs its own term is a node whose OPTIONS moved under a
+/// running wait: the record carries a fingerprint of the set it was armed
+/// against, and a fingerprint that no longer matches re-arms rather than
+/// answering a screen that has been repriced.
+///
+/// # Every host decides — and answers — for the whole fleet (issues #1116/#1343)
+///
+/// This host used to run `With<LocalShip>`. It cannot, now that it writes
+/// [`CommsRuntime::pending_ai_responses`] and draws from
+/// [`SimStream::CommsBackfillChoice`](crate::sim_rng::SimStream::CommsBackfillChoice):
+/// both are folded into the authoritative digest, and `LocalShip` is a
+/// DIFFERENT hull on each host of a fleet, so a schedule (or an RNG position)
+/// derived from it is a value two peers disagree about from the tick it is
+/// written. `server_app::components::LocalShip` states that rule and
+/// `tests/local_ship_neutrality.rs` enforces it.
+///
+/// So the walk runs over the whole frozen fleet — every
+/// [`FleetSlotOf`](crate::lockstep::FleetSlotOf) hull, in SLOT order rather than
+/// archetype order — and every host therefore arms the same waits and takes the
+/// same draws in the same sequence.
+///
+/// The EMISSION is fleet-wide for the same reason, and this is the half #1343
+/// got wrong at first. A host cannot leave a peer's hull to be answered "by the
+/// peer and replicated here": an admitted AI command is never logged, so it never
+/// crosses the mesh at all — [`crate::lockstep::frame`] says so in as many words
+/// ("Any AI emission … an AI decision never crosses one"), and
+/// [`emit_ai_command`](crate::command_admission::ai_emit::emit_ai_command) pushes
+/// straight into `AdmittedCommands` without ever building a `LoggedCommand`. A
+/// host that emitted only for its own hull would therefore apply only its own
+/// hull's pick, and with a WEIGHTED pool the picks differ per hull — which is a
+/// divergence in `selected_response`, in whatever the `on_pick` wrote, and in the
+/// retired dialogue. Every host consequently emits every hull's answer, which is
+/// the doctrine every other NPC AI host already follows: *every host derives every
+/// NPC from the same ticks and the same RNG streams*. There is no double-apply,
+/// because there is no second copy to apply — the human path, which DOES
+/// replicate, still reaches exactly one `AdmittedCommands` per host.
+///
+/// The pass is nonetheless in two halves: one read-only sweep that decides for
+/// every hull (it borrows the whole fleet at once), then one mutable sweep that
+/// submits, per hull, in the order the first sweep decided. A hull that sits out
+/// its own `evaluate_every_ticks` does not thereby cancel its waits — its existing
+/// entries are carried forward untouched, which is what keeps two hulls on
+/// different cadences from wiping each other's schedules.
+///
+/// Every INPUT to that walk has to clear the same bar, which is the half a
+/// fleet-wide query does not buy on its own: reachability was still being read
+/// from [`CommsRuntime::range_flags`](crate::comms::server::CommsRuntime::range_flags),
+/// whose only writer measures from `LocalShip`. It reaches folded state three
+/// ways — an unreachable sender empties the pool, so no wait is carried into
+/// `pending_ai_responses`; it folds into the `response_set_fingerprint` the wait
+/// is armed against; and it decides whether the `CommsBackfillChoice` draw is
+/// taken at all — so a two-hull fleet answering a sender only one hull could
+/// hear diverged on all three. The sweep reads
+/// [`sender_in_range_for_slot`](crate::comms::server::sender_in_range_for_slot)
+/// against the hull being decided instead, which every host computes identically
+/// for every slot. The other inputs were audited alongside it and are listed in
+/// `pasm/spec/architecture/comms.yaml` under `comms-ai-operator`; nothing else
+/// here is `LocalShip`-gated or read from `ShipClientConfigResource`.
+///
 /// # AC4 — read-only scenario state
 ///
 /// Same structural guarantee as [`operate_comms_ai`]: `WorldContentRuntime` is a
@@ -1832,29 +2184,32 @@ pub fn operate_comms_response_ai(
     // cadence (tick + interval) bundled as one `SystemParam` (issue #1185). See
     // [`CommsResponseContext`].
     context: CommsResponseContext,
-    mut ships: Query<
-        (
-            Entity,
-            Option<&EntityUuid>,
-            &ShipSystemControlSources,
-            Option<&crate::ship_plugin::ShipConfigComponent>,
-            &mut crate::core::messages::AdmittedCommands,
-            Option<&crate::ship::state::ShipRedAlert>,
-            Option<&crate::entities::spawner::EntitySystemHull>,
-            Option<&CommsResponseAiPolicy>,
-            Option<&CommsResponseAiCadence>,
-            // The authored ship `power_rating` lives on the CO-LOCATED selector
-            // component (both are inserted on the same entity at spawn), so it
-            // is read from there rather than left permanently absent — the #779
-            // empty-facts lesson: a fact an authored guard can name must carry a
-            // real value in production, or `fact(power_rating) > 3` silently
-            // never fires.
-            Option<&CommsTargetSelector>,
-        ),
-        With<crate::server_app::LocalShip>,
-    >,
+    // EVERY hull the frozen roster put in the world (`&FleetSlotOf` is the
+    // filter as well as the sort key), never `With<LocalShip>` — see the "Every
+    // host decides — and answers — for the whole fleet" section above. The
+    // marker is absent from this query on purpose: nothing this system does,
+    // decision or emission, is allowed to depend on which hull the host projects.
+    mut ships: Query<(
+        Entity,
+        Option<&EntityUuid>,
+        &crate::lockstep::FleetSlotOf,
+        &ShipSystemControlSources,
+        Option<&crate::ship_plugin::ShipConfigComponent>,
+        &mut crate::core::messages::AdmittedCommands,
+        Option<&crate::ship::state::ShipRedAlert>,
+        Option<&crate::entities::spawner::EntitySystemHull>,
+        Option<&CommsResponseAiPolicy>,
+        Option<&CommsResponseAiCadence>,
+        // The authored ship `power_rating` lives on the CO-LOCATED selector
+        // component (both are inserted on the same entity at spawn), so it
+        // is read from there rather than left permanently absent — the #779
+        // empty-facts lesson: a fact an authored guard can name must carry a
+        // real value in production, or `fact(power_rating) > 3` silently
+        // never fires.
+        Option<&CommsTargetSelector>,
+    )>,
 ) {
-    // Restore the pre-#1185 locals so the body below is byte-for-byte unchanged.
+    // Restore the pre-#1185 locals so the policy body below reads as it did.
     let CommsResponseContext {
         comms,
         inbox,
@@ -1862,27 +2217,73 @@ pub fn operate_comms_response_ai(
         log,
         tick,
         base_interval,
+        world_config,
+        sim_rng,
     } = context;
 
-    let (Some(comms), Some(inbox)) = (comms.as_deref(), inbox.as_deref()) else {
+    let (Some(mut comms_res), Some(inbox)) = (comms, inbox) else {
         return;
     };
+    let inbox = &*inbox;
     let tick = tick.map(|t| t.0).unwrap_or(0);
     let base_interval = base_interval.map(|b| b.0).unwrap_or(1);
+    // The authored fixed-step rate an `ai_delay_seconds` is converted against
+    // (issue #1343). The same read `handle_respond_to_message` makes to build its
+    // `SchedClock`, and the same fallback: a fixture with no world loaded runs at
+    // the canonical rate rather than dividing by nothing.
+    let tick_hz = world_config
+        .as_ref()
+        .map(|wc| wc.global.sim_tick_hz)
+        .unwrap_or(crate::world::script::schedule::SchedClock::ZERO.tick_hz);
 
+    // The waits that survive this pass. Every entry the pass does not re-arm is
+    // CANCELLED by being left out of it — see the system docs for why the four
+    // authored cancellation cases all reduce to that one rule.
+    let mut pending_next: std::collections::BTreeMap<
+        crate::comms::server::PendingAiResponseKey,
+        crate::comms::server::PendingAiResponse,
+    > = std::collections::BTreeMap::new();
+    // Whether the frozen fleet is in the world at all this tick. A pass that saw
+    // NO hull must not be mistaken for one that cancelled everything — a
+    // snapshot restore re-establishes this map a tick before it re-spawns the
+    // hulls, and a world that has not reached `game_start` has none yet. Fleet
+    // POPULATION is host-neutral (every host spawns a hull per roster slot), so
+    // this guard is not a `LocalShip` reading in disguise.
+    let mut fleet_seen = false;
+    // The FLEET's answers, in the order the pass decided them (roster order, then
+    // inbox order). Emission is deferred to a second sweep because the decision
+    // sweep is read-only over the whole fleet while an emission needs
+    // `&mut AdmittedCommands` for one ship — not because any of it is local.
+    let mut answers: Vec<(Entity, String, usize)> = Vec::new();
+
+    // ── Pass one: every fleet hull decides, in ROSTER ORDER ──────────────────
+    //
+    // Sorted by fleet slot rather than walked in query order: archetype order is
+    // an allocation detail, and the draws taken below advance a SHARED RNG
+    // stream, so two hulls answering on the same tick have to consume it in an
+    // order every host computes the same way.
+    let mut fleet: Vec<_> = ships.iter().collect();
+    fleet.sort_by_key(|(_, _, slot, ..)| slot.0);
     for (
         entity,
-        entity_uuid,
+        _entity_uuid,
+        slot,
         sources,
-        ship_config,
-        mut admitted,
+        _ship_config,
+        _admitted,
         red_alert,
         hull,
         policy_comp,
         cadence_comp,
         selector_comp,
-    ) in ships.iter_mut()
+    ) in fleet
     {
+        fleet_seen = true;
+        let host = slot.0;
+        // Read-only for the length of the pass; the one write (`pending_next`
+        // replacing the running waits) lands after the loop, so nothing inside it
+        // can see a half-updated schedule.
+        let comms = &*comms_res;
         // The Control-Source gate (AC5 human exclusivity — a human Comms officer
         // answers their own dialogues) and the strict AI-declaration check (no
         // `[comms_console.ai]` ⇒ the ship answers nothing) now live in the shared
@@ -1900,6 +2301,17 @@ pub fn operate_comms_response_ai(
             base_interval,
             evaluate_every_ticks,
         ) {
+            // Sitting out this tick is NOT a cancellation: carry this hull's own
+            // running waits forward untouched. Without this, two hulls on
+            // different `evaluate_every_ticks` would wipe each other's schedules
+            // on every tick only one of them walked.
+            pending_next.extend(
+                comms
+                    .pending_ai_responses
+                    .iter()
+                    .filter(|(key, _)| key.host == host)
+                    .map(|(key, record)| (key.clone(), *record)),
+            );
             continue;
         }
         // The read-only scenario flag chain (AC4), anchored at the layer that
@@ -1927,7 +2339,75 @@ pub fn operate_comms_response_ai(
                 continue;
             }
 
-            let sender_in_range = current_sender_in_range(comms, &message.sender_uuid);
+            // Reachability FROM THE HULL BEING DECIDED, never from the hull this
+            // host projects (issue #1343). `current_sender_in_range` reads
+            // `CommsRuntime::range_flags`, whose only writer measures from
+            // `LocalShip` — so on a two-hull fleet it answers "can MY crew's
+            // ship hear them", which is a different question on each host and a
+            // different answer once the hulls are not equidistant. This value is
+            // an input to three folded things: whether a wait is carried into
+            // `pending_ai_responses` at all (an empty pool cancels), the
+            // fingerprint it is armed against, and whether the
+            // `CommsBackfillChoice` draw is taken. All three would then be
+            // host-dependent, which is the GM `ship_power` incident's shape.
+            let sender_in_range = crate::comms::server::sender_in_range_for_slot(
+                comms,
+                Some(host),
+                &message.sender_uuid,
+            );
+
+            // ── The weighted picker (issue #1343) ────────────────────────────
+            //
+            // Exclusive with the policy below: a node that authors weights is
+            // decided here and `decide` is never consulted for it, so the
+            // authored `response_index = 0` cannot answer a decision with the
+            // stand-by an author had to put first.
+            if crate::comms::ai_choice::node_authors_ai_choice(responses) {
+                match weighted_backfill_choice(
+                    WeightedChoiceInputs {
+                        comms,
+                        inbox,
+                        host,
+                        message: &message,
+                        responses,
+                        sender_in_range,
+                        sources,
+                        policy_declared: policy.is_some(),
+                        now_tick: tick,
+                        tick_hz,
+                    },
+                    sim_rng.as_deref(),
+                ) {
+                    // Nothing to wait on: a human holds the console, the ship
+                    // declares no comms AI, the sender is unreachable, the node
+                    // offers an unmanned console nothing, or a reprice has
+                    // superseded this message. Any running wait is cancelled by
+                    // not being carried into `pending_next`.
+                    WeightedChoiceOutcome::Cancel => {}
+                    // The wait is running — just armed, still counting, or
+                    // re-armed because the options moved under it.
+                    WeightedChoiceOutcome::Wait(record) => {
+                        pending_next.insert(
+                            crate::comms::server::PendingAiResponseKey::new(host, &message.id),
+                            record,
+                        );
+                    }
+                    // The wait expired and the draw picked an option. It goes
+                    // through the ordinary admitted path a human's press takes,
+                    // and the record is not carried forward: the router answers
+                    // the message this same tick.
+                    //
+                    // Queued for EVERY hull, not just this host's: the draw above
+                    // ran identically on every host, and an AI emission never
+                    // crosses the mesh, so a host that skipped a peer's hull here
+                    // would simply never apply that hull's pick.
+                    WeightedChoiceOutcome::Answer(index) => {
+                        answers.push((entity, message.id.clone(), index));
+                    }
+                }
+                continue;
+            }
+
             let reading = CommsResponseReading {
                 response_count: responses.len(),
                 available_response_count: if sender_in_range { responses.len() } else { 0 },
@@ -1979,37 +2459,284 @@ pub fn operate_comms_response_ai(
                 continue;
             }
 
-            let admitted_ok = crate::command_admission::ai_emit::emit_ai_command(
-                entity_uuid,
-                crate::ship::system_registry::comms_system_id(),
-                crate::core::messages::SystemControlPayload::RespondToMessage {
-                    message_id: message.id.clone(),
-                    response_index: index,
-                },
-                sources,
-                &sessions,
-                ship_config,
-                &mut admitted,
-            );
-            if admitted_ok {
-                crate::pdebug!(
-                    log,
-                    crate::logging::LogCat::Comms,
-                    entity = entity,
-                    "backfill comms AI answered {} with response {index}",
-                    message.id
-                );
-            } else {
-                crate::pwarn!(
-                    log,
-                    crate::logging::LogCat::Comms,
-                    entity = entity,
-                    "backfill comms AI response to {} refused at admission",
-                    message.id
-                );
-            }
+            // Same rule as the weighted branch: the policy resolved for every
+            // fleet hull, so every fleet hull's answer is queued on every host.
+            answers.push((entity, message.id.clone(), index));
         }
     }
+
+    // The one write of the pass. Assigning the whole map rather than mutating it
+    // in place is what makes the cancellations structural: a wait that this pass
+    // did not re-arm is gone, and no cancellation case needs a hook of its own.
+    //
+    // Guarded on the schedule having actually MOVED, so a steady-state tick does
+    // not flip `CommsRuntime`'s change-detection tick for a map that is
+    // identical to the one already there.
+    if fleet_seen && comms_res.pending_ai_responses != pending_next {
+        comms_res.pending_ai_responses = pending_next;
+    }
+
+    // ── Pass two: submit the fleet's answers ─────────────────────────────────
+    //
+    // In the order pass one decided them (roster order, then inbox order), so a
+    // hull answering two conversations on one tick admits them in one sequence,
+    // and two hulls answering on one tick admit in slot order.
+    for (entity, message_id, index) in answers {
+        let Ok((_, entity_uuid, _, sources, ship_config, mut admitted, ..)) = ships.get_mut(entity)
+        else {
+            continue;
+        };
+        emit_backfill_response(
+            &BackfillResponseEmit {
+                entity,
+                entity_uuid,
+                message_id: &message_id,
+                index,
+                sources,
+                sessions: &sessions,
+                ship_config,
+                log: log.as_deref(),
+            },
+            &mut admitted,
+        );
+    }
+}
+
+/// Everything [`emit_backfill_response`] needs, grouped so the two call sites
+/// (the authored policy and the weighted picker) submit through one seam.
+struct BackfillResponseEmit<'a> {
+    entity: Entity,
+    entity_uuid: Option<&'a EntityUuid>,
+    message_id: &'a str,
+    index: usize,
+    sources: &'a ShipSystemControlSources,
+    sessions: &'a crate::lobby::Sessions,
+    ship_config: Option<&'a crate::ship_plugin::ShipConfigComponent>,
+    log: Option<&'a crate::logging::LogFilterConfig>,
+}
+
+/// Submit one Backfill response through the ordinary admitted-command path.
+///
+/// The ONE emission seam for both mechanisms, and the reason it is one: an AI
+/// response is an ordinary `SystemControlPayload::RespondToMessage`, admitted
+/// against the same Control Source and drained by the same router a human's
+/// press is. Two copies of this would be two places for that to stop being true.
+fn emit_backfill_response(
+    emit: &BackfillResponseEmit<'_>,
+    admitted: &mut crate::core::messages::AdmittedCommands,
+) {
+    let log = emit.log;
+    let admitted_ok = crate::command_admission::ai_emit::emit_ai_command(
+        emit.entity_uuid,
+        crate::ship::system_registry::comms_system_id(),
+        crate::core::messages::SystemControlPayload::RespondToMessage {
+            message_id: emit.message_id.to_string(),
+            response_index: emit.index,
+        },
+        emit.sources,
+        emit.sessions,
+        emit.ship_config,
+        admitted,
+    );
+    let index = emit.index;
+    if admitted_ok {
+        crate::pdebug!(
+            log,
+            crate::logging::LogCat::Comms,
+            entity = emit.entity,
+            "backfill comms AI answered {} with response {index}",
+            emit.message_id
+        );
+    } else {
+        crate::pwarn!(
+            log,
+            crate::logging::LogCat::Comms,
+            entity = emit.entity,
+            "backfill comms AI response to {} refused at admission",
+            emit.message_id
+        );
+    }
+}
+
+/// What one evaluation of a weighted node decided (issue #1343).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WeightedChoiceOutcome {
+    /// No wait may run on this node right now, so any record for it is dropped.
+    Cancel,
+    /// The wait is running — carry this record into the next tick.
+    Wait(crate::comms::server::PendingAiResponse),
+    /// The wait expired and the draw selected this response index.
+    Answer(usize),
+}
+
+/// Everything [`weighted_backfill_choice`] reads, grouped to keep the signature
+/// honest rather than nine positional arguments.
+struct WeightedChoiceInputs<'a> {
+    comms: &'a CommsRuntime,
+    inbox: &'a CommsInboxRes,
+    /// The fleet slot whose console is deciding — the half of the wait's key
+    /// that is not the message, and the reason two crewed hulls do not share
+    /// (or overwrite) one schedule.
+    host: crate::command_admission::HostSlot,
+    message: &'a CommsMessage,
+    responses: &'a [crate::comms::content::CommsResponse],
+    sender_in_range: bool,
+    sources: &'a ShipSystemControlSources,
+    policy_declared: bool,
+    now_tick: u64,
+    tick_hz: f32,
+}
+
+/// Decide what an unmanned Comms console does with ONE weighted dialogue node
+/// this tick (issue #1343).
+///
+/// The order of the gates is the order of the acceptance criteria, and every
+/// early return is a cancellation:
+///
+///   1. **Control Source.** A human on the Comms console decides their own
+///      conversations; the wait is cancelled the tick they take the seat, and a
+///      fresh one arms if they hand it back.
+///   2. **Declaration.** Strict AI-declaration (issue #885): a ship with no
+///      `[comms_console.ai]` block does nothing at all, weighted node or not.
+///   3. **Supersession.** A repriced claim opens a NEW message on the same
+///      thread, and both stay independently answerable. The wait belongs to the
+///      screen that is current, so a message with a later live sibling in its
+///      thread is cancelled rather than answered against a board that has moved.
+///   4. **The pool.** Zero-weight, unweighted and unavailable options are
+///      excluded ([`weighted_pool`](crate::comms::ai_choice::weighted_pool)); an
+///      empty pool holds the conversation open rather than falling back to the
+///      first response, because falling back IS the bug this replaces.
+///   5. **The wait.** Armed against an absolute tick computed once from the
+///      authored seconds — never a wall-clock read — and re-armed whenever the
+///      node's options no longer fingerprint to what the wait was armed against.
+///   6. **The draw.** ONE draw off [`SimStream::CommsBackfillChoice`], taken
+///      only on the tick the answer is actually submitted, so a world that
+///      authors no weights never moves that stream at all.
+fn weighted_backfill_choice(
+    inputs: WeightedChoiceInputs<'_>,
+    sim_rng: Option<&crate::sim_rng::SimRng>,
+) -> WeightedChoiceOutcome {
+    use crate::comms::ai_choice;
+
+    if !crate::ai::host::ai_operates(
+        &inputs.sources.0,
+        crate::ship::system_registry::comms_system_id(),
+    ) {
+        return WeightedChoiceOutcome::Cancel;
+    }
+    if !inputs.policy_declared {
+        return WeightedChoiceOutcome::Cancel;
+    }
+    if message_is_superseded(inputs.comms, inputs.inbox, inputs.message) {
+        return WeightedChoiceOutcome::Cancel;
+    }
+
+    let pool = ai_choice::weighted_pool(inputs.responses, inputs.sender_in_range);
+    if pool.is_empty() {
+        return WeightedChoiceOutcome::Cancel;
+    }
+    let total = ai_choice::pool_total_weight(&pool);
+    if total == 0 {
+        return WeightedChoiceOutcome::Cancel;
+    }
+
+    let fingerprint = ai_choice::response_set_fingerprint(inputs.responses, inputs.sender_in_range);
+    let armed = inputs
+        .comms
+        .pending_ai_responses
+        .get(&crate::comms::server::PendingAiResponseKey::new(
+            inputs.host,
+            &inputs.message.id,
+        ))
+        .filter(|record| record.response_fingerprint == fingerprint);
+    let Some(record) = armed else {
+        // First sight of this node, or the options moved under a running wait.
+        // Either way the pause starts now and the choice is sampled from the
+        // options that are on the screen when it ends.
+        let delay_ticks = crate::world::script::schedule::seconds_to_ticks(
+            i64::from(ai_choice::choice_delay_seconds(inputs.responses)),
+            inputs.tick_hz,
+        );
+        return WeightedChoiceOutcome::Wait(crate::comms::server::PendingAiResponse {
+            due_tick: inputs.now_tick.saturating_add(delay_ticks),
+            response_fingerprint: fingerprint,
+        });
+    };
+    if inputs.now_tick < record.due_tick {
+        return WeightedChoiceOutcome::Wait(*record);
+    }
+
+    // Due. One draw, one answer. `>=` rather than `==` because this host runs on
+    // the shared AI cadence and may not be evaluated on the exact due tick.
+    let draw = crate::sim_rng::with_stream(
+        sim_rng,
+        crate::sim_rng::SimStream::CommsBackfillChoice,
+        |rng| rng.below(total),
+    );
+    match ai_choice::pick_by_draw(&pool, draw) {
+        Some(index) => WeightedChoiceOutcome::Answer(index),
+        // Unreachable for a draw below the total, and a hold rather than a panic
+        // if it ever were: a dialogue must not be able to bring the server down.
+        None => WeightedChoiceOutcome::Wait(*record),
+    }
+}
+
+/// Whether a LATER message on the same thread has taken this conversation over
+/// (issue #1343).
+///
+/// Repricing does not edit the node a claimant is already showing: it opens a
+/// new message on the same `thread_id`, and the old one stays in the inbox,
+/// still answerable, still describing a board that has since moved. A human sees
+/// both and answers the one they mean. An unmanned console has no such judgement,
+/// so its wait follows the LATEST live message on the thread and every earlier
+/// one is cancelled — which is exactly the AC3 "response replacement/repricing
+/// cancels the pending choice" case, expressed against the shape repricing
+/// actually has here.
+///
+/// Inbox order is injection order, so "later" is a position comparison and needs
+/// no timestamps. Only messages with a live, unanswered dialogue count: a
+/// superseding message that has itself been answered supersedes nothing.
+///
+/// # The authoring contract this depends on
+///
+/// `ctx.effects.open_comms` MINTS a fresh thread id whenever the author omits
+/// `thread_id` ([`crate::comms::scripted::open_scripted_comms_threads`]), so a
+/// repricing that does not name its thread is not on the claim's thread and
+/// nothing here can tell the two apart. A world that reopens a weighted decision
+/// at a new price must therefore author the SAME `thread_id` on both opens —
+/// Falling Skyway's three lift conversations name `falling-skyway-claim-*` on
+/// every road into each one (the parley, the twenty-two-second call-back after a
+/// hold, and the repricing watch), and
+/// `falling_skyway_reprices_a_claim_on_the_thread_it_was_claimed_on` in
+/// `tests/headless_runner.rs` is what holds that true against the real script.
+///
+/// Sender identity is deliberately NOT the key. Two live conversations from one
+/// party are two decisions, and answering only the later of them would leave the
+/// earlier open for ever; the thread is the modelled unit of a conversation
+/// here, the same unit the inbox's own live-thread reading uses.
+///
+/// An EMPTY thread id supersedes nothing, matching the fallback the inbox and
+/// the client both apply (`CommsInbox::has_live_critical_thread`): a message
+/// with no thread is its own thread, so two of them are two conversations rather
+/// than one.
+fn message_is_superseded(
+    comms: &CommsRuntime,
+    inbox: &CommsInboxRes,
+    message: &CommsMessage,
+) -> bool {
+    if message.thread_id.is_empty() {
+        return false;
+    }
+    inbox
+        .0
+        .iter()
+        .skip_while(|m| m.id != message.id)
+        .skip(1)
+        .any(|later| {
+            later.thread_id == message.thread_id
+                && later.selected_response.is_none()
+                && comms.active_dialogues.contains_key(&later.id)
+        })
 }
 
 /// Resolve a Hail directive's target NAME to an entity UUID.

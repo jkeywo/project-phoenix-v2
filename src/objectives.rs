@@ -17,6 +17,8 @@
 //   - `ObjectiveManager::scored_pool` — utility-scored pool for AI (issue #571)
 //   - `ObjectiveManager::is_dirty` / `ObjectiveManager::mark_clean` — change tracking
 //     so callers can push `ObjectiveSummary` only on change
+//   - `ObjectiveManager::drain_transitions` — the ordered per-tick log of every
+//     mutation the mutators above made, for the mission-timeline recorder (#1338)
 
 use crate::core::messages::{
     AiDirective, ObjectiveSnapshot, ObjectiveSource, ObjectiveStatus, ScoredObjective, StationId,
@@ -250,6 +252,19 @@ pub fn directive_relevance(directive: &AiDirective) -> Vec<SystemAffinity> {
         // Weapons Tactical selector reads it too (to lock the ally), for the
         // same reason as the tractor verbs above.
         AiDirective::FieldRepair { .. } => vec![SystemAffinity::Repair],
+        // Secure routes to Security, which owns the teams (issue #1346). Its own
+        // affinity rather than Weapons': which station owns the Security System is
+        // a hull's authoring decision, so the directive names the system and the
+        // seat that holds it decides the concrete `DispatchSecurityTeam`.
+        // Deliberately NOT a Helm or Weapons goal — a team crossing to a burning
+        // compartment is not an acquisition.
+        AiDirective::Secure { .. } => vec![SystemAffinity::Security],
+        // Rescue routes to Engineering, which owns the transporter (issue #1348).
+        // Deliberately NOT the Weapons Tactical selector like the tractor verbs:
+        // the transporter names its OWN discovered contact rather than resolving
+        // through the combat lock, so a rescue never pulls a weapons lock onto
+        // the civilians it is saving.
+        AiDirective::Rescue { .. } => vec![SystemAffinity::Engineering],
     }
 }
 
@@ -286,6 +301,36 @@ pub fn tractor_directive_target(directive: &AiDirective) -> Option<&str> {
     }
 }
 
+/// The target a `Rescue` directive names, or `None` for any other directive
+/// (issue #1348). The transporter host's own-kind test, factored out so the host
+/// and its tests read one rule. The tractor-versus-rescue precedence is settled
+/// through [`engineering_seat_operate_target`] (the shared seat), not here.
+pub fn rescue_directive_target(directive: &AiDirective) -> Option<&str> {
+    match directive {
+        AiDirective::Rescue { target } => Some(target.as_str()),
+        _ => None,
+    }
+}
+
+/// The target of any directive that occupies the single Engineering backfill
+/// seat — a tractor verb (`Tow`/`Stabilise`/`Escort`) or the transporter's
+/// `Rescue` — or `None` for anything else (issue #1348).
+///
+/// The tractor and the rescue transporter are distinct systems but share one
+/// Engineering seat: one pair of hands. Both backfill hosts pass THIS predicate
+/// to [`top_operate_directive`], so they rank the tractor and rescue orders
+/// against the ONE scored pool and the seat resolves to a single winner. Each
+/// host then keeps only its own kind of that winner (via
+/// [`tractor_directive_target`] / [`rescue_directive_target`]): when a tractor
+/// obligation outscores a rescue the transporter host sees `None` and stands
+/// down, and when a rescue outscores the tractor the tractor host stands down —
+/// so a higher-scored life-saving stabilisation defers the rescue exactly as the
+/// acceptance criterion requires, and neither ever runs while the other holds the
+/// seat.
+pub fn engineering_seat_operate_target(directive: &AiDirective) -> Option<&str> {
+    tractor_directive_target(directive).or_else(|| rescue_directive_target(directive))
+}
+
 /// The target a `Transfer` directive names, or `None` (issue #1162). Shared by
 /// the Helm dock host and the Engineering umbilical host — the two seats of the
 /// resupply chain.
@@ -301,6 +346,16 @@ pub fn transfer_directive_target(directive: &AiDirective) -> Option<&str> {
 pub fn field_repair_directive_target(directive: &AiDirective) -> Option<&str> {
     match directive {
         AiDirective::FieldRepair { target } => Some(target.as_str()),
+        _ => None,
+    }
+}
+
+/// The target a `Secure` directive names, or `None` (issue #1346). The Security
+/// backfill host's predicate: a target it names has its authored Security work
+/// promoted to `urgent_objective` in the host's ranking.
+pub fn secure_directive_target(directive: &AiDirective) -> Option<&str> {
+    match directive {
+        AiDirective::Secure { target } => Some(target.as_str()),
         _ => None,
     }
 }
@@ -391,6 +446,51 @@ pub struct ObjectiveDebugView<'a> {
     pub directive: &'a AiDirective,
 }
 
+// ── Transition log (issue #1338) ───────────────────────────────────────────
+
+/// Which mutation an [`ObjectiveTransition`] records.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ObjectiveTransitionKind {
+    /// A new `Active` objective was inserted.
+    Posted,
+    /// An `Active` objective became `Completed`.
+    Completed,
+    /// An `Active` objective became `Failed`.
+    Failed,
+    /// The record was dropped entirely (a world layer unloading its own).
+    Removed,
+}
+
+/// One mutation of the objective set, logged in the order it happened.
+///
+/// Exists because the mission timeline (issue #1338) asks for *transitions*, and
+/// a status field can only report the state a tick ENDED in. An objective posted
+/// and completed inside one tick — a handler that adds it and a deadline
+/// callback that resolves it, both on the same fixed tick — is one status field
+/// and two story beats. Diffing the snapshot can only ever see the second.
+///
+/// The record's fields are copied in rather than referenced by id because the
+/// drain happens after the tick: an objective posted and then REMOVED in one
+/// tick has no record left to look up, and its posting still happened.
+///
+/// Non-authoritative by construction: nothing in the fixed tick reads this log,
+/// `sim_digest`/`snapshot` do not walk it, and
+/// [`crate::narrative::emit_scenario_narrative`] drains it in full every tick.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ObjectiveTransition {
+    /// The objective's stable id.
+    pub id: String,
+    /// What happened to it.
+    pub kind: ObjectiveTransitionKind,
+    /// The objective's `strings.csv` text id, carried so a posting that no
+    /// longer has a record can still be reported in full.
+    pub text: String,
+    /// Whether the mission requires it.
+    pub mandatory: bool,
+    /// The objective's authored targets, in authored order.
+    pub targets: Vec<String>,
+}
+
 // ── Manager ────────────────────────────────────────────────────────────────
 
 /// Manages the full lifecycle of mission objectives.
@@ -398,6 +498,12 @@ pub struct ObjectiveDebugView<'a> {
 pub struct ObjectiveManager {
     objectives: Vec<ObjectiveRecord>,
     dirty: bool,
+    /// Every mutation since the last [`ObjectiveManager::drain_transitions`],
+    /// in the order it was made — see [`ObjectiveTransition`]. Drained once per
+    /// fixed tick by the narrative recorder; a build with no recorder (a bare
+    /// `App` unit test) simply never reads it, and it grows only on actual
+    /// objective mutations, which are authored and few.
+    transitions: Vec<ObjectiveTransition>,
 }
 
 impl ObjectiveManager {
@@ -487,9 +593,20 @@ impl ObjectiveManager {
         if self.objectives.iter().any(|o| o.id == id) {
             return false;
         }
+        let text = text.into();
+        // Logged BEFORE the move into the record, and only on the branch that
+        // actually inserts — a duplicate id is a no-op and no beat (issue
+        // #1338).
+        self.transitions.push(ObjectiveTransition {
+            id: id.clone(),
+            kind: ObjectiveTransitionKind::Posted,
+            text: text.clone(),
+            mandatory,
+            targets: targets.clone(),
+        });
         self.objectives.push(ObjectiveRecord {
             id,
-            text: text.into(),
+            text,
             text_params,
             mandatory,
             status: ObjectiveStatus::Active,
@@ -501,6 +618,29 @@ impl ObjectiveManager {
         });
         self.dirty = true;
         true
+    }
+
+    /// Log one transition off the record it happened to (issue #1338).
+    fn log_transition(rec: &ObjectiveRecord, kind: ObjectiveTransitionKind) -> ObjectiveTransition {
+        ObjectiveTransition {
+            id: rec.id.clone(),
+            kind,
+            text: rec.text.clone(),
+            mandatory: rec.mandatory,
+            targets: rec.targets.clone(),
+        }
+    }
+
+    /// Take the ordered log of every mutation since the last drain (issue
+    /// #1338).
+    ///
+    /// The mission-timeline recorder's primary input: it reports one event per
+    /// entry, so an objective posted and resolved inside a single fixed tick
+    /// produces both beats and not just the terminal one. Draining (rather than
+    /// reading) is what keeps the log a per-tick buffer rather than a growing
+    /// second copy of the objective set.
+    pub fn drain_transitions(&mut self) -> Vec<ObjectiveTransition> {
+        std::mem::take(&mut self.transitions)
     }
 
     /// The Command stances currently contributed by `Active` objectives
@@ -532,6 +672,8 @@ impl ObjectiveManager {
             .find(|o| o.id == id && o.status == ObjectiveStatus::Active)
         {
             rec.status = ObjectiveStatus::Completed;
+            let transition = Self::log_transition(rec, ObjectiveTransitionKind::Completed);
+            self.transitions.push(transition);
             self.dirty = true;
             true
         } else {
@@ -550,6 +692,8 @@ impl ObjectiveManager {
             .find(|o| o.id == id && o.status == ObjectiveStatus::Active)
         {
             rec.status = ObjectiveStatus::Failed;
+            let transition = Self::log_transition(rec, ObjectiveTransitionKind::Failed);
+            self.transitions.push(transition);
             self.dirty = true;
             true
         } else {
@@ -574,10 +718,21 @@ impl ObjectiveManager {
     /// this drops the record so a world layer's objectives disappear when the
     /// layer unloads. Returns `true` if a record was removed.
     pub fn remove(&mut self, id: &str) -> bool {
+        // Logged off the record BEFORE it is dropped (issue #1338): the timeline
+        // recorder needs the objective's own fields to reconcile a posting that
+        // happened earlier in the same tick, and after the retain there is
+        // nothing left to read them from.
+        let doomed: Vec<ObjectiveTransition> = self
+            .objectives
+            .iter()
+            .filter(|o| o.id == id)
+            .map(|o| Self::log_transition(o, ObjectiveTransitionKind::Removed))
+            .collect();
         let before = self.objectives.len();
         self.objectives.retain(|o| o.id != id);
         let removed = self.objectives.len() != before;
         if removed {
+            self.transitions.extend(doomed);
             self.dirty = true;
         }
         removed
@@ -879,6 +1034,60 @@ mod tests {
             })
             .is_none()
         );
+    }
+
+    #[test]
+    fn engineering_seat_defers_rescue_to_a_higher_scored_tractor_obligation() {
+        // Both orders sit on the one Engineering seat. The tractor Stabilise
+        // outscores the rescue, so the seat winner is the Stabilise.
+        let pool = vec![
+            scored_dir(
+                "stab",
+                9.0,
+                AiDirective::Stabilise {
+                    target: "tender".into(),
+                },
+            ),
+            scored_dir(
+                "rescue",
+                4.0,
+                AiDirective::Rescue {
+                    target: "lifeboat".into(),
+                },
+            ),
+        ];
+        let seat = |d: &AiDirective| engineering_seat_operate_target(d).is_some();
+        let winner = top_operate_directive(&pool, SystemAffinity::Engineering, seat);
+        // Transporter host keeps only a rescue winner → stands down here.
+        assert_eq!(winner.and_then(rescue_directive_target), None);
+        // Tractor host keeps the tractor winner → holds the seat.
+        assert_eq!(winner.and_then(tractor_directive_target), Some("tender"));
+    }
+
+    #[test]
+    fn engineering_seat_gives_a_higher_scored_rescue_the_seat() {
+        // Reverse the scores: the rescue now outranks the tractor obligation.
+        let pool = vec![
+            scored_dir(
+                "rescue",
+                9.0,
+                AiDirective::Rescue {
+                    target: "lifeboat".into(),
+                },
+            ),
+            scored_dir(
+                "stab",
+                4.0,
+                AiDirective::Stabilise {
+                    target: "tender".into(),
+                },
+            ),
+        ];
+        let seat = |d: &AiDirective| engineering_seat_operate_target(d).is_some();
+        let winner = top_operate_directive(&pool, SystemAffinity::Engineering, seat);
+        // Rescue wins the seat; the tractor host stands down.
+        assert_eq!(winner.and_then(rescue_directive_target), Some("lifeboat"));
+        assert_eq!(winner.and_then(tractor_directive_target), None);
     }
 
     #[test]
@@ -1397,6 +1606,84 @@ mod tests {
         assert!(mgr.sorted_snapshots().is_empty());
         assert!(mgr.scored_pool(&WorldConditions::default()).is_empty());
         assert!(mgr.is_dirty());
+    }
+
+    // ── The transition log (issue #1338) ───────────────────────────────────
+
+    /// The log records every mutation in the order it was made, and the whole
+    /// reason it exists is that the *status field* cannot: an objective added
+    /// and completed before anyone reads the manager has one status and two
+    /// transitions.
+    #[test]
+    fn the_transition_log_records_every_mutation_in_order() {
+        let mut mgr = ObjectiveManager::new();
+        mgr.add("obj-1", "world.probe.objective.one", true, vec![]);
+        mgr.complete("obj-1");
+        mgr.add("obj-2", "world.probe.objective.two", false, vec![]);
+        mgr.fail("obj-2");
+
+        let log = mgr.drain_transitions();
+        let shape: Vec<(&str, ObjectiveTransitionKind)> =
+            log.iter().map(|t| (t.id.as_str(), t.kind)).collect();
+        assert_eq!(
+            shape,
+            vec![
+                ("obj-1", ObjectiveTransitionKind::Posted),
+                ("obj-1", ObjectiveTransitionKind::Completed),
+                ("obj-2", ObjectiveTransitionKind::Posted),
+                ("obj-2", ObjectiveTransitionKind::Failed),
+            ]
+        );
+        // Each entry carries the objective's own fields, so a reader never has
+        // to look the record back up.
+        assert_eq!(log[0].text, "world.probe.objective.one");
+        assert!(log[0].mandatory);
+        assert!(!log[3].mandatory);
+
+        // Draining empties it: it is a per-tick buffer, not a second copy of
+        // the objective set.
+        assert!(mgr.drain_transitions().is_empty());
+    }
+
+    /// A call that changes nothing logs nothing — a duplicate id, a completion
+    /// of an already-completed objective, a removal of a ghost. Otherwise the
+    /// timeline would carry beats for events that did not happen.
+    #[test]
+    fn no_op_calls_log_no_transition() {
+        let mut mgr = ObjectiveManager::new();
+        mgr.add("obj-1", "Text", true, vec![]);
+        let _ = mgr.drain_transitions();
+
+        assert!(!mgr.add("obj-1", "Text again", false, vec![]));
+        assert!(mgr.complete("obj-1"));
+        assert!(!mgr.complete("obj-1"));
+        assert!(!mgr.fail("obj-1"));
+        assert!(!mgr.remove("ghost"));
+
+        let log = mgr.drain_transitions();
+        assert_eq!(log.len(), 1, "{log:?}");
+        assert_eq!(log[0].kind, ObjectiveTransitionKind::Completed);
+    }
+
+    /// A removal is logged off the record BEFORE it is dropped, so the entry
+    /// still carries the objective's fields — which is what lets the recorder
+    /// reconcile an objective posted and removed inside one tick.
+    #[test]
+    fn a_removal_is_logged_with_the_record_it_dropped() {
+        let mut mgr = ObjectiveManager::new();
+        mgr.add(
+            "obj-1",
+            "world.probe.objective.one",
+            true,
+            vec!["uuid-a".into()],
+        );
+        assert!(mgr.remove("obj-1"));
+
+        let log = mgr.drain_transitions();
+        assert_eq!(log.len(), 2, "{log:?}");
+        assert_eq!(log[1].kind, ObjectiveTransitionKind::Removed);
+        assert_eq!(log[1].text, "world.probe.objective.one");
+        assert_eq!(log[1].targets, vec!["uuid-a".to_string()]);
     }
 
     #[test]

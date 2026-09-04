@@ -1,0 +1,227 @@
+# Probe world for issue #1349 — the alternative-resolution half of a standoff.
+#
+# #1041's `probe_restraint.toml` proves the two GUNNERY endings: a hull driven
+# under its own weapons threshold, and a hull destroyed. Those are still its
+# tests. What this world proves are the three things #1349 adds, and each of
+# them is a claim the shipped `falling_skyway.toml` beat rests on:
+#
+#   SECURITY RESOLVES IT   A neutral, armed picket authors `secure_contain` and
+#                          `board` as ordinary `[[security_target.action]]`
+#                          blocks. Nobody sends the teams: the #1346 backfill
+#                          host does, through the same `DispatchSecurityTeam` a
+#                          human at Tactical emits, and each action's authored
+#                          `outcome_flag` is the whole of what reaches the
+#                          script. No shot is fired to make either happen.
+#
+#   BACKFILL DOES NOT      …and the same run's crew never open fire at all. That
+#   OPEN FIRE              is the invariant #1349's fourth criterion is about,
+#                          and it is asserted on the SAME window that proves the
+#                          teams worked: a picket that is merely PRESENT, armed,
+#                          and carrying work a backfilled seat wants to do is
+#                          still not something a backfilled seat shoots.
+#
+#   A HOSTILITY CAN END    `remove_faction_enemy` from script, which is the
+#                          mechanism the mission's "crossing the threshold ends
+#                          the hostile directive" is built on. Measured as a
+#                          BEFORE and an AFTER on one hull with nothing else
+#                          moving: the destroyer is shooting, the enmity is
+#                          withdrawn, and it stops — through the applier's own
+#                          AI-target re-validation (#710) rather than through
+#                          anything this file knows about locks.
+#
+# The fourth claim is the timeline's (#1338): a hull the script removes AFTER
+# recording an authored outcome is `escaped`, not `destroyed`. That is how the
+# mission says a picket flew home rather than died, and it is asserted off the
+# run report's own narrative counts.
+#
+# The comparison shape is `probe_restraint.toml`'s, and it is here for the same
+# reason: every claim is a before/after on one hull, or a pair that differs in
+# exactly one authored fact.
+#
+# ── Timeline (60 Hz), in mission seconds ────────────────────────────────────
+#
+#   t=0    nothing is hostile to anything. The Harrow are neutral by default and
+#          this world declares no enmity at load — deliberately, because the
+#          whole first window is about what a backfilled bridge does when there
+#          is nothing to shoot.
+#   ~t=1   the Security backfill sees two pieces of authored work in reach on
+#          `probe_picket` and commits both teams: containment first (it is
+#          `threat_containment`), boarding second (`optional`).
+#   ~t=11  the containment lands: `probe_picket_contained` rises, the handler
+#          chains, and the picket is held to its own weapons hold.
+#   ~t=13  the boarding lands: `probe_picket_boarded` rises.
+#   t=10   `probe_leaver` withdraws — an authored `escaped` recorded FIRST, then
+#          the removal, in one call. That order is the engine's own contract for
+#          "this despawn was not a death".
+#   t=18   Harrow and Federation are made mutually hostile. The destroyer closes
+#          on `probe_brawler`, forty units away, and opens fire. The picket is
+#          three hundred units off and outside every gun in the world.
+#   t=28   the enmity is WITHDRAWN. Both hulls' locks are re-validated away and
+#          the shooting stops with both of them still floating.
+#
+# BASELINE. This world is new in #1349 and has no recorded digest yet. It is a
+# probe rather than a shipped scenario, so nothing in `scenarios.toml` names it
+# and no shipped world's digest can move because of it.
+
+[global]
+seed = 1349
+ai_helm_tick_hz = 30.0
+
+# Every hull below is a Harrow patrol boat, and each one's single template
+# doctrine entry is re-pointed by id at a station of its own — the per-id edit
+# `falling_skyway.toml` and `probe_restraint.toml` both use, and for the same
+# reason: a world has to declare every anchor a hull steers to, and naming
+# somebody else's border here would be authoring a lie to satisfy a validator.
+[anchors]
+probe_picket_station = [0.0, 0.0, 300.0]
+probe_leaver_station = [0.0, 0.0, -300.0]
+probe_brawler_station = [40.0, 0.0, 0.0]
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# The crew's own hull, and the ONE shipped hull that musters Security teams. A
+# world that flew anything else here would be testing an empty roster.
+[[entity]]
+template_path = "assets/entities/alliance_destroyer.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# ── The subject ─────────────────────────────────────────────────────────────
+#
+# Three hundred units out: inside the destroyer's authored Security reach of 400
+# and outside every weapon in this world, including its own 50-unit beams. So
+# "the teams got there" and "nobody shot anybody" are independent facts rather
+# than two readings of one distance.
+#
+# Armed and neutral, which is the pairing the whole beat needs. Its condition
+# threshold is here so the test can assert the mount was never touched: a
+# containment that had actually been a quiet gunnery kill would have dropped
+# `probe_picket_guns_online` on the way.
+[[entity]]
+template_path = "assets/entities/ship_harrow_patrol.toml"
+name = "world.probe_picket.entity.picket.name"
+narrative = true
+transform = { anchor = "probe_picket_station" }
+
+[entity.overrides]
+behaviour = { doctrine = [
+  { id = "patrol-ironveil", directive_kind = "Reach", directive_anchors = [], directive_loop = false, directive_anchor = "probe_picket_station" },
+] }
+
+[entity.overrides.infrastructure]
+publish = false
+condition = 100.0
+condition_max = 100.0
+
+[[entity.overrides.infrastructure.threshold]]
+flag = "probe_picket_guns_online"
+fails_below = 0.35
+
+# The two jobs, in the shipped mission's own priority order and at a tenth of its
+# durations — this is a mechanism probe, not a pacing one. No `warning`: the
+# field is optional and a probe has no console to show one on.
+[entity.overrides.security_target]
+
+[[entity.overrides.security_target.action]]
+action = "secure_contain"
+duration_secs = 3.0
+risk = 0.5
+priority = "threat_containment"
+outcome_flag = "probe_picket_contained"
+
+[[entity.overrides.security_target.action]]
+action = "board"
+duration_secs = 5.0
+risk = 0.75
+priority = "optional"
+outcome_flag = "probe_picket_boarded"
+
+# ── The one that leaves ─────────────────────────────────────────────────────
+#
+# Identical to the subject but for the two facts under test: it offers no
+# Security work, and the script removes it after stating an outcome. Marked, so
+# the timeline has something to be right or wrong about.
+[[entity]]
+template_path = "assets/entities/ship_harrow_patrol.toml"
+name = "world.probe_picket.entity.leaver.name"
+narrative = true
+transform = { anchor = "probe_leaver_station" }
+overrides = { behaviour = { doctrine = [
+  { id = "patrol-ironveil", directive_kind = "Reach", directive_anchors = [], directive_loop = false, directive_anchor = "probe_leaver_station" },
+] } }
+
+# ── The one that gets shot at ───────────────────────────────────────────────
+#
+# Forty units out, so the destroyer has something inside its own thirty-unit
+# beam once there is a reason to use it. NOT marked: the timeline claim above is
+# "no death was recorded in this run", and a hull that could die would make that
+# claim about luck.
+#
+# The hull is authored absurdly heavy for exactly that reason. The A/B this
+# world is here for is "it was shooting, then the enmity ended, then it was not"
+# — and a target that died in between would satisfy the second sample for the
+# wrong reason.
+[[entity]]
+template_path = "assets/entities/ship_harrow_patrol.toml"
+name = "world.probe_picket.entity.brawler.name"
+transform = { anchor = "probe_brawler_station" }
+overrides = { hull = { hull_integrity = 20000.0 }, behaviour = { doctrine = [
+  { id = "patrol-ironveil", directive_kind = "Reach", directive_anchors = [], directive_loop = false, directive_anchor = "probe_brawler_station" },
+] } }
+
+[script]
+setup = """
+// THE SECURITY SEAM. An action's authored `outcome_flag` is the whole of what a
+// finished boarding party reaches the scenario with — an ordinary world flag,
+// raised by the engine, meaning nothing to it. Both handlers below are this
+// world's, exactly as `falling_skyway.toml`'s are.
+on_flag_set("probe_picket_contained", "on_picket_contained");
+on_flag_set("probe_picket_boarded", "on_picket_boarded");
+
+on_timer(10, "on_leaver_withdraws");
+on_timer(18, "on_enmity_declared");
+on_timer(28, "on_enmity_withdrawn");
+
+// CONTAINED. The mounts are locked out from outside, which this world makes real
+// the same way the mission does: through #1041's weapons-hold lever, applied to
+// an NPC through the same state a captain's console writes.
+fn on_picket_contained(ctx) {
+    ctx.effects.hold_fire("world.probe_picket.entity.picket.name");
+    ctx.flags.picket_contained = 1;
+    ctx.flags.restraint_shown = 1;
+}
+
+// BOARDED. A second team, a second job, a second flag — and the pair is the
+// point: two teams working two actions on one target at once is what #1346's
+// muster is for, and a scenario that could only hear one of them would not be
+// able to tell the two endings apart.
+fn on_picket_boarded(ctx) {
+    ctx.flags.picket_boarded = 1;
+}
+
+// WITHDRAWN, not killed. The outcome is recorded BEFORE the removal and in the
+// same call, which is the engine's contract for suppressing the automatic death
+// beat: the authored `escaped` then stands alone.
+fn on_leaver_withdraws(ctx) {
+    ctx.flags.leaver_withdrew = 1;
+    ctx.effects.narrative_outcome("world.probe_picket.entity.leaver.name", "escaped");
+    ctx.effects.destroy_entity("world.probe_picket.entity.leaver.name");
+}
+
+fn on_enmity_declared(ctx) {
+    ctx.flags.enmity_declared = 1;
+    ctx.effects.add_faction_enemy("Harrow", "Federation");
+    ctx.effects.add_faction_enemy("Federation", "Harrow");
+}
+
+// The half this world exists for. Nothing else changes: both hulls are in the
+// same places, both are still armed, both are still in range of each other.
+// Only the relationship is withdrawn.
+fn on_enmity_withdrawn(ctx) {
+    ctx.flags.enmity_withdrawn = 1;
+    ctx.effects.remove_faction_enemy("Harrow", "Federation");
+    ctx.effects.remove_faction_enemy("Federation", "Harrow");
+}
+"""

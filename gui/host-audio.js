@@ -11,7 +11,10 @@
  * Looping beds and the siren use `<audio>` elements (constructed via the
  * injected `AudioCtor`, never `document.querySelectorAll` — they are
  * deliberately detached elements that never enter the DOM). The blaster uses
- * Web Audio instead: one-shots overlap, and `<audio>` cannot pan.
+ * Web Audio instead: one-shots overlap, and `<audio>` cannot pan. The ship's-
+ * computer tone (issue #1342) is a third shape: a one-shot like the blaster,
+ * but not positional, so it plays through a fresh, ungraphed `<audio>`
+ * element the same way a looping bed does — see `playComputerMessageCue`.
  *
  * ## Master volume (issue #939)
  *
@@ -237,11 +240,35 @@ export function createHostAudio({
     }
   }
 
-  // One-shot positional cue. Coordinates are already listener-relative, so
-  // the Web Audio listener stays at the origin facing -Z.
+  // Ship's-computer tone (issue #1342). Not positional — no panner, no
+  // AudioContext graph — just a fresh one-shot `<audio>` element at the
+  // authored×master volume for the given severity. `_audioCfg.computer_message`
+  // is the ship's `[audio.computer_message]` section, pushed once on the
+  // "audio_config" channel; a severity with no configured cue (or no section
+  // at all) plays nothing (AC4: missing configuration is silent).
+  function playComputerMessageCue(severity) {
+    const section = _audioCfg && _audioCfg.computer_message;
+    const spec = section && section[severity];
+    if (!spec || !spec.file) return;
+    try {
+      const el = new AudioCtor(spec.file);
+      el.volume = applyMaster(spec.volume);
+      el.play().catch(function() {});
+    } catch (e) {
+      console.warn('[Phoenix] computer-message cue failed', e);
+    }
+  }
+
+  // One-shot cue dispatch. `"blaster"` is positional (coordinates are already
+  // listener-relative, so the Web Audio listener stays at the origin facing
+  // -Z); `"computer_message"` (issue #1342) is not.
   function audioCue(json) {
     let c;
     try { c = JSON.parse(json); } catch (e) { return; }
+    if (c.kind === 'computer_message') {
+      playComputerMessageCue(c.severity);
+      return;
+    }
     if (c.kind !== 'blaster' || !_blasterBuf || !_actx) return;
     const spec = _audioCfg && _audioCfg.blaster;
     if (!spec) return;

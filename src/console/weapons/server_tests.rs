@@ -1152,6 +1152,167 @@ fn backfilled_tactical_does_not_lock_a_non_objective_named_derelict() {
     );
 }
 
+// ── Confirmed debris threats (issue #1347) ─────────────────────────────
+//
+// The engine can tell every tick which rocks are on course. Tactical Backfill
+// deliberately cannot: the candidate source is gated on `DebrisThreat::
+// confirmed`, which only an assessment somebody took ever raises. These tests
+// pin that gate, and the deadline ordering it lets through.
+
+/// Spawn a moving hazard the Tactical selector can see.
+///
+/// Not a `Ship` and with no faction — a rock is neither — so the ONLY way it can
+/// become a candidate is the assessment-gated debris source. That is what makes
+/// "an unassessed rock is invisible to Backfill" a real claim here rather than an
+/// accident of which scan surface it was spawned onto.
+fn spawn_debris_contact(
+    app: &mut App,
+    uuid: &str,
+    x: f32,
+    z: f32,
+    confirmed: bool,
+    secs_to_impact: Option<f32>,
+) -> Entity {
+    let mut threat = crate::debris::DebrisThreat::new(crate::debris::DebrisConfig {
+        protected_target: "the-depot".into(),
+        impact_radius: 40.0,
+        ..Default::default()
+    });
+    threat.assessed = confirmed;
+    threat.confirmed = confirmed;
+    threat.reckoned_secs_to_impact = secs_to_impact;
+    app.world_mut()
+        .spawn((
+            crate::entities::spawner::EntityUuid(uuid.into()),
+            Transform::from_xyz(x, 0.0, z),
+            threat,
+        ))
+        .id()
+}
+
+/// The shared arrangement: a Backfilled Tactical actively scanning, with the
+/// hostile registry present so the ordinary sources are live alongside debris.
+fn backfilled_tactical_looking_for_targets(app: &mut App) {
+    set_tactical_radar_range(app, 100.0);
+    setup_harrow_ship_hostile_to_federation(app);
+    set_tactical_control_source(app, crate::ship::control_source::ControlSource::Ai);
+    insert_untargeted_destroy_objective(app, 35.0);
+    set_local_last_attacker(app, None);
+}
+
+#[test]
+fn backfilled_tactical_ignores_a_rock_nobody_has_assessed() {
+    // THE GATE, and the whole reason the Sensors seat is load-bearing. This rock
+    // is close aboard and — as far as the simulation privately knows — about to
+    // arrive. Nobody has looked at it, so Tactical must not see it at all.
+    let mut app = test_app();
+    let rock = uuid::Uuid::new_v4().to_string();
+    backfilled_tactical_looking_for_targets(&mut app);
+    spawn_debris_contact(&mut app, &rock, 0.0, -10.0, false, Some(5.0));
+
+    tick(&mut app);
+
+    assert!(
+        get_weapons_target(&mut app).is_none(),
+        "a backfilled Tactical must not lock a hazard no assessment has confirmed \
+         — engaging rocks the crew were never told about would make the Sensors \
+         seat decorative"
+    );
+}
+
+#[test]
+fn backfilled_tactical_locks_a_confirmed_rock() {
+    // The other half of the gate: once an assessment HAS said so, the same
+    // contact in the same place becomes a candidate. Only the threat state
+    // differs from the test above.
+    let mut app = test_app();
+    let rock = uuid::Uuid::new_v4().to_string();
+    backfilled_tactical_looking_for_targets(&mut app);
+    spawn_debris_contact(&mut app, &rock, 0.0, -10.0, true, Some(120.0));
+
+    tick(&mut app);
+
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some(rock.as_str()),
+        "a confirmed threat to a protected asset is an eligible Tactical target"
+    );
+}
+
+#[test]
+fn backfilled_tactical_takes_the_nearest_deadline_first() {
+    // The prioritisation the issue asks for, and the reason the urgency bands
+    // exist. Two confirmed rocks, equally eligible — the ONLY thing separating
+    // them is when each arrives. Both sit inside the authored
+    // `debris_pressing_secs`; only one is inside `debris_urgent_secs`, and that
+    // single band has to beat the 50-point switch margin for the pick to move.
+    let mut app = test_app();
+    let patient = "11111111-1111-4111-8111-111111111111";
+    let urgent = "99999999-9999-4999-8999-999999999999";
+    backfilled_tactical_looking_for_targets(&mut app);
+    // The patient rock carries the SMALLER uuid, so the selector's tie-break
+    // (smallest uuid wins) would pick it if the deadline terms did nothing. The
+    // assertion therefore fails loudly if the bands are dropped or misguarded.
+    spawn_debris_contact(&mut app, patient, 0.0, -12.0, true, Some(50.0));
+    spawn_debris_contact(&mut app, urgent, 0.0, -10.0, true, Some(10.0));
+
+    tick(&mut app);
+
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some(urgent),
+        "with two confirmed rocks eligible, Tactical works the queue \
+         earliest-deadline-first"
+    );
+}
+
+#[test]
+fn backfilled_tactical_prefers_a_rock_with_a_real_deadline_to_one_with_none() {
+    // `impact_secs` is ABSENT on a contact confirmed earlier and since shoved off
+    // course, and an absent fact reads as 0 — which is a real answer here,
+    // "arriving now". Without the separate `debris_deadline_known` marker the
+    // deadline-less rock would read as maximally urgent and out-rank one that
+    // genuinely is about to land. It carries the smaller uuid, so the tie-break
+    // favours it too.
+    let mut app = test_app();
+    let no_deadline = "11111111-1111-4111-8111-111111111111";
+    let arriving = "99999999-9999-4999-8999-999999999999";
+    backfilled_tactical_looking_for_targets(&mut app);
+    spawn_debris_contact(&mut app, no_deadline, 0.0, -12.0, true, None);
+    spawn_debris_contact(&mut app, arriving, 0.0, -10.0, true, Some(8.0));
+
+    tick(&mut app);
+
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some(arriving),
+        "a missing deadline must not read as zero seconds and beat a rock that \
+         really is arriving"
+    );
+}
+
+#[test]
+fn backfilled_tactical_drops_a_rock_that_has_already_landed() {
+    // Nothing left to intercept. Leaving a struck contact in the source would
+    // hold the lock on a rock that has already done its damage while a live one
+    // went unengaged.
+    let mut app = test_app();
+    let landed = uuid::Uuid::new_v4().to_string();
+    backfilled_tactical_looking_for_targets(&mut app);
+    let entity = spawn_debris_contact(&mut app, &landed, 0.0, -10.0, true, Some(0.0));
+    app.world_mut()
+        .get_mut::<crate::debris::DebrisThreat>(entity)
+        .expect("the contact carries its threat state")
+        .struck = true;
+
+    tick(&mut app);
+
+    assert!(
+        get_weapons_target(&mut app).is_none(),
+        "a contact that has already reached its protected asset is not a target"
+    );
+}
+
 // ── WeaponsUpdate / fire_ready tests ───────────────────────────────────
 
 fn register_reconnect_player(app: &mut App, token: &str, station: Option<&str>) {
@@ -8370,6 +8531,90 @@ fn ai_target_selection_locks_a_nonhostile_only_via_an_operate_directive() {
         Some(derelict_uuid.as_str()),
         "an active Tow directive naming a non-hostile must lock it through the directive-gated \
          `source_operate` eligibility disjunct (issue #1162 D2)"
+    );
+}
+
+/// Attach a [`CivilianRescue`](crate::transporter::CivilianRescue) to a
+/// previously-spawned target: `count` souls authored, `recovered` already
+/// aboard, so `remaining() == count - recovered` decides carrier membership.
+fn attach_civilian_rescue(app: &mut App, uuid: &str, count: u32, recovered: u32) {
+    let mut q = app
+        .world_mut()
+        .query::<(Entity, &crate::entities::spawner::EntityUuid)>();
+    let target = q
+        .iter(app.world())
+        .find(|(_, u)| u.0 == uuid)
+        .map(|(e, _)| e)
+        .expect("the civilian carrier must be spawned before its rescue is attached");
+    let mut rescue = crate::transporter::CivilianRescue::new(count);
+    rescue.recovered = recovered;
+    rescue.revealed = true;
+    app.world_mut().entity_mut(target).insert(rescue);
+}
+
+/// Tactical Backfill excludes a contact still carrying unrecovered civilians
+/// (issue #1348, acceptance criterion #5): even the operate-directive path that
+/// WOULD lock the same non-hostile derelict (proved by
+/// [`ai_target_selection_locks_a_nonhostile_only_via_an_operate_directive`])
+/// must find no candidate once souls are aboard — the AI never fires on people
+/// it could rescue.
+#[test]
+fn ai_target_selection_excludes_a_contact_with_unrecovered_civilians() {
+    let mut app = test_app();
+    let carrier_uuid = uuid::Uuid::new_v4().to_string();
+
+    set_tactical_radar_range(&mut app, 200.0);
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+    spawn_entity_target(&mut app, &carrier_uuid, 0.0, -30.0);
+    // Four authored, one recovered → three souls still aboard.
+    attach_civilian_rescue(&mut app, &carrier_uuid, 4, 1);
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .name_to_uuid
+        .insert("hulk".into(), carrier_uuid.clone());
+    // The very Tow directive that locks a bare derelict above.
+    insert_operate_objective_blackboard(&mut app, "hulk", 80.0);
+    set_local_last_attacker(&mut app, None);
+
+    tick(&mut app);
+
+    assert!(
+        get_weapons_target(&mut app).is_none(),
+        "a contact carrying unrecovered civilians must be excluded from AI target selection, even \
+         under an operate directive that would otherwise lock it"
+    );
+}
+
+/// The other side of the same distinction: a FULLY-recovered carrier
+/// (`remaining() == 0`) is an ordinary hulk again and remains targetable through
+/// the operate-directive path — so the exclusion turns strictly on souls still
+/// aboard, not on ever having carried any.
+#[test]
+fn ai_target_selection_locks_a_fully_recovered_carrier() {
+    let mut app = test_app();
+    let carrier_uuid = uuid::Uuid::new_v4().to_string();
+
+    set_tactical_radar_range(&mut app, 200.0);
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+    spawn_entity_target(&mut app, &carrier_uuid, 0.0, -30.0);
+    // Three authored, all three recovered → nobody left aboard.
+    attach_civilian_rescue(&mut app, &carrier_uuid, 3, 3);
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .name_to_uuid
+        .insert("hulk".into(), carrier_uuid.clone());
+    insert_operate_objective_blackboard(&mut app, "hulk", 80.0);
+    set_local_last_attacker(&mut app, None);
+
+    tick(&mut app);
+
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some(carrier_uuid.as_str()),
+        "a fully-recovered carrier is an ordinary hulk once its souls are aboard and remains \
+         lockable through the operate directive — the civilian exclusion is not sticky"
     );
 }
 

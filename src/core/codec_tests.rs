@@ -739,6 +739,7 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
             ServerMessage::GameOver {
                 reason: "server.game_over.ship_destroyed".into(),
                 outcome: Some("defeat".into()),
+                report: Vec::new(),
             },
         ),
         (
@@ -1985,13 +1986,15 @@ fn an_objective_without_the_params_key_still_decodes() {
 // ── GameOver carries the authored outcome (PRD #1023 module 4) ────────
 
 /// The whole surface of the message the game-over screen reads. `outcome`
-/// is written even when it is `null`, so the client tests one shape.
+/// and `report` are written even when they are empty, so the client tests
+/// one shape.
 #[test]
-fn game_over_wire_keys_are_reason_and_outcome() {
+fn game_over_wire_keys_are_reason_outcome_and_report() {
     let encoded = JsonCodec
         .encode_server(&ServerMessage::GameOver {
             reason: "world.falling_skyway.ending.held".into(),
             outcome: Some("victory".into()),
+            report: Vec::new(),
         })
         .unwrap();
     let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
@@ -2002,10 +2005,12 @@ fn game_over_wire_keys_are_reason_and_outcome() {
             .keys()
             .map(String::as_str)
             .collect::<std::collections::BTreeSet<&str>>(),
-        std::collections::BTreeSet::from(["reason", "outcome"]),
-        "the ending's whole surface: what happened, and which side it was"
+        std::collections::BTreeSet::from(["reason", "outcome", "report"]),
+        "the ending's whole surface: what happened, which side it was, and \
+         the report rows if it authored any"
     );
     assert_eq!(value["data"]["outcome"], "victory");
+    assert!(value["data"]["report"].as_array().unwrap().is_empty());
 
     // Still written when there is no declared side, because a key that
     // came and went would make absence and defeat look alike to a client
@@ -2014,6 +2019,7 @@ fn game_over_wire_keys_are_reason_and_outcome() {
         .encode_server(&ServerMessage::GameOver {
             reason: "r".into(),
             outcome: None,
+            report: Vec::new(),
         })
         .unwrap();
     let value: serde_json::Value = serde_json::from_str(&undeclared).unwrap();
@@ -2029,6 +2035,7 @@ fn game_over_outcome_round_trips_and_defaults_when_absent() {
             ServerMessage::GameOver {
                 reason: "server.game_over.ship_destroyed".into(),
                 outcome: outcome.clone(),
+                report: Vec::new(),
             },
         );
     }
@@ -2037,12 +2044,88 @@ fn game_over_outcome_round_trips_and_defaults_when_absent() {
     // undeclared ending rather than failing the message.
     let legacy = r#"{"type":"GameOver","data":{"reason":"Ship destroyed"}}"#;
     match JsonCodec.decode_server(legacy).unwrap() {
-        ServerMessage::GameOver { reason, outcome } => {
+        ServerMessage::GameOver {
+            reason,
+            outcome,
+            report,
+        } => {
             assert_eq!(reason, "Ship destroyed");
             assert_eq!(outcome, None);
+            assert!(report.is_empty(), "a pre-#1344 peer authored no report");
         }
         other => panic!("expected GameOver, got {other:?}"),
     }
+}
+
+// ── The report rides GameOver, score-free (issue #1344) ───────────────
+
+/// Every row field a player surface needs, and nothing a player must not
+/// see. The `score` on `core::report::ReportRow` has no home in this shape
+/// at all — a compile-time absence, not a runtime filter — and this pins the
+/// key set so adding one would have to be a deliberate act.
+#[test]
+fn game_over_report_rows_carry_ids_and_state_but_never_a_score() {
+    let encoded = JsonCodec
+        .encode_server(&ServerMessage::GameOver {
+            reason: "world.falling_skyway.game_over.mission_complete".into(),
+            outcome: Some("victory".into()),
+            report: vec![crate::core::messages::GameOverReportRow {
+                id: "lyra".into(),
+                heading: "world.falling_skyway.report.lyra.heading".into(),
+                outcome: "world.falling_skyway.report.lyra.saved".into(),
+                state: "saved".into(),
+            }],
+        })
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+    let rows = value["data"]["report"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<&str>>(),
+        std::collections::BTreeSet::from(["id", "heading", "outcome", "state"]),
+        "a player-facing row names the thing and its fate: no score, no \
+         total, no grade"
+    );
+    assert_eq!(rows[0]["state"], "saved");
+    assert_eq!(
+        rows[0]["heading"],
+        "world.falling_skyway.report.lyra.heading"
+    );
+    assert!(
+        !encoded.contains("score"),
+        "score must never reach the wire"
+    );
+}
+
+#[test]
+fn game_over_report_rows_round_trip_in_authored_order() {
+    let rows = vec![
+        crate::core::messages::GameOverReportRow {
+            id: "lyra".into(),
+            heading: "world.falling_skyway.report.lyra.heading".into(),
+            outcome: "world.falling_skyway.report.lyra.lost".into(),
+            state: "lost".into(),
+        },
+        crate::core::messages::GameOverReportRow {
+            id: "traffic".into(),
+            heading: "world.falling_skyway.report.traffic.heading".into(),
+            outcome: "world.falling_skyway.report.traffic.partial".into(),
+            state: "partial".into(),
+        },
+    ];
+    assert_server_roundtrip(
+        &JsonCodec,
+        ServerMessage::GameOver {
+            reason: "world.falling_skyway.game_over.lark_collision".into(),
+            outcome: Some("defeat".into()),
+            report: rows,
+        },
+    );
 }
 
 // ── Human-seeking hosts on the wire (issue #984) ──────────────────────
@@ -2465,6 +2548,135 @@ fn external_repair_dispatch_and_recall_control_system_round_trip() {
     );
 }
 
+/// Security dispatch and recall (issue #1346): both control payloads round-trip
+/// and keep their pinned wire shape. Unlike `DispatchExternalRepair`, both NAME
+/// their team — and the dispatch also names its target and action — because a
+/// hull with two teams working two places cannot resolve any of the three from a
+/// single Tactical lock.
+#[test]
+fn security_dispatch_and_recall_control_system_round_trip() {
+    let dispatch = ClientMessage::ControlSystem {
+        target: SystemId(crate::ship::system_registry::SECURITY_SYSTEM_ID.into()),
+        payload: SystemControlPayload::DispatchSecurityTeam {
+            team_idx: 1,
+            target: "00000000-0000-8000-8000-000000000042".into(),
+            action: "assist_evacuation".into(),
+        },
+    };
+    assert_client_roundtrip(&JsonCodec, dispatch.clone());
+    assert_client_roundtrip(&PrettyJsonCodec, dispatch.clone());
+    assert_eq!(
+        JsonCodec.encode_client(&dispatch).unwrap(),
+        r#"{"type":"ControlSystem","data":{"target":"security","payload":{"type":"DispatchSecurityTeam","data":{"team_idx":1,"target":"00000000-0000-8000-8000-000000000042","action":"assist_evacuation"}}}}"#,
+        "DispatchSecurityTeam wire shape must stay pinned"
+    );
+
+    let recall = ClientMessage::ControlSystem {
+        target: SystemId(crate::ship::system_registry::SECURITY_SYSTEM_ID.into()),
+        payload: SystemControlPayload::RecallSecurityTeam { team_idx: 0 },
+    };
+    assert_client_roundtrip(&JsonCodec, recall.clone());
+    assert_client_roundtrip(&PrettyJsonCodec, recall.clone());
+    assert_eq!(
+        JsonCodec.encode_client(&recall).unwrap(),
+        r#"{"type":"ControlSystem","data":{"target":"security","payload":{"type":"RecallSecurityTeam","data":{"team_idx":0}}}}"#,
+        "RecallSecurityTeam wire shape must stay pinned"
+    );
+}
+
+/// Detonate charges (issue #1350): the fourth stage of a controlled demolition
+/// round-trips and keeps its pinned wire shape. It targets the `security` system
+/// the team was dispatched from — the station that fires the charges — and NAMES
+/// its obstruction, because a ship can be running more than one demolition.
+#[test]
+fn detonate_charges_control_system_round_trips() {
+    let detonate = ClientMessage::ControlSystem {
+        target: SystemId(crate::ship::system_registry::SECURITY_SYSTEM_ID.into()),
+        payload: SystemControlPayload::DetonateCharges {
+            target: "00000000-0000-8000-8000-000000000042".into(),
+        },
+    };
+    assert_client_roundtrip(&JsonCodec, detonate.clone());
+    assert_client_roundtrip(&PrettyJsonCodec, detonate.clone());
+    assert_eq!(
+        JsonCodec.encode_client(&detonate).unwrap(),
+        r#"{"type":"ControlSystem","data":{"target":"security","payload":{"type":"DetonateCharges","data":{"target":"00000000-0000-8000-8000-000000000042"}}}}"#,
+        "DetonateCharges wire shape must stay pinned"
+    );
+}
+
+/// The Security blackboard (issue #1346) round-trips whole, and an idle muster
+/// pays for none of the optional fields — so a hull that musters teams and has
+/// used none of them puts a payload on the wire with no refusal and no
+/// assignments in it.
+#[test]
+fn security_blackboard_round_trips_and_omits_its_optional_fields_when_idle() {
+    use crate::core::messages::{
+        SecurityActionOption, SecurityBlackboard, SecurityTargetOption, SecurityTeamSlot,
+    };
+
+    let working = SystemBlackboard::Security(SecurityBlackboard {
+        range: 400.0,
+        teams: vec![
+            SecurityTeamSlot {
+                state: "working".into(),
+                target: Some("00000000-0000-8000-8000-000000000042".into()),
+                target_name: Some("world.falling_skyway.entity.rung_c_compartment.name".into()),
+                action: Some("secure_contain".into()),
+                progress: 0.5,
+                risk: 0.6,
+            },
+            SecurityTeamSlot {
+                state: "available".into(),
+                ..Default::default()
+            },
+        ],
+        targets: vec![SecurityTargetOption {
+            uuid: "00000000-0000-8000-8000-000000000042".into(),
+            name: Some("world.falling_skyway.entity.rung_c_compartment.name".into()),
+            separation: 180.0,
+            in_range: true,
+            actions: vec![SecurityActionOption {
+                action: "assist_evacuation".into(),
+                duration_secs: 20.0,
+                risk: 0.35,
+                priority: "life_safety".into(),
+                warning: Some("security.warning.evacuation_under_fire".into()),
+            }],
+        }],
+        refusal: Some("security.dispatch.refused.team_busy".into()),
+    });
+    let json = serde_json::to_string(&working).unwrap();
+    assert_eq!(
+        serde_json::from_str::<SystemBlackboard>(&json).unwrap(),
+        working
+    );
+    assert!(
+        json.contains(r#""kind":"Security""#),
+        "the blackboard is tagged by kind so the JS mirror can switch on it, got {json}"
+    );
+
+    let idle = SystemBlackboard::Security(SecurityBlackboard {
+        range: 400.0,
+        teams: vec![SecurityTeamSlot {
+            state: "available".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    });
+    let idle_json = serde_json::to_string(&idle).unwrap();
+    assert!(
+        !idle_json.contains("refusal")
+            && !idle_json.contains("target_name")
+            && !idle_json.contains("\"action\""),
+        "an idle muster omits its optional fields, got {idle_json}"
+    );
+    assert_eq!(
+        serde_json::from_str::<SystemBlackboard>(&idle_json).unwrap(),
+        idle
+    );
+}
+
 /// The external repair-dispatch fields on the repair blackboard (issue #1161)
 /// round-trip, and a hull that authored no dispatch pays for none of the
 /// optional fields — so its wire shape is byte-identical to one built before
@@ -2646,6 +2858,12 @@ fn system_blackboard_tractor_round_trips_and_is_additive() {
 /// and none of them a result, a summary, a narration or a description. A
 /// `scan_text` field would have to be added here, in a diff, moving this
 /// test.
+///
+/// Issue #1347 moved it exactly that way, and the ten stay ten: the bulk class
+/// and the debris projection are `skip_serializing_if`, so a reading of an
+/// ordinary structure puts the same keys on the wire it always did. What the
+/// three new keys may say is pinned separately, by
+/// [`a_debris_reading_carries_a_projection_and_still_no_prose`].
 #[test]
 fn system_blackboard_scan_round_trips_and_carries_no_field_for_authored_prose() {
     use crate::core::messages::{ScanBlackboard, ScanReadingSnapshot};
@@ -2660,6 +2878,9 @@ fn system_blackboard_scan_round_trips_and_carries_no_field_for_authored_prose() 
         condition_fraction: 0.31,
         condition_step: 0.01,
         mass: 250_000.0,
+        mass_class: String::new(),
+        mass_class_label: String::new(),
+        debris: None,
         flags: vec![("world.skyhook.transfer.label".into(), false)],
         capacities: vec![("world.skyhook.berths.label".into(), 4)],
     };
@@ -2727,6 +2948,84 @@ fn system_blackboard_scan_round_trips_and_carries_no_field_for_authored_prose() 
     };
     assert_server_roundtrip(&JsonCodec, msg.clone());
     assert_server_roundtrip(&PrettyJsonCodec, msg);
+}
+
+/// The debris half of a reading (issue #1347), pinned as its own key set for
+/// the reason the reading above is pinned as one.
+///
+/// A moving hazard is exactly the subject a scripted reveal would be most
+/// tempting for — "IT IS GOING TO HIT THE DEPOT" is a sentence somebody could
+/// have typed — so the wire shape says, in a form the compiler enforces, that
+/// nobody did: six keys, five of them numbers or a boolean derived from
+/// numbers, and one a `strings.csv` id an author wrote against **the protected
+/// asset** rather than against the threat. There is nowhere for a warning to
+/// ride.
+#[test]
+fn a_debris_reading_carries_a_projection_and_still_no_prose() {
+    use crate::core::messages::ScanReadingSnapshot;
+    use std::collections::BTreeSet;
+
+    let reading = ScanReadingSnapshot {
+        subject_uuid: "00000000-0000-8000-8000-000000000077".into(),
+        subject_name: "world.falling_skyway.entity.skyway_debris_alpha.name".into(),
+        band: "detailed".into(),
+        band_label: "entity.alliance_destroyer.scan.band.detailed.label".into(),
+        taken_at_tick: 1200,
+        condition_fraction: 1.0,
+        condition_step: 0.01,
+        mass: 4_200.0,
+        mass_class: "medium".into(),
+        mass_class_label: "entity.alliance_destroyer.scan.mass_class.medium.label".into(),
+        debris: Some(crate::debris::DebrisAssessment {
+            protected_name: "world.falling_skyway.entity.depot_ladder_b.name".into(),
+            course: [-14.0, 3.0],
+            closest_approach: 6.5,
+            seconds_to_closest_approach: 41.0,
+            on_collision_course: true,
+            seconds_to_impact: Some(37.0),
+        }),
+        flags: Vec::new(),
+        capacities: Vec::new(),
+    };
+
+    let value: serde_json::Value =
+        serde_json::from_str(&serde_json::to_string(&reading).unwrap()).unwrap();
+    let debris = value
+        .get("debris")
+        .and_then(|d| d.as_object())
+        .expect("an assessed debris reading carries its projection");
+    assert_eq!(
+        debris
+            .keys()
+            .map(String::as_str)
+            .collect::<BTreeSet<&str>>(),
+        BTreeSet::from([
+            "protected_name",
+            "course",
+            "closest_approach",
+            "seconds_to_closest_approach",
+            "on_collision_course",
+            "seconds_to_impact",
+        ]),
+        "the projection's whole surface — geometry and the protected asset's own \
+         name id, and nowhere for an authored warning to ride"
+    );
+
+    // Round-trips, and the absent-arrival case stays absent rather than
+    // decaying to a zero a crew would read as "impact now".
+    let decoded: ScanReadingSnapshot =
+        serde_json::from_str(&serde_json::to_string(&reading).unwrap()).unwrap();
+    assert_eq!(decoded, reading);
+    let mut misses = reading.clone();
+    if let Some(d) = misses.debris.as_mut() {
+        d.on_collision_course = false;
+        d.seconds_to_impact = None;
+    }
+    let json = serde_json::to_string(&misses).unwrap();
+    assert!(
+        !json.contains("seconds_to_impact"),
+        "a contact that never arrives says nothing about when: {json}"
+    );
 }
 
 /// The dossier blackboard (issue #1030), and the hidden-truth guarantee
@@ -4406,6 +4705,8 @@ fn encode_hud_state_round_trips() {
         engine_thrust: 0.0,
         phaser_firing: true,
         game_over_message: None,
+        computer_message: None,
+        game_over_report: Vec::new(),
     };
     let json = encode_hud_state(&state).expect("encode hud");
     let decoded: ViewscreenHudState = serde_json::from_str(&json).unwrap();
@@ -4422,12 +4723,59 @@ fn encode_hud_state_emits_snake_case_fields() {
         engine_thrust: 0.0,
         phaser_firing: false,
         game_over_message: None,
+        computer_message: None,
+        game_over_report: Vec::new(),
     };
     let json = encode_hud_state(&state).expect("encode hud");
     assert!(json.contains("\"heading\":0"), "got: {json}");
     assert!(json.contains("\"hull_pct\":100"), "got: {json}");
     assert!(json.contains("\"condition\":\"NOMINAL\""), "got: {json}");
     assert!(json.contains("\"red_alert\":false"), "got: {json}");
+}
+
+#[test]
+fn encode_hud_state_carries_the_computer_message_when_present() {
+    use crate::core::messages::ComputerMessageWire;
+    let state = ViewscreenHudState {
+        heading: 0,
+        hull_pct: 100,
+        condition: "NOMINAL".into(),
+        red_alert: false,
+        engine_thrust: 0.0,
+        phaser_firing: false,
+        game_over_message: None,
+        computer_message: Some(ComputerMessageWire {
+            id: "hail_debris".into(),
+            text: "world.probe.computer_message.text".into(),
+            severity: "advisory".into(),
+            station: Some("tactical".into()),
+        }),
+        game_over_report: Vec::new(),
+    };
+    let json = encode_hud_state(&state).expect("encode hud");
+    assert!(json.contains("\"computer_message\":{"), "got: {json}");
+    let decoded: ViewscreenHudState = serde_json::from_str(&json).unwrap();
+    assert_eq!(state, decoded);
+}
+
+#[test]
+fn encode_hud_state_omits_absent_computer_message() {
+    let state = ViewscreenHudState {
+        heading: 0,
+        hull_pct: 100,
+        condition: "NOMINAL".into(),
+        red_alert: false,
+        engine_thrust: 0.0,
+        phaser_firing: false,
+        game_over_message: None,
+        computer_message: None,
+        game_over_report: Vec::new(),
+    };
+    let json = encode_hud_state(&state).expect("encode hud");
+    assert!(
+        !json.contains("computer_message"),
+        "absent field must not appear at all: {json}"
+    );
 }
 
 // ── SystemBlackboard tag-shape tests (not envelope round-trips) ────────

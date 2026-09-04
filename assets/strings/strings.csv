@@ -1205,6 +1205,11 @@ server.hud_heading,Viewscreen HUD nav readout. {deg} is the 3-digit heading,HEAD
 server.hud_hull,Viewscreen HUD hull readout. {pct} is hull percent,HULL {pct}
 server.hud_weapons_hot,Viewscreen HUD tactical slot while the ship is at red alert,[WEAPONS HOT]
 server.hud_clear,Viewscreen HUD tactical slot while the ship is not at red alert,[CLEAR]
+server.computer_message.label,Viewscreen ship's-computer message banner — source label above the message text,SHIP'S COMPUTER
+server.computer_message.severity.info,Viewscreen ship's-computer message banner — severity word,Info
+server.computer_message.severity.advisory,Viewscreen ship's-computer message banner — severity word,Advisory
+server.computer_message.severity.warning,Viewscreen ship's-computer message banner — severity word,Warning
+server.computer_message.severity.critical,Viewscreen ship's-computer message banner — severity word,Critical
 server.unknown_scenario,Host lobby title when the selected scenario carries no title of its own,[Unknown Scenario]
 server.complexity_low,Host lobby station card — complexity pill for a Low-complexity console preset,[LOW]
 server.complexity_normal,Host lobby station card — complexity pill for any other console preset,[NORMAL]
@@ -1372,6 +1377,22 @@ component.deadlines.cancelled,Deadline countdown panel — shown in place of the
 world.probe_deadlines.deadline.window_opens.label,assets/worlds/probe_deadlines.toml → [deadline] label,[Transfer window opens]
 world.probe_deadlines.deadline.stabiliser_failure.label,assets/worlds/probe_deadlines.toml → [deadline] label,[Stabiliser failure]
 world.probe_deadlines.deadline.first_warning.label,assets/worlds/probe_deadlines.toml → [deadline] label,[First warning]
+world.probe_narrative.global.title,assets/worlds/probe_narrative.toml → [global] title,[Narrative timeline probe]
+world.probe_narrative.global.description,assets/worlds/probe_narrative.toml → [global] description,[A probe world that authors one of every mission-timeline beat (issue #1338).]
+world.probe_narrative.entity.lyra.name,assets/worlds/probe_narrative.toml → [[entity]] name,[Lyra Ascending]
+world.probe_narrative.report.lyra.heading,"Post-mission report row heading in the #1344 probe world",[Lyra Ascending]
+world.probe_narrative.report.lyra.saved,"Post-mission report row outcome in the #1344 probe world — the crew answered and she came through",[Answered and came through.]
+world.probe_narrative.game_over.closed,"Ending reason for the #1344 probe world — declared a defeat, and still report-bearing",[The probe window closed.]
+world.probe_narrative.entity.wreck.name,assets/worlds/probe_narrative.toml → [[entity]] name,[Derelict hauler]
+world.probe_narrative.deadline.window_opens.label,assets/worlds/probe_narrative.toml → [deadline] label,[Transfer window opens]
+world.probe_narrative.objective.hold_the_channel,assets/worlds/probe_narrative.toml → add_objective text,[Hold the channel open]
+world.probe_narrative.objective.log_the_wreck,assets/worlds/probe_narrative.toml → add_objective text,[Log the wreck]
+world.probe_narrative.objective.sound_off,assets/worlds/probe_narrative.toml → add_objective text,[Sound off]
+world.probe_narrative.comms.lyra_hails,assets/worlds/probe_narrative.toml → comms node message,[Lyra Ascending: we are still on the ladder. Are you receiving?]
+world.probe_narrative.comms.stand_by,assets/worlds/probe_narrative.toml → comms response text,[Receiving you. Stand by.]
+world.probe_narrative.computer_message.debris,assets/worlds/probe_narrative.toml → show_message text (issue #1342),[Debris field detected on approach.]
+world.probe_narrative.computer_message.charge,assets/worlds/probe_narrative.toml → show_message text (issue #1342),[Tactical charge nearing safety threshold.]
+world.probe_narrative.computer_message.wreck_cleared,assets/worlds/probe_narrative.toml → show_message text (issue #1342),[Derelict cleared from the approach lane.]
 system_hull.power_reactor.display_name,Shared hull component display name — the ship's reactor. Shared by every hull carrying that component,Power Reactor
 system_hull.power_battery.display_name,Shared hull component display name — the ship's battery. Shared by every hull carrying that component,Power Battery
 system_hull.core.display_name,Shared hull component display name — the ship's core. Shared by every hull carrying that component,Core
@@ -1576,6 +1597,10 @@ world.falling_skyway.comms.lark_holding,Dialogue body — Hauler Lark acknowledg
 world.falling_skyway.comms.lark_collision_report,Dialogue body — Hauler Lark announces entry immediately before the committed corridor collision,"[Destroyer, Lark. No scan-backed stop received. We are entering the corridor now—stand by—]"
 world.falling_skyway.game_over.lark_collision,Defeat reason — uncontrolled Hauler Lark physically destroys the Falling Skyway,"[Hauler Lark struck Skyway Meridian in the uncontrolled corridor. The structure is lost.]"
 world.falling_skyway.game_over.mission_complete,Victory reason — the Falling Skyway episode reaches its authored resolution,"[The transfer window has closed and the Falling Skyway record is complete.]"
+world.falling_skyway.report.lyra.heading,"Post-mission report row heading (issue #1344) — names the stricken hauler the rescue was about, so the row reads as a person's ship and not a scenario flag",[Lyra Ascending]
+world.falling_skyway.report.lyra.saved,"Post-mission report row outcome — Lyra was under control before the second radiation band closed over the lane",[Pulled clear of the lane before the band closed.]
+world.falling_skyway.report.lyra.crew_saved,"Post-mission report row outcome (T2 refinement) — Lyra's crew were taken off and she warped out under her own power; saving her is saving her people, not her hull",[Her crew came off before the band closed. She made her own way out.]
+world.falling_skyway.report.lyra.lost,"Post-mission report row outcome — Lyra was still adrift when the deadline ran out and the second band took her",[Still adrift when the band closed. She was lost.]
 world.probe_evidence.entity.skyway_hook.name,"assets/worlds/probe_evidence.toml -> [[entity]] name","[Skyway Hook]"
 world.probe_evidence.entity.line_foreman.name,"assets/worlds/probe_evidence.toml -> [[entity]] name","[Line Foreman]"
 world.probe_evidence.capacity.berths.label,"Crew-facing label for the berths capacity in the #1031 probe world","[Berths]"
@@ -1782,6 +1807,14 @@ world.falling_skyway.entity.window_transfer_manifold.name,assets/worlds/falling_
 world.falling_skyway.objective.window.text,Objective text — the Act 3 transfer window itself in Falling Skyway,"[The window is open and the lift will not cover all three claims. Read Control's manifest and decide who goes.]"
 world.falling_skyway.comms.window_opens_short,"Dialogue body — Control opening a transfer window that has lift in it but not enough in Falling Skyway. {available} is the lift the chain can deliver this window, {claimed} what the three claimants have asked for between them, {shortfall} the difference","[Skyway Control to destroyer: transfer window is open. The head is certified and the ladder is pumping what it can pump. That comes to {available} between them, against {claimed} asked for by the three of them, and you do not need me to tell you which of those is the larger. You are short by {shortfall}. You have lift for two of them and not for three, and nothing anybody does in the next hour changes that. Nobody down here is going to make the call for you.]"
 world.falling_skyway.comms.window_opens_dead,Dialogue body — Control opening a transfer window with no lift available at all in Falling Skyway,"[Skyway Control to destroyer: transfer window is open on paper and on paper only. The head is not certified to run a climber and the ladder has nothing to put in one, so the lift available on our manifest reads nothing at all against three standing claims. Every one of them is short by the whole of it. If you want anybody off this rock before we shut, somebody has to make the chain work first.]"
+world.falling_skyway.comms.window_stands_undecided,"Dialogue body — Control restating a transfer manifest that moved before the captain answered anybody in Falling Skyway. {available} is the lift still unspoken for","[Skyway Control: manifest update, Destroyer. That board has moved and you have not answered one of them yet. Lift still unspoken for reads {available}, which is any two of the claims standing against it and not the three. None of that improves by being left.]"
+world.falling_skyway.comms.window_stands_any_pair,"Dialogue body — Control restating a transfer manifest on which every remaining pairing still fits in Falling Skyway. {available} is the lift still unspoken for","[Skyway Control: manifest update. Lift still unspoken for reads {available}. Every pairing left standing on that board fits inside it, so nothing I am holding decides this for you. Whoever is still waiting, they can both go.]"
+world.falling_skyway.comms.window_stands_particular,"Dialogue body — Control restating a transfer manifest on which only some pairings still fit in Falling Skyway. {available} is the lift still unspoken for","[Skyway Control: manifest update, and read this one carefully. Lift still unspoken for reads {available}. Some pairs standing against that fit inside it and some do not. This has stopped being any two of them and started being which two. Check the claims against the number before you promise anybody anything.]"
+world.falling_skyway.comms.window_stands_one,"Dialogue body — Control restating a transfer manifest on which several claims fit alone but no two fit together in Falling Skyway. {available} is the lift still unspoken for","[Skyway Control: manifest update. Lift still unspoken for reads {available}. More than one of them fits inside that on their own. No two of them fit inside it together. One name, Destroyer, and it is whichever one you can live with.]"
+world.falling_skyway.comms.window_stands_sole_committee,"Dialogue body — Control restating a transfer manifest on which only the strike committee's claim still fits in Falling Skyway. {available} is the lift still unspoken for","[Skyway Control: manifest update. Lift still unspoken for reads {available}, and there is exactly one claim left on this board that fits inside it — the committee's, at eighteen. Any other name you give me I will have to refuse on your behalf, and I would rather you did that yourself.]"
+world.falling_skyway.comms.window_stands_sole_havelock,"Dialogue body — Control restating a transfer manifest on which only Havelock's claim still fits in Falling Skyway. {available} is the lift still unspoken for","[Skyway Control: manifest update. Lift still unspoken for reads {available}. The only claim still standing that fits inside that is Havelock's twenty-two. That is the arithmetic, Destroyer. I am not telling you it is the right answer.]"
+world.falling_skyway.comms.window_stands_sole_convoy,"Dialogue body — Control restating a transfer manifest on which only the convoy's claim still fits in Falling Skyway. {available} is the lift still unspoken for","[Skyway Control: manifest update. Lift still unspoken for reads {available}. The only claim on this board that still fits inside it is the convoy's twenty-six, which is the largest number I have got. Make of that what you like.]"
+world.falling_skyway.comms.window_stands_none,"Dialogue body — Control restating a transfer manifest that can no longer honour any standing claim in Falling Skyway. {available} is the lift still unspoken for","[Skyway Control: manifest update, and it is the bad one. Lift still unspoken for reads {available}. Nothing left standing on this board fits inside that number. There is no name you can give me that I can put on a climber, and I am sorry to be the one saying it.]"
 world.falling_skyway.comms.window_closes,Dialogue body — Control closing the transfer window in Falling Skyway,"[Skyway Control: window is shut. Anything not already at the top comes back down — that was the rule before you got here and it is not mine to bend. The manifest stands as it stands.]"
 world.probe_window.workforce.crews.label,assets/worlds/probe_window.toml -> [[workforce]] label,[Depot crews]
 world.probe_window.workforce.pickets.label,assets/worlds/probe_window.toml -> [[workforce]] label,[Picket]
@@ -1880,6 +1913,7 @@ client.pick_taken,"Phone scenario/ship picker — shown when another phone's pic
 client.game_over_victory,Game-over overlay headline when the run ended in the scenario's victory condition,[VICTORY]
 client.game_over_defeat,Game-over overlay headline when the run ended in defeat — the scenario's loss condition or the hull reaching zero,[DEFEAT]
 client.game_over_ended,Game-over overlay headline when the run ended without a declared win or loss,[ENGAGEMENT ENDED]
+client.game_over_reported,"Game-over overlay headline when the scenario authored a post-mission report (issue #1344). It replaces the victory/defeat headline entirely: the rows below it are the result, and a win/loss word above them would be a verdict the report exists to refuse",[MISSION REPORT]
 client.link_connecting,Console banner before the first state arrives from the host — an empty console is loading rather than broken,[Linking to the ship…]
 client.link_dead,Console banner headline while the link to the host is down. The console behind it is dimmed and stops accepting commands,[LINK LOST]
 server.qr_caption,Host viewscreen join panel — caption above the QR code telling guests what scanning it does,[Scan to join the crew]
@@ -1952,6 +1986,190 @@ server.join.joining_off,"Host viewscreen join panel — what it says INSTEAD of 
 server.join.rendezvous_lost,"Host viewscreen connection diagnostics — the join-code service could not be reached and nothing is re-registering, so there is no code, no QR and no link. Since issue #1112 retired PeerJS there is no second route: nobody can join at all until the service comes back",[No join-code service — nobody can join until it is back.]
 server.join.rendezvous_reregistering,"Host viewscreen connection diagnostics — the join-code service dropped and the host is re-registering on a backoff, but this is the FIRST-EVER registration attempt (issue #1115): there is no earlier code held to ask for back, so the one that arrives really will be a new one. See rendezvous_reclaiming for the ordinary case, an already-issued code reconnecting",[Join-code service dropped — reconnecting. A new code will appear here.]
 server.join.rendezvous_reclaiming,"Host viewscreen connection diagnostics — the join-code service dropped and the host is re-registering on a backoff, presenting the reclaim secret its own earlier code carried (issue #1115). Nobody can join in the meantime, but the letters already on screen and QR'd across the room should come back rather than being replaced",[Join-code service dropped — reconnecting your code.]
+task.ended.completed,"Continuous-task terminal reason — the work produced its result (issue #1341)","[Complete.]"
+task.ended.released,"Continuous-task terminal reason — the operator stopped it (issue #1341)","[Released.]"
+task.ended.order_withdrawn,"Continuous-task terminal reason — the standing order that opened the task is no longer active, so the crew let go (issue #1341)","[Order withdrawn.]"
+task.ended.restarted,"Continuous-task terminal reason — a fresh activation replaced this one before it finished (issue #1341)","[Restarted.]"
+task.ended.target_lost,"Continuous-task terminal reason — the selection or lock the work needed is gone (issue #1341)","[Target lost.]"
+task.ended.target_destroyed,"Continuous-task terminal reason — the subject left the world, destroyed or removed (issue #1341)","[Target destroyed.]"
+task.ended.mission_ended,"Continuous-task terminal reason — the mission ended with the work still running (issue #1341)","[Mission ended.]"
+task.ended.out_of_range,"Continuous-task terminal reason — the subject is past the authored reach (issue #1341)","[Out of range.]"
+task.ended.unpowered,"Continuous-task terminal reason — the owning system fell below its authored power level (issue #1341)","[Insufficient power.]"
+task.ended.disabled,"Continuous-task terminal reason — the owning system was damaged out (issue #1341)","[System disabled.]"
+task.ended.not_capable,"Continuous-task terminal reason — this hull cannot do this work at all (issue #1341)","[Not fitted for this.]"
+task.ended.no_such_target,"Continuous-task terminal reason — nothing in the world answers to the contact the order named (issue #1341)","[No such contact.]"
+task.ended.unreadable,"Continuous-task terminal reason — the subject carries nothing the work can read (issue #1341)","[Nothing to read.]"
+task.ended.blinded,"Continuous-task terminal reason — interference pushed the return past anything usable (issue #1341)","[Interference.]"
+entity.lifecycle_tender.power_groups.tractor.label,assets/entities/lifecycle_tender.toml -> [power_groups.tractor] label,[Tractor]
+entity.lifecycle_tender.power_groups.survey.label,assets/entities/lifecycle_tender.toml -> [power_groups.survey] label,[Survey Suite]
+entity.lifecycle_tender.station.engineering.description,assets/entities/lifecycle_tender.toml -> [[station]] description,[Runs the tender's tractor beam and survey suite.]
+entity.lifecycle_tender.scan.band.detailed.label,assets/entities/lifecycle_tender.toml -> [[scan.band]] label,[Detailed Survey]
+entity.lifecycle_tender.scan.band.coarse.label,assets/entities/lifecycle_tender.toml -> [[scan.band]] label,[Coarse Sweep]
+world.probe_task_lifecycle.entity.derelict.name,assets/worlds/probe_task_lifecycle.toml -> [[entity]] name,[Derelict Hauler]
+world.probe_task_lifecycle.entity.depot.name,assets/worlds/probe_task_lifecycle.toml -> [[entity]] name,[Skyway Transfer Depot]
+world.probe_task_lifecycle.capacity.berths.label,assets/worlds/probe_task_lifecycle.toml -> [[entity.overrides.infrastructure.capacity]] label,[Berths]
+world.probe_task_lifecycle.threshold.transfer_capable.label,assets/worlds/probe_task_lifecycle.toml -> [[entity.overrides.infrastructure.threshold]] label,[Transfer Arm]
+security.dispatch.refused.disabled,"Security dispatch refusal — the Security System is damaged out, so no team can be sent anywhere (issue #1346)","[Security offline — no team can be sent.]"
+security.dispatch.refused.no_such_team,"Security dispatch refusal — the command named a team this hull does not muster (issue #1346)","[No such Security team.]"
+security.dispatch.refused.team_busy,"Security dispatch refusal — that team already holds an assignment; one team, one job (issue #1346)","[Team already assigned — recall it first.]"
+security.dispatch.refused.no_such_target,"Security dispatch refusal — nothing answers to the named target, or what does offers no Security work (issue #1346)","[No such target.]"
+security.dispatch.refused.action_unavailable,"Security dispatch refusal — the target does not offer the action that was asked for (issue #1346)","[That cannot be done here.]"
+security.dispatch.refused.out_of_range,"Security dispatch refusal — the target is past the hull's authored Security reach (issue #1346)","[Out of range — close on the target.]"
+world.falling_skyway.security.warning.head_evacuation,"assets/worlds/falling_skyway.toml -> [[entity.overrides.security_target.action]] warning — what a Security team is being asked to walk into on the slipping tether head (issue #1346)","[Tether under load — team exposed to a structural failure while aboard.]"
+world.falling_skyway.security.warning.gallery_fire,"assets/worlds/falling_skyway.toml -> [[entity.overrides.security_target.action]] warning — the pump-gallery fire on Ladder B (issue #1346)","[Gallery fire, unattended. Smoke and no local crew to hand over to.]"
+world.falling_skyway.objective.head_evacuation.text,"assets/worlds/falling_skyway.toml -> add_objective text — the optional Security objective to get the people off the tether head (issue #1346)","[Get the people off the tether head.]"
+world.falling_skyway.objective.gallery_fire.text,"assets/worlds/falling_skyway.toml -> add_objective text — the optional Security objective to contain the Ladder B pump-gallery fire (issue #1346)","[Contain the pump-gallery fire on Ladder B.]"
+component.security_teams.title,Security teams panel heading (issue #1346),[SECURITY TEAMS]
+component.security_teams.jobs_title,"Security panel heading over the list of targets and actions a team can be sent to (issue #1346)",[AVAILABLE WORK]
+component.security_teams.no_teams,Security panel when the hull musters no Security teams (issue #1346),[NO SECURITY TEAMS]
+component.security_teams.no_jobs,Security panel when nothing in reach offers Security work (issue #1346),[Nothing to send a team to]
+component.security_teams.team,Security team fallback name. {n} is the team number (issue #1346),[Team {n}]
+component.security_teams.recall,Security team control that brings the team home (issue #1346),[RECALL]
+component.security_teams.risk,"Security job row: how dangerous and how long. {pct} is the authored risk as a percentage, {secs} the authored duration in seconds (issue #1346)",[{pct}% · {secs}s]
+component.security_teams.state.available,Security team status badge: mustered aboard and ready to be sent (issue #1346),[AVAILABLE]
+component.security_teams.state.deploying,Security team status badge: crossing to its target (issue #1346),[DEPLOYING]
+component.security_teams.state.working,Security team status badge: at the target doing the work (issue #1346),[WORKING]
+component.security_teams.state.withdrawing,Security team status badge: coming home (issue #1346),[WITHDRAWING]
+component.security_teams.state.unavailable,"Security team status badge: off the board because the Security System is damaged out (issue #1346)",[UNAVAILABLE]
+component.security_teams.action.secure_contain,Security action label: secure or contain the target (issue #1346),[Secure / Contain]
+component.security_teams.action.assist_evacuation,Security action label: assist an evacuation already under way (issue #1346),[Assist Evacuation]
+component.security_teams.action.board,Security action label: board the target (issue #1346),[Board]
+component.security_teams.action.place_charges,Security action label: place demolition charges (issue #1346),[Place Charges]
+component.security_teams.priority.life_safety,Security priority chip: an immediate threat to life (issue #1346),[LIFE]
+component.security_teams.priority.evacuation_underway,Security priority chip: an evacuation already under way (issue #1346),[EVAC]
+component.security_teams.priority.urgent_objective,Security priority chip: work a live urgent Objective names (issue #1346),[OBJECTIVE]
+component.security_teams.priority.threat_containment,Security priority chip: containing an active threat (issue #1346),[CONTAIN]
+component.security_teams.priority.optional,Security priority chip: worth doing when there is nothing better (issue #1346),[OPTIONAL]
+console.tactical.security,"tactical console — ""Security"" panel heading (issue #1346)",[Security]
+console.common.security_toggle,Button that toggles the Security teams overlay on the tactical console (issue #1346),[Security]
+world.falling_skyway.security.warning.picket_containment,"assets/worlds/falling_skyway.toml -> [[entity.overrides.security_target.action]] warning — locking out the Havelock picket's mounts from outside (issue #1349)","[Armed boat, crew aboard. Team works the mounts from the hull with her guns live.]"
+world.falling_skyway.security.warning.picket_boarding,"assets/worlds/falling_skyway.toml -> [[entity.overrides.security_target.action]] warning — going aboard the Havelock picket (issue #1349)","[Contested hatch. Once the team is inside, the boat's crew decide how this goes.]"
+world.falling_skyway.objective.picket.text,"assets/worlds/falling_skyway.toml -> add_objective text — the optional objective to get the Havelock picket out of the lane (issue #1349)",[Clear the Havelock picket from the corridor.]
+world.falling_skyway.objective.picket_force.text,"assets/worlds/falling_skyway.toml -> add_objective text — the authorised-force objective posted only when a captain licenses it on the channel (issue #1349)",[Authorised: put the Havelock picket's guns out of the fight.]
+world.falling_skyway.comms.picket_holds_station,"Dialogue body — the Havelock picket answering a first hail in Falling Skyway","[Destroyer, you are close to a contracted lane hold. We are paid to sit here. Say what you want.]"
+world.falling_skyway.comms.picket_holds_station_warned,"Dialogue body — the Havelock picket after being told a boarding party is coming, Falling Skyway","[We heard you the first time. We are still here. Nothing has changed on our end.]"
+world.falling_skyway.comms.picket_holds_station_refused,"Dialogue body — the Havelock picket after refusing to stand off, Falling Skyway","[Same answer as before, Destroyer. Ask again if it helps you sleep.]"
+world.falling_skyway.comms.picket_channel_closed,"Dialogue body — the picket channel answering a stale response after the standoff is settled or the mission has closed, Falling Skyway",[That conversation is over. Nothing on this channel now.]
+world.falling_skyway.comms.picket_ask_withdraw,"Dialogue response — ask the Havelock picket to stand off the lane, Falling Skyway",[Take your boat off the lane. There are people waiting on it.]
+world.falling_skyway.comms.picket_warn_boarders,"Dialogue response — warn the Havelock picket that a boarding party is coming and no guns will be used, Falling Skyway","[Understand this: we will come aboard you. We will not shoot you.]"
+world.falling_skyway.comms.picket_authorize_force,"Dialogue response — authorise Tactical force against the Havelock picket, Falling Skyway",[Tactical is authorised. Take their guns off them.]
+world.falling_skyway.comms.picket_refuses,"Dialogue body — the Havelock picket refusing to stand off, Falling Skyway","[No. The hold is contracted and we are not the ones who wrote it. Take it up with the cutter.]"
+world.falling_skyway.comms.picket_stands_off,"Dialogue body — the Havelock picket agreeing to leave the lane, Falling Skyway","[…Right. We are not dying over a lane hold. Coming off station. The lane is yours.]"
+world.falling_skyway.comms.picket_force_authorized,"Dialogue body — the Havelock picket hearing the force authorisation read to it, Falling Skyway","[Understood, Destroyer. On the record: you said that, not us.]"
+world.falling_skyway.comms.picket_force_standing,"Dialogue body — the Havelock picket answering a repeated force authorisation, Falling Skyway",[You have already said it. We are not going to be told twice.]
+world.falling_skyway.comms.picket_contained_report,"Dialogue body — the Havelock picket's own crew after a Security team locks their mounts out, Falling Skyway","[Mounts are cold. Your people were civil about it. We are still here and we are still watching.]"
+world.falling_skyway.comms.picket_boarded_report,"Dialogue body — the Havelock picket after a Security team comes aboard, Falling Skyway","[Your party has the bridge. Nobody died over it. Somebody is going to have to explain this to the office.]"
+world.falling_skyway.comms.picket_disabled_report,"Dialogue body — the Havelock picket after its mounts are shot off, Falling Skyway","[Mounts are slag. We are still breathing, which I am told was a choice you made.]"
+world.falling_skyway.comms.picket_destroyed_report,"Dialogue body — Havelock operations on the picket being destroyed, Falling Skyway — the one report the boat cannot make itself",[There were four people on that boat. Do not hail this office again tonight.]
+world.falling_skyway.commitment.picket_restraint.terms,"Commitment terms — the captain's promise to the Havelock picket that it will be boarded and not shot, Falling Skyway",[The picket will be taken by boarding party and not by weapons fire.]
+world.falling_skyway.commitment.picket_restraint.resolves,"Commitment resolution condition — the picket-restraint promise in Falling Skyway",[Settled when the standoff ends.]
+world.falling_skyway.evidence.picket_contract,"Dossier line — the lane-hold contract the Havelock picket reads out when it is warned, Falling Skyway","[Picket crew cited a lane-hold clause paid by Havelock operations, not by the depot.]"
+world.falling_skyway.report.picket.heading,"Post-mission report row heading (issue #1349) — names the standoff the row is about",[Havelock Picket]
+world.falling_skyway.report.picket.contained,"Post-mission report row outcome — a Security team locked the picket's mounts out from outside",[Mounts locked out from outside. Her crew walked away from it.]
+world.falling_skyway.report.picket.boarded,"Post-mission report row outcome — a Security team went aboard and took the picket, and somebody aboard her was hurt",[Taken by boarding party. One of theirs hurt getting there.]
+world.falling_skyway.report.picket.boarded_clean,"Post-mission report row outcome — a Security team went aboard and took the picket after a warning on the channel, and nobody was hurt","[Taken by boarding party. They were warned, and nobody was hurt.]"
+world.falling_skyway.report.picket.disabled,"Post-mission report row outcome — the picket's guns were shot off and the engagement ended there",[Guns shot off her and the shooting stopped. She is still floating.]
+world.falling_skyway.report.picket.withdrew,"Post-mission report row outcome — the picket was talked off the lane and left under its own power",[Talked off the lane. She flew home whole.]
+world.falling_skyway.report.picket.destroyed,"Post-mission report row outcome — the picket was destroyed",[Destroyed with her crew aboard.]
+world.falling_skyway.report.picket.engaged,"Post-mission report row outcome — the crew opened fire on the picket, settled nothing and left her on station","[Fired on and left standing. The lane stayed hers, and she has the holes to show for it.]"
+world.falling_skyway.report.picket.holding,"Post-mission report row outcome — the crew opened the channel and left the picket where it was",[Hailed and left standing. The lane stayed hers.]
+world.falling_skyway.report.picket.unresolved,"Post-mission report row outcome — nobody ever addressed the standoff",[Never addressed. She was still on station when the shutters came down.]
+world.falling_skyway.report.survey.heading,"Post-mission report row heading (issue #1351) — the corridor survey and the evidence the crew came away holding",[Corridor Survey]
+world.falling_skyway.report.survey.corroborated,"Post-mission report row outcome — a worker corroborated the corridor record on the channel",[A worker put it on the record. The case holds.]
+world.falling_skyway.report.survey.records,"Post-mission report row outcome — the crew hold the depot maintenance discrepancy but no living witness",[The depot record shows the fault. It stands on paper.]
+world.falling_skyway.report.survey.filed,"Post-mission report row outcome — the survey was filed with Control but turned up nothing to hang a case on",[Survey filed. Nothing on the record to hang a case on.]
+world.falling_skyway.report.survey.missed,"Post-mission report row outcome — no complete survey ever reached Control",[No survey reached Control. The corridor went on the operator's word.]
+world.falling_skyway.report.labour.heading,"Post-mission report row heading (issue #1351) — how the Ladder B strike was settled",[Ladder B Strike]
+world.falling_skyway.report.labour.negotiated,"Post-mission report row outcome — the strike was talked to a settlement",[Talked to a vote. The rung went back to work on its own terms.]
+world.falling_skyway.report.labour.forced,"Post-mission report row outcome — the picket was cleared over the workers' heads",[Cleared by authorisation. The rung moved; the crew did not agree to it.]
+world.falling_skyway.report.labour.unresolved,"Post-mission report row outcome — the strike was left stopped",[Left stopped. The next crew through inherits a rung nobody freed.]
+world.falling_skyway.report.traffic.heading,"Post-mission report row heading (issue #1351) — the corridor traffic that rode out the storm",[Corridor Traffic]
+world.falling_skyway.report.traffic.clear,"Post-mission report row outcome — every corridor craft came through the sweep",[Every craft came through the sweep.]
+world.falling_skyway.report.traffic.thinned,"Post-mission report row outcome — some corridor craft were lost to the sweep",[The sweep took some of them. The rest came through.]
+world.falling_skyway.report.traffic.scattered,"Post-mission report row outcome — the corridor traffic was lost to the sweep",[The lane was cleared of them. None came through.]
+world.falling_skyway.report.skyhook.heading,"Post-mission report row heading (issue #1351) — whether the skyhook head stood",[The Skyhook]
+world.falling_skyway.report.skyhook.held,"Post-mission report row outcome — the tether was held and the head stood",[The tether held. The head is still standing.]
+world.falling_skyway.report.skyhook.lost,"Post-mission report row outcome — the head came down",[The head came down. The corridor lost its lee.]
+world.falling_skyway.report.lifts.heading,"Post-mission report row heading (issue #1351) — who the transfer window carried clear",[Transfer Window]
+world.falling_skyway.report.lifts.full,"Post-mission report row outcome — the window carried all it could",[The window carried all it could hold.]
+world.falling_skyway.report.lifts.some,"Post-mission report row outcome — the window carried one claimant clear",[One claimant carried clear. The others stayed on the rock.]
+world.falling_skyway.report.lifts.none,"Post-mission report row outcome — the window carried nobody",[Nobody was carried clear.]
+world.falling_skyway.report.commitments.heading,"Post-mission report row heading (issue #1351) — the captain's word, kept and broken",[The Captain's Word]
+world.falling_skyway.report.commitments.kept,"Post-mission report row outcome — every promise the captain made was kept",[Every promise was kept.]
+world.falling_skyway.report.commitments.mixed,"Post-mission report row outcome — some promises were kept and some broken",[Some were kept. Some were read back to the ship that broke them.]
+world.falling_skyway.report.commitments.broken,"Post-mission report row outcome — the promises the captain made were broken",[The word was given and not kept.]
+world.falling_skyway.report.civilians.heading,"Post-mission report row heading (issue #1351) — the survivors shed by the falling head",[Head Survivors]
+world.falling_skyway.report.civilians.all,"Post-mission report row outcome — every survivor off the head was recovered",[Both craft off the head were brought in.]
+world.falling_skyway.report.civilians.some,"Post-mission report row outcome — some survivors off the head were recovered and some lost",[One craft was brought in. The debris took the other.]
+world.falling_skyway.report.civilians.none,"Post-mission report row outcome — the survivors off the head were lost",[The debris took both craft off the head.]
+world.falling_skyway.comms.picket_leave_it,"Dialogue response — leave the Havelock picket where it is and close the channel, Falling Skyway",[Leave them. They are not the problem tonight.]
+world.falling_skyway.comms.picket_left_alone,"Dialogue body — the Havelock picket after the captain decides to leave it alone, Falling Skyway",[Then we will be right here. Mind the lane on your way past.]
+world.probe_picket.entity.picket.name,assets/worlds/probe_picket.toml -> [[entity]] name,[Probe Picket]
+world.probe_picket.entity.leaver.name,assets/worlds/probe_picket.toml -> [[entity]] name,[Probe Leaver]
+world.probe_picket.entity.brawler.name,assets/worlds/probe_picket.toml -> [[entity]] name,[Probe Brawler]
+world.probe_fleet_comms_choice.entity.claimant.name,"assets/worlds/probe_fleet_comms_choice.toml -> [[entity]] name, the party that calls the fleet. [bracketed]: unapproved copy",[PROBE CORRIDOR CLAIMANT]
+world.probe_fleet_comms_choice.comms.claim,"assets/worlds/probe_fleet_comms_choice.toml -> the weighted decision's body. [bracketed]: unapproved copy",[Who takes the corridor?]
+world.probe_fleet_comms_choice.comms.stand_by,"assets/worlds/probe_fleet_comms_choice.toml -> response text, the hold an unmanned console may not take. [bracketed]: unapproved copy",[Stand by.]
+world.probe_fleet_comms_choice.comms.grant,"assets/worlds/probe_fleet_comms_choice.toml -> response text, the one weighted option. [bracketed]: unapproved copy",[The corridor is yours.]
+world.probe_fleet_comms_choice.comms.refuse,"assets/worlds/probe_fleet_comms_choice.toml -> response text, authored but unweighted. [bracketed]: unapproved copy",[The corridor stays closed.]
+world.probe_fleet_comms_choice.entity.claimant_far.name,"assets/worlds/probe_fleet_comms_choice.toml -> [[entity]] name, the party that calls the FAR hull — out of the near hull's comms range on purpose. [bracketed]: unapproved copy",[PROBE FAR CORRIDOR CLAIMANT]
+entity.alliance_destroyer.scan.mass_class.light.label,"assets/entities/alliance_destroyer.toml -> [[scan.mass_class]] label","[Light]"
+entity.alliance_destroyer.scan.mass_class.medium.label,"assets/entities/alliance_destroyer.toml -> [[scan.mass_class]] label","[Medium]"
+entity.alliance_destroyer.scan.mass_class.heavy.label,"assets/entities/alliance_destroyer.toml -> [[scan.mass_class]] label","[Heavy]"
+entity.alliance_destroyer.scan.mass_class.massive.label,"assets/entities/alliance_destroyer.toml -> [[scan.mass_class]] label","[Massive]"
+world.falling_skyway.entity.debris_lead.name,"assets/worlds/falling_skyway.toml -> spawn_entity name, the debris on course for Ladder A","[Corridor Debris Alpha]"
+world.falling_skyway.entity.debris_trail.name,"assets/worlds/falling_skyway.toml -> spawn_entity name, the debris on course for Ladder B","[Corridor Debris Beta]"
+world.falling_skyway.entity.debris_stray.name,"assets/worlds/falling_skyway.toml -> spawn_entity name, the harmless drifting mass","[Corridor Debris Gamma]"
+world.falling_skyway.objective.debris_scan_near.text,"Objective text — assess the nearest shed mass, Falling Skyway","[Something came out of the storm's wake close aboard. Scan it and find out what it is.]"
+world.falling_skyway.objective.debris_scan_lead.text,"Objective text — assess the lead shed mass, Falling Skyway","[There is a second return up-track of Ladder A. Get in survey range and read it.]"
+world.falling_skyway.objective.debris_scan_trail.text,"Objective text — assess the trailing shed mass, Falling Skyway","[A third return is drifting down toward Ladder B. Find out where it is going.]"
+world.falling_skyway.objective.debris_lead.text,"Objective text — intercept the mass on course for Ladder A, Falling Skyway","[Corridor Debris Alpha is on course for Ladder A. Break it up before it arrives.]"
+world.falling_skyway.objective.debris_trail.text,"Objective text — intercept the mass on course for Ladder B, Falling Skyway","[Corridor Debris Beta is on course for Ladder B. Break it up before it arrives.]"
+world.falling_skyway.computer_message.debris_unidentified,"Ship's-computer cue — unidentified returns after the storm, Falling Skyway","[Three unidentified masses in the corridor. No trajectory solution.]"
+world.falling_skyway.computer_message.debris_collision_lead,"Ship's-computer cue — collision confirmed on Ladder A, Falling Skyway","[Collision confirmed. Corridor Debris Alpha will strike Ladder A.]"
+world.falling_skyway.computer_message.debris_collision_trail,"Ship's-computer cue — collision confirmed on Ladder B, Falling Skyway","[Collision confirmed. Corridor Debris Beta will strike Ladder B.]"
+world.falling_skyway.computer_message.debris_urgent_lead,"Ship's-computer cue — impact on Ladder A imminent, Falling Skyway","[Impact on Ladder A imminent. Firing window closing.]"
+world.falling_skyway.computer_message.debris_urgent_trail,"Ship's-computer cue — impact on Ladder B imminent, Falling Skyway","[Impact on Ladder B imminent. Firing window closing.]"
+world.falling_skyway.computer_message.debris_stray_clear,"Ship's-computer cue — the near mass is aimed at nothing, Falling Skyway","[Corridor Debris Gamma is on no collision course. Nothing under it.]"
+world.falling_skyway.computer_message.debris_struck_lead,"Ship's-computer cue — Ladder A was hit, Falling Skyway","[Impact. Ladder A has taken the mass we did not stop.]"
+world.falling_skyway.computer_message.debris_struck_trail,"Ship's-computer cue — Ladder B was hit, Falling Skyway","[Impact. Ladder B has taken the mass we did not stop.]"
+world.falling_skyway.computer_message.debris_corridor_clear,"Ship's-computer cue — no confirmed masses left in the corridor, Falling Skyway","[Corridor clear. No confirmed masses remaining.]"
+world.falling_skyway.evidence.debris_strike,"Evidence text — a rung struck by shed corridor debris, Falling Skyway","[Struck by a mass shed from the corridor after the storm. Damage is on the rung's own condition track.]"
+component.scan.debris.protected,"Science scan readout — row label naming the asset a moving hazard is on course to strike (issue #1347)","[On course for]"
+component.scan.debris.clear,"Science scan readout — value shown when a moving hazard is on no collision course, which is a finding rather than an absence (issue #1347)","[No collision course]"
+component.scan.debris.closest,"Science scan readout — row label for how near a moving hazard comes to the asset under it, world units (issue #1347)","[Closest approach]"
+component.scan.debris.impact,"Science scan readout — row label for the projected time until a moving hazard reaches the asset under it (issue #1347)","[Time to impact]"
+world.probe_debris.entity.depot.name,assets/worlds/probe_debris.toml -> [[entity]] name,[Probe Transfer Depot]
+world.probe_debris.entity.mass.name,assets/worlds/probe_debris.toml -> [[entity]] name,[Probe Corridor Mass]
+transporter.refused.no_contact,"Transporter refusal — no rescue contact is selected (issue #1348)","[No contact selected.]"
+transporter.refused.not_discovered,"Transporter refusal — the selected contact has not been revealed by a completed scan (issue #1348)","[No life signs confirmed — scan the contact first.]"
+transporter.refused.no_civilians,"Transporter refusal — the selected contact carries no unrecovered civilians (issue #1348)","[Everyone is aboard.]"
+transporter.refused.out_of_range,"Transporter refusal — the selected contact is past the transporter's authored range (issue #1348)","[Out of range — close on the contact.]"
+transporter.refused.unpowered,"Transporter refusal — the transporter's power group is below its authored minimum level (issue #1348)","[Insufficient power allocated.]"
+transporter.refused.disabled,"Transporter refusal — the transporter system is damaged to Disabled (issue #1348)","[Transporter disabled.]"
+console.engineering.transporter,"Engineering console — Transporter panel heading (issue #1348)","[Transporter]"
+console.transporter.start,"Engineering console — Transporter start button (issue #1348)","[Beam Up]"
+console.transporter.stop,"Engineering console — Transporter stop button (issue #1348)","[Hold]"
+world.probe_transporter.entity.destroyer.name,assets/worlds/probe_transporter.toml -> [[entity]] name,[Probe Destroyer]
+world.probe_transporter.entity.lighter.name,assets/worlds/probe_transporter.toml -> [[entity]] name,[Stranded Lighter]
+world.probe_transporter.objective.rescue.text,assets/worlds/probe_transporter.toml -> rescue objective,[Recover the civilians aboard the Stranded Lighter.]
+world.probe_transporter.cue.life_signs,assets/worlds/probe_transporter.toml -> discovery cue,[Life signs detected aboard the Stranded Lighter. Transport available.]
+world.probe_transporter.cue.rescue_complete,assets/worlds/probe_transporter.toml -> rescue-complete cue,[All civilians recovered.]
+world.probe_transporter.cue.civilians_lost,assets/worlds/probe_transporter.toml -> casualty cue,[Contact lost with civilians still aboard.]
+world.probe_transporter.report.civilians.heading,assets/worlds/probe_transporter.toml -> report row heading,[Stranded Lighter]
+world.probe_transporter.report.civilians.saved,assets/worlds/probe_transporter.toml -> report row outcome (saved),[Civilians recovered by transporter.]
+world.probe_transporter.report.civilians.lost,assets/worlds/probe_transporter.toml -> report row outcome (lost),[Lost with civilians still aboard.]
+demolition.detonate.refused.disabled,"Demolition detonate refusal — the Security System that fires the charges is damaged out (issue #1350)","[Security offline — cannot fire the charges.]"
+demolition.detonate.refused.no_such_target,"Demolition detonate refusal — nothing in the world answers to the named obstruction, or it offers no demolition (issue #1350)","[No such demolition target.]"
+demolition.detonate.refused.not_charged,"Demolition detonate refusal — charges have not been placed here yet (issue #1350)","[No charges placed — send a team first.]"
+demolition.detonate.refused.already_detonated,"Demolition detonate refusal — the charges have already been fired (issue #1350)","[Charges already fired.]"
+world.falling_skyway.entity.corridor_obstruction.name,"assets/worlds/falling_skyway.toml -> [[entity]] name — the collapsed mass wedged across the corridor that Act 3 clears by controlled demolition (issue #1350)","[Corridor Obstruction]"
+world.falling_skyway.security.warning.obstruction_charges,"assets/worlds/falling_skyway.toml -> [[entity.overrides.security_target.action]] warning — what a Security team walks into placing charges on the wedged mass (issue #1350)","[Unstable mass under load — team exposed while setting charges.]"
+world.falling_skyway.demolition.warning.obstruction,"assets/worlds/falling_skyway.toml -> [entity.overrides.demolition_target] warning — what firing the charges on the corridor obstruction will do (issue #1350)","[Live charges. Confirm the team is clear and the mass is held before firing.]"
+world.falling_skyway.computer_message.obstruction_cleared,"assets/worlds/falling_skyway.toml -> show_message — the ship's computer confirms a clean, stabilised demolition (issue #1350)","[Obstruction cleared. Debris field limited and drifting clear.]"
+world.falling_skyway.computer_message.obstruction_unsupported,"assets/worlds/falling_skyway.toml -> show_message — an unsupported detonation scattered more debris than a held shot (issue #1350)","[Obstruction down, but unheld — heavy debris scattered across the lane.]"
+world.falling_skyway.computer_message.obstruction_premature,"assets/worlds/falling_skyway.toml -> show_message — the charges went off with the team still on the mass (issue #1350)","[Premature detonation — team caught in the blast. Casualties reported.]"
+world.falling_skyway.computer_message.obstruction_weapons,"assets/worlds/falling_skyway.toml -> show_message — the obstruction was broken up by ordinary weapons fire (issue #1350)","[Obstruction broken up by weapons fire — uncontrolled debris across the lane.]"
 server.save_slots.heading,Host pre-scenario local save catalogue heading (issue #865),[Saved Sessions]
 server.save_slots.intro,Host save catalogue peer-local storage explanation (issue #865),[These saves belong to this browser only.]
 server.save_slots.new_session,Host save catalogue action that leaves the ordinary scenario picker available,[New Session]
@@ -2163,3 +2381,17 @@ console.gm_takeover.active_with_activity,Crew-public authentic console banner in
 settings.fleet.role_heading,Accessible label for choosing this privileged host's fleet role before open or join,[Join fleet as]
 settings.fleet.role_ship,Privileged host fleet role that owns one player-ship slot,[Player ship]
 settings.fleet.role_gm,Privileged host fleet role that owns no player ship and has equal Game Master presence,[Game Master]
+world.falling_skyway.entity.castaway_lifeboat.name,"assets/entities/skyway_castaway_lifeboat.toml -> [[entity]] name — a castaway lifeboat adrift in the corridor throat carrying civilians the Engineering transporter can beam aboard (issue #1348 mechanism, T2 refinement)",[Castaway Lifeboat]
+world.falling_skyway.objective.castaway_rescue.text,"assets/worlds/falling_skyway.toml -> the Rescue-directive objective posted when a scan discovers the castaway lifeboat (issue #1348 mechanism)",[Beam the civilians aboard the Castaway Lifeboat to safety.]
+world.falling_skyway.cue.castaway_life_signs,"assets/worlds/falling_skyway.toml -> discovery cue when a Sensors scan turns up the castaway lifeboat",[Life signs detected aboard a castaway lifeboat in the throat. Transport available.]
+world.falling_skyway.cue.castaway_recovered,"assets/worlds/falling_skyway.toml -> rescue-complete cue when the transporter recovers every civilian off the lifeboat",[All civilians aboard the lifeboat recovered.]
+world.falling_skyway.cue.castaway_lost,"assets/worlds/falling_skyway.toml -> casualty cue when the lifeboat is destroyed with civilians still aboard",[The lifeboat is gone — lost with civilians still aboard.]
+world.falling_skyway.report.transporter_civilians.heading,"Post-mission report row heading (issue #1348 mechanism, T2 refinement) — the civilians the Engineering transporter beamed off the castaway lifeboat, a different population from the head survivors",[Beamed Civilians]
+world.falling_skyway.report.transporter_civilians.saved,"Post-mission report row outcome — every civilian aboard the castaway lifeboat was beamed to safety",[The lifeboat's civilians were all beamed aboard.]
+world.falling_skyway.report.transporter_civilians.lost,"Post-mission report row outcome — the castaway lifeboat was lost with its civilians still aboard",[The lifeboat was lost with its civilians still aboard.]
+world.falling_skyway.objective.obstruction.text,"assets/worlds/falling_skyway.toml -> the non-mandatory Act-3 Stabilise objective that surfaces the corridor obstruction's controlled demolition alongside the head-save, both contending for the one tractor (issue #1350, T2 refinement)",[Clear the corridor obstruction — hold it on the tractor and detonate when the team is clear.]
+world.falling_skyway.report.demolition.heading,"Post-mission report row heading (issue #1350, scored for the T2 refinement) — how the corridor obstruction was cleared",[The Corridor Obstruction]
+world.falling_skyway.report.demolition.safe,"Post-mission report row outcome — the obstruction was cleared by a clean, stabilised demolition with the team clear",[Cleared cleanly. The mass was held and the team was clear.]
+world.falling_skyway.report.demolition.unsupported,"Post-mission report row outcome — the charges were fired without the tractor holding the mass, scattering heavier debris","[Cleared, but unheld — heavier debris scattered across the lane.]"
+world.falling_skyway.report.demolition.weapons,"Post-mission report row outcome — the obstruction was broken up by ordinary weapons fire, the least controlled clearance",[Broken up by gunnery. The lane took the worst of the debris.]
+world.falling_skyway.report.demolition.premature,"Post-mission report row outcome — the charges were fired with the Security team still on the mass, and the team was caught",[Fired early. The team was still on the mass and was caught.]

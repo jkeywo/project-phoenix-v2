@@ -451,6 +451,20 @@ pub enum ConsoleFamily {
     Command,
     Tractor,
     Umbilical,
+    /// Security teams (issue #1346). A family of its own rather than reusing
+    /// `Tactical`, for the reason this enum exists: the Alliance Destroyer's
+    /// Tactical STATION owns the Security System, but its readout is nothing
+    /// like a weapons view — a team list, their assignments and progress, and
+    /// the targets they can be sent to — and another hull may hang the same
+    /// system off Command or Engineering without any of that changing. The
+    /// tractor and the umbilical are the same shape: engineering-owned, drawn by
+    /// their own family.
+    Security,
+    /// The rescue transporter (issue #1348). Its own family, the way the tractor
+    /// and umbilical have theirs: engineering-owned, drawn by a bespoke readout
+    /// (a selected contact, its life signs, the recovery progress) that is
+    /// nothing like any other console.
+    Transporter,
 }
 
 impl ConsoleFamily {
@@ -468,6 +482,8 @@ impl ConsoleFamily {
             Self::Command => "command",
             Self::Tractor => "tractor",
             Self::Umbilical => "umbilical",
+            Self::Security => "security",
+            Self::Transporter => "transporter",
         }
     }
 }
@@ -1505,6 +1521,17 @@ pub struct ShipClientConfig {
     /// `[sensors_console.long_range_radar] selects`.
     #[serde(default)]
     pub sensors_radar_selects: Vec<String>,
+    /// How far into the future the Sensors selected-contact trajectory
+    /// projection extends, in seconds (issue #1339). Sourced from
+    /// `[sensors_console.projection] horizon_secs`; defaults to 60s when the
+    /// hull omits the table.
+    #[serde(default = "crate::entities::config::default_sensors_projection_horizon_secs")]
+    pub sensors_projection_horizon_secs: f32,
+    /// Spacing between successive projection markers, in seconds (issue
+    /// #1339). Sourced from `[sensors_console.projection]
+    /// marker_interval_secs`; defaults to 10s when the hull omits the table.
+    #[serde(default = "crate::entities::config::default_sensors_projection_marker_interval_secs")]
+    pub sensors_projection_marker_interval_secs: f32,
     /// Targetability filter for the Navigation system chart. Sourced from
     /// `[navigation_console.system_chart] selects`.
     #[serde(default)]
@@ -1696,6 +1723,10 @@ impl Default for ShipClientConfig {
             sensors_radar_range: default_sensors_radar_range(),
             sensors_radar_shows: Vec::new(),
             sensors_radar_selects: Vec::new(),
+            sensors_projection_horizon_secs:
+                crate::entities::config::default_sensors_projection_horizon_secs(),
+            sensors_projection_marker_interval_secs:
+                crate::entities::config::default_sensors_projection_marker_interval_secs(),
             nav_chart_shows: Vec::new(),
             nav_chart_selects: Vec::new(),
             nav_chart_range: default_nav_chart_range(),
@@ -2510,6 +2541,93 @@ pub enum SystemControlPayload {
     /// umbilical, so there is nothing to disambiguate. What has already moved has
     /// moved.
     StopTransfer,
+    /// Select a discovered rescue contact for the transporter (issue #1348).
+    ///
+    /// Targets the engineering-owned `transporter` system
+    /// (`system_registry::TRANSPORTER_SYSTEM_ID`), a real station-owned system,
+    /// so it takes the ordinary station-tenure admission path — the Engineering
+    /// holder may send it, an AI operating the transporter may emit it, and
+    /// nobody else is admitted.
+    ///
+    /// Unlike the tractor's `EngageTractor` (which couples to the ship's combat
+    /// lock), the transporter NAMES its target: a rescue is a deliberate act
+    /// against a specific discovered contact, not against whatever Tactical has
+    /// locked, so the uuid is carried — the same identifier `SetScienceTarget`
+    /// carries and the console already holds from its radar blips. Selecting is
+    /// intent only; `StartTransport` begins the recovery.
+    TransportSelectContact {
+        /// The selected contact's uuid.
+        uuid: String,
+    },
+    /// Start recovering civilians from the selected rescue contact (issue #1348).
+    /// Targets the `transporter` system. No fields — the target is whatever
+    /// `TransportSelectContact` last named, resolved server-side. Explicit
+    /// intent, not a toggle: `StopTransport` is its own command, so a retried or
+    /// stale-UI start is idempotent. A start with no contact, an undiscovered or
+    /// out-of-range contact, or one carrying no unrecovered civilians is refused
+    /// with a reason the console shows.
+    StartTransport,
+    /// Stop the rescue transport, leaving whoever has already been recovered
+    /// aboard (issue #1348). Targets the `transporter` system, the sibling of
+    /// `StartTransport`. No fields — a ship runs one transporter. Resuming is a
+    /// fresh `StartTransport` on the same selection, which picks the recovery up
+    /// where it left off.
+    StopTransport,
+    /// Send one Security team to a named target to perform a named action (issue
+    /// #1346). Targets the `security` system — a real station-owned system, so it
+    /// takes the ordinary station-tenure admission path: on the Alliance Destroyer
+    /// the Tactical holder may send it, the backfill Security host may emit it,
+    /// and nobody else is admitted. There is no Duty Officer gate.
+    ///
+    /// Unlike `DispatchExternalRepair`, this command NAMES all three of its parts,
+    /// because none of them can be resolved server-side from context: a hull
+    /// musters several teams working several targets at once, so a single Tactical
+    /// lock cannot say which team, which target, or which of the target's authored
+    /// actions is meant. `action` is one of the generic action ids
+    /// (`secure_contain`, `assist_evacuation`, `board`, `place_charges`); an id
+    /// nothing answers to, and one the target does not offer, are both refused with
+    /// a reason the console shows. Explicit intent, not a toggle:
+    /// `RecallSecurityTeam` is its own command, so a retried or stale-UI dispatch
+    /// of a team that is already out is refused rather than reassigning it.
+    DispatchSecurityTeam {
+        /// Which of the hull's authored teams to send, 0-based.
+        team_idx: u8,
+        /// The target entity's uuid.
+        target: String,
+        /// The action id to perform there.
+        action: String,
+    },
+    /// Bring one Security team home, ending whatever it was doing where it stands
+    /// (issue #1346). Targets the `security` system, the sibling of
+    /// `DispatchSecurityTeam`. The team index is named for the same reason the
+    /// dispatch names it: a hull with two teams out cannot say which one a
+    /// fieldless recall meant. Recalling a team that is not out is a no-op.
+    RecallSecurityTeam {
+        /// Which of the hull's authored teams to recall, 0-based.
+        team_idx: u8,
+    },
+    /// Detonate the charges a Security team has placed on a named obstruction
+    /// (issue #1350). Targets the `security` system — the same station-owned
+    /// system the team was dispatched from, so on the Alliance Destroyer the
+    /// Tactical holder fires it, the backfill host may emit it, and nobody else
+    /// is admitted. There is no Duty Officer gate.
+    ///
+    /// This is the FOURTH and final stage of a controlled demolition, and it is
+    /// deliberately its own explicit command rather than something a completed
+    /// charge placement triggers: completing placement starts the team home, it
+    /// never fires the charges. The obstruction is NAMED because a ship can be
+    /// running more than one demolition operation, and a single Tactical lock
+    /// cannot say which mass is meant.
+    ///
+    /// A detonation with no charges placed, or one already fired, is refused with
+    /// a reason the console shows. A detonation while the team has not yet
+    /// withdrawn is NOT refused — it is the premature outcome, with casualties —
+    /// so the console shows the team-safety state and leaves the choice to
+    /// Tactical.
+    DetonateCharges {
+        /// The obstruction entity's uuid.
+        target: String,
+    },
 }
 
 /// `ClientMessageDiscriminants` (from `strum::EnumDiscriminants`) is a
@@ -3063,6 +3181,39 @@ pub struct ScenarioCatalogWire {
     pub ships: Vec<crate::world::config::AvailableShipEntry>,
 }
 
+/// One row of the post-mission report as it travels to a player surface
+/// (issue #1344).
+///
+/// Two pages render these rows and both normalize them through the ONE
+/// exported `reportRows` in `gui/game-over-view.js`, which each loads as a
+/// module: the phone (client.html) reaches it via that module's `gameOverView`,
+/// and the Viewscreen (server.html) calls it directly from `__updateHud`,
+/// because its rows ride [`ViewscreenHudState::game_over_report`] rather than a
+/// [`ServerMessage::GameOver`]. Different messages and different overlays, but
+/// one definition of which row is renderable and which `state` words style — so
+/// the two surfaces cannot disagree about what the report says.
+///
+/// The **player-safe** projection of [`crate::core::report::ReportRow`]: the
+/// authored row id, the two `strings.csv` ids the surface localizes, and the
+/// semantic state it styles on. The row's signed diagnostic **score is not
+/// here and must never be added** — it is design's number, not the crew's, and
+/// the headless report is where it belongs. Nor is there a total, a grade, or a
+/// win/loss label anywhere in this shape: a report row says what became of the
+/// thing it names, and nothing else.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GameOverReportRow {
+    /// The author's stable row id — machine identity, never displayed.
+    pub id: String,
+    /// `strings.csv` id for what the row is about.
+    pub heading: String,
+    /// `strings.csv` id for how it ended.
+    pub outcome: String,
+    /// [`crate::core::report::ReportRowState::as_str`] — `"saved"`, `"lost"`,
+    /// `"partial"` or `"neutral"`. A label rather than the enum, for the same
+    /// reason `GameOver::outcome` is one.
+    pub state: String,
+}
+
 /// `ServerMessageDiscriminants` (from `strum::EnumDiscriminants`) is a
 /// fieldless companion enum that automatically stays in sync with the
 /// variant list below — used by the codec's table-driven round-trip harness
@@ -3415,6 +3566,25 @@ pub enum ServerMessage {
         /// key the client has to test for twice.
         #[serde(default)]
         outcome: Option<String>,
+        /// The structured post-mission report (issue #1344), in authored row
+        /// order, or empty when the scenario authored none.
+        ///
+        /// When it is non-empty the client frames the ending with the ROWS
+        /// instead of the victory/defeat headline — `outcome` above still
+        /// travels, and is still the authored truth about the ending, it simply
+        /// stops being the frame. See `gui/game-over-view.js`.
+        ///
+        /// Deliberately score-free. `crate::core::report::ReportRow` carries a
+        /// signed diagnostic score and this projection drops it: the number is
+        /// for design, and putting it on a player's screen would turn a rescue
+        /// into a coupon. Headless output carries the scores and the total; the
+        /// wire never does.
+        ///
+        /// `#[serde(default)]` so a peer sending the pre-#1344 shape decodes as
+        /// an empty report. Always WRITTEN, no `skip_serializing_if`, for the
+        /// same reason `outcome` is.
+        #[serde(default)]
+        report: Vec<GameOverReportRow>,
     },
     /// Broadcast when all players return to the lobby from the GameOver screen.
     /// Clients should switch back to the lobby panel. Station claims and ready
@@ -3562,6 +3732,49 @@ pub struct ViewscreenHudState {
     /// `localiseTree` client-side. `None` while in progress.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub game_over_message: Option<String>,
+    /// The active ship's-computer message, if any (issue #1342). Rides the
+    /// existing `"hud"` channel rather than a dedicated one — this struct is
+    /// already "everything the border/status-strip needs", and the banner is
+    /// exactly one more thing on the Viewscreen overlay. `None` clears the
+    /// banner: superseded, expired, or a mission/lobby transition all produce
+    /// a HUD push with this field absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub computer_message: Option<ComputerMessageWire>,
+    /// The structured post-mission report (issue #1344), in authored row order,
+    /// set only while the game has ended and only when the scenario authored
+    /// one. The SAME [`GameOverReportRow`] the phone receives on
+    /// `ServerMessage::GameOver`: the Viewscreen and a console must not be able
+    /// to disagree about what the mission came away with, and one shape is how
+    /// that is guaranteed rather than promised.
+    ///
+    /// Both text fields are `strings.csv` ids, which the host channel's
+    /// `localiseTree` boundary resolves like every other id in this payload;
+    /// `state` is a machine label and passes through untouched. There is no
+    /// score here for the same reason there is none on the wire row.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub game_over_report: Vec<GameOverReportRow>,
+}
+
+/// The active ship's-computer message's Viewscreen-facing half (issue #1342).
+///
+/// Every text-shaped field is a `strings.csv` id, never localized prose
+/// (AGENTS.md rule 11) — `window.__updateHud` resolves `text` (and `station`,
+/// if present) through `localiseHostPayload`/`t()`, exactly as
+/// `game_over_message` already does. `severity` is the bare wire word
+/// ([`crate::core::computer_message::ComputerMessageSeverity::as_str`]); the
+/// client maps it to a CSS class and (for `station`) an optional badge.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ComputerMessageWire {
+    /// The author's own stable id — presentation only, never rendered.
+    pub id: String,
+    /// `strings.csv` id for the message body.
+    pub text: String,
+    /// `"info"` / `"advisory"` / `"warning"` / `"critical"`.
+    pub severity: String,
+    /// Station id for the optional badge (`"tactical"`, `"helm"`, …), if the
+    /// scenario authored one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub station: Option<String>,
 }
 
 /// A single radar blip on the Tactical console radar.
@@ -3736,6 +3949,16 @@ pub struct SensorRadarBlackboard {
     /// this intelligence to the Sensors operator.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_target_alert: Option<bool>,
+    /// World-space relative velocity (target minus this ship's own velocity,
+    /// X/Z) of the selected target, in world units/sec (issue #1339).
+    /// `Some(..)` only when the selection names a ship (player or NPC) whose
+    /// `ShipPhysics` this tick's publisher can resolve; `None` for no
+    /// selection, a non-ship contact (asteroid/station/planet/region), or an
+    /// unresolvable target. `None` is the "unknown velocity" signal the client
+    /// uses to suppress the trajectory projection entirely — same shape as
+    /// `selected_target_alert` above.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_target_relative_velocity: Option<[f32; 2]>,
 }
 
 /// One visible mission deadline, as the Captain console reads it (issue #1024).
@@ -4308,6 +4531,235 @@ pub enum SystemBlackboard {
     /// umbilical IS a thing aboard the ship: it declares a power group, carries a
     /// damage entry and is commanded and refused through the engineering console.
     Umbilical(UmbilicalBlackboard),
+    /// The Security System's readout (issue #1346). One per ship carrying a
+    /// `security` system, keyed by `system_registry::security_system_id` — a REAL
+    /// system id, because Security IS a thing aboard the ship: it carries a damage
+    /// entry, is commanded and refused through the console of whichever station
+    /// the hull gave it to (Tactical, on the Alliance Destroyer), and its teams go
+    /// off the board when it is knocked out.
+    Security(SecurityBlackboard),
+    /// The rescue transporter's readout (issue #1348). One per ship carrying a
+    /// `transporter` system, keyed by `system_registry::transporter_system_id` —
+    /// a REAL system id, not a reserved channel, because unlike an operation the
+    /// transporter IS a thing aboard the ship: it declares a power group, carries
+    /// a damage entry and is commanded and refused through the engineering
+    /// console.
+    Transporter(TransporterBlackboard),
+    /// The controlled-demolition operation readout (issue #1350). One per ship
+    /// that can fire charges, keyed by `demolition::DEMOLITION_BLACKBOARD_KEY` — a
+    /// reserved channel, not a real system id, because unlike Security or the
+    /// tractor an OPERATION is not a thing aboard the ship that can be damaged or
+    /// commanded on its own: what fires the charges is the `security` system, and
+    /// what holds the mass is the `tractor`. This channel carries the operation
+    /// STATE those two coordinate through — charged, team clear, stabilised,
+    /// detonated — so a Tactical seat can see it may not treat a completed
+    /// placement as an automatic detonation.
+    Demolition(DemolitionBlackboard),
+}
+
+/// Raw sim truth for a ship's rescue transporter, published each tick under its
+/// system id (issue #1348).
+///
+/// Additive on the wire in both directions, the way `TractorBlackboard` is: the
+/// adjacently-tagged `SystemBlackboard` enum's other variants are untouched by
+/// adding `Transporter`, and every field here is `#[serde(default)]`, so a
+/// payload predating one decodes rather than being refused whole. No English
+/// crosses: `selected_contact_name` is a world entity name id and `refusal` a
+/// `strings.csv` id the console resolves.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct TransporterBlackboard {
+    /// The authored transporter range, so the console can show the crew how far
+    /// the transporter reaches. Authored content, not live state.
+    #[serde(default)]
+    pub range: f32,
+    /// The uuid of the contact currently selected for rescue, or `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_contact: Option<String>,
+    /// The selected contact's authored world entity name id, resolved for
+    /// display, or `None` when nothing is selected or it has no authored name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_contact_name: Option<String>,
+    /// Whether the selected contact has been revealed by a completed scan — the
+    /// discovery gate, published so the console can show "life signs confirmed".
+    #[serde(default)]
+    pub discovered: bool,
+    /// Whether the transport is running (recovering civilians) this tick.
+    #[serde(default)]
+    pub transporting: bool,
+    /// How many civilians the selected contact still carries, so the console can
+    /// show the crew what is left to bring aboard.
+    #[serde(default)]
+    pub civilians_remaining: u32,
+    /// Accrual toward the NEXT civilian, 0.0–1.0 — the progress bar the console
+    /// draws while a transport runs.
+    #[serde(default)]
+    pub progress: f32,
+    /// `strings.csv` id for why the last start or transport could not run —
+    /// `transporter.refused.*`. Retained until the operator selects, starts or
+    /// stops again; `None` while the transporter is idle or running cleanly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal: Option<String>,
+}
+
+/// Raw sim truth for a ship's controlled-demolition operations, published each
+/// tick under its reserved channel (issue #1350).
+///
+/// Additive on the wire in both directions: adding the `Demolition` variant
+/// leaves every other `SystemBlackboard` arm untouched, and every field here is
+/// `#[serde(default)]`, so a payload predating one decodes rather than being
+/// refused whole. No English crosses: names are world entity name ids, the
+/// outcome is a machine id, and `refusal` and `warning` are `strings.csv` ids the
+/// console resolves.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct DemolitionBlackboard {
+    /// Every obstruction in the world this ship could demolish, in uuid order,
+    /// with the live state of each operation.
+    #[serde(default)]
+    pub targets: Vec<DemolitionSlot>,
+    /// Why the last detonation was refused — a `strings.csv` id. `None` when
+    /// nothing has been refused since the last command.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal: Option<String>,
+}
+
+/// One demolition operation's live state, as the Tactical console shows it (issue
+/// #1350).
+///
+/// The three booleans the crew read before firing are the whole of what
+/// distinguishes the outcomes: `charged` says the detonate control is armed at
+/// all, `team_clear` is the team-safety state a completed placement must NOT be
+/// mistaken for, and `stabilized` against `stabilization_required` says whether
+/// the shot will be clean or messy. `detonated` marks a spent operation.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct DemolitionSlot {
+    /// The obstruction's uuid — the target a `DetonateCharges` command names.
+    #[serde(default)]
+    pub target: String,
+    /// The obstruction's authored world entity name id, resolved for display.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_name: Option<String>,
+    /// Whether charges have been placed — the detonate control is armed.
+    #[serde(default)]
+    pub charged: bool,
+    /// Whether no Security team is still committed to this target: the team has
+    /// withdrawn and a detonation now would not catch anyone.
+    #[serde(default)]
+    pub team_clear: bool,
+    /// Whether this mass needs a tractor hold to come apart cleanly (authored).
+    #[serde(default)]
+    pub stabilization_required: bool,
+    /// Whether the ship's tractor beam is currently holding this target.
+    #[serde(default)]
+    pub stabilized: bool,
+    /// Whether the charges have already been fired.
+    #[serde(default)]
+    pub detonated: bool,
+    /// A `strings.csv` id for the warning shown beside the detonate control.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
+}
+
+/// Raw sim truth for a ship's Security teams, published each tick under its
+/// system id (issue #1346).
+///
+/// This is the whole data half of the repair-team-style interface: the team list
+/// with each team's state, assignment, progress and risk, plus every target in
+/// the world that offers Security work and what each of them offers. The console
+/// renders it and sends `DispatchSecurityTeam` / `RecallSecurityTeam` back.
+///
+/// Additive on the wire in both directions: adding the `Security` variant leaves
+/// every other `SystemBlackboard` arm untouched, and every field here is
+/// `#[serde(default)]`, so a payload predating one decodes rather than being
+/// refused whole. No English crosses: names are world entity name ids, `state`,
+/// `action` and `priority` are machine ids, and `refusal` and `warning` are
+/// `strings.csv` ids the console resolves.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct SecurityBlackboard {
+    /// The authored reach a team can cross, so the console can show the crew how
+    /// far Security goes. Authored content, not live state.
+    #[serde(default)]
+    pub range: f32,
+    /// Every team the hull musters, in authored index order — the index a
+    /// dispatch or recall names.
+    #[serde(default)]
+    pub teams: Vec<SecurityTeamSlot>,
+    /// Every entity in the world that offers Security work, in uuid order, with
+    /// the actions each of them offers.
+    #[serde(default)]
+    pub targets: Vec<SecurityTargetOption>,
+    /// Why the last dispatch was refused, or why the world ended a live
+    /// assignment — a `strings.csv` id. `None` when nothing has been refused since
+    /// the last command.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal: Option<String>,
+}
+
+/// One Security team's live state, as the console shows it (issue #1346).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct SecurityTeamSlot {
+    /// `available` / `deploying` / `working` / `withdrawing` / `unavailable`.
+    #[serde(default)]
+    pub state: String,
+    /// The uuid of the target it is assigned to, while it holds an assignment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    /// That target's authored world entity name id, resolved for display.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_name: Option<String>,
+    /// The action id it was sent to perform.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
+    /// How far through its CURRENT state it is, 0.0–1.0 — the crossing, the work,
+    /// or the return, whichever it is in, so the console draws one bar.
+    #[serde(default)]
+    pub progress: f32,
+    /// The authored risk of the assignment it is on, 0.0–1.0.
+    #[serde(default)]
+    pub risk: f32,
+}
+
+/// One target that offers Security work, and what it offers (issue #1346).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct SecurityTargetOption {
+    /// The target entity's uuid — what a dispatch names.
+    #[serde(default)]
+    pub uuid: String,
+    /// Its authored world entity name id, for display.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// How far it is from the operator, in world units.
+    #[serde(default)]
+    pub separation: f32,
+    /// Whether it is inside the hull's authored Security reach this tick — the
+    /// "eligible target" answer, pre-computed so the console never re-derives a
+    /// range rule the server owns.
+    #[serde(default)]
+    pub in_range: bool,
+    /// The actions available here, in authored order.
+    #[serde(default)]
+    pub actions: Vec<SecurityActionOption>,
+}
+
+/// One action a target offers, and its authored terms (issue #1346).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct SecurityActionOption {
+    /// The action id a dispatch names.
+    #[serde(default)]
+    pub action: String,
+    /// How long a team works here once it has arrived.
+    #[serde(default)]
+    pub duration_secs: f32,
+    /// How dangerous it is, 0.0–1.0.
+    #[serde(default)]
+    pub risk: f32,
+    /// How urgent it is — the same class the backfill host ranks on, shown so the
+    /// crew and the AI are reading one list.
+    #[serde(default)]
+    pub priority: String,
+    /// A `strings.csv` id for the warning shown beside this action, when the
+    /// target authors one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
 }
 
 /// Raw sim truth for a ship's tractor beam, published each tick under its system
@@ -4507,6 +4959,24 @@ pub struct ScanReadingSnapshot {
     /// still decodes, at `0.0`.
     #[serde(default)]
     pub mass: f32,
+    /// The machine code of the bulk class that answered for `mass` (issue
+    /// #1347), or ABSENT when the scanning suite authors no
+    /// `[[scan.mass_class]]` ladder — which is every hull shipped before it, so
+    /// those readings put exactly the payload on the wire they did before.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub mass_class: String,
+    /// `strings.csv` id for that class's crew-facing name. Absent with the code.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub mass_class_label: String,
+    /// What the reading worked out about a moving hazard (issue #1347): what it
+    /// is closing on, how near it gets, and when. Absent for every subject that
+    /// is not debris, which is every subject shipped before it.
+    ///
+    /// Still a projection of state rather than a result somebody authored — see
+    /// `crate::debris::threat` for why the type has no field a scripted verdict
+    /// could arrive on, which is the same guarantee the reading around it makes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debris: Option<crate::debris::DebrisAssessment>,
     /// `(label id, held)` per operational flag the subject authored a label
     /// for. Empty when the answering band does not resolve flags.
     #[serde(default)]
@@ -4534,6 +5004,9 @@ impl ScanReadingSnapshot {
             condition_fraction: reading.condition_fraction,
             condition_step: reading.condition_step,
             mass: reading.mass,
+            mass_class: reading.mass_class.clone(),
+            mass_class_label: reading.mass_class_label.clone(),
+            debris: reading.debris.clone(),
             flags: reading.flags.clone(),
             capacities: reading.capacities.clone(),
         }
@@ -5298,6 +5771,36 @@ pub enum AiDirective {
     /// `DispatchExternalRepair`/`RecallExternalRepair`, and the shared free-team
     /// availability answer keeps it from starving the hull's own repairs.
     FieldRepair { target: String },
+    /// Secure the named target (issue #1346): Tactical sends a Security team
+    /// across to do whatever that target authors as the most urgent work
+    /// available there. Routes to Security.
+    ///
+    /// A *per-verb operate directive* like the tractor's: it lives upstream of
+    /// admission and names WHAT to secure, never the concrete command or the
+    /// action. Which of the target's authored actions is served — contain the
+    /// fire, assist the evacuation, board, place charges — is the target's own
+    /// priority ranking, not the mission's, which is what keeps a mission from
+    /// having to know a compartment's internal vocabulary. What naming a target
+    /// DOES buy is urgency: an active `Secure` order promotes that target's
+    /// authored work to `urgent_objective` in the backfill ranking, and never
+    /// below what it already was.
+    Secure { target: String },
+    /// Rescue the civilians aboard the named target (issue #1348): Engineering
+    /// selects the discovered contact and runs the transporter until everyone is
+    /// recovered. Routes to Engineering, the transporter's owner.
+    ///
+    /// A *per-verb operate directive* like the tractor's: it lives upstream of
+    /// admission and names WHAT to rescue, not the concrete command; the
+    /// transporter seat decides the `TransportSelectContact`/`StartTransport`/
+    /// `StopTransport`. Unlike `Tow`/`Stabilise`/`Escort` it does NOT resolve
+    /// through the combat lock — the transporter names its own contact — so it
+    /// never routes to the Weapons Tactical selector. The tractor-versus-rescue
+    /// priority the mission wants is an AUTHORED-SCORING concern: the Engineering
+    /// backfill runs its own rescue query independently of the tractor query, and
+    /// whichever objective the scenario's utility scoring ranks higher is the one
+    /// the seat serves that tick (AGENTS.md rule 6 — the seat has one pair of
+    /// hands, and the scored pool decides which life-saving order wins it).
+    Rescue { target: String },
 }
 
 /// Whether an objective originates from the active mission or from standing doctrine.
@@ -5341,6 +5844,14 @@ pub enum SystemAffinity {
     /// tractor is crewed (or vice versa) routes each directive to exactly the
     /// seat that owns it.
     Repair,
+    /// Security cares about the `Secure` operate directive (issue #1346): the
+    /// backfilled Security host consumes it from the local scored-objective pool
+    /// and issues the same `DispatchSecurityTeam` command a human at the owning
+    /// station sends. Its own affinity, kept apart from `Weapons`, because which
+    /// STATION owns Security is the hull's authoring decision — Tactical on the
+    /// Alliance Destroyer, but not necessarily anywhere else — so the directive
+    /// routes to the SYSTEM rather than to a seat the engine assumed.
+    Security,
 }
 
 /// An objective with its computed utility score, published on the Viewscreen

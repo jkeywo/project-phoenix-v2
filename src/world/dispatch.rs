@@ -201,6 +201,61 @@ pub enum ActionCmd {
         /// layer-owned objective ids so `UnloadWorld` removes them.
         origin_layer: Option<String>,
     },
+    /// Record an authored story beat on the mission timeline (issue #1338).
+    ///
+    /// `id` is the author's own semantic identifier — the scenario's
+    /// punctuation, with no other meaning to the simulation. Nothing branches
+    /// on it and no state moves: the applier buffers it onto the narrative
+    /// effect queue and `narrative::emit_authored_and_marked_entity_narrative`
+    /// turns it into a `NarrativeKind::BeatFired` event. This is the "authors
+    /// explicitly mark beats" half of PRD #1337 — the sim never infers one.
+    NarrativeBeat { id: String },
+    /// Record an authored outcome for a marked narrative entity (issue #1338).
+    ///
+    /// `entity` is the world's authored entity NAME, not a UUID, resolved by
+    /// the applier against `WorldContentRuntime::name_to_uuid` for the reason
+    /// every other name-carrying command here is. `outcome` is already
+    /// validated at the script boundary
+    /// ([`crate::core::narrative::NarrativeKind::parse_outcome`]), so a typo
+    /// raises there rather than reaching this queue as a silently different
+    /// beat.
+    ///
+    /// Spawn and death are emitted automatically for any entity carrying a
+    /// [`crate::core::narrative::NarrativeMark`] — death on BOTH removal paths,
+    /// the combat kill and the scripted
+    /// [`ActionCmd::DestroyEntity`]. This is the door for the outcomes only an
+    /// author can judge — escaped, rescued, abandoned, disabled.
+    ///
+    /// It is also how an author says a scripted removal was NOT a death.
+    /// Because a marked hull `ctx.effects.destroy_entity(..)` removes reports
+    /// `marked_entity_destroyed` by default, an author who despawns one to
+    /// mean something else records that outcome **before, or on the same tick
+    /// as, the destroy**; the automatic death is then suppressed and the
+    /// authored outcome stands alone. Recording it a tick LATER is too late —
+    /// the death has already been written. See
+    /// [`crate::core::narrative::NarrativeKind::MarkedEntityDestroyed`].
+    NarrativeOutcome {
+        entity: String,
+        outcome: crate::core::narrative::NarrativeKind,
+    },
+    /// Show a timed ship's-computer message on the Viewscreen (issue #1342).
+    ///
+    /// Fully resolved and validated at the script boundary before it ever
+    /// reaches here: `severity` is already parsed
+    /// ([`crate::core::computer_message::ComputerMessageSeverity::parse`])
+    /// and `duration_secs` already checked positive
+    /// (`world::script::effects::register_effects`'s `show_message` host fn).
+    /// The applier does no name resolution at all — `station` is an authored
+    /// Station id, not an entity name — so it only buffers this onto the
+    /// computer-message effect queue for
+    /// `crate::narrative::tick_computer_message` to apply.
+    ShowComputerMessage {
+        id: String,
+        text: String,
+        severity: crate::core::computer_message::ComputerMessageSeverity,
+        duration_secs: i64,
+        station: Option<crate::core::messages::StationId>,
+    },
     /// Mark an objective complete. A no-op for unknown / non-Active ids.
     CompleteObjective { id: String },
     /// Re-arm the trigger(s) with the given authored id (issue #751).
@@ -353,6 +408,21 @@ pub enum ActionCmd {
         reason: String,
         outcome: Option<crate::core::balance::Outcome>,
     },
+    /// Write one row of the structured post-mission report (issue #1344).
+    ///
+    /// Buffered onto `EffectQueue<ReportRow>` by the applier and drained by
+    /// [`crate::mission_report::apply_report_rows`], for the reason every #1223
+    /// effect is: the applier holds no resources and no message writers.
+    ///
+    /// Writing the same row `id` again UPDATES it in place, so a scenario can
+    /// re-state a row as the mission moves without the report growing; a row
+    /// never written is simply absent from the report, which is how a
+    /// genuinely inapplicable row is omitted rather than invented.
+    ///
+    /// The state word is already validated at the script boundary
+    /// ([`crate::core::report::ReportRowState::parse`]), so a typo raises there
+    /// rather than reaching this queue as a row nothing can style.
+    SetReportRow(crate::core::report::ReportRow),
     /// Queue a game-phase transition.
     SetNextState { phase: GamePhase },
     /// Additively load a sub-world. `loader_path` is the layer that issued the

@@ -1,0 +1,171 @@
+# Probe world for issue #1343 — a weighted Backfill Comms decision, taken by a
+# FLEET rather than by a single hull.
+#
+# `probe_fleet_duel.toml` is the class this borrows from (two `game_start` ship
+# rows, a hostile close enough to engage, a short `command_delay_ticks`) and the
+# one thing it adds is the reason it exists: `open_comms` conversations whose
+# responses author `ai_weight` / `ai_delay_seconds`.
+#
+# WHY IT HAD TO BE ITS OWN WORLD. `tests/local_ship_neutrality.rs` runs a world
+# twice with the `LocalShip` marker on a different fleet hull and compares the
+# authoritative fold on every tick. Neither of its two existing probes contains a
+# single `open_comms` call, so the comms scope of the digest was never entered
+# and the guard could not see the state #1343 added to it — an unmanned Comms
+# console's running weighted decisions, which `sim_digest::fold_comms_scope`
+# walks. This world enters that scope, holds waits open across many ticks, and
+# then resolves them.
+#
+# TWO EQUALLY-WEIGHTED OPTIONS, which is the shape Falling Skyway's lift band
+# actually authors and the only shape that makes the comparison bite. With a pool
+# of one, every hull on every host draws the same answer and the guard passes
+# whatever the emission does; with a pool of two the hulls draw independently, so
+# the flags an `on_pick` writes record WHICH way each corridor went. A host that
+# emitted or drained only the hull it happens to project leaves the other
+# corridor unanswered — and, because an admitted AI command is never logged and
+# so never replicates, unanswered on that host alone: a divergence in
+# `selected_response`, in the flags the `on_pick` wrote, and in the retired
+# dialogue. That is exactly the bug `handle_respond_to_message`'s fleet-wide
+# drain fixes, and this world is what holds it fixed.
+#
+# TWO CLAIMANTS, EACH REACHABLE BY EXACTLY ONE HULL, which is the geometry the
+# rest of the guard rests on. Each claimant sits 40 units from its own hull and
+# 360 from the other, and each authors a 200-unit comms range (the effective
+# range is `min(hull 1200, claimant 200)`), so every reachability reading here is
+# ASYMMETRIC: slot 1 can answer the near claimant and not the far one, slot 2 the
+# other way about. That asymmetry is the whole point — it is what makes
+# "reachable?" a per-hull question rather than a fleet-wide constant, so a host
+# that answers it from `CommsRuntime::range_flags` (measured from `LocalShip`,
+# a different hull on each host) reads BOTH conversations as its own hull sees
+# them and diverges from its peer three ways at once: the injected message's
+# folded `sender_in_range` stamp, whose consoles arm a wait, and whether the
+# response router admits the answer. A world whose hulls sit equidistant from
+# one claimant cannot see any of that, because every host computes the same
+# number by accident.
+#
+# WHY THE ASYMMETRY IS AUTHORED IN COMMS RANGE RATHER THAN IN DISTANCE. Every
+# entity here is deliberately within `DEFAULT_PLAYER_LOD_BUBBLE_RADIUS` (600) of
+# BOTH hulls, so `ai::server::lod_ai_ships` — which anchors its high-fidelity
+# bubble on the `LocalShip` — reaches the same verdict for every NPC on both
+# hosts. Spreading the fleet out until the claimants fell outside comms range by
+# DISTANCE would put them outside that bubble too, and the guard would then fail
+# on an unrelated (and much older) `LocalShip` reading instead of the comms one
+# it is here to make. Shrinking the claimants' authored range keeps the whole
+# world inside one bubble and still splits the comms reading in two.
+#
+# The stand-by sits at index 0 carrying `ai_weight = 0`, because the other thing
+# worth proving here is that an unmanned bridge does NOT answer with it.
+
+[global]
+seed = 1343
+ai_helm_tick_hz = 30.0
+# Two ticks at 60 Hz, as `probe_fleet_duel.toml` authors and for its reason: a
+# probe wants the future-tick path exercised in a handful of ticks.
+command_delay_ticks = 2
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# Fleet slot 1's ship — the fleet owner's. Takes `[player_spawn]`.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "fleet-ship-1"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# Fleet slot 2's ship, placed by its own transform — 400 units up the line: far
+# enough that each claimant's 200-unit comms range holds one hull and not the
+# other, close enough that every entity here stays inside one LOD bubble.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "fleet-ship-2"
+transform = { position = [400.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# The party that calls SLOT 1. A real, hailable hull rather than `_self`: the
+# response router range-gates a pick against the SENDER's live range flag, so
+# only a reachable sender can be answered — the same authoring rule
+# `probe_evidence.toml` records. 40 units from slot 1 and 360 from slot 2, with
+# an authored 200-unit comms range: exactly one console in the fleet can answer
+# it.
+[[entity]]
+template_path = "assets/entities/ship_civilian_hauler.toml"
+id = "corridor_claimant"
+name = "world.probe_fleet_comms_choice.entity.claimant.name"
+transform = { position = [40.0, 0.0, 0.0] }
+overrides = { comms = { hailable = true, range = 200.0 } }
+
+# The party that calls SLOT 2 — the mirror image, 40 units from slot 2 and 360
+# from slot 1.
+[[entity]]
+template_path = "assets/entities/ship_civilian_hauler.toml"
+id = "corridor_claimant_far"
+name = "world.probe_fleet_comms_choice.entity.claimant_far.name"
+transform = { position = [360.0, 0.0, 0.0] }
+overrides = { comms = { hailable = true, range = 200.0 } }
+
+[script]
+setup = """
+on_world_loaded("on_load");
+on_timer(0, "on_spawn");
+on_timer(2, "open_corridor_claims");
+
+fn on_load(ctx) {
+    ctx.effects.add_faction_enemy("Harrow", "Federation");
+    ctx.effects.add_faction_enemy("Federation", "Harrow");
+}
+
+// The hostile, placed EQUIDISTANT from the two hulls (283 units from each) so
+// the combat half of the world is symmetric and the only asymmetry in it is the
+// one the comms half is testing.
+fn on_spawn(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/alliance_cruiser.toml",
+        name: "fleet_probe_hostile",
+        position: [200, 0, 200],
+        overrides: #{ faction: "cccccccc-3333-4333-8333-cccccccccccc" }
+    });
+}
+
+// The decisions. Opened two seconds in, so the fleet is spawned and its comms
+// range flags are live before the conversations exist. Two threads, one per
+// claimant: each is reachable by one hull and unreachable by the other, so the
+// fleet's two consoles decide about DIFFERENT conversations.
+fn open_corridor_claims(ctx) {
+    ctx.effects.open_comms(#{
+        from: "world.probe_fleet_comms_choice.entity.claimant.name",
+        node_fn: "corridor_claim",
+        thread_id: "probe-fleet-corridor",
+    });
+    ctx.effects.open_comms(#{
+        from: "world.probe_fleet_comms_choice.entity.claimant_far.name",
+        node_fn: "corridor_claim",
+        thread_id: "probe-fleet-corridor-far",
+    });
+}
+
+// Five authored seconds of silence, then a coin-flip between the two options an
+// absent officer is allowed to take. The hold is index 0 and forbidden outright;
+// grant and refuse are equally weighted, the Falling Skyway lift shape. Both
+// threads share the node fn — the decision is the same one twice, put to two
+// different consoles.
+fn corridor_claim(ctx) {
+    #{
+        message: "world.probe_fleet_comms_choice.comms.claim",
+        responses: [
+            #{ text: "world.probe_fleet_comms_choice.comms.stand_by",
+               on_pick: "on_corridor_hold",
+               ai_weight: 0, ai_delay_seconds: 5 },
+            #{ text: "world.probe_fleet_comms_choice.comms.grant",
+               on_pick: "on_corridor_grant",
+               ai_weight: 1, ai_delay_seconds: 5 },
+            #{ text: "world.probe_fleet_comms_choice.comms.refuse",
+               on_pick: "on_corridor_refuse",
+               ai_weight: 1, ai_delay_seconds: 5 },
+        ],
+    }
+}
+
+fn on_corridor_hold(ctx) { ctx.flags.increment("corridor_held", 1); }
+fn on_corridor_grant(ctx) { ctx.flags.increment("corridor_granted", 1); }
+fn on_corridor_refuse(ctx) { ctx.flags.increment("corridor_refused", 1); }
+"""

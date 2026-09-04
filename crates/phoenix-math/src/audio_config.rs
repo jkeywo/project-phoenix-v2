@@ -122,6 +122,51 @@ pub struct ForcefieldAudio {
     pub source: ForcefieldSource,
 }
 
+/// One severity's ship's-computer tone: file plus a flat playback volume. Not
+/// positional — see [`AudioCue::computer_message`] — so no `PannerNode`
+/// parameters, unlike [`BlasterAudio`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComputerMessageCue {
+    pub file: String,
+    pub volume: f32,
+}
+
+/// Ship's-computer message tones, keyed by severity (issue #1342). From
+/// `[audio.computer_message]` on the ship entity.
+///
+/// Every severity is optional, exactly like every section of
+/// [`ShipAudioConfig`] — a severity with no cue configured plays no sound at
+/// all when a message of that severity shows, rather than falling back to
+/// some other severity's tone or a hardcoded default.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComputerMessageAudio {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub info: Option<ComputerMessageCue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub advisory: Option<ComputerMessageCue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning: Option<ComputerMessageCue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub critical: Option<ComputerMessageCue>,
+}
+
+impl ComputerMessageAudio {
+    /// The configured cue for `severity`, or `None` if that severity's
+    /// section was never authored — "missing configuration is silent" applied
+    /// per-severity rather than to the section as a whole.
+    pub fn for_severity(&self, severity: &str) -> Option<&ComputerMessageCue> {
+        match severity {
+            "info" => self.info.as_ref(),
+            "advisory" => self.advisory.as_ref(),
+            "warning" => self.warning.as_ref(),
+            "critical" => self.critical.as_ref(),
+            _ => None,
+        }
+    }
+}
+
 /// All ship-borne audio. From `[audio]` on the ship entity TOML.
 ///
 /// Every section is optional — an absent section means that sound is silent.
@@ -141,6 +186,8 @@ pub struct ShipAudioConfig {
     pub blaster: Option<BlasterAudio>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forcefield: Option<ForcefieldAudio>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub computer_message: Option<ComputerMessageAudio>,
 }
 
 // ── World audio (world TOML) ──────────────────────────────────────────────
@@ -191,21 +238,36 @@ pub struct AudioConfigPayload {
     pub forcefield: Option<ForcefieldWire>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub red_alert: Option<RedAlertAudio>,
+    /// Ship's-computer tones by severity (issue #1342). Unlike forcefield,
+    /// there is no envelope to hide — every field here is exactly what JS
+    /// needs — so the ship config crosses the bridge unchanged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub computer_message: Option<ComputerMessageAudio>,
 }
 
-/// A one-shot positional audio cue. Encoded by `codec::encode_audio_cue` and
-/// pushed via the `AudioCueEvent` bridge message.
+/// A one-shot audio cue. Encoded by `codec::encode_audio_cue` and pushed via
+/// the `AudioCueEvent` bridge message.
 ///
-/// `x`/`y`/`z` are **listener-relative** (see [`listener_relative`]), so JS
-/// leaves the Web Audio listener at the origin facing −Z and assigns these
-/// straight to `PannerNode.positionX/Y/Z`.
+/// Two shapes share one struct, discriminated by `kind`:
+///
+/// * `"blaster"` is **positional** — `x`/`y`/`z` are listener-relative (see
+///   [`listener_relative`]), so JS leaves the Web Audio listener at the
+///   origin facing −Z and assigns these straight to
+///   `PannerNode.positionX/Y/Z`. `severity` is unused (`None`).
+/// * `"computer_message"` (issue #1342) is **not** positional — a ship's-
+///   computer tone plays the same everywhere on the bridge, so `x`/`y`/`z`
+///   are zeroed and JS skips the panner node entirely; `severity` names which
+///   of `AudioConfigPayload::computer_message`'s already-pushed cues to play.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AudioCue {
-    /// Cue discriminator. Currently only `"blaster"`.
     pub kind: String,
     pub x: f32,
     pub y: f32,
     pub z: f32,
+    /// Severity word (`"info"`/`"advisory"`/`"warning"`/`"critical"`) for a
+    /// `"computer_message"` cue. `None` for every other kind.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub severity: Option<String>,
 }
 
 impl AudioCue {
@@ -216,6 +278,18 @@ impl AudioCue {
             x: pos[0],
             y: pos[1],
             z: pos[2],
+            severity: None,
+        }
+    }
+
+    /// A ship's-computer tone for `severity`. Not positional (issue #1342).
+    pub fn computer_message(severity: &str) -> Self {
+        Self {
+            kind: "computer_message".to_string(),
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            severity: Some(severity.to_string()),
         }
     }
 }
@@ -240,6 +314,7 @@ pub fn build_audio_payload(
             })
         }),
         red_alert: world.and_then(|w| w.red_alert.clone()),
+        computer_message: ship.and_then(|s| s.computer_message.clone()),
     }
 }
 
@@ -491,6 +566,99 @@ music_volume = 0.35
         let p = build_audio_payload(Some(&ship), Some(&world));
         assert_eq!(p.ambient.unwrap().file, "assets/sounds/Ambient.mp3");
         assert_eq!(p.red_alert.unwrap().music_file, "m.ogg");
+    }
+
+    // ── Ship's-computer message audio (issue #1342) ────────────────────
+
+    fn computer_message_cfg() -> ComputerMessageAudio {
+        ComputerMessageAudio {
+            info: Some(ComputerMessageCue {
+                file: "assets/sounds/ComputerInfo.mp3".into(),
+                volume: 0.3,
+            }),
+            advisory: None,
+            warning: Some(ComputerMessageCue {
+                file: "assets/sounds/ComputerWarning.mp3".into(),
+                volume: 0.6,
+            }),
+            critical: None,
+        }
+    }
+
+    #[test]
+    fn computer_message_audio_parses_and_omits_absent_severities() {
+        let cfg: ShipAudioConfig = toml::from_str(
+            r#"
+[computer_message.info]
+file   = "assets/sounds/ComputerInfo.mp3"
+volume = 0.3
+"#,
+        )
+        .expect("parses");
+        let cm = cfg.computer_message.as_ref().unwrap();
+        assert_eq!(cm.info.as_ref().unwrap().volume, 0.3);
+        assert!(cm.advisory.is_none());
+        assert!(cm.warning.is_none());
+        assert!(cm.critical.is_none());
+    }
+
+    #[test]
+    fn for_severity_returns_only_the_configured_ones() {
+        let cm = computer_message_cfg();
+        assert_eq!(
+            cm.for_severity("info").unwrap().file,
+            "assets/sounds/ComputerInfo.mp3"
+        );
+        assert!(cm.for_severity("advisory").is_none());
+        assert_eq!(
+            cm.for_severity("warning").unwrap().file,
+            "assets/sounds/ComputerWarning.mp3"
+        );
+        assert!(cm.for_severity("critical").is_none());
+        assert!(cm.for_severity("not-a-severity").is_none());
+    }
+
+    #[test]
+    fn build_payload_carries_computer_message_audio_through() {
+        let ship = ShipAudioConfig {
+            computer_message: Some(computer_message_cfg()),
+            ..Default::default()
+        };
+        let p = build_audio_payload(Some(&ship), None);
+        assert_eq!(
+            p.computer_message.unwrap().info.unwrap().file,
+            "assets/sounds/ComputerInfo.mp3"
+        );
+    }
+
+    #[test]
+    fn build_payload_without_computer_message_config_is_absent_from_json() {
+        let p = build_audio_payload(None, None);
+        assert!(p.computer_message.is_none());
+        let json = serde_json::to_string(&p).unwrap();
+        assert!(!json.contains("computer_message"));
+    }
+
+    #[test]
+    fn audio_cue_computer_message_is_not_positional() {
+        let cue = AudioCue::computer_message("critical");
+        assert_eq!(cue.kind, "computer_message");
+        assert_eq!(cue.x, 0.0);
+        assert_eq!(cue.y, 0.0);
+        assert_eq!(cue.z, 0.0);
+        assert_eq!(cue.severity.as_deref(), Some("critical"));
+    }
+
+    #[test]
+    fn audio_cue_blaster_carries_no_severity() {
+        let cue = AudioCue::blaster([1.0, 2.0, 3.0]);
+        assert_eq!(cue.kind, "blaster");
+        assert!(cue.severity.is_none());
+        let json = serde_json::to_string(&cue).unwrap();
+        assert!(
+            !json.contains("severity"),
+            "absent severity must not appear in the wire JSON: {json}"
+        );
     }
 
     #[test]

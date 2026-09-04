@@ -1,0 +1,156 @@
+entities:
+  - component: security-team-controller
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Security Team Controller
+      summary: Runs the Security System - a generic station-owned `[[system]]` whose teams cross to a named target to secure or contain it, assist an evacuation already under way there, board it, or place charges on it. Takes the per-team dispatch/recall commands, gates each on the pure dispatch verdict, walks every team through deploy - work - withdraw on the authored clock, raises the target's authored outcome flag on the world store when work completes, ends the assignment when the target leaves the world or the reach, and publishes the team list and the eligible targets. Issue #1346, PRD #1337.
+      rationale:
+        - "[ai] IT COPIES THE TRACTOR'S, DOCK'S AND UMBILICAL'S SHAPE (rule 10). A pure Bevy-free `teams` module owns the action vocabulary, the priority classes, the authored `[security]` and `[security_target]` configs and their validation, the refusal vocabulary, the per-team state machine, the dispatch verdict and the backfill selection - unit-tested in isolation with no app, no world and no schedule. A `server` adapter gathers the live world, calls in, and applies what comes back."
+        - "[ai] SECURITY IS ASSIGNED THROUGH SHIP CONFIGURATION AND THERE IS NO DUTY OFFICER. The `[[system]] kind = \"security\"` block names the STATION that owns it - Tactical on the Alliance Destroyer - and that is the whole of the ownership question: the ordinary station-tenure admission path decides who may command it, and the backfill host emits the byte-identical command when nobody is sitting there (rule 6). No second gate, no roster, no officer."
+        - "[ai] TWO TEAMS, TWO INDEPENDENT ASSIGNMENTS. Unlike the external repair dispatch (#1161), which claims ONE team against whatever the ship has designated, a Security command NAMES its team, its target and its action - none of the three can be resolved server-side from a single Tactical lock once two teams are working two compartments. One team holds at most one assignment: a second order to a busy team is refused rather than reassigning it."
+        - "[ai] EACH TEAM GETS ITS OWN TASK-LIFECYCLE SLOT (`security_team_0`, `security_team_1`), because a TaskSlot holds at most one live activation and the two teams are genuinely simultaneous - sharing a slot would make the second team's dispatch silently Restart the first team's work. Every assignment reports through the SHARED #1341 lifecycle rather than a parallel telemetry, so a completion, a recall, an interruption and a knock-out all reach the timeline with the right terminal class."
+        - "[ai] THE ENGINE NEVER LEARNS A SCENARIO'S NAMES (rule 11). The action vocabulary is fixed and generic - secure/contain, assist evacuation, board, place charges - and every number attached to one at a given place is authored on the TARGET: the duration, the risk, the priority class, the warning string id, and the world flag its success raises. The consequence path is that flag and nothing else, mirrored onto the world event stream exactly as an infrastructure threshold crossing is, so a scenario hangs a trigger off it. A compartment on the Falling Skyway and a boarding target in a later mission are the same code with different TOML."
+        - "[ai] RISK IS AN AUTHORED, DISPLAYED FIGURE, NOT A HIDDEN ROLL. The simulation is seeded and bit-identical across hosts; a dice roll behind a dispatch would be one more thing two hosts could disagree about, for no gain in meaning over telling the crew plainly what they are being asked to walk into."
+        - "[ai] EVERY INTERRUPTION ENDS THE WORK WHERE IT STANDS AND BANKS NOTHING. A target that leaves the world, a target that drifts past the authored reach, a recall, and a Security System damaged out all end the assignment and start the team home with its outcome flag unraised - and each records the one refusal the console shows and the matching lifecycle terminal. A team already withdrawing is past interrupting: it is on its way home either way."
+    architecture:
+      kind: subsystem
+      authority: authoritative
+      owns: [security-team-state, security-target-state]
+      reads: [ship-station-system-topology-state, system-control-source-state, world-configuration-state]
+      writes: [world-flag-state]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/security/teams.rs
+        - src/security/server.rs
+      symbols:
+        - SecurityAction
+        - SecurityPriority
+        - SecurityConfig
+        - SecurityActionConfig
+        - SecurityTargetConfig
+        - SecurityRefusal
+        - SecurityTeamState
+        - SecurityTeam
+        - dispatch_status
+        - select_assignments
+        - ShipSecurityTeams
+        - SecurityTargetActions
+        - SecuritySaveState
+        - SecurityPlugin
+        - handle_security_commands
+        - tick_security_teams
+        - publish_security_blackboard
+      messages: [DispatchSecurityTeam, RecallSecurityTeam]
+      tests: [cargo test]
+
+  - component: security-backfill-host
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Security Backfill Host
+      summary: The AI seat for the Security System. Ranks every piece of Security work the ship can see by the authored priority order - immediate life safety, an evacuation already under way, an urgent Objective, active threat containment, then optional work - and commits its free teams to the top of that list through the same admitted commands a human at the owning console sends, reserving a team rather than stranding a known higher-priority job. Issue #1346.
+      rationale:
+        - "[ai] THE RANKING IS PURE AND UNIT-TESTABLE (rule 10). `select_assignments` takes a candidate pool and a free-team count and returns which candidates to commit, sorted by priority class with target-uuid and action-id tiebreaks so two hosts walking the same world in different archetype order select the same work. No clock, no RNG, no HashMap walk."
+        - "[ai] THE RESERVATION IS ONE RULE APPLIED AT ONE MOMENT: before the LAST free team is committed. If any candidate of STRICTLY higher priority exists that is not currently dispatchable - the burning compartment out of reach this second but not in ten - the last team stays home rather than being spent on the lesser job. It is the direct analogue of the external-repair host's one-team-per-critical-local-repair reserve: both fold a policy into the one availability answer rather than second-guessing the applier, and both can only make the host MORE conservative than the applier's own gate, so a selection is always one `dispatch_status` admits. A candidate that is already the most urgent thing known is never held back - there is nothing above it to protect."
+        - "[ai] THE MISSION CONTRIBUTES URGENCY, NOT VOCABULARY. An active `Secure` directive naming a target promotes that target's authored classes to `urgent_objective`, and NEVER below what they already were - a mission naming a fire cannot make it less urgent. Which of the target's authored actions gets served stays the target's own ranking, so a mission never has to know a compartment's internal vocabulary. With no directive at all the host still works the list: a fire is a fire whether or not the mission mentioned it, which is what prioritising immediate threats to life means when the Objective pool is silent."
+        - "[ai] HUMAN AND AI ISSUE THE SAME COMMANDS (rule 6). The host emits exactly the DispatchSecurityTeam / RecallSecurityTeam a human at the owning station sends, through the same emit_ai_command seam, so the command handler never learns who spoke. It recalls only a team whose bit is set in its own per-team claim marker, and it releases that bit the moment the team is home, so a later console dispatch of that team is never mistaken for its own."
+        - "[ai] THE CLAIM MARKER IS RE-DERIVED, WHICH IS WHY IT IS NEITHER FOLDED NOR SNAPSHOTTED. Each AI tick the host ADOPTS every committed team whose current target-and-action is still in that tick's candidate pool - work it would have sent that team to itself, whoever actually did - iterating teams in index order over the pool's own deterministic order. A lost marker therefore heals within one AI tick, including the one a restore leaves behind: restore_entities brings committed teams back with no marker at all, and without adoption the host would forget they were its own and leave them standing on finished work. A team out on work OUTSIDE the pool is never adopted and never recalled by the host."
+        - "[ai] THE POOL IS FILTERED BEFORE IT IS RANKED, NOT AFTER. `select_assignments` returns at most one pick per FREE team, so work a committed team already holds has to leave the pool BEFORE selection (`unassigned_candidates`) - otherwise a free team's one pick is spent on a duplicate the emit loop can only drop, and that team idles while the next job down goes unworked. Filtering first also keeps the reservation honest: work already under way needs no team held back for it."
+        - "[ai] FINISHED WORK IS NOT WORK. A candidate whose authored `outcome_flag` is already raised on the world flag store leaves the pool, which is what stops the host re-dispatching a completed job on every tick forever and spamming the shared #1341 lifecycle with Start/Completed pairs for work already done. The flag is the action's whole consequence path, so it is also the only durable authored record that the job is finished - the host reads back exactly what the controller wrote. An action authoring no flag has no observable completion and stays in the pool, which is the field's own contract: its only consequence is the doing of it."
+    architecture:
+      kind: subsystem
+      authority: advisory
+      reads: [security-team-state, security-target-state, scored-objective-pool-state, world-flag-state]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/security/server.rs]
+      symbols:
+        - operate_security_ai
+        - SecurityAiDispatched
+        - SecurityCandidate
+        - select_assignments
+        - unassigned_candidates
+        - secure_directive_target
+      tests: [cargo test]
+
+  - state: security-team-state
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Security Team State
+      summary: "Per-ship: the authored `[security]` terms (team count, crossing and return times, reach) and every team's live state - available, deploying, working, withdrawing or unavailable - with its target, action, authored risk and phase clock, plus why the last dispatch was refused. Authoritative: a host that thought a team was still working disagrees about whether the work completes."
+      rationale:
+        - "[ai] FOLDED into the authoritative-state digest, in a namespace of its own keyed on the minted entity id: each committed team's index, state and target, for every ship with anybody abroad. What a completed action leaves behind lands on the world flag store (which folds through the scenario scope), but WHICH teams are out, where, and in what state is the fact that decides whether the next tick completes the work at all - exactly as the umbilical folds its running fact and the dock the docked one. The authored terms are content, which content_digest answers for; the risk and the last refusal are projections the next tick re-derives. The phase clock is NOT a projection - it is accumulated authoritative state that nothing reconstructs, which is why SecuritySaveState carries it; it is left unfolded deliberately, because folding it would make every tick of a live assignment a fresh digest - a rate, not a fact - and a drifting clock is caught one tick later anyway, when it crosses a phase boundary and moves the team's folded state."
+        - "[ai] A muster with every team HOME folds NOTHING - not even a row, the umbilical namespace's empty-walk affordance. That is what lets a shipped hull gain a `[security]` table without moving any committed world's digest."
+        - "[ai] Snapshotted as a PROJECTION rather than whole: each committed team's assignment and its position in it travel (SecuritySaveState), while the authored terms ride the template and are re-derived on spawn. A team the save does not name was home when the snapshot was taken and stays home. The last refusal is not persisted - it is re-derived on the first resumed tick, so a stored one would only ever name a condition that no longer holds. EntityConfig sets deny_unknown_fields, so a build predating the `[security]` table refuses the template outright, which is why this did not bump SNAPSHOT_FORMAT."
+    architecture:
+      classification: authoritative
+      owner: security-team-controller
+      writers: [security-team-controller]
+      replicas: [security-published-state]
+    implementation:
+      status: declared
+      paths: [src/security/server.rs]
+      symbols:
+        - ShipSecurityTeams
+        - SecuritySaveState
+        - SecurityTeamSaveState
+      tests: [cargo test]
+
+  - state: security-target-state
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Security Target State
+      summary: "Per world entity: the authored `[security_target]` table - which of the generic Security actions may be performed here, how long each takes, how dangerous it is, how urgent it is, the strings.csv warning shown beside it, and the world flag its success raises. The mirror of the ship-side terms: that says what a hull can do the work with, this says what work a place offers."
+      rationale:
+        - "[ai] DeferredFold with ZERO folded fields, which is the honest reading of that class: it is authoritative - a host that thought a compartment offered a different action would dispatch differently - but every byte of it came out of the entity template and nothing ever writes it, so content_digest already answers for it and world_digest walks none of it. The same reading the pending queues on WorldContentRuntime get."
+        - "[ai] THIS IS WHERE A SCENARIO'S CONTAINMENT OR EVACUATION PATH LIVES. A world adds one by authoring a `[security_target]` block on an entity; it never adds Rust, and the engine never branches on the entity's name. An entity that authors nothing carries no component and cannot be dispatched to, which is why every shipped hull and every existing world is untouched."
+    architecture:
+      classification: authoritative
+      owner: security-team-controller
+      writers: [security-team-controller]
+      replicas: [security-published-state]
+    implementation:
+      status: declared
+      paths: [src/security/teams.rs, src/security/server.rs]
+      symbols:
+        - SecurityTargetConfig
+        - SecurityActionConfig
+        - SecurityTargetActions
+      tests: [cargo test]
+
+  - state: security-published-state
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Published Security State
+      summary: The client-visible projection of a ship's Security System - the authored reach, the team list with each team's state, assignment, progress and risk, every target in the world that offers Security work with its separation, whether it is in reach, and the actions it offers, and why the last dispatch was refused. Published every tick under the Security System's own system id by ships that muster teams, and by nobody else.
+      rationale:
+        - "[ai] This is the whole data half of the repair-team-style interface issue #1346 asks for: the console renders the team list and the eligible targets/actions and sends DispatchSecurityTeam / RecallSecurityTeam back. A SystemBlackboard variant keyed by the REAL security system id, not a reserved channel, because Security IS a thing aboard the ship: it is commanded and refused through the console of whichever station the hull gave it to, and its teams go off the board when it is knocked out. Whether a given hull makes it knockable-out is that hull's own `[[hull.system_hull]]` decision - the shipped destroyer authors no box, exactly as its `[repair]` teams do, because that table is the pool hull damage is spread across and a box is durability the hull's combat ladder never priced."
+        - "[ai] PROGRESS IS ONE NUMBER FOR WHICHEVER PHASE THE TEAM IS IN - the crossing, the work or the return - so the console draws one bar and does not have to know which authored duration to divide by."
+        - "[ai] IN-RANGE IS PRE-COMPUTED SERVER-SIDE. The console shows what exists and whether it can be reached; the range rule stays where the applier's own verdict reads it, so a console can never offer a dispatch the server would refuse for a reason the console derived differently."
+        - "[ai] NO ENGLISH CROSSES THE WIRE. Target names are world entity name ids; states, action ids and priority classes are machine ids; the refusal (`security.dispatch.refused.*`) and each action's warning are strings.csv ids the console resolves through t(). The refusal is a match in Rust rather than a composed id, so check-strings can see every id a new variant needs a row for."
+        - "[ai] Additive on the wire in both directions - the adjacently-tagged enum's other variants are untouched by adding Security, and every field is serde-default, so a payload predating one decodes rather than being refused whole."
+    architecture:
+      classification: client-projection
+      owner: security-team-controller
+      writers: [security-team-controller]
+    implementation:
+      status: declared
+      paths: [src/core/messages.rs, gui/security-dispatch.js]
+      symbols:
+        - SecurityBlackboard
+        - SecurityTeamSlot
+        - SecurityTargetOption
+        - SecurityActionOption
+      tests: [cargo test, npx vitest run]

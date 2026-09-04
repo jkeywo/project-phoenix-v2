@@ -55,6 +55,12 @@
                (issues #1097, #1098) and no longer visit Tactical as overlays.
                Intel is not a system and never moves — it stays here regardless
                of which station is currently hosting Comms. -->
+          <!-- Security teams (issue #1346). Tactical owns the Security System on
+               this hull, and its panel is an overlay for the same reason Intel is:
+               the weapons column is what the seat looks at while fighting, and a
+               team crossing to a compartment is a minute-scale decision the player
+               opens deliberately. -->
+          <button class="overlay-toggle" id="security-toggle" data-overlay="security-overlay" data-active="false" data-i18n="console.common.security_toggle">Security</button>
           <button class="overlay-toggle" id="intel-toggle" data-overlay="intel-overlay" data-active="false" data-i18n="console.common.intel_toggle">Intel</button>
         </div>
       </div>
@@ -87,6 +93,13 @@
     </div>
     <!-- Intelligence files (issue #1030). Independent of Comms, which is now
          its own hero-bar console (issue #1098) rather than a toggle here. -->
+    <!-- Security teams (issue #1346): the team list, their assignments and
+         progress, and the eligible targets/actions to send them to. -->
+    <div class="overlay-panel" id="security-overlay">
+      <button class="overlay-back" id="security-back" data-overlay-back data-i18n="console.common.back">&#8592; Back</button>
+      <h2 data-i18n="console.tactical.security">Security</h2>
+      <ph-security-teams id="security-teams"></ph-security-teams>
+    </div>
     <div class="overlay-panel" id="intel-overlay">
       <button class="overlay-back" id="intel-back" data-overlay-back data-i18n="console.common.back">&#8592; Back</button>
       <h2 data-i18n="console.tactical.intel">Intel</h2>
@@ -99,6 +112,7 @@
     import '../components/ph-blasters-controls.js';
     import '../components/ph-torpedo-controls.js';
     import '../components/ph-dossier-panel.js';
+    import '../components/ph-security-teams.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
     import { initConsoleOverlays } from '../console-overlays.js';

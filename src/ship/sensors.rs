@@ -409,17 +409,24 @@ pub struct ThreatScanSurfaces<'w, 's> {
     >,
 }
 
-/// The three read-only lookup surfaces `operate_sensors_ai` reads, bundled as
-/// one `SystemParam` (issue #1185): the entity name/position table (tier-2 name
-/// resolution) and the split hostile-scan candidates — ships (live position on
+/// The read-only lookup surfaces `operate_sensors_ai` reads, bundled as one
+/// `SystemParam` (issue #1185): the entity name/position table (tier-2 name
+/// resolution), the split hostile-scan candidates — ships (live position on
 /// `ShipPhysics`) and non-ship entities (live position on `Transform`), the same
-/// split [`ThreatScanSurfaces`] makes.
+/// split [`ThreatScanSurfaces`] makes — and the debris contacts.
+///
+/// [`debris`](Self::debris) (issue #1347) is a FOURTH surface rather than a
+/// filter over `entities`, and separate for the reason the Tactical side keeps
+/// its own: a moving hazard has no faction, so it can never be reached by the
+/// hostile scans above, and the only way one becomes a candidate is the
+/// explicit source that reads this query. Keeping it apart is what makes
+/// "Sensors will look at a rock, and nothing else here will" checkable.
 ///
 /// A signature grouping only — every query keeps its exact shape and filter, so
-/// the access set is byte-for-byte unchanged (all three stay read-only and
-/// disjoint from the mutable `AdmittedCommands` in the ship query); the system
-/// destructures it back to its `entity_q` / `hostile_ship_q` / `hostile_entity_q`
-/// locals at entry.
+/// the access set stays read-only and disjoint from the mutable
+/// `AdmittedCommands` in the ship query; the system destructures it back to its
+/// `entity_q` / `hostile_ship_q` / `hostile_entity_q` / `debris_q` locals at
+/// entry.
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct SensorScanSurfaces<'w, 's> {
     pub entities: Query<
@@ -450,6 +457,18 @@ pub struct SensorScanSurfaces<'w, 's> {
             Option<&'static crate::entities::spawner::FactionComponent>,
         ),
         Without<crate::server_app::Ship>,
+    >,
+    /// Every moving hazard in the world (issue #1347), with what the crew have
+    /// worked out about it so far. See the type docs for why it is its own
+    /// surface.
+    pub debris: Query<
+        'w,
+        's,
+        (
+            &'static crate::entities::spawner::EntityUuid,
+            &'static Transform,
+            &'static crate::debris::DebrisThreat,
+        ),
     >,
 }
 
@@ -712,6 +731,7 @@ pub fn publish_sensor_radar_blackboard(
     mut ships_q: Query<
         (
             Option<&SensorRadarSelection>,
+            Option<&crate::ship::state::ShipPhysics>,
             &mut crate::server_app::ShipSystemBlackboards,
         ),
         With<crate::server_app::Ship>,
@@ -727,8 +747,20 @@ pub fn publish_sensor_radar_blackboard(
         ),
         With<crate::server_app::Ship>,
     >,
+    // Read-only lookup of ship physics by uuid, for the relative-velocity
+    // projection (issue #1339). Only ship entities carry `ShipPhysics` — no
+    // non-ship contact (asteroid/station/planet/region) is ever velocity-
+    // eligible, so a selection naming one resolves to `None` for free, with no
+    // scenario-specific branch (same eligibility shape as `alert_q`).
+    physics_q: Query<
+        (
+            &crate::entities::spawner::EntityUuid,
+            &crate::ship::state::ShipPhysics,
+        ),
+        With<crate::server_app::Ship>,
+    >,
 ) {
-    for (sensors_target, mut bbs) in ships_q.iter_mut() {
+    for (sensors_target, own_physics, mut bbs) in ships_q.iter_mut() {
         let selected_target = sensors_target.and_then(|st| st.0.clone());
         // Resolve the selected target's authoritative Red Alert state. `Some(..)`
         // only when the selection names a Red-Alert-capable ship; `None` for no
@@ -739,14 +771,54 @@ pub fn publish_sensor_radar_blackboard(
                 .find(|(uuid, _)| uuid.0 == selected)
                 .map(|(_, red_alert)| red_alert.0)
         });
+        // Resolve the selected target's world-space relative velocity
+        // (target minus own), X/Z. `Some(..)` only when the selection names a
+        // ship this tick's publisher can resolve `ShipPhysics` for AND this
+        // ship itself has `ShipPhysics`; `None` for no selection, a non-ship
+        // contact, or (defensively) a scanning ship with no physics of its own
+        // — every production ship has `ShipPhysics`, so this only guards test
+        // fixtures that omit it (issue #1339).
+        let own_velocity = own_physics.map(ship_world_velocity);
+        let selected_target_relative_velocity = selected_target.as_deref().and_then(|selected| {
+            let own_velocity = own_velocity?;
+            physics_q
+                .iter()
+                .find(|(uuid, _)| uuid.0 == selected)
+                .map(|(_, target_physics)| {
+                    let target_velocity = ship_world_velocity(target_physics);
+                    [
+                        target_velocity[0] - own_velocity[0],
+                        target_velocity[1] - own_velocity[1],
+                    ]
+                })
+        });
         bbs.0.insert(
             crate::ship::system_registry::sensor_radar_system_id(),
             SystemBlackboard::SensorRadar(crate::core::messages::SensorRadarBlackboard {
                 selected_target,
                 selected_target_alert,
+                selected_target_relative_velocity,
             }),
         );
     }
+}
+
+/// A ship's true world-space velocity (X/Z), combining forward and lateral
+/// motion (issue #1339).
+///
+/// At yaw 0 the ship faces `-Z`, so forward is `(sin y, -cos y)` and
+/// starboard is its right-hand perpendicular, `(cos y, sin y)` — the same
+/// convention `crate::server::pfx::ship_velocity` uses for the dust field,
+/// derived here in plain `[f32; 2]` X/Z rather than a `bevy::math::Vec3` since
+/// this module has no 3D-vector dependency otherwise. Uses `simmath` rather
+/// than `f32::sin_cos` for the same determinism reason the rest of this
+/// module's bearing math does (see the `simmath::atan2` use above).
+fn ship_world_velocity(physics: &crate::ship::state::ShipPhysics) -> [f32; 2] {
+    let sin_y = simmath::sin(physics.yaw);
+    let cos_y = simmath::cos(physics.yaw);
+    let vx = sin_y * physics.forward_speed + cos_y * physics.lateral_speed;
+    let vz = -cos_y * physics.forward_speed + sin_y * physics.lateral_speed;
+    [vx, vz]
 }
 
 /// Build a [`crate::ai::selector::SelectorCandidate`] for a detectable,
@@ -769,6 +841,44 @@ fn detectable_candidate(
     facts.set_fact(fid::HOSTILE, 1.0);
     // `source_fact` is a `SOURCE_*` catalogue constant's `.name()` (issue #1210).
     facts.set(source_fact, 1.0);
+    crate::ai::selector::SelectorCandidate {
+        uuid: uuid.to_string(),
+        position,
+        facts,
+    }
+}
+
+/// Build a [`crate::ai::selector::SelectorCandidate`] for a moving hazard
+/// (issue #1347) — the one Sensors source that offers a NON-hostile contact.
+///
+/// `hostile` is deliberately absent rather than set to zero: a rock has no
+/// faction and no opinion, and stamping it with a hostility fact at all would
+/// invite an authored guard to reason about a rock's allegiance. The authored
+/// eligibility lets one through by naming `source_debris_assess`, which is the
+/// honest reason it is eligible: not "this is an enemy" but "this is a thing
+/// this instrument can still learn something about".
+///
+/// The three descriptive facts are what doctrine ranks a field of rocks by:
+/// whether the reading is stale ([`fid::DEBRIS_UNASSESSED`]) and whether it came
+/// back as a threat ([`fid::DEBRIS_CONFIRMED`]).
+///
+/// [`fid::DEBRIS_UNASSESSED`]: crate::entities::ai_flag_hosts::DEBRIS_UNASSESSED
+/// [`fid::DEBRIS_CONFIRMED`]: crate::entities::ai_flag_hosts::DEBRIS_CONFIRMED
+fn debris_candidate(
+    uuid: &str,
+    position: [f32; 3],
+    wants_assessment: bool,
+    confirmed: bool,
+) -> crate::ai::selector::SelectorCandidate {
+    use crate::entities::ai_flag_hosts as fid;
+    let mut facts = crate::world::flags::AiFacts::new();
+    facts.set_fact(fid::DETECTABLE, 1.0);
+    facts.set_fact(fid::SOURCE_DEBRIS_ASSESS, 1.0);
+    facts.set_fact(
+        fid::DEBRIS_UNASSESSED,
+        if wants_assessment { 1.0 } else { 0.0 },
+    );
+    facts.set_fact(fid::DEBRIS_CONFIRMED, if confirmed { 1.0 } else { 0.0 });
     crate::ai::selector::SelectorCandidate {
         uuid: uuid.to_string(),
         position,
@@ -838,6 +948,14 @@ pub fn operate_sensors_ai(
             Option<&crate::ship_plugin::ShipConfigComponent>,
             Option<&crate::entities::spawner::FactionComponent>,
             Option<&SensorsTargetSelector>,
+            // This hull's own scan suite (issue #1347), read-only and optional:
+            // a hull that authors no `[scan]` table carries no record at all.
+            // It is what says whether a debris contact is a thing this seat can
+            // still learn something about — see `scan_reach` below. Safe to read
+            // beside `science::server::tick_scans`' `&mut` on the same component
+            // because that system is in `Modifiers` and this one is in `Input`,
+            // which the `SimSet` chain orders strictly.
+            Option<&crate::science::server::ShipScanRecord>,
             &mut crate::core::messages::AdmittedCommands,
         ),
         With<crate::server_app::Ship>,
@@ -859,15 +977,43 @@ pub fn operate_sensors_ai(
     // Independent nearest-hostile tier (issue #746). Faction verdicts need the
     // registry; absent (tests without world setup), tier 3 is simply skipped.
     faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
+    // The debris tier's clock (issue #1347): "has the crew's reading of this rock
+    // gone stale" is a question about elapsed time, and both halves of the answer
+    // are authored — the tick rate (`[global] sim_tick_hz`) and the contact's own
+    // `reassess_secs`. `Option` like every other clock read in this module, so a
+    // bare-`App` fixture without them simply reads an age of zero and offers each
+    // rock exactly once.
+    tick: Option<Res<crate::sim_tick::SimTick>>,
+    time: Option<Res<Time>>,
 ) {
     // Restore the pre-#1185 locals so the body below is byte-for-byte unchanged.
     let SensorScanSurfaces {
         entities: entity_q,
         hostile_ships: hostile_ship_q,
         hostile_entities: hostile_entity_q,
+        debris: debris_q,
     } = scans;
 
     let console_range = ship_config.0.sensors_radar_range;
+    let now_tick = tick.map(|t| t.0).unwrap_or(0);
+    let secs_per_tick = time.map(|t| t.delta_secs()).unwrap_or(0.0);
+
+    // The debris snapshot, built once for every ship this tick like the hostile
+    // one below it, and sorted for the same reason: raw query order is archetype
+    // order, and this list is scored.
+    let mut debris_contacts: Vec<(String, [f32; 3], bool, bool)> = debris_q
+        .iter()
+        .filter(|(_, _, threat)| !threat.struck)
+        .map(|(uuid, tf, threat)| {
+            (
+                uuid.0.clone(),
+                tf.translation.to_array(),
+                threat.needs_assessment(now_tick, secs_per_tick),
+                threat.confirmed,
+            )
+        })
+        .collect();
+    debris_contacts.sort_by(|a, b| a.0.cmp(&b.0));
 
     // Build the shared candidate snapshot once (world state is the same for
     // every ship this tick). Each entry: (uuid, [x, y, z], faction).
@@ -900,6 +1046,7 @@ pub fn operate_sensors_ai(
         ship_config_comp,
         self_faction,
         target_selector,
+        scan_record,
         mut admitted,
     ) in &mut ships
     {
@@ -982,6 +1129,37 @@ pub fn operate_sensors_ai(
             let dx = pos[0] - physics.x;
             let dz = pos[2] - physics.z;
             dx * dx + dz * dz <= range_sq
+        };
+
+        // The SUITE's reach, which is not the radar's (issue #1347).
+        //
+        // "Can this seat still learn something about that contact" is two
+        // questions, and the horizon above only answers the first. The second is
+        // whether the instrument could return a reading at all: a hull that
+        // authored no `[scan]` table carries no record (or, once it has been
+        // asked once, the empty-laddered stand-in `tick_scans` inserts), and a
+        // hull that authored one still answers nothing past its coarsest band.
+        // `ScanConfig::band_for` is the same resolution `derive` runs, so the two
+        // agree by construction rather than by a second copy of the numbers here.
+        //
+        // Why this gate exists at all, given `tick_scans` owns refusals: a scan
+        // that comes back refused never sets `DebrisThreat::assessed`, so
+        // `needs_assessment` stays true forever and an ungated seat would re-ask
+        // on every AI snapshot for the rest of the mission — a rock it can never
+        // read holding its designation, and a Start/End pair per snapshot in the
+        // AAR timeline. The mission Scan directive at the top of this loop is a
+        // different case and is deliberately left alone: it is bounded by its
+        // objective staying active, which a scenario ends.
+        //
+        // XZ like the horizon tests above, and for the same reason: this seat
+        // works from `ShipPhysics`, which is a plane.
+        let scan_reach = |pos: [f32; 3]| {
+            let Some(record) = scan_record else {
+                return false;
+            };
+            let dx = pos[0] - physics.x;
+            let dz = pos[2] - physics.z;
+            record.config.band_for((dx * dx + dz * dz).sqrt()).is_some()
         };
 
         // ── Build candidate sources for the data-driven target selector (#776) ──
@@ -1081,6 +1259,35 @@ pub fn operate_sensors_ai(
             }
         }
 
+        // Source: debris-assessment — the moving hazards inside this ship's own
+        // live horizon (issue #1347). The one source here that offers a contact
+        // with no faction, which is why the authored eligibility has to name it
+        // to let one through.
+        //
+        // Every unstruck rock IN THIS SUITE'S REACH is offered, read or unread,
+        // and `debris_unassessed` says which is which. That split is what "keeps
+        // assessing" actually means: doctrine scores an unread contact above a
+        // read one, so the seat reads a rock, that rock stops asking for
+        // attention, and the next unknown becomes the best candidate — the field
+        // gets worked down instead of the first rock being stared at. A contact
+        // whose authored `reassess_secs` has elapsed re-enters the unread tier on
+        // its own, so a plot Tactical is prioritising on does not silently rot.
+        //
+        // `scan_reach` is a *source* filter and not merely an emit guard because
+        // an unreadable rock left in the list still WINS: the doctrine weights a
+        // hazard above an incidental radar hostile, so a courier with no `[scan]`
+        // table — every hull that inherits `fragments/ai/fleet_baseline.toml`
+        // without authoring a suite — would park its science designation on a
+        // rock it can never read, in front of the contact its Tactical actually
+        // wants designated. A thing this instrument cannot learn anything about
+        // is not a candidate for it.
+        for (uuid, pos, wants_assessment, confirmed) in &debris_contacts {
+            if !in_range_pos(*pos) || !scan_reach(*pos) {
+                continue;
+            }
+            candidates.push(debris_candidate(uuid, *pos, *wants_assessment, *confirmed));
+        }
+
         // Self context: position (horizon filter) + authored power rating,
         // exposed to the selector expressions as `self_fact(power_rating)` (AC2).
         let mut self_facts = crate::world::flags::AiFacts::new();
@@ -1103,6 +1310,55 @@ pub fn operate_sensors_ai(
             sensors_target.0.as_deref(),
             &flag_chain,
         );
+
+        // ── Take the reading ───────────────────────────────────────────────
+        //
+        // Pointing the radar at a rock is not the same as reading it, and this is
+        // the step that closes that gap (issue #1347): a debris contact the seat
+        // has settled on and that still wants assessing gets the exact
+        // `ScanTarget` payload a human console sends, through the same admission
+        // path, for `science::server::tick_scans` to apply as the sole applier.
+        //
+        // Deliberately OUTSIDE the change-only gate below, because "keep
+        // assessing" is a repeating act rather than a transition: a rock the seat
+        // is already holding must still be re-read when its authored
+        // `reassess_secs` elapses, and that tick is by definition one where the
+        // selection has not changed.
+        //
+        // It is bounded by `scan_reach`, and it has to be. A SUCCESSFUL reading
+        // resolves on the tick it is asked for, so `needs_assessment` is false
+        // again next tick and this stops firing until the cadence comes round —
+        // but a REFUSED one sets nothing, and `DebrisThreat::assessed` is
+        // per-contact rather than per-ship, so a seat that cannot read a rock
+        // would find it stale again on every AI snapshot for the rest of the
+        // mission. That is not a retry, it is a loop with no exit: a Start/End
+        // lifecycle pair per snapshot in the AAR timeline and a `ShipScanRecord`
+        // conjured onto a hull that never had a suite. So the permanent refusal
+        // classes — no `[scan]` table (`NotCapable`) and past the coarsest band
+        // (`OutOfRange`) — are pre-checked here, and only they. The transient
+        // ones (`Underpowered`, `Blinded` inside a storm) are still left to
+        // `tick_scans`, because the condition that caused them genuinely does
+        // change and re-asking is the right behaviour.
+        if let Some(target) = decided.as_deref() {
+            if debris_contacts
+                .iter()
+                .any(|(uuid, pos, wants_assessment, _)| {
+                    uuid == target && *wants_assessment && scan_reach(*pos)
+                })
+            {
+                emit_ai_command(
+                    entity_uuid,
+                    crate::ship::system_registry::sensors_system_id(),
+                    crate::core::messages::SystemControlPayload::ScanTarget {
+                        uuid: target.to_string(),
+                    },
+                    sources,
+                    &sessions,
+                    ship_config_comp,
+                    &mut admitted,
+                );
+            }
+        }
 
         // ── Emit on change only ────────────────────────────────────────────
         if decided == sensors_target.0 {

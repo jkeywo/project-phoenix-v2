@@ -1309,6 +1309,20 @@ struct TargetSelectionScans<'w, 's> {
             With<crate::entities::spawner::StaticPointDefence>,
         )>,
     >,
+    /// The debris scan surface (issue #1347) — a FIFTH surface, and narrow on
+    /// purpose: every moving hazard in the world, so the host can offer Tactical
+    /// the ones a crew have confirmed. It is not folded into `hostiles` because
+    /// a rock has no faction and must never be reachable by faction-hostile
+    /// auto-acquisition; the only way one becomes a candidate is the explicit,
+    /// assessment-gated source below.
+    debris: Query<
+        'w,
+        's,
+        (
+            &'static crate::entities::spawner::EntityUuid,
+            &'static crate::debris::DebrisThreat,
+        ),
+    >,
 }
 
 /// The read-only resource context `ai_target_selection` reads besides the
@@ -1493,6 +1507,16 @@ fn ai_target_selection(
     // runs this host must register it (`register_ai_host_env`) or fail loudly at
     // schedule build, so a bare `App` cannot silently diverge from production.
     ai_env: crate::ai::host::AiHostEnv,
+    // Contacts carrying unrecovered civilians (issue #1348). The Backfill target
+    // selector excludes these from its candidate pool: the ship's own AI never
+    // fires on a hull full of people it could rescue. A HUMAN Tactical operator
+    // is not subject to this filter — the human fire path is `SetTarget` /
+    // `FirePhaser`, untouched here — so a human may still fire, with the casualty
+    // consequences the transporter module records.
+    civilian_contacts: Query<(
+        &crate::entities::spawner::EntityUuid,
+        &crate::transporter::CivilianRescue,
+    )>,
 ) {
     // Restore the pre-#1185 locals so the body below is byte-for-byte unchanged.
     let TargetSelectionEnv {
@@ -1505,6 +1529,7 @@ fn ai_target_selection(
         asteroids: asteroid_q,
         other_ships: other_ships_q,
         hostiles: hostile_scan_q,
+        debris: debris_q,
     } = scans;
 
     let registry_default = crate::ai::faction::FactionRegistry::default();
@@ -1512,6 +1537,18 @@ fn ai_target_selection(
         .as_deref()
         .map(|r| &r.0)
         .unwrap_or(&registry_default);
+
+    // Contacts still carrying unrecovered civilians (issue #1348). Backfill
+    // Tactical excludes these from its candidate pool: the ship's AI never fires
+    // on people it could rescue. A fully-recovered carrier is NOT excluded — it
+    // is an ordinary hulk once its souls are aboard. A `BTreeSet` for a stable
+    // membership test; the filter decision it feeds is deterministic regardless
+    // of iteration order, but the ordered set keeps the walk itself reproducible.
+    let civilian_carrying: std::collections::BTreeSet<String> = civilian_contacts
+        .iter()
+        .filter(|(_, rescue)| rescue.remaining() > 0)
+        .map(|(uuid, _)| uuid.0.clone())
+        .collect();
 
     // World-space position of a targetable UUID, asteroid or entity. Tactical
     // radar deliberately projects this onto (x, z), while an operation's
@@ -1722,6 +1759,13 @@ fn ai_target_selection(
         // `detectable` is implied by passing the host's own range gate.
         let make_candidate =
             |uuid: &str, source_fact: &str| -> Option<crate::ai::selector::SelectorCandidate> {
+                // Backfill never fires on a contact carrying unrecovered
+                // civilians (issue #1348) — whatever source proposed it. The
+                // human fire path (`SetTarget`/`FirePhaser`) does not run through
+                // here, so a human operator is untouched by this exclusion.
+                if civilian_carrying.contains(uuid) {
+                    return None;
+                }
                 let (tx, ty, tz) = target_xyz(uuid)?;
                 // Acquisition remains bounded by Tactical radar. Once the
                 // tractor is actually holding the active operate target,
@@ -1867,6 +1911,64 @@ fn ai_target_selection(
                 }
             }
         }
+        // Source: confirmed-debris-threat (issue #1347) — the moving hazards
+        // some crew's scan has said are on course to strike a protected asset.
+        //
+        // ASSESSMENT-GATED, and that gate is the beat. `threat.confirmed` rises
+        // only when an assessment taken through the ordinary scan lifecycle said
+        // so, so a rock nobody has read is not a candidate at any distance and
+        // on any course — Backfill cannot open fire on something the crew were
+        // never told about. A human Tactical is untouched: this whole system
+        // stands down while the radar is human-operated, so an operator remains
+        // free to lock an unread contact and shoot it on their own judgement.
+        //
+        // A struck contact drops out: there is nothing left to intercept, and
+        // leaving it in would hold the lock on a rock that has already landed.
+        //
+        // Each candidate carries `impact_secs` — the crew's OWN deadline, dead-
+        // reckoned by `debris::server::tick_debris_state` — so an authored
+        // urgency band ranks several confirmed rocks by which one arrives first
+        // (`fleet_baseline.toml`'s three additive debris terms). The number is
+        // the crew's rather than the simulation's on purpose: Tactical prioritises
+        // what Sensors reported, so a stale assessment produces a stale priority
+        // and re-scanning is worth doing.
+        //
+        // UUID order, for `debris::server::tick_debris_drift`'s reason: raw query
+        // order is archetype order. The selector's own tie-break makes this
+        // immaterial to the pick, but a deterministic candidate list is cheap and
+        // keeps this loop from being the one place a P2P divergence could hide.
+        let mut debris_rows: Vec<(&str, &crate::debris::DebrisThreat)> = debris_q
+            .iter()
+            .filter(|(_, threat)| threat.confirmed && !threat.struck)
+            .map(|(uuid, threat)| (uuid.0.as_str(), threat))
+            .collect();
+        debris_rows.sort_by(|a, b| a.0.cmp(b.0));
+        for (debris_uuid, threat) in debris_rows {
+            let Some(mut candidate) = make_candidate(
+                debris_uuid,
+                crate::entities::ai_flag_hosts::SOURCE_DEBRIS_THREAT.name(),
+            ) else {
+                continue;
+            };
+            if let Some(secs) = threat.reckoned_secs_to_impact {
+                candidate
+                    .facts
+                    .set_fact(crate::entities::ai_flag_hosts::IMPACT_SECS, secs as f64);
+                // The separate "there IS a reading" marker the authored urgency
+                // bands are guarded on. An absent fact reads as 0, and 0 is a
+                // real answer here — "arriving now" — so the two cases cannot be
+                // told apart by the number alone. A contact confirmed earlier and
+                // since shoved off course keeps its confirmation but has no
+                // arrival any more; without this marker its missing deadline
+                // would read as zero seconds and out-rank every rock that really
+                // is about to land.
+                candidate
+                    .facts
+                    .set_fact(crate::entities::ai_flag_hosts::DEBRIS_DEADLINE_KNOWN, 1.0);
+            }
+            candidates.push(candidate);
+        }
+
         // Source: radar-contacts — nearest faction-hostile, licensed by
         // untargeted combat doctrine (see `destroy_is_untargeted`) OR by being a
         // static point-defence platform. A turret has no doctrine to make its

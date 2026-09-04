@@ -264,6 +264,34 @@ damaged_threshold_pct = 0.5
 disabled_threshold_pct = 0.15
 debuff_magnitude = 0.15
 
+# NO `[[hull.system_hull]]` ENTRY FOR SECURITY (issue #1346), and the reason is
+# the caveat written beside the three coupling compartments above rather than an
+# oversight. Those three already sit outside the 300-point combat ladder "in intent
+# even though the raw `is_destroyed` sum now includes them"; each one a hull
+# authors widens the pool `SystemHull::apply_damage` spreads incoming hull damage
+# across, so it buys durability the ladder never priced.
+#
+# A fourth was not free. Authored at the coupling systems' 30 HP it took this
+# hull's system pool from 390 to 420 and the measurement is on the record:
+# `probe_aggressor` at seed 3 — where a player Alliance cruiser kills a passive
+# one of these — ran 105 ticks longer, and every one of those ticks fell inside
+# the cruiser's torpedo-run bow hold, tipping
+# `headless_runner::the_composed_player_cruiser_rings_its_target_and_breaks_off_
+# to_bear_its_tubes` from 129 bow-hold ticks against 176 on the ring to 234
+# against the same 176. Dropping the entry restores that run tick for tick.
+#
+# So Security is authored the way `[repair]` is — the other people-and-teams
+# System on this hull, which musters two teams, dispatches them across the same
+# 400-unit reach, and carries no compartment of its own either. Twenty of this
+# hull's thirty-three `[[system]]` blocks author no damage entry; a box is what a
+# hull SPENDS on a system it wants knocked out, not a tax every system pays.
+#
+# The lever itself is untouched and stays data-driven: `security_disabled` reads
+# `EntitySystemHull.tier_for("security")`, so any hull that wants its muster
+# wreckable authors the entry and gets `unavailable` teams and a `Disabled`
+# terminal — proved by `security::server_tests::
+# a_disabled_security_system_makes_every_team_unavailable_and_ends_the_work`.
+
 [repair]
 repair_team_count = 2
 travel_duration_secs = 5
@@ -286,6 +314,30 @@ repair_rate_hp_per_sec = 0.5
 [repair.external_dispatch]
 range = 400.0
 repair_rate = 0.5
+
+# Security teams (issue #1346, PRD #1337). TWO teams, dispatched and recalled
+# independently from whichever station the `[[system]] kind = "security"` block
+# below gives them to — Tactical, on this hull — with no Duty Officer standing
+# between the seat and the order.
+#
+# What a team may DO once it gets somewhere is authored on the TARGET, never
+# here: this table is only the hull's own half — how many people it can send, how
+# long they take to get across and come back, and how far they can reach. A hull
+# that authors no `[security]` table musters nobody.
+#
+# [ai] All four unratified. `range = 400` is carried across from
+# `[repair.external_dispatch]` above deliberately: a repair team and a security
+# team cross the same gap by the same means, and two different reaches on one
+# hull would be a difference the crew could see and nobody could explain. The
+# crossing and return times are longer than the internal damage-control walk
+# (`[repair] travel_duration_secs = 5`) because this is a transfer to another
+# structure under way, not a run down a corridor — and the asymmetry (out slower
+# than back) is the encumbrance of going equipped.
+[security]
+team_count = 2
+deploy_duration_secs = 8.0
+withdraw_duration_secs = 6.0
+range = 400.0
 
 [weapons_console]
 power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
@@ -599,6 +651,16 @@ range = 250
 shows = [ "player", "asteroid_field", "ship", "station", "planet", "star" ]
 selects = [ "ship", "station", "planet" ]
 
+# Selected-contact trajectory projection (issue #1339). Renders the Science
+# Target's projected relative path whenever its velocity is known (every
+# ship contact; non-ship contacts carry no velocity and project nothing).
+# These are the initial authored defaults from the approved plan — a hull
+# tunes them without a code change, and a hull that omits this table entirely
+# still gets the same 60s/10s behaviour from the parse defaults.
+[sensors_console.projection]
+horizon_secs = 60.0
+marker_interval_secs = 10.0
+
 # The survey suite (issue #1032). What comes back from a scan is DERIVED from
 # the subject's own [infrastructure] condition track — there is no authored
 # scan text anywhere in this file or any other — so everything authored here is
@@ -636,6 +698,43 @@ condition_step = 0.25
 # A sweep this coarse resolves whether a system is up or down but does not
 # pretend to count berths.
 report_capacities = false
+
+# The BULK ladder (issue #1347), beside the fidelity ladder and for the same
+# reason: what a reading says about a contact's weight is a property of this
+# instrument, not of the contact. "Heavy" is a thing this suite says; the rock
+# just has a mass. A hull that authors no ladder reports no class at all, which
+# is what every hull did before this table existed.
+#
+# Unlike the bands above it does NOT coarsen with range — mass is content
+# identity, so the class is the same answer from 40 units or 240. What range
+# still decides is whether there is a reading at all.
+#
+# The four steps are cut against the masses actually authored in the fleet, so
+# each one separates things a crew would want separated: a courier or a piece of
+# corridor plating from a working hauler, a hauler from a warship, and a warship
+# from a depot or a skyhook. The last class is the open top — anything heavier
+# than 60,000 reports as the heaviest.
+#
+# [ai] All four thresholds unratified.
+[[scan.mass_class]]
+id = "light"
+label = "entity.alliance_destroyer.scan.mass_class.light.label"
+max_mass = 5000.0
+
+[[scan.mass_class]]
+id = "medium"
+label = "entity.alliance_destroyer.scan.mass_class.medium.label"
+max_mass = 20000.0
+
+[[scan.mass_class]]
+id = "heavy"
+label = "entity.alliance_destroyer.scan.mass_class.heavy.label"
+max_mass = 60000.0
+
+[[scan.mass_class]]
+id = "massive"
+label = "entity.alliance_destroyer.scan.mass_class.massive.label"
+max_mass = 1000000.0
 
 [helm_console]
 # Red-alert hostile weapon-arc overlay (issue #874): RGBA 0-1, the fourth
@@ -1408,6 +1507,40 @@ kind = "dock"
 station = "helm"
 power_group = "helm"
 
+# The rescue transporter (issue #1348) — Engineering-owned, on the `helm` group
+# at `min_power_level = 2` like the tractor and umbilical it stands beside, for
+# the same reason spelled out above: a coupling family that adds no new resting
+# draw and takes down with the drive when a Power officer robs Helm. It recovers
+# the civilians a Sensors scan revealed aboard a discovered contact; the terms it
+# runs under are the `[transporter]` table further down.
+[[system]]
+id = "transporter"
+kind = "transporter"
+station = "engineering"
+power_group = "helm"
+
+# ── Security (issue #1346) ───────────────────────────────────────────────────
+#
+# TACTICAL owns the Security teams on this hull. That is an authoring decision
+# rather than an engine one — `kind = "security"` is generic and another hull may
+# hang it off Command or Engineering — but it is the right one here: the seat that
+# already holds the combat lock and reads the tactical picture is the seat that
+# knows which compartment is worth risking people on, and the destroyer's
+# Engineering officer already has the tractor, the umbilical and the damage-
+# control sweep on their hands.
+#
+# NO POWER GROUP, deliberately. Security is people: a Power officer who robs a
+# group does not stop a boarding party crossing, and hanging the teams off `helm`
+# with the couplings would have made "the drive is browned out" mean "nobody can
+# fight a fire". No `[[hull.system_hull]]` compartment either, for the reason
+# written out beside the hull table above — this hull's `[repair]` teams carry
+# none and neither do these, and the engine lever is there for a hull that wants
+# it.
+[[system]]
+id = "security"
+kind = "security"
+station = "tactical"
+
 # ── Reference grid ───────────────────────────────────────────────────────────
 #
 # A faint lattice lying in the y = 0 plane, drawn under THIS hull on the
@@ -1773,4 +1906,15 @@ min_power_level = 2
 capacity = "reserve_fuel"
 rate = 20.0
 direction = "deliver"
+min_power_level = 2
+
+# TRANSPORTER (issue #1348) — the reach a discovered rescue contact must sit
+# within, how long recovering one civilian takes, and the lowest powered rung.
+# `range = 500` matches the tractor's reach: a rescue is a close-in act like a
+# tow. `seconds_per_civilian = 2` gives a full hold's worth of a dozen souls a
+# tuneable half-minute so the crew watch the recovery advance and can be pulled
+# off it by range, power or a more urgent tractor hold. [ai] Unratified.
+[transporter]
+range = 500.0
+seconds_per_civilian = 2.0
 min_power_level = 2

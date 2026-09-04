@@ -60,7 +60,10 @@ export const CONSOLE_SPECS = Object.freeze({
   // Other verified multi-family consoles (the alliance_destroyer's own
   // multi-family seats — kept authoritative, not reused by NPC hulls).
   'gui/destroyer/captain.html': Object.freeze({ families: Object.freeze(['captain', 'sensors']) }),
-  'gui/destroyer/tactical.html': Object.freeze({ families: Object.freeze(['tactical', 'navigation', 'comms']) }),
+  // Tactical also OWNS the Security System on this hull (issue #1346): the seat
+  // authors `kind = "security"` in alliance_destroyer.toml and the console
+  // embeds `<ph-security-teams>`, so it is owned coverage, not a visiting panel.
+  'gui/destroyer/tactical.html': Object.freeze({ families: Object.freeze(['tactical', 'navigation', 'comms', 'security']) }),
   'gui/destroyer/engineering.html': Object.freeze({ families: Object.freeze(['shields', 'power', 'repair']) }),
 });
 

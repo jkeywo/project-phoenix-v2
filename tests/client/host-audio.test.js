@@ -444,4 +444,123 @@ describe('createHostAudio', () => {
       expect(Ctor.__nodes.pannerNodes[0].positionX.value).toBe(1);
     });
   });
+
+  describe('ship\'s-computer tone (issue #1342)', () => {
+    /** An `AudioCtor` that records every instance constructed, so a
+     * non-positional one-shot (never stored in `_els`) is still inspectable. */
+    function spyAudioCtor() {
+      const instances = [];
+      function SpyAudio(src) {
+        FakeAudio.call(this, src);
+        instances.push(this);
+      }
+      SpyAudio.prototype = Object.create(FakeAudio.prototype);
+      SpyAudio.__instances = instances;
+      return SpyAudio;
+    }
+
+    function computerMessageAudioConfig() {
+      return shipAudioConfig({
+        computer_message: {
+          info: { file: 'assets/sounds/ComputerInfo.mp3', volume: 0.3 },
+          warning: { file: 'assets/sounds/ComputerWarning.mp3', volume: 0.6 },
+          // advisory/critical deliberately absent.
+        },
+      });
+    }
+
+    // `audioConfig` itself builds several looping `<audio>` elements (ambient,
+    // engine, phaser, forcefield, red-alert music/siren) through the SAME
+    // `AudioCtor`, so every assertion below counts only the instances built
+    // AFTER config — i.e. by `audioCue` itself — never the raw total.
+    function instancesSince(Ctor, countBefore) {
+      return Ctor.__instances.slice(countBefore);
+    }
+
+    it('plays the configured tone for the cue\'s severity, scaled by master volume', () => {
+      const Ctor = spyAudioCtor();
+      const audio = createHostAudio({ doc, storage: fakeStorage(), AudioCtor: Ctor });
+      audio.audioConfig(JSON.stringify(computerMessageAudioConfig()));
+      audio.setMasterVolume(0.5);
+      const before = Ctor.__instances.length;
+
+      audio.audioCue(JSON.stringify({ kind: 'computer_message', severity: 'warning' }));
+
+      const cued = instancesSince(Ctor, before);
+      expect(cued.length).toBe(1);
+      expect(cued[0].src).toBe('assets/sounds/ComputerWarning.mp3');
+      expect(cued[0].playCalls).toBe(1);
+      // authored 0.6 * master 0.5
+      expect(cued[0].volume).toBeCloseTo(0.3, 5);
+    });
+
+    it('is silent for a severity with no configured cue (AC4)', () => {
+      const Ctor = spyAudioCtor();
+      const audio = createHostAudio({ doc, storage: fakeStorage(), AudioCtor: Ctor });
+      audio.audioConfig(JSON.stringify(computerMessageAudioConfig()));
+      const before = Ctor.__instances.length;
+
+      audio.audioCue(JSON.stringify({ kind: 'computer_message', severity: 'advisory' }));
+
+      expect(instancesSince(Ctor, before)).toHaveLength(0);
+    });
+
+    it('is silent when the ship has no [audio.computer_message] section at all', () => {
+      const Ctor = spyAudioCtor();
+      const audio = createHostAudio({ doc, storage: fakeStorage(), AudioCtor: Ctor });
+      audio.audioConfig(JSON.stringify(shipAudioConfig())); // no computer_message key
+      const before = Ctor.__instances.length;
+      expect(() =>
+        audio.audioCue(JSON.stringify({ kind: 'computer_message', severity: 'critical' })),
+      ).not.toThrow();
+      expect(instancesSince(Ctor, before)).toHaveLength(0);
+    });
+
+    it('is silent before any audioConfig has landed', () => {
+      const Ctor = spyAudioCtor();
+      const audio = createHostAudio({ doc, storage: fakeStorage(), AudioCtor: Ctor });
+      audio.audioCue(JSON.stringify({ kind: 'computer_message', severity: 'info' }));
+      expect(Ctor.__instances).toHaveLength(0);
+    });
+
+    it('a replacement at the same severity fires a fresh instance each time', () => {
+      const Ctor = spyAudioCtor();
+      const audio = createHostAudio({ doc, storage: fakeStorage(), AudioCtor: Ctor });
+      audio.audioConfig(JSON.stringify(computerMessageAudioConfig()));
+      const before = Ctor.__instances.length;
+
+      audio.audioCue(JSON.stringify({ kind: 'computer_message', severity: 'info' }));
+      audio.audioCue(JSON.stringify({ kind: 'computer_message', severity: 'info' }));
+
+      const cued = instancesSince(Ctor, before);
+      expect(cued).toHaveLength(2);
+      expect(cued[0].playCalls).toBe(1);
+      expect(cued[1].playCalls).toBe(1);
+      expect(cued[0]).not.toBe(cued[1]);
+    });
+
+    it('does not touch the AudioContext at all for this kind', () => {
+      // A minimal AudioContext stub that would fail loudly (an unexpected
+      // call) if the computer_message path ever reached for it.
+      let createBufferSourceCalls = 0;
+      function NoisyAudioContext() {
+        this.state = 'running';
+        this.destination = {};
+        this.createBufferSource = () => { createBufferSourceCalls++; return {}; };
+        this.decodeAudioData = () => Promise.resolve({});
+        this.resume = () => Promise.resolve();
+      }
+      const audioCtor = spyAudioCtor();
+      const audio = createHostAudio({
+        doc: { defaultView: { AudioContext: NoisyAudioContext } },
+        storage: fakeStorage(),
+        AudioCtor: audioCtor,
+      });
+      audio.audioConfig(JSON.stringify(computerMessageAudioConfig()));
+      const before = audioCtor.__instances.length;
+      audio.audioCue(JSON.stringify({ kind: 'computer_message', severity: 'warning' }));
+      expect(createBufferSourceCalls).toBe(0);
+      expect(instancesSince(audioCtor, before)).toHaveLength(1);
+    });
+  });
 });

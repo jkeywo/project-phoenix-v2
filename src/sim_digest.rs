@@ -53,7 +53,9 @@
 //! #907), the identity analogue of the same thing, so a divergent *spawn
 //! count* is caught the tick it happens rather than on the tick the next id is
 //! minted; `GamePhase`; `GameOverReason` (both the reason string
-//! and the `Outcome`); `CaptainPriorityBoost`'s every `(scope, objective)` pair
+//! and the `Outcome`); `MissionReport`'s every row in authored order, all five
+//! fields including the hidden score (issue #1344);
+//! `CaptainPriorityBoost`'s every `(scope, objective)` pair
 //! in sorted key order; and the `WorldResource` projection described below.
 //!
 //! **Folded (`EntityUuid` namespace, in `FoldKey` order):** every entity
@@ -233,6 +235,7 @@ use crate::dock::DockControl;
 use crate::entities::spawner::{EntitySystemHull, EntityUuid};
 use crate::infrastructure::{InfrastructureCondition, InfrastructureState};
 use crate::lobby::WorldResource;
+use crate::security::ShipSecurityTeams;
 use crate::server_app::{AsteroidUuid, CaptainPriorityBoost, GameOverReason};
 use crate::ship::damage::SystemHull;
 use crate::ship::state::{ShipPhysics, ShipRedAlert, ShipWeaponsHold};
@@ -365,6 +368,19 @@ fn fold_optional_str(acc: u64, value: Option<&str>) -> u64 {
     }
 }
 
+/// Fold an optional number as a present/absent marker plus its value.
+///
+/// [`fold_optional_str`]'s reason, one step sharper: an authored
+/// `ai_weight = 0` and an unauthored one are different instructions to the
+/// Backfill picker (forbidden versus "this is not a weighted decision"), so
+/// folding them alike would hide exactly the disagreement worth catching.
+fn fold_optional_u64(acc: u64, value: Option<u64>) -> u64 {
+    match value {
+        Some(number) => fold_u64(fold_u64(acc, 1), number),
+        None => fold_u64(acc, 0),
+    }
+}
+
 /// Fold a value whose serde shape is deliberately pinned.
 pub fn fold_serde<T: serde::Serialize>(acc: u64, value: &T) -> u64 {
     fold_digest(acc, digest_postcard(value))
@@ -435,6 +451,7 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("umbilical", fold_umbilical_namespace),
     ("asteroid", fold_asteroid_namespace),
     ("collisions", fold_collisions),
+    ("security", fold_security_namespace),
 ];
 
 /// The running accumulator after each named stage of the fold.
@@ -566,6 +583,27 @@ fn fold_run_scope(world: &World, mut acc: u64) -> u64 {
             fold_str(acc, outcome.map_or("\u{0}none", |o| o.as_str()))
         }
         None => fold_str(acc, "game-over-reason:absent"),
+    };
+
+    // The structured post-mission report (issue #1344). Every field of every
+    // row, in the report's own authored order — never sorted, because the ORDER
+    // is authored content: two instances that agree on the rows but disagree on
+    // their order would show two different reports and must not share a digest.
+    // The hidden score folds like everything else; it is authoritative state
+    // that merely never reaches a player.
+    acc = match world.get_resource::<crate::core::report::MissionReport>() {
+        Some(report) => {
+            let mut acc = fold_u64(acc, report.rows().len() as u64);
+            for row in report.rows() {
+                acc = fold_str(acc, &row.id);
+                acc = fold_str(acc, &row.heading_id);
+                acc = fold_str(acc, &row.outcome_id);
+                acc = fold_str(acc, row.state.as_str());
+                acc = fold_i64(acc, i64::from(row.score));
+            }
+            acc
+        }
+        None => fold_str(acc, "mission-report:absent"),
     };
 
     // Sorted by scope key, never HashMap iteration order. `boosts_sorted`
@@ -1209,11 +1247,23 @@ fn fold_scenario_records(world: &World, mut acc: u64) -> u64 {
 /// `open_hails` pruning, and touches no `CommsMessage` at all. The per-message
 /// stamping happens on CLONES — `broadcast_comms_state` stamps
 /// `CommsInbox::messages()`, and `publish_comms_blackboard` stamps its own copy
-/// — so the STORED reading is written once, at injection, by
-/// `current_sender_in_range`, and then carried unchanged for the life of the
-/// message. `CommsState::inbox` stores the whole `CommsMessage` verbatim, so a
-/// restore reproduces both fields exactly and folding them cannot break the
-/// at-restore digest equality `tests/snapshot_resume.rs` asserts.
+/// — so the STORED reading is written once, at injection, and then carried
+/// unchanged for the life of the message. `CommsState::inbox` stores the whole
+/// `CommsMessage` verbatim, so a restore reproduces both fields exactly and
+/// folding them cannot break the at-restore digest equality
+/// `tests/snapshot_resume.rs` asserts.
+///
+/// That they fold is exactly why the injection stamp may not be a `LocalShip`
+/// reading — and it was one until issue #1343. `current_sender_in_range`
+/// measures from the hull THIS host projects, so on a fleet whose hulls are not
+/// equidistant from the sender two peers stamped different values into a field
+/// folded verbatim, from the tick the message was injected. Both injection sites
+/// (`open_scripted_comms_threads`, and `handle_respond_to_message`'s follow-up
+/// node) now stamp
+/// [`crate::comms::server::sender_in_range_for_fleet`]: the union over every
+/// `FleetSlotOf` hull, which is the reading that matches a fleet-SHARED inbox and
+/// which every host computes identically. Whether a given hull may ANSWER stays
+/// a per-hull question, asked of `CommsRuntime::fleet_range_flags`.
 ///
 /// They are worth folding rather than merely safe to fold. A derelict under tow
 /// carries no `ShipPhysics`, so the entity namespace folds nothing about where
@@ -1224,8 +1274,10 @@ fn fold_scenario_records(world: &World, mut acc: u64) -> u64 {
 ///
 /// # What is still left out, and why
 ///
-/// `CommsRuntime`'s `contacts`, `range_flags` and `range_active` are genuinely
-/// re-derived: `update_comms_range_flags` rebuilds all three every tick from the
+/// `CommsRuntime`'s `contacts`, `range_flags` and `range_active` — and the
+/// per-fleet-slot `fleet_range_flags` / `fleet_range_active` #1343 added beside
+/// them — are genuinely
+/// re-derived: `update_comms_range_flags` rebuilds all five every tick from the
 /// live hailable entities and the ship and entity transforms the entity
 /// namespace already folds, which is the same call
 /// [`crate::snapshot::CommsState`] makes when it declines to carry them.
@@ -1246,7 +1298,13 @@ fn fold_comms_scope(world: &World, mut acc: u64) -> u64 {
     let inbox_len = inbox.map_or(0, |inbox| inbox.0.len());
     let dialogue_len = comms.map_or(0, |comms| comms.active_dialogues.len());
     let hail_len = comms.map_or(0, |comms| comms.open_hails.len());
-    if inbox_len == 0 && dialogue_len == 0 && hail_len == 0 && opens.is_empty() {
+    let pending_ai_len = comms.map_or(0, |comms| comms.pending_ai_responses.len());
+    if inbox_len == 0
+        && dialogue_len == 0
+        && hail_len == 0
+        && pending_ai_len == 0
+        && opens.is_empty()
+    {
         return acc;
     }
 
@@ -1299,6 +1357,13 @@ fn fold_comms_scope(world: &World, mut acc: u64) -> u64 {
             for response in &dialogue.current_node.responses {
                 acc = fold_str(acc, &response.text);
                 acc = fold_u64(acc, u64::from(response.important));
+                // The Backfill choice metadata (issue #1343). Folded because it
+                // decides what an unmanned console reaches for and when: two
+                // peers holding different weights for the same live node will
+                // answer it differently, which is a divergence the tick it
+                // happens rather than the tick they disagree about the outcome.
+                acc = fold_optional_u64(acc, response.ai.weight.map(u64::from));
+                acc = fold_optional_u64(acc, response.ai.delay_seconds.map(u64::from));
             }
             acc = fold_str(acc, &dialogue.script.script_path);
             acc = fold_optional_str(acc, dialogue.script.origin_layer.as_deref());
@@ -1313,7 +1378,25 @@ fn fold_comms_scope(world: &World, mut acc: u64) -> u64 {
         for target in &comms.open_hails {
             acc = fold_str(acc, target);
         }
+
+        // The unmanned console's running weighted decisions (issue #1343),
+        // already in message-id order — a `BTreeMap`, chosen for exactly this.
+        // Two peers that agree about every open conversation but disagree about
+        // WHEN one of them gets answered have diverged, and this is the tick
+        // that says so rather than the tick the answer lands.
+        acc = fold_u64(acc, pending_ai_len as u64);
+        for (key, record) in &comms.pending_ai_responses {
+            // The fleet slot first, because the key's own ordering is slot-first
+            // and because "which hull is waiting" is half of what two peers must
+            // agree about — a fleet whose two consoles swapped waits folds the
+            // same message ids and is still diverged.
+            acc = fold_u64(acc, u64::from(key.host.0));
+            acc = fold_str(acc, &key.message_id);
+            acc = fold_u64(acc, record.due_tick);
+            acc = fold_u64(acc, record.response_fingerprint);
+        }
     } else {
+        acc = fold_u64(acc, 0);
         acc = fold_u64(acc, 0);
     }
 
@@ -1811,6 +1894,89 @@ fn fold_umbilical_namespace(world: &World, mut acc: u64) -> u64 {
     acc = fold_u64(acc, rows.len() as u64);
     for (key, _) in rows {
         acc = fold_str(acc, &key.id);
+    }
+    acc
+}
+
+/// Every ship with a Security team OUT (issue #1346), in [`FoldKey`] order, in
+/// its own namespace.
+///
+/// # What is folded, and why it has to be
+///
+/// Each committed team's index, state and target, for every ship with anybody
+/// abroad. This is the authoritative divergence signal a resume must survive that
+/// nothing else catches: what a completed action leaves behind lands on the world
+/// flag store (which folds through the scenario scope), but WHICH teams are out,
+/// where, and how far along, is the state that decides whether the next tick
+/// completes the work at all — exactly as the umbilical folds its running fact
+/// and the dock the docked one. The authored terms are content, which
+/// `content_digest` answers for; the risk and the last refusal are projections the
+/// next tick re-derives, so neither is folded.
+///
+/// The elapsed phase clock is a different case, and the difference matters. It is
+/// accumulated authoritative state — `tick_security_teams` adds this tick's delta
+/// to it and nothing reconstructs it from anything else, which is precisely why
+/// `SecuritySaveState` has to carry it. It is left UNFOLDED deliberately, not
+/// because it is derived: folding it would make every tick of a live assignment a
+/// fresh digest, which reports a rate rather than a fact. Two hosts whose clocks
+/// drift still diverge here — one tick later, when a clock crosses a phase
+/// boundary and the team's folded state changes underneath it.
+///
+/// The empty-walk affordance is [`fold_umbilical_namespace`]'s, and does the same
+/// real work: a hull that authored `[security]` and has every team home folds
+/// NOTHING — not even a row — so a shipped hull can gain Security teams without
+/// moving any committed world's digest. The moment one team crosses over, the row
+/// count is in the accumulator like everyone else's.
+fn fold_security_namespace(world: &World, mut acc: u64) -> u64 {
+    let Some(mut query) = world.try_query::<(Entity, &EntityUuid, &ShipSecurityTeams)>() else {
+        // A world that never registered the component musters nobody — the empty
+        // case, not a distinct one.
+        return acc;
+    };
+    let mut rows: Vec<(
+        FoldKey,
+        bevy::ecs::entity::EntityIndex,
+        Vec<(u8, &'static str, String)>,
+    )> = query
+        .iter(world)
+        .filter_map(|(entity, uuid, security)| {
+            let committed: Vec<(u8, &'static str, String)> = security
+                .teams
+                .iter()
+                .enumerate()
+                .filter(|(_, team)| team.is_committed())
+                .map(|(index, team)| {
+                    (
+                        index as u8,
+                        team.state.as_str(),
+                        team.target.clone().unwrap_or_default(),
+                    )
+                })
+                .collect();
+            (!committed.is_empty()).then(|| {
+                (
+                    FoldKey::from_world_id(Namespace::Entity, &uuid.0),
+                    entity.index(),
+                    committed,
+                )
+            })
+        })
+        .collect();
+    if rows.is_empty() {
+        return acc;
+    }
+    rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+
+    acc = fold_str(acc, "security-namespace");
+    acc = fold_u64(acc, rows.len() as u64);
+    for (key, _, committed) in rows {
+        acc = fold_str(acc, &key.id);
+        acc = fold_u64(acc, committed.len() as u64);
+        for (index, state, target) in committed {
+            acc = fold_u64(acc, index as u64);
+            acc = fold_str(acc, state);
+            acc = fold_str(acc, &target);
+        }
     }
     acc
 }

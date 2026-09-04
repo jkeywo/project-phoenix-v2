@@ -1,0 +1,268 @@
+# Probe world for issues #1338, #1342 and #1344 — the authored mission timeline,
+# the ship's-computer message and the post-mission report, end to end.
+#
+# No combat, no traffic, no hazard. Every event this world produces is one a
+# SCENARIO AUTHOR asked for, which is the whole claim PRD #1337 makes about the
+# narrative surface: the timeline is the story the world chose to tell, not a
+# second copy of the damage log. A run of this world with nothing but a player
+# hull and one marked civilian must produce exactly the beats listed below and
+# nothing else.
+#
+# The authored timeline, in mission seconds:
+#
+#   t=1   `post` runs. Two objectives are posted (one mandatory, one not), a
+#         THIRD is posted and completed in the same tick, the opening beat
+#         fires, Lyra Ascending hails the crew, and the ship's computer shows
+#         a short `info` message (issue #1342) that outlives no one else's
+#         business — it expires on its own two seconds later.
+#   t=4   `resolve` runs. The mandatory objective completes, the optional one
+#         fails, and the author declares Lyra rescued — an outcome no amount of
+#         simulation could have inferred, which is why it is authorable at all.
+#         The ship's computer shows a second, `critical`, Station-cued message
+#         (issue #1342). The SAME tick writes the run's one post-mission report
+#         row (`lyra`, saved, hidden score +6): a row is written when the fate
+#         is decided, not at the ending, which is what makes an inapplicable
+#         row an ABSENT row rather than an invented one.
+#   t=5   `resolve`'s one-second follow-up re-states that row IDENTICALLY. This
+#         is the rate guard, and the assertion is a NEGATIVE one: nothing moved,
+#         so the timeline must carry no second beat.
+#   t=6   `window_opens` fires. Its handler records the beat that says the
+#         deadline mattered.
+#   t=8   `clear_the_wreck` runs. The derelict — marked, and with no authored
+#         outcome — is removed with `destroy_entity`, and Lyra, already
+#         declared rescued, is removed too. A THIRD computer message supersedes
+#         the still-active t=4 message immediately.
+#   t=10  `close_the_probe` runs. The run ends in `GamePhase::GameOver` with a
+#         DECLARED defeat that is still report-bearing — and so classifies
+#         `reported`, not `defeat` (issue #1344). The declaration is deliberate:
+#         the flag the rows outrank is still latched, still folded and still on
+#         the wire, which is the only way to prove the ranking rather than
+#         assume it. The ending also clears the still-active t=8 computer
+#         message — deliberately NOT a beat, because #1342's shown / superseded
+#         / expired trio does not include a mission-end clear.
+#
+# Every one of those reaches the headless run report's `narrative` field and,
+# under `--format ndjson`, the inline stream — except `report_row_updated`,
+# which is folded but never streamed because a re-scored row is a rate — plus
+# `marked_entity_spawned` for each marked hull on the tick it enters the world,
+# and `comms_opened` on the tick Lyra's hail lands. The unmarked player hull
+# produces no entity beat at all: marking is the gate, and this world proves it
+# by leaving the player unmarked.
+#
+# THE TWO REPORT BEATS, and why one of them is a count of one:
+#
+#   * `report_row_updated` fires ONCE, at t=4. The identical re-statement at t=5
+#     moves nothing, so it writes nothing — a re-scored row is a rate, and the
+#     ndjson stream drops this kind entirely for that reason while the folded
+#     timeline still counts it.
+#   * `report_finalized` fires ONCE, at t=10, carrying the ending's reason id
+#     (`world.probe_narrative.game_over.closed`), the row count and the hidden
+#     total. It fires only because the report is non-empty: an ending that
+#     authored no report is not a report-bearing ending.
+#
+# The score itself never leaves the host. It is on the row here and in the
+# headless run report, and it is absent by construction from
+# `core::messages::GameOverReportRow` — the shape both player surfaces render.
+#
+# THE TWO REMOVALS AT t=8 ARE THE POINT OF THE DERELICT. A scripted
+# `destroy_entity` writes no combat event — an authorial removal is not a kill,
+# and must never enter the combat ledger — so the timeline records it from the
+# scripted-removal signal instead, and only when the author said nothing else:
+#
+#   * the derelict has no authored outcome, so it records `marked_entity_destroyed`;
+#   * Lyra was declared `rescued` four seconds earlier, so her removal records
+#     NOTHING and the rescue stands alone.
+#
+# Without that pair, a scenario could remove a marked hull and leave it in the
+# timeline with a spawn and no fate at all.
+#
+# THE THREE SHOW_MESSAGE CALLS (issue #1342) exercise all three ship's-computer
+# lifecycle events on one authoritative "latest only" message: `debris_notice`
+# (t=1, 2s duration) EXPIRES on its own before `resolve` ever runs; `charge_ready`
+# (t=4, 10s duration, Station "tactical") is still active when `clear_the_wreck`
+# shows a third message at t=8, so it is SUPERSEDED rather than expiring; the
+# third message is simply SHOWN, outlives its own 300s duration, and is cleared
+# without a beat when the mission ends at t=10. So the timeline carries three
+# `computer_message_posted` and exactly TWO `computer_message_cleared`.
+#
+# THE PLAYER HULL IS A COURIER, not the destroyer the other probes fly, and the
+# reason is `[comms_console.ai]`: a headless run has no human on Comms, so the
+# only way a *choice* gets made is the Comms AI submitting the same admitted
+# `RespondToMessage` a console would. The destroyer authors no such policy and
+# would leave Lyra's hail unanswered forever.
+
+[global]
+seed = 1338
+ai_helm_tick_hz = 30.0
+title = "world.probe_narrative.global.title"
+description = "world.probe_narrative.global.description"
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# The player ship — AI-backfilled in a headless run.
+[[entity]]
+template_path = "assets/entities/alliance_courier.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# The marked entity. `narrative = true` is the author saying "this hull is part
+# of the story"; without it she would spawn, hail, and be declared rescued
+# without a single line of it reaching the timeline.
+#
+# Parked 120 units off so her hail is comfortably inside comms range for the
+# whole run — an out-of-range sender's responses are greyed, and a probe that
+# depended on the crew drifting into range would be testing helm, not the
+# timeline.
+[[entity]]
+template_path = "assets/entities/ship_civilian_hauler.toml"
+id = "lyra"
+name = "world.probe_narrative.entity.lyra.name"
+narrative = true
+transform = { position = [120.0, 0.0, 0.0] }
+overrides = { comms = { hailable = true } }
+
+# The derelict. Marked exactly as Lyra is, and never spoken about again: the
+# script simply removes it at t=8. That is the case the timeline used to lose —
+# a hull the story introduced and the story took away, with nothing in between.
+[[entity]]
+template_path = "assets/entities/ship_civilian_hauler.toml"
+id = "wreck"
+name = "world.probe_narrative.entity.wreck.name"
+narrative = true
+transform = { position = [-120.0, 0.0, 0.0] }
+
+# The clock. One named deadline, visible, with a handler that records the beat.
+[[deadline]]
+id = "window_opens"
+label = "world.probe_narrative.deadline.window_opens.label"
+due_secs = 6
+visible = true
+
+[script]
+setup = """
+on_timer(1, "post");
+on_timer(4, "resolve");
+on_timer(8, "clear_the_wreck");
+on_timer(10, "close_the_probe");
+on_deadline("window_opens", "on_window_opens");
+
+// The opening. Two objectives, one authored beat, one hail.
+fn post(ctx) {
+    ctx.effects.add_objective(#{
+        id: "hold_the_channel",
+        text: "world.probe_narrative.objective.hold_the_channel",
+        mandatory: true,
+    });
+    ctx.effects.add_objective(#{
+        id: "log_the_wreck",
+        text: "world.probe_narrative.objective.log_the_wreck",
+        mandatory: false,
+    });
+    // Posted and resolved inside ONE tick. The timeline must carry both beats:
+    // a recorder that only diffed the tick's end state would report the
+    // completion and silently swallow the posting.
+    ctx.effects.add_objective(#{
+        id: "sound_off",
+        text: "world.probe_narrative.objective.sound_off",
+        mandatory: false,
+    });
+    ctx.effects.complete_objective("sound_off");
+    ctx.effects.narrative_beat("probe_opening");
+    // issue #1342: a short-lived message that expires on its own, well before
+    // `resolve` ever runs.
+    ctx.effects.show_message(
+        "debris_notice",
+        "world.probe_narrative.computer_message.debris",
+        "info",
+        2,
+    );
+    ctx.effects.open_comms(#{
+        from: "world.probe_narrative.entity.lyra.name",
+        node_fn: "lyra_hails",
+        urgent: true,
+    });
+}
+
+// One node, one response, so the Comms AI's pick is unambiguous.
+fn lyra_hails(ctx) {
+    #{
+        message: "world.probe_narrative.comms.lyra_hails",
+        responses: [
+            #{ text: "world.probe_narrative.comms.stand_by", on_pick: "on_stand_by" },
+        ],
+    }
+}
+
+// A terminal response: it records its own beat and ends the thread.
+fn on_stand_by(ctx) {
+    ctx.effects.narrative_beat("probe_answered");
+}
+
+// The resolution. One objective each way, and the author's judgement on Lyra.
+fn resolve(ctx) {
+    ctx.effects.complete_objective("hold_the_channel");
+    ctx.effects.fail_objective("log_the_wreck");
+    ctx.effects.narrative_outcome("world.probe_narrative.entity.lyra.name", "rescued");
+    // issue #1342: a long-lived, Station-cued message — still active four
+    // seconds later, at t=8, so `clear_the_wreck` supersedes it rather than
+    // its expiring on its own.
+    ctx.effects.show_message(
+        "charge_ready",
+        "world.probe_narrative.computer_message.charge",
+        "critical",
+        10,
+        "tactical",
+    );
+    // The post-mission report row (issue #1344), written on the tick her fate
+    // is decided rather than at the ending — which is what makes an
+    // inapplicable row an ABSENT row rather than an invented one.
+    ctx.effects.report_row(#{
+        id: "lyra",
+        heading: "world.probe_narrative.report.lyra.heading",
+        outcome: "world.probe_narrative.report.lyra.saved",
+        state: "saved",
+        score: 6,
+    });
+    // Re-stated identically on the next tick. Nothing moved, so the timeline
+    // must carry ONE report_row_updated beat and not two — the rate guard the
+    // ndjson stream policy exists for.
+    ctx.schedule.after(1, |ctx| {
+        ctx.effects.report_row(#{
+            id: "lyra",
+            heading: "world.probe_narrative.report.lyra.heading",
+            outcome: "world.probe_narrative.report.lyra.saved",
+            state: "saved",
+            score: 6,
+        });
+    });
+}
+
+fn on_window_opens(ctx) {
+    ctx.effects.narrative_beat("probe_deadline_beat");
+}
+
+// The two scripted removals. Neither writes a combat event; the derelict still
+// gets its death, and Lyra — already rescued — does not.
+fn clear_the_wreck(ctx) {
+    ctx.effects.destroy_entity("world.probe_narrative.entity.wreck.name");
+    ctx.effects.destroy_entity("world.probe_narrative.entity.lyra.name");
+    // issue #1342: supersedes "charge_ready", which is still active. A long
+    // duration so it genuinely outlives the probe's run window rather than
+    // expiring in turn.
+    ctx.effects.show_message(
+        "wreck_cleared",
+        "world.probe_narrative.computer_message.wreck_cleared",
+        "advisory",
+        300,
+    );
+}
+
+// The ending, DECLARED a defeat and still report-bearing (issue #1344). The
+// declaration is deliberate: the run classifies `reported`, not `defeat`, and
+// the flag it outranks is still latched, still folded and still on the wire.
+fn close_the_probe(ctx) {
+    ctx.effects.game_over("world.probe_narrative.game_over.closed", "defeat");
+}
+"""

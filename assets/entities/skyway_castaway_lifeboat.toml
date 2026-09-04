@@ -1,0 +1,59 @@
+# A castaway lifeboat adrift in the Falling Skyway corridor — a scannable derelict
+# carrying trapped civilians (issue #1348 mechanism, placed for the T2 refinement).
+#
+# It is the mirror of the transporter on the rescuing hull: the destroyer authors a
+# `[transporter]` table saying what it can do the rescuing WITH, and this entity
+# authors a `[civilian_rescue]` table saying who is aboard to be rescued. The life
+# signs are DISCOVERED, not given: the count is authored here, but a crew learns it
+# only after Sensors complete a scan — the `[infrastructure]` condition track below
+# is what makes the lifeboat scannable at all (issue #1032's rule).
+#
+# It carries a `[hull]` so weapons CAN destroy it: a human Tactical operator who
+# fires on it registers the casualty, exactly as the probe lighter does. Backfill
+# Tactical never fires on a civilian-carrying contact, so the AI cannot cause that.
+#
+# This is a Falling-Skyway-specific contact, so it names itself under
+# `world.falling_skyway.*` rather than reusing the probe world's lighter — the two
+# are the same mechanic, not the same craft.
+
+name = "world.falling_skyway.entity.castaway_lifeboat.name"
+tags = ["civilian", "infrastructure"]
+mass = 60000.0
+
+[target]
+tags = ["civilian"]
+threat_level = "none"
+description = "world.falling_skyway.entity.castaway_lifeboat.name"
+
+# A soft hull — a lifeboat is not a warship — so a Tactical operator who chooses to
+# fire on it can, and the destruction is what the casualty attribution hangs off.
+[hull]
+hull_integrity = 60.0
+
+[collider]
+shape = "Cylinder"
+radius = 3.0
+half_height = 1.5
+length = 0.0
+
+[radar_appearance]
+colour = [0.4, 0.7, 0.85]
+size = 8.0
+icon = "station"
+
+# The condition track that makes the lifeboat scannable (issue #1032). A scan of a
+# hull with no readable condition is refused, so without this the life signs could
+# never be discovered — `[infrastructure]` is the door the scan reads through, and
+# `[civilian_rescue]` is what the discovery beat announces once that reading lands.
+[infrastructure]
+condition_max = 100.0
+condition = 55.0
+hull_damage_share = 0.5
+
+# The civilians aboard (issue #1348). Authored here, discovered by scan, recovered
+# by the destroyer's Engineering transporter. THREE souls: the report scores +1 for
+# each recovered and -2 for each lost, so a clean rescue is +3 and losing the boat
+# with all aboard is -6. [ai] Unratified — the count and its scoring are a first
+# guess for John to ratify, and the report helper's magnitudes match this number.
+[civilian_rescue]
+count = 3

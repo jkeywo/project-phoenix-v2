@@ -425,10 +425,16 @@ mod tests {
             lod_bubble: None,
             infrastructure: None,
             scan: None,
+            debris: None,
             tractor: None,
             held_response: None,
             dock: None,
             umbilical: None,
+            security: None,
+            security_target: None,
+            transporter: None,
+            civilian_rescue: None,
+            demolition_target: None,
             civilian: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();

@@ -27,6 +27,9 @@ use crate::core::messages::{
     ModifierSlot, ModifierSource, PowerGroupId, SystemAffinity, SystemBlackboard,
     SystemControlPayload, SystemId, TractorBlackboard,
 };
+use crate::core::task_lifecycle::{
+    TaskLifecycleRequest, TaskSlot, TaskTerminalReason, TASK_VERB_TRACTOR_HOLD,
+};
 use crate::effect_queue::EffectQueue;
 use crate::entities::config::DEFAULT_ENTITY_MASS;
 use crate::entities::spawner::{EntityMass, EntityName, EntitySystemHull, EntityUuid};
@@ -256,16 +259,37 @@ impl Plugin for TractorPlugin {
 /// speak (a human tenure token at the network gate, or #1162's tractor AI
 /// through the same `validate_and_admit` seam) and stripped the source, so
 /// nothing here asks who sent the command (AGENTS.md rule 6).
+///
+/// # Why the engage reports no lifecycle START (issue #1341)
+///
+/// An engage is an intent, and the intent does not know its own subject yet.
+/// This system and `console::weapons::beam::handle_set_target` — the ship's ONE
+/// applier of `TacticalRadarSelection` — are both in `SimSet::Input` with no
+/// ordering between them, and `world::server` and the scripted-comms appliers
+/// move the lock from other sets entirely. A start minted here would therefore
+/// name whatever the lock happened to be at an ambiguous moment, while
+/// `tick_tractor` couples the beam to the lock as it stands in
+/// `SimSet::Modifiers`. When those differ — a `SetTarget` and an `EngageTractor`
+/// admitted on one tick, or a scripted re-designation — the activation would
+/// carry a subject the beam is not holding, permanently: from the next tick the
+/// beam's coupling and the lock agree again, so nothing would ever correct it.
+///
+/// So the activation is keyed off the coupling that ACTUALLY forms, in
+/// `tick_tractor`, which is also the only place that knows whether one formed at
+/// all. The release below still reports from here, because letting go is an
+/// intent and needs no subject.
 pub fn handle_tractor_commands(
+    mut lifecycle: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
     mut ships: Query<(
         Entity,
         &crate::core::messages::AdmittedCommands,
         &mut TractorBeam,
+        Option<&EntityUuid>,
     )>,
     mut pending: Option<ResMut<Messages<PendingTractorActionFeedback>>>,
     mut outbound: Option<ResMut<Messages<crate::lobby::OutboundMessage>>>,
 ) {
-    for (entity, admitted, mut beam) in ships.iter_mut() {
+    for (entity, admitted, mut beam, uuid) in ships.iter_mut() {
         // The last engage/release in the tick wins — the same latest-command-
         // wins policy the helm axes take, so a stale-UI double tap is idempotent.
         for cmd in admitted.for_target(TRACTOR_SYSTEM_ID) {
@@ -287,6 +311,19 @@ pub fn handle_tractor_commands(
                     }
                 }
                 SystemControlPayload::ReleaseTractor => {
+                    // Report the cancel BEFORE clearing the intent, so a
+                    // release of an idle beam (a stale-UI double tap) reports
+                    // nothing at all.
+                    if beam.engaged {
+                        push_lifecycle(
+                            lifecycle.as_deref_mut(),
+                            uuid,
+                            TaskLifecycleRequest::End {
+                                slot: hold_slot(uuid),
+                                reason: TaskTerminalReason::Released,
+                            },
+                        );
+                    }
                     beam.engaged = false;
                     beam.coupled_target = None;
                     beam.last_refusal = None;
@@ -299,6 +336,54 @@ pub fn handle_tractor_commands(
                 _ => {}
             }
         }
+    }
+}
+
+/// The lifecycle slot a hull's tractor hold occupies (issue #1341) — its uuid,
+/// the tractor system, and the hold verb.
+fn hold_slot(uuid: Option<&EntityUuid>) -> TaskSlot {
+    TaskSlot::new(
+        uuid.map(|u| u.0.clone()).unwrap_or_default(),
+        TRACTOR_SYSTEM_ID,
+        TASK_VERB_TRACTOR_HOLD,
+    )
+}
+
+/// Queue one lifecycle report, if there is a queue and the hull has a uuid to be
+/// identified by.
+///
+/// A hull with no [`EntityUuid`] — every reduced fixture — reports nothing and
+/// behaves exactly as it did before this existed: the activation key is built
+/// from the operator's uuid, and a keyless task could not be paired with its own
+/// terminal event.
+fn push_lifecycle(
+    queue: Option<&mut EffectQueue<TaskLifecycleRequest>>,
+    uuid: Option<&EntityUuid>,
+    request: TaskLifecycleRequest,
+) {
+    if uuid.is_none() {
+        return;
+    }
+    if let Some(queue) = queue {
+        queue.0.push(request);
+    }
+}
+
+/// The terminal reason a dropped hold reports, from the refusal the pure
+/// coupling module returned (issue #1341).
+///
+/// The mapping is where the two vocabularies meet: a lost LOCK is the selection
+/// going away (interrupted), while power, damage and range are the task's own
+/// preconditions failing (failed). The emitter upgrades the lock/range pair to
+/// `TargetDestroyed` when the subject has actually left the world — a
+/// distinction `hold_status` cannot make, because a despawned hull and a distant
+/// one look identical to it.
+fn terminal_reason_for(refusal: TractorRefusal) -> TaskTerminalReason {
+    match refusal {
+        TractorRefusal::NoLock => TaskTerminalReason::TargetLost,
+        TractorRefusal::OutOfRange => TaskTerminalReason::OutOfRange,
+        TractorRefusal::Unpowered => TaskTerminalReason::Unpowered,
+        TractorRefusal::Disabled => TaskTerminalReason::Disabled,
     }
 }
 
@@ -360,6 +445,7 @@ pub fn operate_tractor_ai(
     mut commands: Commands,
     sessions: Res<crate::lobby::Sessions>,
     runtime: Option<Res<WorldContentRuntime>>,
+    mut lifecycle: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
     mut ships: Query<(
         Entity,
         Option<&EntityUuid>,
@@ -381,7 +467,11 @@ pub fn operate_tractor_ai(
             continue;
         }
         // The named target of the top tractor operate directive, owned so the
-        // borrow of the blackboard is released before the emit.
+        // borrow of the blackboard is released before the emit. Ranked against
+        // the rescue that shares the one Engineering seat (issue #1348): a
+        // higher-scored `Rescue` wins the seat and `tractor_directive_target`
+        // returns `None` here, so this host stands down for the transporter —
+        // one pair of hands.
         let directive_target: Option<String> = match blackboards
             .0
             .get(&crate::ship::system_registry::viewscreen_system_id())
@@ -389,7 +479,7 @@ pub fn operate_tractor_ai(
             Some(SystemBlackboard::Viewscreen(vbb)) => crate::objectives::top_operate_directive(
                 &vbb.scored_objectives,
                 SystemAffinity::Engineering,
-                |d| crate::objectives::tractor_directive_target(d).is_some(),
+                |d| crate::objectives::engineering_seat_operate_target(d).is_some(),
             )
             .and_then(crate::objectives::tractor_directive_target)
             .map(str::to_string),
@@ -423,6 +513,22 @@ pub fn operate_tractor_ai(
             None => {
                 if beam.engaged && host_engaged {
                     commands.entity(entity).remove::<TractorAiEngaged>();
+                    // The scenario closing the task, not the operator changing
+                    // their mind (issue #1341). Reported HERE, ahead of the
+                    // `ReleaseTractor` this emits, because this system is
+                    // ordered before `handle_tractor_commands` and the emitter
+                    // records the FIRST terminal report for an activation: the
+                    // handler's own `Released` for the same hold arrives second
+                    // and is dropped, so a withdrawn order reads as a withdrawn
+                    // order rather than as a crew decision.
+                    push_lifecycle(
+                        lifecycle.as_deref_mut(),
+                        uuid,
+                        TaskLifecycleRequest::End {
+                            slot: hold_slot(uuid),
+                            reason: TaskTerminalReason::OrderWithdrawn,
+                        },
+                    );
                     Some(SystemControlPayload::ReleaseTractor)
                 } else {
                     None
@@ -456,7 +562,13 @@ pub fn operate_tractor_ai(
 /// lock; on any refusal `engaged` and `coupled_target` both clear and the reason
 /// is retained for the console. An idle (`!engaged`) beam is left untouched, so
 /// its retained refusal persists until the operator acts again.
+///
+/// This is also where a hold's task activation is opened and closed (issue
+/// #1341), because the coupling this decides is the only thing that knows what
+/// the beam is really holding: a fresh coupling opens one, a lock that MOVES
+/// under a live hold closes one and opens another, and a refusal closes it.
 pub fn tick_tractor(
+    mut lifecycle: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
     mut set: ParamSet<(
         // Operator rows: everything the verdict needs off the operator itself.
         Query<(
@@ -466,6 +578,7 @@ pub fn tick_tractor(
             &Transform,
             Option<&ShipPowerSystem>,
             Option<&EntitySystemHull>,
+            Option<&EntityUuid>,
         )>,
         // Every entity's position, to resolve the locked target's separation.
         Query<(&EntityUuid, &Transform)>,
@@ -477,6 +590,7 @@ pub fn tick_tractor(
     // each take the world without holding the other's borrow.
     struct Row {
         entity: Entity,
+        uuid: Option<EntityUuid>,
         lock: Option<String>,
         operator_pos: Vec3,
         power_level: u8,
@@ -487,8 +601,8 @@ pub fn tick_tractor(
     let rows: Vec<Row> = set
         .p0()
         .iter()
-        .filter(|(_, beam, _, _, _, _)| beam.engaged)
-        .map(|(entity, beam, selection, transform, power, hull)| {
+        .filter(|(_, beam, _, _, _, _, _)| beam.engaged)
+        .map(|(entity, beam, selection, transform, power, hull, uuid)| {
             let power_level = power
                 .map(|p| power_level_for(&p.0, &beam.power_group))
                 .unwrap_or(0);
@@ -502,6 +616,7 @@ pub fn tick_tractor(
                 .unwrap_or(false);
             Row {
                 entity,
+                uuid: uuid.cloned(),
                 lock: selection.and_then(|s| s.0.clone()),
                 operator_pos: transform.translation,
                 power_level,
@@ -547,15 +662,83 @@ pub fn tick_tractor(
             row.disabled,
         ) {
             Ok(()) => {
+                // The ACTIVATION follows the coupling, never the intent (issue
+                // #1341). Every transition of `coupled_target` is reported from
+                // right here, which is the only place that knows what the beam
+                // actually gripped:
+                //
+                // * `None -> Some(lock)` — the coupling a fresh engage asked for
+                //   has formed, and THIS is the subject it formed on, whatever
+                //   the lock was when `handle_tractor_commands` read the intent.
+                // * `Some(a) -> Some(b)` — the ship's one lock MOVED under a
+                //   live hold. Tactical is a separate station and
+                //   `ai_target_selection` re-evaluates locks on its own, so
+                //   re-designating while Engineering holds the beam is ordinary
+                //   play. The beam simply re-couples — but the activation cannot
+                //   follow it, because its subject is half of its key. So the
+                //   hold of the old hull ENDS, its lock having gone elsewhere,
+                //   and a fresh hold of the new one begins; otherwise the
+                //   timeline would go on naming the hull the beam let go of, and
+                //   the new subject would never get a start.
+                //
+                // A hold that simply continues reports nothing at all.
+                if beam.coupled_target != row.lock {
+                    if beam.coupled_target.is_some() {
+                        push_lifecycle(
+                            lifecycle.as_deref_mut(),
+                            row.uuid.as_ref(),
+                            TaskLifecycleRequest::End {
+                                slot: hold_slot(row.uuid.as_ref()),
+                                reason: TaskTerminalReason::TargetLost,
+                            },
+                        );
+                    }
+                    push_lifecycle(
+                        lifecycle.as_deref_mut(),
+                        row.uuid.as_ref(),
+                        TaskLifecycleRequest::Start {
+                            slot: hold_slot(row.uuid.as_ref()),
+                            target: row.lock.clone(),
+                        },
+                    );
+                }
                 beam.coupled_target = row.lock.clone();
                 beam.last_refusal = None;
             }
             Err(refusal) => {
+                // An engage the tick refuses before any coupling formed still
+                // gets a whole activation (issue #1341) — opened here, an
+                // instant before its own terminal, so a refused engage is a beat
+                // rather than a silence. Its subject is the lock the refusal was
+                // judged against, which is exactly what `hold_status` looked at.
+                // A hold that was already gripping something has its activation
+                // open already and only needs the ending.
+                if beam.coupled_target.is_none() {
+                    push_lifecycle(
+                        lifecycle.as_deref_mut(),
+                        row.uuid.as_ref(),
+                        TaskLifecycleRequest::Start {
+                            slot: hold_slot(row.uuid.as_ref()),
+                            target: row.lock.clone(),
+                        },
+                    );
+                }
                 // Each interruption ends the hold: intent and coupling drop
                 // together, and the crew watch the hulk stop following them.
                 beam.engaged = false;
                 beam.coupled_target = None;
                 beam.last_refusal = Some(refusal);
+                // …and it ends the ACTIVATION, with the reason the refusal
+                // carries. Every row here was `engaged`, so this is always a
+                // live hold being dropped, never an idle beam.
+                push_lifecycle(
+                    lifecycle.as_deref_mut(),
+                    row.uuid.as_ref(),
+                    TaskLifecycleRequest::End {
+                        slot: hold_slot(row.uuid.as_ref()),
+                        reason: terminal_reason_for(refusal),
+                    },
+                );
             }
         }
     }
@@ -987,5 +1170,148 @@ mod tests {
     #[test]
     fn an_idle_beam_saves_as_default() {
         assert_eq!(beam().save_state(), TractorSaveState::default());
+    }
+
+    // ── The activation follows the coupling, not the intent (issue #1341) ────
+
+    /// A beam that needs no power, so the verdict turns on the lock and the
+    /// separation alone.
+    fn unpowered_beam() -> TractorBeam {
+        let mut b = beam();
+        b.config.min_power_level = 0;
+        b
+    }
+
+    /// One operator carrying an `EngageTractor`, one subject at the origin, and
+    /// the lifecycle queue the two systems push onto.
+    fn engage_world(lock: &str) -> (bevy::prelude::World, bevy::prelude::Entity) {
+        use bevy::prelude::*;
+        let mut world = World::new();
+        world.init_resource::<EffectQueue<TaskLifecycleRequest>>();
+        let operator = world
+            .spawn((
+                EntityUuid("uuid-tender".into()),
+                unpowered_beam(),
+                TacticalRadarSelection(Some(lock.into())),
+                Transform::default(),
+                crate::core::messages::AdmittedCommands(vec![
+                    crate::core::messages::AdmittedCommand {
+                        target: tractor_system_id(),
+                        payload: SystemControlPayload::EngageTractor,
+                        response_token: None,
+                        feedback_correlation: None,
+                    },
+                ]),
+            ))
+            .id();
+        for uuid in ["uuid-hulk", "uuid-depot"] {
+            world.spawn((EntityUuid(uuid.into()), Transform::default()));
+        }
+        (world, operator)
+    }
+
+    /// Every lifecycle request queued so far, drained.
+    fn queued(world: &mut bevy::prelude::World) -> Vec<TaskLifecycleRequest> {
+        std::mem::take(&mut world.resource_mut::<EffectQueue<TaskLifecycleRequest>>().0)
+    }
+
+    /// The defect this pins: `handle_tractor_commands` and the ship's ONE lock
+    /// applier are both in `SimSet::Input` with no ordering between them, and
+    /// scripted appliers move the lock from other sets entirely — so the lock an
+    /// engage is read against is not necessarily the lock `tick_tractor` couples
+    /// to in `SimSet::Modifiers`.
+    ///
+    /// The activation must therefore be opened by the coupling that ACTUALLY
+    /// formed. If it were opened by the intent, the timeline would name a hull
+    /// the beam is not holding for the whole activation — permanently, because
+    /// from the next tick the coupling and the lock agree again and nothing
+    /// would ever correct it.
+    #[test]
+    fn a_first_coupling_names_the_hull_the_beam_actually_gripped() {
+        use bevy::ecs::system::RunSystemOnce;
+        let (mut world, operator) = engage_world("uuid-hulk");
+
+        world
+            .run_system_once(handle_tractor_commands)
+            .expect("the engage applies");
+        assert!(
+            queued(&mut world).is_empty(),
+            "the intent opens nothing: it does not yet know its own subject"
+        );
+
+        // Tactical re-designates in the same tick, after the engage was handled.
+        world
+            .entity_mut(operator)
+            .insert(TacticalRadarSelection(Some("uuid-depot".into())));
+        world
+            .run_system_once(tick_tractor)
+            .expect("the verdict applies");
+
+        assert_eq!(
+            queued(&mut world),
+            vec![TaskLifecycleRequest::Start {
+                slot: TaskSlot::new("uuid-tender", TRACTOR_SYSTEM_ID, TASK_VERB_TRACTOR_HOLD),
+                target: Some("uuid-depot".into()),
+            }],
+            "the hold names the hull the beam gripped, not the one the intent \
+             happened to read"
+        );
+        assert_eq!(
+            world
+                .get::<TractorBeam>(operator)
+                .expect("the operator keeps its beam")
+                .coupled_target
+                .as_deref(),
+            Some("uuid-depot"),
+        );
+
+        // A hold that simply continues reports nothing more.
+        world
+            .run_system_once(tick_tractor)
+            .expect("the verdict applies");
+        assert!(queued(&mut world).is_empty(), "an unchanged hold is silent");
+    }
+
+    /// An engage the very same tick refuses still gets a whole activation — a
+    /// start and its own terminal — so a refused engage is a beat rather than a
+    /// silence, and the pair stays adjacent on one slot for the emitter's
+    /// coalescing rule to recognise.
+    #[test]
+    fn an_engage_refused_before_it_couples_still_opens_and_closes_one_activation() {
+        use bevy::ecs::system::RunSystemOnce;
+        let (mut world, operator) = engage_world("uuid-hulk");
+        // Beyond the authored 500m reach.
+        world
+            .entity_mut(operator)
+            .insert(Transform::from_xyz(5_000.0, 0.0, 0.0));
+
+        world
+            .run_system_once(handle_tractor_commands)
+            .expect("the engage applies");
+        world
+            .run_system_once(tick_tractor)
+            .expect("the verdict applies");
+
+        let slot = TaskSlot::new("uuid-tender", TRACTOR_SYSTEM_ID, TASK_VERB_TRACTOR_HOLD);
+        assert_eq!(
+            queued(&mut world),
+            vec![
+                TaskLifecycleRequest::Start {
+                    slot: slot.clone(),
+                    target: Some("uuid-hulk".into()),
+                },
+                TaskLifecycleRequest::End {
+                    slot,
+                    reason: TaskTerminalReason::OutOfRange,
+                },
+            ],
+        );
+        assert!(
+            !world
+                .get::<TractorBeam>(operator)
+                .expect("the operator keeps its beam")
+                .engaged,
+            "a refused engage drops the intent with the coupling"
+        );
     }
 }

@@ -132,15 +132,18 @@ entities:
       status: implemented
       confidence: confirmed
       title: Sensor Radar Blackboard State
-      summary: Per-ship sensor-radar blackboard carrying the Science Target (selected_target), mirrored from SensorRadarSelection and lifted by the viewscreen aggregator into science_target (issue #829). Also carries selected_target_alert, an optional replica of the selected target's authoritative Red Alert state, present only when that target is a Red-Alert-capable ship (issue #749).
+      summary: Per-ship sensor-radar blackboard carrying the Science Target (selected_target), mirrored from SensorRadarSelection and lifted by the viewscreen aggregator into science_target (issue #829). Also carries selected_target_alert, an optional replica of the selected target's authoritative Red Alert state, present only when that target is a Red-Alert-capable ship (issue #749). Also carries selected_target_relative_velocity, an optional world-space X/Z replica (target minus this ship's own ShipPhysics velocity) present only when the selection names a ship whose physics this tick's publisher can resolve (issue #1339) — a pure presentation addition riding alongside the existing selection, not a change to Science Target or Combat Lock authority.
+      rationale:
+        - "Issue #1339: the client (buildTargetProjection in gui/console-state.js) derives a future relative-path marker series from this velocity — future relative offset = current relative offset + relative_velocity * t, rotated into ship-relative radar space by the same transform every other radar blip uses — over an authored horizon/marker-spacing tunable (SensorsProjectionConfig, [sensors_console.projection] in the ship TOML; 60s/10s parse defaults when a hull omits the table). A non-ship contact (asteroid/station/planet/region) carries no ShipPhysics and so is structurally velocity-ineligible with no scenario-specific branch — the same eligibility shape selected_target_alert already established. ph-radar.js draws the marker series as fading ticks along the path; ph-sensor-radar.js passes it through as target_projection."
     architecture:
       classification: derived
       owner: sensors-target-controller
-      derived_from: [sensors-target-state]
+      derived_from: [sensors-target-state, authoritative-ship-motion-state]
     implementation:
       status: declared
-      paths: [src/ship/sensors.rs, src/core/messages.rs, gui/console-state.js]
-      symbols: [SensorRadarBlackboard]
+      paths: [src/ship/sensors.rs, src/core/messages.rs, src/entities/config.rs, src/lobby/server.rs, gui/console-state.js, gui/sim-state.js, gui/components/ph-sensor-radar.js, gui/components/ph-radar.js]
+      symbols: [SensorRadarBlackboard, SensorsProjectionConfig, buildTargetProjection]
+      tests: [cargo test, npx vitest run]
 
   - message: sensors-target-designation
     core:

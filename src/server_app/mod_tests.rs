@@ -7001,6 +7001,9 @@ fn game_over_broadcasts_the_latched_outcome() {
 
     let mut world = World::new();
     world.init_resource::<SimOutbox>();
+    // The `ReportFinalized` beat's writer (issue #1344). Present but unused on
+    // an ending that authored no report, which is this test's case.
+    world.init_resource::<bevy::ecs::message::Messages<crate::core::narrative::NarrativeEvent>>();
     world.insert_resource(GameOverReason(
         Some("world.falling_skyway.ending.held".into()),
         Some(crate::core::balance::Outcome::Victory),
@@ -7011,9 +7014,17 @@ fn game_over_broadcasts_the_latched_outcome() {
     let outbox = world.resource::<SimOutbox>();
     assert_eq!(outbox.len(), 1);
     match outbox.iter().next().map(|(_, message)| message) {
-        Some(ServerMessage::GameOver { reason, outcome }) => {
+        Some(ServerMessage::GameOver {
+            reason,
+            outcome,
+            report,
+        }) => {
             assert_eq!(reason, "world.falling_skyway.ending.held");
             assert_eq!(outcome.as_deref(), Some("victory"));
+            assert!(
+                report.is_empty(),
+                "a scenario that authored no report publishes none"
+            );
         }
         other => panic!("expected GameOver, got {other:?}"),
     }
@@ -7042,6 +7053,7 @@ fn game_over_publishes_no_outcome_when_none_was_declared() {
 
     let mut world = World::new();
     world.init_resource::<SimOutbox>();
+    world.init_resource::<bevy::ecs::message::Messages<crate::core::narrative::NarrativeEvent>>();
     world.insert_resource(GameOverReason(None, None));
 
     world.run_system_once(on_game_over_enter).unwrap();
@@ -7052,10 +7064,407 @@ fn game_over_publishes_no_outcome_when_none_was_declared() {
         .next()
         .map(|(_, message)| message)
     {
-        Some(ServerMessage::GameOver { reason, outcome }) => {
+        Some(ServerMessage::GameOver {
+            reason,
+            outcome,
+            report,
+        }) => {
             assert_eq!(reason, "");
             assert_eq!(*outcome, None);
+            assert!(report.is_empty());
         }
         other => panic!("expected GameOver, got {other:?}"),
     };
+}
+
+// ── The post-mission report on the ending broadcast (issue #1344) ─────────
+
+/// AC1 and AC3 at the broadcast seam: a report-bearing ending publishes its
+/// rows, in authored order, with the two String Ids and the semantic state
+/// the surface needs — and WITHOUT the hidden score, which stays on the
+/// resource for the headless report to read.
+#[test]
+fn game_over_publishes_the_report_rows_without_their_scores() {
+    use crate::core::report::{MissionReport, ReportRow, ReportRowState};
+    use bevy::ecs::system::RunSystemOnce;
+
+    let mut world = World::new();
+    world.init_resource::<SimOutbox>();
+    world.init_resource::<bevy::ecs::message::Messages<crate::core::narrative::NarrativeEvent>>();
+    world.insert_resource(GameOverReason(
+        Some("world.falling_skyway.game_over.lark_collision".into()),
+        Some(crate::core::balance::Outcome::Defeat),
+    ));
+    let mut report = MissionReport::default();
+    report.set_row(ReportRow {
+        id: "lyra".into(),
+        heading_id: "world.falling_skyway.report.lyra.heading".into(),
+        outcome_id: "world.falling_skyway.report.lyra.saved".into(),
+        state: ReportRowState::Saved,
+        score: 6,
+    });
+    world.insert_resource(report);
+
+    world.run_system_once(on_game_over_enter).unwrap();
+
+    match world
+        .resource::<SimOutbox>()
+        .iter()
+        .next()
+        .map(|(_, message)| message)
+    {
+        Some(ServerMessage::GameOver {
+            outcome, report, ..
+        }) => {
+            // The declared side still travels — it is the authored truth about
+            // the ending. It simply stops being the frame the client draws.
+            assert_eq!(outcome.as_deref(), Some("defeat"));
+            assert_eq!(report.len(), 1);
+            assert_eq!(report[0].id, "lyra");
+            assert_eq!(
+                report[0].heading,
+                "world.falling_skyway.report.lyra.heading"
+            );
+            assert_eq!(report[0].outcome, "world.falling_skyway.report.lyra.saved");
+            assert_eq!(report[0].state, "saved");
+        }
+        other => panic!("expected GameOver, got {other:?}"),
+    };
+
+    // The score stayed behind, on the authoritative resource the headless
+    // report reads after the run.
+    assert_eq!(
+        world
+            .resource::<crate::core::report::MissionReport>()
+            .total(),
+        6
+    );
+}
+
+/// The finalized beat fires once for a report-bearing ending, and not at all
+/// for an ending that authored no report — "finalized" over an empty report
+/// would tell an after-action reader a report existed.
+#[test]
+fn game_over_beats_report_finalized_only_when_there_are_rows() {
+    use crate::core::narrative::{NarrativeEvent, NarrativeKind, NarrativeValue};
+    use crate::core::report::{MissionReport, ReportRow, ReportRowState};
+    use bevy::ecs::system::RunSystemOnce;
+
+    let finalized = |report: MissionReport| -> Vec<NarrativeEvent> {
+        let mut world = World::new();
+        world.init_resource::<SimOutbox>();
+        world.init_resource::<bevy::ecs::message::Messages<NarrativeEvent>>();
+        world.insert_resource(GameOverReason(
+            Some("world.falling_skyway.game_over.mission_complete".into()),
+            Some(crate::core::balance::Outcome::Victory),
+        ));
+        world.insert_resource(report);
+        world.run_system_once(on_game_over_enter).unwrap();
+        world
+            .resource_mut::<bevy::ecs::message::Messages<NarrativeEvent>>()
+            .drain()
+            .collect()
+    };
+
+    assert!(
+        finalized(MissionReport::default()).is_empty(),
+        "an ending with no report authors no finalized beat"
+    );
+
+    let mut report = MissionReport::default();
+    report.set_row(ReportRow {
+        id: "lyra".into(),
+        heading_id: "world.falling_skyway.report.lyra.heading".into(),
+        outcome_id: "world.falling_skyway.report.lyra.lost".into(),
+        state: ReportRowState::Lost,
+        score: -6,
+    });
+    let events = finalized(report);
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].kind, NarrativeKind::ReportFinalized);
+    assert_eq!(
+        events[0].id,
+        "world.falling_skyway.game_over.mission_complete"
+    );
+    assert_eq!(events[0].detail.get("rows"), Some(&NarrativeValue::Int(1)));
+    // The timeline is a diagnostic surface, so the hidden total is on it.
+    assert_eq!(
+        events[0].detail.get("total"),
+        Some(&NarrativeValue::Int(-6))
+    );
+}
+
+/// AC5 across a MULTI-ROUND session: round two must not inherit round one's
+/// report.
+///
+/// The report is per-run state and the process is not. Play Falling Skyway to
+/// a saved Lyra, end, `ReturnToLobby`, then start combat_test — a scenario
+/// that authors no report at all — and reach its ending. Without the run
+/// boundary that `reset_mission_report` puts on
+/// `OnEnter(GamePhase::InProgress)`, that ending publishes Lyra's row, the
+/// client classifies it `reported` and swaps the victory headline for MISSION
+/// REPORT, and the timeline carries a `ReportFinalized` beat over a report
+/// nobody wrote — a report about a mission the crew never flew.
+#[test]
+fn a_second_round_does_not_inherit_the_first_rounds_report() {
+    use crate::core::narrative::{NarrativeEvent, NarrativeKind};
+    use crate::core::report::{MissionReport, ReportRow, ReportRowState};
+    use crate::effect_queue::EffectQueue;
+    use crate::mission_report::reset_mission_report;
+    use bevy::ecs::system::RunSystemOnce;
+
+    let mut world = World::new();
+    world.init_resource::<SimOutbox>();
+    world.init_resource::<bevy::ecs::message::Messages<NarrativeEvent>>();
+    world.init_resource::<EffectQueue<ReportRow>>();
+    world.init_resource::<MissionReport>();
+
+    // Round one: Falling Skyway, Lyra pulled clear, ending broadcast.
+    world.resource_mut::<MissionReport>().set_row(ReportRow {
+        id: "lyra".into(),
+        heading_id: "world.falling_skyway.report.lyra.heading".into(),
+        outcome_id: "world.falling_skyway.report.lyra.saved".into(),
+        state: ReportRowState::Saved,
+        score: 6,
+    });
+    world.insert_resource(GameOverReason(
+        Some("world.falling_skyway.game_over.lark_collision".into()),
+        Some(crate::core::balance::Outcome::Defeat),
+    ));
+    world.run_system_once(on_game_over_enter).unwrap();
+    world.resource_mut::<SimOutbox>().clear();
+    world
+        .resource_mut::<bevy::ecs::message::Messages<NarrativeEvent>>()
+        .clear();
+
+    // Round two begins: the run boundary runs, then a report-free scenario
+    // reaches its own declared ending.
+    world.run_system_once(reset_mission_report).unwrap();
+    world.insert_resource(GameOverReason(
+        Some("world.combat_test.game_over.cleared".into()),
+        Some(crate::core::balance::Outcome::Victory),
+    ));
+    world.run_system_once(on_game_over_enter).unwrap();
+
+    match world
+        .resource::<SimOutbox>()
+        .iter()
+        .next()
+        .map(|(_, message)| message)
+    {
+        Some(ServerMessage::GameOver {
+            reason,
+            outcome,
+            report,
+        }) => {
+            assert_eq!(reason, "world.combat_test.game_over.cleared");
+            // Classified by ITS declared outcome, because there is nothing to
+            // report — which is the whole of AC5.
+            assert_eq!(outcome.as_deref(), Some("victory"));
+            assert!(
+                report.is_empty(),
+                "round two published round one's rows: {report:?}"
+            );
+        }
+        other => panic!("expected GameOver, got {other:?}"),
+    }
+
+    let beats: Vec<NarrativeEvent> = world
+        .resource_mut::<bevy::ecs::message::Messages<NarrativeEvent>>()
+        .drain()
+        .collect();
+    assert!(
+        !beats
+            .iter()
+            .any(|e| e.kind == NarrativeKind::ReportFinalized),
+        "a report-free ending must not beat ReportFinalized"
+    );
+}
+
+// ── The narrative mark on the GameStart spawn path (issue #1338) ──────────
+
+/// `narrative = true` says nothing about WHEN the hull enters the world, so
+/// the GameStart spawner marks exactly as the Immediate one does.
+///
+/// The combination the field doc promises and world validation accepts —
+/// `name` + `narrative = true` + `spawn_on = "game_start"` — used to spawn a
+/// hull with no `NarrativeMark`, so the run report recorded neither its
+/// arrival nor its death and nothing anywhere said why. That is the one
+/// failure PRD #1337's "authored, never inferred" rule cannot absorb: the
+/// author believes they marked it.
+#[test]
+fn a_game_start_entity_marked_narrative_carries_the_mark() {
+    use crate::core::narrative::NarrativeMark;
+    use crate::world::config::{
+        TransformConfig, WorldConfig as UnifiedWorldConfig, WorldEntity, WorldEntitySpawnOn,
+    };
+
+    // An `objective_marker` beacon rather than a hull: this test is about the
+    // mark, and a `ship`-tagged row would take the player-ship branch and drag
+    // the whole lobby loadout in with it.
+    fn beacon(name: &str, narrative: bool, x: f32) -> WorldEntity {
+        WorldEntity {
+            template_path: "assets/entities/nav_beacon.toml".into(),
+            name: Some(name.into()),
+            narrative,
+            spawn_on: WorldEntitySpawnOn::GameStart,
+            transform: Some(TransformConfig {
+                position: Some([x, 0.0, 0.0]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    let mut world_cfg = UnifiedWorldConfig::default();
+    world_cfg.entities.push(beacon("lyra", true, 120.0));
+    // The control: the same row without the flag. An unmarked hull produces no
+    // timeline entry however violently it dies.
+    world_cfg.entities.push(beacon("rock", false, 60.0));
+    // What the Startup assign pass leaves behind for every NAMED row, whatever
+    // its `spawn_on` — the map this spawner reads its uuids out of.
+    world_cfg
+        .name_to_uuid
+        .insert("lyra".into(), "uuid-lyra".into());
+    world_cfg
+        .name_to_uuid
+        .insert("rock".into(), "uuid-rock".into());
+
+    let mut app = App::new();
+    app.insert_resource(world_cfg);
+    app.add_systems(Update, spawn_game_start_entities);
+    app.update();
+
+    let mut query = app.world_mut().query::<&NarrativeMark>();
+    let marks: Vec<String> = query.iter(app.world()).map(|mark| mark.0.clone()).collect();
+    assert_eq!(
+        marks,
+        vec!["lyra".to_string()],
+        "only the row that asked for it is marked, and the mark carries the \
+         world's authored name"
+    );
+}
+
+/// A nameless row cannot be marked — the mark's payload IS the name — and the
+/// spawner must not invent one. `world::validate` is what tells the author,
+/// through a `narrative-mark-needs-name` warning at load.
+#[test]
+fn a_nameless_game_start_entity_takes_no_mark() {
+    use crate::core::narrative::NarrativeMark;
+    use crate::world::config::{
+        TransformConfig, WorldConfig as UnifiedWorldConfig, WorldEntity, WorldEntitySpawnOn,
+    };
+
+    let mut world_cfg = UnifiedWorldConfig::default();
+    world_cfg.entities.push(WorldEntity {
+        template_path: "assets/entities/nav_beacon.toml".into(),
+        name: None,
+        narrative: true,
+        spawn_on: WorldEntitySpawnOn::GameStart,
+        transform: Some(TransformConfig {
+            position: Some([30.0, 0.0, 0.0]),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+
+    let mut app = App::new();
+    app.insert_resource(world_cfg);
+    app.add_systems(Update, spawn_game_start_entities);
+    app.update();
+
+    let mut query = app.world_mut().query::<&NarrativeMark>();
+    assert_eq!(query.iter(app.world()).count(), 0);
+}
+
+/// A marked GameStart hull must spawn under the SAME uuid its authored name
+/// resolves to, because the timeline records it under both.
+///
+/// `narrative::emit_authored_and_marked_entity_narrative` reads the uuid off the spawned
+/// entity (`EntityUuid` + `NarrativeMark`) for `marked_entity_spawned`, while
+/// `ActionCmd::NarrativeOutcome` resolves the author's
+/// `ctx.effects.narrative_outcome("name", ..)` through
+/// `WorldContentRuntime.name_to_uuid` — the mirror of `WorldConfig.name_to_uuid`
+/// this spawner reads. When this spawner minted its own uuid instead, those two
+/// halves of one hull's story carried two different actors, and the one the
+/// outcome carried belonged to no entity in the world at all. Nothing name-
+/// resolving (comms `from`, trigger targets, `set_target`) could reach the hull
+/// either; the timeline is simply where the split became visible.
+#[test]
+fn a_named_game_start_entity_spawns_under_its_registered_uuid() {
+    use crate::core::narrative::NarrativeMark;
+    use crate::entities::spawner::EntityUuid;
+    use crate::world::config::{
+        TransformConfig, WorldConfig as UnifiedWorldConfig, WorldEntity, WorldEntitySpawnOn,
+    };
+
+    let mut world_cfg = UnifiedWorldConfig::default();
+    world_cfg.entities.push(WorldEntity {
+        template_path: "assets/entities/nav_beacon.toml".into(),
+        name: Some("lyra".into()),
+        narrative: true,
+        spawn_on: WorldEntitySpawnOn::GameStart,
+        transform: Some(TransformConfig {
+            position: Some([120.0, 0.0, 0.0]),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    world_cfg
+        .name_to_uuid
+        .insert("lyra".into(), "uuid-lyra".into());
+
+    let mut app = App::new();
+    app.insert_resource(world_cfg);
+    app.add_systems(Update, spawn_game_start_entities);
+    app.update();
+
+    let mut query = app.world_mut().query::<(&EntityUuid, &NarrativeMark)>();
+    let spawned: Vec<(String, String)> = query
+        .iter(app.world())
+        .map(|(uuid, mark)| (mark.0.clone(), uuid.0.clone()))
+        .collect();
+    assert_eq!(
+        spawned,
+        vec![("lyra".to_string(), "uuid-lyra".to_string())],
+        "the marked hull must carry the uuid registered against its authored \
+         name, not a freshly minted one"
+    );
+}
+
+/// The Immediate half of the same contract, stated from the other side: an
+/// ANONYMOUS GameStart row (the player-ship placeholder every shipped world
+/// uses) has no name to anchor to and still mints. Guards the fix above from
+/// being read as "GameStart rows never mint".
+#[test]
+fn an_anonymous_game_start_entity_still_mints_its_own_uuid() {
+    use crate::entities::spawner::EntityUuid;
+    use crate::world::config::{
+        TransformConfig, WorldConfig as UnifiedWorldConfig, WorldEntity, WorldEntitySpawnOn,
+    };
+
+    let mut world_cfg = UnifiedWorldConfig::default();
+    world_cfg.entities.push(WorldEntity {
+        template_path: "assets/entities/nav_beacon.toml".into(),
+        name: None,
+        spawn_on: WorldEntitySpawnOn::GameStart,
+        transform: Some(TransformConfig {
+            position: Some([30.0, 0.0, 0.0]),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+
+    let mut app = App::new();
+    app.insert_resource(world_cfg);
+    app.add_systems(Update, spawn_game_start_entities);
+    app.update();
+
+    let mut query = app.world_mut().query::<&EntityUuid>();
+    let uuids: Vec<String> = query.iter(app.world()).map(|u| u.0.clone()).collect();
+    assert_eq!(uuids.len(), 1, "the row still spawns");
+    assert!(
+        !uuids[0].is_empty(),
+        "an anonymous row mints its own uuid: {uuids:?}"
+    );
 }

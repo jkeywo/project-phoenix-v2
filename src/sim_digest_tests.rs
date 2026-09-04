@@ -927,6 +927,7 @@ fn dialogue(node_fn: &str) -> ActiveDialogue {
             responses: vec![CommsResponse {
                 text: "comms.response.acknowledge".into(),
                 important: false,
+                ai: Default::default(),
             }],
         },
         thread_id: "thread-1".into(),
@@ -1571,6 +1572,132 @@ fn every_other_comms_surface_moves_the_digest() {
         world_digest(&world),
         "a scripted open queued but not yet materialised mints an id when it \
          drains, so two hosts must agree the queue holds it"
+    );
+}
+
+/// Issue #1343 — the two surfaces the delayed weighted picker adds.
+///
+/// The METADATA decides what an unmanned console may reach for; the WAIT decides
+/// when it reaches. Two peers holding a live conversation who disagree about
+/// either are already divergent, and this is the tick that says so rather than
+/// the tick the answer lands on one of them and not the other.
+#[test]
+fn the_backfill_choice_metadata_and_its_running_wait_move_the_digest() {
+    let mut world = scenario_world();
+    world
+        .resource_mut::<CommsRuntime>()
+        .active_dialogues
+        .insert("msg-1".into(), dialogue("node_opening"));
+    let mut previous = world_digest(&world);
+
+    let set_ai = |world: &mut World, ai: crate::comms::content::CommsResponseAi| {
+        world
+            .resource_mut::<CommsRuntime>()
+            .active_dialogues
+            .get_mut("msg-1")
+            .expect("live")
+            .current_node
+            .responses[0]
+            .ai = ai;
+    };
+
+    // A weight authored on a response the peers already agree exists.
+    set_ai(
+        &mut world,
+        crate::comms::content::CommsResponseAi {
+            weight: Some(1),
+            delay_seconds: None,
+        },
+    );
+    let weighted = world_digest(&world);
+    assert_ne!(
+        previous, weighted,
+        "an authored weight changes which responses an unmanned console may pick"
+    );
+    previous = weighted;
+
+    // ZERO is not ABSENT: a forbidden option and an unoffered one are different
+    // instructions, so the present/absent marker has to fold.
+    set_ai(
+        &mut world,
+        crate::comms::content::CommsResponseAi {
+            weight: Some(0),
+            delay_seconds: None,
+        },
+    );
+    let forbidden = world_digest(&world);
+    assert_ne!(previous, forbidden, "weight 0 must not fold as no weight");
+    previous = forbidden;
+
+    set_ai(
+        &mut world,
+        crate::comms::content::CommsResponseAi {
+            weight: Some(0),
+            delay_seconds: Some(5),
+        },
+    );
+    let delayed = world_digest(&world);
+    assert_ne!(previous, delayed, "the authored pause is folded too");
+    previous = delayed;
+
+    // And the running wait itself.
+    world
+        .resource_mut::<CommsRuntime>()
+        .pending_ai_responses
+        .insert(
+            crate::comms::server::PendingAiResponseKey::new(
+                crate::command_admission::HostSlot::SOLO,
+                "msg-1",
+            ),
+            crate::comms::server::PendingAiResponse {
+                due_tick: 300,
+                response_fingerprint: 0xabcd,
+            },
+        );
+    let armed = world_digest(&world);
+    assert_ne!(previous, armed, "an armed wait is folded");
+
+    world
+        .resource_mut::<CommsRuntime>()
+        .pending_ai_responses
+        .get_mut(&crate::comms::server::PendingAiResponseKey::new(
+            crate::command_admission::HostSlot::SOLO,
+            "msg-1",
+        ))
+        .expect("armed")
+        .due_tick = 301;
+    let retimed = world_digest(&world);
+    assert_ne!(
+        armed, retimed,
+        "two hosts that agree a wait is running but not WHEN it expires have \
+         already diverged"
+    );
+
+    // …and WHICH hull is waiting. A fleet has one inbox but a Comms console per
+    // hull, so the same message waited on by a different fleet slot is a
+    // different mission state (issues #1343 + #1116).
+    {
+        let mut comms = world.resource_mut::<CommsRuntime>();
+        let record = comms
+            .pending_ai_responses
+            .remove(&crate::comms::server::PendingAiResponseKey::new(
+                crate::command_admission::HostSlot::SOLO,
+                "msg-1",
+            ))
+            .expect("armed");
+        comms.pending_ai_responses.insert(
+            crate::comms::server::PendingAiResponseKey::new(
+                crate::command_admission::HostSlot(2),
+                "msg-1",
+            ),
+            record,
+        );
+    }
+    assert_ne!(
+        retimed,
+        world_digest(&world),
+        "the fleet slot holding the wait is folded too — two peers that swapped \
+         which hull is waiting have diverged even though the message ids agree"
     );
 }
 

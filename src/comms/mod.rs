@@ -10,7 +10,13 @@
 //! materialises `ctx.effects.open_comms(#{…})` requests into live threads. It
 //! is kept apart from `server` because the M7 collapse deletes the declarative
 //! front-end and this module is what survives it.
+//!
+//! `ai_choice` is the pure half of the delayed weighted Backfill picker (issue
+//! #1343): what an unmanned console may reach for on a live dialogue node, and
+//! how one uniform draw becomes the response index it submits. The Bevy half is
+//! `console::comms::server::operate_comms_response_ai`.
 
+pub mod ai_choice;
 pub mod component;
 pub mod content;
 pub mod range;

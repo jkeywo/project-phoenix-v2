@@ -1,0 +1,93 @@
+# Probe world for issue #1347 — one drifting mass, one thing under it, and a
+# ship that can read the mass.
+#
+# It exists for the SAVE, not for the beat. `falling_skyway.toml` owns the beat
+# and `tests/headless_runner.rs` drives it; what no test there can reach is the
+# question this world is built to ask: what does a peer joining by snapshot
+# transfer, or a crew resuming a save, get handed?
+#
+# A debris contact carries two things nothing else in a save carries:
+#
+#   1. WHERE IT HAS GOT TO. A rock has no `ShipPhysics`, so the entity
+#      namespace's `physics` field — the thing that puts every other moving
+#      object back where it flew to — is `None` for one of these, and
+#      `SpawnOrigin` deliberately records where a mass was SHED rather than where
+#      it has since travelled. `debris::server::tick_debris_drift` is the only
+#      writer of that transform in the whole simulation.
+#
+#   2. WHAT THE CREW ESTABLISHED. `assessed` / `confirmed` / `urgent` / `struck`
+#      are the record of somebody having looked, and the entire beat is the
+#      difference between a mass the simulation privately knows is on course and
+#      a mass a crew have READ. A joiner handed the geometry alone comes back
+#      with every contact unread: its Backfilled Tactical drops the confirmed
+#      lock (the candidate source filters on `confirmed`) and its Sensors seat
+#      re-scans a field the host had already worked.
+#
+# So: one destroyer with its shipped `[scan]` ladder unmodified, one depot, and
+# one mass aimed straight at the depot from up-track. The test flies the ship,
+# takes a reading through the ordinary admitted `ScanTarget` path, captures, and
+# resumes. Nothing here is scripted — there is no `[script]` block at all, which
+# is deliberate: a scenario that raised the flags itself would prove the flag
+# store round-trips, which is a different claim that already has its own tests.
+
+[global]
+seed = 1347
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# The reading ship. The destroyer's own shipped `[scan]` ladder is used
+# unmodified — this world overrides nothing about the suite — so the run is a
+# test of the hull the demo actually flies rather than of a fixture.
+[[entity]]
+template_path = "assets/entities/alliance_destroyer.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# ── What is under the rock ──────────────────────────────────────────────────
+# A published structure at the origin. Its condition track is not the subject
+# here; what it is for is to be the `protected_target` the projection is taken
+# against, which is the only way a contact can ever be CONFIRMED.
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+id = "probe_depot"
+name = "world.probe_debris.entity.depot.name"
+transform = { position = [0.0, 0.0, 0.0] }
+overrides = { infrastructure = { condition = 80.0, decay_per_sec = 0.0 } }
+
+# ── The mass ────────────────────────────────────────────────────────────────
+# 600 units up-track of the depot, closing at 4 units a second on a 30-unit
+# impact radius: about 142 seconds to arrive, which is far longer than any
+# capture this world is used for, so the rock is always still in flight when the
+# save is taken. It drifts on the x axis alone so a reader can check the
+# translation by eye.
+#
+# The `[infrastructure]` table is not decoration. `science::scan` refuses a
+# subject with no readable condition track, and the debris projection is folded
+# into the reading that refusal would replace — so a mass with no condition
+# track is a mass no crew can read, and there would be nothing to save.
+[[entity]]
+template_path = "assets/entities/asteroid_common_1_large.toml"
+id = "probe_debris_mass"
+name = "world.probe_debris.entity.mass.name"
+transform = { position = [600.0, 0.0, 0.0] }
+
+[entity.overrides.infrastructure]
+condition_max = 60.0
+decay_per_sec = 0.0
+
+[entity.overrides.debris]
+drift = [-4.0, 0.0, 0.0]
+protected_target = "world.probe_debris.entity.depot.name"
+impact_radius = 30.0
+# A minute's warning, and a reading that is taken once. Neither number is
+# exercised by the save test; they are here because a `[debris]` table that
+# authored no urgency window would be an unusual one to round-trip.
+urgent_secs = 60.0
+reassess_secs = 0.0
+assessed_flag = "probe_debris_read"
+confirmed_flag = "probe_debris_confirmed"
+urgent_flag = "probe_debris_urgent"
+impact_flag = "probe_debris_struck"

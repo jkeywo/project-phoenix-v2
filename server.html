@@ -712,6 +712,47 @@
     }
     #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
 
+    /* ── Ship's-computer message banner (issue #1342) ────────────────────
+       Top-centre, below the existing cap-top frame (56px tall) and clear of
+       the bottom status strip and #game-over-overlay. z-index 6: above the
+       border pieces (5), below the frame's own overlay (15). */
+    .vs-computer-message {
+      position: absolute;
+      top: 64px; left: 50%; transform: translateX(-50%);
+      z-index: 6;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      max-width: min(560px, 70vw);
+      padding: 7px 20px;
+      background: rgba(6, 12, 16, 0.78);
+      border: 1px solid var(--vs-signal);
+      border-radius: 2px;
+      pointer-events: none;
+      text-align: center;
+    }
+    .vs-computer-message.shown { display: flex; }
+    .vs-computer-message-source {
+      font-family: "Chakra Petch", system-ui, sans-serif;
+      font-size: 8px; font-weight: 600;
+      letter-spacing: 0.26em;
+      text-transform: uppercase;
+      color: var(--vs-text);
+    }
+    .vs-computer-message-text {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 12px; line-height: 1.45;
+      color: var(--vs-signal);
+    }
+    /* Severity treatment — border + text tint, one word per severity. */
+    .vs-computer-message.sev-advisory { border-color: #d8c85f; }
+    .vs-computer-message.sev-advisory .vs-computer-message-text { color: #d8c85f; }
+    .vs-computer-message.sev-warning { border-color: #ff9a3d; }
+    .vs-computer-message.sev-warning .vs-computer-message-text { color: #ff9a3d; }
+    .vs-computer-message.sev-critical { border-color: var(--vs-alert); }
+    .vs-computer-message.sev-critical .vs-computer-message-text { color: var(--vs-alert); }
+
     /* ── AI chatter widget (bottom-left) ──────────────────────── */
     #chatter-container {
       position: absolute;
@@ -1505,9 +1546,13 @@
         </section>
       </main>
 
-      <!-- Game-over overlay: shown when GamePhase::GameOver via __updateHud. -->
+      <!-- Game-over overlay: shown when GamePhase::GameOver via __updateHud.
+           When the scenario authored a post-mission report (issue #1344) its
+           rows render under the closing message, in the author's order, with no
+           score, total or grade — the HUD payload carries none. -->
       <div id="game-over-overlay" style="display:none;position:absolute;inset:0;z-index:85;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,0.88);color:#cde;font-family:'Chakra Petch',monospace;text-align:center;padding:32px;">
         <div id="game-over-message" style="font-size:clamp(0.95rem,2.5vw,1.15rem);white-space:pre-wrap;line-height:1.7;max-width:64ch;letter-spacing:0.03em;"></div>
+        <dl id="game-over-report" style="display:none;grid-template-columns:minmax(0,auto) minmax(0,1fr);gap:10px 24px;margin:28px 0 0;padding:0;max-width:64ch;text-align:left;font-size:clamp(0.85rem,2vw,1rem);"></dl>
         <button id="return-to-lobby-btn" style="margin-top:32px;padding:12px 32px;font-family:'Chakra Petch',monospace;font-size:1rem;letter-spacing:0.08em;text-transform:uppercase;color:#cde;background:rgba(140,180,220,0.12);border:1px solid #8ac;border-radius:2px;cursor:pointer;" data-i18n="client.return_to_lobby">Return to Lobby</button>
       </div>
 
@@ -1534,6 +1579,12 @@
         <div class="vs-piece vs-cap bottom"></div>
         <!-- Ship designation (top-centre, above cap) -->
         <div class="vs-designation" id="hud-designation" data-i18n="server.hud_designation">PHOENIX</div>
+        <!-- Ship's-computer message banner (issue #1342): shown/hidden and
+             styled by severity from window.__updateHud's s.computer_message. -->
+        <div class="vs-computer-message" id="hud-computer-message">
+          <div class="vs-computer-message-source"><span data-i18n="server.computer_message.label">SHIP'S COMPUTER</span><span id="hud-computer-message-severity"></span><span id="hud-computer-message-station"></span></div>
+          <div class="vs-computer-message-text" id="hud-computer-message-text"></div>
+        </div>
         <!-- 4-slot status strip (bottom-centre, inside cap-bottom) -->
         <div class="vs-status-strip">
           <div class="vs-status-slot"><div class="vs-slot-label" data-i18n="server.hud_nav">Nav</div><div class="vs-slot-value" id="v-nav">—</div></div>
@@ -1838,6 +1889,18 @@
        right now" gate (issue #1115 AC2: rotatable in Lobby/GameOver, refused
        in Loading/InProgress). Self-registers window.codesRotatable. -->
   <script type="module" src="gui/phase-toggle.js"></script>
+  <!-- Post-mission report rows (issue #1344). The SAME module client.html
+       loads: the phone calls its gameOverView() for the whole game-over frame,
+       and __updateHud's overlay below calls its reportRows() for the rows. The
+       Viewscreen gets those rows on the HUD payload rather than on a GameOver
+       message, so it needs only the row half — but "which row is renderable"
+       and "which state words style" are the two rules that must not exist
+       twice, and a second copy of them here is exactly what a review of #1344
+       found rendering blank lines a phone dropped. Self-registers
+       window.gameOverReportRows, the same load-order-tolerant pattern as the
+       view models above; __updateHud fires from a WASM push long after this
+       module graph has run. -->
+  <script type="module" src="gui/game-over-view.js"></script>
   <!-- Host lobby view-model (issue #1229): the pure phase-transition, title/
        crew/ready-badge/countdown/station-card/reserved-chip/spectator-pill/
        hint computation behind __updateLobby's station-grid renderer lives in
@@ -2141,6 +2204,14 @@
       return window.phStrings ? window.phStrings.t(id, params) : id;
     }
 
+    // Whether a string id exists in the table — the local mirror of `t()`
+    // above, for call sites (like the computer-message Station badge below)
+    // that need to fall back gracefully instead of showing t()'s ⟨missing⟩
+    // marker for a free-form value that is only SOMETIMES a known id.
+    function has(id) {
+      return !!(window.phStrings && window.phStrings.has(id));
+    }
+
     // Resolve a string id that came from authored DATA rather than from this
     // page's own markup — an `[[available_ships]] label`, a `[[scenario]]
     // label`. Phones get those already resolved, because every peer message
@@ -2244,6 +2315,47 @@
       const desig = document.getElementById('hud-designation');
       if (desig) desig.textContent = s.ship_name;
     }
+    // ── Ship's-computer message banner (issue #1342) ────────────────────────
+    // `s.computer_message.text` has already crossed localiseTree() in the
+    // host-channel dispatcher (issue #949) — it is the resolved display
+    // string here, exactly like `game_over_message` below, because both ride
+    // the same "hud" channel payload. `severity` and `station` are bare wire
+    // words (never string ids themselves) and are resolved with t() here.
+    //
+    // `severity` is a closed Rust enum (`info`/`advisory`/`warning`/
+    // `critical`) with a strings.csv row authored for every variant, so it is
+    // always safe to resolve directly with t(). `station`, by contrast, is a
+    // free-form Rhai-authored cue that `show_message` deliberately does NOT
+    // validate against the ship's roster (src/core/computer_message.rs) — an
+    // unrecognised or mistyped id must degrade to no badge rather than show
+    // t()'s ⟨station.xxx.name⟩ miss marker on the live Viewscreen (issue
+    // #949's stationLabel() in client.html sets the precedent), so that one
+    // goes through has() first.
+    const cmBanner   = document.getElementById('hud-computer-message');
+    const cmText     = document.getElementById('hud-computer-message-text');
+    const cmSeverity = document.getElementById('hud-computer-message-severity');
+    const cmStation  = document.getElementById('hud-computer-message-station');
+    if (cmBanner && cmText) {
+      const cm = s.computer_message;
+      if (cm) {
+        cmText.textContent = cm.text;
+        cmBanner.className = 'vs-computer-message shown sev-' + cm.severity;
+        if (cmSeverity) {
+          cmSeverity.textContent = ' · ' + t('server.computer_message.severity.' + cm.severity);
+        }
+        if (cmStation) {
+          const stationId = 'station.' + cm.station + '.name';
+          cmStation.textContent = cm.station && has(stationId)
+            ? (' · ' + t(stationId))
+            : '';
+        }
+      } else {
+        cmBanner.className = 'vs-computer-message';
+        cmText.textContent = '';
+        if (cmSeverity) cmSeverity.textContent = '';
+        if (cmStation) cmStation.textContent = '';
+      }
+    }
     // ── Game-over overlay ───────────────────────────────────────────────────
     // The message is the scenario's `[[trigger.action]] message`, authored as a
     // string id; it arrives resolved via localiseHostPayload (issue #949).
@@ -2256,6 +2368,44 @@
       } else {
         goOverlay.style.display = 'none';
       }
+    }
+    // ── Post-mission report rows (issue #1344) ─────────────────────────────
+    // The same rows a phone renders, in the same order, arriving already
+    // localised through localiseHostPayload like every other id in this
+    // payload. `state` is a machine label and drives the accent only; there is
+    // no score in the payload to leak, by construction (see
+    // core::messages::GameOverReportRow — the wire shape has no score field).
+    //
+    // Normalised by gui/game-over-view.js's reportRows(), the SAME function
+    // client.html's overlay runs its rows through. That is the point of the
+    // call and not a convenience: the rules it applies — drop a row missing
+    // either of its two texts, and lower-case `state` before styling on it —
+    // are what makes the phone and the Viewscreen agree about what the report
+    // says. This block used to apply neither, so an empty heading rendered here
+    // as a blank dt/dd pair and did not render at all on a phone.
+    //
+    // The typeof guard is defensive only: the module tag above is deferred and
+    // so has run before DOMContentLoaded, while every call to __updateHud comes
+    // from a WASM push that boots later. Showing no rows beats showing
+    // unfiltered ones, which is why the fallback is [] and not the raw array.
+    const goReport = document.getElementById('game-over-report');
+    if (goReport) {
+      const rows = typeof window.gameOverReportRows === 'function'
+        ? window.gameOverReportRows(s.game_over_report)
+        : [];
+      goReport.replaceChildren();
+      const accent = { saved: '#7ad48f', lost: '#e8705a', partial: '#e0c060', neutral: '#8a98c4' };
+      for (const row of rows) {
+        const dt = document.createElement('dt');
+        dt.textContent = row.headingId;
+        dt.style.cssText = 'letter-spacing:0.18em;text-transform:uppercase;white-space:nowrap;color:'
+          + (accent[row.state] || '#8a98c4') + ';';
+        const dd = document.createElement('dd');
+        dd.textContent = row.outcomeId;
+        dd.style.cssText = 'margin:0;line-height:1.6;color:#cde;';
+        goReport.append(dt, dd);
+      }
+      goReport.style.display = rows.length ? 'grid' : 'none';
     }
   };
 

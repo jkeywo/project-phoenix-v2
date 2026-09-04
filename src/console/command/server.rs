@@ -152,9 +152,17 @@ impl Plugin for CommandPlugin {
                 // than writing ShipStationStances itself, so #1108's Human→AI
                 // reconcile (below, after the applier) still has the final word
                 // on a handoff tick. Cadence-gated like every other AI operator.
+                // …and AFTER this tick's `SetRedAlert` orders have landed
+                // (`RedAlertApplied`), because `select_stance` is a function OF
+                // the alert level. Unordered against the applier it is a coin
+                // toss the schedule's topology settles: lose it and the host
+                // reads last tick's alert and the ship stays on the wrong
+                // stance for a whole `ai_snapshot_hz` period — an authoritative
+                // difference that moves the digest (issue #1346).
                 operate_command_ai
                     .in_set(crate::sim_sets::SimSet::Input)
                     .after(reconcile_station_stances)
+                    .after(crate::sim_sets::RedAlertApplied)
                     .before(handle_set_station_stance)
                     .run_if(crate::ai::cadence::ai_snapshot_ready),
                 // A human Command operator's stance pick lands next…
@@ -164,9 +172,16 @@ impl Plugin for CommandPlugin {
                 // …then the alert-level neutral-to-neutral switch runs, so a
                 // stored neutral follows an alert change the same tick the
                 // captain raises it (issue #1107 criterion 5).
+                // …then the alert-level neutral-to-neutral switch runs. Its
+                // `.after(RedAlertApplied)` is what makes "the same tick the
+                // captain raises it" true: it reads `Changed<ShipRedAlert>`, so
+                // running before the applier does not lose the change — it
+                // defers it a tick, which is the same digest-visible difference
+                // by a quieter route.
                 apply_alert_change_to_stances
                     .in_set(crate::sim_sets::SimSet::Input)
-                    .after(handle_set_station_stance),
+                    .after(handle_set_station_stance)
+                    .after(crate::sim_sets::RedAlertApplied),
                 // The persist-behind-human trigger (issue #1108): when the
                 // directed target Station transitions Human→AI, a persistent
                 // stance resumes and a transient one falls back to the current

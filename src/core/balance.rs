@@ -713,6 +713,19 @@ pub enum RunOutcome {
     Defeat,
     Draw,
     Timeout,
+    /// The ending carried a structured post-mission report (issue #1344): the
+    /// scenario wrote at least one [`crate::core::report::ReportRow`] before it
+    /// ended, so what the run came away with is the ROWS and not a single word.
+    ///
+    /// It outranks victory and defeat rather than sitting beside them, because
+    /// the two answer different questions and only one of them can be the
+    /// headline. A Falling Skyway run that pulls Lyra clear and then loses the
+    /// skyway to the Lark is a declared `defeat` AND a report holding a saved
+    /// row; framing it as DEFEAT throws the row away, which is the exact
+    /// failure the report exists to fix. The declared [`Outcome`] is not lost —
+    /// it is still latched on `GameOverReason`, still folded into the digest,
+    /// and still on the wire — it simply stops being the frame.
+    Reported,
 }
 
 impl RunOutcome {
@@ -722,6 +735,7 @@ impl RunOutcome {
             RunOutcome::Defeat => "defeat",
             RunOutcome::Draw => "draw",
             RunOutcome::Timeout => "timeout",
+            RunOutcome::Reported => "reported",
         }
     }
 }
@@ -835,17 +849,32 @@ pub struct OutcomeReport {
     pub outcome: RunOutcome,
     pub player: SideMargins,
     pub enemy: SideMargins,
+    /// The structured post-mission report the scenario authored, or an empty
+    /// one when it authored none (issue #1344). Carried HERE rather than beside
+    /// the margins in the run report because it is what
+    /// [`RunOutcome::Reported`] means: the classification and the rows that
+    /// caused it have to travel together, or a reader can see `reported` with
+    /// nothing to read.
+    pub report: crate::core::report::MissionReport,
 }
 
 impl OutcomeReport {
-    /// Serialise as `"outcome": ..., "sides": {...}` (object body, no outer
-    /// braces) so the report can inline it between its other fields.
+    /// Serialise as `"outcome": ..., "sides": {...}, "report": {...}` (object
+    /// body, no outer braces) so the report can inline it between its other
+    /// fields.
+    ///
+    /// `report` is always written, even when empty — the key set is the shape a
+    /// reader parses against, and a key that comes and goes is a key every
+    /// consumer has to test for twice. An unreported run says
+    /// `{"rows": [], "total": 0}`, which states "this scenario authored no
+    /// report" rather than leaving a gap.
     pub fn to_json(&self) -> String {
         format!(
-            "\"outcome\": {:?},\n  \"sides\": {{\"player\": {}, \"enemy\": {}}}",
+            "\"outcome\": {:?},\n  \"sides\": {{\"player\": {}, \"enemy\": {}}},\n  \"report\": {}",
             self.outcome.as_str(),
             self.player.to_json(),
             self.enemy.to_json(),
+            self.report.to_json(),
         )
     }
 }
@@ -854,26 +883,43 @@ impl OutcomeReport {
 /// folded into the margins — so every outcome is unit-testable (AC3).
 ///
 /// Precedence:
-/// 1. Reached `GamePhase::GameOver` → victory or defeat from `outcome_flag`.
+/// 1. The run ended holding a non-empty [`crate::core::report::MissionReport`]
+///    → [`RunOutcome::Reported`] (issue #1344). Outranks the victory/defeat
+///    branch below for the reason spelled out on the variant: a report-bearing
+///    ending is described by its rows, not by a single word, and that is true
+///    of a catastrophic ending as much as an orderly one. A run still
+///    `InProgress` cannot be report-bearing however many rows it has written —
+///    the mission has not ended, so there is nothing to report on yet.
+/// 2. Reached `GamePhase::GameOver` → victory or defeat from `outcome_flag`.
 ///    A scenario `game_over` with **no** declared outcome defaults to
 ///    **victory**: the scenario ran to a scripted end-state, and the built-in
 ///    player-death path is the separately-latched [`Outcome::Defeat`]. So an
 ///    undeclared scripted end is the ship surviving to the finish, not losing.
-/// 2. Budget exhausted (still `InProgress`) → draw vs timeout from the closing
+/// 3. Budget exhausted (still `InProgress`) → draw vs timeout from the closing
 ///    window: damage still landing means both sides were fighting (timeout); a
 ///    silent window means mutual ineffectiveness (draw). Both carry the same
 ///    margin payload.
+///
+/// `report` is taken by value and moved into the result, so a caller with no
+/// report passes `MissionReport::default()` — the empty report, which is
+/// exactly "this scenario authored none" and keeps every existing scenario's
+/// ending unchanged (AC5).
 pub fn classify(
     final_phase_is_game_over: bool,
     outcome_flag: Option<Outcome>,
     player: SideMargins,
     enemy: SideMargins,
+    report: crate::core::report::MissionReport,
 ) -> OutcomeReport {
     let outcome = if final_phase_is_game_over {
-        match outcome_flag {
-            Some(Outcome::Defeat) => RunOutcome::Defeat,
-            // Declared victory, or an undeclared scripted end (default victory).
-            Some(Outcome::Victory) | None => RunOutcome::Victory,
+        if !report.is_empty() {
+            RunOutcome::Reported
+        } else {
+            match outcome_flag {
+                Some(Outcome::Defeat) => RunOutcome::Defeat,
+                // Declared victory, or an undeclared scripted end (default victory).
+                Some(Outcome::Victory) | None => RunOutcome::Victory,
+            }
         }
     } else {
         let closing = player.closing_damage_rate + enemy.closing_damage_rate;
@@ -887,12 +933,14 @@ pub fn classify(
         outcome,
         player,
         enemy,
+        report,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::report::{MissionReport, ReportRow, ReportRowState};
 
     fn hit(attacker: Option<&str>, victim: &str, shield: f32, hull: f32) -> BalanceEvent {
         BalanceEvent::DamageApplied {
@@ -1517,11 +1565,19 @@ mod tests {
             Some(Outcome::Victory),
             margins(80.0, 100.0, 200.0, 40.0, 0.0),
             margins(0.0, 0.0, 40.0, 200.0, 0.0),
+            MissionReport::default(),
         );
         assert_eq!(report.outcome, RunOutcome::Victory);
         // A scripted end with no declared outcome also reads as victory.
         assert_eq!(
-            classify(true, None, SideMargins::default(), SideMargins::default()).outcome,
+            classify(
+                true,
+                None,
+                SideMargins::default(),
+                SideMargins::default(),
+                MissionReport::default()
+            )
+            .outcome,
             RunOutcome::Victory
         );
     }
@@ -1534,6 +1590,7 @@ mod tests {
             Some(Outcome::Defeat),
             margins(0.0, 100.0, 30.0, 220.0, 0.0),
             margins(60.0, 100.0, 220.0, 30.0, 0.0),
+            MissionReport::default(),
         );
         assert_eq!(report.outcome, RunOutcome::Defeat);
     }
@@ -1547,6 +1604,7 @@ mod tests {
             None,
             margins(55.0, 100.0, 120.0, 90.0, 3.5),
             margins(40.0, 100.0, 90.0, 120.0, 2.0),
+            MissionReport::default(),
         );
         assert_eq!(report.outcome, RunOutcome::Timeout);
         // Margins survive onto the report for AC2.
@@ -1563,6 +1621,7 @@ mod tests {
             None,
             margins(70.0, 100.0, 10.0, 8.0, 0.0),
             margins(65.0, 100.0, 8.0, 10.0, 0.0),
+            MissionReport::default(),
         );
         assert_eq!(report.outcome, RunOutcome::Draw);
         assert_eq!(report.player.damage_dealt, 10.0);
@@ -1578,6 +1637,7 @@ mod tests {
             Some(Outcome::Victory),
             margins(50.0, 100.0, 0.0, 0.0, 5.0),
             margins(50.0, 100.0, 0.0, 0.0, 0.0),
+            MissionReport::default(),
         );
         assert_eq!(live.outcome, RunOutcome::Timeout);
     }
@@ -1627,6 +1687,7 @@ mod tests {
             None,
             margins(55.0, 100.0, 120.0, 90.0, 3.5),
             margins(40.0, 80.0, 90.0, 120.0, 2.0),
+            MissionReport::default(),
         );
         let json = format!("{{{}}}", report.to_json());
         let parsed: serde_json::Value = serde_json::from_str(&json)
@@ -1636,5 +1697,135 @@ mod tests {
         assert_eq!(parsed["sides"]["player"]["closing_damage_rate"], 3.5);
         assert_eq!(parsed["sides"]["enemy"]["remaining_hull_max"], 80.0);
         assert_eq!(parsed["sides"]["enemy"]["damage_dealt"], 90.0);
+        // Always written, even with nothing authored — see `OutcomeReport::to_json`.
+        assert_eq!(parsed["report"]["total"], 0);
+        assert!(parsed["report"]["rows"].as_array().unwrap().is_empty());
+    }
+
+    // ── Report-bearing endings (issue #1344) ───────────────────────────────
+
+    /// A Lyra-shaped row, the tracer this classification was built for.
+    fn lyra_row(state: ReportRowState, score: i32) -> ReportRow {
+        ReportRow {
+            id: "lyra".into(),
+            heading_id: "world.falling_skyway.report.lyra.heading".into(),
+            outcome_id: format!("world.falling_skyway.report.lyra.{}", state.as_str()),
+            state,
+            score,
+        }
+    }
+
+    fn report_with(rows: Vec<ReportRow>) -> MissionReport {
+        let mut report = MissionReport::default();
+        for row in rows {
+            report.set_row(row);
+        }
+        report
+    }
+
+    /// AC1: a report-bearing ending is classified `reported`.
+    #[test]
+    fn classify_reported_when_the_ending_carries_a_report() {
+        let report = classify(
+            true,
+            Some(Outcome::Victory),
+            margins(80.0, 100.0, 200.0, 40.0, 0.0),
+            margins(0.0, 0.0, 40.0, 200.0, 0.0),
+            report_with(vec![lyra_row(ReportRowState::Saved, 6)]),
+        );
+        assert_eq!(report.outcome, RunOutcome::Reported);
+        assert_eq!(report.report.rows().len(), 1);
+        assert_eq!(report.report.total(), 6);
+    }
+
+    /// The catastrophic half of AC2: a declared DEFEAT that still carries a row
+    /// is reported, not framed as a defeat. Losing the skyway does not erase
+    /// what the crew did for Lyra on the way there.
+    #[test]
+    fn classify_reported_outranks_a_declared_defeat() {
+        let report = classify(
+            true,
+            Some(Outcome::Defeat),
+            margins(0.0, 100.0, 30.0, 220.0, 0.0),
+            margins(60.0, 100.0, 220.0, 30.0, 0.0),
+            report_with(vec![lyra_row(ReportRowState::Saved, 6)]),
+        );
+        assert_eq!(report.outcome, RunOutcome::Reported);
+    }
+
+    /// AC5: an EMPTY report is not a report. Every scenario that authors none
+    /// keeps the ending it always had.
+    #[test]
+    fn classify_leaves_an_unreported_ending_exactly_as_it_was() {
+        for (flag, expected) in [
+            (Some(Outcome::Victory), RunOutcome::Victory),
+            (Some(Outcome::Defeat), RunOutcome::Defeat),
+            (None, RunOutcome::Victory),
+        ] {
+            let report = classify(
+                true,
+                flag,
+                SideMargins::default(),
+                SideMargins::default(),
+                MissionReport::default(),
+            );
+            assert_eq!(report.outcome, expected, "flag {flag:?}");
+        }
+    }
+
+    /// A run still `InProgress` has not ended, so rows written so far cannot
+    /// make it report-bearing: the budget branch still decides.
+    #[test]
+    fn classify_ignores_a_report_before_game_over() {
+        let live = classify(
+            false,
+            None,
+            margins(50.0, 100.0, 0.0, 0.0, 5.0),
+            margins(50.0, 100.0, 0.0, 0.0, 0.0),
+            report_with(vec![lyra_row(ReportRowState::Saved, 6)]),
+        );
+        assert_eq!(live.outcome, RunOutcome::Timeout);
+        // The rows still travel — a reader diagnosing an unfinished run wants
+        // to see what had been recorded when the budget ran out.
+        assert_eq!(live.report.rows().len(), 1);
+    }
+
+    /// AC4: the headless JSON carries the signed per-row score and a total
+    /// equal to the visible rows' scores.
+    #[test]
+    fn outcome_report_json_carries_the_rows_scores_and_total() {
+        let report = classify(
+            true,
+            Some(Outcome::Defeat),
+            SideMargins::default(),
+            SideMargins::default(),
+            report_with(vec![lyra_row(ReportRowState::Lost, -6)]),
+        );
+        let json = format!("{{{}}}", report.to_json());
+        let parsed: serde_json::Value = serde_json::from_str(&json)
+            .unwrap_or_else(|e| panic!("outcome report is not valid JSON: {e}\n{json}"));
+        assert_eq!(parsed["outcome"], "reported");
+        assert_eq!(parsed["report"]["rows"][0]["id"], "lyra");
+        assert_eq!(parsed["report"]["rows"][0]["state"], "lost");
+        assert_eq!(parsed["report"]["rows"][0]["score"], -6);
+        assert_eq!(parsed["report"]["total"], -6);
+    }
+
+    /// The wire vocabulary guard: every `RunOutcome` has a stable label, and
+    /// no two share one.
+    #[test]
+    fn every_run_outcome_has_a_distinct_label() {
+        let labels: std::collections::BTreeSet<&str> = [
+            RunOutcome::Victory,
+            RunOutcome::Defeat,
+            RunOutcome::Draw,
+            RunOutcome::Timeout,
+            RunOutcome::Reported,
+        ]
+        .iter()
+        .map(|o| o.as_str())
+        .collect();
+        assert_eq!(labels.len(), 5);
+        assert!(labels.contains("reported"));
     }
 }

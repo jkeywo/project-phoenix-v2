@@ -393,6 +393,12 @@ pub(crate) fn register_trigger_builders(
     // Parsed through the SAME `parse_predicate` the declarative `when =` field
     // uses, and refused the same bounded-history atoms, so the two front-ends
     // build the identical `Predicate`.
+    //
+    // Hands the handle BACK rather than unit, for the reason `repeat` below
+    // does: the two trigger-level modifiers are orthogonal fields of one
+    // `Trigger`, so an author writing them in the other order
+    // (`on_hailed(e, h).when("flag(x)").repeat()`) is saying the same sentence
+    // and must not meet a function-not-found error on a Rhai unit value.
     let s = state.clone();
     host_fn!(
         engine,
@@ -402,10 +408,11 @@ pub(crate) fn register_trigger_builders(
         params = ["predicate"],
         summary = "Gate the registration just authored on a flag predicate: \
                   `on_all_destroyed(g, h).when(\"counter(x) >= 8\")`. A false \
-                  reading suppresses the firing WITHOUT consuming the trigger.",
+                  reading suppresses the firing WITHOUT consuming the trigger. \
+                  Chains with `.repeat()`, in either order.",
         move |handle: &mut TriggerHandle,
               predicate: ImmutableString|
-              -> Result<(), Box<EvalAltResult>> {
+              -> Result<TriggerHandle, Box<EvalAltResult>> {
             let pred = crate::world::flags::parse_predicate(&predicate)
                 .map_err(|e| raise(format!("Trigger 'when' predicate parse error: {e}")))?;
             reject_world_history(&pred, "Trigger 'when' predicate").map_err(raise)?;
@@ -414,12 +421,60 @@ pub(crate) fn register_trigger_builders(
             match st.script_triggers.get_mut(index) {
                 Some(t) => {
                     t.trigger.when = Some(pred);
-                    Ok(())
+                    Ok(*handle)
                 }
                 // Unreachable through the front-end: a handle is only ever minted
                 // by `push_trigger`, and nothing removes from `script_triggers`.
                 None => Err(raise(format!(
                     "when(): trigger handle {index} names no registered trigger"
+                ))),
+            }
+        },
+    );
+
+    // The trigger-LEVEL lifecycle policy, the second sibling field of
+    // `condition` the declarative front-end already spells (`repeat = true`,
+    // issue #751) and the script front-end could not.
+    //
+    // Why a scenario needs it, and why a `when` cannot stand in: `when` keeps a
+    // registration ARMED across a false reading, but a registration that has
+    // actually fired is spent forever. So an author who wants a recurring event
+    // — a hail on a channel a crew may open, clear and open again — was reduced
+    // to registering the same handler once per reachable state and hoping the
+    // partition covered every one of them. It cannot: any state a pick leaves
+    // unchanged is a state whose one registration is already consumed, and the
+    // channel goes dead with the situation it answers still open (#1349).
+    //
+    // No cooldown twin is offered. The conditions worth repeating here are
+    // EVENT-driven (a hail, an attack, a flag transition), so one condition
+    // occurrence is one firing and there is nothing for a minimum spacing to
+    // suppress; `cooldown_secs` stays a declarative-only field until an author
+    // has a level-triggered repeat that needs it.
+    //
+    // Returns the handle so the two modifiers compose in either order —
+    // `on_hailed(e, h).repeat().when("counter(x) < 1")` reads as the sentence it
+    // is.
+    let s = state.clone();
+    host_fn!(
+        engine,
+        "repeat",
+        receiver = "trigger",
+        category = "trigger",
+        params = [],
+        summary = "Make the registration just authored repeatable: \
+                  `on_hailed(e, h).repeat()` fires every time its condition \
+                  occurs instead of once. Chains with `.when(…)`.",
+        move |handle: &mut TriggerHandle| -> Result<TriggerHandle, Box<EvalAltResult>> {
+            let mut st = s.lock().expect("builder state lock");
+            let index = handle.index;
+            match st.script_triggers.get_mut(index) {
+                Some(t) => {
+                    t.trigger.repeat = true;
+                    Ok(*handle)
+                }
+                // Unreachable through the front-end, exactly as in `when` above.
+                None => Err(raise(format!(
+                    "repeat(): trigger handle {index} names no registered trigger"
                 ))),
             }
         },
@@ -743,6 +798,55 @@ mod tests {
                 "predicate `{bad}` must be refused at load"
             );
         }
+    }
+
+    /// `.repeat()` marks exactly the registration it is chained onto, and it
+    /// composes with `.when(…)` in either order — the two are orthogonal
+    /// modifiers of one `Trigger`, not a sequence.
+    #[test]
+    fn repeat_marks_the_registration_it_is_chained_onto_and_composes_with_when() {
+        let regs = script_triggers(
+            r#"
+            on_hailed("x", "a");
+            on_hailed("x", "b").repeat();
+            on_hailed("x", "c").repeat().when("flag(armed)");
+            on_hailed("x", "d").when("flag(armed)").repeat();
+            fn a(ctx) { }
+            fn b(ctx) { }
+            fn c(ctx) { }
+            fn d(ctx) { }
+            "#,
+        );
+        let repeating: Vec<&str> = regs
+            .iter()
+            .filter(|r| r.trigger.repeat)
+            .map(|r| r.handler.as_str())
+            .collect();
+        assert_eq!(repeating, vec!["b", "c", "d"]);
+        let guarded: Vec<&str> = regs
+            .iter()
+            .filter(|r| r.trigger.when.is_some())
+            .map(|r| r.handler.as_str())
+            .collect();
+        assert_eq!(
+            guarded,
+            vec!["c", "d"],
+            "both modifiers hand the handle straight back, so the two compose in \
+             EITHER order and both land on the same registration — the guide, the \
+             spec and this front-end's own summaries all promise that, and `d` is \
+             the order the promise used to break in"
+        );
+        assert_eq!(
+            regs.iter()
+                .find(|r| r.handler == "c")
+                .expect("the third registration")
+                .trigger
+                .cooldown_secs,
+            None,
+            "no cooldown twin is exposed on this front-end: an event-driven condition \
+             fires once per occurrence and has nothing for a minimum spacing to \
+             suppress"
+        );
     }
 
     // ── the front-end also records the handler and defaults the lifecycle ─────

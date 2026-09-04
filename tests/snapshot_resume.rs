@@ -3867,6 +3867,189 @@ fn a_restored_game_over_reruns_its_entry_effects() {
     );
 }
 
+/// Issue #1344: the post-mission report survives a capture/restore, rows and
+/// order and hidden scores intact.
+///
+/// It has to. `MissionReport` is authoritative state a scenario SCRIPT writes
+/// over the course of a mission, and the rows written before a snapshot are
+/// facts about what the crew did — a resume that came back with an empty report
+/// would have silently un-rescued the hauler. The order is content too, so this
+/// pins the sequence and not just the set.
+#[test]
+fn a_restored_run_keeps_its_post_mission_report() {
+    use project_phoenix::core::report::{MissionReport, ReportRow, ReportRowState};
+
+    let row = |id: &str, state: ReportRowState, score: i32| ReportRow {
+        id: id.to_string(),
+        heading_id: format!("world.probe.report.{id}.heading"),
+        outcome_id: format!("world.probe.report.{id}.{}", state.as_str()),
+        state,
+        score,
+    };
+
+    let mut live = duel();
+    step(&mut live, CAPTURE_AT);
+    {
+        let mut report = live.world_mut().resource_mut::<MissionReport>();
+        report.set_row(row("lyra", ReportRowState::Saved, 6));
+        report.set_row(row("traffic", ReportRowState::Partial, -2));
+    }
+
+    let payload = capture(live.world());
+    assert_eq!(
+        payload
+            .mission_report
+            .iter()
+            .map(|r| r.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["lyra", "traffic"],
+        "the capture records the rows in authored order"
+    );
+
+    let mut resumed = boot_to_restore_point(&args(DUEL, ("cruiser", "destroyer")), &payload);
+    assert!(
+        resumed.world().resource::<MissionReport>().is_empty(),
+        "the fresh app has recorded nothing of its own yet"
+    );
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+
+    let restored = resumed.world().resource::<MissionReport>();
+    assert_eq!(restored.rows().len(), 2);
+    assert_eq!(restored.rows()[0].id, "lyra");
+    assert_eq!(restored.rows()[0].state, ReportRowState::Saved);
+    assert_eq!(restored.rows()[0].score, 6);
+    assert_eq!(
+        restored.rows()[0].heading_id,
+        "world.probe.report.lyra.heading"
+    );
+    assert_eq!(restored.rows()[1].id, "traffic");
+    assert_eq!(restored.rows()[1].state, ReportRowState::Partial);
+    // The hidden total is a fold of the restored rows, so it comes back too.
+    assert_eq!(restored.total(), 4);
+}
+
+/// The empty half, which is the one a stale resource would break: restoring a
+/// capture taken BEFORE any row was written must clear a report the resuming
+/// world had recorded on its own, not leave it standing.
+#[test]
+fn a_restore_clears_a_report_the_captured_tick_did_not_have() {
+    use project_phoenix::core::report::{MissionReport, ReportRow, ReportRowState};
+
+    let mut live = duel();
+    step(&mut live, CAPTURE_AT);
+    let payload = capture(live.world());
+    assert!(payload.mission_report.is_empty());
+
+    let mut resumed = boot_to_restore_point(&args(DUEL, ("cruiser", "destroyer")), &payload);
+    resumed
+        .world_mut()
+        .resource_mut::<MissionReport>()
+        .set_row(ReportRow {
+            id: "ghost".into(),
+            heading_id: "world.probe.report.ghost.heading".into(),
+            outcome_id: "world.probe.report.ghost.lost".into(),
+            state: ReportRowState::Lost,
+            score: -3,
+        });
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+    assert!(
+        resumed.world().resource::<MissionReport>().is_empty(),
+        "the restored tick had recorded nothing, so neither should the resumed world"
+    );
+}
+
+/// How many `report_finalized` beats a run's collected timeline holds.
+///
+/// Read off `RunTelemetry` rather than the folded `RunReport`, because the
+/// question here is about a world mid-restore, not about an exit summary.
+fn finalized_beats(app: &bevy::prelude::App) -> usize {
+    app.world()
+        .resource::<project_phoenix::headless::report::RunTelemetry>()
+        .narrative_events
+        .iter()
+        .filter(|stamped| stamped.event.kind.as_str() == "report_finalized")
+        .count()
+}
+
+/// Issue #1344's re-audit of `run_restored_phase_entry_effects`: re-running
+/// `OnEnter(GameOver)` on a restore now emits a THIRD observable effect —
+/// `NarrativeKind::ReportFinalized` — and this pins how many of them a resumed
+/// report-bearing run's timeline ends up holding.
+///
+/// One, the same as the live run's, and that number is the point rather than an
+/// implementation detail. The restored `MissionReport` still holds its rows, so
+/// `core::balance::classify` still calls the resumed run `reported`; a resumed
+/// timeline carrying ZERO finalized beats would be an after-action surface
+/// contradicting the outcome printed beside it in the same report. Two would be
+/// the opposite error — an ending that closed twice. The snapshot deliberately
+/// carries no narrative telemetry (nothing authoritative reads it, so nothing
+/// folds it), which is exactly why this has to be asserted rather than inferred
+/// from the digest.
+#[test]
+fn a_restored_report_bearing_game_over_finalizes_exactly_once() {
+    use project_phoenix::core::report::{MissionReport, ReportRow, ReportRowState};
+
+    let mut live = duel();
+    step(&mut live, CAPTURE_AT);
+    assert_eq!(
+        finalized_beats(&live),
+        0,
+        "a mid-run world has finalized nothing"
+    );
+    live.world_mut()
+        .resource_mut::<MissionReport>()
+        .set_row(ReportRow {
+            id: "lyra".into(),
+            heading_id: "world.probe.report.lyra.heading".into(),
+            outcome_id: "world.probe.report.lyra.saved".into(),
+            state: ReportRowState::Saved,
+            score: 6,
+        });
+    force_game_over(
+        &mut live,
+        "hull breach",
+        project_phoenix::core::balance::Outcome::Defeat,
+    );
+    assert_eq!(
+        finalized_beats(&live),
+        1,
+        "the live report-bearing ending beats finalized once"
+    );
+
+    let payload = capture(live.world());
+    assert_eq!(
+        payload.mission_report.len(),
+        1,
+        "the capture is report-bearing, which is what makes the re-run interesting"
+    );
+
+    let mut resumed = boot_to_restore_point(&args(DUEL, ("cruiser", "destroyer")), &payload);
+    assert_eq!(
+        finalized_beats(&resumed),
+        0,
+        "the fresh app is still mid-run and has finalized nothing of its own"
+    );
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+    // The beat is WRITTEN into the message buffer by the re-run `OnEnter`
+    // schedule; `collect_narrative_events` runs in `Last`, so one frame is what
+    // moves it onto the timeline.
+    step(&mut resumed, 1);
+
+    assert_eq!(
+        finalized_beats(&resumed),
+        1,
+        "restoring a report-bearing GameOver should beat `report_finalized` \
+         exactly once — the ending's effect on the after-action surface, put \
+         back the same way the GameOver wire message is"
+    );
+}
+
 /// The other half of #934's fix: a save button is a no-op outside a run, and
 /// says so, rather than recording a `Lobby`/`Loading` phase a restore would
 /// have nothing meaningful to re-enter.
@@ -6318,6 +6501,202 @@ fn a_world_with_no_survey_suite_writes_no_scan_state() {
     assert!(
         payload.entities.iter().all(|e| e.scan.is_none()),
         "a hull with no [scan] table carries no scan record and writes no scan state"
+    );
+}
+
+// ── Issue #1347: a read rock stays read, and stays where it drifted to ───────
+
+/// The debris probe: one destroyer, one depot, one mass aimed at the depot.
+const DEBRIS: &str = "assets/worlds/probe_debris.toml";
+
+/// Frames to run before the debris capture.
+///
+/// It only has to be far enough in that the game is InProgress, the stations are
+/// backfilled and the mass has visibly MOVED — the rock closes at 4 units a
+/// second and takes about 142 seconds to arrive, so any capture in this range is
+/// taken mid-flight. The preconditions below assert both rather than trusting
+/// the number.
+const DEBRIS_CAPTURE_AT: u64 = 90;
+
+/// Where `probe_debris.toml` authors the mass. A fresh boot puts it here, and a
+/// restore that dropped the position would leave it here — which is exactly what
+/// the control below looks for.
+const DEBRIS_AUTHORED_X: f32 = 600.0;
+
+fn debris_args() -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: DEBRIS.into(),
+        ship_path: "assets/entities/alliance_destroyer.toml".into(),
+        max_ticks: 600,
+        deterministic: true,
+        seed: Some(1347),
+        ..Default::default()
+    }
+}
+
+/// Fly the destroyer alongside the drifting mass and read it through the
+/// ordinary admitted `ScanTarget` path — the same path `take_a_reading` uses on
+/// the depot, pointed at a rock.
+fn read_the_mass(app: &mut bevy::prelude::App) {
+    use project_phoenix::core::messages::{ClientMessage, SystemControlPayload};
+    use project_phoenix::entities::spawner::{EntityName, EntityUuid};
+    use project_phoenix::lobby::InboundMessage;
+    use project_phoenix::server_app::LocalShip;
+    use project_phoenix::ship::state::ShipPhysics;
+
+    let (mass, mass_x) = {
+        let mut q = app
+            .world_mut()
+            .query::<(&EntityName, &EntityUuid, &bevy::prelude::Transform)>();
+        let found = q
+            .iter(app.world())
+            .find(|(n, _, _)| n.0 == "world.probe_debris.entity.mass.name")
+            .map(|(_, uuid, tf)| (uuid.0.clone(), tf.translation.x));
+        found.expect("the probe world spawns the mass")
+    };
+    let ship = {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<bevy::prelude::Entity, bevy::prelude::With<LocalShip>>();
+        let found = q.iter(app.world()).next();
+        found.expect("the probe world spawns a local ship")
+    };
+    // Inside the destroyer's finest authored band, measured off where the rock
+    // actually is rather than off where it was authored — the whole point of the
+    // fixture is that those two have parted company by now.
+    app.world_mut()
+        .get_mut::<ShipPhysics>(ship)
+        .expect("the local ship is a ship")
+        .x = mass_x - 80.0;
+    app.world_mut()
+        .resource_mut::<bevy::ecs::message::Messages<InboundMessage>>()
+        .write(InboundMessage {
+            token: "ai:debris-resume-probe".into(),
+            msg: ClientMessage::ControlSystem {
+                target: project_phoenix::ship::system_registry::sensors_system_id(),
+                payload: SystemControlPayload::ScanTarget { uuid: mass },
+            },
+        });
+    step(app, 3);
+}
+
+/// **Issue #1347.** A save taken over a debris corridor comes back with the
+/// corridor the crew were actually working: the masses where they had drifted
+/// to, and the ones that had been read still read.
+///
+/// Both halves are states nothing else in a save can recover. A rock carries no
+/// `ShipPhysics`, so `EntityState::physics` is `None` for one and `SpawnOrigin`
+/// holds where it was SHED — a restore that dropped this field puts every mass
+/// back at the top of its run with its deadline reset. And `confirmed` is what a
+/// crew ESTABLISHED: a joiner that came back with it clear would have its
+/// Backfilled Tactical drop the lock (the candidate source filters on exactly
+/// that field) and its Sensors seat re-scan a field the host had already worked.
+///
+/// The control below reads the freshly booted world first, so an inert restore
+/// is visible rather than hidden behind a value that happened to match.
+#[test]
+fn the_resumed_world_keeps_a_read_rock_read_and_where_it_drifted_to() {
+    use project_phoenix::debris::DebrisThreat;
+
+    let mut live = boot(&debris_args());
+    step(&mut live, DEBRIS_CAPTURE_AT);
+    read_the_mass(&mut live);
+
+    let payload = capture(live.world());
+    let captured: Vec<_> = payload
+        .entities
+        .iter()
+        .filter_map(|e| e.debris.as_ref().map(|d| (&e.uuid, d)))
+        .collect();
+    assert_eq!(
+        captured.len(),
+        1,
+        "the probe world carries exactly one entity with a [debris] table"
+    );
+    let (uuid, state) = captured[0];
+    assert!(
+        state.assessed && state.confirmed,
+        "precondition: the capture must be taken after a reading came back saying \
+         this mass is on course — an unread rock would round-trip identically even \
+         if restore dropped the whole field: {state:?}"
+    );
+    assert!(
+        state.translation[0] < DEBRIS_AUTHORED_X,
+        "precondition: and after the mass has drifted off its authored position \
+         ({} vs {DEBRIS_AUTHORED_X})",
+        state.translation[0]
+    );
+    assert!(
+        !state.struck,
+        "precondition: it is still in flight, so the save is of a live problem"
+    );
+
+    let mut resumed = boot_to_restore_point(&debris_args(), &payload);
+    let before_restore = resumed
+        .world_mut()
+        .query::<(&DebrisThreat, &bevy::prelude::Transform)>()
+        .iter(resumed.world())
+        .next()
+        .map(|(threat, tf)| (threat.clone(), tf.translation))
+        .expect("the fresh world spawned the mass from its template");
+    assert!(
+        !before_restore.0.assessed && !before_restore.0.confirmed,
+        "control: a freshly booted crew have read nothing, so an inert restore \
+         would be visible here rather than hidden behind a value that matched"
+    );
+    assert_eq!(
+        before_restore.1.x, DEBRIS_AUTHORED_X,
+        "control: …and the fresh mass is at its authored start, which is precisely \
+         what a restore that dropped the position would leave it at"
+    );
+    assert_eq!(
+        before_restore.0.config.impact_radius, 30.0,
+        "…and it carries its authored [debris] table, which the save deliberately \
+         does NOT: that is content, re-derived from the template on spawn"
+    );
+
+    restore(resumed.world_mut(), &payload);
+    let after = capture(resumed.world());
+    let restored = after
+        .entities
+        .iter()
+        .find(|e| &e.uuid == uuid)
+        .and_then(|e| e.debris.as_ref())
+        .unwrap_or_else(|| panic!("mass {uuid} came back without its debris state"));
+    assert_eq!(
+        restored, state,
+        "mass {uuid}: where it had drifted to, the reading the crew took, the tick \
+         they took it on and all four latches must come back exactly as captured"
+    );
+
+    let live_config = resumed
+        .world_mut()
+        .query::<&DebrisThreat>()
+        .iter(resumed.world())
+        .next()
+        .map(|threat| threat.config.clone())
+        .expect("the component is still attached");
+    assert_eq!(
+        live_config, before_restore.0.config,
+        "and the restore left the authored table alone — it restores the mutable \
+         half of the contact, not the content half"
+    );
+}
+
+/// **Issue #1347.** A world with no debris writes nothing debris-shaped into its
+/// save.
+///
+/// Every shipped world but the corridor mission is in this arm, and none of them
+/// should pay a byte for a hazard they never field.
+#[test]
+fn a_world_with_no_debris_writes_no_debris_state() {
+    let mut live = boot(&args(DUEL, ("cruiser", "cruiser")));
+    step(&mut live, 120);
+    let payload = capture(live.world());
+    assert!(
+        payload.entities.iter().all(|e| e.debris.is_none()),
+        "an entity with no [debris] table carries no threat component and writes \
+         no debris state"
     );
 }
 

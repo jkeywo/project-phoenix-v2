@@ -210,6 +210,11 @@ fn lobby_payload(phase: &str, holder: Option<&str>) -> String {
         max_players: 2,
         all_stations_filled: false,
         all_ready: false,
+        // Fields the #1300 GM-platform work added to `LobbyStatePayload`; this
+        // fixture renders the lobby surface, so empty/default values are fine.
+        readiness: Default::default(),
+        presentation_ready: false,
+        gms: vec![],
         stations: vec![
             station("helm", "Helm", "HLM", "Lieutenant", holder),
             station("weapons", "Tactical", "TAC", "Ensign", None),

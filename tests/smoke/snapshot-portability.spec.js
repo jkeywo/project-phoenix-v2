@@ -23,6 +23,7 @@ import {
   readHostPeerId,
   createTestClient,
   waitForWasmReady,
+  openWorldPicker,
 } from './fixtures';
 import { ts } from './strings';
 import fs from 'node:fs';
@@ -87,6 +88,9 @@ async function scenarioStage(context) {
   const page = await context.newPage();
   await page.goto('/');
   await page.bringToFront();
+  // The host's first paint is the landing screen now (issue #1360), so the
+  // World picker is one New Game click away rather than already on screen.
+  await openWorldPicker(page);
   await scenarioButtons(page).first().waitFor({ state: 'visible', timeout: 30_000 });
   return page;
 }

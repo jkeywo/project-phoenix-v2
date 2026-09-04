@@ -407,11 +407,21 @@ describe('no custom property is defined in terms of itself', () => {
  * which gave the first two a rung to name for every value they were holding raw,
  * and their allowlist entries are empty. KNOWN_LITERALS below is what remains,
  * and says why it is the useful shape.
+ *
+ * gui/host-landing.css joins in the slice that CREATED it (issue #1360), with
+ * no allowlist entry, and that timing is the point rather than tidiness. #1357
+ * had just emptied the two entries above; a new host stylesheet allowed to
+ * arrive unlisted would have switched the rule off again on the newest surface
+ * in the fleet, which is the state #1356 filed this list to end. A sheet
+ * written against the vocabulary from its first line costs nothing to enforce,
+ * and enforcing it from its first line is what stops it acquiring the raw
+ * palette its three siblings each had to be walked back out of.
  */
 const SURFACES = [
   ...componentFiles(),
   ...consoleDocuments(),
   path.join(GUI, 'console.css'),
+  path.join(GUI, 'host-landing.css'),
   path.join(GUI, 'host-lobby.css'),
   path.join(GUI, 'host-qr.css'),
   path.join(GUI, 'host-scenarios.css'),

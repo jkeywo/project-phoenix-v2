@@ -69,6 +69,19 @@ const SCENARIOS_CSS = fs.readFileSync(
   'utf-8',
 );
 
+/**
+ * The landing screen's stylesheet (issue #1360) — the newest full-viewport
+ * layer in the fleet, and since that slice the one an operator sits on
+ * longest: it is what a cold `/` paints, ahead of the picker. The z-index
+ * assertion below reads `#landing-panel` from here for the same reason it
+ * reads the other two panels from theirs, and because a house ratchet that
+ * skips the newest sheet is a ratchet with a hole in it.
+ */
+const LANDING_CSS = fs.readFileSync(
+  path.join(path.dirname(fileURLToPath(import.meta.url)), '../../gui/host-landing.css'),
+  'utf-8',
+);
+
 /** The shipped join-code table — the bounds the fleet controls read. */
 const JOIN_DATA = JSON.parse(fs.readFileSync(
   path.join(path.dirname(fileURLToPath(import.meta.url)), '../../assets/join/join-codes.json'),
@@ -1129,10 +1142,13 @@ describe('server.html host-page guards', () => {
   // The cog is `position: fixed` on <body>, so it only reaches the operator
   // if its z-index clears every full-viewport panel that can be on screen
   // when they want it — not just the one panel a manual check happens to
-  // land on. #scenario-panel and .lobby-panel are opaque and cover the
-  // whole viewport before a mission starts; that is also the only window
-  // where the Audio tab's menu music is playing, so a regression here is a
-  // volume control the host cannot reach for the one sound that is audible.
+  // land on. #scenario-panel, #landing-panel and .lobby-panel are opaque and
+  // cover the whole viewport before a mission starts; that is also the only
+  // window where the Audio tab's menu music is playing, so a regression here
+  // is a volume control the host cannot reach for the one sound that is
+  // audible. #landing-panel at 205 is the tightest of the three — five under
+  // the cog, four under the overlay — and it is the surface a cold load
+  // shows, so it is the one a restyle is most likely to bury the cog behind.
   it('the cog outranks every full-viewport panel it must sit above', () => {
     const zIndexIn = (source, label) => (pattern) => {
       const m = source.match(pattern);
@@ -1142,18 +1158,29 @@ describe('server.html host-page guards', () => {
     const zIndexOf = zIndexIn(SRC, 'server.html');
     const zIndexOfLobby = zIndexIn(LOBBY_CSS, 'gui/host-lobby.css');
     const zIndexOfScenarios = zIndexIn(SCENARIOS_CSS, 'gui/host-scenarios.css');
+    const zIndexOfLanding = zIndexIn(LANDING_CSS, 'gui/host-landing.css');
     const btnZ = zIndexOf(/#server-settings-btn\s*\{[^}]*z-index:\s*(\d+)/);
     const overlayZ = zIndexOf(/#server-settings-overlay\s*\{[^}]*z-index:\s*(\d+)/);
     // Lives in gui/host-scenarios.css since #1328; the cog it must sit under is
     // still this page's.
     const scenarioPanelZ = zIndexOfScenarios(/#scenario-panel\s*\{[^}]*z-index:\s*(\d+)/);
     const lobbyPanelZ = zIndexOfLobby(/\.lobby-panel\s*\{[^}]*z-index:\s*(\d+)/);
+    // The `\{` matters: `#landing-panel::before` must not answer for the panel.
+    const landingZ = zIndexOfLanding(/#landing-panel\s*\{[^}]*z-index:\s*(\d+)/);
     const gameOverZ = zIndexOf(/id="game-over-overlay"[^>]*z-index:\s*(\d+)/);
 
     expect(btnZ).toBeGreaterThan(scenarioPanelZ);
     expect(overlayZ).toBeGreaterThan(scenarioPanelZ);
     expect(btnZ).toBeGreaterThan(lobbyPanelZ);
     expect(overlayZ).toBeGreaterThan(lobbyPanelZ);
+    expect(btnZ).toBeGreaterThan(landingZ);
+    expect(overlayZ).toBeGreaterThan(landingZ);
+    // "The landing is the first paint" is a stacking fact, not just a smoke
+    // walk: it is CSS-visible over #scenario-panel before a line of script
+    // runs, which is what stops a cold `/` showing a world list. Guarded here
+    // as well as in tests/smoke/landing.spec.js, because a static check runs
+    // in every PR and the Playwright tier does not.
+    expect(landingZ).toBeGreaterThan(scenarioPanelZ);
     // Already known to hold; guarded so a future restyle can't regress it
     // while "fixing" the panels above.
     expect(btnZ).toBeGreaterThan(gameOverZ);
@@ -1174,6 +1201,13 @@ describe('server.html host-page guards', () => {
   // Playwright assertion in tests/smoke/server-settings-cog.spec.js, which
   // measures the actual rects under Chromium; this one only catches someone
   // editing the padding back out.
+  //
+  // The landing (#1360) is deliberately NOT in here: it declares no keep-out
+  // at all, because the cog's corner falls inside `.landing-rail`, whose
+  // content sits at the far end, and everything else opens below the cog. A
+  // declaration test cannot express "cleared by layout" — that corner is
+  // guarded by the rect assertions in the same smoke spec, and by nothing
+  // here, which is the honest place for it.
   it('both top-left panels reserve a keep-out at least as big as the cog', () => {
     const num = (pattern, label) => {
       const m = SRC.match(pattern);

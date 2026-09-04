@@ -36,11 +36,13 @@
 //! [`build_pane_document`]: crate::native_host::panes::document::build_pane_document
 //!
 //! What the assembled document adds around that fragment is only what a
-//! fragment cannot carry: a `<head>` naming the four stylesheets the web host
+//! fragment cannot carry: a `<head>` naming the five stylesheets the web host
 //! links (`gui/tokens.css`, `gui/host-lobby.css`, `gui/host-qr.css`,
-//! `gui/host-scenarios.css` — the last three exist *because* of this surface), a
-//! ground colour, the vendored QR encoder, the bridge scripts, and the module
-//! island that wires the shared view models to the shared renderers.
+//! `gui/host-scenarios.css`, `gui/host-landing.css` — the last four exist
+//! *because* of this surface, the landing's written that way one slice ahead of
+//! arriving here), a ground colour, the vendored QR encoder, the bridge
+//! scripts, and the module island that wires the shared view models to the
+//! shared renderers.
 //!
 //! It carries no `<title>`, deliberately: an embedded view has no tab bar, so a
 //! title would be player-visible English nothing ever shows — and every string a
@@ -65,6 +67,8 @@
 //! | that panel's `#mod-pack-upload` and `#snapshot-import` removed (issue #1328) | host TOOLING — file inputs with page-lifetime handlers this document does not carry, and which a demo build removes outright. A control that silently does nothing is worse than no control |
 //! | the lobby rail's `#gm-start-controls` buttons removed (issue #1300's Game Master, merged onto #1325) | the same rule: the GM Ready/Force Start buttons are wired by `server.html`'s GM session script, which this surface does not run, so on the viewscreen they would be dead controls. Their `<div class="gm-start-actions">` is stripped; the section's aria-hidden status regions carry no control and stay |
 //! | that panel starts `display: none` (issue #1328) | the page opens ON the picker, because a browser host always chooses at the prompt; a native host may have been given `--world`, and a picker covering the lobby of a host that has nothing to pick would be a viewscreen that never moves. It is shown by the first scenario push, which only a world-less host makes |
+//! | the page's `#landing-panel` carried too, and starting `display: none` (issue #1361) | the front door, by the same rule again: the page's own markup, so `gui/host-landing-render.js` writes into the ids it expects, and hidden until the first landing push — which, like the picker's, only a world-less host makes. A `--world` host was told at the prompt what it is flying and must not be shown a menu asking |
+//! | that panel's `#landing-fullscreen-btn` removed (issue #1361) | a browser host's control forwards to `gui/page-chrome.js`'s one `initFullscreen`, which asks a BROWSER to fill a screen. This window has no browser chrome and no page lifecycle; the window mode is the host process's, and setting it is issue #1367. Until then nothing is behind the control, so it is not here |
 //!
 //! The AI-launch `<button>` is **kept**, and was not always: #1325 stripped it,
 //! because a read-only surface with a control that silently does nothing is
@@ -79,9 +83,13 @@
 //! answers it.** #1329's QR toggle is added because the host owns the flip;
 //! #1330's monitor row is not in this markup at all, because the shared renderer
 //! builds those buttons from a row the host pushes, so they exist only when
-//! there is a layout to move; and the picker's file inputs are removed because
-//! nothing here handles them. A test pins the resulting set — see
-//! `the_ai_launch_button_is_kept_because_the_surface_can_now_answer_it`.
+//! there is a layout to move; the picker's file inputs are removed because
+//! nothing here handles them; and #1361's landing arrives with its fullscreen
+//! control stripped and its Connect-to-Host entry absent — the second not by an
+//! edit here at all, but because that entry's row in
+//! `gui/host-landing-view.js` is marked `platforms: ['web']`, a native host
+//! being always a host with no join leg to offer. A test pins the resulting set
+//! — see `the_ai_launch_button_is_kept_because_the_surface_can_now_answer_it`.
 //!
 //! Everything else the document does to the markup it does by *omission*: it
 //! leaves `--settings-cog-keepout` undefined, which selects the `0px` fallback
@@ -183,6 +191,25 @@ pub fn host_lobby_scenario_script(json: &str) -> String {
     vellum_ultralight::bridge::push_call("window.__phoenixHostLobbyScenario", json)
 }
 
+/// The script that hands the surface the landing screen's state (issue #1361).
+///
+/// One encoded [`LandingPanelPayload`]: which build this binary is, and whether
+/// a World has been committed and taken the front door away. Those are the only
+/// two things `landingViewModel` needs that the page cannot know for itself --
+/// everything else the landing shows comes from the shared entry table, which
+/// is why this payload is two fields rather than a menu.
+///
+/// A push of its own rather than a field folded into the scenario payload
+/// beside it: that payload is precisely `scenarioCatalogView`'s three
+/// arguments, and #1328 carried three and nothing else on purpose. Growing it a
+/// fourth for a different screen's renderer would put two decisions back into
+/// one shape that the next slice would have to split again.
+///
+/// [`LandingPanelPayload`]: super::landing::LandingPanelPayload
+pub fn host_lobby_landing_script(json: &str) -> String {
+    vellum_ultralight::bridge::push_call("window.__phoenixHostLobbyLanding", json)
+}
+
 /// The script that flips the join QR (issue #1329).
 ///
 /// One press, from a phone's `ClientMessage::ToggleQrCode` — the same button on
@@ -244,6 +271,15 @@ pub enum HostLobbyDocumentError {
     NoScenarioPanel,
     /// `#scenario-panel` opens and never closes.
     UnbalancedScenarioPanel,
+    /// The page has no `#landing-panel` element, so there is no front door
+    /// (issue #1361).
+    ///
+    /// Refused for the same reason as its three siblings: a world-less host
+    /// whose viewscreen cannot show the landing opens on nothing, and being
+    /// told so at the prompt beats discovering it in a room full of people.
+    NoLandingPanel,
+    /// `#landing-panel` opens and never closes.
+    UnbalancedLandingPanel,
 }
 
 impl std::fmt::Display for HostLobbyDocumentError {
@@ -280,6 +316,17 @@ impl std::fmt::Display for HostLobbyDocumentError {
             HostLobbyDocumentError::UnbalancedScenarioPanel => write!(
                 f,
                 "the host page's #scenario-panel never closes — its <div> elements do not \
+                 balance before the end of the document"
+            ),
+            HostLobbyDocumentError::NoLandingPanel => write!(
+                f,
+                "the host page has no #landing-panel element, so the viewscreen would open on \
+                 nothing; check that --client-dir points at a bundle built from this \
+                 checkout's server.html"
+            ),
+            HostLobbyDocumentError::UnbalancedLandingPanel => write!(
+                f,
+                "the host page's #landing-panel never closes — its <div> elements do not \
                  balance before the end of the document"
             ),
         }
@@ -337,6 +384,34 @@ const JOIN_PANEL_MARKER: &str = "<div id=\"qr-panel\"";
 
 /// The element the scenario picker hangs off, in the host page (issue #1328).
 const SCENARIO_PANEL_MARKER: &str = "<div id=\"scenario-panel\"";
+
+/// The element the landing screen hangs off, in the host page (issue #1361).
+///
+/// The FOURTH extraction, by the rule the three above it established: the
+/// landing is fifteen element ids in a particular nest and
+/// `gui/host-landing-render.js` writes into them, so a hand-written copy here
+/// would render nowhere the first time somebody added a row to the web landing.
+/// The menu inside it is deliberately EMPTY in the page and in this document
+/// alike -- its entries are data (`gui/host-landing-view.js`'s
+/// `LANDING_ENTRIES`), built by the shared renderer, which is what lets the two
+/// surfaces differ exactly where a row says they differ and nowhere else.
+const LANDING_PANEL_MARKER: &str = "<div id=\"landing-panel\"";
+
+/// The landing's fullscreen control, which this surface cannot answer
+/// (issue #1361).
+///
+/// `server.html` forwards it to `gui/page-chrome.js`'s one `initFullscreen`,
+/// which asks a BROWSER to fill a screen. This document is an embedded view
+/// with no browser chrome: the window mode belongs to the host process, and
+/// setting it from here is issue #1367's work. Until something is behind it,
+/// the control is not here -- the same judgement that removed the picker's file
+/// inputs and the rail's GM buttons.
+///
+/// A `<button>`, so it is stripped with `panes::document::strip_elements_matching`
+/// rather than with [`remove_element`]: that helper counts `<div>` nesting, and
+/// a scan started on a `<button>` would run past it into the landing's stage and
+/// take the whole screen with it.
+const LANDING_TOOLING_BUTTON_MARKER: &str = "id=\"landing-fullscreen-btn\"";
 
 /// The two host-tooling blocks inside `#scenario-panel` that this surface must
 /// not carry (issue #1328).
@@ -405,6 +480,26 @@ pub fn build_host_lobby_document(host_index_html: &str) -> Result<String, HostLo
         1,
     );
 
+    // The landing (issue #1361), minus the fullscreen control, and hidden until
+    // the first landing push -- which, like the picker's, only a world-less host
+    // makes. See the module table for both edits.
+    let landing_panel = extract_element(
+        host_index_html,
+        LANDING_PANEL_MARKER,
+        HostLobbyDocumentError::NoLandingPanel,
+        HostLobbyDocumentError::UnbalancedLandingPanel,
+    )?;
+    let landing_panel = crate::native_host::panes::document::strip_elements_matching(
+        landing_panel,
+        "button",
+        Some(LANDING_TOOLING_BUTTON_MARKER),
+    );
+    let landing_panel = landing_panel.replacen(
+        LANDING_PANEL_MARKER,
+        &format!("{LANDING_PANEL_MARKER} style=\"display:none\""),
+        1,
+    );
+
     let head = format!(
         "\n<script>\n{}\n{}</script>\n",
         queue_shim(HOST_LOBBY_OUT_NAMESPACE),
@@ -419,6 +514,7 @@ pub fn build_host_lobby_document(host_index_html: &str) -> Result<String, HostLo
          <link rel=\"stylesheet\" href=\"gui/host-lobby.css\" />\n\
          <link rel=\"stylesheet\" href=\"gui/host-qr.css\" />\n\
          <link rel=\"stylesheet\" href=\"gui/host-scenarios.css\" />\n\
+         <link rel=\"stylesheet\" href=\"gui/host-landing.css\" />\n\
          <style>\n{GROUND_CSS}</style>{head}\
          <script src=\"{QR_ENCODER_SRC}\"></script>\n\
          </head>\n\
@@ -427,6 +523,7 @@ pub fn build_host_lobby_document(host_index_html: &str) -> Result<String, HostLo
          <div id=\"overlay\">\n{join_panel}\n</div>\n\
          {QR_TOGGLE_MARKUP}\n\
          {scenario_panel}\n\
+         {landing_panel}\n\
          <script type=\"module\">\n{HOST_LOBBY_LINK_JS}\n</script>\n\
          </body>\n\
          </html>\n"
@@ -488,24 +585,46 @@ const QR_TOGGLE_MARKUP: &str = "<div id=\"host-lobby-qr-toggle\" role=\"button\"
 
 /// The page ground this document supplies, because a fragment cannot.
 ///
-/// Three declarations, and all of them are load-bearing:
+/// Four things, and all of them are load-bearing:
 ///
 /// * `html, body` reset — the shared lobby sheet positions `.lobby-panel` at
 ///   `inset: 0`, which needs a viewport-sized ground with no default margin.
 /// * the black background — the host copies this view's pixels into an opaque
 ///   texture, so an unpainted body would composite as white over the viewscreen
 ///   for the frames before the first push arrives.
-/// * the join panel's layer, above the scenario picker (issue #1328). This is
-///   the surface's own answer to a decision `server.html` makes in JavaScript:
-///   `#scenario-panel` is `z-index: 200` and `#overlay` is `190`, so while the
-///   picker is up the join code would be behind it — and the whole point of
-///   showing the QR *during* selection is that the crew join while the operator
-///   is still choosing. The host page lifts the overlay in
-///   `showJoinQrOverPanel()` and drops it back in `resetJoinQrLayer()`, because
-///   that page has a HUD and a canvas underneath whose stacking it has to
-///   return to. This document has neither — the picker is the only thing above
-///   `190` on it — so the lift is unconditional, and there is nothing to
-///   restore.
+/// * the join panel's layer, above **both** full-screen panels this document
+///   carries (issues #1328 and #1361). This is the surface's own answer to a
+///   decision `server.html` makes in JavaScript. The shared sheets declare a
+///   ladder — `#overlay` is `190` (`gui/host-qr.css`), `#scenario-panel` is
+///   `200` (`gui/host-scenarios.css`), `#landing-panel` is `205`
+///   (`gui/host-landing.css`) — so while either of the two is up the join code
+///   is behind it, and the whole point of showing the QR *during* selection is
+///   that the crew join while the operator is still choosing. The host page
+///   reaches the same end by moving the node instead of lifting it:
+///   `showJoinQrOverPanel()` docks the live `#overlay` INTO `#scenario-panel`
+///   as `.pre-scenario`, which the landing's own sheet then lays out inside its
+///   middle column (`#scenario-panel.landing-docked #overlay.pre-scenario`),
+///   and `resetJoinQrLayer()` moves it back out, because that page has a HUD
+///   and a canvas underneath whose stacking it has to return to. This document
+///   does neither, and cannot: it never adds the class and never moves the
+///   node, so an `#overlay` parked inside `#scenario-panel` would go dark with
+///   the picker at world load and never come back for the F9 reveal, and there
+///   is no page lifecycle here to move it back. So the lift stays, it is
+///   unconditional, and since #1361 it clears `205` as well as `200` — the
+///   landing is now the FIRST paint on this surface, so a lift that cleared
+///   only the picker would leave the join code behind the front door for the
+///   whole of selection. `#host-lobby-qr-toggle` rides one rung above the
+///   panel, so the control that hides it is never underneath it.
+/// * the join panel's bottom inset, because that lift buys a collision. A
+///   floating `#overlay` sits at `bottom: 1rem; right: 1rem`, and the landing's
+///   `.landing-statusbar` is `left: 64px; right: 0; bottom: 0` — the same
+///   corner, and the row under it is the build stamp. So the panel is raised by
+///   the bar's height plus the inset it would otherwise have had, at both of
+///   the landing sheet's breakpoints (the bar is 56px, and 44px once the rail
+///   becomes a top bar). Unconditional for the same reason the lift is: nothing
+///   in this document knows whether the landing is up, and holding the join
+///   panel a status bar's height off the floor of the crew lobby costs a
+///   viewscreen nothing.
 ///
 /// What is deliberately NOT here is `--settings-cog-keepout`.
 /// `gui/host-lobby.css` floors `.lobby-panel-wrap`'s left padding at the host
@@ -518,8 +637,11 @@ const QR_TOGGLE_MARKUP: &str = "<div id=\"host-lobby-qr-toggle\" role=\"button\"
 const GROUND_CSS: &str = "\
 html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }\n\
 body { font-family: monospace; }\n\
-#overlay { z-index: 210; }\n\
-#host-lobby-qr-toggle { z-index: 211; }\n";
+#overlay { z-index: 210; bottom: 72px; }\n\
+#host-lobby-qr-toggle { z-index: 211; }\n\
+@media (max-width: 999px), (orientation: portrait) {\n\
+#overlay { bottom: 60px; }\n\
+}\n";
 
 /// One `<div>` element of `html`, opening tag to closing tag.
 ///
@@ -588,8 +710,9 @@ mod tests {
     use super::*;
 
     /// The shape of the real host page, reduced to what the assembly depends
-    /// on: a nested `#lobby-panel` with the AI-launch button inside it, and
-    /// enough surrounding page to prove nothing else is taken.
+    /// on: a nested `#lobby-panel` with the AI-launch button inside it, a
+    /// `#landing-panel` with the fullscreen control this surface cannot answer,
+    /// and enough surrounding page to prove nothing else is taken.
     ///
     /// The *real* page is asserted against too — see
     /// [`a_lobby_document_assembles_from_the_repositorys_own_host_page`], which
@@ -611,6 +734,33 @@ mod tests {
          <button id=\"snapshot-import-btn\" class=\"world-btn\">Import saved game</button>\n\
          </div>\n\
          </div>\n\
+         </div>\n\
+         <div id=\"landing-panel\" class=\"is-idle\" data-landing-stage=\"idle\">\n\
+         <aside class=\"landing-rail\">\n\
+         <span id=\"landing-rail-stamp\" data-i18n=\"server.landing.rail_stamp\">PHX</span>\n\
+         </aside>\n\
+         <button id=\"landing-fullscreen-btn\" class=\"landing-icon-btn\" type=\"button\" \
+         data-i18n-attr=\"title:client.fullscreen_tip\">&#9974;</button>\n\
+         <div class=\"landing-stage\">\n\
+         <div class=\"landing-stage-inner\">\n\
+         <div class=\"landing-track\">\n\
+         <section class=\"landing-col landing-col-menu\">\n\
+         <div class=\"landing-lockup\">\n\
+         <span id=\"landing-logo\" role=\"img\"></span>\n\
+         <h1 id=\"landing-title\" data-i18n=\"server.landing.title\">Project Phoenix</h1>\n\
+         <span id=\"landing-tagline\"></span><span id=\"landing-platform\"></span>\n\
+         </div>\n\
+         <nav id=\"landing-menu\"></nav>\n\
+         </section>\n\
+         <section id=\"landing-mid\" class=\"landing-col landing-col-mid\"></section>\n\
+         </div>\n\
+         </div>\n\
+         </div>\n\
+         <footer class=\"landing-statusbar\">\n\
+         <span id=\"landing-status-platform\"></span>\n\
+         <span id=\"landing-status-session\"></span>\n\
+         <span id=\"landing-status-build\"></span>\n\
+         </footer>\n\
          </div>\n\
          <div id=\"lobby-panel\" class=\"lobby-panel\" style=\"display:none;\">\n\
          <div class=\"lobby-bg\"></div>\n\
@@ -688,7 +838,10 @@ mod tests {
             button_ids(&html),
             vec!["ai-launch-btn", "host-lobby-qr-toggle"],
             "every control on the assembled document has something wired behind \
-             it: the AI launch (issue #1328) and the QR toggle (issue #1329)"
+             it: the AI launch (issue #1328) and the QR toggle (issue #1329). \
+             The landing's own fullscreen control is NOT in that set (issue \
+             #1361) — a native window's mode belongs to the host process, and \
+             setting it is #1367"
         );
     }
 
@@ -735,21 +888,324 @@ mod tests {
     }
 
     #[test]
-    fn the_join_code_stays_above_the_picker_that_would_otherwise_cover_it() {
-        // `#scenario-panel` is z-index 200 and `#overlay` is 190, so without
-        // this the join QR is behind the picker for the whole of selection —
-        // which is precisely the window in which showing it matters, because a
-        // crew join while the operator is still choosing. The host page lifts
-        // the overlay in JavaScript and puts it back; this document has nothing
-        // to put it back for.
+    fn the_landing_is_the_host_pages_own_and_starts_hidden() {
+        // Issue #1361, the FOURTH extraction, by the rule the three before it
+        // set: the page's own markup, so `gui/host-landing-render.js` writes
+        // into the ids it expects and a row added to the web landing is a row
+        // on this one. Hidden to start because only a world-less host pushes a
+        // landing, and a `--world` host must not be shown a menu asking a
+        // question it was answered at the prompt.
         let html = build_host_lobby_document(HOST_PAGE).unwrap();
-        assert!(html.contains("#overlay { z-index: 210; }"));
-        assert!(html.contains("#host-lobby-qr-toggle { z-index: 211; }"));
-        // …and it is written AFTER the linked sheets, so the later rule wins on
-        // equal specificity rather than relying on source order in one file.
+        assert!(html.contains("<div id=\"landing-panel\" style=\"display:none\""));
+        for id in [
+            "landing-menu",
+            "landing-mid",
+            "landing-title",
+            "landing-tagline",
+            "landing-platform",
+            "landing-logo",
+            "landing-status-platform",
+            "landing-status-session",
+            "landing-status-build",
+        ] {
+            assert!(
+                html.contains(&format!("id=\"{id}\"")),
+                "the lobby document must carry #{id}, which the shared landing renderer \
+                 writes into"
+            );
+        }
+        // Its stylesheet comes with it, or the landing would be an unstyled
+        // column of controls over the viewscreen.
+        assert!(html.contains("href=\"gui/host-landing.css\""));
+        // …and the extraction stopped where the panel does.
+        assert!(!html.contains("id=\"canvas\""));
+    }
+
+    #[test]
+    fn the_landing_menu_is_empty_markup_because_its_entries_are_data() {
+        // The claim that makes "one landing" true rather than aspirational:
+        // this document carries the NEST and none of the rows. Which entries
+        // exist — and which platform is offered which — is
+        // `gui/host-landing-view.js`'s table, so the two surfaces differ
+        // exactly where a row says they differ. If the menu's controls were
+        // markup, the native one would have to be edited every time the web one
+        // grew an entry, and Connect to Host could only be kept off this
+        // surface by an edit here.
+        let html = build_host_lobby_document(HOST_PAGE).unwrap();
+        let start = html
+            .find("<nav id=\"landing-menu\"")
+            .expect("the menu is carried");
+        let nav = &html[start..][..html[start..].find("</nav>").expect("the menu closes")];
+        assert!(
+            !nav.contains("<button"),
+            "the menu ships empty and the shared renderer fills it: {nav}"
+        );
+        for id in [
+            "new_game",
+            "load_game",
+            "join_peer",
+            "connect_host",
+            "load_mod_pack",
+        ] {
+            assert!(
+                !html.contains(id),
+                "{id} is a row in gui/host-landing-view.js, never markup in this document"
+            );
+        }
+    }
+
+    #[test]
+    fn the_landings_fullscreen_control_is_removed_because_nothing_here_answers_it() {
+        // The doctrine, applied to the one control the landing markup carries:
+        // a browser host's forwards to `gui/page-chrome.js`'s `initFullscreen`,
+        // which asks a BROWSER to fill a screen. This is an embedded view with
+        // no browser chrome; the window mode is the host process's and setting
+        // it is issue #1367. Removed rather than hidden, for the reason the
+        // picker's file inputs are: a `display: none` control is still in the
+        // DOM to be reached.
+        let html = build_host_lobby_document(HOST_PAGE).unwrap();
+        assert!(!html.contains("id=\"landing-fullscreen-btn\""));
+        assert!(!html.contains("client.fullscreen_tip"));
+        // The removal is surgical: everything around it survives, including the
+        // rail it sits beside and the stage it sits above.
+        assert!(html.contains("id=\"landing-rail-stamp\""));
+        assert!(html.contains("class=\"landing-stage\""));
+        assert!(html.contains("id=\"landing-menu\""));
+        // …and the allowlist is unchanged by the landing's arrival.
+        assert_eq!(
+            button_ids(&html),
+            vec!["ai-launch-btn", "host-lobby-qr-toggle"]
+        );
+    }
+
+    #[test]
+    fn the_entries_this_surface_cannot_answer_are_absent_from_the_shipped_table() {
+        // The other half of the doctrine, and it is deliberately checked
+        // against `gui/host-landing-view.js` rather than against this document:
+        // the menu is DATA, so "Connect to Host is not on native" is a field on
+        // a row and not an edit to the markup. A native host is always a host
+        // and has no join leg at all, so nothing is behind that entry here.
+        //
+        // Exit to Desktop is the mirror image — issue #1365's native-only row —
+        // and is not built in this slice, so it must not be in the table yet
+        // either. Both claims read the same file, because "a control exists
+        // exactly when something behind it answers it" is one rule, not two.
+        let view = std::fs::read_to_string("gui/host-landing-view.js")
+            .expect("the shared landing view model is checked in");
+        let row = view
+            .find("id: 'connect_host'")
+            .expect("the shipped table still has a Connect to Host row");
+        let tail = &view[row..];
+        let end = tail.find("},").expect("the row closes");
+        assert!(
+            tail[..end].contains("platforms: ['web']"),
+            "Connect to Host must be web-only: a native host has no join leg \
+             (issues #1361, #1364)"
+        );
+        assert!(
+            !view.contains("id: 'exit'"),
+            "Exit to Desktop is issue #1365 and is not built here"
+        );
+    }
+
+    #[test]
+    fn a_page_with_no_landing_is_refused_by_its_own_name() {
+        // A world-less host whose viewscreen cannot show the front door opens
+        // on nothing. Being told so at the prompt beats discovering it in a
+        // room full of people.
+        let page = "<body><div id=\"lobby-panel\">x</div><div id=\"qr-panel\">y</div>\
+                    <div id=\"scenario-panel\"><div id=\"world-list\"></div></div></body>";
+        assert_eq!(
+            build_host_lobby_document(page),
+            Err(HostLobbyDocumentError::NoLandingPanel)
+        );
+    }
+
+    #[test]
+    fn a_landing_panel_that_never_closes_is_refused_by_its_own_name_too() {
+        // Its three siblings each have this case for the same reason: an
+        // operator is told WHICH panel of the bundle is malformed, and an error
+        // variant nothing constructs in a test is a name that can quietly stop
+        // being reachable.
+        let page = "<body><div id=\"lobby-panel\">x</div><div id=\"qr-panel\">y</div>\
+                    <div id=\"scenario-panel\"><div id=\"world-list\"></div></div>\
+                    <div id=\"landing-panel\"><div class=\"landing-stage\"></div></body>";
+        assert_eq!(
+            build_host_lobby_document(page),
+            Err(HostLobbyDocumentError::UnbalancedLandingPanel)
+        );
+    }
+
+    #[test]
+    fn a_pushed_landing_state_is_escaped_into_its_own_call() {
+        // Its own entry point, not a field of the scenario payload beside it:
+        // that payload is precisely `scenarioCatalogView`'s three arguments,
+        // and it carries three and nothing else on purpose.
+        assert_eq!(
+            host_lobby_landing_script(r#"{"build":"0.1.0","dismissed":false}"#),
+            r#"window.__phoenixHostLobbyLanding('{"build":"0.1.0","dismissed":false}')"#
+        );
+    }
+
+    #[test]
+    fn the_landings_two_menu_records_are_in_the_one_vocabulary_the_host_drains() {
+        // The page→host half (issue #1361). Not a second record type and not a
+        // second queue: `take_records` is a drain with one reader, so a new
+        // control is a variant. The tags are what `host_lobby_link.js` writes
+        // by hand — it has no serde — so they are pinned here rather than left
+        // to be discovered on a viewscreen.
+        use super::super::HostLobbyRecord;
+        assert_eq!(
+            HostLobbyRecord::decode(r#"{"kind":"landing_open","entry":"new_game"}"#),
+            Some(HostLobbyRecord::LandingOpen {
+                entry: "new_game".into()
+            })
+        );
+        assert_eq!(
+            HostLobbyRecord::decode(r#"{"kind":"landing_close"}"#),
+            Some(HostLobbyRecord::LandingClose)
+        );
+        // The document's own client half is what sends them, and it sends them
+        // through the queue this document installs rather than by touching the
+        // namespace directly.
+        let html = build_host_lobby_document(HOST_PAGE).unwrap();
+        assert!(html.contains("kind: 'landing_open'"));
+        assert!(html.contains("kind: 'landing_close'"));
+        assert!(html.contains("window.phoenixHostLobbyOut.send"));
+    }
+
+    #[test]
+    fn the_landing_renders_from_the_shared_modules_and_decides_nothing_itself() {
+        // The rule `host_lobby_link.js`'s own header states: a render decision
+        // appearing in that file has escaped the shared path. So the document's
+        // client half imports the #1360 pair and calls them, and what it tells
+        // the renderer are facts about this surface rather than judgements
+        // about the landing.
+        let html = build_host_lobby_document(HOST_PAGE).unwrap();
+        assert!(html.contains("gui/host-landing-view.js"));
+        assert!(html.contains("gui/host-landing-render.js"));
+        assert!(html.contains("landingViewModel"));
+        assert!(html.contains("nextOpenEntry"));
+        assert!(html.contains("platform: 'native'"));
+        assert!(html.contains("ownPanelVisibility: true"));
+        // No fullscreen hook, because the control it would drive is stripped
+        // above — a hook wired to a control that is not there is the dead
+        // button in another form.
+        assert!(!html.contains("toggleFullscreen:"));
+    }
+
+    /// Every value `prop` takes in the rules whose selector is exactly
+    /// `selector`, in source order, as the leading integer of the declaration.
+    ///
+    /// Read out of the real stylesheets rather than restated as constants here:
+    /// the point of the two assertions below is that a number moving in
+    /// `gui/host-landing.css` breaks a test in THIS file, and a copy of that
+    /// number kept here would move with it and prove nothing.
+    fn declared(sheet: &str, selector: &str, prop: &str) -> Vec<u32> {
+        let opener = format!("{selector} {{");
+        let mut out = Vec::new();
+        let mut at = 0usize;
+        while let Some(found) = sheet[at..].find(&opener) {
+            let start = at + found;
+            let body = start + opener.len();
+            let end = body + sheet[body..].find('}').expect("unterminated CSS rule");
+            at = end;
+            // The selector must OPEN its line, or `.landing-statusbar {` would
+            // also match `.landing-statusbar .landing-sep {`'s tail.
+            if !sheet[..start]
+                .chars()
+                .rev()
+                .take_while(|c| *c != '\n')
+                .all(|c| c == ' ')
+            {
+                continue;
+            }
+            for decl in sheet[body..end].split(';') {
+                if let Some(value) = decl.trim().strip_prefix(&format!("{prop}:")) {
+                    let digits: String = value
+                        .trim_start()
+                        .chars()
+                        .take_while(|c| c.is_ascii_digit())
+                        .collect();
+                    if let Ok(n) = digits.parse::<u32>() {
+                        out.push(n);
+                    }
+                    break;
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn the_join_code_stays_above_the_landing_and_the_picker_that_would_cover_it() {
+        // The ladder the shared sheets declare — `#overlay` 190, then the two
+        // full-screen panels this document also carries, `#scenario-panel` 200
+        // and `#landing-panel` 205. Without the lift the join QR is behind the
+        // front door, and then behind the picker, for the whole of selection —
+        // which is precisely the window in which showing it matters, because a
+        // crew join while the operator is still choosing. The host page reaches
+        // the same end by MOVING the node (docking `#overlay` into the picker,
+        // which the landing lays out in its middle column) and moving it back;
+        // this surface never docks and has no lifecycle to move it back with,
+        // so it lifts instead — and since #1361 the lift has to clear 205 as
+        // well as 200. All four numbers are asserted so that a change to any of
+        // them, in a stylesheet or here, breaks this test rather than the
+        // viewscreen.
+        let qr = std::fs::read_to_string("gui/host-qr.css").unwrap();
+        let picker = std::fs::read_to_string("gui/host-scenarios.css").unwrap();
+        let landing = std::fs::read_to_string("gui/host-landing.css").unwrap();
+        let base = declared(&qr, "#overlay", "z-index");
+        let over_picker = declared(&picker, "#scenario-panel", "z-index");
+        let over_landing = declared(&landing, "#landing-panel", "z-index");
+        let lift = declared(GROUND_CSS, "#overlay", "z-index");
+        let toggle = declared(GROUND_CSS, "#host-lobby-qr-toggle", "z-index");
+        assert_eq!(base, [190], "gui/host-qr.css's ground layer for the panel");
+        assert_eq!(over_picker, [200], "gui/host-scenarios.css's picker layer");
+        assert_eq!(over_landing, [205], "gui/host-landing.css's landing layer");
+        assert_eq!(lift, [210], "this document's lift");
+        assert_eq!(toggle, [211], "and the control that hides the panel");
+        assert!(
+            base[0] < over_picker[0]
+                && over_picker[0] < over_landing[0]
+                && over_landing[0] < lift[0]
+                && lift[0] < toggle[0],
+            "the join panel belongs above BOTH panels this document carries, \
+             and its toggle above the panel"
+        );
+        // …and the lift is written AFTER the linked sheets, so the later rule
+        // wins on equal specificity rather than relying on source order in one
+        // file.
+        let html = build_host_lobby_document(HOST_PAGE).unwrap();
         let sheet = html.find("href=\"gui/host-qr.css\"").unwrap();
-        let lift = html.find("#overlay { z-index: 210; }").unwrap();
-        assert!(sheet < lift);
+        let ground = html.find("#overlay { z-index: 210;").unwrap();
+        assert!(sheet < ground);
+    }
+
+    #[test]
+    fn the_lifted_join_panel_clears_the_landings_status_bar_at_both_breakpoints() {
+        // What the lift buys: the join panel now floats over the landing, and
+        // the landing owns the corner it floats in. `.landing-statusbar` is
+        // anchored `right: 0; bottom: 0`, and the row under it carries the
+        // build stamp, so a panel left at `bottom: 1rem` paints on top of it.
+        // The ground raises it by the bar's height plus the inset it would
+        // otherwise have had, at both of the landing sheet's heights and inside
+        // the landing sheet's own breakpoint, so the two cannot drift apart.
+        const OWN_INSET_PX: u32 = 16; // #overlay's `bottom: 1rem`, gui/host-qr.css
+        const NARROW: &str = "@media (max-width: 999px), (orientation: portrait)";
+        let landing = std::fs::read_to_string("gui/host-landing.css").unwrap();
+        let bars = declared(&landing, ".landing-statusbar", "height");
+        assert_eq!(bars, [56, 44], "the wide bar then the narrow one");
+        assert_eq!(
+            declared(GROUND_CSS, "#overlay", "bottom"),
+            [bars[0] + OWN_INSET_PX, bars[1] + OWN_INSET_PX],
+            "the join panel would paint over the landing's build stamp"
+        );
+        assert!(
+            landing.contains(NARROW),
+            "the sheet's own narrow breakpoint"
+        );
+        assert!(GROUND_CSS.contains(NARROW), "and the ground matches it");
     }
 
     #[test]
@@ -974,6 +1430,7 @@ mod tests {
         let page = "<div id=\"lobby-panel\"><!-- a </div> in prose --><div>x</div></div>\
                     <div id=\"qr-panel\"></div>\
                     <div id=\"scenario-panel\"><div id=\"world-list\"></div></div>\
+                    <div id=\"landing-panel\"><nav id=\"landing-menu\"></nav></div>\
                     <canvas id=\"trailing\"></canvas>";
         let html = build_host_lobby_document(page).unwrap();
         assert!(html.contains("<div>x</div>"));
@@ -1085,6 +1542,33 @@ mod tests {
                 "the lobby document must carry #{id}, which the shared picker writes into"
             );
         }
+
+        // The landing's own ids, which gui/host-landing-render.js writes into
+        // (issue #1361) — the fourth extraction, by the same rule again. The
+        // menu is `#landing-menu` and nothing inside it: its entries are data,
+        // which is what lets this surface offer a different set from the web
+        // one without a second copy of the markup.
+        for id in [
+            "landing-panel",
+            "landing-menu",
+            "landing-mid",
+            "landing-title",
+            "landing-tagline",
+            "landing-platform",
+            "landing-logo",
+            "landing-status-platform",
+            "landing-status-session",
+            "landing-status-build",
+        ] {
+            assert!(
+                html.contains(&format!("id=\"{id}\"")),
+                "the lobby document must carry #{id}, which the shared landing writes into"
+            );
+        }
+        // …minus the fullscreen control, which the real page really does carry
+        // and which nothing on this surface can answer until issue #1367.
+        assert!(page.contains("id=\"landing-fullscreen-btn\""));
+        assert!(!html.contains("id=\"landing-fullscreen-btn\""));
         // …minus the host tooling, which the real page really does carry.
         assert!(page.contains("id=\"mod-pack-upload\""));
         assert!(!html.contains("id=\"mod-pack-upload\""));
@@ -1145,6 +1629,11 @@ mod tests {
                 HostLobbyDocumentError::NoScenarioPanel,
                 HostLobbyDocumentError::UnbalancedScenarioPanel,
             ),
+            (
+                LANDING_PANEL_MARKER,
+                HostLobbyDocumentError::NoLandingPanel,
+                HostLobbyDocumentError::UnbalancedLandingPanel,
+            ),
         ] {
             let subtree = extract_element(&page, marker, missing, unbalanced).unwrap();
             assert!(
@@ -1202,6 +1691,14 @@ mod tests {
         assert!(
             !page.contains("#scenario-panel {"),
             "the picker's rules belong in gui/host-scenarios.css, not back in server.html"
+        );
+        assert!(
+            page.contains("href=\"gui/host-landing.css\""),
+            "server.html must link the shared landing stylesheet this document also links"
+        );
+        assert!(
+            !page.contains("#landing-panel {"),
+            "the landing's rules belong in gui/host-landing.css, not back in server.html"
         );
     }
 }

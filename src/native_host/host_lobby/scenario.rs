@@ -20,8 +20,9 @@
 //!   is locked out — carried as one snapshot. Nothing is computed here that the
 //!   shared view model computes there.
 //! * [`HostLobbyRecord`] is what the surface says back — **all** of it, not
-//!   only the picker's half: the monitor row's press (issue #1330) and a
-//!   station's two screen-row presses (issue #1331) are variants here too,
+//!   only the picker's half: the monitor row's press (issue #1330), a
+//!   station's two screen-row presses (issue #1331) and the landing menu's two
+//!   (issue #1361) are variants here too,
 //!   because the bridge's record queue is a drain with one reader. A
 //!   closed vocabulary, because the surface is **not a participant**: it holds
 //!   no session token, and a `ClientMessage` arriving on this bridge would be a
@@ -154,6 +155,38 @@ pub enum HostLobbyRecord {
     /// console (issue #1331). Kebab-tagged, for the reason above.
     #[serde(rename = "unassign-station")]
     UnassignStation { station: String },
+    /// The operator opened a route on the landing screen (issue #1361).
+    ///
+    /// `entry` is a row's `id` from `gui/host-landing-view.js`'s
+    /// `LANDING_ENTRIES` — `new_game` today, and whatever #1365-#1367 add
+    /// beside it. Carried as a **string**, not as a Rust enum mirroring that
+    /// table: the table is the one place an entry is declared, and a second
+    /// copy here would make "add an entry" mean editing two files in two
+    /// languages, which is exactly what #1360 made the entries data to avoid.
+    ///
+    /// WHICH entry is open is not the host's answer — `nextOpenEntry` decides
+    /// it over the page's own memory, on both surfaces. What this carries is
+    /// what the operator *did*, so the process can say in its log what its own
+    /// viewscreen is showing, and so an entry that needs the host to answer it
+    /// has somewhere to land. `new_game` needs nothing: it reveals the
+    /// `#scenario-panel` this surface already carries, whose picks reach
+    /// `crate::lobby::scenario_arbiter` and `native_host::world_load` down
+    /// exactly the path they always did.
+    ///
+    /// Snake_case, like the picks and the AI launch it sits with — the kebab
+    /// spellings are the layout row's alone, and are historical (see
+    /// [`SetViewscreen`](Self::SetViewscreen)) rather than a convention to
+    /// extend.
+    LandingOpen { entry: String },
+    /// The operator closed the open route — a second press on the entry that
+    /// opened it (issue #1361).
+    ///
+    /// A verb of its own rather than a `LandingOpen { entry: "" }`, for the
+    /// reason [`UnassignStation`](Self::UnassignStation) is not an
+    /// `AssignStation` with an empty monitor at this layer: "nothing is open"
+    /// is a state the host can state, and a sentinel string would be a state
+    /// it can only be read to mean.
+    LandingClose,
 }
 
 impl HostLobbyRecord {
@@ -213,7 +246,7 @@ mod tests {
     }
 
     #[test]
-    fn the_surfaces_six_records_round_trip() {
+    fn the_surfaces_eight_records_round_trip() {
         for record in [
             HostLobbyRecord::SelectScenario {
                 scenario_id: "combat_test".into(),
@@ -232,6 +265,10 @@ mod tests {
             HostLobbyRecord::UnassignStation {
                 station: "helm".into(),
             },
+            HostLobbyRecord::LandingOpen {
+                entry: "new_game".into(),
+            },
+            HostLobbyRecord::LandingClose,
         ] {
             let json = serde_json::to_string(&record).expect("a record encodes");
             assert_eq!(HostLobbyRecord::decode(&json), Some(record));
@@ -300,6 +337,28 @@ mod tests {
         assert_eq!(
             HostLobbyRecord::decode(r#"{"kind":"unassign_station","station":"helm"}"#),
             None
+        );
+        // The landing's two (issue #1361) are snake_case, like the picks they
+        // sit with rather than like the layout row above them.
+        assert_eq!(
+            HostLobbyRecord::decode(r#"{"kind":"landing_open","entry":"new_game"}"#),
+            Some(HostLobbyRecord::LandingOpen {
+                entry: "new_game".into()
+            })
+        );
+        assert_eq!(
+            HostLobbyRecord::decode(r#"{"kind":"landing_close"}"#),
+            Some(HostLobbyRecord::LandingClose)
+        );
+        // An entry id this build has never heard of still decodes: the entry
+        // TABLE is the client's, a bundle may be newer than the host, and a
+        // record the host cannot act on is a line in its log rather than a
+        // parse failure that reads as a broken bridge.
+        assert_eq!(
+            HostLobbyRecord::decode(r#"{"kind":"landing_open","entry":"exit"}"#),
+            Some(HostLobbyRecord::LandingOpen {
+                entry: "exit".into()
+            })
         );
     }
 

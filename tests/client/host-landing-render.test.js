@@ -376,3 +376,141 @@ describe('a deliberately incomplete document', () => {
     }).not.toThrow();
   });
 });
+
+describe('renderHostLanding — the native viewscreen (issue #1361)', () => {
+  // The claim #1360 made and this slice cashes: `doc` is the first argument, so
+  // a SECOND surface hands it a different document and gets the same landing.
+  // What differs between the two surfaces is stated here in full — a trimmed
+  // document, a curated entry list, and who owns the panel's visibility — and
+  // nothing else, because anything else would be a second landing.
+
+  /**
+   * The native lobby document's landing, as `document.rs` assembles it: the
+   * page's own markup minus the fullscreen control it cannot answer.
+   *
+   * Built by DELETING from server.html's markup rather than by hand, so this
+   * suite cannot drift into testing a landing neither surface shows.
+   */
+  function nativeLandingDoc() {
+    const doc = landingDoc();
+    doc.getElementById('landing-fullscreen-btn').remove();
+    doc.getElementById('landing-panel').style.display = 'none';
+    return doc;
+  }
+
+  /** What `host_lobby_link.js` passes: platform, build, and who owns the panel. */
+  const nativeVm = (extra) => landingViewModel(Object.assign(
+    { platform: 'native', build: '0.1.0' },
+    extra,
+  ));
+
+  it('draws the same landing into a document with the fullscreen control gone', () => {
+    const doc = nativeLandingDoc();
+    expect(() => {
+      renderHostLanding(doc, nativeVm(), t, {}, { ownPanelVisibility: true });
+    }).not.toThrow();
+    expect(text(doc, 'landing-title')).toBe('server.landing.title');
+    expect(text(doc, 'landing-platform')).toBe('server.landing.platform_native');
+    expect(text(doc, 'landing-status-build')).toBe('server.landing.build:{"build":"0.1.0"}');
+  });
+
+  it('does not offer Connect to Host, which a native host has no leg to answer', () => {
+    // The doctrine, and it is enforced by the entry table rather than by
+    // anything here: a control exists exactly when something behind it can
+    // answer it, and a native host is always a host.
+    const doc = nativeLandingDoc();
+    renderHostLanding(doc, nativeVm(), t, {}, { ownPanelVisibility: true });
+    const ids = entries(doc).map((el) => el.getAttribute(LANDING_ENTRY_ATTR));
+    expect(ids).not.toContain('connect_host');
+    expect(ids).toEqual(['new_game', 'load_game', 'join_peer', 'load_mod_pack']);
+    // …and the same document on the web surface still offers it, so this is a
+    // curated menu and not a lost row.
+    const web = landingDoc();
+    renderHostLanding(web, landingViewModel(), t, {});
+    expect(entries(web).map((el) => el.getAttribute(LANDING_ENTRY_ATTR)))
+      .toContain('connect_host');
+  });
+
+  it('does not offer Exit to Desktop either, which is #1365 and not built here', () => {
+    const doc = nativeLandingDoc();
+    renderHostLanding(doc, nativeVm(), t, {}, { ownPanelVisibility: true });
+    expect(entries(doc).map((el) => el.getAttribute(LANDING_ENTRY_ATTR)))
+      .not.toContain('exit');
+  });
+
+  it('shows the panel the first push reveals it with, and hides it when dismissed', () => {
+    // The native document assembles #landing-panel at `display: none` so a host
+    // given --world never flashes a front door it walked through at the prompt.
+    // The first push is what opens it, and the push that says a World has
+    // landed is what takes it away — the crew lobby underneath sits at z-index
+    // 180, so a landing left up would cover the thing the room is watching.
+    const doc = nativeLandingDoc();
+    const panel = doc.getElementById('landing-panel');
+    expect(panel.style.display).toBe('none');
+
+    renderHostLanding(doc, nativeVm(), t, {}, { ownPanelVisibility: true });
+    expect(panel.style.display).toBe('');
+
+    renderHostLanding(doc, nativeVm({ dismissed: true }), t, {}, { ownPanelVisibility: true });
+    expect(panel.style.display).toBe('none');
+  });
+
+  it('leaves the panel alone for a surface that owns its own lifecycle', () => {
+    // server.html passes nothing and keeps hideLanding() — the option is what
+    // stops this renderer becoming a second authority on that page.
+    const doc = landingDoc();
+    renderHostLanding(doc, landingViewModel({ dismissed: true }), t, {});
+    expect(doc.getElementById('landing-panel').style.display).toBe('');
+  });
+
+  it('reveals the picker into the middle column on the native document too', () => {
+    // New Game moves the LIVE #scenario-panel, on this surface as on the page,
+    // so a pick reaches the native world-load path down exactly the wire the
+    // picker already used.
+    const doc = nativeLandingDoc();
+    renderHostLanding(
+      doc,
+      nativeVm({ openEntryId: 'new_game' }),
+      t,
+      {},
+      { ownPanelVisibility: true },
+    );
+    const picker = doc.getElementById('scenario-panel');
+    expect(picker.parentElement).toBe(doc.getElementById('landing-mid'));
+    expect(picker.classList.contains(PICKER_DOCKED_CLASS)).toBe(true);
+    expect(picker.querySelector('#world-list')).not.toBe(null);
+  });
+
+  it('takes the picker back out of a landing it is about to hide', () => {
+    // The bug `undockPicker` exists for, reached the other way: a `display` set
+    // on a node parented inside a hidden ancestor shows nothing at all, so a
+    // dismissed landing must not still be holding the picker.
+    const doc = nativeLandingDoc();
+    const opts = { ownPanelVisibility: true };
+    renderHostLanding(doc, nativeVm({ openEntryId: 'new_game' }), t, {}, opts);
+    renderHostLanding(doc, nativeVm({ openEntryId: 'new_game', dismissed: true }), t, {}, opts);
+    expect(doc.getElementById('scenario-panel').parentElement).toBe(doc.body);
+    expect(doc.getElementById('landing-panel').style.display).toBe('none');
+  });
+
+  it('carries a menu press back through the hook, and nowhere else', () => {
+    const doc = nativeLandingDoc();
+    const [h, calls] = hooks();
+    renderHostLanding(doc, nativeVm(), t, h, { ownPanelVisibility: true });
+    doc.querySelector(`[${LANDING_ENTRY_ATTR}="new_game"]`).click();
+    expect(calls.pick).toEqual(['new_game']);
+    // Inert entries report too: whether a press does anything is the view
+    // model's decision, never a second judgement made in the renderer.
+    doc.querySelector(`[${LANDING_ENTRY_ATTR}="load_game"]`).click();
+    expect(calls.pick).toEqual(['new_game', 'load_game']);
+  });
+
+  it('survives a document with no landing at all, panel ownership and all', () => {
+    // The two-document contract at its extreme: a surface may hand this a
+    // document that carries none of the markup, and every write is guarded.
+    const doc = document.implementation.createHTMLDocument('');
+    expect(() => {
+      renderHostLanding(doc, nativeVm({ dismissed: true }), t, {}, { ownPanelVisibility: true });
+    }).not.toThrow();
+  });
+});

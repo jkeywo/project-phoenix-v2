@@ -17,7 +17,8 @@
 //     session token, and what it sends over the page->host queue is not a
 //     participant's ClientMessage but the host OPERATOR's own presses — a
 //     scenario, a hull, an AI launch (issue #1328), a monitor for the
-//     viewscreen (issue #1330) — every one of them decoded by the single
+//     viewscreen (issue #1330), a route opened or closed on the landing
+//     (issue #1361) — every one of them decoded by the single
 //     vocabulary native_host::host_lobby::HostLobbyRecord. A press asks the
 //     host to arbitrate its own lobby or rearrange its own screens; nothing
 //     here is anything a participant may say. The queue the shim installs
@@ -59,6 +60,14 @@
     // landed and closed the picker for good.
     scenario: null,
     renderScenario: null,
+    // The landing screen's half (issue #1361): which build this host binary is,
+    // and whether a world has taken the front door away. A snapshot like the
+    // three above it. Which ENTRY is open is deliberately not in here — that is
+    // the module island's own memory, exactly as `_landingOpenEntry` is
+    // server.html's, because gui/host-landing-view.js's `nextOpenEntry` is the
+    // one rule and it runs on the page.
+    landing: null,
+    renderLanding: null,
   };
   window.__phoenixHostLobby = lobby;
 
@@ -138,6 +147,26 @@
   window.__phoenixHostLobbyScenario = function (json) {
     lobby.scenario = json;
     lobby.paintScenario();
+  };
+
+  lobby.paintLanding = function () {
+    if (!lobby.renderLanding || lobby.landing === null) return;
+    try {
+      lobby.renderLanding(lobby.landing);
+    } catch (e) {
+      // Same reason lobby.paint() swallows: a throw out of here propagates out
+      // of the host's evaluate_script, is read as a failed push, and is retried
+      // with the same payload forever.
+      console.error('[host-lobby] landing render failed', e);
+    }
+  };
+
+  // Host -> page: one encoded LandingPanelPayload
+  // (native_host::host_lobby::landing) - which build this is, and whether a
+  // world has been committed and dismissed the landing.
+  window.__phoenixHostLobbyLanding = function (json) {
+    lobby.landing = json;
+    lobby.paintLanding();
   };
 
   // Host -> page: somebody pressed the QR toggle on a phone. No argument: the

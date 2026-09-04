@@ -72,11 +72,16 @@ export const LANDING_ENTRIES = [
     platforms: ['web', 'native'],
   },
   {
+    // WEB ONLY, and this is the doctrine rather than a gap (issues #1361,
+    // #1364): a native host is always a host and has no join leg at all, so
+    // there is nothing behind this control on that surface. A control exists
+    // exactly when something behind it can answer it, and the row — not a
+    // build check in the renderer — is where that is said.
     id: 'connect_host',
     labelId: 'server.landing.connect_host',
     descId: 'server.landing.connect_host_desc',
     stage: null,
-    platforms: ['web', 'native'],
+    platforms: ['web'],
   },
   {
     id: 'load_mod_pack',
@@ -138,6 +143,7 @@ export function nextOpenEntry(openEntryId, entryId, entries) {
  *   openEntryId?: string|null,
  *   platform?: 'web'|'native',
  *   build?: string,
+ *   dismissed?: boolean,
  *   entries?: Array<object>,
  * }} [input]
  *   `openEntryId` is the caller's own memory of which entry is open — held by
@@ -149,8 +155,19 @@ export function nextOpenEntry(openEntryId, entryId, entries) {
  *   `params` on a `{id, params}` pair the way `gui/lobby-view.js` carries
  *   data-dependent text.
  *
+ *   `dismissed` is "this surface is past the landing" — a world has been
+ *   committed and the front door has nothing left to offer. It collapses the
+ *   whole model to the `dismissed` stage, which is the exact sibling of
+ *   `scenarioCatalogView`'s `locked`: the one stage that means "not on
+ *   screen", so a surface that owns its own panel visibility
+ *   (`renderHostLanding`'s `ownPanelVisibility` — the native viewscreen,
+ *   issue #1361) reads it from the view model rather than being told twice.
+ *   The host PAGE passes nothing and keeps `hideLanding()`, which is its own
+ *   lifecycle and not this model's.
+ *
  * @returns {{
  *   stage: string,
+ *   dismissed: boolean,
  *   openEntryId: string|null,
  *   depth: number,
  *   rootClass: string,
@@ -162,15 +179,19 @@ export function nextOpenEntry(openEntryId, entryId, entries) {
 export function landingViewModel(input) {
   const opts = input || {};
   const platform = opts.platform === 'native' ? 'native' : 'web';
+  const dismissed = !!opts.dismissed;
   const list = landingEntries(platform, opts.entries);
 
   // An `openEntryId` naming an entry this platform does not offer (or an
   // entry that never had a stage) reads as closed rather than as a stage
   // nothing can render. The caller's memory can outlive a menu change — a
   // native host and a browser host share this module and not their rows.
-  const open = list.find(function (e) {
+  // A dismissed landing has no open stage by construction: the operator is
+  // past it, and a remembered entry re-opening the moment it came back would
+  // be the surface disagreeing with the host about where the session is.
+  const open = dismissed ? null : (list.find(function (e) {
     return e.id === opts.openEntryId && !!e.stage;
-  }) || null;
+  }) || null);
 
   const entries = list.map(function (entry, i) {
     return {
@@ -187,7 +208,11 @@ export function landingViewModel(input) {
   });
 
   return {
-    stage: open ? open.stage : 'idle',
+    // `dismissed` outranks every other stage, and is a stage rather than a
+    // flag beside one so that a renderer switching on `vm.stage` cannot be
+    // shown the landing and told it is gone in the same breath.
+    stage: dismissed ? 'dismissed' : open ? open.stage : 'idle',
+    dismissed: dismissed,
     openEntryId: open ? open.id : null,
     // The track's offset, as a number the stylesheet reads through a custom
     // property. The DOCUMENT says only how deep it is; which columns that

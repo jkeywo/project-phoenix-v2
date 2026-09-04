@@ -79,6 +79,14 @@ describe('Helm semantic actions', () => {
     });
   });
 
+  it('inverts only the thrust axis so stick-forward drives forward, not reverse', () => {
+    // Standard left-stick-y reads UP as -1; forward thrust is +1, so thrust
+    // must be inverted while steering (right = +1 = starboard) must not be.
+    expect(HELM_THRUST_ACTION.tuning.inverted).toBe(true);
+    expect(HELM_STEERING_ACTION.tuning.inverted).toBe(false);
+    expect(HELM_LATERAL_ACTION.tuning.inverted).toBe(false);
+  });
+
   it('keeps keyboard/modifier and gamepad defaults in the two discrete slots', () => {
     expect(HELM_IMPULSE_ACTION.bindings).toEqual([
       expect.objectContaining({ type: 'keyboard', code: 'ControlLeft' }),

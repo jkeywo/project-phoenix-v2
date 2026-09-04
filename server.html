@@ -250,10 +250,19 @@
       max-width: 44rem; padding: 1.5rem; border: 1px solid var(--edge-control);
       display: grid; gap: .9rem;
     }
+    /* CONTROL BOUNDARIES IN THIS BLOCK (issue #1357). WCAG 1.4.11 measures a
+       control's border against the colour ADJACENT to it, which for these
+       filled GM controls is --surface-panel-up, not the page. --edge-control
+       is the ladder's floor rung and clears 3:1 on a page GROUND only — it is
+       2.20:1 on --surface-panel-up — so every control here whose fill is that
+       rung takes --edge-bright (3.46:1 on it) instead. The five borders below
+       that keep --edge-control are the ones drawn on the GM page itself or on
+       --surface-abyss / --surface-void, where it is 3.06 to 3.13. See the Edges
+       block in gui/tokens.css; design-tokens.test.js asserts the whole ladder. */
     #gm-session-actions { display: flex; flex-wrap: wrap; gap: .75rem; }
     #gm-session-actions button {
       min-width: 8rem; padding: .65rem 1rem; color: var(--ink-primary);
-      background: var(--surface-panel-up); border: 1px solid var(--edge-control);
+      background: var(--surface-panel-up); border: 1px solid var(--edge-bright);
       font: inherit; cursor: pointer;
     }
     #gm-session-actions button:disabled { opacity: .45; cursor: default; }
@@ -276,26 +285,26 @@
     .gm-activity-filter { display: grid; gap: .3rem; color: var(--ink-muted); }
     .gm-activity-filter select {
       min-width: 12rem; padding: .45rem .6rem; color: var(--ink-primary);
-      background: var(--surface-panel-up); border: 1px solid var(--edge-control); font: inherit;
+      background: var(--surface-panel-up); border: 1px solid var(--edge-bright); font: inherit;
     }
     #gm-activity-status, #gm-activity-empty { margin: 0; color: var(--ink-muted); }
     #gm-activity-list {
       margin: 0; padding: 0; list-style: none; max-height: 20rem; overflow-y: auto;
       display: grid; gap: .45rem;
     }
-    .gm-activity-entry { padding: .65rem .75rem; border-left: 3px solid var(--edge-control); background: var(--surface-panel-up); }
+    .gm-activity-entry { padding: .65rem .75rem; border-left: 3px solid var(--edge-bright); background: var(--surface-panel-up); }
     .gm-activity-entry[data-category="destruction"] { border-left-color: var(--fire-bright); }
     .gm-activity-metadata, .gm-activity-involved { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
     .gm-activity-tick, .gm-activity-category, .gm-activity-detail, .gm-activity-system { color: var(--ink-muted); }
     .gm-activity-category { text-transform: uppercase; letter-spacing: .08em; }
     .gm-activity-link {
       padding: .2rem .35rem; color: var(--ink-primary); background: transparent;
-      border: 1px solid var(--edge-control); font: inherit; cursor: pointer;
+      border: 1px solid var(--edge-bright); font: inherit; cursor: pointer;
     }
     .gm-activity-link:disabled { border-color: transparent; color: var(--ink-muted); cursor: default; }
     #gm-activity-clear-filters {
       align-self: end; padding: .45rem .75rem; color: var(--ink-primary);
-      background: var(--surface-panel-up); border: 1px solid var(--edge-control); font: inherit;
+      background: var(--surface-panel-up); border: 1px solid var(--edge-bright); font: inherit;
     }
     #gm-entity-map {
       display: block; width: 100%; height: clamp(22rem, 54vh, 46rem);
@@ -310,7 +319,7 @@
     #gm-entity-hull { width: 100%; }
     #gm-entity-target {
       color: var(--ink-primary); background: var(--surface-panel-up);
-      border: 1px solid var(--edge-control); font: inherit; text-align: left; cursor: pointer;
+      border: 1px solid var(--edge-bright); font: inherit; text-align: left; cursor: pointer;
     }
     #gm-entity-target:disabled { border-color: transparent; background: transparent; cursor: default; }
     @media (max-width: 880px) {
@@ -328,7 +337,7 @@
     #gm-station-controls h2 { grid-column: 1 / -1; }
     #gm-station-select, #gm-station-toggle {
       min-height: 2.75rem; padding: .55rem .75rem; color: var(--ink-primary);
-      background: var(--surface-panel-up); border: 1px solid var(--edge-control);
+      background: var(--surface-panel-up); border: 1px solid var(--edge-bright);
       font: inherit;
     }
     #gm-station-toggle { cursor: pointer; }

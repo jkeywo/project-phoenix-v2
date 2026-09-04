@@ -44,11 +44,17 @@ Focus is a **token-system** concern, not a per-component outline. There is a
 documented **pair** in `gui/tokens.css`:
 
 ```css
---focus-ring:          var(--signal);   /* 11.16:1 on --surface-base — standard */
---focus-ring-contrast: #ffffff;         /* 18.79:1 on --surface-base — data-contrast="more" (issue #1171) */
+--focus-ring:          var(--signal);   /* 11.63:1 on --surface-base — standard */
+--focus-ring-contrast: #ffffff;         /* 19.57:1 on --surface-base — data-contrast="more" (issue #1171) */
 --focus-ring-width:    2px;
 --focus-ring-offset:   2px;
 ```
+
+> Those two ratios are quoted against the GRAPHITE `--surface-base` (`#0a0c10`)
+> the ramp moved to in issue #1357; on the navy `#0a1028` they read 11.16 and
+> 18.79. Nothing about the ring changed — the background under it did. This
+> block is a verbatim quotation of `gui/tokens.css`, so it is a second site a
+> retint has to sweep: re-measure here whenever the reference surface moves.
 
 - `--focus-ring` is the standard ring. `--focus-ring-contrast` is the
   high-contrast ring that `data-contrast="more"` (the accessibility profile,

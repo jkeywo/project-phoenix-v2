@@ -26,24 +26,48 @@
  * stylesheet resolves against the STYLESHEET, and this file sits one directory
  * down from the bundle root both surfaces load it from.
  *
- * WHY THERE IS STILL RAW HEX BELOW (issue #1356). The two literals with an
- * EXACT token now name it: --surface-void behind the logo, and
- * rgba(var(--rgb-void), 0.75) for the world column's scrim. #cce, #334, #889,
- * #111, #aae, #223, #558, #224, #66c and #ccf are the pre-graphite picker
- * palette and gui/tokens.css names none of them; picking a near rung for each
- * would retint the first screen the host operator sees, which is PRD #1355's
- * next slice to decide.
+ * NO RAW HEX BELOW ANY MORE (issue #1357, PRD #1355). #1356 could name only
+ * the two literals with an exact token — --surface-void behind the logo and
+ * rgba(var(--rgb-void), 0.75) for the world column's scrim — because #cce,
+ * #334, #889, #111, #aae, #223, #558, #224, #66c and #ccf were the pre-graphite
+ * picker palette and gui/tokens.css held no rung with those values. #1357 moved
+ * the vocabulary to graphite, so each is named here now, BY ROLE:
  *
- * They stay, but they are not unguarded. This sheet IS in
- * design-tokens.test.js's SURFACES list, and each surviving literal is named in
- * that suite's KNOWN_LITERALS allowlist — a new hex here fails, and a literal
- * #1355 retires has to leave the allowlist too, so the list only shrinks.
+ *   #111 button fill        → --surface-card, one rung off the void ground
+ *   #223 / #224 hover, on   → --surface-raised / --surface-high, so pressing
+ *                             through rest → hover → chosen is still three
+ *                             visibly separated steps
+ *   #334 column rule        → --edge-faint on the divider, --edge-strong on
+ *                             the button, which is a CONTROL boundary and so
+ *                             measured against the fill it encloses: 3.90:1 on
+ *                             the --surface-card .world-btn paints itself with.
+ *                             --edge-control is 2.94:1 there — the same 0.06
+ *                             shortfall gui/host-lobby.css records at its two
+ *                             control rows, and the reason the picker takes the
+ *                             rung they took. (--edge-control is 3.13:1 on the
+ *                             --surface-void GROUND behind the button, which is
+ *                             the ratio to quote if this button ever loses its
+ *                             fill, and not before.)
+ *   #558 hover edge         → --edge-bright, 4.41:1 on the --surface-raised
+ *                             hover fill, so rest → hover still steps up now
+ *                             that rest is --edge-strong
+ *   #66c chosen edge        → --cyan, the same accent boundary the crew lobby
+ *                             gives a claimed station, so "this one" reads the
+ *                             same on both host screens
+ *   #cce / #ccf / #aae ink  → --ink for the panel and the chosen button,
+ *                             --ink-dim for a resting button and the column
+ *                             label, keeping resting quieter than chosen
  *
- * #world-list-label's 0.75rem became --text-sm, which is `max(12px, 0.75rem)`
- * and therefore NOT an identity: no root font-size is set on this surface, so
- * the label holds 12px on a browser whose default has been shrunk instead of
- * following it down. That floor is what the ramp exists for, and it is the one
- * deliberate visual change in a slice that otherwise moves nothing.
+ * Its KNOWN_LITERALS entry in design-tokens.test.js is gone with them, and that
+ * suite fails on a stale entry as well as on a new literal — so this sheet is
+ * now held at zero rather than at a list somebody has to remember to shrink.
+ *
+ * #world-list-label's 0.75rem became --text-sm in #1356, which is
+ * `max(12px, 0.75rem)` and therefore NOT an identity: no root font-size is set
+ * on this surface, so the label holds 12px on a browser whose default has been
+ * shrunk instead of following it down. .world-btn's 0.95rem joins it at
+ * --text-lg — `max(15px, 1rem)`, a hair larger — on the same reasoning: this is
+ * the first screen the host operator reads, usually across a room.
  */
 
 /* ── Scenario picker (issue #755) ─────────────────────────────────────── */
@@ -56,7 +80,7 @@
   flex-direction: row;
   align-items: stretch;
   font-family: monospace;
-  color: #cce;
+  color: var(--ink);
 }
 #world-list {
   display: flex;
@@ -78,23 +102,29 @@
   max-width: 18rem;
   overflow-y: auto;
   background: rgba(var(--rgb-void), 0.75);
-  border-right: 1px solid #334;
+  border-right: 1px solid var(--edge-faint);
   box-sizing: border-box;
 }
 #world-list-label {
   font-size: var(--text-sm);
-  color: #889;
+  color: var(--ink-dim);
   letter-spacing: 0.06em;
   margin-bottom: 0.5rem;
   text-transform: uppercase;
 }
 .world-btn {
-  background: #111;
-  color: #aae;
-  border: 1px solid #334;
+  background: var(--surface-card);
+  color: var(--ink-dim);
+  /* --edge-strong, not --edge-control, for the measurement gui/host-lobby.css
+     states at its own control rows: WCAG 1.4.11 measures a control boundary
+     against the ADJACENT colour, and the adjacent colour here is this button's
+     own --surface-card fill, where --edge-control is 2.94:1 and --edge-strong
+     is 3.90:1. The 3.13:1 --edge-control reads on --surface-void is the ground
+     the panel paints behind the button, not the fill this border encloses. */
+  border: 1px solid var(--edge-strong);
   padding: 0.55rem 0.9rem;
   font-family: monospace;
-  font-size: 0.95rem;
+  font-size: var(--text-lg);
   border-radius: 4px;
   cursor: pointer;
   text-align: left;
@@ -104,8 +134,12 @@
   text-overflow: ellipsis;
   transition: background 0.15s, border-color 0.15s;
 }
-.world-btn:hover { background: #223; border-color: #558; }
-.world-btn.active { background: #224; border-color: #66c; color: #ccf; }
+/* --edge-bright on the hover, because rest is --edge-strong now: the pair has
+   to keep stepping UP, and --edge-bright is 4.41:1 on the --surface-raised
+   this state fills with (--edge-strong would be 3.72 there — passing, but no
+   brighter than rest). */
+.world-btn:hover { background: var(--surface-raised); border-color: var(--edge-bright); }
+.world-btn.active { background: var(--surface-high); border-color: var(--cyan); color: var(--ink); }
 
 /* Portrait / narrow hosts (carried over in the GM platform merge, #1300): the
    picker stacks its columns and lets the page scroll them in sequence. The join

@@ -126,7 +126,11 @@ export class PhShipPicker extends PhElement {
       display: flex; flex-direction: column; gap: 6px; min-height: var(--control-hit-min);
     }
     .ship-card:disabled { cursor: default; }
-    .ship-card:hover { background: var(--surface-panel-up); border-color: var(--edge-control); }
+    /* --edge-bright, not --edge-control (issue #1357): the hover fill is
+       --surface-panel-up and WCAG 1.4.11 measures this border against that,
+       where --edge-control is 2.20:1 and --edge-bright is 3.46:1. See the
+       control ladder in the Edges block of gui/tokens.css. */
+    .ship-card:hover { background: var(--surface-panel-up); border-color: var(--edge-bright); }
     .ship-card:active { background: var(--surface-panel-up); border-color: var(--violet); }
     /* The hull itself (PRD #1023 user story 3). One yaw tile out of the
        captured billboard strip; shipArtStyle() computes the size and offset.

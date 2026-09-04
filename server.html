@@ -2717,12 +2717,11 @@
       }
     }
 
-    // ── Status hint ───────────────────────────────────────────────────
-    const hintEl = document.getElementById('lobby-status-hint');
-    if (hintEl) {
-      hintEl.textContent = t(vm.hint.id, vm.hint.params);
-      hintEl.style.color = vm.hint.color;
-    }
+    // The status hint used to be written again here, after the renderer had
+    // already written it — a leftover of the extraction that only stayed
+    // harmless because both wrote the same words. It went with the hint's
+    // inline colour (issue #1358): the tone is a class now, and a second
+    // writer setting a stale `vm.hint.color` would have wiped it.
 
     // ── AI-only launch button ─────────────────────────────────────────
     const aiBtn = document.getElementById('ai-launch-btn');

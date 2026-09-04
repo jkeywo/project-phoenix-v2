@@ -50,9 +50,10 @@
 //! It also carries no Google Fonts `<link>`, which `server.html` does have. A
 //! bridge machine is not assumed to have internet, and a render-blocking
 //! stylesheet on a host that does not would stall the surface's first paint for
-//! however long the DNS lookup takes. The shared sheet's faces are all declared
-//! with a fallback stack (`'Chakra Petch', system-ui, monospace`), so the cost
-//! is the substitute face rather than an unstyled lobby.
+//! however long the DNS lookup takes. The shared sheet names its faces through
+//! the vocabulary's `--font-display` / `--font-mono`, each of which is declared
+//! in `gui/tokens.css` with a full fallback stack, so the cost is the
+//! substitute face rather than an unstyled lobby.
 //!
 //! # What the document adds and takes away
 //!

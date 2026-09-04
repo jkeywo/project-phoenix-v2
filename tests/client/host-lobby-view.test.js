@@ -246,25 +246,42 @@ describe('hostLobbyViewModel — spectator pill list', () => {
   });
 });
 
+// The hint's second field is a TONE — a class name — rather than a colour
+// (issue #1358). This module is pure and cannot see a stylesheet, so the three
+// hexes it used to return were a slice of the palette that did not follow
+// #1357's retint: the lobby was painting pre-graphite navy greys onto a
+// graphite surface. What it decides is whether the line is live; what live
+// looks like is gui/host-lobby.css's business.
 describe('hostLobbyViewModel — status hint', () => {
   it('launching hint wins during countdown', () => {
     const vm = hostLobbyViewModel(payload({ countdown_secs: 3 }), '');
-    expect(vm.hint).toEqual({ id: 'server.hint_launching', params: { secs: 3 }, color: '#5fd8e8' });
+    expect(vm.hint).toEqual({ id: 'server.hint_launching', params: { secs: 3 }, tone: 'live' });
   });
 
   it('waiting-for-players when nobody has joined', () => {
     const vm = hostLobbyViewModel(payload({ crew_count: 0 }), '');
-    expect(vm.hint).toEqual({ id: 'server.waiting_players', params: {}, color: '#667' });
+    expect(vm.hint).toEqual({ id: 'server.waiting_players', params: {}, tone: '' });
   });
 
   it('all-ready hint when the crew is ready', () => {
     const vm = hostLobbyViewModel(payload({ crew_count: 1, all_ready: true }), '');
-    expect(vm.hint).toEqual({ id: 'client.status_all_ready', params: {}, color: '#5fd8e8' });
+    expect(vm.hint).toEqual({ id: 'client.status_all_ready', params: {}, tone: 'live' });
   });
 
   it('waiting-for-ready otherwise', () => {
     const vm = hostLobbyViewModel(payload({ crew_count: 1, all_ready: false }), '');
-    expect(vm.hint).toEqual({ id: 'server.waiting_ready', params: {}, color: '#889' });
+    expect(vm.hint).toEqual({ id: 'server.waiting_ready', params: {}, tone: '' });
+  });
+
+  it('names no colour at all, so a retint reaches the lobby without touching this file', () => {
+    for (const p of [
+      payload({ countdown_secs: 3 }),
+      payload({ crew_count: 0 }),
+      payload({ crew_count: 1, all_ready: true }),
+      payload({ crew_count: 1, all_ready: false }),
+    ]) {
+      expect(hostLobbyViewModel(p, '').hint.color).toBeUndefined();
+    }
   });
 });
 

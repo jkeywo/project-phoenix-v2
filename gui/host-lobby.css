@@ -1,19 +1,18 @@
 /*
  * gui/host-lobby.css - the host lobby panel's stylesheet (issue #1325).
  *
- * Lifted verbatim out of server.html's inline <style> (issue #436's block,
- * plus its reduced-motion rule from the block below it) so that the ONE
- * lobby surface has ONE stylesheet: server.html links it, and so does the
+ * ONE surface, ONE stylesheet: server.html links it, and so does the
  * host-lobby document the native host assembles in memory
  * (src/native_host/host_lobby/document.rs). A second copy for the native
- * surface is exactly the drift issue #1325 asked to avoid on the render
- * path, and CSS is the other half of a render path.
+ * surface is exactly the drift issue #1325 asked to avoid on the render path,
+ * and CSS is the other half of a render path. Restyles go THROUGH this pair —
+ * this sheet and gui/host-lobby-render.js — never into a native variant.
  *
  * Linked from server.html BEFORE its inline <style>. Nothing earlier in that
- * block targets a lobby element, and the only later rule that does -
- * `#lobby-ready-badge.go` under `prefers-reduced-motion` - moved here with
- * it, keeping its position after the base rule it overrides. So the cascade
- * these rules were written against is unchanged.
+ * block targets a lobby element, and the only later rule that did -
+ * `#lobby-ready-badge.go` under `prefers-reduced-motion` - moved here with it,
+ * keeping its position after the base rule it overrides. So the cascade these
+ * rules were written against is unchanged.
  *
  * `--settings-cog-keepout` is server.html's own: the settings cog is a host
  * PAGE control and the keep-out it reserves is that page's geometry. It is
@@ -21,54 +20,107 @@
  * legitimately be absent - it is, on the native lobby surface, which has no
  * cog to clear.
  *
- * NO RAW HEX BELOW ANY MORE (issue #1357, PRD #1355). #1356 swapped every
- * literal that had an EXACT token and stopped there, because the thirty-two it
- * could not name were the pre-graphite lobby palette and gui/tokens.css held no
- * rung with those values. #1357 moved the vocabulary itself to graphite, so
- * this sheet's remaining literals are named here — chosen BY ROLE, not by
- * nearest hex, which is the only way the mapping survives the next retint:
+ * ── The design (issue #1358, PRD #1355) ────────────────────────────────────
  *
- *   panel fill      #0e0e14 card, #191e28 avatar, #181e2a chip, #131722 button
- *                   → --surface-card / --surface-raised, one rung apart so a
- *                     control still lifts off the card it sits on
- *   divider         #334 rails and rules, #2a2d3a and #2a3a48 card borders
- *                   → --edge-faint (page rules) / --edge (card and chip
- *                     borders). Content, so WCAG 1.4.11 does not reach them.
- *   control edge    the screen-row and monitor-row buttons → --edge-strong,
- *                   hover --edge-bright. NOT --edge-control, which is quoted at
- *                   3.02:1 against --surface-base and measures 2.94:1 on the
- *                   --surface-card these buttons actually sit on — 0.06 short
- *                   of 1.4.11's floor, because graphite makes the card a LIFT
- *                   off the page rather than the navy ramp's hue shift at the
- *                   same lightness. --edge-strong is 3.90:1 there.
- *   holder name     #cce → --ink; #8a8aa0 → --ink-dim; #778/#667/#556 → the
- *                   quiet rung --ink-faint, which on graphite measures 4.90:1
- *                   on a card and so no longer needs the ad-hoc lift the two
- *                   comments below used to record.
- *   ready accent    #2a8a96 boundary → --cyan; the near-black teal fills
- *                   (#0a2830, #101a1d, #0a1a20, #0d2830) → --cyan-deep resting
- *                   and --cyan-dim lit, keeping every resting/hover pair a
- *                   pair; --signal stays the foreground accent it already was.
- *   status hues     the low-complexity pill → the --loaded family, the idle
- *                   READY badge and the monitor notice → the --reloading
- *                   family. Semantic, so they take the semantic rung.
+ * Restyled to the canvas's "Host lobby — web" and "Host lobby — native"
+ * artboards, which are ONE artboard drawn twice: the same document, the same
+ * rules, and a `surface` prop deciding which rows appear. That is the shape
+ * this pair already had, so the translation is a retint and a re-proportion
+ * rather than a rebuild — every selector the renderer writes, the smoke specs
+ * measure and src/native_host/host_lobby/document.rs slices survives it.
  *
- * Its KNOWN_LITERALS entry in design-tokens.test.js is gone with them. That
- * suite fails on a STALE allowlist entry as well as on a new literal, so the
- * emptying is enforced rather than remembered: plant a hex here and the next
- * run says so.
+ * The canvas is drawn in raw hex and literal type sizes; issue #1357's mapping
+ * table is what each value becomes, and every rung below was chosen from it BY
+ * ROLE rather than by nearest hex. gui/host-landing.css (issue #1360) made the
+ * same crossing for the landing screen and its header records the same table;
+ * the two agree deliberately, because a host operator walks from one surface
+ * straight onto the other.
  *
- * THE TYPE RUNGS ARE NOT AN IDENTITY. #1356 moved the 0.75rem labels to
- * --text-sm, which is `max(12px, 0.75rem)` — equal to what it replaced only at
- * a 16px root. Nothing sets a root font-size on this surface (neither
- * server.html nor src/native_host/host_lobby/document.rs does; gui/console.css
- * sizes the console iframes, not this), so the root is the browser's
- * user-configurable default, and a reader who has shrunk theirs to 14px now
- * gets 12px labels here rather than 10.5px. #1357 finishes the sweep on the
- * same terms. The two VIEWPORT-scaled sizes keep their clamp and name rungs as
- * its ends — `clamp(var(--text-xl), 2.5vw, var(--text-2xl))` — because this
- * surface is a television across a room, and collapsing the title to a fixed
- * rung would be the one place the ramp made things worse.
+ *   #050608 ground              -> --surface-void
+ *   #0b0e14 / #0d1016 card fill -> --surface-card
+ *   #131722 control fill        -> --surface-raised (a control on a card is one
+ *                                  rung up from the card)
+ *   #14171c avatar fill         -> --surface-panel
+ *   #1b1f26 / #171b22 rules     -> --edge-faint (content dividers, exempt from
+ *                                  WCAG 1.4.11 — a column is legible without
+ *                                  its border)
+ *   #22262d / #2a2d3a / #2a3a48 card and chip borders -> --edge (content again)
+ *   #2a2d3a / #262b33 CONTROL border -> --edge-strong, NOT --edge-control:
+ *                                  1.4.11 measures a control boundary against
+ *                                  the ADJACENT colour, which is the button's
+ *                                  own fill. --edge-control is quoted at 3.02:1
+ *                                  against --surface-base and measures 2.94:1
+ *                                  on --surface-card and 2.83:1 on
+ *                                  --surface-raised; --edge-strong is 3.90:1
+ *                                  and 3.58:1 there. The ladder is the point:
+ *                                  pick the rung by the surface the control is
+ *                                  painted on, and --edge-control clears the
+ *                                  floor on the page grounds only.
+ *   #4a5570 hover edge          -> --edge-bright, so rest -> hover still steps up
+ *   #2a8a96 accent boundary     -> --cyan       (the accent BOUNDARY)
+ *   #5fd8e8 accent foreground   -> --signal     (the accent FOREGROUND)
+ *   #0c1a1e resting lit fill    -> --cyan-deep
+ *   #0a2830 lit fill            -> --cyan-dim
+ *   #5a3c10 / #17130a reserved  -> --reloading-dim / --reloading-deep. Amber is
+ *                                  semantic here — a seat held for a holder who
+ *                                  dropped — so it takes the semantic family.
+ *   #6a727b, #5c646d, #4a525b as TEXT -> --ink-faint. The table is explicit
+ *                                  that #6a727b is a STROKE rung
+ *                                  (--edge-strong) and fails the 4.5 text
+ *                                  floor; the canvas uses these greys for 11px
+ *                                  labels, which is exactly what --ink-faint
+ *                                  exists for.
+ *   #d8e2ff display white       -> --ink. The ink ladder tops out at --ink
+ *                                  (#b8c0c8); the canvas's cooler white has no
+ *                                  rung and inventing one is #1357's business,
+ *                                  not this slice's.
+ *
+ * NO RAW HEX, NO LITERAL TYPE SIZES. This sheet's KNOWN_LITERALS entry in
+ * tests/client/design-tokens.test.js is `[]`, and that suite fails on a STALE
+ * allowlist entry as well as on a new literal — so the emptying is enforced
+ * rather than remembered: plant a hex here and the next run says so.
+ *
+ * THE TYPE RUNGS ARE NOT AN IDENTITY. The canvas's 11px goes to --text-xs,
+ * 12.5/13.5px to --text-md and 15px to --text-lg. The ramp's rungs are `max()`
+ * against an absolute floor, so they equal the canvas's literals only at a 16px
+ * root — and nothing sets a root font-size on this surface, so the root is the
+ * reader's own. A reader who has shrunk theirs gets the floor rather than 8px
+ * labels, which is the direction to be wrong in on a television. The
+ * VIEWPORT-scaled sizes keep their clamp with rungs at its ends
+ * (`clamp(var(--text-xl), 2.5vw, var(--text-2xl))`), which is the form #1357's
+ * table asks for: this surface is a room away from its reader, and collapsing
+ * the title to one fixed rung would be the one place the ramp made things
+ * worse.
+ *
+ * ── The three Station states ───────────────────────────────────────────────
+ *
+ * The canvas draws claimed, free and reserved. Two of them are classes and the
+ * third is a NEGATION, deliberately:
+ *
+ *   claimed   `.station-card.claimed`   — the renderer's own class, set from
+ *                                         the payload's `holder_name`.
+ *   free      `.station-card:not(.claimed):not(.empty)` — no class to write,
+ *                                         because "free" is exactly "not
+ *                                         claimed" and a second class carrying
+ *                                         the same fact is a second thing to
+ *                                         keep in step.
+ *   reserved  `.station-card.empty`     — a seat held for a holder who dropped.
+ *                                         Also the per-slot placeholder the
+ *                                         compact layout folds into
+ *                                         `#reserved-aggregate`, which is why
+ *                                         `.per-slot` and the aggregate chip
+ *                                         wear the same amber: they are the
+ *                                         same fact at two densities.
+ *
+ * ── The control target floor ───────────────────────────────────────────────
+ *
+ * Every rule here that declares `cursor: pointer` carries
+ * `min-height: var(--control-hit-min)`. This surface is a television driven by
+ * a mouse rather than a phone, so it sits outside control-floors.test.js's
+ * TOUCH sweep — but the native host points a real pointer at these rows from
+ * across a room, and a chip drawn at its label's height is a miss either way.
+ * The floor makes the screen chips taller than the canvas draws them; that is
+ * the trade, taken knowingly.
  */
 
 /* ── Lobby panel (issue #436) ────────────────────────────────────────── */
@@ -76,13 +128,38 @@
   position: fixed;
   inset: 0;
   z-index: 180;
-  font-family: monospace;
+  font-family: var(--font-display);
   color: var(--ink);
+  -webkit-font-smoothing: antialiased;
 }
+/* The ground: the void, lifted by the same faint signal bloom the landing
+   screen opens on, so walking from one host surface to the other is one room
+   rather than two. */
 .lobby-bg {
   position: absolute;
   inset: 0;
-  background: var(--surface-void);
+  background:
+    radial-gradient(ellipse 70% 60% at 50% 46%,
+      rgba(var(--rgb-signal), 0.055) 0%, rgba(var(--rgb-signal), 0) 70%),
+    var(--surface-void);
+}
+/* Vignette and scanlines: chrome, never a hit target, and never over the
+   content — both sit on the background layer, below `.lobby-panel-wrap`'s
+   z-index 1. */
+.lobby-bg::before,
+.lobby-bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.lobby-bg::before {
+  box-shadow: inset 0 0 180px 40px rgba(var(--rgb-void), 0.9);
+}
+.lobby-bg::after {
+  background-image: repeating-linear-gradient(to bottom,
+    rgba(var(--rgb-signal), 0.022) 0px, rgba(var(--rgb-signal), 0.022) 1px,
+    transparent 1px, transparent 3px);
 }
 .lobby-panel-wrap {
   position: relative;
@@ -111,50 +188,140 @@
   min-width: 0;
   min-height: 0;
 }
+
+/* ── Station cards ───────────────────────────────────────────────────── */
+/* The chamfer is `clip-path` rather than `border-radius`: the fleet's panels
+   are cut corners, not rounded ones, and the canvas draws every card, chip and
+   button that way. */
 .station-card {
-  display: flex; flex-direction: column; gap: 6px;
-  padding: 10px 12px; border-radius: 6px;
-  background: var(--surface-card); border: 1px solid var(--edge);
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 14px;
+  background: var(--surface-card);
+  border: 1px solid var(--edge);
   transition: border-color .2s, box-shadow .2s;
-  font-family: 'Chakra Petch', system-ui, monospace;
+  font-family: var(--font-display);
+  clip-path: polygon(9px 0, 100% 0, 100% calc(100% - 9px), calc(100% - 9px) 100%, 0 100%, 0 9px);
+}
+/* Free: nobody holds it. Dashed and dropped to the page ground, so a filling
+   grid reads as "these four are taken" from the far side of the room without
+   anybody having to read a name. */
+.station-card:not(.claimed):not(.empty) {
+  background: var(--surface-base);
+  border-style: dashed;
+  border-color: var(--edge-faint);
 }
 .station-card.claimed {
-  border-color: var(--cyan); box-shadow: 0 0 8px rgba(var(--rgb-cyan), 0.25);
+  background: var(--cyan-deep);
+  border-color: var(--cyan);
+  /* INSET, and the chamfer above is why. `clip-path` clips everything the
+     element paints — an OUTSET box-shadow with it — so the outward bloom this
+     card carried before the corners were cut stopped painting the moment they
+     were. Same interaction gui/components/ph-console-styles.js records for
+     outset focus rings, and the same answer: draw it inward, on the card's own
+     fill, where the clip cannot reach it. */
+  box-shadow: inset 0 0 12px rgba(var(--rgb-cyan), 0.35);
 }
+/* Reserved: a seat whose holder dropped, held rather than given away. Amber,
+   because that is what amber means everywhere else in the fleet — and the same
+   amber `#reserved-aggregate` carries when the compact layout folds these into
+   one chip. */
 .station-card.empty {
-  opacity: 0.5; border-style: dashed;
-  background: repeating-linear-gradient(45deg,transparent,transparent 6px,rgba(var(--rgb-white), 0.02) 6px,rgba(var(--rgb-white), 0.02) 12px);
+  background: var(--reloading-deep);
+  border-color: var(--reloading-dim);
+  border-style: dashed;
 }
 .station-card .card-header {
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center; gap: 10px;
+}
+.station-card .card-id {
+  display: flex; flex-direction: column; gap: 4px;
+  min-width: 0; flex: 1;
 }
 .station-card .card-avatar {
-  width: 32px; height: 32px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  font-size: var(--text-sm); font-weight: bold; background: var(--surface-raised);
-  color: var(--signal); border: 1px solid var(--edge);
+  width: 38px; height: 38px; flex: 0 0 38px;
+  display: grid; place-items: center;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs); font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+  background: var(--surface-panel);
+  color: var(--signal);
+  border: 1px solid var(--edge);
+  clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px);
+}
+/* The short code standing in for a holder's initials. A class rather than the
+   inline colour the renderer used to write, so the one thing that tells an
+   unclaimed seat from a claimed one across a room follows the palette instead
+   of a hex frozen into JavaScript. */
+.station-card .card-avatar.placeholder {
+  color: var(--ink-faint);
+  border-color: var(--edge-faint);
 }
 .station-card .card-name {
   font-size: var(--text-md); font-weight: 600; color: var(--ink);
+  text-transform: uppercase; letter-spacing: var(--tracking);
 }
 .station-card .card-rank {
-  font-size: var(--text-xs); color: var(--ink-faint); text-transform: uppercase; letter-spacing: .06em;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs); color: var(--ink-faint);
+  text-transform: uppercase; letter-spacing: var(--tracking);
 }
-.station-card .card-consoles {
-  display: flex; flex-wrap: wrap; gap: 4px;
+/* Who is in the seat, in words. The avatar carries two letters of it, which is
+   an identifier rather than a name — and a room deciding whether to wait for
+   somebody needs the name. */
+.station-card .card-holder {
+  font-size: var(--text-md); font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+  color: var(--signal);
 }
-.station-card .console-chip {
-  padding: 2px 8px; border-radius: 3px;
-  font-size: var(--text-xs); background: var(--surface-raised); color: var(--cyan);
+.station-card .card-holder.none {
+  color: var(--ink-faint);
+  font-style: italic;
+}
+.station-card .card-consoles,
+.station-card .card-foot {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+}
+/* The console chip and the complexity pill are the same chip at two meanings,
+   so they are one rule with one variant. Quiet by default: what a Station is
+   FOR is its name, and these are the footnotes under it. */
+.station-card .console-chip,
+.station-card .complexity-pill {
+  padding: 5px 8px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs); font-weight: 600;
+  letter-spacing: var(--tracking); text-transform: uppercase;
+  white-space: nowrap;
+  background: transparent;
+  color: var(--ink-faint);
   border: 1px solid var(--edge);
 }
-.station-card .complexity-pill {
-  padding: 1px 8px; border-radius: 8px;
-  font-size: var(--text-xs); font-weight: 600; text-transform: uppercase;
-  background: var(--surface-lift); color: var(--cyan);
-}
+/* Low complexity is the seat a newcomer is being pointed at, so it is the one
+   allowed to be green. */
 .station-card .complexity-pill.low {
-  background: var(--loaded-deep); color: var(--loaded); border: 1px solid var(--loaded-dim);
+  color: var(--loaded); border-color: var(--loaded-dim);
+}
+/* The quiet rung, lifted one step on the two states that are NOT drawn on
+   --surface-card. --ink-faint measures 4.90:1 there and clears WCAG 1.4.3's
+   4.5:1 for normal text; on the claimed card's --cyan-deep it is 4.48:1 and on
+   the reserved card's --reloading-deep 3.98:1 — and BOTH of those fills arrived
+   with this restyle, so the rung that was safe while every card shared one fill
+   is not safe on the states the design added. --ink-dim is 6.03:1 and 5.35:1 on
+   the same two, which is the smallest step that clears the floor while keeping
+   the card's own hierarchy: these stay the footnotes under the Station's name.
+   A claimed card is the ordinary state of a filled lobby, so this is most of
+   the grid rather than an edge case.
+
+   `.low` is excluded rather than lifted: its green is 8.15:1 on --cyan-deep
+   and 7.23:1 on --reloading-deep, and it carries the one meaning in this row a
+   grey would erase. */
+.station-card.claimed .card-rank,
+.station-card.claimed .console-chip,
+.station-card.claimed .complexity-pill:not(.low),
+.station-card.empty .card-rank,
+.station-card.empty .console-chip,
+.station-card.empty .complexity-pill:not(.low),
+.station-card.empty .card-holder.none {
+  color: var(--ink-dim);
 }
 
 /* This station's screen row (issue #1331) — which display its console opens
@@ -176,42 +343,54 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
-  margin-top: 2px;
+  gap: 5px;
+  padding-top: 8px;
+  border-top: 1px solid var(--edge-faint);
 }
 .station-card .station-screens-label {
+  font-family: var(--font-mono);
   font-size: var(--text-xs);
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: .1em;
+  letter-spacing: var(--tracking-wide);
   /* --ink-dim, not the quiet --ink-faint, for the same reason the monitor row's
      quiet half is one rung up: this is 0.65rem-class text and it has to clear
-     WCAG 1.4.3's 4.5:1 on the card. Both rungs now do (6.58:1 and 4.90:1 on
-     --surface-card) — the graphite ramp lifted the faint rung past the floor
-     the pre-graphite #667 failed at — so the choice is emphasis rather than
-     rescue, and the emphasis the row was drawn with is kept. */
+     WCAG 1.4.3's 4.5:1 on the card it sits on. WHICH card matters, and the
+     figures below are quoted with the fill they were measured against, because
+     this sheet draws three of them. --ink-dim clears the floor on all three
+     (6.58:1 on --surface-card, 6.03:1 on the claimed card's --cyan-deep,
+     5.35:1 on the reserved card's --reloading-deep); --ink-faint clears it on
+     --surface-card alone (4.90:1, against 4.48:1 and 3.98:1), which is what the
+     lift beside the chip rules above exists to answer. So here the rung is
+     emphasis rather than rescue, and the emphasis the row was drawn with is
+     kept. */
   color: var(--ink-dim);
   margin-right: 2px;
 }
 .station-card .station-screens-message {
+  font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--ink-dim);
 }
 .station-card .station-screen-button {
   display: inline-flex;
-  align-items: baseline;
-  gap: 4px;
-  padding: 3px 8px;
-  border-radius: 3px;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px;
+  /* The target floor, stated in the header: a mouse across a room misses a
+     chip drawn at its label's height. */
+  min-height: var(--control-hit-min);
   /* --edge-strong, not --edge-control: this is a CONTROL boundary and WCAG
-     1.4.11 asks 3:1 of it, but --edge-control is quoted against --surface-base
-     and measures only 2.94:1 on the --surface-card this button sits inside.
-     --edge-strong is 3.90:1 there. See the header. */
+     1.4.11 asks 3:1 of it, measured against the fill it encloses. This button's
+     fill is --surface-raised, where --edge-control is 2.83:1 and --edge-strong
+     is 3.58:1. See the header's ladder note. */
   border: 1px solid var(--edge-strong);
   background: var(--surface-raised);
   color: var(--ink);
-  font-family: 'Chakra Petch', system-ui, monospace;
+  font-family: var(--font-mono);
   font-size: var(--text-xs);
-  letter-spacing: .04em;
+  font-weight: 600;
+  letter-spacing: var(--tracking);
   cursor: pointer;
 }
 .station-card .station-screen-button:hover:enabled { border-color: var(--edge-bright); }
@@ -226,10 +405,11 @@
   border-style: dashed;
 }
 .station-card .station-screen-reason {
+  font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--ink-dim);
   text-transform: uppercase;
-  letter-spacing: .08em;
+  letter-spacing: var(--tracking);
 }
 .station-card .station-screen-button:focus,
 .station-card .station-screen-button:focus-visible {
@@ -239,7 +419,7 @@
 
 /* Crew dots */
 .crew-dot {
-  width: 8px; height: 8px; border-radius: 50%;
+  width: 9px; height: 9px; border-radius: 50%;
   background: var(--surface-lift); border: 1px solid var(--edge);
   transition: background .2s, border-color .2s;
 }
@@ -249,23 +429,38 @@
   background: var(--cyan-dim); color: var(--signal); border-color: var(--signal);
   animation: ready-pulse 1.5s ease-in-out infinite;
 }
+/* INSET, because #lobby-ready-badge is chamfer-clipped below and a clip-path
+   takes an outset box-shadow away with it — the outward pulse this badge used
+   to breathe stopped painting the moment the badge was cut. Drawn inward, the
+   pulse is the badge's own fill brightening, which is the same message at the
+   same rhythm. Keep the two frames in step with the held frame in the
+   reduced-motion block at the foot of this sheet: that block freezes the 50%
+   frame, so a change here is a change there. */
 @keyframes ready-pulse {
-  0%, 100% { box-shadow: 0 0 4px rgba(var(--rgb-signal), 0.3); }
-  50% { box-shadow: 0 0 14px rgba(var(--rgb-signal), 0.6); }
+  0%, 100% { box-shadow: inset 0 0 6px rgba(var(--rgb-signal), 0.3); }
+  50% { box-shadow: inset 0 0 16px rgba(var(--rgb-signal), 0.6); }
 }
 
 /* Lobby responsive layout */
 .lobby-body {
   display: flex;
   flex: 1;
-  gap: 2rem;
-  padding-top: 1rem;
+  gap: 28px;
+  padding: 20px 0 24px;
   overflow: hidden;
   min-height: 0;
 }
 .lobby-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 360px));
+  /* Rows as tall as the cards in them, not a share of the grid's own height.
+     `auto` rows in a grid with a DEFINITE height (this one is `flex: 1` in a
+     column) come out evenly divided, which is invisible while every card is
+     short and becomes a card whose content hangs out of its own border the
+     moment one grows — which is exactly what the native surface's per-Station
+     screen row does to it (issue #1331). `max-content` sizes the row to the
+     tallest card and lets `overflow-y` do the rest. */
+  grid-auto-rows: max-content;
   gap: 12px;
   flex: 1;
   align-content: start;
@@ -273,68 +468,66 @@
   overflow-y: auto;
 }
 .lobby-rail {
-  width: 18rem;
+  width: 19.75rem;
   min-width: 14rem;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.875rem;
   border-left: 1px solid var(--edge-faint);
   padding-left: 1.5rem;
 }
 .lobby-rail-section {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   font-size: var(--text-sm);
   color: var(--ink-dim);
 }
 .lobby-rail-spacer { flex: 1; }
 .lobby-status-hint {
-  font-size: var(--text-sm);
+  font-size: var(--text-md);
+  line-height: 1.5;
   color: var(--ink-faint);
   text-align: right;
   padding-top: 0.5rem;
   border-top: 1px solid var(--edge-faint);
 }
-.lobby-rail-label {
+/* The hint's one lit state — a countdown running, or a crew that is ready. It
+   used to arrive as an inline colour the view model carried as a hex; the fact
+   is "this line is live", and a class is how a fact reaches a stylesheet
+   without freezing a palette into JavaScript. */
+.lobby-status-hint.live { color: var(--signal); }
+/* The rail's section headings, and the crew counter's — the canvas's eyebrow. */
+.lobby-rail-label,
+.lobby-crew-label {
+  font-family: var(--font-mono);
   font-size: var(--text-xs);
+  font-weight: 600;
   color: var(--ink-faint);
   text-transform: uppercase;
-  letter-spacing: .08em;
-  margin-bottom: 0.5rem;
+  letter-spacing: var(--tracking-widest);
 }
+.lobby-rail-label { margin-bottom: 0.5rem; }
 
 /* Card font scaling for wide screens / readability. The clamp survives the
    move onto the ramp — this surface is a television across a room and a fixed
    rung would be the one place the ramp made things worse — but its ENDS are
-   rungs now, so the sheet still holds no size of its own.
-
-   The complexity pill dropped out, and that IS a size change, recorded here
-   rather than passed off as a no-op. Its clamp ran `clamp(0.55rem, 0.65vw,
-   0.65rem)`: 8.8px below a ~1354px-wide host window, 10.4px above ~1600px.
-   The ramp has no rung under --text-min (11px) and is not getting one — that
-   floor is the whole reason the ramp exists — so there is nothing to write the
-   bottom end with. The rule goes instead of being written with a bottom end
-   that is really its top, and the pill inherits the base rule's --text-xs:
-   flat 11px, up ~2px on a 1280px host window and ~0.6px on a wide one. It
-   stops shrinking with the viewport, which for a two-word "LOW"/"HIGH" badge
-   read across a room is the direction to be wrong in. See THE TYPE RUNGS ARE
-   NOT AN IDENTITY in the header — same trade, stated once more because this
-   one is a deleted rule and the ratchet only sees literals that REMAIN. */
+   rungs, so the sheet still holds no size of its own. */
 .station-card .card-name { font-size: clamp(var(--text-md), 1vw, var(--text-lg)); }
 .station-card .card-rank { font-size: clamp(var(--text-xs), 0.7vw, var(--text-sm)); }
-.station-card .console-chip { font-size: clamp(var(--text-xs), 0.7vw, var(--text-sm)); }
+.station-card .card-holder { font-size: clamp(var(--text-md), 0.9vw, var(--text-lg)); }
 
 .station-card { min-height: 90px; }
 
 /* Connected-list pills (used in both landscape column and compact wrap) */
 .spectator-pill {
-  padding: 4px 10px;
-  border-radius: 3px;
+  padding: 5px 10px;
   background: var(--surface-raised);
   color: var(--ink);
   border: 1px solid var(--edge);
-  font-size: var(--text-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-tight);
   white-space: nowrap;
   align-self: flex-start;
 }
@@ -349,83 +542,110 @@
   font-style: italic;
 }
 
-/* Aggregate RESERVED chip (compact mode only) */
+/* Aggregate RESERVED chip (compact mode only). The same amber
+   `.station-card.empty` wears, because it is the same fact folded up. */
 .reserved-aggregate {
   display: none;
   padding: 6px 12px;
-  border-radius: 4px;
-  border: 1px dashed var(--edge);
-  background: repeating-linear-gradient(45deg,transparent,transparent 6px,rgba(var(--rgb-white), 0.02) 6px,rgba(var(--rgb-white), 0.02) 12px);
-  font-size: var(--text-sm);
-  color: var(--ink-faint);
+  border: 1px dashed var(--reloading-dim);
+  background: var(--reloading-deep);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--reloading);
   text-align: center;
-  letter-spacing: .04em;
-  font-family: 'Chakra Petch', system-ui, monospace;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking);
+  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
 }
 
 /* Header reflow */
 .lobby-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   flex-wrap: wrap;
+  gap: 32px;
   row-gap: 0.5rem;
-  padding-bottom: 1rem;
+  padding-bottom: 18px;
   border-bottom: 1px solid var(--edge-faint);
 }
-.lobby-title-block { display: flex; flex-direction: column; }
+.lobby-title-block { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .lobby-status-block {
   display: flex;
-  align-items: center;
-  gap: 1.5rem;
-  flex-wrap: wrap;
-  row-gap: 0.5rem;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+  /* Shrinkable, not fixed: the ready badge carries a whole sentence in some
+     languages, and a block that refused to give way pushed it off the right
+     edge of a narrow viewport rather than wrapping under the title. */
+  flex: 0 1 auto;
+  min-width: 0;
 }
 .lobby-crew-info {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-}
-.lobby-crew-label {
-  font-size: var(--text-sm);
-  color: var(--ink-dim);
-  text-transform: uppercase;
-  letter-spacing: .06em;
+  gap: 12px;
 }
 #lobby-title {
   font-size: clamp(var(--text-xl), 2.5vw, var(--text-2xl));
-  font-weight: bold;
-  letter-spacing: .08em;
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: var(--tracking);
+  text-transform: uppercase;
   color: var(--ink);
 }
 #lobby-subtitle {
-  font-size: var(--text-sm);
-  color: var(--ink-faint);
+  font-size: var(--text-md);
+  line-height: 1.55;
+  max-width: 620px;
+  color: var(--ink-dim);
 }
 #lobby-crew-count {
   font-size: clamp(var(--text-lg), 2vw, var(--text-xl));
-  font-weight: bold;
+  font-weight: 700;
   color: var(--ink);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
+  letter-spacing: var(--tracking-tight);
 }
-#lobby-crew-dots { display: flex; gap: 4px; }
+#lobby-crew-dots { display: flex; gap: 5px; }
 #lobby-spectator-tag {
+  font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--ink-faint);
   padding: 2px 6px;
   border: 1px solid var(--edge);
-  border-radius: 3px;
 }
 #lobby-ready-badge {
-  padding: 6px 14px;
-  border-radius: 4px;
-  font-size: var(--text-sm);
-  font-weight: bold;
-  letter-spacing: .1em;
-  background: var(--reloading-deep);
-  color: var(--reloading);
-  border: 1px solid var(--reloading);
+  padding: 7px 12px;
+  max-width: 100%;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  background: transparent;
+  color: var(--ink-faint);
+  border: 1px solid var(--edge);
   transition: all .3s ease;
+  clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px);
+}
+/* The countdown, which the canvas draws as the amber half of a badge pair. It
+   is a separate element here — the number alone, big enough to be read from the
+   far end of a room while the badge beside it says what is being counted — so
+   it takes the amber and the badge keeps the cyan. The renderer sets
+   `display: flex` while it is running and `none` when it is not; everything
+   else about it is here, where it had nothing at all before this slice. */
+.lobby-countdown {
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: clamp(var(--text-2xl), 4vw, var(--text-display));
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: var(--tracking-tight);
+  color: var(--reloading);
+  padding-top: 0.5rem;
 }
 
 /* AI-only launch button (bottom-left, lobby only, no-players condition) */
@@ -433,24 +653,47 @@
   position: absolute;
   bottom: 1.5rem;
   left: 1.5rem;
-  padding: 8px 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: var(--control-hit-min);
+  padding: 0 20px;
   background: var(--cyan-deep);
   color: var(--signal);
   border: 1px solid var(--cyan);
-  border-radius: 4px;
-  font-family: 'Chakra Petch', system-ui, monospace;
-  font-size: var(--text-sm);
-  font-weight: 600;
-  letter-spacing: .1em;
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide);
   text-transform: uppercase;
   cursor: pointer;
   transition: background .2s, border-color .2s, box-shadow .2s;
   z-index: 2;
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
 }
 #ai-launch-btn:hover {
   background: var(--cyan-dim);
   border-color: var(--signal);
-  box-shadow: 0 0 8px rgba(var(--rgb-signal), 0.25);
+  /* Inward, for the chamfer reason stated on the claimed card: this button
+     clips itself, so an outward halo would be clipped away with the corners. */
+  box-shadow: inset 0 0 18px rgba(var(--rgb-signal), 0.28);
+}
+/* #1128's bar — a visible ring on a control a keyboard can reach — in the
+   CHAMFER-SAFE shape, which is the only one that paints here. This button clips
+   itself, and a clip-path clips an outset outline away with the corners;
+   `--focus-ring-offset` then puts the whole ring outside the clipped box, so
+   the outset form draws literally nothing. The inset form is what
+   gui/components/ph-console-styles.js gives the .btn family and what
+   gui/host-landing.css gives its own chamfered controls, for exactly this
+   reason. Still the tokens and never a literal, so `--focus-ring` still
+   resolves to `--focus-ring-contrast` for a data-contrast="more" reader
+   (gui/tokens.css). Declared after `:hover` at the same specificity, so a
+   button that is both hovered and focused shows the RING rather than the hover
+   bloom — of the two, the ring is the one that has to be unmistakable. */
+#ai-launch-btn:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 var(--focus-ring-width) var(--focus-ring);
 }
 
 /* Compact form: portrait OR narrow landscape */
@@ -462,6 +705,16 @@
   .lobby-grid {
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     overflow-y: visible;
+  }
+  /* Sized by its cards, not by a share of the body. The grid scrolls inside
+     itself in the landscape layout; here `.lobby-body` is the scroller and the
+     grid is `overflow-y: visible`, so a column still claiming `flex: 1` gets a
+     height that has nothing to do with its content and lets the cards spill
+     over the rail beneath them. Which is also what the smoke spec measures —
+     `.lobby-grid-column`'s bottom against the rail's top
+     (tests/smoke/lobby-responsive.spec.js). */
+  .lobby-grid-column {
+    flex: 0 0 auto;
   }
   /* Hide individual RESERVED placeholders, show aggregate */
   .lobby-grid .station-card.empty.per-slot { display: none; }
@@ -489,6 +742,14 @@
     flex-wrap: wrap;
     gap: 6px;
   }
+  /* The header stacks: the crew block goes under the title rather than
+     squeezing it, and stops being right-aligned once there is nothing to its
+     left to align against. */
+  .lobby-status-block {
+    align-items: flex-start;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
 }
 
 /* ── Bridge monitor row (issue #1330) ─────────────────────────────────
@@ -510,34 +771,43 @@
    * Nothing here animates or transitions, so `prefers-reduced-motion` has
      nothing to switch off — a row of buttons on a television in a room full
      of people has no business moving. Hover and press are colour changes on
-     a static box. */
+     a static box.
+
+   The canvas draws it as a card of its own rather than a bare strip in the
+   rail, which is what tells an operator the row is a THING to act on and not
+   a caption under the pills above it. */
 .monitor-row {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding-top: 0.75rem;
+  gap: 8px;
+  padding: 14px;
+  background: var(--surface-card);
+  border: 1px solid var(--edge);
+  clip-path: polygon(9px 0, 100% 0, 100% calc(100% - 9px), calc(100% - 9px) 100%, 0 100%, 0 9px);
 }
 .monitor-row-buttons {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
 }
 .monitor-button {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 5px;
   align-items: flex-start;
-  padding: 6px 10px;
-  border-radius: 4px;
+  justify-content: center;
+  min-height: var(--control-hit-min);
+  padding: 9px 12px;
   /* --edge-strong rather than --edge-control, and for the same measurement the
-     station screen row states above: this button's fill is --surface-card, and
-     --edge-control is 2.94:1 against that while --edge-strong is 3.90:1. */
+     station screen row states above: this button's fill is --surface-raised,
+     where --edge-control is 2.83:1 and --edge-strong is 3.58:1. */
   border: 1px solid var(--edge-strong);
-  background: var(--surface-card);
+  background: var(--surface-raised);
   color: var(--ink);
-  font-family: 'Chakra Petch', system-ui, monospace;
+  font-family: var(--font-mono);
   font-size: var(--text-sm);
-  letter-spacing: .04em;
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
   text-align: left;
   cursor: pointer;
 }
@@ -546,21 +816,23 @@
   border-color: var(--cyan);
   background: var(--cyan-deep);
 }
+.monitor-button.viewscreen .monitor-button-name { color: var(--signal); }
 /* --ink-dim, not the quiet --ink-faint: these are 0.65rem-class body text and
    have to clear WCAG 1.4.3's 4.5:1 for normal text, which the row cannot claim
    to meet while carrying words that matter. --ink-dim is 6.58:1 on the button's
-   --surface-card and still reads as its quiet half. --ink-faint would now clear
-   the floor too (4.90:1, where the pre-graphite #667 was 3.4:1), so keeping the
-   lighter rung is the row's emphasis rather than its rescue. The viewscreen's
-   own mark below is --signal, 10.36:1 on --cyan-deep. */
+   fill and still reads as its quiet half. --ink-faint would now clear the floor
+   too (4.90:1, where the pre-graphite #667 was 3.4:1), so keeping the lighter
+   rung is the row's emphasis rather than its rescue. The viewscreen's own mark
+   below is --signal, 10.36:1 on --cyan-deep. */
 .monitor-button .monitor-button-mark,
 .monitor-button .monitor-button-stations {
   font-size: var(--text-xs);
+  font-weight: 600;
   color: var(--ink-dim);
 }
 .monitor-button .monitor-button-mark {
   text-transform: uppercase;
-  letter-spacing: .1em;
+  letter-spacing: var(--tracking-wide);
 }
 .monitor-button.viewscreen .monitor-button-mark { color: var(--signal); }
 .monitor-button:focus,
@@ -569,6 +841,7 @@
   outline-offset: var(--focus-ring-offset);
 }
 .monitor-row-notice {
+  font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--reloading);
   line-height: 1.4;
@@ -621,17 +894,22 @@
   .station-card .station-screen-button:focus-visible {
     outline: 3px solid var(--focus-ring-contrast);
   }
+
+  /* The holder's name is the card's one piece of live information, and the
+     accent it is drawn in is the first thing a tinted palette takes away. */
+  .station-card .card-holder { color: rgb(var(--rgb-white)); }
 }
 
 /* Reduced motion (PRD #1023 module 3), the lobby's own half. The viewscreen
    is a television in a room full of people, so a looping glow is exactly what
    a viewer who asked for stillness cannot walk away from. The badge is held at
    the frame that carries its meaning rather than switched off, so it keeps its
-   glow. Its siblings in that media block (the boot spinner, the red-alert
-   vignette) are not lobby chrome and stay in server.html. */
+   glow — `ready-pulse`'s 50% frame verbatim, inset for the same chamfer
+   reason the keyframes are. Its siblings in that media block (the boot spinner,
+   the red-alert vignette) are not lobby chrome and stay in server.html. */
 @media (prefers-reduced-motion: reduce) {
   #lobby-ready-badge.go {
     animation: none;
-    box-shadow: 0 0 14px rgba(var(--rgb-signal), 0.6);
+    box-shadow: inset 0 0 16px rgba(var(--rgb-signal), 0.6);
   }
 }

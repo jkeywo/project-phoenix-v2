@@ -172,11 +172,23 @@ export function renderHostLobby(doc, vm, t, opts) {
     const card = doc.createElement('div');
     card.className = 'station-card' + (c.claimed ? ' claimed' : '');
 
-    // Header row: avatar + name + rank
+    // Header row: avatar + name + rank. The design (issue #1358) puts the
+    // avatar FIRST and the identity beside it, so the DOM order follows —
+    // a reader who hears the row gets it in the order a viewer sees it.
     const header = doc.createElement('div');
     header.className = 'card-header';
+
+    // Avatar initials. The placeholder is a CLASS rather than the inline
+    // colour this used to write: the one thing that tells an unclaimed seat
+    // from a claimed one across a room now follows the palette in
+    // gui/host-lobby.css instead of a hex frozen into this module.
+    const avatar = doc.createElement('div');
+    avatar.className = 'card-avatar' + (c.avatar.placeholder ? ' placeholder' : '');
+    avatar.textContent = c.avatar.text;
+    header.appendChild(avatar);
+
     const nameInfo = doc.createElement('div');
-    nameInfo.style.cssText = 'display:flex;flex-direction:column;gap:2px;';
+    nameInfo.className = 'card-id';
     const name = doc.createElement('div');
     name.className = 'card-name';
     name.textContent = c.name;
@@ -186,14 +198,17 @@ export function renderHostLobby(doc, vm, t, opts) {
     nameInfo.appendChild(name);
     nameInfo.appendChild(rank);
     header.appendChild(nameInfo);
-
-    // Avatar initials
-    const avatar = doc.createElement('div');
-    avatar.className = 'card-avatar';
-    avatar.textContent = c.avatar.text;
-    if (c.avatar.placeholder) avatar.style.color = '#556';
-    header.appendChild(avatar);
     card.appendChild(header);
+
+    // Who holds the seat, in words (issue #1358). The avatar carries two
+    // letters of it, which is an identifier rather than a name — and a room
+    // deciding whether to wait for somebody needs the name. A free Station
+    // says what will fly it instead: the Backfill rating, which is what
+    // actually runs its systems when nobody sits down.
+    const holder = doc.createElement('div');
+    holder.className = 'card-holder' + (c.holder.text ? '' : ' none');
+    holder.textContent = c.holder.text || t(c.holder.id, c.holder.params);
+    card.appendChild(holder);
 
     // Console chips
     const chips = doc.createElement('div');
@@ -213,10 +228,12 @@ export function renderHostLobby(doc, vm, t, opts) {
     // carries no bridge at all.
     if (c.screens) renderStationScreens(doc, card, c.screens, t);
 
-    // Footer: complexity pill(s)
+    // Footer: complexity pill(s). A class rather than the inline flex this
+    // used to carry — the console chips above it are ruled the same way, and
+    // the design draws the two as one meta row.
     if (c.presetPills.length > 0) {
       const footer = doc.createElement('div');
-      footer.style.cssText = 'display:flex;gap:6px;align-items:center;margin-top:2px;';
+      footer.className = 'card-foot';
       for (const pill of c.presetPills) {
         const pillEl = doc.createElement('span');
         pillEl.className = 'complexity-pill' + (pill.low ? ' low' : '');
@@ -265,10 +282,15 @@ export function renderHostLobby(doc, vm, t, opts) {
   }
 
   // ── Status hint ───────────────────────────────────────────────────
+  // The tone is a CLASS, not an inline colour (issue #1358). The view model
+  // used to carry a hex, which put three values of the palette in a pure
+  // module that cannot see a stylesheet and could not follow a retint; what it
+  // decides is whether the line is LIVE, and gui/host-lobby.css decides what
+  // live looks like.
   const hintEl = doc.getElementById('lobby-status-hint');
   if (hintEl) {
     hintEl.textContent = t(vm.hint.id, vm.hint.params);
-    hintEl.style.color = vm.hint.color;
+    hintEl.className = 'lobby-status-hint' + (vm.hint.tone ? ' ' + vm.hint.tone : '');
   }
 
   // ── Bridge monitor row (issue #1330) ──────────────────────────────

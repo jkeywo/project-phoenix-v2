@@ -190,6 +190,15 @@ export function hostLobbyViewModel(s, prevPhase, layout) {
       claimed,
       name: st.name || st.short_code || '',
       rank: st.rank || '',
+      // The holder in words, beside the avatar's two letters (issue #1358).
+      // A held seat carries the name the host already resolved; a free one
+      // carries a string id for the rating that flies it instead, on the same
+      // `{ id, params }` convention the badge and the hint use. An unheld
+      // Station is not "empty" — Backfill runs its systems — and the card is
+      // where a room reads which of the two it is looking at.
+      holder: claimed
+        ? { text: st.holder_name, id: null, params: {} }
+        : { text: null, id: 'station.rating.backfill.name', params: {} },
       avatar,
       consoles,
       presetPills,
@@ -245,15 +254,21 @@ export function hostLobbyViewModel(s, prevPhase, layout) {
   };
 
   // ── Status hint ──────────────────────────────────────────────────────────
+  // `tone` is a class name, not a colour (issue #1358). This module used to
+  // return three hexes, which put a slice of the palette inside a pure module
+  // that cannot see a stylesheet and did not follow #1357's retint — the
+  // lobby's hint was still painting pre-graphite navy greys onto a graphite
+  // surface. What this decides is whether the line is LIVE; gui/host-lobby.css
+  // decides what live looks like.
   let hint;
   if (countdownSecs > 0) {
-    hint = { id: 'server.hint_launching', params: { secs: countdownSecs }, color: '#5fd8e8' };
+    hint = { id: 'server.hint_launching', params: { secs: countdownSecs }, tone: 'live' };
   } else if (crewN === 0) {
-    hint = { id: 'server.waiting_players', params: {}, color: '#667' };
+    hint = { id: 'server.waiting_players', params: {}, tone: '' };
   } else if (s.all_ready) {
-    hint = { id: 'client.status_all_ready', params: {}, color: '#5fd8e8' };
+    hint = { id: 'client.status_all_ready', params: {}, tone: 'live' };
   } else {
-    hint = { id: 'server.waiting_ready', params: {}, color: '#889' };
+    hint = { id: 'server.waiting_ready', params: {}, tone: '' };
   }
 
   // ── AI-only launch button ────────────────────────────────────────────────

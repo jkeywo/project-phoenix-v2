@@ -1,7 +1,7 @@
 /**
  * tests/client/control-floors.test.js — module 3's contract (PRD #1023).
  *
- * Three floors, and the PRD's own words for why they are a TEST rather than a
+ * Four floors, and the PRD's own words for why they are a TEST rather than a
  * one-off sweep: "so that a future component cannot silently reintroduce
  * 6-pixel text". Every one of these was already broken by shipped code, and
  * every one of them broke quietly — nothing crashes when a button is 16px, it
@@ -14,6 +14,9 @@
  *      font string.
  *   3. MOTION. Every indefinitely looping animation has a reduced-motion
  *      variant.
+ *   4. FOCUS. Every chamfered control draws a focus ring in the one shape its
+ *      own `clip-path` does not erase. The fourth floor is the newest and it
+ *      arrived the same way as the other three: already broken (issue #1358).
  *
  * ── How "a control" is decided ─────────────────────────────────────────────
  *
@@ -431,5 +434,154 @@ describe('every looping animation respects reduced motion', () => {
       }
     }
     expect(offenders).toEqual([]);
+  });
+});
+
+// ── 4. Focus ────────────────────────────────────────────────────────────────
+
+/**
+ * The HOST surfaces: the four sheets that dress the operator's screens.
+ *
+ * They are here rather than in TOUCH_SURFACES because a keyboard is not an
+ * input device you can opt out of the way a television opts out of a thumb.
+ * The host lobby and landing screens are tabbed through — the native
+ * viewscreen window has no pointer chrome of its own beyond what these sheets
+ * draw — so a control on them that loses its ring loses the only way in.
+ *
+ * These are also the sheets that CUT their controls: the fleet's panels are
+ * chamfered with `clip-path`, which is the whole reason this floor exists.
+ */
+const FOCUS_SURFACES = fs.readdirSync(GUI)
+  .filter((f) => /^host-.*\.css$/.test(f))
+  .sort()
+  .map((f) => path.join(GUI, f));
+
+/** A selector with its focus pseudo-classes taken off: `.x:focus` -> `.x`. */
+const focusBase = (part) => part.trim().replace(/:focus-visible|:focus\b/g, '').trim();
+
+/**
+ * Every base selector in `file` that clips itself to a chamfer, mapped to
+ * whether that rule also calls itself a control.
+ *
+ * Only the element's OWN `clip-path`, never an ancestor's. An ancestor clip is
+ * a real effect — the station card's 9px corners do cut whatever reaches them —
+ * but the cards and rows here carry 14px of padding, so a descendant's ring
+ * lands nowhere near the corner. Policing ancestry would flag every control on
+ * a chamfered panel in the fleet and teach a reader to ignore the rule.
+ */
+function chamferedSelectors(file) {
+  const out = new Map();
+  for (const rule of cssRules(readStripped(file))) {
+    if (!/clip-path\s*:/.test(rule.body) || /clip-path\s*:\s*none/.test(rule.body)) continue;
+    const control = /cursor\s*:\s*pointer/.test(rule.body);
+    for (const part of rule.selector.split(',')) {
+      const key = part.trim();
+      if (key) out.set(key, (out.get(key) || false) || control);
+    }
+  }
+  return out;
+}
+
+/**
+ * Every rule in `file` that styles a focus state, as `{base, body}`.
+ *
+ * At-rules are NOT filtered out. A high-contrast block that re-states a ring
+ * (`@media (prefers-contrast: more)`) is exactly as clippable as the base rule,
+ * and it is the one a reader who needs the ring most is looking at.
+ */
+function focusRules(file) {
+  const out = [];
+  for (const rule of cssRules(readStripped(file))) {
+    if (!/:focus/.test(rule.selector)) continue;
+    for (const part of rule.selector.split(',')) {
+      if (!/:focus/.test(part)) continue;
+      out.push({ base: focusBase(part), body: rule.body });
+    }
+  }
+  return out;
+}
+
+/**
+ * Does this body declare an `outline` that paints OUTSIDE the box — the shape
+ * a clip-path eats?
+ *
+ * A loop over the declarations rather than the one regex it looks like it
+ * wants to be, because `/outline\s*:\s*(?!none)/` does not say what it appears
+ * to say: `\s*` backtracks to zero width, the lookahead then reads the SPACE
+ * before `none` rather than `none` itself, and the pattern matches every
+ * `outline: none` in the codebase. Which is the chamfer-safe spelling — so the
+ * short form fails precisely the controls it exists to bless. Do not fold this
+ * back into a lookahead.
+ */
+function declaresOutsetOutline(body) {
+  const re = /(?:^|;)\s*outline\s*:\s*([^;]*)/g;
+  let m;
+  while ((m = re.exec(body)) !== null) {
+    if (!/^none\b/.test(m[1].trim())) return true;
+  }
+  return false;
+}
+
+/** The chamfer-safe ring: drawn on the control's own body, inside the clip. */
+const INSET_RING = /box-shadow\s*:\s*inset\b/;
+
+describe('every chamfered control keeps a focus ring the clip cannot eat', () => {
+  it('finds the chamfered controls to check', () => {
+    // A clip-path clips everything the element paints, an outset outline and an
+    // outer box-shadow included. That is stated in
+    // gui/components/ph-console-styles.js and it is why --focus-ring-offset is
+    // documented in gui/tokens.css as "for the un-clipped outline path". A
+    // silent zero here would let a refactor delete every chamfered control and
+    // still pass, so the sweep says out loud that it found some.
+    const total = FOCUS_SURFACES.reduce(
+      (n, f) => n + [...chamferedSelectors(f).values()].filter(Boolean).length, 0,
+    );
+    expect(total).toBeGreaterThanOrEqual(4);
+  });
+
+  for (const file of FOCUS_SURFACES) {
+    const name = rel(file);
+    const chamfered = chamferedSelectors(file);
+    if (chamfered.size === 0) continue;
+
+    it(`${name} draws no OUTSET ring on a control it has clipped`, () => {
+      // The failure this catches is invisible rather than ugly: the rule is
+      // present, the tokens are right, the cascade reaches it — and the ring is
+      // clipped away with the corners, so the control has no keyboard
+      // indicator at all. #1358 shipped exactly this on two controls.
+      const eaten = focusRules(file)
+        .filter((rule) => chamfered.has(rule.base) && declaresOutsetOutline(rule.body))
+        .map((rule) => `${rule.base} (its clip-path eats this outline)`);
+      expect(eaten).toEqual([]);
+    });
+
+    const controls = [...chamfered].filter(([, isControl]) => isControl).map(([sel]) => sel);
+    if (controls.length === 0) continue;
+
+    it(`${name} gives all ${controls.length} of them the inset ring instead`, () => {
+      // The other half of the ratchet: forbidding the outset shape alone could
+      // be satisfied by deleting the ring, which is the same regression with
+      // less evidence. Issue #1128's bar is a ring that is SEEN.
+      const rules = focusRules(file);
+      const ringless = controls.filter((selector) => !rules
+        .some((rule) => rule.base === selector && INSET_RING.test(rule.body)));
+      expect(ringless).toEqual([]);
+    });
+  }
+
+  it('the ring is still the shared token, so the high-contrast swap reaches it', () => {
+    // An inset ring is a box-shadow, and a box-shadow is an easy place to write
+    // a colour by hand. gui/tokens.css redefines --focus-ring as
+    // --focus-ring-contrast under :root[data-contrast="more"] (issue #1171), so
+    // a hand-written colour is a ring that stops answering the preference.
+    expect(TOKENS).toMatch(/:root\[data-contrast="more"\][\s\S]*?--focus-ring:\s*var\(--focus-ring-contrast\)/);
+    for (const file of FOCUS_SURFACES) {
+      const chamfered = chamferedSelectors(file);
+      for (const rule of focusRules(file)) {
+        if (!chamfered.has(rule.base) || !INSET_RING.test(rule.body)) continue;
+        const shadow = rule.body.match(/box-shadow\s*:\s*([^;]+)/)[1];
+        expect(shadow, `${rel(file)} :: ${rule.base}`).toMatch(/var\(--focus-ring\)/);
+      }
+    }
   });
 });

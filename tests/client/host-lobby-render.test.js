@@ -204,11 +204,33 @@ describe('the station grid', () => {
     });
     const avatars = document.querySelectorAll('#station-grid .card-avatar');
     expect(avatars[0].textContent).toBe('AD');
-    expect(avatars[0].style.color).toBe('');
+    expect(avatars[0].className).toBe('card-avatar');
     expect(avatars[1].textContent).toBe('TA');
     // The placeholder is dimmed — the one thing that tells an unclaimed seat
-    // apart from a claimed one at a glance across a room.
-    expect(avatars[1].style.color).not.toBe('');
+    // apart from a claimed one at a glance across a room. A CLASS since issue
+    // #1358, not the inline hex this renderer used to write: the colour lives
+    // in gui/host-lobby.css, where a retint reaches it.
+    expect(avatars[1].className).toBe('card-avatar placeholder');
+    expect(avatars[1].style.color).toBe('');
+  });
+
+  it('names the holder in words, and names Backfill on a seat nobody holds', () => {
+    // The avatar's two letters are an identifier; a room deciding whether to
+    // wait for somebody needs the name. And a free Station is not empty — the
+    // Backfill rating runs its systems — so the card says which of the two it
+    // is rather than leaving a blank line under the rank.
+    installLobbyPanel(document);
+    render({
+      stations: [
+        station({ holder_name: 'Ada' }),
+        station({ name: 'Tactical', short_code: 'TAC' }),
+      ],
+    });
+    const holders = document.querySelectorAll('#station-grid .card-holder');
+    expect(holders[0].textContent).toBe('Ada');
+    expect(holders[0].className).toBe('card-holder');
+    expect(holders[1].textContent).toBe(t('station.rating.backfill.name'));
+    expect(holders[1].className).toBe('card-holder none');
   });
 
   it('renders console chips and complexity pills from the roster', () => {
@@ -263,11 +285,19 @@ describe('the rail', () => {
     render();
     const hint = document.getElementById('lobby-status-hint');
     expect(hint.textContent).toBe(t('server.waiting_players'));
-    expect(hint.style.color).not.toBe('');
+    // The tone is a CLASS since issue #1358, so a retint reaches it. Waiting
+    // is the quiet state and carries the base class alone; the live states add
+    // one, and the element keeps its own class either way — a renderer that
+    // wrote only the tone would strip `.lobby-status-hint` off the element the
+    // rail's rules are written against.
+    expect(hint.className).toBe('lobby-status-hint');
+    expect(hint.style.color).toBe('');
 
     render({ crew_count: 1, stations: [station({ holder_name: 'Ada' })], all_ready: true });
     expect(document.getElementById('lobby-status-hint').textContent)
       .toBe(t('client.status_all_ready'));
+    expect(document.getElementById('lobby-status-hint').className)
+      .toBe('lobby-status-hint live');
   });
 });
 

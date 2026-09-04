@@ -895,7 +895,15 @@ mod tests {
         assert!(declaration < profile);
         assert!(profile < adapter);
         assert!(html.contains("surface: 'native-pane'"));
-        assert!(html.contains("gamepad: false"));
+        // The native pane now DOES support a gamepad: the host feeds one from
+        // gilrs and the boot script installs a `navigator.getGamepads()` shim, so
+        // the ordinary client runtime samples it. Vibration still has no native
+        // backend and stays off.
+        assert!(html.contains("gamepad: true"));
+        assert!(
+            html.contains("navigator.getGamepads"),
+            "the native pane installs the host-fed gamepad shim so the runtime can sample it"
+        );
         assert!(html.contains("vibration: false"));
         assert_eq!(
             html.matches("src=\"gui/operator-profile.js\"").count(),

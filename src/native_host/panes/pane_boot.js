@@ -44,17 +44,38 @@
   // Operator-profile capability declaration (issue #1280). The pane still
   // loads the ordinary client page and its one versioned profile; this tells
   // that shared adapter which retained settings can be active here. Keyboard
-  // input is delivered by #1124's focused native input route. Ultralight has no
-  // Gamepad API sampling or vibration backend, so neither gets a second native
-  // route. The profile keeps both choices for later export to a capable browser.
+  // input is delivered by #1124's focused native input route.
+  //
+  // Ultralight still has no W3C Gamepad API of its own, but the native host now
+  // FEEDS one: a Bevy gilrs system pushes a standard-mapped snapshot of every
+  // connected pad into `window.__phoenixSetGamepads` each frame, and the shim
+  // below makes `navigator.getGamepads()` return it — so the ordinary client
+  // runtime (gui/gamepad-input.js) works here unchanged. A native pane is one
+  // console, so the pad the operator SELECTED for this screen always drives this
+  // station, with no focus routing. Vibration has no native backend, so it stays
+  // off and the profile keeps that choice for later export to a capable browser.
   window.PhoenixOperatorCapabilities = Object.freeze({
     surface: 'native-pane',
     keyboard: true,
-    gamepad: false,
+    gamepad: true,
     vibration: false,
     semanticCues: true,
     accessibility: true,
   });
+
+  // The host's per-frame gamepad snapshot (W3C "standard" shape, slot-indexed,
+  // `null` in empty slots) and the shim that hands it to the client runtime.
+  // `__phoenixSetGamepads` is called by the native host (src/native_host/panes:
+  // push_gamepads_to_panes) with the array directly; `getGamepads` returns the
+  // latest. Installed here, before any page script runs, so the runtime that
+  // `client.html` starts sees a working Gamepad API from its first poll.
+  window.__phoenixGamepads = [];
+  window.__phoenixSetGamepads = function (pads) {
+    window.__phoenixGamepads = Array.isArray(pads) ? pads : [];
+  };
+  navigator.getGamepads = function () {
+    return window.__phoenixGamepads;
+  };
 
   // ── requestAnimationFrame, off a timer ─────────────────────────────────────
   //

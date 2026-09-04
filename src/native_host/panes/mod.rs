@@ -79,6 +79,7 @@
 //! compiles.
 
 pub mod document;
+pub mod gamepad;
 pub mod identity;
 pub mod os_prefs;
 pub mod placement;

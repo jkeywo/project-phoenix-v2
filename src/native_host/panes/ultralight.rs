@@ -587,6 +587,11 @@ impl Plugin for PaneDisplayPlugin {
                 sync_viewscreen_hud_presence,
                 cache_hud_state
                     .run_if(resource_exists::<bevy::ecs::message::Messages<HudStateChanged>>),
+                // Feed the host's gamepads into each console pane (native gamepad
+                // route) BEFORE `drive_panes`, so the snapshot the page polls this
+                // tick is current. Gated on the input plugin so the rendererless
+                // Contract host — which has neither input nor gilrs — skips it.
+                push_gamepads_to_panes.run_if(resource_exists::<ButtonInput<MouseButton>>),
                 drive_panes.run_if(resource_exists::<Assets<Image>>),
             )
                 .chain(),
@@ -1175,6 +1180,108 @@ fn sync_viewscreen_hud_presence(
         if node.display != want {
             node.display = want;
         }
+    }
+}
+
+/// Stable browser-slot numbering for the host's gamepads (native gamepad route).
+///
+/// The page's per-station selection setting stores a slot index, so a slot must
+/// stay pointed at the same physical pad for the session: a `gilrs` entity keeps
+/// the slot it was first seen on. `had_any` lets the feeder push one clearing
+/// snapshot when the last pad leaves and then fall quiet.
+#[derive(Default)]
+struct GamepadSlots {
+    map: std::collections::HashMap<Entity, usize>,
+    next: usize,
+    had_any: bool,
+}
+
+/// Read every connected gilrs gamepad into the W3C "standard" `PadReading` shape
+/// — buttons in W3C order, and the stick Y axes negated to the W3C convention
+/// (positive is DOWN, where Bevy's stick Y is positive UP).
+fn read_pads(
+    pads: &Query<(Entity, &Gamepad)>,
+    slots: &mut GamepadSlots,
+) -> Vec<super::gamepad::PadReading> {
+    const W3C_BUTTONS: [GamepadButton; super::gamepad::STANDARD_BUTTONS] = [
+        GamepadButton::South,
+        GamepadButton::East,
+        GamepadButton::West,
+        GamepadButton::North,
+        GamepadButton::LeftTrigger,
+        GamepadButton::RightTrigger,
+        GamepadButton::LeftTrigger2,
+        GamepadButton::RightTrigger2,
+        GamepadButton::Select,
+        GamepadButton::Start,
+        GamepadButton::LeftThumb,
+        GamepadButton::RightThumb,
+        GamepadButton::DPadUp,
+        GamepadButton::DPadDown,
+        GamepadButton::DPadLeft,
+        GamepadButton::DPadRight,
+    ];
+    let mut out = Vec::new();
+    for (entity, pad) in pads.iter() {
+        let slot = match slots.map.get(&entity) {
+            Some(slot) => *slot,
+            None => {
+                let slot = slots.next;
+                slots.next += 1;
+                slots.map.insert(entity, slot);
+                slot
+            }
+        };
+        let mut buttons = [(false, 0.0f32); super::gamepad::STANDARD_BUTTONS];
+        for (i, button) in W3C_BUTTONS.into_iter().enumerate() {
+            buttons[i] = (pad.pressed(button), pad.get(button).unwrap_or(0.0));
+        }
+        let axes = [
+            pad.get(GamepadAxis::LeftStickX).unwrap_or(0.0),
+            -pad.get(GamepadAxis::LeftStickY).unwrap_or(0.0),
+            pad.get(GamepadAxis::RightStickX).unwrap_or(0.0),
+            -pad.get(GamepadAxis::RightStickY).unwrap_or(0.0),
+        ];
+        out.push(super::gamepad::PadReading {
+            slot,
+            buttons,
+            axes,
+        });
+    }
+    out
+}
+
+/// Feed every connected gamepad's live state into each console pane each frame
+/// (native gamepad route). Ultralight has no Gamepad API, so `pane_boot.js`
+/// installs a `navigator.getGamepads()` shim; this pushes the W3C-standard
+/// snapshot it returns, and the client page's ordinary `gui/gamepad-input.js`
+/// runtime does the per-pad selection and drives THIS pane's one station.
+///
+/// Only console panes get it — the host-lobby and HUD surfaces are not client
+/// consoles and install no receiver. Pushed before `drive_panes` renders, so the
+/// snapshot the page's `requestAnimationFrame` poll reads this tick is current.
+fn push_gamepads_to_panes(
+    host: Option<NonSendMut<PaneHost>>,
+    pads: Query<(Entity, &Gamepad)>,
+    mut slots: Local<GamepadSlots>,
+) {
+    let Some(mut host) = host else {
+        return;
+    };
+    let readings = read_pads(&pads, &mut slots);
+    // The steady no-pad state pushes nothing; the frame the last pad leaves
+    // pushes one empty snapshot so the page sees it disconnect, then falls quiet.
+    if readings.is_empty() && !slots.had_any {
+        return;
+    }
+    slots.had_any = !readings.is_empty();
+    let json = super::gamepad::gamepad_snapshot_json(&readings);
+    let script = format!("window.__phoenixSetGamepads({json})");
+    for pane in host.windows.iter_mut() {
+        if pane.is_host_lobby() || pane.is_hud_overlay() {
+            continue;
+        }
+        let _ = pane.surface.push(&script);
     }
 }
 

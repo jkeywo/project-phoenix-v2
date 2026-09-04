@@ -1169,7 +1169,11 @@ fn sync_viewscreen_hud_presence(
     else {
         return;
     };
-    let want = if *phase.get() == GamePhase::InProgress {
+    // Shown in play AND at game over: the frame stays up while the mission runs,
+    // and the same surface carries the game-over screen when it ends (its
+    // `#game-over-overlay`, revealed by `__updateHud` from `game_over_message`).
+    // Hiding it in `GameOver` would blank the ending, so both phases keep it.
+    let want = if matches!(*phase.get(), GamePhase::InProgress | GamePhase::GameOver) {
         Display::DEFAULT
     } else {
         Display::None

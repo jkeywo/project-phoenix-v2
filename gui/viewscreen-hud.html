@@ -204,6 +204,19 @@
     </div>
   </div>
 
+  <!--
+    Game-over screen (issue #422): shown over the frame when a mission ends,
+    mirroring server.html's viewscreen overlay. `__updateHud` fills the closing
+    message and reveals this when the host enters GamePhase::GameOver (the HUD
+    state carries `game_over_message` only then). The web host's report rows and
+    return-to-lobby button are deliberately left out here: the rows are always
+    strings.csv ids the native viewscreen has no table to resolve, and this
+    passive overlay takes no input — the operator consoles own return-to-lobby.
+  -->
+  <div id="game-over-overlay" style="display:none;position:absolute;inset:0;z-index:85;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,0.88);color:#cde;font-family:'Chakra Petch',system-ui,monospace;text-align:center;padding:32px;">
+    <div id="game-over-message" style="font-size:clamp(0.95rem,2.5vw,1.15rem);white-space:pre-wrap;line-height:1.7;max-width:64ch;letter-spacing:0.03em;"></div>
+  </div>
+
   <script>
     // Rust's ViewscreenHudState sends `condition` as a strings.csv id; the web
     // host resolves it through localiseTree. The native overlay has no string
@@ -211,6 +224,13 @@
     var HUD_CONDITION = {
       'server.hud_nominal': 'NOMINAL',
       'server.hud_alert': 'ALERT',
+    };
+
+    // Known built-in game-over message ids the native overlay maps itself; an
+    // authored scenario message is prose and passes through unchanged, and an
+    // unmapped id shows raw rather than being dropped.
+    var GAME_OVER = {
+      'server.game_over.ship_destroyed': 'SHIP DESTROYED',
     };
 
     function setText(id, value) {
@@ -237,6 +257,19 @@
       }
       if (s.ship_name) {
         setText('hud-designation', s.ship_name);
+      }
+      // Game-over screen: reveal the overlay with the closing message when the
+      // host enters GamePhase::GameOver. `game_over_message` is null in every
+      // other phase, so this both shows the ending and clears it on a new run.
+      var goOverlay = document.getElementById('game-over-overlay');
+      var goMsg = document.getElementById('game-over-message');
+      if (goOverlay && goMsg) {
+        if (s.game_over_message != null) {
+          goMsg.textContent = GAME_OVER[s.game_over_message] || s.game_over_message;
+          goOverlay.style.display = 'flex';
+        } else {
+          goOverlay.style.display = 'none';
+        }
       }
     };
   </script>

@@ -1,7 +1,7 @@
 name = "entity.alliance_battleship.name"
 display_name = "entity.alliance_battleship.display_name"
 class = "battleship"
-hull_id = "NCC-2001"
+hull_id = "AEV-2001"
 power_rating = 120
 css = "gui/themes/battleship.css"
 # Authored mass (issue #1154), the game's own mass unit — the deterministic

@@ -195,7 +195,7 @@ describe('renderEntityPreviewView', () => {
   });
 
   it('overlay shows resolved faction name (not raw UUID)', () => {
-    const factionMap = new Map([['ff-1', 'Federation']]);
+    const factionMap = new Map([['ff-1', 'Alliance']]);
     const preview = computeEntityPreview(
       { tags: ['ship'], faction: 'ff-1' },
       factionMap,
@@ -206,7 +206,7 @@ describe('renderEntityPreviewView', () => {
     const overlay = host.children.find((c) => c.classList.contains('entity-preview-overlay'));
     expect(overlay).toBeDefined();
     const text = overlay.children.map((r) => r.textContent).join('\n');
-    expect(text).toContain('Federation');
+    expect(text).toContain('Alliance');
     expect(text).not.toContain('ff-1');
   });
 

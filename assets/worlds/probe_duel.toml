@@ -3,7 +3,7 @@
 #
 # A player Alliance cruiser (AI-backfilled in a headless run) is placed a short
 # distance from a world-spawned Alliance destroyer that has been re-flagged to
-# the Harrow faction and given a standing combat doctrine. Harrow and Federation
+# the Harrow faction and given a standing combat doctrine. Harrow and Alliance
 # are made mutually hostile at world-load. Because the two hulls start well
 # inside AI sensor range (100 units default), the NPC promotes to high-LOD
 # immediately and — once the invariant holds — engages and trades fire with the
@@ -221,14 +221,14 @@ spawn_on = "game_start"
 
 [script]
 setup = """
-// Make Harrow and Federation mutually hostile before the destroyer spawns.
+// Make Harrow and Alliance mutually hostile before the destroyer spawns.
 on_world_loaded("on_load");
 // Spawn the hostile Alliance destroyer close to the player at t=0.
 on_timer(0, "on_spawn_hostile");
 
 fn on_load(ctx) {
-    ctx.effects.add_faction_enemy("Harrow", "Federation");
-    ctx.effects.add_faction_enemy("Federation", "Harrow");
+    ctx.effects.add_faction_enemy("Harrow", "Alliance");
+    ctx.effects.add_faction_enemy("Alliance", "Harrow");
 }
 
 fn on_spawn_hostile(ctx) {

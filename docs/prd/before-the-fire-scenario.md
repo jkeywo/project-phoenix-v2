@@ -69,7 +69,7 @@ When this PRD ships, "Before the Fire" appears in the host's scenario selector a
   - `assets/entities/region_kaleth_nebula.toml` — verify effects: `damage_zone` (3 DPS), `radar_dampening` (0.4× multiplier), `sensor_blind`, `comms_jammed`.
   - `assets/entities/region_radiation_zone.toml` — heavy `damage_zone` (~8 DPS) with `shield_pierce ≈ 0.3` — this is the load-bearing use of the engine PRD's new shield-pierce property.
 
-- **Factions:** Reuse `federation` faction as the Alliance (no rename; the narrative names them "Alliance" via comms text). `harrow` faction has `federation` (Alliance) in its enemies list. `requiem` faction has empty enemies; the courier dies via scripted `destroy_entity`, not via faction hostility.
+- **Factions:** Reuse `alliance` faction as the Alliance (no rename; the narrative names them "Alliance" via comms text). `harrow` faction has `alliance` (Alliance) in its enemies list. `requiem` faction has empty enemies; the courier dies via scripted `destroy_entity`, not via faction hostility.
 
 - **Coordinates:** Round the doc's coordinates to clean numbers, used as named anchors:
   - `ship_start = [0, 0, 0]`

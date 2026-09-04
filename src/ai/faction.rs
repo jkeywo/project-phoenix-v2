@@ -17,7 +17,7 @@ use uuid::Uuid;
 pub struct FactionConfig {
     /// Stable UUID identifying this faction.
     pub uuid: Uuid,
-    /// Reference name (e.g. "Federation", "Pirate") — the id world triggers and
+    /// Reference name (e.g. "Alliance", "Pirate") — the id world triggers and
     /// entity templates name a faction by, and NOT display text: no
     /// player-facing surface renders it.
     pub name: String,
@@ -87,7 +87,7 @@ impl FactionRegistry {
     /// (case-sensitive exact match). Returns `None` if no faction matches.
     ///
     /// Used by world trigger actions that reference factions by name
-    /// (e.g. `add_faction_enemy { faction = "Harrow", enemy = "Federation" }`)
+    /// (e.g. `add_faction_enemy { faction = "Harrow", enemy = "Alliance" }`)
     /// so scenario authors don't have to write raw UUIDs in TOML.
     ///
     /// Lowest matching uuid wins, rather than "whichever the map yields first"
@@ -165,7 +165,7 @@ pub fn is_enemy(a: Option<Uuid>, b: Option<Uuid>, registry: &FactionRegistry) ->
 mod tests {
     use super::*;
 
-    fn fed_uuid() -> Uuid {
+    fn alliance_uuid() -> Uuid {
         Uuid::parse_str("aaaaaaaa-0000-0000-0000-000000000001").unwrap()
     }
 
@@ -173,12 +173,12 @@ mod tests {
         Uuid::parse_str("bbbbbbbb-0000-0000-0000-000000000002").unwrap()
     }
 
-    fn make_registry_fed_hostile_to_pirate() -> FactionRegistry {
+    fn make_registry_allied_hostile_to_pirate() -> FactionRegistry {
         let mut reg = FactionRegistry::new();
         reg.insert(FactionConfig {
             display_name: None,
-            uuid: fed_uuid(),
-            name: "Federation".to_string(),
+            uuid: alliance_uuid(),
+            name: "Alliance".to_string(),
             enemies: vec![pirate_uuid()],
             compliance: None,
         });
@@ -202,24 +202,24 @@ mod tests {
     // One factionless → not enemies
     #[test]
     fn one_factionless_is_not_enemy() {
-        let reg = make_registry_fed_hostile_to_pirate();
-        assert!(!is_enemy(Some(fed_uuid()), None, &reg));
+        let reg = make_registry_allied_hostile_to_pirate();
+        assert!(!is_enemy(Some(alliance_uuid()), None, &reg));
         assert!(!is_enemy(None, Some(pirate_uuid()), &reg));
     }
 
     // A lists B → A considers B an enemy (asymmetric)
     #[test]
     fn a_lists_b_as_enemy_is_true() {
-        let reg = make_registry_fed_hostile_to_pirate();
-        assert!(is_enemy(Some(fed_uuid()), Some(pirate_uuid()), &reg));
+        let reg = make_registry_allied_hostile_to_pirate();
+        assert!(is_enemy(Some(alliance_uuid()), Some(pirate_uuid()), &reg));
     }
 
     // B does NOT list A → not an enemy (asymmetry)
     #[test]
     fn b_does_not_list_a_is_not_enemy() {
-        let reg = make_registry_fed_hostile_to_pirate();
+        let reg = make_registry_allied_hostile_to_pirate();
         // Pirate has no enemies listed
-        assert!(!is_enemy(Some(pirate_uuid()), Some(fed_uuid()), &reg));
+        assert!(!is_enemy(Some(pirate_uuid()), Some(alliance_uuid()), &reg));
     }
 
     // Neither lists the other → not enemies
@@ -251,12 +251,12 @@ mod tests {
     fn faction_config_toml_round_trip() {
         let toml_str = r#"
 uuid = "aaaaaaaa-0000-0000-0000-000000000001"
-name = "Federation"
+name = "Alliance"
 enemies = ["bbbbbbbb-0000-0000-0000-000000000002"]
 "#;
         let config = parse_faction_config(toml_str).expect("parse must succeed");
-        assert_eq!(config.uuid, fed_uuid());
-        assert_eq!(config.name, "Federation");
+        assert_eq!(config.uuid, alliance_uuid());
+        assert_eq!(config.name, "Alliance");
         assert_eq!(config.enemies, vec![pirate_uuid()]);
     }
 
@@ -274,10 +274,10 @@ name = "Pirate"
     // FactionRegistry insert and lookup
     #[test]
     fn registry_insert_and_get() {
-        let reg = make_registry_fed_hostile_to_pirate();
+        let reg = make_registry_allied_hostile_to_pirate();
         assert_eq!(reg.len(), 2);
-        let fed = reg.get(&fed_uuid()).expect("federation must be present");
-        assert_eq!(fed.name, "Federation");
+        let alliance = reg.get(&alliance_uuid()).expect("alliance must be present");
+        assert_eq!(alliance.name, "Alliance");
     }
 
     // Unknown faction UUID → not an enemy (registry miss)
@@ -291,13 +291,13 @@ name = "Pirate"
 
     // Load actual TOML asset files
     #[test]
-    fn federation_toml_parses_correctly() {
-        let toml_str = include_str!("../../assets/factions/federation.toml");
-        let config = parse_faction_config(toml_str).expect("federation.toml must parse");
-        assert_eq!(config.name, "Federation");
+    fn alliance_toml_parses_correctly() {
+        let toml_str = include_str!("../../assets/factions/alliance.toml");
+        let config = parse_faction_config(toml_str).expect("alliance.toml must parse");
+        assert_eq!(config.name, "Alliance");
         assert!(!config.uuid.is_nil());
         // Must list pirates as enemies
-        assert!(!config.enemies.is_empty(), "Federation must have enemies");
+        assert!(!config.enemies.is_empty(), "Alliance must have enemies");
     }
 
     #[test]
@@ -309,48 +309,48 @@ name = "Pirate"
     }
 
     #[test]
-    fn federation_and_pirate_are_mutually_hostile() {
-        let fed_toml = include_str!("../../assets/factions/federation.toml");
+    fn alliance_and_pirate_are_mutually_hostile() {
+        let alliance_toml = include_str!("../../assets/factions/alliance.toml");
         let pirate_toml = include_str!("../../assets/factions/pirate.toml");
-        let fed = parse_faction_config(fed_toml).unwrap();
+        let alliance = parse_faction_config(alliance_toml).unwrap();
         let pirate = parse_faction_config(pirate_toml).unwrap();
 
         let mut reg = FactionRegistry::new();
-        reg.insert(fed.clone());
+        reg.insert(alliance.clone());
         reg.insert(pirate.clone());
 
         assert!(
-            is_enemy(Some(fed.uuid), Some(pirate.uuid), &reg),
-            "Federation must consider Pirates as enemies"
+            is_enemy(Some(alliance.uuid), Some(pirate.uuid), &reg),
+            "Alliance must consider Pirates as enemies"
         );
         assert!(
-            is_enemy(Some(pirate.uuid), Some(fed.uuid), &reg),
-            "Pirates must consider Federation as enemies"
+            is_enemy(Some(pirate.uuid), Some(alliance.uuid), &reg),
+            "Pirates must consider Alliance as enemies"
         );
     }
 
     #[test]
-    fn federation_and_harrow_are_neutral_by_default() {
+    fn alliance_and_harrow_are_neutral_by_default() {
         // Harrow defaults to neutral so it can be reused as ambient
         // patrols in non-combat worlds (e.g. Starbase Alpha, Before the
         // Fire). Hostile scenarios (combat test) flip the relationship at
         // runtime via the `add_faction_enemy` trigger action.
-        let fed_toml = include_str!("../../assets/factions/federation.toml");
+        let alliance_toml = include_str!("../../assets/factions/alliance.toml");
         let harrow_toml = include_str!("../../assets/factions/harrow.toml");
-        let fed = parse_faction_config(fed_toml).unwrap();
+        let alliance = parse_faction_config(alliance_toml).unwrap();
         let harrow = parse_faction_config(harrow_toml).unwrap();
 
         let mut reg = FactionRegistry::new();
-        reg.insert(fed.clone());
+        reg.insert(alliance.clone());
         reg.insert(harrow.clone());
 
         assert!(
-            !is_enemy(Some(fed.uuid), Some(harrow.uuid), &reg),
-            "Federation must default to neutral toward Harrow"
+            !is_enemy(Some(alliance.uuid), Some(harrow.uuid), &reg),
+            "Alliance must default to neutral toward Harrow"
         );
         assert!(
-            !is_enemy(Some(harrow.uuid), Some(fed.uuid), &reg),
-            "Harrow must default to neutral toward Federation"
+            !is_enemy(Some(harrow.uuid), Some(alliance.uuid), &reg),
+            "Harrow must default to neutral toward Alliance"
         );
     }
 
@@ -358,22 +358,22 @@ name = "Pirate"
 
     #[test]
     fn uuid_by_name_finds_existing_faction() {
-        let reg = make_registry_fed_hostile_to_pirate();
-        assert_eq!(reg.uuid_by_name("Federation"), Some(fed_uuid()));
+        let reg = make_registry_allied_hostile_to_pirate();
+        assert_eq!(reg.uuid_by_name("Alliance"), Some(alliance_uuid()));
         assert_eq!(reg.uuid_by_name("Pirate"), Some(pirate_uuid()));
     }
 
     #[test]
     fn uuid_by_name_returns_none_for_unknown() {
-        let reg = make_registry_fed_hostile_to_pirate();
+        let reg = make_registry_allied_hostile_to_pirate();
         assert!(reg.uuid_by_name("Klingon").is_none());
     }
 
     #[test]
     fn uuid_by_name_is_case_sensitive() {
-        let reg = make_registry_fed_hostile_to_pirate();
-        assert!(reg.uuid_by_name("federation").is_none());
-        assert!(reg.uuid_by_name("FEDERATION").is_none());
+        let reg = make_registry_allied_hostile_to_pirate();
+        assert!(reg.uuid_by_name("alliance").is_none());
+        assert!(reg.uuid_by_name("ALLIANCE").is_none());
     }
 
     #[test]
@@ -404,43 +404,47 @@ name = "Pirate"
 
     #[test]
     fn add_enemy_is_idempotent() {
-        let mut reg = make_registry_fed_hostile_to_pirate();
-        // Federation already lists Pirate as an enemy.
-        assert!(!reg.add_enemy(fed_uuid(), pirate_uuid()));
+        let mut reg = make_registry_allied_hostile_to_pirate();
+        // Alliance already lists Pirate as an enemy.
+        assert!(!reg.add_enemy(alliance_uuid(), pirate_uuid()));
         // And the relationship hasn't been duplicated.
-        let fed = reg.get(&fed_uuid()).unwrap();
+        let alliance = reg.get(&alliance_uuid()).unwrap();
         assert_eq!(
-            fed.enemies.iter().filter(|u| **u == pirate_uuid()).count(),
+            alliance
+                .enemies
+                .iter()
+                .filter(|u| **u == pirate_uuid())
+                .count(),
             1
         );
     }
 
     #[test]
     fn add_enemy_returns_false_for_unknown_faction() {
-        let mut reg = make_registry_fed_hostile_to_pirate();
+        let mut reg = make_registry_allied_hostile_to_pirate();
         let unknown = Uuid::new_v4();
-        assert!(!reg.add_enemy(unknown, fed_uuid()));
+        assert!(!reg.add_enemy(unknown, alliance_uuid()));
     }
 
     #[test]
     fn remove_enemy_clears_relationship() {
-        let mut reg = make_registry_fed_hostile_to_pirate();
-        assert!(is_enemy(Some(fed_uuid()), Some(pirate_uuid()), &reg));
-        assert!(reg.remove_enemy(fed_uuid(), pirate_uuid()));
-        assert!(!is_enemy(Some(fed_uuid()), Some(pirate_uuid()), &reg));
+        let mut reg = make_registry_allied_hostile_to_pirate();
+        assert!(is_enemy(Some(alliance_uuid()), Some(pirate_uuid()), &reg));
+        assert!(reg.remove_enemy(alliance_uuid(), pirate_uuid()));
+        assert!(!is_enemy(Some(alliance_uuid()), Some(pirate_uuid()), &reg));
     }
 
     #[test]
     fn remove_enemy_is_idempotent() {
-        let mut reg = make_registry_fed_hostile_to_pirate();
-        // Pirate has no enemies listed → removing Federation is a no-op.
-        assert!(!reg.remove_enemy(pirate_uuid(), fed_uuid()));
+        let mut reg = make_registry_allied_hostile_to_pirate();
+        // Pirate has no enemies listed → removing Alliance is a no-op.
+        assert!(!reg.remove_enemy(pirate_uuid(), alliance_uuid()));
     }
 
     #[test]
     fn remove_enemy_returns_false_for_unknown_faction() {
-        let mut reg = make_registry_fed_hostile_to_pirate();
+        let mut reg = make_registry_allied_hostile_to_pirate();
         let unknown = Uuid::new_v4();
-        assert!(!reg.remove_enemy(unknown, fed_uuid()));
+        assert!(!reg.remove_enemy(unknown, alliance_uuid()));
     }
 }

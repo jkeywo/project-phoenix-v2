@@ -813,7 +813,7 @@ mod tests {
             .compile(
                 r#"fn node(ctx) {
                     ctx.effects.complete_objective("a");
-                    ctx.effects.add_faction_enemy("Harrow", "Federation");
+                    ctx.effects.add_faction_enemy("Harrow", "Alliance");
                     #{}
                 }"#,
             )
@@ -839,7 +839,7 @@ mod tests {
                 }),
                 BufferedEffect::Action(TriggerAction::AddFactionEnemy {
                     faction: "Harrow".to_string(),
-                    enemy: "Federation".to_string(),
+                    enemy: "Alliance".to_string(),
                 }),
             ],
             "a dialogue fn's name-resolving effect must reach the applier, in \

@@ -1857,15 +1857,15 @@ fn faction_field_defaults_to_none_when_absent() {
 }
 
 #[test]
-fn battleship_toml_parses_with_federation_faction() {
+fn battleship_toml_parses_with_alliance_faction() {
     let config = shipped_hull("alliance_battleship");
     let faction = config
         .faction
         .expect("alliance_battleship must declare a faction");
-    // Must match the Federation UUID in assets/factions/federation.toml
-    let fed_toml = include_str!("../../assets/factions/federation.toml");
+    // Must match the Alliance UUID in assets/factions/alliance.toml
+    let fed_toml = include_str!("../../assets/factions/alliance.toml");
     let fed = crate::ai::faction::parse_faction_config(fed_toml).unwrap();
-    assert_eq!(faction, fed.uuid, "battleship faction must be Federation");
+    assert_eq!(faction, fed.uuid, "battleship faction must be Alliance");
 }
 
 // ── Behaviour block tests ─────────────────────────────────────────────
@@ -2051,7 +2051,7 @@ base_priority = 35.0
 #[test]
 fn harrow_destroyer_template_parses_with_harrow_faction() {
     // (#472) The enemy destroyer is Harrow-factioned so the player ship's
-    // auto-fire (Federation faction) engages it.
+    // auto-fire (Alliance faction) engages it.
     let toml_str = &resolved_text("ship_harrow_destroyer");
     let config = EntityConfig::from_toml(toml_str).expect("ship_harrow_destroyer.toml must parse");
     let faction = config

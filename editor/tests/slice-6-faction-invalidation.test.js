@@ -43,8 +43,8 @@ describe('Slice 6: faction-save invalidation refreshes Entity Mode', () => {
     // Entity Mode discover() returns a controllable factionMap so we can
     // assert it gets re-called after a faction save.
     let discoverCallCount = 0;
-    const factionMapV1 = new Map([['uuid-1', 'Federation']]);
-    const factionMapV2 = new Map([['uuid-1', 'United Federation']]);
+    const factionMapV1 = new Map([['uuid-1', 'Alliance']]);
+    const factionMapV2 = new Map([['uuid-1', 'United Alliance']]);
     const io = {
       readFile: async (path) => fixture(path),
       listDirectory: async (rel) => {
@@ -81,17 +81,17 @@ describe('Slice 6: faction-save invalidation refreshes Entity Mode', () => {
     expect(discoverCallCount).toBe(1);
     // Sanity: initial setFactionMap landed.
     const initial = view.shell.getFactionDropdownOptions();
-    expect(initial.some((o) => o.name === 'Federation')).toBe(true);
+    expect(initial.some((o) => o.name === 'Alliance')).toBe(true);
 
     // Stage a fake faction save through SaveFlow → fires fireFactionSaved
     // → Entity Mode's subscriber re-runs discover().
     modeShell.switchMode('Definitions');
-    modeShell.setOpenFiles('Definitions', ['assets/factions/federation.toml']);
-    modeShell.setActiveFile('Definitions', 'assets/factions/federation.toml');
-    modeShell.markDirty('Definitions', 'assets/factions/federation.toml', true);
-    saveFlow.setContent('Definitions', 'assets/factions/federation.toml', {
+    modeShell.setOpenFiles('Definitions', ['assets/factions/alliance.toml']);
+    modeShell.setActiveFile('Definitions', 'assets/factions/alliance.toml');
+    modeShell.markDirty('Definitions', 'assets/factions/alliance.toml', true);
+    saveFlow.setContent('Definitions', 'assets/factions/alliance.toml', {
       kind: 'faction',
-      data: { uuid: 'uuid-1', name: 'United Federation', enemies: [] },
+      data: { uuid: 'uuid-1', name: 'United Alliance', enemies: [] },
     });
 
     await saveFlow.saveActive();
@@ -101,7 +101,7 @@ describe('Slice 6: faction-save invalidation refreshes Entity Mode', () => {
 
     expect(discoverCallCount).toBe(2);
     const after = view.shell.getFactionDropdownOptions();
-    expect(after.some((o) => o.name === 'United Federation')).toBe(true);
-    expect(after.some((o) => o.name === 'Federation')).toBe(false);
+    expect(after.some((o) => o.name === 'United Alliance')).toBe(true);
+    expect(after.some((o) => o.name === 'Alliance')).toBe(false);
   });
 });

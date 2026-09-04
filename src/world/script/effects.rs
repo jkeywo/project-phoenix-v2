@@ -1855,18 +1855,17 @@ mod tests {
     #[test]
     fn add_faction_enemy_matches_toml() {
         let effs = run_buffered(
-            r#"fn f(ctx) { ctx.effects.add_faction_enemy("Harrow", "Federation"); }"#,
+            r#"fn f(ctx) { ctx.effects.add_faction_enemy("Harrow", "Alliance"); }"#,
             "f",
         );
-        let toml = toml_action(
-            "type = \"add_faction_enemy\"\nfaction = \"Harrow\"\nenemy = \"Federation\"",
-        );
+        let toml =
+            toml_action("type = \"add_faction_enemy\"\nfaction = \"Harrow\"\nenemy = \"Alliance\"");
         assert_eq!(effs, vec![BufferedEffect::Action(toml)]);
         assert_eq!(
             effs,
             vec![BufferedEffect::Action(TriggerAction::AddFactionEnemy {
                 faction: "Harrow".to_string(),
-                enemy: "Federation".to_string(),
+                enemy: "Alliance".to_string(),
             })]
         );
     }
@@ -1879,18 +1878,18 @@ mod tests {
     #[test]
     fn remove_faction_enemy_matches_toml() {
         let effs = run_buffered(
-            r#"fn f(ctx) { ctx.effects.remove_faction_enemy("Harrow", "Federation"); }"#,
+            r#"fn f(ctx) { ctx.effects.remove_faction_enemy("Harrow", "Alliance"); }"#,
             "f",
         );
         let toml = toml_action(
-            "type = \"remove_faction_enemy\"\nfaction = \"Harrow\"\nenemy = \"Federation\"",
+            "type = \"remove_faction_enemy\"\nfaction = \"Harrow\"\nenemy = \"Alliance\"",
         );
         assert_eq!(effs, vec![BufferedEffect::Action(toml)]);
         assert_eq!(
             effs,
             vec![BufferedEffect::Action(TriggerAction::RemoveFactionEnemy {
                 faction: "Harrow".to_string(),
-                enemy: "Federation".to_string(),
+                enemy: "Alliance".to_string(),
             })]
         );
     }
@@ -1903,8 +1902,8 @@ mod tests {
     fn the_faction_verbs_keep_their_authored_order() {
         let effs = run_buffered(
             r#"fn f(ctx) {
-                ctx.effects.add_faction_enemy("Harrow", "Federation");
-                ctx.effects.remove_faction_enemy("Federation", "Harrow");
+                ctx.effects.add_faction_enemy("Harrow", "Alliance");
+                ctx.effects.remove_faction_enemy("Alliance", "Harrow");
             }"#,
             "f",
         );
@@ -1913,10 +1912,10 @@ mod tests {
             vec![
                 BufferedEffect::Action(TriggerAction::AddFactionEnemy {
                     faction: "Harrow".to_string(),
-                    enemy: "Federation".to_string(),
+                    enemy: "Alliance".to_string(),
                 }),
                 BufferedEffect::Action(TriggerAction::RemoveFactionEnemy {
-                    faction: "Federation".to_string(),
+                    faction: "Alliance".to_string(),
                     enemy: "Harrow".to_string(),
                 }),
             ]
@@ -2666,7 +2665,7 @@ mod tests {
         let effs = run_buffered(
             r#"fn f(ctx) {
                 ctx.effects.complete_objective("first");
-                ctx.effects.add_faction_enemy("Harrow", "Federation");
+                ctx.effects.add_faction_enemy("Harrow", "Alliance");
                 ctx.effects.fail_objective("last");
             }"#,
             "f",
@@ -2679,7 +2678,7 @@ mod tests {
                 }),
                 BufferedEffect::Action(TriggerAction::AddFactionEnemy {
                     faction: "Harrow".to_string(),
-                    enemy: "Federation".to_string(),
+                    enemy: "Alliance".to_string(),
                 }),
                 BufferedEffect::Cmd(ActionCmd::FailObjective {
                     id: "last".to_string()
@@ -2815,7 +2814,7 @@ mod tests {
             r#"fn f(ctx) {
                 ctx.effects.complete_objective("first");
                 ctx.effects.open_comms(#{ from: "axiom", node_fn: "hail" });
-                ctx.effects.add_faction_enemy("Harrow", "Federation");
+                ctx.effects.add_faction_enemy("Harrow", "Alliance");
                 ctx.effects.fail_objective("last");
             }"#,
             "f",
@@ -2828,7 +2827,7 @@ mod tests {
                 }),
                 BufferedEffect::Action(TriggerAction::AddFactionEnemy {
                     faction: "Harrow".to_string(),
-                    enemy: "Federation".to_string(),
+                    enemy: "Alliance".to_string(),
                 }),
                 BufferedEffect::Cmd(ActionCmd::FailObjective {
                     id: "last".to_string()

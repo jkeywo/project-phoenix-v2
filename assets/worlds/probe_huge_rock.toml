@@ -111,7 +111,7 @@ transform = { position = [-24.0, 0.0, -64.0] }
 # So this picket flies its own lane 2 km east, through its own huge rock. The
 # distance is the point: its authored `sensor_range` is 110, and LOD promotion
 # needs the player inside that, so it stays demoted for the whole run no matter
-# where the player's own patrol takes it. Harrow and the Federation are left
+# where the player's own patrol takes it. Harrow and the Alliance are left
 # neutral (this world adds no `add_faction_enemy`), so the two ships never fight
 # and the picket's own `patrol-ironveil` doctrine outscores its `destroy-hostiles`
 # entry throughout.

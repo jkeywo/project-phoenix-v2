@@ -23,7 +23,7 @@
 #   Ladder Depot A      62/100. Pumping. The one that still works.
 #   Ladder Depot B      34/100, below its own 40 % line, so it reads as OFF from
 #                       the first tick — the triage picture is data, not prose.
-#   Skyway Control      the authority. Hailable, Federation, and where the
+#   Skyway Control      the authority. Hailable, Alliance, and where the
 #                       survey report goes.
 #
 # THREE CLAIMANTS, TWO BERTHS. That ratio is the whole scenario, and all three
@@ -758,7 +758,7 @@ description = "world.falling_skyway.global.description"
 # world that had to script its own opening state would be describing a change
 # nobody was there for.
 #
-# Two sides, and they are NOT factions. Both parties are Federation, neither
+# Two sides, and they are NOT factions. Both parties are Alliance, neither
 # will ever fire on the other, and the whole crisis is between them — folding a
 # strike into the enemies list would have made "the line is down" mean "the
 # depot is hostile" on every console that reads a faction.
@@ -1355,7 +1355,7 @@ priority = "threat_containment"
 outcome_flag = "depot_b_gallery_contained"
 warning = "world.falling_skyway.security.warning.gallery_fire"
 
-# Skyway Control. Federation, hailable at the template level, and the party the
+# Skyway Control. Alliance, hailable at the template level, and the party the
 # survey report goes to. It is a `station_axiom.toml` because that is the
 # shipped authority station; its point defence is beside the point in a world
 # with nothing hostile in it.
@@ -4259,7 +4259,7 @@ fn on_file_evidence(ctx) {
 // rather than by a hail that silently does nothing.
 on_hailed("world.falling_skyway.entity.havelock_enforcer.name", "on_picket_hailed").repeat();
 
-// Provocation. Until this fires the Harrow and the Federation are not enemies
+// Provocation. Until this fires the Harrow and the Alliance are not enemies
 // and the picket does nothing at all — which is what makes what follows a
 // CHOICE the crew made rather than an ambush the mission sprang.
 on_attacked("world.falling_skyway.entity.havelock_enforcer.name", "on_picket_attacked");
@@ -4313,8 +4313,8 @@ fn picket_settled(ctx) {
 fn stand_the_picket_down(ctx) {
     ctx.flags.increment("havelock_enforcer_resolved", 1);
     ctx.flags.havelock_enforcer_force_authorized = 0;
-    ctx.effects.remove_faction_enemy("Harrow", "Federation");
-    ctx.effects.remove_faction_enemy("Federation", "Harrow");
+    ctx.effects.remove_faction_enemy("Harrow", "Alliance");
+    ctx.effects.remove_faction_enemy("Alliance", "Harrow");
     ctx.effects.complete_objective("obj-a1-picket");
     if ctx.flags.havelock_enforcer_force_posted > 0 {
         ctx.effects.complete_objective("obj-a1-picket-force");
@@ -4393,8 +4393,8 @@ fn on_picket_attacked(ctx) {
         return;
     }
     ctx.flags.picket_engaged = 1;
-    ctx.effects.add_faction_enemy("Harrow", "Federation");
-    ctx.effects.add_faction_enemy("Federation", "Harrow");
+    ctx.effects.add_faction_enemy("Harrow", "Alliance");
+    ctx.effects.add_faction_enemy("Alliance", "Harrow");
     // [ai] Unratified: shooting at the operator's security is worth twelve
     // points of their goodwill. It is a number for #1036's negotiation to argue
     // with, not a balance claim.

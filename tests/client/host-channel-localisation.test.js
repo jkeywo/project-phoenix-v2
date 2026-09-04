@@ -151,7 +151,7 @@ describe('host channel localisation boundary', () => {
         position: [12, 0, -8],
         faction: {
           entity_id: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
-          name: 'faction.federation.display_name',
+          name: 'faction.alliance.display_name',
         },
         status: { hull_percent: null, condition_percent: null, destroyed: false },
         current_target: {

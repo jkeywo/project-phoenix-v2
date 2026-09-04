@@ -224,7 +224,7 @@ Scenario-applied modifiers and flags have `ModifierSource::Scenario { id, tag }`
 ### Default content
 - A canonical default scenario (Starbase Alpha) spawns a raider and a station. The station can be hailed (a short branching dialogue). When the **raider** is attacked, an `on_attacked` handler broadcasts a comms message (no player interaction required) and `load_world` brings in the reinforcements layer. The station has a parallel `on_attacked` handler with its own distress broadcast.
 - A canonical AI demo scenario (patrol) spawns a Harrow patrol ship (`ship_harrow_patrol`) at named anchors, exercising every state and most conditions.
-- Two default factions ship: Federation (player) and Pirate (enemies = Federation), in `assets/factions/`.
+- Two default factions ship: Alliance (player) and Pirate (enemies = Alliance), in `assets/factions/`.
 
 ---
 

@@ -3053,7 +3053,7 @@ fn system_blackboard_dossiers_round_trips_and_carries_no_field_for_a_secret() {
         facts: vec![
             DossierFactSnapshot {
                 label: crate::dossier::FACT_FACTION.into(),
-                value: DossierValue::Text("faction.federation.display_name".into()),
+                value: DossierValue::Text("faction.alliance.display_name".into()),
             },
             DossierFactSnapshot {
                 label: crate::dossier::FACT_COMMS.into(),

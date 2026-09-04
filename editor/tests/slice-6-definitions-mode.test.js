@@ -32,7 +32,7 @@ describe('Slice 6: Definitions Mode', () => {
   });
 
   it('clicking a faction file populates the form with UUID + name + enemies (AC2)', async () => {
-    await ctx.view._internal.loadFactionFile('assets/factions/federation.toml');
+    await ctx.view._internal.loadFactionFile('assets/factions/alliance.toml');
 
     const formRoot = ctx.host.querySelector('.faction-form');
     expect(formRoot).toBeTruthy();
@@ -41,20 +41,20 @@ describe('Slice 6: Definitions Mode', () => {
     expect(uuid.textContent).toBe('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa');
 
     const nameInput = ctx.host.querySelector('.def-name-input');
-    expect(nameInput.value).toBe('Federation');
+    expect(nameInput.value).toBe('Alliance');
 
     const select = ctx.host.querySelector('.def-multi-select');
     expect(select).toBeTruthy();
   });
 
   it('enemy multi-select option labels are faction NAMES, not UUIDs (AC3)', async () => {
-    await ctx.view._internal.loadFactionFile('assets/factions/federation.toml');
+    await ctx.view._internal.loadFactionFile('assets/factions/alliance.toml');
 
     const select = ctx.host.querySelector('.def-multi-select');
     const options = select.querySelectorAll('OPTION');
     const texts = options.map((o) => o.textContent).sort();
 
-    // The other three factions (Federation is excluded as the active file).
+    // The other three factions (Alliance is excluded as the active file).
     expect(texts).toEqual(['Harrow', 'Pirate', 'Requiem']);
 
     // The UUID lives in `.value`, never in the visible text.
@@ -65,41 +65,41 @@ describe('Slice 6: Definitions Mode', () => {
   });
 
   it('mutating a faction name stages content + marks dirty + saves via TOML stringifier; fireFactionSaved fires (AC5)', async () => {
-    await ctx.view._internal.loadFactionFile('assets/factions/federation.toml');
+    await ctx.view._internal.loadFactionFile('assets/factions/alliance.toml');
 
     const factionFired = [];
     ctx.invalidationBus.onFactionSaved((p) => factionFired.push(p));
 
-    ctx.view._internal.handleFactionNameChange('United Federation');
+    ctx.view._internal.handleFactionNameChange('United Alliance');
 
-    const path = 'assets/factions/federation.toml';
+    const path = 'assets/factions/alliance.toml';
     expect(ctx.modeShell.isDirty('Definitions', path)).toBe(true);
     const stash = ctx.saveFlow._contentCache.Definitions[path];
     expect(stash.kind).toBe('faction');
-    expect(stash.data.name).toBe('United Federation');
+    expect(stash.data.name).toBe('United Alliance');
 
     const undoEntries = ctx.modeShell.getUndoHistory('Definitions', path);
     expect(undoEntries.length).toBe(1);
-    expect(undoEntries[0].data.name).toBe('Federation');
+    expect(undoEntries[0].data.name).toBe('Alliance');
 
     ctx.modeShell.setActiveFile('Definitions', path);
     const result = await ctx.saveFlow.saveActive();
     expect(result.ok).toBe(true);
     expect(ctx.writeFileCalls.length).toBe(1);
     expect(ctx.writeFileCalls[0].path).toBe(path);
-    expect(ctx.writeFileCalls[0].content).toContain('United Federation');
+    expect(ctx.writeFileCalls[0].content).toContain('United Alliance');
     expect(ctx.modeShell.isDirty('Definitions', path)).toBe(false);
     expect(factionFired).toEqual([path]);
   });
 
   it('undo restores prior faction name', async () => {
-    await ctx.view._internal.loadFactionFile('assets/factions/federation.toml');
-    ctx.view._internal.handleFactionNameChange('United Federation');
+    await ctx.view._internal.loadFactionFile('assets/factions/alliance.toml');
+    ctx.view._internal.handleFactionNameChange('United Alliance');
 
     const restore = ctx.getRestoreCb();
     expect(restore).toBeDefined();
-    restore(ctx.modeShell, 'assets/factions/federation.toml', 'undo');
+    restore(ctx.modeShell, 'assets/factions/alliance.toml', 'undo');
 
-    expect(ctx.view.factionEditor.getFormState().name).toBe('Federation');
+    expect(ctx.view.factionEditor.getFormState().name).toBe('Alliance');
   });
 });

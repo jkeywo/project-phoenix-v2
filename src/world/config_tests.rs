@@ -2379,7 +2379,7 @@ fn parse_world_combat_test_toml_is_script_authored_with_8_timed_waves() {
             "world load must spawn nothing — the raid is the whole roster"
         );
     }
-    // Both directions of the Federation <-> Harrow rivalry are armed there.
+    // Both directions of the Alliance <-> Harrow rivalry are armed there.
     let enemies: Vec<(&str, &str)> = all_actions
         .iter()
         .filter_map(|a| match a {
@@ -2391,7 +2391,7 @@ fn parse_world_combat_test_toml_is_script_authored_with_8_timed_waves() {
         .collect();
     assert_eq!(
         enemies,
-        vec![("Harrow", "Federation"), ("Federation", "Harrow")],
+        vec![("Harrow", "Alliance"), ("Alliance", "Harrow")],
         "the rivalry is asymmetric, so both directions must be authored"
     );
 
@@ -3656,13 +3656,13 @@ fn add_faction_enemy_action_parses() {
 [[action]]
 type    = "add_faction_enemy"
 faction = "Harrow"
-enemy   = "Federation"
+enemy   = "Alliance"
 "#;
     let parsed = actions(toml).expect("must parse");
     match &parsed[0] {
         TriggerAction::AddFactionEnemy { faction, enemy } => {
             assert_eq!(faction, "Harrow");
-            assert_eq!(enemy, "Federation");
+            assert_eq!(enemy, "Alliance");
         }
         other => panic!("expected AddFactionEnemy, got {other:?}"),
     }
@@ -3674,13 +3674,13 @@ fn remove_faction_enemy_action_parses() {
 [[action]]
 type    = "remove_faction_enemy"
 faction = "Harrow"
-enemy   = "Federation"
+enemy   = "Alliance"
 "#;
     let parsed = actions(toml).expect("must parse");
     match &parsed[0] {
         TriggerAction::RemoveFactionEnemy { faction, enemy } => {
             assert_eq!(faction, "Harrow");
-            assert_eq!(enemy, "Federation");
+            assert_eq!(enemy, "Alliance");
         }
         other => panic!("expected RemoveFactionEnemy, got {other:?}"),
     }
@@ -3691,7 +3691,7 @@ fn add_faction_enemy_rejects_a_missing_faction() {
     let toml = r#"
 [[action]]
 type  = "add_faction_enemy"
-enemy = "Federation"
+enemy = "Alliance"
 "#;
     let err = actions(toml).expect_err("must reject");
     assert!(err.contains("faction"), "error must mention faction: {err}");
@@ -3713,7 +3713,7 @@ fn remove_faction_enemy_rejects_a_missing_faction() {
     let toml = r#"
 [[action]]
 type  = "remove_faction_enemy"
-enemy = "Federation"
+enemy = "Alliance"
 "#;
     let err = actions(toml).expect_err("must reject");
     assert!(err.contains("faction"), "error must mention faction: {err}");

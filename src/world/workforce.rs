@@ -18,7 +18,7 @@
 //! [`FactionConfig`](crate::ai::faction::FactionConfig) already answers *who
 //! shoots whom*. A workforce answers *who turns up for work*, which is a
 //! different question with a different lifetime: the Skyway workers and the
-//! operator that employs them are both Federation, neither will ever fire on
+//! operator that employs them are both Alliance, neither will ever fire on
 //! the other, and the whole crisis is between them. Folding a strike into the
 //! enemies list would have made "the line is down" mean "the depot is hostile",
 //! which is the wrong thing on every console that reads a faction.

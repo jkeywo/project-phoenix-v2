@@ -127,7 +127,7 @@ Campaign projection treats `[infrastructure] publish = false` as a private missi
 
 Factions are loaded from `assets/factions/*.toml` (`FactionConfig` at `src/ai/faction.rs:17`) into a `FactionRegistry` (`src/ai/faction.rs:53`) exposed as `FactionRegistryResource` (`src/entities/config_cache.rs:1065`). The asymmetric `is_enemy(a, b, registry)` predicate (`src/ai/faction.rs:148`) returns `true` only when `a`'s `enemies` list contains `b`; factionless entities are neutral to everyone. A faction may carry an optional `display_name` string id, the only faction string a player sees; `name` remains the reference key used by `add_faction_enemy` and entity templates. The AI's shared nearest-hostile scan (`find_nearest_hostile`, `src/ai/core.rs:1632`) consults this predicate when picking a target.
 
-**Defaults:** Federation is hostile to Pirate only. Harrow defaults to neutral so non-combat worlds (Starbase Alpha in `default.toml`, Before the Fire in `before_the_fire.toml`) can reuse the same Harrow ship templates as ambient patrols. Combat scenarios (`combat_test.toml`) flip the Federation↔Harrow relationship hostile on `on_world_loaded` via two `add_faction_enemy` actions before the first wave's hostile scan.
+**Defaults:** Alliance is hostile to Pirate only. Harrow defaults to neutral so non-combat worlds (Starbase Alpha in `default.toml`, Before the Fire in `before_the_fire.toml`) can reuse the same Harrow ship templates as ambient patrols. Combat scenarios (`combat_test.toml`) flip the Alliance↔Harrow relationship hostile on `on_world_loaded` via two `add_faction_enemy` actions before the first wave's hostile scan.
 
 
 ## Resources

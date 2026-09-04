@@ -533,7 +533,7 @@ fn operate_sensors_ai_runs_per_entity_for_ai_controlled_ships() {
 
 // ── tick_sensors_threat_warning tests ──────────────────────────────────────
 
-/// Helper: initialise a faction registry with Federation (self) and Harrow
+/// Helper: initialise a faction registry with Alliance (self) and Harrow
 /// (enemy) factions, register the sensor range, and spawn the local ship.
 fn test_app_with_factions() -> (App, uuid::Uuid, uuid::Uuid) {
     let mut app = test_app();
@@ -549,13 +549,13 @@ fn test_app_with_factions() -> (App, uuid::Uuid, uuid::Uuid) {
     .expect("the shipped battleship declares a ship config");
 
     // Seed the faction registry so is_enemy works.
-    let fed_uuid = uuid::Uuid::new_v4();
+    let alliance_uuid = uuid::Uuid::new_v4();
     let harrow_uuid = uuid::Uuid::new_v4();
     let mut reg = crate::ai::faction::FactionRegistry::new();
     reg.insert(crate::ai::faction::FactionConfig {
         display_name: None,
-        uuid: fed_uuid,
-        name: "Federation".into(),
+        uuid: alliance_uuid,
+        name: "Alliance".into(),
         enemies: vec![harrow_uuid],
         compliance: None,
     });
@@ -563,7 +563,7 @@ fn test_app_with_factions() -> (App, uuid::Uuid, uuid::Uuid) {
         display_name: None,
         uuid: harrow_uuid,
         name: "Harrow".into(),
-        enemies: vec![fed_uuid],
+        enemies: vec![alliance_uuid],
         compliance: None,
     });
     app.insert_resource(crate::entities::config_cache::FactionRegistryResource(reg));
@@ -580,11 +580,11 @@ fn test_app_with_factions() -> (App, uuid::Uuid, uuid::Uuid) {
         crate::entities::spawner::EntityUuid(ship_uuid.clone()),
         SensorsThreatState::default(),
         crate::modifiers::ShipModifiers::new(),
-        crate::entities::spawner::FactionComponent(fed_uuid),
+        crate::entities::spawner::FactionComponent(alliance_uuid),
         crate::ship::state::ShipPhysics::default(),
     ));
 
-    (app, fed_uuid, harrow_uuid)
+    (app, alliance_uuid, harrow_uuid)
 }
 
 /// Spawn a hostile entity at the given position.
@@ -1627,8 +1627,8 @@ fn publish_npc_without_profile_falls_back_to_console_range() {
 
 // ── Issue #746 tests: independent horizon-limited hostile selection ──────
 
-/// Build on `sensors_ai_test_app` with a Federation/Harrow faction registry
-/// and give the single test ship the Federation faction, so the tier-3
+/// Build on `sensors_ai_test_app` with a Alliance/Harrow faction registry
+/// and give the single test ship the Alliance faction, so the tier-3
 /// nearest-hostile selector can judge who is an enemy.
 fn sensors_ai_test_app_with_factions() -> (App, uuid::Uuid, uuid::Uuid) {
     let mut app = sensors_ai_test_app();
@@ -1639,7 +1639,7 @@ fn sensors_ai_test_app_with_factions() -> (App, uuid::Uuid, uuid::Uuid) {
     reg.insert(crate::ai::faction::FactionConfig {
         display_name: None,
         uuid: fed,
-        name: "Federation".into(),
+        name: "Alliance".into(),
         enemies: vec![harrow],
         compliance: None,
     });
@@ -1691,7 +1691,7 @@ fn selection_of(app: &mut App, uuid: &str) -> Option<String> {
 #[test]
 fn ai_sensors_independently_selects_nearest_hostile_only() {
     let (mut app, fed, harrow) = sensors_ai_test_app_with_factions();
-    let neutral_faction = uuid::Uuid::new_v4(); // not an enemy of Federation
+    let neutral_faction = uuid::Uuid::new_v4(); // not an enemy of Alliance
 
     let ally = uuid::Uuid::new_v4().to_string();
     let neutral = uuid::Uuid::new_v4().to_string();

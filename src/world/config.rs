@@ -1116,7 +1116,7 @@ pub enum TriggerAction {
     },
     /// Add `enemy` to `faction`'s enemies list in the live
     /// `FactionRegistry`. Both fields are faction `name` strings
-    /// (e.g. `"Harrow"`, `"Federation"`) and are resolved to UUIDs via
+    /// (e.g. `"Harrow"`, `"Alliance"`) and are resolved to UUIDs via
     /// `FactionRegistry::uuid_by_name` at dispatch time.
     ///
     /// `is_enemy(a, b)` is asymmetric, so flipping a relationship in both
@@ -1126,7 +1126,7 @@ pub enum TriggerAction {
     ///
     /// Used by scenarios that need to make an otherwise-neutral faction
     /// hostile (e.g. `assets/worlds/combat_test.toml` arms the
-    /// Federation<->Harrow rivalry on world load).
+    /// Alliance<->Harrow rivalry on world load).
     AddFactionEnemy {
         faction: String,
         enemy: String,

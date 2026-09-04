@@ -1869,11 +1869,11 @@ radius = 150.0
 Factionless entities (no `faction` field on the entity) are neither
 enemies nor targets.
 
-### Example — `assets/factions/federation.toml`
+### Example — `assets/factions/alliance.toml`
 
 ```toml
 uuid = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
-name = "Federation"
+name = "Alliance"
 enemies = ["bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb"]
 ```
 

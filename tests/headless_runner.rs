@@ -3617,7 +3617,7 @@ fn the_harrow_battleship_takes_its_close_defence_opportunities_in_a_real_run() {
 /// via the built-in player-death path. (A fast courier can also evade a slow
 /// battleship indefinitely — that is a legitimate timeout under other seeds —
 /// so this pins the seed that resolves.) Both combatants appear in the per-ship
-/// ledger (side A = Federation, side B = Harrow), and the side aggregates in
+/// ledger (side A = Alliance, side B = Harrow), and the side aggregates in
 /// `outcome_report` carry the enemy's surviving hull.
 #[test]
 fn asymmetric_duel_ends_in_annihilation_with_side_tagged_ledgers() {
@@ -7779,7 +7779,7 @@ fn the_dossier_channel_carries_what_the_crew_know_and_not_what_they_do_not() {
     assert_eq!(control.facts[0].label, FACT_FACTION);
     assert_eq!(
         control.facts[0].value,
-        DossierValue::Text("faction.federation.display_name".into())
+        DossierValue::Text("faction.alliance.display_name".into())
     );
 
     // THE PROMISE, on the sheet of the party it was made to and nobody else's.

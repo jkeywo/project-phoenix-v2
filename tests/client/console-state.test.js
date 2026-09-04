@@ -279,7 +279,7 @@ describe('buildBlips', () => {
     const blips = buildBlips(
       [
         { uuid: 'hostile', x: 1, z: 0, tags: ['ship'], target_tags: ['ship'], faction: 'harrow', radar_icon: 'ship' },
-        { uuid: 'ally', x: 2, z: 0, tags: ['ship'], target_tags: ['ship'], faction: 'federation', radar_icon: 'ship' },
+        { uuid: 'ally', x: 2, z: 0, tags: ['ship'], target_tags: ['ship'], faction: 'alliance', radar_icon: 'ship' },
         { uuid: 'derelict', x: 3, z: 0, tags: ['ship'], target_tags: ['ship'], radar_icon: 'ship' },
         { uuid: 'structure', x: 4, z: 0, tags: ['station'], target_tags: ['station'], radar_icon: 'station' },
       ],

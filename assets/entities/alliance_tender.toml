@@ -33,7 +33,7 @@ includes = ["fragments/ai/fleet_baseline.toml", "fragments/ai/captain_alliance.t
 
 class = "courier"  # picker badge / scan subtitle — a light support hull
 tags = ["ship", "npc"]
-faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"  # Federation — allied to the player
+faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"  # Alliance — allied to the player
 # Authored mass (issue #1154).
 mass = 11000.0
 

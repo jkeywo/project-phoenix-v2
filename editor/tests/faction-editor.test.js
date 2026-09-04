@@ -31,10 +31,10 @@ function allFactionFiles() {
 
 describe('parseFactionToml', () => {
   it('parses a valid faction TOML', () => {
-    const toml = `uuid = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"\nname = "Federation"\nenemies = ["bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb"]\n`;
+    const toml = `uuid = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"\nname = "Alliance"\nenemies = ["bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb"]\n`;
     const result = parseFactionToml(toml);
     expect(result.uuid).toBe('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa');
-    expect(result.name).toBe('Federation');
+    expect(result.name).toBe('Alliance');
     expect(result.enemies).toEqual(['bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb']);
   });
 
@@ -70,7 +70,7 @@ describe('stringifyFactionToml', () => {
   it('serializes a faction to TOML', () => {
     const faction = {
       uuid: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
-      name: 'Federation',
+      name: 'Alliance',
       enemies: ['bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb'],
     };
     const toml = stringifyFactionToml(faction);
@@ -83,7 +83,7 @@ describe('stringifyFactionToml', () => {
   it('produces parseable TOML', () => {
     const faction = {
       uuid: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
-      name: 'Federation',
+      name: 'Alliance',
       enemies: ['bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb'],
     };
     const toml = stringifyFactionToml(faction);
@@ -124,9 +124,9 @@ describe('FactionEditor — file list', () => {
     }
   });
 
-  it('includes federation, harrow, pirate, requiem', () => {
+  it('includes alliance, harrow, pirate, requiem', () => {
     const list = editor.getFileList();
-    expect(list).toContain('assets/factions/federation.toml');
+    expect(list).toContain('assets/factions/alliance.toml');
     expect(list).toContain('assets/factions/harrow.toml');
     expect(list).toContain('assets/factions/pirate.toml');
     expect(list).toContain('assets/factions/requiem.toml');
@@ -148,12 +148,12 @@ describe('FactionEditor — openFile and form state', () => {
   });
 
   it('opens a faction file and populates form state', () => {
-    const opened = editor.openFile('assets/factions/federation.toml');
+    const opened = editor.openFile('assets/factions/alliance.toml');
     expect(opened).toBe(true);
-    expect(editor.getActiveFile()).toBe('assets/factions/federation.toml');
+    expect(editor.getActiveFile()).toBe('assets/factions/alliance.toml');
     const state = editor.getFormState();
     expect(state.uuid).toBe('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa');
-    expect(state.name).toBe('Federation');
+    expect(state.name).toBe('Alliance');
     expect(Array.isArray(state.enemies)).toBe(true);
   });
 
@@ -162,7 +162,7 @@ describe('FactionEditor — openFile and form state', () => {
   });
 
   it('uuid is read-only (form state cannot change it)', () => {
-    editor.openFile('assets/factions/federation.toml');
+    editor.openFile('assets/factions/alliance.toml');
     const state = editor.getFormState();
     const originalUuid = state.uuid;
     // Mutating returned state should not change internal state
@@ -179,12 +179,12 @@ describe('FactionEditor — setName', () => {
   beforeEach(() => {
     editor = new FactionEditor();
     editor.loadAll(allFactionFiles());
-    editor.openFile('assets/factions/federation.toml');
+    editor.openFile('assets/factions/alliance.toml');
   });
 
   it('updates the name in the form state', () => {
-    editor.setName('New Federation');
-    expect(editor.getFormState().name).toBe('New Federation');
+    editor.setName('New Alliance');
+    expect(editor.getFormState().name).toBe('New Alliance');
   });
 
   it('does not change uuid when name is updated', () => {
@@ -209,13 +209,13 @@ describe('FactionEditor — getEnemyOptions', () => {
   beforeEach(() => {
     editor = new FactionEditor();
     editor.loadAll(allFactionFiles());
-    editor.openFile('assets/factions/federation.toml');
+    editor.openFile('assets/factions/alliance.toml');
   });
 
   it('returns all factions except the open one', () => {
     const options = editor.getEnemyOptions();
     const paths = options.map((o) => o.path);
-    expect(paths).not.toContain('assets/factions/federation.toml');
+    expect(paths).not.toContain('assets/factions/alliance.toml');
     expect(paths).toContain('assets/factions/harrow.toml');
     expect(paths).toContain('assets/factions/pirate.toml');
     expect(paths).toContain('assets/factions/requiem.toml');
@@ -247,7 +247,7 @@ describe('FactionEditor — setEnemies', () => {
   beforeEach(() => {
     editor = new FactionEditor();
     editor.loadAll(allFactionFiles());
-    editor.openFile('assets/factions/federation.toml');
+    editor.openFile('assets/factions/alliance.toml');
   });
 
   it('replaces enemies list in form state', () => {
@@ -284,12 +284,12 @@ describe('FactionEditor — serialize', () => {
   });
 
   it('serializes the form state to TOML', () => {
-    editor.openFile('assets/factions/federation.toml');
+    editor.openFile('assets/factions/alliance.toml');
     const toml = editor.serialize();
     expect(typeof toml).toBe('string');
     const reparsed = parse(toml);
     expect(reparsed.uuid).toBe('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa');
-    expect(reparsed.name).toBe('Federation');
+    expect(reparsed.name).toBe('Alliance');
   });
 
   it('writes enemies as a UUID array', () => {
@@ -321,7 +321,7 @@ describe('Round-trip: load → modify → serialize → deep-equal expected', ()
     // Modify name
     editor.setName('Requiem Reborn');
 
-    // Modify enemies — add Federation and Pirate by UUID
+    // Modify enemies — add Alliance and Pirate by UUID
     editor.setEnemies([
       'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
       'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb',

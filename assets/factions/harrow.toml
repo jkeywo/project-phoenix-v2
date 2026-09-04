@@ -1,5 +1,5 @@
 # Harrow defaults to neutral. Scenarios that need them hostile to the
-# Federation (e.g. assets/worlds/combat_test.toml) flip the relationship
+# Alliance (e.g. assets/worlds/combat_test.toml) flip the relationship
 # at runtime via the `add_faction_enemy` world trigger action so the same
 # Harrow ship templates can also appear as ambient patrols in non-combat
 # worlds (Starbase Alpha, Before the Fire).

@@ -2823,7 +2823,7 @@ mod tests {
             ]
         );
         assert_eq!(projected.class.as_deref(), Some("cruiser"));
-        assert_eq!(projected.hull_id.as_deref(), Some("NCC-1864"));
+        assert_eq!(projected.hull_id.as_deref(), Some("AEV-1864"));
         assert_eq!(projected.power_rating, Some(90));
         assert_eq!(
             projected.ship_css.as_deref(),

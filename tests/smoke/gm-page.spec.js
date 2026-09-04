@@ -877,7 +877,7 @@ test('a GM reaches and operates a spatial Helm Station at 1280x720, then release
   expect(spatial.range).toBe(authoredConfig.helmRange);
   expect(spatial.blips).toBeGreaterThan(0);
   expect(authoredConfig).toMatchObject({
-    hullId: 'NCC-1864',
+    hullId: 'AEV-1864',
     helmRange: 93.75,
     sensorsRange: 300,
     navRange: 800,

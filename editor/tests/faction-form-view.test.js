@@ -14,7 +14,7 @@ describe('renderFactionFormView', () => {
     const host = mount({
       formState: {
         uuid: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
-        name: 'Federation',
+        name: 'Alliance',
         enemies: [],
       },
       enemyOptions: [],
@@ -37,7 +37,7 @@ describe('renderFactionFormView', () => {
   it('renders name as an editable text input wired to onNameChange', () => {
     let lastName = null;
     const host = mount({
-      formState: { uuid: 'x', name: 'Federation', enemies: [] },
+      formState: { uuid: 'x', name: 'Alliance', enemies: [] },
       enemyOptions: [],
       onNameChange: (n) => { lastName = n; },
       onEnemiesChange: () => {},
@@ -46,17 +46,17 @@ describe('renderFactionFormView', () => {
     const input = host.querySelector('.def-name-input');
     expect(input).toBeTruthy();
     expect(input.type).toBe('text');
-    expect(input.value).toBe('Federation');
+    expect(input.value).toBe('Alliance');
 
-    fireInput(input, 'United Federation');
-    expect(lastName).toBe('United Federation');
+    fireInput(input, 'United Alliance');
+    expect(lastName).toBe('United Alliance');
   });
 
   it('enemy multi-select shows NAMES as option text and UUIDs as values (AC3)', () => {
     const host = mount({
       formState: { uuid: 'me', name: 'Me', enemies: [] },
       enemyOptions: [
-        { uuid: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', name: 'Federation', path: 'a.toml' },
+        { uuid: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', name: 'Alliance', path: 'a.toml' },
         { uuid: 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb', name: 'Pirate', path: 'b.toml' },
       ],
       onNameChange: () => {},
@@ -71,7 +71,7 @@ describe('renderFactionFormView', () => {
 
     // textContent must be the NAME (the human-readable label).
     const texts = options.map((o) => o.textContent).sort();
-    expect(texts).toEqual(['Federation', 'Pirate']);
+    expect(texts).toEqual(['Alliance', 'Pirate']);
 
     // value must be the UUID (the canonical wire identity).
     const values = options.map((o) => o.value).sort();
@@ -86,7 +86,7 @@ describe('renderFactionFormView', () => {
     const host = mount({
       formState: { uuid: 'me', name: 'Me', enemies: [] },
       enemyOptions: [
-        { uuid: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', name: 'Federation', path: 'a.toml' },
+        { uuid: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', name: 'Alliance', path: 'a.toml' },
         { uuid: 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb', name: 'Pirate', path: 'b.toml' },
       ],
       onNameChange: () => {},
@@ -104,7 +104,7 @@ describe('renderFactionFormView', () => {
     const host2 = mount({
       formState: { uuid: 'me', name: 'Me', enemies: ['aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa'] },
       enemyOptions: [
-        { uuid: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', name: 'Federation', path: 'a.toml' },
+        { uuid: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', name: 'Alliance', path: 'a.toml' },
         { uuid: 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb', name: 'Pirate', path: 'b.toml' },
       ],
       onNameChange: () => {},

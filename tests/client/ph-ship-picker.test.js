@@ -26,8 +26,8 @@ describe('PhShipPicker', () => {
     const { el } = setup();
     el.state = {
       ships: [
-        { template_path: 'assets/entities/alliance_battleship.toml', label: 'Battleship', class: 'battleship', hull_id: 'NCC-2001', power_rating: 120 },
-        { template_path: 'assets/entities/alliance_cruiser.toml', label: 'Cruiser', class: 'cruiser', hull_id: 'NCC-1864', power_rating: 90 },
+        { template_path: 'assets/entities/alliance_battleship.toml', label: 'Battleship', class: 'battleship', hull_id: 'AEV-2001', power_rating: 120 },
+        { template_path: 'assets/entities/alliance_cruiser.toml', label: 'Cruiser', class: 'cruiser', hull_id: 'AEV-1864', power_rating: 90 },
       ]
     };
     const cards = el.shadowRoot.querySelectorAll('.ship-card');
@@ -126,10 +126,10 @@ describe('PhShipPicker', () => {
     const { el } = setup();
     el.state = {
       ships: [
-        { template_path: 'assets/entities/alliance_battleship.toml', label: 'Battleship', class: 'battleship', hull_id: 'NCC-2001', power_rating: 120 },
+        { template_path: 'assets/entities/alliance_battleship.toml', label: 'Battleship', class: 'battleship', hull_id: 'AEV-2001', power_rating: 120 },
       ]
     };
-    expect(el.shadowRoot.textContent).toContain('NCC-2001');
+    expect(el.shadowRoot.textContent).toContain('AEV-2001');
     expect(el.shadowRoot.textContent).toContain('120');
   });
 

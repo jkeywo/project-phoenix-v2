@@ -115,7 +115,7 @@ describe('entity-toml extended', () => {
       }));
       const map = buildFactionMap(factionFiles);
       expect(map.size).toBeGreaterThan(0);
-      expect(map.get('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa')).toBe('Federation');
+      expect(map.get('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa')).toBe('Alliance');
       expect(map.get('bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb')).toBe('Pirate');
     });
 
@@ -413,8 +413,8 @@ describe('EntityModeShell', () => {
     });
 
     it('resolveFactionName returns name when known', () => {
-      shell.setFactionMap(new Map([['aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', 'Federation']]));
-      expect(shell.resolveFactionName('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa')).toBe('Federation');
+      shell.setFactionMap(new Map([['aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', 'Alliance']]));
+      expect(shell.resolveFactionName('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa')).toBe('Alliance');
     });
 
     it('resolveFactionName returns uuid when unknown', () => {

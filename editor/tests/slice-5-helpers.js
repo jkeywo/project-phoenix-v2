@@ -178,7 +178,7 @@ export async function setupEntityMode(opts = {}) {
     getProjectRoot: async () => ({ stub: true }),
     discover: async () => ({
       factionMap: new Map([
-        ['aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', 'Federation'],
+        ['aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', 'Alliance'],
         ['bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb', 'Pirate'],
       ]),
       complexityPaths: ['assets/complexity/tactical.toml'],

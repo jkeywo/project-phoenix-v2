@@ -7,7 +7,7 @@
 name = "entity.alliance_courier.name"
 display_name = "entity.alliance_courier.display_name"
 class = "courier"
-hull_id = "NCC-0912"
+hull_id = "AEV-0912"
 # Independent of the (absent) [power] block: feeds the lobby card and
 # combat_test's ship_power counter. Low enough to stay under that scenario's
 # >=90 / >=100 bonus-spawn gates, which is the point of flying solo.

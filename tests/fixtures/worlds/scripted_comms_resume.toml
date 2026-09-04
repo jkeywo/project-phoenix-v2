@@ -7,7 +7,7 @@
 #
 # ── The one frame this world exists to produce ───────────────────────────────
 #
-# One player cruiser, one Federation station in comms range of it, and one
+# One player cruiser, one Alliance station in comms range of it, and one
 # scripted `on_timer(1, …)` trigger that opens a thread. At the default 60 Hz
 # `sim_tick_hz` the trigger fires ~1 s (~tick 60) in, and
 # `open_scripted_comms_threads` materialises the thread in `SimSet::Physics` of

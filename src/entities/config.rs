@@ -3264,7 +3264,7 @@ pub struct EntityConfig {
     /// top-level TOML `class` field.
     #[serde(default)]
     pub class: Option<String>,
-    /// Unique hull identifier/registry number (e.g. "NCC-1701"). Sourced from
+    /// Unique hull identifier/registry number (e.g. "AEV-1864"). Sourced from
     /// top-level TOML `hull_id` field.
     #[serde(default)]
     pub hull_id: Option<String>,

@@ -510,7 +510,7 @@ world.combat_test.comms.9.message,assets/worlds/combat_test.toml → [comms] mes
 world.combat_test.comms.10.message,assets/worlds/combat_test.toml → [comms] message,[Starbase Alpha: hull integrity below 50 percent. We need immediate support.]
 world.combat_test.comms.11.message,assets/worlds/combat_test.toml → [comms] message,"[Starbase Alpha: critical hull integrity below 10 percent. Phoenix, defend the station.]"
 world.default.global.title,assets/worlds/default.toml → [global] title,Starbase Alpha
-world.default.global.description,assets/worlds/default.toml → [global] description,[Defend the Federation outpost against an incoming raider patrol.]
+world.default.global.description,assets/worlds/default.toml → [global] description,[Defend the Alliance outpost against an incoming raider patrol.]
 world.entity.luna.name,assets/worlds/default.toml → [entity] name (entity display name; also the cross-reference key),luna
 world.entity.lava_planet.name,assets/worlds/default.toml → [entity] name (entity display name; also the cross-reference key),Lava Planet
 world.entity.raider_alpha.name,assets/worlds/default.toml → [entity] name (entity display name; also the cross-reference key),raider_alpha
@@ -1533,7 +1533,7 @@ dossier.fact.condition,"Dossier fact label — the subject structure's condition
 dossier.fact.commitment_open,"Dossier fact label — a promise made to this party and still owed (issue #1030)","[Promised]"
 dossier.fact.commitment_kept,"Dossier fact label — a promise made to this party and kept (issue #1030)","[Promise kept]"
 dossier.fact.commitment_broken,"Dossier fact label — a promise made to this party and broken (issue #1030)","[Promise broken]"
-faction.federation.display_name,"assets/factions/federation.toml -> display_name","[Alliance]"
+faction.alliance.display_name,"assets/factions/alliance.toml -> display_name","[Alliance]"
 faction.harrow.display_name,"assets/factions/harrow.toml -> display_name","[Harrow]"
 faction.pirate.display_name,"assets/factions/pirate.toml -> display_name","[Raiders]"
 faction.requiem.display_name,"assets/factions/requiem.toml -> display_name","[Requiem]"
@@ -1841,7 +1841,7 @@ world.falling_skyway.comms.deny_committee,Response text — refusing the strike 
 world.falling_skyway.comms.committee_lifting,Dialogue body — the strike committee hearing they are carried in Falling Skyway,"[Say that again on the record. — Right. Thirty-one, moving now. Nobody who matters is going to thank you for this, Destroyer. We will.]"
 world.falling_skyway.comms.committee_denied,Dialogue body — the strike committee hearing they are not carried in Falling Skyway,[Understood. We will get the gear off the arm and find ourselves a wall.]
 world.falling_skyway.comms.committee_waits,Dialogue body — the strike committee standing by for a decision in Falling Skyway,[We will hold. We have got very good at holding.]
-world.falling_skyway.comms.havelock_claims,Dialogue body — Havelock ask for a lift in the transfer window in Falling Skyway,"[Destroyer, Havelock Cutter. Twenty-two units, and I will say plainly what it buys you. This depot chain is company-run, and the next Federation hull through this corridor books its fuel through us. Our people are staff, not cargo.]"
+world.falling_skyway.comms.havelock_claims,Dialogue body — Havelock ask for a lift in the transfer window in Falling Skyway,"[Destroyer, Havelock Cutter. Twenty-two units, and I will say plainly what it buys you. This depot chain is company-run, and the next Alliance hull through this corridor books its fuel through us. Our people are staff, not cargo.]"
 world.falling_skyway.comms.lift_havelock,Response text — granting Havelock a lift in Falling Skyway,[Havelock has the second slot. Load your people.]
 world.falling_skyway.comms.deny_havelock,Response text — refusing Havelock a lift in Falling Skyway,[Your staff can sit it out with everyone else. Havelock is not on the manifest.]
 world.falling_skyway.comms.havelock_lifting,Dialogue body — Havelock hearing they are carried in Falling Skyway,"[Noted, and logged. You will find us reasonable the next time you come through this corridor.]"

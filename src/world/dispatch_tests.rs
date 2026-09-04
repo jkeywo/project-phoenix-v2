@@ -100,7 +100,7 @@ fn layer(loader_path: Option<&str>) -> LayerView {
 /// A registry with two named factions plus their UUIDs.
 fn two_factions() -> (FactionRegistry, Uuid, Uuid) {
     let harrow = Uuid::from_u128(1);
-    let federation = Uuid::from_u128(2);
+    let alliance = Uuid::from_u128(2);
     let mut registry = FactionRegistry::new();
     registry.insert(FactionConfig {
         display_name: None,
@@ -111,12 +111,12 @@ fn two_factions() -> (FactionRegistry, Uuid, Uuid) {
     });
     registry.insert(FactionConfig {
         display_name: None,
-        uuid: federation,
-        name: "Federation".to_string(),
+        uuid: alliance,
+        name: "Alliance".to_string(),
         enemies: vec![],
         compliance: None,
     });
-    (registry, harrow, federation)
+    (registry, harrow, alliance)
 }
 
 fn add_objective(targets: Vec<&str>) -> TriggerAction {
@@ -1238,12 +1238,12 @@ fn destroy_entity_unknown_name_warns_and_emits_nothing() {
 
 #[test]
 fn add_faction_enemy_resolves_both_names_to_uuids() {
-    let (registry, harrow, federation) = two_factions();
+    let (registry, harrow, alliance) = two_factions();
     let mut fx = Fixture::new();
     fx.factions = Some(registry);
     let action = TriggerAction::AddFactionEnemy {
         faction: "Harrow".to_string(),
-        enemy: "Federation".to_string(),
+        enemy: "Alliance".to_string(),
     };
     let out = dispatch_action(&action, &fx.ctx());
 
@@ -1251,7 +1251,7 @@ fn add_faction_enemy_resolves_both_names_to_uuids() {
         out.commands,
         vec![ActionCmd::AddFactionEnemy {
             faction_uuid: harrow,
-            enemy_uuid: federation,
+            enemy_uuid: alliance,
         }]
     );
     assert!(out.warnings.is_empty());
@@ -1262,7 +1262,7 @@ fn add_faction_enemy_without_registry_warns_and_emits_nothing() {
     let fx = Fixture::new();
     let action = TriggerAction::AddFactionEnemy {
         faction: "Harrow".to_string(),
-        enemy: "Federation".to_string(),
+        enemy: "Alliance".to_string(),
     };
     let out = dispatch_action(&action, &fx.ctx());
 
@@ -1280,7 +1280,7 @@ fn add_faction_enemy_unknown_faction_warns_and_emits_nothing() {
     fx.factions = Some(registry);
     let action = TriggerAction::AddFactionEnemy {
         faction: "Nobody".to_string(),
-        enemy: "Federation".to_string(),
+        enemy: "Alliance".to_string(),
     };
     let out = dispatch_action(&action, &fx.ctx());
 
@@ -1316,7 +1316,7 @@ fn faction_name_lookup_is_case_sensitive() {
     fx.factions = Some(registry);
     let action = TriggerAction::AddFactionEnemy {
         faction: "harrow".to_string(),
-        enemy: "Federation".to_string(),
+        enemy: "Alliance".to_string(),
     };
     let out = dispatch_action(&action, &fx.ctx());
 
@@ -1328,12 +1328,12 @@ fn faction_name_lookup_is_case_sensitive() {
 
 #[test]
 fn remove_faction_enemy_resolves_both_names_to_uuids() {
-    let (registry, harrow, federation) = two_factions();
+    let (registry, harrow, alliance) = two_factions();
     let mut fx = Fixture::new();
     fx.factions = Some(registry);
     let action = TriggerAction::RemoveFactionEnemy {
         faction: "Harrow".to_string(),
-        enemy: "Federation".to_string(),
+        enemy: "Alliance".to_string(),
     };
     let out = dispatch_action(&action, &fx.ctx());
 
@@ -1341,7 +1341,7 @@ fn remove_faction_enemy_resolves_both_names_to_uuids() {
         out.commands,
         vec![ActionCmd::RemoveFactionEnemy {
             faction_uuid: harrow,
-            enemy_uuid: federation,
+            enemy_uuid: alliance,
         }]
     );
     assert!(out.warnings.is_empty());
@@ -1352,7 +1352,7 @@ fn remove_faction_enemy_without_registry_warns_and_emits_nothing() {
     let fx = Fixture::new();
     let action = TriggerAction::RemoveFactionEnemy {
         faction: "Harrow".to_string(),
-        enemy: "Federation".to_string(),
+        enemy: "Alliance".to_string(),
     };
     let out = dispatch_action(&action, &fx.ctx());
 
@@ -1370,7 +1370,7 @@ fn remove_faction_enemy_unknown_faction_warns_and_emits_nothing() {
     fx.factions = Some(registry);
     let action = TriggerAction::RemoveFactionEnemy {
         faction: "Nobody".to_string(),
-        enemy: "Federation".to_string(),
+        enemy: "Alliance".to_string(),
     };
     let out = dispatch_action(&action, &fx.ctx());
 
@@ -1521,12 +1521,12 @@ fn state_game_over_without_message_yields_empty_reason_not_none_directly() {
 
 #[test]
 fn state_add_faction_enemy_emits_command_directly() {
-    let (registry, harrow, federation) = two_factions();
+    let (registry, harrow, alliance) = two_factions();
     let mut fx = Fixture::new();
     fx.factions = Some(registry);
     let action = TriggerAction::AddFactionEnemy {
         faction: "Harrow".to_string(),
-        enemy: "Federation".to_string(),
+        enemy: "Alliance".to_string(),
     };
     let out = dispatch_state_action(&action, &fx.ctx());
 
@@ -1534,7 +1534,7 @@ fn state_add_faction_enemy_emits_command_directly() {
         out.commands,
         vec![ActionCmd::AddFactionEnemy {
             faction_uuid: harrow,
-            enemy_uuid: federation,
+            enemy_uuid: alliance,
         }]
     );
     assert!(out.warnings.is_empty());
@@ -1545,7 +1545,7 @@ fn state_add_faction_enemy_without_registry_warns_directly() {
     let fx = Fixture::new();
     let action = TriggerAction::AddFactionEnemy {
         faction: "Harrow".to_string(),
-        enemy: "Federation".to_string(),
+        enemy: "Alliance".to_string(),
     };
     let out = dispatch_state_action(&action, &fx.ctx());
 
@@ -1558,12 +1558,12 @@ fn state_add_faction_enemy_without_registry_warns_directly() {
 
 #[test]
 fn state_remove_faction_enemy_emits_command_directly() {
-    let (registry, harrow, federation) = two_factions();
+    let (registry, harrow, alliance) = two_factions();
     let mut fx = Fixture::new();
     fx.factions = Some(registry);
     let action = TriggerAction::RemoveFactionEnemy {
         faction: "Harrow".to_string(),
-        enemy: "Federation".to_string(),
+        enemy: "Alliance".to_string(),
     };
     let out = dispatch_state_action(&action, &fx.ctx());
 
@@ -1571,7 +1571,7 @@ fn state_remove_faction_enemy_emits_command_directly() {
         out.commands,
         vec![ActionCmd::RemoveFactionEnemy {
             faction_uuid: harrow,
-            enemy_uuid: federation,
+            enemy_uuid: alliance,
         }]
     );
     assert!(out.warnings.is_empty());

@@ -69,7 +69,7 @@ Infrastructure matters culturally as well as mechanically. A skyhook, depot, con
 
 The Alliance is an exploratory and humanitarian interstellar polity whose ship crews exercise substantial local discretion while remaining answerable to public legitimacy. Its professional starship tradition combines technical, diplomatic, scientific, medical, logistical, and protective responsibilities rather than separating exploration from duty of care. Alliance crews should act with confidence without being infallible, and institutional disagreement should arise from competing responsibilities rather than a simple enlightened-versus-corrupt split.
 
-The current internal `Federation` faction identifier is a technical legacy, not a second polity. Player-facing fiction should use **Alliance** unless a future migration deliberately changes the runtime identifier. The Alliance’s constitution, territorial scale, central institutions, rank system, and exact pre-war relationship with the Imperium remain open.
+The current internal `Alliance` faction identifier is a technical legacy, not a second polity. Player-facing fiction should use **Alliance** unless a future migration deliberately changes the runtime identifier. The Alliance’s constitution, territorial scale, central institutions, rank system, and exact pre-war relationship with the Imperium remain open.
 
 ### The Imperium and the later Dynasty
 
@@ -176,7 +176,7 @@ Dialogue is currently text-led. If voiced material is introduced, the complete t
 - Exact date and political conditions of Phoenix relative to the future Alliance–Imperium war.
 - Phoenix’s region, local powers, political map, travel model, and relationship to the later Neutral Zone frontier.
 - The formal nature of the Alliance and Imperium, their current diplomacy, and whether the future war has identifiable early causes.
-- Runtime migration from the internal `Federation` identifier to the player-facing Alliance name.
+- Runtime migration from the internal `Alliance` identifier to the player-facing Alliance name.
 - Which Imperial branch traditions already exist, how Houses share authority, and the current status of minor Houses.
 - House Harrow’s Phoenix-era leadership, internal factions, language, self-understanding, and relationship to local operations.
 - Havelock’s legal status, scale, and relationship to both major factions.

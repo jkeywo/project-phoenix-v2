@@ -2783,7 +2783,7 @@ fn harrow_faction_uuid() -> uuid::Uuid {
 
 #[test]
 fn add_faction_enemy_action_makes_factions_mutually_hostile() {
-    // Pre-condition: Harrow and Federation default to neutral.
+    // Pre-condition: Harrow and Alliance default to neutral.
     let app = ai_trigger_test_app();
     {
         let reg = &app
@@ -2796,7 +2796,7 @@ fn add_faction_enemy_action_makes_factions_mutually_hostile() {
                 Some(harrow_faction_uuid()),
                 reg
             ),
-            "precondition: Federation must not consider Harrow hostile by default"
+            "precondition: Alliance must not consider Harrow hostile by default"
         );
         assert!(
             !crate::ai::faction::is_enemy(
@@ -2804,7 +2804,7 @@ fn add_faction_enemy_action_makes_factions_mutually_hostile() {
                 Some(fed_faction_uuid()),
                 reg
             ),
-            "precondition: Harrow must not consider Federation hostile by default"
+            "precondition: Harrow must not consider Alliance hostile by default"
         );
     }
 
@@ -2812,10 +2812,10 @@ fn add_faction_enemy_action_makes_factions_mutually_hostile() {
     let app = dispatch_delayed_actions_in_new_app(vec![
         TriggerAction::AddFactionEnemy {
             faction: "Harrow".into(),
-            enemy: "Federation".into(),
+            enemy: "Alliance".into(),
         },
         TriggerAction::AddFactionEnemy {
-            faction: "Federation".into(),
+            faction: "Alliance".into(),
             enemy: "Harrow".into(),
         },
     ]);
@@ -2826,30 +2826,30 @@ fn add_faction_enemy_action_makes_factions_mutually_hostile() {
         .0;
     assert!(
         crate::ai::faction::is_enemy(Some(fed_faction_uuid()), Some(harrow_faction_uuid()), reg),
-        "Federation must consider Harrow hostile after add_faction_enemy"
+        "Alliance must consider Harrow hostile after add_faction_enemy"
     );
     assert!(
         crate::ai::faction::is_enemy(Some(harrow_faction_uuid()), Some(fed_faction_uuid()), reg),
-        "Harrow must consider Federation hostile after add_faction_enemy"
+        "Harrow must consider Alliance hostile after add_faction_enemy"
     );
 }
 
 #[test]
 fn add_faction_enemy_action_with_unknown_faction_name_is_noop() {
-    // The Federation registry stays unchanged when the named faction
+    // The Alliance registry stays unchanged when the named faction
     // is missing. Verifies the warn-and-skip dispatch path.
     let app = dispatch_delayed_actions_in_new_app(vec![TriggerAction::AddFactionEnemy {
         faction: "Klingon".into(), // not a registered faction
-        enemy: "Federation".into(),
+        enemy: "Alliance".into(),
     }]);
 
     let reg = &app
         .world()
         .resource::<crate::entities::config_cache::FactionRegistryResource>()
         .0;
-    // Federation's enemies list must still contain Pirate (its default)
+    // Alliance's enemies list must still contain Pirate (its default)
     // and nothing else from the AddFactionEnemy dispatch.
-    let fed = reg.get(&fed_faction_uuid()).expect("federation present");
+    let fed = reg.get(&fed_faction_uuid()).expect("alliance present");
     let pirate_uuid = uuid::Uuid::parse_str("bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb").unwrap();
     assert_eq!(
         fed.enemies,
@@ -2864,11 +2864,11 @@ fn remove_faction_enemy_action_removes_relationship() {
     let app = dispatch_delayed_actions_in_new_app(vec![
         TriggerAction::AddFactionEnemy {
             faction: "Harrow".into(),
-            enemy: "Federation".into(),
+            enemy: "Alliance".into(),
         },
         TriggerAction::RemoveFactionEnemy {
             faction: "Harrow".into(),
-            enemy: "Federation".into(),
+            enemy: "Alliance".into(),
         },
     ]);
 
@@ -2883,12 +2883,12 @@ fn remove_faction_enemy_action_removes_relationship() {
 }
 
 /// Scenario:
-///   1. Spawn a Harrow-factioned NPC that has locked a Federation player
+///   1. Spawn a Harrow-factioned NPC that has locked a Alliance player
 ///      ship (the lock is seeded by hand to stand in for a prior
 ///      `enemy_in_range` engagement).
 ///   2. Make the two sides mutually hostile via `add_faction_enemy`, so the
 ///      precondition holds.
-///   3. Dispatch `remove_faction_enemy` for Harrow → Federation.
+///   3. Dispatch `remove_faction_enemy` for Harrow → Alliance.
 ///   4. Assert the NPC's lock is cleared — the revalidation kicked in
 ///      because the target's faction is no longer hostile to its own.
 ///
@@ -2902,7 +2902,7 @@ fn remove_faction_enemy_action_clears_blackboard_target_when_target_becomes_frie
 
     let mut app = ai_trigger_test_app();
 
-    // Prepare a Federation-factioned "player ship" entity.
+    // Prepare a Alliance-factioned "player ship" entity.
     let player_uuid_str = "11111111-1111-1111-1111-111111111111";
     let player_uuid = uuid::Uuid::parse_str(player_uuid_str).unwrap();
     app.world_mut().spawn((
@@ -2947,21 +2947,21 @@ fn remove_faction_enemy_action_clears_blackboard_target_when_target_becomes_frie
         vec![
             TriggerAction::AddFactionEnemy {
                 faction: "Harrow".into(),
-                enemy: "Federation".into(),
+                enemy: "Alliance".into(),
             },
             TriggerAction::AddFactionEnemy {
-                faction: "Federation".into(),
+                faction: "Alliance".into(),
                 enemy: "Harrow".into(),
             },
             TriggerAction::RemoveFactionEnemy {
                 faction: "Harrow".into(),
-                enemy: "Federation".into(),
+                enemy: "Alliance".into(),
             },
         ],
     );
 
     // The NPC's lock must be cleared because Harrow no longer considers
-    // Federation hostile. `ai_target_selection`'s retention tier would
+    // Alliance hostile. `ai_target_selection`'s retention tier would
     // otherwise hold the lock forever: it re-checks that the target is alive
     // and in radar range, never that it is still an enemy.
     let lock = app
@@ -6517,11 +6517,11 @@ fn delayed_queue_dispatches_every_action_variant_in_queue_order() {
             },
             TriggerAction::AddFactionEnemy {
                 faction: "Harrow".into(),
-                enemy: "Federation".into(),
+                enemy: "Alliance".into(),
             },
             TriggerAction::RemoveFactionEnemy {
                 faction: "Harrow".into(),
-                enemy: "Federation".into(),
+                enemy: "Alliance".into(),
             },
             TriggerAction::LoadWorld {
                 path: "assets/worlds/allvar_load.toml".into(),

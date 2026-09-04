@@ -270,7 +270,7 @@ test('the public Fleet role control selects the explicit GM boot profile', async
   expect(errors).toEqual([]);
 });
 
-test('rendererless GM maps and inspects stable local ship truth', async ({ context }) => {
+test('rendererless GM maps and inspects stable local ship truth', { tag: '@core' }, async ({ context }) => {
   const page = await context.newPage();
   const errors = captureServerPageErrors(page);
   await page.goto('/?gm=1&scenario=assets/worlds/default.toml');

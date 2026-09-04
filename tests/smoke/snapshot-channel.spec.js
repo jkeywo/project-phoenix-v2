@@ -35,7 +35,7 @@ async function bootHost(context) {
   return { serverPage, hostId: await readHostPeerId(serverPage) };
 }
 
-test('SimState arrives via the lossy channel when it is available', async ({ context }) => {
+test('SimState arrives via the lossy channel when it is available', { tag: '@core' }, async ({ context }) => {
   const { serverPage, hostId } = await bootHost(context);
   const client = await createTestClient(context, hostId, { name: 'Tester' });
 

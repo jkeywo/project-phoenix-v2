@@ -89,7 +89,7 @@ function firstDivergence(
   return null;
 }
 
-test('wasm: a delayed browser instance folds the same digests as the native pin', async ({
+test('wasm: a delayed browser instance folds the same digests as the native pin', { tag: '@core' }, async ({
   context,
 }) => {
   const pinned = JSON.parse(readFileSync(LEDGER_PATH, 'utf8'));

@@ -234,7 +234,7 @@ function expectViewscreenDrawn(stats, errors, label) {
 test.describe('viewscreen renders', () => {
   test.describe.configure({ timeout: 420_000 });
 
-  test('combat_test draws the scene on the shipped [render] defaults', async ({ context }) => {
+  test('combat_test draws the scene on the shipped [render] defaults', { tag: '@core' }, async ({ context }) => {
     const { errors, stats } = await bootAndMeasure(context, { world: COMBAT_TEST });
     console.log(`combat_test/default pixels: ${JSON.stringify(stats)}`);
     expectViewscreenDrawn(stats, errors, 'combat_test default');

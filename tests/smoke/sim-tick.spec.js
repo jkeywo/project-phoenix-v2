@@ -34,7 +34,7 @@ async function waitFrames(page, frames) {
   );
 }
 
-test('sim advances on the fixed logical tick, not the rendered frame', async ({ context }) => {
+test('sim advances on the fixed logical tick, not the rendered frame', { tag: '@core' }, async ({ context }) => {
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
   await waitForWasmReady(serverPage);

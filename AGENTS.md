@@ -592,7 +592,17 @@ PHOENIX_DEMO_BUILD=true cargo test --lib -- \
 
 # Smoke tests (Playwright, Chromium) — requires dist/ built first
 cd tests/smoke && npm install && npx playwright install chromium
-npx playwright test                            # from tests/smoke/
+npm run test:core                              # the @core tier — what CI runs
+npx playwright test                            # all 241 — the nightly's tier
+npx playwright test comms-visiting-station     # ONE feature's deep specs
+#   @core is 44 tests, one breadth test per feature area, tagged in the spec
+#   with `{ tag: '@core' }`. It is what a PR and a main push run, so it is the
+#   tier a change has to survive. It CANNOT catch a regression confined to one
+#   variant of a feature whose breadth test still passes — while working on a
+#   feature, run that feature's own spec by name (third line above), and if a
+#   PR genuinely needs the lot, label it `smoke-full`.
+#   Adding a feature means adding its @core test: if a whole feature can break
+#   with the @core tier green, the tier has a hole in it.
 #   PHOENIX_SMOKE_PORT=3100 npx playwright test  — serve dist/ on another port
 #   AND refuse to adopt an existing server. `reuseExistingServer` otherwise
 #   silently picks up a stale `npx serve` on 3000 (another worktree's dist/, or
@@ -626,10 +636,13 @@ git diff perf/baselines
 #   and header prose survive. Write commentary in the HEADER — the RON value
 #   below it is regenerated. See src/perf/baseline.rs.
 
-# CI: ci.yml — eight jobs. `pasm`, `test` and `editor-test` run in PARALLEL and
-# gate independently (any one of them red fails the build); `build` needs
-# `test`; `smoke` needs `build`; `perf` needs `test` and `smoke`; `balance`
-# needs `test`; `deploy` runs on main and needs none of `perf`/`balance`.
+# CI: ci.yml — eleven jobs on two cadences. `pasm`, `test`, `editor-test`,
+# `viewer-test` and `boundary` run in PARALLEL and gate independently (any one
+# of them red fails the build); `build` needs `test`; `smoke` needs `build`;
+# `deploy` runs on main. `native-build`, `perf` and `balance` are NIGHTLY ONLY
+# (schedule + workflow_dispatch) — none of them was ever on the critical path,
+# so they cost runner minutes rather than wall clock, and they measure things
+# that move on the order of days.
 #
 #   pasm         uv run pasm validate ; uv run pasm scan — both through
 #                vellum's `pasm-validate` composite action (fleet-standard,
@@ -643,14 +656,28 @@ git diff perf/baselines
 #                npm run lod-captures:check
 #   build        TRUNK_BUILD_RELEASE=true trunk build --release ;
 #                node scripts/build-client.mjs
-#   smoke        npx playwright test (against the built dist/)
+#   smoke        npx playwright test $SMOKE_GREP --shard=N/3, against the built
+#                dist/, across a 3-way matrix. TWO TIERS: @core (44 breadth
+#                tests, one per feature area) on PRs and main pushes; the full
+#                241 on the nightly, on workflow_dispatch, and on a PR labelled
+#                `smoke-full`. See the job's header comment for the trade.
+#   deploy       peaceiris/actions-gh-pages@v4 — publishes dist/ to GitHub
+#                Pages; main branch only, gated on the @core smoke pass
+#
+#   — nightly only —
+#   native-build release phoenix-headless + phoenix-perf, as `native-bins`
 #   perf         phoenix-perf assets|mesh|report — GATES on the `assets`
 #                scenario only (report --gate, exit 3); every other scenario
 #                reports into the job summary and the perf-capture artifact
 #   balance      destroyer report (non-gating) plus the ratified cruiser matrix
 #                (`scripts/balance-runs.cruiser.toml`, gating)
-#   deploy       peaceiris/actions-gh-pages@v4 — publishes dist/ to GitHub
-#                Pages; main branch only, no gate of its own
+#
+# Perf or balance numbers for a branch in flight: run the workflow by hand
+# (`gh workflow run ci.yml --ref <branch>`), which takes the nightly path.
+#
+# Keep this list in sync with .github/workflows/ci.yml — if you add a gate
+# there, add it above, and vice versa. Trusting a stale list here is how a
+# batch lands "green" and breaks the build.
 #
 # Keep this list in sync with .github/workflows/ci.yml — if you add a gate
 # there, add it above, and vice versa. Trusting a stale list here is how a
@@ -873,7 +900,7 @@ Two rules that are easy to get wrong:
   The sibling is the old `mod tests { ... }` body dedented one level, unchanged otherwise: same `use super::*;` (still resolves — `super` is the production module, unaffected by where the file lives) plus whatever other imports the tests need, same `#[test]` fns, same fixture helpers. This is a **test-only move** — it must not touch a line of production code and must not change what a test does, only where it lives; a relocation commit's diff on the production file should be `-mod tests { ... }` / `+#[path] mod tests;` and nothing else.
   Companion convention for the fixture bodies themselves: an inline literal (a large JSON payload, an embedded Rhai program) that's reused by name across several tests hoists to a named `const`/helper item near the top of the sibling, instead of staying duplicated inline at each call site. A literal used by exactly one test stays inline next to the assertion it supports — hoisting a single-use fixture away from its only reader makes the test harder to read, not easier.
 - **JS tests (`npx vitest run`):** `tests/client/*.test.js` covering the pure `gui/*.js` modules (state builders, action map, registries, panels) and the pure `scripts/balance-runs.mjs` merge/format/expand fns (`tests/client/balance-runs.test.js`, fabricated report JSON — no sim).
-- **Smoke tests (`tests/smoke/`, Playwright):** boot real server WASM in headless Chromium with a `BroadcastChannel`-backed transport stand-in, `tests/smoke/rendezvous-shim.js` (CI has no real WebRTC and no deployed worker). It fakes only the WebSocket and the `RTCPeerConnection`: the rendezvous protocol it terminates is the REAL `worker-rendezvous/src/registry.js`, imported into the host page. `tests/smoke/transport-fixture.js` is the single seam every transport assumption lives behind — `fixtures.js` and the ~40 specs that use `readHostPeerId`/`createTestClient` know nothing about it. `tests/smoke/transport-shim.spec.js` tests the stand-in itself. Two projects in `playwright.config.js`: `chromium` runs the message/DOM specs with no GPU (`src/server/bridge.rs` skips `RenderPlugin` under `navigator.webdriver`), and `render` runs `*.render.spec.js` under SwiftShader with that flag hidden, so the viewscreen actually draws. `npx playwright test` runs both.
+- **Smoke tests (`tests/smoke/`, Playwright):** boot real server WASM in headless Chromium with a `BroadcastChannel`-backed transport stand-in, `tests/smoke/rendezvous-shim.js` (CI has no real WebRTC and no deployed worker). It fakes only the WebSocket and the `RTCPeerConnection`: the rendezvous protocol it terminates is the REAL `worker-rendezvous/src/registry.js`, imported into the host page. `tests/smoke/transport-fixture.js` is the single seam every transport assumption lives behind — `fixtures.js` and the ~40 specs that use `readHostPeerId`/`createTestClient` know nothing about it. `tests/smoke/transport-shim.spec.js` tests the stand-in itself. Two projects in `playwright.config.js`: `chromium` runs the message/DOM specs with no GPU (`src/server/bridge.rs` skips `RenderPlugin` under `navigator.webdriver`), and `render` runs `*.render.spec.js` under SwiftShader with that flag hidden, so the viewscreen actually draws. `npx playwright test` runs both. **Two tiers since the 2026-09 restructure:** every spec is always here, and `{ tag: '@core' }` marks the 44 that make up the breadth pass CI runs on a PR or a main push — one test per feature area, so no whole feature can break unnoticed. The remaining ~200 (every edge, refusal and per-arc variant) run on the nightly, on `workflow_dispatch`, and on a PR labelled `smoke-full`. A NEW FEATURE NEEDS A NEW @core TEST; a new edge case does not.
 - **Viewscreen render check (`tests/smoke/viewscreen.render.spec.js`):** boots combat_test and falling_skyway to a live viewscreen and reads canvas pixels back through a screenshot, asserting the scene area is not one flat colour. It exists because a render-graph break need not log anything — the PRD #1023 HDR regression turned the canvas black with a completely clean console (see `render_setup::apply_target_hdr`), and no other test in this repo draws a frame. Covers both the shipped `[render]` defaults and the documented `hdr = false` retreat.
 - **Headless runner (`tests/headless_runner.rs`, `--features headless`):** boots the whole simulation natively with nobody connected and asserts on end state. Lives in an *integration* test, not an inline `mod tests`, because building a headless app populates the process-global native template cache — inside the lib test binary that leaks into ~2500 unrelated unit tests. Anything calling `config_cache::insert_native_config` belongs here.
 - **PASM model checks (`uv run pasm validate`, `uv run pasm scan`, `uv run pasm traceability`):** the fleet tool's own deterministic checks over the design model in `pasm/spec/` — reference integrity, cross-domain links, declared-versus-observed drift, traceability roll-ups. **These assert on the spec YAML, so editing a slice can fail them without touching a line of Rust.** `cargo test` will not catch it; CI's `pasm` job will. Run them whenever you touch `pasm/spec/`. `validate` is green at `Status: OK` with ~39 informational warnings and exit 0. There is no pytest suite here — the tool, and its tests, live in [vellum](https://github.com/jkeywo/vellum) (de-vendored in `ada7a172`); see [pasm/README.md](./pasm/README.md).

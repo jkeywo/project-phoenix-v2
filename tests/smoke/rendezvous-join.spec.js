@@ -62,7 +62,7 @@ test('the host shows a code a guest can read across the room', async ({ context 
   expect(await host.evaluate(() => window.__qrDraws)).toContain(link);
 });
 
-test('typing the code reaches Welcome over a direct channel', async ({ context }) => {
+test('typing the code reaches Welcome over a direct channel', { tag: '@core' }, async ({ context }) => {
   const host = await bootHost(context);
   const code = await joinCodeOn(host);
 

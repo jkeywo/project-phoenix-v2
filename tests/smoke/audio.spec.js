@@ -62,7 +62,7 @@ const EXPECTED = {
   music: tomlString(COMBAT_TEST_TOML, 'audio.red_alert', 'music_file'),
 };
 
-test('audio config is data-driven from ship + world TOML and builds the audio graph', async ({
+test('audio config is data-driven from ship + world TOML and builds the audio graph', { tag: '@core' }, async ({
   context,
 }) => {
   await context.route('**/assets/worlds/combat_test.toml', (route) =>

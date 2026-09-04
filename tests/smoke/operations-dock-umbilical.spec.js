@@ -103,7 +103,7 @@ async function latestBlackboard(client, systemId) {
   }, systemId);
 }
 
-test('Helm dock -> Engineering umbilical -> capacity moves between two hulls', async ({
+test('Helm dock -> Engineering umbilical -> capacity moves between two hulls', { tag: '@core' }, async ({
   context,
 }) => {
   test.setTimeout(90_000);

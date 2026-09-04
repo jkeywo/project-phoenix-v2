@@ -49,7 +49,7 @@ test('refresh in the lobby rejoins the same station', async ({ context }) => {
   await c1b.close();
 });
 
-test('refresh mid-game rejoins straight onto the same console', async ({ context }) => {
+test('refresh mid-game rejoins straight onto the same console', { tag: '@core' }, async ({ context }) => {
   const hostId = await bootServer(context);
   const TOKEN = 'reconnect-ingame';
 

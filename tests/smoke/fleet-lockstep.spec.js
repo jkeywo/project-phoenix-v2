@@ -177,7 +177,7 @@ async function fleetOfTwo(context) {
 }
 
 test.describe('two ship hosts hold one tick clock', () => {
-  test('each host runs on because it keeps hearing from the other', async ({ context }) => {
+  test('each host runs on because it keeps hearing from the other', { tag: '@core' }, async ({ context }) => {
     const { lead, member } = await fleetOfTwo(context);
 
     // Both are in a fleet, know their own slot, and took the agreed delay.

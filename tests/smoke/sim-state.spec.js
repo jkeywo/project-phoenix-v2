@@ -121,7 +121,7 @@ test('StartImpulseCharge completes in the TOML-configured duration (~3 s)', asyn
   await helm.close();
 });
 
-test('SetThrust changes ship position in subsequent blackboard updates', async ({ context }) => {
+test('SetThrust changes ship position in subsequent blackboard updates', { tag: '@core' }, async ({ context }) => {
   const { captain, helm, serverPage } = await startGame(context);
 
   // Record initial position from first HelmBlackboard

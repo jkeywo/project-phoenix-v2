@@ -44,7 +44,7 @@ async function readPalette(page) {
   });
 }
 
-test('contrast setting round-trip: data-contrast="more" swaps in a visibly different palette', async ({ context }) => {
+test('contrast setting round-trip: data-contrast="more" swaps in a visibly different palette', { tag: '@core' }, async ({ context }) => {
   const page = await context.newPage();
   // Bare client shell: gui/tokens.css is linked and the accessibility module
   // exposes the write path at load — no host hash needed for the palette seam.

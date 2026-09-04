@@ -84,7 +84,7 @@ const peerConfigsOn = (page) => page.evaluate(() => window.__transportShim.peerC
  */
 const WS_RELAY_LINE = ts('server.client_ws_relay', { id: 'PEERID' }).split('PEERID').pop();
 
-test('a direct join negotiates both channels and never reaches for a fallback', async ({ context }) => {
+test('a direct join negotiates both channels and never reaches for a fallback', { tag: '@core' }, async ({ context }) => {
   // PINNED to direct on both ends, which is what makes this the direct-path
   // spec rather than "whatever the shim happened to build". `?transport=direct`
   // withholds the STUN/TURN list from the peer connection — the only spelling

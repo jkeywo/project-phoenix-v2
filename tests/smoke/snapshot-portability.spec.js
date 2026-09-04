@@ -118,7 +118,7 @@ const staged = (page) =>
 
 // ── The round trip ───────────────────────────────────────────────────────────
 
-test('a save exported from a running host imports into a fresh one and is staged for restore', async ({
+test('a save exported from a running host imports into a fresh one and is staged for restore', { tag: '@core' }, async ({
   context,
 }) => {
   const host = await startedHost(context);

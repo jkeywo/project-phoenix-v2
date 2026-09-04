@@ -89,7 +89,7 @@ const WORLD_LOAD_OBJECTIVES = objectivesAddedBy(SCRIPT_BODY, /^on_world_loaded\(
 // wave a fast smoke run can see.
 const FIRST_WAVE_OBJECTIVES = objectivesAddedBy(SCRIPT_BODY, /^on_timer\(0,\s*"([^"]+)"\)/gm);
 
-test('combat_test scenario: starbase + objective + player + first wave appear after game start', async ({ context }) => {
+test('combat_test scenario: starbase + objective + player + first wave appear after game start', { tag: '@core' }, async ({ context }) => {
   await context.route('**/assets/worlds/combat_test.toml', (route) =>
     route.fulfill({ contentType: 'text/plain', body: stripHeavyEntities(COMBAT_TEST_TOML) }),
   );

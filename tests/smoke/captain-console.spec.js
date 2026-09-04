@@ -62,7 +62,7 @@ test('captain console: standard alert state renders correctly', async ({ page })
   await expect(page.locator('ph-objective-list .empty')).toHaveText(ts('component.objectives.empty'));
 });
 
-test('captain console: camera-select and red alert call __sendAction with correct envelopes', async ({ page }) => {
+test('captain console: camera-select and red alert call __sendAction with correct envelopes', { tag: '@core' }, async ({ page }) => {
   await page.goto(CONSOLE_URL);
 
   await page.evaluate(() => {

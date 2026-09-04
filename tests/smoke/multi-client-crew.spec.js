@@ -17,7 +17,7 @@ const CREW = [
   { name: 'Dee', station: 'Engineering' },
 ];
 
-test('four phones join one host on one code and hold four different seats', async ({ context }) => {
+test('four phones join one host on one code and hold four different seats', { tag: '@core' }, async ({ context }) => {
   test.setTimeout(90_000);
 
   const serverPage = await context.newPage();

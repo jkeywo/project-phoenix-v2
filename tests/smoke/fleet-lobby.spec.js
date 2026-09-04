@@ -132,7 +132,7 @@ const waitForFleetError = (page) =>
 // stand up the same fleet again is two more WASM boots for one more assertion.
 const FLEET_TIMEOUT = 240_000;
 
-test('two ship hosts assemble a fleet, and each crew star stays on its own host', async ({ context }) => {
+test('two ship hosts assemble a fleet, and each crew star stays on its own host', { tag: '@core' }, async ({ context }) => {
   test.setTimeout(FLEET_TIMEOUT);
   const lead = await bootHost(context);
   const fleet = await openFleet(lead);

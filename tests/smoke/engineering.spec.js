@@ -51,7 +51,7 @@ async function startGameWithEngineering(context) {
   return { captain, engineer };
 }
 
-test('Engineering player receives SystemHullUpdate after game start', async ({ context }) => {
+test('Engineering player receives SystemHullUpdate after game start', { tag: '@core' }, async ({ context }) => {
   const { captain, engineer } = await startGameWithEngineering(context);
 
   const msg = await engineer.waitForMessage('SystemHullUpdate', 2_000);

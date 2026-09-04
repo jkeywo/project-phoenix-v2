@@ -55,7 +55,7 @@ test('tactical console: __updateConsole renders phaser banks, torpedo tubes and 
   await expect(page.locator('#magazine')).toHaveText('7 / 20');
 });
 
-test('tactical console: FIRE buttons call __sendAction with correct envelopes', async ({ page }) => {
+test('tactical console: FIRE buttons call __sendAction with correct envelopes', { tag: '@core' }, async ({ page }) => {
   // ph-tactical-radar is a square (aspect-ratio 1/1) that eats most of the
   // vertical space at the default 1280×720 viewport, pushing the phaser and
   // torpedo controls low enough that the console's outer .frame overlay

@@ -19,7 +19,7 @@ import {
   MINIMAL_DEFAULT_WORLD,
 } from './fixtures';
 
-test('default scenario: the world\'s station appears in WorldSetup after game start', async ({ context }) => {
+test('default scenario: the world\'s station appears in WorldSetup after game start', { tag: '@core' }, async ({ context }) => {
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
   await waitForWasmReady(serverPage);

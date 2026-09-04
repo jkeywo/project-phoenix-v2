@@ -111,7 +111,7 @@ test('sensors console: cancel impulse button visible when charging', async ({ pa
   await expect(page.locator('#btn-cancel-impulse')).not.toHaveCSS('display', 'none');
 });
 
-test('sensors console: on-screen button calls __sendAction with set_view', async ({ page }) => {
+test('sensors console: on-screen button calls __sendAction with set_view', { tag: '@core' }, async ({ page }) => {
   await page.goto(CONSOLE_URL);
   await page.evaluate(() => {
     window.__sent = [];

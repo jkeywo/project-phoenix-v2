@@ -74,7 +74,7 @@ const uploadPack = (page, name) =>
 
 // ── Valid pack: host UI + connected phone + #990 provenance ───────────────────
 
-test('valid pack: host shows the applied pack, its scenario joins the catalog, and a connected phone gets the active-pack list + mod origin', async ({
+test('valid pack: host shows the applied pack, its scenario joins the catalog, and a connected phone gets the active-pack list + mod origin', { tag: '@core' }, async ({
   context,
 }) => {
   const manifest = readModPackManifest('valid-v1');

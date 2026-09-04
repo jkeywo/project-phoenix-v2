@@ -89,7 +89,7 @@ async function waitForViewMode(
   );
 }
 
-test('captain can set view to Camera(Fore)', async ({ context }) => {
+test('captain can set view to Camera(Fore)', { tag: '@core' }, async ({ context }) => {
   const { captainPlayer, helmPlayer, sciencePlayer, commsPlayer } = await startGame(context);
 
   // Ensure we are starting from a known non-Fore view by first switching to Aft,

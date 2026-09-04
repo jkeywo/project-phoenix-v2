@@ -90,7 +90,7 @@ async function startSoloCaptain(context) {
   return { serverPage, captain };
 }
 
-test('fetched layer requests its sibling Rhai once and applies its authoritative effect', async ({ context }) => {
+test('fetched layer requests its sibling Rhai once and applies its authoritative effect', { tag: '@core' }, async ({ context }) => {
   let layerRequests = 0;
   let scriptRequests = 0;
 

@@ -50,7 +50,7 @@ test('SelectStation — claims station and both clients receive StationAssigned'
   await clientB.close();
 });
 
-test('all players SetReady starts the game', async ({ context }) => {
+test('all players SetReady starts the game', { tag: '@core' }, async ({ context }) => {
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
   await waitForWasmReady(serverPage);

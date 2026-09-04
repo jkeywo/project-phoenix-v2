@@ -148,7 +148,7 @@ async function exportSlot(page, slotId) {
   }, slotId);
 }
 
-test('local save slots complete their browser lifecycle and restore only in a fresh App', async ({
+test('local save slots complete their browser lifecycle and restore only in a fresh App', { tag: '@core' }, async ({
   context,
 }) => {
   test.setTimeout(240_000);

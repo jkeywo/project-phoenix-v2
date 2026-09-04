@@ -56,7 +56,7 @@ async function waitForRatingChangedAfter(client, fromIndex, isBackfill) {
 
 const msgCount = (client) => client.page.evaluate(() => (window.__messages || []).length);
 
-test('AC1 — a station holder enters AFK and keeps the seat', async ({ context }) => {
+test('AC1 — a station holder enters AFK and keeps the seat', { tag: '@core' }, async ({ context }) => {
   const hostId = await bootServer(context);
 
   const c = await createTestClient(context, hostId, { name: 'Helm' });

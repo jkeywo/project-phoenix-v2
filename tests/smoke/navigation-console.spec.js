@@ -14,7 +14,7 @@ test('navigation console: tapping the map alone never sends a waypoint action', 
   expect(sent).toHaveLength(0);
 });
 
-test('navigation console: Set Waypoint pick mode places a free waypoint on tap', async ({ page }) => {
+test('navigation console: Set Waypoint pick mode places a free waypoint on tap', { tag: '@core' }, async ({ page }) => {
   await page.goto(CONSOLE_URL);
   await page.evaluate(() => {
     window.__sent = [];

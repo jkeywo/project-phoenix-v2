@@ -59,7 +59,7 @@ test('repair console: Core bar shows and pops up damaged core systems when click
   await expect(coreBar.locator('ph-damage-detail .row')).toHaveCount(1);
 });
 
-test('repair console: dispatch buttons call __sendAction with correct envelope', async ({ page }) => {
+test('repair console: dispatch buttons call __sendAction with correct envelope', { tag: '@core' }, async ({ page }) => {
   await page.goto(CONSOLE_URL);
   await page.evaluate(() => {
     window.__sent = [];

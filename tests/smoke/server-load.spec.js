@@ -2,7 +2,7 @@
 
 import { test, expect, captureServerPageErrors, waitForWasmReady } from './fixtures';
 
-test('server page: WASM initialises without JS errors', async ({ context }) => {
+test('server page: WASM initialises without JS errors', { tag: '@core' }, async ({ context }) => {
   const serverPage = await context.newPage();
   const errors = captureServerPageErrors(serverPage);
 

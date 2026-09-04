@@ -61,7 +61,7 @@ test('power console: __updateConsole reflects draining state', async ({ page }) 
   await expect(page.locator('#bat-val')).toHaveText('40%');
 });
 
-test('power console: +/- buttons call __sendAction with correct envelopes', async ({ page }) => {
+test('power console: +/- buttons call __sendAction with correct envelopes', { tag: '@core' }, async ({ page }) => {
   await page.goto(CONSOLE_URL);
 
   await page.evaluate(() => {

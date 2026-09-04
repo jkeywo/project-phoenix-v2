@@ -3,7 +3,7 @@ title: Client Architecture
 type: concept
 tags: [client, javascript, iframe, console, console-family, state, accessibility, keyboard, gamepad, feedback, gm, host-channel, vitest]
 sources: [client.html, server.html, gui/mount-plan.js, gui/hero-bar.js, gui/reducer-result.js, gui/lobby-state.js, gui/sim-state.js, gui/comms-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/gm-local-projection.js, gui/gm-activity-feed.js, gui/entity-inspector.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/semantic-controls-remapper.js, gui/host-actions.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/server-settings.js, gui/gamepad-input.js, gui/client-semantic-actions.js, gui/composite-action-routing.js, gui/stations/captain-actions.js, gui/stations/helm-actions.js, gui/stations/tactical-actions.js, gui/stations/comms-actions.js, gui/stations/sensors-actions.js, gui/stations/navigation-actions.js, gui/stations/navigation-action-control.js, gui/stations/engineering-actions.js, gui/stations/engineering-action-control.js, gui/components/ph-navigation-map.js, gui/components/ph-civilian-traffic.js, gui/operator-profile.js, gui/action-map.js, gui/console-core.js, gui/console-latency.js, gui/iframe-bridge.js, gui/client-router.js, gui/coordination-popup.js, gui/accessibility-profile.js, gui/roving-tabindex.js, gui/focus-trap.js, gui/tokens.css, src/core/messages.rs, src/command_admission/mod.rs, src/gm_action.rs, src/gm_projection.rs, src/gm_activity.rs, src/server/bridge.rs, src/console/captain/server.rs, src/console/navigation/server.rs, src/console/repair/dispatch.rs, src/console/repair/external_server.rs, src/civilian/server.rs, src/science/server.rs, src/ship/helm_admission.rs, src/ship/sensors.rs, src/ship/shields.rs, src/ship/power.rs, src/tractor/server.rs, src/umbilical/server.rs, src/ship/system_registry.rs, src/dock/server.rs, src/entities/spawner.rs, src/lobby/server.rs, tests/client/]
-updated: 2026-09-02
+updated: 2026-09-04
 ---
 
 ## Summary
@@ -248,7 +248,8 @@ resurrecting the old value.
 | `station-roster.js` | Pure fold: players + station defs → lobby roster rows + aggregates |
 | `client-router.js` | Pure reducer-result driver: mirrors accepted LobbyState, applies local render/bezel guards, and emits the ordered named side-effect plan without receiving a ServerMessage; Coordination effects carry the authoritative address through to presentation |
 | `dirty-consoles.js` | Merged semantic domains, changed Systems and changed blackboards → Console Families → actual owning Stations. It has no `ServerMessage` input or message-variant census; unknown domains/ids and pre-`Welcome` metadata route nowhere rather than guessing. |
-| `lobby-view.js` | Lobby view model (row classes, ready-button state, status-line string-id selection) |
+| `lobby-view.js` | Lobby view model (row classes, ready-button state, and the `{ id, params }` string-id pair for every string the lobby says — it decides, the renderer resolves) |
+| `client-lobby-render.js` | The client lobby's DOM writes over that model (issue #1369), on the host's `gui/host-lobby-render.js` conventions: document first, `t` injected, every write guarded on its element, and the six controls that close over page-local mutable state (`releaseArmed`, `pendingMidGameClaim`, `lobbyConsole`) arriving as an injected handlers object |
 | `coordination-popup.js` | Generic producer-owned Coordination presentation resolver plus the phone's two-content-line and Viewscreen's one-line DOM builders; it knows no semantic payload variants and owns each surface's single bracket pair |
 | `phase-toggle.js` | Lobby vs in-game section visibility (`GameOver` counts as in-game) |
 | `phone-bezel.js` | Diegetic phone bezel chrome |
@@ -334,3 +335,8 @@ being inferred from the focusable canvas wrappers.
   focusability, naming, roles and keyboard reachability under source-level and
   jsdom regression coverage; `tests/smoke/*keyboard*.spec.js` exercise the real
   console documents without pointer events.
+- `tests/client/client-lobby-render.test.js` drives the lobby renderer in jsdom
+  against `client.html`'s own `#lobby-ui` subtree — lifted with `DOMParser`, so
+  a renamed element fails there rather than rendering nothing with a clean log
+  — including the deliberately half-mounted document and the empty one, which
+  is what the guard on every write is for.

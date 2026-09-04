@@ -28,6 +28,7 @@ import {
   tomlString,
   tableArrayValues,
   stripHeavyEntities,
+  openWorldPicker,
 } from './fixtures';
 import { ts } from './strings';
 import fs from 'fs';
@@ -65,6 +66,9 @@ async function openScenarioStage(context) {
   const page = await context.newPage();
   await page.goto('/');
   await page.bringToFront();
+  // The host's first paint is the landing screen now (issue #1360), so the
+  // World picker is one New Game click away rather than already on screen.
+  await openWorldPicker(page);
   await scenarioButtons(page).first().waitFor({ state: 'visible', timeout: 30_000 });
   return page;
 }
@@ -245,6 +249,9 @@ test('upload after world load is ignored: the panel is hidden and no pack is app
 
   const page = await context.newPage();
   await page.goto('/?manifest=assets/scenarios.demo.toml');
+  // The host's first paint is the landing screen now (issue #1360), so the
+  // World picker is one New Game click away rather than already on screen.
+  await openWorldPicker(page);
   await page.bringToFront();
   const buttons = scenarioButtons(page);
   await buttons.first().waitFor({ state: 'visible', timeout: 30_000 });

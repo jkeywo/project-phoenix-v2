@@ -1,0 +1,547 @@
+/*
+ * gui/host-landing.css — the landing screen's stylesheet (issue #1360, PRD #1355).
+ *
+ * The landing is the first thing a host paints, so this sheet is linked from
+ * server.html's <head> and is written to be loadable by the native host's
+ * lobby document too (#1361) — the same argument gui/host-lobby.css (#1325),
+ * gui/host-scenarios.css (#1328) and gui/host-qr.css (#1329) each make: one
+ * surface, one stylesheet, because CSS is half of a render path and a second
+ * copy drifts the first time either is touched.
+ *
+ * The logo is `../assets/logo.png`, not `assets/logo.png`: a URL in a
+ * stylesheet resolves against the STYLESHEET, and this file sits one directory
+ * down from the bundle root both surfaces load it from. That is the rule that
+ * bites a sheet moved out of an inline <style>, and gui/host-scenarios.css
+ * records it for the same image.
+ *
+ * The settings cog is a host PAGE control: `position: fixed` at z-index 210,
+ * above this panel's 205, so it is already on top of the landing and the
+ * landing draws none of its own — a second one would be two controls
+ * disagreeing about which is open. What the landing does NOT do is reserve a
+ * keep-out for it the way `#world-list` does in `gui/host-scenarios.css`. The
+ * cog's corner falls inside `.landing-rail`, and everything a host reads is
+ * already clear of it by layout: the rail keeps its stamp at the far end and
+ * `.landing-stage` opens at `top: 88px` (64px when the rail is a top bar),
+ * below the cog's 44px extent. `tests/smoke/server-settings-cog.spec.js`
+ * measures exactly that, which is the only place it CAN be measured — a
+ * declared padding proves nothing about a rect. `--settings-cog-keepout` is
+ * still named once, as the floor under the narrow bar's left inset, and always
+ * WITH a fallback: that is this sheet saying the property may legitimately be
+ * absent, as it is on the native lobby surface, which has no cog at all.
+ *
+ * ── z-index 205 ────────────────────────────────────────────────────────────
+ *
+ * Above `#scenario-panel` (200), which is CSS-visible before any script runs —
+ * that is what makes the landing the FIRST paint rather than something that
+ * appears once a module has loaded. Below the settings overlay (209) and its
+ * cog (210), which stay reachable from the landing.
+ *
+ * ── The document says which stage; this sheet says what that looks like ────
+ *
+ * `gui/host-landing-render.js` writes exactly two things about layout: the
+ * class `is-idle`/`is-open` and the custom property `--landing-depth`. Every
+ * arrangement below is chosen HERE, per breakpoint, so a window resize or an
+ * orientation change relays out with no script running at all. Wide and
+ * landscape puts the columns abreast with the menu centred until a stage
+ * opens; narrow or portrait shows one pane at a time and slides the track by
+ * the depth.
+ *
+ * ── NO RAW HEX, NO LITERAL TYPE SIZES ──────────────────────────────────────
+ *
+ * The design canvas this is built from is drawn in raw hex and literal sizes;
+ * issue #1357's mapping table is what each value became, and every rung below
+ * was chosen from it BY ROLE rather than by nearest hex. The ones worth
+ * writing down, because the table says they are the traps:
+ *
+ *   #050608 ground            -> --surface-void
+ *   #0d1016 / #0b0e14 fills   -> --surface-card
+ *   #12171f hover fill        -> --surface-raised
+ *   #14171c rail fill         -> --surface-panel (via --rgb-panel, alpha'd)
+ *   #262b33 / #1b1f26 rules   -> --edge-faint (content dividers, exempt from 3:1)
+ *   #262b33 control border    -> --edge-strong, NOT --edge-control: WCAG 1.4.11
+ *                                measures a control boundary against the
+ *                                ADJACENT colour, which is the button's own
+ *                                --surface-card fill, where --edge-control is
+ *                                2.94:1 and --edge-strong is 3.90:1. This is
+ *                                the same measurement gui/host-scenarios.css
+ *                                records at .world-btn, and the menu entries
+ *                                are the same kind of control on the same fill.
+ *   #558-weight hover edge    -> --edge-bright, so rest -> hover still steps up
+ *   #2a8a96 accent boundary   -> --cyan       (the accent BOUNDARY)
+ *   #5fd8e8 accent foreground -> --signal     (the accent FOREGROUND)
+ *   #0c1a1e resting lit fill  -> --cyan-deep
+ *   #6a727b, #5c646d, #4a525b, #3f4750 as TEXT -> --ink-faint. The table is
+ *                                explicit that #6a727b is a stroke rung
+ *                                (--edge-strong) and fails the 4.5 text floor;
+ *                                the design uses these greys for 11px labels,
+ *                                which is exactly the case --ink-faint exists
+ *                                for, so every one of them is --ink-faint here
+ *                                and none of them is used as ink at its own hex.
+ *   #d8e2ff display white     -> --ink. The ink ladder tops out at --ink
+ *                                (#b8c0c8); the canvas's cooler white has no
+ *                                rung and inventing one is #1357's business,
+ *                                not this slice's.
+ *
+ * Type: the canvas's 11px goes to --text-xs, 13px to --text-md, 15px to
+ * --text-lg and 17px to --text-xl (the ramp has no 17 and the host surface is
+ * a television across a room, so it rounds UP). The 32px wordmark keeps its
+ * viewport scaling with ramp rungs at the ends of the clamp, which is the form
+ * #1357's table asks for rather than collapsing it to one fixed rung.
+ *
+ * This sheet is in SURFACES in tests/client/design-tokens.test.js from the
+ * slice that created it, with no KNOWN_LITERALS entry — it is held at zero
+ * rather than at a list somebody has to remember to shrink.
+ */
+
+/* ── The surface ──────────────────────────────────────────────────────── */
+#landing-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 205;
+  display: block;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 70% 60% at 50% 46%,
+      rgba(var(--rgb-signal), 0.055) 0%, rgba(var(--rgb-signal), 0) 70%),
+    var(--surface-void);
+  color: var(--ink);
+  font-family: var(--font-display);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Vignette and scanlines: chrome, never a hit target. */
+#landing-panel::before,
+#landing-panel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+#landing-panel::before {
+  z-index: 2;
+  box-shadow: inset 0 0 180px 40px rgba(var(--rgb-void), 0.9);
+}
+#landing-panel::after {
+  z-index: 3;
+  background-image: repeating-linear-gradient(to bottom,
+    rgba(var(--rgb-signal), 0.022) 0px, rgba(var(--rgb-signal), 0.022) 1px,
+    transparent 1px, transparent 3px);
+}
+
+/* Frame ticks — the canvas's corner registration marks. */
+.landing-ck { position: absolute; width: 20px; height: 20px; z-index: 4; }
+.landing-ck::before,
+.landing-ck::after { content: ""; position: absolute; background: var(--cyan); }
+.landing-ck.tl { top: 16px; left: 16px; }
+.landing-ck.tl::before { left: 0; top: 0; width: 20px; height: 1px; }
+.landing-ck.tl::after { left: 0; top: 0; width: 1px; height: 20px; }
+.landing-ck.tr { top: 16px; right: 16px; }
+.landing-ck.tr::before { right: 0; top: 0; width: 20px; height: 1px; }
+.landing-ck.tr::after { right: 0; top: 0; width: 1px; height: 20px; }
+.landing-ck.bl { bottom: 16px; left: 16px; }
+.landing-ck.bl::before { left: 0; bottom: 0; width: 20px; height: 1px; }
+.landing-ck.bl::after { left: 0; bottom: 0; width: 1px; height: 20px; }
+.landing-ck.br { bottom: 16px; right: 16px; }
+.landing-ck.br::before { right: 0; bottom: 0; width: 20px; height: 1px; }
+.landing-ck.br::after { right: 0; bottom: 0; width: 1px; height: 20px; }
+
+/* ── Left rail ────────────────────────────────────────────────────────── */
+.landing-rail {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 64px;
+  z-index: 6;
+  border-right: 1px solid var(--edge-faint);
+  background: linear-gradient(to right,
+    rgba(var(--rgb-panel), 0.9), rgba(var(--rgb-base), 0.4));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* `flex-end` is what clears the settings cog, and there is deliberately no
+     keep-out padding here to go with it: gui/server-settings.js pins
+     #server-settings-btn to the page's top-left corner, which is INSIDE this
+     rail's top — and this rail keeps its one child at the bottom, so nothing
+     of the host's is up there to be painted over. A top reserve would look
+     like the guard and be none: padding above content already pushed to the
+     far end holds nothing. What guards it instead is a measurement —
+     tests/smoke/server-settings-cog.spec.js puts the cog's rect against this
+     stamp and against the lockup, on a cold load, before anything is clicked. */
+  justify-content: flex-end;
+  padding: 0 0 28px;
+  box-sizing: border-box;
+}
+.landing-rail-stamp {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 1.7;
+  letter-spacing: var(--tracking-wide);
+  color: var(--ink-faint);
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  text-transform: uppercase;
+}
+
+/* ── The two corner icon buttons ──────────────────────────────────────── */
+.landing-icon-btn {
+  width: 46px;
+  height: 46px;
+  min-width: var(--control-hit-min);
+  min-height: var(--control-hit-min);
+  display: grid;
+  place-items: center;
+  background: var(--surface-panel);
+  border: 1px solid var(--edge-strong);
+  color: var(--ink-dim);
+  cursor: pointer;
+  padding: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  line-height: 1;
+  transition: color 0.18s, border-color 0.18s, background 0.18s;
+  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+}
+.landing-icon-btn:hover {
+  color: var(--signal);
+  border-color: var(--cyan);
+  background: var(--cyan-deep);
+}
+.landing-icon-btn:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 var(--focus-ring-width) var(--focus-ring);
+}
+#landing-fullscreen-btn {
+  position: absolute;
+  top: 34px;
+  right: 34px;
+  z-index: 6;
+}
+
+/* ── Stage and track ──────────────────────────────────────────────────── */
+.landing-stage {
+  position: absolute;
+  left: 64px; right: 0; top: 88px; bottom: 56px;
+  z-index: 5;
+  overflow: hidden;
+}
+.landing-stage-inner { position: absolute; inset: 0 clamp(16px, 3.9vw, 56px); }
+.landing-track {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: stretch;
+  gap: clamp(16px, 2.8vw, 40px);
+  transition: transform 0.5s cubic-bezier(0.22, 0.72, 0.2, 1);
+}
+.landing-col { display: flex; flex-direction: column; min-height: 0; }
+.landing-col-menu {
+  width: 352px;
+  flex: 0 0 352px;
+  justify-content: center;
+  transition: margin-left 0.5s cubic-bezier(0.22, 0.72, 0.2, 1), opacity 0.38s ease;
+}
+.landing-col-mid {
+  width: 416px;
+  flex: 0 0 416px;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-28px);
+  transition: opacity 0.34s ease,
+              transform 0.34s cubic-bezier(0.22, 0.72, 0.2, 1),
+              visibility 0s linear 0.5s;
+}
+.is-open .landing-col-mid {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition: opacity 0.38s ease 0.12s,
+              transform 0.38s cubic-bezier(0.22, 0.72, 0.2, 1) 0.12s,
+              visibility 0s;
+}
+
+/* ── Identity lockup ──────────────────────────────────────────────────── */
+.landing-lockup {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 18px;
+  margin-bottom: 34px;
+}
+.landing-logo {
+  display: block;
+  width: clamp(140px, 15vw, 196px);
+  aspect-ratio: 1 / 1;
+  background: url('../assets/logo.png') center center / contain no-repeat;
+  transition: width 0.5s cubic-bezier(0.22, 0.72, 0.2, 1);
+}
+.is-open .landing-logo { width: clamp(96px, 8vw, 112px); }
+.landing-wordmark {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(var(--text-2xl), 2.6vw, var(--text-display));
+  line-height: 1;
+  letter-spacing: var(--tracking-widest);
+  text-transform: uppercase;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.landing-subline { display: flex; align-items: center; gap: 12px; width: 100%; }
+.landing-subline .landing-bar {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(to right, var(--cyan), rgba(var(--rgb-cyan), 0));
+}
+.landing-eyebrow {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: var(--text-xs);
+  line-height: 1;
+  letter-spacing: var(--tracking-widest);
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.landing-eyebrow.landing-on { color: var(--signal); }
+
+/* ── Menu ─────────────────────────────────────────────────────────────── */
+.landing-menu { display: flex; flex-direction: column; gap: 10px; }
+.landing-mi {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 64px;
+  min-height: var(--control-hit-min);
+  padding: 0 16px 0 20px;
+  width: 100%;
+  text-align: left;
+  background: var(--surface-card);
+  /* --edge-strong, not --edge-control: see the header's mapping note. */
+  border: 1px solid var(--edge-strong);
+  color: var(--ink);
+  font-family: var(--font-display);
+  cursor: pointer;
+  transition: background 0.18s, border-color 0.18s, transform 0.18s;
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+}
+.landing-mi:hover { background: var(--surface-raised); border-color: var(--edge-bright); transform: translateX(3px); }
+.landing-mi:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 var(--focus-ring-width) var(--focus-ring);
+}
+.landing-mi.on { background: var(--cyan-deep); border-color: var(--cyan); }
+.landing-mi-bar { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: transparent; }
+.landing-mi.on .landing-mi-bar { background: var(--signal); }
+.landing-mi-ix {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: var(--text-xs);
+  line-height: 1;
+  letter-spacing: var(--tracking);
+  color: var(--ink-faint);
+}
+.landing-mi.on .landing-mi-ix { color: var(--cyan); }
+.landing-mi-body { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 0; }
+.landing-mi-label {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: var(--text-xl);
+  line-height: 1;
+  letter-spacing: var(--tracking);
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.landing-mi.on .landing-mi-label { color: var(--signal); }
+.landing-mi-desc {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: var(--text-xs);
+  line-height: 1.2;
+  letter-spacing: var(--tracking);
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+/* The chevron is drawn, not written: a text glyph in the markup would be one
+   more untranslated string for the string gate to warn about, and it carries
+   no meaning a reader needs read aloud. */
+.landing-mi::after {
+  content: "\203a";
+  color: var(--ink-faint);
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  line-height: 1;
+}
+.landing-mi:hover::after,
+.landing-mi.on::after { color: var(--signal); }
+
+/* An entry whose slice has not landed. Dashed, dimmed, and still focusable —
+   the renderer marks it `aria-disabled` rather than `disabled`, so it reads as
+   "here, but not yet" instead of vanishing from the tab order. */
+.landing-mi.inert { border-style: dashed; border-color: var(--edge); }
+.landing-mi.inert .landing-mi-label { color: var(--ink-dim); }
+.landing-mi.inert:hover { transform: none; background: var(--surface-card); border-color: var(--edge); }
+
+/* ── Status bar ───────────────────────────────────────────────────────── */
+.landing-statusbar {
+  position: absolute;
+  left: 64px; right: 0; bottom: 0;
+  height: 56px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 0 56px;
+  border-top: 1px solid var(--edge-faint);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: var(--text-xs);
+  line-height: 1;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  box-sizing: border-box;
+}
+.landing-statusbar .landing-sep { flex: 1; height: 1px; background: var(--edge-faint); }
+.landing-statusbar .landing-live { color: var(--signal); }
+
+/* ── The docked World picker ──────────────────────────────────────────── */
+/*
+ * `#scenario-panel` is a fixed, full-screen layer of its own. While the
+ * landing has it in the middle column it is an ordinary flex child instead,
+ * and everything that made it a layer is unwound here rather than in script —
+ * the renderer only adds the class. Its own rules (gui/host-scenarios.css)
+ * still style the column inside it, which is the point of borrowing the node
+ * rather than rebuilding it.
+ */
+#scenario-panel.landing-docked {
+  position: static;
+  inset: auto;
+  z-index: auto;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  background: none;
+  border: 1px solid var(--edge-faint);
+  /* Column, not row: the panel's three surfaces — the world list, the docked
+     join panel and the save catalogue — were laid out side by side across a
+     whole screen, and the landing gives them one 416px column. This is the
+     same stacking the picker already applies to itself on a narrow host. */
+  flex-direction: column;
+  overflow-y: auto;
+  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+}
+#scenario-panel.landing-docked #world-list {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  /* No cog above this column any more — the rail holds the keep-out now, so
+     the picker must not reserve it a second time. */
+  padding-top: 16px;
+  border-right: 0;
+  overflow-y: visible;
+  background: rgba(var(--rgb-base), 0.88);
+}
+/* The join panel keeps its place in the stack rather than being hidden: a crew
+   can still scan the code from the landing, which is what it is for. Only the
+   geometry it borrowed from a full screen goes. */
+#scenario-panel.landing-docked #overlay.pre-scenario {
+  width: 100%;
+  max-height: none;
+  margin: 0;
+  padding: 16px;
+  overflow: visible;
+}
+
+/* ── Wide and landscape: columns abreast, the menu centred until open ──── */
+/*
+ * A percentage margin resolves against the track — whose width IS the stage's
+ * — so the centring holds at any width without arithmetic. 176px is half the
+ * menu column's 352px.
+ */
+@media (min-width: 1000px) and (orientation: landscape) {
+  .is-idle .landing-col-menu { margin-left: calc(50% - 176px); }
+  .is-open .landing-col-menu { margin-left: 0; }
+}
+
+/* ── Narrow or portrait: one pane at a time ───────────────────────────── */
+/*
+ * The rail becomes a top bar, the track slides by `--landing-depth`, and the
+ * status strip and corner control shrink to match. Two columns, so one step is
+ * half the track.
+ */
+@media (max-width: 999px), (orientation: portrait) {
+  .landing-rail {
+    top: 0; left: 0; right: 0; bottom: auto;
+    width: auto; height: 64px;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 14px;
+    /* This edge's own inset, floored at the cog's keep-out rather than reserved
+       for it — which is why it has a real fallback where the vertical rail has
+       no padding at all: 16px is what the inset is worth on a surface with no
+       cog, i.e. the native lobby (the optional fallback is this sheet saying
+       the property may legitimately be absent there). 72px on the right is
+       #landing-fullscreen-btn's 46px plus its 16px inset. */
+    padding: 0 72px 0 var(--settings-cog-keepout, 16px);
+    border-right: 0;
+    border-bottom: 1px solid var(--edge-faint);
+    background: linear-gradient(to bottom,
+      rgba(var(--rgb-panel), 0.92), rgba(var(--rgb-base), 0.4));
+  }
+  .landing-rail-stamp { writing-mode: horizontal-tb; text-orientation: mixed; }
+  #landing-fullscreen-btn { top: 9px; right: 16px; }
+
+  .landing-stage { left: 0; top: 64px; bottom: 44px; }
+  .landing-stage-inner { inset: 16px; }
+  .landing-track {
+    width: 200%;
+    gap: 0;
+    transform: translateX(calc(var(--landing-depth, 0) * -50%));
+  }
+  .landing-col { flex: 0 0 50%; width: auto; padding-right: 16px; overflow-y: auto; }
+  .landing-col-menu { justify-content: flex-start; margin-left: 0; }
+  .landing-col-mid { transform: none; }
+
+  .landing-lockup { align-items: center; gap: 14px; margin-bottom: 22px; }
+  .landing-logo, .is-open .landing-logo { width: clamp(112px, 34vw, 156px); }
+  .landing-wordmark { font-size: clamp(var(--text-lg), 5.4vw, var(--text-2xl)); letter-spacing: var(--tracking-wide); }
+  .landing-subline { justify-content: center; }
+  .landing-menu { gap: 8px; }
+  .landing-mi { height: 62px; }
+  .landing-mi-label { font-size: var(--text-lg); }
+
+  .landing-statusbar { left: 0; height: 44px; padding: 0 20px; gap: 12px; }
+}
+
+/* ── Short landscape (a phone on its side) ────────────────────────────── */
+/*
+ * The identity block would eat the whole pane, so it steps aside and the menu
+ * takes the height back.
+ */
+@media (orientation: landscape) and (max-height: 520px) {
+  .landing-lockup { flex-direction: row; align-items: center; gap: 14px; margin-bottom: 14px; }
+  .landing-logo, .is-open .landing-logo { width: 74px; }
+  .landing-wordmark { font-size: var(--text-lg); }
+  .landing-subline { display: none; }
+  .landing-mi { height: 54px; }
+  .landing-mi-desc { display: none; }
+}
+
+/* ── Reduced motion ───────────────────────────────────────────────────── */
+/*
+ * Every transition here is decoration over a state change that has already
+ * happened: the class is on the root before the slide starts, so removing the
+ * slide loses nothing but the travel.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .landing-track,
+  .landing-col-menu,
+  .landing-col-mid,
+  .landing-logo,
+  .landing-mi,
+  .landing-icon-btn {
+    transition: none;
+  }
+  .landing-mi:hover { transform: none; }
+}

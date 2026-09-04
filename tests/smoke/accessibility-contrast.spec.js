@@ -59,7 +59,7 @@ test('contrast setting round-trip: data-contrast="more" swaps in a visibly diffe
   // ── Standard palette (no explicit choice; CI reports no prefers-contrast) ──
   const standard = await readPalette(page);
   expect(standard.dataContrast).not.toBe('more');
-  expect(standard.surfaceBase).toBe('#0a1028'); // the authored navy reference
+  expect(standard.surfaceBase).toBe('#0a0c10'); // the authored graphite reference (#1357)
 
   // ── Force contrast "more" — exactly what the Accessibility tab's choice row
   //    does (update simState, persist privately, re-apply to the roots). ──────
@@ -94,7 +94,7 @@ test('contrast setting round-trip: data-contrast="more" swaps in a visibly diffe
 
   const off = await readPalette(page);
   expect(off.dataContrast).toBe('standard');
-  expect(off.surfaceBase).toBe('#0a1028');
+  expect(off.surfaceBase).toBe('#0a0c10');
   expect(off.ink).toBe(standard.ink);
   expect(off.edgeFaint).toBe(standard.edgeFaint);
 });

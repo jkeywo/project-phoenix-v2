@@ -130,7 +130,11 @@ describe('contrast-bearing tokens meet WCAG AA', () => {
     return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
   };
 
-  const BASE = '#0a1028'; // --surface-base, the reference background
+  // --surface-base, the reference background. Graphite since issue #1357
+  // (PRD #1355), where it moved from the navy #0a1028 to the splash
+  // deliverable's page colour. It is DARKER in luminance terms (0.0037 against
+  // 0.0059), so every accent's ratio climbed rather than fell.
+  const BASE = '#0a0c10';
 
   it('measures against the surface the consoles actually paint on', () => {
     expect(hex('--surface-base')).toBe(BASE);
@@ -147,14 +151,68 @@ describe('contrast-bearing tokens meet WCAG AA', () => {
     });
   }
 
-  it('--edge-control clears the 3:1 floor WCAG 1.4.11 asks of a control boundary', () => {
-    expect(ratio(hex('--edge-control'), BASE)).toBeGreaterThanOrEqual(3);
+  // --surface-panel is a LIFT off the reference background since issue #1357,
+  // and an enforced text rung is drawn on it — a console's content column is
+  // filled with it, and gui/console.css's 0.6rem footers sit in that column.
+  // --ink-faint was derived against it for exactly that reason; --fire was the
+  // rung that reached AA on --surface-base (4.70) and failed on the panel
+  // (4.32) while this suite stayed green, so the panel is asserted too.
+  const PANEL = '#14171c';
+
+  it('measures against the panel a console fills its content column with', () => {
+    expect(hex('--surface-panel')).toBe(PANEL);
+  });
+
+  for (const name of ['--ink', '--ink-dim', '--ink-faint', '--tactical', '--fire',
+    '--fire-bright', '--loaded', '--reloading', '--cyan', '--gold', '--signal',
+    '--sky', '--science']) {
+    it(`${name} clears 4.5:1 as text on --surface-panel`, () => {
+      expect(ratio(hex(name), PANEL)).toBeGreaterThanOrEqual(4.5);
+    });
+  }
+
+  // WCAG 1.4.11 measures a control's boundary against the colour ADJACENT to
+  // it — the fill it encloses — not against a reference background. So the
+  // control boundary is a LADDER, and the guarantee has to be enforced on the
+  // surfaces each rung is actually claimed to carry. Asserting only
+  // `--edge-control` against `--surface-base` was green while --edge-control
+  // sat at 2.94 on --surface-card (gui/host-lobby.css, gui/host-scenarios.css)
+  // and 2.20 on --surface-panel-up (server.html's GM block,
+  // gui/components/ph-ship-picker.js). This table is the Edges block of
+  // gui/tokens.css restated as a test; the two must move together.
+  const CONTROL_LADDER = {
+    '--edge-control': ['--surface-void', '--surface-abyss', '--surface-deep', '--surface-base'],
+    '--edge-strong': ['--surface-card', '--surface-raised', '--surface-panel',
+      '--surface-high', '--surface-lift'],
+    '--edge-bright': ['--surface-panel-up'],
+  };
+
+  for (const [edge, surfaces] of Object.entries(CONTROL_LADDER)) {
+    for (const surface of surfaces) {
+      it(`${edge} clears 1.4.11's 3:1 on ${surface}, a surface it bounds controls over`, () => {
+        const e = hex(edge);
+        const s = hex(surface);
+        expect(e).not.toBeNull();
+        expect(s).not.toBeNull();
+        expect(ratio(e, s)).toBeGreaterThanOrEqual(3);
+      });
+    }
+  }
+
+  it('keeps the ladder ordered, so a lighter fill always takes a lighter rung', () => {
+    // If a rung ever overtook the one above it the table would still pass while
+    // meaning nothing — "step up for a lighter fill" has to stay true.
+    const rungs = ['--edge-faint', '--edge', '--edge-control', '--edge-strong', '--edge-bright'];
+    const ratios = rungs.map((n) => ratio(hex(n), BASE));
+    for (let i = 1; i < ratios.length; i += 1) {
+      expect(ratios[i]).toBeGreaterThan(ratios[i - 1]);
+    }
   });
 
   it('documents why the content edges are exempt rather than leaving it silent', () => {
     // `--edge` divides content — a panel column's border. The column is
     // legible without it, so it carries no information a player must perceive,
-    // and it stays at the authored navy. That reasoning has to be written
+    // and it stays at the authored graphite. That reasoning has to be written
     // down, or the next person reads a failing floor as an oversight.
     expect(TOKENS).toMatch(/1\.4\.11/);
     expect(TOKENS).toMatch(/exempt/i);
@@ -344,14 +402,26 @@ describe('no custom property is defined in terms of itself', () => {
  * clean: the join panel was already written against the vocabulary, so listing
  * it is what stops it drifting back out. Its three siblings — gui/host-lobby.css,
  * gui/host-scenarios.css and server.html's inline <style> — were lifted verbatim
- * out of the host page and still carry the pre-graphite lobby palette, so they
- * join with an allowlist instead. KNOWN_LITERALS below is that allowlist, and
- * says why it is the useful shape.
+ * out of the host page and still carried the pre-graphite lobby palette, so they
+ * joined with an allowlist instead. Issue #1357 retinted the vocabulary itself,
+ * which gave the first two a rung to name for every value they were holding raw,
+ * and their allowlist entries are empty. KNOWN_LITERALS below is what remains,
+ * and says why it is the useful shape.
+ *
+ * gui/host-landing.css joins in the slice that CREATED it (issue #1360), with
+ * no allowlist entry, and that timing is the point rather than tidiness. #1357
+ * had just emptied the two entries above; a new host stylesheet allowed to
+ * arrive unlisted would have switched the rule off again on the newest surface
+ * in the fleet, which is the state #1356 filed this list to end. A sheet
+ * written against the vocabulary from its first line costs nothing to enforce,
+ * and enforcing it from its first line is what stops it acquiring the raw
+ * palette its three siblings each had to be walked back out of.
  */
 const SURFACES = [
   ...componentFiles(),
   ...consoleDocuments(),
   path.join(GUI, 'console.css'),
+  path.join(GUI, 'host-landing.css'),
   path.join(GUI, 'host-lobby.css'),
   path.join(GUI, 'host-qr.css'),
   path.join(GUI, 'host-scenarios.css'),
@@ -368,19 +438,25 @@ const SURFACES = [
  * the three out of SURFACES until the palette lands — would have left the rule
  * switched off exactly where #1356 did its work.
  *
- * What is listed is the pre-graphite lobby palette: #cce ink on #0e0e14 cards
+ * What was listed is the pre-graphite lobby palette: #cce ink on #0e0e14 cards
  * with #2a8a96 claimed borders, around a hundred distinct values between the
- * three, and gui/tokens.css names almost none of them. #1356 swapped every
- * literal that DOES have an exact token — --signal, --surface-void, the
- * --rgb-* triplets, the type rungs — and stopped there. Rounding what is left
- * onto the nearest rung would be a retint smuggled in under a slice whose whole
- * claim is that nothing moves, and the retint is PRD #1355's own decision, made
- * in the one file the vocabulary lives in.
+ * three, and gui/tokens.css named almost none of them. #1356 swapped every
+ * literal that DID have an exact token — --signal, --surface-void, the
+ * --rgb-* triplets, the type rungs — and stopped there, because rounding what
+ * was left onto the nearest rung would have been a retint smuggled in under a
+ * slice whose whole claim was that nothing moves.
+ *
+ * #1357 is where that retint was actually decided, in the one file the
+ * vocabulary lives in — and with a graphite rung for every role the lobby was
+ * naming in raw hex, both stylesheet entries went to `[]`. They are kept as
+ * empty objects rather than deleted so the ratchet's end state is visible in
+ * the file that enforced it: these two surfaces are now held at zero, exactly
+ * like the ones that never needed an entry.
  *
  * The list can only SHRINK: a value that leaves a file must leave here too,
  * because the assertions below fail on a STALE entry as well as on a new
- * literal. That turns #1355 into a list this suite watches empty out, rather
- * than a SURFACES edit somebody has to remember to make.
+ * literal. That is what made #1355 a list this suite watched empty out, rather
+ * than a SURFACES edit somebody had to remember to make.
  *
  * server.html needs more than the retint before its entry reaches `[]`.
  * css-scan.js reads the WHOLE file, not the <style> block — there is no lexer
@@ -395,33 +471,8 @@ const SURFACES = [
  *   node --input-type=module -e "import { readStripped, colourLiterals,  *     fontSizeLiterals } from './tests/client/css-scan.js'; const s =  *     readStripped('server.html'); console.log([...new Set(colourLiterals(s))],  *     [...new Set(fontSizeLiterals(s))])"
  */
 const KNOWN_LITERALS = {
-  "gui/host-lobby.css": {
-    colours: [
-      "#cce", "#0e0e14", "#2a2d3a", "#2a8a96", "#191e28", "#2a3a48", "#778",
-      "#181e2a", "#7aa", "#1a3828", "#5fd88a", "#2a6850", "#8a8aa0",
-      "#131722", "#4a5570", "#101a1d", "#cfe8ff", "#3a3d4a", "#0a2830",
-      "#334", "#889", "#667", "#aac", "#556", "#aae", "#445", "#332", "#ca0",
-      "#0a1a20", "#0d2830", "#c9a86a", "rgba(42,138,150 …)",
-    ],
-    sizes: [
-      "font-size: 0.9rem", "font-size: 0.65rem", "font-size: 0.6rem",
-      "font-size: 0.8rem", "font-size: 0.7rem",
-      "font-size: clamp(0.85rem, 1vw, 1rem)",
-      "font-size: clamp(0.6rem, 0.7vw, 0.7rem)",
-      "font-size: clamp(0.55rem, 0.65vw, 0.65rem)",
-      "font-size: clamp(1.1rem, 2.5vw, 1.6rem)",
-      "font-size: clamp(1rem, 2vw, 1.4rem)",
-    ],
-  },
-  "gui/host-scenarios.css": {
-    colours: [
-      "#cce", "#334", "#889", "#111", "#aae", "#223", "#558", "#224", "#66c",
-      "#ccf",
-    ],
-    sizes: [
-      "font-size: 0.95rem",
-    ],
-  },
+  "gui/host-lobby.css": { colours: [], sizes: [] },
+  "gui/host-scenarios.css": { colours: [], sizes: [] },
   "server.html": {
     colours: [
       "#05080d", "#334", "#fa4", "#f44", "#4c4", "#cce", "#aae", "#223",

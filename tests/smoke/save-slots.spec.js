@@ -11,6 +11,7 @@ import {
   createTestClient,
   waitForWasmReady,
   MINIMAL_DEFAULT_WORLD,
+  openWorldPicker,
 } from './fixtures';
 import { ts } from './strings';
 
@@ -130,6 +131,9 @@ async function cataloguePage(page) {
   // Start action arms the same synchronous handoff before assigning href.
   await page.evaluate(() => window.phSaveSlots.armBrowserSaveIdentityHandoff(window));
   await page.goto('/');
+  // The host's first paint is the landing screen now (issue #1360), so the
+  // World picker is one New Game click away rather than already on screen.
+  await openWorldPicker(page);
   await expect(page.locator('#save-slots-panel .save-slots-heading')).toBeVisible({
     timeout: 30_000,
   });

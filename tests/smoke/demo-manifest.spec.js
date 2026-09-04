@@ -27,6 +27,7 @@ import {
   waitForWasmReady,
   stripHeavyEntities,
   tableArrayValues,
+  openWorldPicker,
 } from './fixtures';
 import fs from 'fs';
 import path from 'path';
@@ -94,6 +95,9 @@ test('demo manifest (?manifest=assets/scenarios.demo.toml): host offers its two 
 
   const serverPage = await context.newPage();
   await serverPage.goto('/?manifest=assets/scenarios.demo.toml');
+  // The host's first paint is the landing screen now (issue #1360), so the
+  // World picker is one New Game click away rather than already on screen.
+  await openWorldPicker(serverPage);
   await serverPage.bringToFront();
 
   // Scenario stage: exactly the manifest's scenarios, no more. `.world-btn`
@@ -140,6 +144,9 @@ test('dev/default (no ?manifest param): host still offers the full base catalogu
   const serverPage = await context.newPage();
   await serverPage.goto('/');
   await serverPage.bringToFront();
+  // The host's first paint is the landing screen now (issue #1360), so the
+  // World picker is one New Game click away rather than already on screen.
+  await openWorldPicker(serverPage);
 
   const scenarioButtons = serverPage.locator('#world-list .world-btn[data-scenario-id]');
   await scenarioButtons.first().waitFor({ state: 'visible', timeout: 30_000 });

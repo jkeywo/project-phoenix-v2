@@ -18,6 +18,13 @@
        that window (or at all, if WASM never boots). NOT the same flag as
        TRUNK_BUILD_RELEASE, which the dev host also sets. -->
   <meta name="phoenix-build-demo" content="false" />
+  <!-- Which build IS this? (issue #1360) The landing's status bar names it, so
+       a report from a room full of people carries the build they were on. A
+       meta tag rather than a compiled-in getter, for the reason the demo flag
+       above needs one too: the landing is the FIRST paint and there is no WASM
+       instance yet to ask. "dev" is the honest answer for any build whose
+       deploy has not rewritten this line — and no deploy rewrites it yet. -->
+  <meta name="phoenix-build-id" content="dev" />
   <title data-i18n="server.doc_title">Project Phoenix — View Screen</title>
   <script>
     // Explicit production rendererless GM route (#1291). This is evaluated
@@ -53,6 +60,15 @@
      save-import rules stayed inline below — they style host tooling the native
      surface strips rather than renders. -->
 <link rel="stylesheet" href="gui/host-scenarios.css" />
+<!-- The landing screen's stylesheet (issue #1360, PRD #1355). Linked AFTER the
+     picker's, because it holds the `#scenario-panel.landing-docked` block that
+     unwinds the picker from a full-screen layer into the landing's middle
+     column — a later rule of equal specificity, which is what makes the
+     docking a stylesheet decision rather than a pile of inline styles. Its own
+     surface sits at z-index 205: above the picker's 200, so the landing is the
+     first thing painted before any script runs, and below the settings
+     overlay's 209 and its cog's 210, which stay reachable from it. -->
+<link rel="stylesheet" href="gui/host-landing.css" />
 
   <!-- The QR encoder, loaded before our script so the global `QRCode` is in
        scope synchronously. VENDORED and same-origin since issue #1329: it used
@@ -250,10 +266,19 @@
       max-width: 44rem; padding: 1.5rem; border: 1px solid var(--edge-control);
       display: grid; gap: .9rem;
     }
+    /* CONTROL BOUNDARIES IN THIS BLOCK (issue #1357). WCAG 1.4.11 measures a
+       control's border against the colour ADJACENT to it, which for these
+       filled GM controls is --surface-panel-up, not the page. --edge-control
+       is the ladder's floor rung and clears 3:1 on a page GROUND only — it is
+       2.20:1 on --surface-panel-up — so every control here whose fill is that
+       rung takes --edge-bright (3.46:1 on it) instead. The five borders below
+       that keep --edge-control are the ones drawn on the GM page itself or on
+       --surface-abyss / --surface-void, where it is 3.06 to 3.13. See the Edges
+       block in gui/tokens.css; design-tokens.test.js asserts the whole ladder. */
     #gm-session-actions { display: flex; flex-wrap: wrap; gap: .75rem; }
     #gm-session-actions button {
       min-width: 8rem; padding: .65rem 1rem; color: var(--ink-primary);
-      background: var(--surface-panel-up); border: 1px solid var(--edge-control);
+      background: var(--surface-panel-up); border: 1px solid var(--edge-bright);
       font: inherit; cursor: pointer;
     }
     #gm-session-actions button:disabled { opacity: .45; cursor: default; }
@@ -276,26 +301,26 @@
     .gm-activity-filter { display: grid; gap: .3rem; color: var(--ink-muted); }
     .gm-activity-filter select {
       min-width: 12rem; padding: .45rem .6rem; color: var(--ink-primary);
-      background: var(--surface-panel-up); border: 1px solid var(--edge-control); font: inherit;
+      background: var(--surface-panel-up); border: 1px solid var(--edge-bright); font: inherit;
     }
     #gm-activity-status, #gm-activity-empty { margin: 0; color: var(--ink-muted); }
     #gm-activity-list {
       margin: 0; padding: 0; list-style: none; max-height: 20rem; overflow-y: auto;
       display: grid; gap: .45rem;
     }
-    .gm-activity-entry { padding: .65rem .75rem; border-left: 3px solid var(--edge-control); background: var(--surface-panel-up); }
+    .gm-activity-entry { padding: .65rem .75rem; border-left: 3px solid var(--edge-bright); background: var(--surface-panel-up); }
     .gm-activity-entry[data-category="destruction"] { border-left-color: var(--fire-bright); }
     .gm-activity-metadata, .gm-activity-involved { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
     .gm-activity-tick, .gm-activity-category, .gm-activity-detail, .gm-activity-system { color: var(--ink-muted); }
     .gm-activity-category { text-transform: uppercase; letter-spacing: .08em; }
     .gm-activity-link {
       padding: .2rem .35rem; color: var(--ink-primary); background: transparent;
-      border: 1px solid var(--edge-control); font: inherit; cursor: pointer;
+      border: 1px solid var(--edge-bright); font: inherit; cursor: pointer;
     }
     .gm-activity-link:disabled { border-color: transparent; color: var(--ink-muted); cursor: default; }
     #gm-activity-clear-filters {
       align-self: end; padding: .45rem .75rem; color: var(--ink-primary);
-      background: var(--surface-panel-up); border: 1px solid var(--edge-control); font: inherit;
+      background: var(--surface-panel-up); border: 1px solid var(--edge-bright); font: inherit;
     }
     #gm-entity-map {
       display: block; width: 100%; height: clamp(22rem, 54vh, 46rem);
@@ -310,7 +335,7 @@
     #gm-entity-hull { width: 100%; }
     #gm-entity-target {
       color: var(--ink-primary); background: var(--surface-panel-up);
-      border: 1px solid var(--edge-control); font: inherit; text-align: left; cursor: pointer;
+      border: 1px solid var(--edge-bright); font: inherit; text-align: left; cursor: pointer;
     }
     #gm-entity-target:disabled { border-color: transparent; background: transparent; cursor: default; }
     @media (max-width: 880px) {
@@ -328,7 +353,7 @@
     #gm-station-controls h2 { grid-column: 1 / -1; }
     #gm-station-select, #gm-station-toggle {
       min-height: 2.75rem; padding: .55rem .75rem; color: var(--ink-primary);
-      background: var(--surface-panel-up); border: 1px solid var(--edge-control);
+      background: var(--surface-panel-up); border: 1px solid var(--edge-bright);
       font: inherit;
     }
     #gm-station-toggle { cursor: pointer; }
@@ -1342,6 +1367,80 @@
        and arrive via the "audio_config" host channel, so the elements are
        built at runtime by __audioConfig below. -->
 
+  <!-- ── Landing screen (issue #1360, PRD #1355) ─────────────────────────
+       The first thing this page paints, ahead of #scenario-panel below: it is
+       CSS-visible at z-index 205 with no script involved, exactly as the
+       picker is at 200, so an operator sees the front door rather than a world
+       list on a cold load.
+
+       The menu itself is EMPTY here on purpose. Its entries are data
+       (gui/host-landing-view.js's LANDING_ENTRIES) so that the six sibling
+       slices which each add one entry add a row rather than editing this
+       markup and colliding with each other. gui/host-landing-render.js fills
+       it as soon as its module island has run — the same "chrome first, rows a
+       tick later" the picker's own #scenario-loading placeholder does.
+
+       The settings cog is deliberately absent: gui/server-settings.js mounts
+       #server-settings-btn fixed at z-index 210, above this panel, so it is
+       already on top of the landing and a second one would be two controls
+       disagreeing about which is open. Its corner lands inside .landing-rail
+       below, and nothing reserves a keep-out for it: the rail keeps its stamp
+       at the far end and .landing-stage opens at top: 88px, so the clearance
+       is the layout's, and tests/smoke/server-settings-cog.spec.js measures
+       the rects rather than trusting a declaration. The fullscreen control IS
+       here, and reaches gui/page-chrome.js's one initFullscreen
+       implementation through a hook — see __hostRenderLanding.
+  -->
+  <div id="landing-panel" class="is-idle" data-landing-stage="idle">
+    <span class="landing-ck tl"></span><span class="landing-ck tr"></span>
+    <span class="landing-ck bl"></span><span class="landing-ck br"></span>
+
+    <aside class="landing-rail">
+      <span id="landing-rail-stamp" class="landing-rail-stamp" data-i18n="server.landing.rail_stamp">PHX</span>
+    </aside>
+
+    <button id="landing-fullscreen-btn" class="landing-icon-btn" type="button"
+      title="Toggle fullscreen" data-i18n-attr="title:client.fullscreen_tip">&#9974;</button>
+
+    <div class="landing-stage">
+      <div class="landing-stage-inner">
+        <div class="landing-track">
+
+          <!-- Column A — identity and menu -->
+          <section class="landing-col landing-col-menu">
+            <div class="landing-lockup">
+              <span id="landing-logo" class="landing-logo" role="img"
+                data-i18n-attr="aria-label:server.landing.logo_alt"></span>
+              <h1 id="landing-title" class="landing-wordmark" data-i18n="server.landing.title">Project Phoenix</h1>
+              <span class="landing-subline">
+                <span id="landing-tagline" class="landing-eyebrow" data-i18n="server.landing.tagline">Bridge simulator</span>
+                <span class="landing-bar"></span>
+                <span id="landing-platform" class="landing-eyebrow landing-on" data-i18n="server.landing.platform_web">Web build</span>
+              </span>
+            </div>
+            <nav id="landing-menu" class="landing-menu"
+              data-i18n-attr="aria-label:server.landing.menu_label"></nav>
+          </section>
+
+          <!-- Column B — whichever stage the open entry reveals. New Game
+               moves the LIVE #scenario-panel node in here (see
+               gui/host-landing-render.js), so a pick still reaches
+               driveWorldLoad() down exactly the path it always did. -->
+          <section id="landing-mid" class="landing-col landing-col-mid"></section>
+
+        </div>
+      </div>
+    </div>
+
+    <footer class="landing-statusbar">
+      <span id="landing-status-platform" class="landing-live" data-i18n="server.landing.platform_web">Web build</span>
+      <span class="landing-sep"></span>
+      <span id="landing-status-session" data-i18n="server.landing.status_no_session">No session</span>
+      <span class="landing-sep"></span>
+      <span id="landing-status-build"></span>
+    </footer>
+  </div>
+
   <!-- Scenario selector shown before the server boots. The scenario buttons
        are rendered from the #754 pre-load catalog by renderScenarioLockState()
        once WASM is ready (issue #755) — no hardcoded world list (AGENTS.md #11).
@@ -1919,6 +2018,28 @@
        view model above; every call site fires from an async event long after
        both have run. -->
   <script type="module" src="gui/host-scenario-render.js"></script>
+  <!-- The landing screen (issue #1360, PRD #1355), in the same two halves and
+       for the same reasons: gui/host-landing-view.js is the pure decision
+       (which entries the menu offers, which one is open — the entries are a
+       TABLE so the six sibling slices that each add one add a row), and
+       gui/host-landing-render.js is every DOM write it drives, written as a
+       shared renderer from the start because #1361 puts this same landing on
+       the native host's viewscreen.
+
+       Unlike the picker's pair, this one has a call site that fires at page
+       load rather than off an async event: the landing is the first paint, so
+       the first render has to happen the moment both modules are up. The
+       island below is that call — module scripts are deferred, so the classic
+       script that defines __hostRenderLanding has long since run by then. -->
+  <script type="module" src="gui/host-landing-view.js"></script>
+  <script type="module" src="gui/host-landing-render.js"></script>
+  <script type="module">
+    // Module scripts are deferred and run in document order, so both halves
+    // above have self-registered and the classic script that defines this
+    // function has long since run. If a path already dismissed the landing (the
+    // ?scenario= dev bypass runs at parse time), this render is a no-op.
+    if (typeof window.__hostRenderLanding === 'function') window.__hostRenderLanding();
+  </script>
   <!-- GamePhase predicates shared with client.html (issue #440), including
        codesRotatable() — the pure "may the operator regenerate a join code
        right now" gate (issue #1115 AC2: rotatable in Lobby/GameOver, refused
@@ -4977,6 +5098,104 @@
      *  reload and without re-running the one-shot preload. */
     let _worldLoadedIntoBevy = false;
 
+    // ── Landing screen (issue #1360, PRD #1355) ───────────────────────────
+    //
+    // The page's half of the pair: this holds the open-entry memory and the
+    // hooks, and nothing else. Which entries exist and which one being open
+    // means what is gui/host-landing-view.js's; every DOM write is
+    // gui/host-landing-render.js's.
+    //
+    // `_landingOpenEntry` lives here rather than in either module for the
+    // reason `_worldLoadStarted` does: it is THIS page's lifecycle, and the
+    // native surface (#1361) owns its own copy. A module-level flag shared by
+    // two documents is a second authority the first time either forgets it.
+    let _landingOpenEntry = null;
+    let _landingDismissed = false;
+
+    function landingBuildId() {
+      const meta = document.querySelector('meta[name="phoenix-build-id"]');
+      const value = meta && meta.getAttribute('content');
+      return value ? value.trim() : 'dev';
+    }
+
+    /**
+     * Draw the landing. Safe to call before its modules have loaded — the
+     * island at the foot of <head> calls it again once they have, which is the
+     * same "not yet imported, the next render settles it" guard
+     * applyPreScenarioRestrictions uses.
+     */
+    window.__hostRenderLanding = function() {
+      if (_landingDismissed) return;
+      if (!window.hostLanding || !window.hostLandingRender) return;
+      const vm = window.hostLanding.landingViewModel({
+        openEntryId: _landingOpenEntry,
+        platform: 'web',
+        build: landingBuildId(),
+      });
+      window.hostLandingRender.renderHostLanding(document, vm, t, {
+        pick: function (entryId) {
+          const next = window.hostLanding.nextOpenEntry(_landingOpenEntry, entryId);
+          // A click on one of the four entries whose slice has not landed yet
+          // returns the open entry unchanged, and the view model is a pure
+          // function of that memory — so re-rendering would rebuild the whole
+          // menu to produce byte-identical DOM. Skipping it is not tidiness:
+          // a rebuild is what costs a keyboard operator the node they are
+          // standing on, and the cheapest way not to pay that is not to
+          // rebuild. The renderer restores focus across the renders that DO
+          // change something (New Game), which this cannot skip.
+          if (next === _landingOpenEntry) return;
+          _landingOpenEntry = next;
+          window.__hostRenderLanding();
+        },
+        // Fullscreen is implemented ONCE, in gui/page-chrome.js's
+        // initFullscreen, which binds #fullscreen-btn. That button lives in
+        // #top-bar over the Bevy canvas and is buried under this panel, so the
+        // landing's corner control forwards to it rather than growing a second
+        // requestFullscreen call that would drift from it — the same "one
+        // implementation, several triggers" shape gui/host-qr.js's toggle has.
+        toggleFullscreen: function () {
+          const btn = document.getElementById('fullscreen-btn');
+          if (btn) btn.click();
+        },
+      });
+    };
+
+    /**
+     * Take the landing off screen for good, and put the World picker back
+     * where the rest of this page expects to find it.
+     *
+     * Called from every path that commits to a world — the ?scenario= dev
+     * bypass, driveWorldLoad, and the save importer. The undock is not
+     * optional: those paths go on to show and hide #scenario-panel by setting
+     * its `display`, and a `display` on a node parented inside a hidden
+     * ancestor shows nothing at all.
+     */
+    function hideLanding() {
+      _landingDismissed = true;
+      _landingOpenEntry = null;
+      if (window.hostLandingRender) window.hostLandingRender.undockPicker(document);
+      const panel = document.getElementById('landing-panel');
+      if (panel) panel.style.display = 'none';
+    }
+
+    /**
+     * Bring the landing back with the World picker already open.
+     *
+     * The two paths that return this page to selection — the New Session
+     * button and Return to Lobby after a Game Over — are both an operator
+     * explicitly asking to choose a world, so they land on the stage that
+     * answers rather than on the front door with one more click to make. It is
+     * also what keeps round two looking exactly like round one did before this
+     * slice existed.
+     */
+    function showLandingAtPicker() {
+      _landingDismissed = false;
+      const panel = document.getElementById('landing-panel');
+      if (panel) panel.style.display = '';
+      _landingOpenEntry = 'new_game';
+      window.__hostRenderLanding();
+    }
+
     // The module-owned New Session button calls this after consuming the URL's
     // resume/scenario pair. Clear the classic script's matching pre-load state
     // too, so a debug `?resume=autosave` cannot survive an explicit choice to
@@ -4992,6 +5211,9 @@
       if (panel) panel.style.display = 'flex';
       renderScenarioLockState();
       showJoinQrOverPanel();
+      // Begin fresh means "choose a world", so the landing comes back on the
+      // stage that answers rather than on its front door (issue #1360).
+      showLandingAtPicker();
     };
 
     function showLobbyPanel() {
@@ -5132,6 +5354,10 @@
       // into wasm_load_world below so world preload only fetches hulls the
       // catalog actually offers, not every hull the world authors.
       _lockedCuratedShips = window.scenarioArbiter.curatedShipsFor(_scenarioCatalog, _preSelection);
+      // The landing goes BEFORE the picker is hidden (issue #1360): hideLanding
+      // returns #scenario-panel to the body first, so the `display: none` below
+      // lands on a node this page can show again for round two.
+      hideLanding();
       document.getElementById('scenario-panel').style.display = 'none';
       resetJoinQrLayer(); // panel gone — drop the QR back to its normal layer
       showLobbyPanel();
@@ -5569,6 +5795,7 @@
         setStatus(t('server.import_snapshot_loading'));
         _worldLoadStarted = true;
         selectedScenario = peek.scenario;
+        hideLanding(); // issue #1360 — see driveWorldLoad for why this is first
         document.getElementById('scenario-panel').style.display = 'none';
         resetJoinQrLayer();
         showLobbyPanel();
@@ -5583,6 +5810,11 @@
       const sp = new URLSearchParams(location.search).get('scenario');
       if (sp) {
         selectedScenario = sp;
+        // This session already names its world, so the front door has nothing
+        // to ask (issue #1360). Dismissing it here — at parse time, before the
+        // landing's module island has run — is also what makes the first
+        // render below a no-op rather than a flash of a menu nobody needs.
+        hideLanding();
         document.getElementById('scenario-panel').style.display = 'none';
         showLobbyPanel();
         initHostTransport();
@@ -5948,6 +6180,13 @@ function finishInit() {
     // the (re)selection completes and driveWorldLoad reuses the loaded world.
     document.getElementById('scenario-panel').style.display = '';
     document.getElementById('lobby-panel').style.display = 'none';
+    // …and the landing with it, on the World-picker stage (issue #1360): a
+    // return to lobby IS a request to pick again, so round two looks exactly
+    // like round one rather than adding a click the operator did not ask for.
+    // This UN-dismisses a landing the ?scenario= bypass took away at parse
+    // time, deliberately: the URL named the FIRST world, not every world this
+    // page will ever load, and round two is a genuine re-selection either way.
+    showLandingAtPicker();
     // Reset the first-valid-wins selection to its empty shape and clear the
     // world-load latch so renderScenarioLockState() rebuilds the scenario-stage
     // buttons. The finished round left _preSelection fully locked and the

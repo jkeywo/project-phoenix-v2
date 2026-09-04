@@ -493,6 +493,26 @@ export async function createServerPage(
   return page;
 }
 
+// ── Getting past the landing (issue #1360) ───────────────────────────────────
+//
+// The host's first paint is the landing screen, not the World picker: an
+// operator opening a cold page sees the front door, and New Game is what opens
+// the picker behind it. Every spec that reaches for `#world-list` on a page it
+// opened with `/` or `?manifest=` therefore has to make that click first.
+//
+// Not needed after `?scenario=<path>` — that dev bypass names the world in the
+// URL, so the landing has nothing to ask and dismisses itself at parse time.
+//
+// It is a helper rather than a line copied into a dozen specs because the click
+// is a fact about the surface, not about any one test: #1362 re-homes the
+// pickers under this menu, and when it does, this is the one place that moves.
+export async function openWorldPicker(page, timeout = 30_000) {
+  const newGame = page.locator('#landing-menu [data-landing-entry="new_game"]');
+  await newGame.waitFor({ state: 'visible', timeout });
+  await newGame.click();
+  return page;
+}
+
 // ── Reading an expectation out of TOML instead of pinning it (issue #941) ────
 //
 // Deliberately tiny, deliberately not a TOML parser: these read the handful of

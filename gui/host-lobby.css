@@ -21,31 +21,54 @@
  * legitimately be absent - it is, on the native lobby surface, which has no
  * cog to clear.
  *
- * WHY THERE IS STILL RAW HEX BELOW (issue #1356). Every literal here that has
- * an EXACT token now names it: --signal for the lobby accent, --surface-void
- * for the black ground, rgba(var(--rgb-white), …) and rgba(var(--rgb-signal), …)
- * for the translucent layers, and --focus-ring-contrast for the high-contrast
- * ring. The rest — #cce ink, the #0e0e14 card, the #2a8a96 claimed border, the
- * 0.6/0.65/0.7/0.8rem sizes — are the pre-graphite lobby palette, and
- * gui/tokens.css names none of those values. Rounding them onto the nearest
- * rung would retint the lobby, which is PRD #1355's next slice to decide and
- * not this one's to do quietly.
+ * NO RAW HEX BELOW ANY MORE (issue #1357, PRD #1355). #1356 swapped every
+ * literal that had an EXACT token and stopped there, because the thirty-two it
+ * could not name were the pre-graphite lobby palette and gui/tokens.css held no
+ * rung with those values. #1357 moved the vocabulary itself to graphite, so
+ * this sheet's remaining literals are named here — chosen BY ROLE, not by
+ * nearest hex, which is the only way the mapping survives the next retint:
  *
- * They stay, but they are not unguarded. This sheet IS in
- * design-tokens.test.js's SURFACES list, and every literal it still carries is
- * named in that suite's KNOWN_LITERALS allowlist: a new hex here fails the
- * suite, and a literal #1355 retires has to leave the allowlist too. The list
- * can only shrink.
+ *   panel fill      #0e0e14 card, #191e28 avatar, #181e2a chip, #131722 button
+ *                   → --surface-card / --surface-raised, one rung apart so a
+ *                     control still lifts off the card it sits on
+ *   divider         #334 rails and rules, #2a2d3a and #2a3a48 card borders
+ *                   → --edge-faint (page rules) / --edge (card and chip
+ *                     borders). Content, so WCAG 1.4.11 does not reach them.
+ *   control edge    the screen-row and monitor-row buttons → --edge-strong,
+ *                   hover --edge-bright. NOT --edge-control, which is quoted at
+ *                   3.02:1 against --surface-base and measures 2.94:1 on the
+ *                   --surface-card these buttons actually sit on — 0.06 short
+ *                   of 1.4.11's floor, because graphite makes the card a LIFT
+ *                   off the page rather than the navy ramp's hue shift at the
+ *                   same lightness. --edge-strong is 3.90:1 there.
+ *   holder name     #cce → --ink; #8a8aa0 → --ink-dim; #778/#667/#556 → the
+ *                   quiet rung --ink-faint, which on graphite measures 4.90:1
+ *                   on a card and so no longer needs the ad-hoc lift the two
+ *                   comments below used to record.
+ *   ready accent    #2a8a96 boundary → --cyan; the near-black teal fills
+ *                   (#0a2830, #101a1d, #0a1a20, #0d2830) → --cyan-deep resting
+ *                   and --cyan-dim lit, keeping every resting/hover pair a
+ *                   pair; --signal stays the foreground accent it already was.
+ *   status hues     the low-complexity pill → the --loaded family, the idle
+ *                   READY badge and the monitor notice → the --reloading
+ *                   family. Semantic, so they take the semantic rung.
  *
- * THE TYPE RUNGS ARE NOT AN IDENTITY. The seven 0.75rem labels now read
+ * Its KNOWN_LITERALS entry in design-tokens.test.js is gone with them. That
+ * suite fails on a STALE allowlist entry as well as on a new literal, so the
+ * emptying is enforced rather than remembered: plant a hex here and the next
+ * run says so.
+ *
+ * THE TYPE RUNGS ARE NOT AN IDENTITY. #1356 moved the 0.75rem labels to
  * --text-sm, which is `max(12px, 0.75rem)` — equal to what it replaced only at
  * a 16px root. Nothing sets a root font-size on this surface (neither
  * server.html nor src/native_host/host_lobby/document.rs does; gui/console.css
  * sizes the console iframes, not this), so the root is the browser's
  * user-configurable default, and a reader who has shrunk theirs to 14px now
- * gets 12px labels here rather than 10.5px. Holding that floor is the whole
- * reason the ramp is written as a max(), so the change is wanted — but it is a
- * change, and the rest of this slice moves nothing.
+ * gets 12px labels here rather than 10.5px. #1357 finishes the sweep on the
+ * same terms. The two VIEWPORT-scaled sizes keep their clamp and name rungs as
+ * its ends — `clamp(var(--text-xl), 2.5vw, var(--text-2xl))` — because this
+ * surface is a television across a room, and collapsing the title to a fixed
+ * rung would be the one place the ramp made things worse.
  */
 
 /* ── Lobby panel (issue #436) ────────────────────────────────────────── */
@@ -54,7 +77,7 @@
   inset: 0;
   z-index: 180;
   font-family: monospace;
-  color: #cce;
+  color: var(--ink);
 }
 .lobby-bg {
   position: absolute;
@@ -91,12 +114,12 @@
 .station-card {
   display: flex; flex-direction: column; gap: 6px;
   padding: 10px 12px; border-radius: 6px;
-  background: #0e0e14; border: 1px solid #2a2d3a;
+  background: var(--surface-card); border: 1px solid var(--edge);
   transition: border-color .2s, box-shadow .2s;
   font-family: 'Chakra Petch', system-ui, monospace;
 }
 .station-card.claimed {
-  border-color: #2a8a96; box-shadow: 0 0 8px rgba(42,138,150,0.25);
+  border-color: var(--cyan); box-shadow: 0 0 8px rgba(var(--rgb-cyan), 0.25);
 }
 .station-card.empty {
   opacity: 0.5; border-style: dashed;
@@ -108,30 +131,30 @@
 .station-card .card-avatar {
   width: 32px; height: 32px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  font-size: var(--text-sm); font-weight: bold; background: #191e28;
-  color: var(--signal); border: 1px solid #2a3a48;
+  font-size: var(--text-sm); font-weight: bold; background: var(--surface-raised);
+  color: var(--signal); border: 1px solid var(--edge);
 }
 .station-card .card-name {
-  font-size: 0.9rem; font-weight: 600; color: #cce;
+  font-size: var(--text-md); font-weight: 600; color: var(--ink);
 }
 .station-card .card-rank {
-  font-size: 0.65rem; color: #778; text-transform: uppercase; letter-spacing: .06em;
+  font-size: var(--text-xs); color: var(--ink-faint); text-transform: uppercase; letter-spacing: .06em;
 }
 .station-card .card-consoles {
   display: flex; flex-wrap: wrap; gap: 4px;
 }
 .station-card .console-chip {
   padding: 2px 8px; border-radius: 3px;
-  font-size: 0.65rem; background: #181e2a; color: #7aa;
-  border: 1px solid #2a3a48;
+  font-size: var(--text-xs); background: var(--surface-raised); color: var(--cyan);
+  border: 1px solid var(--edge);
 }
 .station-card .complexity-pill {
   padding: 1px 8px; border-radius: 8px;
-  font-size: 0.6rem; font-weight: 600; text-transform: uppercase;
-  background: #2a3a48; color: #7aa;
+  font-size: var(--text-xs); font-weight: 600; text-transform: uppercase;
+  background: var(--surface-lift); color: var(--cyan);
 }
 .station-card .complexity-pill.low {
-  background: #1a3828; color: #5fd88a; border: 1px solid #2a6850;
+  background: var(--loaded-deep); color: var(--loaded); border: 1px solid var(--loaded-dim);
 }
 
 /* This station's screen row (issue #1331) — which display its console opens
@@ -157,17 +180,21 @@
   margin-top: 2px;
 }
 .station-card .station-screens-label {
-  font-size: 0.6rem;
+  font-size: var(--text-xs);
   text-transform: uppercase;
   letter-spacing: .1em;
-  /* #8a8aa0 for the same reason the monitor row's quiet half is: #667 on this
-     card's #0e0e14 is 3.4:1, under WCAG 1.4.3's floor for small text. */
-  color: #8a8aa0;
+  /* --ink-dim, not the quiet --ink-faint, for the same reason the monitor row's
+     quiet half is one rung up: this is 0.65rem-class text and it has to clear
+     WCAG 1.4.3's 4.5:1 on the card. Both rungs now do (6.58:1 and 4.90:1 on
+     --surface-card) — the graphite ramp lifted the faint rung past the floor
+     the pre-graphite #667 failed at — so the choice is emphasis rather than
+     rescue, and the emphasis the row was drawn with is kept. */
+  color: var(--ink-dim);
   margin-right: 2px;
 }
 .station-card .station-screens-message {
-  font-size: 0.65rem;
-  color: #8a8aa0;
+  font-size: var(--text-xs);
+  color: var(--ink-dim);
 }
 .station-card .station-screen-button {
   display: inline-flex;
@@ -175,47 +202,51 @@
   gap: 4px;
   padding: 3px 8px;
   border-radius: 3px;
-  border: 1px solid #2a2d3a;
-  background: #131722;
-  color: #cce;
+  /* --edge-strong, not --edge-control: this is a CONTROL boundary and WCAG
+     1.4.11 asks 3:1 of it, but --edge-control is quoted against --surface-base
+     and measures only 2.94:1 on the --surface-card this button sits inside.
+     --edge-strong is 3.90:1 there. See the header. */
+  border: 1px solid var(--edge-strong);
+  background: var(--surface-raised);
+  color: var(--ink);
   font-family: 'Chakra Petch', system-ui, monospace;
-  font-size: 0.65rem;
+  font-size: var(--text-xs);
   letter-spacing: .04em;
   cursor: pointer;
 }
-.station-card .station-screen-button:hover:enabled { border-color: #4a5570; }
+.station-card .station-screen-button:hover:enabled { border-color: var(--edge-bright); }
 .station-card .station-screen-button.selected {
-  border-color: #2a8a96;
-  background: #101a1d;
+  border-color: var(--cyan);
+  background: var(--cyan-deep);
   color: var(--signal);
 }
 .station-card .station-screen-button:disabled {
   cursor: default;
-  color: #8a8aa0;
+  color: var(--ink-dim);
   border-style: dashed;
 }
 .station-card .station-screen-reason {
-  font-size: 0.6rem;
-  color: #8a8aa0;
+  font-size: var(--text-xs);
+  color: var(--ink-dim);
   text-transform: uppercase;
   letter-spacing: .08em;
 }
 .station-card .station-screen-button:focus,
 .station-card .station-screen-button:focus-visible {
-  outline: 2px solid #cfe8ff;
-  outline-offset: 2px;
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 
 /* Crew dots */
 .crew-dot {
   width: 8px; height: 8px; border-radius: 50%;
-  background: #2a2d3a; border: 1px solid #3a3d4a;
+  background: var(--surface-lift); border: 1px solid var(--edge);
   transition: background .2s, border-color .2s;
 }
 .crew-dot.filled { background: var(--signal); border-color: var(--signal); }
 /* Ready badge states */
 #lobby-ready-badge.go {
-  background: #0a2830; color: var(--signal); border-color: var(--signal);
+  background: var(--cyan-dim); color: var(--signal); border-color: var(--signal);
   animation: ready-pulse 1.5s ease-in-out infinite;
 }
 @keyframes ready-pulse {
@@ -247,37 +278,52 @@
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  border-left: 1px solid #334;
+  border-left: 1px solid var(--edge-faint);
   padding-left: 1.5rem;
 }
 .lobby-rail-section {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 0.8rem;
-  color: #889;
+  font-size: var(--text-sm);
+  color: var(--ink-dim);
 }
 .lobby-rail-spacer { flex: 1; }
 .lobby-status-hint {
   font-size: var(--text-sm);
-  color: #667;
+  color: var(--ink-faint);
   text-align: right;
   padding-top: 0.5rem;
-  border-top: 1px solid #334;
+  border-top: 1px solid var(--edge-faint);
 }
 .lobby-rail-label {
-  font-size: 0.7rem;
-  color: #667;
+  font-size: var(--text-xs);
+  color: var(--ink-faint);
   text-transform: uppercase;
   letter-spacing: .08em;
   margin-bottom: 0.5rem;
 }
 
-/* Card font scaling for wide screens / readability */
-.station-card .card-name { font-size: clamp(0.85rem, 1vw, 1rem); }
-.station-card .card-rank { font-size: clamp(0.6rem, 0.7vw, 0.7rem); }
-.station-card .console-chip { font-size: clamp(0.6rem, 0.7vw, 0.7rem); }
-.station-card .complexity-pill { font-size: clamp(0.55rem, 0.65vw, 0.65rem); }
+/* Card font scaling for wide screens / readability. The clamp survives the
+   move onto the ramp — this surface is a television across a room and a fixed
+   rung would be the one place the ramp made things worse — but its ENDS are
+   rungs now, so the sheet still holds no size of its own.
+
+   The complexity pill dropped out, and that IS a size change, recorded here
+   rather than passed off as a no-op. Its clamp ran `clamp(0.55rem, 0.65vw,
+   0.65rem)`: 8.8px below a ~1354px-wide host window, 10.4px above ~1600px.
+   The ramp has no rung under --text-min (11px) and is not getting one — that
+   floor is the whole reason the ramp exists — so there is nothing to write the
+   bottom end with. The rule goes instead of being written with a bottom end
+   that is really its top, and the pill inherits the base rule's --text-xs:
+   flat 11px, up ~2px on a 1280px host window and ~0.6px on a wide one. It
+   stops shrinking with the viewport, which for a two-word "LOW"/"HIGH" badge
+   read across a room is the direction to be wrong in. See THE TYPE RUNGS ARE
+   NOT AN IDENTITY in the header — same trade, stated once more because this
+   one is a deleted rule and the ratchet only sees literals that REMAIN. */
+.station-card .card-name { font-size: clamp(var(--text-md), 1vw, var(--text-lg)); }
+.station-card .card-rank { font-size: clamp(var(--text-xs), 0.7vw, var(--text-sm)); }
+.station-card .console-chip { font-size: clamp(var(--text-xs), 0.7vw, var(--text-sm)); }
 
 .station-card { min-height: 90px; }
 
@@ -285,21 +331,21 @@
 .spectator-pill {
   padding: 4px 10px;
   border-radius: 3px;
-  background: #181e2a;
-  color: #aac;
-  border: 1px solid #2a3a48;
+  background: var(--surface-raised);
+  color: var(--ink);
+  border: 1px solid var(--edge);
   font-size: var(--text-sm);
   white-space: nowrap;
   align-self: flex-start;
 }
 .spectator-pill.waiting {
   font-style: italic;
-  color: #778;
+  color: var(--ink-faint);
   border-style: dashed;
 }
 .spectator-empty {
-  color: #556;
-  font-size: 0.8rem;
+  color: var(--ink-faint);
+  font-size: var(--text-sm);
   font-style: italic;
 }
 
@@ -308,10 +354,10 @@
   display: none;
   padding: 6px 12px;
   border-radius: 4px;
-  border: 1px dashed #2a2d3a;
+  border: 1px dashed var(--edge);
   background: repeating-linear-gradient(45deg,transparent,transparent 6px,rgba(var(--rgb-white), 0.02) 6px,rgba(var(--rgb-white), 0.02) 12px);
   font-size: var(--text-sm);
-  color: #667;
+  color: var(--ink-faint);
   text-align: center;
   letter-spacing: .04em;
   font-family: 'Chakra Petch', system-ui, monospace;
@@ -325,7 +371,7 @@
   flex-wrap: wrap;
   row-gap: 0.5rem;
   padding-bottom: 1rem;
-  border-bottom: 1px solid #334;
+  border-bottom: 1px solid var(--edge-faint);
 }
 .lobby-title-block { display: flex; flex-direction: column; }
 .lobby-status-block {
@@ -342,43 +388,43 @@
 }
 .lobby-crew-label {
   font-size: var(--text-sm);
-  color: #889;
+  color: var(--ink-dim);
   text-transform: uppercase;
   letter-spacing: .06em;
 }
 #lobby-title {
-  font-size: clamp(1.1rem, 2.5vw, 1.6rem);
+  font-size: clamp(var(--text-xl), 2.5vw, var(--text-2xl));
   font-weight: bold;
   letter-spacing: .08em;
-  color: #cce;
+  color: var(--ink);
 }
 #lobby-subtitle {
-  font-size: 0.8rem;
-  color: #778;
+  font-size: var(--text-sm);
+  color: var(--ink-faint);
 }
 #lobby-crew-count {
-  font-size: clamp(1rem, 2vw, 1.4rem);
+  font-size: clamp(var(--text-lg), 2vw, var(--text-xl));
   font-weight: bold;
-  color: #aae;
+  color: var(--ink);
   font-family: 'JetBrains Mono', monospace;
 }
 #lobby-crew-dots { display: flex; gap: 4px; }
 #lobby-spectator-tag {
-  font-size: 0.7rem;
-  color: #667;
+  font-size: var(--text-xs);
+  color: var(--ink-faint);
   padding: 2px 6px;
-  border: 1px solid #445;
+  border: 1px solid var(--edge);
   border-radius: 3px;
 }
 #lobby-ready-badge {
   padding: 6px 14px;
   border-radius: 4px;
-  font-size: 0.8rem;
+  font-size: var(--text-sm);
   font-weight: bold;
   letter-spacing: .1em;
-  background: #332;
-  color: #ca0;
-  border: 1px solid #ca0;
+  background: var(--reloading-deep);
+  color: var(--reloading);
+  border: 1px solid var(--reloading);
   transition: all .3s ease;
 }
 
@@ -388,9 +434,9 @@
   bottom: 1.5rem;
   left: 1.5rem;
   padding: 8px 16px;
-  background: #0a1a20;
+  background: var(--cyan-deep);
   color: var(--signal);
-  border: 1px solid #2a8a96;
+  border: 1px solid var(--cyan);
   border-radius: 4px;
   font-family: 'Chakra Petch', system-ui, monospace;
   font-size: var(--text-sm);
@@ -402,7 +448,7 @@
   z-index: 2;
 }
 #ai-launch-btn:hover {
-  background: #0d2830;
+  background: var(--cyan-dim);
   border-color: var(--signal);
   box-shadow: 0 0 8px rgba(var(--rgb-signal), 0.25);
 }
@@ -425,7 +471,7 @@
     width: auto;
     min-width: 0;
     border-left: none;
-    border-top: 1px solid #334;
+    border-top: 1px solid var(--edge-faint);
     padding-left: 0;
     padding-top: 0.75rem;
     flex-direction: column;
@@ -483,29 +529,34 @@
   align-items: flex-start;
   padding: 6px 10px;
   border-radius: 4px;
-  border: 1px solid #2a2d3a;
-  background: #0e0e14;
-  color: #cce;
+  /* --edge-strong rather than --edge-control, and for the same measurement the
+     station screen row states above: this button's fill is --surface-card, and
+     --edge-control is 2.94:1 against that while --edge-strong is 3.90:1. */
+  border: 1px solid var(--edge-strong);
+  background: var(--surface-card);
+  color: var(--ink);
   font-family: 'Chakra Petch', system-ui, monospace;
   font-size: var(--text-sm);
   letter-spacing: .04em;
   text-align: left;
   cursor: pointer;
 }
-.monitor-button:hover { border-color: #4a5570; }
+.monitor-button:hover { border-color: var(--edge-bright); }
 .monitor-button.viewscreen {
-  border-color: #2a8a96;
-  background: #101a1d;
+  border-color: var(--cyan);
+  background: var(--cyan-deep);
 }
-/* #8a8aa0, not the #667 this started as: these are 0.65rem body text, and #667
-   on the button's #0e0e14 is 3.4:1 — under WCAG 1.4.3's 4.5:1 for normal text,
-   which the row cannot claim to meet while carrying words that matter. This is
-   5.7:1 and still reads as the button's quiet half. The viewscreen's own mark
-   below is 10.5:1 on #101a1d and is unchanged. */
+/* --ink-dim, not the quiet --ink-faint: these are 0.65rem-class body text and
+   have to clear WCAG 1.4.3's 4.5:1 for normal text, which the row cannot claim
+   to meet while carrying words that matter. --ink-dim is 6.58:1 on the button's
+   --surface-card and still reads as its quiet half. --ink-faint would now clear
+   the floor too (4.90:1, where the pre-graphite #667 was 3.4:1), so keeping the
+   lighter rung is the row's emphasis rather than its rescue. The viewscreen's
+   own mark below is --signal, 10.36:1 on --cyan-deep. */
 .monitor-button .monitor-button-mark,
 .monitor-button .monitor-button-stations {
-  font-size: 0.65rem;
-  color: #8a8aa0;
+  font-size: var(--text-xs);
+  color: var(--ink-dim);
 }
 .monitor-button .monitor-button-mark {
   text-transform: uppercase;
@@ -514,12 +565,12 @@
 .monitor-button.viewscreen .monitor-button-mark { color: var(--signal); }
 .monitor-button:focus,
 .monitor-button:focus-visible {
-  outline: 2px solid #cfe8ff;
-  outline-offset: 2px;
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 .monitor-row-notice {
-  font-size: 0.7rem;
-  color: #c9a86a;
+  font-size: var(--text-xs);
+  color: var(--reloading);
   line-height: 1.4;
 }
 .monitor-row-notice-line + .monitor-row-notice-line { margin-top: 4px; }

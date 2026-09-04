@@ -28,14 +28,14 @@ const key = (code) => Object.freeze({
 });
 const button = (control) => Object.freeze({ type: 'gamepad', input: 'button', control });
 
-function axisAction(id, label, control) {
+function axisAction(id, label, control, options = {}) {
   return Object.freeze({
     id,
     contexts: HELM_CONTEXTS,
     labelId: `semantic_action.helm.${label}.label`,
     accessibilityLabelId: `semantic_action.helm.${label}.accessibility`,
     continuous: Object.freeze({ min: -1, max: 1, neutral: 0, cadenceMs: 100 }),
-    tuning: Object.freeze({ deadzone: 0.1, inverted: false }),
+    tuning: Object.freeze({ deadzone: 0.1, inverted: options.inverted === true }),
     bindings: Object.freeze([
       Object.freeze({ type: 'gamepad', input: 'axis', control }),
       null,
@@ -55,8 +55,14 @@ function authoritativeAction(id, label, keyboard, gamepad, options = {}) {
   });
 }
 
+// The standard gamepad maps left-stick-y so pushing UP (forward) reads as -1
+// and DOWN as +1, but forward thrust is a POSITIVE value (the on-screen
+// joystick negates its own Y for the same reason — see gui/components/
+// ph-helm-joystick.js). Inverting the axis here makes stick-forward drive the
+// ship forward instead of into reverse. Steering (left-stick-x) needs no such
+// flip: right is already +1, which is starboard.
 export const HELM_THRUST_ACTION = axisAction(
-  HELM_THRUST_ACTION_ID, 'thrust', 'left-stick-y',
+  HELM_THRUST_ACTION_ID, 'thrust', 'left-stick-y', { inverted: true },
 );
 
 export const HELM_STEERING_ACTION = axisAction(

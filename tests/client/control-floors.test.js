@@ -78,6 +78,10 @@ const EXEMPT = new Map([
     'a slider thumb cannot carry a min-height — the ROW it sits in takes the floor'],
   ['client.html :: .settings-vol-row input[type="range"]::-moz-range-thumb',
     'as above, the Firefox spelling of the same thumb'],
+  ['client.html :: .settings-binding-label select option',
+    'an <option> takes no height: the dropdown list is drawn by the OS, not by '
+    + 'the page. The SELECT that opens it is the target, and it carries the '
+    + 'floor on the rule above this one'],
   ['gui/components/ph-shield-facings.js :: .arc-path',
     'an SVG path: no CSS box, so no min-height. Its target is .hit-path below'],
   ['gui/components/ph-shield-facings.js :: .hit-path',

@@ -160,14 +160,20 @@ afterEach(() => {
 
 describe('pane_boot.js — the identity comes out of the fragment', () => {
   it('declares native capability gaps before the shared client profile loads', () => {
-    // #1124 remains the only pane input route: no browser-shaped Gamepad API
-    // stub is allowed to create a second path. #1127 remains the Accessibility
-    // path; the declaration only filters active capabilities and retains data.
+    // Gamepad is DECLARED here, and that is the newer rule: the native host
+    // feeds a standard-mapped snapshot of every connected pad into
+    // `window.__phoenixSetGamepads` each frame and pane_boot.js shims
+    // `navigator.getGamepads()` over it, so gui/gamepad-input.js runs here
+    // unchanged. That supersedes the older "no browser-shaped Gamepad API stub
+    // may create a second path" reading of #1124 — the shim IS the one route,
+    // not a second one. Vibration stays off because no native backend answers
+    // it, and the declaration still only filters active capabilities rather
+    // than discarding the profile's data. #1127 remains the Accessibility path.
     runBoot(fragment('abcd', 'Ada'));
     expect(window.PhoenixOperatorCapabilities).toEqual({
       surface: 'native-pane',
       keyboard: true,
-      gamepad: false,
+      gamepad: true,
       vibration: false,
       semanticCues: true,
       accessibility: true,

@@ -132,7 +132,6 @@
        by the console-state.js tag above; this tag documents the dependency
        and defines window.applyTutorialAction for the inline script). -->
   <script type="module" src="gui/tutorial-state.js"></script>
-  <script type="module" src="gui/device-orientation.js"></script>
   <script type="module" src="gui/comms-state.js"></script>
   <!-- ICE/TURN server list, relay probe and the connect/backoff schedules the
        transport is tuned by (issues #603, #1226). -->
@@ -815,9 +814,6 @@
     #spectator-claim-status { font-size: var(--text-sm); color: var(--ink-dim); }
     #spectator-claim-status[data-state="taken"] { color: var(--reloading); }
     .spectator-claims-empty { font-size: var(--text-xs); color: var(--ink-dim); }
-    #spectate-btn { padding: 6px 14px; border-radius: 4px; background: var(--surface-panel-up);
-      color: var(--ink); border: 1px solid var(--edge-strong); font-family: 'Chakra Petch', sans-serif;
-      letter-spacing: .06em; }
 
     /* ── Ship header ─────────────────────────────────────────────────────
        The client lobby's command bar, drawn to the "Client lobby — portrait
@@ -912,109 +908,369 @@
     }
 
     /* Name input row */
-    #lobby-name-row { flex-shrink: 0; padding: 6px 0 2px; }
+    #lobby-name-row { flex-shrink: 0; padding: var(--space-3) 0 var(--space-1); }
     #lobby-name-row label { font-size: var(--text-sm); color: var(--ink-faint); margin: 0;
-      display: flex; align-items: center; gap: 8px; }
+      display: flex; align-items: center; gap: var(--space-4); }
     #lobby-name-row input { flex: 1; background: var(--surface-panel); color: var(--ink);
-      border: 1px solid var(--edge); padding: 4px 8px; border-radius: 3px;
-      font-family: 'Chakra Petch', system-ui, sans-serif; font-size: var(--text-md);
+      border: 1px solid var(--edge); padding: var(--space-2) var(--space-4); border-radius: 3px;
+      font-family: var(--font-display); font-size: var(--text-md);
       display: inline; width: auto; margin: 0; }
+
+    /* ── Lobby body ──────────────────────────────────────────────────────
+       The roster and the seat rail, drawn to the "Client lobby — portrait
+       frame" and "— landscape frame" artboards (PRD #1355, issue #1370).
+
+       The two artboards are ONE document at two frame sizes, and this is the
+       joint that makes that true in the page: `#lobby-side` holds the seat
+       detail and the command row, and it is `display: contents` in portrait —
+       so the detail card and the Ready bar flow as the column's own children,
+       exactly as three stacked siblings would — and a real box in landscape,
+       where it stands up as a rail beside the roster. Nothing about which
+       arrangement is in force is decided in script; the viewport decides it,
+       in the one `@media (orientation: landscape)` block at the end of this
+       section. That is why the orientation `render()` used to compute and
+       write onto #console-container is gone: a script-written attribute is a
+       second answer to a question the browser already answers. */
+    #lobby-body {
+      flex: 1; min-height: 0; display: flex; flex-direction: column;
+      gap: var(--space-5); padding-top: var(--space-4);
+    }
+    #lobby-side { display: contents; }
+
     /* Station list */
-    #station-list { flex: 1; overflow-y: auto; padding: 8px 0; display: flex;
-      flex-direction: column; gap: 6px; }
-    .station-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
-      border-radius: 6px; background: var(--surface-panel); border: 1px solid var(--edge);
-      transition: border-color .2s, background .2s; }
-    .station-row.mine { border-color: var(--signal); background: var(--cyan-deep); }
+    #station-list { flex: 1; overflow-y: auto; display: flex;
+      flex-direction: column; gap: var(--space-3); }
+
+    /* ── Station roster ──────────────────────────────────────────────────
+       The artboard's `.st` row. Every value is the rung issue #1357's mapping
+       table gives for the ROLE the artboard's hex is playing, not the nearest
+       colour by eye:
+
+         row fill      #0b0e14 → --surface-card
+         row border    #22262d → --edge. That hex's own rung is
+                       --surface-lift, which is a SURFACE; a row's boundary is
+                       a content divider, and --edge is the divider rung.
+         held row      #2a8a96 → --cyan, the accent BOUNDARY, kept distinct
+                       from --signal, the accent FOREGROUND (the name, the
+                       glyph). The table draws that line explicitly.
+         station name  #d8e2ff → --ink, for the reason #1369 gave the ship
+                       name: the artboard's near-white has no rung, and
+                       inventing one would be a palette change.
+         job line      #8f99a4 → --ink-dim
+         holder name   #6a727b → --ink-faint, NOT --edge-strong, which is what
+                       that hex maps to as a stroke: this is text and has to
+                       clear the 4.5 floor. It is somebody ELSE's name, so it
+                       is deliberately not accent-coloured any more.
+         blocked seat  #d8a040 → --reloading
+
+       The artboard's 8px row chamfer has no rung — the vocabulary's chamfers
+       are 0.22/0.34/0.875rem — so the rows and their controls take
+       --control-cham-md, the control family's own chamfer, rather than a
+       fourth size invented here. Same for the 6px on the row buttons. */
+    .station-row {
+      display: flex; align-items: center; gap: var(--space-5);
+      padding: var(--space-4) var(--space-5);
+      /* The list is a flex COLUMN, and a flex item shrinks below its content
+         by default — which crops the holder's name and the private reason off
+         the bottom of a row rather than scrolling the list. */
+      flex-shrink: 0;
+      min-height: calc(var(--control-hit-min) + var(--space-7));
+      background: var(--surface-card); border: 1px solid var(--edge);
+      transition: border-color .2s, background .2s;
+      clip-path: polygon(
+        var(--control-cham-md) 0, 100% 0,
+        100% calc(100% - var(--control-cham-md)),
+        calc(100% - var(--control-cham-md)) 100%, 0 100%, 0 var(--control-cham-md));
+    }
+    .station-row.mine { border-color: var(--cyan); background: var(--cyan-deep); }
     .station-row.taken { opacity: 0.7; }
-    .station-row .glyph { width: 36px; height: 36px; border-radius: 50%;
+    /* A free seat blocked by this player's private accessibility profile
+       (issue #1103 AC1). The artboard's blocked ground (#17130a) has no rung,
+       so the row keeps its own surface and says "blocked" with the amber
+       boundary and the inline reason instead of a fill this file would have
+       had to invent. */
+    .station-row.ineligible { border-color: var(--reloading-dim); opacity: 0.8; }
+    .station-row .glyph {
+      width: calc(var(--control-hit-min) - var(--space-3));
+      height: calc(var(--control-hit-min) - var(--space-3));
+      flex: 0 0 calc(var(--control-hit-min) - var(--space-3));
       display: flex; align-items: center; justify-content: center;
-      font-size: var(--text-sm); font-weight: 700; flex-shrink: 0;
-      background: var(--surface-panel-up); color: var(--ink-faint); border: 1px solid var(--edge); }
-    .station-row.mine .glyph { border-color: var(--signal); color: var(--signal); }
-    .station-row .info { flex: 1; min-width: 0; }
-    .station-row .info .name { font-size: var(--text-md); font-weight: 600; }
+      font-family: var(--font-mono); font-size: var(--text-xs); font-weight: 700;
+      letter-spacing: var(--tracking-tight);
+      background: var(--surface-panel); color: var(--ink-faint);
+      border: 1px solid var(--edge);
+      clip-path: polygon(
+        var(--control-cham-sm) 0, 100% 0,
+        100% calc(100% - var(--control-cham-sm)),
+        calc(100% - var(--control-cham-sm)) 100%, 0 100%, 0 var(--control-cham-sm));
+    }
+    .station-row.mine .glyph { border-color: var(--cyan); color: var(--signal); }
+    .station-row .info { flex: 1; min-width: 0;
+      display: flex; flex-direction: column; gap: var(--space-1); }
+    .station-row .info .name {
+      font-family: var(--font-display); font-size: var(--text-lg); font-weight: 600;
+      letter-spacing: var(--tracking); text-transform: uppercase; color: var(--ink);
+    }
+    .station-row.mine .info .name { color: var(--signal); }
     .station-row .info .meta { font-size: var(--text-xs); color: var(--ink-faint);
-      display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
-    .station-row .info .meta .cons { padding: 1px 5px; border-radius: 2px;
-      background: var(--surface-panel-up); font-size: var(--text-xs); color: var(--ink-dim); }
+      display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; }
+    /* The seat's rank, beside the console chip (issue #1370 AC1). */
+    .station-row .info .meta .rank { font-family: var(--font-mono); font-weight: 500;
+      letter-spacing: var(--tracking); }
+    .station-row .info .meta .cons { padding: var(--space-1) var(--space-3);
+      border: 1px solid var(--surface-ridge); white-space: nowrap;
+      font-family: var(--font-mono); font-size: var(--text-xs);
+      letter-spacing: var(--tracking); text-transform: uppercase; color: var(--ink-dim); }
     /* What the seat does, read before it is claimed (PRD #1023 module 4).
        --ink-dim rather than --ink-faint: this is copy meant to be read at
        arm's length, not a de-emphasised label. */
     .station-row .info .desc { font-size: var(--text-sm); color: var(--ink-dim);
-      margin-top: 2px; line-height: 1.4; }
-    .station-row .info .occupant { font-size: var(--text-sm); color: var(--signal); }
+      line-height: 1.4; }
+    .station-row .info .occupant { font-family: var(--font-display);
+      font-size: var(--text-sm); font-weight: 600;
+      letter-spacing: var(--tracking-tight); color: var(--ink-faint); }
+    /* The private functional reason. Local-only, and rendered on a FREE seat
+       this viewer could otherwise take and on nothing else — the renderer
+       decides that (issue #1369); this only paints it. */
+    .station-row .info .ineligible-reason { font-size: var(--text-sm);
+      color: var(--reloading); line-height: 1.4; font-style: italic; }
     .station-row .action { flex-shrink: 0; }
-    .station-row .action button { padding: 4px 12px; border-radius: 4px;
-      font-family: 'Chakra Petch', system-ui, sans-serif; font-size: var(--text-sm);
-      font-weight: 600; letter-spacing: .06em; cursor: pointer; border: 1px solid;
-      transition: background .15s; display: block; width: auto; margin: 0; text-align: center; min-height: var(--control-hit-min); }
-    .station-row .action .claim-btn { background: var(--surface-panel-up); color: var(--signal);
-      border-color: var(--signal); }
+    .station-row .action button {
+      min-height: var(--control-hit-min); padding: 0 var(--space-6);
+      display: inline-flex; align-items: center; justify-content: center;
+      width: auto; margin: 0; text-align: center; cursor: pointer;
+      font-family: var(--font-mono); font-size: var(--text-xs); font-weight: 700;
+      letter-spacing: var(--tracking-wide); text-transform: uppercase;
+      border: 1px solid; border-radius: 0; transition: background .15s;
+      clip-path: polygon(
+        var(--control-cham-md) 0, 100% 0,
+        100% calc(100% - var(--control-cham-md)),
+        calc(100% - var(--control-cham-md)) 100%, 0 100%, 0 var(--control-cham-md));
+    }
+    .station-row .action .claim-btn { background: var(--surface-raised); color: var(--signal);
+      border-color: var(--cyan); }
     .station-row .action .claim-btn:hover { background: var(--cyan-dim); }
     .station-row .action .mine-btn { background: var(--cyan-deep); color: var(--signal);
-      border-color: var(--signal); }
+      border-color: var(--cyan); }
+    /* --surface-panel, not --surface-card: the ROW is --surface-card, and a
+       disarmed control the same colour as the card it sits on stops reading as
+       a control at all. One rung up keeps its silhouette. */
     .station-row .action .taken-btn { background: var(--surface-panel); color: var(--ink-faint);
-      border-color: var(--edge); cursor: default; }
-    /* A free seat blocked by this player's private accessibility profile
-       (issue #1103 AC1). Muted like 'taken'; the functional reason sits inline
-       under the station name and is local-only. */
+      border-color: var(--edge-control); cursor: default; }
     .station-row .action .ineligible-btn { background: var(--surface-panel); color: var(--ink-faint);
-      border-color: var(--edge); cursor: not-allowed; }
-    .station-row.ineligible { opacity: 0.75; }
-    .station-row .info .ineligible-reason { font-size: var(--text-sm); color: var(--ink-dim);
-      margin-top: 2px; line-height: 1.4; font-style: italic; }
-    /* Detail panel */
-    #detail-panel { flex-shrink: 0; border-top: 1px solid var(--edge);
-      padding: 8px 0 4px; margin-top: 4px; transition: opacity .3s ease; }
-    #detail-panel.idle { opacity: 0.4; }
-    #detail-panel .detail-header { display: flex; align-items: center; justify-content: space-between; }
-    #detail-panel .detail-station-name { font-size: var(--text-md); font-weight: 600; color: var(--ink-faint); }
+      border-color: var(--reloading-dim); cursor: not-allowed; }
+
+    /* ── At-your-station detail ──────────────────────────────────────────
+       The artboard's `.detail` card: a card in BOTH orientations, where the
+       artboard hides it in portrait. It is not decoration — it carries the
+       console chips, the complexity ladder and the LEAVE control, so hiding
+       it on a phone held upright would take three functions away from the
+       orientation most players hold. It moves; it does not vanish. */
+    #detail-panel {
+      flex-shrink: 0; display: flex; flex-direction: column; gap: var(--space-4);
+      padding: var(--space-5); background: var(--surface-card);
+      border: 1px solid var(--edge); transition: opacity .3s ease;
+      clip-path: polygon(
+        var(--cham-panel) 0, 100% 0,
+        100% calc(100% - var(--cham-panel)),
+        calc(100% - var(--cham-panel)) 100%, 0 100%, 0 var(--cham-panel));
+    }
+    #detail-panel.idle { opacity: 0.4; border-style: dashed; }
+    #detail-panel .detail-header { display: flex; align-items: center;
+      justify-content: space-between; gap: var(--space-4); }
+    #detail-panel .detail-station-name { min-width: 0; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap;
+      font-family: var(--font-display); font-size: var(--text-lg); font-weight: 600;
+      letter-spacing: var(--tracking); color: var(--ink-faint); }
     #detail-panel.active .detail-station-name { color: var(--signal); }
     #detail-panel .detail-station-desc:empty { display: none; }
     #detail-panel .detail-station-desc { font-size: var(--text-sm); color: var(--ink-dim);
-      margin: 3px 0 0; line-height: 1.4; }
-    #detail-panel .detail-consoles { display: flex; gap: 4px; margin: 4px 0; flex-wrap: wrap; }
-    #detail-panel .detail-consoles .chip { padding: 2px 8px; border-radius: 3px;
-      font-size: var(--text-xs); background: var(--surface-panel-up); color: var(--ink-dim); border: 1px solid var(--edge);
-      cursor: pointer; transition: background .15s, border-color .15s, color .15s; display: inline-flex; align-items: center; justify-content: center; min-height: var(--control-hit-min); }
-    #detail-panel .detail-consoles .chip:hover { border-color: var(--signal); color: var(--signal); }
-    #detail-panel .detail-consoles .chip.selected { background: var(--surface-panel-up);
-      border-color: var(--signal); color: var(--signal); }
-    #detail-panel .detail-ratings { display: flex; gap: 2px; margin: 4px 0; }
-    #detail-panel .detail-ratings .rating-btn { padding: 2px 10px; border-radius: 3px;
-      font-family: 'Chakra Petch', system-ui, sans-serif; font-size: var(--text-xs);
-      font-weight: 500; cursor: pointer; border: 1px solid var(--edge);
-      background: var(--surface-panel); color: var(--ink-faint); display: block; width: auto; margin: 0;
-      transition: background .15s, border-color .15s; min-height: var(--control-hit-min); }
-    #detail-panel .detail-ratings .rating-btn.active { background: var(--surface-panel-up);
-      border-color: var(--signal); color: var(--signal); }
-    #detail-panel .detail-release-btn { padding: 2px 10px; border-radius: 3px;
-      font-family: 'Chakra Petch', system-ui, sans-serif; font-size: var(--text-xs);
-      font-weight: 600; letter-spacing: .06em; cursor: pointer;
-      border: 1px solid var(--fire-hot); background: transparent; color: var(--fire-hot);
-      display: block; width: auto; margin: 0; flex-shrink: 0;
-      transition: background .15s; min-height: var(--control-hit-min); }
+      margin: 0; line-height: 1.4; }
+    #detail-panel .detail-consoles { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+    #detail-panel .detail-consoles .chip { min-height: var(--control-hit-min);
+      padding: 0 var(--space-4); display: inline-flex; align-items: center;
+      justify-content: center; cursor: pointer;
+      font-family: var(--font-mono); font-size: var(--text-xs);
+      letter-spacing: var(--tracking); text-transform: uppercase;
+      background: var(--surface-panel); color: var(--ink-dim);
+      /* --edge-strong, not the SURFACE rung --surface-ridge (1.57:1 here):
+         the chip is a tappable control, so its boundary is on the control
+         ladder, and --edge-strong is that ladder's --surface-panel rung
+         (3.68:1). Same error the row border above is commented against. */
+      border: 1px solid var(--edge-strong); border-radius: 0;
+      transition: background .15s, border-color .15s, color .15s;
+      clip-path: polygon(
+        var(--control-cham-md) 0, 100% 0,
+        100% calc(100% - var(--control-cham-md)),
+        calc(100% - var(--control-cham-md)) 100%, 0 100%, 0 var(--control-cham-md)); }
+    #detail-panel .detail-consoles .chip:hover { border-color: var(--cyan); color: var(--signal); }
+    #detail-panel .detail-consoles .chip.selected { background: var(--cyan-deep);
+      border-color: var(--cyan); color: var(--signal); }
+    #detail-panel .detail-ratings { display: flex; gap: var(--space-1); flex-wrap: wrap; }
+    #detail-panel .detail-ratings .rating-btn { min-height: var(--control-hit-min);
+      padding: 0 var(--space-5); display: inline-flex; align-items: center;
+      justify-content: center; width: auto; margin: 0; cursor: pointer;
+      font-family: var(--font-display); font-size: var(--text-xs); font-weight: 500;
+      letter-spacing: var(--tracking-tight);
+      background: var(--surface-panel); color: var(--ink-faint);
+      /* --edge-strong: the ladder's --surface-panel rung, 3.68:1. The
+         inactive rating is an ENABLED control — it is how the ladder is set —
+         so 1.4.11 applies, and --edge-control measures 2.77 on this fill. */
+      border: 1px solid var(--edge-strong); border-radius: 0;
+      transition: background .15s, border-color .15s;
+      clip-path: polygon(
+        var(--control-cham-md) 0, 100% 0,
+        100% calc(100% - var(--control-cham-md)),
+        calc(100% - var(--control-cham-md)) 100%, 0 100%, 0 var(--control-cham-md)); }
+    #detail-panel .detail-ratings .rating-btn.active { background: var(--cyan-deep);
+      border-color: var(--cyan); color: var(--signal); }
+    /* LEAVE: the row's RELEASE under another resting label, sharing its one
+       arm→confirm handler (#771 AC3/AC4). --fire, not --fire-hot: the
+       artboard's #e14330 is the danger-red RUNG, and --fire-hot is reserved
+       for the red-alert bezel. The artboard's #6c1a14 boundary is 1.4:1 and
+       would fail WCAG 1.4.11 on a control, so the border takes --fire too. */
+    #detail-panel .detail-release-btn { min-height: var(--control-hit-min);
+      padding: 0 var(--space-5); display: inline-flex; align-items: center;
+      justify-content: center; width: auto; margin: 0; flex-shrink: 0; cursor: pointer;
+      font-family: var(--font-mono); font-size: var(--text-xs); font-weight: 700;
+      letter-spacing: var(--tracking-wide); text-transform: uppercase;
+      border: 1px solid var(--fire); background: transparent; color: var(--fire);
+      border-radius: 0; transition: background .15s;
+      clip-path: polygon(
+        var(--control-cham-md) 0, 100% 0,
+        100% calc(100% - var(--control-cham-md)),
+        calc(100% - var(--control-cham-md)) 100%, 0 100%, 0 var(--control-cham-md)); }
     #detail-panel .detail-release-btn:hover { background: rgba(var(--rgb-fire), 0.1); }
-    /* Lobby footer */
-    #lobby-footer { flex-shrink: 0; display: flex; align-items: center;
-      justify-content: space-between; padding: 6px 0 4px;
-      border-top: 1px solid var(--edge); margin-top: auto; }
-    #status-line { font-size: var(--text-xs); color: var(--ink-faint); }
-    #ready-btn { padding: 6px 16px; border-radius: 4px;
-      font-family: 'Chakra Petch', system-ui, sans-serif; font-size: var(--text-sm);
-      font-weight: 700; letter-spacing: .12em; cursor: pointer;
-      border: 1px solid var(--edge); background: var(--surface-panel); color: var(--ink-faint);
-      transition: all .3s ease; display: none; width: auto; margin: 0; min-height: var(--control-hit-min); }
-    #ready-btn.armed { display: block; background: var(--surface-panel-up);
-      border-color: var(--signal); color: var(--signal); }
+
+    /* ── Lobby command row ───────────────────────────────────────────────
+       Ready, Spectate and the status line. The artboard puts the status line
+       UNDER the Ready bar in both frames, while a screen reader should hear
+       the connection state BEFORE the control it gates — so #status-line is
+       first in the markup and painted last with `order`.
+
+       That is the only box `order` moves here, and deliberately: the status
+       line is a <span> with no tab stop, so repainting it costs no focus
+       order. The two BUTTONS take their painted order from the markup instead
+       (Ready, then Spectate), because `order` does not carry a tab stop with
+       the box it moves — ordering focusable controls against their paint
+       order is what WCAG 2.4.3 forbids, and it is what `order: 1` and
+       `order: 2` did here. */
+    #lobby-footer { flex-shrink: 0; display: flex; flex-wrap: wrap;
+      align-items: center; gap: var(--space-4); }
+    #status-line { order: 3; flex: 1 0 100%;
+      font-size: var(--text-xs); color: var(--ink-faint); }
+    #ready-btn { flex: 1 1 auto;
+      min-height: var(--control-hit-min);
+      height: calc(var(--control-hit-min) + var(--space-5));
+      padding: 0 var(--space-6); display: none; width: auto; margin: 0;
+      text-align: center; cursor: pointer;
+      font-family: var(--font-display); font-size: var(--text-lg); font-weight: 700;
+      letter-spacing: var(--tracking-wide); text-transform: uppercase;
+      background: var(--surface-card); color: var(--ink-faint);
+      /* --edge-strong: the ladder's --surface-card rung, 3.90:1. Unarmed is
+         not disabled — the bar is the surface's primary control and has to be
+         findable before it lights — and --edge-control is 2.94 on the card. */
+      border: 1px solid var(--edge-strong); border-radius: 0;
+      transition: color .3s ease, background .3s ease, border-color .3s ease;
+      clip-path: polygon(
+        var(--control-cham-lg) 0, 100% 0,
+        100% calc(100% - var(--control-cham-lg)),
+        calc(100% - var(--control-cham-lg)) 100%, 0 100%, 0 var(--control-cham-lg)); }
+    #ready-btn.armed { display: block; background: var(--cyan-deep);
+      border-color: var(--cyan); color: var(--signal); }
     #ready-btn.armed:hover { background: var(--cyan-dim); }
     #ready-btn.armed.glow { animation: ready-pulse 1s ease-in-out infinite; }
+    /* Inset, like #ready-pill's: the bar's chamfer is a clip-path, and a
+       clip-path clips an OUTER glow away to nothing (issue #1369's note). */
     @keyframes ready-pulse {
-      0%, 100% { box-shadow: 0 0 6px rgba(var(--rgb-signal), 0.3); }
-      50%       { box-shadow: 0 0 18px rgba(var(--rgb-signal), 0.7); }
+      0%, 100% { box-shadow: inset 0 0 6px rgba(var(--rgb-signal), 0.3); }
+      50%       { box-shadow: inset 0 0 18px rgba(var(--rgb-signal), 0.7); }
     }
     #ready-btn:disabled { opacity: 0.4; cursor: default; animation: none !important; }
+    #spectate-btn { flex: 0 0 auto;
+      min-height: var(--control-hit-min); padding: 0 var(--space-5);
+      display: none; align-items: center; justify-content: center;
+      width: auto; margin: 0; text-align: center; cursor: pointer;
+      font-family: var(--font-mono); font-size: var(--text-xs); font-weight: 700;
+      letter-spacing: var(--tracking-wide); text-transform: uppercase;
+      background: var(--surface-panel-up); color: var(--ink);
+      /* --edge-bright, the rung the ladder in gui/tokens.css gives a control
+         filled --surface-panel-up: 3.46:1. --edge-control is the GROUND rung
+         and measures 2.20 against this fill, under 1.4.11's 3:1. */
+      border: 1px solid var(--edge-bright); border-radius: 0;
+      clip-path: polygon(
+        var(--control-cham-md) 0, 100% 0,
+        100% calc(100% - var(--control-cham-md)),
+        calc(100% - var(--control-cham-md)) 100%, 0 100%, 0 var(--control-cham-md)); }
+
+    /* Every control above is chamfer-clipped, and a clip-path clips an OUTSET
+       focus ring away with it — so they draw the ring INSET, exactly the way
+       gui/components/ph-console-styles.js does for the .btn family. The ring's
+       colour and thickness come from the focus tokens, so the high-contrast
+       swap under data-contrast="more" reaches the lobby too. */
+    #lobby-ui .station-row .action button:focus-visible,
+    #lobby-ui #detail-panel .chip:focus-visible,
+    #lobby-ui #detail-panel .rating-btn:focus-visible,
+    #lobby-ui #detail-panel .detail-release-btn:focus-visible,
+    #lobby-ui #spectate-btn:focus-visible {
+      outline: none;
+      box-shadow: inset 0 0 0 var(--focus-ring-width) var(--focus-ring);
+    }
+    /* The Ready bar's pulse animates the same property the ring is drawn in,
+       and an animation outranks it — so focusing the bar holds the glow still
+       and shows the ring. Focus is transient; an invisible ring is not. */
+    #lobby-ui #ready-btn:focus-visible {
+      outline: none; animation: none;
+      box-shadow: inset 0 0 0 var(--focus-ring-width) var(--focus-ring);
+    }
+
+    /* ── Orientation ─────────────────────────────────────────────────────
+       The one place the lobby's layout changes, and it is a media query: the
+       document is the same in both frames and the VIEWPORT chooses, so
+       rotating a phone re-lays out one screen rather than swapping between
+       two. Portrait is everything above; landscape stands #lobby-side up as a
+       rail beside the roster and compacts the rows to a thumb. The per-seat
+       job line SURVIVES that: dropping it is a short-viewport measure and has
+       its own query below.
+
+       Scoped to #lobby-ui wherever it names `.station-row`, because the
+       spectator claim list (#spectator-claims, issue #1106) reuses that class
+       and is not the surface any of this was drawn for. */
+    @media (orientation: landscape) {
+      #lobby-body { flex-direction: row; align-items: stretch; }
+      #station-list { flex: 1 1 auto; min-width: 0; }
+      #lobby-side {
+        display: flex; flex-direction: column; gap: var(--space-4);
+        flex: 0 0 clamp(200px, 30vw, 260px); min-height: 0; overflow-y: auto;
+      }
+      /* The card takes the rail's slack and scrolls INSIDE itself, so the
+         command row below it stays on screen: Ready is the primary control of
+         the whole surface and must never be the thing pushed off the bottom.
+         It stops shrinking at a floor of one header plus a line, and past that
+         the rail itself scrolls (the 320px-tall landscape case) rather than
+         crushing the card to a sliver that crops LEAVE in half. */
+      #detail-panel { flex: 1 1 auto; overflow-y: auto;
+        min-height: calc(var(--control-hit-min) + var(--space-7)); }
+      #lobby-ui .station-row { min-height: var(--control-hit-min);
+        padding: var(--space-3) var(--space-4); gap: var(--space-4); }
+      #lobby-footer { flex-direction: column; align-items: stretch;
+        margin-top: auto; }
+      #ready-btn, #spectate-btn { flex: 0 0 auto; width: auto; }
+      #ready-btn { height: calc(var(--control-hit-min) + var(--space-4));
+        font-size: var(--text-md); }
+      #status-line { flex: 0 0 auto; }
+    }
+
+    /* The one thing the landscape layout REMOVES rather than moves, gated on
+       the height that actually motivates it. AC1 asks every row for what the
+       seat does and PRD #1355's user story 47 is reading that BEFORE claiming,
+       so a landscape desktop — hundreds of spare pixels — has to keep it. A
+       phone held sideways is ~390px tall and genuinely has none, and there the
+       seat the player holds still carries its description in #detail-panel.
+       Orientation AND height, then; never orientation alone. */
+    @media (orientation: landscape) and (max-height: 500px) {
+      #lobby-ui .station-row .info .desc { display: none; }
+    }
 
     /* ── Settings panel ──────────────────────────────────────────
        Gear button fixed at top-left, overlay modal centered.
@@ -1318,7 +1574,9 @@
     }
     :root[data-reduced-motion="reduce"] #ready-btn.armed.glow {
       animation: none;
-      box-shadow: 0 0 18px rgba(var(--rgb-signal), 0.7);
+      /* Inset, like the loop it holds: the bar's chamfer (issue #1370) is a
+         clip-path, and a clip-path clips an outer glow away to nothing. */
+      box-shadow: inset 0 0 18px rgba(var(--rgb-signal), 0.7);
     }
   </style>
 </head>
@@ -1334,9 +1592,14 @@
        All client state lives in the gui/*.js modules loaded in <head>. -->
 
   <!-- Console container: full-screen flex layout host for all in-game
-       console sections. [data-orientation] drives portrait (column) vs
-       landscape (row) styling in console CSS; set by render() on each paint. -->
-  <div id="console-container" data-orientation="portrait">
+       console sections. Portrait (column) vs landscape (row) is decided by
+       `@media (orientation: …)` — in this page's own stylesheet and in
+       gui/console.css — and by nothing else. It used to carry a
+       `data-orientation` attribute that render() recomputed on every paint
+       from gui/device-orientation.js; no stylesheet ever selected it, so it
+       was a second answer to a question the browser already answers, and
+       issue #1370 removed the attribute, the writer and the module. -->
+  <div id="console-container">
 
     <section id="lobby-ui">
       <!-- Ship header -->
@@ -1370,29 +1633,43 @@
         <div id="gm-presence-list" role="list"></div>
       </section>
 
-      <!-- Station list -->
-      <div id="station-list"></div>
+      <!-- The lobby body (issue #1370). Two boxes rather than three loose
+           siblings, because the orientations differ in how these GROUP, not in
+           what they contain: portrait stacks the roster over the seat detail
+           and a full-width Ready bar; landscape stands #lobby-side up as a rail
+           beside a compacted roster. One document, one set of controls, and CSS
+           alone picks the arrangement — nothing here is decided in script. -->
+      <div id="lobby-body">
+        <!-- Station list -->
+        <div id="station-list"></div>
 
-      <!-- At-your-station detail panel -->
-      <div id="detail-panel" class="idle">
-        <div class="detail-header">
-          <span class="detail-station-name" data-i18n="client.no_station">No station assigned</span>
-        </div>
-        <div class="detail-station-desc"></div>
-        <div id="detail-console-area">
-          <div class="detail-consoles"></div>
-          <div class="detail-ratings"></div>
-        </div>
-      </div>
+        <div id="lobby-side">
+          <!-- At-your-station detail panel -->
+          <div id="detail-panel" class="idle">
+            <div class="detail-header">
+              <span class="detail-station-name" data-i18n="client.no_station">No station assigned</span>
+            </div>
+            <div class="detail-station-desc"></div>
+            <div id="detail-console-area">
+              <div class="detail-consoles"></div>
+              <div class="detail-ratings"></div>
+            </div>
+          </div>
 
-      <!-- Footer -->
-      <div id="lobby-footer">
-        <span id="status-line" data-i18n="client.connecting_host">Connecting to host…</span>
-        <!-- Spectate toggle (issue #1105): opt out of a station into the
-             explicit Spectator role, or (when spectating) opt back into the
-             crew. Label + handler are set by renderLobby from the view model. -->
-        <button id="spectate-btn" data-i18n="client.spectator.spectate" style="display:none">Spectate</button>
-        <button id="ready-btn" data-i18n="client.ready">READY</button>
+          <!-- Footer -->
+          <div id="lobby-footer">
+            <!-- #status-line comes FIRST so a screen reader hears the
+                 connection state before the control it gates; CSS paints it
+                 last. The two buttons are in the order they are painted, left
+                 to right, so Tab follows the eye (WCAG 2.4.3). -->
+            <span id="status-line" data-i18n="client.connecting_host">Connecting to host…</span>
+            <button id="ready-btn" data-i18n="client.ready">READY</button>
+            <!-- Spectate toggle (issue #1105): opt out of a station into the
+                 explicit Spectator role, or (when spectating) opt back into the
+                 crew. Label + handler are set by renderLobby from the view model. -->
+            <button id="spectate-btn" data-i18n="client.spectator.spectate" style="display:none">Spectate</button>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -2020,9 +2297,10 @@
         render(uiState);
       });
     }
-    // Expose so gui/device-orientation.js can coalesce its resize-driven
-    // re-render through the same rAF scheduler (issue #462).
-    window.scheduleRender = scheduleRender;
+    // Its one outside caller was gui/device-orientation.js, which coalesced a
+    // resize-driven re-render through this scheduler (issue #462). Layout is
+    // now a media query and needs no repaint, so the module and this export
+    // went with it (issue #1370); `scheduleRender` stays page-local.
 
     // QR-first scenario/ship picker rendering (issue #755). Keyed on the
     // current stage so the DOM (and the ph-ship-picker web component) is only
@@ -2303,12 +2581,9 @@
         }
       }
 
-      // Orientation drives console CSS via the container's data attribute.
-      const orientation = (typeof window.currentOrientation === 'function')
-        ? window.currentOrientation()
-        : (window.innerWidth >= window.innerHeight ? 'landscape' : 'portrait');
-      const container = $('console-container');
-      if (container) container.dataset.orientation = orientation;
+      // Orientation is CSS's business (issue #1370): the media queries in this
+      // page and in gui/console.css read the viewport directly, so render()
+      // no longer computes one and no longer writes it onto the container.
 
       // Link state (PRD #1023 module 4): the console dims and stops taking
       // taps when the host is gone, and reads as LOADING rather than broken
@@ -3298,9 +3573,10 @@
     // Bevy WASM client console UIs (#47–#49) were retired with the pure-JS
     // client migration.
 
-    // Orientation watching (resize + orientationchange ? recompute the
-    // singleton and rerender so console CSS re-flows) lives in
-    // gui/device-orientation.js, which owns window.currentOrientation().
+    // Nothing watches orientation any more (issue #1370). The page used to
+    // recompute a singleton on resize/orientationchange and re-render so
+    // "console CSS re-flows" — but CSS re-flows on its own, and the attribute
+    // that repaint existed to update had no rule reading it.
 
     // -- Incoming message handler --------------------------------
 

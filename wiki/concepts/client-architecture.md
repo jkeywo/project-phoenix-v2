@@ -258,7 +258,7 @@ resurrecting the old value.
 | `roving-tabindex.js` | Shared one-Tab-stop keyboard navigation for composite controls; arrows move inside the composite while actions continue through `action-map.js` |
 | `focus-trap.js` | Shared modal contract: move and trap focus, close on Escape, inert the background, then restore the invoking control |
 | `tokens.css`, `components/ph-console-styles.js` | Shared high-contrast, reduced-motion and visible-focus presentation consumed on both sides of shadow roots |
-| `console-core.js`, `device-orientation.js`, `help-panel.js`, `manual-panel.js`, `settings-panel.js`, `server-settings.js` | Iframe boot glue, orientation handling, the phone Settings menu (including current-station help and the ship manual), and the host Settings shell/readback presenter |
+| `console-core.js`, `help-panel.js`, `manual-panel.js`, `settings-panel.js`, `server-settings.js` | Iframe boot glue, the phone Settings menu (including current-station help and the ship manual), and the host Settings shell/readback presenter. Orientation is not among them: portrait vs landscape is a `@media (orientation: …)` query and no script computes it (issue #1370) |
 
 Each console UI is one HTML file per ship class (`gui/battleship/helm.html`, `gui/cruiser/science.html`, …) loaded as an iframe; the URL comes from the station's TOML `console` field via `gui/console-resolver.js`, and the section/iframe DOM ids from `gui/mount-plan.js`. See [Console UI Authoring Library](./console-ui-library.md) for the authoring pattern.
 

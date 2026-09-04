@@ -158,6 +158,10 @@ function renderRoster(doc, vm, t, on) {
     meta.className = 'meta';
     if (row.rank) {
       const rankEl = doc.createElement('span');
+      // Classed, not bare: issue #1370 gives the rank its own type in the
+      // roster's meta line, and a rule cannot select an unclassed span
+      // without also catching whatever field lands beside it next.
+      rankEl.className = 'rank';
       rankEl.textContent = row.rank;
       meta.appendChild(rankEl);
     }

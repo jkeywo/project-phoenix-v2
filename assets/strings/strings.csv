@@ -1137,6 +1137,15 @@ client.name_placeholder,Lobby name field — greyed-out hint inside the empty te
 client.preparing_scenario,Asset-loading overlay while models and icons pre-cache. Shown on the phone client and on both host viewscreen overlays,Preparing scenario…
 client.return_to_lobby,Game-over overlay — button back to the lobby,[Return to Lobby]
 client.waiting_scenario,Overlay shown while the host picks the next scenario,[Waiting for host to select a scenario…]
+client.logo_alt,Phone loading surface — accessible name of the insignia beside the progress stack,[Project Phoenix insignia]
+client.loading_assets,Phone loading surface status line while the host pre-caches models and icons,[Loading — assets]
+client.loading_waiting_host,Phone loading surface status line while the host is still choosing a World,[Waiting on host]
+client.loading_retrying,Phone loading surface status line when the link to the host has gone and the page is dialling again,[Link lost — retrying]
+client.loading_ticks_assets,Phone loading surface — small print under the bar naming what the asset preload is counting,[Models · icons · rigs]
+client.loading_ticks_none,Phone loading surface — small print under an indeterminate bar; there is no fraction to report,[No progress to report]
+client.loading_of_total,Phone loading surface — the measured percentage against its total. {pct} is the whole percentage,[{pct} / 100]
+client.loading_ship,Phone loading surface — the ship the crew is about to fly. {hull} is the hull id and {class} its class badge,[{hull} · {class}]
+client.loading_ship_class_only,Phone loading surface — the ship line when the Session names a class but no hull id. {class} is the class badge,[{class}]
 client.select_scenario,Phone scenario picker — heading over the scenario list,[Select a scenario]
 client.select_ship,Phone scenario picker — heading over the ship list,[Select a ship]
 client.scenario_locked,Phone scenario picker — status once the selection is locked and the world is loading,Loading scenario…

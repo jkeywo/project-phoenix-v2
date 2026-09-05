@@ -1,6 +1,8 @@
+// @vitest-environment jsdom
+//
 /**
  * tests/client/pre-play-view.test.js — the one pre-play surface decision
- * (issue #1359).
+ * (issue #1359), and the loading surface projected out of it (issue #1368).
  *
  * Four full-screen surfaces can precede play on client.html, and each of them
  * used to toggle its own `display` from its own call site:
@@ -28,7 +30,11 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { prePlayView, PRE_PLAY_SURFACES } from '../../gui/pre-play-view.js';
+import {
+  prePlayView, loadingView, PRE_PLAY_SURFACES, LOADING_SURFACES,
+} from '../../gui/pre-play-view.js';
+import { renderLoading } from '../../gui/loading-render.js';
+import { buildTable } from '../../gui/strings.js';
 
 const repoFile = (rel) =>
   fs.readFileSync(
@@ -513,5 +519,466 @@ describe('client.html, the one consumer', () => {
       .map((m) => m[1])
       .filter((id) => PRE_PLAY_SURFACES.includes(id));
     expect(ladder).toEqual([...PRE_PLAY_SURFACES]);
+  });
+});
+
+// ── The loading surface (issue #1368) ────────────────────────────────────────
+//
+// Two of the four surfaces above report progress rather than wait on a person,
+// and they now wear one treatment: a ring, a lead line, a progress bar, and the
+// Session named underneath it. `loadingView` is a PROJECTION of the decision
+// above rather than a second reading of its inputs, which is the whole reason
+// it takes `view` as its first argument — the tests below drive it with the
+// real `prePlayView` output for exactly that reason, so a disagreement between
+// the two would have to be constructed rather than merely inherited.
+
+/** The String Table the client actually ships. */
+const STRINGS = buildTable(repoFile('assets/strings/strings.csv'));
+
+/** A resolver that shows the id and its params, so both stay assertable. */
+const tid = (id, params) => {
+  const keys = Object.keys(params || {});
+  return keys.length === 0 ? id : `${id}(${keys.map((k) => `${k}=${params[k]}`).join(',')})`;
+};
+
+/** The inputs that raise each loading surface, as prePlayView takes them. */
+const RAISES = {
+  'asset-loading': [{ joinPrompt: false }, {}, 0.62],
+  'waiting-overlay': [{ joinPrompt: false }, { waitingForScenario: true }, null],
+};
+
+/** The model for one surface, driven through the real decision. */
+function loadingFor(surface, context) {
+  const view = prePlayView(...RAISES[surface]);
+  expect(view.surface).toBe(surface);
+  return loadingView(view, context);
+}
+
+/** client.html's real markup for one loading surface, in a fresh document. */
+function installSurface(surface, { keep = null } = {}) {
+  const parsed = new DOMParser().parseFromString(CLIENT_HTML, 'text/html');
+  const node = parsed.getElementById(surface);
+  expect(node, `no #${surface} in client.html`).not.toBeNull();
+  document.body.innerHTML = '';
+  const imported = document.importNode(node, true);
+  if (keep) {
+    // The deliberately INCOMPLETE document: the page paints from the first
+    // server message with its modules still arriving, so a half-mounted
+    // surface is a real state and every write has to survive it.
+    for (const el of [...imported.querySelectorAll('[id]')]) {
+      if (!keep.includes(el.id)) el.remove();
+    }
+  }
+  document.body.appendChild(imported);
+  return imported;
+}
+
+describe('LOADING_SURFACES', () => {
+  it('names the two pre-play surfaces that report progress, in the same priority order', () => {
+    expect(LOADING_SURFACES).toEqual(['asset-loading', 'waiting-overlay']);
+    expect(Object.isFrozen(LOADING_SURFACES)).toBe(true);
+  });
+
+  it('is a subset of the pre-play set, so no third surface can appear only here', () => {
+    for (const id of LOADING_SURFACES) expect(PRE_PLAY_SURFACES).toContain(id);
+  });
+
+  it('excludes the two surfaces that are waiting on a PERSON, not on work', () => {
+    // A catalogue waiting on a tap and a guest typing a code are not progress.
+    expect(LOADING_SURFACES).not.toContain('scenario-picker-overlay');
+    expect(LOADING_SURFACES).not.toContain('join-entry');
+  });
+});
+
+describe('loadingView is a projection of the one decision', () => {
+  const rows = everyCombination();
+
+  it('produces a model exactly when the decision named a loading surface', () => {
+    for (const { connection, lobby, preloadFraction } of rows) {
+      const view = prePlayView(connection, lobby, preloadFraction);
+      const model = loadingView(view, { connectionState: connection.state });
+      expect(model === null).toBe(!LOADING_SURFACES.includes(view.surface));
+      if (model) expect(model.surface).toBe(view.surface);
+    }
+  });
+
+  it('carries the measurability the decision already settled, never re-deciding it', () => {
+    for (const { connection, lobby, preloadFraction } of rows) {
+      const view = prePlayView(connection, lobby, preloadFraction);
+      const model = loadingView(view, {});
+      if (!model) continue;
+      expect(model.measurable).toBe(view.measurable);
+      expect(model.pct).toBe(view.pct);
+      // The AC in one line: a number only where the decision measured one.
+      expect(model.bar.indeterminate).toBe(!view.measurable);
+    }
+  });
+
+  it('renders nothing at all for a surface it does not own', () => {
+    expect(loadingView(prePlayView({ joinPrompt: true }, {}, null), {})).toBeNull();
+    expect(loadingView(prePlayView({}, { pickingScenario: true }, null), {})).toBeNull();
+    expect(loadingView(prePlayView({}, {}, null), {})).toBeNull();
+    expect(loadingView(null, null)).toBeNull();
+  });
+});
+
+describe('only the asset preload puts a number on the bar', () => {
+  it('fills the bar to the measured fraction and counts it against its total', () => {
+    const model = loadingFor('asset-loading', {});
+    expect(model.measurable).toBe(true);
+    expect(model.pct).toBe(62);
+    expect(model.bar).toEqual({ indeterminate: false, width: '62%' });
+    expect(model.ticks.right).toEqual({ id: 'client.loading_of_total', params: { pct: 62 } });
+  });
+
+  it('sweeps without a number, and without an inline width, when nothing is measurable', () => {
+    const model = loadingFor('waiting-overlay', {});
+    expect(model.measurable).toBe(false);
+    expect(model.pct).toBeNull();
+    expect(model.bar.indeterminate).toBe(true);
+    // EMPTY, not '34%': the sweep's width is a stylesheet decision, and it has
+    // to become the whole track under reduced motion. An inline width written
+    // from script would outrank the rule that does that.
+    expect(model.bar.width).toBe('');
+    expect(model.ticks.right).toBeNull();
+    expect(model.ticks.left).toEqual({ id: 'client.loading_ticks_none', params: {} });
+  });
+});
+
+describe('a lost link says it is retrying', () => {
+  it('says so on every loading surface, in both lost states', () => {
+    for (const surface of LOADING_SURFACES) {
+      for (const state of ['disconnected', 'error']) {
+        const model = loadingFor(surface, { connectionState: state });
+        expect(model.retrying, `${surface} in ${state}`).toBe(true);
+        expect(model.status).toEqual({ id: 'client.loading_retrying', params: {} });
+      }
+    }
+  });
+
+  it('says what is being waited on while the link is up', () => {
+    for (const state of ['connecting', 'ready', undefined]) {
+      expect(loadingFor('asset-loading', { connectionState: state }).status)
+        .toEqual({ id: 'client.loading_assets', params: {} });
+      expect(loadingFor('waiting-overlay', { connectionState: state }).status)
+        .toEqual({ id: 'client.loading_waiting_host', params: {} });
+    }
+    expect(loadingFor('asset-loading', {}).retrying).toBe(false);
+  });
+
+  it('changes a LINE and never a surface — the link state still decides nothing', () => {
+    // The line #1359 drew, held from the other side: the retry copy is text on
+    // a surface that was already up, so the same inputs must still land on the
+    // same surface in every link state.
+    for (const { connection, lobby, preloadFraction } of everyCombination()) {
+      const base = prePlayView({ ...connection, state: 'ready' }, lobby, preloadFraction);
+      const lost = prePlayView({ ...connection, state: 'disconnected' }, lobby, preloadFraction);
+      expect(lost.surface).toBe(base.surface);
+    }
+  });
+});
+
+describe('the scenario and the ship are named', () => {
+  const session = {
+    scenarioTitle: 'Combat Test',
+    shipClass: 'destroyer',
+    hullId: 'AEV-074',
+  };
+
+  it('names both, on the surface whose World is already loaded', () => {
+    const { context } = loadingFor('asset-loading', session);
+    expect(context.visible).toBe(true);
+    expect(context.scenario).toEqual({ text: 'Combat Test' });
+    expect(context.ship.hull).toBe('AEV-074');
+    expect(context.ship.classId).toBe('component.ship_picker.class.destroyer');
+    expect(context.ship.lineId).toBe('client.loading_ship');
+  });
+
+  it('names NOTHING on the surface that exists because no World is chosen', () => {
+    // The stale-mission trap, and it is the DEFAULT content of this surface on
+    // the ordinary GameOver -> ReturnToLobby path: `ReturnedToLobby` sets
+    // waitingForScenario and clears the game-over rows, but deliberately
+    // leaves scenarioTitle and shipConfig standing (gui/lobby-state.js), so
+    // the Session it can see still describes the mission that just ENDED.
+    // Printing it under "Waiting for host to select a scenario..." is the same
+    // invented fact as a fabricated percentage. Emptiness cannot catch it — a
+    // stale title is a present, well-formed string — so the entitlement is a
+    // column on the treatment, not a guess about the value.
+    const { context } = loadingFor('waiting-overlay', session);
+    expect(context.visible).toBe(false);
+  });
+
+  it('holds that rule for a Session carrying only one of the three fields', () => {
+    for (const partial of [
+      { scenarioTitle: 'Combat Test' },
+      { shipClass: 'destroyer' },
+      { hullId: 'AEV-074' },
+    ]) {
+      expect(loadingFor('waiting-overlay', partial).context.visible).toBe(false);
+      expect(loadingFor('asset-loading', partial).context.visible).toBe(true);
+    }
+  });
+
+  it('names the class alone when the Session carries no hull id', () => {
+    const { context } = loadingFor('asset-loading', { shipClass: 'cruiser' });
+    expect(context.visible).toBe(true);
+    expect(context.ship.lineId).toBe('client.loading_ship_class_only');
+    expect(context.ship.classId).toBe('component.ship_picker.class.cruiser');
+  });
+
+  it('hides the block outright before Welcome has landed', () => {
+    // The other half of the pair: this is the ENTITLED surface with nothing
+    // yet to name, where #waiting-overlay above is an unentitled surface with
+    // a full Session sitting right there.
+    // Not three empty rows inside a bordered box, which reads as a defect —
+    // an absent block reads as "not known yet", which is what is true.
+    const { context } = loadingFor('asset-loading', {});
+    expect(context.visible).toBe(false);
+    expect(context.scenario).toBeNull();
+    expect(context.ship.classId).toBe('component.ship_picker.class.unknown');
+  });
+});
+
+describe('every id the loading surface can emit is authored', () => {
+  it('has a String Table row for all of them', () => {
+    const ids = new Set();
+    for (const surface of LOADING_SURFACES) {
+      for (const state of ['ready', 'disconnected']) {
+        const m = loadingFor(surface, { connectionState: state, shipClass: 'destroyer', hullId: 'X' });
+        ids.add(m.status.id);
+        ids.add(m.ticks.left.id);
+        if (m.ticks.right) ids.add(m.ticks.right.id);
+        ids.add(m.context.ship.lineId);
+        ids.add(m.context.ship.classId);
+      }
+      // The class-only spelling, and the unknown-hull fallback rung.
+      const bare = loadingFor(surface, {});
+      ids.add(bare.context.ship.lineId);
+      ids.add(bare.context.ship.classId);
+    }
+    const missing = [...ids].filter((id) => !STRINGS.get(id));
+    expect(missing, 'ids the loading surface emits with no strings.csv row').toEqual([]);
+  });
+
+  it('authors the markup ids each loading surface carries, too', () => {
+    // The insignia's accessible name is markup rather than model, so it would
+    // not be caught above — and an unauthored one renders as its own id.
+    const markupIds = new Set();
+    for (const surface of LOADING_SURFACES) {
+      const node = installSurface(surface);
+      for (const el of node.querySelectorAll('[data-i18n]')) {
+        markupIds.add(el.getAttribute('data-i18n'));
+      }
+      for (const el of node.querySelectorAll('[data-i18n-attr]')) {
+        for (const pair of el.getAttribute('data-i18n-attr').split(',')) {
+          markupIds.add(pair.split(':')[1]);
+        }
+      }
+    }
+    expect(markupIds.has('client.logo_alt')).toBe(true);
+    expect([...markupIds].filter((id) => !STRINGS.get(id))).toEqual([]);
+  });
+});
+
+describe('renderLoading writes the model into a document', () => {
+  it('shows the number and fills the bar for the asset preload', () => {
+    installSurface('asset-loading');
+    renderLoading(document, loadingFor('asset-loading', {
+      scenarioTitle: 'Combat Test', shipClass: 'destroyer', hullId: 'AEV-074',
+    }), tid);
+
+    expect(document.getElementById('asset-loading-pct').textContent).toBe('62');
+    expect(document.getElementById('asset-loading-pct-row').hidden).toBe(false);
+    expect(document.getElementById('asset-loading-fill').style.width).toBe('62%');
+    expect(document.getElementById('asset-loading-bar').classList.contains('indet')).toBe(false);
+    expect(document.getElementById('asset-loading-bar').getAttribute('aria-valuenow')).toBe('62');
+    // ...and NOTHING supersedes it. `aria-valuetext` outranks `aria-valuenow`
+    // as the announced value, so writing both would publish the percentage to
+    // the eye and hide it from assistive tech, which announces the status line
+    // forever and never the 62 sitting in the attribute beside it.
+    expect(document.getElementById('asset-loading-bar').hasAttribute('aria-valuetext'))
+      .toBe(false);
+    expect(document.getElementById('asset-loading-tick-right').textContent)
+      .toBe('client.loading_of_total(pct=62)');
+    expect(document.getElementById('asset-loading-ctx').hidden).toBe(false);
+    expect(document.getElementById('asset-loading-scenario').textContent).toBe('Combat Test');
+    expect(document.getElementById('asset-loading-ship').textContent)
+      .toContain('component.ship_picker.class.destroyer');
+    expect(document.getElementById('asset-loading-status').textContent)
+      .toBe('client.loading_assets');
+  });
+
+  it('shows motion and NO number on a surface with nothing to measure', () => {
+    installSurface('waiting-overlay');
+    renderLoading(document, loadingFor('waiting-overlay', {}), tid);
+
+    const bar = document.getElementById('waiting-overlay-bar');
+    expect(bar.classList.contains('indet')).toBe(true);
+    // Absent, not zero: "0%" is the invented number in another form, and an
+    // absent aria-valuenow is what tells a screen reader the value is unknown.
+    expect(bar.hasAttribute('aria-valuenow')).toBe(false);
+    // The converse of the determinate case: with no number to announce, the
+    // status line is what the bar is worth saying out loud.
+    expect(bar.getAttribute('aria-valuetext')).toBe('client.loading_waiting_host');
+    expect(document.getElementById('waiting-overlay-fill').style.width).toBe('');
+    expect(document.getElementById('waiting-overlay-tick-right').textContent).toBe('');
+    expect(document.getElementById('waiting-overlay-ctx').hidden).toBe(true);
+    // This surface has no percentage in its markup at all, and the renderer
+    // asked for one anyway without throwing.
+    expect(document.getElementById('waiting-overlay-pct')).toBeNull();
+  });
+
+  it('keeps the Session block down on the waiting overlay, however full the Session', () => {
+    // The rendered half of the stale-mission rule: this is the state a player
+    // is actually in after Return to Lobby, and the box that would have named
+    // last mission stays shut.
+    installSurface('waiting-overlay');
+    renderLoading(document, loadingFor('waiting-overlay', {
+      scenarioTitle: 'Combat Test', shipClass: 'destroyer', hullId: 'AEV-074',
+    }), tid);
+    expect(document.getElementById('waiting-overlay-ctx').hidden).toBe(true);
+  });
+
+  it('marks the status line while the page is dialling again', () => {
+    installSurface('asset-loading');
+    renderLoading(document, loadingFor('asset-loading', { connectionState: 'disconnected' }), tid);
+    const status = document.getElementById('asset-loading-status');
+    expect(status.textContent).toBe('client.loading_retrying');
+    expect(status.classList.contains('retrying')).toBe(true);
+  });
+
+  it('drops the retry mark again once the link comes back', () => {
+    installSurface('asset-loading');
+    renderLoading(document, loadingFor('asset-loading', { connectionState: 'error' }), tid);
+    renderLoading(document, loadingFor('asset-loading', { connectionState: 'ready' }), tid);
+    expect(document.getElementById('asset-loading-status').classList.contains('retrying'))
+      .toBe(false);
+  });
+
+  it('never writes the lead line, which the markup already owns', () => {
+    // #1359's rule: every surface carries its own data-i18n and applyToDom
+    // renders it. A renderer that also wrote it would be the second writer of
+    // one string, which is the drift HEADLINES exists to prevent.
+    installSurface('asset-loading');
+    const label = document.querySelector('#asset-loading .ld-label');
+    const before = label.textContent;
+    renderLoading(document, loadingFor('asset-loading', {}), tid);
+    expect(label.textContent).toBe(before);
+  });
+
+  it('writes what it can into a half-mounted surface rather than throwing', () => {
+    installSurface('asset-loading', { keep: ['asset-loading', 'asset-loading-status'] });
+    expect(() => renderLoading(document, loadingFor('asset-loading', {}), tid)).not.toThrow();
+    expect(document.getElementById('asset-loading-status').textContent)
+      .toBe('client.loading_assets');
+  });
+
+  it('does nothing when handed no model', () => {
+    installSurface('asset-loading');
+    expect(() => renderLoading(document, null, tid)).not.toThrow();
+    expect(document.getElementById('asset-loading-status').textContent).toBe('');
+  });
+});
+
+describe('client.html, the loading surface it draws', () => {
+  it('carries every element id the renderer addresses', () => {
+    const parts = {
+      'asset-loading': [
+        'pct-row', 'pct', 'bar', 'fill', 'tick-left', 'tick-right',
+        'ctx', 'scenario', 'ship', 'status',
+      ],
+      // No percentage: nothing about a host still choosing is measurable, and
+      // the renderer must survive the difference rather than be told about it.
+      'waiting-overlay': [
+        'bar', 'fill', 'tick-left', 'tick-right', 'ctx', 'scenario', 'ship', 'status',
+      ],
+    };
+    for (const [surface, ids] of Object.entries(parts)) {
+      installSurface(surface);
+      for (const part of ids) {
+        expect(document.getElementById(`${surface}-${part}`), `#${surface}-${part}`)
+          .not.toBeNull();
+      }
+    }
+  });
+
+  it('lets `hidden` actually hide the rows the renderer withholds', () => {
+    // The trap this closes, found by looking at the surface rather than at the
+    // model: `hidden` is a UA `display: none`, and ANY author `display`
+    // outranks it — so the flex column carrying these rows kept the percentage
+    // and the Session block on screen holding placeholder text, however
+    // carefully the renderer had hidden them.
+    expect(CLIENT_HTML).toContain('.ld-stack [hidden] { display: none; }');
+  });
+
+  it('gives both loading surfaces the same ring, and stills it without removing it', () => {
+    for (const surface of LOADING_SURFACES) {
+      const rule = CLIENT_HTML.match(
+        new RegExp('#' + surface + ' \\.spinner-ring \\{([^}]*)\\}'),
+      );
+      expect(rule, `no .spinner-ring rule for #${surface}`).not.toBeNull();
+      expect(rule[1]).toMatch(/animation:\s*spin/);
+      expect(CLIENT_HTML).toContain(
+        `:root[data-reduced-motion="reduce"] #${surface} .spinner-ring`,
+      );
+    }
+  });
+
+  it('rests the fill EMPTY, so an unrendered bar cannot read as full', () => {
+    // A block-level fill with no width is width:auto, which is the whole
+    // track: before the renderer has run — and on the page's own documented
+    // degraded path, where gui/ never loads and applyPrePlaySurfaces() writes
+    // only the percentage — the bar paints FULL. That is the invented number
+    // in its loudest form, and it is one declaration to make impossible rather
+    // than something only script can be trusted to establish.
+    expect(CLIENT_HTML).toMatch(/\.ld-fill \{[^}]*width:\s*0/);
+  });
+
+  it('gives each progress bar an accessible name', () => {
+    // role=progressbar with no name announces as a bare "progress bar".
+    for (const surface of LOADING_SURFACES) {
+      installSurface(surface);
+      const bar = document.getElementById(`${surface}-bar`);
+      expect(bar.getAttribute('role')).toBe('progressbar');
+      expect(bar.getAttribute('data-i18n-attr')).toMatch(/^aria-label:client\./);
+    }
+  });
+
+  it('stops the indeterminate sweep under reduced motion, and keeps the bar', () => {
+    const override = CLIENT_HTML.match(
+      /:root\[data-reduced-motion="reduce"\] \.ld-bar\.indet \.ld-fill \{([^}]*)\}/,
+    );
+    expect(override, 'the sweep has no reduced-motion counterpart').not.toBeNull();
+    expect(override[1]).toMatch(/animation:\s*none/);
+    // The ring stops but STAYS, and so does the bar: the information the
+    // movement carried has to survive the stilling.
+    expect(override[1]).not.toMatch(/display\s*:\s*none/);
+    expect(override[1]).toMatch(/width:\s*100%/);
+  });
+
+  it('switches portrait and landscape in CSS, with no script on the change', () => {
+    const rule = '#asset-loading, #waiting-overlay { flex-direction: row; }';
+    const at = CLIENT_HTML.indexOf(rule);
+    expect(at, 'the loading surfaces never turn into a row').toBeGreaterThan(-1);
+    // …and the only thing that turns them is the viewport, so an orientation
+    // change relays out without a line of script running.
+    expect(CLIENT_HTML.slice(Math.max(0, at - 200), at))
+      .toContain('@media (orientation: landscape)');
+  });
+
+  it('hands the ONE decision to the loading renderer, and writes the pct itself only if gui/ never loaded', () => {
+    const open = CLIENT_HTML.indexOf('function applyPrePlaySurfaces(');
+    let i = CLIENT_HTML.indexOf('{', open);
+    let depth = 0;
+    for (; i < CLIENT_HTML.length; i += 1) {
+      if (CLIENT_HTML[i] === '{') depth += 1;
+      else if (CLIENT_HTML[i] === '}' && (depth -= 1) === 0) break;
+    }
+    const applier = CLIENT_HTML.slice(open, i + 1);
+    // `view` is the decision this same function just made — the projection is
+    // fed from it and never from a second read of the inputs behind it.
+    expect(applier).toMatch(/window\.loadingView\(view, loadingContext\(\)\)/);
+    expect(applier).toMatch(/window\.loadingRender\.renderLoading\(document, loading, t\)/);
+    expect(applier).toMatch(/else if \(view\.measurable\)/);
   });
 });

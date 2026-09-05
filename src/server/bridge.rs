@@ -4052,6 +4052,35 @@ pub fn wasm_fail_world_fetch(path: String, message: String) {
     crate::entities::config_cache::wasm_fail_world_fetch(path, message);
 }
 
+/// Deliver an entity template to Rust for PRE-LOAD catalogue enrichment.
+///
+/// `wasm_get_scenario_catalog` is read before any world is activated, so
+/// `delivery::payload::ship_payload` finds no cached template and publishes
+/// `template_path` + `label` and nothing else — the reason every hull card in
+/// the picker badged `[UNKNOWN]` with no registry, mass or power rating. The
+/// host page closes that gap by fetching each hull the first catalogue pass
+/// names and delivering it here BEFORE reading the catalogue again.
+///
+/// Pass `root = true` for a hull the catalogue named and `false` for an include
+/// fragment. The return value is the canonical fragment paths still missing;
+/// fetch those, deliver them the same way, and repeat until it comes back
+/// empty. This store is separate from the preload's own and is read only by
+/// `delivery::payload::ship_payload` — see `config_cache::push_catalog_template`.
+///
+/// Pass an EMPTY `toml_str` when the fetch failed, the way `handleConfigRequest`
+/// calls `wasm_load_config(path, '')` on a 404: a mod pack's own hull has no URL
+/// at all, and that is what lets its text be taken from the session overlay
+/// instead. With no overlay copy either the call is a no-op.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_push_catalog_template(path: String, toml_str: String, root: bool) -> Array {
+    let out = Array::new();
+    for p in crate::entities::config_cache::push_catalog_template(path, toml_str, root) {
+        out.push(&JsValue::from_str(&p));
+    }
+    out
+}
+
 /// Deliver a preloaded or runtime-fetched model-rig sidecar TOML to Rust.
 ///
 /// Before boot, the entity-config preload calls this for every primary authored

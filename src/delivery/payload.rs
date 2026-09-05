@@ -113,6 +113,12 @@ impl ScenarioPayload {
 /// has not been delivered yet (the browser fetches asynchronously) or does not
 /// declare them.
 ///
+/// The lookup is `catalog_entity_config`, not `get_cached_entity_config`: the
+/// browser publishes this catalogue BEFORE any world is activated, so the
+/// preload's cache is still empty and the host's pre-load catalogue store is the
+/// only place a hull's template has been delivered. That store is display-only
+/// and is deliberately unreachable from the spawn lookup (issue #917).
+///
 /// `mass` is the one of those with no `Option` behind it: an entity that
 /// authors none still takes [`crate::entities::config::default_mass`] (issue
 /// #1154), so a hull whose template IS cached always has a mass to publish. It
@@ -126,8 +132,7 @@ pub fn ship_payload(ship: &AvailableShipEntry) -> ShipPayload {
         "label",
         ship.label.as_deref().unwrap_or(&ship.template_path),
     );
-    if let Some(cfg) = crate::entities::config_cache::get_cached_entity_config(&ship.template_path)
-    {
+    if let Some(cfg) = crate::entities::config_cache::catalog_entity_config(&ship.template_path) {
         if let Some(ref class) = cfg.class {
             out.push_text("class", class.clone());
         }
@@ -216,6 +221,48 @@ mod tests {
             p.get("label").and_then(PayloadValue::as_text),
             Some("assets/entities/alliance_cruiser.toml")
         );
+    }
+
+    /// The enrichment the ship picker's card is built from, and the seam it
+    /// arrives through. On the browser this catalogue is published BEFORE any
+    /// world is activated, so the preload's config cache is empty and the
+    /// host's pre-load catalogue store is the only place the hull's template
+    /// has been delivered. Reading it is `catalog_entity_config`'s whole job.
+    #[test]
+    fn a_hull_delivered_only_to_the_catalogue_store_still_publishes_its_details() {
+        use crate::entities::config_cache as cache;
+        cache::clear_catalog_templates();
+        let path = "assets/entities/__payload_enrich/destroyer.toml";
+        cache::push_catalog_template(
+            path.to_string(),
+            "class = \"destroyer\"\nhull_id = \"AEV-0741\"\nmass = 14000.0\npower_rating = 70\nname = \"AEV Phoenix\"\n"
+                .to_string(),
+            true,
+        );
+
+        let p = ship_payload(&ship(path, Some("Destroyer")));
+        assert_eq!(
+            p.get("class").and_then(PayloadValue::as_text),
+            Some("destroyer"),
+            "without this the card badges component.ship_picker.class.unknown"
+        );
+        assert_eq!(
+            p.get("hull_id").and_then(PayloadValue::as_text),
+            Some("AEV-0741")
+        );
+        assert_eq!(p.get("mass"), Some(&PayloadValue::Number(14000.0)));
+        assert_eq!(p.get("power_rating"), Some(&PayloadValue::Number(70.0)));
+        assert_eq!(
+            p.get("name").and_then(PayloadValue::as_text),
+            Some("AEV Phoenix")
+        );
+
+        // ...and it stops answering the moment the store is discarded, which is
+        // what `wasm_load_world` does when the real preload takes over.
+        cache::clear_catalog_templates();
+        let p = ship_payload(&ship(path, Some("Destroyer")));
+        let keys: Vec<&str> = p.entries().iter().map(|(k, _)| *k).collect();
+        assert_eq!(keys, vec!["template_path", "label"]);
     }
 
     #[test]

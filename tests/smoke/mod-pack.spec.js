@@ -29,6 +29,7 @@ import {
   tableArrayValues,
   stripHeavyEntities,
   openWorldPicker,
+  waitForWasmReady,
 } from './fixtures';
 import { ts } from './strings';
 import fs from 'fs';
@@ -148,6 +149,67 @@ for (const name of ['script-valid', 'editor-round-trip']) {
     await expect(scenarioButtons(page)).toHaveCount(before + 1);
   });
 }
+
+// ── A pack that carries its OWN hulls: the overlay is the only source ─────────
+//
+// The ship picker's class badge, registry, mass and power rating are enrichment
+// `delivery::payload::ship_payload` reads out of a delivered entity template,
+// and the host delivers those by FETCHING each hull the catalogue names before
+// reading the catalogue back. A pack's own hull has no URL to fetch — its text
+// lives only in the session overlay — so that fetch 404s, and the host has to
+// deliver the failure as an empty body (the same contract `handleConfigRequest`
+// keeps with `wasm_load_config`) for Rust to substitute the pack's copy.
+//
+// Nothing shipped can catch this: every base hull is served, so the whole
+// overlay branch is dead code that stays green. Left out of @core deliberately
+// — both halves of the seam are unit-tested per-PR (Rust
+// `config_cache::tests`, vitest `host-catalog-templates.test.js`) and this is
+// the end-to-end proof rather than the first line of defence.
+
+test('a pack that ships its own hulls enriches their cards from the overlay, not the network', async ({
+  context,
+}) => {
+  const manifest = readModPackManifest('pack-hull');
+  const scenarioId = tableArrayValues(manifest, 'scenario', 'id')[0];
+  const HULLS = [
+    'assets/entities/borrowed_lancer.toml',
+    'assets/entities/borrowed_warden.toml',
+  ];
+
+  // The premise: these paths are NOT served. If the dist ever did carry them
+  // this test would pass for the wrong reason, so the 404 is asserted.
+  const hullResponses = [];
+  context.on('response', (res) => {
+    const url = res.url().split('?')[0];
+    if (HULLS.some((h) => url.endsWith(`/${h}`))) hullResponses.push(res.status());
+  });
+
+  const page = await openScenarioStage(context);
+  await uploadPack(page, 'pack-hull');
+  await expect(page.locator('#mod-pack-status')).toContainText(ts('server.mod_pack_applied'));
+  await expect(page.locator('#mod-pack-findings .mod-pack-finding.error')).toHaveCount(0);
+  await scenarioButton(page, scenarioId).click({ timeout: 30_000 });
+
+  // Two hulls, so the scenario offers a CHOICE and cards are drawn at all
+  // (a single-hull scenario auto-resolves, issue #917).
+  const cards = page.locator('ph-ship-picker .ship-card');
+  await cards.first().waitFor({ state: 'visible', timeout: 30_000 });
+  await expect(cards).toHaveCount(HULLS.length);
+
+  // Structural, not pinned to `BH-0021`/`40`: the failure this guards is total
+  // — no enrichment at all — and the fixture's numbers are its own business.
+  for (let i = 0; i < HULLS.length; i += 1) {
+    const card = cards.nth(i);
+    await expect(card.locator('.ship-badge')).not.toHaveClass(/(^|\s)unknown(\s|$)/);
+    await expect(card.locator('.ship-stat-value')).not.toHaveCount(0);
+    await expect(card.locator('.ship-stat-value').first()).not.toBeEmpty();
+  }
+
+  expect(
+    hullResponses.every((status) => status >= 400),
+    `a pack hull has no URL; every response for one must be an error, got ${hullResponses}`,
+  ).toBe(true);
+});
 
 // ── Every rejected fixture: findings in the DOM, catalog unchanged, no fetch ───
 
@@ -282,4 +344,61 @@ test('upload after world load is ignored: the panel is hidden and no pack is app
     }
   });
   expect(packCount, 'no pack may be applied once the world has loaded').toBe(0);
+});
+
+// ── ...but a SECOND lobby round accepts one again ────────────────────────
+//
+// Return to Lobby clears `_worldLoadStarted`, so the upload above is refused
+// only WHILE a round is running. The round that comes back is the one state
+// where the pre-load catalogue store has to answer over a world that is already
+// loaded: issue #756 REUSES the running Bevy app rather than calling
+// `wasm_load_world` again, so `WORLD_CONFIG` never goes back to `None`. A
+// catalogue lookup gated on "no world is loaded yet" would be inert here and
+// every card in this picker would badge `[UNKNOWN]` again — which is why the
+// store hangs off `catalog_entity_config` (display) instead of widening
+// `get_cached_entity_config` (spawn), and needs no such gate to stay off the
+// spawn path.
+//
+// The pack's hulls are what make this falsifiable. Round one preloaded the
+// hulls IT was curated for, so a base hull would read out of the preload's own
+// cache and prove nothing.
+
+test('a pack uploaded in a SECOND lobby round still enriches its hull cards', async ({
+  context,
+}) => {
+  await context.route('**/assets/worlds/combat_test.toml', (route) =>
+    route.fulfill({ contentType: 'text/plain', body: stripHeavyEntities(COMBAT_TEST_TOML) }),
+  );
+  const manifest = readModPackManifest('pack-hull');
+  const scenarioId = tableArrayValues(manifest, 'scenario', 'id')[0];
+
+  const page = await context.newPage();
+  await page.goto('/?manifest=assets/scenarios.demo.toml');
+  await openWorldPicker(page);
+  await page.bringToFront();
+  const buttons = scenarioButtons(page);
+  await buttons.first().waitFor({ state: 'visible', timeout: 30_000 });
+  await buttons.first().click();
+  const destroyer = page.locator(
+    '#landing-ship ph-ship-picker .ship-card[data-template="assets/entities/alliance_destroyer.toml"]',
+  );
+  await destroyer.waitFor({ state: 'visible', timeout: 30_000 });
+  await destroyer.click();
+  await expect(page.locator('#lobby-panel')).toBeVisible({ timeout: 60_000 });
+  await waitForWasmReady(page);
+
+  // Round two. The world stays loaded in the running instance, and
+  // `showLandingAtPicker` re-opens the World stage itself — a New Game click
+  // here would TOGGLE it shut again, so this only waits.
+  await page.evaluate(() => window.__hostReturnToLobby());
+  await buttons.first().waitFor({ state: 'visible', timeout: 30_000 });
+
+  await uploadPack(page, 'pack-hull');
+  await expect(page.locator('#mod-pack-status')).toContainText(ts('server.mod_pack_applied'));
+  await scenarioButton(page, scenarioId).click({ timeout: 30_000 });
+
+  const card = page.locator('ph-ship-picker .ship-card').first();
+  await card.waitFor({ state: 'visible', timeout: 30_000 });
+  await expect(card.locator('.ship-badge')).not.toHaveClass(/(^|\s)unknown(\s|$)/);
+  await expect(card.locator('.ship-stat-value').first()).not.toBeEmpty();
 });

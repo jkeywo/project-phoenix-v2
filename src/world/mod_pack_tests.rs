@@ -882,6 +882,28 @@ fn fixture_valid_v1_is_accepted() {
     );
 }
 
+/// A pack that carries its OWN playable hulls under `assets/entities/`, which
+/// is what the host's pre-load catalogue enrichment has to serve out of the
+/// session overlay rather than off the wire (they have no URL). Accepted for the
+/// same reason `valid-v1` is; the enrichment itself is driven end-to-end by
+/// tests/smoke/mod-pack.spec.js over these same bytes.
+#[test]
+fn fixture_pack_hull_is_accepted() {
+    let bytes = include_bytes!("../../tests/fixtures/mod-packs/pack-hull.zip");
+    let result = validate_mod_pack(
+        bytes,
+        &fixture_base_identity(),
+        no_base,
+        &no_templates(),
+        &[],
+    );
+    assert!(
+        result.is_accepted(),
+        "pack-hull.zip must be accepted: {:?}",
+        result.findings
+    );
+}
+
 #[test]
 fn fixture_format_too_new_is_rejected() {
     let bytes = include_bytes!("../../tests/fixtures/mod-packs/format-too-new.zip");

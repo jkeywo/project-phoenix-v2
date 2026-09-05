@@ -1,0 +1,8 @@
+# The second hull, so the scenario offers a CHOICE and the picker draws cards
+# rather than auto-resolving (issue #917).
+
+class = "warden"
+hull_id = "BH-0022"
+mass = 12000.0
+power_rating = 55
+name = "Borrowed Warden"

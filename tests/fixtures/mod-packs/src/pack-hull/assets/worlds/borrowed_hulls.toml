@@ -1,0 +1,13 @@
+# The pack's own world. Both hulls it offers are the pack's own files, so
+# neither has ever existed at a URL.
+
+[global]
+title = "Borrowed Hulls"
+
+[[available_ships]]
+template_path = "assets/entities/borrowed_lancer.toml"
+label = "Borrowed Lancer"
+
+[[available_ships]]
+template_path = "assets/entities/borrowed_warden.toml"
+label = "Borrowed Warden"

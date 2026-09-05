@@ -2243,6 +2243,16 @@
        click, a Rust host-channel push) that only ever happens after this
        module has finished loading. -->
   <script type="module" src="gui/host-scenarios.js"></script>
+  <!-- Pre-load catalogue enrichment: the hull cards' class badge, registry,
+       mass and power rating are read by delivery::payload::ship_payload from
+       the CACHED entity template, and the catalogue is read before any world
+       is activated — so buildScenarioCatalog has to deliver the hulls itself
+       or every card renders label-only. Which paths, in what order, how deep
+       an include closure may go and what a failed fetch means live in the
+       module so vitest can reach them; the fetch and the wasmBindings call
+       stay below. Same self-registering pattern as the two modules around
+       it. -->
+  <script type="module" src="gui/host-catalog-templates.js"></script>
   <!-- Host scenario-picker renderer (issue #1328): every DOM write inside
        #world-list that used to be inline in renderScenarioLockState below.
        Extracted for the reason gui/host-lobby-render.js was — the NATIVE host
@@ -6088,6 +6098,61 @@
       return _manifestPush;
     }
 
+    // Deliver the hull templates a catalog references, then read it again.
+    //
+    // The catalog's `class`, `hull_id`, `mass`, `power_rating` and `name` are
+    // enrichment `delivery::payload::ship_payload` reads out of the cached
+    // entity template, and drops when the template is not there. Nothing
+    // fetched a hull template before the picker was drawn — the preload does
+    // it, and that runs when a world is CHOSEN — so every card came back with
+    // `template_path` and `label` alone: an `[UNKNOWN]` class badge and no
+    // registry, mass or power rating.
+    //
+    // The paths come from the catalog's own first pass (i.e. from the worlds'
+    // `[[available_ships]]` entries, already resolved by build_merged_catalog),
+    // never from guessing at file names. `wasm_push_catalog_template` keeps
+    // them in a store of its own, separate from the preload's, which
+    // `wasm_load_world` empties — so this cannot make the real preload skip a
+    // hull it still has to record in the content ledger and fetch a rig for.
+    // Only the card reads that store (`catalog_entity_config`); no spawn can,
+    // which is what keeps the #917 curation intact without a timing guard.
+    //
+    // Returns the catalog to use. A hull that 404s or will not parse leaves
+    // that one card label-only, exactly as before; a failure here never costs
+    // us the catalog we already have. A pack's own hull 404s BY DEFINITION —
+    // its text is in the session overlay, not at a URL — and the empty delivery
+    // is what lets Rust substitute the overlay's copy.
+    async function enrichCatalogTemplates(catalog) {
+      const api = window.hostCatalogTemplates;
+      if (!api || !window.wasmBindings ||
+          typeof wasmBindings.wasm_push_catalog_template !== 'function') return catalog;
+      const paths = api.catalogTemplatePaths(catalog);
+      if (paths.length === 0) return catalog;
+      const report = await api.deliverCatalogTemplates({
+        paths,
+        fetchText: async function (path) {
+          const r = await fetch(path);
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.text();
+        },
+        pushTemplate: function (path, toml, isRoot) {
+          return Array.from(wasmBindings.wasm_push_catalog_template(path, toml, isRoot) || []);
+        },
+      });
+      // Info, not a warning: a mod pack's own hull is ALWAYS here (no URL to
+      // fetch), and its text comes from the session overlay instead. A shipped
+      // hull in this list is a genuine 404, which the missing card then shows.
+      if (report.unfetched.length) {
+        console.info('[Phoenix] no hull template fetched (session overlay may still carry it):',
+          report.unfetched.join(', '));
+      }
+      if (report.failed.length || report.truncated) {
+        console.warn('[Phoenix] hull card details unavailable for:', report.failed.join(', '),
+          report.truncated ? '(include closure too deep)' : '');
+      }
+      return Array.from(wasmBindings.wasm_get_scenario_catalog() || []);
+    }
+
     // Build the pre-load catalog once WASM is ready: push the base manifest and
     // each referenced world TOML into Rust so wasm_get_scenario_catalog() (the
     // #754 authoritative catalog) can resolve titles + per-scenario ships.
@@ -6104,6 +6169,13 @@
           } catch (_) {}
         }));
         _scenarioCatalog = Array.from(wasmBindings.wasm_get_scenario_catalog() || []);
+        // Second pass, with the hulls delivered. Guarded separately: the
+        // catalog we already have is worth keeping even if enrichment blows up.
+        try {
+          _scenarioCatalog = await enrichCatalogTemplates(_scenarioCatalog);
+        } catch (e) {
+          console.warn('[Phoenix] hull card enrichment failed — cards stay label-only:', e);
+        }
       } catch (e) {
         console.error('[Phoenix] scenario catalog build failed:', e);
         _scenarioCatalog = [];
@@ -6127,6 +6199,17 @@
       }
       renderScenarioLockState();
       broadcastScenarioCatalog();
+      // A pack's own hulls have never been fetched either, so their cards
+      // arrive label-only for the same reason the base ones did. Enrich and
+      // redraw after the fact rather than making the upload wait on a fetch:
+      // the pack's scenarios are already listed and pickable.
+      enrichCatalogTemplates(_scenarioCatalog).then(function (enriched) {
+        _scenarioCatalog = enriched;
+        renderScenarioLockState();
+        broadcastScenarioCatalog();
+      }).catch(function (e) {
+        console.warn('[Phoenix] hull card enrichment failed — cards stay label-only:', e);
+      });
     }
 
     // ── Applied mod-pack stack UI (issue #987) ─────────────────────────────
@@ -6823,6 +6906,20 @@ function finishInit() {
     // Re-broadcast the (now-unlocked) catalog so already-connected phones
     // return to the shared pre-scenario picker for the next round (issue #756).
     broadcastScenarioCatalog();
+    // Round two needs the hulls delivered AGAIN: wasm_load_world emptied the
+    // pre-load catalogue store when round one's real preload took over, and the
+    // preload's own cache only holds the hulls THAT round's #917 curation let
+    // through. Concretely: a first round of falling_skyway (one hull) leaves
+    // every combat_test card label-only in the second. Re-deliver and redraw
+    // after the fact, the way the mod-pack refresh does, rather than holding the
+    // picker on a fetch — the World rows are already up and pickable.
+    enrichCatalogTemplates(_scenarioCatalog).then(function (enriched) {
+      _scenarioCatalog = enriched;
+      renderScenarioLockState();
+      broadcastScenarioCatalog();
+    }).catch(function (e) {
+      console.warn('[Phoenix] hull card enrichment failed — cards stay label-only:', e);
+    });
     // Re-dock the join QR in the freshly re-shown scenario panel (AC1).
     showJoinQrOverPanel();
     startMenuMusic();

@@ -1,0 +1,33 @@
+# Committed mod-pack fixture: a pack that carries its OWN hulls.
+#
+# The one fixture whose ship cards can only come from the session overlay. A
+# pack's entity TOML has NO URL, so the host's pre-load catalogue fetch 404s for
+# it every time, and delivering that failure as an empty body — the same
+# contract `handleConfigRequest` keeps with `wasm_load_config` — is the only
+# thing that lets `push_catalog_template` substitute the pack's own text. Get
+# that wrong and the mod-pack half of the enrichment is dead code that no
+# shipped-content test would ever notice.
+#
+# TWO hulls on purpose: a single-hull scenario auto-resolves (issue #917) and
+# never draws a card at all, so one hull would make the guard unfalsifiable.
+#
+# Regenerate the .zip with `node scripts/build-mod-pack-fixtures.mjs`
+# (byte-reproducible; gated by `--check`). The SAME .zip bytes are validated
+# from Rust (src/world/mod_pack_tests.rs) and driven through the real host page
+# by tests/smoke/mod-pack.spec.js.
+
+[pack]
+format = 1
+id = "borrowed-hulls"
+version = "1.0.0"
+name = "Borrowed Hulls"
+author = "Fixture Author"
+description = "A pack that ships its own playable hulls."
+
+[pack.requires]
+content_id = "phoenix-base"
+content_epoch = 1
+
+[[scenario]]
+id = "borrowed_hulls"
+world = "assets/worlds/borrowed_hulls.toml"

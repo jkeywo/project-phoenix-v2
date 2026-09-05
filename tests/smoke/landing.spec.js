@@ -139,8 +139,20 @@ test('choosing a world from the landing reaches the lobby it always reached',
     // `#scenario-panel`. When it IS the hull stage, the two things that slice
     // claimed are checked on the way past: the World rows are still standing,
     // and the landing has slid one column further rather than swapped one.
+    //
+    // RACE, not a poll: `isVisible()` does NOT wait — it answers about this
+    // instant and ignores a `timeout` passed to it. Asking it straight after the
+    // world click therefore always said "no picker", the ship was never chosen,
+    // and the assertions below then failed on a landing that was right to still
+    // be up. So wait for whichever of the two outcomes this world produces, and
+    // click only if it was the picker.
     const shipCard = page.locator('ph-ship-picker .ship-card').first();
-    if (await shipCard.isVisible({ timeout: 10_000 }).catch(() => false)) {
+    const landingGone = page.locator('#landing-panel');
+    await Promise.race([
+      shipCard.waitFor({ state: 'visible', timeout: 60_000 }),
+      landingGone.waitFor({ state: 'hidden', timeout: 60_000 }),
+    ]);
+    if (await shipCard.isVisible()) {
       await expect(page.locator('#landing-ship ph-ship-picker')).toBeVisible();
       await expect(page.locator(SCENARIO_BUTTONS).first()).toBeVisible();
       await expect(page.locator('#landing-panel')).toHaveClass(/is-deep/);

@@ -23,9 +23,10 @@
 //! A GLB's materials are ASSETS, shared by every entity rendering that GLB: all
 //! 32 rocks of a size class hold the same handles. Writing alpha into them would
 //! fade the whole field. So the fade takes a per-visual COPY of each material it
-//! touches ([`FadeMaterialSwap`]), drives alpha on the copy, and hands the
-//! originals back when it finishes. A fade-out drops its copies with the entity;
-//! a fade-in restores the shared handles, so nothing is left holding a clone.
+//! touches ([`FadedMaterial`], hung on the mesh that owes the original back),
+//! drives alpha on the copy, and hands the originals back when it finishes. A
+//! fade-out drops its copies with the entity; a fade-in restores the shared
+//! handles, so nothing is left holding a clone.
 //!
 //! An opaque material's copy fades through `AlphaMode::AlphaToCoverage` rather
 //! than `Blend`: coverage keeps the mesh in the opaque pass with depth writes
@@ -151,9 +152,19 @@ impl VisualFade {
     }
 }
 
-/// One mesh whose material this fade has taken a private copy of.
-struct SwappedMaterial {
-    mesh: Entity,
+/// One mesh's place in a running fade: the shared asset it drew with before,
+/// and the private copy it is drawing with now. Lives on the MESH.
+///
+/// Deliberately not a list on the fade's root. A `SceneRoot` populates its
+/// children over several frames and can lose one just as asynchronously — a
+/// scene instance respawn, an LOD ladder churning beneath a long window — so a
+/// root-side `Vec<Entity>` is a cache of handles with no owner to invalidate
+/// it. Hung off the mesh instead, the record is destroyed by the same despawn
+/// that destroys the mesh, and the private copy it holds the last strong handle
+/// to is freed with it. There is then no way to address a handback to an entity
+/// that has gone.
+#[derive(Component)]
+pub struct FadedMaterial {
     /// The SHARED asset the mesh carried before the fade — handed back at the
     /// end of a fade-in, and never written to in between.
     original: Handle<StandardMaterial>,
@@ -167,13 +178,6 @@ struct SwappedMaterial {
     fading: Handle<StandardMaterial>,
 }
 
-/// The material copies a fading visual's meshes are drawing with, and the shared
-/// assets they came from. Also the record of which descendants have already been
-/// swapped: a GLB's `SceneRoot` populates its children over several frames, so
-/// the walk repeats until the scene has finished arriving.
-#[derive(Component, Default)]
-pub struct FadeMaterialSwap(Vec<SwappedMaterial>);
-
 /// The full local scale a materialising visual is growing toward — captured
 /// once, at the first frame of the fade, because it is whatever the spawn put
 /// there (a GLB child carries its rig's `[base].scale`, a billboard root its
@@ -184,6 +188,12 @@ pub struct FadeTargetScale(Vec3);
 /// Advance every running fade: alpha onto the visual's own material copies,
 /// scale for an arrival, and the teardown or hand-back when the window closes.
 ///
+/// Each frame the fade re-derives which meshes it owns by walking the live
+/// hierarchy under its root, and remembers nothing about them between frames
+/// except what it hung on the meshes themselves. A mesh that has gone is simply
+/// absent from this frame's walk: no record of it survives to be handed back to,
+/// and its material copy died with it.
+///
 /// `Without<SelfDrivenAlpha>` on the material walk is what keeps the one-writer
 /// rule — see that marker.
 pub fn drive_visual_fades(
@@ -192,16 +202,16 @@ pub fn drive_visual_fades(
     mut materials: ResMut<Assets<StandardMaterial>>,
     children: Query<&Children>,
     mesh_materials: Query<&MeshMaterial3d<StandardMaterial>, Without<SelfDrivenAlpha>>,
+    faded: Query<&FadedMaterial>,
     mut fading: Query<(
         Entity,
         &mut VisualFade,
         &mut Transform,
-        Option<&mut FadeMaterialSwap>,
         Option<&FadeTargetScale>,
     )>,
 ) {
     let dt = time.delta_secs();
-    for (root, mut fade, mut transform, swap, target_scale) in fading.iter_mut() {
+    for (root, mut fade, mut transform, target_scale) in fading.iter_mut() {
         fade.elapsed += dt;
 
         // Arrival scaling, against the size the spawn actually produced rather
@@ -219,15 +229,20 @@ pub fn drive_visual_fades(
         }
 
         // Take a private copy of every material this visual draws with, and
-        // drive alpha on the copy. Repeated each frame: a scene's children
-        // appear over several frames, and a late arrival must not stay opaque
-        // through a fade that has already started.
+        // drive alpha on the copy. The walk repeats each frame because a
+        // scene's children appear over several frames and a late arrival must
+        // not stay opaque through a fade that has already started — and because
+        // it is the walk, not a stored list, that decides which meshes this
+        // fade still owns.
         let alpha = fade.alpha();
-        let mut swapped: Vec<SwappedMaterial> = swap
-            .map(|s| std::mem::take(&mut s.into_inner().0))
-            .unwrap_or_default();
+        let mut swapped: Vec<(Entity, Handle<StandardMaterial>)> = Vec::new();
         for mesh in visual_meshes(root, &children) {
-            if swapped.iter().any(|s| s.mesh == mesh) {
+            if let Ok(FadedMaterial { original, fading }) = faded.get(mesh) {
+                // Already swapped on an earlier frame; drive alpha on its copy.
+                if let Some(mat) = materials.get_mut(fading) {
+                    mat.base_color = mat.base_color.with_alpha(alpha);
+                }
+                swapped.push((mesh, original.clone()));
                 continue;
             }
             let Ok(handle) = mesh_materials.get(mesh) else {
@@ -239,44 +254,46 @@ pub fn drive_visual_fades(
             };
             let mut copy = source;
             copy.alpha_mode = fade_alpha_mode(copy.alpha_mode);
+            copy.base_color = copy.base_color.with_alpha(alpha);
             let fading = materials.add(copy);
-            commands.entity(mesh).insert(MeshMaterial3d(fading.clone()));
-            swapped.push(SwappedMaterial {
-                mesh,
-                original: handle.0.clone(),
-                fading,
-            });
-        }
-
-        for swap in swapped.iter() {
-            if let Some(mat) = materials.get_mut(&swap.fading) {
-                mat.base_color = mat.base_color.with_alpha(alpha);
-            }
+            // Both halves of the swap land in one command: the entity draws
+            // with the copy and carries the record of what it owes back.
+            commands.entity(mesh).insert((
+                MeshMaterial3d(fading.clone()),
+                FadedMaterial {
+                    original: handle.0.clone(),
+                    fading,
+                },
+            ));
+            swapped.push((mesh, handle.0.clone()));
         }
 
         if !fade.finished() {
-            commands.entity(root).insert(FadeMaterialSwap(swapped));
             continue;
         }
 
         match fade.direction {
             // The window closed on an outgoing tier: it and its material copies
-            // go together.
+            // go together, the copies freed by the despawn of the meshes that
+            // hold them.
             FadeDirection::Out => commands.entity(root).try_despawn(),
             FadeDirection::In => {
                 // Hand the shared assets back, drop the copies, and leave the
-                // visual exactly as an un-faded spawn would have left it.
-                for swap in swapped {
+                // visual exactly as an un-faded spawn would have left it. Every
+                // entity here was matched by a query THIS frame, so none of
+                // these commands can be addressed to a despawned mesh.
+                for (mesh, original) in swapped {
                     commands
-                        .entity(swap.mesh)
-                        .insert(MeshMaterial3d(swap.original));
+                        .entity(mesh)
+                        .insert(MeshMaterial3d(original))
+                        .remove::<FadedMaterial>();
                 }
                 if let Some(FadeTargetScale(full)) = target_scale {
                     transform.scale = *full;
                 }
                 commands
                     .entity(root)
-                    .remove::<(VisualFade, FadeMaterialSwap, FadeTargetScale)>();
+                    .remove::<(VisualFade, FadeTargetScale)>();
             }
         }
     }
@@ -583,7 +600,7 @@ mod tests {
                 .unwrap();
             assert_eq!(handle.0, shared, "the shared asset is handed back");
             assert!(app.world().get::<VisualFade>(fading).is_none());
-            assert!(app.world().get::<FadeMaterialSwap>(fading).is_none());
+            assert!(app.world().get::<FadedMaterial>(fading).is_none());
         }
 
         /// An arrival scales against whatever the spawn produced — a GLB child
@@ -610,6 +627,92 @@ mod tests {
             assert!(
                 (landed - authored).length() < 1e-6,
                 "an arrival lands on exactly its authored scale, got {landed:?}"
+            );
+        }
+
+        /// The defect this module shipped with, and the reason a native host
+        /// filled its log with `Entity despawned: ... its index now has
+        /// generation N` a few seconds into `combat_test`.
+        ///
+        /// A scene populates its children over several frames, and it can also
+        /// LOSE one mid-fade — a scene instance respawn, an LOD churn beneath a
+        /// long window. The swap record must not outlive the mesh it describes:
+        /// a dead mesh's private material copy dies with it and there is
+        /// nothing left to hand back, while the handback itself must never be
+        /// addressed to an entity whose index has since been recycled.
+        ///
+        /// The error handler is set to PANIC here on purpose. A command applied
+        /// to a stale handle is only ever visible as an error — Bevy compares
+        /// generations, so a recycled index is rejected rather than silently
+        /// written — and the whole point of the fix is that the error is never
+        /// raised.
+        #[test]
+        fn a_mesh_that_dies_mid_fade_is_never_handed_a_material_back() {
+            let (mut app, shared, fading, _) = fixture();
+            app.insert_resource(bevy::ecs::error::DefaultErrorHandler(
+                bevy::ecs::error::panic,
+            ));
+            let doomed = app
+                .world_mut()
+                .spawn((MeshMaterial3d(shared.clone()), Transform::default()))
+                .id();
+            let survivor = app
+                .world_mut()
+                .spawn((MeshMaterial3d(shared.clone()), Transform::default()))
+                .id();
+            app.world_mut()
+                .entity_mut(fading)
+                .add_children(&[doomed, survivor]);
+            app.world_mut()
+                .entity_mut(fading)
+                .insert(VisualFade::fade_in(1.0));
+
+            // Both children are swapped onto private copies.
+            advance(&mut app, 0.1);
+            assert_ne!(
+                app.world()
+                    .get::<MeshMaterial3d<StandardMaterial>>(doomed)
+                    .unwrap()
+                    .0,
+                shared,
+                "the doomed child is drawing with a copy before it dies"
+            );
+
+            // The mesh goes, and its index is recycled by a NEW child of the
+            // same visual — exactly the `414v2 -> generation 3` shape from the
+            // host log.
+            app.world_mut().entity_mut(doomed).despawn();
+            let recycled = app
+                .world_mut()
+                .spawn((MeshMaterial3d(shared.clone()), Transform::default()))
+                .id();
+            app.world_mut().entity_mut(fading).add_child(recycled);
+            assert_eq!(
+                recycled.index(),
+                doomed.index(),
+                "the fixture needs the index reused for this to be the reported bug"
+            );
+
+            advance(&mut app, 0.4);
+            // Closing the window hands the shared assets back. Nothing may be
+            // addressed to `doomed`.
+            advance(&mut app, 1.0);
+
+            assert_eq!(
+                app.world()
+                    .get::<MeshMaterial3d<StandardMaterial>>(survivor)
+                    .unwrap()
+                    .0,
+                shared,
+                "a surviving mesh still gets its shared asset back"
+            );
+            assert_eq!(
+                app.world()
+                    .get::<MeshMaterial3d<StandardMaterial>>(recycled)
+                    .unwrap()
+                    .0,
+                shared,
+                "so does the one that took the dead mesh's index"
             );
         }
 

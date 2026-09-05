@@ -81,6 +81,10 @@
        join field (issue #1359). Before it, the only thing stopping two of them
        showing contradictory things at once was their z-index order. -->
   <script type="module" src="gui/pre-play-view.js"></script>
+  <!-- The DOM half of that decision's loading projection (issue #1368). Pairs
+       with `loadingView()` in gui/pre-play-view.js the way
+       gui/client-lobby-render.js pairs with gui/lobby-view.js. -->
+  <script type="module" src="gui/loading-render.js"></script>
   <script type="module" src="gui/coordination-popup.js"></script>
   <!-- Per-tab session identity (issue: multiple clients on one desktop).
        localStorage is shared across all tabs of an origin, so every console
@@ -499,28 +503,199 @@
       color: var(--ink-dim);
     }
 
-    /* -- Asset loading overlay (shown during Loading phase) ---------- */
+    /* -- The loading surfaces (issue #1368) --------------------------
+       #asset-loading and #waiting-overlay are the two pre-play surfaces that
+       report progress rather than wait on a person, so they wear one
+       treatment: the ring, a lead line, a progress bar, the small print under
+       it, and the Session named at the bottom so a player holding the phone
+       knows what they are about to play.
+
+       PORTRAIT STACKS; LANDSCAPE PUTS THE MARK BESIDE THE STACK, and the
+       switch is `@media (orientation: ...)` and nothing else -- no script runs
+       on an orientation change, exactly as the console container below does
+       it.
+
+       Which of the two is up is decided once, in gui/pre-play-view.js; what it
+       SAYS is decided once, by `loadingView()` in the same file; and
+       gui/loading-render.js writes it. The stylesheet owns only what neither
+       of those can: the motion, and the layout. */
     #asset-loading {
       display: none;
       position: fixed; inset: 0; z-index: 200;
+      background: var(--surface-void);
+    }
+    #asset-loading, #waiting-overlay {
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      background: var(--surface-abyss);
-      color: var(--sky);
+      gap: var(--space-7);
+      padding: var(--space-6);
+      color: var(--ink);
       font-family: 'Chakra Petch', monospace;
-      font-size: var(--text-lg);
       text-align: center;
-      gap: 16px;
     }
+    /* The ring keeps the anatomy it shipped with -- 40px across, a 3px stroke,
+       one arc in the accent -- because that is what a returning player already
+       reads as "working". Only the accent moved, onto the surface's own
+       --signal. Both loading surfaces draw the same one. */
     #asset-loading .spinner-ring {
       width: 40px; height: 40px;
-      border: 3px solid var(--surface-ridge);
-      border-top-color: var(--sky);
+      border: 3px solid var(--surface-lift);
+      border-top-color: var(--signal);
       border-radius: 50%;
       animation: spin 0.8s linear infinite;
     }
-    #asset-loading .pct { font-size: var(--text-xl); font-weight: 600; }
+    /* The insignia beside (landscape) or above (portrait) the progress stack.
+       A background image rather than an <img>, so the element can carry its
+       accessible name from the String Table instead of an alt attribute
+       nobody would translate.
+
+       `logo.png`, NOT `assets/logo.png`: scripts/build-client.mjs copies it to
+       the CLIENT ROOT beside index.html — the phone bundle has no assets/
+       entry for it — which is the same layout the favicon link at the top of
+       this page is written against. gui/host-landing.css says the opposite
+       thing for the opposite reason: it is a stylesheet one directory down,
+       and a URL in a stylesheet resolves against the stylesheet. */
+    .ld-mark {
+      flex: 0 0 auto;
+      width: clamp(72px, 26vw, 150px);
+      height: clamp(72px, 26vw, 150px);
+      background: url('logo.png') center center / contain no-repeat;
+    }
+    .ld-stack {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: var(--space-5);
+      width: 100%;
+      max-width: 340px;
+    }
+    /* `hidden` has to be able to win in here. The attribute's own rule is a UA
+       `display: none`, and ANY author `display` outranks it — so the two rows
+       the renderer withholds (the percentage where nothing is measurable, the
+       Session before Welcome lands) stayed on the screen holding placeholder
+       text until this said otherwise. */
+    .ld-stack [hidden] { display: none; }
+    .ld-label {
+      font-size: var(--text-md);
+      font-weight: 600;
+      letter-spacing: var(--tracking);
+      text-transform: uppercase;
+      color: var(--ink);
+    }
+    /* The number, and ONLY where there is one to report. The renderer hides
+       this row outright on every other state rather than leaving a stale or
+       invented figure standing. */
+    .ld-pct {
+      font-family: var(--font-mono);
+      font-size: var(--text-display);
+      font-weight: 700;
+      letter-spacing: var(--tracking-tight);
+      color: var(--signal);
+    }
+    .ld-pct-unit {
+      font-size: var(--text-xl);
+      color: var(--ink-faint);
+      margin-left: var(--space-1);
+    }
+    .ld-bar {
+      position: relative;
+      overflow: hidden;
+      width: 100%;
+      height: 8px;
+      background: var(--surface-raised);
+      border: 1px solid var(--edge-faint);
+    }
+    .ld-fill {
+      display: block;
+      height: 100%;
+      /* A block-level fill with no width is width:auto -- the WHOLE track. So
+         the resting state of an unrendered bar is FULL, which is the invented
+         number in its loudest form, and it is exactly what the page's own
+         degraded path paints: gui/ never loads, applyPrePlaySurfaces() writes
+         the percentage by hand, and "3" sits beside a completely full bar.
+         Zero here makes the empty bar a stylesheet invariant rather than
+         something only script can be trusted to establish. Both overrides
+         still outrank it -- `.ld-bar.indet .ld-fill` sets 34%, and the
+         reduced-motion rule at the foot of this sheet sets 100%. */
+      width: 0;
+      background: linear-gradient(to right, var(--cyan-dim), var(--signal));
+      transition: width 0.3s ease;
+    }
+    /* Nothing to measure -- a connecting link, a host still choosing. A sweep
+       says "working" without claiming progress nobody counted, and it covers a
+       THIRD of the track: a full bar that happens to be moving still reads as
+       a full bar, which is the invented number in another form. The width is
+       here rather than written from script for the same reason -- see the
+       reduced-motion counterpart at the foot of this stylesheet, which has to
+       be able to outrank it. */
+    .ld-bar.indet .ld-fill {
+      width: 34%;
+      animation: ld-sweep 1.4s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+    }
+    @keyframes ld-sweep {
+      0%   { transform: translateX(-105%); }
+      100% { transform: translateX(315%); }
+    }
+    .ld-ticks {
+      display: flex;
+      justify-content: space-between;
+      gap: var(--space-4);
+      width: 100%;
+      font-family: var(--font-mono);
+      font-size: var(--text-xs);
+      font-weight: 600;
+      letter-spacing: var(--tracking);
+      text-transform: uppercase;
+      color: var(--ink-faint);
+    }
+    .ld-ctx {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: var(--space-3);
+      width: 100%;
+      padding-top: var(--space-5);
+      border-top: 1px solid var(--edge-faint);
+    }
+    .ld-ctx b {
+      font-size: var(--text-lg);
+      font-weight: 600;
+      letter-spacing: var(--tracking);
+      text-transform: uppercase;
+      color: var(--ink);
+    }
+    .ld-ship {
+      font-family: var(--font-mono);
+      font-size: var(--text-xs);
+      font-weight: 600;
+      letter-spacing: var(--tracking-wide);
+      text-transform: uppercase;
+      color: var(--ink-faint);
+    }
+    .ld-status {
+      font-family: var(--font-mono);
+      font-size: var(--text-xs);
+      font-weight: 600;
+      letter-spacing: var(--tracking-wide);
+      text-transform: uppercase;
+      color: var(--signal);
+    }
+    /* The link went away and the page is dialling again. Amber rather than the
+       accent, because a bar that has stopped moving with no explanation is the
+       failure this line exists to close. */
+    .ld-status.retrying { color: var(--reloading); }
+    /* Side by side once the frame is wider than it is tall. */
+    @media (orientation: landscape) {
+      #asset-loading, #waiting-overlay { flex-direction: row; }
+      .ld-mark { width: clamp(72px, 18vw, 160px); height: clamp(72px, 18vw, 160px); }
+      .ld-stack { max-width: 380px; }
+    }
+    /* A short frame cannot spare the vertical rhythm. */
+    @media (max-height: 430px) {
+      .ld-pct { font-size: var(--text-2xl); }
+      .ld-ctx { padding-top: var(--space-4); }
+    }
 
     /* -- Game-over overlay (shown when GamePhase::GameOver) ---------- */
     #game-over-overlay {
@@ -635,27 +810,20 @@
       cursor: pointer; min-height: var(--control-hit-min);
     }
 
-    /* -- Waiting-for-scenario overlay (shown after ReturnToLobby until host picks) */
+    /* -- Waiting-for-scenario overlay (shown after ReturnToLobby until host picks)
+       The second loading surface: it wears the treatment above and differs in
+       only two things -- what it sits on (a scrim, because the lobby behind it
+       is still the truth) and having no percentage at all, because a host
+       still choosing a World is not a quantity anybody can measure. */
     #waiting-overlay {
       display: none;
       position: fixed; inset: 0; z-index: 185;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
       background: rgba(var(--rgb-void), 0.92);
-      color: var(--ink-dim);
-      font-family: 'Chakra Petch', monospace;
-      text-align: center;
-      padding: 32px;
-      font-size: var(--text-lg);
-      letter-spacing: 0.06em;
     }
     #waiting-overlay .spinner-ring {
-      display: inline-block;
-      width: 32px; height: 32px;
-      margin-bottom: 24px;
-      border: 2px solid rgba(var(--rgb-cyan), 0.2);
-      border-top-color: var(--ink-dim);
+      width: 40px; height: 40px;
+      border: 3px solid var(--surface-lift);
+      border-top-color: var(--signal);
       border-radius: 50%;
       animation: spin 0.8s linear infinite;
     }
@@ -1564,6 +1732,19 @@
     :root[data-reduced-motion="reduce"] #waiting-overlay .spinner-ring {
       animation: none;
     }
+    /* The indeterminate progress bar (issue #1368), by the same reasoning one
+       step on: the sweep stops, and the sliver it was sweeping becomes the
+       whole track at reduced opacity. What the movement was carrying -- "this
+       is working, and there is nothing here to count" -- survives it, which is
+       the rule the whole layer is written to: still the motion, keep the
+       information. It has to outrank `.ld-bar.indet .ld-fill`'s own 34%, and
+       the `:root[...]` prefix is what buys that; the width is in the
+       stylesheet rather than written from script precisely so this can win. */
+    :root[data-reduced-motion="reduce"] .ld-bar.indet .ld-fill {
+      animation: none;
+      width: 100%;
+      opacity: 0.4;
+    }
     /* The two "you are good to go" glows, held at the peak of their own pulse
        so the ready state is still the brightest thing in the footer. */
     :root[data-reduced-motion="reduce"] #ready-pill.go {
@@ -1761,8 +1942,16 @@
   <!-- Asset loading overlay: shown during GamePhase::Loading while the
        server pre-caches GLB models, radar icons, and rig sidecars. -->
   <div id="asset-loading">
-    <div class="spinner-ring"></div>
-    <span><span data-i18n="client.preparing_scenario">Preparing scenario&hellip;</span> <span class="pct" id="asset-loading-pct">0</span>%</span>
+    <div class="ld-mark" role="img" data-i18n-attr="aria-label:client.logo_alt"></div>
+    <div class="ld-stack">
+      <div class="spinner-ring"></div>
+      <span class="ld-label" data-i18n="client.preparing_scenario">Preparing scenario&hellip;</span>
+      <span class="ld-pct" id="asset-loading-pct-row"><span id="asset-loading-pct">0</span><span class="ld-pct-unit">%</span></span>
+      <span class="ld-bar" id="asset-loading-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Preparing scenario" data-i18n-attr="aria-label:client.preparing_scenario"><i class="ld-fill" id="asset-loading-fill"></i></span>
+      <span class="ld-ticks"><span id="asset-loading-tick-left"></span><span id="asset-loading-tick-right"></span></span>
+      <span class="ld-ctx" id="asset-loading-ctx" hidden><b id="asset-loading-scenario"></b><span class="ld-ship" id="asset-loading-ship"></span></span>
+      <span class="ld-status" id="asset-loading-status"></span>
+    </div>
   </div>
 
   <!-- Game-over overlay: shown when GamePhase::GameOver. Displays either
@@ -1789,8 +1978,15 @@
   <!-- Waiting-for-scenario overlay: shown after ReturnToLobby while the
        host picks a scenario from the server's scenario-selection panel. -->
   <div id="waiting-overlay">
-    <div class="spinner-ring"></div>
-    <span data-i18n="client.waiting_scenario">Waiting for host to select a scenario&hellip;</span>
+    <div class="ld-mark" role="img" data-i18n-attr="aria-label:client.logo_alt"></div>
+    <div class="ld-stack">
+      <div class="spinner-ring"></div>
+      <span class="ld-label" data-i18n="client.waiting_scenario">Waiting for host to select a scenario&hellip;</span>
+      <span class="ld-bar" id="waiting-overlay-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Waiting for host to select a scenario" data-i18n-attr="aria-label:client.waiting_scenario"><i class="ld-fill" id="waiting-overlay-fill"></i></span>
+      <span class="ld-ticks"><span id="waiting-overlay-tick-left"></span><span id="waiting-overlay-tick-right"></span></span>
+      <span class="ld-ctx" id="waiting-overlay-ctx" hidden><b id="waiting-overlay-scenario"></b><span class="ld-ship" id="waiting-overlay-ship"></span></span>
+      <span class="ld-status" id="waiting-overlay-status"></span>
+    </div>
   </div>
 
   <!-- QR-first scenario/ship picker overlay (issue #755): before any world is
@@ -1993,10 +2189,18 @@
       // the whole inline script in a temporal dead zone. The onStatus callback
       // that drives every LATER transition repaints instead.
       if (state !== 'ready') linkHasData = false;
+      lastConnectionState = state;
       chromeSetConnectionStatus(state);
-      // No applyPrePlaySurfaces() here: which pre-play surface is up does not
-      // depend on the link state (issue #1359 — priority is the whole rule),
-      // and every input that DOES move it re-applies the decision itself.
+      // Which pre-play surface is up STILL does not depend on the link state
+      // (issue #1359 — priority is the whole rule), and nothing below changes
+      // that: applyPrePlaySurfaces() runs the same decision over the same
+      // three inputs and lands on the same surface it would have anyway.
+      //
+      // What the re-apply is for is the LINE (issue #1368). A loading surface
+      // that is already up has to be able to say the link went away and the
+      // page is dialling again — a ring still turning over a bar that has
+      // stopped moving, with no explanation, is the failure that line closes.
+      applyPrePlaySurfaces();
     }
 
     // -- Pre-play surfaces (issue #1359) -------------------------------------
@@ -2028,6 +2232,10 @@
     let preloadFraction = null;
     /// True while the page is asking the guest for a join code.
     let joinPromptOpen = false;
+    /// The last link state setConnectionStatus() was told about. It decides no
+    /// surface — see loadingContext() — only whether a loading surface that is
+    /// already up says it is retrying (issue #1368).
+    let lastConnectionState = 'connecting';
 
     // The surfaces, highest z-index first — the same list gui/pre-play-view.js
     // exports, kept here for the module-absent case below. The z-index order
@@ -2058,6 +2266,29 @@
       return { surface, headline: null, measurable: !absent, pct };
     }
 
+    /**
+     * What the loading surface can say about the Session, gathered in one
+     * place: the link state, and the World's scenario and the ship the crew is
+     * about to fly. Every field is optional — the surface comes up before
+     * `Welcome` has landed, and it names what it has rather than guessing.
+     *
+     * The link state is read HERE and nowhere in gui/pre-play-view.js's
+     * surface decision, which is the line #1359 drew and this keeps: a dropped
+     * link cannot raise, suppress or swap a surface. It changes one line of
+     * text on the surface that is already up, because a bar that has stopped
+     * moving with no explanation is worse than no bar.
+     */
+    function loadingContext() {
+      const ls = window.lobbyState;
+      const ship = (ls && ls.shipConfig) || {};
+      return {
+        connectionState: lastConnectionState,
+        scenarioTitle: (ls && ls.scenarioTitle) || '',
+        shipClass: ship.class || '',
+        hullId: ship.hull_id || '',
+      };
+    }
+
     function applyPrePlaySurfaces() {
       const decide = (typeof window.prePlayView === 'function')
         ? window.prePlayView : localPrePlayView;
@@ -2082,8 +2313,20 @@
         if (id === 'join-entry') el.classList.toggle('open', shown);
         else el.style.display = shown ? 'flex' : 'none';
       }
-      // Only the preload has a number, so only it writes one.
-      if (view.measurable) {
+      // The loading surface's own contents (issue #1368): the ring, the bar,
+      // the small print and the Session named underneath it. `loadingView()`
+      // takes the decision ABOVE as its input rather than re-reading the
+      // inputs behind it, so there is no second answer to "is there anything
+      // to measure" that could disagree with this one; it returns null for the
+      // surfaces that are not loading surfaces, and the renderer no-ops.
+      const loading = (typeof window.loadingView === 'function')
+        ? window.loadingView(view, loadingContext()) : null;
+      if (loading && window.loadingRender) {
+        window.loadingRender.renderLoading(document, loading, t);
+      } else if (view.measurable) {
+        // gui/ never loaded. The percentage is the one thing a waiting player
+        // is actually reading, so the page still writes it itself — the same
+        // posture as localPrePlayView above, for the same reason.
         const pctEl = document.getElementById('asset-loading-pct');
         if (pctEl) pctEl.textContent = String(view.pct);
       }

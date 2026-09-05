@@ -156,8 +156,168 @@ export function prePlayView(connection, lobby, preloadFraction) {
   return decision(null, null);
 }
 
+/* ────────────────────────────────────────────────────────────────────────────
+ * The loading surface (issue #1368)
+ *
+ * Two of the four surfaces above are *loading* surfaces: they say "the mission
+ * is coming, keep holding the phone". `#asset-loading` says it while the host
+ * pre-caches models, icons and rig sidecars, and `#waiting-overlay` says it
+ * while the host is still choosing a World. Both now carry the same anatomy —
+ * a ring, a lead line, a progress bar, and the Session named underneath it.
+ *
+ * `loadingView` takes `prePlayView`'s decision as its INPUT rather than
+ * re-reading the inputs behind it. That is the whole point: a second read of
+ * `preloadFraction` here would be a second answer to "is there anything to
+ * measure", and the two would disagree the first time either was touched.
+ * There is one decision, and this is a projection of it.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * The loading treatment, one row per surface that wears it.
+ *
+ * DATA, not a switch. A surface joins the treatment by gaining a row here —
+ * `statusId` is the line in the corner that says what is being waited on,
+ * `ticksLeftId` is the small print under the bar that says what the bar is
+ * counting, and `namesSession` is whether this surface may name the World at
+ * all. Neither of the first two is a lead line: every surface's headline is
+ * written into its own markup as a `data-i18n` and rendered by
+ * gui/strings.js's applyToDom, exactly as HEADLINES above explains, and this
+ * module is not a second writer of it.
+ *
+ * `namesSession` is the third column because "what is the crew about to play"
+ * is a DIFFERENT question per surface, not a property of the Session record.
+ * `#asset-loading` comes up with a World already loaded — `Welcome` landed
+ * before the pre-cache began — so what the Session carries is what is coming.
+ * `#waiting-overlay` is the opposite by construction: it exists for the window
+ * where the host has NOT chosen a World, and `ReturnedToLobby` deliberately
+ * leaves `scenarioTitle`/`shipConfig` standing (see gui/lobby-state.js), so
+ * the Session there still describes the mission that just ENDED. Naming it
+ * under "Waiting for host to select a scenario…" is the same invented fact as
+ * a fabricated percentage, arriving on the ordinary GameOver → ReturnToLobby
+ * path. Emptiness cannot tell the two apart — a stale title is a present,
+ * well-formed string — so the surface has to say whether it is entitled to
+ * name one.
+ */
+const LOADING_TREATMENT = Object.freeze({
+  'asset-loading': Object.freeze({
+    statusId: 'client.loading_assets',
+    ticksLeftId: 'client.loading_ticks_assets',
+    namesSession: true,
+  }),
+  'waiting-overlay': Object.freeze({
+    statusId: 'client.loading_waiting_host',
+    ticksLeftId: 'client.loading_ticks_none',
+    namesSession: false,
+  }),
+});
+
+/** The pre-play surfaces that wear the loading treatment, in priority order. */
+export const LOADING_SURFACES = Object.freeze(
+  PRE_PLAY_SURFACES.filter((id) => id in LOADING_TREATMENT),
+);
+
+/**
+ * Link states in which the page has lost the host and is trying again.
+ *
+ * This is the ONLY thing the link state decides, and it decides a LINE OF TEXT
+ * rather than a surface. Which surface shows is still priority and nothing
+ * else — see `prePlayView` — so a dropped link cannot raise, suppress or swap
+ * a surface; it can only change what the surface that is already up says about
+ * itself. A player watching a bar that has stopped moving is owed the reason.
+ */
+const RETRYING_STATES = Object.freeze(['disconnected', 'error']);
+
+/** The class badge every hull already has a translated label under. */
+const SHIP_CLASS_PREFIX = 'component.ship_picker.class.';
+
+/** A trimmed string, or '' for anything that is not one. */
+function text(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+/**
+ * What the loading surface says, or null when the surface that is up is not a
+ * loading surface (the scenario picker and the join field are inputs waiting
+ * on a person, not work waiting on a machine).
+ *
+ * @param {{surface: string|null, measurable: boolean, pct: number|null}} view
+ *        `prePlayView`'s decision, passed through rather than recomputed.
+ * @param {{ connectionState?: string, scenarioTitle?: string,
+ *           shipClass?: string, hullId?: string }} [context]
+ *        What the Session knows about itself: the link state, and the World's
+ *        scenario and the ship the crew is about to fly. All optional — a
+ *        surface that comes up before `Welcome` has landed names what it has.
+ * @returns {object|null}
+ */
+export function loadingView(view, context) {
+  const v = view || {};
+  const ctx = context || {};
+  const treatment = LOADING_TREATMENT[v.surface];
+  if (!treatment) return null;
+
+  // Straight from the decision. `measurable` is true for the asset preload and
+  // nothing else, which is exactly the rule the bar needs: a real fraction
+  // fills it, and everything else sweeps without claiming a number.
+  const measurable = !!v.measurable && typeof v.pct === 'number';
+  const pct = measurable ? v.pct : null;
+  const retrying = RETRYING_STATES.includes(text(ctx.connectionState));
+
+  const scenario = text(ctx.scenarioTitle);
+  const hull = text(ctx.hullId);
+  const shipClass = text(ctx.shipClass);
+
+  return {
+    // Echoed so a renderer addresses the surface it was handed rather than
+    // guessing, and so a caller can tell one model from another.
+    surface: v.surface,
+    // Advisory, like HEADLINES: the markup's own data-i18n renders this line.
+    labelId: HEADLINES[v.surface],
+    measurable,
+    pct,
+    // The bar. `indeterminate` is the honest state — motion without a number.
+    // `width` is the measured fraction, and EMPTY when there is nothing to
+    // measure: an indeterminate sweep's width is a stylesheet decision (it is
+    // a third of the track, and it becomes the whole track under reduced
+    // motion), and an inline width written from script would outrank both.
+    bar: {
+      indeterminate: !measurable,
+      width: measurable ? `${pct}%` : '',
+    },
+    // The small print under the bar. The right-hand tick is the number again,
+    // against its total, and exists only when there IS a number.
+    ticks: {
+      left: { id: measurable ? treatment.ticksLeftId : 'client.loading_ticks_none', params: {} },
+      right: measurable ? { id: 'client.loading_of_total', params: { pct } } : null,
+    },
+    // The corner line: what is being waited on, or that the link went away and
+    // the page is trying again.
+    status: {
+      id: retrying ? 'client.loading_retrying' : treatment.statusId,
+      params: {},
+    },
+    retrying,
+    // What the player is about to play. Two things have to be true for the
+    // block to show: this surface may name a World at all (`namesSession` —
+    // #waiting-overlay may not, because the Session it can see is the mission
+    // that just ended), and there is something in the Session to name. Absent
+    // rather than empty for the second: before `Welcome` lands there is
+    // genuinely nothing to name, and a bordered empty box reads as a bug.
+    context: {
+      visible: !!treatment.namesSession && !!(scenario || hull || shipClass),
+      scenario: scenario ? { text: scenario } : null,
+      ship: {
+        lineId: hull ? 'client.loading_ship' : 'client.loading_ship_class_only',
+        classId: SHIP_CLASS_PREFIX + (shipClass || 'unknown'),
+        hull,
+      },
+    },
+  };
+}
+
 // Expose for the non-module inline script in client.html.
 if (typeof window !== 'undefined') {
   window.prePlayView = prePlayView;
+  window.loadingView = loadingView;
   window.PRE_PLAY_SURFACES = PRE_PLAY_SURFACES;
+  window.LOADING_SURFACES = LOADING_SURFACES;
 }

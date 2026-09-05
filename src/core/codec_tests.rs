@@ -5381,6 +5381,30 @@ fn power_group_entry_round_trips() {
         "a pre-#1004 entry must decode to the engine's floor, not to 0"
     );
     assert_eq!(legacy.min_level, 1);
+
+    // An AUTHORED floor of 0 — the coldable weapons group of issue #1395 — has
+    // to survive the round trip as 0. `0` is `u8::default()`, so a
+    // `skip_serializing_if`-style optimisation on this field would drop it from
+    // the wire and the client would decode it back as 1: the panel would gate
+    // its `−` at 1 and refuse to offer the one order the whole feature exists
+    // for.
+    let coldable = PowerGroupEntry {
+        id: "weapons".into(),
+        label: "WEAPONS".into(),
+        level: 0,
+        commanded_level: 0,
+        min_level: 0,
+        max_level: 4,
+    };
+    let json = serde_json::to_string(&coldable).unwrap();
+    assert!(
+        json.contains(r#""min_level":0"#),
+        "a floor of 0 must be ON the wire: {json}"
+    );
+    let decoded: PowerGroupEntry = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded, coldable);
+    assert_eq!(decoded.min_level, 0);
+    assert_eq!(decoded.level, 0);
 }
 
 // ── Batch inbound decode (issue #602) ────────────────────────────────

@@ -633,6 +633,88 @@ fn rejects_unknown_power_group() {
     );
 }
 
+/// Issue #1395: `min_level` is an allocation clamp now, so the trio has to
+/// describe a range the reactor can actually work in. A floor level with the
+/// ceiling leaves a group with one legal level and a stepper with nothing to
+/// step to.
+#[test]
+fn rejects_a_power_group_whose_floor_is_not_below_its_ceiling() {
+    let toml = valid_toml().replace(
+        "[power_groups.ops]
+label = \"Operations\"
+default_level = 2
+min_level = 1
+max_level = 4",
+        "[power_groups.ops]
+label = \"Operations\"
+default_level = 4
+min_level = 4
+max_level = 4",
+    );
+
+    assert_eq!(
+        parse_and_validate(&toml, KINDS),
+        Err(ShipConfigError::InvalidPowerGroupLevels {
+            group: PowerGroupId("ops".into()),
+            min_level: 4,
+            max_level: 4,
+        })
+    );
+}
+
+/// A floor of 0 is legal — that is the whole point of #1395 — so long as it
+/// still sits under the ceiling.
+#[test]
+fn accepts_a_power_group_authored_at_a_floor_of_zero() {
+    let toml = valid_toml().replace(
+        "[power_groups.weapons]
+label = \"Weapons\"
+default_level = 2
+min_level = 1
+max_level = 4",
+        "[power_groups.weapons]
+label = \"Weapons\"
+default_level = 2
+min_level = 0
+max_level = 4",
+    );
+
+    let config = parse_and_validate(&toml, KINDS).expect("a coldable group is valid authoring");
+    assert_eq!(
+        config.power_groups[&PowerGroupId("weapons".into())].min_level,
+        0
+    );
+}
+
+/// The boot level has to be inside the group's own range. The reactor would
+/// clamp it, so nothing crashes — the ship just spawns somewhere other than
+/// where the file says it does, and the budget stops adding up.
+#[test]
+fn rejects_a_power_group_that_boots_outside_its_own_range() {
+    let toml = valid_toml().replace(
+        "[power_groups.ops]
+label = \"Operations\"
+default_level = 2
+min_level = 1
+max_level = 4",
+        "[power_groups.ops]
+label = \"Operations\"
+default_level = 1
+min_level = 2
+max_level = 4",
+    );
+
+    assert_eq!(
+        parse_and_validate(&toml, KINDS),
+        Err(ShipConfigError::PowerGroupDefaultOutOfRange {
+            group: PowerGroupId("ops".into()),
+            default_level: 1,
+            min_level: 2,
+            max_level: 4,
+        })
+    );
+}
+
 #[test]
 fn rejects_unknown_station_owner() {
     let toml = valid_toml().replace("station = \"captain\"", "station = \"ghost\"");

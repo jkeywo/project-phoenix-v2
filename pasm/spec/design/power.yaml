@@ -46,6 +46,23 @@ entities:
       protected: true
       must_not_be: [overridden by Power AI while human-controlled]
 
+  - decision: coldable-power-group
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: A Power Group May Be Commanded Cold
+      summary: A power group's authored [power_groups.<id>] min_level is the lowest level any operator may command it to, and it may be 0 - a group that can be switched OFF rather than merely turned down. PowerSystem stores the floor per group (PowerSystem::floors, seeded by authored_power_group_seed) and every clamp in the allocation API reads it, so set_group_allocation, decrease, restore and plan_allocation all honour the hull's number instead of the global GROUP_LEVEL_MIN. GROUP_LEVEL_MIN remains the DEFAULT an unauthored group takes and the level the exhaustion lock forces every group DOWN to; the lock uses min(current, GROUP_LEVEL_MIN) so a brownout never raises a cold group. The Alliance destroyer and cruiser author weapons at min_level = 0 and helm and shields at 1; that is how those hulls express RESTRAINT, as an Engineering order visible on the reactor rather than as a hidden captain's toggle. The Power console shows LVL 0 with a COLD tag and an all-dark pip row; the row still draws four rungs, because level 0 is the absence of a lit rung and not a zeroth gem. is_group_cold(group) is the read model, guarded on has_group so a hull with no such group never reads as cold.
+      rationale:
+        - "[ai] Issue #1395. Two rules bind the AI, and they are symmetric halves of one decision: the AI never RAISES a group somebody switched off, and it never PARKS one cold either. The first is enforced in plan_allocation, which drops a bid for a group already at 0 so the group holds through the un-bid reservation path at no cost to the budget. It has to be there rather than in the bid loop because every Alliance hull inherits an UNCONDITIONAL priority-0 weapons rule from fragments/ai/fleet_baseline.toml that bids level 2 on any healthy-battery tick - without the guard a cold weapons group is warmed on the next decision arm and restraint lasts one tick. The second is enforced in bid_guarantee, which guarantees a bid asking for a WARM level at least GROUP_LEVEL_MIN, so rationing a short budget can never be the thing that takes a coldable group to 0 and then, by the first rule, leave it there. An authored rule that explicitly bids 0 is still served, and costs the budget nothing. Nothing is stranded: warming a group is a COMMAND, and a human's or a script's SetPowerGroupAllocation reaches set_group_allocation through handle_power_messages without passing through the planner at all."
+        - "[ai] This is NOT a reintroduction of the reactor-side battery floors the 2026-08-10 revert removed, and the two must not be conflated because they share the word floor. Those were floors the reactor held a group UP at while the reserve was low - a commanded-versus-effective split, degradation the player did not ask for. min_level is a floor on what may be ORDERED, in the other direction entirely: it lowers the bottom of the commandable range rather than raising the bottom of the running one, creates no commanded-versus-effective split, and does nothing at all while the battery is healthy. The exhaustion lock is untouched. Avoidable brownouts remain an AI-side min_reserve discipline."
+        - "[ai] Two alternatives were rejected. A fifth pip for rung 0 on a coldable group: a lit gem meaning 'no light' is not a readout, and it would put five pips on weapons beside four on helm and shields, so the console would stop reading as one panel - LVL 0 plus a COLD tag over a dark row says it in one look. And a weapons_cold boolean on the wire: redundant, since the client already receives the group's level and level == 0 is the same predicate the server's is_group_cold applies, so a second field could only disagree with the first."
+    game_design:
+      enforcement_links: [ship-power-controller]
+      owner_role: power-operator
+      protected: true
+      must_not_be: [a reactor-side battery floor that holds a group up, a floor the AI may raise on its own, a floor a save file can rewrite, a fifth pip on the console's row]
+
   - decision: ai-power-allocation-rules
     core:
       status: accepted

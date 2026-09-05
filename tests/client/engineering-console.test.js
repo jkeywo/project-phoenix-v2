@@ -141,6 +141,35 @@ describe('destroyer engineering renderStation', () => {
     expect(el('threat-bearing').textContent).toBe('45°M');
   });
 
+  // Issue #1395: the destroyer authors `[power_groups.weapons] min_level = 0`,
+  // so a level-0 group is a state this console will really be handed. The
+  // renderer must pass it to the panel intact — a `|| []`-style falsy guard
+  // anywhere on this seam would drop the very row that says the guns are off.
+  it('passes a weapons group commanded to level 0 through to the power panel', () => {
+    const cold = {
+      ...basePayload,
+      systems: {
+        ...basePayload.systems,
+        'power-reactor': {
+          ...basePayload.systems['power-reactor'],
+          consoles: [
+            { id: 'helm', level: 2, commanded_level: 2, min_level: 1, max_level: 4 },
+            { id: 'weapons', level: 0, commanded_level: 0, min_level: 0, max_level: 4 },
+          ],
+          power_auto: false,
+        },
+      },
+    };
+    destroyerRender(cold, document);
+    expect(el('power-controls').state).toEqual({
+      groups: [
+        { id: 'helm', level: 2, commanded_level: 2, min_level: 1, max_level: 4 },
+        { id: 'weapons', level: 0, commanded_level: 0, min_level: 0, max_level: 4 },
+      ],
+      auto: false,
+    });
+  });
+
   it('clears the threat-bearing readout when Sensors holds no threat', () => {
     const noThreat = { ...basePayload, systems: { ...basePayload.systems, 'shields-system': { ...basePayload.systems['shields-system'], threat_bearing: null } } };
     destroyerRender(noThreat, document);

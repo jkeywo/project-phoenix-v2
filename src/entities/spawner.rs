@@ -504,7 +504,7 @@ fn insert_ship_config_and_core_bundle(
     config: &EntityConfig,
     position: Vec3,
     cmds: &mut EntityCommands,
-) -> Vec<(crate::core::messages::PowerGroupId, u8)> {
+) -> Vec<crate::modifiers::power_system::AuthoredPowerGroup> {
     // Build the ship's ShipConfigComponent from its own TOML [[station]]/
     // [[system]]/[power_groups] blocks, parsed the same way ship entity TOMLs
     // is parsed. If the entity TOML declared none, this is a truly empty
@@ -665,7 +665,7 @@ fn insert_ship_scratch_state(cmds: &mut EntityCommands) {
 /// optional inline power-allocation policy from `[power.ai_policy]`.
 fn insert_power_state(
     config: &EntityConfig,
-    power_group_seed: &[(crate::core::messages::PowerGroupId, u8)],
+    power_group_seed: &[crate::modifiers::power_system::AuthoredPowerGroup],
     cmds: &mut EntityCommands,
 ) {
     cmds.insert(crate::ship::power::ShipPowerSystem(

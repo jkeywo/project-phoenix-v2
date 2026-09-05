@@ -419,6 +419,24 @@ pub const POWER_WEAPONS_RESERVE_PARAM: &str = "min_reserve_weapons";
 /// weapons channel must be back OVER before it may elevate again (issue #1003).
 /// Sibling of [`POWER_HELM_RESTORE_PARAM`]; see there for what the gap buys.
 pub const POWER_WEAPONS_RESTORE_PARAM: &str = "min_restore_weapons";
+// Weapons at level 0 — COLD — is outside the shed ladder those two parameters
+// describe, and deliberately so (issue #1395).
+//
+// The reserve/restore pair is BROWNOUT AVOIDANCE: a group gives its elevated
+// point back when the battery is low and takes it again when the battery
+// recovers, all of it a function of `fact(battery_pct)`. Nothing in that ladder
+// reaches 0, because there is no reserve so low that switching the guns off is
+// the right way to save it — level 1 already costs almost nothing and keeps the
+// ship able to defend itself. So the AI never PARKS weapons at 0 of its own
+// accord; it would have to be an authored rule that bid for it.
+//
+// A cold weapons group is therefore an order somebody gave, and
+// `modifiers::power_system::plan_allocation` enforces the other half of that: a
+// bid for a group already at 0 is dropped, so no baseline rule — including the
+// unconditional priority-0 `set_power_group_allocation level = 2` every
+// Alliance hull inherits from `fragments/ai/fleet_baseline.toml` — can warm a
+// group the crew or a scenario script has switched off.
+
 /// Host-seeded fact name: current battery charge as a percentage (0–100). The
 /// reserve guard `fact(battery_pct) >= param(min_reserve_*)` reads this; it is
 /// the stateless brownout-avoidance predicate (AC5).

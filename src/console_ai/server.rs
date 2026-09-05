@@ -832,6 +832,22 @@ fn ai_power_allocation(
                         .and_then(|sc| sc.0.power_groups.get(group_id))
                         .map(|g| g.max_level)
                         .unwrap_or_else(crate::ship::config::default_max_power_level),
+                    // And its own authored floor (issue #1395). A group whose
+                    // hull authored `min_level = 0` costs the budget nothing to
+                    // keep in the running, so the planner does not spend a
+                    // point guaranteeing a minimum the hull never asked for.
+                    // Same fallback as the ceiling above: no `[power_groups.*]`
+                    // block, no number to read, so the parse default stands in
+                    // — which is also the floor the reactor seeded with.
+                    //
+                    // The bid is still made for a group that is currently COLD;
+                    // `plan_allocation` drops it there, because the decision
+                    // that the AI may not warm a group somebody switched off is
+                    // the planner's to keep, not this loop's to anticipate.
+                    floor: ship_config
+                        .and_then(|sc| sc.0.power_groups.get(group_id))
+                        .map(|g| g.min_level)
+                        .unwrap_or_else(crate::ship::config::default_min_power_level),
                     rule_priority,
                 });
             }

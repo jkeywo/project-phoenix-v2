@@ -485,18 +485,21 @@ fn publish_power_blackboard_contains_correct_data() {
     assert!(!bb.draining, "should not be draining at the resting total");
 }
 
-/// **Every published entry carries the group's display floor (issue
-/// #1004).**
+/// **Every published entry carries the group's floor (issue #1004).**
 ///
 /// The console draws its pip row from `min_level..=max_level`. Before this
 /// the field did not exist, the client fell back to `0`, and the row grew a
 /// bottom rung no order could ever light — a three-group console showed
 /// NINE lights where twelve were expected. A hull that authors no
 /// `[power_groups.*]` block (this fixture's `ShipConfigComponent::default`)
-/// publishes the parse default, which is also the level `PowerSystem`
-/// clamps every group to.
+/// publishes the parse default, which is also the floor `PowerSystem` SEEDS
+/// that group with — the two cannot drift apart, because `GROUP_LEVEL_MIN`
+/// is defined by calling the same `default_min_power_level`. It is a
+/// seeded default, not a global clamp: since issue #1395 each group is
+/// clamped to its OWN stored floor, and `GROUP_LEVEL_MIN` is additionally
+/// the rung the exhaustion lock forces every group down to.
 #[test]
-fn publish_power_blackboard_carries_each_groups_display_floor() {
+fn publish_power_blackboard_carries_each_groups_floor() {
     let mut app = test_app();
     start_game(&mut app);
     tick(&mut app);
@@ -528,16 +531,22 @@ fn publish_power_blackboard_carries_each_groups_display_floor() {
     assert_eq!(pips, 12, "12 pips, never the phantom 9-light state");
 }
 
-/// **A hull that authors a floor above the parse default has it published
-/// verbatim (issue #1004).**
+/// **A hull's own authored floor is published verbatim, above the parse
+/// default and below it alike (issues #1004, #1395).**
 ///
 /// The floor is read off the ship's own `[power_groups.<id>]` block, not
 /// off the multiplier table — that table's LENGTH is a ceiling and says
-/// nothing about where the rungs start. Nothing server-side clamps to this
-/// value; it moves where the pip row begins and nothing else.
+/// nothing about where the rungs start.
+///
+/// This is the config-to-wire pin for the number that IS the engine clamp:
+/// since #1395 `PowerSystem::floor_for` holds this same field, seeded at
+/// spawn by `authored_power_group_seed`, and every order goes through it.
+/// So the panel's `−` gate and the server's clamp read one number, and a
+/// hull that authors `min_level = 0` gets a group the crew may take cold
+/// — asserted below on `weapons`, alongside the above-default `helm` case.
 #[test]
 fn publish_power_blackboard_reads_the_authored_floor() {
-    use crate::modifiers::power_system::HELM_POWER_GROUP;
+    use crate::modifiers::power_system::{HELM_POWER_GROUP, WEAPONS_POWER_GROUP};
     let mut app = test_app();
     start_game(&mut app);
     {
@@ -560,6 +569,19 @@ fn publish_power_blackboard_reads_the_authored_floor() {
                 max_level: 4,
             },
         );
+        // The coldable case, as the destroyer and the cruiser author it: a
+        // floor BELOW the parse default. Nothing on the way to the wire may
+        // round this up to 1, or the panel would gate `−` one rung above the
+        // level the reactor would actually accept.
+        cfg.0.power_groups.insert(
+            PowerGroupId(WEAPONS_POWER_GROUP.into()),
+            crate::ship::config::PowerGroupConfig {
+                label: "power.group.weapons".into(),
+                default_level: 2,
+                min_level: 0,
+                max_level: 4,
+            },
+        );
         app.world_mut().entity_mut(ship).insert(cfg);
     }
     tick(&mut app);
@@ -571,7 +593,20 @@ fn publish_power_blackboard_reads_the_authored_floor() {
         .find(|e| e.id == HELM_POWER_GROUP)
         .expect("helm entry");
     assert_eq!(helm.min_level, 3, "the authored floor reaches the wire");
-    for other in bb.groups.iter().filter(|e| e.id != HELM_POWER_GROUP) {
+    let weapons = bb
+        .groups
+        .iter()
+        .find(|e| e.id == WEAPONS_POWER_GROUP)
+        .expect("weapons entry");
+    assert_eq!(
+        weapons.min_level, 0,
+        "an authored floor of 0 reaches the wire as 0, never floored to 1"
+    );
+    for other in bb
+        .groups
+        .iter()
+        .filter(|e| e.id != HELM_POWER_GROUP && e.id != WEAPONS_POWER_GROUP)
+    {
         assert_eq!(
             other.min_level,
             crate::ship::config::default_min_power_level(),
@@ -1106,7 +1141,7 @@ fn tick_power_brownout_advisory_fires_only_on_reactor_lock() {
     );
 
     // EXHAUST it: a flat battery at a draining total. `tick_power_system`
-    // clamps the charge at zero, slams every group to GROUP_LEVEL_MIN and
+    // clamps the charge at zero, takes every group down to GROUP_LEVEL_MIN and
     // locks — the brownout. One advisory per (mapped) group.
     set_reactor(
         &mut app,

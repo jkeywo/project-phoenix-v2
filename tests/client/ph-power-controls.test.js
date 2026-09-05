@@ -75,16 +75,18 @@ describe('PhPowerControls', () => {
     const { el } = setup();
     el.state = {
       groups: [
-        { id: 'helm', label: 'HELM', level: 2, min_level: 0, max_level: 4 },
+        { id: 'weapons', label: 'WEAPONS', level: 2, min_level: 0, max_level: 4 },
       ],
     };
+    // A coldable group draws the same four rungs as its neighbours (#1395):
+    // the row always starts at 1, and level 0 is the absence of a lit rung.
     const pips = el.shadowRoot.querySelectorAll('.pip');
-    expect(pips.length).toBe(5);
+    expect(pips.length).toBe(4);
+    expect(Array.from(pips).map(p => p.dataset.level)).toEqual(['1', '2', '3', '4']);
     expect(pips[0].classList.contains('active')).toBe(true);
     expect(pips[1].classList.contains('active')).toBe(true);
-    expect(pips[2].classList.contains('active')).toBe(true);
+    expect(pips[2].classList.contains('active')).toBe(false);
     expect(pips[3].classList.contains('active')).toBe(false);
-    expect(pips[4].classList.contains('active')).toBe(false);
   });
 
   // ── The floor comes off the wire (issue #1004) ───────────────────────────
@@ -125,8 +127,10 @@ describe('PhPowerControls', () => {
   });
 
   it('honours an authored floor above 1', () => {
-    // A hull may still author a higher display floor; the panel draws from it
-    // rather than from the fallback.
+    // A hull may author a floor above 1; the panel draws the row from that
+    // authored floor rather than from the fallback. Since #1395 it is the same
+    // number the server clamps orders to, so the row cannot offer a rung the
+    // reactor would refuse.
     const { el } = setup();
     el.state = {
       groups: [{ id: 'helm', label: 'HELM', level: 3, min_level: 2, max_level: 4 }],
@@ -134,6 +138,119 @@ describe('PhPowerControls', () => {
     const pips = el.shadowRoot.querySelectorAll('.pip');
     expect(pips.length).toBe(3); // levels 2..4
     expect(pips[0].dataset.level).toBe('2');
+  });
+
+  // ── Level 0: a group commanded COLD (issue #1395) ────────────────────────
+  //
+  // `min_level` is a real engine clamp now: a hull that authors 0 for a group
+  // has said that group may be switched OFF, not merely turned down. The panel
+  // has to make that state legible without inventing a fifth rung — a lit gem
+  // meaning "no light" is not a readout.
+
+  it('draws four dark pips and a COLD tag for a group at level 0', () => {
+    const { el } = setup();
+    el.state = {
+      groups: [
+        { id: 'weapons', label: 'WEAPONS', level: 0, commanded_level: 0, min_level: 0, max_level: 4 },
+      ],
+    };
+    const pips = el.shadowRoot.querySelectorAll('.pip');
+    expect(pips.length).toBe(4);
+    expect(Array.from(pips).every(p => p.classList.contains('inactive'))).toBe(true);
+    expect(Array.from(pips).some(p => p.classList.contains('active'))).toBe(false);
+    expect(el.shadowRoot.querySelector('.cold-tag').hidden).toBe(false);
+    expect(queryText(el, '.level-text')).toBe(t('component.power.level', { n: 0 }));
+  });
+
+  it('hides the COLD tag as soon as the group carries any power', () => {
+    const { el } = setup();
+    el.state = {
+      groups: [
+        { id: 'weapons', label: 'WEAPONS', level: 0, commanded_level: 0, min_level: 0, max_level: 4 },
+      ],
+    };
+    expect(el.shadowRoot.querySelector('.cold-tag').hidden).toBe(false);
+
+    el.state = {
+      groups: [
+        { id: 'weapons', label: 'WEAPONS', level: 1, commanded_level: 1, min_level: 0, max_level: 4 },
+      ],
+    };
+    expect(el.shadowRoot.querySelector('.cold-tag').hidden).toBe(true);
+  });
+
+  it('does not tag a floored group COLD just because its neighbour can be', () => {
+    const { el } = setup();
+    el.state = {
+      groups: [
+        { id: 'helm',    label: 'HELM',    level: 1, min_level: 1, max_level: 4 },
+        { id: 'weapons', label: 'WEAPONS', level: 0, min_level: 0, max_level: 4 },
+      ],
+    };
+    const tags = el.shadowRoot.querySelectorAll('.cold-tag');
+    expect(tags.length).toBe(2);
+    expect(tags[0].hidden).toBe(true);
+    expect(tags[1].hidden).toBe(false);
+    // And both rows still draw four rungs, so the console reads as one panel.
+    const rows = el.shadowRoot.querySelectorAll('.pip-row');
+    expect(Array.from(rows).map(r => r.querySelectorAll('.pip').length)).toEqual([4, 4]);
+  });
+
+  it('keeps − live at level 1 for a coldable group and disables it at 0', () => {
+    const { el } = setup();
+    el.state = {
+      groups: [
+        { id: 'weapons', label: 'WEAPONS', level: 1, min_level: 0, max_level: 4 },
+      ],
+    };
+    let decr = el.shadowRoot.querySelector('.mini-btn[data-action="decr"]');
+    expect(decr.disabled).toBe(false);
+
+    el.state = {
+      groups: [
+        { id: 'weapons', label: 'WEAPONS', level: 0, min_level: 0, max_level: 4 },
+      ],
+    };
+    decr = el.shadowRoot.querySelector('.mini-btn[data-action="decr"]');
+    expect(decr.disabled).toBe(true);
+  });
+
+  it('sends set_power level 0 when − is pressed at level 1 on a coldable group', () => {
+    const sendAction = vi.fn();
+    const { el } = setup({ sendAction });
+    el.state = {
+      groups: [
+        { id: 'weapons', label: 'WEAPONS', level: 1, commanded_level: 1, min_level: 0, max_level: 4 },
+      ],
+    };
+    el.shadowRoot.querySelector('.mini-btn[data-action="decr"]').click();
+    expect(sendAction).toHaveBeenCalledWith('set_power', { target: 'weapons', level: 0 });
+  });
+
+  it('does not send level 0 for a group floored at 1', () => {
+    const sendAction = vi.fn();
+    const { el } = setup({ sendAction });
+    el.state = {
+      groups: [
+        { id: 'helm', label: 'HELM', level: 1, commanded_level: 1, min_level: 1, max_level: 4 },
+      ],
+    };
+    el.shadowRoot.querySelector('.mini-btn[data-action="decr"]').click();
+    expect(sendAction).not.toHaveBeenCalled();
+  });
+
+  it('warms a cold group back up with +', () => {
+    const sendAction = vi.fn();
+    const { el } = setup({ sendAction });
+    el.state = {
+      groups: [
+        { id: 'weapons', label: 'WEAPONS', level: 0, commanded_level: 0, min_level: 0, max_level: 4 },
+      ],
+    };
+    const incr = el.shadowRoot.querySelector('.mini-btn[data-action="incr"]');
+    expect(incr.disabled).toBe(false);
+    incr.click();
+    expect(sendAction).toHaveBeenCalledWith('set_power', { target: 'weapons', level: 1 });
   });
 
   it('disables increment button at max_level', () => {
@@ -193,10 +310,10 @@ describe('PhPowerControls', () => {
     const sendAction = vi.fn();
     const { el } = setup({ sendAction });
     el.state = {
-      groups: [{ id: 'helm', label: 'HELM', level: 2, min_level: 0, max_level: 4 }],
+      groups: [{ id: 'helm', label: 'HELM', level: 2, min_level: 1, max_level: 4 }],
     };
     const pips = el.shadowRoot.querySelectorAll('.pip');
-    pips[3].click(); // click level 3
+    pips[2].click(); // click level 3
     expect(sendAction).toHaveBeenCalledWith('set_power', { target: 'helm', level: 3 });
   });
 
@@ -204,11 +321,11 @@ describe('PhPowerControls', () => {
     const sendAction = vi.fn();
     const { el } = setup({ sendAction });
     el.state = {
-      groups: [{ id: 'helm', label: 'HELM', level: 2, min_level: 0, max_level: 4 }],
+      groups: [{ id: 'helm', label: 'HELM', level: 2, min_level: 1, max_level: 4 }],
       auto: true,
     };
     const pips = el.shadowRoot.querySelectorAll('.pip');
-    pips[3].click();
+    pips[2].click();
     expect(sendAction).not.toHaveBeenCalled();
   });
 

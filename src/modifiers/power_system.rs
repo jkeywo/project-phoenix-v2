@@ -15,7 +15,7 @@ pub struct PowerReadState {
     pub allocations: Vec<(PowerGroupId, u8)>,
     pub battery_charge: f32,
     /// True while the reactor is locked out after exhausting its battery — every
-    /// group is forced to level 1 and the allocation controls are frozen until
+    /// group is taken down to level 1 and the allocation controls are frozen until
     /// the reserve recovers past [`PowerConfig::emergency_threshold`].
     pub locked: bool,
 }
@@ -62,20 +62,44 @@ pub const POWER_GROUP_ORDER: &[&str] =
 /// first calling `set_group_allocation`. Additional groups can be added by
 /// TOML-driven config in future PRs.
 ///
+/// # Per-group floors
+///
+/// Since issue #1395 the floor is the GROUP'S OWN, read off its authored
+/// `[power_groups.<id>] min_level` and carried in `floors`. A hull that authors
+/// `min_level = 0` for a group has said that group may be commanded COLD —
+/// switched off outright rather than merely turned down — and every clamp in
+/// the setter API honours that. [`GROUP_LEVEL_MIN`] is now the DEFAULT floor an
+/// unauthored group takes, not a global one every group is held at.
+///
 /// # Exhaustion lock
 ///
 /// `groups` holds what the reactor has been told to run each group at — by a
 /// human Power operator or by `ai_power_allocation`, through the one admitted
 /// `SetPowerGroupAllocation` applier. When the battery is drained to empty the
-/// reactor browns out: every group is forced to level 1 and `locked` is set,
-/// freezing the allocation controls until the reserve has recovered past
+/// reactor browns out: every group is forced DOWN to level 1 and `locked` is
+/// set, freezing the allocation controls until the reserve has recovered past
 /// [`PowerConfig::emergency_threshold`]. A player who fails to manage power is
 /// meant to feel that — there is no graceful per-group floor holding systems up.
+///
+/// Down, never up: a brownout is a loss of power, so it cannot be the thing
+/// that switches a cold group back on. A group the crew (or a script) has taken
+/// to 0 stays at 0 through the lock.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PowerSystem {
-    /// Per-group allocation level. Values are clamped to `[1, 4]` by the setter
-    /// API; direct construction should preserve that invariant.
+    /// Per-group allocation level. Values are clamped to
+    /// `[floors[group], GROUP_LEVEL_MAX]` by the setter API; direct
+    /// construction should preserve that invariant.
     groups: HashMap<PowerGroupId, u8>,
+    /// Per-group commandable floor — the group's authored
+    /// `[power_groups.<id>] min_level`, or [`GROUP_LEVEL_MIN`] for a group
+    /// seeded without one (issue #1395).
+    ///
+    /// Separate from `groups` because it is CONFIG, not run state: it is seeded
+    /// once from the hull and never moves again, which is why [`Self::restore`]
+    /// rebuilds `groups` and `order` from a save but leaves this map alone —
+    /// the save records what a run commanded, the hull records what the run was
+    /// allowed to command.
+    floors: HashMap<PowerGroupId, u8>,
     /// Insertion order of `groups`; walked by publishers so wire output is
     /// deterministic even when the HashMap iteration order isn't.
     order: Vec<PowerGroupId>,
@@ -87,6 +111,46 @@ pub struct PowerSystem {
     /// The ship-wide allocation budget copied from its authored reactor config.
     max_commanded_total: u8,
     pub battery_charge: f32,
+}
+
+/// One authored power group as the reactor is SEEDED with it (issue #1395):
+/// the group's id, the level it spawns at, and the floor no order may take it
+/// below.
+///
+/// A named struct rather than a tuple because the floor is the whole point of
+/// it. `(id, level)` was already ambiguous enough at a call site; `(id, level,
+/// floor)` would be worse, and a caller that mixed the last two up would author
+/// a group whose floor was 2 and whose boot level was 1 — a hull that spawns
+/// under its own minimum and can never be commanded back down to where it
+/// started. Named fields make that unwriteable.
+///
+/// Every field is read off the hull's `[power_groups.<id>]` block by
+/// `ship::power::authored_power_group_seed`. There is nothing here a Rust
+/// caller supplies that the TOML does not.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AuthoredPowerGroup {
+    /// The group's id — the `[power_groups.<id>]` table name.
+    pub id: PowerGroupId,
+    /// The level the group boots at — its authored `default_level`.
+    pub level: u8,
+    /// The lowest level any operator, human or AI, may command this group to —
+    /// its authored `min_level`. `0` means the group may be taken COLD.
+    pub floor: u8,
+}
+
+impl AuthoredPowerGroup {
+    /// A seed entry for a fixture that authors no `[power_groups.*]` floor: the
+    /// group takes [`GROUP_LEVEL_MIN`], exactly as the TOML parse default would
+    /// give it. Used by tests and by code building a config in Rust; production
+    /// spawns go through `ship::power::authored_power_group_seed`, which reads
+    /// the hull's real `min_level`.
+    pub fn at_default_floor(id: PowerGroupId, level: u8) -> Self {
+        Self {
+            id,
+            level,
+            floor: GROUP_LEVEL_MIN,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -105,10 +169,17 @@ pub struct PowerConfig {
     pub emergency_threshold: f32,
 }
 
-/// The lowest level any power group can be commanded to. Defined by CALLING
-/// [`crate::ship::config::default_min_power_level`] — the parse default a
-/// `[power_groups.<id>] min_level` gets — so the setter API's lower clamp and
-/// the authoring default cannot drift apart.
+/// The DEFAULT lowest level a power group can be commanded to — the floor a
+/// group takes when its hull authors no `[power_groups.<id>] min_level`.
+/// Defined by CALLING [`crate::ship::config::default_min_power_level`] — the
+/// parse default that field gets — so the seeded floor and the authoring
+/// default cannot drift apart.
+///
+/// Since issue #1395 this is no longer a global clamp. A group may author its
+/// own `min_level`, including `0`, and [`PowerSystem`] stores and clamps to
+/// that; see [`PowerSystem::floor_for`]. What this constant still is, on its
+/// own account, is the level the exhaustion lock forces every group DOWN to —
+/// the one rung a brownout leaves running.
 pub const GROUP_LEVEL_MIN: u8 = crate::ship::config::default_min_power_level();
 
 /// The highest level any power group can be commanded to, whatever its own
@@ -172,14 +243,20 @@ impl PowerSystem {
     /// groups pre-seeded at level 2 and the requested battery charge.
     fn seeded_with_defaults(config: &PowerConfig) -> Self {
         let mut groups = HashMap::with_capacity(3);
+        let mut floors = HashMap::with_capacity(3);
         let mut order = Vec::with_capacity(3);
         for &name in POWER_GROUP_ORDER {
             let id = PowerGroupId(name.to_string());
             groups.insert(id.clone(), 2u8);
+            // No hull to read: the canonical trio takes the parse default
+            // floor, which is what a `[power_groups.*]`-less TOML would give
+            // them anyway.
+            floors.insert(id.clone(), GROUP_LEVEL_MIN);
             order.push(id);
         }
         Self {
             groups,
+            floors,
             order,
             locked: false,
             max_commanded_total: config.max_commanded_total,
@@ -188,30 +265,41 @@ impl PowerSystem {
     }
 
     /// Construct a `PowerSystem` seeded from a ship's authored power groups
-    /// (issue #762). Each `(group, level)` is inserted at the given level,
-    /// clamped to `[1, 4]`, in the order supplied — so a ship that authors an
-    /// extra group beyond the canonical three gets it seeded and therefore
-    /// allocatable (otherwise `set_group_allocation` returns `UnknownGroup`
-    /// and any authored rule targeting it silently no-ops).
+    /// (issue #762). Each entry is inserted at its authored level, clamped to
+    /// `[floor, GROUP_LEVEL_MAX]`, in the order supplied — so a ship that
+    /// authors an extra group beyond the canonical three gets it seeded and
+    /// therefore allocatable (otherwise `set_group_allocation` returns
+    /// `UnknownGroup` and any authored rule targeting it silently no-ops).
+    ///
+    /// Each entry also carries the group's own [`AuthoredPowerGroup::floor`],
+    /// which is STORED (issue #1395): it is the floor every later clamp in this
+    /// type reads, so a hull authoring `min_level = 0` really can be commanded
+    /// cold. Taking the floor here rather than deriving it later is what makes
+    /// the seed the single place a hull's authoring enters the reactor.
     ///
     /// Falls back to [`Self::seeded_with_defaults`] (the canonical `helm` /
-    /// `weapons` / `shields` at level 2) when `groups` is empty, so ships and
-    /// fixtures without a `[power_groups.*]` block are unchanged.
-    pub fn from_authored_groups(config: &PowerConfig, groups: &[(PowerGroupId, u8)]) -> Self {
+    /// `weapons` / `shields` at level 2, all at [`GROUP_LEVEL_MIN`]) when
+    /// `groups` is empty, so ships and fixtures without a `[power_groups.*]`
+    /// block are unchanged.
+    pub fn from_authored_groups(config: &PowerConfig, groups: &[AuthoredPowerGroup]) -> Self {
         if groups.is_empty() {
             return Self::seeded_with_defaults(config);
         }
         let mut map = HashMap::with_capacity(groups.len());
+        let mut floors = HashMap::with_capacity(groups.len());
         let mut order = Vec::with_capacity(groups.len());
-        for (id, level) in groups {
-            if map.contains_key(id) {
+        for group in groups {
+            if map.contains_key(&group.id) {
                 continue;
             }
-            map.insert(id.clone(), (*level).clamp(GROUP_LEVEL_MIN, GROUP_LEVEL_MAX));
-            order.push(id.clone());
+            let floor = group.floor.min(GROUP_LEVEL_MAX);
+            map.insert(group.id.clone(), group.level.clamp(floor, GROUP_LEVEL_MAX));
+            floors.insert(group.id.clone(), floor);
+            order.push(group.id.clone());
         }
         Self {
             groups: map,
+            floors,
             order,
             locked: false,
             max_commanded_total: config.max_commanded_total,
@@ -260,6 +348,28 @@ impl PowerSystem {
         self.groups.contains_key(group)
     }
 
+    /// The lowest level `group` may be commanded to — its authored
+    /// `[power_groups.<id>] min_level` (issue #1395).
+    ///
+    /// Returns [`GROUP_LEVEL_MIN`] for a group the reactor does not track, so a
+    /// caller reading a floor before checking [`Self::has_group`] gets the
+    /// conservative answer rather than a licence to switch something off.
+    pub fn floor_for(&self, group: &PowerGroupId) -> u8 {
+        self.floors.get(group).copied().unwrap_or(GROUP_LEVEL_MIN)
+    }
+
+    /// True when this reactor tracks `group` and it is currently at level 0 —
+    /// COLD, switched off rather than turned down (issue #1395).
+    ///
+    /// Guarded on [`Self::has_group`] deliberately. [`Self::level_for`] returns
+    /// `0` for a group the reactor has never heard of, so the bare level test
+    /// would read every hull with no weapons group as having cold weapons —
+    /// the exact opposite of the answer a fire gate or a sensor readout wants
+    /// from it.
+    pub fn is_group_cold(&self, group: &PowerGroupId) -> bool {
+        self.has_group(group) && self.level_for(group) == 0
+    }
+
     /// Insertion-ordered iteration over `(&PowerGroupId, level)` pairs.
     pub fn iter(&self) -> impl Iterator<Item = (&PowerGroupId, u8)> {
         self.order.iter().map(move |id| (id, self.level_for(id)))
@@ -284,6 +394,15 @@ impl PowerSystem {
     /// over-budget transient nor set the levels of a locked-out reactor. A
     /// restore reinstates a state the run already reached under those rules; it
     /// is not commanding a new one.
+    ///
+    /// Clamps to the group's OWN floor rather than to [`GROUP_LEVEL_MIN`]
+    /// (issue #1395). The global clamp was the resume bug: a ship whose crew had
+    /// taken weapons cold came back at level 1 with live guns, because the one
+    /// line that reinstated the save disagreed with the hull about what the
+    /// lowest legal level was. The floors themselves are NOT restored — they are
+    /// the hull's, seeded at spawn by [`Self::from_authored_groups`] before any
+    /// save is laid over the entity, and a save that could rewrite them would be
+    /// a save that could re-author the ship.
     pub fn restore(
         &mut self,
         allocations: &[(PowerGroupId, u8)],
@@ -296,8 +415,9 @@ impl PowerSystem {
             if self.groups.contains_key(id) {
                 continue;
             }
+            let floor = self.floor_for(id);
             self.groups
-                .insert(id.clone(), (*level).clamp(GROUP_LEVEL_MIN, GROUP_LEVEL_MAX));
+                .insert(id.clone(), (*level).clamp(floor, GROUP_LEVEL_MAX));
             self.order.push(id.clone());
         }
         self.battery_charge = battery_charge;
@@ -317,8 +437,13 @@ impl PowerSystem {
     }
 
     /// Set the allocation for a specific power group to `level`, clamped to
-    /// `[1, 4]`. Delta is applied one step at a time via `increase` /
-    /// `decrease` so the `total() <= 8` and `locked` invariants are honoured.
+    /// `[floor_for(group), GROUP_LEVEL_MAX]`. Delta is applied one step at a
+    /// time via `increase` / `decrease` so the `total() <= 8` and `locked`
+    /// invariants are honoured.
+    ///
+    /// The lower clamp is the GROUP'S floor since issue #1395, so a group whose
+    /// hull authored `min_level = 0` can be ordered cold and one that did not
+    /// still cannot.
     pub fn set_group_allocation(
         &mut self,
         group: &PowerGroupId,
@@ -328,7 +453,7 @@ impl PowerSystem {
             return Err(PowerAllocationError::UnknownGroup(group.clone()));
         }
         let current = self.commanded_level_for(group);
-        let target_level = level.clamp(GROUP_LEVEL_MIN, GROUP_LEVEL_MAX);
+        let target_level = level.clamp(self.floor_for(group), GROUP_LEVEL_MAX);
         if target_level > current {
             for _ in 0..(target_level - current) {
                 self.increase(group);
@@ -354,14 +479,16 @@ impl PowerSystem {
         }
     }
 
-    /// Decrease the allocation for `group` by 1. Clamped to `1` per group.
-    /// No-op when the reactor is locked.
+    /// Decrease the allocation for `group` by 1. Clamped to that group's own
+    /// authored floor ([`Self::floor_for`], issue #1395) — `0` for a group its
+    /// hull says may be taken cold. No-op when the reactor is locked.
     pub fn decrease(&mut self, group: &PowerGroupId) {
         if self.locked {
             return;
         }
+        let floor = self.floor_for(group);
         if let Some(v) = self.groups.get_mut(group) {
-            if *v > GROUP_LEVEL_MIN {
+            if *v > floor {
                 *v -= 1;
             }
         }
@@ -394,9 +521,9 @@ impl PowerSystem {
     }
 
     /// Advance the simulation by `dt` seconds. Integrates the battery from the
-    /// current total allocation, then handles exhaustion (every group forced to
-    /// 1 and the reactor locked) and recovery (unlock once the charge climbs
-    /// back to [`PowerConfig::emergency_threshold`]).
+    /// current total allocation, then handles exhaustion (every group forced
+    /// DOWN to 1 and the reactor locked) and recovery (unlock once the charge
+    /// climbs back to [`PowerConfig::emergency_threshold`]).
     ///
     /// There is no graceful per-group floor. A ship that flattens its battery
     /// browns out completely: the player who let it happen loses the lot until
@@ -412,7 +539,13 @@ impl PowerSystem {
 
         if self.battery_charge <= 0.0 {
             for v in self.groups.values_mut() {
-                *v = GROUP_LEVEL_MIN;
+                // `min`, not assignment (issue #1395). A brownout is a LOSS of
+                // power; it takes every group down to the one rung the reserve
+                // can still carry, and a group already at 0 is below that
+                // already. Slamming it to 1 would have the reactor switching
+                // the guns back on at the exact moment it lost the battery,
+                // undoing a standing order nobody had cancelled.
+                *v = (*v).min(GROUP_LEVEL_MIN);
             }
             self.locked = true;
         } else if self.locked && self.battery_charge >= config.emergency_threshold {
@@ -446,6 +579,16 @@ pub struct AllocationBid {
     /// This group's own ceiling — `[power_groups.<id>] max_level`, or its parse
     /// default for a hull that authors no such block.
     pub max_level: u8,
+    /// This group's own floor — `[power_groups.<id>] min_level`, or its parse
+    /// default for a hull that authors no such block (issue #1395).
+    ///
+    /// The planner guarantees every bidder its floor before it hands out a
+    /// single discretionary point, so this is what a bidding group costs the
+    /// budget just by being in the running. A group authored at `0` therefore
+    /// costs nothing to keep in the plan, which is the arithmetic that lets a
+    /// hull carry a coldable weapons group without shrinking what the rest of
+    /// the reactor can be asked for.
+    pub floor: u8,
     /// The `priority` of the authored rule that won this group's channel. The
     /// ordering key, and the whole of the "priority is data-authored"
     /// requirement: a designer who wants weapons served before helm when the
@@ -458,6 +601,40 @@ pub struct AllocationBid {
     /// design opinion: it only decides between groups the hull ranked
     /// identically. See the sort site in [`plan_allocation`].
     pub rule_priority: i32,
+}
+
+/// A bid's effective floor: its authored `min_level`, held under its own
+/// ceiling so a hull that authored the pair the wrong way round cannot make the
+/// planner's `want - floor` arithmetic underflow.
+fn bid_floor(bid: &AllocationBid) -> u8 {
+    bid.floor
+        .min(bid.max_level.clamp(GROUP_LEVEL_MIN, GROUP_LEVEL_MAX))
+}
+
+/// The level [`plan_allocation`] GUARANTEES a bidder before it hands out a
+/// single discretionary point — and therefore both what the bid costs the
+/// budget and how far rationing can cut it.
+///
+/// The group's own floor, except that a bid asking for a WARM level is
+/// guaranteed at least [`GROUP_LEVEL_MIN`] (issue #1395). Rationing hands a
+/// group as much as the budget reaches, and for a coldable group "as much as
+/// the budget reaches" could reach zero — which would have the planner switch
+/// weapons off because the reactor was busy, and then, by the cold rule in
+/// [`plan_allocation`], leave them off. Restraint is an order somebody gives,
+/// not a rounding outcome, so the two halves of the rule are symmetric: the AI
+/// never RAISES a cold group, and it never PARKS one cold either. A bid that
+/// explicitly asks for its floor still lands there — an authored rule that bids
+/// 0 gets 0, and costs the budget nothing.
+fn bid_guarantee(bid: &AllocationBid) -> u8 {
+    bid_want(bid).min(bid_floor(bid).max(GROUP_LEVEL_MIN))
+}
+
+/// What a bid is asking for, clamped into its group's own authored range.
+fn bid_want(bid: &AllocationBid) -> u8 {
+    bid.want.clamp(
+        bid_floor(bid),
+        bid.max_level.clamp(GROUP_LEVEL_MIN, GROUP_LEVEL_MAX),
+    )
 }
 
 /// Distribute the reactor's allocation budget across the groups that bid for it
@@ -482,12 +659,19 @@ pub struct AllocationBid {
 ///   policy has authored no verb for them, so there is nothing that says they
 ///   may be cut; this preserves an authored auxiliary group a policy does not
 ///   bid for.
-/// * Every bidding group is guaranteed [`GROUP_LEVEL_MIN`], because that is the
-///   floor the setter API clamps to and no distribution can go under it.
-/// * What is left over — `max_commanded_total - reserved - one per bidder` — is
-///   the DISCRETIONARY budget, handed out in authored-priority order until it
-///   runs out. A group that cannot be paid in full lands as high as the budget
-///   reaches, never at a level the applier would refuse.
+/// * A group that is currently COLD is treated as one of those — its bid is
+///   DROPPED (issue #1395). See "The AI never raises a cold group" below.
+/// * Every bidding group is guaranteed [`AllocationBid::floor`] — its own
+///   authored `min_level`, not the global [`GROUP_LEVEL_MIN`], since #1395.
+///   Reading the global here would have the planner spend a point on a group
+///   whose hull says it needs none, and refuse a rule that asked for 0. The one
+///   qualification is that a bid for a WARM level is guaranteed at least
+///   `GROUP_LEVEL_MIN`, so rationing can never be the thing that switches a
+///   coldable group off: see [`bid_guarantee`].
+/// * What is left over — `max_commanded_total - reserved - each bidder's
+///   guarantee` — is the DISCRETIONARY budget, handed out in authored-priority
+///   order until it runs out. A group that cannot be paid in full lands as high
+///   as the budget reaches, never at a level the applier would refuse.
 /// * Each grant is capped by that group's own authored `max_level` as well as
 ///   by [`GROUP_LEVEL_MAX`], so a bid over the hull's ceiling is trimmed here
 ///   rather than silently trimmed by the applier and re-emitted.
@@ -515,6 +699,32 @@ pub struct AllocationBid {
 /// "fits" is not the word for it. Adding the load-time guard the stronger claim
 /// assumes is a separate piece of work.
 ///
+/// # The AI never raises a cold group
+///
+/// **Decision (issue #1395).** A group at level 0 is not a group running low;
+/// it is a group somebody switched OFF, and switching it back on is an order,
+/// not a default. So a bid for a cold group is dropped here and the group falls
+/// into the reserved set at 0, costing the budget nothing.
+///
+/// Without this the feature does not exist. Every Alliance hull ships a
+/// priority-0 weapons rule in `fragments/ai/fleet_baseline.toml` that bids
+/// level 2 on any tick the battery is healthy — an unconditional baseline, not
+/// a reaction to anything — so a cold weapons group would be planned straight
+/// back to 2 on the next decision arm, whoever had cold it and however
+/// deliberately. Restraint would last one tick.
+///
+/// Nothing is stranded by it: warming a group is a COMMAND, and commands do not
+/// come through the planner. A human Power officer's `SetPowerGroupAllocation`
+/// and a scenario script's power order both reach
+/// [`PowerSystem::set_group_allocation`] directly through
+/// `ship::power::handle_power_messages`, which reads the group's floor and not
+/// this function. The rule is that the AI's standing policy may not undo a cold
+/// order, not that a cold group can never be warmed.
+///
+/// And the planner cannot walk a group into that state behind the rule's back:
+/// see [`bid_guarantee`] for the other half, which keeps rationing from ever
+/// landing a warm bid on 0.
+///
 /// # Why the order of the returned commands matters
 ///
 /// `ship::power::handle_power_messages` applies admitted commands one at a
@@ -528,9 +738,13 @@ pub struct AllocationBid {
 pub fn plan_allocation(power: &PowerSystem, bids: &[AllocationBid]) -> Vec<(PowerGroupId, u8)> {
     // Bids for groups the reactor does not track would be rejected by
     // `set_group_allocation` as `UnknownGroup`; dropping them here keeps them
-    // out of the budget arithmetic too.
-    let mut ranked: Vec<&AllocationBid> =
-        bids.iter().filter(|b| power.has_group(&b.group)).collect();
+    // out of the budget arithmetic too. A bid for a COLD group is dropped for
+    // the reason the doc comment states: the group then holds at 0 through the
+    // reservation path below, at no cost to the budget.
+    let mut ranked: Vec<&AllocationBid> = bids
+        .iter()
+        .filter(|b| power.has_group(&b.group) && !power.is_group_cold(&b.group))
+        .collect();
 
     // Groups nothing bid for hold what they were last commanded to, and that
     // holding costs budget.
@@ -547,17 +761,19 @@ pub fn plan_allocation(power: &PowerSystem, bids: &[AllocationBid]) -> Vec<(Powe
     // opinion: it only decides between groups the hull has ranked identically.
     ranked.sort_by_key(|b| std::cmp::Reverse(b.rule_priority));
 
-    let mins = ranked.len() as u16 * GROUP_LEVEL_MIN as u16;
+    // What each bid is GUARANTEED, off that group's own authored floor rather
+    // than off one global number: what a group costs the budget just for being
+    // in the running is what its hull says its lowest legal level is.
+    let mins: u16 = ranked.iter().map(|b| bid_guarantee(b) as u16).sum();
     let mut spare = (power.max_commanded_total as u16).saturating_sub(reserved + mins);
 
     let mut planned: Vec<(PowerGroupId, u8)> = Vec::with_capacity(ranked.len());
     for bid in ranked {
-        let ceiling = bid.max_level.clamp(GROUP_LEVEL_MIN, GROUP_LEVEL_MAX);
-        let want = bid.want.clamp(GROUP_LEVEL_MIN, ceiling);
-        let asked = (want - GROUP_LEVEL_MIN) as u16;
+        let guaranteed = bid_guarantee(bid);
+        let asked = (bid_want(bid) - guaranteed) as u16;
         let granted = asked.min(spare);
         spare -= granted;
-        planned.push((bid.group.clone(), GROUP_LEVEL_MIN + granted as u8));
+        planned.push((bid.group.clone(), guaranteed + granted as u8));
     }
 
     // Decreases first (see the doc comment): both halves keep the authored
@@ -774,9 +990,13 @@ mod tests {
     // ── exhaustion lock ───────────────────────────────────────────────────
 
     /// **Exhaustion.** Nothing degrades until the battery hits zero; then every
-    /// group is slammed to 1 in the same instant and the reactor locks. There is
-    /// no graceful per-group floor — a player who drains the reserve loses the
-    /// lot. Replaces the issue-#952 floor ladder this reverts.
+    /// group is taken down to 1 in the same instant and the reactor locks. There
+    /// is no graceful per-group floor — a player who drains the reserve loses
+    /// the lot. Replaces the issue-#952 floor ladder this reverts.
+    ///
+    /// Down, never up: `exhaustion_forces_one_but_never_raises_a_cold_group`
+    /// below covers the direction this one cannot see, since every group here
+    /// starts warm.
     #[test]
     fn exhaustion_forces_groups_to_one_and_locks() {
         let config = still_config();
@@ -798,6 +1018,133 @@ mod tests {
         assert_eq!(ps.level_for(&weapons()), 1);
         assert_eq!(ps.level_for(&shields()), 1);
         assert!(ps.locked());
+    }
+
+    // ── Issue #1395: a group its hull authored at min_level 0 ────────────────
+
+    /// The Alliance shape since #1395: weapons may be taken cold, helm and
+    /// shields may not.
+    fn reactor_with_coldable_weapons() -> PowerSystem {
+        PowerSystem::from_authored_groups(
+            &PowerConfig::default(),
+            &[
+                seed(helm(), 2),
+                coldable_seed(weapons(), 2),
+                seed(shields(), 2),
+            ],
+        )
+    }
+
+    /// **The floor is the group's own.** A hull that authored `min_level = 0`
+    /// for weapons can have that group ordered to 0; one that authored 1 for
+    /// helm cannot, and the same command against helm stops at 1.
+    #[test]
+    fn a_group_authored_at_zero_can_be_commanded_cold_and_its_neighbours_cannot() {
+        let mut ps = reactor_with_coldable_weapons();
+        assert_eq!(ps.floor_for(&weapons()), 0);
+        assert_eq!(ps.floor_for(&helm()), GROUP_LEVEL_MIN);
+
+        ps.set_group_allocation(&weapons(), 0).unwrap();
+        assert_eq!(ps.level_for(&weapons()), 0);
+        assert!(ps.is_group_cold(&weapons()));
+
+        ps.set_group_allocation(&helm(), 0).unwrap();
+        assert_eq!(
+            ps.level_for(&helm()),
+            1,
+            "helm authored a floor of 1 and the same order is clamped to it"
+        );
+        assert!(!ps.is_group_cold(&helm()));
+    }
+
+    /// `is_group_cold` is about a group this reactor HAS. `level_for` returns 0
+    /// for a group it has never heard of, so the bare level test would read
+    /// every hull without a weapons group as having cold weapons — the exact
+    /// opposite of what a fire gate wants to hear.
+    #[test]
+    fn an_untracked_group_is_not_cold() {
+        let ps = reactor_with_coldable_weapons();
+        let unknown = PowerGroupId("tractor".into());
+        assert_eq!(ps.level_for(&unknown), 0);
+        assert!(!ps.is_group_cold(&unknown));
+        assert_eq!(
+            ps.floor_for(&unknown),
+            GROUP_LEVEL_MIN,
+            "and its floor reads as the conservative default, not as 0"
+        );
+    }
+
+    /// `decrease` walks a coldable group all the way off, one step at a time,
+    /// and stops there.
+    #[test]
+    fn decrease_stops_at_the_groups_own_floor() {
+        let mut ps = reactor_with_coldable_weapons();
+        for _ in 0..4 {
+            ps.decrease(&weapons());
+        }
+        assert_eq!(ps.level_for(&weapons()), 0, "weapons authored a floor of 0");
+
+        for _ in 0..4 {
+            ps.decrease(&shields());
+        }
+        assert_eq!(
+            ps.level_for(&shields()),
+            1,
+            "shields authored a floor of 1 and holds there"
+        );
+    }
+
+    /// **Exhaustion takes power away; it does not hand it out.** The lock still
+    /// forces every warm group to 1, but a group the crew switched off stays
+    /// off — otherwise a flat battery would be the thing that put the guns back
+    /// on, undoing a standing order nobody had cancelled.
+    #[test]
+    fn exhaustion_forces_one_but_never_raises_a_cold_group() {
+        let config = still_config();
+        let mut ps = reactor_with_coldable_weapons();
+        ps.set_group_allocation(&weapons(), 0).unwrap();
+        ps.set_group_allocation(&helm(), 4).unwrap();
+
+        ps.battery_charge = 0.0;
+        assert!(ps.tick(1.0, &config), "the lock engaged");
+        assert_eq!(ps.level_for(&helm()), 1, "a warm group is forced down to 1");
+        assert_eq!(ps.level_for(&shields()), 1);
+        assert_eq!(ps.level_for(&weapons()), 0, "a cold group is left cold");
+        assert!(ps.is_group_cold(&weapons()));
+        assert!(ps.locked());
+    }
+
+    /// **The resume bug.** `restore` clamped to the global minimum, so a ship
+    /// saved with its weapons cold came back at level 1 with live guns. It now
+    /// clamps to the group's own floor.
+    #[test]
+    fn restore_reinstates_a_cold_group() {
+        let mut ps = reactor_with_coldable_weapons();
+        assert_eq!(
+            ps.level_for(&weapons()),
+            2,
+            "precondition: the fresh reactor is warm, so what comes back below \
+             cannot be a bootstrap coincidence"
+        );
+
+        ps.restore(&[(helm(), 3), (weapons(), 0), (shields(), 2)], 40.0, false);
+
+        assert_eq!(ps.level_for(&weapons()), 0);
+        assert!(ps.is_group_cold(&weapons()));
+        assert_eq!(ps.level_for(&helm()), 3);
+        assert_eq!(ps.battery_charge, 40.0);
+    }
+
+    /// The floors are the HULL's, not the save's. A payload carrying a level
+    /// under a group's authored floor is still lifted to it — the ship the
+    /// resume boots is the ship the file describes, and a save cannot re-author
+    /// what an officer is allowed to command.
+    #[test]
+    fn restore_still_lifts_a_group_below_its_own_floor() {
+        let mut ps = reactor_with_coldable_weapons();
+        ps.restore(&[(helm(), 0), (weapons(), 0), (shields(), 2)], 40.0, false);
+        assert_eq!(ps.level_for(&helm()), 1, "helm's authored floor is 1");
+        assert_eq!(ps.level_for(&weapons()), 0, "weapons' authored floor is 0");
     }
 
     /// Recovery: once locked, the reactor stays locked until the charge climbs
@@ -964,13 +1311,38 @@ mod tests {
     }
 
     /// A bid at the shipped fleet's ordering: every elevation rule authored at
-    /// priority 10, ties falling back to the caller's group order.
+    /// priority 10, ties falling back to the caller's group order. The group
+    /// authors no floor of its own, so it takes the parse default.
     fn bid(group: PowerGroupId, want: u8, rule_priority: i32) -> AllocationBid {
         AllocationBid {
             group,
             want,
             max_level: crate::ship::config::default_max_power_level(),
+            floor: GROUP_LEVEL_MIN,
             rule_priority,
+        }
+    }
+
+    /// The same bid for a group whose hull authored `min_level = 0` — one that
+    /// may be taken cold (issue #1395).
+    fn coldable_bid(group: PowerGroupId, want: u8, rule_priority: i32) -> AllocationBid {
+        AllocationBid {
+            floor: 0,
+            ..bid(group, want, rule_priority)
+        }
+    }
+
+    /// A seed entry for a group that authors no floor.
+    fn seed(group: PowerGroupId, level: u8) -> AuthoredPowerGroup {
+        AuthoredPowerGroup::at_default_floor(group, level)
+    }
+
+    /// A seed entry for a group whose hull authored `min_level = 0`.
+    fn coldable_seed(group: PowerGroupId, level: u8) -> AuthoredPowerGroup {
+        AuthoredPowerGroup {
+            id: group,
+            level,
+            floor: 0,
         }
     }
 
@@ -980,10 +1352,10 @@ mod tests {
         PowerSystem::from_authored_groups(
             &PowerConfig::default(),
             &[
-                (helm(), 2),
-                (weapons(), 2),
-                (shields(), 1),
-                (auxiliary(), 1),
+                seed(helm(), 2),
+                seed(weapons(), 2),
+                seed(shields(), 1),
+                seed(auxiliary(), 1),
             ],
         )
     }
@@ -1175,6 +1547,140 @@ mod tests {
         assert_eq!(plan, vec![(weapons(), 4)]);
     }
 
+    // ── Issue #1395: the planner and a coldable group ────────────────────────
+
+    /// **The AI never raises a cold group.** Every Alliance hull ships an
+    /// unconditional priority-0 weapons rule bidding level 2; without this the
+    /// planner would warm a cold weapons group on the very next decision arm
+    /// and restraint would last one tick.
+    #[test]
+    fn plan_allocation_never_raises_a_cold_group() {
+        let mut ps = reactor_with_coldable_weapons();
+        ps.set_group_allocation(&weapons(), 0).unwrap();
+
+        let plan = plan_allocation(&ps, &[coldable_bid(weapons(), 2, 0), bid(helm(), 2, 10)]);
+        assert!(
+            !plan.iter().any(|(id, _)| id == &weapons()),
+            "the cold group is not in the plan at all: {plan:?}"
+        );
+        assert!(plan.is_empty(), "and helm was already at 2: {plan:?}");
+    }
+
+    /// The freed point is genuinely freed. A cold group is reserved at 0 rather
+    /// than at the global minimum, so the rest of the reactor may spend what it
+    /// is not using — helm to its ceiling on a budget that could not otherwise
+    /// have paid for it.
+    #[test]
+    fn a_cold_group_hands_its_point_back_to_the_budget() {
+        let mut ps = reactor_with_coldable_weapons();
+        ps.set_group_allocation(&weapons(), 0).unwrap();
+
+        let plan = plan_allocation(&ps, &[bid(helm(), 4, 10), bid(shields(), 4, 10)]);
+        let mut after = ps.clone();
+        for (group, level) in &plan {
+            after.set_group_allocation(group, *level).unwrap();
+        }
+        assert_eq!(after.level_for(&helm()), 4);
+        assert_eq!(after.level_for(&shields()), 4);
+        assert_eq!(after.level_for(&weapons()), 0);
+        assert_eq!(
+            after.commanded_total(),
+            8,
+            "the whole 8-point budget went to the two warm groups"
+        );
+    }
+
+    /// **The other half of the rule: the AI never PARKS a group cold either.**
+    ///
+    /// Rationing hands a group as much as the budget reaches, and for a group
+    /// whose floor is 0 that could reach zero. Here helm and shields hold the
+    /// whole 8-point budget between them — the over-authored shape the test
+    /// below documents, and the only way a bidder's discretionary share can
+    /// saturate to nothing — and weapons bids 3 with not a point left to pay
+    /// for it. It holds the 1 it has rather than being cut to 0. Otherwise a
+    /// busy reactor would switch the guns off, and the cold rule above would
+    /// then keep them off for the rest of the encounter.
+    #[test]
+    fn plan_allocation_rations_a_coldable_group_down_to_one_not_to_zero() {
+        let ps = PowerSystem::from_authored_groups(
+            &PowerConfig::default(),
+            &[
+                seed(helm(), 4),
+                coldable_seed(weapons(), 1),
+                seed(shields(), 4),
+            ],
+        );
+        assert_eq!(ps.commanded_total(), 9, "deliberately over the 8-point cap");
+
+        let plan = plan_allocation(&ps, &[coldable_bid(weapons(), 3, 0)]);
+        assert_eq!(
+            plan,
+            vec![],
+            "no spare to grant, and the guarantee holds weapons at the 1 it \
+             already has rather than cutting it to 0: {plan:?}"
+        );
+    }
+
+    /// A rule that ASKS for 0 is served, because that is an authored decision
+    /// rather than a rounding outcome — and it costs the budget nothing, so the
+    /// point it gives up is available to the group bidding beside it.
+    #[test]
+    fn plan_allocation_serves_a_rule_that_bids_a_group_cold() {
+        let ps = reactor_with_coldable_weapons();
+        let plan = plan_allocation(&ps, &[coldable_bid(weapons(), 0, 10), bid(helm(), 4, 5)]);
+        assert_eq!(
+            plan,
+            vec![(weapons(), 0), (helm(), 4)],
+            "the decrease is ordered first, as ever, and helm gets the point"
+        );
+    }
+
+    /// A group whose hull authored a floor ABOVE the global minimum is
+    /// guaranteed its own floor, not 1 — the same rule read from the other end.
+    /// Helm here holds 4 and shields 3, leaving one discretionary point for an
+    /// `ops` group authored at `min_level = 2` bidding 4: it lands on 3.
+    #[test]
+    fn plan_allocation_guarantees_a_group_its_own_raised_floor() {
+        let mut ps = PowerSystem::from_authored_groups(
+            &PowerConfig::default(),
+            &[
+                seed(helm(), 2),
+                seed(shields(), 2),
+                AuthoredPowerGroup {
+                    id: auxiliary(),
+                    level: 2,
+                    floor: 2,
+                },
+            ],
+        );
+        ps.set_group_allocation(&helm(), 4).unwrap();
+        assert_eq!(ps.commanded_total(), 8);
+
+        let raised = AllocationBid {
+            floor: 2,
+            ..bid(auxiliary(), 4, 10)
+        };
+        let plan = plan_allocation(&ps, &[raised]);
+        assert_eq!(
+            plan,
+            vec![],
+            "helm 4 + shields 2 reserved is 6; ops is guaranteed its own floor of \
+             2, which is exactly what it already holds: {plan:?}"
+        );
+
+        ps.set_group_allocation(&shields(), 1).unwrap();
+        let raised = AllocationBid {
+            floor: 2,
+            ..bid(auxiliary(), 4, 10)
+        };
+        let plan = plan_allocation(&ps, &[raised]);
+        assert_eq!(
+            plan,
+            vec![(auxiliary(), 3)],
+            "one point freed, one point granted on top of the authored floor"
+        );
+    }
+
     /// **The qualifier on "the returned total fits."** A hull whose
     /// `[power_groups.*] default_level` values already sum past
     /// the authored `max_commanded_total` is not something this function can undo, and
@@ -1194,11 +1700,11 @@ mod tests {
         let over = PowerSystem::from_authored_groups(
             &PowerConfig::default(),
             &[
-                (helm(), 2),
-                (weapons(), 2),
-                (shields(), 2),
-                (auxiliary(), 2),
-                (life_support.clone(), 2),
+                seed(helm(), 2),
+                seed(weapons(), 2),
+                seed(shields(), 2),
+                seed(auxiliary(), 2),
+                seed(life_support.clone(), 2),
             ],
         );
         assert!(over.commanded_total() > over.max_commanded_total());

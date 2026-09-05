@@ -260,8 +260,13 @@ pub const fn default_power_level() -> u8 {
 }
 
 /// The floor a `[power_groups.<id>]` entry gets when its hull authors no
-/// `min_level` — and the floor the allocation API clamps every group to, so it
-/// is also the lowest level ANY operator can command a group to.
+/// `min_level`.
+///
+/// The authored `min_level` IS the lowest level any operator can command that
+/// group to since issue #1395 — `PowerSystem` stores it per group and every
+/// clamp in the allocation API reads it — so this is the default a group takes,
+/// not a floor every group is held at. A hull may author `0` and mean it: that
+/// group can be switched off.
 ///
 /// `pub const` for the same reason as [`default_max_power_level`]: issue #959's
 /// budget planner needs "the lowest level this group could be commanded to"
@@ -297,6 +302,34 @@ pub enum ShipConfigError {
         system: SystemId,
     },
     EmptyPowerGroupId,
+    /// A `[power_groups.<id>]` block whose floor is not below its ceiling
+    /// (issue #1395).
+    ///
+    /// `min_level` became a real allocation clamp in that issue, so the pair
+    /// now describes a RANGE the reactor enforces rather than two independent
+    /// display hints. `min_level == max_level` is a group with one legal level
+    /// — a stepper with nothing to step to, which is not a power group — and
+    /// `min_level > max_level` is a group with none at all, which would have
+    /// `PowerSystem` seed it below its own floor. Both are authoring mistakes
+    /// worth refusing at load rather than discovering as a dead console.
+    InvalidPowerGroupLevels {
+        group: PowerGroupId,
+        min_level: u8,
+        max_level: u8,
+    },
+    /// A `[power_groups.<id>]` block whose boot level is outside its own
+    /// `[min_level, max_level]` range (issue #1395).
+    ///
+    /// The reactor clamps the seed into range, so this would not crash — it
+    /// would silently spawn the ship somewhere other than where the hull says
+    /// it boots, and the difference would surface as a reactor budget that does
+    /// not add up against the numbers in the file.
+    PowerGroupDefaultOutOfRange {
+        group: PowerGroupId,
+        default_level: u8,
+        min_level: u8,
+        max_level: u8,
+    },
     ReservedCoreStationId {
         station: StationId,
     },
@@ -758,6 +791,30 @@ pub fn validate(
     for power_group_id in &power_group_ids {
         if power_group_id.0.trim().is_empty() {
             return Err(ShipConfigError::EmptyPowerGroupId);
+        }
+    }
+    // The level trio has to describe a real range now that `min_level` is an
+    // allocation clamp and not a drawing hint (issue #1395). Walked in sorted
+    // id order rather than in `HashMap` order so a hull with two bad blocks
+    // always names the same one.
+    let mut power_group_levels: Vec<(&PowerGroupId, &PowerGroupConfig)> =
+        config.power_groups.iter().collect();
+    power_group_levels.sort_by(|a, b| a.0 .0.cmp(&b.0 .0));
+    for (id, group) in power_group_levels {
+        if group.min_level >= group.max_level {
+            return Err(ShipConfigError::InvalidPowerGroupLevels {
+                group: id.clone(),
+                min_level: group.min_level,
+                max_level: group.max_level,
+            });
+        }
+        if group.default_level < group.min_level || group.default_level > group.max_level {
+            return Err(ShipConfigError::PowerGroupDefaultOutOfRange {
+                group: id.clone(),
+                default_level: group.default_level,
+                min_level: group.min_level,
+                max_level: group.max_level,
+            });
         }
     }
     let station_id_set: HashSet<StationId> = config.stations.iter().map(|s| s.id.clone()).collect();

@@ -897,7 +897,7 @@ fn insert_player_core_bundle(
     ship_config: crate::ship_plugin::ShipConfigComponent,
     initial_control_sources: crate::ship_plugin::ShipSystemControlSources,
     initial_active_ratings: crate::ship_plugin::ActiveStationRatings,
-    power_group_seed: &[(crate::core::messages::PowerGroupId, u8)],
+    power_group_seed: &[crate::modifiers::power_system::AuthoredPowerGroup],
     pos: Vec3,
     initial_yaw: f32,
     placement: &FleetPlacement<'_>,
@@ -1564,7 +1564,7 @@ fn insert_player_power_state(
     commands: &mut Commands,
     spawned: Entity,
     config: &crate::entities::config::EntityConfig,
-    power_group_seed: &[(crate::core::messages::PowerGroupId, u8)],
+    power_group_seed: &[crate::modifiers::power_system::AuthoredPowerGroup],
 ) {
     // Power config — unconditionally insert as per-entity Component
     // so systems that iterate `With<Ship>` always see a value on

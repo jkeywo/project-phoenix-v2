@@ -214,6 +214,20 @@ pub fn apply_radar_damage_modifiers(
 /// hull's own guns would still be a range cap wearing a different name. The
 /// fleet keeps its horizons clear of its guns by AUTHORING, pinned by
 /// `tests::every_hulls_acquisition_horizon_clears_its_longest_gun_at_rest`.
+///
+/// # A COLD group (level 0) reads the bottom rung
+///
+/// The multiplier tables have four rungs, for levels 1 to 4, and none for
+/// "off". A group commanded to 0 (issue #1395) therefore takes the level-1
+/// entry through the `saturating_sub(1)` below rather than a fifth value, and
+/// the table's own authoring stays four numbers per group.
+///
+/// That is the right shape for helm and shields, whose hulls floor them at 1 so
+/// the case never arises. It is deliberately NOT the whole answer for a cold
+/// weapons group: what a switched-off gun does is not fire at the level-1
+/// damage multiplier, it does not fire at all — and that is a FIRE GATE, read
+/// off `PowerSystem::is_group_cold` where the shot is authorised, not a number
+/// in this table. Issue #1396 owns it.
 pub fn apply_power_modifiers(
     modifiers: &mut ShipModifiers,
     power: &PowerSystem,

@@ -185,6 +185,11 @@ function commandedLevel(group) {
     ? group.commanded_level : Number(group.level || 0);
 }
 
+// How far the stepper may go in `direction`, off the group's OWN authored
+// bounds. The `!= null` tests are load-bearing rather than defensive style: a
+// group whose hull authored `min_level = 0` may be taken COLD (issue #1395),
+// and a truthiness check would read that 0 as "absent" and quietly floor the
+// group at 1 — refusing the one order the feature exists for.
 function powerLimit(group, direction) {
   return direction < 0
     ? Number(group.min_level != null ? group.min_level : 1)

@@ -1664,22 +1664,22 @@ fn reserve_gate_lowers_allocation_when_battery_dips_under_load() {
 /// there is NOTHING left to spend.
 fn over_budget_power_app(policy: PowerAiPolicy) -> (App, Entity) {
     use crate::modifiers::power_system::{
-        HELM_POWER_GROUP, SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
+        AuthoredPowerGroup, HELM_POWER_GROUP, SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
     };
     let seed = [
-        (
+        AuthoredPowerGroup::at_default_floor(
             crate::core::messages::PowerGroupId(HELM_POWER_GROUP.into()),
             3u8,
         ),
-        (
+        AuthoredPowerGroup::at_default_floor(
             crate::core::messages::PowerGroupId(WEAPONS_POWER_GROUP.into()),
             2,
         ),
-        (
+        AuthoredPowerGroup::at_default_floor(
             crate::core::messages::PowerGroupId(SHIELDS_POWER_GROUP.into()),
             2,
         ),
-        (crate::core::messages::PowerGroupId("ops".into()), 1),
+        AuthoredPowerGroup::at_default_floor(crate::core::messages::PowerGroupId("ops".into()), 1),
     ];
 
     let mut app = App::new();
@@ -2440,6 +2440,83 @@ fn a_human_power_command_pushes_past_the_ai_shed_floors() {
     );
 }
 
+/// **Issue #1395: the AI never raises a group somebody switched off.**
+///
+/// The destroyer authors `[power_groups.weapons] min_level = 0`, so weapons can
+/// be taken COLD — and that is how the ship expresses restraint. It only works
+/// if the standing policy leaves it alone, and the shipped policy is not shy:
+/// `fragments/ai/fleet_baseline.toml` carries an UNCONDITIONAL priority-0
+/// weapons rule bidding level 2 on any tick the battery is healthy. Before the
+/// planner learned about cold groups that rule warmed the guns back up on the
+/// next arm, whoever had cold them, so restraint lasted exactly one tick.
+///
+/// Run on the shipped hull with its shipped policy rather than a fixture, since
+/// the rule that would break it is the one the fleet actually flies.
+#[test]
+fn the_ai_leaves_a_cold_weapons_group_cold() {
+    use crate::modifiers::power_system::{
+        HELM_POWER_GROUP, SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
+    };
+    let weapons = crate::core::messages::PowerGroupId(WEAPONS_POWER_GROUP.into());
+    let (mut app, e) = shipped_hull_power_app_clearing("assets/entities/alliance_destroyer.toml");
+
+    // Arm the channel first: at a full battery under red alert the policy
+    // elevates weapons to 3 of its own accord. Without this the assertion
+    // below would pass on a policy that had never asked for weapons at all.
+    set_battery_pct(&mut app, e, 100.0);
+    power_tick_with_dt(&mut app, 1.0 / 30.0);
+    assert_eq!(
+        commanded(&app, e, WEAPONS_POWER_GROUP),
+        3,
+        "precondition: the shipped policy does bid for this group"
+    );
+
+    // Engineering takes the guns off line.
+    app.world_mut()
+        .entity_mut(e)
+        .get_mut::<crate::ship::power::ShipPowerSystem>()
+        .unwrap()
+        .0
+        .set_group_allocation(&weapons, 0)
+        .unwrap();
+    assert_eq!(commanded(&app, e, WEAPONS_POWER_GROUP), 0);
+
+    for tick in 0..300 {
+        set_battery_pct(&mut app, e, 100.0);
+        power_tick_with_dt(&mut app, 1.0 / 30.0);
+        assert_eq!(
+            commanded(&app, e, WEAPONS_POWER_GROUP),
+            0,
+            "tick {tick}: the AI warmed a group the crew had switched off"
+        );
+        assert!(
+            !emitted_allocations(&app, e)
+                .iter()
+                .any(|(group, _)| group == WEAPONS_POWER_GROUP),
+            "tick {tick}: the AI is re-bidding a cold group every arm — {:?}",
+            emitted_allocations(&app, e)
+        );
+    }
+
+    // And the rest of the reactor is unaffected: helm and shields are still
+    // served, out of a budget the cold group is no longer spending against.
+    assert!(
+        commanded(&app, e, HELM_POWER_GROUP) >= 2,
+        "helm still gets its allocation"
+    );
+    assert!(
+        commanded(&app, e, SHIELDS_POWER_GROUP) >= 1,
+        "and so do shields"
+    );
+    assert!(app
+        .world()
+        .entity(e)
+        .get::<crate::ship::power::ShipPowerSystem>()
+        .unwrap()
+        .0
+        .is_group_cold(&weapons));
+}
+
 /// A four-group hull config whose `weapons` group is capped at
 /// `max_level = 2`, parsed through the real `ShipConfig` path so
 /// `[power_groups.<id>] max_level` is read exactly as an authored hull file
@@ -2757,9 +2834,14 @@ fn two_ships_with_different_authored_group_layouts_allocate_independently() {
             crate::ship::system_registry::power_reactor_system_id(),
             ControlSource::Ai,
         );
-        let seed: Vec<(crate::core::messages::PowerGroupId, u8)> = groups
+        let seed: Vec<crate::modifiers::power_system::AuthoredPowerGroup> = groups
             .iter()
-            .map(|(g, l)| (crate::core::messages::PowerGroupId(g.to_string()), *l))
+            .map(|(g, l)| {
+                crate::modifiers::power_system::AuthoredPowerGroup::at_default_floor(
+                    crate::core::messages::PowerGroupId(g.to_string()),
+                    *l,
+                )
+            })
             .collect();
         app.world_mut()
             .spawn((

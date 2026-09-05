@@ -6792,6 +6792,117 @@ fn an_order_to_hold_fire_survives_a_resume() {
     );
 }
 
+// ── Issue #1395: an order to power the weapons down survives the save ────────
+
+/// Frames to run before the power-down capture. Far enough in that the world is
+/// genuinely moving (the liveness guard below asserts it rather than trusting
+/// the number) and well short of anything that ends the run.
+const POWER_DOWN_CAPTURE_AT: u64 = 120;
+
+/// Every ship's saved WEAPONS allocation, keyed by uuid.
+fn weapons_levels(payload: &PhoenixSnapshot) -> Vec<(String, u8)> {
+    let mut rows: Vec<(String, u8)> = payload
+        .entities
+        .iter()
+        .filter_map(|e| {
+            e.power.as_ref().and_then(|p| {
+                p.allocations
+                    .iter()
+                    .find(|(group, _)| group == "weapons")
+                    .map(|(_, level)| (e.uuid.clone(), *level))
+            })
+        })
+        .collect();
+    rows.sort();
+    rows
+}
+
+/// Order every ship in the world to take its weapons group cold, and report how
+/// many actually got there.
+///
+/// The order is given to EVERY hull on purpose. `set_group_allocation` clamps to
+/// each group's own authored floor, so a hull that authors `min_level = 1` for
+/// weapons refuses it and stays at 1 — which is the other half of the claim, and
+/// is asserted below alongside the ships that went cold.
+fn power_all_weapons_down(world: &mut bevy::prelude::World) -> usize {
+    use project_phoenix::core::messages::PowerGroupId;
+    use project_phoenix::ship::power::ShipPowerSystem;
+
+    let weapons = PowerGroupId("weapons".into());
+    let mut cold = 0;
+    let mut query = world.query::<&mut ShipPowerSystem>();
+    for mut power in query.iter_mut(world) {
+        let _ = power.0.set_group_allocation(&weapons, 0);
+        if power.0.is_group_cold(&weapons) {
+            cold += 1;
+        }
+    }
+    cold
+}
+
+/// **Issue #1395.** A ship whose Engineering took the weapons group to LVL 0
+/// comes back at 0.
+///
+/// Sharp for the same reason the hold-fire test above is: the fresh app does not
+/// start from the save. It boots the same world file, which spawns every hull's
+/// weapons group at its authored `default_level` of 2, and only then has the
+/// capture laid over it — so the resumed world genuinely holds the wrong answer
+/// at the moment `restore` is called. `PowerSystem::restore` used to clamp every
+/// level it reinstated to the GLOBAL minimum of 1, so a crew that had powered
+/// their guns down got them back live on the first tick after a resume, with
+/// nothing in the save or the log to say the order had been dropped.
+///
+/// No `world_digest` equality here, unlike the hold-fire test: the reactor
+/// allocation is one of the entity-scope rows the fold deliberately defers (see
+/// `sim_digest`'s DEFERRED paragraph), so the digest cannot see this field in
+/// either direction and asserting on it would prove nothing about the claim.
+/// The allocations are read off the payload instead.
+#[test]
+fn an_order_to_power_down_survives_a_resume() {
+    let mut live = boot(&combat_test_args());
+    step(&mut live, POWER_DOWN_CAPTURE_AT);
+
+    let cold = power_all_weapons_down(live.world_mut());
+    assert!(
+        cold > 0,
+        "precondition: at least one hull in this world authors a weapons group \
+         that may be taken cold — otherwise the round-trip below is asserting \
+         that 1 survives being saved as 1"
+    );
+
+    let payload = capture(live.world());
+    let ordered = weapons_levels(&payload);
+    assert!(
+        ordered.iter().any(|(_, level)| *level == 0),
+        "precondition: the capture records the cold order"
+    );
+    assert!(
+        ordered.iter().any(|(_, level)| *level > 0),
+        "precondition: and something else is still powered at the same instant, \
+         so what round-trips below is a per-ship answer rather than a constant"
+    );
+
+    let mut resumed = boot_to_restore_point(&combat_test_args(), &payload);
+    assert!(
+        weapons_levels(&capture(resumed.world()))
+            .iter()
+            .all(|(_, level)| *level > 0),
+        "precondition: the freshly booted world has every hull's weapons group \
+         powered — it is a fresh read of the same file, not a resumed one, so \
+         nothing below can be satisfied by a bootstrap coincidence"
+    );
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+
+    assert_eq!(
+        weapons_levels(&capture(resumed.world())),
+        ordered,
+        "every ship's weapons allocation comes back exactly as it was ordered — \
+         the cold hulls cold, the rest at the level they were carrying"
+    );
+}
+
 /// A save written before the weapons hold was recorded is refused on **format**.
 ///
 /// The field carries `#[serde(default)]`, so an older payload still parses —

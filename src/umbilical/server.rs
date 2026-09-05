@@ -896,7 +896,12 @@ mod tests {
         let power = ShipPowerSystem(
             crate::modifiers::power_system::PowerSystem::from_authored_groups(
                 &power_config,
-                &[(PowerGroupId("umbilical".into()), 2)],
+                &[
+                    crate::modifiers::power_system::AuthoredPowerGroup::at_default_floor(
+                        PowerGroupId("umbilical".into()),
+                        2,
+                    ),
+                ],
             ),
         );
         let operator = app

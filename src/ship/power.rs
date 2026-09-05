@@ -6,8 +6,8 @@ use crate::core::messages::{
     PowerReactorBlackboard, ServerMessage, SystemBlackboard, SystemId,
 };
 use crate::modifiers::power_system::{
-    power_level_for_group, PowerConfig, PowerSystem, HELM_POWER_GROUP, POWER_GROUP_ORDER,
-    SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
+    power_level_for_group, AuthoredPowerGroup, PowerConfig, PowerSystem, HELM_POWER_GROUP,
+    POWER_GROUP_ORDER, SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
 };
 use crate::ship_plugin::CoordinationEnqueue;
 
@@ -222,21 +222,30 @@ pub fn power_level_for(ps: &PowerSystem, group: &PowerGroupId) -> u8 {
 ///
 /// The canonical groups (`helm`, `weapons`, `shields`) come first in their
 /// stable [`POWER_GROUP_ORDER`], then any extra authored groups (e.g. `ops`)
-/// sorted by id, each seeded at its authored `default_level`. Returns an empty
-/// vec when there are no authored groups so the caller falls back to the
-/// canonical default seeding (unchanged behaviour for NPCs / fixtures without a
-/// `[power_groups.*]` block).
+/// sorted by id, each seeded at its authored `default_level` AND its authored
+/// `min_level` (issue #1395 — the floor the reactor stores and clamps every
+/// later order to, so a hull that authors `min_level = 0` really can have that
+/// group commanded cold). Returns an empty vec when there are no authored
+/// groups so the caller falls back to the canonical default seeding (unchanged
+/// behaviour for NPCs / fixtures without a `[power_groups.*]` block).
 pub fn authored_power_group_seed(
     power_groups: &std::collections::HashMap<PowerGroupId, crate::ship::config::PowerGroupConfig>,
-) -> Vec<(PowerGroupId, u8)> {
+) -> Vec<AuthoredPowerGroup> {
     if power_groups.is_empty() {
         return Vec::new();
     }
-    let mut seed: Vec<(PowerGroupId, u8)> = Vec::with_capacity(power_groups.len());
+    fn entry(id: PowerGroupId, cfg: &crate::ship::config::PowerGroupConfig) -> AuthoredPowerGroup {
+        AuthoredPowerGroup {
+            id,
+            level: cfg.default_level,
+            floor: cfg.min_level,
+        }
+    }
+    let mut seed: Vec<AuthoredPowerGroup> = Vec::with_capacity(power_groups.len());
     for &name in POWER_GROUP_ORDER {
         let id = PowerGroupId(name.to_string());
         if let Some(cfg) = power_groups.get(&id) {
-            seed.push((id, cfg.default_level));
+            seed.push(entry(id, cfg));
         }
     }
     let mut extra: Vec<(&PowerGroupId, &crate::ship::config::PowerGroupConfig)> = power_groups
@@ -245,7 +254,7 @@ pub fn authored_power_group_seed(
         .collect();
     extra.sort_by(|a, b| a.0 .0.cmp(&b.0 .0));
     for (id, cfg) in extra {
-        seed.push((id.clone(), cfg.default_level));
+        seed.push(entry(id.clone(), cfg));
     }
     seed
 }
@@ -528,11 +537,12 @@ fn address_for_power_group(
 }
 
 /// Emit power brownout coordination advisories when the reactor EXHAUSTS —
-/// battery charge hits zero and [`PowerSystem::tick`] slams every group to
+/// battery charge hits zero and [`PowerSystem::tick`] takes every group DOWN to
 /// [`GROUP_LEVEL_MIN`] and locks the reactor.
 ///
 /// This is the brownout, and the only one: the ship actually lost power and
-/// every system reset to 1. It is emphatically NOT a "reserve running low"
+/// every system that was running reset to 1. (A group somebody had already
+/// switched off is left cold rather than raised — see `PowerSystem::tick`.) It is emphatically NOT a "reserve running low"
 /// warning — a draining-but-managed reactor (the AI shed ladder doing its job
 /// on the way down, which is the normal state of any ship holding elevated
 /// power in combat) is expected and says nothing. Firing on mere drain
@@ -714,12 +724,18 @@ fn publish_power_blackboard(
                 .get(&gid)
                 .map(|arr| arr.len() as u8)
                 .unwrap_or(4);
-            // This group's own authored floor — the lowest rung the pip row
-            // draws (issue #1004). A hull that declares no `[power_groups.*]`
-            // block has none to read, so the parse default stands in, which is
-            // also the floor `PowerSystem` clamps to. Read off the hull rather
-            // than off the multiplier table, since the table's LENGTH is a
-            // ceiling and says nothing about where the rungs start.
+            // This group's own authored floor — the lowest level it may be
+            // commanded to (issue #1004, made a real engine clamp by #1395). A
+            // hull that declares no `[power_groups.*]` block has none to read,
+            // so the parse default stands in, which is also the floor
+            // `PowerSystem` seeds. Read off the hull rather than off the
+            // multiplier table, since the table's LENGTH is a ceiling and says
+            // nothing about where the rungs start.
+            //
+            // The same number the reactor is holding: `PowerSystem::floor_for`
+            // was seeded from this very field at spawn. Published from the
+            // config rather than from the reactor because the blackboard is
+            // built from the hull throughout, and the two cannot disagree.
             let min_level = ship_config
                 .and_then(|sc| sc.0.power_groups.get(&gid))
                 .map(|g| g.min_level)

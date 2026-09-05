@@ -159,6 +159,58 @@ describe('Engineering, Power, and Repair semantic actions', () => {
     expect(sendAction).not.toHaveBeenCalled();
   });
 
+  // Issue #1395: a group whose hull authored `min_level = 0` may be taken COLD.
+  // The refusal case above proves helm at 0 is still refused, so this is a
+  // per-group answer read off the wire rather than a floor lifted for everyone.
+  it('lets a coldable group be commanded to level 0 and still refuses its neighbours', () => {
+    const sendAction = vi.fn();
+    const view = {
+      ...power(),
+      consoles: [
+        { id: 'helm', level: 2, commanded_level: 2, min_level: 1, max_level: 4 },
+        { id: 'weapons', level: 1, commanded_level: 1, min_level: 0, max_level: 4 },
+      ],
+    };
+    const actions = registry({ getState: () => view, sendAction });
+
+    expect(actions.activate(POWER_DECREASE_ACTION_ID, {
+      context: POWER_ACTION_CONTEXT, detail: { target: 'weapons', level: 0 },
+    })).toMatchObject({ claimed: true, handled: true });
+    expect(sendAction).toHaveBeenCalledWith('set_power', expect.objectContaining({
+      target: 'weapons', level: 0, control_system_id: 'power-reactor',
+    }));
+
+    sendAction.mockClear();
+    expect(actions.activate(POWER_DECREASE_ACTION_ID, {
+      context: POWER_ACTION_CONTEXT, detail: { target: 'helm', level: 0 },
+    })).toMatchObject({ claimed: true, handled: false });
+    expect(sendAction).not.toHaveBeenCalled();
+  });
+
+  // And the un-parameterised stepper, which is what a gamepad axis sends: one
+  // press off a cold-capable group at 1 takes it to 0 rather than stopping.
+  it('steps a coldable group down to 0 with no explicit level', () => {
+    const sendAction = vi.fn();
+    const view = {
+      ...power(),
+      consoles: [{ id: 'weapons', level: 1, commanded_level: 1, min_level: 0, max_level: 4 }],
+    };
+    const actions = registry({ getState: () => view, sendAction });
+
+    expect(actions.activate(POWER_DECREASE_ACTION_ID, { context: POWER_ACTION_CONTEXT }))
+      .toMatchObject({ handled: true });
+    expect(sendAction).toHaveBeenCalledWith('set_power', expect.objectContaining({
+      target: 'weapons', level: 0,
+    }));
+
+    // …and a second press off 0 has nowhere to go.
+    sendAction.mockClear();
+    view.consoles[0] = { id: 'weapons', level: 0, commanded_level: 0, min_level: 0, max_level: 4 };
+    expect(actions.activate(POWER_DECREASE_ACTION_ID, { context: POWER_ACTION_CONTEXT }))
+      .toMatchObject({ handled: false });
+    expect(sendAction).not.toHaveBeenCalled();
+  });
+
   it('routes exact repair slot, target, and named system without changing the projection', () => {
     const sendAction = vi.fn();
     const view = repair();

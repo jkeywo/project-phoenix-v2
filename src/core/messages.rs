@@ -3458,7 +3458,7 @@ pub enum ServerMessage {
     /// brownout.
     ///
     /// The third group is `shields`, not `sensors` (issue #952). `locked` marks
-    /// the exhaustion lock: when the battery bottoms out every group is forced
+    /// the exhaustion lock: when the battery bottoms out every group is taken down
     /// to 1 and the allocation controls freeze until the reserve recovers past
     /// `emergency_threshold`. `draining` says which way the reserve is moving.
     PowerState {
@@ -5151,7 +5151,7 @@ pub struct PowerBlackboard {
     #[serde(default)]
     pub charging: bool,
     /// Whether the reactor is locked out after a full brownout: the battery
-    /// bottomed out, every group was forced to 1, and the allocation controls
+    /// bottomed out, every group was taken down to 1, and the allocation controls
     /// are frozen until the charge recovers past `emergency_threshold`. Lets the
     /// Power panel grey out its +/- and show the lockout. `#[serde(default)]`
     /// so payloads predating the lock's restoration still decode.
@@ -5321,21 +5321,32 @@ pub struct PowerGroupEntry {
     /// "unknown" and the client falls back to `level`.
     #[serde(default)]
     pub commanded_level: u8,
-    /// The lowest rung this group's pip row DRAWS — its authored
+    /// The lowest level this group may be COMMANDED to — its authored
     /// `[power_groups.<id>] min_level`, published so the console stops guessing
     /// (issue #1004).
     ///
-    /// A display floor, not an engine one: `PowerSystem` clamps every group to
-    /// [`crate::modifiers::power_system::GROUP_LEVEL_MIN`] whatever a hull authors here, so
-    /// this field changes what the panel paints and nothing about what an
-    /// officer may command. Without it the client fell back to `0` and drew a
-    /// phantom rung the server can never occupy — three groups showing nine
-    /// lights instead of twelve.
+    /// An engine floor since issue #1395, and the panel's `−` is gated on it:
+    /// [`crate::modifiers::power_system::PowerSystem`] stores this per group and
+    /// every clamp in its setter API reads it, so a group whose hull authored
+    /// `0` really can be taken COLD and one that authored `1` really cannot be
+    /// taken below 1. (It was a display-only floor when #1004 introduced it —
+    /// the engine held every group at
+    /// [`crate::modifiers::power_system::GROUP_LEVEL_MIN`] whatever a hull said.
+    /// That is what #1395 changed.) Without the field the client fell back to
+    /// `0` and drew a phantom rung the server could never occupy — three groups
+    /// showing nine lights instead of twelve.
+    ///
+    /// It is not, on its own, the count of pips the panel draws. The pip row
+    /// starts at rung 1 whatever this says: level 0 is the ABSENCE of a lit
+    /// rung, painted as an all-dark row and a COLD tag rather than as a
+    /// zeroth gem, so a coldable group and a floored one show the same four
+    /// lights and differ only in how far the `−` will go.
     ///
     /// `#[serde(default = "…")]` rather than a bare `#[serde(default)]` because
     /// the meaningful absent value is `1`, not `0`: a pre-#1004 payload came
-    /// from a server whose floor was already `GROUP_LEVEL_MIN`, and decoding it
-    /// to `0` would reinstate the very ghost pip this field exists to kill.
+    /// from a server whose floor was `GROUP_LEVEL_MIN` for every group, and
+    /// decoding it to `0` would tell the panel that server's groups could be
+    /// switched off — offering an order it would silently refuse.
     #[serde(default = "default_min_power_level")]
     pub min_level: u8,
     /// Maximum power level for this power group.

@@ -5572,7 +5572,7 @@ fn decreasing_weapons_power_updates_phaser_damage_via_modifiers() {
     );
 }
 
-/// A flat battery locks the reactor and slams every group to 1 (the
+/// A flat battery locks the reactor and takes every group down to 1 (the
 /// exhaustion lock restored after issue #952's floors were reverted), so
 /// every multiplier crushes to x0.667 and the standing order is overwritten.
 #[test]

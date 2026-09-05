@@ -72,6 +72,7 @@
 //! | the lobby rail's `#gm-start-controls` buttons removed (issue #1300's Game Master, merged onto #1325) | the same rule: the GM Ready/Force Start buttons are wired by `server.html`'s GM session script, which this surface does not run, so on the viewscreen they would be dead controls. Their `<div class="gm-start-actions">` is stripped; the section's aria-hidden status regions carry no control and stay |
 //! | that panel starts `display: none` (issue #1328) | the page opens ON the picker, because a browser host always chooses at the prompt; a native host may have been given `--world`, and a picker covering the lobby of a host that has nothing to pick would be a viewscreen that never moves. It is shown by the first scenario push, which only a world-less host makes |
 //! | the page's `#landing-panel` carried too, and starting `display: none` (issue #1361) | the front door, by the same rule again: the page's own markup, so `gui/host-landing-render.js` writes into the ids it expects, and hidden until the first landing push — which, like the picker's, only a world-less host makes. A `--world` host was told at the prompt what it is flying and must not be shown a menu asking |
+//! | that panel's `#landing-ship` hull column REMOVED (issue #1362) | the landing's third column, and the one part of it this surface cannot reach: the staged rung it belongs to is entered by passing `deepStage` (which `host_lobby_link.js` does not) and left by a Back control that needs a release verb `HostLobbyRecord` does not have, while `is-deep` makes `#landing-menu` inert. Carried, it would be a permanently invisible column with the ONLY hull picker mounted inside it — a multi-hull World unpickable on this screen. Removed, `gui/host-scenario-render.js` takes its documented single-column branch and draws the hulls in the World column, as this surface always did |
 //! | that panel's `#landing-fullscreen-btn` KEPT (issue #1367; removed by #1361) | #1361 stripped it because a browser host's control forwards to `gui/page-chrome.js`'s one `initFullscreen`, which asks a BROWSER to fill a screen, and this window has no browser chrome. #1367 put something behind it instead: the press crosses the page->host queue as `HostLobbyRecord::ToggleFullscreen` and `fullscreen::apply_window_mode_toggle` sets the primary window's mode the way the display-assignment law already does |
 //! | `gui/native-settings.css` linked (issue #1367) | the native settings overlay's chrome. The host PAGE's settings CSS lives inline in `server.html` and cannot be borrowed the way its markup can, so the surface that mounts the shared overlay kit brings a token-only sheet of its own. The kit, the tab list and every control's behaviour are the shared ones; this is only where the panel is painted |
 //!
@@ -426,6 +427,51 @@ const SCENARIO_PANEL_MARKER: &str = "<div id=\"scenario-panel\"";
 /// surfaces differ exactly where a row says they differ and nowhere else.
 const LANDING_PANEL_MARKER: &str = "<div id=\"landing-panel\"";
 
+/// The landing's THIRD column — the staged hull picker — which this surface
+/// does not carry (issue #1362).
+///
+/// The one place the landing is not taken whole, and the reason is the same
+/// rule the tooling removals below follow: this document must not carry a
+/// control it cannot reach.
+///
+/// #1362 gave the web landing a second rung. Choosing a World slides the track
+/// one column along, the hulls are mounted into `#ship-list` in their own
+/// column, and a Back control in that column releases the locked World and
+/// slides back. Three things make that rung reachable, and this surface has
+/// exactly none of them:
+///
+///  * the caller has to say the picker is on its `ship-picker` stage
+///    (`landingViewModel`'s `deepStage`), which is what puts `is-deep` on the
+///    root. `server.html` derives it from `scenarioCatalogView` on every
+///    picker render; `host_lobby_link.js` has no such call, so this landing is
+///    only ever `is-open` and `gui/host-landing.css` keeps `.landing-col-ship`
+///    at `opacity: 0; visibility: hidden` at every breakpoint;
+///  * the Back control is drawn only for a surface that supplies a
+///    `backToWorlds` hook, and this one has no arbiter to answer it: releasing
+///    a locked World is a HOST move here, and `HostLobbyRecord` has no verb for
+///    it;
+///  * `is-deep` also makes `#landing-menu` `inert`, so a surface that went deep
+///    with no Back would have taken away the front door and offered no way out
+///    of the column it went into.
+///
+/// Carried anyway, the column would therefore be a permanently invisible one
+/// with the ONLY hull picker mounted inside it — a multi-hull World would be
+/// unpickable on the native viewscreen, silently. Removed, the shared renderer
+/// takes its documented single-column branch (`gui/host-scenario-render.js`'s
+/// `const host = shipList || worldList`) and the hulls are drawn in the World
+/// column, which is what this surface showed before #1362 and what it shows
+/// now. That branch is not a lesser rendering of the staged one; it is the only
+/// honest one on a document with one column to draw in.
+///
+/// A slice that wants the staged layout here buys the three bullets above — a
+/// `deepStage` derived the way `server.html` derives it, a release verb on
+/// `HostLobbyRecord`, and a `backToWorlds` hook that sends it — and then
+/// deletes this marker. Until then this line is the record that it did not.
+///
+/// A `<section>`, unlike every other marker in this module, which is why
+/// [`extract_tagged`] takes a tag name.
+const LANDING_HULL_COLUMN_MARKER: &str = "<section id=\"landing-ship\"";
+
 /// The two host-tooling blocks inside `#scenario-panel` that this surface must
 /// not carry (issue #1328).
 ///
@@ -503,6 +549,11 @@ pub fn build_host_lobby_document(host_index_html: &str) -> Result<String, HostLo
         HostLobbyDocumentError::NoLandingPanel,
         HostLobbyDocumentError::UnbalancedLandingPanel,
     )?;
+    // ...minus the staged hull column, the one part of the landing this surface
+    // cannot reach. See `LANDING_HULL_COLUMN_MARKER` — without it the shared
+    // picker takes its single-column branch and the hulls are drawn in the
+    // World column, which is what this viewscreen has always shown.
+    let landing_panel = remove_tagged(landing_panel, LANDING_HULL_COLUMN_MARKER, "section");
     let landing_panel = landing_panel.replacen(
         LANDING_PANEL_MARKER,
         &format!("{LANDING_PANEL_MARKER} style=\"display:none\""),
@@ -552,9 +603,20 @@ pub fn build_host_lobby_document(host_index_html: &str) -> Result<String, HostLo
 /// tooling that a demo bundle has already removed for its own reasons, so
 /// "already gone" is a normal outcome rather than an error.
 fn remove_element(html: &str, marker: &str) -> String {
-    match extract_element(
+    remove_tagged(html, marker, "div")
+}
+
+/// [`remove_element`], for an element whose tag is not `<div>`.
+///
+/// Same contract as its sibling, including the "absent is not an error" one:
+/// a marker this page does not carry leaves the html alone, because the
+/// removals are about what this SURFACE must not show and not about what the
+/// page happens to contain today.
+fn remove_tagged(html: &str, marker: &str, tag: &str) -> String {
+    match extract_tagged(
         html,
         marker,
+        tag,
         HostLobbyDocumentError::NoScenarioPanel,
         HostLobbyDocumentError::UnbalancedScenarioPanel,
     ) {
@@ -695,6 +757,31 @@ fn extract_element<'a>(
     missing: HostLobbyDocumentError,
     unbalanced: HostLobbyDocumentError,
 ) -> Result<&'a str, HostLobbyDocumentError> {
+    extract_tagged(html, marker, "div", missing, unbalanced)
+}
+
+/// [`extract_element`], counting whichever tag the caller names.
+///
+/// The four panels this document borrows are `<div>`s, and were the only reason
+/// this scan existed — but the landing's own columns are `<section>`s, and one
+/// of them has to come OUT (see [`LANDING_HULL_COLUMN_MARKER`]). Counting
+/// `<div>` while removing a `<section>` would have matched the column's inner
+/// panel and left a stray `</section>` behind, so the tag is a parameter rather
+/// than a second hand-rolled scanner.
+///
+/// It counts ONE tag name and nothing else, which is what makes it safe on the
+/// element it is pointed at rather than in general: `<section id="landing-ship">`
+/// nests no further sections, so its own opening and closing tags are the only
+/// two the count ever sees.
+fn extract_tagged<'a>(
+    html: &'a str,
+    marker: &str,
+    tag: &str,
+    missing: HostLobbyDocumentError,
+    unbalanced: HostLobbyDocumentError,
+) -> Result<&'a str, HostLobbyDocumentError> {
+    let open = format!("<{tag}");
+    let close = format!("</{tag}>");
     let start = html.find(marker).ok_or(missing)?;
     let rest = &html[start..];
     let bytes = rest.as_bytes();
@@ -712,20 +799,20 @@ fn extract_element<'a>(
                 None => return Err(unbalanced),
             }
         }
-        if rest[i..].starts_with("</div>") {
+        if rest[i..].starts_with(close.as_str()) {
             // `depth` cannot be 0 here — the scan starts on the panel's own
             // opening tag — but a saturating decrement keeps a future caller
             // that started it elsewhere out of an arithmetic panic.
             depth = depth.saturating_sub(1);
-            i += "</div>".len();
+            i += close.len();
             if depth == 0 {
                 return Ok(&rest[..i]);
             }
             continue;
         }
-        if rest[i..].starts_with("<div") {
+        if rest[i..].starts_with(open.as_str()) {
             depth += 1;
-            i += "<div".len();
+            i += open.len();
             continue;
         }
         // Advance by one CHARACTER, not one byte: `html` is `&str` and slicing
@@ -746,8 +833,15 @@ mod tests {
 
     /// The shape of the real host page, reduced to what the assembly depends
     /// on: a nested `#lobby-panel` with the AI-launch button inside it, a
-    /// `#landing-panel` with the fullscreen control this surface cannot answer,
-    /// and enough surrounding page to prove nothing else is taken.
+    /// `#landing-panel` with the fullscreen control this surface cannot answer
+    /// and the `#landing-ship` hull column it cannot reach, and enough
+    /// surrounding page to prove nothing else is taken.
+    ///
+    /// The hull column is `<section>`-wrapped exactly as the page's is, because
+    /// that is the whole reason [`extract_tagged`] exists: a `<div>`-counting
+    /// removal would have stopped at the column's inner panel and left a stray
+    /// `</section>` behind. A stub that flattened it to a `<div>` would pass
+    /// while the real page failed.
     ///
     /// The *real* page is asserted against too — see
     /// [`a_lobby_document_assembles_from_the_repositorys_own_host_page`], which
@@ -788,6 +882,14 @@ mod tests {
          <nav id=\"landing-menu\"></nav>\n\
          </section>\n\
          <section id=\"landing-mid\" class=\"landing-col landing-col-mid\"></section>\n\
+         <section id=\"landing-ship\" class=\"landing-col landing-col-ship\">\n\
+         <div class=\"landing-ship-panel\">\n\
+         <div class=\"landing-ship-head\">\n\
+         <h2 id=\"ship-list-label\" data-i18n=\"server.select_ship\">Select a ship</h2>\n\
+         </div>\n\
+         <div id=\"ship-list\" class=\"landing-ship-body\"></div>\n\
+         </div>\n\
+         </section>\n\
          </div>\n\
          </div>\n\
          </div>\n\
@@ -957,6 +1059,56 @@ mod tests {
         // column of controls over the viewscreen.
         assert!(html.contains("href=\"gui/host-landing.css\""));
         // …and the extraction stopped where the panel does.
+        assert!(!html.contains("id=\"canvas\""));
+    }
+
+    #[test]
+    fn the_landings_hull_column_is_not_carried_because_this_surface_never_stages_it() {
+        // Issue #1362's staged rung, and the one part of the landing this
+        // document does NOT take whole. See `LANDING_HULL_COLUMN_MARKER` for
+        // the three things that make the rung reachable and which this surface
+        // has none of; what this pins is the consequence.
+        //
+        // The failure it guards is silent rather than loud: `#ship-list` is
+        // where `gui/host-scenario-render.js` mounts `ph-ship-picker` when a
+        // document carries it, and `.landing-col-ship` is
+        // `opacity: 0; visibility: hidden` until the root is `is-deep`, which
+        // this surface never makes it. Carried, the hull picker would mount
+        // into an invisible column and a multi-hull World would simply be
+        // unpickable on the viewscreen, with a clean log and no error.
+        let html = build_host_lobby_document(HOST_PAGE).unwrap();
+        assert!(
+            HOST_PAGE.contains("id=\"landing-ship\""),
+            "the stub must carry the column, or this test proves nothing"
+        );
+        assert!(HOST_PAGE.contains("id=\"ship-list\""));
+        assert!(
+            !html.contains("id=\"landing-ship\""),
+            "the staged hull column must not reach the viewscreen"
+        );
+        assert!(
+            !html.contains("id=\"ship-list\""),
+            "with #ship-list absent the shared picker draws the hulls in the World \
+             column, which is the only rendering this document can show"
+        );
+        // The `<section>` went whole. A `<div>`-counting removal would have
+        // stopped at the column's inner panel and left this behind, and a
+        // landing with an unopened `</section>` in it is a layout nobody
+        // authored.
+        assert!(!html.contains("landing-ship-panel"));
+        assert!(!html.contains("ship-list-label"));
+        assert_eq!(
+            html.matches("<section").count(),
+            html.matches("</section>").count(),
+            "the removal left an unbalanced <section> in the document"
+        );
+        // The two columns that DO belong here are untouched, so this is a
+        // removal and not a landing that lost its middle.
+        assert!(html.contains("id=\"landing-mid\""));
+        assert!(html.contains("id=\"landing-menu\""));
+        // …and the panel still closes where it did: the removal ran inside the
+        // extracted landing, so nothing after it was swallowed.
+        assert!(html.contains("id=\"landing-status-build\""));
         assert!(!html.contains("id=\"canvas\""));
     }
 
@@ -1844,6 +1996,32 @@ mod tests {
         // verb behind it on this surface as well as on the page.
         assert!(page.contains("id=\"landing-fullscreen-btn\""));
         assert!(html.contains("id=\"landing-fullscreen-btn\""));
+        // …minus the staged hull column, which the real page really does carry
+        // and this surface cannot reach (issue #1362; see
+        // `LANDING_HULL_COLUMN_MARKER`). This is the assertion the stub above
+        // cannot make on its own: `#landing-ship` arrived here by ACCIDENT, as
+        // a child of the whole-panel extraction, and nothing said so until the
+        // hull picker was mounting into a permanently invisible column.
+        assert!(page.contains("id=\"landing-ship\""));
+        assert!(page.contains("id=\"ship-list\""));
+        assert!(
+            !html.contains("id=\"landing-ship\""),
+            "the staged hull column reached the viewscreen, where `is-deep` is \
+             never set and it can therefore never be seen"
+        );
+        assert!(
+            !html.contains("id=\"ship-list\""),
+            "with #ship-list present the shared picker mounts ph-ship-picker into \
+             the hidden column and a multi-hull World becomes unpickable here"
+        );
+        assert!(!html.contains("id=\"ship-list-label\""));
+        // …and the column went whole. A `<div>`-counting removal would have
+        // stopped at its inner panel and left a `</section>` nothing opened.
+        assert_eq!(
+            html.matches("<section").count(),
+            html.matches("</section>").count(),
+            "the hull-column removal left an unbalanced <section> in the document"
+        );
         // …minus the host tooling, which the real page really does carry.
         assert!(page.contains("id=\"mod-pack-upload\""));
         assert!(!html.contains("id=\"mod-pack-upload\""));

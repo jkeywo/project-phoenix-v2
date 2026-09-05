@@ -32,6 +32,7 @@
  *   | `needs`          | a capability the SURFACE must say it provides for the row's stage to open — `'packs'` is how #1366's mod-pack shelf arrives without a check for how the host was started |
  *   | `statusId`       | what the status bar says while this entry is open, for a route that is not "hosting" |
  *   | `join`           | this entry's stage is a JOIN CODE field: which typed namespace a bare suffix composes into, which surface words a refusal, which action a good code runs, and the four string ids the panel is written from (issue #1364) |
+ *   | `shelf`          | this entry's stage is a SHELF: a folder the HOST scanned, drawn as a chooser with an install control — absent for every other route, and read instead of the stage's name so a second shelf-shaped row costs no branch (issue #1366) |
  *   | `confirm`        | the row asks once before its verb runs, and this is everything that stage says and does — `null`/absent for a route that simply opens |
  *   | `action`         | the machine verb a stage's own control sends, named once on the row that owns it |
  *
@@ -68,10 +69,16 @@
  * about the build at all: the same `phoenix-host` offers a mod-pack shelf when
  * it was started with `--mod-pack-dir` and none when it was not. So the row
  * declares what it `needs` and the surface declares what it `provides`, and an
- * unmet row is inert exactly as it was before its slice landed. That is also
- * why `server.html` needed no edit to keep the landing it had. `platforms`
- * could not have expressed it: it would have made one invocation of the native
- * binary a different platform from another.
+ * unmet row is inert. `platforms` could not have expressed it: it would have
+ * made one invocation of the native binary a different platform from another.
+ *
+ * The two are not alternatives, and `load_mod_pack` carries BOTH: `platforms:
+ * ['native']` because a shelf is a scanned FOLDER and no browser has one (the
+ * web host's mod-pack door is the `#mod-pack-upload` file picker of issue #760,
+ * which rides into the landing's middle column with `#scenario-panel`), and
+ * `needs: 'packs'` because being native is still not enough. A row that leaned
+ * on `needs` alone would have rendered for ever dashed on the web, one column
+ * away from a live control onto the same idea.
  *
  * ## A ladder is a field, not a second entry (issue #1362)
  *
@@ -306,25 +313,49 @@ export const LANDING_ENTRIES = [
     },
   },
   {
-    // OFFERED EVERYWHERE, ANSWERED ONLY WHERE THERE IS A SHELF (issue #1366).
+    // NATIVE ONLY, AND ANSWERED ONLY WHERE THERE IS A SHELF (issue #1366).
     //
-    // The third shape of the same doctrine the two rows above and below state
-    // in `platforms`, for a route whose availability is not a fact about the
-    // BUILD but a fact about how this particular host was started. A native
-    // host given `--mod-pack-dir` has a folder to offer; the same binary
-    // started without it has none, and a browser host has none either. So the
-    // row cannot say "native" or "web" — it says what it NEEDS, and the surface
-    // says what it PROVIDES (`landingViewModel`'s `provides`). Unmet, the row
-    // is inert exactly as it was before this slice; met, its stage opens.
+    // TWO fields, saying two different true things, and neither covering for
+    // the other:
     //
-    // `platforms` could not have expressed this: it would have made one
-    // invocation of the native binary a different platform from another.
+    //   * `platforms: ['native']` — the same doctrine `connect_host` above and
+    //     `exit_desktop` below state, and it is about the SHELF rather than
+    //     about mod packs. This stage is a scanned FOLDER: a native host given
+    //     `--mod-pack-dir` reads what is in it and offers the archives, because
+    //     that window has no file input and no file dialog. A browser has no
+    //     folder to scan and never will — and it is not missing a mod-pack door
+    //     either. It has a working one: the `#mod-pack-upload` file picker of
+    //     issue #760, which lives inside `#scenario-panel` and therefore rides
+    //     into the landing's middle column the moment New Game docks that
+    //     panel. A dashed, permanently `aria-disabled` row one column away from
+    //     a live "Upload mod pack" button is two doors onto one idea with the
+    //     front one nailed shut, which is the exact reading "a control exists
+    //     on a surface exactly when something behind it can answer it" forbids.
+    //     So the row is not offered there at all. This is NOT `load_game`'s
+    //     shape: that row's `stagePlatforms` records a route its surface has no
+    //     other way to take, and this surface has one.
+    //
+    //   * `needs: 'packs'` — and being native is still not enough, which is why
+    //     the field survives the line above rather than being replaced by it.
+    //     The same binary offers a shelf when it was started with
+    //     `--mod-pack-dir` and none when it was not, so which RUNS can answer
+    //     this row is not a fact about the build and `platforms` could not have
+    //     expressed it: it would have made one invocation of the native binary
+    //     a different platform from another. The surface says what it PROVIDES
+    //     (`landingViewModel`'s `provides`); unmet, the row is inert.
     id: 'load_mod_pack',
     labelId: 'server.landing.load_mod_pack',
     descId: 'server.landing.load_mod_pack_desc',
     stage: 'mod-packs',
     needs: 'packs',
-    platforms: ['web', 'native'],
+    // This row's stage is a SHELF — a folder of archives with a chooser and an
+    // install control — and that is a fact about the ROW, exactly as `confirm`
+    // and `join` are facts about theirs. `landingViewModel` publishes the shelf
+    // from this field and never from the stage's NAME, so a second
+    // shelf-shaped route (a folder of saved sessions, a folder of scenario
+    // manifests) costs one line here and no branch there.
+    shelf: true,
+    platforms: ['native'],
     // The machine verb, named ONCE, on the row that owns it — the same
     // arrangement `exit_desktop`'s `confirm.action` makes below, and
     // deliberately the same token as the `kind` of the record the native
@@ -795,8 +826,9 @@ export function nextOpenEntry(openEntryId, entryId, entries, provides) {
  *   for every route that simply opens something (New Game's picker), which is
  *   what lets the renderer draw a confirmation from its presence alone.
  *
- *   `packs` is the mod-pack shelf, drawn only while the row that needs it is
- *   the open one — the exact sibling of `confirm`, and `null` everywhere else
+ *   `packs` is the mod-pack shelf, drawn only while the row that OWNS it is
+ *   the open one — the exact sibling of `confirm`, published from the row's own
+ *   `shelf` field rather than from the stage's name, and `null` everywhere else
  *   for the same reason: the renderer draws the stage from its presence and
  *   holds no opinion about which route it belongs to.
  */
@@ -914,11 +946,14 @@ export function landingViewModel(input) {
         action: open.confirm.action || open.id,
       }
       : null,
-    // The mod-pack shelf, drawn only while the row that needs it is open
-    // (issue #1366) — the exact sibling of `confirm` above, decided from the
-    // open ROW rather than from an id, so a second shelf-shaped stage would be
-    // a second row and not a branch here.
-    packs: open && open.stage === 'mod-packs'
+    // The mod-pack shelf, drawn only while the row that OWNS it is open
+    // (issue #1366) — the exact sibling of `confirm` above, and read the same
+    // way: from a FIELD ON THE OPEN ROW (`shelf`), never from the stage's
+    // name. That is what makes a second shelf-shaped route a second row rather
+    // than a second branch here, and until this line said `open.shelf` it was
+    // the one place in this module that compared a stage to a literal while
+    // claiming not to.
+    packs: open && open.shelf
       ? packsStage(open, opts.packs, opts.chosenPack)
       : null,
     status: {

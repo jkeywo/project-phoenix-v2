@@ -230,10 +230,17 @@ pub enum HostLobbyRecord {
     /// are the layout row's alone and are historical (see
     /// [`SetViewscreen`](Self::SetViewscreen)).
     ///
-    /// **Web hosts never send it**: the row that opens the shelf is inert on any
-    /// surface that cannot answer it, which a browser host cannot — it has no
-    /// scanned folder, and it already loads a pack from the file input inside
-    /// `#scenario-panel`.
+    /// **Web hosts never send it**, and are not offered the row: the shelf is a
+    /// scanned FOLDER and a browser has none, while the mod-pack door a browser
+    /// host does have — the `#mod-pack-upload` file input inside
+    /// `#scenario-panel`, which rides into the landing's middle column when New
+    /// Game docks that panel — is a working control one column away. So the row
+    /// is `platforms: ['native']`, the same doctrine
+    /// [`ExitDesktop`](Self::ExitDesktop) states pointing the other way; a
+    /// second, permanently dashed door beside a live one would be the thing that
+    /// doctrine forbids. `needs: 'packs'` stays on the row beside it and says
+    /// the other half: a native host started without `--mod-pack-dir` has
+    /// nothing to offer either, so the row is inert on that run too.
     InstallModPack { pack: String },
     /// The operator pressed the landing's fullscreen control (issue #1367).
     ///

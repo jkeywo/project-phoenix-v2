@@ -141,8 +141,11 @@ describe('renderHostLanding — the idle landing', () => {
     const doc = landingDoc();
     renderHostLanding(doc, landingViewModel(), t);
     const list = entries(doc);
+    // The WEB menu: four rows. Exit to Desktop is native-only (a tab cannot
+    // quit an app) and so is Load mod pack (its stage is a scanned folder, and
+    // this host's mod-pack door is the live upload control inside the picker).
     expect(list.map((el) => el.getAttribute(LANDING_ENTRY_ATTR))).toEqual([
-      'new_game', 'load_game', 'join_peer', 'connect_host', 'load_mod_pack',
+      'new_game', 'load_game', 'join_peer', 'connect_host',
     ]);
     expect(list[0].querySelector('.landing-mi-ix').textContent).toBe('01');
     expect(list[0].querySelector('.landing-mi-label').textContent).toBe('server.landing.new_game');
@@ -150,15 +153,25 @@ describe('renderHostLanding — the idle landing', () => {
     for (const el of list) expect(el.classList.contains(LANDING_ENTRY_CLASS)).toBe(true);
   });
 
-  it('marks the entries with no stage aria-disabled rather than disabled', () => {
+  it('marks an inert entry aria-disabled rather than disabled', () => {
     // Focusable and readable: "here, but not yet" is more honest than a control
     // a screen reader cannot reach at all.
+    //
+    // Nothing on the pre-boot WEB menu is inert any more — every row this host
+    // offers is a row it can open — so the claim is made where an inert row
+    // actually lives: the native menu, whose Load Game and Join as Peer stages
+    // are unbuilt and whose Load mod pack needs a folder this run has none of.
+    const web = landingDoc();
+    renderHostLanding(web, landingViewModel(), t);
+    expect(entries(web).filter((el) => el.getAttribute('aria-disabled') === 'true'))
+      .toEqual([]);
+
     const doc = landingDoc();
-    renderHostLanding(doc, landingViewModel(), t);
+    renderHostLanding(doc, landingViewModel({ platform: 'native' }), t);
     const list = entries(doc);
     expect(list.filter((el) => el.getAttribute('aria-disabled') === 'true')
       .map((el) => el.getAttribute(LANDING_ENTRY_ATTR)))
-      .toEqual(['load_mod_pack']);
+      .toEqual(['load_game', 'join_peer', 'load_mod_pack']);
     expect(list.every((el) => el.disabled === false)).toBe(true);
   });
 
@@ -174,7 +187,7 @@ describe('renderHostLanding — the idle landing', () => {
     renderHostLanding(doc, landingViewModel(), t);
     renderHostLanding(doc, landingViewModel(), t);
 
-    expect(entries(doc)).toHaveLength(5);
+    expect(entries(doc)).toHaveLength(4);
     expect(doc.getElementById('not-ours')).not.toBe(null);
   });
 
@@ -186,7 +199,7 @@ describe('renderHostLanding — the idle landing', () => {
     renderHostLanding(doc, landingViewModel(), t, h);
     entries(doc).forEach((el) => el.click());
     expect(calls.pick).toEqual([
-      'new_game', 'load_game', 'join_peer', 'connect_host', 'load_mod_pack',
+      'new_game', 'load_game', 'join_peer', 'connect_host',
     ]);
   });
 
@@ -909,7 +922,7 @@ describe('a deliberately incomplete document', () => {
     const doc = landingDoc();
     doc.getElementById('landing-title').remove();
     renderHostLanding(doc, landingViewModel({ openEntryId: 'new_game' }), t, {});
-    expect(entries(doc)).toHaveLength(5);
+    expect(entries(doc)).toHaveLength(4);
     expect(doc.getElementById('scenario-panel').parentElement)
       .toBe(doc.getElementById('landing-mid'));
     expect(text(doc, 'landing-status-session')).toBe('server.landing.status_hosting');
@@ -934,14 +947,20 @@ describe('renderHostLanding — the native viewscreen (issue #1361)', () => {
 
   /**
    * The native lobby document's landing, as `document.rs` assembles it: the
-   * page's own markup minus the fullscreen control it cannot answer.
+   * page's own markup minus the staged hull column it cannot reach.
    *
    * Built by DELETING from server.html's markup rather than by hand, so this
-   * suite cannot drift into testing a landing neither surface shows.
+   * suite cannot drift into testing a landing neither surface shows. The two
+   * deletions are the two `document.rs` makes, and each has its own case below.
+   *
+   * `#landing-fullscreen-btn` is NOT one of them any more — #1367 put a host
+   * verb behind that control and the document kept it — so it stays here.
    */
   function nativeLandingDoc() {
     const doc = landingDoc();
-    doc.getElementById('landing-fullscreen-btn').remove();
+    // The staged hull column (issue #1362), which `LANDING_HULL_COLUMN_MARKER`
+    // strips from the real document. See the case below for why.
+    doc.getElementById('landing-ship').remove();
     doc.getElementById('landing-panel').style.display = 'none';
     return doc;
   }
@@ -952,7 +971,7 @@ describe('renderHostLanding — the native viewscreen (issue #1361)', () => {
     extra,
   ));
 
-  it('draws the same landing into a document with the fullscreen control gone', () => {
+  it('draws the same landing into a document with the hull column gone', () => {
     const doc = nativeLandingDoc();
     expect(() => {
       renderHostLanding(doc, nativeVm(), t, {}, { ownPanelVisibility: true });
@@ -960,6 +979,51 @@ describe('renderHostLanding — the native viewscreen (issue #1361)', () => {
     expect(text(doc, 'landing-title')).toBe('server.landing.title');
     expect(text(doc, 'landing-platform')).toBe('server.landing.platform_native');
     expect(text(doc, 'landing-status-build')).toBe('server.landing.build:{"build":"0.1.0"}');
+  });
+
+  it('carries no hull column, because it never enters the rung that reveals one', () => {
+    // Issue #1362's staged rung, and the two halves of one decision that have
+    // to stay together.
+    //
+    // `host_lobby_link.js` passes no `deepStage` — the way OUT of a deep stage
+    // is the hull column's Back control, which needs a `backToWorlds` hook this
+    // surface has no host verb behind — so the root never becomes `is-deep`,
+    // and `gui/host-landing.css` keeps `.landing-col-ship` at
+    // `opacity: 0; visibility: hidden` at every breakpoint until it does. So
+    // `native_host::host_lobby::document` removes the column outright
+    // (`LANDING_HULL_COLUMN_MARKER`), which is what makes
+    // `gui/host-scenario-render.js` take its single-column branch and draw the
+    // hulls in the World column, as this surface always did.
+    //
+    // Carried WITHOUT a `deepStage` — which is how it arrived, as a child of
+    // the whole-panel extraction — the hull picker would mount into a column
+    // nothing can ever show, and a multi-hull World would be unpickable here
+    // with a clean log.
+    const doc = nativeLandingDoc();
+    renderHostLanding(
+      doc, nativeVm({ openEntryId: 'new_game' }), t, {}, { ownPanelVisibility: true },
+    );
+    const root = doc.getElementById('landing-panel');
+    expect(root.classList.contains('is-open')).toBe(true);
+    expect(root.classList.contains('is-deep')).toBe(false);
+    expect(root.style.getPropertyValue('--landing-depth')).toBe('1');
+    expect(doc.getElementById('ship-list')).toBe(null);
+    // …and the menu is still reachable, which is the other thing the deep rung
+    // takes away: the renderer writes `inert` on it from the depth, and a
+    // surface that went deep with no Back would have closed its own front door.
+    expect(doc.getElementById('landing-menu').hasAttribute('inert')).toBe(false);
+
+    // The WEB surface does go deep, so this is a surface that opted out of a
+    // rung and not a rung nobody has.
+    const web = landingDoc();
+    renderHostLanding(
+      web, landingViewModel({ openEntryId: 'new_game', deepStage: 'ship-picker' }), t,
+    );
+    const webRoot = web.getElementById('landing-panel');
+    expect(webRoot.classList.contains('is-deep')).toBe(true);
+    expect(webRoot.style.getPropertyValue('--landing-depth')).toBe('2');
+    expect(web.getElementById('ship-list')).not.toBe(null);
+    expect(web.getElementById('landing-menu').hasAttribute('inert')).toBe(true);
   });
 
   it('does not offer Connect to Host, which a native host has no leg to answer', () => {

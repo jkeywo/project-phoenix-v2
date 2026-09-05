@@ -68,9 +68,11 @@ test('the landing is the first paint, and New Game opens the World picker',
     // slices each ADD a row or activate one, so a spec that pinned "five
     // entries" — or "one live entry" — would fail on the next one for no
     // reason. What must hold is that New Game is offered and live, and that the
-    // rows still WAITING for a slice are the ones that say so. Since issue
-    // #1364 that is Load mod pack alone: Load Game got its stage in #1363 and
-    // both join routes got theirs in #1364.
+    // rows still WAITING for a slice are the ones that say so. On THIS host,
+    // before a world has booted, that is now none of them: Load Game got its
+    // stage in #1363, both join routes got theirs in #1364, and Load mod pack
+    // is native-only — a shelf is a scanned folder, and the browser's own
+    // mod-pack door is the live upload control inside the picker.
     await expect(page.locator(`${MENU} [data-landing-entry]`).first())
       .toBeVisible({ timeout: 30_000 });
     // `toContainText`, not `toHaveText`: the button also carries its ordinal
@@ -81,7 +83,7 @@ test('the landing is the first paint, and New Game opens the World picker',
     await expect(page.locator(`${NEW_GAME}[aria-disabled="true"]`)).toHaveCount(0);
     expect(await page.locator(`${MENU} [data-landing-entry][aria-disabled="true"]`)
       .evaluateAll((els) => els.map((el) => el.getAttribute('data-landing-entry'))))
-      .toEqual(['load_mod_pack']);
+      .toEqual([]);
 
     // ── New Game ─────────────────────────────────────────────────────────
     //
@@ -177,6 +179,6 @@ test('choosing a world from the landing reaches the lobby it always reached',
     // than gone from the menu.
     expect(await page.locator(`${MENU} [data-landing-entry][aria-disabled="true"]`)
       .evaluateAll((els) => els.map((el) => el.getAttribute('data-landing-entry'))))
-      .toEqual(['join_peer', 'connect_host', 'load_mod_pack']);
+      .toEqual(['join_peer', 'connect_host']);
     await expect(page.locator(`${NEW_GAME}[aria-disabled="true"]`)).toHaveCount(0);
   });

@@ -260,6 +260,26 @@ function landingProvides() {
   return landingPacks ? ['packs'] : [];
 }
 
+// NO `deepStage`, and that is a decision rather than an omission (issue #1362).
+//
+// `server.html` derives one from `scenarioCatalogView().stage` on every picker
+// render, which puts `is-deep` on the landing root and reveals the third
+// column. This surface deliberately does not, because it cannot afford the rung:
+// the way OUT of a deep stage is the hull column's Back control, Back is drawn
+// only for a caller that supplies a `backToWorlds` hook, and releasing a locked
+// World here is a HOST move that `HostLobbyRecord` has no verb for. `is-deep`
+// also makes `#landing-menu` inert, so going deep with no Back would take the
+// front door away and offer nothing in its place.
+//
+// So the native lobby document does not carry the column at all — its
+// `#landing-ship` is removed in `native_host::host_lobby::document`, which is
+// what makes `gui/host-scenario-render.js` take its documented single-column
+// branch and draw the hulls in the World column. The two halves of that decision
+// have to stay together: a `deepStage` passed here without the column would slide
+// the track onto nothing, and the column restored without a `deepStage` would
+// mount the hull picker somewhere permanently invisible. See
+// `LANDING_HULL_COLUMN_MARKER` for what a slice that wants the staged layout on
+// this surface has to buy first.
 function drawLanding() {
   renderHostLanding(
     document,

@@ -176,15 +176,24 @@ describe('the shipped entry table', () => {
       .toEqual(['join_peer', 'connect_host']);
   });
 
-  it('makes Load mod pack need a SHELF rather than need a platform', () => {
-    // Issue #1366's whole availability rule, and why it is a third field rather
-    // than more `platforms`: the same native binary offers a mod-pack folder
-    // when it was started with --mod-pack-dir and none when it was not, so
-    // which hosts can answer this row is not a fact about the build.
+  it('makes Load mod pack need a SHELF *and* a native host, saying both', () => {
+    // TWO availability fields on one row, and neither covering for the other.
+    //
+    // `platforms: ['native']` is doctrine about the build: this stage is a
+    // scanned FOLDER and a browser has none. The web host is not missing a
+    // mod-pack door either — `#mod-pack-upload` (issue #760) is a working file
+    // picker that rides into the landing's middle column with `#scenario-panel`
+    // — so a row rendered for ever dashed there would have been a second door
+    // onto one idea with the front one nailed shut.
+    //
+    // `needs: 'packs'` is the rule `platforms` could not have expressed: the
+    // same native binary offers a folder when it was started with
+    // --mod-pack-dir and none when it was not, which is not a fact about the
+    // build.
     const row = LANDING_ENTRIES.find((e) => e.id === 'load_mod_pack');
     expect(row.stage).toBe('mod-packs');
     expect(row.needs).toBe('packs');
-    expect(row.platforms).toEqual(['web', 'native']);
+    expect(row.platforms).toEqual(['native']);
     // …and its verb is named once, on the row that owns it — the same
     // arrangement `exit_desktop`'s `confirm.action` makes, and deliberately the
     // same token as the record the native surface sends.
@@ -216,6 +225,15 @@ describe('the shipped entry table', () => {
   it('gives no other row a confirmation, so New Game still opens on one press', () => {
     expect(LANDING_ENTRIES.filter((e) => e.confirm).map((e) => e.id))
       .toEqual(['exit_desktop']);
+  });
+
+  it('marks the one shelf-shaped row as a shelf, on the row rather than by name', () => {
+    // The exact sibling of the confirmation case above, and the reason the view
+    // model can publish `packs` without comparing a stage to the literal
+    // 'mod-packs'. A second folder-shaped route — saved sessions, scenario
+    // manifests — is then one more row here and no new branch anywhere.
+    expect(LANDING_ENTRIES.filter((e) => e.shelf).map((e) => e.id))
+      .toEqual(['load_mod_pack']);
   });
 
   it('gives every row a label and a description id, so the renderer never guesses', () => {
@@ -496,8 +514,11 @@ describe('landingViewModel', () => {
     const vm = landingViewModel({ openEntryId: 'new_game' });
     expect(vm.stage).toBe('world-picker');
     expect(vm.entries.find((e) => e.id === 'new_game').selected).toBe(true);
-    expect(vm.entries.filter((e) => e.inert).map((e) => e.id))
-      .toEqual(['load_mod_pack']);
+    // Nothing on the WEB menu is inert on a pre-boot landing: every row this
+    // host offers is a row it can open. Load mod pack used to sit here dashed
+    // for ever; it is native-only now, because the browser's mod-pack door is
+    // the live upload control inside the picker.
+    expect(vm.entries.filter((e) => e.inert).map((e) => e.id)).toEqual([]);
   });
 
   it('opens Load Game onto the save catalogue, borrowing its panel (issue #1363)', () => {
@@ -1031,6 +1052,11 @@ const NEEDY = [
     descId: 'x.s_desc',
     stage: 'mod-packs',
     needs: 'packs',
+    // What makes the view model publish a shelf: a field on the ROW. The stage
+    // name here is deliberately the shipped one, so a branch that had gone back
+    // to reading the name would still pass — and the case below, whose row
+    // names a stage of its own, is what would fail.
+    shelf: true,
     action: 'x_install',
   },
 ];
@@ -1082,12 +1108,24 @@ describe('a row that NEEDS something the surface must provide', () => {
     expect(vm.packs).toBe(null);
   });
 
-  it('leaves the shipped Load mod pack row exactly as inert as it was', () => {
-    // The reason `server.html` needed no edit: the host page provides nothing,
-    // so the row it has been rendering since #1360 is unchanged.
+  it('keeps the shipped Load mod pack row off the web and inert without a shelf', () => {
+    // Both of its availability fields, on the shipped row, from the outside.
+    // The web host is not offered it at all — its mod-pack door is the live
+    // `#mod-pack-upload` control inside the picker, and a dashed second door
+    // beside a working one is the thing the doctrine forbids.
     const web = landingViewModel();
-    expect(web.entries.find((e) => e.id === 'load_mod_pack').inert).toBe(true);
+    expect(web.entries.find((e) => e.id === 'load_mod_pack')).toBeUndefined();
+    // The native host IS offered it, and it is inert until that RUN says it
+    // scanned a folder — which is the half `platforms` could not have said.
+    const native = landingViewModel({ platform: 'native' });
+    expect(native.entries.find((e) => e.id === 'load_mod_pack').inert).toBe(true);
+    const shelved = landingViewModel({ platform: 'native', provides: ['packs'] });
+    expect(shelved.entries.find((e) => e.id === 'load_mod_pack').inert).toBe(false);
+    // ...and the press is judged over the same two fields, so the memory and
+    // the render cannot disagree.
     expect(nextOpenEntry(null, 'load_mod_pack')).toBe(null);
+    expect(nextOpenEntry(null, 'load_mod_pack', landingEntries('native'), ['packs']))
+      .toBe('load_mod_pack');
   });
 });
 
@@ -1106,6 +1144,41 @@ describe('landingViewModel — the mod-pack shelf stage (issue #1366)', () => {
       .toBe(null);
     expect(open().packs).not.toBe(null);
     expect(open({ openEntryId: 'plain' }).packs).toBe(null);
+  });
+
+  it('is decided by the row`s own `shelf` field and never by the stage`s name', () => {
+    // The claim the comment over `packs:` makes, tested the only way it can be:
+    // a shelf-shaped row whose stage is called something ELSE still gets a
+    // shelf, and a row called 'mod-packs' that never declared one does not.
+    // Until this was true, the module compared a stage to a literal in the one
+    // place it claimed nothing did.
+    const renamed = [{
+      id: 'folder',
+      labelId: 'x.f',
+      descId: 'x.f_desc',
+      stage: 'saved-sessions',
+      needs: 'packs',
+      shelf: true,
+      action: 'x_install',
+    }];
+    const vm = landingViewModel({
+      entries: renamed, provides: ['packs'], openEntryId: 'folder', packs: SHELF,
+    });
+    expect(vm.stage).toBe('saved-sessions');
+    expect(vm.packs).not.toBe(null);
+    expect(vm.packs.rows.map((r) => r.file))
+      .toEqual(['thin-margin.zip', 'borrowed-sun.zip']);
+
+    const unshelved = [{
+      id: 'named',
+      labelId: 'x.n',
+      descId: 'x.n_desc',
+      stage: 'mod-packs',
+      needs: 'packs',
+    }];
+    expect(landingViewModel({
+      entries: unshelved, provides: ['packs'], openEntryId: 'named', packs: SHELF,
+    }).packs).toBe(null);
   });
 
   it('lists what the host offered, in the order it offered it', () => {

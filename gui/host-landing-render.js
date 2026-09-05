@@ -99,9 +99,36 @@ export const PICKER_DOCKED_CLASS = 'landing-docked';
  */
 export const CONFIRM_DANGER_CLASS = 'landing-confirm-danger';
 
+/**
+ * Everything this renderer OWNS inside `#landing-packs-list` (issue #1366).
+ *
+ * A lifecycle hook for the reason [`LANDING_ENTRY_SELECTOR`] is one: this
+ * renderer replaces every shelf row on every render, and a selector that also
+ * matched static markup would delete controls it does not own.
+ */
+export const LANDING_PACK_SELECTOR = '.landing-pack';
+
+/** The attribute a shelf row carries its archive's file name in. */
+export const LANDING_PACK_ATTR = 'data-landing-pack';
+
+/**
+ * Everything this renderer owns inside `#landing-packs-notes` — the outcome
+ * line, the findings, the installed list and the conflict report.
+ *
+ * One selector for all four because they are one rebuilt column: every render
+ * replaces the lot, and what separates them is the heading each carries rather
+ * than a container each would need.
+ */
+export const LANDING_NOTE_SELECTOR = '.landing-note';
+
 /** Remove every entry this renderer owns, leaving anything else alone. */
 export function clearLandingEntries(menu) {
   menu.querySelectorAll(LANDING_ENTRY_SELECTOR).forEach(function (el) { el.remove(); });
+}
+
+/** Remove every element matching `selector` inside `root`. */
+function clearOwned(root, selector) {
+  root.querySelectorAll(selector).forEach(function (el) { el.remove(); });
 }
 
 /** Write `text` into `id` if this document has it. */
@@ -168,6 +195,151 @@ function renderConfirm(doc, vm, t, h) {
 }
 
 /**
+ * One note row in the shelf's report column: a label, a line, and a tone.
+ *
+ * `line` is either a resolved sentence (a validator's prose) or a `{id, params}`
+ * pair — the two shapes `vm.packs` deliberately keeps apart, and the reason this
+ * takes text rather than an id.
+ */
+function appendNote(doc, root, tone, label, text) {
+  const note = doc.createElement('div');
+  note.className = 'landing-note' + (tone ? ' landing-note-' + tone : '');
+  if (label) {
+    const key = doc.createElement('span');
+    key.className = 'landing-note-key';
+    key.textContent = label;
+    note.appendChild(key);
+  }
+  const value = doc.createElement('span');
+  value.className = 'landing-note-value';
+  value.textContent = text;
+  note.appendChild(value);
+  root.appendChild(note);
+}
+
+/**
+ * Draw `#landing-packs` from the open row's shelf (issue #1366).
+ *
+ * The middle column's third tenant, and the exact sibling of
+ * [`renderConfirm`]: everything it says comes off `vm.packs`, which the view
+ * model composes only while the row that NEEDS a shelf is the open one — so
+ * this function knows there is such a thing as a shelf and knows nothing at all
+ * about Load mod pack. A second folder-shaped stage would be a second row.
+ *
+ * Three things worth stating rather than reading back out of the code:
+ *
+ *   * **The rows are rebuilt, and so is the report column.** A hidden panel
+ *     holding the last folder's archives is a panel that shows them for one
+ *     frame the next time it opens — the same reason the menu is rebuilt.
+ *   * **Cancel is the entry's own toggle**, reported through `pick` with the
+ *     open entry's id, exactly as the confirmation's is and for the same
+ *     reason: one way to close one stage.
+ *   * **The CTA carries the ROW's verb**, not a name this file knows. It is
+ *     handed to `installPack` with the highlighted file, and what that means is
+ *     the caller's business.
+ */
+function renderPacks(doc, vm, t, h) {
+  const packs = vm.packs || null;
+  const root = doc.getElementById('landing-packs');
+  if (root) root.style.display = packs ? '' : 'none';
+
+  setOptionalText(doc, 'landing-packs-title', t, packs && packs.titleId);
+  setText(doc, 'landing-packs-folder', packs ? t(packs.folder.id, packs.folder.params) : '');
+
+  // The empty state carries BOTH halves when there are both: the id says which
+  // emptiness this is, and the host's own sentence names the folder it could
+  // not read. A scan failure with no sentence still says something.
+  const empty = doc.getElementById('landing-packs-empty');
+  if (empty) {
+    const words = packs && packs.emptyId
+      ? [t(packs.emptyId), packs.scanError || ''].filter(Boolean).join(' ')
+      : '';
+    empty.textContent = words;
+    empty.style.display = words ? '' : 'none';
+  }
+
+  const list = doc.getElementById('landing-packs-list');
+  if (list) {
+    clearOwned(list, LANDING_PACK_SELECTOR);
+    (packs ? packs.rows : []).forEach(function (pack) {
+      const btn = doc.createElement('button');
+      btn.type = 'button';
+      btn.className = 'landing-pack' + (pack.selected ? ' on' : '');
+      btn.setAttribute(LANDING_PACK_ATTR, pack.file);
+      btn.setAttribute('aria-pressed', pack.selected ? 'true' : 'false');
+      const label = doc.createElement('span');
+      label.className = 'landing-pack-label';
+      label.textContent = pack.label;
+      btn.appendChild(label);
+      const file = doc.createElement('span');
+      file.className = 'landing-pack-file';
+      file.textContent = pack.file;
+      btn.appendChild(file);
+      btn.addEventListener('click', function () {
+        if (h.pickPack) h.pickPack(pack.file);
+      });
+      list.appendChild(btn);
+    });
+  }
+
+  const notes = doc.getElementById('landing-packs-notes');
+  if (notes) {
+    clearOwned(notes, LANDING_NOTE_SELECTOR);
+    if (packs) {
+      if (packs.outcome) {
+        appendNote(doc, notes, packs.outcome.tone, '',
+          t(packs.outcome.line.id, packs.outcome.line.params));
+      }
+      // What is wrong, in the validator's own words. This is the acceptance
+      // criterion "a pack that fails validation says what is wrong", and it is
+      // drawn whether the attempt was accepted or not — a warning-only accept
+      // still has something to say.
+      packs.findings.forEach(function (finding) {
+        appendNote(doc, notes, finding.tone, t(finding.labelId),
+          [finding.file, finding.message].filter(Boolean).join(' — '));
+      });
+      if (packs.installedHeadingId) {
+        appendNote(doc, notes, 'head', '', t(packs.installedHeadingId));
+      }
+      packs.installed.forEach(function (pack) {
+        appendNote(doc, notes, 'ok', '', t(pack.line.id, pack.line.params));
+      });
+      // Which pack won each shared path. The acceptance criterion "conflicting
+      // packs are reported, so it is clear which pack won".
+      if (packs.conflictsHeadingId) {
+        appendNote(doc, notes, 'head', '', t(packs.conflictsHeadingId));
+      }
+      packs.conflicts.forEach(function (conflict) {
+        appendNote(doc, notes, 'warn', '', t(conflict.line.id, conflict.line.params));
+      });
+    }
+  }
+
+  // `onclick`, not addEventListener: static markup, and this runs on every
+  // render — see the fullscreen control's note.
+  const cta = doc.getElementById('landing-packs-cta');
+  if (cta) {
+    cta.textContent = packs ? t(packs.ctaId) : '';
+    const enabled = !!packs && packs.ctaEnabled;
+    // `aria-disabled` rather than `disabled`, as the inert menu entries take
+    // it: a control a screen reader cannot reach is not more honest than one
+    // that says it is unavailable.
+    cta.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+    cta.classList.toggle('off', !enabled);
+    cta.onclick = enabled && h.installPack
+      ? function () { h.installPack(packs.action, packs.chosen); }
+      : null;
+  }
+  const cancel = doc.getElementById('landing-packs-cancel');
+  if (cancel) {
+    cancel.textContent = packs ? t(packs.cancelId) : '';
+    cancel.onclick = packs && h.pick
+      ? function () { h.pick(vm.openEntryId); }
+      : null;
+  }
+}
+
+/**
  * Render one landing view model into `doc`.
  *
  * @param {Document} doc the document holding the `#landing-panel` markup.
@@ -176,6 +348,8 @@ function renderConfirm(doc, vm, t, h) {
  * @param {{
  *   pick?: (entryId: string) => void,
  *   confirm?: (action: string) => void,
+ *   pickPack?: (file: string) => void,
+ *   installPack?: (action: string, file: string) => void,
  *   toggleFullscreen?: () => void,
  * }} [hooks]
  *   `pick` carries an operator's click on a menu entry back to whoever owns
@@ -193,6 +367,16 @@ function renderConfirm(doc, vm, t, h) {
  *   the native viewscreen sends a record its host answers with an app-exit, and
  *   the host PAGE supplies no such hook at all, because a browser tab cannot
  *   quit an application. Absent, the control renders and does nothing.
+ *
+ *   `pickPack` and `installPack` are the mod-pack shelf's two (issue #1366),
+ *   and they are two rather than one for the reason the confirmation's press is
+ *   not its entry's: highlighting a row is this surface's own memory and costs
+ *   nothing, while installing reads an archive off a disk and changes the
+ *   catalogue every phone in the room is looking at. `installPack` carries the
+ *   open row's `action` verb, exactly as `confirm` does, so this file never
+ *   learns what the verb is called. Both absent, the rows render and the button
+ *   does nothing — which is what a surface with no shelf behind it would be,
+ *   and is also why the view model refuses to open the stage there at all.
  * @param {{dockPicker?: boolean, ownPanelVisibility?: boolean}} [opts]
  *   `dockPicker: false` leaves `#scenario-panel` where it is, for a surface
  *   that composes the picker some other way. `server.html` passes nothing and
@@ -342,6 +526,14 @@ export function renderHostLanding(doc, vm, t, hooks, opts) {
   // renderer holds no opinion about which route that is.
   renderConfirm(doc, vm, t, h);
 
+  // ── The mod-pack shelf (issue #1366) ────────────────────────────────
+  //
+  // The middle column's third tenant, drawn from `vm.packs` being there at all
+  // — never from the stage's name and never from an entry id — so the route
+  // that offers a folder is a row in the entry table and this renderer holds no
+  // opinion about which route that is.
+  renderPacks(doc, vm, t, h);
+
   // ── The middle column ───────────────────────────────────────────────
   //
   // "Reveals the EXISTING World picker" is meant literally: `#scenario-panel`
@@ -397,6 +589,9 @@ if (typeof window !== 'undefined') {
     LANDING_ENTRY_CLASS,
     LANDING_ENTRY_SELECTOR,
     LANDING_ENTRY_ATTR,
+    LANDING_PACK_SELECTOR,
+    LANDING_PACK_ATTR,
+    LANDING_NOTE_SELECTOR,
     PICKER_DOCKED_CLASS,
     CONFIRM_DANGER_CLASS,
   };

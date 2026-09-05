@@ -35,9 +35,9 @@
 //! state rather than an edge — so an older value has nothing to say that the
 //! newest one does not, and holding a backlog of them would only cost
 //! main-thread time inside a browser engine (see [`super::super::panes::surface`]'s
-//! note on why that time is the *simulation's*). Six latest-wins slots — the
-//! reveal, the join invitation, the landing screen, the picker, the monitor row
-//! and the lobby state — at most one push each a frame.
+//! note on why that time is the *simulation's*). Seven latest-wins slots — the
+//! reveal, the join invitation, the landing screen, the mod-pack shelf, the
+//! picker, the monitor row and the lobby state — at most one push each a frame.
 //!
 //! The one exception is the QR toggle, which is an *edge* and is counted rather
 //! than collapsed — see [`HostLobbyBridge::push_qr_toggle`].
@@ -52,8 +52,8 @@ use std::sync::{Arc, Mutex};
 
 use super::document::{
     host_lobby_apply_script, host_lobby_join_script, host_lobby_landing_script,
-    host_lobby_layout_script, host_lobby_qr_toggle_script, host_lobby_reveal_script,
-    host_lobby_scenario_script,
+    host_lobby_layout_script, host_lobby_packs_script, host_lobby_qr_toggle_script,
+    host_lobby_reveal_script, host_lobby_scenario_script,
 };
 use crate::native_host::panes::{PaneSurface, PaneSurfaceError};
 
@@ -103,6 +103,12 @@ struct Inner {
     /// same reason: its feed pushes on the first frame and on the frame a World
     /// lands, and nothing in between.
     landing: Option<String>,
+    /// The newest mod-pack shelf not yet handed to the page (issue #1366).
+    ///
+    /// Latest-wins like the landing above it, and carrying no dedupe for the
+    /// same reason: its feed pushes on the first frame and on the frame an
+    /// install attempt finished, and nothing in between.
+    packs: Option<String>,
     /// QR toggles asked for but not yet applied (issue #1329).
     ///
     /// A COUNT, not a flag, because this is the one thing on this bridge that is
@@ -195,6 +201,12 @@ impl HostLobbyBridge {
         self.lock().landing = Some(json.into());
     }
 
+    /// Hand the surface the mod-pack shelf
+    /// ([`super::packs::ModPackPanelPayload`], already encoded) - issue #1366.
+    pub fn push_packs(&self, json: impl Into<String>) {
+        self.lock().packs = Some(json.into());
+    }
+
     /// Somebody asked for the join QR to be flipped (issue #1329).
     ///
     /// A phone's `ClientMessage::ToggleQrCode`, arriving over the relay at a
@@ -232,6 +244,7 @@ impl HostLobbyBridge {
             || inner.join.is_some()
             || inner.scenario.is_some()
             || inner.landing.is_some()
+            || inner.packs.is_some()
             || inner.layout.is_some()
             || inner.qr_toggles > 0
     }
@@ -275,6 +288,7 @@ impl HostLobbyBridge {
             join: inner.join.take(),
             scenario: inner.scenario.take(),
             landing: inner.landing.take(),
+            packs: inner.packs.take(),
             layout: inner.layout.take(),
             payload: inner.payload.take(),
             qr_toggles: std::mem::take(&mut inner.qr_toggles),
@@ -318,6 +332,13 @@ impl HostLobbyBridge {
         }
     }
 
+    fn restore_packs(&self, json: String) {
+        let mut inner = self.lock();
+        if inner.packs.is_none() {
+            inner.packs = Some(json);
+        }
+    }
+
     fn restore_layout(&self, json: String) {
         let mut inner = self.lock();
         if inner.layout.is_none() {
@@ -340,6 +361,7 @@ struct Pending {
     reveal: Option<bool>,
     join: Option<String>,
     landing: Option<String>,
+    packs: Option<String>,
     scenario: Option<String>,
     layout: Option<String>,
     payload: Option<String>,
@@ -350,8 +372,8 @@ struct Pending {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct HostLobbyPumpReport {
     /// Scripts handed to the surface — the reveal, the invitation, the landing
-    /// screen, the picker, the monitor row and the lobby state, plus one for
-    /// every QR toggle.
+    /// screen, the mod-pack shelf, the picker, the monitor row and the lobby
+    /// state, plus one for every QR toggle.
     pub pushed: usize,
     /// Values put back because a push failed.
     pub deferred: usize,
@@ -383,17 +405,22 @@ pub struct HostLobbyPumpReport {
 ///    `document::GROUND_CSS` lifts it clear of all three, so nothing in this
 ///    order decides what covers it — which is why its push sits at 2 for an
 ///    unrelated reason;)
-/// 4. **the scenario picker** (issue #1328), before the lobby it covers: the
+/// 4. **the mod-pack shelf** (issue #1366), which is a STAGE INSIDE the landing
+///    — one of the panels `#landing-mid` holds — so it goes after the landing it
+///    is drawn in and before everything the landing covers. A frame carrying
+///    both a dismissal and a shelf paints the front door's absence once, rather
+///    than filling a panel on a screen that is going away;
+/// 5. **the scenario picker** (issue #1328), before the lobby it covers: the
 ///    picker is a full-screen panel over the crew lobby, so a frame that both
 ///    closes it and fills the lobby behind it decides the covering first. No
 ///    element is written by both renderers, so nothing here can clobber
 ///    anything — the order is fixed and stated so it stays that way;
-/// 5. **the monitor row** (issue #1330), for the same reason the four above it
+/// 6. **the monitor row** (issue #1330), for the same reason the five above it
 ///    go first: the state push is what repaints the whole lobby, so the row has
 ///    to be in place when it lands rather than corrected after it;
-/// 6. **the lobby state**, which carries the phase, and with it the join
+/// 7. **the lobby state**, which carries the phase, and with it the join
 ///    panel's show/hide law;
-/// 7. **QR toggles last**, because an operator's press is their answer to the
+/// 8. **QR toggles last**, because an operator's press is their answer to the
 ///    phase, not the other way round. Applied before the state, a toggle in the
 ///    same frame as a `Lobby` push would be silently overwritten by it.
 ///
@@ -402,8 +429,8 @@ pub struct HostLobbyPumpReport {
 /// snapshots unless it is an edge, in which case it joins the toggles.
 ///
 /// (`host_lobby_boot.js` renders nothing until it has something to render, so a
-/// lone reveal, a lone picker, a lone monitor row or a lone toggle on the first
-/// frame is free.)
+/// lone reveal, a lone picker, a lone shelf, a lone monitor row or a lone toggle
+/// on the first frame is free.)
 pub fn pump_host_lobby(
     bridge: &HostLobbyBridge,
     surface: &mut dyn PaneSurface,
@@ -460,6 +487,23 @@ pub fn pump_host_lobby(
                     report.push_failure = Some(e);
                     report.deferred += 1;
                     bridge.restore_landing(json);
+                    failed = true;
+                }
+            }
+        }
+    }
+
+    if let Some(json) = pending.packs {
+        if failed {
+            report.deferred += 1;
+            bridge.restore_packs(json);
+        } else {
+            match surface.push(&host_lobby_packs_script(&json)) {
+                Ok(()) => report.pushed += 1,
+                Err(e) => {
+                    report.push_failure = Some(e);
+                    report.deferred += 1;
+                    bridge.restore_packs(json);
                     failed = true;
                 }
             }
@@ -939,34 +983,38 @@ mod tests {
         // asserted whole rather than pairwise, because the pairwise tests above
         // each leave the slots they do not mention free to drift.
         //
-        // All SEVEN, since the picker (issue #1328) joined the row (issue
-        // #1330) and the landing (issue #1361) joined both: three slices adding
-        // a snapshot each is exactly the situation the stated rule exists for,
-        // and an assertion one slot short leaves the newest to be placed by
-        // whichever slice lands next. The landing goes with the snapshots and
-        // ahead of the picker it reveals, because of the three panels that
-        // cover one another — lobby, picker, landing — it is the outermost. The
-        // join overlay sits above all three (`document::GROUND_CSS`) and so is
-        // not placed by this order at all.
+        // All EIGHT, since the picker (issue #1328) joined the row (issue
+        // #1330), the landing (issue #1361) joined both and the mod-pack shelf
+        // (issue #1366) joined all three: four slices adding a snapshot each is
+        // exactly the situation the stated rule exists for, and an assertion one
+        // slot short leaves the newest to be placed by whichever slice lands
+        // next. The landing goes with the snapshots and ahead of the picker it
+        // reveals, because of the three panels that cover one another — lobby,
+        // picker, landing — it is the outermost; the shelf goes immediately
+        // after it because it is a stage drawn INSIDE it. The join overlay sits
+        // above all three (`document::GROUND_CSS`) and so is not placed by this
+        // order at all.
         let bridge = HostLobbyBridge::new();
         bridge.push_lobby_state(LOBBY);
         bridge.push_qr_toggle();
         bridge.push_layout(ROW);
         bridge.push_scenario(r#"{"scenarios":[],"locked":false}"#);
         bridge.push_landing(r#"{"build":"0.1.0","dismissed":false}"#);
+        bridge.push_packs(r#"{"dir":"mods","offered":[]}"#);
         bridge.push_join(r#"{"kind":"code","code":"ABCDE"}"#);
         bridge.push_reveal(true);
         let mut surface = RecordingSurface::ready();
 
         let report = pump_host_lobby(&bridge, &mut surface);
-        assert_eq!(report.pushed, 7);
+        assert_eq!(report.pushed, 8);
         assert!(surface.pushed[0].contains("__phoenixHostLobbyReveal('true')"));
         assert!(surface.pushed[1].contains("__phoenixHostLobbyJoin("));
         assert!(surface.pushed[2].contains("__phoenixHostLobbyLanding("));
-        assert!(surface.pushed[3].contains("__phoenixHostLobbyScenario("));
-        assert!(surface.pushed[4].contains("__phoenixHostLobbyLayout("));
-        assert!(surface.pushed[5].contains("__phoenixHostLobbyApply("));
-        assert_eq!(surface.pushed[6], "window.__phoenixHostLobbyQrToggle()");
+        assert!(surface.pushed[3].contains("__phoenixHostLobbyPacks("));
+        assert!(surface.pushed[4].contains("__phoenixHostLobbyScenario("));
+        assert!(surface.pushed[5].contains("__phoenixHostLobbyLayout("));
+        assert!(surface.pushed[6].contains("__phoenixHostLobbyApply("));
+        assert_eq!(surface.pushed[7], "window.__phoenixHostLobbyQrToggle()");
     }
 
     #[test]

@@ -177,7 +177,8 @@ pub struct LoadedContent {
 /// HTTP and [`Self::merged_catalog`] hands one to the native host's lobby
 /// (issue #1326), and the two must never resolve a world differently.
 ///
-/// Touches no process-global state.
+/// Reads the session mod-pack overlay (see [`Self::resolve_world`]) and writes
+/// nothing process-global of its own.
 pub struct ManifestSource {
     /// The content tree every relative path resolves against.
     root: PathBuf,
@@ -217,8 +218,25 @@ impl ManifestSource {
 
     /// The raw text of one manifest-listed world, or `None` when it cannot be
     /// read. The whole of native's `resolve_world`.
+    ///
+    /// **Overlay first, disk second**, which is not a nicety: it is the order
+    /// [`build_merged_catalog`]'s contract requires of its caller, the order the
+    /// browser twin already resolves in (`bridge`'s
+    /// `config_cache::resolved_world_source`), and the order every other native
+    /// content channel uses — `include_resolve::FsFragmentSource`,
+    /// `config_cache::OverlayScriptResolver`, `world::load::OverlayFsReader`. A
+    /// pack that ADDS a scenario carries that scenario's world only in its own
+    /// [`ActivePack::files`](crate::entities::config_cache::ActivePack), never on
+    /// disk, and `build_catalog` SKIPS an entry whose world will not resolve — so
+    /// a disk-only resolver would accept the pack, log it installed, and then
+    /// silently drop the very scenario it was installed for.
+    ///
+    /// The two lookups share a key: the overlay is keyed by the authored
+    /// repo-relative path (`assets/worlds/x.toml`) the manifest already names,
+    /// which is exactly what `self.root.join(rel)` is built from.
     pub fn resolve_world(&self, rel: &str) -> Option<String> {
-        std::fs::read_to_string(self.root.join(rel)).ok()
+        crate::entities::config_cache::mod_pack_overlay_get(rel)
+            .or_else(|| std::fs::read_to_string(self.root.join(rel)).ok())
     }
 
     /// `validate_manifest`'s findings, flattened to one line each for the
@@ -241,11 +259,13 @@ impl ManifestSource {
     /// [`build_merged_catalog`] call `wasm_get_scenario_catalog` makes
     /// (issue #1326).
     ///
-    /// On native the overlay stack is empty today (nothing calls
-    /// `config_cache::push_mod_pack` off the browser), so this returns exactly
-    /// what [`Self::catalog`] does; going through the merge anyway is what keeps
-    /// the native lobby's catalogue the browser's catalogue rather than a second
-    /// derivation of it, and is the seam a native mod-pack path would land on.
+    /// With no pack installed this returns exactly what [`Self::catalog`] does;
+    /// going through the merge anyway is what keeps the native lobby's catalogue
+    /// the browser's catalogue rather than a second derivation of it. Since issue
+    /// #1366 the native stack is no longer always empty — `host_lobby`'s
+    /// `apply_mod_pack_choice` pushes onto it — which is why
+    /// [`Self::resolve_world`] has to be overlay-aware for this method to mean
+    /// anything.
     pub fn merged_catalog(&self) -> MergedCatalog {
         let active = crate::entities::config_cache::active_packs();
         let parsed: Vec<(String, Manifest)> = active
@@ -275,8 +295,11 @@ impl ManifestSource {
 
 /// Read the manifest and its worlds off disk and build the published document.
 ///
-/// Touches no process-global state, so it is safe from a unit test — unlike
-/// [`preload_templates`], which is not.
+/// Writes no process-global state, so it is safe from a unit test — unlike
+/// [`preload_templates`], which is not. It does READ the session mod-pack
+/// overlay through [`ManifestSource::resolve_world`], which is empty unless a
+/// test installed a pack (and [`crate::entities::config_cache`]'s
+/// `overlay_test_guard` is how one asks for that).
 pub fn load_content(content_dir: &str, manifest_rel: &str) -> Result<LoadedContent, String> {
     Ok(ManifestSource::read(content_dir, manifest_rel)?.loaded_content())
 }
@@ -1124,6 +1147,24 @@ template_path = \"assets/entities/alliance_destroyer.toml\"
 template_path = \"assets/entities/alliance_cruiser.toml\"
 ";
 
+    /// A world a MOD PACK carries. Never written to the fixture's content tree,
+    /// so anything that finds it found it in the overlay.
+    const PACK_WORLD: &str = "\
+[global]
+title = \"Pack Only\"
+description = \"A scenario only the pack knows about.\"
+
+[[available_ships]]
+template_path = \"assets/entities/alliance_destroyer.toml\"
+";
+
+    /// That pack's own scenario manifest, naming the world above.
+    const PACK_MANIFEST: &str = "\
+[[scenario]]
+id = \"pack_only\"
+world = \"assets/worlds/pack_only.toml\"
+";
+
     /// A content tree on disk, in a directory this test owns.
     struct Fixture {
         dir: PathBuf,
@@ -1171,6 +1212,58 @@ template_path = \"assets/entities/alliance_cruiser.toml\"
         "Sec-WebSocket-Version: 13",
         "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
     ];
+
+    /// The acceptance criterion of issue #1366's install path, and the case a
+    /// disk-only `resolve_world` silently dropped: an accepted pack that ADDS a
+    /// scenario has to appear in the catalogue the lobby publishes.
+    ///
+    /// A pack's own world exists ONLY in its `files` map — nothing writes it to
+    /// the content tree — so this passes exactly when the resolver consults the
+    /// overlay before the disk.
+    #[test]
+    fn an_accepted_pack_widens_the_merged_catalogue_with_its_own_world() {
+        let _overlay = crate::entities::config_cache::overlay_test_guard();
+        let fixture = Fixture::new("merged-catalog-pack", MANIFEST);
+        let source = ManifestSource::read(&fixture.path(), "assets/scenarios.toml")
+            .expect("the fixture manifest reads");
+        assert_eq!(
+            source.merged_catalog().catalog.scenarios.len(),
+            1,
+            "the base catalogue is the one scenario on disk"
+        );
+
+        crate::entities::config_cache::push_mod_pack(crate::entities::config_cache::ActivePack {
+            id: "widening-pack".to_string(),
+            name: "Widening Pack".to_string(),
+            version: "1".to_string(),
+            files: [(
+                "assets/worlds/pack_only.toml".to_string(),
+                PACK_WORLD.to_string(),
+            )]
+            .into_iter()
+            .collect(),
+            manifest_toml: PACK_MANIFEST.to_string(),
+        });
+
+        let merged = source.merged_catalog();
+        let added = merged
+            .catalog
+            .scenarios
+            .iter()
+            .find(|s| s.id == "pack_only")
+            .expect("a pack's own world lives only in the overlay — disk cannot resolve it");
+        assert_eq!(added.origin.as_deref(), Some("widening-pack"));
+        assert_eq!(added.label.as_deref(), Some("Pack Only"));
+        assert_eq!(added.ships.len(), 1);
+        assert!(
+            merged
+                .catalog
+                .scenarios
+                .iter()
+                .any(|s| s.id == "combat_test"),
+            "a pack WIDENS the catalogue; it does not replace what was there"
+        );
+    }
 
     #[test]
     fn a_well_formed_upgrade_on_a_claimed_path_hands_the_key_over() {

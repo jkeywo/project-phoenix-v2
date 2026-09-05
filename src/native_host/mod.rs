@@ -109,6 +109,16 @@ pub mod layout_store;
 /// accepted lobby change back to it, both gated off for a run an operator gave
 /// an explicit `--profile`.
 pub mod layout_store_systems;
+/// The **mod-pack shelf** (issue #1366) — pure, Bevy-free, and filesystem-free
+/// by construction: it takes a directory LISTING and answers "what is on the
+/// shelf", so every rule about which files are offered is an ordinary
+/// `cargo test` with no temp directory in it. The native host has no file input
+/// and no file dialog, so `--mod-pack-dir` names a folder and the landing offers
+/// what is in it. What happens to a chosen pack is deliberately NOT here — that
+/// is the existing [`crate::world::mod_pack`] validation and the existing
+/// [`crate::entities::config_cache`] overlay, reached through
+/// [`host_lobby::packs`].
+pub mod mod_packs;
 pub mod panes;
 /// The real WebSocket behind [`relay_transport`]. Behind the `host` feature
 /// because it is the only thing here that needs `tungstenite`; the protocol it
@@ -149,7 +159,7 @@ pub use app::{
 ///    shaders, textures and audio.
 /// 2. **Raw `std::fs`** against the **process working directory**, for the full
 ///    authored path a world TOML writes. This governs the world TOML itself
-///    (`world::load::FsReader`), entity templates (`FsTemplateLoader`), Rhai
+///    (`world::load::OverlayFsReader`), entity templates (`FsTemplateLoader`), Rhai
 ///    scripts (`FsScriptFallback`) and model-rig sidecars
 ///    (`entities::glb_visual`).
 ///

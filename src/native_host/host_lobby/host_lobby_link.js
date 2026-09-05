@@ -22,8 +22,8 @@
 //                               (#1328)
 //   gui/host-landing-view.js    which routes the menu offers, and which one a
 //                               press opens or closes (#1360)
-//   gui/host-landing-render.js  that decision -> the DOM inside #landing-panel
-//                               (#1360)
+//   gui/host-landing-render.js  that decision -> the DOM inside #landing-panel,
+//                               the mod-pack shelf included (#1360, #1366)
 //
 // If this file ever grows a render decision of its own, that decision has
 // escaped the shared path and belongs back in one of those modules instead.
@@ -134,15 +134,16 @@ window.__phoenixHostLobby.renderJoin = function (json, qrToggles) {
   drawJoinQr(document, { url, code: invite.code }, window.QRCode, { link: false });
 };
 
-// ── Page -> host (issues #1328/#1330/#1331) ─────────────────────────────────
+// ── Page -> host (issues #1328/#1330/#1331/#1361/#1365/#1366) ───────────────
 //
 // Unlike the renders above, this surface SENDS: a scenario, a hull, the AI
 // launch (issue #1328), a monitor for the viewscreen (issue #1330), a screen
 // for a station's console — or none, closing it (issue #1331) — a route
-// opened or closed on the landing menu (issue #1361), and the confirmed Exit
-// to Desktop (issue #1365). All nine go over
+// opened or closed on the landing menu (issue #1361), the confirmed Exit
+// to Desktop (issue #1365) and a mod pack chosen off the shelf (issue #1366).
+// All ten go over
 // the ONE page->host queue the boot script installed, as
-// native_host::host_lobby::HostLobbyRecord — nine tags in one vocabulary, and
+// native_host::host_lobby::HostLobbyRecord — ten tags in one vocabulary, and
 // deliberately not ClientMessages, because this surface holds no session token
 // and is not a participant. The host drains that queue in one system and
 // dispatches on the tag; a second queue or a second record type would be a
@@ -232,6 +233,21 @@ let landingOpenEntry = null;
 // World has taken the front door away. Held so a re-render driven by a click
 // carries the same facts the last push did.
 let landingState = { build: 'dev', dismissed: false };
+// The host's mod-pack shelf (issue #1366), or null on a host started without
+// `--mod-pack-dir` — which is most of them, and is exactly how the landing's
+// Load-mod-pack row stays inert here. `landingProvides` is what this surface
+// tells `landingViewModel` it can ANSWER, and it is derived from the shelf
+// rather than declared: a capability list that said `packs` on a host that
+// never pushed one would be this file claiming something the process cannot do.
+let landingPacks = null;
+// Which archive the operator has highlighted. This surface's own memory, for the
+// reason `landingOpenEntry` is: the host hears about a choice when it is asked
+// to install one, and holding it there would make every highlight a round trip.
+let landingPackChoice = null;
+
+function landingProvides() {
+  return landingPacks ? ['packs'] : [];
+}
 
 function drawLanding() {
   renderHostLanding(
@@ -243,11 +259,14 @@ function drawLanding() {
       platform: 'native',
       build: landingState.build,
       dismissed: landingState.dismissed,
+      provides: landingProvides(),
+      packs: landingPacks,
+      chosenPack: landingPackChoice,
     }),
     t,
     {
       pick: (entryId) => {
-        const next = nextOpenEntry(landingOpenEntry, entryId);
+        const next = nextOpenEntry(landingOpenEntry, entryId, undefined, landingProvides());
         // An entry whose slice has not landed returns the open entry unchanged,
         // and the view model is a pure function of that memory - so re-rendering
         // would rebuild the whole menu to produce byte-identical DOM, at the
@@ -271,6 +290,26 @@ function drawLanding() {
       // does is go away. A hopeful re-render would be this document claiming to
       // know that the host agreed.
       confirm: (action) => send({ kind: action }),
+      // The mod-pack shelf's two (issue #1366), and they are two because they
+      // cost different things. Highlighting a row is this document's own memory
+      // and is answered by a repaint; installing reads an archive off a disk,
+      // runs the whole validation and changes the catalogue every phone in the
+      // room is looking at, so it is a record the host answers.
+      pickPack: (file) => {
+        if (landingPackChoice === file) return;
+        landingPackChoice = file;
+        drawLanding();
+      },
+      // `action` is the verb the OPEN ROW declared, forwarded as the record's
+      // `kind` rather than translated through a table here — the same
+      // arrangement `confirm` above makes, and the reason a row names its verb
+      // once in the one place a row is declared.
+      //
+      // Nothing is redrawn afterwards, and nothing should be: what answers this
+      // is a push carrying the host's own account of what happened, and a
+      // hopeful repaint here would be this document claiming to know the answer
+      // before it arrives.
+      installPack: (action, file) => send({ kind: action, pack: file }),
       // No fullscreen hook is handed over: the control it would drive is
       // stripped from this document (native_host::host_lobby::document),
       // because a native window's mode belongs to the host process and setting
@@ -303,6 +342,31 @@ window.__phoenixHostLobby.renderLanding = function (json) {
   // later (a Game Over returning this host to selection) opens on its front
   // door rather than on a stage nobody asked for.
   if (landingState.dismissed) landingOpenEntry = null;
+  drawLanding();
+};
+
+// Host -> page: the mod-pack shelf (issue #1366). Arriving at all is what tells
+// this surface it can answer the Load-mod-pack row, so a host started without
+// `--mod-pack-dir` — which never pushes — leaves that row inert with no check
+// for the flag anywhere on this side of the bridge.
+window.__phoenixHostLobby.renderPacks = function (json) {
+  let payload;
+  try {
+    payload = JSON.parse(json);
+  } catch (e) {
+    console.warn('[host-lobby] bad mod-pack shelf json', e);
+    return;
+  }
+  landingPacks = payload;
+  // A highlight the host is no longer offering is dropped rather than carried:
+  // the shelf is rescanned on every attempt, so the archive an operator chose
+  // can have left the folder — and an install of a pack that is not on the
+  // shelf is a refusal, which is a worse way to find that out than the row
+  // simply no longer being there.
+  if (landingPackChoice
+    && !(payload.offered || []).some((p) => p.file === landingPackChoice)) {
+    landingPackChoice = null;
+  }
   drawLanding();
 };
 
@@ -390,3 +454,4 @@ window.__phoenixHostLobby.paint();
 window.__phoenixHostLobby.paintJoin();
 window.__phoenixHostLobby.paintScenario();
 window.__phoenixHostLobby.paintLanding();
+window.__phoenixHostLobby.paintPacks();

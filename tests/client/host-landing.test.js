@@ -39,11 +39,26 @@ describe('the shipped entry table', () => {
     ]);
   });
 
-  it('gives New Game and Exit to Desktop a stage — the rest are inert', () => {
+  it('gives New Game, Load mod pack and Exit to Desktop a stage — the rest are inert', () => {
     // The honest shape of a tracer: the ones without a stage each have a
     // sibling issue that gives them one, and until then they must not pretend.
     const staged = LANDING_ENTRIES.filter((e) => e.stage).map((e) => e.id);
-    expect(staged).toEqual(['new_game', 'exit_desktop']);
+    expect(staged).toEqual(['new_game', 'load_mod_pack', 'exit_desktop']);
+  });
+
+  it('makes Load mod pack need a SHELF rather than need a platform', () => {
+    // Issue #1366's whole availability rule, and why it is a third field rather
+    // than more `platforms`: the same native binary offers a mod-pack folder
+    // when it was started with --mod-pack-dir and none when it was not, so
+    // which hosts can answer this row is not a fact about the build.
+    const row = LANDING_ENTRIES.find((e) => e.id === 'load_mod_pack');
+    expect(row.stage).toBe('mod-packs');
+    expect(row.needs).toBe('packs');
+    expect(row.platforms).toEqual(['web', 'native']);
+    // …and its verb is named once, on the row that owns it — the same
+    // arrangement `exit_desktop`'s `confirm.action` makes, and deliberately the
+    // same token as the record the native surface sends.
+    expect(row.action).toBe('install_mod_pack');
   });
 
   it('offers Exit to Desktop on native only, because a tab cannot quit an app', () => {
@@ -383,5 +398,250 @@ describe('landingViewModel — a dismissed landing', () => {
   it('still lists the menu, so a landing shown again needs no second decision', () => {
     const vm = landingViewModel({ entries: TABLE, platform: 'native', dismissed: true });
     expect(vm.entries.map((e) => e.id)).toEqual(['alpha', 'beta', 'gamma']);
+  });
+});
+
+// ── The mod-pack shelf (issue #1366) ────────────────────────────────────────
+//
+// Two separable claims, and they are separable on purpose:
+//
+//   1. `needs`/`provides` is a GENERAL rule over the table, exercised through a
+//      table this suite owns, so it cannot be satisfied by a special case for
+//      the one shipped row that uses it;
+//   2. the shelf stage is a pure function of the host's snapshot plus the one
+//      thing the host does not know — which row the operator highlighted.
+
+/** A table this suite owns, whose one interesting row needs something. */
+const NEEDY = [
+  { id: 'plain', labelId: 'x.p', descId: 'x.p_desc', stage: 'plain-stage' },
+  {
+    id: 'shelf',
+    labelId: 'x.s',
+    descId: 'x.s_desc',
+    stage: 'mod-packs',
+    needs: 'packs',
+    action: 'x_install',
+  },
+];
+
+/** A host snapshot in the shape `native_host::host_lobby::packs` encodes. */
+const SHELF = {
+  dir: 'mods',
+  offered: [
+    { file: 'thin-margin.zip', label: 'thin-margin' },
+    { file: 'borrowed-sun.zip', label: 'borrowed-sun' },
+  ],
+  installed: [{ id: 'thin-margin', name: 'Thin Margin', version: '1.2' }],
+  attempted: null,
+  accepted: false,
+  findings: [],
+  conflicts: [],
+};
+
+describe('a row that NEEDS something the surface must provide', () => {
+  it('is inert until the surface says it can answer it', () => {
+    const without = landingViewModel({ entries: NEEDY });
+    expect(without.entries.find((e) => e.id === 'shelf').inert).toBe(true);
+    const with_ = landingViewModel({ entries: NEEDY, provides: ['packs'] });
+    expect(with_.entries.find((e) => e.id === 'shelf').inert).toBe(false);
+  });
+
+  it('is one word for two reasons, because they look the same on screen', () => {
+    // A route with no stage yet and a route this host cannot answer are both
+    // "renders, and pressing it changes nothing".
+    const vm = landingViewModel({ entries: NEEDY });
+    expect(vm.entries.map((e) => [e.id, e.inert]))
+      .toEqual([['plain', false], ['shelf', true]]);
+  });
+
+  it('will not open through nextOpenEntry while the need is unmet', () => {
+    expect(nextOpenEntry(null, 'shelf', NEEDY)).toBe(null);
+    expect(nextOpenEntry('plain', 'shelf', NEEDY)).toBe('plain');
+    expect(nextOpenEntry(null, 'shelf', NEEDY, ['packs'])).toBe('shelf');
+    expect(nextOpenEntry('shelf', 'shelf', NEEDY, ['packs'])).toBe(null);
+  });
+
+  it('reads as closed when a remembered open id needs what this run cannot give', () => {
+    // A page reloaded against a host restarted without --mod-pack-dir. The
+    // caller's memory outlives the RUN as well as the menu, and opening a shelf
+    // stage with no shelf behind it would be worse than the front door.
+    const vm = landingViewModel({ entries: NEEDY, openEntryId: 'shelf' });
+    expect(vm.stage).toBe('idle');
+    expect(vm.openEntryId).toBe(null);
+    expect(vm.packs).toBe(null);
+  });
+
+  it('leaves the shipped Load mod pack row exactly as inert as it was', () => {
+    // The reason `server.html` needed no edit: the host page provides nothing,
+    // so the row it has been rendering since #1360 is unchanged.
+    const web = landingViewModel();
+    expect(web.entries.find((e) => e.id === 'load_mod_pack').inert).toBe(true);
+    expect(nextOpenEntry(null, 'load_mod_pack')).toBe(null);
+  });
+});
+
+describe('landingViewModel — the mod-pack shelf stage (issue #1366)', () => {
+  const open = (extra) => landingViewModel(Object.assign({
+    entries: NEEDY,
+    provides: ['packs'],
+    openEntryId: 'shelf',
+    packs: SHELF,
+  }, extra || {}));
+
+  it('is null unless the row that needs it is the open one', () => {
+    // The exact sibling of `confirm`: the renderer draws the stage from its
+    // presence, and never from a stage name or an entry id.
+    expect(landingViewModel({ entries: NEEDY, provides: ['packs'], packs: SHELF }).packs)
+      .toBe(null);
+    expect(open().packs).not.toBe(null);
+    expect(open({ openEntryId: 'plain' }).packs).toBe(null);
+  });
+
+  it('lists what the host offered, in the order it offered it', () => {
+    expect(open().packs.rows.map((r) => [r.file, r.label, r.selected])).toEqual([
+      ['thin-margin.zip', 'thin-margin', false],
+      ['borrowed-sun.zip', 'borrowed-sun', false],
+    ]);
+  });
+
+  it('names the folder even when there is nothing in it', () => {
+    // "There are no packs here" and "this host was never given a folder" ask
+    // the operator to do different things, so the panel always says which.
+    const vm = open({ packs: Object.assign({}, SHELF, { offered: [] }) });
+    expect(vm.packs.folder).toEqual({
+      id: 'server.landing.packs.folder',
+      params: { dir: 'mods' },
+    });
+    expect(vm.packs.emptyId).toBe('server.landing.packs.empty');
+    expect(vm.packs.scanError).toBe(null);
+  });
+
+  it('says a folder it could not READ is a different emptiness', () => {
+    const vm = open({
+      packs: Object.assign({}, SHELF, { offered: [], scan_error: 'mods: not found' }),
+    });
+    expect(vm.packs.emptyId).toBe('server.landing.packs.scan_failed');
+    // The host's own sentence about the operator's own path rides beside the
+    // id rather than inside it: no string table could hold it.
+    expect(vm.packs.scanError).toBe('mods: not found');
+  });
+
+  it('installs nothing until a row is highlighted', () => {
+    expect(open().packs.ctaEnabled).toBe(false);
+    expect(open().packs.chosen).toBe(null);
+    const chosen = open({ chosenPack: 'borrowed-sun.zip' });
+    expect(chosen.packs.ctaEnabled).toBe(true);
+    expect(chosen.packs.chosen).toBe('borrowed-sun.zip');
+    expect(chosen.packs.rows.map((r) => r.selected)).toEqual([false, true]);
+  });
+
+  it('drops a highlight the host is no longer offering', () => {
+    // The shelf is rescanned on every attempt, so an archive can leave the
+    // folder between the click that chose it and the render that draws it.
+    const vm = open({ chosenPack: 'deleted-since.zip' });
+    expect(vm.packs.chosen).toBe(null);
+    expect(vm.packs.ctaEnabled).toBe(false);
+  });
+
+  it('carries the OPEN ROW’s verb, so no caller keeps a mapping table', () => {
+    expect(open().packs.action).toBe('x_install');
+  });
+
+  it('says what is wrong when a pack was refused, in the validator’s own words', () => {
+    const vm = open({
+      packs: Object.assign({}, SHELF, {
+        attempted: 'broken.zip',
+        accepted: false,
+        findings: [{
+          severity: 'error',
+          category: 'missing-manifest',
+          message: 'mod pack is missing its required scenarios.toml manifest',
+          file: 'scenarios.toml',
+        }],
+      }),
+    });
+    expect(vm.packs.outcome).toEqual({
+      tone: 'bad',
+      line: { id: 'server.landing.packs.refused', params: { pack: 'broken.zip' } },
+    });
+    expect(vm.packs.findingsHeadingId).toBe('server.landing.packs.findings_heading');
+    expect(vm.packs.findings).toEqual([{
+      tone: 'bad',
+      labelId: 'server.landing.packs.severity_error',
+      category: 'missing-manifest',
+      message: 'mod pack is missing its required scenarios.toml manifest',
+      file: 'scenarios.toml',
+    }]);
+  });
+
+  it('reports a warning without calling the install a failure', () => {
+    const vm = open({
+      packs: Object.assign({}, SHELF, {
+        attempted: 'ok.zip',
+        accepted: true,
+        findings: [{
+          severity: 'warning',
+          category: 'overlapping-pack-path',
+          message: 'ok shadows thin-margin for assets/entities/x.toml',
+          file: 'scenarios.toml',
+        }],
+      }),
+    });
+    expect(vm.packs.outcome.tone).toBe('ok');
+    expect(vm.packs.outcome.line.id).toBe('server.landing.packs.accepted');
+    expect(vm.packs.findings[0].tone).toBe('warn');
+    expect(vm.packs.findings[0].labelId).toBe('server.landing.packs.severity_warning');
+  });
+
+  it('reports nothing at all before the first attempt', () => {
+    // A freshly opened shelf must not claim a success nobody asked for.
+    expect(open().packs.outcome).toBe(null);
+    expect(open().packs.findingsHeadingId).toBe(null);
+  });
+
+  it('names which pack won a path two of them carry', () => {
+    // The acceptance criterion, and the reason it matters: two packs that both
+    // replace one hull produce one hull, and an operator who cannot see which
+    // is flying has no way to work out why their change did nothing.
+    const vm = open({
+      packs: Object.assign({}, SHELF, {
+        conflicts: [{
+          path: 'assets/entities/alliance_destroyer.toml',
+          winner: 'borrowed-sun',
+          losers: ['thin-margin'],
+        }],
+      }),
+    });
+    expect(vm.packs.conflictsHeadingId).toBe('server.landing.packs.conflict_heading');
+    expect(vm.packs.conflicts[0].line).toEqual({
+      id: 'server.landing.packs.conflict_line',
+      params: {
+        path: 'assets/entities/alliance_destroyer.toml',
+        winner: 'borrowed-sun',
+        losers: 'thin-margin',
+      },
+    });
+  });
+
+  it('lists what is already applied, so a second install is an addition', () => {
+    expect(open().packs.installedHeadingId).toBe('server.landing.packs.installed_heading');
+    expect(open().packs.installed[0].line).toEqual({
+      id: 'server.landing.packs.installed_line',
+      params: { name: 'Thin Margin', version: '1.2', id: 'thin-margin' },
+    });
+  });
+
+  it('renders an open shelf the host has not pushed yet without crashing', () => {
+    // The frame between the row opening and the first push. Every list is
+    // empty, the folder is empty, and nothing pretends.
+    const vm = landingViewModel({
+      entries: NEEDY, provides: ['packs'], openEntryId: 'shelf', packs: null,
+    });
+    expect(vm.packs.rows).toEqual([]);
+    expect(vm.packs.installed).toEqual([]);
+    expect(vm.packs.conflicts).toEqual([]);
+    expect(vm.packs.findings).toEqual([]);
+    expect(vm.packs.emptyId).toBe('server.landing.packs.empty');
+    expect(vm.packs.ctaEnabled).toBe(false);
   });
 });

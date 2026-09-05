@@ -378,6 +378,213 @@ describe('renderHostLanding — the confirmation stage (issue #1365)', () => {
   });
 });
 
+describe('renderHostLanding — the mod-pack shelf (issue #1366)', () => {
+  // The third tenant of the middle column, and the same claim the confirmation
+  // stage makes: everything drawn comes off `vm.packs`, which the view model
+  // composes from the OPEN ROW — so this renderer knows there is such a thing
+  // as a shelf and knows nothing about Load mod pack.
+  const el = (doc, id) => doc.getElementById(id);
+  const SHELF = {
+    dir: 'mods',
+    offered: [
+      { file: 'thin-margin.zip', label: 'thin-margin' },
+      { file: 'borrowed-sun.zip', label: 'borrowed-sun' },
+    ],
+    installed: [],
+    attempted: null,
+    accepted: false,
+    findings: [],
+    conflicts: [],
+  };
+  /** What `host_lobby_link.js` passes on a native host given --mod-pack-dir. */
+  const shelfVm = (extra) => landingViewModel(Object.assign({
+    platform: 'native',
+    build: '0.1.0',
+    provides: ['packs'],
+    openEntryId: 'load_mod_pack',
+    packs: SHELF,
+  }, extra || {}));
+  const rows = (doc) => Array.from(doc.querySelectorAll('.landing-pack'));
+  const notes = (doc) => Array.from(doc.querySelectorAll('.landing-note'))
+    .map((n) => n.textContent);
+
+  it('is off screen and wordless until the route is open', () => {
+    const doc = landingDoc();
+    renderHostLanding(doc, landingViewModel(), t);
+    expect(el(doc, 'landing-packs').style.display).toBe('none');
+    expect(text(doc, 'landing-packs-title')).toBe('');
+    expect(text(doc, 'landing-packs-cta')).toBe('');
+    expect(rows(doc)).toEqual([]);
+  });
+
+  it('lists the scanned archives and names the folder they came from', () => {
+    const doc = landingDoc();
+    renderHostLanding(doc, shelfVm(), t);
+    expect(el(doc, 'landing-packs').style.display).toBe('');
+    expect(text(doc, 'landing-packs-title')).toBe('server.landing.packs.title');
+    expect(text(doc, 'landing-packs-folder'))
+      .toBe('server.landing.packs.folder:{"dir":"mods"}');
+    expect(rows(doc).map((r) => r.getAttribute('data-landing-pack')))
+      .toEqual(['thin-margin.zip', 'borrowed-sun.zip']);
+    expect(rows(doc)[0].querySelector('.landing-pack-label').textContent)
+      .toBe('thin-margin');
+    // The file name is shown as well as the label: a folder is the operator's
+    // own filing, and two packs whose labels read alike are told apart by the
+    // bytes on disk.
+    expect(rows(doc)[0].querySelector('.landing-pack-file').textContent)
+      .toBe('thin-margin.zip');
+  });
+
+  it('says which emptiness an empty shelf is', () => {
+    const doc = landingDoc();
+    renderHostLanding(doc, shelfVm({
+      packs: { ...SHELF, offered: [] },
+    }), t);
+    expect(text(doc, 'landing-packs-empty')).toBe('server.landing.packs.empty');
+    renderHostLanding(doc, shelfVm({
+      packs: { ...SHELF, offered: [], scan_error: 'mods: not found' },
+    }), t);
+    // The id says which emptiness; the host's own sentence names the path.
+    expect(text(doc, 'landing-packs-empty'))
+      .toBe('server.landing.packs.scan_failed mods: not found');
+    // …and it goes away entirely the moment there is something to list.
+    renderHostLanding(doc, shelfVm(), t);
+    expect(el(doc, 'landing-packs-empty').style.display).toBe('none');
+  });
+
+  it('highlights through the hook and installs through the other one', () => {
+    // Two hooks because they cost different things: a highlight is this
+    // surface's own memory, an install reads a disk and changes the catalogue
+    // every phone in the room is looking at.
+    const doc = landingDoc();
+    const calls = { pickPack: [], installPack: [], pick: [] };
+    const h = {
+      pick: (id) => calls.pick.push(id),
+      pickPack: (file) => calls.pickPack.push(file),
+      installPack: (action, file) => calls.installPack.push([action, file]),
+    };
+    renderHostLanding(doc, shelfVm(), t, h);
+    doc.querySelector('[data-landing-pack="borrowed-sun.zip"]').click();
+    expect(calls.pickPack).toEqual(['borrowed-sun.zip']);
+    // Nothing is chosen yet as far as this render is concerned, so the install
+    // control is dead — that decision is the view model's, not this file's.
+    el(doc, 'landing-packs-cta').click();
+    expect(calls.installPack).toEqual([]);
+    expect(el(doc, 'landing-packs-cta').getAttribute('aria-disabled')).toBe('true');
+
+    renderHostLanding(doc, shelfVm({ chosenPack: 'borrowed-sun.zip' }), t, h);
+    expect(el(doc, 'landing-packs-cta').getAttribute('aria-disabled')).toBe('false');
+    expect(rows(doc)[1].classList.contains('on')).toBe(true);
+    expect(rows(doc)[1].getAttribute('aria-pressed')).toBe('true');
+    el(doc, 'landing-packs-cta').click();
+    // The ROW's verb, carried verbatim: this renderer never learns its name.
+    expect(calls.installPack).toEqual([['install_mod_pack', 'borrowed-sun.zip']]);
+  });
+
+  it('binds the install control once per render, not once more each time', () => {
+    // Static markup, re-rendered on every press: an accumulated listener would
+    // install one pack per render.
+    const doc = landingDoc();
+    const calls = [];
+    const h = { installPack: (action, file) => calls.push(file) };
+    const vm = () => shelfVm({ chosenPack: 'thin-margin.zip' });
+    renderHostLanding(doc, vm(), t, h);
+    renderHostLanding(doc, vm(), t, h);
+    renderHostLanding(doc, vm(), t, h);
+    el(doc, 'landing-packs-cta').click();
+    expect(calls).toEqual(['thin-margin.zip']);
+  });
+
+  it('closes through the entry own toggle rather than a second way out', () => {
+    const doc = landingDoc();
+    const calls = [];
+    renderHostLanding(doc, shelfVm(), t, { pick: (id) => calls.push(id) });
+    el(doc, 'landing-packs-cancel').click();
+    expect(calls).toEqual(['load_mod_pack']);
+  });
+
+  it('draws what a refusal said, so a failed pack says what is wrong', () => {
+    const doc = landingDoc();
+    renderHostLanding(doc, shelfVm({
+      packs: {
+        ...SHELF,
+        attempted: 'broken.zip',
+        accepted: false,
+        findings: [{
+          severity: 'error',
+          category: 'missing-manifest',
+          message: 'mod pack is missing its required scenarios.toml manifest',
+          file: 'scenarios.toml',
+        }],
+      },
+    }), t);
+    const drawn = notes(doc);
+    expect(drawn[0]).toBe('server.landing.packs.refused:{"pack":"broken.zip"}');
+    expect(drawn[1]).toContain('server.landing.packs.severity_error');
+    expect(drawn[1]).toContain('scenarios.toml');
+    expect(drawn[1]).toContain('missing its required scenarios.toml manifest');
+    expect(doc.querySelector('.landing-note-bad')).not.toBe(null);
+  });
+
+  it('names which pack won a path two of them carry', () => {
+    const doc = landingDoc();
+    renderHostLanding(doc, shelfVm({
+      packs: {
+        ...SHELF,
+        installed: [
+          { id: 'thin-margin', name: 'Thin Margin', version: '1.2' },
+          { id: 'borrowed-sun', name: 'Borrowed Sun', version: '0.9' },
+        ],
+        conflicts: [{
+          path: 'assets/entities/alliance_destroyer.toml',
+          winner: 'borrowed-sun',
+          losers: ['thin-margin'],
+        }],
+      },
+    }), t);
+    const drawn = notes(doc);
+    expect(drawn).toContain('server.landing.packs.installed_heading');
+    expect(drawn).toContain('server.landing.packs.conflict_heading');
+    expect(drawn.some((n) => n.includes('"winner":"borrowed-sun"')
+      && n.includes('"losers":"thin-margin"'))).toBe(true);
+  });
+
+  it('clears itself when the route closes, rather than keeping last words', () => {
+    const doc = landingDoc();
+    renderHostLanding(doc, shelfVm({
+      packs: { ...SHELF, attempted: 'broken.zip', accepted: false },
+    }), t);
+    expect(notes(doc).length).toBe(1);
+    renderHostLanding(doc, landingViewModel({ platform: 'native' }), t);
+    expect(el(doc, 'landing-packs').style.display).toBe('none');
+    expect(text(doc, 'landing-packs-title')).toBe('');
+    expect(rows(doc)).toEqual([]);
+    expect(notes(doc)).toEqual([]);
+  });
+
+  it('renders the shelf with no hooks at all, and does nothing', () => {
+    const doc = landingDoc();
+    renderHostLanding(doc, shelfVm({ chosenPack: 'thin-margin.zip' }), t);
+    expect(() => {
+      el(doc, 'landing-packs-cta').click();
+      el(doc, 'landing-packs-cancel').click();
+      rows(doc)[0].click();
+    }).not.toThrow();
+  });
+
+  it('survives a document that carries no shelf markup at all', () => {
+    // The two-document contract: the shelf's panel is one more branch whose
+    // element may be absent, and it must do nothing rather than abandon the
+    // rest of the render half-written.
+    const doc = landingDoc();
+    doc.getElementById('landing-packs').remove();
+    expect(() => renderHostLanding(doc, shelfVm(), t)).not.toThrow();
+    // …and the writes AFTER it still happened.
+    expect(text(doc, 'landing-title')).toBe('server.landing.title');
+    expect(doc.getElementById('scenario-panel').parentElement).toBe(doc.body);
+  });
+});
+
 describe('undockPicker', () => {
   it('returns the picker to the body whatever the landing is doing', () => {
     // The page-lifecycle escape hatch: driveWorldLoad hides the landing

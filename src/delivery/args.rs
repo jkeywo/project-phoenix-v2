@@ -92,6 +92,22 @@ pub struct SimArgs {
     /// A compatible local slot to stage into this newly constructed native App.
     /// Resume is startup-only; there is deliberately no live-session restore.
     pub resume_slot: Option<String>,
+    /// The directory the landing's mod-pack shelf is scanned from
+    /// (`--mod-pack-dir <DIR>`, issue #1366), resolved against the launch
+    /// directory before `--content-dir` re-roots the process.
+    ///
+    /// `None` is a host with no shelf: the landing's Load-mod-pack entry stays
+    /// the inert row #1360 shipped, because nothing behind it can answer. That
+    /// is the same rule the rest of this surface follows — a control exists
+    /// exactly when something behind it answers it — and it is why this is an
+    /// `Option` rather than a defaulted path that would offer an empty shelf on
+    /// every host in the world.
+    ///
+    /// It lives in [`SimArgs`] and is refused without `--lobby`, because the
+    /// landing that offers the shelf is only ever shown by a world-less host
+    /// (`native_host::host_lobby::feed_landing_panel`) and a pack has to be
+    /// installed BEFORE a World is ingested to change anything at all.
+    pub mod_pack_dir: Option<String>,
     /// Local Station panes to open, one per `--pane <NAME>`, in the order given
     /// (issue #1122).
     ///
@@ -209,6 +225,17 @@ SIMULATION
     --log <SPEC>          Log filter, e.g. info,ai=debug,admit=trace
     --log-entity <NAMES>  Restrict logging to these entity names
 
+MOD PACKS (issue #1366)
+    --mod-pack-dir <DIR>  Scan this directory for mod-pack .zip archives and
+                          offer them on the landing screen, relative to the
+                          launch directory. This window has no file dialog, so
+                          the folder IS the file picker. A chosen pack goes
+                          through exactly the validation a browser upload does,
+                          and is refused whole if any of it fails. Needs
+                          --lobby: a pack changes the catalogue a world is
+                          chosen FROM, and a --world host was told at the prompt
+                          what it is flying.
+
 LOCAL STATIONS (requires a build with --features ultralight)
     --pane <NAME>         Open a local Station pane for a participant of this
                           name, in an embedded browser view showing the ordinary
@@ -307,6 +334,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
     let mut confirm_delete = false;
     let mut resume_slot: Option<String> = None;
     let mut panes: Vec<String> = Vec::new();
+    let mut mod_pack_dir: Option<String> = None;
     let mut setup = false;
     let mut profile: Option<String> = None;
     let mut lobby = false;
@@ -358,6 +386,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
             "--confirm-delete" => confirm_delete = true,
             "--resume-save" => resume_slot = Some(value_for(&arg, &mut it)?),
             "--pane" => panes.push(value_for(&arg, &mut it)?),
+            "--mod-pack-dir" => mod_pack_dir = Some(value_for(&arg, &mut it)?),
             "--rendezvous" => rendezvous = Some(value_for(&arg, &mut it)?),
             "--origin" => origin = Some(value_for(&arg, &mut it)?),
             other => return Err(format!("unknown argument {other:?}")),
@@ -418,6 +447,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
             ("--solo", solo),
             ("--save-dir", save_dir_given),
             ("--pane", !panes.is_empty()),
+            ("--mod-pack-dir", mod_pack_dir.is_some()),
             ("--rendezvous", rendezvous.is_some()),
             ("--origin", origin.is_some()),
         ] {
@@ -477,6 +507,22 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
         );
     }
 
+    // The mod-pack shelf is offered by the LANDING, and only a world-less host
+    // ever shows one (`native_host::host_lobby::feed_landing_panel` requires a
+    // `LobbyScenarioCatalog`). A pack also only changes anything before a World
+    // is ingested — it widens the catalogue a world is chosen from. So on a
+    // `--world` host, and on a delivery-only one, the folder would be scanned
+    // for a shelf nobody can ever open: say so at the prompt rather than let an
+    // operator conclude their packs are broken (issue #1366).
+    if mod_pack_dir.is_some() && !lobby {
+        return Err(
+            "--mod-pack-dir needs --lobby: the shelf is offered on the landing screen, which \
+             only a host with no --world shows, and a pack widens the catalogue a world is \
+             chosen FROM"
+                .to_string(),
+        );
+    }
+
     // The save-catalogue controls and --resume-save act on a concrete scenario
     // at startup — before a --lobby host has picked one — so they need --world
     // itself, not merely a lobby to choose from.
@@ -498,6 +544,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
             save_dir,
             save_actions,
             resume_slot,
+            mod_pack_dir,
             panes,
             rendezvous,
             origin,
@@ -678,6 +725,52 @@ mod tests {
     fn a_bridge_profile_may_be_pinned_for_a_lobby_host() {
         let a = run(&["--lobby", "--profile", "bridge.toml"]);
         assert_eq!(a.profile.as_deref(), Some("bridge.toml"));
+    }
+
+    #[test]
+    fn a_lobby_host_may_be_given_a_mod_pack_shelf_to_scan() {
+        // Issue #1366. The folder IS the file picker on this surface, so the
+        // one thing the flag has to do is arrive intact.
+        let a = run(&["--lobby", "--mod-pack-dir", "mods"]);
+        let sim = a.sim.expect("--lobby selects the simulation");
+        assert_eq!(sim.mod_pack_dir.as_deref(), Some("mods"));
+    }
+
+    #[test]
+    fn a_host_with_no_shelf_is_the_default_rather_than_an_empty_one() {
+        // `None` is "this host has no shelf", which keeps the landing's
+        // Load-mod-pack row the inert one #1360 shipped. An empty-string or
+        // current-directory default would offer a shelf on every host in the
+        // world and make the row lie.
+        let a = run(&["--lobby"]);
+        assert_eq!(a.sim.expect("--lobby").mod_pack_dir, None);
+    }
+
+    #[test]
+    fn a_mod_pack_shelf_without_a_lobby_is_refused_at_the_prompt() {
+        // The shelf is offered by the LANDING, which only a world-less host
+        // shows, and a pack only widens the catalogue a world is chosen from.
+        // Scanning a folder for a shelf nobody can open would let an operator
+        // conclude their packs were broken.
+        for argv in [
+            vec!["--mod-pack-dir", "mods"],
+            vec![
+                "--world",
+                "assets/worlds/combat_test.toml",
+                "--mod-pack-dir",
+                "mods",
+            ],
+        ] {
+            let err = err(&argv);
+            assert!(err.contains("--mod-pack-dir"), "{err}");
+            assert!(err.contains("--lobby"), "{err}");
+        }
+    }
+
+    #[test]
+    fn setup_refuses_a_mod_pack_shelf_like_every_other_simulation_flag() {
+        let err = err(&["--setup", "--mod-pack-dir", "mods"]);
+        assert!(err.contains("--mod-pack-dir"), "{err}");
     }
 
     #[test]

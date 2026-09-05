@@ -101,6 +101,17 @@ fn main() {
         sim.save_dir = resolve_launch_path(&launch_dir, &sim.save_dir)
             .to_string_lossy()
             .into_owned();
+        // The mod-pack shelf (issue #1366) is the operator's own folder of
+        // archives, not authored content, so it is resolved here for exactly the
+        // reason `--save-dir` is: `pin_content_root` below moves this process
+        // into the content tree, and a relative `--mod-pack-dir mods` read after
+        // that would name a folder inside the content root the operator never
+        // meant.
+        if let Some(dir) = sim.mod_pack_dir.as_mut() {
+            *dir = resolve_launch_path(&launch_dir, dir)
+                .to_string_lossy()
+                .into_owned();
+        }
         for action in &mut sim.save_actions {
             if let project_phoenix::delivery::args::SaveOperatorAction::Export { path, .. } = action
             {
@@ -564,6 +575,31 @@ fn main() {
         }
     }
     cfg.host_lobby = host_lobby.clone();
+    // The mod-pack shelf (issue #1366). Scanned HERE rather than inside the app
+    // builder, so an operator who named a folder that is not there is told at the
+    // prompt as well as on the viewscreen — the surface's own message is for
+    // whoever is standing in front of it, and this one is for whoever typed the
+    // command. `bound.content_dir` is `.` for an authoritative host (see
+    // `bind_args`), which is the same root every other read in this process
+    // resolves against once `pin_content_root` has run.
+    if let Some(dir) = &sim.mod_pack_dir {
+        let shelf = native_host::host_lobby::ModPackShelfResource::new(
+            dir,
+            &bound.content_dir,
+            &bound.manifest,
+        );
+        match &shelf.scan_error {
+            Some(error) => eprintln!(
+                "phoenix-host: no mod packs on the landing — {error}. The landing's Load mod \
+                 pack entry will say so."
+            ),
+            None => eprintln!(
+                "phoenix-host: mod-pack shelf {dir} — {} pack(s) offered on the landing",
+                shelf.shelf.len()
+            ),
+        }
+        cfg.mod_pack_shelf = Some(shelf);
+    }
     // Kept for the shutdown below, before `server` moves into the delivery
     // thread: the thread outlives `App::run()` by however long the join takes,
     // and nothing should be serving a bridge surface in that window.

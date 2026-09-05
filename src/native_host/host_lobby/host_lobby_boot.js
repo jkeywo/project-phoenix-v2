@@ -68,6 +68,14 @@
     // one rule and it runs on the page.
     landing: null,
     renderLanding: null,
+    // The mod-pack shelf's half (issue #1366): which folder this host scans,
+    // what is on it, what is installed, and what the last attempt had to say. A
+    // snapshot like the four above it. Which ROW the operator has highlighted is
+    // deliberately not in here, for the same reason which ENTRY is open is not:
+    // it is the module island's own memory, and the host hears about a choice
+    // when it is asked to install one.
+    packs: null,
+    renderPacks: null,
   };
   window.__phoenixHostLobby = lobby;
 
@@ -167,6 +175,26 @@
   window.__phoenixHostLobbyLanding = function (json) {
     lobby.landing = json;
     lobby.paintLanding();
+  };
+
+  lobby.paintPacks = function () {
+    if (!lobby.renderPacks || lobby.packs === null) return;
+    try {
+      lobby.renderPacks(lobby.packs);
+    } catch (e) {
+      // Same reason lobby.paint() swallows: a throw out of here propagates out
+      // of the host's evaluate_script, is read as a failed push, and is retried
+      // with the same payload forever.
+      console.error('[host-lobby] mod-pack shelf render failed', e);
+    }
+  };
+
+  // Host -> page: one encoded ModPackPanelPayload
+  // (native_host::host_lobby::packs) - the folder this host scans, the archives
+  // in it, the packs already applied, and what the last attempt reported.
+  window.__phoenixHostLobbyPacks = function (json) {
+    lobby.packs = json;
+    lobby.paintPacks();
   };
 
   // Host -> page: somebody pressed the QR toggle on a phone. No argument: the

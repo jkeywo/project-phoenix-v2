@@ -210,6 +210,24 @@ pub fn host_lobby_landing_script(json: &str) -> String {
     vellum_ultralight::bridge::push_call("window.__phoenixHostLobbyLanding", json)
 }
 
+/// The script that hands the surface its mod-pack shelf (issue #1366).
+///
+/// One encoded [`ModPackPanelPayload`]: which folder is being scanned, what is
+/// on it, what is already installed, what the last attempt had to say, and which
+/// pack wins each authored path two of them share.
+///
+/// A push of its own rather than a field folded into the landing payload beside
+/// it, for exactly the reason that payload is not a field of the picker's: the
+/// landing carries the two facts the page cannot know about the PROCESS, and
+/// this carries a whole panel's contents. One shape holding both would put a
+/// shelf rescan behind the landing's push rule — which fires on the first frame
+/// and when a World lands, and never when an operator installs something.
+///
+/// [`ModPackPanelPayload`]: super::packs::ModPackPanelPayload
+pub fn host_lobby_packs_script(json: &str) -> String {
+    vellum_ultralight::bridge::push_call("window.__phoenixHostLobbyPacks", json)
+}
+
 /// The script that flips the join QR (issue #1329).
 ///
 /// One press, from a phone's `ClientMessage::ToggleQrCode` — the same button on
@@ -1108,6 +1126,55 @@ mod tests {
     }
 
     #[test]
+    fn a_pushed_mod_pack_shelf_is_escaped_into_its_own_call() {
+        // Issue #1366, and its own entry point rather than a field of the
+        // landing payload beside it: that payload carries the two facts the page
+        // cannot know about the PROCESS, and this carries a whole panel.
+        assert_eq!(
+            host_lobby_packs_script(r#"{"dir":"mods","offered":[]}"#),
+            r#"window.__phoenixHostLobbyPacks('{"dir":"mods","offered":[]}')"#
+        );
+    }
+
+    #[test]
+    fn the_mod_pack_hooks_are_handed_over_and_forward_the_rows_own_verb() {
+        // The same claim the confirm hook's case below makes, for issue #1366's
+        // two: `landing-packs-cta` and `landing-packs-cancel` are on this
+        // document's button allowlist because something on this surface is
+        // behind them, and the whole of that something is these two lines.
+        // Delete either and the buttons still render, are still allowlisted, and
+        // do nothing.
+        assert!(
+            HOST_LOBBY_LINK_JS
+                .contains("installPack: (action, file) => send({ kind: action, pack: file })"),
+            "the shelf's install control must reach the host: `renderHostLanding` hangs its \
+             handler on this hook, and `apply_mod_pack_choice` is what answers the verb it sends"
+        );
+        assert!(
+            HOST_LOBBY_LINK_JS.contains("pickPack:"),
+            "highlighting a row is this surface's own memory, and the renderer reports it \
+             through a hook rather than holding it"
+        );
+        // Verbatim, which is the point of the hook being one line: the verb is
+        // the OPEN ROW's, so a second shelf-shaped route costs a row and not a
+        // branch here. `install_mod_pack` appearing in this file would be the
+        // mapping table `gui/host-landing-view.js`'s `action` field replaces.
+        assert!(
+            !HOST_LOBBY_LINK_JS.contains("install_mod_pack"),
+            "the verb travels as the record's `kind`; naming it here is the mapping table \
+             the row's `action` field replaces"
+        );
+        // And the surface says what it can ANSWER rather than checking a flag:
+        // a host started without --mod-pack-dir never pushes a shelf, so
+        // `landingProvides()` is empty and the row stays inert with no
+        // build check, no CLI check and no id read by name on this side.
+        assert!(
+            HOST_LOBBY_LINK_JS.contains("provides: landingProvides()"),
+            "which routes this surface can answer is data it declares, not a branch"
+        );
+    }
+
+    #[test]
     fn the_confirm_hook_is_handed_over_and_forwards_the_rows_own_verb() {
         // The positive twin of the `toggleFullscreen:` assertion above, and the
         // half the allowlist below TAKES ON TRUST: `landing-confirm-cta` is on
@@ -1610,6 +1677,18 @@ mod tests {
             "landing-confirm-note",
             "landing-confirm-cancel",
             "landing-confirm-cta",
+            // The mod-pack shelf's own (issue #1366). Markup for the same
+            // reason the confirmation's is: one panel whose CONTENTS are data.
+            // Its list and its report column ship empty, like `#landing-menu`,
+            // because what is in the folder is the host's answer.
+            "landing-packs",
+            "landing-packs-title",
+            "landing-packs-folder",
+            "landing-packs-empty",
+            "landing-packs-list",
+            "landing-packs-notes",
+            "landing-packs-cancel",
+            "landing-packs-cta",
         ] {
             assert!(
                 html.contains(&format!("id=\"{id}\"")),
@@ -1651,7 +1730,18 @@ mod tests {
                 // `drain_surface_records` with an `AppExit`. Unlike the
                 // fullscreen control, something on this surface is behind them.
                 "landing-confirm-cancel",
-                "landing-confirm-cta"
+                "landing-confirm-cta",
+                // The mod-pack shelf's own two (issue #1366), on the allowlist
+                // by the same rule and for the same reason: `renderHostLanding`
+                // hangs `pick` and `installPack` on them, `host_lobby_link.js`
+                // supplies both, and the verb the install control carries is
+                // answered here by `drain_surface_records` and
+                // `apply_mod_pack_choice`. On a host started without
+                // `--mod-pack-dir` the panel never opens at all — the row is
+                // inert because this surface never says it provides a shelf —
+                // so the buttons are unreachable rather than dead.
+                "landing-packs-cancel",
+                "landing-packs-cta"
             ],
             "a control on the viewscreen with nothing wired behind it is a dead \
              button the operator will press"

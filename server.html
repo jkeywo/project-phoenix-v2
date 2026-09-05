@@ -1455,6 +1455,35 @@
                 <button id="landing-confirm-cta" class="landing-confirm-cta" type="button"></button>
               </div>
             </div>
+
+            <!-- The mod-pack shelf (issue #1366): the column's third tenant.
+                 A native host started with --mod-pack-dir scans that folder and
+                 offers what is in it here, because that window has no file
+                 input and no file dialog. It carries no English and no rows,
+                 for the same reason #landing-menu ships empty: the archives are
+                 the HOST's answer and every word around them is a string id the
+                 shared renderer resolves. It starts hidden because no route is
+                 open on a cold load, and because this document is the one the
+                 native host borrows its landing from. On the host PAGE nothing
+                 ever fills it — that surface provides no `packs` capability, so
+                 the row stays inert and this panel stays closed. -->
+            <div id="landing-packs" class="landing-packs" role="group"
+              aria-labelledby="landing-packs-title" style="display: none">
+              <div class="landing-packs-head">
+                <h2 id="landing-packs-title" class="landing-confirm-title"></h2>
+                <span id="landing-packs-folder" class="landing-eyebrow"></span>
+              </div>
+              <span class="landing-confirm-rule"></span>
+              <div class="landing-packs-body">
+                <div id="landing-packs-empty" class="landing-packs-empty"></div>
+                <div id="landing-packs-list" class="landing-packs-list"></div>
+                <div id="landing-packs-notes" class="landing-packs-notes"></div>
+              </div>
+              <div class="landing-confirm-foot">
+                <button id="landing-packs-cancel" class="landing-confirm-cancel" type="button"></button>
+                <button id="landing-packs-cta" class="landing-confirm-cta" type="button"></button>
+              </div>
+            </div>
           </section>
 
         </div>

@@ -217,6 +217,20 @@ pub struct NativeHostConfig {
     /// `None` leaves the host byte-for-byte as it was: no plugin, no resource,
     /// no surface.
     pub host_lobby: Option<crate::native_host::host_lobby::LocalHostLobby>,
+    /// The mod-pack shelf this host offers on its landing (issue #1366), already
+    /// scanned, or `None` for a host given no `--mod-pack-dir`.
+    ///
+    /// `None` is the whole of "this host offers no shelf": with no resource the
+    /// surface is never told it can answer the Load-mod-pack row, so that row
+    /// stays exactly the inert one issue #1360 shipped. The alternative — a
+    /// resource pointing at some default folder — would put an empty shelf on
+    /// every native host in the world and make the row lie.
+    ///
+    /// Scanned by the CALLER, for the same reason `--content-dir` is resolved
+    /// there: the folder is named relative to the launch directory, and
+    /// [`crate::native_host::pin_content_root`] has moved the process out of it
+    /// by the time anything in this builder runs.
+    pub mod_pack_shelf: Option<crate::native_host::host_lobby::ModPackShelfResource>,
 }
 
 impl NativeHostConfig {
@@ -238,6 +252,7 @@ impl NativeHostConfig {
             panes: None,
             bridge_profile: None,
             host_lobby: None,
+            mod_pack_shelf: None,
         }
     }
 
@@ -342,7 +357,11 @@ pub(crate) fn boot_plan(
             format!("warn,{log_spec}")
         },
         world_path: world_path.unwrap_or_default().to_string(),
-        reader: Box::new(crate::world::load::FsReader),
+        // Overlay-first (issue #1366). A native host can now have mod packs
+        // installed, and a pack's worlds live only in the overlay — so a bare
+        // `FsReader` would offer a pack's scenario in the lobby and then fail to
+        // read the world behind it. With no pack installed this IS `FsReader`.
+        reader: Box::new(crate::world::load::OverlayFsReader),
         script_resolver: Box::new(crate::entities::config_cache::production_script_resolver()),
         // A shipped rendered host is not reproduced tick-for-tick, so it keeps
         // the multithreaded pool — the same answer both browser profiles give.
@@ -786,6 +805,14 @@ pub fn build_native_host_app(
             lobby.bridge.clone(),
         ));
         app.add_plugins(crate::native_host::host_lobby::HostLobbyPlugin);
+        // The mod-pack shelf (issue #1366), inserted only when the operator
+        // named a folder. Beside the bridge rather than outside this block on
+        // purpose: the shelf is a stage of the LANDING, and the landing only
+        // exists on a host with a lobby surface — a shelf without one would be a
+        // scanned folder nothing could ever show.
+        if let Some(shelf) = &cfg.mod_pack_shelf {
+            app.insert_resource(shelf.clone());
+        }
         #[cfg(feature = "ultralight")]
         {
             app.insert_resource(

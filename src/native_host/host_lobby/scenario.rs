@@ -208,6 +208,33 @@ pub enum HostLobbyRecord {
     /// **Web hosts never send it**, and cannot: the row is `platforms:
     /// ['native']`, because a browser tab has no application to quit.
     ExitDesktop,
+    /// The operator chose a mod pack off the shelf (issue #1366).
+    ///
+    /// `pack` is a FILE NAME this host itself offered — one of the `file` values
+    /// in [`packs::ModPackPanelPayload::offered`](super::packs::ModPackPanelPayload)
+    /// — carried verbatim. It is never a path, and whatever answers it never
+    /// joins it onto the scanned directory: the host looks it up in the shelf it
+    /// produced ([`crate::native_host::mod_packs::offered`]), so a name it never
+    /// offered and a name deleted since the scan are one refusal. That lookup
+    /// gate is why this can safely be a bare string off a bridge.
+    ///
+    /// The SECOND landing verb the host has to answer, and the second one
+    /// [`LandingOpen`](Self::LandingOpen) was written to make room for. Unlike
+    /// [`ExitDesktop`](Self::ExitDesktop) it carries no confirmation: a pack that
+    /// is wrong is refused whole and reports why, and one that is merely unwanted
+    /// can be taken back out of the overlay stack — so there is nothing here to
+    /// ask twice about, and a host that asked would be asking about the one
+    /// landing route that IS reversible.
+    ///
+    /// Snake_case, with the picks and the landing's own two; the kebab spellings
+    /// are the layout row's alone and are historical (see
+    /// [`SetViewscreen`](Self::SetViewscreen)).
+    ///
+    /// **Web hosts never send it**: the row that opens the shelf is inert on any
+    /// surface that cannot answer it, which a browser host cannot — it has no
+    /// scanned folder, and it already loads a pack from the file input inside
+    /// `#scenario-panel`.
+    InstallModPack { pack: String },
 }
 
 impl HostLobbyRecord {
@@ -267,7 +294,7 @@ mod tests {
     }
 
     #[test]
-    fn the_surfaces_nine_records_round_trip() {
+    fn the_surfaces_ten_records_round_trip() {
         for record in [
             HostLobbyRecord::SelectScenario {
                 scenario_id: "combat_test".into(),
@@ -291,6 +318,9 @@ mod tests {
             },
             HostLobbyRecord::LandingClose,
             HostLobbyRecord::ExitDesktop,
+            HostLobbyRecord::InstallModPack {
+                pack: "thin-margin.zip".into(),
+            },
         ] {
             let json = serde_json::to_string(&record).expect("a record encodes");
             assert_eq!(HostLobbyRecord::decode(&json), Some(record));
@@ -381,6 +411,26 @@ mod tests {
             Some(HostLobbyRecord::ExitDesktop)
         );
         assert_eq!(HostLobbyRecord::decode(r#"{"kind":"exit-desktop"}"#), None);
+        // The mod-pack shelf's one verb (issue #1366), snake_case with them.
+        assert_eq!(
+            HostLobbyRecord::decode(r#"{"kind":"install_mod_pack","pack":"thin-margin.zip"}"#),
+            Some(HostLobbyRecord::InstallModPack {
+                pack: "thin-margin.zip".into()
+            })
+        );
+        assert_eq!(
+            HostLobbyRecord::decode(r#"{"kind":"install-mod-pack","pack":"a.zip"}"#),
+            None
+        );
+        // A pack name this host never offered still DECODES — the refusal is the
+        // host's shelf lookup, not the parser's. A parse failure here would read
+        // as a broken bridge, and the honest answer is a finding on the panel.
+        assert_eq!(
+            HostLobbyRecord::decode(r#"{"kind":"install_mod_pack","pack":"../secrets.zip"}"#),
+            Some(HostLobbyRecord::InstallModPack {
+                pack: "../secrets.zip".into()
+            })
+        );
         // An entry id this build has never heard of still decodes: the entry
         // TABLE is the client's, a bundle may be newer than the host, and a
         // record the host cannot act on is a line in its log rather than a

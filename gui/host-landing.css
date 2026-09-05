@@ -589,6 +589,182 @@
   box-shadow: 0 0 18px rgba(var(--rgb-fire), 0.2);
 }
 
+/* ── The mod-pack shelf (issue #1366) ─────────────────────────────────── */
+/*
+ * The middle column's third tenant, beside the docked World picker and the
+ * confirmation. It is drawn on the confirmation's own panel — same fill, same
+ * rules, same foot row, the same two controls — because it IS that panel with a
+ * list in it, and a second set of panel rules would be a second answer to
+ * "what does a landing stage look like".
+ *
+ * `display: none` is the markup's, not this sheet's: `renderHostLanding` shows
+ * and hides it, and a rule here would fight the inline style it sets.
+ *
+ * The values are the canvas's, read through #1357's mapping table. The rows are
+ * its `.row` — `#0b0e14` is the fill one rung under a card, which the ramp holds
+ * as --surface-card, on `#22262d` = --surface-lift as a boundary; the selected
+ * state is the accent pair the whole landing uses (--cyan-deep ground,
+ * --cyan boundary, --signal foreground). The report column's notes are its
+ * `.chip` tones read across: ok is the loaded quad, warn the reloading quad,
+ * bad the fire quad, each as foreground + its own deep rung for the boundary.
+ */
+.landing-packs {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  background: rgba(var(--rgb-base), 0.88);
+  border: 1px solid var(--edge-faint);
+  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+}
+.landing-packs-head {
+  padding: 22px 22px 16px;
+  border-bottom: 1px solid var(--edge-faint);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.landing-packs-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.landing-packs-empty {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--text-md);
+  line-height: 1.6;
+  color: var(--ink-faint);
+}
+.landing-packs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* One archive on the shelf: the canvas's `.row`, with the file name where a
+   scenario row carries its chips. The name is shown as well as the label
+   because a folder is the operator's own filing, and two packs whose labels
+   read alike are told apart by the bytes on disk. */
+.landing-pack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  padding: 14px 16px;
+  min-height: var(--control-hit-min);
+  background: var(--surface-card);
+  border: 1px solid var(--surface-lift);
+  color: var(--ink);
+  font-family: var(--font-display);
+  cursor: pointer;
+  transition: background 0.16s, border-color 0.16s;
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+}
+.landing-pack:hover { background: var(--surface-raised); border-color: var(--edge-bright); }
+.landing-pack:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 var(--focus-ring-width) var(--focus-ring);
+}
+.landing-pack.on { background: var(--cyan-deep); border-color: var(--cyan); }
+.landing-pack-label {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: var(--text-md);
+  line-height: 1.2;
+  letter-spacing: var(--tracking);
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.landing-pack.on .landing-pack-label { color: var(--signal); }
+.landing-pack-file {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  letter-spacing: var(--tracking);
+  color: var(--ink-faint);
+  overflow-wrap: anywhere;
+}
+
+/* The report column: what the last attempt said, what is installed, and which
+   pack won each path two of them carry. One rebuilt list, tone per note. */
+.landing-packs-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.landing-note {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--edge);
+  background: var(--surface-card);
+}
+.landing-note-key {
+  flex: none;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.landing-note-value {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--ink-dim);
+  overflow-wrap: anywhere;
+}
+/* A heading note carries no ground of its own: it is a label over the notes
+   under it, not one of them. */
+.landing-note-head {
+  background: transparent;
+  border-left-color: transparent;
+  padding: 10px 0 2px;
+}
+.landing-note-head .landing-note-value {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.landing-note-ok { border-left-color: var(--loaded); }
+.landing-note-ok .landing-note-key { color: var(--loaded); }
+.landing-note-warn { border-left-color: var(--reloading); }
+.landing-note-warn .landing-note-key { color: var(--reloading); }
+.landing-note-bad { border-left-color: var(--fire); }
+.landing-note-bad .landing-note-key { color: var(--fire); }
+
+/* The install control is the confirmation's CTA; `off` is the canvas's own
+   disabled half of that button, and it is a CLASS rather than the `disabled`
+   attribute for the reason the inert menu entries take `aria-disabled`: a
+   control a keyboard cannot reach is not more honest than one that says it is
+   unavailable. */
+.landing-confirm-cta.off {
+  background: var(--surface-card);
+  border-color: var(--edge-control);
+  color: var(--ink-faint);
+  cursor: default;
+  box-shadow: none;
+}
+.landing-confirm-cta.off:hover {
+  background: var(--surface-card);
+  box-shadow: none;
+}
+
 /* ── Status bar ───────────────────────────────────────────────────────── */
 .landing-statusbar {
   position: absolute;
@@ -749,6 +925,7 @@
   .landing-logo,
   .landing-mi,
   .landing-icon-btn,
+  .landing-pack,
   .landing-confirm-cancel,
   .landing-confirm-cta {
     transition: none;

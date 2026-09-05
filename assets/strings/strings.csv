@@ -958,6 +958,9 @@ settings.rating,Settings — station rating (difficulty) section heading,Rating
 settings.volume,Settings — audio volume section heading,Volume
 settings.qr_code,Settings — QR code section heading,QR Code
 settings.toggle_qr,Settings — button that shows/hides the join QR code on the viewscreen,[Toggle QR on Screen]
+settings.display,"Native host settings menu — Gameplay tab, heading over this window's display options (issue #1367)",[Display]
+settings.toggle_fullscreen,Native host settings menu — button that fills the display with this window or gives its border back,[Toggle Fullscreen]
+settings.display_hint,Native host settings menu — explains that the fullscreen control moves this window's mode rather than a browser's,[Fills the display this window is on. The viewscreen returns to the display you assigned it.]
 settings.station,Settings — station section heading,Station
 settings.leave_station,Settings — button that releases the player's claimed station,Leave Station
 settings.afk,Settings — Away From Keyboard section heading (issue #1104),Away

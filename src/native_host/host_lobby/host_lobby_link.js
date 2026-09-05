@@ -24,6 +24,10 @@
 //                               press opens or closes (#1360)
 //   gui/host-landing-render.js  that decision -> the DOM inside #landing-panel,
 //                               the mod-pack shelf included (#1360, #1366)
+//   gui/native-settings.js      this surface's settings cog and modal, built
+//                               from the SHARED overlay kit and the SHARED tab
+//                               list (#1367) — the host page's cog and the
+//                               phone's are the other two consumers of both
 //
 // If this file ever grows a render decision of its own, that decision has
 // escaped the shared path and belongs back in one of those modules instead.
@@ -48,6 +52,7 @@ import { scenarioCatalogView } from './gui/host-scenarios.js';
 import { renderHostScenarios } from './gui/host-scenario-render.js';
 import { landingViewModel, nextOpenEntry } from './gui/host-landing-view.js';
 import { renderHostLanding } from './gui/host-landing-render.js';
+import { mountNativeSettings } from './gui/native-settings.js';
 
 // The static `data-i18n` markup — "CREW", "CONNECTED", the awaiting-selection
 // badge, the join panel's caption, this surface's QR toggle, the picker's
@@ -310,11 +315,20 @@ function drawLanding() {
       // hopeful repaint here would be this document claiming to know the answer
       // before it arrives.
       installPack: (action, file) => send({ kind: action, pack: file }),
-      // No fullscreen hook is handed over: the control it would drive is
-      // stripped from this document (native_host::host_lobby::document),
-      // because a native window's mode belongs to the host process and setting
-      // it is issue #1367. The renderer's hook is optional precisely so a
-      // surface can decline one.
+      // The corner fullscreen control (issue #1367). #1361 handed over no hook
+      // and the document stripped the control with it, because a browser host's
+      // forwards to `gui/page-chrome.js`'s one `initFullscreen` — which asks a
+      // BROWSER to fill a screen, and this window has no browser chrome. What
+      // fullscreen means here is the primary window's mode, which belongs to
+      // the host process, so the press is a record like every other thing this
+      // surface cannot do itself.
+      //
+      // Nothing is redrawn afterwards, and nothing should be: what answers it
+      // is `fullscreen::apply_window_mode_toggle` moving a window, and this
+      // document cannot see a window mode at all — there is no
+      // `document.fullscreenElement` on an embedded view. A repaint here would
+      // be the page claiming to know an answer only the host has.
+      toggleFullscreen: () => send({ kind: 'toggle_fullscreen' }),
     },
     // This document has no page lifecycle: its host is the only thing that
     // knows a World has been committed, which is what `dismissed` carries and
@@ -379,6 +393,42 @@ const aiLaunch = document.getElementById('ai-launch-btn');
 if (aiLaunch) {
   aiLaunch.addEventListener('click', () => send({ kind: 'force_start' }));
 }
+
+// ── The settings cog (issue #1367) ─────────────────────────────────────────
+//
+// The native host had no settings of any kind, and this is the EXISTING one
+// rather than a third: `gui/native-settings.js` builds the cog and the modal
+// from `gui/settings-overlay-kit.js` and takes its tabs from
+// `gui/settings-tabs.js`, which are the same shell and the same list the host
+// page's cog (#939) and the phone's (#940) use. What is per-surface is the tab
+// BODIES, which the kit's own doc says must stay per-surface — the three
+// surfaces reach what they control down genuinely different paths, and this one
+// reaches everything through the two hooks below.
+//
+// Mounted unconditionally, and it is not a control with nothing behind it: both
+// verbs on its table are answered here, one in this document and one by the
+// host. A tab with no control on this surface is not offered at all, so the
+// panel can never show an empty Audio page — see `nativeSettingsView`.
+
+// The verbs THIS DOCUMENT answers itself, one row each. Everything not in here
+// is a record the host answers, which is the default rather than a case: the
+// QR panel's visibility is this document's own DOM and a round trip would add a
+// frame of latency to a decision nobody else needs to know, while the window
+// mode is the host process's and cannot be reached from a page at all. A
+// settings control that the surface can serve locally is a row here; one the
+// host serves is a row in `NATIVE_SETTINGS_CONTROLS` and nothing here at all.
+const LOCAL_SETTINGS_VERBS = {
+  toggle_qr: () => toggleQr(document),
+};
+
+mountNativeSettings(document, {
+  // The row's verb, forwarded — never a name this file decides.
+  run: (action) => {
+    const local = LOCAL_SETTINGS_VERBS[action];
+    if (local) local();
+    else send({ kind: action });
+  },
+}, { t });
 
 // This surface's own QR control. A click, handled here and not sent anywhere:
 // the panel's visibility is this document's DOM, and a round trip through the

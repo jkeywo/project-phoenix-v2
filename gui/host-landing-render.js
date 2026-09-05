@@ -24,11 +24,12 @@
  * ## Every write is guarded on the element existing
  *
  * This is not defensive habit, it is the two-document contract: the native
- * lobby document carries a trimmed subset of this markup (it has no settings
- * cog, and its fullscreen control is the window manager's), so a branch whose
+ * lobby document carries a trimmed subset of this markup, so a branch whose
  * element is absent must do nothing rather than throw and abandon the rest of
  * the render half-written. The suite drives a deliberately incomplete document
- * for exactly this.
+ * for exactly this. It stopped being only a hypothetical in #1367: the native
+ * document really did have this landing's fullscreen control cut out of it
+ * until that slice gave the control a host verb to reach.
  *
  * ## `t` is injected, never imported
  *
@@ -41,11 +42,14 @@
  * ## Side effects arrive as hooks
  *
  * A menu click has to reach whatever owns the open-entry memory, and the two
- * surfaces own it in different places. Fullscreen is already implemented once,
- * in `gui/page-chrome.js`'s `initFullscreen` — so the landing's corner control
- * does not toggle anything itself; the caller hands over a hook that reaches
- * that one implementation, the way three separate callers reach one
- * `gui/host-qr.js` toggle.
+ * surfaces own it in different places. Fullscreen is the clearest case for a
+ * hook rather than a call, because the two surfaces do not even mean the same
+ * thing by it: on the web it is already implemented once, in
+ * `gui/page-chrome.js`'s `initFullscreen`, and the corner control forwards to
+ * that; on the native viewscreen there is no browser to ask, so the same
+ * control sends `toggle_fullscreen` over the page->host queue and the host
+ * moves the window's mode (issue #1367). This module knows neither, which is
+ * the only reason one control can serve both.
  *
  * ## The menu is rebuilt, so focus is carried across the rebuild
  *
@@ -59,13 +63,20 @@
  *
  * ## What it does NOT draw
  *
- * The settings cog. `gui/server-settings.js` mounts its own `#server-settings-btn`
- * fixed at z-index 210, above this panel's 205, so it is already on top of the
- * landing and drawing a second one would be two cogs disagreeing about which
- * is open. Nor does the landing reserve a keep-out for it the way `#world-list`
- * does in `gui/host-scenarios.css`: the cog's corner falls inside
- * `.landing-rail`, whose content sits at the far end, and everything else
- * starts below it — the clearance is layout, and
+ * The settings cog — on either surface, and that is one rule rather than a gap
+ * on each. A settings cog is the settings overlay's OWN control: it is
+ * find-or-created by `gui/settings-overlay-kit.js` beside the modal it opens,
+ * so it exists exactly where an overlay has been mounted and cannot get out of
+ * step with it. `gui/server-settings.js` mounts `#server-settings-btn` on the
+ * host page (issue #939) and `gui/native-settings.js` mounts
+ * `#native-settings-btn` on the viewscreen (issue #1367); both are `fixed`
+ * above this panel and both land in the corner the design draws the cog in,
+ * which is inside `.landing-rail`. Drawing one here as well would be two
+ * controls disagreeing about which panel is open.
+ *
+ * Nor does the landing reserve a keep-out for it the way `#world-list` does in
+ * `gui/host-scenarios.css`: the rail's content sits at the far end and
+ * everything else starts below the cog — the clearance is layout, and
  * `tests/smoke/server-settings-cog.spec.js` measures it.
  */
 

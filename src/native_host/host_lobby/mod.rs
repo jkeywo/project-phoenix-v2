@@ -134,6 +134,7 @@
 
 pub mod bridge;
 pub mod document;
+pub mod fullscreen;
 pub mod join;
 pub mod landing;
 pub mod layout;
@@ -156,6 +157,7 @@ use crate::native_host::world_load::{
 
 pub use bridge::{pump_host_lobby, HostLobbyBridge, HostLobbyPumpReport};
 pub use document::{build_host_lobby_document, host_lobby_drain_script, HostLobbyDocumentError};
+pub use fullscreen::{monitor_to_restore, next_window_mode, WindowModeToggle};
 pub use join::{
     join_addr_reach, phone_rendezvous, JoinAddrReach, JoinInvite, PhoneRendezvous,
     CLIENT_DEFAULT_RENDEZVOUS,
@@ -420,11 +422,24 @@ pub struct HostLobbyPlugin;
 impl Plugin for HostLobbyPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<HostLobbyRevealResource>()
+            // The fullscreen control's latch (issue #1367). Initialised here
+            // rather than by whatever opens a window, so a press has somewhere
+            // to land on every composition that carries a lobby surface —
+            // `apply_window_mode_toggle` is what decides a host with no window
+            // cannot answer it, in one place, rather than the dispatcher
+            // guessing from the absence of a resource.
+            .init_resource::<fullscreen::WindowModeToggle>()
             .add_systems(
                 Update,
                 (
                     feed_lobby_state,
                     feed_landing_panel,
+                    // The window mode a press in `PreUpdate` asked for
+                    // (issue #1367). Early in the chain with the other
+                    // answers, and before the feeds, for the reason
+                    // `apply_mod_pack_choice` is: the operator's press is
+                    // answered in the frame it arrived rather than the next.
+                    fullscreen::apply_window_mode_toggle,
                     // The mod-pack install an operator asked for in `PreUpdate`
                     // (issue #1366), answered BEFORE the two feeds below it —
                     // deliberately, and it is the same one-frame edge the
@@ -926,6 +941,7 @@ pub(crate) fn drain_surface_records(
     force_start: Option<ResMut<crate::server::bridge::PendingForceStart>>,
     layout: Option<ResMut<BridgeLayoutResource>>,
     shelf: Option<ResMut<packs::ModPackShelfResource>>,
+    window_mode: Option<ResMut<fullscreen::WindowModeToggle>>,
     mut exit: MessageWriter<AppExit>,
     log: Option<Res<LogFilterConfig>>,
 ) {
@@ -939,6 +955,7 @@ pub(crate) fn drain_surface_records(
     let mut force_start = force_start;
     let mut layout = layout;
     let mut shelf = shelf;
+    let mut window_mode = window_mode;
     // Within this batch it replaces rather than accumulates: the row shows what
     // happened to the last thing the operator did, so an accepted press clears
     // the refusal the one before it earned. What lands on the RESOURCE is
@@ -1057,6 +1074,32 @@ pub(crate) fn drain_surface_records(
                         log,
                         LogCat::Lobby,
                         "host lobby: a mod pack ({pack}) was chosen on a host started without                          --mod-pack-dir, so there is no shelf to take it from; it is dropped"
+                    ),
+                }
+                continue;
+            }
+            HostLobbyRecord::ToggleFullscreen => {
+                // Issue #1367, and a LATCH rather than the work itself, for the
+                // reason `ForceStart` above sets one: this system is a
+                // dispatcher over a drained queue and most compositions that run
+                // it carry no window at all. `fullscreen::apply_window_mode_toggle`
+                // answers it in `Update` of the same frame, where the primary
+                // window is legible and its absence is one warning rather than a
+                // system that cannot run.
+                match window_mode.as_mut() {
+                    Some(toggle) => {
+                        crate::pinfo!(
+                            log,
+                            LogCat::Lobby,
+                            "host lobby: fullscreen toggle requested from the landing"
+                        );
+                        toggle.pending = true;
+                    }
+                    None => crate::pwarn!(
+                        log,
+                        LogCat::Lobby,
+                        "host lobby: the fullscreen control was pressed on a host that carries \
+                         no window-mode latch; it is dropped"
                     ),
                 }
                 continue;
@@ -1588,6 +1631,108 @@ mod tests {
         let (mut app, bridge) = app_with_lobby();
         let mut surface = crate::native_host::panes::RecordingSurface::ready();
         surface.queue_record(r#"{"kind":"force_start"}"#);
+        pump_host_lobby(&bridge, &mut surface);
+        app.update();
+    }
+
+    /// The primary window's mode, read the way `bridge_display`'s own tests
+    /// read it — by the entity the fixture spawned, so a second window arriving
+    /// later could never make this ambiguous.
+    fn window_mode(app: &App, window: Entity) -> bevy::window::WindowMode {
+        app.world()
+            .entity(window)
+            .get::<bevy::window::Window>()
+            .unwrap()
+            .mode
+    }
+
+    #[test]
+    fn the_fullscreen_control_moves_the_primary_window_and_moves_it_back() {
+        // Issue #1367, and the half `fullscreen.rs`'s unit tests cannot reach:
+        // those prove what the two pure functions DECIDE, and this proves the
+        // wiring around them — the record latches in `PreUpdate`, and
+        // `apply_window_mode_toggle` spends the latch on the primary window in
+        // `Update` of the SAME frame. Without it, deleting the dispatcher's arm
+        // or dropping the applier out of `HostLobbyPlugin`'s chain leaves the
+        // whole suite green and the answer to "does the window actually move?"
+        // written down nowhere.
+        use bevy::window::{MonitorSelection, PrimaryWindow, Window, WindowMode};
+
+        let (mut app, bridge) = app_with_lobby();
+        let window = app
+            .world_mut()
+            .spawn((Window::default(), PrimaryWindow))
+            .id();
+        assert_eq!(window_mode(&app, window), WindowMode::Windowed);
+
+        let mut surface = crate::native_host::panes::RecordingSurface::ready();
+        surface.queue_record(r#"{"kind":"toggle_fullscreen"}"#);
+        pump_host_lobby(&bridge, &mut surface);
+
+        // ONE frame: the drain latches in `PreUpdate` and the applier spends it
+        // in `Update`, so an operator's press is answered in the frame it
+        // arrived rather than the next one.
+        app.update();
+        assert_eq!(
+            window_mode(&app, window),
+            // `Current` because nothing has assigned this window a display:
+            // the pure functions' own tests say why that is the only honest
+            // answer, and this says the applier asks them.
+            WindowMode::BorderlessFullscreen(MonitorSelection::Current)
+        );
+        assert!(
+            !app.world()
+                .resource::<fullscreen::WindowModeToggle>()
+                .pending,
+            "the frame that applies a press clears the latch, or the window would flip again"
+        );
+        assert!(
+            inbound(&mut app).is_empty(),
+            "a window mode is this host's own, never a participant's command"
+        );
+
+        // And back, which is the whole control: a press is a TOGGLE, and the
+        // second one has to read the mode the first one wrote.
+        surface.queue_record(r#"{"kind":"toggle_fullscreen"}"#);
+        pump_host_lobby(&bridge, &mut surface);
+        app.update();
+        assert_eq!(window_mode(&app, window), WindowMode::Windowed);
+    }
+
+    #[test]
+    fn a_host_with_no_primary_window_drops_the_fullscreen_press_rather_than_panicking() {
+        // The sibling of the force-start case above, and `app_with_lobby` is
+        // bare in the same way: a delivery-only or headless composition carries
+        // the lobby surface and no window at all, so the applier's window query
+        // matches nothing every time it runs. That is one warning, not a panic
+        // — and the latch is spent either way, because a press held until the
+        // day a window appeared would be a control acting minutes after it was
+        // pressed.
+        let (mut app, bridge) = app_with_lobby();
+        let mut surface = crate::native_host::panes::RecordingSurface::ready();
+        surface.queue_record(r#"{"kind":"toggle_fullscreen"}"#);
+        pump_host_lobby(&bridge, &mut surface);
+        app.update();
+        assert!(
+            !app.world()
+                .resource::<fullscreen::WindowModeToggle>()
+                .pending
+        );
+    }
+
+    #[test]
+    fn a_composition_with_no_window_mode_latch_ignores_the_press_rather_than_panicking() {
+        // The drain's OTHER guard: `window_mode` is `Option<ResMut<_>>` there
+        // for the reason `force_start` is, and while `HostLobbyPlugin` always
+        // inserts the latch today, the arm that answers its absence is reached
+        // by any composition that runs `drain_surface_records` without it. A
+        // dispatcher that panicked on a record it could not answer would take
+        // every other record in the same batch down with it.
+        let (mut app, bridge) = app_with_lobby();
+        app.world_mut()
+            .remove_resource::<fullscreen::WindowModeToggle>();
+        let mut surface = crate::native_host::panes::RecordingSurface::ready();
+        surface.queue_record(r#"{"kind":"toggle_fullscreen"}"#);
         pump_host_lobby(&bridge, &mut surface);
         app.update();
     }

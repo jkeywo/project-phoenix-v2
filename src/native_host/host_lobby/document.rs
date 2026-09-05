@@ -40,7 +40,11 @@
 //! links (`gui/tokens.css`, `gui/host-lobby.css`, `gui/host-qr.css`,
 //! `gui/host-scenarios.css`, `gui/host-landing.css` — the last four exist
 //! *because* of this surface, the landing's written that way one slice ahead of
-//! arriving here), a ground colour, the vendored QR encoder, the bridge
+//! arriving here) plus the one it does not (`gui/native-settings.css`, issue
+//! #1367: the host page paints its settings overlay from an inline `<style>`
+//! block there is no way to slice, so the surface that mounts the shared kit
+//! brings a token-only sheet), a ground colour, the vendored QR encoder, the
+//! bridge
 //! scripts, and the module island that wires the shared view models to the
 //! shared renderers.
 //!
@@ -62,13 +66,14 @@
 //! | edit | why |
 //! |---|---|
 //! | the page's `#qr-panel` carried too, in an `#overlay` of this document's own (issue #1329) | the crew have to be shown how to JOIN the lobby they are looking at. The panel is the page's own markup for the same reason the lobby is; the overlay around it is not, because the page's also carries the fleet panel and the diagnostics readout, and neither has anything to say on a viewscreen |
-//! | `#host-lobby-qr-toggle` added (issue #1329) | a host page toggles the QR from its settings cog; this window has no cog, so the one decision that surface genuinely needs gets the one control it needs |
+//! | `#host-lobby-qr-toggle` added (issue #1329) | a host page toggles the QR from its settings cog; this window had no cog, so the one decision that surface genuinely needs got the one control it needs. #1367 gave the window a cog and put the same decision on its Gameplay tab as well — two triggers, one `gui/host-qr.js` toggle — and this control stays, because a join code is what a room needs fastest and one press from the screen the crew are looking at is the whole point of it |
 //! | the page's `#scenario-panel` carried too (issue #1328) | an operator has to be able to pick the scenario and the hull from the viewscreen. Same rule as the lobby and the join panel: the page's own markup, so `gui/host-scenario-render.js` writes into the ids it expects |
 //! | that panel's `#mod-pack-upload` and `#snapshot-import` removed (issue #1328) | host TOOLING — file inputs with page-lifetime handlers this document does not carry, and which a demo build removes outright. A control that silently does nothing is worse than no control |
 //! | the lobby rail's `#gm-start-controls` buttons removed (issue #1300's Game Master, merged onto #1325) | the same rule: the GM Ready/Force Start buttons are wired by `server.html`'s GM session script, which this surface does not run, so on the viewscreen they would be dead controls. Their `<div class="gm-start-actions">` is stripped; the section's aria-hidden status regions carry no control and stay |
 //! | that panel starts `display: none` (issue #1328) | the page opens ON the picker, because a browser host always chooses at the prompt; a native host may have been given `--world`, and a picker covering the lobby of a host that has nothing to pick would be a viewscreen that never moves. It is shown by the first scenario push, which only a world-less host makes |
 //! | the page's `#landing-panel` carried too, and starting `display: none` (issue #1361) | the front door, by the same rule again: the page's own markup, so `gui/host-landing-render.js` writes into the ids it expects, and hidden until the first landing push — which, like the picker's, only a world-less host makes. A `--world` host was told at the prompt what it is flying and must not be shown a menu asking |
-//! | that panel's `#landing-fullscreen-btn` removed (issue #1361) | a browser host's control forwards to `gui/page-chrome.js`'s one `initFullscreen`, which asks a BROWSER to fill a screen. This window has no browser chrome and no page lifecycle; the window mode is the host process's, and setting it is issue #1367. Until then nothing is behind the control, so it is not here |
+//! | that panel's `#landing-fullscreen-btn` KEPT (issue #1367; removed by #1361) | #1361 stripped it because a browser host's control forwards to `gui/page-chrome.js`'s one `initFullscreen`, which asks a BROWSER to fill a screen, and this window has no browser chrome. #1367 put something behind it instead: the press crosses the page->host queue as `HostLobbyRecord::ToggleFullscreen` and `fullscreen::apply_window_mode_toggle` sets the primary window's mode the way the display-assignment law already does |
+//! | `gui/native-settings.css` linked (issue #1367) | the native settings overlay's chrome. The host PAGE's settings CSS lives inline in `server.html` and cannot be borrowed the way its markup can, so the surface that mounts the shared overlay kit brings a token-only sheet of its own. The kit, the tab list and every control's behaviour are the shared ones; this is only where the panel is painted |
 //!
 //! The AI-launch `<button>` is **kept**, and was not always: #1325 stripped it,
 //! because a read-only surface with a control that silently does nothing is
@@ -84,17 +89,23 @@
 //! #1330's monitor row is not in this markup at all, because the shared renderer
 //! builds those buttons from a row the host pushes, so they exist only when
 //! there is a layout to move; the picker's file inputs are removed because
-//! nothing here handles them; and #1361's landing arrives with its fullscreen
+//! nothing here handles them; #1361's landing arrived with its fullscreen
 //! control stripped and its Connect-to-Host entry absent — the second not by an
 //! edit here at all, but because that entry's row in
 //! `gui/host-landing-view.js` is marked `platforms: ['web']`, a native host
-//! being always a host with no join leg to offer. A test pins the resulting set
-//! — see `the_ai_launch_button_is_kept_because_the_surface_can_now_answer_it`.
+//! being always a host with no join leg to offer; and #1367 gave the fullscreen
+//! control a host verb to reach, so it comes back by the same rule that took it
+//! away. A test pins the resulting set — see
+//! `the_ai_launch_button_is_kept_because_the_surface_can_now_answer_it`.
 //!
-//! Everything else the document does to the markup it does by *omission*: it
-//! leaves `--settings-cog-keepout` undefined, which selects the `0px` fallback
-//! `gui/host-lobby.css` and `gui/host-scenarios.css` both name, because there is
-//! no settings cog on the viewscreen window to reserve a corner for.
+//! Until #1367 the document also acted by *omission*: it left
+//! `--settings-cog-keepout` undefined, which selects the `0px` fallback
+//! `gui/host-lobby.css` and `gui/host-scenarios.css` both name, because there
+//! was no settings cog on the viewscreen window to reserve a corner for. There
+//! is one now, so the ground supplies the token and the two floors hold. The
+//! rail itself still reserves nothing, for the reason `gui/host-landing.css`
+//! gives: it keeps its stamp at the far end, and padding above content already
+//! pushed to the other end holds nothing.
 //!
 //! # No identity, and therefore nothing to leak
 //!
@@ -415,22 +426,6 @@ const SCENARIO_PANEL_MARKER: &str = "<div id=\"scenario-panel\"";
 /// surfaces differ exactly where a row says they differ and nowhere else.
 const LANDING_PANEL_MARKER: &str = "<div id=\"landing-panel\"";
 
-/// The landing's fullscreen control, which this surface cannot answer
-/// (issue #1361).
-///
-/// `server.html` forwards it to `gui/page-chrome.js`'s one `initFullscreen`,
-/// which asks a BROWSER to fill a screen. This document is an embedded view
-/// with no browser chrome: the window mode belongs to the host process, and
-/// setting it from here is issue #1367's work. Until something is behind it,
-/// the control is not here -- the same judgement that removed the picker's file
-/// inputs and the rail's GM buttons.
-///
-/// A `<button>`, so it is stripped with `panes::document::strip_elements_matching`
-/// rather than with [`remove_element`]: that helper counts `<div>` nesting, and
-/// a scan started on a `<button>` would run past it into the landing's stage and
-/// take the whole screen with it.
-const LANDING_TOOLING_BUTTON_MARKER: &str = "id=\"landing-fullscreen-btn\"";
-
 /// The two host-tooling blocks inside `#scenario-panel` that this surface must
 /// not carry (issue #1328).
 ///
@@ -498,20 +493,16 @@ pub fn build_host_lobby_document(host_index_html: &str) -> Result<String, HostLo
         1,
     );
 
-    // The landing (issue #1361), minus the fullscreen control, and hidden until
-    // the first landing push -- which, like the picker's, only a world-less host
-    // makes. See the module table for both edits.
+    // The landing (issue #1361), whole, and hidden until the first landing push
+    // -- which, like the picker's, only a world-less host makes. Its fullscreen
+    // control came back in #1367, when a host verb was put behind it; see the
+    // module table.
     let landing_panel = extract_element(
         host_index_html,
         LANDING_PANEL_MARKER,
         HostLobbyDocumentError::NoLandingPanel,
         HostLobbyDocumentError::UnbalancedLandingPanel,
     )?;
-    let landing_panel = crate::native_host::panes::document::strip_elements_matching(
-        landing_panel,
-        "button",
-        Some(LANDING_TOOLING_BUTTON_MARKER),
-    );
     let landing_panel = landing_panel.replacen(
         LANDING_PANEL_MARKER,
         &format!("{LANDING_PANEL_MARKER} style=\"display:none\""),
@@ -533,6 +524,7 @@ pub fn build_host_lobby_document(host_index_html: &str) -> Result<String, HostLo
          <link rel=\"stylesheet\" href=\"gui/host-qr.css\" />\n\
          <link rel=\"stylesheet\" href=\"gui/host-scenarios.css\" />\n\
          <link rel=\"stylesheet\" href=\"gui/host-landing.css\" />\n\
+         <link rel=\"stylesheet\" href=\"gui/native-settings.css\" />\n\
          <style>\n{GROUND_CSS}</style>{head}\
          <script src=\"{QR_ENCODER_SRC}\"></script>\n\
          </head>\n\
@@ -588,10 +580,17 @@ const QR_ENCODER_SRC: &str = "gui/vendor/qrcode.js";
 ///
 /// A host PAGE has a settings cog whose Gameplay tab carries "toggle the QR"
 /// (`gui/server-settings.js` → `__hostToggleQrCode`). The native viewscreen
-/// window has no cog and no chrome of its own, so this document grows the one
+/// window had no cog and no chrome of its own, so this document grew the one
 /// control that decision needs — the smallest honest affordance, reachable
 /// exactly when the surface is: in the lobby, and in play once F9 has revealed
 /// it (`super::reveal`).
+///
+/// Issue #1367 gave the window a cog, and put the same decision on its Gameplay
+/// tab (`gui/native-settings.js`'s `NATIVE_SETTINGS_CONTROLS`). This control
+/// stays anyway, and that is not a duplicate implementation: both triggers call
+/// the one `gui/host-qr.js` toggle, the way three separate callers already
+/// reach it. A join code is what a room needs fastest, and one press from the
+/// screen the crew are looking at is the whole reason this affordance exists.
 ///
 /// It carries **no text of its own**. `data-i18n` is resolved by `applyToDom`
 /// in `host_lobby_link.js`, from the same string the host page's settings menu
@@ -644,15 +643,33 @@ const QR_TOGGLE_MARKUP: &str = "<div id=\"host-lobby-qr-toggle\" role=\"button\"
 ///   panel a status bar's height off the floor of the crew lobby costs a
 ///   viewscreen nothing.
 ///
-/// What is deliberately NOT here is `--settings-cog-keepout`.
-/// `gui/host-lobby.css` floors `.lobby-panel-wrap`'s left padding at the host
-/// PAGE's settings-cog corner, and `gui/host-scenarios.css` floors
-/// `#world-list`'s top padding at the same token; both name it with a `0px`
-/// fallback. There is no cog on the viewscreen window, so leaving the property
-/// undefined *is* this surface's answer — and defining it to zero here would be
-/// a second way of saying the same thing, in the document rather than in the
-/// sheets that know why the floor exists.
+/// * `--settings-cog-keepout`, which until issue #1367 was deliberately absent.
+///   `gui/host-lobby.css` floors `.lobby-panel-wrap`'s left padding at the
+///   settings cog's corner and `gui/host-scenarios.css` floors `#world-list`'s
+///   top padding at the same token, both naming it WITH a fallback — which is
+///   those sheets saying the property may legitimately be missing, as it was
+///   here while this window had no cog at all. It has one now
+///   (`gui/native-settings.js`), pinned into the landing rail's top, so the
+///   floor has something to hold.
+///
+///   ONE scalar answers TWO axes — a left padding on the lobby and a top
+///   padding on the picker — so it is the cog's TALLEST extent at either of the
+///   landing sheet's breakpoints rather than an average of the four. The wide
+///   breakpoint pins the cog at `top: 34px`, level with
+///   `#landing-fullscreen-btn` in the opposite corner because the design draws
+///   the two as a pair, so 46px of button reaches 80px; 92px is that plus the
+///   same 12px gap the host page leaves its own cog (`server.html` declares
+///   56px for a 44px corner). The other three extents are shorter — 55px to the
+///   right of the wide breakpoint's `left: 9px`, 55px and 62px at the narrow
+///   one — so this token is sized by its VERTICAL consumer, and it is the same
+///   92px `gui/native-settings.css` drops the panel to, by the same arithmetic.
+///   `the_cog_keep_out_clears_the_corner_its_cog_occupies` derives all of it
+///   from those two sheets rather than restating it. The picker does not pay
+///   it twice — `#scenario-panel.landing-docked #world-list` overrides that top
+///   padding back to 16px, because a picker docked in the landing's middle
+///   column has no cog above it.
 const GROUND_CSS: &str = "\
+:root { --settings-cog-keepout: 92px; }\n\
 html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }\n\
 body { font-family: monospace; }\n\
 #overlay { z-index: 210; bottom: 72px; }\n\
@@ -854,12 +871,16 @@ mod tests {
         // appearing on a viewscreen as a dead button.
         assert_eq!(
             button_ids(&html),
-            vec!["ai-launch-btn", "host-lobby-qr-toggle"],
+            vec![
+                "ai-launch-btn",
+                "host-lobby-qr-toggle",
+                "landing-fullscreen-btn"
+            ],
             "every control on the assembled document has something wired behind \
-             it: the AI launch (issue #1328) and the QR toggle (issue #1329). \
-             The landing's own fullscreen control is NOT in that set (issue \
-             #1361) — a native window's mode belongs to the host process, and \
-             setting it is #1367"
+             it: the AI launch (issue #1328), the QR toggle (issue #1329) and \
+             the landing's fullscreen control (issue #1367), whose press \
+             crosses the queue as `HostLobbyRecord::ToggleFullscreen` and moves \
+             this window's mode"
         );
     }
 
@@ -974,27 +995,54 @@ mod tests {
     }
 
     #[test]
-    fn the_landings_fullscreen_control_is_removed_because_nothing_here_answers_it() {
-        // The doctrine, applied to the one control the landing markup carries:
-        // a browser host's forwards to `gui/page-chrome.js`'s `initFullscreen`,
-        // which asks a BROWSER to fill a screen. This is an embedded view with
-        // no browser chrome; the window mode is the host process's and setting
-        // it is issue #1367. Removed rather than hidden, for the reason the
-        // picker's file inputs are: a `display: none` control is still in the
-        // DOM to be reached.
+    fn the_landings_fullscreen_control_is_kept_because_this_surface_can_now_answer_it() {
+        // The doctrine turned around, the same way the AI launch's was in
+        // #1328. #1361 stripped this control: a browser host's forwards to
+        // `gui/page-chrome.js`'s `initFullscreen`, which asks a BROWSER to fill
+        // a screen, and this is an embedded view with no browser chrome. #1367
+        // removed the reason — the press crosses the page->host queue as
+        // `HostLobbyRecord::ToggleFullscreen`, and `fullscreen`'s applier sets
+        // the primary window's mode the way the display-assignment law already
+        // does — so the control comes back by the rule that took it away.
         let html = build_host_lobby_document(HOST_PAGE).unwrap();
-        assert!(!html.contains("id=\"landing-fullscreen-btn\""));
-        assert!(!html.contains("client.fullscreen_tip"));
-        // The removal is surgical: everything around it survives, including the
-        // rail it sits beside and the stage it sits above.
+        assert!(html.contains("id=\"landing-fullscreen-btn\""));
+        // It carries the page's own string id, so `applyToDom` names it in
+        // whatever language the room is in (AGENTS.md rule 11).
+        assert!(html.contains("client.fullscreen_tip"));
+        // …and keeping it took nothing else with it: the rail it sits beside
+        // and the stage it sits above are untouched.
         assert!(html.contains("id=\"landing-rail-stamp\""));
         assert!(html.contains("class=\"landing-stage\""));
         assert!(html.contains("id=\"landing-menu\""));
-        // …and the allowlist is unchanged by the landing's arrival.
         assert_eq!(
             button_ids(&html),
-            vec!["ai-launch-btn", "host-lobby-qr-toggle"]
+            vec![
+                "ai-launch-btn",
+                "host-lobby-qr-toggle",
+                "landing-fullscreen-btn"
+            ]
         );
+    }
+
+    #[test]
+    fn the_native_settings_overlay_brings_its_own_sheet() {
+        // Issue #1367. The markup this document borrows comes from the host
+        // page, but `server.html`'s settings CSS is an inline `<style>` block
+        // in that page and there is nothing to slice — so the surface that
+        // mounts the shared overlay kit links a token-only sheet of its own.
+        // The kit, the tab list and the controls' behaviour stay shared; only
+        // the paint is here.
+        let html = build_host_lobby_document(HOST_PAGE).unwrap();
+        assert!(html.contains("href=\"gui/native-settings.css\""));
+        // Beside the sheets it already had, not instead of one of them.
+        assert!(html.contains("href=\"gui/host-landing.css\""));
+        assert!(html.contains("href=\"gui/tokens.css\""));
+        // The cog and the panel themselves are NOT markup here: the kit
+        // find-or-creates both (`gui/settings-overlay-kit.js`), so they exist
+        // exactly when `host_lobby_link.js` has mounted them and never as a
+        // control the assembly could leave dead.
+        assert!(!html.contains("id=\"native-settings-btn\""));
+        assert!(!html.contains("id=\"native-settings-overlay\""));
     }
 
     #[test]
@@ -1119,10 +1167,42 @@ mod tests {
         assert!(html.contains("nextOpenEntry"));
         assert!(html.contains("platform: 'native'"));
         assert!(html.contains("ownPanelVisibility: true"));
-        // No fullscreen hook, because the control it would drive is stripped
-        // above — a hook wired to a control that is not there is the dead
-        // button in another form.
-        assert!(!html.contains("toggleFullscreen:"));
+        // The fullscreen hook IS handed over since issue #1367, and what it
+        // does is a record rather than a call: a browser host's control
+        // forwards to `gui/page-chrome.js`'s `initFullscreen`, and there is no
+        // browser here to ask. So the press crosses the same queue as every
+        // other thing this surface cannot do itself, and the verb is pinned
+        // here for the reason the two menu records above are — the client half
+        // writes it by hand and has no serde to keep it honest.
+        assert!(html.contains("toggleFullscreen:"));
+        assert!(html.contains("kind: 'toggle_fullscreen'"));
+        assert_eq!(
+            super::super::HostLobbyRecord::decode(r#"{"kind":"toggle_fullscreen"}"#),
+            Some(super::super::HostLobbyRecord::ToggleFullscreen)
+        );
+    }
+
+    #[test]
+    fn the_settings_cog_is_mounted_from_the_shared_kit_and_not_rebuilt_here() {
+        // Issue #1367's other half, and the claim the PRD makes in one line:
+        // settings are not rebuilt. So the document's client half imports
+        // `gui/native-settings.js`, which takes its shell from
+        // `gui/settings-overlay-kit.js` and its tabs from
+        // `gui/settings-tabs.js` — the same two the host page's cog and the
+        // phone's use — and this surface supplies only the hook that says what
+        // a pressed row's verb means here.
+        let html = build_host_lobby_document(HOST_PAGE).unwrap();
+        assert!(html.contains("gui/native-settings.js"));
+        assert!(html.contains("mountNativeSettings"));
+        // Its two verbs, pinned for the reason every other hand-written tag on
+        // this bridge is: one is answered in the page and one crosses the
+        // queue, and neither is spelled anywhere serde can check.
+        assert!(html.contains("toggle_qr:"));
+        assert!(html.contains("kind: 'toggle_fullscreen'"));
+        // …and no second settings implementation rides along: nothing here
+        // reaches for the host PAGE's cog, which is wired to `wasm_*` bindings
+        // this process does not publish to a document.
+        assert!(!html.contains("server-settings"));
     }
 
     #[test]
@@ -1493,14 +1573,48 @@ mod tests {
     }
 
     #[test]
-    fn the_cog_keep_out_is_left_undefined_because_there_is_no_cog_on_this_window() {
-        // `.lobby-panel-wrap` floors its left padding at the host PAGE's
-        // settings-cog corner, naming the token with a `0px` fallback. Leaving
-        // the property undefined here is what selects that fallback; defining it
-        // to the page's own value would be an unexplained indent on a window
-        // that has no cog.
+    fn the_cog_keep_out_clears_the_corner_its_cog_occupies() {
+        // `.lobby-panel-wrap` floors its left padding at the settings cog's
+        // corner and `#world-list` floors its TOP padding at the same token,
+        // both naming it with a fallback so the property may be absent. It was
+        // absent here through #1325-#1366, because there was no cog. #1367
+        // mounts one from the shared kit, pinned into the landing rail's top —
+        // so the token is defined and the two floors hold a real corner rather
+        // than an imported one.
+        //
+        // ONE scalar, TWO axes, and that is the whole difficulty. The host
+        // page's cog is a 34px square at top/left 10, so 56px clears it either
+        // way and `tests/client/server-settings.test.js` asserts exactly this
+        // pair of inequalities over there. THIS cog is not square-cornered:
+        // `top: 34px; left: 9px` on the wide breakpoint, because 9px centres a
+        // 46px button in the 64px rail and 34px sits it level with
+        // `#landing-fullscreen-btn` in the opposite corner. So the honest
+        // scalar is the tallest of the four extents, and every number below is
+        // read out of the two sheets rather than restated here — a cog that
+        // moves has to break this test rather than the first screen the
+        // operator reads.
+        let settings = std::fs::read_to_string("gui/native-settings.css").unwrap();
+        let landing = std::fs::read_to_string("gui/host-landing.css").unwrap();
+        let size = declared(&landing, ".landing-icon-btn", "height");
+        assert_eq!(size, [46], "the chamfered square the cog borrows");
+        let keepout = declared(GROUND_CSS, ":root", "--settings-cog-keepout");
+        assert_eq!(keepout.len(), 1, "one token, declared once");
+        let insets: Vec<u32> = declared(&settings, ".native-settings-btn", "top")
+            .into_iter()
+            .chain(declared(&settings, ".native-settings-btn", "left"))
+            .collect();
+        assert_eq!(insets.len(), 4, "a top and a left at each breakpoint");
+        for inset in insets {
+            assert!(
+                keepout[0] >= inset + size[0],
+                "the keep-out is {}px and the cog reaches {}px; an undocked \
+                 picker would print its label under the cog",
+                keepout[0],
+                inset + size[0]
+            );
+        }
         let html = build_host_lobby_document(HOST_PAGE).unwrap();
-        assert!(!html.contains("--settings-cog-keepout"));
+        assert!(html.contains(&format!("--settings-cog-keepout: {}px", keepout[0])));
     }
 
     #[test]
@@ -1695,10 +1809,10 @@ mod tests {
                 "the lobby document must carry #{id}, which the shared landing writes into"
             );
         }
-        // …minus the fullscreen control, which the real page really does carry
-        // and which nothing on this surface can answer until issue #1367.
+        // …including the fullscreen control, which since issue #1367 has a host
+        // verb behind it on this surface as well as on the page.
         assert!(page.contains("id=\"landing-fullscreen-btn\""));
-        assert!(!html.contains("id=\"landing-fullscreen-btn\""));
+        assert!(html.contains("id=\"landing-fullscreen-btn\""));
         // …minus the host tooling, which the real page really does carry.
         assert!(page.contains("id=\"mod-pack-upload\""));
         assert!(!html.contains("id=\"mod-pack-upload\""));
@@ -1727,10 +1841,17 @@ mod tests {
                 // the allowlist because they ARE wired: the shared renderer
                 // hangs its handlers on them from `renderHostLanding`, and the
                 // verb the confirm control carries is answered here by
-                // `drain_surface_records` with an `AppExit`. Unlike the
-                // fullscreen control, something on this surface is behind them.
+                // `drain_surface_records` with an `AppExit`.
                 "landing-confirm-cancel",
                 "landing-confirm-cta",
+                // The landing's fullscreen control (issue #1367), on the
+                // allowlist for the same reason and by the same rule: the
+                // shared renderer hangs `toggleFullscreen` on it,
+                // `host_lobby_link.js` supplies a hook that sends
+                // `toggle_fullscreen`, and `fullscreen::apply_window_mode_toggle`
+                // moves this window's mode. Until it had that, #1361 stripped
+                // it from this document rather than ship a dead corner.
+                "landing-fullscreen-btn",
                 // The mod-pack shelf's own two (issue #1366), on the allowlist
                 // by the same rule and for the same reason: `renderHostLanding`
                 // hangs `pick` and `installPack` on them, `host_lobby_link.js`

@@ -14,11 +14,16 @@
  * bites a sheet moved out of an inline <style>, and gui/host-scenarios.css
  * records it for the same image.
  *
- * The settings cog is a host PAGE control: `position: fixed` at z-index 210,
- * above this panel's 205, so it is already on top of the landing and the
- * landing draws none of its own — a second one would be two controls
- * disagreeing about which is open. What the landing does NOT do is reserve a
- * keep-out for it the way `#world-list` does in `gui/host-scenarios.css`. The
+ * The settings cog belongs to the settings OVERLAY, not to the landing:
+ * `gui/settings-overlay-kit.js` find-or-creates it beside the modal it opens,
+ * so it exists exactly where an overlay has been mounted — `#server-settings-btn`
+ * on the host page (issue #939) and `#native-settings-btn` on the native
+ * viewscreen (issue #1367). Both are `position: fixed` above this panel's 205,
+ * so both are already on top of the landing, in the corner the design draws the
+ * cog in, and the landing draws none of its own — a second one would be two
+ * controls disagreeing about which panel is open. What the landing does NOT
+ * do is reserve a keep-out for it the way `#world-list` does in
+ * `gui/host-scenarios.css`. The
  * cog's corner falls inside `.landing-rail`, and everything a host reads is
  * already clear of it by layout: the rail keeps its stamp at the far end and
  * `.landing-stage` opens at `top: 88px` (64px when the rail is a top bar),
@@ -27,7 +32,8 @@
  * declared padding proves nothing about a rect. `--settings-cog-keepout` is
  * still named once, as the floor under the narrow bar's left inset, and always
  * WITH a fallback: that is this sheet saying the property may legitimately be
- * absent, as it is on the native lobby surface, which has no cog at all.
+ * absent, as it was on the native lobby surface until #1367 mounted a cog
+ * there.
  *
  * ── z-index 205 ────────────────────────────────────────────────────────────
  *
@@ -187,11 +193,12 @@
   flex-direction: column;
   align-items: center;
   /* `flex-end` is what clears the settings cog, and there is deliberately no
-     keep-out padding here to go with it: gui/server-settings.js pins
-     #server-settings-btn to the page's top-left corner, which is INSIDE this
-     rail's top — and this rail keeps its one child at the bottom, so nothing
-     of the host's is up there to be painted over. A top reserve would look
-     like the guard and be none: padding above content already pushed to the
+     keep-out padding here to go with it: whichever cog this surface mounts
+     (#server-settings-btn on the page, #native-settings-btn on the native
+     viewscreen) is pinned to a top-left corner INSIDE this rail's top — and
+     this rail keeps its one child at the bottom, so nothing of the host's is up
+     there to be painted over. A top reserve would look like the guard and be
+     none: padding above content already pushed to the
      far end holds nothing. What guards it instead is a measurement —
      tests/smoke/server-settings-cog.spec.js puts the cog's rect against this
      stamp and against the lockup, on a cold load, before anything is clicked. */
@@ -863,10 +870,11 @@
     gap: 14px;
     /* This edge's own inset, floored at the cog's keep-out rather than reserved
        for it — which is why it has a real fallback where the vertical rail has
-       no padding at all: 16px is what the inset is worth on a surface with no
-       cog, i.e. the native lobby (the optional fallback is this sheet saying
-       the property may legitimately be absent there). 72px on the right is
-       #landing-fullscreen-btn's 46px plus its 16px inset. */
+       no padding at all: 16px is what the inset is worth on a surface that
+       mounts no settings overlay and therefore declares no corner (the optional
+       fallback is this sheet saying the property may legitimately be absent).
+       72px on the right is #landing-fullscreen-btn's 46px plus its 16px
+       inset. */
     padding: 0 72px 0 var(--settings-cog-keepout, 16px);
     border-right: 0;
     border-bottom: 1px solid var(--edge-faint);

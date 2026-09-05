@@ -127,7 +127,7 @@
 
 /* ── The native surface's own toggle (issue #1329) ───────────────────── */
 /* A host page has a settings cog whose Gameplay tab carries "show/hide the QR"
-   (gui/server-settings.js). The native viewscreen window has no cog and no
+   (gui/server-settings.js). The native viewscreen window had no cog and no
    pointer chrome of its own, so the lobby document grows this one control -
    the smallest honest affordance for the same decision. It renders only there:
    server.html has no #host-lobby-qr-toggle, and this rule matches nothing on a

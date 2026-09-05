@@ -235,6 +235,32 @@ pub enum HostLobbyRecord {
     /// scanned folder, and it already loads a pack from the file input inside
     /// `#scenario-panel`.
     InstallModPack { pack: String },
+    /// The operator pressed the landing's fullscreen control (issue #1367).
+    ///
+    /// The THIRD landing verb the host has to answer, and the only one that is
+    /// not a route at all: it is the corner control beside the menu rather than
+    /// a row in it, so it carries no entry id and opens no stage.
+    ///
+    /// A browser host never sends it and does not need to — `gui/page-chrome.js`
+    /// implements fullscreen once, in the page, and the landing's control
+    /// forwards to that. There is no such implementation to forward to here:
+    /// this window has no browser chrome, and what fullscreen MEANS on it is the
+    /// primary window's `WindowMode`, which is the host process's to set. So the
+    /// press crosses the bridge, and
+    /// [`fullscreen::apply_window_mode_toggle`](super::fullscreen::apply_window_mode_toggle)
+    /// answers it the way the display-assignment law already does.
+    ///
+    /// A toggle rather than a `SetWindowMode { fullscreen: bool }`, because the
+    /// page cannot see the answer: the surface is an embedded view with no
+    /// `document.fullscreenElement` and no window manager, so a record naming
+    /// the state it wanted would be the page asserting something only the host
+    /// knows. What the operator did is "press the control"; what that means is
+    /// decided where the current mode is legible.
+    ///
+    /// Snake_case, with the picks and the landing's own verbs; the kebab
+    /// spellings are the layout row's alone and are historical (see
+    /// [`SetViewscreen`](Self::SetViewscreen)).
+    ToggleFullscreen,
 }
 
 impl HostLobbyRecord {
@@ -294,7 +320,7 @@ mod tests {
     }
 
     #[test]
-    fn the_surfaces_ten_records_round_trip() {
+    fn the_surfaces_eleven_records_round_trip() {
         for record in [
             HostLobbyRecord::SelectScenario {
                 scenario_id: "combat_test".into(),
@@ -321,6 +347,7 @@ mod tests {
             HostLobbyRecord::InstallModPack {
                 pack: "thin-margin.zip".into(),
             },
+            HostLobbyRecord::ToggleFullscreen,
         ] {
             let json = serde_json::to_string(&record).expect("a record encodes");
             assert_eq!(HostLobbyRecord::decode(&json), Some(record));

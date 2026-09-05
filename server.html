@@ -2654,7 +2654,17 @@
   // on screen. The native lobby surface reads the same law out of the same
   // module, which is the other half of why it moved.
   window.__hostToggleQrCode = function() {
+    // The landing is asked first, exactly as it is on the phase path: while it
+    // stands in front of the panel there is nothing to join and the panel is
+    // not the operator's to open, so the cog REFUSES rather than opening a code
+    // over the front door that nothing would take away again. `false` is the
+    // registry's own "that did nothing" (gui/host-actions.js), so the semantic
+    // action reports a refusal instead of settling as applied. It cannot fire
+    // while the docked picker is on screen — that is the row above, and the
+    // shared `joinPanelSuppressed` is the one place either is decided.
+    if (joinPanelBlockedByLanding()) return false;
     if (window.hostQr) window.hostQr.toggleQr(document);
+    return true;
   };
   window.__hostIsQrVisible = function() {
     return !!window.hostQr && window.hostQr.isQrVisible(document);
@@ -2859,7 +2869,17 @@
     const lobbyProjection = fleetHandle && fleetStartPolicy
       ? { ...s, all_ready: !!fleetStartPolicy.all_ready }
       : s;
-    const vm = window.hostLobbyViewModel(lobbyProjection, _lobbyPrevPhase);
+    // Both are INPUTS the page holds and the payload does not: the landing is a
+    // pre-simulation surface with no GamePhase of its own, and `GamePhase::Lobby`
+    // is the default, so the phase cannot tell the front door from the lobby —
+    // and whether the landing is CARRYING the join panel in its middle column
+    // is the difference between this surface and the native one, which floats
+    // the same node over its landing instead. What the pair MEANS for the join
+    // panel is decided once, in gui/host-lobby-view.js, for both of them.
+    const vm = window.hostLobbyViewModel(lobbyProjection, _lobbyPrevPhase, null, {
+      landingUp: !_landingDismissed,
+      panelDocked: joinPanelDockedInLanding(),
+    });
     drainFleetStartResult();
     const tr = vm.transitions;
 
@@ -5189,6 +5209,10 @@
             try {
               const parsed = JSON.parse(json);
               if (parsed.type === 'ToggleQrCode') {
+                // Same refusal as the cog's, and it has to be here rather than
+                // on a control: a phone's press arrives as a message, so
+                // hiding a button would leave this path open.
+                if (joinPanelBlockedByLanding()) return;
                 if (window.hostQr) window.hostQr.toggleQr(document);
                 return;
               }
@@ -5694,6 +5718,8 @@
       if (window.hostLandingRender) window.hostLandingRender.undockLandingPanels(document);
       const panel = document.getElementById('landing-panel');
       if (panel) panel.style.display = 'none';
+      // The landing is one of the join panel's two inputs, and it just moved.
+      applyJoinPanelLaw();
     }
 
     /**
@@ -5713,6 +5739,9 @@
       _landingOpenEntry = 'new_game';
       _landingJoinError = null;
       window.__hostRenderLanding();
+      // …and the other direction: a landing brought back over a mission that
+      // ended with the code on screen takes it away again.
+      applyJoinPanelLaw();
     }
 
     // The module-owned New Session button calls this after consuming the URL's
@@ -5761,8 +5790,83 @@
         scenarioPanel.appendChild(qrOverlay);
       }
       qrOverlay.classList.add('pre-scenario');
-      // Visibility state lives in gui/host-qr.js (there is no `qrVisible`).
-      window.hostQr.setQrVisible(document, true);
+      // Docking is this page's business; whether the panel is SEEN is not.
+      // This used to assert `setQrVisible(document, true)` on the spot. The
+      // answer is the same on this surface — a panel docked into the picker
+      // shows, which is AC1, and gui/host-landing.css lays it out as the
+      // landing's middle column when New Game moves #scenario-panel into
+      // #landing-mid — but it is the shared law's answer now rather than this
+      // page's own. That is what lets the one surface that does NOT dock (the
+      // native viewscreen, whose #overlay floats over the landing at z-index
+      // 210) get the opposite answer out of the same function instead of out of
+      // a second opinion written here.
+      applyJoinPanelLaw();
+    }
+
+    /**
+     * Re-ask the join panel's own law with the facts this page holds: the
+     * authoritative phase it last saw, whether the landing is still up, and
+     * whether the landing is CARRYING the panel.
+     *
+     * gui/host-lobby-view.js decides — for this surface and the native one —
+     * and gui/host-qr.js carries it out; this only supplies the facts. Called
+     * from the three moments that move the panel with no lobby payload in hand
+     * (the pre-scenario dock above, and the two landing transitions), because
+     * the lobby push is deduped and "the landing went away" is not a lobby
+     * state change.
+     *
+     * Safe before either module has loaded: the next lobby push settles it, the
+     * same guard __updateLobby uses.
+     */
+    function applyJoinPanelLaw() {
+      if (!window.hostQr || typeof window.joinPanelAction !== 'function') return;
+      window.hostQr.applyQrPhase(
+        document,
+        window.joinPanelAction(
+          _lobbyPrevPhase, !_landingDismissed, joinPanelDockedInLanding(),
+        ),
+      );
+    }
+
+    /**
+     * Whether the join panel is docked INSIDE the landing's layout rather than
+     * floating over it — `showJoinQrOverPanel`'s `pre-scenario` dock, which
+     * parks #overlay in #scenario-panel and rides along when New Game moves
+     * that panel into #landing-mid.
+     *
+     * This is issue #755's AC1 as a FACT rather than as an assertion: a panel
+     * the landing is carrying in its own middle column cannot cover the front
+     * door, so the landing has no quarrel with it and a crew scans the code
+     * from the same column the room is picking a World in. It is read off the
+     * class rather than remembered, for the reason there is no `qrVisible` here
+     * any more: the dock and the undock (`resetJoinQrLayer`) already write it,
+     * and a second copy is a second thing to keep in step.
+     */
+    function joinPanelDockedInLanding() {
+      const qrOverlay = document.getElementById('overlay');
+      return !!qrOverlay && qrOverlay.classList.contains('pre-scenario');
+    }
+
+    /**
+     * Whether a toggle must be refused because the landing is in front of the
+     * panel — this page's half of the rule the native surface keeps in
+     * `requestToggleQr`.
+     *
+     * Both of this page's toggle entry points ask it: the settings cog
+     * (`__hostToggleQrCode`) and a phone's `ToggleQrCode`, which arrives as a
+     * message and so cannot be covered by hiding a control. Refused and not
+     * deferred, because nothing would undo it: the lobby push is deduped and
+     * the landing only re-asks the law when it MOVES, so a press over the front
+     * door would leave the join code sitting on it.
+     *
+     * `joinPanelSuppressed` is the shared module's — the same function the law
+     * itself reads — so "the panel is not on screen and is not the operator's
+     * to open either" stays one decision. Before the module has loaded there is
+     * nothing on screen to toggle and no harm in saying so.
+     */
+    function joinPanelBlockedByLanding() {
+      if (typeof window.joinPanelSuppressed !== 'function') return false;
+      return window.joinPanelSuppressed(!_landingDismissed, joinPanelDockedInLanding());
     }
     function resetJoinQrLayer() {
       const qrOverlay = document.getElementById('overlay');

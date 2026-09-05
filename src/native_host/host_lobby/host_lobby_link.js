@@ -39,7 +39,11 @@
 import './gui/strings-boot.js';
 import { t, localiseTree, applyToDom } from './gui/strings.js';
 import { localiseHostPayload } from './gui/host-channel.js';
-import { hostLobbyViewModel } from './gui/host-lobby-view.js';
+import {
+  hostLobbyViewModel,
+  joinPanelAction,
+  joinPanelSuppressed,
+} from './gui/host-lobby-view.js';
 import {
   renderHostLobby,
   MONITOR_BUTTON_ATTR,
@@ -98,7 +102,19 @@ window.__phoenixHostLobby.render = function (json, revealChrome, layoutJson) {
       console.warn('[host-lobby] bad monitor row json', e);
     }
   }
-  const vm = hostLobbyViewModel(payload, prevPhase, layout);
+  // `landingUp` is an INPUT this document holds and the payload does not, not
+  // a decision made here: the landing is a pre-simulation surface with no
+  // GamePhase of its own, and a world-less host reads `Lobby` from its first
+  // frame. What that fact MEANS for the join panel is gui/host-lobby-view.js's
+  // `joinPanelAction`, exactly as it is on the host page. `landingUp()` and not
+  // `!landingState.dismissed`, because a host that never pushed a landing has
+  // not got one up — see the flag itself. No `panelDocked`: this surface floats
+  // its `#overlay` over the landing rather than docking it into the landing's
+  // middle column the way the host page does, which is the whole difference
+  // between the two hosts as far as that law is concerned.
+  const vm = hostLobbyViewModel(payload, prevPhase, layout, {
+    landingUp: landingUp(),
+  });
   prevPhase = payload.phase;
   renderHostLobby(document, vm, t, { revealChrome });
   // The join panel's visibility follows the same law on this surface as on the
@@ -111,7 +127,7 @@ window.__phoenixHostLobby.render = function (json, revealChrome, layoutJson) {
 // The join panel's own render (issue #1329): what the QR encodes, and the
 // presses that have arrived since the last one.
 window.__phoenixHostLobby.renderJoin = function (json, qrToggles) {
-  for (let i = 0; i < qrToggles; i += 1) toggleQr(document);
+  for (let i = 0; i < qrToggles; i += 1) requestToggleQr();
   if (!json) return;
   let invite;
   try {
@@ -244,6 +260,24 @@ let landingOpenEntry = null;
 // World has taken the front door away. Held so a re-render driven by a click
 // carries the same facts the last push did.
 let landingState = { build: 'dev', dismissed: false };
+// Whether a landing has ever been PUSHED to this surface, which is not the same
+// question as `dismissed` above and differs by a whole host configuration.
+// `feed_landing_panel` (src/native_host/host_lobby/mod.rs) requires a
+// `LobbyScenarioCatalog`, and src/native_host/app.rs inserts one only when the
+// process was started WITHOUT `--world` — so `phoenix-host --world …` never
+// pushes a landing at all and the `dismissed: false` above stays a default
+// nothing ever answered. Read on its own as "the landing is up" it would hide
+// the join panel for the entire run on the one configuration that knew its
+// World at the prompt: no QR, no URL, no typed code, and every lobby push
+// re-hiding the panel behind the operator's own toggle. The lobby feed has no
+// catalogue gate (`feed_lobby_state`), so those pushes keep coming.
+let landingPushed = false;
+
+/** Whether the landing screen is in front of this surface right now. */
+function landingUp() {
+  return landingPushed && !landingState.dismissed;
+}
+
 // The host's mod-pack shelf (issue #1366), or null on a host started without
 // `--mod-pack-dir` — which is most of them, and is exactly how the landing's
 // Load-mod-pack row stays inert here. `landingProvides` is what this surface
@@ -381,6 +415,10 @@ window.__phoenixHostLobby.renderLanding = function (json) {
     console.warn('[host-lobby] bad landing json', e);
     return;
   }
+  // A landing EXISTS on this surface from here on, whatever this one says. The
+  // pair is what `landingUp()` reads; `dismissed` alone cannot tell a host that
+  // dismissed its landing from one that was never given a landing to dismiss.
+  landingPushed = true;
   landingState = {
     build: payload.build || 'dev',
     dismissed: !!payload.dismissed,
@@ -390,6 +428,12 @@ window.__phoenixHostLobby.renderLanding = function (json) {
   // door rather than on a stage nobody asked for.
   if (landingState.dismissed) landingOpenEntry = null;
   drawLanding();
+  // This push moved one of the join panel's two inputs, so the panel's own law
+  // is asked again with the pair now in hand. Without it a World committed
+  // while the lobby payload happened not to change would leave the code hidden
+  // until something else moved — the lobby push is deduped, and "the landing
+  // went away" is not a lobby state change.
+  applyQrPhase(document, joinPanelAction(prevPhase, landingUp()));
 };
 
 // Host -> page: the mod-pack shelf (issue #1366). Arriving at all is what tells
@@ -451,7 +495,7 @@ if (aiLaunch) {
 // settings control that the surface can serve locally is a row here; one the
 // host serves is a row in `NATIVE_SETTINGS_CONTROLS` and nothing here at all.
 const LOCAL_SETTINGS_VERBS = {
-  toggle_qr: () => toggleQr(document),
+  toggle_qr: () => requestToggleQr(),
 };
 
 mountNativeSettings(document, {
@@ -463,20 +507,48 @@ mountNativeSettings(document, {
   },
 }, { t });
 
+/**
+ * Toggle the join panel — unless the landing is standing in front of it.
+ *
+ * Every toggle this surface can receive lands here: the settings row's
+ * `toggle_qr` verb, the `#host-lobby-qr-toggle` control's click and its
+ * keyboard parity, and the presses a phone's `ToggleQrCode` arrives as on
+ * `renderJoin`. The guard is the shared law's own `joinPanelSuppressed` rather
+ * than a rule of this file's — "not on screen, and not the operator's to open
+ * either" is one fact, decided in gui/host-lobby-view.js for both hosts.
+ *
+ * It is a REFUSAL and not a deferral because nothing here would undo it: this
+ * surface's `#overlay` floats at z-index 210 over the landing's 205, the lobby
+ * push is deduped in Rust (`Inner::last_accepted`), and the landing push only
+ * fires on the first frame and the frame a World lands. One press over the
+ * front door would otherwise leave the join code sitting on it until the roster
+ * happened to change — which is the reported bug, one click further on.
+ *
+ * Guarding the verb rather than hiding the control is deliberate: hiding
+ * `#host-lobby-qr-toggle` would cover this surface's own button and not the
+ * phone that sends the same press over the bridge.
+ */
+function requestToggleQr() {
+  if (joinPanelSuppressed(landingUp())) return;
+  toggleQr(document);
+}
+
 // This surface's own QR control. A click, handled here and not sent anywhere:
 // the panel's visibility is this document's DOM, and a round trip through the
 // host would add a frame of latency to a decision nobody else needs to know.
-// A phone's ToggleQrCode reaches the same `toggleQr` from the other direction.
+// A phone's ToggleQrCode reaches the same `requestToggleQr` from the other
+// direction — which is also where the landing's refusal lives, so both presses
+// obey it and neither of them re-states it.
 const qrToggle = document.getElementById('host-lobby-qr-toggle');
 if (qrToggle) {
-  qrToggle.addEventListener('click', () => toggleQr(document));
+  qrToggle.addEventListener('click', () => requestToggleQr());
   // Keyboard parity (issue #1128): the surface is in the pane input router, so
   // it can be reached by a keyboard, and a control a keyboard can focus but not
   // press is worse than one it cannot reach.
   qrToggle.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
-      toggleQr(document);
+      requestToggleQr();
     }
   });
 }

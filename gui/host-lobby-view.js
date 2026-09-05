@@ -68,6 +68,86 @@ export function fleetStartValidationState({
 }
 
 /**
+ * Whether the landing is standing IN FRONT of the join panel.
+ *
+ * The landing's half of the law, named because two callers need the same
+ * answer for two different reasons: [`joinPanelAction`]'s top row, and every
+ * toggle — the host page's settings cog, a phone's `ToggleQrCode`, the native
+ * surface's own control. A toggle is not a phase transition and nothing here
+ * reasserts anything, so a control that could open the panel over the landing
+ * would leave it open with nothing to take it back (the lobby push is deduped
+ * on both hosts, and the landing push only fires when the landing moves).
+ * "Not on screen, and not the operator's to open either" is one fact, so it is
+ * one function rather than a rule each surface's glue re-states for itself.
+ *
+ * `panelDocked` is the difference between the two hosts, and it is what keeps
+ * issue #755's AC1 alive. On the host page the join panel is not a layer over
+ * the landing at all: `showJoinQrOverPanel` docks `#overlay` INSIDE the
+ * borrowed World picker (`#overlay.pre-scenario`), and gui/host-landing.css's
+ * `#scenario-panel.landing-docked #overlay.pre-scenario` block lays it out as
+ * that column's second surface — "a crew can still scan the code from the
+ * landing, which is what it is for". A panel carried in the landing's own
+ * column cannot cover it, so the landing has no quarrel with it. The native
+ * surface never docks: its `#overlay` floats at z-index 210 over the landing's
+ * 205, which is the bug this input exists for, and it passes nothing.
+ *
+ * @param {boolean} landingUp     whether the landing is on this surface.
+ * @param {boolean} [panelDocked] whether it is carrying the join panel.
+ * @returns {boolean}
+ */
+export function joinPanelSuppressed(landingUp, panelDocked) {
+  return !!landingUp && !panelDocked;
+}
+
+/**
+ * When the join panel shows, for every surface that has one.
+ *
+ * The phase half is the table in `gui/host-qr.js`'s header and is unchanged:
+ * shown in the Lobby, hidden while a mission loads and once it is over, and
+ * LEFT ALONE (`null`) in play so an operator can open a late arrival's code and
+ * have it stay open.
+ *
+ * The landing is the input no `GamePhase` carries. The landing (PRD #1355) is a
+ * PRE-SIMULATION surface: the host is sitting in `GamePhase::Lobby` — which is
+ * the DEFAULT (`src/core/messages.rs`), so a world-less native host boots
+ * straight into it — while the operator is still at the front door with no
+ * World chosen and no Session to join. The phase alone therefore cannot tell
+ * the landing from the lobby, which is exactly how the join panel came to be
+ * drawn over both. So it is asked first, and it answers in full:
+ *
+ *   - standing in front of the panel ([`joinPanelSuppressed`]) it is `'hide'`
+ *     rather than `null`, because the host page's pre-scenario dock can have
+ *     made the panel visible before this law was ever consulted;
+ *   - carrying the panel in its own column it is `'show'` — issue #755's AC1,
+ *     and the assertion that dock used to make for itself.
+ *
+ * Neither branch consults the phase, deliberately: before a World is loaded
+ * there is no simulation to have one, and the `''` the host page holds until
+ * its first lobby payload would answer `null` for the whole of World selection
+ * — leaving a crew with no code to scan on the very screen that asks them to.
+ *
+ * A caller with no landing at all passes nothing and gets the phase law on its
+ * own. That is ALSO what "this run has never had a landing" has to look like,
+ * and not `landingUp: true`: a `phoenix-host --world` publishes no landing ever
+ * (`feed_landing_panel` requires a `LobbyScenarioCatalog`, which
+ * `src/native_host/app.rs` inserts only when the process was started without
+ * `--world`), so a surface reading "landing up" off an unanswered default would
+ * hide its join panel for the whole run.
+ *
+ * @param {string} phase   the authoritative `GamePhase` name.
+ * @param {boolean} landingUp whether the landing screen is still on screen.
+ * @param {boolean} [panelDocked] whether the landing is carrying the panel.
+ * @returns {'show'|'hide'|null}
+ */
+export function joinPanelAction(phase, landingUp, panelDocked) {
+  if (joinPanelSuppressed(landingUp, panelDocked)) return 'hide';
+  if (landingUp) return 'show';
+  if (phase === 'Lobby') return 'show';
+  if (phase === 'Loading' || phase === 'GameOver') return 'hide';
+  return null;
+}
+
+/**
  * @param {object} s  Parsed `LobbyStatePayload` — { phase, scenario_title,
  *                    scenario_body, crew_count, max_players, all_ready,
  *                    stations: [{ name, short_code, rank, holder_name,
@@ -81,9 +161,21 @@ export function fleetStartValidationState({
  *                    the `BridgeLayoutPayload` a native host pushes (issue
  *                    #1330). Omitted — and therefore `null` — on the browser
  *                    host, which has no monitors of its own to offer.
+ * @param {object} [surface]  What the calling surface knows about its own
+ *                    chrome that no `GamePhase` carries. Two facts, both about
+ *                    the landing screen (PRD #1355): `landingUp`, whether it is
+ *                    on this surface, and `panelDocked`, whether it is carrying
+ *                    the join panel in its own middle column rather than having
+ *                    it float overhead. server.html holds the pair in
+ *                    `_landingDismissed` and `#overlay.pre-scenario`; the native
+ *                    lobby document holds the first in `landingState` (paired
+ *                    with `landingPushed`, because a `--world` host never
+ *                    pushes a landing at all) and never docks. Both hand them
+ *                    here rather than acting on them themselves. Omitted reads
+ *                    as "no landing" — see [`joinPanelAction`].
  * @returns {object} view model — see the return literal below.
  */
-export function hostLobbyViewModel(s, prevPhase, layout) {
+export function hostLobbyViewModel(s, prevPhase, layout, surface) {
   const phase = s.phase;
   const isLobby = phase === 'Lobby';
   const maxP = s.max_players || 0;
@@ -115,10 +207,15 @@ export function hostLobbyViewModel(s, prevPhase, layout) {
   // transition leaves it untouched (null), which is what lets an operator open
   // the code for a late arrival and have it stay open. The toggles are the host
   // page's settings cog, a phone's ToggleQrCode, and (issue #1329) the native
-  // surface's own control.
-  const qrOverlayAction = isLobby ? 'show'
-    : (phase === 'Loading' || phase === 'GameOver') ? 'hide'
-    : null;
+  // surface's own control. The landing outranks the phase either way, because
+  // it is in front of a host whose phase still reads Lobby: standing over the
+  // panel it takes it off screen, carrying the panel in its own column it puts
+  // it on — see [`joinPanelAction`], which is the whole of this decision.
+  const qrOverlayAction = joinPanelAction(
+    phase,
+    !!(surface && surface.landingUp),
+    !!(surface && surface.panelDocked),
+  );
   const hideGameOverOverlay = phase !== 'GameOver';
 
   const transitions = {
@@ -503,4 +600,12 @@ export function hostLobbyStationRows(layout) {
 if (typeof window !== 'undefined') {
   window.hostLobbyViewModel = hostLobbyViewModel;
   window.fleetStartValidationState = fleetStartValidationState;
+  // The join panel's law on its own, for the host page's pre-scenario dock and
+  // its two landing transitions — the three moments that move the panel
+  // without a lobby payload in hand — and its landing half for the toggle
+  // entry points, which must refuse while the landing is in front of the panel.
+  // They call THESE rather than deciding, so there is still exactly one answer
+  // to "is the join panel on screen".
+  window.joinPanelAction = joinPanelAction;
+  window.joinPanelSuppressed = joinPanelSuppressed;
 }

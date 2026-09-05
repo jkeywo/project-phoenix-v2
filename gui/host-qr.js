@@ -20,15 +20,34 @@
  *
  * ## The visibility law, and where it comes from
  *
- * Unchanged from what `server.html` has always done, now stated once:
+ * Stated once, and read top to bottom — the first row that matches wins:
  *
  *   | when | the join panel |
  *   |---|---|
+ *   | the landing screen is up, docked into it | shown — the crew scans the code from the column the room is picking a World in (issue #755's AC1) |
+ *   | the landing screen is up | hidden — no World, no Session, nothing to join, and it would stand over the front door |
  *   | the Lobby phase | shown — this is what it is for |
  *   | Loading, GameOver | hidden |
  *   | InProgress | left exactly as it was |
  *
- * The phase half arrives as `hostLobbyViewModel().transitions.qrOverlayAction`
+ * The landing rows sit above the phase rows because the landing is not a phase:
+ * a host with no World sits in the DEFAULT `GamePhase::Lobby` from its first
+ * frame, so the phase alone cannot tell the front door from the lobby, and the
+ * panel used to be drawn over both. "Docked into it" is the host page's
+ * `#overlay.pre-scenario` inside the borrowed World picker — a panel the
+ * landing is CARRYING cannot cover it. The native surface never docks, so its
+ * `#overlay` (z-index 210 over the landing's 205) takes the second row.
+ *
+ * The second row is the one the toggles obey as well, which is what makes
+ * "first row wins" true rather than merely written down: while it matches, the
+ * settings cog, a phone's `ToggleQrCode` and the native control all refuse,
+ * because nothing would take the panel away again if they did not — both hosts
+ * dedupe their lobby push, and the landing push only fires when the landing
+ * moves. The refusal is the shared [`joinPanelSuppressed`] in
+ * `gui/host-lobby-view.js`, asked by each surface at its own entry points; no
+ * row of this table is re-stated in the glue.
+ *
+ * All of it arrives as `hostLobbyViewModel().transitions.qrOverlayAction`
  * (`'show'` / `'hide'` / `null`) — the view model already decided it, for both
  * surfaces, and [`applyQrPhase`] only carries it out. `null` is the
  * load-bearing case: **during a mission nothing phase-driven touches the
@@ -37,7 +56,8 @@
  * The toggle half is [`toggleQr`], reached from three places — the host page's
  * settings cog (`gui/server-settings.js` → `__hostToggleQrCode`), a phone's
  * `ToggleQrCode`, and the native surface's own control — all of which land on
- * this one function.
+ * this one function, and all of which are refused first while the landing row
+ * above matches.
  *
  * ## The state is the DOM
  *

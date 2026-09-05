@@ -7,6 +7,8 @@ import {
   hostLobbyMonitorRow,
   hostLobbyStationRows,
   fleetStartValidationState,
+  joinPanelAction,
+  joinPanelSuppressed,
 } from '../../gui/host-lobby-view.js';
 // The real assets/strings/strings.csv is loaded by the vitest setup file, so the
 // tests below can check the sentence an operator actually reads and not only the
@@ -101,6 +103,118 @@ describe('hostLobbyViewModel — phase transitions', () => {
     // operator cannot get back without noticing it went.
     expect(hostLobbyViewModel(payload({ phase: 'InProgress' }), 'Lobby').transitions.qrOverlayAction).toBeNull();
     expect(hostLobbyViewModel(payload({ phase: 'InProgress' }), 'InProgress').transitions.qrOverlayAction).toBeNull();
+  });
+
+  it('keeps the join panel off the landing, on a host whose phase already reads Lobby', () => {
+    // The bug this input exists for. `GamePhase::Lobby` is the DEFAULT
+    // (src/core/messages.rs), so a world-less native host boots straight into
+    // it and the phase law answered 'show' while the operator was still at the
+    // landing's front door with no World chosen — the join code drawn over the
+    // menu, above it in the stacking order. The landing is not a phase, so the
+    // view model is told about it rather than asked to infer it.
+    const landing = { landingUp: true };
+    expect(hostLobbyViewModel(payload({ phase: 'Lobby' }), '', null, landing)
+      .transitions.qrOverlayAction).toBe('hide');
+    // …and it is a 'hide', not a "leave it alone": the host page docks the same
+    // node into #scenario-panel before any of this runs, so the panel can
+    // already be visible by the time the law is first consulted.
+    expect(hostLobbyViewModel(payload({ phase: 'InProgress' }), 'InProgress', null, landing)
+      .transitions.qrOverlayAction).toBe('hide');
+  });
+
+  it('shows it again the moment the landing is dismissed', () => {
+    // Dismissal is what "the lobby is open" means on a surface that has a
+    // landing; nothing else about the law changed.
+    expect(hostLobbyViewModel(payload({ phase: 'Lobby' }), 'Lobby', null, { landingUp: false })
+      .transitions.qrOverlayAction).toBe('show');
+    // A caller with no landing at all — and the pre-#1355 three-argument call —
+    // gets the phase law on its own.
+    expect(hostLobbyViewModel(payload({ phase: 'Lobby' }), 'Lobby', null, {})
+      .transitions.qrOverlayAction).toBe('show');
+  });
+
+  it('is the phase law for a host that never had a landing at all', () => {
+    // Not the same surface as "the landing was dismissed", and the difference
+    // is the whole of `phoenix-host --world …`: `feed_landing_panel` requires a
+    // `LobbyScenarioCatalog`, which src/native_host/app.rs inserts only when
+    // the process was started WITHOUT a world, so that host never publishes a
+    // landing — while `feed_lobby_state` has no such gate and its lobby pushes
+    // arrive as usual. A surface that reported “landing up” off a default
+    // nothing had answered would take the QR, the URL and the typed code away
+    // for the whole run, and re-hide the panel on every push behind the
+    // operator's own toggle. That is why the native document pairs
+    // `landingState.dismissed` with `landingPushed` and this reads 'show'.
+    expect(hostLobbyViewModel(payload({ phase: 'Lobby' }), 'Lobby', null, { landingUp: false })
+      .transitions.qrOverlayAction).toBe('show');
+    expect(hostLobbyViewModel(payload({ phase: 'InProgress' }), 'InProgress', null,
+      { landingUp: false }).transitions.qrOverlayAction).toBeNull();
+  });
+
+  it('shows on a landing that is carrying the panel (issue #755 AC1)', () => {
+    // The host page docks #overlay into the World picker the landing borrows
+    // into its middle column, so the panel cannot cover the front door — and a
+    // crew scans the code from the same column the room is picking a World in.
+    // Neither landing row consults the phase, which matters here: no world is
+    // loaded, so the page's `_lobbyPrevPhase` is still '' and a fall-through
+    // would answer null for the whole of selection.
+    const docked = { landingUp: true, panelDocked: true };
+    expect(hostLobbyViewModel(payload({ phase: 'Lobby' }), '', null, docked)
+      .transitions.qrOverlayAction).toBe('show');
+    expect(hostLobbyViewModel(payload({ phase: '' }), '', null, docked)
+      .transitions.qrOverlayAction).toBe('show');
+    // Round two, after a Game Over returns the page to the picker.
+    expect(hostLobbyViewModel(payload({ phase: 'GameOver' }), 'GameOver', null, docked)
+      .transitions.qrOverlayAction).toBe('show');
+  });
+
+  it('states the whole law once, so both surfaces read the same table', () => {
+    // The rows in gui/host-qr.js's header, top to bottom: a landing CARRYING
+    // the panel shows it, a landing standing in front of it hides it whatever
+    // the phase says, then Lobby shows, Loading/GameOver hide, and InProgress
+    // is left alone so an operator's toggle survives a mission.
+    expect(joinPanelAction('Lobby', true, true)).toBe('show');
+    expect(joinPanelAction('GameOver', true, true)).toBe('show');
+    expect(joinPanelAction('', true, true)).toBe('show');
+    expect(joinPanelAction('Lobby', true)).toBe('hide');
+    expect(joinPanelAction('Loading', true)).toBe('hide');
+    expect(joinPanelAction('InProgress', true)).toBe('hide');
+    expect(joinPanelAction('Lobby', false)).toBe('show');
+    expect(joinPanelAction('Loading', false)).toBe('hide');
+    expect(joinPanelAction('GameOver', false)).toBe('hide');
+    expect(joinPanelAction('InProgress', false)).toBeNull();
+    // The native document's first render, before any phase has arrived.
+    expect(joinPanelAction('', false)).toBeNull();
+    // A surface that never docks reads `panelDocked` false however it asks.
+    expect(joinPanelAction('Lobby', true, false)).toBe('hide');
+    expect(joinPanelAction('Lobby', true, undefined)).toBe('hide');
+  });
+
+  it('answers the toggles with the same fact it answers the law with', () => {
+    // `joinPanelSuppressed` is the row every toggle obeys — the host page's cog
+    // and a phone's ToggleQrCode (`joinPanelBlockedByLanding` in server.html),
+    // the native surface's control and verb (`requestToggleQr`). It is one
+    // function because "not on screen, and not the operator's to open either"
+    // is one fact: nothing reasserts the law during a mission, both hosts dedupe
+    // their lobby push, and the landing only re-asks when it MOVES, so a press
+    // over the front door would stick until the roster happened to change.
+    expect(joinPanelSuppressed(true)).toBe(true);
+    expect(joinPanelSuppressed(true, false)).toBe(true);
+    // …and it does NOT refuse the docked panel, which is on screen on purpose.
+    expect(joinPanelSuppressed(true, true)).toBe(false);
+    expect(joinPanelSuppressed(false)).toBe(false);
+    expect(joinPanelSuppressed(false, true)).toBe(false);
+    // Whenever it refuses, the law hides — whatever the phase says. That pair
+    // is what makes gui/host-qr.js's "the first row that matches wins" true of
+    // the code and not only of the table: the row that hides the panel is the
+    // same row that will not let a toggle open it.
+    for (const phase of ['Lobby', 'Loading', 'InProgress', 'GameOver', '']) {
+      expect(joinPanelAction(phase, true)).toBe('hide');
+      expect(joinPanelSuppressed(true)).toBe(true);
+    }
+    // …and no other 'hide' refuses: Loading and GameOver take the panel away
+    // and an operator can still put it back.
+    expect(joinPanelAction('Loading', false)).toBe('hide');
+    expect(joinPanelSuppressed(false)).toBe(false);
   });
 
   it('hides the game-over overlay whenever the phase is not GameOver', () => {

@@ -689,11 +689,22 @@ const QR_TOGGLE_MARKUP: &str = "<div id=\"host-lobby-qr-toggle\" role=\"button\"
 ///   node, so an `#overlay` parked inside `#scenario-panel` would go dark with
 ///   the picker at world load and never come back for the F9 reveal, and there
 ///   is no page lifecycle here to move it back. So the lift stays, it is
-///   unconditional, and since #1361 it clears `205` as well as `200` — the
-///   landing is now the FIRST paint on this surface, so a lift that cleared
-///   only the picker would leave the join code behind the front door for the
-///   whole of selection. `#host-lobby-qr-toggle` rides one rung above the
-///   panel, so the control that hides it is never underneath it.
+///   unconditional, and since #1361 it clears `205` as well as `200`.
+///
+///   That last rung is now belt-and-braces rather than the thing that puts the
+///   code on screen: because this document floats the panel instead of docking
+///   it, the join panel's own law (`joinPanelAction` in
+///   `gui/host-lobby-view.js`) keeps it OFF while the landing is up — there is
+///   no World, no Session and nothing to join at the front door, and a floating
+///   panel would stand over it rather than sit in its middle column the way the
+///   host page's docked one does. The clearance stays anyway, because stacking
+///   that cannot collide is worth more than stacking that depends on a law
+///   being asked in the right order. `#host-lobby-qr-toggle` rides one rung
+///   above the panel, so the control that hides it is never underneath it —
+///   and that control, like every other way in, refuses while the landing is up
+///   (`requestToggleQr` in `host_lobby_link.js`): the verb is guarded rather
+///   than the button, because a phone's `ToggleQrCode` arrives as a message and
+///   a hidden button would not have covered it.
 /// * the join panel's bottom inset, because that lift buys a collision. A
 ///   floating `#overlay` sits at `bottom: 1rem; right: 1rem`, and the landing's
 ///   `.landing-statusbar` is `left: 64px; right: 0; bottom: 0` — the same

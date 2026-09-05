@@ -1425,8 +1425,37 @@
           <!-- Column B — whichever stage the open entry reveals. New Game
                moves the LIVE #scenario-panel node in here (see
                gui/host-landing-render.js), so a pick still reaches
-               driveWorldLoad() down exactly the path it always did. -->
-          <section id="landing-mid" class="landing-col landing-col-mid"></section>
+               driveWorldLoad() down exactly the path it always did.
+
+               The confirmation panel below is the column's other tenant
+               (issue #1365): the stage a route that cannot be taken back opens
+               instead of acting. Every word in it is written by the renderer
+               from the OPEN ROW's own `confirm` block, so this markup names no
+               route and carries no English — the same reason #landing-menu
+               ships empty. It starts hidden because no route is open on a cold
+               load, and this document is the one the native host borrows its
+               landing from, where a panel visible before the first push would
+               be a front door over a running mission. -->
+          <section id="landing-mid" class="landing-col landing-col-mid">
+            <div id="landing-confirm" class="landing-confirm" role="group"
+              aria-labelledby="landing-confirm-title" style="display: none">
+              <div class="landing-confirm-head">
+                <h2 id="landing-confirm-title" class="landing-confirm-title"></h2>
+                <span id="landing-confirm-eyebrow" class="landing-eyebrow"></span>
+              </div>
+              <span class="landing-confirm-rule"></span>
+              <div class="landing-confirm-body">
+                <div class="landing-confirm-role">
+                  <span id="landing-confirm-lead" class="landing-confirm-lead"></span>
+                  <span id="landing-confirm-note" class="landing-confirm-note"></span>
+                </div>
+              </div>
+              <div class="landing-confirm-foot">
+                <button id="landing-confirm-cancel" class="landing-confirm-cancel" type="button"></button>
+                <button id="landing-confirm-cta" class="landing-confirm-cta" type="button"></button>
+              </div>
+            </div>
+          </section>
 
         </div>
       </div>

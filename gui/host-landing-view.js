@@ -25,17 +25,28 @@
  *   | `descId`    | the string id of the line under it |
  *   | `stage`     | which contextual stage opening it reveals, or `null` for an entry that does nothing yet |
  *   | `platforms` | which hosts offer it at all — `['native']` is how #1365's Exit to Desktop arrives without a build check anywhere in this file |
+ *   | `confirm`   | the row asks once before its verb runs, and this is everything that stage says and does — `null`/absent for a route that simply opens |
  *
  * Adding an entry is adding a row. Nothing below reads an id by name.
  *
- * ## Only one entry works in this slice, and that is deliberate
+ * ## Two entries work, and the rest are deliberately inert
  *
- * `new_game` carries `stage: 'world-picker'`; the other four carry `stage:
- * null` and are inert — they render, and clicking them changes nothing. An
- * inert entry that silently pretended to open something would be worse than a
- * button that plainly does not work yet, and each of the four has a sibling
- * issue that gives it a stage of its own. [`nextOpenEntry`] is where "inert"
- * is enforced, in one place, rather than at each caller.
+ * `new_game` carries `stage: 'world-picker'` and `exit_desktop` (issue #1365)
+ * carries `stage: 'exit-confirm'`; the others carry `stage: null` and are inert
+ * — they render, and clicking them changes nothing. An inert entry that
+ * silently pretended to open something would be worse than a button that
+ * plainly does not work yet, and each of them has a sibling issue that gives it
+ * a stage of its own. [`nextOpenEntry`] is where "inert" is enforced, in one
+ * place, rather than at each caller.
+ *
+ * ## An entry that ASKS FIRST is still one row
+ *
+ * Exit to Desktop cannot be undone by pressing the entry again, so its press
+ * opens a confirmation rather than doing the thing. That confirmation is a
+ * `confirm` block on the row and the view model republishes it as
+ * [`landingViewModel`]'s `confirm` — so the renderer draws "the open route's
+ * confirmation", never "the exit confirmation", and the third such route costs
+ * a row rather than a branch.
  */
 
 /**
@@ -46,8 +57,9 @@
  * variation. `landingViewModel` takes the list rather than reaching for this
  * constant, and this is only its default.
  *
- * `Exit to Desktop` is deliberately absent: it is a native-build entry and
- * arrives in #1365 as one more row carrying `platforms: ['native']`.
+ * `Exit to Desktop` is the last row, and is native-only: it arrived in #1365
+ * as one more row carrying `platforms: ['native']`, which is the whole of what
+ * "the web host does not offer it" cost.
  */
 export const LANDING_ENTRIES = [
   {
@@ -90,7 +102,53 @@ export const LANDING_ENTRIES = [
     stage: null,
     platforms: ['web', 'native'],
   },
+  {
+    // NATIVE ONLY (issue #1365), and for the plainest reason in the table: a
+    // browser tab cannot quit an application, so on the web there is nothing
+    // behind this control at all. The same doctrine `connect_host` above
+    // states, in the same field, pointing the other way.
+    //
+    // It is also the one row that carries a `confirm` block. Quitting is the
+    // only route on this menu that an operator cannot take back by pressing
+    // the entry again, so the press does not do it — it opens a stage that
+    // says what is about to happen and asks once. The block is DATA for the
+    // same reason the rows are: the next entry that needs a confirmation adds
+    // one of these, and neither this module nor its renderer learns an id by
+    // name to draw it.
+    id: 'exit_desktop',
+    labelId: 'server.landing.exit_desktop',
+    descId: 'server.landing.exit_desktop_desc',
+    stage: 'exit-confirm',
+    platforms: ['native'],
+    confirm: {
+      titleId: 'server.landing.exit_confirm_title',
+      eyebrowId: 'server.landing.exit_confirm_eyebrow',
+      leadId: 'server.landing.exit_confirm_lead',
+      noteId: 'server.landing.exit_confirm_note',
+      ctaId: 'server.landing.exit_confirm_cta',
+      // Why the tone is a field and not a class the renderer picks: which
+      // confirmations are destructive is knowledge the ROW has, and a renderer
+      // deciding it would be deciding it a second time.
+      tone: 'danger',
+      // The machine verb the caller dispatches on, and deliberately the same
+      // token as the `kind` of the record the native surface sends
+      // (`native_host::host_lobby::HostLobbyRecord::ExitDesktop`). A confirming
+      // row names its verb once; `host_lobby_link.js` forwards it rather than
+      // keeping a mapping table that would be the second place to edit.
+      action: 'exit_desktop',
+    },
+  },
 ];
+
+/**
+ * The label a confirmation's cancel control wears when its row does not name
+ * one.
+ *
+ * Shared rather than repeated per row because "the way back" is the same act on
+ * every confirmation there will ever be. A row that genuinely needs other words
+ * still overrides it with a `cancelId` of its own.
+ */
+export const CONFIRM_CANCEL_ID = 'server.landing.confirm_back';
 
 /** The platform label each host wears, by the `platform` this module is given. */
 const PLATFORM_LABEL = {
@@ -173,8 +231,13 @@ export function nextOpenEntry(openEntryId, entryId, entries) {
  *   rootClass: string,
  *   identity: {titleId: string, taglineId: string, logoAltId: string, platformLabelId: string},
  *   entries: Array<{id: string, ordinal: string, labelId: string, descId: string, stage: string|null, selected: boolean, inert: boolean}>,
+ *   confirm: null|{titleId: string, eyebrowId: string|null, leadId: string|null, noteId: string|null, ctaId: string, cancelId: string, tone: string, action: string},
  *   status: {platformLabelId: string, sessionId: string, build: {id: string, params: {build: string}}},
  * }}
+ *   `confirm` is the OPEN ROW's own confirmation block, republished — never a
+ *   second decision made here, and never keyed off an entry id. It is `null`
+ *   for every route that simply opens something (New Game's picker), which is
+ *   what lets the renderer draw a confirmation from its presence alone.
  */
 export function landingViewModel(input) {
   const opts = input || {};
@@ -227,6 +290,25 @@ export function landingViewModel(input) {
       platformLabelId: PLATFORM_LABEL[platform],
     },
     entries: entries,
+    // The open row's confirmation, or nothing. Composed rather than passed
+    // straight through so that a row states only what is peculiar to it: the
+    // way back reads the shared default, and a row that never named a tone is
+    // an ordinary confirmation rather than an undefined one the renderer would
+    // have to interpret.
+    confirm: open && open.confirm
+      ? {
+        titleId: open.confirm.titleId,
+        eyebrowId: open.confirm.eyebrowId || null,
+        leadId: open.confirm.leadId || null,
+        noteId: open.confirm.noteId || null,
+        ctaId: open.confirm.ctaId,
+        cancelId: open.confirm.cancelId || CONFIRM_CANCEL_ID,
+        tone: open.confirm.tone || 'normal',
+        // The verb, carried verbatim. This module never runs it and never
+        // decides what it means — the caller with something behind it does.
+        action: open.confirm.action || open.id,
+      }
+      : null,
     status: {
       platformLabelId: PLATFORM_LABEL[platform],
       sessionId: open ? 'server.landing.status_hosting' : 'server.landing.status_no_session',
@@ -238,5 +320,11 @@ export function landingViewModel(input) {
 // Expose for the classic-script consumer (server.html is not a module) — the
 // same self-registering pattern window.hostScenarios uses.
 if (typeof window !== 'undefined') {
-  window.hostLanding = { LANDING_ENTRIES, landingEntries, nextOpenEntry, landingViewModel };
+  window.hostLanding = {
+    LANDING_ENTRIES,
+    CONFIRM_CANCEL_ID,
+    landingEntries,
+    nextOpenEntry,
+    landingViewModel,
+  };
 }

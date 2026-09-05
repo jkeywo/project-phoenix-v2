@@ -138,10 +138,11 @@ window.__phoenixHostLobby.renderJoin = function (json, qrToggles) {
 //
 // Unlike the renders above, this surface SENDS: a scenario, a hull, the AI
 // launch (issue #1328), a monitor for the viewscreen (issue #1330), a screen
-// for a station's console — or none, closing it (issue #1331) — and a route
-// opened or closed on the landing menu (issue #1361). All eight go over
+// for a station's console — or none, closing it (issue #1331) — a route
+// opened or closed on the landing menu (issue #1361), and the confirmed Exit
+// to Desktop (issue #1365). All nine go over
 // the ONE page->host queue the boot script installed, as
-// native_host::host_lobby::HostLobbyRecord — eight tags in one vocabulary, and
+// native_host::host_lobby::HostLobbyRecord — nine tags in one vocabulary, and
 // deliberately not ClientMessages, because this surface holds no session token
 // and is not a participant. The host drains that queue in one system and
 // dispatches on the tag; a second queue or a second record type would be a
@@ -257,6 +258,19 @@ function drawLanding() {
         send(next ? { kind: 'landing_open', entry: next } : { kind: 'landing_close' });
         drawLanding();
       },
+      // A confirmation's own control (issue #1365). `action` is the verb the
+      // OPEN ROW declared — the quit verb today — and it is sent as the record
+      // `kind` rather than translated through a table here, so a confirming row
+      // names its verb once, in the one place a row is declared. The host
+      // dispatches on the tag like every other record and warns about one it
+      // does not speak, which is what an unknown verb should look like on a
+      // surface whose page can be older than the binary serving it.
+      //
+      // Nothing is redrawn afterwards, and nothing should be: what answers the
+      // quit verb is an application exit, so the next thing this window
+      // does is go away. A hopeful re-render would be this document claiming to
+      // know that the host agreed.
+      confirm: (action) => send({ kind: action }),
       // No fullscreen hook is handed over: the control it would drive is
       // stripped from this document (native_host::host_lobby::document),
       // because a native window's mode belongs to the host process and setting

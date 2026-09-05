@@ -89,6 +89,16 @@ export const LANDING_ENTRY_ATTR = 'data-landing-entry';
 /** The class `#scenario-panel` wears while it is docked in the landing. */
 export const PICKER_DOCKED_CLASS = 'landing-docked';
 
+/**
+ * The class `#landing-confirm` wears while it is asking about something
+ * destructive (issue #1365).
+ *
+ * Driven off the open row's `confirm.tone`, never off its id: which
+ * confirmations are destructive is the entry table's knowledge, and a renderer
+ * deciding it from an id would be the second place that decision lived.
+ */
+export const CONFIRM_DANGER_CLASS = 'landing-confirm-danger';
+
 /** Remove every entry this renderer owns, leaving anything else alone. */
 export function clearLandingEntries(menu) {
   menu.querySelectorAll(LANDING_ENTRY_SELECTOR).forEach(function (el) { el.remove(); });
@@ -100,6 +110,63 @@ function setText(doc, id, text) {
   if (el) el.textContent = text;
 }
 
+/** Write `t(id)` into `elementId`, or clear it when the row named no string. */
+function setOptionalText(doc, elementId, t, id) {
+  setText(doc, elementId, id ? t(id) : '');
+}
+
+/**
+ * Draw `#landing-confirm` from the open row's confirmation block (issue #1365).
+ *
+ * The stage the menu's one irreversible route opens. Everything it says comes
+ * off `vm.confirm`, which is the ROW's block republished — so this function
+ * knows there is such a thing as a confirmation and knows nothing whatever
+ * about Exit to Desktop. A second confirming entry is a second row.
+ *
+ * Two things are worth stating rather than reading back out of the code:
+ *
+ *   * **Cancel is the entry's own toggle.** It reports through `pick` with the
+ *     open entry's id, which is exactly what a second press on the menu entry
+ *     does, and `nextOpenEntry` closes it. A `cancel` hook of its own would be
+ *     a second way to close one stage, and the day the two disagreed the
+ *     operator would be the one to find out.
+ *   * **`onclick`, not `addEventListener`.** These are STATIC markup and this
+ *     function runs again on every render, so an added listener would
+ *     accumulate one quit per render — see the fullscreen control's note.
+ */
+function renderConfirm(doc, vm, t, h) {
+  const confirm = vm.confirm || null;
+  const root = doc.getElementById('landing-confirm');
+  if (root) {
+    root.style.display = confirm ? '' : 'none';
+    root.classList.toggle(CONFIRM_DANGER_CLASS, !!confirm && confirm.tone === 'danger');
+  }
+  // The writes below happen whether or not the panel is on screen — the same
+  // reason the menu is rebuilt every render: a hidden panel holding the last
+  // route's words is a panel that shows them for one frame the next time it
+  // opens. `confirm` being null clears rather than skips.
+  setOptionalText(doc, 'landing-confirm-title', t, confirm && confirm.titleId);
+  setOptionalText(doc, 'landing-confirm-eyebrow', t, confirm && confirm.eyebrowId);
+  setOptionalText(doc, 'landing-confirm-lead', t, confirm && confirm.leadId);
+  setOptionalText(doc, 'landing-confirm-note', t, confirm && confirm.noteId);
+  setOptionalText(doc, 'landing-confirm-cta', t, confirm && confirm.ctaId);
+  setOptionalText(doc, 'landing-confirm-cancel', t, confirm && confirm.cancelId);
+
+  const cta = doc.getElementById('landing-confirm-cta');
+  if (cta) {
+    cta.classList.toggle(CONFIRM_DANGER_CLASS, !!confirm && confirm.tone === 'danger');
+    cta.onclick = confirm && h.confirm
+      ? function () { h.confirm(confirm.action); }
+      : null;
+  }
+  const cancel = doc.getElementById('landing-confirm-cancel');
+  if (cancel) {
+    cancel.onclick = confirm && h.pick
+      ? function () { h.pick(vm.openEntryId); }
+      : null;
+  }
+}
+
 /**
  * Render one landing view model into `doc`.
  *
@@ -108,6 +175,7 @@ function setText(doc, id, text) {
  * @param {(id: string, params?: object) => string} t string-id resolver.
  * @param {{
  *   pick?: (entryId: string) => void,
+ *   confirm?: (action: string) => void,
  *   toggleFullscreen?: () => void,
  * }} [hooks]
  *   `pick` carries an operator's click on a menu entry back to whoever owns
@@ -117,6 +185,14 @@ function setText(doc, id, text) {
  *   view model's decision (`nextOpenEntry`) and not a second judgement made
  *   here. `toggleFullscreen` reaches `gui/page-chrome.js`'s one fullscreen
  *   implementation; absent, the control renders and does nothing.
+ *
+ *   `confirm` is what an operator pressing a confirmation's own control asks
+ *   for, carrying the open row's `action` verb (issue #1365). It is a hook and
+ *   not something done here for the plainest reason in the module: quitting an
+ *   application is not a DOM write, and the two surfaces reach it differently —
+ *   the native viewscreen sends a record its host answers with an app-exit, and
+ *   the host PAGE supplies no such hook at all, because a browser tab cannot
+ *   quit an application. Absent, the control renders and does nothing.
  * @param {{dockPicker?: boolean, ownPanelVisibility?: boolean}} [opts]
  *   `dockPicker: false` leaves `#scenario-panel` where it is, for a surface
  *   that composes the picker some other way. `server.html` passes nothing and
@@ -258,6 +334,14 @@ export function renderHostLanding(doc, vm, t, hooks, opts) {
     }
   }
 
+  // ── The confirmation stage (issue #1365) ────────────────────────────
+  //
+  // The middle column's other tenant. It is drawn from `vm.confirm` being
+  // there at all — never from the stage's name and never from an entry id —
+  // so the route that asks before it acts is a row in the entry table and this
+  // renderer holds no opinion about which route that is.
+  renderConfirm(doc, vm, t, h);
+
   // ── The middle column ───────────────────────────────────────────────
   //
   // "Reveals the EXISTING World picker" is meant literally: `#scenario-panel`
@@ -314,5 +398,6 @@ if (typeof window !== 'undefined') {
     LANDING_ENTRY_SELECTOR,
     LANDING_ENTRY_ATTR,
     PICKER_DOCKED_CLASS,
+    CONFIRM_DANGER_CLASS,
   };
 }

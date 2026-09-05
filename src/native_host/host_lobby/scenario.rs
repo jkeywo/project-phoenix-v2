@@ -187,6 +187,27 @@ pub enum HostLobbyRecord {
     /// is a state the host can state, and a sentinel string would be a state
     /// it can only be read to mean.
     LandingClose,
+    /// The operator confirmed Exit to Desktop (issue #1365).
+    ///
+    /// The first landing verb the HOST has to answer, and the reason
+    /// [`LandingOpen`](Self::LandingOpen) was written to be extended rather
+    /// than to be the whole of the menu's vocabulary. It is the confirmation's
+    /// press, never the entry's: the row carries a `confirm` block
+    /// (`gui/host-landing-view.js`), so opening the route only draws the panel
+    /// that asks, and this arrives only once an operator has answered it. There
+    /// is no second confirmation on this side — a host that re-asked would be
+    /// asking a question the operator already answered on a surface they are
+    /// looking at.
+    ///
+    /// Snake_case, with the picks: the kebab spellings are the layout row's
+    /// alone and are historical (see [`SetViewscreen`](Self::SetViewscreen)).
+    /// The tag is deliberately the same token as the row's `confirm.action`, so
+    /// the page forwards the verb it was given instead of keeping a mapping
+    /// table that would be a second place to edit.
+    ///
+    /// **Web hosts never send it**, and cannot: the row is `platforms:
+    /// ['native']`, because a browser tab has no application to quit.
+    ExitDesktop,
 }
 
 impl HostLobbyRecord {
@@ -246,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    fn the_surfaces_eight_records_round_trip() {
+    fn the_surfaces_nine_records_round_trip() {
         for record in [
             HostLobbyRecord::SelectScenario {
                 scenario_id: "combat_test".into(),
@@ -269,6 +290,7 @@ mod tests {
                 entry: "new_game".into(),
             },
             HostLobbyRecord::LandingClose,
+            HostLobbyRecord::ExitDesktop,
         ] {
             let json = serde_json::to_string(&record).expect("a record encodes");
             assert_eq!(HostLobbyRecord::decode(&json), Some(record));
@@ -350,6 +372,15 @@ mod tests {
             HostLobbyRecord::decode(r#"{"kind":"landing_close"}"#),
             Some(HostLobbyRecord::LandingClose)
         );
+        // Exit to Desktop (issue #1365) is snake_case with them, and its tag is
+        // the same token the entry table gives the row as its `confirm.action`
+        // — that identity is what lets `host_lobby_link.js` forward the verb it
+        // was handed rather than translate it.
+        assert_eq!(
+            HostLobbyRecord::decode(r#"{"kind":"exit_desktop"}"#),
+            Some(HostLobbyRecord::ExitDesktop)
+        );
+        assert_eq!(HostLobbyRecord::decode(r#"{"kind":"exit-desktop"}"#), None);
         // An entry id this build has never heard of still decodes: the entry
         // TABLE is the client's, a bundle may be newer than the host, and a
         // record the host cannot act on is a line in its log rather than a

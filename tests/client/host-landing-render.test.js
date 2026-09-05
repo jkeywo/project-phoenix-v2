@@ -34,8 +34,9 @@ import {
   LANDING_ENTRY_SELECTOR,
   LANDING_ENTRY_ATTR,
   PICKER_DOCKED_CLASS,
+  CONFIRM_DANGER_CLASS,
 } from '../../gui/host-landing-render.js';
-import { landingViewModel } from '../../gui/host-landing-view.js';
+import { CONFIRM_CANCEL_ID, landingViewModel } from '../../gui/host-landing-view.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = fs.readFileSync(path.join(HERE, '../../server.html'), 'utf-8');
@@ -64,10 +65,11 @@ function landingDoc() {
 
 /** A recording hook set — what each surface supplies in its own way. */
 function hooks() {
-  const calls = { pick: [], fullscreen: 0 };
+  const calls = { pick: [], confirm: [], fullscreen: 0 };
   return [
     {
       pick: (id) => calls.pick.push(id),
+      confirm: (action) => calls.confirm.push(action),
       toggleFullscreen: () => { calls.fullscreen += 1; },
     },
     calls,
@@ -233,13 +235,146 @@ describe('renderHostLanding — New Game', () => {
     const picker = doc.getElementById('scenario-panel');
     renderHostLanding(doc, openVm(), t);
     expect(doc.getElementById('scenario-panel')).toBe(picker);
-    expect(doc.getElementById('landing-mid').children).toHaveLength(1);
+    // One picker in the column, however often the render runs. Counted as
+    // pickers rather than as children because the column has a second, static
+    // tenant now — the confirmation stage (issue #1365) — which lives there
+    // whether or not it is on screen.
+    expect(doc.getElementById('landing-mid').querySelectorAll('#scenario-panel'))
+      .toHaveLength(1);
   });
 
   it('leaves the picker alone when the surface says it owns it elsewhere', () => {
     const doc = landingDoc();
     renderHostLanding(doc, openVm(), t, null, { dockPicker: false });
     expect(doc.getElementById('scenario-panel').parentElement).toBe(doc.body);
+  });
+});
+
+describe('renderHostLanding — the confirmation stage (issue #1365)', () => {
+  // Exit to Desktop is the one route on the menu an operator cannot take back,
+  // so pressing the entry opens a panel that says what is about to happen and
+  // asks once. Everything below is written from `vm.confirm` — the OPEN ROW's
+  // own block — so this renderer draws confirmations and knows nothing about
+  // quitting.
+
+  const NATIVE = { platform: 'native', build: '0.1.0' };
+  const askingVm = () => landingViewModel({ ...NATIVE, openEntryId: 'exit_desktop' });
+  const el = (doc, id) => doc.getElementById(id);
+
+  it('is off screen and wordless until the route is open', () => {
+    const doc = landingDoc();
+    renderHostLanding(doc, landingViewModel(), t);
+    expect(el(doc, 'landing-confirm').style.display).toBe('none');
+    expect(text(doc, 'landing-confirm-title')).toBe('');
+    expect(text(doc, 'landing-confirm-cta')).toBe('');
+  });
+
+  it('writes the open row own words when it opens', () => {
+    const doc = landingDoc();
+    renderHostLanding(doc, askingVm(), t);
+    expect(el(doc, 'landing-confirm').style.display).toBe('');
+    expect(text(doc, 'landing-confirm-title')).toBe('server.landing.exit_confirm_title');
+    expect(text(doc, 'landing-confirm-eyebrow')).toBe('server.landing.exit_confirm_eyebrow');
+    expect(text(doc, 'landing-confirm-lead')).toBe('server.landing.exit_confirm_lead');
+    expect(text(doc, 'landing-confirm-note')).toBe('server.landing.exit_confirm_note');
+    expect(text(doc, 'landing-confirm-cta')).toBe('server.landing.exit_confirm_cta');
+    expect(text(doc, 'landing-confirm-cancel')).toBe(CONFIRM_CANCEL_ID);
+  });
+
+  it('marks a destructive confirmation from the row tone, not from its id', () => {
+    const doc = landingDoc();
+    renderHostLanding(doc, askingVm(), t);
+    expect(el(doc, 'landing-confirm').classList.contains(CONFIRM_DANGER_CLASS)).toBe(true);
+    expect(el(doc, 'landing-confirm-cta').classList.contains(CONFIRM_DANGER_CLASS)).toBe(true);
+
+    // A confirmation that named no tone is an ordinary one, and is drawn as
+    // one — proving the class follows `tone` rather than "there is a confirm".
+    const quiet = [{
+      id: 'q',
+      labelId: 'x.q',
+      descId: 'x.q_desc',
+      stage: 'q-stage',
+      confirm: { titleId: 'x.q.t', ctaId: 'x.q.c', action: 'q' },
+    }];
+    renderHostLanding(doc, landingViewModel({ entries: quiet, openEntryId: 'q' }), t);
+    expect(el(doc, 'landing-confirm').classList.contains(CONFIRM_DANGER_CLASS)).toBe(false);
+  });
+
+  it('clears itself when the route closes, rather than keeping last words', () => {
+    // A hidden panel still holding the previous route's sentence shows it for
+    // a frame the next time it opens.
+    const doc = landingDoc();
+    renderHostLanding(doc, askingVm(), t);
+    renderHostLanding(doc, landingViewModel(NATIVE), t);
+    expect(el(doc, 'landing-confirm').style.display).toBe('none');
+    expect(text(doc, 'landing-confirm-title')).toBe('');
+    expect(text(doc, 'landing-confirm-note')).toBe('');
+    expect(el(doc, 'landing-confirm').classList.contains(CONFIRM_DANGER_CLASS)).toBe(false);
+  });
+
+  it('is not drawn by the stage that opens the World picker', () => {
+    const doc = landingDoc();
+    renderHostLanding(doc, landingViewModel({ openEntryId: 'new_game' }), t);
+    expect(el(doc, 'landing-confirm').style.display).toBe('none');
+    expect(doc.getElementById('scenario-panel').parentElement)
+      .toBe(doc.getElementById('landing-mid'));
+  });
+
+  it('carries the row verb through the hook, and judges nothing itself', () => {
+    const doc = landingDoc();
+    const [h, calls] = hooks();
+    renderHostLanding(doc, askingVm(), t, h);
+    el(doc, 'landing-confirm-cta').click();
+    expect(calls.confirm).toEqual(['exit_desktop']);
+    // Never through `pick`: a confirmed verb is not a menu press.
+    expect(calls.pick).toEqual([]);
+  });
+
+  it('binds the confirm control once per render, not once more each time', () => {
+    // The same failure the fullscreen control has: these are STATIC markup and
+    // this function runs on every click, so an accumulated listener would send
+    // one quit per render.
+    const doc = landingDoc();
+    const [h, calls] = hooks();
+    renderHostLanding(doc, askingVm(), t, h);
+    renderHostLanding(doc, askingVm(), t, h);
+    renderHostLanding(doc, askingVm(), t, h);
+    el(doc, 'landing-confirm-cta').click();
+    expect(calls.confirm).toEqual(['exit_desktop']);
+  });
+
+  it('closes through the entry own toggle rather than a second way out', () => {
+    // Cancel reports as a press on the open entry, which is exactly what a
+    // second click on the menu row is — so `nextOpenEntry` closes it, and
+    // there is one rule for "this stage is shut" instead of two.
+    const doc = landingDoc();
+    const [h, calls] = hooks();
+    renderHostLanding(doc, askingVm(), t, h);
+    el(doc, 'landing-confirm-cancel').click();
+    expect(calls.pick).toEqual(['exit_desktop']);
+    expect(calls.confirm).toEqual([]);
+  });
+
+  it('leaves both controls inert while nothing is open', () => {
+    const doc = landingDoc();
+    const [h, calls] = hooks();
+    renderHostLanding(doc, landingViewModel(), t, h);
+    el(doc, 'landing-confirm-cta').click();
+    el(doc, 'landing-confirm-cancel').click();
+    expect(calls.confirm).toEqual([]);
+    expect(calls.pick).toEqual([]);
+  });
+
+  it('renders the asking stage with no hooks at all, and does nothing', () => {
+    // The host PAGE supplies no `confirm` hook, deliberately: a browser tab
+    // cannot quit an application. The control must render and be inert rather
+    // than throw out of a click handler.
+    const doc = landingDoc();
+    renderHostLanding(doc, askingVm(), t);
+    expect(() => {
+      el(doc, 'landing-confirm-cta').click();
+      el(doc, 'landing-confirm-cancel').click();
+    }).not.toThrow();
   });
 });
 
@@ -334,6 +469,11 @@ describe('a deliberately incomplete document', () => {
     'landing-logo', 'landing-status-platform', 'landing-status-session',
     'landing-status-build', 'landing-fullscreen-btn', 'landing-menu',
     'landing-mid', 'scenario-panel',
+    // The confirmation stage (issue #1365), which the renderer writes into by
+    // id like everything above it and must therefore survive the absence of.
+    'landing-confirm', 'landing-confirm-title', 'landing-confirm-eyebrow',
+    'landing-confirm-lead', 'landing-confirm-note', 'landing-confirm-cancel',
+    'landing-confirm-cta',
   ];
 
   for (const id of TOUCHED) {
@@ -343,6 +483,13 @@ describe('a deliberately incomplete document', () => {
       expect(() => {
         renderHostLanding(doc, landingViewModel({ openEntryId: 'new_game' }), t, {});
         renderHostLanding(doc, landingViewModel(), t, {});
+        // …and on the stage that writes into the ids this case removes.
+        renderHostLanding(
+          doc,
+          landingViewModel({ platform: 'native', openEntryId: 'exit_desktop' }),
+          t,
+          {},
+        );
       }).not.toThrow();
     });
   }
@@ -422,7 +569,9 @@ describe('renderHostLanding — the native viewscreen (issue #1361)', () => {
     renderHostLanding(doc, nativeVm(), t, {}, { ownPanelVisibility: true });
     const ids = entries(doc).map((el) => el.getAttribute(LANDING_ENTRY_ATTR));
     expect(ids).not.toContain('connect_host');
-    expect(ids).toEqual(['new_game', 'load_game', 'join_peer', 'load_mod_pack']);
+    expect(ids).toEqual([
+      'new_game', 'load_game', 'join_peer', 'load_mod_pack', 'exit_desktop',
+    ]);
     // …and the same document on the web surface still offers it, so this is a
     // curated menu and not a lost row.
     const web = landingDoc();
@@ -431,11 +580,18 @@ describe('renderHostLanding — the native viewscreen (issue #1361)', () => {
       .toContain('connect_host');
   });
 
-  it('does not offer Exit to Desktop either, which is #1365 and not built here', () => {
+  it('offers Exit to Desktop here and nowhere else (issue #1365)', () => {
+    // The mirror image of the case above, on the same mechanism: a browser tab
+    // cannot quit an application, so the row is `platforms: ['native']` and no
+    // build check appears in this renderer or in either document.
     const doc = nativeLandingDoc();
     renderHostLanding(doc, nativeVm(), t, {}, { ownPanelVisibility: true });
     expect(entries(doc).map((el) => el.getAttribute(LANDING_ENTRY_ATTR)))
-      .not.toContain('exit');
+      .toContain('exit_desktop');
+    const web = landingDoc();
+    renderHostLanding(web, landingViewModel(), t, {});
+    expect(entries(web).map((el) => el.getAttribute(LANDING_ENTRY_ATTR)))
+      .not.toContain('exit_desktop');
   });
 
   it('shows the panel the first push reveals it with, and hides it when dismissed', () => {

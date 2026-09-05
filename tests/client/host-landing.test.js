@@ -18,6 +18,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   LANDING_ENTRIES,
+  CONFIRM_CANCEL_ID,
   landingEntries,
   nextOpenEntry,
   landingViewModel,
@@ -31,21 +32,45 @@ const TABLE = [
 ];
 
 describe('the shipped entry table', () => {
-  it('offers the five entries this slice draws, in order', () => {
+  it('offers the six entries drawn so far, in order', () => {
     expect(LANDING_ENTRIES.map((e) => e.id)).toEqual([
       'new_game', 'load_game', 'join_peer', 'connect_host', 'load_mod_pack',
+      'exit_desktop',
     ]);
   });
 
-  it('gives exactly New Game a stage — the rest render and are inert', () => {
-    // The honest shape of a tracer: the four without a stage each have a
+  it('gives New Game and Exit to Desktop a stage — the rest are inert', () => {
+    // The honest shape of a tracer: the ones without a stage each have a
     // sibling issue that gives them one, and until then they must not pretend.
     const staged = LANDING_ENTRIES.filter((e) => e.stage).map((e) => e.id);
-    expect(staged).toEqual(['new_game']);
+    expect(staged).toEqual(['new_game', 'exit_desktop']);
   });
 
-  it('does not offer Exit to Desktop, which is a native-only row for #1365', () => {
-    expect(LANDING_ENTRIES.some((e) => e.id === 'exit')).toBe(false);
+  it('offers Exit to Desktop on native only, because a tab cannot quit an app', () => {
+    // Issue #1365, and the whole of how it is kept off the web: a field on a
+    // row. There is no build check in the view model, in the renderer, or in
+    // either document.
+    const exit = LANDING_ENTRIES.find((e) => e.id === 'exit_desktop');
+    expect(exit.platforms).toEqual(['native']);
+  });
+
+  it('makes Exit to Desktop ask instead of act, and says so on the row', () => {
+    // The one irreversible route on the menu, so the press opens a stage that
+    // states what happens and asks once. Everything that stage says is on the
+    // row, which is what lets a second confirming entry cost a row.
+    const exit = LANDING_ENTRIES.find((e) => e.id === 'exit_desktop');
+    expect(exit.stage).toBe('exit-confirm');
+    expect(exit.confirm.tone).toBe('danger');
+    expect(exit.confirm.action).toBe('exit_desktop');
+    for (const key of ['titleId', 'eyebrowId', 'leadId', 'noteId', 'ctaId']) {
+      expect(typeof exit.confirm[key]).toBe('string');
+      expect(exit.confirm[key].length).toBeGreaterThan(0);
+    }
+  });
+
+  it('gives no other row a confirmation, so New Game still opens on one press', () => {
+    expect(LANDING_ENTRIES.filter((e) => e.confirm).map((e) => e.id))
+      .toEqual(['exit_desktop']);
   });
 
   it('gives every row a label and a description id, so the renderer never guesses', () => {
@@ -178,15 +203,102 @@ describe('landingViewModel', () => {
     // happened, so "no input" has to be a state and not a crash.
     const vm = landingViewModel();
     expect(vm.rootClass).toBe('is-idle');
-    expect(vm.entries.map((e) => e.id)).toEqual(LANDING_ENTRIES.map((e) => e.id));
+    // No platform given means the WEB one, so this is the shipped table as
+    // that host is offered it — which is no longer the whole table, now that a
+    // row is native-only (issue #1365).
+    expect(vm.entries.map((e) => e.id))
+      .toEqual(landingEntries('web', LANDING_ENTRIES).map((e) => e.id));
   });
 
-  it('opens New Game off the shipped table, which is the one working action', () => {
+  it('opens New Game off the shipped table, the one working action on the web', () => {
     const vm = landingViewModel({ openEntryId: 'new_game' });
     expect(vm.stage).toBe('world-picker');
     expect(vm.entries.find((e) => e.id === 'new_game').selected).toBe(true);
     expect(vm.entries.filter((e) => e.inert).map((e) => e.id))
       .toEqual(['load_game', 'join_peer', 'connect_host', 'load_mod_pack']);
+  });
+});
+
+describe('landingViewModel — a route that asks first (issue #1365)', () => {
+  // The claim that keeps a confirmation DATA: the model republishes the OPEN
+  // ROW's block, so a renderer draws "this route's confirmation" and never
+  // "the exit confirmation". Driven through a table this suite owns wherever
+  // the mechanism is the point, and through the shipped one where the shipped
+  // row is.
+
+  const ASKS = [
+    { id: 'plain', labelId: 'x.p', descId: 'x.p_desc', stage: 'plain-stage' },
+    {
+      id: 'grave',
+      labelId: 'x.g',
+      descId: 'x.g_desc',
+      stage: 'grave-stage',
+      confirm: {
+        titleId: 'x.g.title',
+        leadId: 'x.g.lead',
+        noteId: 'x.g.note',
+        ctaId: 'x.g.cta',
+        tone: 'danger',
+        action: 'do_the_grave_thing',
+      },
+    },
+  ];
+
+  it('is null for a route that simply opens something', () => {
+    expect(landingViewModel({ entries: ASKS, openEntryId: 'plain' }).confirm).toBe(null);
+    expect(landingViewModel({ entries: ASKS }).confirm).toBe(null);
+  });
+
+  it('republishes the open row block, verb and tone included', () => {
+    const vm = landingViewModel({ entries: ASKS, openEntryId: 'grave' });
+    expect(vm.stage).toBe('grave-stage');
+    expect(vm.confirm.titleId).toBe('x.g.title');
+    expect(vm.confirm.leadId).toBe('x.g.lead');
+    expect(vm.confirm.noteId).toBe('x.g.note');
+    expect(vm.confirm.ctaId).toBe('x.g.cta');
+    expect(vm.confirm.tone).toBe('danger');
+    expect(vm.confirm.action).toBe('do_the_grave_thing');
+  });
+
+  it('fills the way back from the shared default, so a row need not repeat it', () => {
+    const vm = landingViewModel({ entries: ASKS, openEntryId: 'grave' });
+    expect(vm.confirm.cancelId).toBe(CONFIRM_CANCEL_ID);
+    // ...and a row that genuinely wants other words still wins.
+    const own = ASKS.map((e) => (e.id === 'grave'
+      ? { ...e, confirm: { ...e.confirm, cancelId: 'x.g.back' } }
+      : e));
+    expect(landingViewModel({ entries: own, openEntryId: 'grave' }).confirm.cancelId)
+      .toBe('x.g.back');
+  });
+
+  it('calls an unnamed tone ordinary rather than leaving it undefined', () => {
+    // The renderer paints from this, so "no tone" has to be a value.
+    const quiet = [{
+      id: 'q', labelId: 'x.q', descId: 'x.q_desc', stage: 's',
+      confirm: { titleId: 'x.q.t', ctaId: 'x.q.c', action: 'q' },
+    }];
+    expect(landingViewModel({ entries: quiet, openEntryId: 'q' }).confirm.tone)
+      .toBe('normal');
+  });
+
+  it('drops it the moment the route closes, and while the landing is dismissed', () => {
+    expect(landingViewModel({ entries: ASKS, openEntryId: null }).confirm).toBe(null);
+    expect(landingViewModel({ entries: ASKS, openEntryId: 'grave', dismissed: true }).confirm)
+      .toBe(null);
+  });
+
+  it('carries the shipped Exit to Desktop block, on native and only there', () => {
+    const native = landingViewModel({ platform: 'native', openEntryId: 'exit_desktop' });
+    expect(native.stage).toBe('exit-confirm');
+    expect(native.confirm.action).toBe('exit_desktop');
+    expect(native.confirm.tone).toBe('danger');
+    expect(native.confirm.ctaId).toBe('server.landing.exit_confirm_cta');
+    // The web host does not offer the row, so a remembered id reads as closed —
+    // which is exactly the guard that stops a shared memory opening a stage
+    // this platform has nothing behind.
+    const web = landingViewModel({ platform: 'web', openEntryId: 'exit_desktop' });
+    expect(web.stage).toBe('idle');
+    expect(web.confirm).toBe(null);
   });
 });
 
@@ -203,7 +315,9 @@ describe('the entries a native host is offered (issue #1361)', () => {
     // no such page and no such leg here.
     const native = landingEntries('native', LANDING_ENTRIES).map((e) => e.id);
     expect(native).not.toContain('connect_host');
-    expect(native).toEqual(['new_game', 'load_game', 'join_peer', 'load_mod_pack']);
+    expect(native).toEqual([
+      'new_game', 'load_game', 'join_peer', 'load_mod_pack', 'exit_desktop',
+    ]);
   });
 
   it('still offers it on the web, so this is a curated menu and not a lost row', () => {
@@ -224,7 +338,16 @@ describe('the entries a native host is offered (issue #1361)', () => {
 
   it('numbers a curated menu from one, so native has no gap where a row was', () => {
     const vm = landingViewModel({ platform: 'native' });
-    expect(vm.entries.map((e) => e.ordinal)).toEqual(['01', '02', '03', '04']);
+    expect(vm.entries.map((e) => e.ordinal)).toEqual(['01', '02', '03', '04', '05']);
+  });
+
+  it('offers Exit to Desktop on native and never on the web', () => {
+    // The mirror of Connect to Host, and settled the same way: a browser tab
+    // cannot quit an application, so nothing is behind that control there.
+    expect(landingEntries('native', LANDING_ENTRIES).map((e) => e.id))
+      .toContain('exit_desktop');
+    expect(landingEntries('web', LANDING_ENTRIES).map((e) => e.id))
+      .not.toContain('exit_desktop');
   });
 });
 

@@ -583,7 +583,7 @@ fn feed_landing_panel(
 /// The other half of [`feed_scenario_panel`] and of [`publish_bridge_layout`],
 /// and the reason this surface stopped being read-only. Records arrive as
 /// [`HostLobbyRecord`] — a closed vocabulary, not `ClientMessage`s, because the
-/// surface holds no session token — and leave as four different things:
+/// surface holds no session token — and leave as five different things:
 ///
 ///  * a pick becomes an `InboundMessage` under
 ///    [`LOCAL_CONSOLE_TOKEN`](crate::console_bridge::LOCAL_CONSOLE_TOKEN), which
@@ -616,6 +616,14 @@ fn feed_landing_panel(
 ///    indistinguishable from a broken button — so it goes back as a
 ///    [`LayoutNotice`] and `publish_bridge_layout` carries it in this same
 ///    frame.
+///
+///  * the confirmed Exit to Desktop (issue #1365) leaves as `AppExit::Success`
+///    — the ordinary application-exit message, written from a system exactly as
+///    `bridge_display::setup_enumerate` writes it to end `--setup`. Nothing
+///    here withdraws a document or stops the delivery service: the runner
+///    returns, and the tail of `phoenix_host::main` does all of that unchanged,
+///    which is the whole point of ending the run through the door that already
+///    exists rather than opening a second one beside it.
 ///
 ///  * a landing-menu press (issue #1361) leaves as a LINE IN THE LOG, and that
 ///    is the whole of it in this slice. It is worth saying why rather than
@@ -670,6 +678,7 @@ pub(crate) fn drain_surface_records(
     mut inbound: MessageWriter<crate::lobby::InboundMessage>,
     force_start: Option<ResMut<crate::server::bridge::PendingForceStart>>,
     layout: Option<ResMut<BridgeLayoutResource>>,
+    mut exit: MessageWriter<AppExit>,
     log: Option<Res<LogFilterConfig>>,
 ) {
     let Some(bridge) = bridge else {
@@ -747,6 +756,29 @@ pub(crate) fn drain_surface_records(
             }
             HostLobbyRecord::LandingClose => {
                 crate::pinfo!(log, LogCat::Lobby, "host lobby: landing closed");
+                continue;
+            }
+            HostLobbyRecord::ExitDesktop => {
+                // Issue #1365, and it is the ORDINARY application exit and
+                // nothing else: `AppExit::Success` is what
+                // `bridge_display::setup_enumerate` writes to end `--setup`,
+                // and it ends the run through the same door — the runner
+                // returns, `native_host::run` returns, and the tail of
+                // `phoenix_host::main` withdraws the hosted documents, stops
+                // the delivery service and joins its thread exactly as it does
+                // when the operator closes the window. Nothing here withdraws
+                // or stops anything itself; a second teardown path would be a
+                // second thing to keep in step with that one.
+                //
+                // No re-confirmation. The surface already asked, on a screen
+                // the operator is looking at, and a host that asked again would
+                // be second-guessing an answer it can see was given.
+                crate::pinfo!(
+                    log,
+                    LogCat::Lobby,
+                    "host lobby: exit to desktop confirmed; shutting the host down"
+                );
+                exit.write(AppExit::Success);
                 continue;
             }
             HostLobbyRecord::SetViewscreen { monitor } => layout::set_viewscreen_action(monitor),
@@ -1088,6 +1120,54 @@ mod tests {
             inbound(&mut app).is_empty(),
             "a launch is a host-side latch, not a participant's command"
         );
+    }
+
+    /// Every `AppExit` this frame wrote, without consuming the reader the app
+    /// itself uses to decide it is finished.
+    fn exits(app: &mut App) -> Vec<AppExit> {
+        app.world()
+            .resource::<Messages<AppExit>>()
+            .iter_current_update_messages()
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn a_confirmed_exit_writes_the_ordinary_app_exit_and_nothing_else() {
+        // Issue #1365. The whole mechanism: the surface's confirmed press
+        // becomes `AppExit::Success` — the same message
+        // `bridge_display::setup_enumerate` writes to end `--setup` — and the
+        // binary's existing teardown then runs unchanged, because the run ends
+        // through the door that was already there. Nothing here withdraws a
+        // document or stops the delivery service, and this asserts that too:
+        // a second teardown path would be a second thing to keep in step.
+        let (mut app, bridge) = app_with_lobby();
+        let mut surface = crate::native_host::panes::RecordingSurface::ready();
+        surface.queue_record(r#"{"kind":"exit_desktop"}"#);
+        pump_host_lobby(&bridge, &mut surface);
+
+        app.update();
+        assert_eq!(exits(&mut app), vec![AppExit::Success]);
+        assert!(
+            inbound(&mut app).is_empty(),
+            "quitting is the host's own act, not a participant's command"
+        );
+    }
+
+    #[test]
+    fn opening_the_exit_route_asks_rather_than_quitting() {
+        // The confirmation is the point of the slice: the ENTRY only opens the
+        // stage that asks (`landing_open`), and it is the stage's own control
+        // that sends `exit_desktop`. A host that quit on the menu press would
+        // be a host with no confirmation at all, whatever the page drew.
+        let (mut app, bridge) = app_with_lobby();
+        let mut surface = crate::native_host::panes::RecordingSurface::ready();
+        surface.queue_record(r#"{"kind":"landing_open","entry":"exit_desktop"}"#);
+        surface.queue_record(r#"{"kind":"landing_close"}"#);
+        pump_host_lobby(&bridge, &mut surface);
+
+        app.update();
+        assert!(exits(&mut app).is_empty());
     }
 
     #[test]

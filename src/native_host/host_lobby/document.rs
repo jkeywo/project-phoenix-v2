@@ -946,6 +946,7 @@ mod tests {
             "join_peer",
             "connect_host",
             "load_mod_pack",
+            "exit_desktop",
         ] {
             assert!(
                 !html.contains(id),
@@ -986,10 +987,11 @@ mod tests {
         // a row and not an edit to the markup. A native host is always a host
         // and has no join leg at all, so nothing is behind that entry here.
         //
-        // Exit to Desktop is the mirror image — issue #1365's native-only row —
-        // and is not built in this slice, so it must not be in the table yet
-        // either. Both claims read the same file, because "a control exists
-        // exactly when something behind it answers it" is one rule, not two.
+        // Exit to Desktop is the mirror image — issue #1365's native-only row,
+        // because a browser tab cannot quit an application. Both claims read
+        // the same file, because "a control exists exactly when something
+        // behind it answers it" is one rule, not two, and both are settled by a
+        // FIELD ON A ROW rather than by an edit to this document.
         let view = std::fs::read_to_string("gui/host-landing-view.js")
             .expect("the shared landing view model is checked in");
         let row = view
@@ -1002,9 +1004,20 @@ mod tests {
             "Connect to Host must be web-only: a native host has no join leg \
              (issues #1361, #1364)"
         );
+        let row = view
+            .find("id: 'exit_desktop'")
+            .expect("the shipped table has an Exit to Desktop row (issue #1365)");
+        let tail = &view[row..];
+        let end = tail
+            .find("confirm:")
+            .expect("the Exit to Desktop row declares its confirmation");
         assert!(
-            !view.contains("id: 'exit'"),
-            "Exit to Desktop is issue #1365 and is not built here"
+            tail[..end].contains("platforms: ['native']"),
+            "Exit to Desktop must be native-only: a browser tab has no application to quit"
+        );
+        assert!(
+            tail[..end].contains("stage: 'exit-confirm'"),
+            "Exit to Desktop opens the stage that ASKS; the press itself must not quit"
         );
     }
 
@@ -1092,6 +1105,33 @@ mod tests {
         // above — a hook wired to a control that is not there is the dead
         // button in another form.
         assert!(!html.contains("toggleFullscreen:"));
+    }
+
+    #[test]
+    fn the_confirm_hook_is_handed_over_and_forwards_the_rows_own_verb() {
+        // The positive twin of the `toggleFullscreen:` assertion above, and the
+        // half the allowlist below TAKES ON TRUST: `landing-confirm-cta` is on
+        // that list because "something on this surface is behind it", and the
+        // whole of that something is one line in `host_lobby_link.js`. Delete
+        // it and the button still renders, is still allowlisted, and does
+        // nothing — the dead button the allowlist exists to forbid, with every
+        // case in this file green. So the hook is pinned here, the way
+        // `the_entries_this_surface_cannot_answer_are_absent_from_the_shipped_table`
+        // pins `platforms: ['native']` in the file that declares it.
+        assert!(
+            HOST_LOBBY_LINK_JS.contains("confirm: (action) => send({ kind: action })"),
+            "the landing's confirm control must reach the host: `renderHostLanding`              hangs the confirmation's handler on this hook, and `drain_surface_records`              is what answers the verb it sends"
+        );
+        // Verbatim, which is the point of the hook being one line: the verb is
+        // the OPEN ROW's, so a second confirming route costs a row and not a
+        // branch here. A mapping table in this file would show up as the verb's
+        // own name — and `exit_desktop` appearing here would be this link
+        // knowing which route it is, which the menu-is-data case above already
+        // forbids for the markup.
+        assert!(
+            !HOST_LOBBY_LINK_JS.contains("exit_desktop"),
+            "the verb travels as the record's `kind`; naming a route here is the              mapping table `gui/host-landing-view.js`'s `confirm` block replaces"
+        );
     }
 
     /// Every value `prop` takes in the rules whose selector is exactly
@@ -1559,6 +1599,17 @@ mod tests {
             "landing-status-platform",
             "landing-status-session",
             "landing-status-build",
+            // The confirmation stage's own (issue #1365). Markup, unlike the
+            // menu's entries, because it is one panel whose WORDS are data
+            // rather than a list whose length is: the shared renderer writes
+            // the open row's `confirm` block into these ids on both surfaces.
+            "landing-confirm",
+            "landing-confirm-title",
+            "landing-confirm-eyebrow",
+            "landing-confirm-lead",
+            "landing-confirm-note",
+            "landing-confirm-cancel",
+            "landing-confirm-cta",
         ] {
             assert!(
                 html.contains(&format!("id=\"{id}\"")),
@@ -1590,7 +1641,18 @@ mod tests {
         // subtrees this document borrows wholesale.
         assert_eq!(
             button_ids(&html),
-            vec!["ai-launch-btn", "host-lobby-qr-toggle"],
+            vec![
+                "ai-launch-btn",
+                "host-lobby-qr-toggle",
+                // The confirmation stage's own two (issue #1365). They are on
+                // the allowlist because they ARE wired: the shared renderer
+                // hangs its handlers on them from `renderHostLanding`, and the
+                // verb the confirm control carries is answered here by
+                // `drain_surface_records` with an `AppExit`. Unlike the
+                // fullscreen control, something on this surface is behind them.
+                "landing-confirm-cancel",
+                "landing-confirm-cta"
+            ],
             "a control on the viewscreen with nothing wired behind it is a dead \
              button the operator will press"
         );

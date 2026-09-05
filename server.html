@@ -63,9 +63,10 @@
 <!-- The landing screen's stylesheet (issue #1360, PRD #1355). Linked AFTER the
      picker's, because it holds the `#scenario-panel.landing-docked` block that
      unwinds the picker from a full-screen layer into the landing's middle
-     column — a later rule of equal specificity, which is what makes the
-     docking a stylesheet decision rather than a pile of inline styles. Its own
-     surface sits at z-index 205: above the picker's 200, so the landing is the
+     column, and the `#save-slots-panel.landing-docked` block that does the
+     same for Load Game's save catalogue (issue #1363) — later rules of equal
+     specificity, which is what makes the docking a stylesheet decision rather
+     than a pile of inline styles. Its own surface sits at z-index 205: above the picker's 200, so the landing is the
      first thing painted before any script runs, and below the settings
      overlay's 209 and its cog's 210, which stay reachable from it. -->
 <link rel="stylesheet" href="gui/host-landing.css" />
@@ -486,9 +487,15 @@
     #snapshot-import-status {
       font-size: var(--text-sm); color: #9ab; white-space: normal; word-break: break-word;
     }
-    /* Peer-local save catalogue (issue #865). It is a sibling of the ordinary
-       scenario picker, so starting a new session never disappears behind save
-       management and no control can imply live-session restore. */
+    /* Peer-local save catalogue (issue #865), and since issue #1363 the
+       landing's Load Game stage rather than a second column of the boot panel.
+       `display: none` at rest is the whole of that change here: this panel is
+       on screen exactly while gui/host-landing-render.js has it docked in the
+       middle column, and gui/host-landing.css's `#save-slots-panel.landing-docked`
+       block is what turns it back on and unwinds the geometry below. The
+       geometry stays because it is what the panel wears anywhere else — a
+       stylesheet that only described the docked case would leave the node
+       shapeless the first time something other than the landing showed it. */
     #save-slots-panel {
       margin-left: auto;
       width: clamp(19rem, 31vw, 29rem);
@@ -498,9 +505,61 @@
       overflow-y: auto;
       background: rgba(var(--rgb-void), 0.82);
       border-left: 1px solid #334;
-      display: flex;
+      display: none;
       flex-direction: column;
       gap: 0.65rem;
+    }
+    /* The panel's header row (issue #1363): its name, and whatever acts on the
+       panel as a whole. Baseline-aligned so the heading and the small
+       monospace control sit on one line the way the design's panel head draws
+       them, and wrapping so the importer's status sentence — which is a child
+       of the importer, not of this row — can take a line of its own on a
+       narrow host instead of squeezing the heading. */
+    .save-slots-head {
+      display: flex; flex-wrap: wrap; align-items: baseline;
+      justify-content: space-between; gap: var(--space-5);
+    }
+    .save-slots-head-actions { display: flex; align-items: center; gap: var(--space-4); }
+    /* No action was handed over — a demo build, which removes the importer
+       outright, or a surface that carries no file chooser. Collapsed rather
+       than left as an empty flex child pushing the heading off centre. */
+    .save-slots-head-actions:empty { display: none; }
+    /* The portable-save importer, now that it lives in that row (issue #866
+       moved in by #1363). It keeps its own column — button over status — so a
+       refusal still reads under the control that caused it. */
+    .save-slots-head #snapshot-import {
+      margin-top: 0; align-items: flex-end; text-align: right; max-width: 100%;
+    }
+    /* Sized and coloured as the design's header control rather than as the
+       world-row `.world-btn` its class name still borrows: at rest a
+       --surface-card fill inside an --edge-strong boundary (3.90:1 on that
+       fill — --edge-control is 2.94:1 there, the shortfall gui/host-scenarios.css
+       records at .world-btn for the same reason), and on hover the accent pair
+       the graphite vocabulary gives a lit control: --cyan-deep fill, --cyan
+       boundary, --signal ink. The ring is INSET because the chamfer below
+       clips anything drawn outside the box. */
+    .save-slots-head #snapshot-import-btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-height: var(--control-h-md);
+      padding: 0 var(--space-5);
+      background: var(--surface-card);
+      border: 1px solid var(--edge-strong);
+      color: var(--ink-dim);
+      font-family: var(--font-mono);
+      font-size: var(--text-xs);
+      font-weight: 600;
+      line-height: 1;
+      letter-spacing: var(--tracking);
+      text-transform: uppercase;
+      cursor: pointer;
+      clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px);
+    }
+    .save-slots-head #snapshot-import-btn:hover {
+      background: var(--cyan-deep); border-color: var(--cyan); color: var(--signal);
+    }
+    .save-slots-head #snapshot-import-btn:focus-visible {
+      outline: none;
+      box-shadow: inset 0 0 0 var(--focus-ring-width) var(--focus-ring);
     }
     .save-slots-heading { margin: 0; color: #cce; font-size: var(--text-lg); letter-spacing: 0.06em; }
     .save-slots-intro, .save-slots-hint {
@@ -1489,11 +1548,20 @@
         <div id="mod-pack-conflicts"></div>
         <div id="mod-pack-findings"></div>
       </div>
-      <!-- Portable save import (issue #866). Pre-activation by construction:
-           #scenario-panel is hidden the moment world load starts, so a save can
-           only ever be picked before this session has a world — which is what
-           the version gate needs, because it runs against the world the save
-           itself names. -->
+      <!-- Portable save import (issue #866). Authored here, inside
+           #scenario-panel, because that is what the native lobby document
+           strips (SCENARIO_TOOLING_MARKERS) and what a demo build removes; at
+           mount it MOVES into the save catalogue's header (issue #1363,
+           `headerAction`), so from then on it is no longer a child of the panel
+           around it.
+           Pre-activation therefore rests on the two guards that survive that
+           move, and not on where the markup sits: both handlers below return
+           early once `_worldLoadStarted` has latched, and #save-slots-panel —
+           the importer's parent from mount onwards — is `display: none` unless
+           the landing has docked it, which it only ever does before a world is
+           chosen. So a save can still only be picked before this session has a
+           world, which is what the version gate needs, because it runs against
+           the world the save itself names. -->
       <div id="snapshot-import">
         <input id="snapshot-import-file" type="file" accept=".ron,.txt,text/plain" style="display:none;">
         <!-- `world-btn` is a STYLING hook only, as on #mod-pack-btn: this is
@@ -1503,8 +1571,17 @@
         <div id="snapshot-import-status"></div>
       </div>
     </div>
-    <aside id="save-slots-panel"></aside>
   </div>
+
+  <!-- Peer-local save catalogue (issue #865), and since issue #1363 the
+       landing's Load Game stage rather than a permanent second column of the
+       boot panel. A body-level panel, a sibling of #scenario-panel and not a
+       child of it, because the two are now alternative middle columns: New
+       Game borrows one, Load Game borrows the other, and a catalogue nested
+       inside the picker would have travelled with it into the World stage.
+       Empty here for the reason #landing-menu is — gui/save-slots.js mounts
+       its contents, importer included, once WASM can answer wasm_list_save_slots. -->
+  <aside id="save-slots-panel"></aside>
 
   <!-- ── HTML Lobby Panel (issue #436) ──────────────────────────────────── -->
   <div id="lobby-panel" class="lobby-panel" style="display:none;">
@@ -1925,6 +2002,12 @@
             doc: document,
             api,
             mode: 'catalogue',
+            // The portable-save importer (issue #866) moves into this panel's
+            // header (issue #1363). The LIVE node, so the page-lifetime click
+            // handler and the hidden <input type=file> installed below travel
+            // with it; null on a demo build, where applyPreScenarioRestrictions
+            // has already removed it outright.
+            headerAction: document.getElementById('snapshot-import'),
             canCapture: function () { return false; },
             download: snapshotTransfer.downloadArtifact,
             onNewSession: function () {
@@ -5177,8 +5260,14 @@
       });
       window.hostLandingRender.renderHostLanding(document, vm, t, {
         pick: function (entryId) {
-          const next = window.hostLanding.nextOpenEntry(_landingOpenEntry, entryId);
-          // A click on one of the four entries whose slice has not landed yet
+          // The WEB menu, not the shipped table: a row this surface offers but
+          // cannot open yet comes back from `landingEntries` with its stage
+          // taken away (`stagePlatforms`), and the judge of a click has to be
+          // looking at the same menu the view model above rendered.
+          const next = window.hostLanding.nextOpenEntry(
+            _landingOpenEntry, entryId, window.hostLanding.landingEntries('web'),
+          );
+          // A click on one of the entries whose slice has not landed yet
           // returns the open entry unchanged, and the view model is a pure
           // function of that memory — so re-rendering would rebuild the whole
           // menu to produce byte-identical DOM. Skipping it is not tidiness:
@@ -5204,19 +5293,21 @@
     };
 
     /**
-     * Take the landing off screen for good, and put the World picker back
-     * where the rest of this page expects to find it.
+     * Take the landing off screen for good, and put both borrowed panels back
+     * where the rest of this page expects to find them.
      *
      * Called from every path that commits to a world — the ?scenario= dev
      * bypass, driveWorldLoad, and the save importer. The undock is not
      * optional: those paths go on to show and hide #scenario-panel by setting
      * its `display`, and a `display` on a node parented inside a hidden
-     * ancestor shows nothing at all.
+     * ancestor shows nothing at all. Since issue #1363 the save catalogue is a
+     * second borrowed panel with the same hazard, and it goes back on the same
+     * call rather than on a second one somebody has to remember to add.
      */
     function hideLanding() {
       _landingDismissed = true;
       _landingOpenEntry = null;
-      if (window.hostLandingRender) window.hostLandingRender.undockPicker(document);
+      if (window.hostLandingRender) window.hostLandingRender.undockLandingPanels(document);
       const panel = document.getElementById('landing-panel');
       if (panel) panel.style.display = 'none';
     }
@@ -5268,18 +5359,21 @@
     // The #overlay QR normally lives over the Bevy canvas and is hidden until
     // Lobby — but that is AFTER world load. During scenario selection, dock the
     // same live node into #scenario-panel's central flex slot. It remains fully
-    // visible without covering either the world picker or save catalogue, and
-    // moving the node preserves all transport state and event handlers.
+    // visible without covering the world picker, and moving the node preserves
+    // all transport state and event handlers.
     function showJoinQrOverPanel() {
       const qrOverlay = document.getElementById('overlay');
       if (!qrOverlay || !window.hostQr) return;
-      // Dock the live QR node into the scenario panel (before the save-slots
-      // catalogue) so it sits as a flex child during scenario selection —
-      // `#overlay.pre-scenario` styles it, and `resetJoinQrLayer` moves it back.
+      // Dock the live QR node into the scenario panel so it sits as a flex
+      // child during scenario selection — `#overlay.pre-scenario` styles it,
+      // and `resetJoinQrLayer` moves it back.
       const scenarioPanel = document.getElementById('scenario-panel');
-      const saveSlotsPanel = document.getElementById('save-slots-panel');
+      // Appended, not inserted before the save catalogue: since issue #1363
+      // the catalogue is a panel of its own that Load Game borrows, so it is
+      // no longer a child of this one — and `insertBefore` with a reference
+      // node that is not a child throws.
       if (scenarioPanel && qrOverlay.parentElement !== scenarioPanel) {
-        scenarioPanel.insertBefore(qrOverlay, saveSlotsPanel || null);
+        scenarioPanel.appendChild(qrOverlay);
       }
       qrOverlay.classList.add('pre-scenario');
       // Visibility state lives in gui/host-qr.js (there is no `qrVisible`).
@@ -5902,9 +5996,36 @@
           setStatus(window.phSnapshotTransfer.importRefusalText(peek));
           return;
         }
-        // Step two happens on the way into wasm_init — see finishInit. All this
-        // does is load the world the save names, which is what the gate there
-        // will need to check it against.
+        // Step two: the file JOINS THE CATALOGUE it was imported from (issue
+        // #1363's AC2). The importer lives in that panel's header now, so an
+        // import is an action on this list, and an action on a list that left
+        // the list unchanged would be a control sitting in the wrong panel.
+        // The row is a manual slot like any other from here on: it is what the
+        // catalogue offers a Start on when it next opens, and the refusal it
+        // carries if this build cannot honour it is the row's (AC3).
+        //
+        // No compatibility gate on the way in — see
+        // `import_artifact_into_catalogue`. The version gate needs the world
+        // the save names, no world is loaded while a host is at the catalogue,
+        // and the gate that AC4 is about still runs below.
+        //
+        // A Store that would not take it stops the import here rather than
+        // booting anyway: a session restored from a file this browser could
+        // not keep is one the operator cannot save back to, and "make room" is
+        // an instruction they can act on.
+        const entered = window.phSnapshotTransfer.parseTransferAnswer(
+          wasmBindings.wasm_import_save_slot(text, file.name || t('server.import_snapshot')),
+        );
+        if (!entered.ok) {
+          setStatus(entered.kind === 'not-stored'
+            ? t('server.import_snapshot_not_stored', { detail: entered.message })
+            : window.phSnapshotTransfer.importRefusalText(entered));
+          return;
+        }
+        if (window.phSaveSlotsController) window.phSaveSlotsController.refresh();
+        // Step three happens on the way into wasm_init — see finishInit. All
+        // this does is load the world the save names, which is what the gate
+        // there will need to check it against.
         window.__phoenixPendingImport = text;
         setStatus(t('server.import_snapshot_loading'));
         _worldLoadStarted = true;
@@ -6163,6 +6284,10 @@ function finishInit() {
   window.wasm_export_file_name = wasmBindings.wasm_export_file_name;
   window.wasm_peek_import = wasmBindings.wasm_peek_import;
   window.wasm_prepare_import = wasmBindings.wasm_prepare_import;
+  // …and since issue #1363 an import is also a CATALOGUE write, because the
+  // importer sits in that panel's header: the file joins the same list a
+  // local save is in, under the name it arrived with.
+  window.wasm_import_save_slot = wasmBindings.wasm_import_save_slot;
   // One canonical diagnostic mutation route (issue #1267). The export is
   // absent from demo WASM; assigning its missing binding is harmless because
   // that build never renders the Debug/Cheat tab. Readback remains available.

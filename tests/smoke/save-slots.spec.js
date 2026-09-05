@@ -11,7 +11,7 @@ import {
   createTestClient,
   waitForWasmReady,
   MINIMAL_DEFAULT_WORLD,
-  openWorldPicker,
+  openSaveCatalogue,
 } from './fixtures';
 import { ts } from './strings';
 
@@ -131,12 +131,17 @@ async function cataloguePage(page) {
   // Start action arms the same synchronous handoff before assigning href.
   await page.evaluate(() => window.phSaveSlots.armBrowserSaveIdentityHandoff(window));
   await page.goto('/');
-  // The host's first paint is the landing screen now (issue #1360), so the
-  // World picker is one New Game click away rather than already on screen.
-  await openWorldPicker(page);
+  // The host's first paint is the landing screen (issue #1360) and the
+  // catalogue is Load Game's own stage in its middle column (issue #1363), so
+  // it is one press away rather than a column of the boot panel.
+  await openSaveCatalogue(page);
   await expect(page.locator('#save-slots-panel .save-slots-heading')).toBeVisible({
     timeout: 30_000,
   });
+  // The importer travelled with it: it is a control ON this catalogue now, in
+  // the panel's header, and not a separate block beside the World list.
+  await expect(page.locator('#save-slots-panel .save-slots-head #snapshot-import-btn'))
+    .toBeVisible({ timeout: 30_000 });
   return page;
 }
 

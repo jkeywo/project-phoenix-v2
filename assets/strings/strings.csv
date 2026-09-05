@@ -1219,6 +1219,7 @@ server.import_snapshot_read_error,Host scenario picker — status when the chose
 server.import_snapshot_damaged,"Host scenario picker — status when the chosen file is not a save this build can parse: truncated, edited, or never a save. {detail} is the parser's own reason","[That file is damaged and could not be read as a saved game. {detail}]"
 server.import_snapshot_incompatible,"Host scenario picker — status when the chosen file IS a save but this build cannot honour it. {detail} is vellum-save's own sentence naming which version dimension moved","[That saved game was made by a different build. {detail}]"
 server.import_snapshot_loading,Host scenario picker — status while the world an imported save names is being loaded on its behalf,[Loading the world that save was taken in…]
+server.import_snapshot_not_stored,"Host save catalogue — status when an imported save is a valid file but this browser's storage would not keep it, so it never became a catalogue row (issue #1363). {detail} is the Store's own reason","[That saved game could not be added to this browser's catalogue. {detail}]"
 server.hud_nominal,Viewscreen HUD — ship condition when undamaged,NOMINAL
 server.hud_alert,Viewscreen HUD — ship condition while the ship is at red alert,ALERT
 server.hud_designation,Viewscreen HUD — default ship designation,PHOENIX

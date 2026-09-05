@@ -100,6 +100,7 @@ function fixture(initialRows = [READY, MOVED], overrides = {}) {
     onPendingCaptureDropped: (message) => droppedCaptures.push(message),
     mode: overrides.mode,
     idPrefix: overrides.idPrefix,
+    headerAction: overrides.headerAction,
   });
   return { controller, calls, downloads, droppedCaptures, starts, rows: () => rows };
 }
@@ -476,5 +477,83 @@ describe('the mounted catalogue', () => {
     expect(url.searchParams.get('log')).toBe('info');
     expect(url.hash).toBe('#crew');
     expect(replaceState).toHaveBeenCalledWith(null, '', cleaned);
+  });
+});
+
+describe('the panel header (issue #1363)', () => {
+  // Load Game shows this catalogue in the landing's middle column, and the
+  // portable-save importer moved into this panel's header with it — it is an
+  // action ON the catalogue, not a separate block of the boot panel it happened
+  // to sit beside. What that costs the module is one row and one option, and
+  // both are asserted here rather than in the page that supplies the node.
+
+  /** The importer as server.html builds it: a button and a hidden file input. */
+  function importer() {
+    const host = document.createElement('div');
+    host.id = 'snapshot-import';
+    const input = document.createElement('input');
+    input.id = 'snapshot-import-file';
+    input.type = 'file';
+    const button = document.createElement('button');
+    button.id = 'snapshot-import-btn';
+    button.type = 'button';
+    host.append(input, button);
+    return { host, button };
+  }
+
+  it('draws a header row holding the heading, in every mode', () => {
+    for (const mode of ['combined', 'catalogue', 'manual']) {
+      fixture([READY], { mode });
+      const head = document.querySelector('.save-slots-head');
+      expect(head, mode).not.toBe(null);
+      const heading = document.querySelector('.save-slots-heading');
+      expect(heading.parentElement).toBe(head);
+      // The heading still NAMES the panel: it is what `aria-labelledby` points
+      // at, and re-parenting it must not break that.
+      expect(document.getElementById('save-slots').getAttribute('aria-labelledby'))
+        .toBe(heading.id);
+    }
+  });
+
+  it('moves the live header action into the row, listeners and children intact', () => {
+    const { host, button } = importer();
+    let presses = 0;
+    button.addEventListener('click', () => { presses += 1; });
+    document.body.appendChild(host);
+    fixture([READY], { mode: 'catalogue', headerAction: host });
+
+    const slot = document.querySelector('.save-slots-head-actions');
+    expect(host.parentElement).toBe(slot);
+    // The SAME node, not a rebuild of it: the page-lifetime handler and the
+    // hidden <input type=file> are what make the control work at all.
+    expect(document.getElementById('snapshot-import')).toBe(host);
+    expect(document.getElementById('snapshot-import-file')).not.toBe(null);
+    button.click();
+    expect(presses).toBe(1);
+  });
+
+  it('leaves the slot empty when no action was handed over', () => {
+    // A demo build removes the importer outright, and a surface that carries no
+    // file chooser never had one. Neither is a hole where a control should be.
+    fixture([READY], { mode: 'catalogue' });
+    const slot = document.querySelector('.save-slots-head-actions');
+    expect(slot).not.toBe(null);
+    expect(slot.children).toHaveLength(0);
+  });
+
+  it('keeps the header above the rows it acts on', async () => {
+    const { host } = importer();
+    document.body.appendChild(host);
+    fixture([READY, MOVED], { mode: 'catalogue', headerAction: host });
+    await flush();
+    const root = document.getElementById('save-slots');
+    const kids = [...root.children];
+    expect(kids.indexOf(document.querySelector('.save-slots-head')))
+      .toBeLessThan(kids.indexOf(document.querySelector('.save-slots-list')));
+    // ...and the list it sits above is still the one the catalogue lists into,
+    // refusal and all — nothing about moving the importer moved the rows.
+    expect([...document.querySelectorAll('.save-slot-select')]).toHaveLength(2);
+    expect(document.querySelector('.save-slot-compatibility.incompatible').textContent)
+      .toBe(t('server.save_slots.incompatible_rules'));
   });
 });

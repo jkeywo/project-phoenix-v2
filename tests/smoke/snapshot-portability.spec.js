@@ -167,6 +167,14 @@ test('a save exported from a running host imports into a fresh one and is staged
   expect(chooser).not.toContain(frameOf('server.import_snapshot_damaged'));
   const session = (await fresh.locator('#snapshot-status').textContent()) || '';
   expect(session).not.toContain(frameOf('server.import_snapshot_incompatible'));
+
+  // …and the file JOINED THE CATALOGUE it was imported from (issue #1363's
+  // AC2). The importer lives in that panel's header now, so an import is an
+  // action on this list: the save is a manual row like any other from here,
+  // under the name the file arrived with, and the page did not have to be
+  // reloaded for it to be there.
+  const rows = await fresh.evaluate(() => Array.from(window.wasm_list_save_slots?.() || []));
+  expect(rows.map((row) => row.display_name)).toContain('phoenix-save.ron');
 });
 
 // ── The two refusals ─────────────────────────────────────────────────────────

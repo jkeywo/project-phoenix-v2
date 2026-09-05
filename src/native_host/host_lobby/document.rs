@@ -1006,6 +1006,37 @@ mod tests {
             !view.contains("id: 'exit'"),
             "Exit to Desktop is issue #1365 and is not built here"
         );
+
+        // Load Game is the CONTRAST, and the reason the table carries two
+        // fields rather than one. That route belongs on this surface — issue
+        // #1363's AC5 asks for a native host that can resume a save without a
+        // startup flag — so the row IS offered here. What is missing is the
+        // stage behind it: this document carries no `#save-slots-panel` (the
+        // catalogue became a body-level sibling of the picker in #1363, so it
+        // is no longer swept up with `#scenario-panel`), `HostLobbyBridge` has
+        // no save-catalogue channel to fill one from, and native resume is
+        // startup-only by design. That is recorded as `stagePlatforms`, which
+        // leaves the row rendered and inert; recording it as `platforms` would
+        // have dropped the row and turned an unfinished AC into a claim that
+        // native hosts do not load games.
+        let load = view
+            .find("id: 'load_game'")
+            .expect("the shipped table still has a Load Game row");
+        let load_row = &view[load..][..view[load..].find("},").expect("the row closes")];
+        assert!(
+            load_row.contains("platforms: ['web', 'native'],"),
+            "Load Game is OFFERED on both surfaces (issue #1363 AC5)"
+        );
+        assert!(
+            load_row.contains("stagePlatforms: ['web'],"),
+            "…and only the web host can open its stage yet, which is the gap              this surface still has to close (issue #1363 AC5)"
+        );
+        assert!(
+            !build_host_lobby_document(HOST_PAGE)
+                .unwrap()
+                .contains("id=\"save-slots-panel\""),
+            "the panel that stage would borrow is genuinely not in this              document — the row's comment says so, and this is the check"
+        );
     }
 
     #[test]

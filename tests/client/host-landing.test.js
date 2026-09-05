@@ -34,7 +34,7 @@ const TABLE = [
     // actually ships with — the depth has to be the position in the list and
     // not a boolean somebody wrote as one (issue #1362).
     deeper: ['stage-a2', 'stage-a3'],
-    docksPicker: true,
+    docks: 'panel-a',
     platforms: ['web', 'native'],
   },
   { id: 'beta', labelId: 'x.beta', descId: 'x.beta_desc', stage: null, platforms: ['web', 'native'] },
@@ -48,11 +48,40 @@ describe('the shipped entry table', () => {
     ]);
   });
 
-  it('gives exactly New Game a stage — the rest render and are inert', () => {
-    // The honest shape of a tracer: the four without a stage each have a
+  it('gives New Game and Load Game a stage — the rest render and are inert', () => {
+    // The honest shape of a tracer: the three without a stage each have a
     // sibling issue that gives them one, and until then they must not pretend.
+    // Load Game joined in issue #1363, and joined by growing a stage on its
+    // own row rather than by anything below it learning its name.
     const staged = LANDING_ENTRIES.filter((e) => e.stage).map((e) => e.id);
-    expect(staged).toEqual(['new_game']);
+    expect(staged).toEqual(['new_game', 'load_game']);
+  });
+
+  it('names the panel each staged row borrows, as an element id on the row', () => {
+    // Two borrowers now, which is why the field is an id rather than the
+    // boolean it was while only the picker docked: the renderer reads the row
+    // and moves the node it names, and a third borrower needs no new branch.
+    expect(LANDING_ENTRIES.filter((e) => e.docks).map((e) => [e.id, e.docks])).toEqual([
+      ['new_game', 'scenario-panel'],
+      ['load_game', 'save-slots-panel'],
+    ]);
+  });
+
+  it('records Load Game\'s native gap as an unserved STAGE, not an unoffered row', () => {
+    // #1363's AC5 is unbuilt, and this is where that is written down. The two
+    // fields say different things: `platforms` is what a surface does not
+    // offer (Connect to Host, for ever), `stagePlatforms` is what it cannot
+    // open yet (Load Game, until the native save-catalogue channel lands).
+    const load = LANDING_ENTRIES.find((e) => e.id === 'load_game');
+    expect(load.platforms).toEqual(['web', 'native']);
+    expect(load.stagePlatforms).toEqual(['web']);
+    const connect = LANDING_ENTRIES.find((e) => e.id === 'connect_host');
+    expect(connect.platforms).toEqual(['web']);
+    expect(connect.stagePlatforms).toBeUndefined();
+    // Nothing else in the shipped table is gated this way; a second one would
+    // be a second unfinished AC and should arrive with its own test.
+    expect(LANDING_ENTRIES.filter((e) => e.stagePlatforms).map((e) => e.id))
+      .toEqual(['load_game']);
   });
 
   it('does not offer Exit to Desktop, which is a native-only row for #1365', () => {
@@ -87,6 +116,49 @@ describe('landingEntries', () => {
   });
 });
 
+describe('landingEntries — a stage this surface cannot serve yet', () => {
+  // `stagePlatforms` is the field that keeps `platforms` honest: one says what
+  // a surface does not OFFER, the other what it cannot yet OPEN, and only the
+  // first is doctrine. Collapsing them would have deleted a row to record a
+  // gap (issue #1363's AC5).
+  const GATED = [
+    { id: 'alpha', labelId: 'x.a', descId: 'x.a_desc', stage: 'stage-a', docks: 'panel-a', deeper: ['stage-a2'], stagePlatforms: ['web'] },
+    { id: 'beta', labelId: 'x.b', descId: 'x.b_desc', stage: 'stage-b' },
+  ];
+
+  it('keeps the row and takes its stage away, on the surface that lacks it', () => {
+    const native = landingEntries('native', GATED);
+    expect(native.map((e) => e.id)).toEqual(['alpha', 'beta']);
+    const alpha = native.find((e) => e.id === 'alpha');
+    expect(alpha.stage).toBe(null);
+    // A stage nothing can open has no panel to borrow and no ladder to climb.
+    expect(alpha.docks).toBe(null);
+    expect(alpha.deeper).toBe(null);
+    // ...and the table itself is untouched: the copy is the surface's view of
+    // the row, never an edit to the shipped row every surface shares.
+    expect(GATED[0].stage).toBe('stage-a');
+    expect(GATED[0].docks).toBe('panel-a');
+  });
+
+  it('leaves the row alone on the surface that lists it, and passes it through', () => {
+    const web = landingEntries('web', GATED);
+    expect(web.find((e) => e.id === 'alpha')).toBe(GATED[0]);
+    expect(web.find((e) => e.id === 'beta')).toBe(GATED[1]);
+  });
+
+  it('opens everywhere when the field is absent — the permissive default', () => {
+    expect(landingEntries('native', GATED).find((e) => e.id === 'beta').stage).toBe('stage-b');
+  });
+
+  it('refuses the press too, so the two memories cannot disagree', () => {
+    // `nextOpenEntry` over the surface's OWN list, which is what both callers
+    // pass: a click judged against the full table would leave the page holding
+    // an entry as open that its view model renders as closed.
+    expect(nextOpenEntry(null, 'alpha', landingEntries('native', GATED))).toBe(null);
+    expect(nextOpenEntry(null, 'alpha', landingEntries('web', GATED))).toBe('alpha');
+  });
+});
+
 describe('nextOpenEntry', () => {
   it('opens an entry that has a stage', () => {
     expect(nextOpenEntry(null, 'alpha', TABLE)).toBe('alpha');
@@ -110,11 +182,15 @@ describe('nextOpenEntry', () => {
     expect(nextOpenEntry(null, 'nonesuch', TABLE)).toBe(null);
   });
 
-  it('reads New Game off the shipped table when given no table at all', () => {
+  it('reads the shipped table when given no table at all', () => {
     expect(nextOpenEntry(null, 'new_game')).toBe('new_game');
     expect(nextOpenEntry('new_game', 'new_game')).toBe(null);
+    // Load Game replaces it rather than sitting beside it: one stage is open
+    // at a time, because there is one middle column (issue #1363).
+    expect(nextOpenEntry('new_game', 'load_game')).toBe('load_game');
+    expect(nextOpenEntry('load_game', 'load_game')).toBe(null);
     // ...and the entries that have no stage yet stay inert through the default.
-    expect(nextOpenEntry(null, 'load_game')).toBe(null);
+    expect(nextOpenEntry(null, 'join_peer')).toBe(null);
   });
 });
 
@@ -192,12 +268,47 @@ describe('landingViewModel', () => {
     expect(vm.entries.map((e) => e.id)).toEqual(LANDING_ENTRIES.map((e) => e.id));
   });
 
-  it('opens New Game off the shipped table, which is the one working action', () => {
+  it('opens New Game off the shipped table', () => {
     const vm = landingViewModel({ openEntryId: 'new_game' });
     expect(vm.stage).toBe('world-picker');
     expect(vm.entries.find((e) => e.id === 'new_game').selected).toBe(true);
     expect(vm.entries.filter((e) => e.inert).map((e) => e.id))
-      .toEqual(['load_game', 'join_peer', 'connect_host', 'load_mod_pack']);
+      .toEqual(['join_peer', 'connect_host', 'load_mod_pack']);
+  });
+
+  it('opens Load Game onto the save catalogue, borrowing its panel (issue #1363)', () => {
+    const vm = landingViewModel({ openEntryId: 'load_game' });
+    expect(vm.stage).toBe('save-catalogue');
+    expect(vm.docks).toBe('save-slots-panel');
+    expect(vm.depth).toBe(1);
+    expect(vm.rootClass).toBe('is-open');
+    expect(vm.entries.find((e) => e.id === 'load_game').selected).toBe(true);
+    // One column, one open stage: New Game is not selected beside it, and the
+    // picker's panel is not the one being borrowed.
+    expect(vm.entries.find((e) => e.id === 'new_game').selected).toBe(false);
+  });
+
+  it('offers Load Game on the native host but cannot open it yet (#1363 AC5)', () => {
+    // The recorded gap, not doctrine. The native lobby document carries no
+    // `#save-slots-panel`, `HostLobbyBridge` has no channel to fill one from,
+    // and native resume is startup-only by design — so the row carries
+    // `stagePlatforms: ['web']` until a slice buys those, and NOT
+    // `platforms: ['web']`, which would have said native hosts do not load
+    // games at all. It renders, it is inert, and pressing it opens nothing.
+    const idle = landingViewModel({ platform: 'native' });
+    const row = idle.entries.find((e) => e.id === 'load_game');
+    expect(row).toBeDefined();
+    expect(row.inert).toBe(true);
+    expect(row.stage).toBe(null);
+
+    const vm = landingViewModel({ platform: 'native', openEntryId: 'load_game' });
+    expect(vm.stage).toBe('idle');
+    expect(vm.docks).toBe(null);
+    expect(vm.openEntryId).toBe(null);
+    // Connect to Host is the contrast, and the reason the two fields are two:
+    // that row is not on this menu at all, because a native host is always a
+    // host and there is nothing behind it to build.
+    expect(idle.entries.map((e) => e.id)).not.toContain('connect_host');
   });
 });
 
@@ -269,15 +380,17 @@ describe('landingViewModel — an open entry with a ladder (issue #1362)', () =>
     expect(vm.rootClass).toBe('is-idle');
   });
 
-  it('says whether the open entry borrows the picker, as a fact about the row', () => {
-    // The renderer moves `#scenario-panel` on this and never on a comparison
-    // of `stage` to a name — a stage-name test would have undocked the picker
-    // the moment the hull rung opened, taking the World list with it.
-    expect(open(null).docksPicker).toBe(true);
-    expect(open('stage-a2').docksPicker).toBe(true);
-    expect(landingViewModel({ entries: TABLE, platform: 'native', openEntryId: 'gamma' }).docksPicker).toBe(false);
-    expect(landingViewModel({ entries: TABLE }).docksPicker).toBe(false);
-    expect(landingViewModel({ entries: TABLE, openEntryId: 'alpha', dismissed: true }).docksPicker).toBe(false);
+  it('says WHICH panel the open entry borrows, as a fact about the row', () => {
+    // The renderer moves the node this names and never a node chosen from a
+    // comparison of `stage` to a name — a stage-name test would have undocked
+    // the picker the moment the hull rung opened, taking the World list with
+    // it. An id rather than a boolean since issue #1363, when a second row
+    // started borrowing a second panel.
+    expect(open(null).docks).toBe('panel-a');
+    expect(open('stage-a2').docks).toBe('panel-a');
+    expect(landingViewModel({ entries: TABLE, platform: 'native', openEntryId: 'gamma' }).docks).toBe(null);
+    expect(landingViewModel({ entries: TABLE }).docks).toBe(null);
+    expect(landingViewModel({ entries: TABLE, openEntryId: 'alpha', dismissed: true }).docks).toBe(null);
   });
 });
 
@@ -290,7 +403,7 @@ describe('the shipped New Game ladder (issue #1362)', () => {
     expect(vm.stage).toBe('ship-picker');
     expect(vm.depth).toBe(2);
     expect(vm.rootClass).toBe('is-open is-deep');
-    expect(vm.docksPicker).toBe(true);
+    expect(vm.docks).toBe('scenario-panel');
   });
 
   it('stays on the World picker for every other stage the picker reports', () => {

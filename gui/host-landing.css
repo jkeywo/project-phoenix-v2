@@ -445,10 +445,12 @@
   min-height: 0;
   background: none;
   border: 1px solid var(--edge-faint);
-  /* Column, not row: the panel's three surfaces — the world list, the docked
-     join panel and the save catalogue — were laid out side by side across a
-     whole screen, and the landing gives them one 416px column. This is the
-     same stacking the picker already applies to itself on a narrow host. */
+  /* Column, not row: the panel's two surfaces — the world list and the docked
+     join panel — were laid out side by side across a whole screen, and the
+     landing gives them one 416px column. Two and not three since issue #1363:
+     the save catalogue was the third, and is now the alternative middle column
+     the block below docks, not a child of this one. This is the same stacking
+     the picker already applies to itself on a narrow host. */
   flex-direction: column;
   overflow-y: auto;
   clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
@@ -473,6 +475,42 @@
   margin: 0;
   padding: 16px;
   overflow: visible;
+}
+
+/* ── The docked save catalogue ────────────────────────────────────────── */
+/*
+ * Load Game's stage (issue #1363), and the second panel this column borrows.
+ * It is written beside the picker's block rather than folded into it because
+ * the two are alternative middle columns: one node docks at a time, and each
+ * says in its own selector what its full-screen self has to give up.
+ *
+ * `#save-slots-panel` is `display: none` at rest (server.html), so this block
+ * is also the only thing that puts it on screen — which is the whole of "Load
+ * Game shows the save catalogue in the middle column". A catalogue that could
+ * be visible undocked would be the second column of the boot panel this slice
+ * exists to remove.
+ *
+ * The chamfer, the rule of an edge and the panel fill are the picker's, for
+ * the reason the hull column takes them: two stages of one landing, and a
+ * second set of values would read as two different screens.
+ */
+#save-slots-panel.landing-docked {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  margin-left: 0;
+  /* No cog above this column — the rail holds the keep-out now, exactly as it
+     does for the docked World list, so the catalogue must not reserve it a
+     second time. */
+  padding: 16px 18px 18px;
+  /* The shorthand, not a `border-left: 0` beside it: undocked this panel wears
+     one rule on its left edge, and docked it is a panel with four. */
+  border: 1px solid var(--edge-faint);
+  background: rgba(var(--rgb-base), 0.88);
+  overflow-y: auto;
+  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
 }
 
 /* ── The hull column ──────────────────────────────────────────────────── */

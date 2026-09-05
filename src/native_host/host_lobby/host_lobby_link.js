@@ -46,7 +46,7 @@ import { applyQrPhase, drawJoinQr, showJoiningOff, toggleQr } from './gui/host-q
 import { joinUrlForCode } from './gui/join-url.js';
 import { scenarioCatalogView } from './gui/host-scenarios.js';
 import { renderHostScenarios } from './gui/host-scenario-render.js';
-import { landingViewModel, nextOpenEntry } from './gui/host-landing-view.js';
+import { landingEntries, landingViewModel, nextOpenEntry } from './gui/host-landing-view.js';
 import { renderHostLanding } from './gui/host-landing-render.js';
 
 // The static `data-i18n` markup — "CREW", "CONNECTED", the awaiting-selection
@@ -226,6 +226,12 @@ window.__phoenixHostLobby.renderScenario = function (json) {
 // function the host page calls, over the same shipped table. Nothing about the
 // menu is decided in this file; `platforms: ['web']` on the Connect-to-Host row
 // is why that entry is not on this surface, and it is said in the table.
+//
+// `nextOpenEntry` is asked over `landingEntries('native')` and not over the raw
+// table, for the reason that function documents: a row this surface offers but
+// cannot open yet — Load Game, until #1363's AC5 lands — comes back with its
+// stage taken away, and a click judged against the full table would leave this
+// file remembering an entry as open that `drawLanding` renders as closed.
 let landingOpenEntry = null;
 // The host's last word about the landing: which build this is, and whether a
 // World has taken the front door away. Held so a re-render driven by a click
@@ -246,7 +252,7 @@ function drawLanding() {
     t,
     {
       pick: (entryId) => {
-        const next = nextOpenEntry(landingOpenEntry, entryId);
+        const next = nextOpenEntry(landingOpenEntry, entryId, landingEntries('native'));
         // An entry whose slice has not landed returns the open entry unchanged,
         // and the view model is a pure function of that memory - so re-rendering
         // would rebuild the whole menu to produce byte-identical DOM, at the

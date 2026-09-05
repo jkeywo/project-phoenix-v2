@@ -3138,6 +3138,66 @@ fn import_resume_after_scenario(
     Ok(run)
 }
 
+/// Enter a portable save's text into a catalogue as a new manual slot
+/// (issue #1363).
+///
+/// Pure over the `Store`, for the reason [`import_resume_after_scenario`] is
+/// pure over its gate: the one rule this path must not break — a file that is
+/// not a `Run` never becomes a row — is then a test rather than a claim about
+/// an edge no native test can call.
+///
+/// **Compatibility is deliberately not an entry gate**, which is
+/// [`wasm_export_save_slot`]'s rule read in the other direction: copying a save
+/// in and copying one out are both ungated, and only STARTING is gated. It is
+/// also the only rule that could be applied here. The version gate's content
+/// dimension is a digest over the world a save names, so it has nothing to
+/// check against until that world is loaded — and a host standing at the
+/// catalogue has loaded none. Gating here would refuse every save from a world
+/// this page has not booted, which is most of them.
+///
+/// Nothing is lost by that. `wasm_list_save_slots` runs the compatibility check
+/// that puts a refusal on the row (#1363's AC3), and a Start reloads into
+/// [`wasm_prepare_resume`], where the gate runs before anything is restored
+/// (AC4). An imported save is a slot like any other from the moment it is
+/// written, which is the whole of "enters an imported save into the same list"
+/// (AC2).
+#[cfg(any(target_arch = "wasm32", test))]
+fn import_artifact_into_catalogue<S: vellum_save::Store>(
+    store: &S,
+    text: &str,
+    display_name: &str,
+) -> Result<String, ImportSlotRefusal> {
+    let run = crate::snapshot::StoredRun::from_ron(text).map_err(|error| {
+        ImportSlotRefusal::Damaged(crate::snapshot::LoadRefusal::Unparsable(error.to_string()))
+    })?;
+    crate::save_slots::create_manual_save(store, display_name, &run)
+        .map_err(ImportSlotRefusal::NotStored)
+}
+
+/// Why an imported file did not become a catalogue row.
+///
+/// Two classes, and they are two for [`wasm_peek_import`]'s reason: they send a
+/// host to different places. A damaged file means pick another one; a Store
+/// that would not take it means make room, and the file is fine.
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ImportSlotRefusal {
+    Damaged(crate::snapshot::LoadRefusal),
+    NotStored(crate::save_slots::CatalogueError),
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl std::fmt::Display for ImportSlotRefusal {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            // The same wire shape every other transfer answer uses: the class,
+            // a tab, and a sentence the page is not allowed to paraphrase.
+            Self::Damaged(refusal) => write!(formatter, "damaged\t{refusal}"),
+            Self::NotStored(error) => write!(formatter, "not-stored\t{error:?}"),
+        }
+    }
+}
+
 #[cfg(any(target_arch = "wasm32", test))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum BrowserResumeRefusal {
@@ -3193,6 +3253,30 @@ pub fn wasm_peek_import(text: String) -> String {
     match crate::snapshot::peek_artifact_scenario(&text) {
         Ok(scenario) => format!("ok\t{scenario}"),
         Err(refusal) => format!("damaged\t{refusal}"),
+    }
+}
+
+/// Enter an imported file into this browser's own save catalogue, as a new
+/// manual slot named `display_name` (issue #1363's AC2).
+///
+/// Returns `""` when the row was written, or `"<class>\t<message>"` when it was
+/// not — `damaged` for a file that is not a `Run` this build can parse, and
+/// `not-stored` for a Store that would not take it. See
+/// [`import_artifact_into_catalogue`] for why there is no third class, and in
+/// particular why compatibility is not one.
+///
+/// This is the half of #866's import that #1363 adds: the importer moved into
+/// the catalogue's header, so importing is now an action ON the catalogue, and
+/// an action on a list that does not change the list would be a control sitting
+/// somewhere it does not belong. The staged direct boot below is unchanged and
+/// still runs after this — the file both joins the list and starts, rather than
+/// only starting.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_import_save_slot(text: String, display_name: String) -> String {
+    match import_artifact_into_catalogue(&browser_save_store(), &text, &display_name) {
+        Ok(_) => String::new(),
+        Err(refusal) => refusal.to_string(),
     }
 }
 
@@ -5104,10 +5188,11 @@ mod tests {
     use super::{
         apply_gm_roster_replacement, apply_instagib_toggles, begin_browser_startup_restore,
         browser_restore_bootstrap_started, defer_unloaded_scenario_content, host_channels,
-        import_resume_after_scenario, legacy_force_start_allowed, load_resume_after_scenario,
-        next_restore_step, queue_fleet_lobby_input_bounded, rebind_fleet_lobby_projections,
-        resolve_browser_startup_restore, save_slot_start_projection, scoped_browser_save_namespace,
-        BoundedFifo, BrowserResumeRefusal, PendingBrowserSaves, PendingRestore, RestoreStep,
+        import_artifact_into_catalogue, import_resume_after_scenario, legacy_force_start_allowed,
+        load_resume_after_scenario, next_restore_step, queue_fleet_lobby_input_bounded,
+        rebind_fleet_lobby_projections, resolve_browser_startup_restore,
+        save_slot_start_projection, scoped_browser_save_namespace, BoundedFifo,
+        BrowserResumeRefusal, ImportSlotRefusal, PendingBrowserSaves, PendingRestore, RestoreStep,
         RestoreWaited, MAX_PENDING_BROWSER_SAVES,
     };
     use crate::console::navigation::server::apply_teleport_to_waypoint;
@@ -5149,6 +5234,60 @@ mod tests {
         fn slots(&self) -> Result<Vec<String>, Self::Error> {
             Ok(vec![self.slot.clone()])
         }
+    }
+
+    /// A Store that actually takes writes, for the paths that make a row.
+    #[derive(Default)]
+    struct MapStore {
+        slots: std::cell::RefCell<std::collections::BTreeMap<String, String>>,
+    }
+
+    impl vellum_save::Store for MapStore {
+        type Error = ReadOnlyStoreError;
+
+        fn read(&self, slot: &str) -> Result<Option<String>, Self::Error> {
+            Ok(self.slots.borrow().get(slot).cloned())
+        }
+
+        fn write(&self, slot: &str, contents: &str) -> Result<(), Self::Error> {
+            self.slots
+                .borrow_mut()
+                .insert(slot.to_string(), contents.to_string());
+            Ok(())
+        }
+
+        fn remove(&self, slot: &str) -> Result<(), Self::Error> {
+            self.slots.borrow_mut().remove(slot);
+            Ok(())
+        }
+
+        fn slots(&self) -> Result<Vec<String>, Self::Error> {
+            Ok(self.slots.borrow().keys().cloned().collect())
+        }
+    }
+
+    /// A minimal portable artifact of `scenario`, as a file a host would pick.
+    fn portable_artifact(scenario: &str, versions: &vellum_save::Versions) -> String {
+        crate::snapshot::run_for(
+            crate::snapshot::PhoenixSnapshot {
+                tick: 42,
+                boot_identity: Some(crate::snapshot::BootIdentity {
+                    selected_ship: "assets/entities/alliance_cruiser.toml".into(),
+                    fleet: crate::lockstep::FleetRoster::default(),
+                    game_start_entity_uuids: vec![crate::snapshot::GameStartEntityUuid {
+                        authored_index: 0,
+                        entity_uuid: "00000000-0000-8000-8000-000000000000".into(),
+                    }],
+                }),
+                ..Default::default()
+            },
+            0xfeed,
+            17,
+            scenario,
+            versions.clone(),
+        )
+        .to_ron()
+        .expect("portable artifact must encode")
     }
 
     fn one_game_start_world() -> crate::world::config::WorldConfig {
@@ -5617,6 +5756,106 @@ spawn_on = "game_start"
                 loaded: "assets/entities/alliance_cruiser.toml".into(),
             }
         );
+    }
+
+    #[test]
+    fn an_imported_artifact_becomes_a_row_of_the_ordinary_catalogue() {
+        // Issue #1363's AC2. The importer now sits in the save catalogue's
+        // header, which makes importing an action ON that list — and an action
+        // on a list that leaves the list unchanged is a control in the wrong
+        // panel. So the file becomes a manual slot like any other, listed by
+        // the same `list_slots` the catalogue reads, under the name the
+        // operator's file had.
+        let current = vellum_save::Versions::new(7, "rules", 0x1234);
+        let artifact = portable_artifact("assets/worlds/default.toml", &current);
+        let store = MapStore::default();
+
+        let slot_id = import_artifact_into_catalogue(&store, &artifact, "away-team.ron")
+            .expect("an intact artifact must enter the catalogue");
+
+        let listed = crate::save_slots::list_slots(&store, &current)
+            .expect("the catalogue must list what was just written");
+        let row = listed
+            .iter()
+            .find(|entry| entry.slot_id == slot_id)
+            .expect("the imported save must be a row of the ordinary catalogue");
+        assert_eq!(row.kind, crate::save_slots::SaveSlotKind::Manual);
+        assert_eq!(row.display_name, "away-team.ron");
+        assert_eq!(
+            row.record
+                .as_ref()
+                .expect("an imported row carries the run's own summary")
+                .scenario,
+            "assets/worlds/default.toml"
+        );
+        // ...and it is startable the moment it lands, which is what makes it a
+        // row of this list rather than a private shelf beside it.
+        assert!(matches!(row.start, crate::save_slots::StartState::Ready));
+    }
+
+    #[test]
+    fn a_file_that_is_not_a_run_never_becomes_a_row() {
+        // The one rule this path must not break, and the reason the helper is
+        // pure: a catalogue row is a promise that something can be read back.
+        let store = MapStore::default();
+        let refusal = import_artifact_into_catalogue(&store, "not a save at all", "junk.txt")
+            .expect_err("an unparsable file must not become a row");
+        assert!(matches!(refusal, ImportSlotRefusal::Damaged(_)));
+        assert!(refusal.to_string().starts_with("damaged\t"));
+        assert!(
+            vellum_save::Store::slots(&store)
+                .expect("the fake store lists")
+                .is_empty(),
+            "a refused import must leave the Store untouched"
+        );
+    }
+
+    #[test]
+    fn a_store_that_will_not_take_it_is_a_different_answer_from_a_damaged_file() {
+        // Two classes because they send a host to two different places: pick
+        // another file, against make room. The page is not left to infer which
+        // from an English sentence it may not paraphrase.
+        let current = vellum_save::Versions::new(7, "rules", 0x1234);
+        let artifact = portable_artifact("assets/worlds/default.toml", &current);
+        let store = ReadOnlyStore {
+            slot: "occupied".into(),
+            text: String::new(),
+        };
+        let refusal = import_artifact_into_catalogue(&store, &artifact, "away-team.ron")
+            .expect_err("a Store that refuses writes cannot make a row");
+        assert!(matches!(refusal, ImportSlotRefusal::NotStored(_)));
+        assert!(refusal.to_string().starts_with("not-stored\t"));
+    }
+
+    #[test]
+    fn an_incompatible_artifact_still_enters_the_catalogue_and_is_refused_on_its_row() {
+        // Compatibility is not an ENTRY gate, exactly as it is not a copy gate
+        // on the way out (`wasm_export_save_slot`). It could not be one here:
+        // the content dimension is a digest over the world the save names, and
+        // a host standing at the catalogue has loaded no world. The refusal
+        // arrives where #1363's AC3 asks for it — on the row — and the gate
+        // that AC4 is about still runs before anything is restored.
+        let saved = vellum_save::Versions::new(6, "rules", 0x1234);
+        let current = vellum_save::Versions::new(7, "rules", 0x1234);
+        let artifact = portable_artifact("assets/worlds/default.toml", &saved);
+        let store = MapStore::default();
+
+        let slot_id = import_artifact_into_catalogue(&store, &artifact, "older.ron")
+            .expect("an intact artifact from another build still enters the list");
+        let listed =
+            crate::save_slots::list_slots(&store, &current).expect("the catalogue must list it");
+        let row = listed
+            .iter()
+            .find(|entry| entry.slot_id == slot_id)
+            .expect("the imported save is a row");
+        assert!(
+            matches!(
+                row.start,
+                crate::save_slots::StartState::Refused(crate::snapshot::LoadRefusal::Moved(_))
+            ),
+            "the row says it cannot be started, and names the dimension that moved"
+        );
+        assert!(!row.can_start());
     }
 
     #[test]

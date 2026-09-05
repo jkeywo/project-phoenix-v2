@@ -25,10 +25,20 @@
  *   | `descId`      | the string id of the line under it |
  *   | `stage`       | which contextual stage opening it reveals, or `null` for an entry that does nothing yet |
  *   | `deeper`      | the stages this entry can descend INTO once open, in order — absent for an entry that is only one column deep |
- *   | `docksPicker` | this entry's stage is the EXISTING `#scenario-panel` node moved into the middle column, rather than markup of its own |
+ *   | `docks`       | this entry's stage is an EXISTING panel node — named by element id — moved into the middle column, rather than markup of its own |
  *   | `platforms`   | which hosts offer it at all — `['native']` is how #1365's Exit to Desktop arrives without a build check anywhere in this file |
+ *   | `stagePlatforms` | which of those hosts can actually OPEN its stage — absent means all of them |
  *
  * Adding an entry is adding a row. Nothing below reads an id by name.
+ *
+ * The last two are deliberately not one field, because they say different
+ * things and a slice that conflated them would lose a row rather than record a
+ * gap. `platforms` is DOCTRINE: this surface does not offer this route and
+ * never will — `connect_host` is absent from the native menu because a native
+ * host is always a host and has no leg to connect with. `stagePlatforms` is
+ * WORK NOT DONE: the route belongs here, this surface cannot serve it yet, so
+ * the row renders and is inert exactly like a row whose `stage` is still
+ * `null`. Load Game is the first of those — see its row, and #1363's AC5.
  *
  * ## A ladder is a field, not a second entry (issue #1362)
  *
@@ -42,14 +52,23 @@
  * string to its own array and neither this module, the renderer, nor the
  * stylesheet learns a new name.
  *
- * ## Only one entry works in this slice, and that is deliberate
+ * ## An entry with no stage is inert, and that is deliberate
  *
- * `new_game` carries `stage: 'world-picker'`; the other four carry `stage:
+ * `new_game` carries `stage: 'world-picker'` and, since issue #1363,
+ * `load_game` carries `stage: 'save-catalogue'`; the other three carry `stage:
  * null` and are inert — they render, and clicking them changes nothing. An
  * inert entry that silently pretended to open something would be worse than a
- * button that plainly does not work yet, and each of the four has a sibling
+ * button that plainly does not work yet, and each of the three has a sibling
  * issue that gives it a stage of its own. [`nextOpenEntry`] is where "inert"
  * is enforced, in one place, rather than at each caller.
+ *
+ * A row can also be inert on ONE surface: [`landingEntries`] takes the `stage`
+ * away from a row whose `stagePlatforms` does not list the platform asking, so
+ * "this host cannot open it yet" reaches every reader — the view model, the
+ * renderer's `aria-disabled`, [`nextOpenEntry`] — as the one condition all
+ * three already understand. It is also why both callers hand `nextOpenEntry`
+ * the list [`landingEntries`] gave them rather than the raw table: the judge of
+ * a click has to be looking at the same menu the operator is.
  */
 
 /**
@@ -78,15 +97,59 @@ export const LANDING_ENTRIES = [
     // Both rungs are drawn by the picker that already exists: the middle
     // column holds the live `#scenario-panel`, and the hull column holds the
     // `ph-ship-picker` its renderer mounts. Nothing here re-implements either.
-    docksPicker: true,
+    docks: 'scenario-panel',
     platforms: ['web', 'native'],
   },
   {
     id: 'load_game',
     labelId: 'server.landing.load_game',
     descId: 'server.landing.load_game_desc',
-    stage: null,
+    // Issue #1363. The catalogue itself — listing, the compatibility refusal a
+    // row carries, manual against automatic, and the version gate that runs
+    // before anything is restored — is `gui/save-slots.js` and predates this
+    // row by five hundred commits. What this row adds is WHERE it is shown:
+    // the middle column, on the same track the World picker opens on, instead
+    // of a permanent second column of the boot panel nobody asked for.
+    stage: 'save-catalogue',
+    // The live `#save-slots-panel` node, borrowed exactly as New Game borrows
+    // `#scenario-panel` above. Borrowed and not re-rendered, for the same
+    // reason: a Start still reaches the resume path down the wire it always
+    // did, and the save importer travels with the panel because it is now one
+    // of its children (`mountSaveSlots`'s `headerAction`).
+    docks: 'save-slots-panel',
+    // Offered on BOTH hosts, because Load Game is a route a native host has
+    // every business showing: #1363's AC5 asks for exactly that. `platforms`
+    // is not the field for what is missing here — see `stagePlatforms` below.
     platforms: ['web', 'native'],
+    // ...but only the web host can OPEN it yet. #1363's AC5 — "the native
+    // surface can resume a save without a startup flag" — IS NOT MET, and this
+    // line is the record of that, on the row, rather than in a comment
+    // somebody has to go looking for. The row still renders on the viewscreen,
+    // dashed and `aria-disabled` like every other not-yet row, because a menu
+    // that quietly dropped it would have turned an unfinished AC into a claim
+    // that native hosts do not load games.
+    //
+    // What the slice closing AC5 has to buy, in the order it will meet it:
+    //
+    //   * the native lobby document (`native_host::host_lobby::document`)
+    //     carries no `#save-slots-panel`. It used to arrive by accident, as the
+    //     last child of the extracted `#scenario-panel`; #1363 made the
+    //     catalogue a body-level sibling, so it now needs an extraction of its
+    //     own beside the four already there.
+    //   * `HostLobbyBridge` has no save-catalogue channel, so there would be
+    //     nothing to fill that panel FROM: the rows, the refusal each carries
+    //     and what a Start reports back all need a record vocabulary, the way
+    //     the picker's and the landing's do.
+    //   * native resume is startup-only BY DESIGN, not by omission.
+    //     `save_slots_store::stage_new_native_session_from_slot` refuses at any
+    //     `SimTick` past 0 — "this startup route cannot become a live-session
+    //     restore by being called later" — and `advance_sim_tick` runs every
+    //     fixed step from a native host's first frame, lobby included. So
+    //     answering a Start there means either relaxing that guard or building
+    //     the App a second time around the restored run. That is a decision
+    //     about the native lifecycle, not a port of this row, which is why it
+    //     is not taken here.
+    stagePlatforms: ['web'],
   },
   {
     id: 'join_peer',
@@ -123,11 +186,22 @@ const PLATFORM_LABEL = {
 };
 
 /**
- * The entries a given platform offers.
+ * The entries a given platform offers, each carrying only what that platform
+ * can actually do with it.
  *
- * A row with no `platforms` is offered everywhere — the permissive default is
- * on purpose, so a slice adding an entry only has to think about the field
+ * A row with no `platforms` is offered everywhere, and a row with no
+ * `stagePlatforms` opens wherever it is offered — both permissive defaults are
+ * on purpose, so a slice adding an entry only has to think about either field
  * when its entry is genuinely platform-bound.
+ *
+ * The second pass is why this returns a copy of a row rather than the table's
+ * own object for a surface that is missing one: a row this platform offers but
+ * cannot yet SERVE comes back with its `stage` taken away, which is already
+ * the whole vocabulary of "renders, and clicking it changes nothing". Nothing
+ * downstream learns a platform name — the view model marks it `inert`, the
+ * renderer writes `aria-disabled`, and [`nextOpenEntry`] refuses to open it,
+ * all off the one field the three of them already read. `docks` and `deeper`
+ * go with it: a stage nothing can open has neither a panel nor a ladder.
  */
 export function landingEntries(platform, entries) {
   const list = Array.isArray(entries) ? entries : LANDING_ENTRIES;
@@ -135,6 +209,10 @@ export function landingEntries(platform, entries) {
     if (!entry || !entry.id) return false;
     if (!Array.isArray(entry.platforms)) return true;
     return entry.platforms.indexOf(platform) !== -1;
+  }).map(function (entry) {
+    if (!entry.stage || !Array.isArray(entry.stagePlatforms)) return entry;
+    if (entry.stagePlatforms.indexOf(platform) !== -1) return entry;
+    return Object.assign({}, entry, { stage: null, docks: null, deeper: null });
   });
 }
 
@@ -146,8 +224,16 @@ export function landingEntries(platform, entries) {
  *
  *   - the entry already open closes (that is the second click on New Game);
  *   - an entry with a `stage` opens, replacing whatever was open;
- *   - an entry with no `stage` — every entry but New Game in this slice —
- *     changes nothing at all, and neither does an id the table does not hold.
+ *   - an entry with no `stage` changes nothing at all, and neither does an id
+ *     the list does not hold.
+ *
+ * `entries` should be the list [`landingEntries`] gave this surface, not the
+ * shipped table: that is where a row's `stage` is taken away on a host which
+ * cannot serve it yet (`stagePlatforms`). Judging a click against the whole
+ * table would let a surface remember an entry as open that its own view model
+ * renders as closed — two memories disagreeing about one press. The default is
+ * the shipped table, which is the right answer for a `web` caller and is what
+ * the pure tests lean on.
  *
  * @returns {string|null} the id to pass back as `openEntryId`.
  */
@@ -203,7 +289,7 @@ export function nextOpenEntry(openEntryId, entryId, entries) {
  *   dismissed: boolean,
  *   openEntryId: string|null,
  *   deepStage: string|null,
- *   docksPicker: boolean,
+ *   docks: string|null,
  *   depth: number,
  *   rootClass: string,
  *   identity: {titleId: string, taglineId: string, logoAltId: string, platformLabelId: string},
@@ -261,11 +347,15 @@ export function landingViewModel(input) {
     // Which rung of the open entry's ladder, as a name, for a caller that
     // needs to tell the two apart without comparing `stage` to a literal.
     deepStage: deepStage,
-    // Whether this stage is served by the borrowed `#scenario-panel` node —
-    // a fact about the ROW, so the renderer never asks "is the stage called
-    // world-picker" and a future entry that borrows the same panel says so on
-    // its own line (issue #1362).
-    docksPicker: !!(open && open.docksPicker),
+    // WHICH existing panel node this stage is served by, as an element id, or
+    // null for a stage drawn from markup of its own — a fact about the ROW, so
+    // the renderer never asks "is the stage called world-picker" and an entry
+    // that borrows a panel says which one on its own line (issues #1362,
+    // #1363). An id rather than a boolean because there are now two: New Game
+    // borrows `#scenario-panel` and Load Game borrows `#save-slots-panel`, and
+    // a second boolean beside the first would be the switch this table exists
+    // to avoid.
+    docks: (open && open.docks) || null,
     // The track's offset, as a number the stylesheet reads through a custom
     // property. The DOCUMENT says only how deep it is; which columns that
     // slides, and whether it slides at all, is the stylesheet's business at

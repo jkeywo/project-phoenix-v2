@@ -86,8 +86,17 @@ export const LANDING_ENTRY_SELECTOR = '.landing-entry';
 /** The attribute a menu entry carries its row's id in. */
 export const LANDING_ENTRY_ATTR = 'data-landing-entry';
 
-/** The class `#scenario-panel` wears while it is docked in the landing. */
-export const PICKER_DOCKED_CLASS = 'landing-docked';
+/**
+ * The class a borrowed panel wears while it is docked in the middle column.
+ *
+ * One class for both borrowers — `#scenario-panel` (issue #1362) and
+ * `#save-slots-panel` (issue #1363) — because it is what the STYLESHEET keys
+ * the unwinding off, and each panel names itself in its own selector there.
+ * It is also how an undock finds what to put back without this module keeping
+ * a list of dockable ids: whatever is parked in the column wearing this class
+ * was parked by this renderer.
+ */
+export const LANDING_DOCKED_CLASS = 'landing-docked';
 
 /**
  * Every lifecycle class this renderer can write on `#landing-panel`.
@@ -128,13 +137,13 @@ function setText(doc, id, text) {
  *   view model's decision (`nextOpenEntry`) and not a second judgement made
  *   here. `toggleFullscreen` reaches `gui/page-chrome.js`'s one fullscreen
  *   implementation; absent, the control renders and does nothing.
- * @param {{dockPicker?: boolean, ownPanelVisibility?: boolean}} [opts]
- *   `dockPicker: false` leaves `#scenario-panel` where it is, for a surface
- *   that composes the picker some other way. `server.html` passes nothing and
- *   gets the docking; so does the native viewscreen (#1361), because the
- *   picker it carries is the same borrowed `#scenario-panel` node and
- *   `gui/host-landing.css`'s `.landing-docked` block is what unwinds it there
- *   too — a second arrangement would be a second landing.
+ * @param {{dockPanels?: boolean, ownPanelVisibility?: boolean}} [opts]
+ *   `dockPanels: false` leaves every borrowed panel where it is, for a surface
+ *   that composes the middle column some other way. `server.html` passes
+ *   nothing and gets the docking; so does the native viewscreen (#1361),
+ *   because the panels it carries are the same borrowed nodes and
+ *   `gui/host-landing.css`'s `.landing-docked` blocks are what unwind them
+ *   there too — a second arrangement would be a second landing.
  *
  *   `ownPanelVisibility` makes this renderer show and hide `#landing-panel`
  *   itself, from `vm.stage === 'dismissed'`. It is the exact sibling of
@@ -148,7 +157,7 @@ function setText(doc, id, text) {
  */
 export function renderHostLanding(doc, vm, t, hooks, opts) {
   const h = hooks || {};
-  const dockPicker = !(opts && opts.dockPicker === false);
+  const dockPanels = !(opts && opts.dockPanels === false);
   const ownPanelVisibility = !!(opts && opts.ownPanelVisibility);
 
   // ── The root says only WHICH stage is open ──────────────────────────
@@ -299,11 +308,12 @@ export function renderHostLanding(doc, vm, t, hooks, opts) {
 
   // ── The middle column ───────────────────────────────────────────────
   //
-  // "Reveals the EXISTING World picker" is meant literally: `#scenario-panel`
-  // is moved into `#landing-mid` rather than re-rendered here, so a pick still
-  // reaches `driveWorldLoad()` down the path it always did, and the mod-pack
-  // upload, the save importer and the docked join panel travel with it because
-  // they are its children.
+  // "Reveals the EXISTING panel" is meant literally: the node named by the
+  // open row's `docks` is moved into `#landing-mid` rather than re-rendered
+  // here, so a pick still reaches `driveWorldLoad()` down the path it always
+  // did and a Start still reaches the resume path down its own, and the
+  // mod-pack upload, the docked join panel and the save importer travel with
+  // their panel because they are its children.
   //
   // Undocking appends it back to `<body>`, which is a restoration and not an
   // approximation of one: the panel is `position: fixed; inset: 0` with an
@@ -311,42 +321,62 @@ export function renderHostLanding(doc, vm, t, hooks, opts) {
   // decides neither its box nor its paint order. That is what lets this be
   // stateless — no remembered parent to go stale between two documents.
   //
-  // The condition is `vm.docksPicker`, a FACT ABOUT THE ROW, and not a
-  // comparison of `vm.stage` to 'world-picker' (issue #1362). The staged New
-  // Game is two stages deep and the picker has to stay put across both — a
-  // stage-name test would have undocked it the moment the hulls appeared,
-  // taking the World list with it. It also keeps the rule readable by a future
-  // entry: an entry that borrows this panel says so on its own line.
-  if (dockPicker) {
+  // What docks is `vm.docks`, a FACT ABOUT THE ROW carried as an element id,
+  // and not a comparison of `vm.stage` to a name (issues #1362, #1363). The
+  // staged New Game is two stages deep and the picker has to stay put across
+  // both — a stage-name test would have undocked it the moment the hulls
+  // appeared, taking the World list with it. An ID rather than a boolean is
+  // what let Load Game borrow `#save-slots-panel` without this block learning
+  // a second name: it reads the row, and the row says which node it wants.
+  //
+  // The undock sweep runs over the column's OWN children rather than over a
+  // list of dockable ids, so this module never has to be told that a new
+  // borrower exists. Anything parked here wearing the docked class was parked
+  // by this renderer and goes back to `<body>` the moment it is not the open
+  // stage's panel.
+  if (dockPanels) {
     const mid = doc.getElementById('landing-mid');
-    const picker = doc.getElementById('scenario-panel');
-    if (mid && picker) {
-      if (vm.docksPicker) {
-        if (picker.parentElement !== mid) mid.appendChild(picker);
-        picker.classList.add(PICKER_DOCKED_CLASS);
-      } else if (picker.parentElement === mid) {
-        picker.classList.remove(PICKER_DOCKED_CLASS);
-        if (doc.body) doc.body.appendChild(picker);
+    if (mid) {
+      const target = vm.docks ? doc.getElementById(vm.docks) : null;
+      Array.prototype.slice.call(mid.children || []).forEach(function (child) {
+        if (child === target) return;
+        if (!child.classList || !child.classList.contains(LANDING_DOCKED_CLASS)) return;
+        undock(doc, child);
+      });
+      if (target) {
+        if (target.parentElement !== mid) mid.appendChild(target);
+        target.classList.add(LANDING_DOCKED_CLASS);
       }
     }
   }
 }
 
+/** Strip the docked class from `el` and hand it back to `doc.body`. */
+function undock(doc, el) {
+  el.classList.remove(LANDING_DOCKED_CLASS);
+  if (doc.body) doc.body.appendChild(el);
+}
+
 /**
- * Put `#scenario-panel` back where it belongs, whatever the landing is doing.
+ * Put every borrowed panel back where it belongs, whatever the landing is
+ * doing.
  *
  * The page lifecycle's own escape hatch: `driveWorldLoad()` hides the landing
- * outright the moment a world is chosen, and the picker must not be left
- * parented inside a hidden panel — the second round after a Game Over re-shows
+ * outright the moment a world is chosen, and a borrowed panel must not be left
+ * parented inside a hidden one — the second round after a Game Over re-shows
  * `#scenario-panel` by setting its `display`, and a `display` on a node inside
  * a hidden ancestor shows nothing at all.
+ *
+ * Both borrowers at once, found by the class rather than by id, for the reason
+ * the render's sweep is written that way: a slice that teaches a row to borrow
+ * a third panel must not also have to remember this function exists.
  */
-export function undockPicker(doc) {
-  const picker = doc.getElementById('scenario-panel');
-  if (!picker) return;
-  picker.classList.remove(PICKER_DOCKED_CLASS);
+export function undockLandingPanels(doc) {
   const mid = doc.getElementById('landing-mid');
-  if (mid && picker.parentElement === mid && doc.body) doc.body.appendChild(picker);
+  if (!mid) return;
+  Array.prototype.slice.call(mid.children || []).forEach(function (child) {
+    if (child.classList && child.classList.contains(LANDING_DOCKED_CLASS)) undock(doc, child);
+  });
 }
 
 // Expose for the classic (non-module) script in server.html — the same
@@ -354,12 +384,12 @@ export function undockPicker(doc) {
 if (typeof window !== 'undefined') {
   window.hostLandingRender = {
     renderHostLanding,
-    undockPicker,
+    undockLandingPanels,
     clearLandingEntries,
     LANDING_ENTRY_CLASS,
     LANDING_ENTRY_SELECTOR,
     LANDING_ENTRY_ATTR,
-    PICKER_DOCKED_CLASS,
+    LANDING_DOCKED_CLASS,
     LANDING_ROOT_CLASSES,
   };
 }

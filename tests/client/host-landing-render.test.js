@@ -29,11 +29,11 @@ import { fileURLToPath } from 'node:url';
 
 import {
   renderHostLanding,
-  undockPicker,
+  undockLandingPanels,
   LANDING_ENTRY_CLASS,
   LANDING_ENTRY_SELECTOR,
   LANDING_ENTRY_ATTR,
-  PICKER_DOCKED_CLASS,
+  LANDING_DOCKED_CLASS,
 } from '../../gui/host-landing-render.js';
 import { landingViewModel } from '../../gui/host-landing-view.js';
 
@@ -44,21 +44,26 @@ const SRC = fs.readFileSync(path.join(HERE, '../../server.html'), 'utf-8');
 const t = (id, params) => (params ? `${id}:${JSON.stringify(params)}` : id);
 
 /**
- * server.html's real landing and picker markup, in a fresh document.
+ * server.html's real landing, picker and save-catalogue markup, in a fresh
+ * document.
  *
- * Both, because the middle column's whole job in this slice is to hold the
- * live `#scenario-panel` node — a landing without the picker beside it could
- * not test the one action that works.
+ * All three, because the middle column's whole job is to hold ONE of the two
+ * live panels the menu's staged rows borrow — `#scenario-panel` for New Game
+ * (issue #1362) and `#save-slots-panel` for Load Game (issue #1363). A landing
+ * without both beside it could not test that opening one puts the other back.
  */
 function landingDoc() {
   const parsed = new DOMParser().parseFromString(SRC, 'text/html');
   const landing = parsed.getElementById('landing-panel');
   const picker = parsed.getElementById('scenario-panel');
+  const saves = parsed.getElementById('save-slots-panel');
   if (!landing) throw new Error('#landing-panel not found in server.html');
   if (!picker) throw new Error('#scenario-panel not found in server.html');
+  if (!saves) throw new Error('#save-slots-panel not found in server.html');
   const doc = document.implementation.createHTMLDocument('');
   doc.body.appendChild(doc.importNode(landing, true));
   doc.body.appendChild(doc.importNode(picker, true));
+  doc.body.appendChild(doc.importNode(saves, true));
   return doc;
 }
 
@@ -130,7 +135,7 @@ describe('renderHostLanding — the idle landing', () => {
     for (const el of list) expect(el.classList.contains(LANDING_ENTRY_CLASS)).toBe(true);
   });
 
-  it('marks the four entries with no stage aria-disabled rather than disabled', () => {
+  it('marks the entries with no stage aria-disabled rather than disabled', () => {
     // Focusable and readable: "here, but not yet" is more honest than a control
     // a screen reader cannot reach at all.
     const doc = landingDoc();
@@ -138,7 +143,7 @@ describe('renderHostLanding — the idle landing', () => {
     const list = entries(doc);
     expect(list.filter((el) => el.getAttribute('aria-disabled') === 'true')
       .map((el) => el.getAttribute(LANDING_ENTRY_ATTR)))
-      .toEqual(['load_game', 'join_peer', 'connect_host', 'load_mod_pack']);
+      .toEqual(['join_peer', 'connect_host', 'load_mod_pack']);
     expect(list.every((el) => el.disabled === false)).toBe(true);
   });
 
@@ -212,7 +217,7 @@ describe('renderHostLanding — New Game', () => {
     renderHostLanding(doc, openVm(), t);
     const picker = doc.getElementById('scenario-panel');
     expect(picker.parentElement).toBe(doc.getElementById('landing-mid'));
-    expect(picker.classList.contains(PICKER_DOCKED_CLASS)).toBe(true);
+    expect(picker.classList.contains(LANDING_DOCKED_CLASS)).toBe(true);
     // The whole picker came, not a copy of part of it.
     expect(picker.querySelector('#world-list')).not.toBe(null);
     expect(picker.querySelector('#mod-pack-btn')).not.toBe(null);
@@ -224,7 +229,7 @@ describe('renderHostLanding — New Game', () => {
     renderHostLanding(doc, landingViewModel(), t);
     const picker = doc.getElementById('scenario-panel');
     expect(picker.parentElement).toBe(doc.body);
-    expect(picker.classList.contains(PICKER_DOCKED_CLASS)).toBe(false);
+    expect(picker.classList.contains(LANDING_DOCKED_CLASS)).toBe(false);
   });
 
   it('is idempotent — re-rendering the open stage does not re-move the node', () => {
@@ -238,7 +243,7 @@ describe('renderHostLanding — New Game', () => {
 
   it('leaves the picker alone when the surface says it owns it elsewhere', () => {
     const doc = landingDoc();
-    renderHostLanding(doc, openVm(), t, null, { dockPicker: false });
+    renderHostLanding(doc, openVm(), t, null, { dockPanels: false });
     expect(doc.getElementById('scenario-panel').parentElement).toBe(doc.body);
   });
 });
@@ -291,7 +296,7 @@ describe('renderHostLanding — one rung deeper (issue #1362)', () => {
     renderHostLanding(doc, deepVm(), t);
     const picker = doc.getElementById('scenario-panel');
     expect(picker.parentElement).toBe(doc.getElementById('landing-mid'));
-    expect(picker.classList.contains(PICKER_DOCKED_CLASS)).toBe(true);
+    expect(picker.classList.contains(LANDING_DOCKED_CLASS)).toBe(true);
     expect(picker.querySelector('#world-list')).not.toBe(null);
   });
 
@@ -339,22 +344,102 @@ describe('renderHostLanding — one rung deeper (issue #1362)', () => {
   });
 });
 
-describe('undockPicker', () => {
+describe('undockLandingPanels', () => {
   it('returns the picker to the body whatever the landing is doing', () => {
     // The page-lifecycle escape hatch: driveWorldLoad hides the landing
     // outright, and a `display` set on a node inside a hidden ancestor shows
     // nothing at all when round two re-shows the picker.
     const doc = landingDoc();
     renderHostLanding(doc, landingViewModel({ openEntryId: 'new_game' }), t);
-    undockPicker(doc);
+    undockLandingPanels(doc);
     const picker = doc.getElementById('scenario-panel');
     expect(picker.parentElement).toBe(doc.body);
-    expect(picker.classList.contains(PICKER_DOCKED_CLASS)).toBe(false);
+    expect(picker.classList.contains(LANDING_DOCKED_CLASS)).toBe(false);
   });
 
-  it('does nothing at all on a document with no picker', () => {
+  it('returns the save catalogue too, without being told it exists', () => {
+    // Found by the docked CLASS rather than by id, which is what stops a row
+    // that borrows a third panel having to remember this function (#1363).
+    const doc = landingDoc();
+    renderHostLanding(doc, landingViewModel({ openEntryId: 'load_game' }), t);
+    undockLandingPanels(doc);
+    const saves = doc.getElementById('save-slots-panel');
+    expect(saves.parentElement).toBe(doc.body);
+    expect(saves.classList.contains(LANDING_DOCKED_CLASS)).toBe(false);
+  });
+
+  it('does nothing at all on a document with no landing column', () => {
     const doc = document.implementation.createHTMLDocument('');
-    expect(() => undockPicker(doc)).not.toThrow();
+    expect(() => undockLandingPanels(doc)).not.toThrow();
+  });
+});
+
+describe('renderHostLanding — Load Game (issue #1363)', () => {
+  const loadVm = () => landingViewModel({ openEntryId: 'load_game' });
+  const newVm = () => landingViewModel({ openEntryId: 'new_game' });
+
+  it('reveals the EXISTING save catalogue by moving it into the middle column', () => {
+    // Not a re-render of the rows: the live node moves, so a Start still
+    // reaches the resume path down the wire it always did — and the save
+    // importer travels with it, because mountSaveSlots put it in this panel's
+    // header rather than leaving it a block of the boot panel.
+    const doc = landingDoc();
+    renderHostLanding(doc, loadVm(), t);
+    const saves = doc.getElementById('save-slots-panel');
+    expect(saves.parentElement).toBe(doc.getElementById('landing-mid'));
+    expect(saves.classList.contains(LANDING_DOCKED_CLASS)).toBe(true);
+    const root = doc.getElementById('landing-panel');
+    expect(root.dataset.landingStage).toBe('save-catalogue');
+    expect(root.classList.contains('is-open')).toBe(true);
+  });
+
+  it('swaps the two borrowed panels rather than stacking them', () => {
+    // One column, one open stage. The failure this catches is the obvious one:
+    // an undock written per-id would have left the picker parented in the
+    // column with the catalogue on top of it.
+    const doc = landingDoc();
+    const mid = doc.getElementById('landing-mid');
+    renderHostLanding(doc, newVm(), t);
+    renderHostLanding(doc, loadVm(), t);
+    expect(mid.children).toHaveLength(1);
+    expect(doc.getElementById('save-slots-panel').parentElement).toBe(mid);
+    expect(doc.getElementById('scenario-panel').parentElement).toBe(doc.body);
+    expect(doc.getElementById('scenario-panel').classList.contains(LANDING_DOCKED_CLASS))
+      .toBe(false);
+
+    renderHostLanding(doc, newVm(), t);
+    expect(mid.children).toHaveLength(1);
+    expect(doc.getElementById('scenario-panel').parentElement).toBe(mid);
+    expect(doc.getElementById('save-slots-panel').parentElement).toBe(doc.body);
+  });
+
+  it('puts the catalogue back on the body when the menu closes again', () => {
+    const doc = landingDoc();
+    renderHostLanding(doc, loadVm(), t);
+    renderHostLanding(doc, landingViewModel(), t);
+    const saves = doc.getElementById('save-slots-panel');
+    expect(saves.parentElement).toBe(doc.body);
+    expect(saves.classList.contains(LANDING_DOCKED_CLASS)).toBe(false);
+  });
+
+  it('is idempotent — re-rendering the open stage does not re-move the node', () => {
+    const doc = landingDoc();
+    renderHostLanding(doc, loadVm(), t);
+    const saves = doc.getElementById('save-slots-panel');
+    renderHostLanding(doc, loadVm(), t);
+    expect(doc.getElementById('save-slots-panel')).toBe(saves);
+    expect(doc.getElementById('landing-mid').children).toHaveLength(1);
+  });
+
+  it('does nothing on a document that carries no catalogue at all', () => {
+    // The two-document contract: a surface may hand this a trimmed subset of
+    // the markup, and a stage whose panel is absent must leave the rest of the
+    // render intact rather than throw half-way through it.
+    const doc = landingDoc();
+    doc.getElementById('save-slots-panel').remove();
+    expect(() => renderHostLanding(doc, loadVm(), t)).not.toThrow();
+    expect(doc.getElementById('landing-panel').dataset.landingStage).toBe('save-catalogue');
+    expect(doc.getElementById('landing-mid').children).toHaveLength(0);
   });
 });
 
@@ -518,6 +603,9 @@ describe('renderHostLanding — the native viewscreen (issue #1361)', () => {
     renderHostLanding(doc, nativeVm(), t, {}, { ownPanelVisibility: true });
     const ids = entries(doc).map((el) => el.getAttribute(LANDING_ENTRY_ATTR));
     expect(ids).not.toContain('connect_host');
+    // Load Game IS still here, and inert: `platforms` says what a surface does
+    // not offer, `stagePlatforms` says what it cannot open yet, and #1363's
+    // AC5 is the second of those. See the row, and the test below.
     expect(ids).toEqual(['new_game', 'load_game', 'join_peer', 'load_mod_pack']);
     // …and the same document on the web surface still offers it, so this is a
     // curated menu and not a lost row.
@@ -573,7 +661,7 @@ describe('renderHostLanding — the native viewscreen (issue #1361)', () => {
     );
     const picker = doc.getElementById('scenario-panel');
     expect(picker.parentElement).toBe(doc.getElementById('landing-mid'));
-    expect(picker.classList.contains(PICKER_DOCKED_CLASS)).toBe(true);
+    expect(picker.classList.contains(LANDING_DOCKED_CLASS)).toBe(true);
     expect(picker.querySelector('#world-list')).not.toBe(null);
   });
 
@@ -596,9 +684,38 @@ describe('renderHostLanding — the native viewscreen (issue #1361)', () => {
     doc.querySelector(`[${LANDING_ENTRY_ATTR}="new_game"]`).click();
     expect(calls.pick).toEqual(['new_game']);
     // Inert entries report too: whether a press does anything is the view
-    // model's decision, never a second judgement made in the renderer.
+    // model's decision, never a second judgement made in the renderer. Load
+    // Game is the interesting one on this surface — a row with a stage the
+    // WEB host opens, which this one cannot yet (#1363's AC5).
     doc.querySelector(`[${LANDING_ENTRY_ATTR}="load_game"]`).click();
     expect(calls.pick).toEqual(['new_game', 'load_game']);
+  });
+
+  it('draws Load Game as a not-yet row rather than dropping it (#1363 AC5)', () => {
+    // The gap is recorded, not hidden. A menu that dropped the row would have
+    // read as "native hosts do not load games", which is not what is true: the
+    // route belongs here and the surface cannot serve it yet, so it renders
+    // dashed and aria-disabled beside the other rows waiting on a slice.
+    const doc = nativeLandingDoc();
+    renderHostLanding(doc, nativeVm(), t, {}, { ownPanelVisibility: true });
+    const disabled = entries(doc)
+      .filter((el) => el.getAttribute('aria-disabled') === 'true')
+      .map((el) => el.getAttribute(LANDING_ENTRY_ATTR));
+    expect(disabled).toEqual(['load_game', 'join_peer', 'load_mod_pack']);
+    // ...and pressing it opens no middle column, which is the failure the row
+    // being absent was avoiding in the first place.
+    renderHostLanding(
+      doc, nativeVm({ openEntryId: 'load_game' }), t, {}, { ownPanelVisibility: true },
+    );
+    expect(doc.getElementById('landing-mid').children).toHaveLength(0);
+    expect(doc.getElementById('save-slots-panel').parentElement).toBe(doc.body);
+    expect(doc.getElementById('landing-panel').dataset.landingStage).toBe('idle');
+    // The same row on the web host does open it, so this is a surface saying
+    // "not yet" and not a row that was never wired.
+    const web = landingDoc();
+    renderHostLanding(web, landingViewModel({ openEntryId: 'load_game' }), t);
+    expect(web.getElementById('save-slots-panel').parentElement)
+      .toBe(web.getElementById('landing-mid'));
   });
 
   it('survives a document with no landing at all, panel ownership and all', () => {

@@ -161,7 +161,23 @@ function errorDetail(error) {
  *   onPendingCaptureDropped?: (message: string) => void,
  *   mode?: 'combined' | 'catalogue' | 'manual',
  *   idPrefix?: string,
+ *   headerAction?: Element,
  * }} options
+ *
+ * `headerAction` is a LIVE element moved into the panel's header row, beside
+ * the heading (issue #1363). It exists for the save importer: importing a
+ * portable save is an action ON this catalogue — it reaches the same World,
+ * the same version gate and the same staged restore a row's Start reaches — so
+ * it belongs in this panel's header rather than as a separate block of the
+ * boot panel, which is where it sat while the catalogue was a column of that
+ * panel and the two were only neighbours.
+ *
+ * The node is MOVED rather than rebuilt, for the reason
+ * `gui/host-landing-render.js` moves `#scenario-panel`: the importer is static
+ * markup with a page-lifetime click handler and a hidden `<input type=file>`,
+ * and a listener survives a re-parent where a re-render would drop it. It is
+ * also why the option takes an element and not a string id — this module does
+ * not know, and must not learn, which document its caller assembled.
  */
 export function mountSaveSlots(options) {
   const root = options && options.root;
@@ -197,12 +213,24 @@ export function mountSaveSlots(options) {
 
   root.replaceChildren();
   root.dataset.saveSlotsMode = mode;
+  // The header row: the panel's name, and whatever acts on the panel as a
+  // whole. A row rather than a bare `<h2>` since issue #1363, because the save
+  // importer now sits here — see `headerAction` above.
+  const head = node(doc, 'div', 'save-slots-head');
   const heading = node(doc, 'h2', 'save-slots-heading');
   heading.id = domId('save-slots-heading');
   heading.tabIndex = -1;
   heading.textContent = t(mode === 'manual'
     ? 'server.save_slots.manual_heading'
     : 'server.save_slots.heading');
+  const headActions = node(doc, 'div', 'save-slots-head-actions');
+  head.append(heading, headActions);
+  // Guarded on the caller actually handing one over: the native viewscreen
+  // carries no file chooser (importing an arbitrary session is host tooling
+  // its document strips), and a demo build removes the importer outright. An
+  // absent action leaves an empty slot the stylesheet collapses, never a hole
+  // where a control should be.
+  if (options.headerAction) headActions.appendChild(options.headerAction);
   root.setAttribute('aria-labelledby', heading.id);
 
   const intro = node(doc, 'p', 'save-slots-intro');
@@ -284,11 +312,11 @@ export function mountSaveSlots(options) {
   status.setAttribute('aria-atomic', 'true');
 
   if (mode === 'combined') {
-    root.append(heading, intro, newSession, createForm, list, actions, confirmation, status);
+    root.append(head, intro, newSession, createForm, list, actions, confirmation, status);
   } else if (showsCatalogue) {
-    root.append(heading, intro, newSession, list, actions, confirmation, status);
+    root.append(head, intro, newSession, list, actions, confirmation, status);
   } else {
-    root.append(heading, createForm, status);
+    root.append(head, createForm, status);
   }
 
   const confirmationFocusTrap = createFocusTrap(confirmation, {

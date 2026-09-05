@@ -513,6 +513,17 @@ export async function openWorldPicker(page, timeout = 30_000) {
   return page;
 }
 
+/** Open the landing's Load Game route, which reveals the save catalogue
+ *  (issue #1363). Its sibling above, and for the same reason: the catalogue is
+ *  a stage of the landing rather than a second column of the boot panel, so a
+ *  spec that wants it presses the row that opens it. */
+export async function openSaveCatalogue(page, timeout = 30_000) {
+  const loadGame = page.locator('#landing-menu [data-landing-entry="load_game"]');
+  await loadGame.waitFor({ state: 'visible', timeout });
+  await loadGame.click();
+  return page;
+}
+
 // ── Reading an expectation out of TOML instead of pinning it (issue #941) ────
 //
 // Deliberately tiny, deliberately not a TOML parser: these read the handful of

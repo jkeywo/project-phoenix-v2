@@ -1,0 +1,13 @@
+# A pack-supplied hull. Every field below is what the ship picker's card reads
+# through `delivery::payload::ship_payload` — the class badge, the registry, the
+# mass and the power rating — and none of it is reachable unless the overlay is
+# consulted for a path whose fetch failed.
+#
+# No `includes`: a pack may only place files DIRECTLY under `assets/entities/`
+# (`ALLOWED_DIR_PREFIXES`), so a pack hull cannot carry an include fragment.
+
+class = "lancer"
+hull_id = "BH-0021"
+mass = 9000.0
+power_rating = 40
+name = "Borrowed Lancer"

@@ -839,6 +839,11 @@ pub fn wasm_load_world(
     toml_str: String,
     curated_ships: Vec<String>,
 ) -> Result<JsValue, JsValue> {
+    // The picker is over: the real preload owns the config cache from here, so
+    // the pre-load catalogue store stops answering (see
+    // `clear_catalog_templates`). Done before the parse so a world that fails
+    // to parse still leaves the two caches unambiguous.
+    clear_catalog_templates();
     let world_config = crate::world::config::parse_world(&toml_str).map_err(|e| {
         web_sys::console::error_1(&JsValue::from_str(&format!(
             "Failed to parse world TOML at {}: {}",
@@ -1154,6 +1159,195 @@ pub fn get_config_cache() -> ConfigCache {
 #[cfg(target_arch = "wasm32")]
 pub fn get_cached_entity_config(path: &str) -> Option<crate::entities::config::EntityConfig> {
     CONFIG_CACHE.with(|cache| cache.borrow().get(path).cloned())
+}
+
+// ── Pre-load catalogue enrichment ───────────────────────────────────────────
+//
+// `wasm_get_scenario_catalog` is read BEFORE any world is activated, so the
+// picker's hull cards are built while `CONFIG_CACHE` is still empty:
+// `ship_payload` finds no template and publishes `template_path` + `label`
+// alone, which is why every card badged `[UNKNOWN]` and carried no registry,
+// mass or power rating.
+//
+// This is a SEPARATE store, deliberately, rather than an early write into the
+// preload machinery. Delivering a hull's text through `wasm_load_config` before
+// `set_config_request_callback` has been wired would record it in
+// `RAW_TEMPLATE_TOML`, and `queue_and_fire`'s `is_raw_template_delivered` guard
+// would then skip it forever — so the real preload would never record the
+// composed document in the content ledger and never queue the hull's primary
+// rig sidecar. Writing straight into `CONFIG_CACHE` loses the same two things
+// for the same reason (`queue_and_fire`'s other guard). Neither loss is visible
+// in the picker and both are fatal later, so the enrichment gets its own store
+// and touches nothing the preload owns: no `PENDING_QUEUE`, no `IN_FLIGHT`, no
+// `PRELOAD_COMPLETE`, no config-request callback.
+//
+// It is also reached through a seam of its own, [`catalog_entity_config`],
+// rather than by widening [`get_cached_entity_config`]: that lookup is the
+// SPAWN path (`entities::loader::WasmTemplateLoader`, `server::reference_grid`),
+// and a catalogue-cached hull standing in for one the locked scenario's `ships`
+// curation (issue #917) deliberately left out of the preload would spawn
+// content the curation excluded. With the store off the spawn lookup entirely,
+// no "is a world loaded yet?" guard is needed to hold that line — which is what
+// lets the enrichment keep working for the SECOND lobby round, where issue #756
+// reuses the already-loaded world and `WORLD_CONFIG` never goes back to `None`.
+//
+// Ungated (native + wasm) for the same reason `RAW_TEMPLATE_TOML` and the
+// mod-pack overlay are: the browser is the only host that drives it, but the
+// decisions here — what an empty delivery means, when a root resolves, when it
+// is left label-only — are the loader contract and must be assertable under
+// `cargo test`. Only the `#[wasm_bindgen]` export in `server::bridge` is gated.
+
+thread_local! {
+    /// Raw TOML for templates and include fragments delivered ahead of the
+    /// preload, keyed by CANONICAL path (what the resolver asks for).
+    static CATALOG_TEMPLATE_RAW: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
+
+    /// Paths delivered as catalogue ROOTS, as `(requested, canonical)`. The
+    /// requested half is the key the world authored, which is what
+    /// `ship_payload` looks the enrichment up under.
+    static CATALOG_TEMPLATE_ROOTS: RefCell<Vec<(String, String)>> = const { RefCell::new(Vec::new()) };
+
+    /// Roots whose include closure resolved and parsed, keyed by requested path.
+    static CATALOG_TEMPLATE_CACHE: RefCell<HashMap<String, crate::entities::config::EntityConfig>> =
+        RefCell::new(HashMap::new());
+}
+
+/// Look up an entity config for CATALOGUE DISPLAY: the preload's cache first,
+/// then the pre-load catalogue store.
+///
+/// The single consumer is `delivery::payload::ship_payload`, whose `class`,
+/// `hull_id`, `mass`, `power_rating` and `name` are enrichment read out of a
+/// cached template — and the catalogue is published before any world is
+/// activated, so on the browser there is no preload to have populated
+/// `CONFIG_CACHE` at all.
+///
+/// Deliberately NOT folded into [`get_cached_entity_config`]: that is the spawn
+/// lookup, and it must keep missing for a hull the locked scenario's `ships`
+/// curation (issue #917) left out of the preload.
+pub fn catalog_entity_config(path: &str) -> Option<crate::entities::config::EntityConfig> {
+    get_cached_entity_config(path)
+        .or_else(|| CATALOG_TEMPLATE_CACHE.with(|cache| cache.borrow().get(path).cloned()))
+}
+
+/// Fragment source over [`CATALOG_TEMPLATE_RAW`].
+///
+/// `absence_is_final` is FALSE: this store fills incrementally, one JS fetch at
+/// a time, exactly like `HostFragmentSource`. A fragment that has not arrived
+/// yet is something to fetch, never a fault.
+struct CatalogFragmentSource;
+
+impl crate::entities::include_resolve::FragmentSource for CatalogFragmentSource {
+    fn read(&self, path: &str) -> Option<String> {
+        if let Some(text) = mod_pack_overlay_get(path) {
+            return Some(text);
+        }
+        CATALOG_TEMPLATE_RAW.with(|m| m.borrow().get(path).cloned())
+    }
+
+    fn absence_is_final(&self) -> bool {
+        false
+    }
+}
+
+/// Deliver one template's raw TOML for catalogue enrichment and report which
+/// include fragments are still missing.
+///
+/// `root` marks a hull the catalogue actually names; everything else delivered
+/// here is a fragment answering a previous call's return value. The returned
+/// paths are canonical and deduplicated — an empty return means every root
+/// delivered so far has either resolved or failed, and there is nothing left to
+/// fetch.
+///
+/// # An EMPTY `toml_str` is "no text came back", not "the file is empty"
+///
+/// The host calls this even when its `fetch` failed, exactly as
+/// `handleConfigRequest` calls `wasm_load_config(path, '')` on a 404 — because a
+/// mod pack's own hull lives in the session overlay and has NO URL to fetch, so
+/// its 404 is the normal case and the overlay is the only place its text has
+/// ever been. The overlay is consulted first here, so that delivery still
+/// composes. With no overlay copy either, the call is a NO-OP: nothing is
+/// recorded, so a missing fragment stays "still to fetch" rather than composing
+/// as present-and-empty, and a missing root is simply never resolved.
+///
+/// Nothing here is fatal. A hull that never arrives, will not compose or will
+/// not parse is simply not cached, and the card degrades to `template_path` +
+/// `label` — exactly what every card showed before this existed.
+pub fn push_catalog_template(path: String, toml_str: String, root: bool) -> Vec<String> {
+    // The active mod-pack stack wins any authored path, as it does on every
+    // other content channel (issue #760 AC2) — and is the ONLY source for a
+    // pack's own hull, whose fetch always fails.
+    let text = match mod_pack_overlay_get(&path) {
+        Some(overlaid) => overlaid,
+        None if toml_str.is_empty() => return resolve_catalog_templates(),
+        None => toml_str,
+    };
+    let canonical = crate::entities::include_resolve::canonical_template_path(&path);
+    CATALOG_TEMPLATE_RAW.with(|m| {
+        m.borrow_mut().insert(canonical.clone(), text);
+    });
+    if root {
+        CATALOG_TEMPLATE_ROOTS.with(|v| {
+            let mut v = v.borrow_mut();
+            if !v.iter().any(|(_, c)| c == &canonical) {
+                v.push((path, canonical));
+            }
+        });
+    }
+    resolve_catalog_templates()
+}
+
+/// Resolve every catalogue root whose include closure is now complete, and
+/// report the fragments the rest are still waiting on.
+fn resolve_catalog_templates() -> Vec<String> {
+    use crate::entities::include_resolve::{preload_step, PreloadStep};
+
+    let roots = CATALOG_TEMPLATE_ROOTS.with(|v| v.borrow().clone());
+    let mut awaiting: Vec<String> = Vec::new();
+    for (requested, canonical) in roots {
+        if CATALOG_TEMPLATE_CACHE.with(|m| m.borrow().contains_key(&requested)) {
+            continue;
+        }
+        if !CATALOG_TEMPLATE_RAW.with(|m| m.borrow().contains_key(&canonical)) {
+            continue;
+        }
+        match preload_step(&canonical, &CatalogFragmentSource) {
+            Ok(PreloadStep::Ready(resolved)) => {
+                if let Ok(config) = resolved.parse() {
+                    CATALOG_TEMPLATE_CACHE.with(|m| {
+                        m.borrow_mut().insert(requested, config);
+                    });
+                }
+            }
+            Ok(PreloadStep::AwaitingIncludes(paths)) => {
+                for p in paths {
+                    if !awaiting.contains(&p) {
+                        awaiting.push(p);
+                    }
+                }
+            }
+            // A cycle or a malformed `includes` list never becomes resolvable
+            // by fetching more. Leave the card label-only.
+            Err(_) => {}
+        }
+    }
+    awaiting
+}
+
+/// Discard the pre-load catalogue store.
+///
+/// Called from [`wasm_load_world`] as hygiene: once the real preload owns the
+/// config cache, a stale pre-load answer for a hull is at best redundant. The
+/// line that keeps a catalogue-cached hull out of a SPAWN is structural rather
+/// than temporal — the store hangs off [`catalog_entity_config`] and no spawn
+/// path reads it — so a round that never re-enters `wasm_load_world` (issue
+/// #756 reuses the loaded world) is safe without this, and enriches again.
+///
+/// Also the test seam, the way [`clear_template_preload_state`] is for the
+/// preload's own stores.
+pub fn clear_catalog_templates() {
+    CATALOG_TEMPLATE_RAW.with(|m| m.borrow_mut().clear());
+    CATALOG_TEMPLATE_ROOTS.with(|v| v.borrow_mut().clear());
+    CATALOG_TEMPLATE_CACHE.with(|m| m.borrow_mut().clear());
 }
 
 /// Queue a path for fetching and fire the callback.
@@ -2165,5 +2359,174 @@ cosmetic_type_paths = ["asteroid_cosmetic.toml"]
         super::wasm_push_sidecar_toml(path.clone(), String::new());
         assert!(super::is_pending_sidecar_delivered(&path));
         assert_eq!(super::take_pending_sidecar_toml(&path), Some(String::new()));
+    }
+
+    // ── Pre-load catalogue enrichment ────────────────────────────────────
+    //
+    // The store the browser fills BEFORE any world is activated, so the ship
+    // picker's hull cards can carry a class, registry, mass and power rating.
+    // Ungated for the same reason the preload's own stores are, and asserted
+    // here rather than only in a browser: these are the same decisions
+    // `drain_resolved_templates` makes one screen later — what a delivery
+    // reveals, what an absence means, what never becomes resolvable — plus the
+    // one thing that must NEVER hold, a catalogue answer satisfying a spawn.
+
+    /// Per-test paths, for the reason [`preload_path`] gives; the mod-pack
+    /// overlay one of these touches is process-global on native.
+    fn catalog_path(test_name: &str, leaf: &str) -> String {
+        format!("assets/entities/__cat_{test_name}/{leaf}")
+    }
+
+    #[test]
+    fn a_catalogue_root_resolves_once_its_fragment_arrives_in_a_later_round() {
+        super::clear_catalog_templates();
+        let hull = catalog_path("rounds", "hull.toml");
+        let fragment = catalog_path("rounds", "frag/core.toml");
+
+        // Round 1: the hull itself. Its fragment has not been fetched, so the
+        // card is not enriched yet and the host is told what to fetch next.
+        let awaiting = super::push_catalog_template(
+            hull.clone(),
+            "includes = [\"frag/core.toml\"]\nhull_id = \"AEV-0001\"\n".to_string(),
+            true,
+        );
+        assert_eq!(awaiting, vec![fragment.clone()]);
+        assert!(super::catalog_entity_config(&hull).is_none());
+
+        // Round 2: the fragment. Now the closure is complete.
+        let awaiting = super::push_catalog_template(
+            fragment,
+            "class = \"destroyer\"\npower_rating = 70\n".to_string(),
+            false,
+        );
+        assert!(awaiting.is_empty(), "nothing left to fetch");
+        let cfg = super::catalog_entity_config(&hull).expect("the composed hull is cached");
+        assert_eq!(cfg.class.as_deref(), Some("destroyer"));
+        assert_eq!(cfg.hull_id.as_deref(), Some("AEV-0001"));
+        assert_eq!(cfg.power_rating, Some(70));
+    }
+
+    /// The line issue #917 draws: a hull cached for the CARD must not be
+    /// spawnable. `get_cached_entity_config` is the spawn lookup
+    /// (`entities::loader::WasmTemplateLoader`, `server::reference_grid`), and
+    /// the catalogue store hangs off `catalog_entity_config` alone.
+    #[test]
+    fn the_catalogue_store_never_answers_the_spawn_lookup() {
+        super::clear_catalog_templates();
+        let hull = catalog_path("spawn_line", "hull.toml");
+        super::push_catalog_template(hull.clone(), "class = \"cruiser\"\n".to_string(), true);
+
+        assert!(
+            super::catalog_entity_config(&hull).is_some(),
+            "the card reads it"
+        );
+        assert!(
+            super::get_cached_entity_config(&hull).is_none(),
+            "a spawn must not: the curation deliberately left hulls out of the preload"
+        );
+    }
+
+    /// A fetch that brought nothing is delivered as an EMPTY string, the way
+    /// `handleConfigRequest` calls `wasm_load_config(path, \'\')` on a 404. With
+    /// nothing in the overlay either that must be a NO-OP: the fragment stays
+    /// "still to fetch" rather than composing as present-and-empty.
+    #[test]
+    fn an_empty_delivery_with_no_overlay_copy_is_a_no_op() {
+        super::clear_catalog_templates();
+        let hull = catalog_path("empty_noop", "hull.toml");
+        let fragment = catalog_path("empty_noop", "frag/core.toml");
+        super::push_catalog_template(
+            hull.clone(),
+            "includes = [\"frag/core.toml\"]\nhull_id = \"H\"\n".to_string(),
+            true,
+        );
+
+        let awaiting = super::push_catalog_template(fragment.clone(), String::new(), false);
+        assert_eq!(
+            awaiting,
+            vec![fragment],
+            "an absent fragment is still something to fetch, not an empty one"
+        );
+        assert!(
+            super::catalog_entity_config(&hull).is_none(),
+            "the card stays label-only rather than composing off a fragment that never arrived"
+        );
+    }
+
+    /// The case the empty delivery EXISTS for: a mod pack\'s own hull lives in
+    /// the session overlay and has no URL at all, so its fetch always fails.
+    #[test]
+    fn a_pack_supplied_hull_composes_from_the_overlay_when_the_fetch_brought_nothing() {
+        let _overlay = super::overlay_test_guard();
+        super::clear_catalog_templates();
+        let hull = catalog_path("pack_hull", "raider.toml");
+        super::push_mod_pack(pack_with(
+            "cat-pack",
+            &[(hull.as_str(), "class = \"raider\"\nhull_id = \"MOD-1\"\n")],
+        ));
+
+        let awaiting = super::push_catalog_template(hull.clone(), String::new(), true);
+        assert!(awaiting.is_empty());
+        let cfg = super::catalog_entity_config(&hull).expect("the pack\'s own hull enriches");
+        assert_eq!(cfg.class.as_deref(), Some("raider"));
+        assert_eq!(cfg.hull_id.as_deref(), Some("MOD-1"));
+    }
+
+    #[test]
+    fn a_cycle_leaves_the_card_label_only_rather_than_fetching_for_ever() {
+        super::clear_catalog_templates();
+        let a = catalog_path("cycle", "a.toml");
+        let b = catalog_path("cycle", "b.toml");
+        super::push_catalog_template(a.clone(), "includes = [\"b.toml\"]\n".to_string(), true);
+        let awaiting =
+            super::push_catalog_template(b, "includes = [\"a.toml\"]\n".to_string(), false);
+
+        assert!(
+            awaiting.is_empty(),
+            "a cycle is never resolved by fetching more"
+        );
+        assert!(super::catalog_entity_config(&a).is_none());
+    }
+
+    #[test]
+    fn a_root_that_will_not_parse_leaves_the_card_label_only() {
+        super::clear_catalog_templates();
+        // Valid TOML, invalid entity: `EntityConfig` is `deny_unknown_fields`.
+        let unknown = catalog_path("unparseable", "unknown_field.toml");
+        super::push_catalog_template(unknown.clone(), "not_a_field = 1\n".to_string(), true);
+        assert!(super::catalog_entity_config(&unknown).is_none());
+
+        // Not even TOML: the composition step itself refuses it.
+        let malformed = catalog_path("unparseable", "malformed.toml");
+        let awaiting =
+            super::push_catalog_template(malformed.clone(), "= not toml".to_string(), true);
+        assert!(awaiting.is_empty());
+        assert!(super::catalog_entity_config(&malformed).is_none());
+    }
+
+    #[test]
+    fn clearing_empties_the_raw_text_the_roots_and_the_resolved_cache() {
+        super::clear_catalog_templates();
+        let hull = catalog_path("clear", "hull.toml");
+        let fragment = catalog_path("clear", "frag/core.toml");
+        super::push_catalog_template(
+            hull.clone(),
+            "includes = [\"frag/core.toml\"]\n".to_string(),
+            true,
+        );
+        super::push_catalog_template(fragment.clone(), "class = \"escort\"\n".to_string(), false);
+        assert!(super::catalog_entity_config(&hull).is_some());
+
+        super::clear_catalog_templates();
+        assert!(
+            super::catalog_entity_config(&hull).is_none(),
+            "the resolved cache is empty"
+        );
+        // The roots are gone, so re-delivering the FRAGMENT alone resolves
+        // nothing — and the raw text is gone, so the hull needs fetching again.
+        let awaiting =
+            super::push_catalog_template(fragment, "class = \"escort\"\n".to_string(), false);
+        assert!(awaiting.is_empty(), "no root is waiting on anything");
+        assert!(super::catalog_entity_config(&hull).is_none());
     }
 }

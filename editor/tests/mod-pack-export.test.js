@@ -749,6 +749,29 @@ describe('committed mod-pack fixtures round-trip through readStoreZip', () => {
     expect(manifest.scenario[0].world).toBe('assets/worlds/aurora_skirmish.toml');
   });
 
+  // The pack that carries its OWN hulls (assets/entities/), which is the only
+  // fixture whose ship cards can come from nowhere but the session overlay:
+  // those files have no URL, so the host's catalogue fetch 404s for them.
+  it('pack-hull.zip carries two playable hulls of its own under assets/entities/', () => {
+    const files = readStoreZip(
+      new Uint8Array(readFileSync(path.join(FIXTURE_DIR, 'pack-hull.zip'))),
+    );
+    expect(tomlParse(files[MANIFEST_PATH]).pack.id).toBe('borrowed-hulls');
+    const world = tomlParse(files['assets/worlds/borrowed_hulls.toml']);
+    expect(world.available_ships.map((s) => s.template_path)).toEqual([
+      'assets/entities/borrowed_lancer.toml',
+      'assets/entities/borrowed_warden.toml',
+    ]);
+    // ...and the hulls themselves ride along, carrying the fields the picker
+    // card renders (class badge, registry, mass, power rating).
+    for (const p of world.available_ships.map((s) => s.template_path)) {
+      const hull = tomlParse(files[p]);
+      expect(hull.class).toBeTruthy();
+      expect(hull.hull_id).toBeTruthy();
+      expect(hull.power_rating).toBeGreaterThan(0);
+    }
+  });
+
   it('format-too-new.zip declares a format above the supported max', () => {
     const manifest = readFixtureManifest('format-too-new.zip');
     expect(manifest.pack.format).toBe(2);

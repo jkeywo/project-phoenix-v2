@@ -14,6 +14,11 @@
 // happens AFTER a world is chosen is already covered several times over
 // (lobby.spec.js, demo-manifest.spec.js, mod-pack.spec.js), and this spec
 // asserts only that the pick still reaches the same place.
+//
+// The one exception is the hull cards' own detail, which the second test below
+// guards because a real page is the ONLY thing that can: the host has to
+// deliver each hull's template to Rust before it reads the catalogue back, and
+// nothing cheaper ever sees that ordering.
 
 import { test, expect, waitForWasmReady } from './fixtures';
 import { ts } from './strings';
@@ -114,6 +119,45 @@ test('the landing is the first paint, and New Game opens the World picker',
       .toBe('landing-panel');
   });
 
+// Tagged @core deliberately, and kept short enough to earn its place there:
+// this is the ONLY test that can catch the enrichment regressing. `class`,
+// `hull_id`, `mass` and `power_rating` are read by
+// `delivery::payload::ship_payload` out of a CACHED entity template, and
+// `buildScenarioCatalog` used to read the catalogue without ever delivering
+// one — so every card badged `component.ship_picker.class.unknown` and drew no
+// stats. The vitest suite hands `<ph-ship-picker>` a row that already carries
+// the fields, and the `?scenario=` dev bypass reads its hulls back AFTER the
+// preload, so a revert would ship green past both. In the nightly-only tier
+// this guard would be worth nothing to the PR that broke it.
+//
+// combat_test BY NAME, not "whichever World is first": a single-hull scenario
+// auto-resolves (issue #917) and never draws a card at all, so reading the
+// first row would turn this into a silent skip the day the manifest is
+// reordered. And the wait is unconditional — no picker here is a FAILURE.
+test('the picker\'s hull cards know which hull they are',
+  { tag: '@core' }, async ({ context }) => {
+    const page = await context.newPage();
+    await page.goto('/');
+    await page.bringToFront();
+
+    await page.locator(NEW_GAME).waitFor({ state: 'visible', timeout: 30_000 });
+    await page.click(NEW_GAME);
+    await page.locator('#world-list .world-btn[data-scenario-id="combat_test"]')
+      .click({ timeout: 30_000 });
+
+    const shipCard = page.locator('ph-ship-picker .ship-card').first();
+    await shipCard.waitFor({ state: 'visible', timeout: 60_000 });
+
+    // Asserted structurally rather than against `#AEV-0741`/`70`: the failure
+    // this guards is TOTAL (no enrichment at all), not a wrong number, and the
+    // numbers themselves are the world file's business to change.
+    await expect(shipCard.locator('.ship-badge')).not.toHaveClass(/(^|\s)unknown(\s|$)/);
+    await expect(shipCard.locator('.ship-stat-value')).not.toHaveCount(0);
+    await expect(shipCard.locator('.ship-stat-value').first()).not.toBeEmpty();
+    // Nothing is clicked: the walk past this point is the next test's, and this
+    // one has no reason to pay for a world load.
+  });
+
 test('choosing a world from the landing reaches the lobby it always reached',
   async ({ context }) => {
     const page = await context.newPage();
@@ -156,6 +200,9 @@ test('choosing a world from the landing reaches the lobby it always reached',
       await expect(page.locator('#landing-ship ph-ship-picker')).toBeVisible();
       await expect(page.locator(SCENARIO_BUTTONS).first()).toBeVisible();
       await expect(page.locator('#landing-panel')).toHaveClass(/is-deep/);
+      // What the card SAYS is the @core test's business, not this one's: it
+      // names combat_test so it cannot be reordered into skipping, whereas
+      // everything in this branch is conditional on which World came first.
       await shipCard.click();
     }
 
@@ -193,4 +240,13 @@ test('choosing a world from the landing reaches the lobby it always reached',
       .evaluateAll((els) => els.map((el) => el.getAttribute('data-landing-entry'))))
       .toEqual(['join_peer', 'connect_host']);
     await expect(page.locator(`${NEW_GAME}[aria-disabled="true"]`)).toHaveCount(0);
+
+    // Round two's hull cards are NOT asserted here, and the omission is
+    // deliberate rather than an oversight: every hull combat_test offers is in
+    // its own `[[available_ships]]`, so round one's #917 curation preloaded all
+    // four and the second round's cards would read out of the preload's cache
+    // whether the catalogue store were re-delivered or not — an assertion that
+    // cannot fail. The round-two enrichment is guarded where it CAN fail, by
+    // uploading a pack whose hulls the first round never saw
+    // (mod-pack.spec.js, 'a pack uploaded in a SECOND lobby round').
   });

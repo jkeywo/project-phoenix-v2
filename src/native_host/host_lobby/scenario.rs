@@ -187,6 +187,80 @@ pub enum HostLobbyRecord {
     /// is a state the host can state, and a sentinel string would be a state
     /// it can only be read to mean.
     LandingClose,
+    /// The operator confirmed Exit to Desktop (issue #1365).
+    ///
+    /// The first landing verb the HOST has to answer, and the reason
+    /// [`LandingOpen`](Self::LandingOpen) was written to be extended rather
+    /// than to be the whole of the menu's vocabulary. It is the confirmation's
+    /// press, never the entry's: the row carries a `confirm` block
+    /// (`gui/host-landing-view.js`), so opening the route only draws the panel
+    /// that asks, and this arrives only once an operator has answered it. There
+    /// is no second confirmation on this side — a host that re-asked would be
+    /// asking a question the operator already answered on a surface they are
+    /// looking at.
+    ///
+    /// Snake_case, with the picks: the kebab spellings are the layout row's
+    /// alone and are historical (see [`SetViewscreen`](Self::SetViewscreen)).
+    /// The tag is deliberately the same token as the row's `confirm.action`, so
+    /// the page forwards the verb it was given instead of keeping a mapping
+    /// table that would be a second place to edit.
+    ///
+    /// **Web hosts never send it**, and cannot: the row is `platforms:
+    /// ['native']`, because a browser tab has no application to quit.
+    ExitDesktop,
+    /// The operator chose a mod pack off the shelf (issue #1366).
+    ///
+    /// `pack` is a FILE NAME this host itself offered — one of the `file` values
+    /// in [`packs::ModPackPanelPayload::offered`](super::packs::ModPackPanelPayload)
+    /// — carried verbatim. It is never a path, and whatever answers it never
+    /// joins it onto the scanned directory: the host looks it up in the shelf it
+    /// produced ([`crate::native_host::mod_packs::offered`]), so a name it never
+    /// offered and a name deleted since the scan are one refusal. That lookup
+    /// gate is why this can safely be a bare string off a bridge.
+    ///
+    /// The SECOND landing verb the host has to answer, and the second one
+    /// [`LandingOpen`](Self::LandingOpen) was written to make room for. Unlike
+    /// [`ExitDesktop`](Self::ExitDesktop) it carries no confirmation: a pack that
+    /// is wrong is refused whole and reports why, and one that is merely unwanted
+    /// can be taken back out of the overlay stack — so there is nothing here to
+    /// ask twice about, and a host that asked would be asking about the one
+    /// landing route that IS reversible.
+    ///
+    /// Snake_case, with the picks and the landing's own two; the kebab spellings
+    /// are the layout row's alone and are historical (see
+    /// [`SetViewscreen`](Self::SetViewscreen)).
+    ///
+    /// **Web hosts never send it**: the row that opens the shelf is inert on any
+    /// surface that cannot answer it, which a browser host cannot — it has no
+    /// scanned folder, and it already loads a pack from the file input inside
+    /// `#scenario-panel`.
+    InstallModPack { pack: String },
+    /// The operator pressed the landing's fullscreen control (issue #1367).
+    ///
+    /// The THIRD landing verb the host has to answer, and the only one that is
+    /// not a route at all: it is the corner control beside the menu rather than
+    /// a row in it, so it carries no entry id and opens no stage.
+    ///
+    /// A browser host never sends it and does not need to — `gui/page-chrome.js`
+    /// implements fullscreen once, in the page, and the landing's control
+    /// forwards to that. There is no such implementation to forward to here:
+    /// this window has no browser chrome, and what fullscreen MEANS on it is the
+    /// primary window's `WindowMode`, which is the host process's to set. So the
+    /// press crosses the bridge, and
+    /// [`fullscreen::apply_window_mode_toggle`](super::fullscreen::apply_window_mode_toggle)
+    /// answers it the way the display-assignment law already does.
+    ///
+    /// A toggle rather than a `SetWindowMode { fullscreen: bool }`, because the
+    /// page cannot see the answer: the surface is an embedded view with no
+    /// `document.fullscreenElement` and no window manager, so a record naming
+    /// the state it wanted would be the page asserting something only the host
+    /// knows. What the operator did is "press the control"; what that means is
+    /// decided where the current mode is legible.
+    ///
+    /// Snake_case, with the picks and the landing's own verbs; the kebab
+    /// spellings are the layout row's alone and are historical (see
+    /// [`SetViewscreen`](Self::SetViewscreen)).
+    ToggleFullscreen,
 }
 
 impl HostLobbyRecord {
@@ -246,7 +320,7 @@ mod tests {
     }
 
     #[test]
-    fn the_surfaces_eight_records_round_trip() {
+    fn the_surfaces_eleven_records_round_trip() {
         for record in [
             HostLobbyRecord::SelectScenario {
                 scenario_id: "combat_test".into(),
@@ -269,6 +343,11 @@ mod tests {
                 entry: "new_game".into(),
             },
             HostLobbyRecord::LandingClose,
+            HostLobbyRecord::ExitDesktop,
+            HostLobbyRecord::InstallModPack {
+                pack: "thin-margin.zip".into(),
+            },
+            HostLobbyRecord::ToggleFullscreen,
         ] {
             let json = serde_json::to_string(&record).expect("a record encodes");
             assert_eq!(HostLobbyRecord::decode(&json), Some(record));
@@ -349,6 +428,35 @@ mod tests {
         assert_eq!(
             HostLobbyRecord::decode(r#"{"kind":"landing_close"}"#),
             Some(HostLobbyRecord::LandingClose)
+        );
+        // Exit to Desktop (issue #1365) is snake_case with them, and its tag is
+        // the same token the entry table gives the row as its `confirm.action`
+        // — that identity is what lets `host_lobby_link.js` forward the verb it
+        // was handed rather than translate it.
+        assert_eq!(
+            HostLobbyRecord::decode(r#"{"kind":"exit_desktop"}"#),
+            Some(HostLobbyRecord::ExitDesktop)
+        );
+        assert_eq!(HostLobbyRecord::decode(r#"{"kind":"exit-desktop"}"#), None);
+        // The mod-pack shelf's one verb (issue #1366), snake_case with them.
+        assert_eq!(
+            HostLobbyRecord::decode(r#"{"kind":"install_mod_pack","pack":"thin-margin.zip"}"#),
+            Some(HostLobbyRecord::InstallModPack {
+                pack: "thin-margin.zip".into()
+            })
+        );
+        assert_eq!(
+            HostLobbyRecord::decode(r#"{"kind":"install-mod-pack","pack":"a.zip"}"#),
+            None
+        );
+        // A pack name this host never offered still DECODES — the refusal is the
+        // host's shelf lookup, not the parser's. A parse failure here would read
+        // as a broken bridge, and the honest answer is a finding on the panel.
+        assert_eq!(
+            HostLobbyRecord::decode(r#"{"kind":"install_mod_pack","pack":"../secrets.zip"}"#),
+            Some(HostLobbyRecord::InstallModPack {
+                pack: "../secrets.zip".into()
+            })
         );
         // An entry id this build has never heard of still decodes: the entry
         // TABLE is the client's, a bundle may be newer than the host, and a

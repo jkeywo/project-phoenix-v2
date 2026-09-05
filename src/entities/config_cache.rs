@@ -306,9 +306,13 @@ pub fn clear_template_preload_state() {
 // Both content-resolution channels (world/catalog fetch and entity/faction
 // config request) consult [`mod_pack_overlay_get`] FIRST, returning the WINNING
 // pack's content for any overridden authored path and falling back to the normal
-// HTTP fetch otherwise (AC2). The overlay only ever ADDS or REPLACES supported
-// authored paths — it never touches disk. It is host-session-scoped: a page
-// reload clears the thread-local naturally, and [`clear_mod_pack_overlay`]
+// HTTP fetch otherwise (AC2). Native resolves the same two channels the same way
+// — `include_resolve::FsFragmentSource`, `world::load::OverlayFsReader` and
+// `delivery::serve::ManifestSource::resolve_world` all consult the overlay before
+// the filesystem — which is what lets a native host's accepted pack widen its
+// lobby catalogue and load its own worlds. The overlay only ever ADDS or REPLACES
+// supported authored paths — it never touches disk. It is host-session-scoped: a
+// page reload clears the browser's stack naturally, and [`clear_mod_pack_overlay`]
 // discards the WHOLE stack for the same-page return-to-lobby / next-upload seam
 // (AC4).
 //
@@ -316,8 +320,8 @@ pub fn clear_template_preload_state() {
 // is unit-testable on native without dragging in wasm-bindgen, exactly like the
 // sidecar inbox above. The resolution and conflict logic are PURE functions over
 // `&[ActivePack]` ([`overlay_lookup`], [`overlay_source_in`],
-// [`overlay_conflicts`]); the thread-local wrappers are a thin session-state
-// layer over them.
+// [`overlay_conflicts`]); the session-state wrappers over them are thin, and the
+// storage they wrap is per-target — see the note above [`ACTIVE_PACKS`].
 
 /// One installed pack in the ordered overlay stack (issue #987).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -398,15 +402,66 @@ pub fn overlay_conflicts(packs: &[ActivePack]) -> Vec<PathConflict> {
     conflicts
 }
 
+// ## Where the stack LIVES, and why that differs per host
+//
+// The browser is one thread, so a `thread_local!` IS the browser's session
+// scoping: every reader is the page, and a reload drops the stack.
+//
+// A native host is not one thread and never was. `apply_mod_pack_choice`
+// (`native_host::host_lobby`) is an ordinary Bevy `Update` system, so it installs
+// on whichever compute-pool worker took that frame; `feed_mod_pack_shelf` is a
+// SEPARATE system that may run on another; `FsFragmentSource::read` runs on
+// whichever worker spawns; and the delivery thread is a different thread
+// outright. A per-thread stack there would install a pack on one worker and
+// leave every other reader looking at an empty overlay — silently, and
+// intermittently, which is the worst shape that bug could take. So native stores
+// the stack in a process-global `RwLock`, for exactly the reason
+// [`NATIVE_CONFIG_CACHE`] below is one.
+//
+// The public functions over it keep one signature across both targets, so no
+// caller knows (or can come to depend on) which storage it is talking to. The
+// price is that native tests no longer get libtest's thread-per-test isolation
+// for free — see [`overlay_test_guard`], which is how they ask for it.
+#[cfg(target_arch = "wasm32")]
 thread_local! {
     /// The ordered mod-pack overlay stack for the current host session
     /// (oldest → newest). See the precedence policy above.
     static ACTIVE_PACKS: RefCell<Vec<ActivePack>> = const { RefCell::new(Vec::new()) };
 }
 
+/// The ordered mod-pack overlay stack for the current host PROCESS
+/// (oldest → newest). See the precedence policy above, and the note on why this
+/// is shared rather than per-thread off the browser.
+#[cfg(not(target_arch = "wasm32"))]
+static ACTIVE_PACKS: std::sync::RwLock<Vec<ActivePack>> = std::sync::RwLock::new(Vec::new());
+
+/// Read the stack. Every public lookup goes through here, so the two storages
+/// are described once and the readers stay identical.
+#[cfg(target_arch = "wasm32")]
+fn with_active_packs<R>(f: impl FnOnce(&[ActivePack]) -> R) -> R {
+    ACTIVE_PACKS.with(|s| f(&s.borrow()))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn with_active_packs<R>(f: impl FnOnce(&[ActivePack]) -> R) -> R {
+    f(&ACTIVE_PACKS.read().expect("mod-pack overlay poisoned"))
+}
+
+/// Mutate the stack. The writer twin of [`with_active_packs`], for the same
+/// reason.
+#[cfg(target_arch = "wasm32")]
+fn with_active_packs_mut<R>(f: impl FnOnce(&mut Vec<ActivePack>) -> R) -> R {
+    ACTIVE_PACKS.with(|s| f(&mut s.borrow_mut()))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn with_active_packs_mut<R>(f: impl FnOnce(&mut Vec<ActivePack>) -> R) -> R {
+    f(&mut ACTIVE_PACKS.write().expect("mod-pack overlay poisoned"))
+}
+
 /// A snapshot of the active pack stack, oldest → newest (issue #987).
 pub fn active_packs() -> Vec<ActivePack> {
-    ACTIVE_PACKS.with(|s| s.borrow().clone())
+    with_active_packs(<[ActivePack]>::to_vec)
 }
 
 /// Push a validated pack onto the top (newest end) of the stack (issue #987).
@@ -415,15 +470,14 @@ pub fn active_packs() -> Vec<ActivePack> {
 /// ever installed. Does NOT evict earlier packs — a later pack merely shadows an
 /// earlier one for the paths they share (that is the whole point of the stack).
 pub fn push_mod_pack(pack: ActivePack) {
-    ACTIVE_PACKS.with(|s| s.borrow_mut().push(pack));
+    with_active_packs_mut(|v| v.push(pack));
 }
 
 /// Remove the pack with `id` from the stack (issue #987). Precedence for every
 /// path it owned re-resolves on the next lookup — the next pack down that carries
 /// the path becomes the winner. Returns whether a pack was removed.
 pub fn remove_mod_pack(id: &str) -> bool {
-    ACTIVE_PACKS.with(|s| {
-        let mut v = s.borrow_mut();
+    with_active_packs_mut(|v| {
         let before = v.len();
         v.retain(|p| p.id != id);
         v.len() != before
@@ -434,8 +488,7 @@ pub fn remove_mod_pack(id: &str) -> bool {
 /// named keep their relative order after the named ones; unknown ids are ignored.
 /// Precedence re-resolves on the next lookup (issue #987).
 pub fn reorder_mod_packs(ids: &[String]) {
-    ACTIVE_PACKS.with(|s| {
-        let mut v = s.borrow_mut();
+    with_active_packs_mut(|v| {
         let mut reordered: Vec<ActivePack> = Vec::with_capacity(v.len());
         for id in ids {
             if let Some(pos) = v.iter().position(|p| &p.id == id) {
@@ -443,7 +496,7 @@ pub fn reorder_mod_packs(ids: &[String]) {
             }
         }
         // Anything not named by `ids` keeps its (now-compacted) relative order.
-        reordered.append(&mut v);
+        reordered.append(v);
         *v = reordered;
     });
 }
@@ -454,7 +507,7 @@ pub fn reorder_mod_packs(ids: &[String]) {
 /// so the WINNING pack's file (the latest loaded carrying the path) is used for
 /// any exact authored path it carries.
 pub fn mod_pack_overlay_get(path: &str) -> Option<String> {
-    ACTIVE_PACKS.with(|s| overlay_lookup(&s.borrow(), path).map(str::to_string))
+    with_active_packs(|packs| overlay_lookup(packs, path).map(str::to_string))
 }
 
 /// The id of the pack that currently owns `path` in the overlay stack, if any
@@ -462,18 +515,50 @@ pub fn mod_pack_overlay_get(path: &str) -> Option<String> {
 /// conflict summary, a diagnostic log — without duplicating the walk.
 ///
 /// Returns an owned `String` rather than the `&str` the pure [`overlay_source_in`]
-/// yields, because the stack lives behind a thread-local `RefCell` that cannot
-/// hand out a borrow past the `with` closure.
+/// yields, because the stack lives behind a `RefCell`/`RwLock` that cannot hand
+/// out a borrow past the accessor closure.
 pub fn overlay_source(path: &str) -> Option<String> {
-    ACTIVE_PACKS.with(|s| overlay_source_in(&s.borrow(), path).map(str::to_string))
+    with_active_packs(|packs| overlay_source_in(packs, path).map(str::to_string))
 }
 
 /// Discard the WHOLE mod-pack overlay stack for the current session (issue #760
 /// AC4, #987). Called before return-to-lobby, so uploaded state never leaks into
 /// a fresh selection stage or a same-page next round. A page reload clears the
-/// thread-local anyway; this covers the same-page seams.
+/// browser's thread-local anyway; this covers the same-page seams, and is the
+/// only thing that empties a native host's process-global stack short of exit.
 pub fn clear_mod_pack_overlay() {
-    ACTIVE_PACKS.with(|s| s.borrow_mut().clear());
+    with_active_packs_mut(Vec::clear);
+}
+
+/// Serialise the tests that drive the native overlay stack, and hand each of
+/// them an empty one.
+///
+/// On the browser the stack is a `thread_local!`, so libtest's thread-per-test
+/// gave every test its own for free — the same reasoning the sibling preload
+/// maps above rely on. Native's stack is process-global (it has to be: Bevy
+/// systems run on worker threads), so that isolation now has to be ASKED FOR.
+/// Taking the guard clears the stack and blocks any other overlay test; dropping
+/// it clears the stack again. A test therefore can neither inherit another
+/// test's packs nor leak its own into an unrelated one running beside it.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[allow(dead_code)]
+pub(crate) struct OverlayTestGuard(std::sync::MutexGuard<'static, ()>);
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+impl Drop for OverlayTestGuard {
+    fn drop(&mut self) {
+        clear_mod_pack_overlay();
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) fn overlay_test_guard() -> OverlayTestGuard {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    // A test that panicked holding the guard poisons the mutex. The next test
+    // still wants a clean overlay, not a cascade of failures about the first one.
+    let guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    clear_mod_pack_overlay();
+    OverlayTestGuard(guard)
 }
 
 // ── Overlay-backed script resolution (issue #988) ────────────────────────────
@@ -1666,14 +1751,16 @@ cosmetic_type_paths = ["asteroid_cosmetic.toml"]
         assert_eq!(conflicts[0].losers, vec!["a".to_string()]);
     }
 
-    // ── Mod-pack overlay stack: session thread-local (issues #760, #987) ─
+    // ── Mod-pack overlay stack: session state (issues #760, #987, #1366) ──
     //
-    // Each test uses UNIQUE pack ids + paths and clears the stack at the end so
-    // the process-wide `ACTIVE_PACKS` thread-local stays order-independent.
+    // Off the browser the stack is process-global (Bevy systems run on worker
+    // threads), so these take [`overlay_test_guard`] rather than relying on
+    // libtest's thread-per-test. Unique pack ids + paths on top of that, so a
+    // failure names one test rather than the order they happened to run in.
 
     #[test]
     fn pushing_pack_b_after_a_does_not_evict_a() {
-        super::clear_mod_pack_overlay();
+        let _overlay = super::overlay_test_guard();
         super::push_mod_pack(pack_with(
             "sess-a",
             &[("assets/entities/__sess_x.toml", "A")],
@@ -1712,9 +1799,43 @@ cosmetic_type_paths = ["asteroid_cosmetic.toml"]
         );
     }
 
+    /// The whole reason the native stack is not a `thread_local!` (issue #1366).
+    ///
+    /// `apply_mod_pack_choice` is an ordinary Bevy `Update` system on a
+    /// multi-threaded host, so it installs on whichever compute-pool worker took
+    /// the frame — while `feed_mod_pack_shelf`, the spawn path's fragment source
+    /// and the delivery thread all read from somewhere else. A per-thread stack
+    /// made every one of those an intermittent, silent miss: a panel reporting an
+    /// install nothing else could see.
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn a_pack_installed_on_one_thread_is_visible_from_another() {
+        let _overlay = super::overlay_test_guard();
+        let path = "assets/entities/__cross_thread_x.toml";
+        std::thread::spawn(move || {
+            super::push_mod_pack(pack_with("cross-thread", &[(path, "installed elsewhere")]));
+        })
+        .join()
+        .expect("the installing thread must not panic");
+
+        assert_eq!(
+            super::mod_pack_overlay_get(path),
+            Some("installed elsewhere".to_string()),
+            "a pack installed on a worker thread has to be visible to every reader"
+        );
+        assert_eq!(super::active_packs().len(), 1);
+        assert_eq!(
+            std::thread::spawn(|| super::active_packs().len())
+                .join()
+                .expect("the reading thread must not panic"),
+            1,
+            "and to a third thread, which is what the delivery thread is"
+        );
+    }
+
     #[test]
     fn reorder_mod_packs_reassigns_the_winner() {
-        super::clear_mod_pack_overlay();
+        let _overlay = super::overlay_test_guard();
         super::push_mod_pack(pack_with("ord-a", &[("assets/entities/__ord_x.toml", "A")]));
         super::push_mod_pack(pack_with("ord-b", &[("assets/entities/__ord_x.toml", "B")]));
         // Newest (ord-b) wins by default.
@@ -1750,7 +1871,7 @@ cosmetic_type_paths = ["asteroid_cosmetic.toml"]
     #[test]
     fn a_pack_script_resolves_from_the_overlay_not_the_fallback() {
         use crate::world::script::load::lift_world_scripts;
-        super::clear_mod_pack_overlay();
+        let _overlay = super::overlay_test_guard();
         crate::content_ledger::reset();
 
         // The overlay carries the sibling; the fallback would serve DIFFERENT
@@ -1782,11 +1903,11 @@ cosmetic_type_paths = ["asteroid_cosmetic.toml"]
         use crate::content_ledger;
         use crate::world::script::load::lift_world_scripts;
 
+        let _overlay = super::overlay_test_guard();
         let world: toml::Value = toml::from_str(r#"script = "on_combat.rhai""#).unwrap();
 
         // WITHOUT a pack: the sibling cannot resolve (no overlay, no fallback),
         // so only the world itself is in the ledger.
-        super::clear_mod_pack_overlay();
         content_ledger::reset();
         content_ledger::record(
             "assets/worlds/combat_test.toml",

@@ -389,7 +389,14 @@ impl PublishedCatalog {
     /// The catalogue message a phone folds through `gui/lobby-state.js`,
     /// identical in shape to the one `server.html` synthesises before its own
     /// world load.
-    fn wire(self) -> ServerMessage {
+    ///
+    /// `pub(crate)` since issue #1366: an accepted mod pack widens the catalogue
+    /// from inside `native_host::host_lobby`, and every phone in the room has to
+    /// be told through the SAME derivation the viewscreen's picker reads. A
+    /// second `ScenarioCatalog` assembled at that call site would be exactly the
+    /// "the viewscreen and the phones are looking at two catalogues" split this
+    /// type exists to close.
+    pub(crate) fn wire(self) -> ServerMessage {
         ServerMessage::ScenarioCatalog {
             scenarios: self.scenarios,
             locked_scenario: self.locked_scenario,

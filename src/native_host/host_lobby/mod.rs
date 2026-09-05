@@ -82,6 +82,7 @@
 //! | [`join`] | what the join panel says, and where its QR points |
 //! | [`landing`] | what the front door is told about the process it is embedded in: which build, and whether a World has taken it away |
 //! | [`layout`] | the monitor row and the per-station screen rows: the roster and the law's eligibility out, and the layout action a press asks for |
+//! | [`packs`] | the mod-pack shelf the landing offers (issue #1366): the panel's whole contents out, and the adapter that fills [`crate::world::mod_pack`]'s injected seams on a host that READS its content rather than fetching it |
 //! | [`reveal`] | when the surface is on screen, and when it has yielded |
 //! | [`scenario`] | what the picker is shown, and [`HostLobbyRecord`] — everything the surface may say back, the three layout presses included |
 //! | this file | the Bevy wiring, and [`LocalHostLobby`], which the binary assembles after its listener has bound |
@@ -133,9 +134,11 @@
 
 pub mod bridge;
 pub mod document;
+pub mod fullscreen;
 pub mod join;
 pub mod landing;
 pub mod layout;
+pub mod packs;
 pub mod reveal;
 pub mod scenario;
 
@@ -154,6 +157,7 @@ use crate::native_host::world_load::{
 
 pub use bridge::{pump_host_lobby, HostLobbyBridge, HostLobbyPumpReport};
 pub use document::{build_host_lobby_document, host_lobby_drain_script, HostLobbyDocumentError};
+pub use fullscreen::{monitor_to_restore, next_window_mode, WindowModeToggle};
 pub use join::{
     join_addr_reach, phone_rendezvous, JoinAddrReach, JoinInvite, PhoneRendezvous,
     CLIENT_DEFAULT_RENDEZVOUS,
@@ -162,6 +166,10 @@ pub use landing::{LandingPanelPayload, BUILD_ID};
 pub use layout::{
     assign_station_action, bridge_layout_payload, set_viewscreen_action, unassign_station_action,
     BridgeLayoutPayload, LayoutNotice, StationRowPayload, StationScreenPayload,
+};
+pub use packs::{
+    InstallOutcome, InstalledPack, ModPackPanelPayload, ModPackShelfResource, OfferedPack,
+    PackConflict, PackFinding,
 };
 pub use reveal::{RevealState, SurfacePresence};
 pub use scenario::{HostLobbyRecord, ScenarioPanelPayload};
@@ -414,11 +422,35 @@ pub struct HostLobbyPlugin;
 impl Plugin for HostLobbyPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<HostLobbyRevealResource>()
+            // The fullscreen control's latch (issue #1367). Initialised here
+            // rather than by whatever opens a window, so a press has somewhere
+            // to land on every composition that carries a lobby surface —
+            // `apply_window_mode_toggle` is what decides a host with no window
+            // cannot answer it, in one place, rather than the dispatcher
+            // guessing from the absence of a resource.
+            .init_resource::<fullscreen::WindowModeToggle>()
             .add_systems(
                 Update,
                 (
                     feed_lobby_state,
                     feed_landing_panel,
+                    // The window mode a press in `PreUpdate` asked for
+                    // (issue #1367). Early in the chain with the other
+                    // answers, and before the feeds, for the reason
+                    // `apply_mod_pack_choice` is: the operator's press is
+                    // answered in the frame it arrived rather than the next.
+                    fullscreen::apply_window_mode_toggle,
+                    // The mod-pack install an operator asked for in `PreUpdate`
+                    // (issue #1366), answered BEFORE the two feeds below it —
+                    // deliberately, and it is the same one-frame edge the
+                    // monitor row's note at the bottom of this chain describes.
+                    // An accepted pack widens `LobbyScenarioCatalog`, which
+                    // `feed_scenario_panel` publishes, and moves the shelf,
+                    // which `feed_mod_pack_shelf` publishes; run after them and
+                    // the operator would look at the old catalogue for a frame
+                    // and at a shelf that had not heard about their press.
+                    apply_mod_pack_choice,
+                    feed_mod_pack_shelf,
                     feed_scenario_panel,
                     observe_phase,
                     // `ButtonInput<KeyCode>` exists only where `InputPlugin`
@@ -491,6 +523,10 @@ fn feed_lobby_state(
 ///    gets no greeting the way a phone does);
 ///  * whenever [`LobbySelection`] moved — a lock, or the reset
 ///    `world_load::unwind_failed_load` performs after a refused world;
+///  * whenever [`LobbyScenarioCatalog`] moved, which since issue #1366 it can:
+///    an accepted mod pack widens it, and a picker still offering the catalogue
+///    the host booted with would be the one screen in the room that had not
+///    heard about the pack the operator just installed;
 ///  * the frame a [`WorldConfig`](crate::world::config::WorldConfig) lands,
 ///    which is what closes the picker for good.
 ///
@@ -517,6 +553,7 @@ fn feed_scenario_panel(
     };
     let moved = !*published
         || selection.is_changed()
+        || catalog.is_changed()
         || world_config.as_ref().is_some_and(|w| w.is_added());
     if !moved {
         return;
@@ -578,12 +615,228 @@ fn feed_landing_panel(
         .push_landing(landing::LandingPanelPayload::new(dismissed).to_json());
 }
 
+/// Carry the mod-pack shelf to the surface (issue #1366).
+///
+/// The landing's Load-mod-pack stage renders from `gui/host-landing-view.js` +
+/// `gui/host-landing-render.js` — the same shared pair the menu around it comes
+/// from — so what crosses is one snapshot of the whole panel:
+/// [`packs::ModPackPanelPayload`].
+///
+/// # It pushes exactly when the shelf moved, and that is the whole rule
+///
+/// The first frame, so a host given `--mod-pack-dir` puts its shelf on the
+/// landing without waiting for anybody to touch it, and then whenever
+/// [`packs::ModPackShelfResource`] changed — which is precisely when an install
+/// attempt finished, because nothing else writes it.
+///
+/// A host given no `--mod-pack-dir` carries no such resource and therefore never
+/// pushes, which leaves the landing's Load-mod-pack row exactly as inert as
+/// issue #1360 shipped it. That is not an omission: the row's stage opens only
+/// on a surface that says it can answer the row (`provides: ['packs']` in
+/// `host_lobby_link.js`, against the `needs: 'packs'` on the row itself), and a
+/// surface with no shelf never says so. One rule — a control exists exactly when
+/// something behind it answers it — said in data on both sides of the bridge.
+fn feed_mod_pack_shelf(
+    bridge: Option<Res<HostLobbyBridgeResource>>,
+    shelf: Option<Res<packs::ModPackShelfResource>>,
+    mut published: Local<bool>,
+) {
+    let (Some(bridge), Some(shelf)) = (bridge, shelf) else {
+        return;
+    };
+    if *published && !shelf.is_changed() {
+        return;
+    }
+    *published = true;
+    bridge.0.push_packs(shelf.payload().to_json());
+}
+
+/// Answer the pack an operator chose off the shelf (issue #1366).
+///
+/// The other half of [`drain_surface_records`]'s latch, and the only place in
+/// this crate that turns a name off the bridge into an open file. Four steps,
+/// and only the first two are this slice's:
+///
+///  1. **the shelf lookup**, which is the gate. The name is looked up in the
+///     shelf THIS host produced ([`crate::native_host::mod_packs::offered`]) and
+///     never joined onto the scanned directory, so "never offered", "invented by
+///     a page newer than this binary" and "deleted since the scan" are one
+///     refusal — and a traversal is unrepresentable rather than merely rejected.
+///  2. **the read**, whose failure is reported in exactly the shape a validator
+///     finding takes, because from where the operator is standing a pack that
+///     could not be opened and a pack that would not validate are the same
+///     event: they chose it and it did not go in.
+///  3. **the existing validation and overlay, unchanged.**
+///     [`packs::install_pack`] is a seam-filling wrapper over
+///     [`crate::world::mod_pack::validate_mod_pack`] and
+///     [`crate::entities::config_cache::push_mod_pack`] — the same two calls
+///     `bridge::wasm_add_mod_pack` makes for a browser upload, with the same
+///     atomic acceptance: on any error nothing is installed and the findings say
+///     what is wrong.
+///  4. **the catalogue**, rebuilt through
+///     [`ManifestSource::merged_catalog`](crate::delivery::serve::ManifestSource::merged_catalog),
+///     which is the same `build_merged_catalog` call `wasm_get_scenario_catalog`
+///     makes and which that method's own comment named as "the seam a native
+///     mod-pack path would land on". This is that path landing on it. The result
+///     goes to [`LobbyScenarioCatalog`] — which [`feed_scenario_panel`] then
+///     publishes to the viewscreen — and one message goes to every phone in the
+///     room, so a pack cannot widen only the screen the operator is looking at.
+///
+/// The shelf is **rescanned on every attempt**, accepted or not: a bridge
+/// machine's mod folder is exactly the sort of place somebody drops a file into
+/// while the host is already up, and a list that only ever reflected boot would
+/// make that invisible.
+///
+/// `Update`, ahead of [`feed_scenario_panel`] and [`feed_mod_pack_shelf`] in the
+/// plugin's chain, so an accepted pack's widened catalogue and the panel's
+/// answer both reach the surface in the frame the operator pressed — the same
+/// one-frame edge that makes a layout refusal something they see rather than
+/// something only the log knows.
+fn apply_mod_pack_choice(
+    shelf: Option<ResMut<packs::ModPackShelfResource>>,
+    catalog: Option<ResMut<LobbyScenarioCatalog>>,
+    selection: Option<Res<LobbySelection>>,
+    settings: Option<Res<LobbyBootSettings>>,
+    outbox: Option<ResMut<crate::lobby::LobbyOutbox>>,
+    log: Option<Res<LogFilterConfig>>,
+) {
+    let Some(mut shelf) = shelf else {
+        return;
+    };
+    // Read through the immutable deref FIRST: touching `ResMut` marks the
+    // resource changed, and `feed_mod_pack_shelf` pushes on exactly that signal.
+    // A frame with nothing to install must cost the surface nothing.
+    if shelf.pending.is_none() {
+        return;
+    }
+    let Some(file) = shelf.pending.take() else {
+        return;
+    };
+    shelf.attempted = Some(file.clone());
+
+    let outcome = match crate::native_host::mod_packs::offered(&shelf.shelf, &file) {
+        None => packs::InstallOutcome {
+            accepted: false,
+            findings: vec![packs::PackFinding::error(
+                "unknown-pack",
+                &file,
+                format!(
+                    "{file} is not on this host's mod-pack shelf — it may have been removed \
+                     since the folder was scanned"
+                ),
+            )],
+        },
+        Some(pack) => {
+            let path = shelf.dir.join(&pack.file);
+            match std::fs::read(&path) {
+                Err(e) => packs::InstallOutcome {
+                    accepted: false,
+                    findings: vec![packs::PackFinding::error(
+                        "unreadable-archive",
+                        &pack.file,
+                        format!("{} could not be read: {e}", path.display()),
+                    )],
+                },
+                Ok(bytes) => {
+                    let root = std::path::PathBuf::from(&shelf.content_dir);
+                    let manifest_toml =
+                        std::fs::read_to_string(root.join(&shelf.manifest_rel)).unwrap_or_default();
+                    packs::install_pack(
+                        &bytes,
+                        &manifest_toml,
+                        // The native `resolve_base` seam. Base content here is
+                        // READ, not fetched, so the browser's preload cache
+                        // (`cached_base_world_source`) is a `None` stub off
+                        // wasm by construction. Rooted at `--content-dir`, which
+                        // is the one root `ManifestSource` resolves a world
+                        // against, so a pack is judged against the very content
+                        // this host serves and not against a second reading of
+                        // it.
+                        |authored| std::fs::read_to_string(root.join(authored)).ok(),
+                        // Authoritative, and safe to pass: `validate_mod_pack`
+                        // wraps it in `PackTemplates`, which serves the
+                        // candidate's own hulls in front of it (issue #973's
+                        // review, F3). A native host IS authoritative about its
+                        // content tree, so a pack naming a hull nothing carries
+                        // is caught here rather than at spawn.
+                        &crate::entities::loader::FsTemplateLoader,
+                    )
+                }
+            }
+        }
+    };
+
+    for finding in &outcome.findings {
+        crate::pwarn!(
+            log,
+            LogCat::Lobby,
+            "host lobby: mod pack {file} [{}] {}: {}",
+            finding.severity,
+            finding.category,
+            finding.message
+        );
+    }
+    shelf.accepted = outcome.accepted;
+    shelf.findings = outcome.findings;
+    // Whatever happened, the folder is read again: the operator is about to look
+    // at this list, and it should be the folder as it is now.
+    shelf.rescan();
+
+    if !shelf.accepted {
+        crate::pwarn!(log, LogCat::Lobby, "host lobby: mod pack {file} refused");
+        return;
+    }
+    crate::pinfo!(
+        log,
+        LogCat::Lobby,
+        "host lobby: mod pack {file} installed; rebuilding the lobby catalogue"
+    );
+
+    let Some(mut catalog) = catalog else {
+        return;
+    };
+    match crate::delivery::serve::ManifestSource::read(&shelf.content_dir, &shelf.manifest_rel) {
+        Err(e) => crate::pwarn!(
+            log,
+            LogCat::Lobby,
+            "host lobby: mod pack {file} is installed, but this host's own manifest could not \
+             be re-read to widen the catalogue: {e}"
+        ),
+        Ok(source) => {
+            let merged = source.merged_catalog();
+            for finding in &merged.findings {
+                crate::pwarn!(
+                    log,
+                    LogCat::Lobby,
+                    "host lobby: merged catalogue [{}] {}: {}",
+                    finding.category,
+                    finding.source.reference,
+                    finding.message
+                );
+            }
+            catalog.0 = merged.catalog;
+            // …and every phone in the room hears it too. The viewscreen gets the
+            // same catalogue from `feed_scenario_panel`, out of this same
+            // resource, in this same frame — one derivation, two audiences,
+            // which is the invariant that would otherwise break the moment a
+            // pack widened only the screen the operator is standing in front of.
+            if let (Some(mut outbox), Some(selection)) = (outbox, selection) {
+                let pinned = settings.as_ref().and_then(|s| s.ship_path.as_deref());
+                outbox.0.push((
+                    crate::lobby::handler::Target::All,
+                    published_catalog(&catalog.0, &selection.0, pinned).wire(),
+                ));
+            }
+        }
+    }
+}
+
 /// Carry what the operator pressed on the viewscreen back into the host.
 ///
 /// The other half of [`feed_scenario_panel`] and of [`publish_bridge_layout`],
 /// and the reason this surface stopped being read-only. Records arrive as
 /// [`HostLobbyRecord`] — a closed vocabulary, not `ClientMessage`s, because the
-/// surface holds no session token — and leave as four different things:
+/// surface holds no session token — and leave as five different things:
 ///
 ///  * a pick becomes an `InboundMessage` under
 ///    [`LOCAL_CONSOLE_TOKEN`](crate::console_bridge::LOCAL_CONSOLE_TOKEN), which
@@ -616,6 +869,23 @@ fn feed_landing_panel(
 ///    indistinguishable from a broken button — so it goes back as a
 ///    [`LayoutNotice`] and `publish_bridge_layout` carries it in this same
 ///    frame.
+///
+///  * the confirmed Exit to Desktop (issue #1365) leaves as `AppExit::Success`
+///    — the ordinary application-exit message, written from a system exactly as
+///    `bridge_display::setup_enumerate` writes it to end `--setup`. Nothing
+///    here withdraws a document or stops the delivery service: the runner
+///    returns, and the tail of `phoenix_host::main` does all of that unchanged,
+///    which is the whole point of ending the run through the door that already
+///    exists rather than opening a second one beside it.
+///
+///  * a mod pack chosen off the shelf (issue #1366) leaves as a LATCH on
+///    [`packs::ModPackShelfResource`], answered by [`apply_mod_pack_choice`] in
+///    `Update` — for the reason the AI launch sets one rather than acting here:
+///    this system is a dispatcher over a drained queue, and an arm that read a
+///    directory, opened an archive and rebuilt the scenario catalogue would make
+///    every other record in the batch wait behind a disk read. On a host started
+///    without `--mod-pack-dir` there is no such resource and the record is a
+///    line in the log, exactly as an unknown one is.
 ///
 ///  * a landing-menu press (issue #1361) leaves as a LINE IN THE LOG, and that
 ///    is the whole of it in this slice. It is worth saying why rather than
@@ -670,6 +940,9 @@ pub(crate) fn drain_surface_records(
     mut inbound: MessageWriter<crate::lobby::InboundMessage>,
     force_start: Option<ResMut<crate::server::bridge::PendingForceStart>>,
     layout: Option<ResMut<BridgeLayoutResource>>,
+    shelf: Option<ResMut<packs::ModPackShelfResource>>,
+    window_mode: Option<ResMut<fullscreen::WindowModeToggle>>,
+    mut exit: MessageWriter<AppExit>,
     log: Option<Res<LogFilterConfig>>,
 ) {
     let Some(bridge) = bridge else {
@@ -681,6 +954,8 @@ pub(crate) fn drain_surface_records(
     }
     let mut force_start = force_start;
     let mut layout = layout;
+    let mut shelf = shelf;
+    let mut window_mode = window_mode;
     // Within this batch it replaces rather than accumulates: the row shows what
     // happened to the last thing the operator did, so an accepted press clears
     // the refusal the one before it earned. What lands on the RESOURCE is
@@ -747,6 +1022,86 @@ pub(crate) fn drain_surface_records(
             }
             HostLobbyRecord::LandingClose => {
                 crate::pinfo!(log, LogCat::Lobby, "host lobby: landing closed");
+                continue;
+            }
+            HostLobbyRecord::ExitDesktop => {
+                // Issue #1365, and it is the ORDINARY application exit and
+                // nothing else: `AppExit::Success` is what
+                // `bridge_display::setup_enumerate` writes to end `--setup`,
+                // and it ends the run through the same door — the runner
+                // returns, `native_host::run` returns, and the tail of
+                // `phoenix_host::main` withdraws the hosted documents, stops
+                // the delivery service and joins its thread exactly as it does
+                // when the operator closes the window. Nothing here withdraws
+                // or stops anything itself; a second teardown path would be a
+                // second thing to keep in step with that one.
+                //
+                // No re-confirmation. The surface already asked, on a screen
+                // the operator is looking at, and a host that asked again would
+                // be second-guessing an answer it can see was given.
+                crate::pinfo!(
+                    log,
+                    LogCat::Lobby,
+                    "host lobby: exit to desktop confirmed; shutting the host down"
+                );
+                exit.write(AppExit::Success);
+                continue;
+            }
+            HostLobbyRecord::InstallModPack { pack } => {
+                // Issue #1366, and a LATCH rather than the work itself, for the
+                // reason `ForceStart` above sets one: this system is a
+                // dispatcher over a drained queue, and an arm that read a
+                // directory, opened an archive, ran the whole composition
+                // validation and rebuilt the scenario catalogue would make every
+                // other record in the same batch wait behind a disk read.
+                // `apply_mod_pack_choice` answers it in `Update`, in time for
+                // `feed_scenario_panel` to publish the widened catalogue in the
+                // SAME frame.
+                //
+                // Nothing here judges the name. That is the shelf lookup's job
+                // (`native_host::mod_packs::offered`), and it is the one gate
+                // between a string off a bridge and a file this process opens.
+                match shelf.as_mut() {
+                    Some(shelf) => {
+                        crate::pinfo!(
+                            log,
+                            LogCat::Lobby,
+                            "host lobby: mod pack chosen from the shelf: {pack}"
+                        );
+                        shelf.pending = Some(pack);
+                    }
+                    None => crate::pwarn!(
+                        log,
+                        LogCat::Lobby,
+                        "host lobby: a mod pack ({pack}) was chosen on a host started without                          --mod-pack-dir, so there is no shelf to take it from; it is dropped"
+                    ),
+                }
+                continue;
+            }
+            HostLobbyRecord::ToggleFullscreen => {
+                // Issue #1367, and a LATCH rather than the work itself, for the
+                // reason `ForceStart` above sets one: this system is a
+                // dispatcher over a drained queue and most compositions that run
+                // it carry no window at all. `fullscreen::apply_window_mode_toggle`
+                // answers it in `Update` of the same frame, where the primary
+                // window is legible and its absence is one warning rather than a
+                // system that cannot run.
+                match window_mode.as_mut() {
+                    Some(toggle) => {
+                        crate::pinfo!(
+                            log,
+                            LogCat::Lobby,
+                            "host lobby: fullscreen toggle requested from the landing"
+                        );
+                        toggle.pending = true;
+                    }
+                    None => crate::pwarn!(
+                        log,
+                        LogCat::Lobby,
+                        "host lobby: the fullscreen control was pressed on a host that carries \
+                         no window-mode latch; it is dropped"
+                    ),
+                }
                 continue;
             }
             HostLobbyRecord::SetViewscreen { monitor } => layout::set_viewscreen_action(monitor),
@@ -1090,6 +1445,183 @@ mod tests {
         );
     }
 
+    /// Every `AppExit` this frame wrote, without consuming the reader the app
+    /// itself uses to decide it is finished.
+    fn exits(app: &mut App) -> Vec<AppExit> {
+        app.world()
+            .resource::<Messages<AppExit>>()
+            .iter_current_update_messages()
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn a_confirmed_exit_writes_the_ordinary_app_exit_and_nothing_else() {
+        // Issue #1365. The whole mechanism: the surface's confirmed press
+        // becomes `AppExit::Success` — the same message
+        // `bridge_display::setup_enumerate` writes to end `--setup` — and the
+        // binary's existing teardown then runs unchanged, because the run ends
+        // through the door that was already there. Nothing here withdraws a
+        // document or stops the delivery service, and this asserts that too:
+        // a second teardown path would be a second thing to keep in step.
+        let (mut app, bridge) = app_with_lobby();
+        let mut surface = crate::native_host::panes::RecordingSurface::ready();
+        surface.queue_record(r#"{"kind":"exit_desktop"}"#);
+        pump_host_lobby(&bridge, &mut surface);
+
+        app.update();
+        assert_eq!(exits(&mut app), vec![AppExit::Success]);
+        assert!(
+            inbound(&mut app).is_empty(),
+            "quitting is the host's own act, not a participant's command"
+        );
+    }
+
+    #[test]
+    fn opening_the_exit_route_asks_rather_than_quitting() {
+        // The confirmation is the point of the slice: the ENTRY only opens the
+        // stage that asks (`landing_open`), and it is the stage's own control
+        // that sends `exit_desktop`. A host that quit on the menu press would
+        // be a host with no confirmation at all, whatever the page drew.
+        let (mut app, bridge) = app_with_lobby();
+        let mut surface = crate::native_host::panes::RecordingSurface::ready();
+        surface.queue_record(r#"{"kind":"landing_open","entry":"exit_desktop"}"#);
+        surface.queue_record(r#"{"kind":"landing_close"}"#);
+        pump_host_lobby(&bridge, &mut surface);
+
+        app.update();
+        assert!(exits(&mut app).is_empty());
+    }
+
+    /// A shelf pointed at a folder that cannot exist.
+    ///
+    /// No temp directory, and none needed: every claim below is about what
+    /// happens to a NAME the surface sent, and the shelf that name is looked up
+    /// in is empty either way. The rules about which files reach a shelf are
+    /// `native_host::mod_packs`'s, tested there without a filesystem at all.
+    fn empty_shelf() -> packs::ModPackShelfResource {
+        packs::ModPackShelfResource::new(
+            "no-such-mod-folder-for-issue-1366",
+            ".",
+            "assets/scenarios.toml",
+        )
+    }
+
+    #[test]
+    fn a_shelf_is_put_on_the_surface_on_the_first_frame_and_not_again() {
+        // Issue #1366's push rule: the landing must show the folder without
+        // waiting for anybody to touch it, and an idle host must then cost the
+        // surface nothing — the same arrangement the picker and the landing
+        // beside it make.
+        let (mut app, bridge) = app_with_lobby();
+        app.insert_resource(empty_shelf());
+        let mut surface = crate::native_host::panes::RecordingSurface::ready();
+
+        let shelves = |surface: &crate::native_host::panes::RecordingSurface| {
+            surface
+                .pushed
+                .iter()
+                .filter(|s| s.contains("__phoenixHostLobbyPacks("))
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+
+        app.update();
+        pump_host_lobby(&bridge, &mut surface);
+        let first = shelves(&surface);
+        assert_eq!(first.len(), 1);
+        assert!(first[0].contains("no-such-mod-folder-for-issue-1366"));
+        // The folder is not there, so the panel says WHICH emptiness this is
+        // rather than showing an empty list that reads as "there are no packs".
+        assert!(first[0].contains("scan_error"));
+
+        app.update();
+        pump_host_lobby(&bridge, &mut surface);
+        assert_eq!(shelves(&surface).len(), 1, "an idle shelf pushes nothing");
+    }
+
+    #[test]
+    fn a_host_with_no_shelf_never_offers_one() {
+        // The whole of how the landing's Load-mod-pack row stays inert on a host
+        // started without `--mod-pack-dir`: no resource, no push, and therefore
+        // nothing that tells the surface it can answer the row. Not a flag, and
+        // not a check on the page.
+        let (mut app, bridge) = app_with_lobby();
+        let mut surface = crate::native_host::panes::RecordingSurface::ready();
+        app.update();
+        pump_host_lobby(&bridge, &mut surface);
+        assert!(surface
+            .pushed
+            .iter()
+            .all(|s| !s.contains("__phoenixHostLobbyPacks(")));
+    }
+
+    #[test]
+    fn a_pack_this_host_never_offered_is_refused_and_says_so_on_the_panel() {
+        // The gate, end to end. A name off the bridge is looked up in the shelf
+        // THIS host produced and never joined onto the scanned directory, so
+        // "never offered", "invented by a newer page" and "deleted since the
+        // scan" are one refusal — and it is a refusal the operator can read,
+        // not a silent drop.
+        let (mut app, bridge) = app_with_lobby();
+        app.insert_resource(empty_shelf());
+        let mut surface = crate::native_host::panes::RecordingSurface::ready();
+        surface.queue_record(r#"{"kind":"install_mod_pack","pack":"../../secrets.zip"}"#);
+        pump_host_lobby(&bridge, &mut surface);
+
+        app.update();
+        let shelf = app.world().resource::<packs::ModPackShelfResource>();
+        assert_eq!(shelf.attempted.as_deref(), Some("../../secrets.zip"));
+        assert!(!shelf.accepted);
+        assert_eq!(shelf.findings.len(), 1);
+        assert_eq!(shelf.findings[0].category, "unknown-pack");
+        assert_eq!(shelf.findings[0].severity, "error");
+        assert!(
+            shelf.pending.is_none(),
+            "the latch is answered, not left set"
+        );
+        // …and the answer reaches the surface in the same frame the press did.
+        pump_host_lobby(&bridge, &mut surface);
+        let packs_push = surface
+            .pushed
+            .iter()
+            .rev()
+            .find(|s| s.contains("__phoenixHostLobbyPacks("))
+            .expect("the panel is told what happened");
+        assert!(packs_push.contains("unknown-pack"));
+        assert!(packs_push.contains(r#""accepted":false"#));
+    }
+
+    #[test]
+    fn a_pack_chosen_on_a_host_with_no_shelf_is_dropped_rather_than_panicking() {
+        // The resource is `Option` in the drain for the reason every other one
+        // is: a bundle can be newer than the binary serving it, and a record for
+        // a feature this host was not started with must be a line in the log
+        // rather than a missing-resource panic on the simulation's own thread.
+        let (mut app, bridge) = app_with_lobby();
+        let mut surface = crate::native_host::panes::RecordingSurface::ready();
+        surface.queue_record(r#"{"kind":"install_mod_pack","pack":"anything.zip"}"#);
+        pump_host_lobby(&bridge, &mut surface);
+        app.update();
+        assert!(inbound(&mut app).is_empty());
+        assert!(exits(&mut app).is_empty());
+    }
+
+    #[test]
+    fn choosing_a_pack_is_not_a_participants_command_and_never_becomes_one() {
+        // The surface holds no session token. An install rearranges this host's
+        // own content overlay, exactly as a layout press rearranges its own
+        // screens — it is not something a participant may say, and nothing here
+        // may quietly turn it into one.
+        let (mut app, bridge) = app_with_lobby();
+        app.insert_resource(empty_shelf());
+        let mut surface = crate::native_host::panes::RecordingSurface::ready();
+        surface.queue_record(r#"{"kind":"install_mod_pack","pack":"thin-margin.zip"}"#);
+        pump_host_lobby(&bridge, &mut surface);
+        app.update();
+        assert!(inbound(&mut app).is_empty());
+    }
+
     #[test]
     fn a_composition_with_no_force_start_latch_ignores_the_press_rather_than_panicking() {
         // `app_with_lobby` is deliberately bare: the resource is `Option` in the
@@ -1099,6 +1631,108 @@ mod tests {
         let (mut app, bridge) = app_with_lobby();
         let mut surface = crate::native_host::panes::RecordingSurface::ready();
         surface.queue_record(r#"{"kind":"force_start"}"#);
+        pump_host_lobby(&bridge, &mut surface);
+        app.update();
+    }
+
+    /// The primary window's mode, read the way `bridge_display`'s own tests
+    /// read it — by the entity the fixture spawned, so a second window arriving
+    /// later could never make this ambiguous.
+    fn window_mode(app: &App, window: Entity) -> bevy::window::WindowMode {
+        app.world()
+            .entity(window)
+            .get::<bevy::window::Window>()
+            .unwrap()
+            .mode
+    }
+
+    #[test]
+    fn the_fullscreen_control_moves_the_primary_window_and_moves_it_back() {
+        // Issue #1367, and the half `fullscreen.rs`'s unit tests cannot reach:
+        // those prove what the two pure functions DECIDE, and this proves the
+        // wiring around them — the record latches in `PreUpdate`, and
+        // `apply_window_mode_toggle` spends the latch on the primary window in
+        // `Update` of the SAME frame. Without it, deleting the dispatcher's arm
+        // or dropping the applier out of `HostLobbyPlugin`'s chain leaves the
+        // whole suite green and the answer to "does the window actually move?"
+        // written down nowhere.
+        use bevy::window::{MonitorSelection, PrimaryWindow, Window, WindowMode};
+
+        let (mut app, bridge) = app_with_lobby();
+        let window = app
+            .world_mut()
+            .spawn((Window::default(), PrimaryWindow))
+            .id();
+        assert_eq!(window_mode(&app, window), WindowMode::Windowed);
+
+        let mut surface = crate::native_host::panes::RecordingSurface::ready();
+        surface.queue_record(r#"{"kind":"toggle_fullscreen"}"#);
+        pump_host_lobby(&bridge, &mut surface);
+
+        // ONE frame: the drain latches in `PreUpdate` and the applier spends it
+        // in `Update`, so an operator's press is answered in the frame it
+        // arrived rather than the next one.
+        app.update();
+        assert_eq!(
+            window_mode(&app, window),
+            // `Current` because nothing has assigned this window a display:
+            // the pure functions' own tests say why that is the only honest
+            // answer, and this says the applier asks them.
+            WindowMode::BorderlessFullscreen(MonitorSelection::Current)
+        );
+        assert!(
+            !app.world()
+                .resource::<fullscreen::WindowModeToggle>()
+                .pending,
+            "the frame that applies a press clears the latch, or the window would flip again"
+        );
+        assert!(
+            inbound(&mut app).is_empty(),
+            "a window mode is this host's own, never a participant's command"
+        );
+
+        // And back, which is the whole control: a press is a TOGGLE, and the
+        // second one has to read the mode the first one wrote.
+        surface.queue_record(r#"{"kind":"toggle_fullscreen"}"#);
+        pump_host_lobby(&bridge, &mut surface);
+        app.update();
+        assert_eq!(window_mode(&app, window), WindowMode::Windowed);
+    }
+
+    #[test]
+    fn a_host_with_no_primary_window_drops_the_fullscreen_press_rather_than_panicking() {
+        // The sibling of the force-start case above, and `app_with_lobby` is
+        // bare in the same way: a delivery-only or headless composition carries
+        // the lobby surface and no window at all, so the applier's window query
+        // matches nothing every time it runs. That is one warning, not a panic
+        // — and the latch is spent either way, because a press held until the
+        // day a window appeared would be a control acting minutes after it was
+        // pressed.
+        let (mut app, bridge) = app_with_lobby();
+        let mut surface = crate::native_host::panes::RecordingSurface::ready();
+        surface.queue_record(r#"{"kind":"toggle_fullscreen"}"#);
+        pump_host_lobby(&bridge, &mut surface);
+        app.update();
+        assert!(
+            !app.world()
+                .resource::<fullscreen::WindowModeToggle>()
+                .pending
+        );
+    }
+
+    #[test]
+    fn a_composition_with_no_window_mode_latch_ignores_the_press_rather_than_panicking() {
+        // The drain's OTHER guard: `window_mode` is `Option<ResMut<_>>` there
+        // for the reason `force_start` is, and while `HostLobbyPlugin` always
+        // inserts the latch today, the arm that answers its absence is reached
+        // by any composition that runs `drain_surface_records` without it. A
+        // dispatcher that panicked on a record it could not answer would take
+        // every other record in the same batch down with it.
+        let (mut app, bridge) = app_with_lobby();
+        app.world_mut()
+            .remove_resource::<fullscreen::WindowModeToggle>();
+        let mut surface = crate::native_host::panes::RecordingSurface::ready();
+        surface.queue_record(r#"{"kind":"toggle_fullscreen"}"#);
         pump_host_lobby(&bridge, &mut surface);
         app.update();
     }

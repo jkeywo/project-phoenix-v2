@@ -425,6 +425,12 @@ const SURFACES = [
   path.join(GUI, 'host-lobby.css'),
   path.join(GUI, 'host-qr.css'),
   path.join(GUI, 'host-scenarios.css'),
+  // gui/native-settings.css joins in the slice that created it (issue #1367),
+  // by the same rule gui/host-landing.css did in #1360: a host stylesheet that
+  // arrives unlisted switches this rule off on the newest surface in the fleet,
+  // and a sheet written against the vocabulary from its first line costs
+  // nothing to enforce. No allowlist entry, and there must never be one.
+  path.join(GUI, 'native-settings.css'),
   path.join(REPO_ROOT, 'client.html'),
   path.join(REPO_ROOT, 'server.html'),
 ];

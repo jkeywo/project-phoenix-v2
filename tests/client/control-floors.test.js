@@ -440,7 +440,7 @@ describe('every looping animation respects reduced motion', () => {
 // ── 4. Focus ────────────────────────────────────────────────────────────────
 
 /**
- * The HOST surfaces: the four sheets that dress the operator's screens.
+ * The HOST surfaces: the five sheets that dress the operator's screens.
  *
  * They are here rather than in TOUCH_SURFACES because a keyboard is not an
  * input device you can opt out of the way a television opts out of a thumb.
@@ -450,9 +450,17 @@ describe('every looping animation respects reduced motion', () => {
  *
  * These are also the sheets that CUT their controls: the fleet's panels are
  * chamfered with `clip-path`, which is the whole reason this floor exists.
+ *
+ * The glob takes `native-` as well as `host-` (issue #1367). An operator sheet
+ * is one by what it dresses, not by what it is called: `gui/native-settings.css`
+ * paints the native viewscreen's settings overlay, draws two control families
+ * and clips its own panel to a chamfer. A prefix list that named only the
+ * surfaces which existed when it was written is how #1358 shipped a clipped
+ * ring in the first place, so this reads the directory instead — and the
+ * sentinel below says out loud that it found some.
  */
 const FOCUS_SURFACES = fs.readdirSync(GUI)
-  .filter((f) => /^host-.*\.css$/.test(f))
+  .filter((f) => /^(?:host|native)-.*\.css$/.test(f))
   .sort()
   .map((f) => path.join(GUI, f));
 

@@ -14,11 +14,16 @@
  * bites a sheet moved out of an inline <style>, and gui/host-scenarios.css
  * records it for the same image.
  *
- * The settings cog is a host PAGE control: `position: fixed` at z-index 210,
- * above this panel's 205, so it is already on top of the landing and the
- * landing draws none of its own — a second one would be two controls
- * disagreeing about which is open. What the landing does NOT do is reserve a
- * keep-out for it the way `#world-list` does in `gui/host-scenarios.css`. The
+ * The settings cog belongs to the settings OVERLAY, not to the landing:
+ * `gui/settings-overlay-kit.js` find-or-creates it beside the modal it opens,
+ * so it exists exactly where an overlay has been mounted — `#server-settings-btn`
+ * on the host page (issue #939) and `#native-settings-btn` on the native
+ * viewscreen (issue #1367). Both are `position: fixed` above this panel's 205,
+ * so both are already on top of the landing, in the corner the design draws the
+ * cog in, and the landing draws none of its own — a second one would be two
+ * controls disagreeing about which panel is open. What the landing does NOT
+ * do is reserve a keep-out for it the way `#world-list` does in
+ * `gui/host-scenarios.css`. The
  * cog's corner falls inside `.landing-rail`, and everything a host reads is
  * already clear of it by layout: the rail keeps its stamp at the far end and
  * `.landing-stage` opens at `top: 88px` (64px when the rail is a top bar),
@@ -27,7 +32,8 @@
  * declared padding proves nothing about a rect. `--settings-cog-keepout` is
  * still named once, as the floor under the narrow bar's left inset, and always
  * WITH a fallback: that is this sheet saying the property may legitimately be
- * absent, as it is on the native lobby surface, which has no cog at all.
+ * absent, as it was on the native lobby surface until #1367 mounted a cog
+ * there.
  *
  * ── z-index 205 ────────────────────────────────────────────────────────────
  *
@@ -89,12 +95,41 @@
  *                                rung and inventing one is #1357's business,
  *                                not this slice's.
  *
+ *   #6c1a14 danger lit fill  -> --fire-dim. The canvas draws it as the danger
+ *                                control's resting border, but a boundary is
+ *                                the one thing it cannot be here: 1.4.11 reads
+ *                                it against the panel fill (1.68:1) and against
+ *                                the button's own --fire-deep (1.56:1), so the
+ *                                confirmation's irreversible control would have
+ *                                no edge at all. It is the fire quad's LIT fill
+ *                                — the rung --cyan-dim occupies for the cyan
+ *                                CTA's hover — and that is where it is used.
+ *   #e14330 danger fore      -> --fire       (the fire quad's foreground) — and
+ *                                its BOUNDARY too, which is the accent-pair
+ *                                rule below read one column across from cyan,
+ *                                where the same value is both. 5.03:1 on the
+ *                                panel fill, 4.67:1 on --fire-deep.
+ *   #170a09 danger ground    -> --fire-deep. No rung sits at that value, and
+ *                                #1357's table does not list it. It is picked
+ *                                by the table's PAIR RULE for an accent quad —
+ *                                resting fill `-deep`, lit or hovered fill
+ *                                `-dim`, boundary, foreground — read across
+ *                                from cyan, which is where that rule is
+ *                                written down.
+ *
  * Type: the canvas's 11px goes to --text-xs, 13px to --text-md, 15px to
  * --text-lg and 17px to --text-xl (the ramp has no 17 and the host surface is
  * a television across a room, so it rounds UP) — and, since issue #1364, the
- * join field's 22px to --text-2xl by the same rule. The 32px wordmark keeps its
- * viewport scaling with ramp rungs at the ends of the clamp, which is the form
- * #1357's table asks for rather than collapsing it to one fixed rung.
+ * join field's 22px to --text-2xl by the same rule. The 12.5px confirmation
+ * body and the 14px call to action (issue #1365) round up the same way, to
+ * --text-md and --text-lg. The 32px wordmark keeps its viewport scaling with
+ * ramp rungs at the ends of the clamp, which is the form #1357's table asks for
+ * rather than collapsing it to one fixed rung.
+ *
+ * Tracking: the canvas's 0.24em and 0.30em have no rung between
+ * --tracking-wide (0.18em) and --tracking-widest (0.32em). They take the
+ * nearer of the two rather than growing a ramp this slice has no mandate to
+ * extend.
  *
  * This sheet is in SURFACES in tests/client/design-tokens.test.js from the
  * slice that created it, with no KNOWN_LITERALS entry — it is held at zero
@@ -166,11 +201,12 @@
   flex-direction: column;
   align-items: center;
   /* `flex-end` is what clears the settings cog, and there is deliberately no
-     keep-out padding here to go with it: gui/server-settings.js pins
-     #server-settings-btn to the page's top-left corner, which is INSIDE this
-     rail's top — and this rail keeps its one child at the bottom, so nothing
-     of the host's is up there to be painted over. A top reserve would look
-     like the guard and be none: padding above content already pushed to the
+     keep-out padding here to go with it: whichever cog this surface mounts
+     (#server-settings-btn on the page, #native-settings-btn on the native
+     viewscreen) is pinned to a top-left corner INSIDE this rail's top — and
+     this rail keeps its one child at the bottom, so nothing of the host's is up
+     there to be painted over. A top reserve would look like the guard and be
+     none: padding above content already pushed to the
      far end holds nothing. What guards it instead is a measurement —
      tests/smoke/server-settings-cog.spec.js puts the cog's rect against this
      stamp and against the lockup, on a cold load, before anything is clicked. */
@@ -404,6 +440,361 @@
 .landing-mi.inert { border-style: dashed; border-color: var(--edge); }
 .landing-mi.inert .landing-mi-label { color: var(--ink-dim); }
 .landing-mi.inert:hover { transform: none; background: var(--surface-card); border-color: var(--edge); }
+
+/* ── The confirmation stage (issue #1365) ─────────────────────────────── */
+/*
+ * The middle column's other tenant, beside the docked World picker: the stage
+ * a route that cannot be taken back opens INSTEAD of acting. Its words are the
+ * open row's own (`gui/host-landing-view.js`'s `confirm` block), written by the
+ * shared renderer, so nothing about which route this is appears here — only
+ * what a confirmation looks like, and what a DESTRUCTIVE one looks like.
+ *
+ * `display: none` is the markup's, not this sheet's: `renderHostLanding` shows
+ * and hides it, and a rule here would fight the inline style it sets.
+ *
+ * The canvas's panel, mapped by the header's table: the `#0d1016`-at-88% fill
+ * is `--rgb-base` alpha'd (the same translucency `#world-list` takes when it is
+ * docked), the `#262b33`/`#1b1f26` rules are `--edge-faint` because they divide
+ * CONTENT, and `#2a8a96`/`#5fd8e8`/`#0c1a1e` are the accent boundary, the accent
+ * foreground and the resting lit fill — `--cyan`, `--signal`, `--cyan-deep`.
+ * The danger half is the fire family read across the same rule: `#e14330` is
+ * `--fire`, which is this half's foreground AND its boundary the way `--cyan`
+ * is both for the half above; `#6c1a14` is `--fire-dim`, the LIT fill, because
+ * a boundary is the one job that rung cannot do at 1.68:1 (the header's note);
+ * and the canvas's `#170a09` ground is `--fire-deep`, the fire quad's resting
+ * fill (there is no rung at that exact value, and the pair rule in #1357's
+ * table is what picks this one).
+ */
+.landing-confirm {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  background: rgba(var(--rgb-base), 0.88);
+  border: 1px solid var(--edge-faint);
+  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+}
+.landing-confirm-head {
+  padding: 22px 22px 16px;
+  border-bottom: 1px solid var(--edge-faint);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.landing-confirm-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--text-md);
+  line-height: 1;
+  letter-spacing: var(--tracking-widest);
+  text-transform: uppercase;
+  color: var(--signal);
+}
+.landing-confirm.landing-confirm-danger .landing-confirm-title { color: var(--fire); }
+.landing-confirm-rule {
+  height: 1px;
+  background: linear-gradient(to right, var(--cyan), rgba(var(--rgb-cyan), 0.08));
+}
+.landing-confirm.landing-confirm-danger .landing-confirm-rule {
+  background: linear-gradient(to right, var(--fire), rgba(var(--rgb-fire), 0.08));
+}
+
+/* The canvas's `.role` block: a rule down one side and two lines beside it. */
+.landing-confirm-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 18px;
+}
+.landing-confirm-role {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  background: var(--cyan-deep);
+  border-left: 3px solid var(--cyan);
+}
+.landing-confirm.landing-confirm-danger .landing-confirm-role {
+  background: var(--fire-deep);
+  /* The boundary rung again, so the danger half of this stage is the cyan half
+     read one column across rather than two different readings of one table. */
+  border-left-color: var(--fire);
+}
+.landing-confirm-lead {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: var(--text-xs);
+  line-height: 1;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--signal);
+}
+.landing-confirm.landing-confirm-danger .landing-confirm-lead { color: var(--fire); }
+.landing-confirm-note {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--text-md);
+  line-height: 1.5;
+  color: var(--ink-dim);
+}
+
+.landing-confirm-foot {
+  padding: 16px 18px 18px;
+  border-top: 1px solid var(--edge-faint);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.landing-confirm-cancel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 9px 12px;
+  min-height: var(--control-hit-min);
+  background: transparent;
+  /* --edge-strong, not --edge-control: the header's mapping note, and the same
+     measurement the menu entries take — 1.4.11 reads a control boundary
+     against the colour beside it, which here is the panel's own fill. */
+  border: 1px solid var(--edge-strong);
+  color: var(--ink-faint);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: var(--text-xs);
+  line-height: 1;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  transition: color 0.18s, border-color 0.18s;
+  clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px);
+}
+.landing-confirm-cancel:hover { color: var(--signal); border-color: var(--cyan); }
+.landing-confirm-cancel:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 var(--focus-ring-width) var(--focus-ring);
+}
+.landing-confirm-cta {
+  flex: 1;
+  height: 52px;
+  min-height: var(--control-hit-min);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: var(--cyan-deep);
+  border: 1px solid var(--cyan);
+  color: var(--signal);
+  cursor: pointer;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--text-lg);
+  line-height: 1;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  transition: background 0.18s, box-shadow 0.18s;
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+}
+.landing-confirm-cta:hover {
+  background: var(--cyan-dim);
+  box-shadow: 0 0 18px rgba(var(--rgb-signal), 0.22);
+}
+.landing-confirm-cta:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 var(--focus-ring-width) var(--focus-ring);
+}
+.landing-confirm-cta.landing-confirm-danger {
+  background: var(--fire-deep);
+  /* --fire, not --fire-dim: the same 1.4.11 measurement `.landing-confirm-cancel`
+     records beside it in this foot row, and the same answer the cyan CTA above
+     already gives by taking the accent BOUNDARY rung. --fire-dim reads 1.68:1 on
+     the panel fill and 1.56:1 on this button's own --fire-deep, so the one
+     control here that cannot be taken back would be delineated by its text
+     alone; --fire is 5.03:1 and 4.67:1. It is the fire quad's boundary read one
+     column across from cyan, not an invented rung. */
+  border-color: var(--fire);
+  color: var(--fire);
+}
+.landing-confirm-cta.landing-confirm-danger:hover {
+  background: var(--fire-dim);
+  box-shadow: 0 0 18px rgba(var(--rgb-fire), 0.2);
+}
+
+/* ── The mod-pack shelf (issue #1366) ─────────────────────────────────── */
+/*
+ * The middle column's third tenant, beside the docked World picker and the
+ * confirmation. It is drawn on the confirmation's own panel — same fill, same
+ * rules, same foot row, the same two controls — because it IS that panel with a
+ * list in it, and a second set of panel rules would be a second answer to
+ * "what does a landing stage look like".
+ *
+ * `display: none` is the markup's, not this sheet's: `renderHostLanding` shows
+ * and hides it, and a rule here would fight the inline style it sets.
+ *
+ * The values are the canvas's, read through #1357's mapping table. The rows are
+ * its `.row` — `#0b0e14` is the fill one rung under a card, which the ramp holds
+ * as --surface-card, on `#22262d` = --surface-lift as a boundary; the selected
+ * state is the accent pair the whole landing uses (--cyan-deep ground,
+ * --cyan boundary, --signal foreground). The report column's notes are its
+ * `.chip` tones read across: ok is the loaded quad, warn the reloading quad,
+ * bad the fire quad, each as foreground + its own deep rung for the boundary.
+ */
+.landing-packs {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  background: rgba(var(--rgb-base), 0.88);
+  border: 1px solid var(--edge-faint);
+  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+}
+.landing-packs-head {
+  padding: 22px 22px 16px;
+  border-bottom: 1px solid var(--edge-faint);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.landing-packs-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.landing-packs-empty {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--text-md);
+  line-height: 1.6;
+  color: var(--ink-faint);
+}
+.landing-packs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* One archive on the shelf: the canvas's `.row`, with the file name where a
+   scenario row carries its chips. The name is shown as well as the label
+   because a folder is the operator's own filing, and two packs whose labels
+   read alike are told apart by the bytes on disk. */
+.landing-pack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  padding: 14px 16px;
+  min-height: var(--control-hit-min);
+  background: var(--surface-card);
+  border: 1px solid var(--surface-lift);
+  color: var(--ink);
+  font-family: var(--font-display);
+  cursor: pointer;
+  transition: background 0.16s, border-color 0.16s;
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+}
+.landing-pack:hover { background: var(--surface-raised); border-color: var(--edge-bright); }
+.landing-pack:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 var(--focus-ring-width) var(--focus-ring);
+}
+.landing-pack.on { background: var(--cyan-deep); border-color: var(--cyan); }
+.landing-pack-label {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: var(--text-md);
+  line-height: 1.2;
+  letter-spacing: var(--tracking);
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.landing-pack.on .landing-pack-label { color: var(--signal); }
+.landing-pack-file {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  letter-spacing: var(--tracking);
+  color: var(--ink-faint);
+  overflow-wrap: anywhere;
+}
+
+/* The report column: what the last attempt said, what is installed, and which
+   pack won each path two of them carry. One rebuilt list, tone per note. */
+.landing-packs-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.landing-note {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--edge);
+  background: var(--surface-card);
+}
+.landing-note-key {
+  flex: none;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.landing-note-value {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--ink-dim);
+  overflow-wrap: anywhere;
+}
+/* A heading note carries no ground of its own: it is a label over the notes
+   under it, not one of them. */
+.landing-note-head {
+  background: transparent;
+  border-left-color: transparent;
+  padding: 10px 0 2px;
+}
+.landing-note-head .landing-note-value {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.landing-note-ok { border-left-color: var(--loaded); }
+.landing-note-ok .landing-note-key { color: var(--loaded); }
+.landing-note-warn { border-left-color: var(--reloading); }
+.landing-note-warn .landing-note-key { color: var(--reloading); }
+.landing-note-bad { border-left-color: var(--fire); }
+.landing-note-bad .landing-note-key { color: var(--fire); }
+
+/* The install control is the confirmation's CTA; `off` is the canvas's own
+   disabled half of that button, and it is a CLASS rather than the `disabled`
+   attribute for the reason the inert menu entries take `aria-disabled`: a
+   control a keyboard cannot reach is not more honest than one that says it is
+   unavailable. */
+.landing-confirm-cta.off {
+  background: var(--surface-card);
+  border-color: var(--edge-control);
+  color: var(--ink-faint);
+  cursor: default;
+  box-shadow: none;
+}
+.landing-confirm-cta.off:hover {
+  background: var(--surface-card);
+  box-shadow: none;
+}
 
 /* ── Status bar ───────────────────────────────────────────────────────── */
 .landing-statusbar {
@@ -818,10 +1209,11 @@
     gap: 14px;
     /* This edge's own inset, floored at the cog's keep-out rather than reserved
        for it — which is why it has a real fallback where the vertical rail has
-       no padding at all: 16px is what the inset is worth on a surface with no
-       cog, i.e. the native lobby (the optional fallback is this sheet saying
-       the property may legitimately be absent there). 72px on the right is
-       #landing-fullscreen-btn's 46px plus its 16px inset. */
+       no padding at all: 16px is what the inset is worth on a surface that
+       mounts no settings overlay and therefore declares no corner (the optional
+       fallback is this sheet saying the property may legitimately be absent).
+       72px on the right is #landing-fullscreen-btn's 46px plus its 16px
+       inset. */
     padding: 0 72px 0 var(--settings-cog-keepout, 16px);
     border-right: 0;
     border-bottom: 1px solid var(--edge-faint);
@@ -892,7 +1284,10 @@
   .landing-col-ship,
   .landing-logo,
   .landing-mi,
-  .landing-icon-btn {
+  .landing-icon-btn,
+  .landing-pack,
+  .landing-confirm-cancel,
+  .landing-confirm-cta {
     transition: none;
   }
   .landing-mi:hover { transform: none; }

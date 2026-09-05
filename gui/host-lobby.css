@@ -14,11 +14,11 @@
  * keeping its position after the base rule it overrides. So the cascade these
  * rules were written against is unchanged.
  *
- * `--settings-cog-keepout` is server.html's own: the settings cog is a host
- * PAGE control and the keep-out it reserves is that page's geometry. It is
- * referenced here WITH a fallback, which is this sheet saying the property may
- * legitimately be absent - it is, on the native lobby surface, which has no
- * cog to clear.
+ * `--settings-cog-keepout` is the SURFACE's own: each host that mounts a
+ * settings cog declares the corner its cog occupies, and this sheet only floors
+ * a padding at it. It is referenced here WITH a fallback, which is this sheet
+ * saying the property may legitimately be absent - it was, on the native lobby
+ * surface, until issue #1367 mounted a cog there.
  *
  * ── The design (issue #1358, PRD #1355) ────────────────────────────────────
  *
@@ -173,10 +173,11 @@
      and stops clearing it below that, so floor the LEFT edge only — the
      top and right stay on the clamp, which keeps the vertical space for
      the station grid. */
-  /* The fallback is not decoration: `--settings-cog-keepout` is the HOST
-     PAGE's token — the corner its settings cog occupies — and the native
-     lobby surface (issue #1325) has no cog, so on that document the property
-     is legitimately absent and the floor is simply nothing. */
+  /* The fallback is not decoration: `--settings-cog-keepout` is the SURFACE's
+     token — the corner ITS settings cog occupies — and a surface that mounts
+     no settings overlay declares none, so the property is legitimately absent
+     there and the floor is simply nothing. The native lobby was such a surface
+     from #1325 until #1367 gave it a cog of its own. */
   padding-left: max(clamp(1rem, 4vw, 3rem), var(--settings-cog-keepout, 0px));
   box-sizing: border-box;
 }

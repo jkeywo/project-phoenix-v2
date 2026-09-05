@@ -16,11 +16,11 @@
  * lobby document strips them from the markup it borrows, so their rules stay
  * inline in server.html where the only surface that renders them lives.
  *
- * `--settings-cog-keepout` is server.html's own: the settings cog is a host
- * PAGE control and the keep-out it reserves is that page's geometry. It is
- * referenced here WITH a fallback, which is this sheet saying the property may
- * legitimately be absent - it is, on the native lobby surface, which has no cog
- * to clear.
+ * `--settings-cog-keepout` is the SURFACE's own: each host that mounts a
+ * settings cog declares the corner its cog occupies, and this sheet only floors
+ * a padding at it. It is referenced here WITH a fallback, which is this sheet
+ * saying the property may legitimately be absent - it was, on the native lobby
+ * surface, until issue #1367 gave that window a cog to clear.
  *
  * The logo is `../assets/logo.png`, not `assets/logo.png`: a URL in a
  * stylesheet resolves against the STYLESHEET, and this file sits one directory

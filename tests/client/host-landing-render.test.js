@@ -34,8 +34,9 @@ import {
   LANDING_ENTRY_SELECTOR,
   LANDING_ENTRY_ATTR,
   LANDING_DOCKED_CLASS,
+  CONFIRM_DANGER_CLASS,
 } from '../../gui/host-landing-render.js';
-import { landingViewModel } from '../../gui/host-landing-view.js';
+import { CONFIRM_CANCEL_ID, landingViewModel } from '../../gui/host-landing-view.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = fs.readFileSync(path.join(HERE, '../../server.html'), 'utf-8');
@@ -66,10 +67,11 @@ function landingDoc() {
 
 /** A recording hook set — what each surface supplies in its own way. */
 function hooks() {
-  const calls = { pick: [], fullscreen: 0, join: [] };
+  const calls = { pick: [], confirm: [], fullscreen: 0, join: [] };
   return [
     {
       pick: (id) => calls.pick.push(id),
+      confirm: (action) => calls.confirm.push(action),
       toggleFullscreen: () => { calls.fullscreen += 1; },
       submitJoin: (join, typed) => calls.join.push([join.action, typed]),
     },
@@ -97,6 +99,21 @@ function landingInWindow() {
 
 const entries = (doc) => Array.from(doc.querySelectorAll(LANDING_ENTRY_SELECTOR));
 const text = (doc, id) => doc.getElementById(id).textContent;
+
+/**
+ * The panels BORROWED into the middle column — which is not the same thing as
+ * that column's children.
+ *
+ * The column has tenants of its own since issues #1365 and #1366:
+ * `#landing-confirm` and `#landing-packs` are markup that LIVES there and is
+ * shown or hidden in place, never moved. So "one open stage at a time" is a
+ * claim about the panels this renderer MOVES, and it is asked the way
+ * `undockLandingPanels` asks it — by the docked class — rather than by counting
+ * everything parented in the column.
+ */
+const docked = (doc) => Array.from(
+  doc.getElementById('landing-mid').querySelectorAll(`.${LANDING_DOCKED_CLASS}`),
+);
 
 describe('renderHostLanding — the idle landing', () => {
   it('writes the identity, the platform and the build into the document', () => {
@@ -236,7 +253,12 @@ describe('renderHostLanding — New Game', () => {
     const picker = doc.getElementById('scenario-panel');
     renderHostLanding(doc, openVm(), t);
     expect(doc.getElementById('scenario-panel')).toBe(picker);
-    expect(doc.getElementById('landing-mid').children).toHaveLength(1);
+    // One picker in the column, however often the render runs. Counted as
+    // pickers rather than as children because the column has a second, static
+    // tenant now — the confirmation stage (issue #1365) — which lives there
+    // whether or not it is on screen.
+    expect(doc.getElementById('landing-mid').querySelectorAll('#scenario-panel'))
+      .toHaveLength(1);
   });
 
   it('leaves the picker alone when the surface says it owns it elsewhere', () => {
@@ -342,6 +364,341 @@ describe('renderHostLanding — one rung deeper (issue #1362)', () => {
   });
 });
 
+describe('renderHostLanding — the confirmation stage (issue #1365)', () => {
+  // Exit to Desktop is the one route on the menu an operator cannot take back,
+  // so pressing the entry opens a panel that says what is about to happen and
+  // asks once. Everything below is written from `vm.confirm` — the OPEN ROW's
+  // own block — so this renderer draws confirmations and knows nothing about
+  // quitting.
+
+  const NATIVE = { platform: 'native', build: '0.1.0' };
+  const askingVm = () => landingViewModel({ ...NATIVE, openEntryId: 'exit_desktop' });
+  const el = (doc, id) => doc.getElementById(id);
+
+  it('is off screen and wordless until the route is open', () => {
+    const doc = landingDoc();
+    renderHostLanding(doc, landingViewModel(), t);
+    expect(el(doc, 'landing-confirm').style.display).toBe('none');
+    expect(text(doc, 'landing-confirm-title')).toBe('');
+    expect(text(doc, 'landing-confirm-cta')).toBe('');
+  });
+
+  it('writes the open row own words when it opens', () => {
+    const doc = landingDoc();
+    renderHostLanding(doc, askingVm(), t);
+    expect(el(doc, 'landing-confirm').style.display).toBe('');
+    expect(text(doc, 'landing-confirm-title')).toBe('server.landing.exit_confirm_title');
+    expect(text(doc, 'landing-confirm-eyebrow')).toBe('server.landing.exit_confirm_eyebrow');
+    expect(text(doc, 'landing-confirm-lead')).toBe('server.landing.exit_confirm_lead');
+    expect(text(doc, 'landing-confirm-note')).toBe('server.landing.exit_confirm_note');
+    expect(text(doc, 'landing-confirm-cta')).toBe('server.landing.exit_confirm_cta');
+    expect(text(doc, 'landing-confirm-cancel')).toBe(CONFIRM_CANCEL_ID);
+  });
+
+  it('marks a destructive confirmation from the row tone, not from its id', () => {
+    const doc = landingDoc();
+    renderHostLanding(doc, askingVm(), t);
+    expect(el(doc, 'landing-confirm').classList.contains(CONFIRM_DANGER_CLASS)).toBe(true);
+    expect(el(doc, 'landing-confirm-cta').classList.contains(CONFIRM_DANGER_CLASS)).toBe(true);
+
+    // A confirmation that named no tone is an ordinary one, and is drawn as
+    // one — proving the class follows `tone` rather than "there is a confirm".
+    const quiet = [{
+      id: 'q',
+      labelId: 'x.q',
+      descId: 'x.q_desc',
+      stage: 'q-stage',
+      confirm: { titleId: 'x.q.t', ctaId: 'x.q.c', action: 'q' },
+    }];
+    renderHostLanding(doc, landingViewModel({ entries: quiet, openEntryId: 'q' }), t);
+    expect(el(doc, 'landing-confirm').classList.contains(CONFIRM_DANGER_CLASS)).toBe(false);
+  });
+
+  it('clears itself when the route closes, rather than keeping last words', () => {
+    // A hidden panel still holding the previous route's sentence shows it for
+    // a frame the next time it opens.
+    const doc = landingDoc();
+    renderHostLanding(doc, askingVm(), t);
+    renderHostLanding(doc, landingViewModel(NATIVE), t);
+    expect(el(doc, 'landing-confirm').style.display).toBe('none');
+    expect(text(doc, 'landing-confirm-title')).toBe('');
+    expect(text(doc, 'landing-confirm-note')).toBe('');
+    expect(el(doc, 'landing-confirm').classList.contains(CONFIRM_DANGER_CLASS)).toBe(false);
+  });
+
+  it('is not drawn by the stage that opens the World picker', () => {
+    const doc = landingDoc();
+    renderHostLanding(doc, landingViewModel({ openEntryId: 'new_game' }), t);
+    expect(el(doc, 'landing-confirm').style.display).toBe('none');
+    expect(doc.getElementById('scenario-panel').parentElement)
+      .toBe(doc.getElementById('landing-mid'));
+  });
+
+  it('carries the row verb through the hook, and judges nothing itself', () => {
+    const doc = landingDoc();
+    const [h, calls] = hooks();
+    renderHostLanding(doc, askingVm(), t, h);
+    el(doc, 'landing-confirm-cta').click();
+    expect(calls.confirm).toEqual(['exit_desktop']);
+    // Never through `pick`: a confirmed verb is not a menu press.
+    expect(calls.pick).toEqual([]);
+  });
+
+  it('binds the confirm control once per render, not once more each time', () => {
+    // The same failure the fullscreen control has: these are STATIC markup and
+    // this function runs on every click, so an accumulated listener would send
+    // one quit per render.
+    const doc = landingDoc();
+    const [h, calls] = hooks();
+    renderHostLanding(doc, askingVm(), t, h);
+    renderHostLanding(doc, askingVm(), t, h);
+    renderHostLanding(doc, askingVm(), t, h);
+    el(doc, 'landing-confirm-cta').click();
+    expect(calls.confirm).toEqual(['exit_desktop']);
+  });
+
+  it('closes through the entry own toggle rather than a second way out', () => {
+    // Cancel reports as a press on the open entry, which is exactly what a
+    // second click on the menu row is — so `nextOpenEntry` closes it, and
+    // there is one rule for "this stage is shut" instead of two.
+    const doc = landingDoc();
+    const [h, calls] = hooks();
+    renderHostLanding(doc, askingVm(), t, h);
+    el(doc, 'landing-confirm-cancel').click();
+    expect(calls.pick).toEqual(['exit_desktop']);
+    expect(calls.confirm).toEqual([]);
+  });
+
+  it('leaves both controls inert while nothing is open', () => {
+    const doc = landingDoc();
+    const [h, calls] = hooks();
+    renderHostLanding(doc, landingViewModel(), t, h);
+    el(doc, 'landing-confirm-cta').click();
+    el(doc, 'landing-confirm-cancel').click();
+    expect(calls.confirm).toEqual([]);
+    expect(calls.pick).toEqual([]);
+  });
+
+  it('renders the asking stage with no hooks at all, and does nothing', () => {
+    // The host PAGE supplies no `confirm` hook, deliberately: a browser tab
+    // cannot quit an application. The control must render and be inert rather
+    // than throw out of a click handler.
+    const doc = landingDoc();
+    renderHostLanding(doc, askingVm(), t);
+    expect(() => {
+      el(doc, 'landing-confirm-cta').click();
+      el(doc, 'landing-confirm-cancel').click();
+    }).not.toThrow();
+  });
+});
+
+describe('renderHostLanding — the mod-pack shelf (issue #1366)', () => {
+  // The third tenant of the middle column, and the same claim the confirmation
+  // stage makes: everything drawn comes off `vm.packs`, which the view model
+  // composes from the OPEN ROW — so this renderer knows there is such a thing
+  // as a shelf and knows nothing about Load mod pack.
+  const el = (doc, id) => doc.getElementById(id);
+  const SHELF = {
+    dir: 'mods',
+    offered: [
+      { file: 'thin-margin.zip', label: 'thin-margin' },
+      { file: 'borrowed-sun.zip', label: 'borrowed-sun' },
+    ],
+    installed: [],
+    attempted: null,
+    accepted: false,
+    findings: [],
+    conflicts: [],
+  };
+  /** What `host_lobby_link.js` passes on a native host given --mod-pack-dir. */
+  const shelfVm = (extra) => landingViewModel(Object.assign({
+    platform: 'native',
+    build: '0.1.0',
+    provides: ['packs'],
+    openEntryId: 'load_mod_pack',
+    packs: SHELF,
+  }, extra || {}));
+  const rows = (doc) => Array.from(doc.querySelectorAll('.landing-pack'));
+  const notes = (doc) => Array.from(doc.querySelectorAll('.landing-note'))
+    .map((n) => n.textContent);
+
+  it('is off screen and wordless until the route is open', () => {
+    const doc = landingDoc();
+    renderHostLanding(doc, landingViewModel(), t);
+    expect(el(doc, 'landing-packs').style.display).toBe('none');
+    expect(text(doc, 'landing-packs-title')).toBe('');
+    expect(text(doc, 'landing-packs-cta')).toBe('');
+    expect(rows(doc)).toEqual([]);
+  });
+
+  it('lists the scanned archives and names the folder they came from', () => {
+    const doc = landingDoc();
+    renderHostLanding(doc, shelfVm(), t);
+    expect(el(doc, 'landing-packs').style.display).toBe('');
+    expect(text(doc, 'landing-packs-title')).toBe('server.landing.packs.title');
+    expect(text(doc, 'landing-packs-folder'))
+      .toBe('server.landing.packs.folder:{"dir":"mods"}');
+    expect(rows(doc).map((r) => r.getAttribute('data-landing-pack')))
+      .toEqual(['thin-margin.zip', 'borrowed-sun.zip']);
+    expect(rows(doc)[0].querySelector('.landing-pack-label').textContent)
+      .toBe('thin-margin');
+    // The file name is shown as well as the label: a folder is the operator's
+    // own filing, and two packs whose labels read alike are told apart by the
+    // bytes on disk.
+    expect(rows(doc)[0].querySelector('.landing-pack-file').textContent)
+      .toBe('thin-margin.zip');
+  });
+
+  it('says which emptiness an empty shelf is', () => {
+    const doc = landingDoc();
+    renderHostLanding(doc, shelfVm({
+      packs: { ...SHELF, offered: [] },
+    }), t);
+    expect(text(doc, 'landing-packs-empty')).toBe('server.landing.packs.empty');
+    renderHostLanding(doc, shelfVm({
+      packs: { ...SHELF, offered: [], scan_error: 'mods: not found' },
+    }), t);
+    // The id says which emptiness; the host's own sentence names the path.
+    expect(text(doc, 'landing-packs-empty'))
+      .toBe('server.landing.packs.scan_failed mods: not found');
+    // …and it goes away entirely the moment there is something to list.
+    renderHostLanding(doc, shelfVm(), t);
+    expect(el(doc, 'landing-packs-empty').style.display).toBe('none');
+  });
+
+  it('highlights through the hook and installs through the other one', () => {
+    // Two hooks because they cost different things: a highlight is this
+    // surface's own memory, an install reads a disk and changes the catalogue
+    // every phone in the room is looking at.
+    const doc = landingDoc();
+    const calls = { pickPack: [], installPack: [], pick: [] };
+    const h = {
+      pick: (id) => calls.pick.push(id),
+      pickPack: (file) => calls.pickPack.push(file),
+      installPack: (action, file) => calls.installPack.push([action, file]),
+    };
+    renderHostLanding(doc, shelfVm(), t, h);
+    doc.querySelector('[data-landing-pack="borrowed-sun.zip"]').click();
+    expect(calls.pickPack).toEqual(['borrowed-sun.zip']);
+    // Nothing is chosen yet as far as this render is concerned, so the install
+    // control is dead — that decision is the view model's, not this file's.
+    el(doc, 'landing-packs-cta').click();
+    expect(calls.installPack).toEqual([]);
+    expect(el(doc, 'landing-packs-cta').getAttribute('aria-disabled')).toBe('true');
+
+    renderHostLanding(doc, shelfVm({ chosenPack: 'borrowed-sun.zip' }), t, h);
+    expect(el(doc, 'landing-packs-cta').getAttribute('aria-disabled')).toBe('false');
+    expect(rows(doc)[1].classList.contains('on')).toBe(true);
+    expect(rows(doc)[1].getAttribute('aria-pressed')).toBe('true');
+    el(doc, 'landing-packs-cta').click();
+    // The ROW's verb, carried verbatim: this renderer never learns its name.
+    expect(calls.installPack).toEqual([['install_mod_pack', 'borrowed-sun.zip']]);
+  });
+
+  it('binds the install control once per render, not once more each time', () => {
+    // Static markup, re-rendered on every press: an accumulated listener would
+    // install one pack per render.
+    const doc = landingDoc();
+    const calls = [];
+    const h = { installPack: (action, file) => calls.push(file) };
+    const vm = () => shelfVm({ chosenPack: 'thin-margin.zip' });
+    renderHostLanding(doc, vm(), t, h);
+    renderHostLanding(doc, vm(), t, h);
+    renderHostLanding(doc, vm(), t, h);
+    el(doc, 'landing-packs-cta').click();
+    expect(calls).toEqual(['thin-margin.zip']);
+  });
+
+  it('closes through the entry own toggle rather than a second way out', () => {
+    const doc = landingDoc();
+    const calls = [];
+    renderHostLanding(doc, shelfVm(), t, { pick: (id) => calls.push(id) });
+    el(doc, 'landing-packs-cancel').click();
+    expect(calls).toEqual(['load_mod_pack']);
+  });
+
+  it('draws what a refusal said, so a failed pack says what is wrong', () => {
+    const doc = landingDoc();
+    renderHostLanding(doc, shelfVm({
+      packs: {
+        ...SHELF,
+        attempted: 'broken.zip',
+        accepted: false,
+        findings: [{
+          severity: 'error',
+          category: 'missing-manifest',
+          message: 'mod pack is missing its required scenarios.toml manifest',
+          file: 'scenarios.toml',
+        }],
+      },
+    }), t);
+    const drawn = notes(doc);
+    expect(drawn[0]).toBe('server.landing.packs.refused:{"pack":"broken.zip"}');
+    expect(drawn[1]).toContain('server.landing.packs.severity_error');
+    expect(drawn[1]).toContain('scenarios.toml');
+    expect(drawn[1]).toContain('missing its required scenarios.toml manifest');
+    expect(doc.querySelector('.landing-note-bad')).not.toBe(null);
+  });
+
+  it('names which pack won a path two of them carry', () => {
+    const doc = landingDoc();
+    renderHostLanding(doc, shelfVm({
+      packs: {
+        ...SHELF,
+        installed: [
+          { id: 'thin-margin', name: 'Thin Margin', version: '1.2' },
+          { id: 'borrowed-sun', name: 'Borrowed Sun', version: '0.9' },
+        ],
+        conflicts: [{
+          path: 'assets/entities/alliance_destroyer.toml',
+          winner: 'borrowed-sun',
+          losers: ['thin-margin'],
+        }],
+      },
+    }), t);
+    const drawn = notes(doc);
+    expect(drawn).toContain('server.landing.packs.installed_heading');
+    expect(drawn).toContain('server.landing.packs.conflict_heading');
+    expect(drawn.some((n) => n.includes('"winner":"borrowed-sun"')
+      && n.includes('"losers":"thin-margin"'))).toBe(true);
+  });
+
+  it('clears itself when the route closes, rather than keeping last words', () => {
+    const doc = landingDoc();
+    renderHostLanding(doc, shelfVm({
+      packs: { ...SHELF, attempted: 'broken.zip', accepted: false },
+    }), t);
+    expect(notes(doc).length).toBe(1);
+    renderHostLanding(doc, landingViewModel({ platform: 'native' }), t);
+    expect(el(doc, 'landing-packs').style.display).toBe('none');
+    expect(text(doc, 'landing-packs-title')).toBe('');
+    expect(rows(doc)).toEqual([]);
+    expect(notes(doc)).toEqual([]);
+  });
+
+  it('renders the shelf with no hooks at all, and does nothing', () => {
+    const doc = landingDoc();
+    renderHostLanding(doc, shelfVm({ chosenPack: 'thin-margin.zip' }), t);
+    expect(() => {
+      el(doc, 'landing-packs-cta').click();
+      el(doc, 'landing-packs-cancel').click();
+      rows(doc)[0].click();
+    }).not.toThrow();
+  });
+
+  it('survives a document that carries no shelf markup at all', () => {
+    // The two-document contract: the shelf's panel is one more branch whose
+    // element may be absent, and it must do nothing rather than abandon the
+    // rest of the render half-written.
+    const doc = landingDoc();
+    doc.getElementById('landing-packs').remove();
+    expect(() => renderHostLanding(doc, shelfVm(), t)).not.toThrow();
+    // …and the writes AFTER it still happened.
+    expect(text(doc, 'landing-title')).toBe('server.landing.title');
+    expect(doc.getElementById('scenario-panel').parentElement).toBe(doc.body);
+  });
+});
+
 describe('undockLandingPanels', () => {
   it('returns the picker to the body whatever the landing is doing', () => {
     // The page-lifecycle escape hatch: driveWorldLoad hides the landing
@@ -399,14 +756,14 @@ describe('renderHostLanding — Load Game (issue #1363)', () => {
     const mid = doc.getElementById('landing-mid');
     renderHostLanding(doc, newVm(), t);
     renderHostLanding(doc, loadVm(), t);
-    expect(mid.children).toHaveLength(1);
+    expect(docked(doc)).toHaveLength(1);
     expect(doc.getElementById('save-slots-panel').parentElement).toBe(mid);
     expect(doc.getElementById('scenario-panel').parentElement).toBe(doc.body);
     expect(doc.getElementById('scenario-panel').classList.contains(LANDING_DOCKED_CLASS))
       .toBe(false);
 
     renderHostLanding(doc, newVm(), t);
-    expect(mid.children).toHaveLength(1);
+    expect(docked(doc)).toHaveLength(1);
     expect(doc.getElementById('scenario-panel').parentElement).toBe(mid);
     expect(doc.getElementById('save-slots-panel').parentElement).toBe(doc.body);
   });
@@ -426,7 +783,7 @@ describe('renderHostLanding — Load Game (issue #1363)', () => {
     const saves = doc.getElementById('save-slots-panel');
     renderHostLanding(doc, loadVm(), t);
     expect(doc.getElementById('save-slots-panel')).toBe(saves);
-    expect(doc.getElementById('landing-mid').children).toHaveLength(1);
+    expect(docked(doc)).toHaveLength(1);
   });
 
   it('does nothing on a document that carries no catalogue at all', () => {
@@ -437,7 +794,7 @@ describe('renderHostLanding — Load Game (issue #1363)', () => {
     doc.getElementById('save-slots-panel').remove();
     expect(() => renderHostLanding(doc, loadVm(), t)).not.toThrow();
     expect(doc.getElementById('landing-panel').dataset.landingStage).toBe('save-catalogue');
-    expect(doc.getElementById('landing-mid').children).toHaveLength(0);
+    expect(docked(doc)).toHaveLength(0);
   });
 });
 
@@ -513,6 +870,11 @@ describe('a deliberately incomplete document', () => {
     'landing-logo', 'landing-status-platform', 'landing-status-session',
     'landing-status-build', 'landing-fullscreen-btn', 'landing-menu',
     'landing-mid', 'scenario-panel',
+    // The confirmation stage (issue #1365), which the renderer writes into by
+    // id like everything above it and must therefore survive the absence of.
+    'landing-confirm', 'landing-confirm-title', 'landing-confirm-eyebrow',
+    'landing-confirm-lead', 'landing-confirm-note', 'landing-confirm-cancel',
+    'landing-confirm-cta',
   ];
 
   for (const id of TOUCHED) {
@@ -522,6 +884,13 @@ describe('a deliberately incomplete document', () => {
       expect(() => {
         renderHostLanding(doc, landingViewModel({ openEntryId: 'new_game' }), t, {});
         renderHostLanding(doc, landingViewModel(), t, {});
+        // …and on the stage that writes into the ids this case removes.
+        renderHostLanding(
+          doc,
+          landingViewModel({ platform: 'native', openEntryId: 'exit_desktop' }),
+          t,
+          {},
+        );
       }).not.toThrow();
     });
   }
@@ -603,8 +972,12 @@ describe('renderHostLanding — the native viewscreen (issue #1361)', () => {
     expect(ids).not.toContain('connect_host');
     // Load Game IS still here, and inert: `platforms` says what a surface does
     // not offer, `stagePlatforms` says what it cannot open yet, and #1363's
-    // AC5 is the second of those. See the row, and the test below.
-    expect(ids).toEqual(['new_game', 'load_game', 'join_peer', 'load_mod_pack']);
+    // AC5 is the second of those. See the row, and the test below. Exit to
+    // Desktop is the mirror image and native-only, so this menu is longer than
+    // the web one by exactly that row (issue #1365).
+    expect(ids).toEqual([
+      'new_game', 'load_game', 'join_peer', 'load_mod_pack', 'exit_desktop',
+    ]);
     // …and the same document on the web surface still offers it, so this is a
     // curated menu and not a lost row.
     const web = landingDoc();
@@ -613,11 +986,18 @@ describe('renderHostLanding — the native viewscreen (issue #1361)', () => {
       .toContain('connect_host');
   });
 
-  it('does not offer Exit to Desktop either, which is #1365 and not built here', () => {
+  it('offers Exit to Desktop here and nowhere else (issue #1365)', () => {
+    // The mirror image of the case above, on the same mechanism: a browser tab
+    // cannot quit an application, so the row is `platforms: ['native']` and no
+    // build check appears in this renderer or in either document.
     const doc = nativeLandingDoc();
     renderHostLanding(doc, nativeVm(), t, {}, { ownPanelVisibility: true });
     expect(entries(doc).map((el) => el.getAttribute(LANDING_ENTRY_ATTR)))
-      .not.toContain('exit');
+      .toContain('exit_desktop');
+    const web = landingDoc();
+    renderHostLanding(web, landingViewModel(), t, {});
+    expect(entries(web).map((el) => el.getAttribute(LANDING_ENTRY_ATTR)))
+      .not.toContain('exit_desktop');
   });
 
   it('shows the panel the first push reveals it with, and hides it when dismissed', () => {
@@ -664,7 +1044,7 @@ describe('renderHostLanding — the native viewscreen (issue #1361)', () => {
   });
 
   it('takes the picker back out of a landing it is about to hide', () => {
-    // The bug `undockPicker` exists for, reached the other way: a `display` set
+    // The bug `undockLandingPanels` exists for, reached the other way: a `display` set
     // on a node parented inside a hidden ancestor shows nothing at all, so a
     // dismissed landing must not still be holding the picker.
     const doc = nativeLandingDoc();
@@ -705,7 +1085,7 @@ describe('renderHostLanding — the native viewscreen (issue #1361)', () => {
     renderHostLanding(
       doc, nativeVm({ openEntryId: 'load_game' }), t, {}, { ownPanelVisibility: true },
     );
-    expect(doc.getElementById('landing-mid').children).toHaveLength(0);
+    expect(docked(doc)).toHaveLength(0);
     expect(doc.getElementById('save-slots-panel').parentElement).toBe(doc.body);
     expect(doc.getElementById('landing-panel').dataset.landingStage).toBe('idle');
     // The same row on the web host does open it, so this is a surface saying
@@ -862,12 +1242,12 @@ describe('renderHostLanding — the join-code stage (issue #1364)', () => {
     const mid = doc.getElementById('landing-mid');
     renderHostLanding(doc, newVm(), t);
     renderHostLanding(doc, peerVm(), t);
-    expect(mid.children).toHaveLength(1);
+    expect(docked(doc)).toHaveLength(1);
     expect(doc.getElementById('landing-join-panel').parentElement).toBe(mid);
     expect(doc.getElementById('scenario-panel').parentElement).toBe(doc.body);
 
     renderHostLanding(doc, newVm(), t);
-    expect(mid.children).toHaveLength(1);
+    expect(docked(doc)).toHaveLength(1);
     expect(doc.getElementById('scenario-panel').parentElement).toBe(mid);
     expect(doc.getElementById('landing-join-panel').parentElement).toBe(doc.body);
   });
@@ -883,7 +1263,7 @@ describe('renderHostLanding — the join-code stage (issue #1364)', () => {
     renderHostLanding(doc, clientVm(), t);
     expect(doc.getElementById('landing-join-panel')).toBe(panel);
     expect(panel.parentElement).toBe(mid);
-    expect(mid.children).toHaveLength(1);
+    expect(docked(doc)).toHaveLength(1);
   });
 
   it('returns the join panel to the body on undockLandingPanels, unasked', () => {
@@ -903,7 +1283,7 @@ describe('renderHostLanding — the join-code stage (issue #1364)', () => {
     doc.getElementById('landing-join-panel').remove();
     expect(() => renderHostLanding(doc, peerVm(), t, hooks()[0])).not.toThrow();
     expect(doc.getElementById('landing-panel').dataset.landingStage).toBe('join-code');
-    expect(doc.getElementById('landing-mid').children).toHaveLength(0);
+    expect(docked(doc)).toHaveLength(0);
   });
 
   it('draws nothing at all for a surface whose menu has no join route', () => {

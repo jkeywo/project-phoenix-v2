@@ -24,11 +24,12 @@
  * ## Every write is guarded on the element existing
  *
  * This is not defensive habit, it is the two-document contract: the native
- * lobby document carries a trimmed subset of this markup (it has no settings
- * cog, and its fullscreen control is the window manager's), so a branch whose
+ * lobby document carries a trimmed subset of this markup, so a branch whose
  * element is absent must do nothing rather than throw and abandon the rest of
  * the render half-written. The suite drives a deliberately incomplete document
- * for exactly this.
+ * for exactly this. It stopped being only a hypothetical in #1367: the native
+ * document really did have this landing's fullscreen control cut out of it
+ * until that slice gave the control a host verb to reach.
  *
  * ## `t` is injected, never imported
  *
@@ -41,11 +42,14 @@
  * ## Side effects arrive as hooks
  *
  * A menu click has to reach whatever owns the open-entry memory, and the two
- * surfaces own it in different places. Fullscreen is already implemented once,
- * in `gui/page-chrome.js`'s `initFullscreen` — so the landing's corner control
- * does not toggle anything itself; the caller hands over a hook that reaches
- * that one implementation, the way three separate callers reach one
- * `gui/host-qr.js` toggle.
+ * surfaces own it in different places. Fullscreen is the clearest case for a
+ * hook rather than a call, because the two surfaces do not even mean the same
+ * thing by it: on the web it is already implemented once, in
+ * `gui/page-chrome.js`'s `initFullscreen`, and the corner control forwards to
+ * that; on the native viewscreen there is no browser to ask, so the same
+ * control sends `toggle_fullscreen` over the page->host queue and the host
+ * moves the window's mode (issue #1367). This module knows neither, which is
+ * the only reason one control can serve both.
  *
  * ## The menu is rebuilt, so focus is carried across the rebuild
  *
@@ -68,13 +72,20 @@
  *
  * ## What it does NOT draw
  *
- * The settings cog. `gui/server-settings.js` mounts its own `#server-settings-btn`
- * fixed at z-index 210, above this panel's 205, so it is already on top of the
- * landing and drawing a second one would be two cogs disagreeing about which
- * is open. Nor does the landing reserve a keep-out for it the way `#world-list`
- * does in `gui/host-scenarios.css`: the cog's corner falls inside
- * `.landing-rail`, whose content sits at the far end, and everything else
- * starts below it — the clearance is layout, and
+ * The settings cog — on either surface, and that is one rule rather than a gap
+ * on each. A settings cog is the settings overlay's OWN control: it is
+ * find-or-created by `gui/settings-overlay-kit.js` beside the modal it opens,
+ * so it exists exactly where an overlay has been mounted and cannot get out of
+ * step with it. `gui/server-settings.js` mounts `#server-settings-btn` on the
+ * host page (issue #939) and `gui/native-settings.js` mounts
+ * `#native-settings-btn` on the viewscreen (issue #1367); both are `fixed`
+ * above this panel and both land in the corner the design draws the cog in,
+ * which is inside `.landing-rail`. Drawing one here as well would be two
+ * controls disagreeing about which panel is open.
+ *
+ * Nor does the landing reserve a keep-out for it the way `#world-list` does in
+ * `gui/host-scenarios.css`: the rail's content sits at the far end and
+ * everything else starts below the cog — the clearance is layout, and
  * `tests/smoke/server-settings-cog.spec.js` measures it.
  */
 
@@ -118,15 +129,254 @@ export const LANDING_DOCKED_CLASS = 'landing-docked';
  */
 export const LANDING_ROOT_CLASSES = ['is-idle', 'is-open', 'is-deep'];
 
+/**
+ * The class `#landing-confirm` wears while it is asking about something
+ * destructive (issue #1365).
+ *
+ * Driven off the open row's `confirm.tone`, never off its id: which
+ * confirmations are destructive is the entry table's knowledge, and a renderer
+ * deciding it from an id would be the second place that decision lived.
+ */
+export const CONFIRM_DANGER_CLASS = 'landing-confirm-danger';
+
+/**
+ * Everything this renderer OWNS inside `#landing-packs-list` (issue #1366).
+ *
+ * A lifecycle hook for the reason [`LANDING_ENTRY_SELECTOR`] is one: this
+ * renderer replaces every shelf row on every render, and a selector that also
+ * matched static markup would delete controls it does not own.
+ */
+export const LANDING_PACK_SELECTOR = '.landing-pack';
+
+/** The attribute a shelf row carries its archive's file name in. */
+export const LANDING_PACK_ATTR = 'data-landing-pack';
+
+/**
+ * Everything this renderer owns inside `#landing-packs-notes` — the outcome
+ * line, the findings, the installed list and the conflict report.
+ *
+ * One selector for all four because they are one rebuilt column: every render
+ * replaces the lot, and what separates them is the heading each carries rather
+ * than a container each would need.
+ */
+export const LANDING_NOTE_SELECTOR = '.landing-note';
+
 /** Remove every entry this renderer owns, leaving anything else alone. */
 export function clearLandingEntries(menu) {
   menu.querySelectorAll(LANDING_ENTRY_SELECTOR).forEach(function (el) { el.remove(); });
+}
+
+/** Remove every element matching `selector` inside `root`. */
+function clearOwned(root, selector) {
+  root.querySelectorAll(selector).forEach(function (el) { el.remove(); });
 }
 
 /** Write `text` into `id` if this document has it. */
 function setText(doc, id, text) {
   const el = doc.getElementById(id);
   if (el) el.textContent = text;
+}
+
+/** Write `t(id)` into `elementId`, or clear it when the row named no string. */
+function setOptionalText(doc, elementId, t, id) {
+  setText(doc, elementId, id ? t(id) : '');
+}
+
+/**
+ * Draw `#landing-confirm` from the open row's confirmation block (issue #1365).
+ *
+ * The stage the menu's one irreversible route opens. Everything it says comes
+ * off `vm.confirm`, which is the ROW's block republished — so this function
+ * knows there is such a thing as a confirmation and knows nothing whatever
+ * about Exit to Desktop. A second confirming entry is a second row.
+ *
+ * Two things are worth stating rather than reading back out of the code:
+ *
+ *   * **Cancel is the entry's own toggle.** It reports through `pick` with the
+ *     open entry's id, which is exactly what a second press on the menu entry
+ *     does, and `nextOpenEntry` closes it. A `cancel` hook of its own would be
+ *     a second way to close one stage, and the day the two disagreed the
+ *     operator would be the one to find out.
+ *   * **`onclick`, not `addEventListener`.** These are STATIC markup and this
+ *     function runs again on every render, so an added listener would
+ *     accumulate one quit per render — see the fullscreen control's note.
+ */
+function renderConfirm(doc, vm, t, h) {
+  const confirm = vm.confirm || null;
+  const root = doc.getElementById('landing-confirm');
+  if (root) {
+    root.style.display = confirm ? '' : 'none';
+    root.classList.toggle(CONFIRM_DANGER_CLASS, !!confirm && confirm.tone === 'danger');
+  }
+  // The writes below happen whether or not the panel is on screen — the same
+  // reason the menu is rebuilt every render: a hidden panel holding the last
+  // route's words is a panel that shows them for one frame the next time it
+  // opens. `confirm` being null clears rather than skips.
+  setOptionalText(doc, 'landing-confirm-title', t, confirm && confirm.titleId);
+  setOptionalText(doc, 'landing-confirm-eyebrow', t, confirm && confirm.eyebrowId);
+  setOptionalText(doc, 'landing-confirm-lead', t, confirm && confirm.leadId);
+  setOptionalText(doc, 'landing-confirm-note', t, confirm && confirm.noteId);
+  setOptionalText(doc, 'landing-confirm-cta', t, confirm && confirm.ctaId);
+  setOptionalText(doc, 'landing-confirm-cancel', t, confirm && confirm.cancelId);
+
+  const cta = doc.getElementById('landing-confirm-cta');
+  if (cta) {
+    cta.classList.toggle(CONFIRM_DANGER_CLASS, !!confirm && confirm.tone === 'danger');
+    cta.onclick = confirm && h.confirm
+      ? function () { h.confirm(confirm.action); }
+      : null;
+  }
+  const cancel = doc.getElementById('landing-confirm-cancel');
+  if (cancel) {
+    cancel.onclick = confirm && h.pick
+      ? function () { h.pick(vm.openEntryId); }
+      : null;
+  }
+}
+
+/**
+ * One note row in the shelf's report column: a label, a line, and a tone.
+ *
+ * `line` is either a resolved sentence (a validator's prose) or a `{id, params}`
+ * pair — the two shapes `vm.packs` deliberately keeps apart, and the reason this
+ * takes text rather than an id.
+ */
+function appendNote(doc, root, tone, label, text) {
+  const note = doc.createElement('div');
+  note.className = 'landing-note' + (tone ? ' landing-note-' + tone : '');
+  if (label) {
+    const key = doc.createElement('span');
+    key.className = 'landing-note-key';
+    key.textContent = label;
+    note.appendChild(key);
+  }
+  const value = doc.createElement('span');
+  value.className = 'landing-note-value';
+  value.textContent = text;
+  note.appendChild(value);
+  root.appendChild(note);
+}
+
+/**
+ * Draw `#landing-packs` from the open row's shelf (issue #1366).
+ *
+ * The middle column's third tenant, and the exact sibling of
+ * [`renderConfirm`]: everything it says comes off `vm.packs`, which the view
+ * model composes only while the row that NEEDS a shelf is the open one — so
+ * this function knows there is such a thing as a shelf and knows nothing at all
+ * about Load mod pack. A second folder-shaped stage would be a second row.
+ *
+ * Three things worth stating rather than reading back out of the code:
+ *
+ *   * **The rows are rebuilt, and so is the report column.** A hidden panel
+ *     holding the last folder's archives is a panel that shows them for one
+ *     frame the next time it opens — the same reason the menu is rebuilt.
+ *   * **Cancel is the entry's own toggle**, reported through `pick` with the
+ *     open entry's id, exactly as the confirmation's is and for the same
+ *     reason: one way to close one stage.
+ *   * **The CTA carries the ROW's verb**, not a name this file knows. It is
+ *     handed to `installPack` with the highlighted file, and what that means is
+ *     the caller's business.
+ */
+function renderPacks(doc, vm, t, h) {
+  const packs = vm.packs || null;
+  const root = doc.getElementById('landing-packs');
+  if (root) root.style.display = packs ? '' : 'none';
+
+  setOptionalText(doc, 'landing-packs-title', t, packs && packs.titleId);
+  setText(doc, 'landing-packs-folder', packs ? t(packs.folder.id, packs.folder.params) : '');
+
+  // The empty state carries BOTH halves when there are both: the id says which
+  // emptiness this is, and the host's own sentence names the folder it could
+  // not read. A scan failure with no sentence still says something.
+  const empty = doc.getElementById('landing-packs-empty');
+  if (empty) {
+    const words = packs && packs.emptyId
+      ? [t(packs.emptyId), packs.scanError || ''].filter(Boolean).join(' ')
+      : '';
+    empty.textContent = words;
+    empty.style.display = words ? '' : 'none';
+  }
+
+  const list = doc.getElementById('landing-packs-list');
+  if (list) {
+    clearOwned(list, LANDING_PACK_SELECTOR);
+    (packs ? packs.rows : []).forEach(function (pack) {
+      const btn = doc.createElement('button');
+      btn.type = 'button';
+      btn.className = 'landing-pack' + (pack.selected ? ' on' : '');
+      btn.setAttribute(LANDING_PACK_ATTR, pack.file);
+      btn.setAttribute('aria-pressed', pack.selected ? 'true' : 'false');
+      const label = doc.createElement('span');
+      label.className = 'landing-pack-label';
+      label.textContent = pack.label;
+      btn.appendChild(label);
+      const file = doc.createElement('span');
+      file.className = 'landing-pack-file';
+      file.textContent = pack.file;
+      btn.appendChild(file);
+      btn.addEventListener('click', function () {
+        if (h.pickPack) h.pickPack(pack.file);
+      });
+      list.appendChild(btn);
+    });
+  }
+
+  const notes = doc.getElementById('landing-packs-notes');
+  if (notes) {
+    clearOwned(notes, LANDING_NOTE_SELECTOR);
+    if (packs) {
+      if (packs.outcome) {
+        appendNote(doc, notes, packs.outcome.tone, '',
+          t(packs.outcome.line.id, packs.outcome.line.params));
+      }
+      // What is wrong, in the validator's own words. This is the acceptance
+      // criterion "a pack that fails validation says what is wrong", and it is
+      // drawn whether the attempt was accepted or not — a warning-only accept
+      // still has something to say.
+      packs.findings.forEach(function (finding) {
+        appendNote(doc, notes, finding.tone, t(finding.labelId),
+          [finding.file, finding.message].filter(Boolean).join(' — '));
+      });
+      if (packs.installedHeadingId) {
+        appendNote(doc, notes, 'head', '', t(packs.installedHeadingId));
+      }
+      packs.installed.forEach(function (pack) {
+        appendNote(doc, notes, 'ok', '', t(pack.line.id, pack.line.params));
+      });
+      // Which pack won each shared path. The acceptance criterion "conflicting
+      // packs are reported, so it is clear which pack won".
+      if (packs.conflictsHeadingId) {
+        appendNote(doc, notes, 'head', '', t(packs.conflictsHeadingId));
+      }
+      packs.conflicts.forEach(function (conflict) {
+        appendNote(doc, notes, 'warn', '', t(conflict.line.id, conflict.line.params));
+      });
+    }
+  }
+
+  // `onclick`, not addEventListener: static markup, and this runs on every
+  // render — see the fullscreen control's note.
+  const cta = doc.getElementById('landing-packs-cta');
+  if (cta) {
+    cta.textContent = packs ? t(packs.ctaId) : '';
+    const enabled = !!packs && packs.ctaEnabled;
+    // `aria-disabled` rather than `disabled`, as the inert menu entries take
+    // it: a control a screen reader cannot reach is not more honest than one
+    // that says it is unavailable.
+    cta.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+    cta.classList.toggle('off', !enabled);
+    cta.onclick = enabled && h.installPack
+      ? function () { h.installPack(packs.action, packs.chosen); }
+      : null;
+  }
+  const cancel = doc.getElementById('landing-packs-cancel');
+  if (cancel) {
+    cancel.textContent = packs ? t(packs.cancelId) : '';
+    cancel.onclick = packs && h.pick
+      ? function () { h.pick(vm.openEntryId); }
+      : null;
+  }
 }
 
 /**
@@ -137,6 +387,9 @@ function setText(doc, id, text) {
  * @param {(id: string, params?: object) => string} t string-id resolver.
  * @param {{
  *   pick?: (entryId: string) => void,
+ *   confirm?: (action: string) => void,
+ *   pickPack?: (file: string) => void,
+ *   installPack?: (action: string, file: string) => void,
  *   toggleFullscreen?: () => void,
  *   submitJoin?: (join: object, typed: string) => void,
  * }} [hooks]
@@ -154,6 +407,24 @@ function setText(doc, id, text) {
  *   from. Nothing is judged here: whether eight letters are a code at all is
  *   `landingJoinAttempt`'s answer, and this module has no more business
  *   parsing one than it has deciding whether an entry may open.
+ *
+ *   `confirm` is what an operator pressing a confirmation's own control asks
+ *   for, carrying the open row's `action` verb (issue #1365). It is a hook and
+ *   not something done here for the plainest reason in the module: quitting an
+ *   application is not a DOM write, and the two surfaces reach it differently —
+ *   the native viewscreen sends a record its host answers with an app-exit, and
+ *   the host PAGE supplies no such hook at all, because a browser tab cannot
+ *   quit an application. Absent, the control renders and does nothing.
+ *
+ *   `pickPack` and `installPack` are the mod-pack shelf's two (issue #1366),
+ *   and they are two rather than one for the reason the confirmation's press is
+ *   not its entry's: highlighting a row is this surface's own memory and costs
+ *   nothing, while installing reads an archive off a disk and changes the
+ *   catalogue every phone in the room is looking at. `installPack` carries the
+ *   open row's `action` verb, exactly as `confirm` does, so this file never
+ *   learns what the verb is called. Both absent, the rows render and the button
+ *   does nothing — which is what a surface with no shelf behind it would be,
+ *   and is also why the view model refuses to open the stage there at all.
  * @param {{dockPanels?: boolean, ownPanelVisibility?: boolean}} [opts]
  *   `dockPanels: false` leaves every borrowed panel where it is, for a surface
  *   that composes the middle column some other way. `server.html` passes
@@ -323,7 +594,7 @@ export function renderHostLanding(doc, vm, t, hooks, opts) {
     }
   }
 
-  // ── The join-code stage (issue #1364) ───────────────────────────────
+  // ── The join-code stage (issue #1364) ──────────────────────
   //
   // Two rows open this one panel — Join as Peer and Connect to Host — and every
   // word in it comes off the open row's `join` descriptor, so the panel does
@@ -376,6 +647,22 @@ export function renderHostLanding(doc, vm, t, hooks, opts) {
     };
   }
   if (submit) submit.onclick = sendJoin;
+
+  // ── The confirmation stage (issue #1365) ────────────────────
+  //
+  // The middle column's next tenant. It is drawn from `vm.confirm` being
+  // there at all — never from the stage's name and never from an entry id —
+  // so the route that asks before it acts is a row in the entry table and this
+  // renderer holds no opinion about which route that is.
+  renderConfirm(doc, vm, t, h);
+
+  // ── The mod-pack shelf (issue #1366) ───────────────────────
+  //
+  // The middle column's last tenant, drawn from `vm.packs` being there at all
+  // — never from the stage's name and never from an entry id — so the route
+  // that offers a folder is a row in the entry table and this renderer holds no
+  // opinion about which route that is.
+  renderPacks(doc, vm, t, h);
 
   // ── The middle column ───────────────────────────────────────────────
   //
@@ -462,5 +749,9 @@ if (typeof window !== 'undefined') {
     LANDING_ENTRY_ATTR,
     LANDING_DOCKED_CLASS,
     LANDING_ROOT_CLASSES,
+    CONFIRM_DANGER_CLASS,
+    LANDING_PACK_SELECTOR,
+    LANDING_PACK_ATTR,
+    LANDING_NOTE_SELECTOR,
   };
 }

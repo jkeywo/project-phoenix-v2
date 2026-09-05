@@ -18,6 +18,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   LANDING_ENTRIES,
+  CONFIRM_CANCEL_ID,
   landingEntries,
   nextOpenEntry,
   landingViewModel,
@@ -71,21 +72,29 @@ const TABLE = [
 ];
 
 describe('the shipped entry table', () => {
-  it('offers the five entries this slice draws, in order', () => {
+  it('offers the six entries drawn so far, in order', () => {
     expect(LANDING_ENTRIES.map((e) => e.id)).toEqual([
       'new_game', 'load_game', 'join_peer', 'connect_host', 'load_mod_pack',
+      'exit_desktop',
     ]);
   });
 
-  it('leaves only Load mod pack without a stage, and it renders inert', () => {
-    // The honest shape of a tracer: the row without a stage has a sibling
-    // issue that gives it one, and until then it must not pretend. Load Game
-    // joined in issue #1363 and both join routes in #1364, each by growing a
-    // stage on its own row rather than by anything below it learning its name.
-    const staged = LANDING_ENTRIES.filter((e) => e.stage).map((e) => e.id);
-    expect(staged).toEqual(['new_game', 'load_game', 'join_peer', 'connect_host']);
-    expect(LANDING_ENTRIES.filter((e) => !e.stage).map((e) => e.id))
-      .toEqual(['load_mod_pack']);
+  it('gives every row a stage, now that all six slices have landed', () => {
+    // The honest shape of a tracer: a row without a stage has a sibling issue
+    // that gives it one, and until then it must not pretend. Load Game joined
+    // in issue #1363, both join routes in #1364, Exit to Desktop in #1365 and
+    // Load mod pack in #1366 — each by growing a stage on its own row rather
+    // than by anything below it learning its name, which is what the six
+    // landing in one table without a switch was supposed to cost.
+    //
+    // A row can still be INERT, and three of them are on some surface or some
+    // run — but through `needs`, `stagePlatforms` or `stagePreBoot`, each
+    // tested below, rather than through a missing stage.
+    expect(LANDING_ENTRIES.filter((e) => e.stage).map((e) => e.id)).toEqual([
+      'new_game', 'load_game', 'join_peer', 'connect_host', 'load_mod_pack',
+      'exit_desktop',
+    ]);
+    expect(LANDING_ENTRIES.filter((e) => !e.stage)).toEqual([]);
   });
 
   it('names the panel each staged row borrows, as an element id on the row', () => {
@@ -167,8 +176,46 @@ describe('the shipped entry table', () => {
       .toEqual(['join_peer', 'connect_host']);
   });
 
-  it('does not offer Exit to Desktop, which is a native-only row for #1365', () => {
-    expect(LANDING_ENTRIES.some((e) => e.id === 'exit')).toBe(false);
+  it('makes Load mod pack need a SHELF rather than need a platform', () => {
+    // Issue #1366's whole availability rule, and why it is a third field rather
+    // than more `platforms`: the same native binary offers a mod-pack folder
+    // when it was started with --mod-pack-dir and none when it was not, so
+    // which hosts can answer this row is not a fact about the build.
+    const row = LANDING_ENTRIES.find((e) => e.id === 'load_mod_pack');
+    expect(row.stage).toBe('mod-packs');
+    expect(row.needs).toBe('packs');
+    expect(row.platforms).toEqual(['web', 'native']);
+    // …and its verb is named once, on the row that owns it — the same
+    // arrangement `exit_desktop`'s `confirm.action` makes, and deliberately the
+    // same token as the record the native surface sends.
+    expect(row.action).toBe('install_mod_pack');
+  });
+
+  it('offers Exit to Desktop on native only, because a tab cannot quit an app', () => {
+    // Issue #1365, and the whole of how it is kept off the web: a field on a
+    // row. There is no build check in the view model, in the renderer, or in
+    // either document.
+    const exit = LANDING_ENTRIES.find((e) => e.id === 'exit_desktop');
+    expect(exit.platforms).toEqual(['native']);
+  });
+
+  it('makes Exit to Desktop ask instead of act, and says so on the row', () => {
+    // The one irreversible route on the menu, so the press opens a stage that
+    // states what happens and asks once. Everything that stage says is on the
+    // row, which is what lets a second confirming entry cost a row.
+    const exit = LANDING_ENTRIES.find((e) => e.id === 'exit_desktop');
+    expect(exit.stage).toBe('exit-confirm');
+    expect(exit.confirm.tone).toBe('danger');
+    expect(exit.confirm.action).toBe('exit_desktop');
+    for (const key of ['titleId', 'eyebrowId', 'leadId', 'noteId', 'ctaId']) {
+      expect(typeof exit.confirm[key]).toBe('string');
+      expect(exit.confirm[key].length).toBeGreaterThan(0);
+    }
+  });
+
+  it('gives no other row a confirmation, so New Game still opens on one press', () => {
+    expect(LANDING_ENTRIES.filter((e) => e.confirm).map((e) => e.id))
+      .toEqual(['exit_desktop']);
   });
 
   it('gives every row a label and a description id, so the renderer never guesses', () => {
@@ -438,7 +485,11 @@ describe('landingViewModel', () => {
     // happened, so "no input" has to be a state and not a crash.
     const vm = landingViewModel();
     expect(vm.rootClass).toBe('is-idle');
-    expect(vm.entries.map((e) => e.id)).toEqual(LANDING_ENTRIES.map((e) => e.id));
+    // No platform given means the WEB one, so this is the shipped table as
+    // that host is offered it — which is no longer the whole table, now that a
+    // row is native-only (issue #1365).
+    expect(vm.entries.map((e) => e.id))
+      .toEqual(landingEntries('web', LANDING_ENTRIES).map((e) => e.id));
   });
 
   it('opens New Game off the shipped table', () => {
@@ -602,6 +653,89 @@ describe('the shipped New Game ladder (issue #1362)', () => {
   });
 });
 
+describe('landingViewModel — a route that asks first (issue #1365)', () => {
+  // The claim that keeps a confirmation DATA: the model republishes the OPEN
+  // ROW's block, so a renderer draws "this route's confirmation" and never
+  // "the exit confirmation". Driven through a table this suite owns wherever
+  // the mechanism is the point, and through the shipped one where the shipped
+  // row is.
+
+  const ASKS = [
+    { id: 'plain', labelId: 'x.p', descId: 'x.p_desc', stage: 'plain-stage' },
+    {
+      id: 'grave',
+      labelId: 'x.g',
+      descId: 'x.g_desc',
+      stage: 'grave-stage',
+      confirm: {
+        titleId: 'x.g.title',
+        leadId: 'x.g.lead',
+        noteId: 'x.g.note',
+        ctaId: 'x.g.cta',
+        tone: 'danger',
+        action: 'do_the_grave_thing',
+      },
+    },
+  ];
+
+  it('is null for a route that simply opens something', () => {
+    expect(landingViewModel({ entries: ASKS, openEntryId: 'plain' }).confirm).toBe(null);
+    expect(landingViewModel({ entries: ASKS }).confirm).toBe(null);
+  });
+
+  it('republishes the open row block, verb and tone included', () => {
+    const vm = landingViewModel({ entries: ASKS, openEntryId: 'grave' });
+    expect(vm.stage).toBe('grave-stage');
+    expect(vm.confirm.titleId).toBe('x.g.title');
+    expect(vm.confirm.leadId).toBe('x.g.lead');
+    expect(vm.confirm.noteId).toBe('x.g.note');
+    expect(vm.confirm.ctaId).toBe('x.g.cta');
+    expect(vm.confirm.tone).toBe('danger');
+    expect(vm.confirm.action).toBe('do_the_grave_thing');
+  });
+
+  it('fills the way back from the shared default, so a row need not repeat it', () => {
+    const vm = landingViewModel({ entries: ASKS, openEntryId: 'grave' });
+    expect(vm.confirm.cancelId).toBe(CONFIRM_CANCEL_ID);
+    // ...and a row that genuinely wants other words still wins.
+    const own = ASKS.map((e) => (e.id === 'grave'
+      ? { ...e, confirm: { ...e.confirm, cancelId: 'x.g.back' } }
+      : e));
+    expect(landingViewModel({ entries: own, openEntryId: 'grave' }).confirm.cancelId)
+      .toBe('x.g.back');
+  });
+
+  it('calls an unnamed tone ordinary rather than leaving it undefined', () => {
+    // The renderer paints from this, so "no tone" has to be a value.
+    const quiet = [{
+      id: 'q', labelId: 'x.q', descId: 'x.q_desc', stage: 's',
+      confirm: { titleId: 'x.q.t', ctaId: 'x.q.c', action: 'q' },
+    }];
+    expect(landingViewModel({ entries: quiet, openEntryId: 'q' }).confirm.tone)
+      .toBe('normal');
+  });
+
+  it('drops it the moment the route closes, and while the landing is dismissed', () => {
+    expect(landingViewModel({ entries: ASKS, openEntryId: null }).confirm).toBe(null);
+    expect(landingViewModel({ entries: ASKS, openEntryId: 'grave', dismissed: true }).confirm)
+      .toBe(null);
+  });
+
+  it('carries the shipped Exit to Desktop block, on native and only there', () => {
+    const native = landingViewModel({ platform: 'native', openEntryId: 'exit_desktop' });
+    expect(native.stage).toBe('exit-confirm');
+    expect(native.confirm.action).toBe('exit_desktop');
+    expect(native.confirm.tone).toBe('danger');
+    expect(native.confirm.ctaId).toBe('server.landing.exit_confirm_cta');
+    // The web host does not offer the row, so a remembered id reads as closed —
+    // which is exactly the guard that stops a shared memory opening a stage
+    // this platform has nothing behind.
+    const web = landingViewModel({ platform: 'web', openEntryId: 'exit_desktop' });
+    expect(web.stage).toBe('idle');
+    expect(web.confirm).toBe(null);
+  });
+});
+
 describe('the entries a native host is offered (issue #1361)', () => {
   // The doctrine, said in the one place it can be said once: a control exists
   // exactly when something behind it can answer it. The native surface renders
@@ -615,7 +749,9 @@ describe('the entries a native host is offered (issue #1361)', () => {
     // no such page and no such leg here.
     const native = landingEntries('native', LANDING_ENTRIES).map((e) => e.id);
     expect(native).not.toContain('connect_host');
-    expect(native).toEqual(['new_game', 'load_game', 'join_peer', 'load_mod_pack']);
+    expect(native).toEqual([
+      'new_game', 'load_game', 'join_peer', 'load_mod_pack', 'exit_desktop',
+    ]);
   });
 
   it('still offers it on the web, so this is a curated menu and not a lost row', () => {
@@ -636,7 +772,16 @@ describe('the entries a native host is offered (issue #1361)', () => {
 
   it('numbers a curated menu from one, so native has no gap where a row was', () => {
     const vm = landingViewModel({ platform: 'native' });
-    expect(vm.entries.map((e) => e.ordinal)).toEqual(['01', '02', '03', '04']);
+    expect(vm.entries.map((e) => e.ordinal)).toEqual(['01', '02', '03', '04', '05']);
+  });
+
+  it('offers Exit to Desktop on native and never on the web', () => {
+    // The mirror of Connect to Host, and settled the same way: a browser tab
+    // cannot quit an application, so nothing is behind that control there.
+    expect(landingEntries('native', LANDING_ENTRIES).map((e) => e.id))
+      .toContain('exit_desktop');
+    expect(landingEntries('web', LANDING_ENTRIES).map((e) => e.id))
+      .not.toContain('exit_desktop');
   });
 });
 
@@ -864,5 +1009,250 @@ describe('landingViewModel — the join stage (issue #1364)', () => {
     expect(vm.join).toBe(null);
     // ...and the shipped row is untouched: the copy is the surface's view of it.
     expect(joinOf('join_peer').action).toBe('boot-game-master');
+  });
+});
+
+// ── The mod-pack shelf (issue #1366) ────────────────────────────────────────
+//
+// Two separable claims, and they are separable on purpose:
+//
+//   1. `needs`/`provides` is a GENERAL rule over the table, exercised through a
+//      table this suite owns, so it cannot be satisfied by a special case for
+//      the one shipped row that uses it;
+//   2. the shelf stage is a pure function of the host's snapshot plus the one
+//      thing the host does not know — which row the operator highlighted.
+
+/** A table this suite owns, whose one interesting row needs something. */
+const NEEDY = [
+  { id: 'plain', labelId: 'x.p', descId: 'x.p_desc', stage: 'plain-stage' },
+  {
+    id: 'shelf',
+    labelId: 'x.s',
+    descId: 'x.s_desc',
+    stage: 'mod-packs',
+    needs: 'packs',
+    action: 'x_install',
+  },
+];
+
+/** A host snapshot in the shape `native_host::host_lobby::packs` encodes. */
+const SHELF = {
+  dir: 'mods',
+  offered: [
+    { file: 'thin-margin.zip', label: 'thin-margin' },
+    { file: 'borrowed-sun.zip', label: 'borrowed-sun' },
+  ],
+  installed: [{ id: 'thin-margin', name: 'Thin Margin', version: '1.2' }],
+  attempted: null,
+  accepted: false,
+  findings: [],
+  conflicts: [],
+};
+
+describe('a row that NEEDS something the surface must provide', () => {
+  it('is inert until the surface says it can answer it', () => {
+    const without = landingViewModel({ entries: NEEDY });
+    expect(without.entries.find((e) => e.id === 'shelf').inert).toBe(true);
+    const with_ = landingViewModel({ entries: NEEDY, provides: ['packs'] });
+    expect(with_.entries.find((e) => e.id === 'shelf').inert).toBe(false);
+  });
+
+  it('is one word for two reasons, because they look the same on screen', () => {
+    // A route with no stage yet and a route this host cannot answer are both
+    // "renders, and pressing it changes nothing".
+    const vm = landingViewModel({ entries: NEEDY });
+    expect(vm.entries.map((e) => [e.id, e.inert]))
+      .toEqual([['plain', false], ['shelf', true]]);
+  });
+
+  it('will not open through nextOpenEntry while the need is unmet', () => {
+    expect(nextOpenEntry(null, 'shelf', NEEDY)).toBe(null);
+    expect(nextOpenEntry('plain', 'shelf', NEEDY)).toBe('plain');
+    expect(nextOpenEntry(null, 'shelf', NEEDY, ['packs'])).toBe('shelf');
+    expect(nextOpenEntry('shelf', 'shelf', NEEDY, ['packs'])).toBe(null);
+  });
+
+  it('reads as closed when a remembered open id needs what this run cannot give', () => {
+    // A page reloaded against a host restarted without --mod-pack-dir. The
+    // caller's memory outlives the RUN as well as the menu, and opening a shelf
+    // stage with no shelf behind it would be worse than the front door.
+    const vm = landingViewModel({ entries: NEEDY, openEntryId: 'shelf' });
+    expect(vm.stage).toBe('idle');
+    expect(vm.openEntryId).toBe(null);
+    expect(vm.packs).toBe(null);
+  });
+
+  it('leaves the shipped Load mod pack row exactly as inert as it was', () => {
+    // The reason `server.html` needed no edit: the host page provides nothing,
+    // so the row it has been rendering since #1360 is unchanged.
+    const web = landingViewModel();
+    expect(web.entries.find((e) => e.id === 'load_mod_pack').inert).toBe(true);
+    expect(nextOpenEntry(null, 'load_mod_pack')).toBe(null);
+  });
+});
+
+describe('landingViewModel — the mod-pack shelf stage (issue #1366)', () => {
+  const open = (extra) => landingViewModel(Object.assign({
+    entries: NEEDY,
+    provides: ['packs'],
+    openEntryId: 'shelf',
+    packs: SHELF,
+  }, extra || {}));
+
+  it('is null unless the row that needs it is the open one', () => {
+    // The exact sibling of `confirm`: the renderer draws the stage from its
+    // presence, and never from a stage name or an entry id.
+    expect(landingViewModel({ entries: NEEDY, provides: ['packs'], packs: SHELF }).packs)
+      .toBe(null);
+    expect(open().packs).not.toBe(null);
+    expect(open({ openEntryId: 'plain' }).packs).toBe(null);
+  });
+
+  it('lists what the host offered, in the order it offered it', () => {
+    expect(open().packs.rows.map((r) => [r.file, r.label, r.selected])).toEqual([
+      ['thin-margin.zip', 'thin-margin', false],
+      ['borrowed-sun.zip', 'borrowed-sun', false],
+    ]);
+  });
+
+  it('names the folder even when there is nothing in it', () => {
+    // "There are no packs here" and "this host was never given a folder" ask
+    // the operator to do different things, so the panel always says which.
+    const vm = open({ packs: Object.assign({}, SHELF, { offered: [] }) });
+    expect(vm.packs.folder).toEqual({
+      id: 'server.landing.packs.folder',
+      params: { dir: 'mods' },
+    });
+    expect(vm.packs.emptyId).toBe('server.landing.packs.empty');
+    expect(vm.packs.scanError).toBe(null);
+  });
+
+  it('says a folder it could not READ is a different emptiness', () => {
+    const vm = open({
+      packs: Object.assign({}, SHELF, { offered: [], scan_error: 'mods: not found' }),
+    });
+    expect(vm.packs.emptyId).toBe('server.landing.packs.scan_failed');
+    // The host's own sentence about the operator's own path rides beside the
+    // id rather than inside it: no string table could hold it.
+    expect(vm.packs.scanError).toBe('mods: not found');
+  });
+
+  it('installs nothing until a row is highlighted', () => {
+    expect(open().packs.ctaEnabled).toBe(false);
+    expect(open().packs.chosen).toBe(null);
+    const chosen = open({ chosenPack: 'borrowed-sun.zip' });
+    expect(chosen.packs.ctaEnabled).toBe(true);
+    expect(chosen.packs.chosen).toBe('borrowed-sun.zip');
+    expect(chosen.packs.rows.map((r) => r.selected)).toEqual([false, true]);
+  });
+
+  it('drops a highlight the host is no longer offering', () => {
+    // The shelf is rescanned on every attempt, so an archive can leave the
+    // folder between the click that chose it and the render that draws it.
+    const vm = open({ chosenPack: 'deleted-since.zip' });
+    expect(vm.packs.chosen).toBe(null);
+    expect(vm.packs.ctaEnabled).toBe(false);
+  });
+
+  it('carries the OPEN ROW’s verb, so no caller keeps a mapping table', () => {
+    expect(open().packs.action).toBe('x_install');
+  });
+
+  it('says what is wrong when a pack was refused, in the validator’s own words', () => {
+    const vm = open({
+      packs: Object.assign({}, SHELF, {
+        attempted: 'broken.zip',
+        accepted: false,
+        findings: [{
+          severity: 'error',
+          category: 'missing-manifest',
+          message: 'mod pack is missing its required scenarios.toml manifest',
+          file: 'scenarios.toml',
+        }],
+      }),
+    });
+    expect(vm.packs.outcome).toEqual({
+      tone: 'bad',
+      line: { id: 'server.landing.packs.refused', params: { pack: 'broken.zip' } },
+    });
+    expect(vm.packs.findingsHeadingId).toBe('server.landing.packs.findings_heading');
+    expect(vm.packs.findings).toEqual([{
+      tone: 'bad',
+      labelId: 'server.landing.packs.severity_error',
+      category: 'missing-manifest',
+      message: 'mod pack is missing its required scenarios.toml manifest',
+      file: 'scenarios.toml',
+    }]);
+  });
+
+  it('reports a warning without calling the install a failure', () => {
+    const vm = open({
+      packs: Object.assign({}, SHELF, {
+        attempted: 'ok.zip',
+        accepted: true,
+        findings: [{
+          severity: 'warning',
+          category: 'overlapping-pack-path',
+          message: 'ok shadows thin-margin for assets/entities/x.toml',
+          file: 'scenarios.toml',
+        }],
+      }),
+    });
+    expect(vm.packs.outcome.tone).toBe('ok');
+    expect(vm.packs.outcome.line.id).toBe('server.landing.packs.accepted');
+    expect(vm.packs.findings[0].tone).toBe('warn');
+    expect(vm.packs.findings[0].labelId).toBe('server.landing.packs.severity_warning');
+  });
+
+  it('reports nothing at all before the first attempt', () => {
+    // A freshly opened shelf must not claim a success nobody asked for.
+    expect(open().packs.outcome).toBe(null);
+    expect(open().packs.findingsHeadingId).toBe(null);
+  });
+
+  it('names which pack won a path two of them carry', () => {
+    // The acceptance criterion, and the reason it matters: two packs that both
+    // replace one hull produce one hull, and an operator who cannot see which
+    // is flying has no way to work out why their change did nothing.
+    const vm = open({
+      packs: Object.assign({}, SHELF, {
+        conflicts: [{
+          path: 'assets/entities/alliance_destroyer.toml',
+          winner: 'borrowed-sun',
+          losers: ['thin-margin'],
+        }],
+      }),
+    });
+    expect(vm.packs.conflictsHeadingId).toBe('server.landing.packs.conflict_heading');
+    expect(vm.packs.conflicts[0].line).toEqual({
+      id: 'server.landing.packs.conflict_line',
+      params: {
+        path: 'assets/entities/alliance_destroyer.toml',
+        winner: 'borrowed-sun',
+        losers: 'thin-margin',
+      },
+    });
+  });
+
+  it('lists what is already applied, so a second install is an addition', () => {
+    expect(open().packs.installedHeadingId).toBe('server.landing.packs.installed_heading');
+    expect(open().packs.installed[0].line).toEqual({
+      id: 'server.landing.packs.installed_line',
+      params: { name: 'Thin Margin', version: '1.2', id: 'thin-margin' },
+    });
+  });
+
+  it('renders an open shelf the host has not pushed yet without crashing', () => {
+    // The frame between the row opening and the first push. Every list is
+    // empty, the folder is empty, and nothing pretends.
+    const vm = landingViewModel({
+      entries: NEEDY, provides: ['packs'], openEntryId: 'shelf', packs: null,
+    });
+    expect(vm.packs.rows).toEqual([]);
+    expect(vm.packs.installed).toEqual([]);
+    expect(vm.packs.conflicts).toEqual([]);
+    expect(vm.packs.findings).toEqual([]);
+    expect(vm.packs.emptyId).toBe('server.landing.packs.empty');
+    expect(vm.packs.ctaEnabled).toBe(false);
   });
 });

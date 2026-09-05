@@ -960,6 +960,9 @@ settings.rating,Settings — station rating (difficulty) section heading,Rating
 settings.volume,Settings — audio volume section heading,Volume
 settings.qr_code,Settings — QR code section heading,QR Code
 settings.toggle_qr,Settings — button that shows/hides the join QR code on the viewscreen,[Toggle QR on Screen]
+settings.display,"Native host settings menu — Gameplay tab, heading over this window's display options (issue #1367)",[Display]
+settings.toggle_fullscreen,Native host settings menu — button that fills the display with this window or gives its border back,[Toggle Fullscreen]
+settings.display_hint,Native host settings menu — explains that the fullscreen control moves this window's mode rather than a browser's,[Fills the display this window is on. The viewscreen returns to the display you assigned it.]
 settings.station,Settings — station section heading,Station
 settings.leave_station,Settings — button that releases the player's claimed station,Leave Station
 settings.afk,Settings — Away From Keyboard section heading (issue #1104),Away
@@ -1209,6 +1212,28 @@ server.landing.connect_host_submit,Landing screen join stage — the button that
 server.landing.join_after_boot,Landing screen join stage — refusing a peer join because this host has already loaded a world and the game master profile is chosen at boot,[This host has already started a session. The game master profile is chosen when a session starts — reload the page to join a fleet as a game master.]
 server.landing.load_mod_pack,Landing screen menu — add a mod pack before a session exists,[Load mod pack]
 server.landing.load_mod_pack_desc,Landing screen menu — the line under Load mod pack,[Content · add a pack]
+server.landing.exit_desktop,Landing screen menu — native only; quit the application,[Exit to Desktop]
+server.landing.exit_desktop_desc,Landing screen menu — the line under Exit to Desktop,[Native build only]
+server.landing.exit_confirm_title,Landing screen — heading of the panel that asks before quitting,[Exit to desktop]
+server.landing.exit_confirm_eyebrow,Landing screen — small label beside the quit heading naming which build this is,[Native build]
+server.landing.exit_confirm_lead,Landing screen — the quit confirmation's own headline,[Close the session]
+server.landing.exit_confirm_note,Landing screen — what quitting costs; shown under the quit confirmation headline,"[Nothing is running, so nothing is lost. Any crew still holding this ship’s join code will need a new one next time.]"
+server.landing.exit_confirm_cta,Landing screen — the button that confirms quitting,[Quit]
+server.landing.confirm_back,Landing screen — the control that closes a confirmation without acting on it,[Back]
+server.landing.packs.title,Landing screen mod-pack shelf — heading of the panel listing the scanned folder,[Mod packs]
+server.landing.packs.folder,Landing screen mod-pack shelf — which folder is being scanned. {dir} is the path,[Folder {dir}]
+server.landing.packs.empty,Landing screen mod-pack shelf — the folder was read and holds no pack archives,[No mod packs in this folder.]
+server.landing.packs.scan_failed,Landing screen mod-pack shelf — the folder itself could not be read; the host’s own message follows,[That folder could not be read.]
+server.landing.packs.install,Landing screen mod-pack shelf — the button that installs the highlighted pack,[Install pack]
+server.landing.packs.accepted,Landing screen mod-pack shelf — the last attempt succeeded. {pack} is the archive file name,[{pack} installed.]
+server.landing.packs.refused,Landing screen mod-pack shelf — the last attempt failed and nothing was applied. {pack} is the archive file name,[{pack} was refused. Nothing was installed.]
+server.landing.packs.findings_heading,Landing screen mod-pack shelf — heading over what the validator reported,[Report]
+server.landing.packs.severity_error,Landing screen mod-pack shelf — label on a finding that blocked the install,[Error]
+server.landing.packs.severity_warning,Landing screen mod-pack shelf — label on a finding that did not block the install,[Warning]
+server.landing.packs.installed_heading,Landing screen mod-pack shelf — heading over the packs already applied this session,[Applied this session]
+server.landing.packs.installed_line,Landing screen mod-pack shelf — one applied pack. {name} {version} {id} come from its manifest,[{name} {version} — {id}]
+server.landing.packs.conflict_heading,Landing screen mod-pack shelf — heading over paths carried by more than one applied pack,[Overridden content]
+server.landing.packs.conflict_line,"Landing screen mod-pack shelf — one contested path. {path} is the authored file, {winner} the pack that owns it, {losers} the packs it shadows",[{path}: {winner} wins over {losers}]
 server.select_world,Host lobby — heading over the scenario picker,[Select a world]
 server.select_ship,Host lobby — picker heading after a world with multiple ships is chosen,[Select a ship]
 server.no_scenarios,Host scenario picker — shown when the pre-load catalog is empty,[No scenarios available]

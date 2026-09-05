@@ -42,8 +42,9 @@
 //!
 //! # The reader seam
 //!
-//! [`WorldReader`] abstracts "read the TOML at this path": [`FsReader`] on native,
-//! [`WasmReader`] over the browser bridge's pending-fetch queue, and
+//! [`WorldReader`] abstracts "read the TOML at this path": [`FsReader`] on native
+//! (or [`OverlayFsReader`], which is [`FsReader`] with a mod pack in front of
+//! it), [`WasmReader`] over the browser bridge's pending-fetch queue, and
 //! [`MemoryReader`] for tests. It is deliberately **not** named `WorldSource` —
 //! that name belongs to [`crate::world::validate::WorldSource`], the parsed
 //! (path, toml, config) triple the composition validator borrows.
@@ -83,6 +84,35 @@ pub struct FsReader;
 impl WorldReader for FsReader {
     fn read(&self, path: &str) -> Option<String> {
         std::fs::read_to_string(path).ok()
+    }
+}
+
+/// Native reader with the session mod-pack overlay in front of the filesystem
+/// (issue #1366).
+///
+/// The native twin of what [`WasmReader`] already does: the browser resolves a
+/// world through `config_cache::resolved_world_source`, which consults the
+/// winning pack before the delivered base text, so a pack's world — or a pack's
+/// override of a base world — is what actually loads. Off the browser
+/// [`FsReader`] alone could never see either, because a pack's files live only in
+/// [`ActivePack::files`](crate::entities::config_cache::ActivePack) and are never
+/// written to the content tree: a host would offer the pack's scenario in its
+/// lobby and then fail to load the world behind it.
+///
+/// Overlay first, disk second — the same order
+/// [`FsFragmentSource`](crate::entities::include_resolve::FsFragmentSource) and
+/// [`OverlayScriptResolver`](crate::entities::config_cache::OverlayScriptResolver)
+/// resolve in, over the same authored repo-relative key. With no pack installed
+/// it IS [`FsReader`], byte for byte, so a headless or `--world` boot is
+/// unchanged.
+#[cfg(not(target_arch = "wasm32"))]
+pub struct OverlayFsReader;
+
+#[cfg(not(target_arch = "wasm32"))]
+impl WorldReader for OverlayFsReader {
+    fn read(&self, path: &str) -> Option<String> {
+        crate::entities::config_cache::mod_pack_overlay_get(path)
+            .or_else(|| std::fs::read_to_string(path).ok())
     }
 }
 

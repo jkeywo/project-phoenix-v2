@@ -18,63 +18,85 @@
  * switch", all six would collide in the same handful of lines. So an entry is
  * a ROW in [`LANDING_ENTRIES`], carrying everything about itself:
  *
- *   | field         | what it decides |
- *   |---------------|-----------------|
- *   | `id`          | the machine key a click reports and a hook dispatches on |
- *   | `labelId`     | the string id of the entry's name |
- *   | `descId`      | the string id of the line under it |
- *   | `stage`       | which contextual stage opening it reveals, or `null` for an entry that does nothing yet |
- *   | `deeper`      | the stages this entry can descend INTO once open, in order — absent for an entry that is only one column deep |
- *   | `docks`       | this entry's stage is an EXISTING panel node — named by element id — moved into the middle column, rather than markup of its own |
- *   | `platforms`   | which hosts offer it at all — `['native']` is how #1365's Exit to Desktop arrives without a build check anywhere in this file |
+ *   | field            | what it decides |
+ *   |------------------|-----------------|
+ *   | `id`             | the machine key a click reports and a hook dispatches on |
+ *   | `labelId`        | the string id of the entry's name |
+ *   | `descId`         | the string id of the line under it |
+ *   | `stage`          | which contextual stage opening it reveals, or `null` for an entry that does nothing yet |
+ *   | `deeper`         | the stages this entry can descend INTO once open, in order — absent for an entry that is only one column deep |
+ *   | `docks`          | this entry's stage is an EXISTING panel node — named by element id — moved into the middle column, rather than markup of its own |
+ *   | `platforms`      | which hosts offer it at all — `['native']` is how #1365's Exit to Desktop arrives without a build check anywhere in this file |
  *   | `stagePlatforms` | which of those hosts can actually OPEN its stage — absent means all of them |
- *   | `stagePreBoot` | its stage opens only BEFORE this host has booted a world — absent means at any point in the session (issue #1364) |
- *   | `statusId`    | what the status bar says while this entry is open, for a route that is not "hosting" |
- *   | `join`        | this entry's stage is a JOIN CODE field: which typed namespace a bare suffix composes into, which surface words a refusal, which action a good code runs, and the four string ids the panel is written from (issue #1364) |
+ *   | `stagePreBoot`   | its stage opens only BEFORE this host has booted a world — absent means at any point in the session (issue #1364) |
+ *   | `needs`          | a capability the SURFACE must say it provides for the row's stage to open — `'packs'` is how #1366's mod-pack shelf arrives without a check for how the host was started |
+ *   | `statusId`       | what the status bar says while this entry is open, for a route that is not "hosting" |
+ *   | `join`           | this entry's stage is a JOIN CODE field: which typed namespace a bare suffix composes into, which surface words a refusal, which action a good code runs, and the four string ids the panel is written from (issue #1364) |
+ *   | `confirm`        | the row asks once before its verb runs, and this is everything that stage says and does — `null`/absent for a route that simply opens |
+ *   | `action`         | the machine verb a stage's own control sends, named once on the row that owns it |
  *
  * Adding an entry is adding a row. Nothing below reads an id by name.
  *
- * `platforms` and `stagePlatforms` are deliberately not one field, because they say different
- * things and a slice that conflated them would lose a row rather than record a
- * gap. `platforms` is DOCTRINE: this surface does not offer this route and
- * never will — `connect_host` is absent from the native menu because a native
- * host is always a host and has no leg to connect with. `stagePlatforms` is
- * WORK NOT DONE: the route belongs here, this surface cannot serve it yet, so
- * the row renders and is inert exactly like a row whose `stage` is still
- * `null`. Load Game is the first of those — see its row, and #1363's AC5.
+ * ## Four availability rules, and none is a weaker version of another
  *
- * `stagePreBoot` is the third of that family and says WHEN rather than where:
- * the landing comes back after a Game Over (`showLandingAtPicker`, issue #756),
- * and by then this page has a world loaded into a running Bevy that was
- * composed from a boot profile. A route whose whole job is to decide that
- * profile — or to leave the page entirely — cannot be offered on that second
- * landing, so both join rows carry it. Like the other two, it takes the STAGE
- * away and leaves the row: an operator who used Join as Peer before the mission
- * should find it where they left it, saying it is not available now, rather
- * than find the menu silently one row shorter.
+ * `platforms`, `stagePlatforms`, `stagePreBoot` and `needs` say four different
+ * things, and a slice that conflated any two of them would lose a row rather
+ * than record a gap.
+ *
+ * `platforms` is DOCTRINE about the BUILD: this surface does not offer this
+ * route and never will — `connect_host` is absent from the native menu because
+ * a native host is always a host and has no leg to connect with, and
+ * `exit_desktop` is absent from the web menu because a browser tab cannot quit
+ * an application. Neither changes between two runs of one binary.
+ *
+ * `stagePlatforms` is WORK NOT DONE: the route belongs here, this surface
+ * cannot serve it yet, so the row renders and is inert exactly like a row whose
+ * `stage` is still `null`. Load Game is the first of those — see its row, and
+ * #1363's AC5.
+ *
+ * `stagePreBoot` is the third and says WHEN rather than where: the landing
+ * comes back after a Game Over (`showLandingAtPicker`, issue #756), and by then
+ * this page has a world loaded into a running Bevy that was composed from a
+ * boot profile. A route whose whole job is to decide that profile — or to leave
+ * the page entirely — cannot be offered on that second landing, so both join
+ * rows carry it. Like the other two, it takes the STAGE away and leaves the
+ * row: an operator who used Join as Peer before the mission should find it
+ * where they left it, saying it is not available now, rather than find the menu
+ * silently one row shorter.
+ *
+ * `needs` is the fourth (issue #1366) and is the only one that is not a fact
+ * about the build at all: the same `phoenix-host` offers a mod-pack shelf when
+ * it was started with `--mod-pack-dir` and none when it was not. So the row
+ * declares what it `needs` and the surface declares what it `provides`, and an
+ * unmet row is inert exactly as it was before its slice landed. That is also
+ * why `server.html` needed no edit to keep the landing it had. `platforms`
+ * could not have expressed it: it would have made one invocation of the native
+ * binary a different platform from another.
  *
  * ## A ladder is a field, not a second entry (issue #1362)
  *
  * New Game asks two questions: choose a World, then choose a hull. The second
- * is not another menu ROW — the menu still has five — it is one rung deeper
- * inside the entry that is already open, and the operator has to be able to
- * see the World list they came through and step back along it. So `deeper` is
- * an ordered list of stage names ON THE ROW, and the caller says which of them
- * it is currently on (`deepStage`). The DEPTH the stylesheet slides by falls
- * out of the position in that list, so an entry that grows a third rung adds a
- * string to its own array and neither this module, the renderer, nor the
+ * is not another menu ROW — the menu still has the rows it had — it is one rung
+ * deeper inside the entry that is already open, and the operator has to be able
+ * to see the World list they came through and step back along it. So `deeper`
+ * is an ordered list of stage names ON THE ROW, and the caller says which of
+ * them it is currently on (`deepStage`). The DEPTH the stylesheet slides by
+ * falls out of the position in that list, so an entry that grows a third rung
+ * adds a string to its own array and neither this module, the renderer, nor the
  * stylesheet learns a new name.
  *
  * ## An entry with no stage is inert, and that is deliberate
  *
- * `new_game` carries `stage: 'world-picker'`, `load_game` carries `stage:
- * 'save-catalogue'` (issue #1363) and both join routes carry `stage:
- * 'join-code'` (issue #1364); `load_mod_pack` alone still carries `stage: null`
- * and is inert — it renders, and clicking it changes nothing. An inert entry
- * that silently pretended to open something would be worse than a button that
- * plainly does not work yet, and it has a sibling issue that gives it a stage
- * of its own. [`nextOpenEntry`] is where "inert" is enforced, in one place,
- * rather than at each caller.
+ * Every row on this table now carries a stage: `new_game` opens
+ * `world-picker`, `load_game` opens `save-catalogue` (issue #1363), both join
+ * routes open `join-code` (issue #1364), `load_mod_pack` opens `mod-packs`
+ * (issue #1366) and `exit_desktop` opens `exit-confirm` (issue #1365). A row
+ * can still be inert — through `stage: null`, through an unmet `needs`, through
+ * a `stagePlatforms` this host is not on, or through `stagePreBoot` on a
+ * landing that has already booted — and an inert entry that silently pretended
+ * to open something would be worse than a button that plainly does not work
+ * yet. [`nextOpenEntry`] is where "inert" is enforced, in one place, rather
+ * than at each caller.
  *
  * ## Two rows, one stage, one panel (issue #1364)
  *
@@ -94,6 +116,15 @@
  * three already understand. It is also why both callers hand `nextOpenEntry`
  * the list [`landingEntries`] gave them rather than the raw table: the judge of
  * a click has to be looking at the same menu the operator is.
+ *
+ * ## An entry that ASKS FIRST is still one row (issue #1365)
+ *
+ * Exit to Desktop cannot be undone by pressing the entry again, so its press
+ * opens a confirmation rather than doing the thing. That confirmation is a
+ * `confirm` block on the row and the view model republishes it as
+ * [`landingViewModel`]'s `confirm` — so the renderer draws "the open route's
+ * confirmation", never "the exit confirmation", and the third such route costs
+ * a row rather than a branch.
  */
 
 // The join code's own module, imported rather than reimplemented: it already
@@ -113,8 +144,9 @@ import { parseJoinCode, reasonStringId } from './join-code.js';
  * variation. `landingViewModel` takes the list rather than reaching for this
  * constant, and this is only its default.
  *
- * `Exit to Desktop` is deliberately absent: it is a native-build entry and
- * arrives in #1365 as one more row carrying `platforms: ['native']`.
+ * `Exit to Desktop` is the last row, and is native-only: it arrived in #1365
+ * as one more row carrying `platforms: ['native']`, which is the whole of what
+ * "the web host does not offer it" cost.
  */
 export const LANDING_ENTRIES = [
   {
@@ -274,13 +306,229 @@ export const LANDING_ENTRIES = [
     },
   },
   {
+    // OFFERED EVERYWHERE, ANSWERED ONLY WHERE THERE IS A SHELF (issue #1366).
+    //
+    // The third shape of the same doctrine the two rows above and below state
+    // in `platforms`, for a route whose availability is not a fact about the
+    // BUILD but a fact about how this particular host was started. A native
+    // host given `--mod-pack-dir` has a folder to offer; the same binary
+    // started without it has none, and a browser host has none either. So the
+    // row cannot say "native" or "web" — it says what it NEEDS, and the surface
+    // says what it PROVIDES (`landingViewModel`'s `provides`). Unmet, the row
+    // is inert exactly as it was before this slice; met, its stage opens.
+    //
+    // `platforms` could not have expressed this: it would have made one
+    // invocation of the native binary a different platform from another.
     id: 'load_mod_pack',
     labelId: 'server.landing.load_mod_pack',
     descId: 'server.landing.load_mod_pack_desc',
-    stage: null,
+    stage: 'mod-packs',
+    needs: 'packs',
     platforms: ['web', 'native'],
+    // The machine verb, named ONCE, on the row that owns it — the same
+    // arrangement `exit_desktop`'s `confirm.action` makes below, and
+    // deliberately the same token as the `kind` of the record the native
+    // surface sends (`native_host::host_lobby::HostLobbyRecord::InstallModPack`).
+    // `host_lobby_link.js` forwards the verb it is handed rather than keeping a
+    // mapping table that would be the second place to edit.
+    action: 'install_mod_pack',
+  },
+  {
+    // NATIVE ONLY (issue #1365), and for the plainest reason in the table: a
+    // browser tab cannot quit an application, so on the web there is nothing
+    // behind this control at all. The same doctrine `connect_host` above
+    // states, in the same field, pointing the other way.
+    //
+    // It is also the one row that carries a `confirm` block. Quitting is the
+    // only route on this menu that an operator cannot take back by pressing
+    // the entry again, so the press does not do it — it opens a stage that
+    // says what is about to happen and asks once. The block is DATA for the
+    // same reason the rows are: the next entry that needs a confirmation adds
+    // one of these, and neither this module nor its renderer learns an id by
+    // name to draw it.
+    id: 'exit_desktop',
+    labelId: 'server.landing.exit_desktop',
+    descId: 'server.landing.exit_desktop_desc',
+    stage: 'exit-confirm',
+    platforms: ['native'],
+    confirm: {
+      titleId: 'server.landing.exit_confirm_title',
+      eyebrowId: 'server.landing.exit_confirm_eyebrow',
+      leadId: 'server.landing.exit_confirm_lead',
+      noteId: 'server.landing.exit_confirm_note',
+      ctaId: 'server.landing.exit_confirm_cta',
+      // Why the tone is a field and not a class the renderer picks: which
+      // confirmations are destructive is knowledge the ROW has, and a renderer
+      // deciding it would be deciding it a second time.
+      tone: 'danger',
+      // The machine verb the caller dispatches on, and deliberately the same
+      // token as the `kind` of the record the native surface sends
+      // (`native_host::host_lobby::HostLobbyRecord::ExitDesktop`). A confirming
+      // row names its verb once; `host_lobby_link.js` forwards it rather than
+      // keeping a mapping table that would be the second place to edit.
+      action: 'exit_desktop',
+    },
   },
 ];
+
+/**
+ * The label a confirmation's cancel control wears when its row does not name
+ * one.
+ *
+ * Shared rather than repeated per row because "the way back" is the same act on
+ * every confirmation there will ever be. A row that genuinely needs other words
+ * still overrides it with a `cancelId` of its own.
+ */
+export const CONFIRM_CANCEL_ID = 'server.landing.confirm_back';
+
+/**
+ * Whether `entry` needs something this surface has not said it provides.
+ *
+ * The one place `needs`/`provides` is read, so "a row whose requirement is
+ * unmet is inert" is decided once rather than at `nextOpenEntry`, at the entry
+ * mapping and at the open-stage lookup separately — three places that would
+ * eventually disagree about the same row.
+ */
+function unmet(entry, provides) {
+  return !!entry.needs && provides.indexOf(entry.needs) === -1;
+}
+
+/** The `provides` list, normalised. Anything else reads as "provides nothing". */
+function providedBy(input) {
+  return Array.isArray(input.provides) ? input.provides : [];
+}
+
+/**
+ * Which note tone a finding severity wears, and what it is called.
+ *
+ * A table rather than a branch for the reason the entries are one: the
+ * validator's severities are its own vocabulary, and a third one arriving
+ * should cost a row here rather than an `else if` in a renderer.
+ */
+const FINDING_SEVERITY = {
+  error: { tone: 'bad', labelId: 'server.landing.packs.severity_error' },
+  warning: { tone: 'warn', labelId: 'server.landing.packs.severity_warning' },
+};
+
+/**
+ * The mod-pack shelf stage (issue #1366).
+ *
+ * Everything it draws comes off the HOST's snapshot — which folder is being
+ * scanned, what is in it, what is installed, what the last attempt said, and
+ * which pack wins each path two of them share — plus the one thing the host
+ * does not know, which is the row the operator has highlighted.
+ *
+ * Two shapes of text, kept apart on purpose:
+ *
+ *   - **string ids**, for every word this surface owns: the heading, the empty
+ *     state, the severity labels, the CTA. Data-dependent ones travel as
+ *     `{id, params}` pairs, the way `gui/lobby-view.js` carries them.
+ *   - **prose**, for a validator's sentence about the operator's own archive
+ *     and for a scan failure naming their own folder. Neither could be a table
+ *     entry: they are generated from the file in front of them, and the browser
+ *     host shows exactly the same sentences in `#mod-pack-findings`.
+ */
+function packsStage(row, packs, chosenPack) {
+  const shelf = packs || {};
+  const offered = Array.isArray(shelf.offered) ? shelf.offered : [];
+  const installed = Array.isArray(shelf.installed) ? shelf.installed : [];
+  const conflicts = Array.isArray(shelf.conflicts) ? shelf.conflicts : [];
+  const findings = Array.isArray(shelf.findings) ? shelf.findings : [];
+  // A highlighted row the host is no longer offering is no highlight at all —
+  // the shelf is rescanned on every attempt, so a pack can leave the folder
+  // between the click that chose it and the render that draws it.
+  const chosen = offered.some(function (p) { return p.file === chosenPack; })
+    ? chosenPack
+    : null;
+  const attempted = shelf.attempted || null;
+  return {
+    titleId: 'server.landing.packs.title',
+    // Which folder, always — a shelf with nothing on it is otherwise
+    // indistinguishable from a host that was never given one, and those two
+    // ask the operator to do different things.
+    folder: { id: 'server.landing.packs.folder', params: { dir: shelf.dir || '' } },
+    rows: offered.map(function (pack) {
+      return {
+        file: pack.file,
+        label: pack.label || pack.file,
+        selected: pack.file === chosen,
+      };
+    }),
+    // The empty state names WHICH emptiness this is. `scanError` is the host's
+    // own sentence about the operator's own path and rides beside the id
+    // rather than inside it.
+    emptyId: offered.length
+      ? null
+      : (shelf.scan_error
+        ? 'server.landing.packs.scan_failed'
+        : 'server.landing.packs.empty'),
+    scanError: shelf.scan_error || null,
+    // What the last attempt did, as one line. `null` before the first one, so
+    // a freshly opened shelf reports nothing rather than reporting success.
+    outcome: attempted
+      ? {
+        tone: shelf.accepted ? 'ok' : 'bad',
+        line: {
+          id: shelf.accepted
+            ? 'server.landing.packs.accepted'
+            : 'server.landing.packs.refused',
+          params: { pack: attempted },
+        },
+      }
+      : null,
+    findingsHeadingId: findings.length ? 'server.landing.packs.findings_heading' : null,
+    findings: findings.map(function (finding) {
+      const severity = FINDING_SEVERITY[finding.severity]
+        || { tone: 'warn', labelId: 'server.landing.packs.severity_warning' };
+      return {
+        tone: severity.tone,
+        labelId: severity.labelId,
+        category: finding.category || '',
+        // Prose. See the note above.
+        message: finding.message || '',
+        file: finding.file || '',
+      };
+    }),
+    installedHeadingId: installed.length ? 'server.landing.packs.installed_heading' : null,
+    installed: installed.map(function (pack) {
+      return {
+        id: pack.id,
+        line: {
+          id: 'server.landing.packs.installed_line',
+          params: { name: pack.name || pack.id, version: pack.version || '', id: pack.id },
+        },
+      };
+    }),
+    // Which pack won a path two of them carry. Shown rather than only logged:
+    // two packs that both replace one hull produce one hull, and an operator
+    // who cannot see which is flying has no way to work out why their change
+    // did nothing.
+    conflictsHeadingId: conflicts.length ? 'server.landing.packs.conflict_heading' : null,
+    conflicts: conflicts.map(function (conflict) {
+      return {
+        path: conflict.path,
+        line: {
+          id: 'server.landing.packs.conflict_line',
+          params: {
+            path: conflict.path,
+            winner: conflict.winner,
+            losers: (conflict.losers || []).join(', '),
+          },
+        },
+      };
+    }),
+    ctaId: 'server.landing.packs.install',
+    // Nothing highlighted is nothing to install. Said in the model rather than
+    // in the renderer so "the button is dead until a row is chosen" is a test.
+    ctaEnabled: !!chosen,
+    chosen: chosen,
+    cancelId: CONFIRM_CANCEL_ID,
+    // The row's own verb, carried verbatim — the same arrangement
+    // `confirm.action` makes. This module never runs it and never decides what
+    // it means; the caller with something behind it does.
+    action: row.action || 'install_mod_pack',
+  };
+}
 
 /** The platform label each host wears, by the `platform` this module is given. */
 const PLATFORM_LABEL = {
@@ -420,7 +668,11 @@ export function landingJoinAttempt(join, raw, data) {
  *   - the entry already open closes (that is the second click on New Game);
  *   - an entry with a `stage` opens, replacing whatever was open;
  *   - an entry with no `stage` changes nothing at all, and neither does an id
- *     the list does not hold.
+ *     the list does not hold;
+ *   - an entry whose `needs` this surface does not provide changes nothing
+ *     either (issue #1366). A host with no scanned folder has nothing to draw
+ *     in the mod-pack stage, and opening an empty panel would be worse than the
+ *     control that plainly does not work yet.
  *
  * `entries` should be the list [`landingEntries`] gave this surface, not the
  * shipped table: that is where a row's `stage` is taken away on a host which
@@ -430,13 +682,22 @@ export function landingJoinAttempt(join, raw, data) {
  * the shipped table, which is the right answer for a `web` caller and is what
  * the pure tests lean on.
  *
+ * @param {Array<object>} [entries] the table to read; defaults to
+ *   [`LANDING_ENTRIES`].
+ * @param {Array<string>} [provides] what THIS surface can answer. Omitted reads
+ *   as "nothing", which is the honest default: a caller that has not said it
+ *   can serve a shelf cannot.
  * @returns {string|null} the id to pass back as `openEntryId`.
  */
-export function nextOpenEntry(openEntryId, entryId, entries) {
+export function nextOpenEntry(openEntryId, entryId, entries, provides) {
   const list = Array.isArray(entries) ? entries : LANDING_ENTRIES;
+  const can = Array.isArray(provides) ? provides : [];
   const entry = list.find(function (e) { return e && e.id === entryId; });
-  // Unknown id, or an entry whose slice has not landed yet: nothing moves.
-  if (!entry || !entry.stage) return openEntryId == null ? null : openEntryId;
+  // Unknown id, an entry whose slice has not landed yet, or one this surface
+  // cannot answer: nothing moves.
+  if (!entry || !entry.stage || unmet(entry, can)) {
+    return openEntryId == null ? null : openEntryId;
+  }
   if (openEntryId === entryId) return null;
   return entryId;
 }
@@ -453,6 +714,9 @@ export function nextOpenEntry(openEntryId, entryId, entries) {
  *   booted?: boolean,
  *   entries?: Array<object>,
  *   joinErrorId?: string|null,
+ *   provides?: Array<string>,
+ *   packs?: object|null,
+ *   chosenPack?: string|null,
  * }} [input]
  *   `deepStage` is how far along the open entry's `deeper` ladder the surface
  *   is (issue #1362). It is an input for the same reason `openEntryId` is: the
@@ -494,6 +758,23 @@ export function nextOpenEntry(openEntryId, entryId, entries) {
  *   memory of how it went is theirs too. [`landingJoinAttempt`] is what turns a
  *   code into one, so the caller never words a refusal itself.
  *
+ *   `provides` is what THIS surface can answer, against the `needs` a row
+ *   declares (issue #1366). It is the one availability rule on this menu that
+ *   is not a fact about the build: the same native binary offers a mod-pack
+ *   shelf when it was started with `--mod-pack-dir` and none when it was not,
+ *   so `platforms` could not have said it. Omitted reads as "provides nothing",
+ *   which keeps every needing row exactly as inert as it was before its slice
+ *   landed — and is why `server.html` needs no edit to keep the behaviour it
+ *   has.
+ *
+ *   `packs` is the host's own shelf snapshot
+ *   (`native_host::host_lobby::packs::ModPackPanelPayload`), already-resolved
+ *   data rather than string ids: a folder path, a list of file names, and the
+ *   validator's own sentences about the operator's own archives. `chosenPack`
+ *   is which row the operator has highlighted — the caller's memory, for
+ *   exactly the reason `openEntryId` is (see above), and never the host's: the
+ *   host learns about a choice when it is asked to install one.
+ *
  * @returns {{
  *   stage: string,
  *   dismissed: boolean,
@@ -505,14 +786,26 @@ export function nextOpenEntry(openEntryId, entryId, entries) {
  *   rootClass: string,
  *   identity: {titleId: string, taglineId: string, logoAltId: string, platformLabelId: string},
  *   entries: Array<{id: string, ordinal: string, labelId: string, descId: string, stage: string|null, selected: boolean, inert: boolean}>,
+ *   confirm: null|{titleId: string, eyebrowId: string|null, leadId: string|null, noteId: string|null, ctaId: string, cancelId: string, tone: string, action: string},
+ *   packs: null|object,
  *   status: {platformLabelId: string, sessionId: string, build: {id: string, params: {build: string}}},
  * }}
+ *   `confirm` is the OPEN ROW's own confirmation block, republished — never a
+ *   second decision made here, and never keyed off an entry id. It is `null`
+ *   for every route that simply opens something (New Game's picker), which is
+ *   what lets the renderer draw a confirmation from its presence alone.
+ *
+ *   `packs` is the mod-pack shelf, drawn only while the row that needs it is
+ *   the open one — the exact sibling of `confirm`, and `null` everywhere else
+ *   for the same reason: the renderer draws the stage from its presence and
+ *   holds no opinion about which route it belongs to.
  */
 export function landingViewModel(input) {
   const opts = input || {};
   const platform = opts.platform === 'native' ? 'native' : 'web';
   const dismissed = !!opts.dismissed;
   const list = landingEntries(platform, opts.entries, { booted: !!opts.booted });
+  const provides = providedBy(opts);
 
   // An `openEntryId` naming an entry this platform does not offer (or an
   // entry that never had a stage) reads as closed rather than as a stage
@@ -521,8 +814,13 @@ export function landingViewModel(input) {
   // A dismissed landing has no open stage by construction: the operator is
   // past it, and a remembered entry re-opening the moment it came back would
   // be the surface disagreeing with the host about where the session is.
+  //
+  // A row whose `needs` this surface does not provide reads as closed too
+  // (issue #1366): the caller's memory can outlive a RUN as well as a menu — a
+  // page reloaded against a host restarted without `--mod-pack-dir` would
+  // otherwise open a shelf stage with no shelf behind it.
   const open = dismissed ? null : (list.find(function (e) {
-    return e.id === opts.openEntryId && !!e.stage;
+    return e.id === opts.openEntryId && !!e.stage && !unmet(e, provides);
   }) || null);
 
   // How far along the OPEN entry's own ladder the surface says it is. The
@@ -544,7 +842,10 @@ export function landingViewModel(input) {
       descId: entry.descId,
       stage: entry.stage || null,
       selected: !!open && open.id === entry.id,
-      inert: !entry.stage,
+      // Two ways to be inert, one word for both, because they look the same to
+      // whoever is standing in front of the screen: the route has no stage
+      // yet, or this surface cannot answer the stage it has.
+      inert: !entry.stage || unmet(entry, provides),
     };
   });
 
@@ -594,6 +895,32 @@ export function landingViewModel(input) {
       platformLabelId: PLATFORM_LABEL[platform],
     },
     entries: entries,
+    // The open row's confirmation, or nothing. Composed rather than passed
+    // straight through so that a row states only what is peculiar to it: the
+    // way back reads the shared default, and a row that never named a tone is
+    // an ordinary confirmation rather than an undefined one the renderer would
+    // have to interpret.
+    confirm: open && open.confirm
+      ? {
+        titleId: open.confirm.titleId,
+        eyebrowId: open.confirm.eyebrowId || null,
+        leadId: open.confirm.leadId || null,
+        noteId: open.confirm.noteId || null,
+        ctaId: open.confirm.ctaId,
+        cancelId: open.confirm.cancelId || CONFIRM_CANCEL_ID,
+        tone: open.confirm.tone || 'normal',
+        // The verb, carried verbatim. This module never runs it and never
+        // decides what it means — the caller with something behind it does.
+        action: open.confirm.action || open.id,
+      }
+      : null,
+    // The mod-pack shelf, drawn only while the row that needs it is open
+    // (issue #1366) — the exact sibling of `confirm` above, decided from the
+    // open ROW rather than from an id, so a second shelf-shaped stage would be
+    // a second row and not a branch here.
+    packs: open && open.stage === 'mod-packs'
+      ? packsStage(open, opts.packs, opts.chosenPack)
+      : null,
     status: {
       platformLabelId: PLATFORM_LABEL[platform],
       // What the open route calls itself, from the ROW, falling back to
@@ -613,6 +940,11 @@ export function landingViewModel(input) {
 // same self-registering pattern window.hostScenarios uses.
 if (typeof window !== 'undefined') {
   window.hostLanding = {
-    LANDING_ENTRIES, landingEntries, nextOpenEntry, landingViewModel, landingJoinAttempt,
+    LANDING_ENTRIES,
+    CONFIRM_CANCEL_ID,
+    landingEntries,
+    nextOpenEntry,
+    landingViewModel,
+    landingJoinAttempt,
   };
 }

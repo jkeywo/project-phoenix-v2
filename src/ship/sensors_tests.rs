@@ -2265,6 +2265,183 @@ fn sensor_radar_velocity_none_when_scanner_has_no_physics() {
     );
 }
 
+// ── publish_sensor_radar_blackboard: selected-target weapons cold
+//    (issue #1397) ─────────────────────────────────────────────────────────
+//
+// The sibling of the alert replica above, and it needs its own fixtures for one
+// reason: EVERY ship carries a `ShipPowerSystem` (the spawner inserts one for
+// player and NPC alike), so the `Ship` marker cannot be the eligibility test the
+// way it is for `ShipRedAlert`. The reactor's own `has_group(weapons)` is, and
+// the last test here is the one that holds that line.
+
+/// Minimal app that runs only `publish_sensor_radar_blackboard`, plus a
+/// scanning ship whose `SensorRadarSelection` we drive directly. Returns the
+/// scanning ship's `Entity` so the caller can read back its blackboard.
+fn power_publisher_app() -> (App, Entity) {
+    let mut app = App::new();
+    crate::ai::host::register_ai_host_env(&mut app);
+    app.add_systems(Update, publish_sensor_radar_blackboard);
+    let scanner = app
+        .world_mut()
+        .spawn((
+            crate::server_app::Ship,
+            crate::server_app::ShipSystemBlackboards::default(),
+            SensorRadarSelection::default(),
+        ))
+        .id();
+    (app, scanner)
+}
+
+/// Read the `selected_target_weapons_cold` replica off a ship's sensor-radar
+/// blackboard.
+fn published_weapons_cold(app: &App, ship: Entity) -> Option<bool> {
+    match app
+        .world()
+        .entity(ship)
+        .get::<crate::server_app::ShipSystemBlackboards>()
+        .and_then(|bbs| {
+            bbs.0
+                .get(&crate::ship::system_registry::sensor_radar_system_id())
+                .cloned()
+        }) {
+        Some(SystemBlackboard::SensorRadar(bb)) => bb.selected_target_weapons_cold,
+        _ => panic!("sensor-radar blackboard missing"),
+    }
+}
+
+/// Spawn a target ship whose reactor tracks exactly `groups`.
+///
+/// Goes through `PowerSystem::from_authored_groups` — the same seam
+/// `entities::spawner::insert_power_state` uses — rather than poking levels in
+/// afterwards, so a group authored at level 0 has to survive the real seed
+/// clamp to arrive cold. (That clamp is `level.clamp(floor, MAX)`: a `level: 0`
+/// entry left at the default floor of 1 comes back at 1, not 0, which is why
+/// the cold fixture below authors `floor: 0` as the destroyer's hull does.)
+fn spawn_ship_with_power(
+    app: &mut App,
+    uuid: &str,
+    groups: &[crate::modifiers::power_system::AuthoredPowerGroup],
+) {
+    let power = crate::modifiers::power_system::PowerSystem::from_authored_groups(
+        &crate::modifiers::power_system::PowerConfig::default(),
+        groups,
+    );
+    app.world_mut().spawn((
+        crate::server_app::Ship,
+        crate::entities::spawner::EntityUuid(uuid.into()),
+        crate::ship::power::ShipPowerSystem(power),
+    ));
+}
+
+/// An authored group entry: `id` at `level`, floored at `floor`.
+fn authored_group(
+    id: &str,
+    level: u8,
+    floor: u8,
+) -> crate::modifiers::power_system::AuthoredPowerGroup {
+    crate::modifiers::power_system::AuthoredPowerGroup {
+        id: PowerGroupId(id.to_string()),
+        level,
+        floor,
+    }
+}
+
+#[test]
+fn sensor_radar_weapons_cold_none_when_no_selection() {
+    let (mut app, scanner) = power_publisher_app();
+    app.update();
+    assert_eq!(
+        published_weapons_cold(&app, scanner),
+        None,
+        "no selection → no weapons-cold field"
+    );
+}
+
+#[test]
+fn sensor_radar_weapons_cold_reports_selected_ship_powered_down() {
+    let (mut app, scanner) = power_publisher_app();
+    // A hull authoring weapons at a floor of 0, booted cold — the destroyer's
+    // shipped shape for expressing restraint.
+    spawn_ship_with_power(
+        &mut app,
+        "enemy-cold",
+        &[
+            authored_group(crate::modifiers::power_system::HELM_POWER_GROUP, 2, 1),
+            authored_group(crate::modifiers::power_system::WEAPONS_POWER_GROUP, 0, 0),
+            authored_group(crate::modifiers::power_system::SHIELDS_POWER_GROUP, 2, 1),
+        ],
+    );
+    set_selection(&mut app, scanner, Some("enemy-cold"));
+    app.update();
+    assert_eq!(
+        published_weapons_cold(&app, scanner),
+        Some(true),
+        "selected ship with its weapons group at level 0 → Some(true)"
+    );
+}
+
+#[test]
+fn sensor_radar_weapons_cold_reports_selected_ship_with_weapons_powered() {
+    let (mut app, scanner) = power_publisher_app();
+    spawn_ship_with_power(
+        &mut app,
+        "enemy-armed",
+        &[
+            authored_group(crate::modifiers::power_system::HELM_POWER_GROUP, 2, 1),
+            authored_group(crate::modifiers::power_system::WEAPONS_POWER_GROUP, 2, 0),
+            authored_group(crate::modifiers::power_system::SHIELDS_POWER_GROUP, 2, 1),
+        ],
+    );
+    set_selection(&mut app, scanner, Some("enemy-armed"));
+    app.update();
+    assert_eq!(
+        published_weapons_cold(&app, scanner),
+        Some(false),
+        "selected ship with its weapons group powered → Some(false)"
+    );
+}
+
+#[test]
+fn sensor_radar_weapons_cold_none_for_non_ship_target() {
+    let (mut app, scanner) = power_publisher_app();
+    // An asteroid: carries a uuid but no reactor and no `Ship` marker → no
+    // capability → no weapons row (the no-leak boundary).
+    app.world_mut()
+        .spawn(crate::entities::spawner::EntityUuid("asteroid-9".into()));
+    set_selection(&mut app, scanner, Some("asteroid-9"));
+    app.update();
+    assert_eq!(
+        published_weapons_cold(&app, scanner),
+        None,
+        "non-ship contact has no reactor → no weapons-cold field"
+    );
+}
+
+#[test]
+fn sensor_radar_weapons_cold_none_for_a_hull_with_no_weapons_bus() {
+    let (mut app, scanner) = power_publisher_app();
+    // A ship WITH a reactor that simply has no weapons group — a tender, a
+    // tug's ops-only bus. `is_group_cold` answers `false` for an untracked
+    // group, so an unguarded publisher would report this hull as POWERED. It
+    // has no weapons bus to power: the correct reading is no row at all.
+    spawn_ship_with_power(
+        &mut app,
+        "unarmed-hull",
+        &[
+            authored_group(crate::modifiers::power_system::HELM_POWER_GROUP, 2, 1),
+            authored_group(crate::modifiers::power_system::SHIELDS_POWER_GROUP, 2, 1),
+        ],
+    );
+    set_selection(&mut app, scanner, Some("unarmed-hull"));
+    app.update();
+    assert_eq!(
+        published_weapons_cold(&app, scanner),
+        None,
+        "a hull whose reactor tracks no weapons group → no weapons-cold field, \
+         not a confident POWERED"
+    );
+}
+
 // ── Working down a debris field (issue #1347) ────────────────────────────────
 //
 // Sensors is the seat that turns a rock into a threat, so these tests pin the

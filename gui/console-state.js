@@ -1694,6 +1694,7 @@ export function buildShieldsConsoleState(state, systemIds = []) {
  *             target_shield_freq: number|null, target_shields: Array,
  *             target_shield_fraction: number|null,
  *             target_alert: boolean|null,
+ *             target_weapons: 'cold'|'powered'|null,
  *             scan: {capable: boolean, reading: object|null,
  *                    refusal: string|null},
  *             own_hull: StationHullAggregate,
@@ -1799,6 +1800,17 @@ export function buildSensorsConsoleState(state, systemIds = []) {
   const sensorRadarBb = blackboardOfKind(state, 'SensorRadar', systemIds)?.data;
   const targetAlert = sensorRadarBb?.selected_target_alert ?? null;
 
+  // Selected-target weapons power (issue #1397). Same authoritative path and
+  // same visibility boundary as the alert above — read ONLY from this ship's
+  // own sensor-radar blackboard, never from the per-entity snapshot, which
+  // carries no power level at all. The host publishes `Some(bool)` only for a
+  // ship whose reactor tracks a weapons group; absent (non-ship contact, a hull
+  // with no weapons bus, or no selection) reads as `null` -> no row. The wire
+  // field is a boolean "is it cold"; the payload carries the reading itself so
+  // the panel renders a value rather than inverting a flag.
+  const targetWeaponsCold = sensorRadarBb?.selected_target_weapons_cold ?? null;
+  const targetWeapons = targetWeaponsCold == null ? null : (targetWeaponsCold ? 'cold' : 'powered');
+
   // Selected-target trajectory projection (issue #1339). Relative velocity is
   // authoritative, read the same way as the alert above — only from this
   // ship's own sensor-radar blackboard, `null` for no selection/non-ship
@@ -1860,6 +1872,7 @@ export function buildSensorsConsoleState(state, systemIds = []) {
     target_shields:     targetShields,
     target_shield_fraction: targetShieldFraction,
     target_alert:       targetAlert,
+    target_weapons:     targetWeapons,
     // Selected-target trajectory projection (issue #1339). `null` when
     // velocity is unknown (no selection, non-ship contact, or unresolvable
     // target) — the client draws no projection in that case.

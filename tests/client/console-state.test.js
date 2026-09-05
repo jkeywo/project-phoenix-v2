@@ -2182,6 +2182,56 @@ describe('buildSensorsConsoleState', () => {
     expect(parse(buildSensorsConsoleState(state)).target_alert).toBeNull();
   });
 
+  // ── target_weapons (#1397) — read only from the sensor-radar blackboard ──
+
+  it("target_weapons reads 'cold' when the blackboard says the target powered weapons down", () => {
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsTarget: 'e1',
+      asteroids: [{ uuid: 'e1', x: 5, z: 0, tags: ['ship'] }],
+      blackboards: { 'sensor-radar': { selected_target: 'e1', selected_target_weapons_cold: true } },
+    };
+    expect(parse(buildSensorsConsoleState(state)).target_weapons).toBe('cold');
+  });
+
+  it("target_weapons reads 'powered' for a capable target with its weapons up", () => {
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsTarget: 'e1',
+      asteroids: [{ uuid: 'e1', x: 5, z: 0, tags: ['ship'] }],
+      blackboards: { 'sensor-radar': { selected_target: 'e1', selected_target_weapons_cold: false } },
+    };
+    expect(parse(buildSensorsConsoleState(state)).target_weapons).toBe('powered');
+  });
+
+  it('target_weapons is null when the blackboard omits selected_target_weapons_cold', () => {
+    // A hull with no weapons bus, or a non-ship contact: the host sends no
+    // field at all, and "no capability" must not read as POWERED.
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsTarget: 'a1',
+      asteroids: [{ uuid: 'a1', x: 0, z: 0, tags: ['asteroid'] }],
+      blackboards: { 'sensor-radar': { selected_target: 'a1' } },
+    };
+    expect(parse(buildSensorsConsoleState(state)).target_weapons).toBeNull();
+  });
+
+  it('target_weapons is null when there is no sensor-radar blackboard', () => {
+    const state = { shipX: 0, shipZ: 0, shipYaw: 0 };
+    expect(parse(buildSensorsConsoleState(state)).target_weapons).toBeNull();
+  });
+
+  it('target_weapons never derives from the entity snapshot (no-leak boundary)', () => {
+    // Even if a power level leaked onto the entity snapshot, the scan card must
+    // ignore it and read only the per-ship blackboard.
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsTarget: 'e1',
+      asteroids: [{ uuid: 'e1', x: 5, z: 0, tags: ['ship'], weapons_cold: true, power_weapons: 0 }],
+    };
+    expect(parse(buildSensorsConsoleState(state)).target_weapons).toBeNull();
+  });
+
   // ── target_projection (#1339) — trajectory projection geometry ────────────
 
   it('target_projection is null when there is no selection', () => {

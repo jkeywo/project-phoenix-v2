@@ -2516,6 +2516,60 @@ fn system_blackboard_dock_round_trips_and_is_additive() {
     assert_eq!(idle_decoded, idle);
 }
 
+/// The sensor-radar blackboard (issues #749, #1339, #1397): the
+/// `SystemBlackboard::SensorRadar` variant round-trips with every target-scoped
+/// replica populated, and an idle radar writes none of them.
+///
+/// `selected_target_weapons_cold` is pinned here because it is a wire field the
+/// Sensors scan card reads and NOTHING else derives: the entity snapshot carries
+/// no power level, so a client that lost this field would silently stop showing
+/// the WEAPONS row rather than fall back to something. It is also deliberately
+/// NOT part of any shared target-facts payload — it exists only on this
+/// blackboard, which is the visibility boundary that keeps a target's restraint
+/// on the Sensors surface.
+#[test]
+fn system_blackboard_sensor_radar_round_trips_and_is_additive() {
+    use crate::core::messages::{SensorRadarBlackboard, SystemBlackboard};
+
+    let scanning = SystemBlackboard::SensorRadar(SensorRadarBlackboard {
+        selected_target: Some("enemy-1".into()),
+        selected_target_alert: Some(true),
+        selected_target_relative_velocity: Some([0.0, -20.0]),
+        selected_target_weapons_cold: Some(true),
+    });
+    let encoded = serde_json::to_string(&scanning).unwrap();
+    assert!(
+        encoded.contains("selected_target_weapons_cold"),
+        "a populated radar must carry the weapons-cold replica, got {encoded}"
+    );
+    let decoded: SystemBlackboard = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(decoded, scanning);
+
+    // A powered target is the distinct `Some(false)` reading, not an absence —
+    // the client renders POWERED for it and nothing at all for `None`.
+    let powered = SystemBlackboard::SensorRadar(SensorRadarBlackboard {
+        selected_target: Some("enemy-2".into()),
+        selected_target_weapons_cold: Some(false),
+        ..Default::default()
+    });
+    let powered_json = serde_json::to_string(&powered).unwrap();
+    let powered_decoded: SystemBlackboard = serde_json::from_str(&powered_json).unwrap();
+    assert_eq!(powered_decoded, powered);
+
+    // An idle radar writes no absent-field noise, and a payload from a host
+    // that predates the field still decodes (additive `#[serde(default)]`).
+    let idle = SystemBlackboard::SensorRadar(SensorRadarBlackboard::default());
+    let idle_json = serde_json::to_string(&idle).unwrap();
+    assert!(
+        !idle_json.contains("selected_target_weapons_cold")
+            && !idle_json.contains("selected_target_alert")
+            && !idle_json.contains("selected_target_relative_velocity"),
+        "an idle sensor-radar blackboard omits its optional fields, got {idle_json}"
+    );
+    let idle_decoded: SystemBlackboard = serde_json::from_str(&idle_json).unwrap();
+    assert_eq!(idle_decoded, idle);
+}
+
 /// External repair dispatch (issue #1161): the fieldless
 /// `DispatchExternalRepair` / `RecallExternalRepair` control payloads
 /// round-trip and keep their pinned wire shape. They target the `repair`

@@ -662,6 +662,9 @@ component.sensor_panel.threat,Sensor readout key: target threat rating,THREAT
 component.sensor_panel.alert,Sensor readout key: selected target's red alert state,ALERT
 component.sensor_panel.alert_active,Sensor readout value: selected target is at red alert,RED ALERT
 component.sensor_panel.alert_standby,Sensor readout value: selected target is not at red alert,STANDBY
+component.sensor_panel.weapons,Sensor readout key: whether the selected target's weapons power group is switched off (issue #1397),WEAPONS
+component.sensor_panel.weapons_cold,"Sensor readout value: the selected target has powered its weapons group down to 0 — it cannot fire",COLD
+component.sensor_panel.weapons_powered,Sensor readout value: the selected target has power on its weapons group,POWERED
 component.sensor_panel.status,Sensor panel status row key while scanning,STATUS
 component.sensor_panel.scanning,Sensor panel status while no scan data has arrived,SCANNING...
 component.sensor_panel.shield,"Sensor readout key: target shield state, per-facing or single-fraction (issue #927)",SHIELD

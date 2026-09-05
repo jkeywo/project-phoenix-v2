@@ -95,6 +95,54 @@ describe('PhSensorPanel', () => {
     expect(sd.textContent).not.toContain(t('component.sensor_panel.alert'));
   });
 
+  // ── Target weapons power (issue #1397) ───────────────────────────────
+
+  it("shows a COLD weapons scan row when target_weapons is 'cold'", () => {
+    const { el } = setup();
+    el.state = {
+      scan_range: 300, blips: [], target_uuid: 'abc', target_kind: 'ship',
+      target_class: "B'REL", target_weapons: 'cold',
+    };
+    const sd = el.shadowRoot.querySelector('#scan-data');
+    expect(sd.textContent).toContain(t('component.sensor_panel.weapons'));
+    expect(sd.textContent).toContain(t('component.sensor_panel.weapons_cold'));
+  });
+
+  it("shows a POWERED weapons scan row when target_weapons is 'powered'", () => {
+    const { el } = setup();
+    el.state = {
+      scan_range: 300, blips: [], target_uuid: 'abc', target_kind: 'ship',
+      target_class: "B'REL", target_weapons: 'powered',
+    };
+    const sd = el.shadowRoot.querySelector('#scan-data');
+    expect(sd.textContent).toContain(t('component.sensor_panel.weapons'));
+    expect(sd.textContent).toContain(t('component.sensor_panel.weapons_powered'));
+  });
+
+  it('hides the weapons scan row when target_weapons is null', () => {
+    const { el } = setup();
+    el.state = {
+      scan_range: 300, blips: [], target_uuid: 'abc', target_kind: 'ship',
+      target_class: "B'REL", target_weapons: null,
+    };
+    const sd = el.shadowRoot.querySelector('#scan-data');
+    expect(sd.textContent).not.toContain(t('component.sensor_panel.weapons'));
+    expect(sd.textContent).not.toContain(t('component.sensor_panel.weapons_powered'));
+  });
+
+  it('renders the weapons row beside the alert row, not in place of it', () => {
+    // The two facts are independent: a target can be at red alert with its
+    // weapons cold (an escort standing off) or calm with them powered.
+    const { el } = setup();
+    el.state = {
+      scan_range: 300, blips: [], target_uuid: 'abc', target_kind: 'ship',
+      target_class: "B'REL", target_alert: true, target_weapons: 'cold',
+    };
+    const sd = el.shadowRoot.querySelector('#scan-data');
+    expect(sd.textContent).toContain(t('component.sensor_panel.alert_active'));
+    expect(sd.textContent).toContain(t('component.sensor_panel.weapons_cold'));
+  });
+
   // ── Target shields (issue #927) ───────────────────────────────────────
   //
   // `target_shields` / `target_shield_fraction` / `target_shield_freq` are on

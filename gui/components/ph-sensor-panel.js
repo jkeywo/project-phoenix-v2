@@ -144,6 +144,12 @@ export class PhSensorPanel extends PhElement {
     // Selected-target red alert (issue #749). Only present for Red-Alert-capable
     // ship targets; `null` (non-ship/incapable/no selection) hides the row.
     if (s.target_alert != null) scanRows.push({ k: t('component.sensor_panel.alert'), v: s.target_alert ? t('component.sensor_panel.alert_active') : t('component.sensor_panel.alert_standby') });
+    // Selected-target weapons power (issue #1397), beside ALERT. `'cold'` is a
+    // target that has switched its weapons group off — restraint expressed as
+    // power, readable from outside the hull. `null` (non-ship contact, a hull
+    // with no weapons bus, or no selection) hides the row: no capability is not
+    // the same reading as POWERED.
+    if (s.target_weapons != null) scanRows.push({ k: t('component.sensor_panel.weapons'), v: s.target_weapons === 'cold' ? t('component.sensor_panel.weapons_cold') : t('component.sensor_panel.weapons_powered') });
 
     // Target shields (issue #927). `target_shields`, `target_shield_fraction`
     // and `target_shield_freq` are on every Sensors payload already

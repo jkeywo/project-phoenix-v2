@@ -759,6 +759,19 @@ pub fn publish_sensor_radar_blackboard(
         ),
         With<crate::server_app::Ship>,
     >,
+    // Read-only lookup of ship reactors by uuid, for the target's weapons-cold
+    // replica (issue #1397). Unlike `ShipRedAlert`, `ShipPowerSystem` is on
+    // EVERY ship (`entities::spawner::insert_power_state` runs for player and
+    // NPC alike), so the `Ship` marker alone does not narrow this to "hulls
+    // that can hold fire by powering down" — the eligibility test is the
+    // reactor's own `has_group(weapons)`, applied below.
+    power_q: Query<
+        (
+            &crate::entities::spawner::EntityUuid,
+            &crate::ship::power::ShipPowerSystem,
+        ),
+        With<crate::server_app::Ship>,
+    >,
 ) {
     for (sensors_target, own_physics, mut bbs) in ships_q.iter_mut() {
         let selected_target = sensors_target.and_then(|st| st.0.clone());
@@ -792,12 +805,38 @@ pub fn publish_sensor_radar_blackboard(
                     ]
                 })
         });
+        // Resolve whether the selected target's WEAPONS group is COLD (issue
+        // #1397). `Some(..)` only when the selection names a ship whose reactor
+        // TRACKS a weapons group; `None` for no selection, a non-ship contact,
+        // or a hull with no weapons bus.
+        //
+        // The `has_group` guard is not belt-and-braces. `is_group_cold` answers
+        // `false` for a group the reactor never heard of — the right answer for
+        // a fire gate, the wrong one here, where "this hull has no weapons bus"
+        // and "this hull's weapons are powered" are different readings and the
+        // scan card must show the first as no row at all. Same shape as the
+        // alert replica above: capability first, then state.
+        let selected_target_weapons_cold = selected_target.as_deref().and_then(|selected| {
+            let weapons = crate::core::messages::PowerGroupId(
+                crate::modifiers::power_system::WEAPONS_POWER_GROUP.to_string(),
+            );
+            power_q
+                .iter()
+                .find(|(uuid, _)| uuid.0 == selected)
+                .and_then(|(_, power)| {
+                    power
+                        .0
+                        .has_group(&weapons)
+                        .then(|| power.0.is_group_cold(&weapons))
+                })
+        });
         bbs.0.insert(
             crate::ship::system_registry::sensor_radar_system_id(),
             SystemBlackboard::SensorRadar(crate::core::messages::SensorRadarBlackboard {
                 selected_target,
                 selected_target_alert,
                 selected_target_relative_velocity,
+                selected_target_weapons_cold,
             }),
         );
     }

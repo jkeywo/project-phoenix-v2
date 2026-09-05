@@ -3959,6 +3959,21 @@ pub struct SensorRadarBlackboard {
     /// `selected_target_alert` above.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_target_relative_velocity: Option<[f32; 2]>,
+    /// Whether the selected target has its WEAPONS power group COLD — switched
+    /// off at level 0 rather than merely turned down (issues #1395, #1397).
+    /// `Some(true)`/`Some(false)` when the selection names a ship whose reactor
+    /// actually tracks a `weapons` power group; `None` when there is no
+    /// selection, the target is a non-ship contact (asteroid/star/planet/
+    /// region), or its hull authors a power block with no weapons group in it.
+    ///
+    /// The `None` case is load-bearing, and is why the publisher asks
+    /// `PowerSystem::has_group` before it asks `is_group_cold`: a hull with no
+    /// weapons bus at all must read as "no such capability" (no WEAPONS row on
+    /// the scan card), never as a confident POWERED. Sensors-scoped only — this
+    /// rides no shared target-facts helper, the same visibility boundary stated
+    /// on `selected_target_alert` above.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_target_weapons_cold: Option<bool>,
 }
 
 /// One visible mission deadline, as the Captain console reads it (issue #1024).

@@ -16,7 +16,7 @@
  * stores a readable property and we assert the exact object the console pushed,
  * with no shadow-DOM / canvas / ResizeObserver machinery in the way.
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { t } from '../../gui/strings.js';
 import { renderStation as battleshipRender } from '../../gui/battleship/tactical.console.js';
 import { renderStation as cruiserRender } from '../../gui/cruiser/tactical.console.js';
@@ -240,6 +240,116 @@ describe('destroyer tactical renderStation', () => {
   it('prefixes the footer target and falls back to the uuid when unnamed', () => {
     destroyerRender(payload, document);
     expect(el('footer-target').textContent).toBe('◉ d1');
+  });
+});
+
+// ── Destroyer: the Intel tab's unread badge (issue #1373) ────────────────────
+//
+// The count the shell's Station Bar draws is computed here, in the console's
+// own render, because only the console knows whether the seat is LOOKING at
+// the panel. gui/intel-unread.js's own suite pins the arithmetic; this pins
+// that the destroyer console feeds it the right subjects, reads the panel's
+// open state, and reports through `__setConsoleTabBadge`.
+
+describe('destroyer tactical intel badge', () => {
+  const OVERLAYS =
+    '<div class="overlay-panel" id="security-overlay"></div>' +
+    '<div class="overlay-panel" id="intel-overlay"></div>';
+
+  let reported;
+  // A FRESH document per test, not the shared jsdom one. The console holds the
+  // "already read" baseline in a WeakMap keyed on the document (see
+  // gui/destroyer/tactical.console.js), and `mount()` only swaps
+  // `document.body.innerHTML` — the document object itself survives every
+  // `beforeEach`, so a baseline left by an earlier test would still be there
+  // and these tests would be asserting each other's leftovers rather than what
+  // they say. A new document is also the production story: a reloaded iframe
+  // is a new document and starts from an empty baseline.
+  let doc;
+
+  const freshDoc = () => {
+    const made = document.implementation.createHTMLDocument();
+    made.body.innerHTML = FIXTURES.destroyer + OVERLAYS;
+    return made;
+  };
+
+  const subject = (uuid, facts) => ({
+    uuid,
+    facts: Array.from({ length: facts }, (_, i) => ({ text: 'f' + i })),
+    evidence: [],
+  });
+  const payloadWith = (dossiers) => ({
+    systems: { 'tactical-radar': { blips: [], banks: [], blasters: [], tubes: [] } },
+    own_hull: { pct: 1 },
+    dossiers,
+  });
+  const openIntel = (target = doc) =>
+    target.getElementById('intel-overlay').classList.add('open');
+  const closeIntel = (target = doc) =>
+    target.getElementById('intel-overlay').classList.remove('open');
+  const latestBadge = () => reported.filter(([id]) => id === 'intel-overlay').at(-1)?.[1];
+
+  beforeEach(() => {
+    doc = freshDoc();
+    reported = [];
+    window.__setConsoleTabBadge = (id, count) => { reported.push([id, count]); };
+  });
+
+  afterEach(() => { delete window.__setConsoleTabBadge; });
+
+  it('reports every subject with something on file to a seat that has not looked', () => {
+    destroyerRender(payloadWith([subject('a', 1), subject('b', 2)]), doc);
+    expect(latestBadge()).toBe(2);
+  });
+
+  it('grows when a dossier gains a fact while the panel is closed', () => {
+    destroyerRender(payloadWith([subject('a', 1)]), doc);
+    openIntel();
+    destroyerRender(payloadWith([subject('a', 1)]), doc);
+    expect(latestBadge()).toBe(0);
+
+    closeIntel();
+    destroyerRender(payloadWith([subject('a', 2)]), doc);
+    expect(latestBadge()).toBe(1);
+  });
+
+  it('clears the moment the panel is open — reading is what marks it read', () => {
+    destroyerRender(payloadWith([subject('a', 3), subject('b', 1)]), doc);
+    expect(latestBadge()).toBe(2);
+    openIntel();
+    destroyerRender(payloadWith([subject('a', 3), subject('b', 1)]), doc);
+    expect(latestBadge()).toBe(0);
+  });
+
+  it('stays cleared over repeated renders with the panel open', () => {
+    openIntel();
+    destroyerRender(payloadWith([subject('a', 3)]), doc);
+    destroyerRender(payloadWith([subject('a', 3)]), doc);
+    expect(reported.map(([, count]) => count)).toEqual([0, 0]);
+  });
+
+  it('reports nothing unread for a hull with no dossiers at all', () => {
+    destroyerRender(payloadWith(undefined), doc);
+    expect(latestBadge()).toBe(0);
+  });
+
+  it('renders fine on a console whose shell installed no badge hook', () => {
+    delete window.__setConsoleTabBadge;
+    expect(() => destroyerRender(payloadWith([subject('a', 1)]), doc)).not.toThrow();
+  });
+
+  it('starts a second document from an empty baseline, whatever the first read', () => {
+    // The isolation the suite above depends on, asserted rather than assumed —
+    // and the reload story itself: one document reads the files, a second one
+    // (the reloaded iframe, the next seat) is told about all of them again.
+    const first = freshDoc();
+    openIntel(first);
+    destroyerRender(payloadWith([subject('a', 2), subject('b', 1)]), first);
+    expect(latestBadge()).toBe(0);
+
+    const second = freshDoc();
+    destroyerRender(payloadWith([subject('a', 2), subject('b', 1)]), second);
+    expect(latestBadge()).toBe(2);
   });
 });
 

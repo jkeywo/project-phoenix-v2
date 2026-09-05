@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { push, wireLoad } from '../../gui/iframe-bridge.js';
+import { push, setOverlay, wireLoad } from '../../gui/iframe-bridge.js';
 
 // ── push ─────────────────────────────────────────────────────────────────────
 
@@ -33,6 +33,51 @@ describe('push', () => {
   it('swallows errors thrown by __updateConsole', () => {
     const iframe = { contentWindow: { __updateConsole: () => { throw new Error('oops'); } } };
     expect(() => push(iframe, 'Repair', '{}')).not.toThrow();
+  });
+});
+
+// ── setOverlay (issue #1373) ─────────────────────────────────────────────────
+
+describe('setOverlay', () => {
+  it('calls __setConsoleOverlay(id) on the iframe contentWindow', () => {
+    const fn = vi.fn();
+    const iframe = { contentWindow: { __setConsoleOverlay: fn } };
+    setOverlay(iframe, 'intel-overlay');
+    expect(fn).toHaveBeenCalledWith('intel-overlay');
+  });
+
+  it('normalises every "nothing selected" spelling to null', () => {
+    const fn = vi.fn();
+    const iframe = { contentWindow: { __setConsoleOverlay: fn } };
+    setOverlay(iframe, null);
+    setOverlay(iframe, undefined);
+    setOverlay(iframe, '');
+    expect(fn.mock.calls).toEqual([[null], [null], [null]]);
+  });
+
+  it('does nothing when iframeEl is null', () => {
+    expect(() => setOverlay(null, 'intel-overlay')).not.toThrow();
+  });
+
+  it('does nothing when iframeEl has no contentWindow', () => {
+    expect(() => setOverlay({}, 'intel-overlay')).not.toThrow();
+  });
+
+  it('does nothing when the console declared no overlays, so installed no hook', () => {
+    const iframe = { contentWindow: {} };
+    expect(() => setOverlay(iframe, 'intel-overlay')).not.toThrow();
+  });
+
+  it('does nothing when __setConsoleOverlay is not a function', () => {
+    const iframe = { contentWindow: { __setConsoleOverlay: 'not-a-function' } };
+    expect(() => setOverlay(iframe, 'intel-overlay')).not.toThrow();
+  });
+
+  it('swallows errors thrown by __setConsoleOverlay', () => {
+    const iframe = {
+      contentWindow: { __setConsoleOverlay: () => { throw new Error('oops'); } },
+    };
+    expect(() => setOverlay(iframe, 'intel-overlay')).not.toThrow();
   });
 });
 

@@ -95,12 +95,21 @@
          its own hero-bar console (issue #1098) rather than a toggle here. -->
     <!-- Security teams (issue #1346): the team list, their assignments and
          progress, and the eligible targets/actions to send them to. -->
-    <div class="overlay-panel" id="security-overlay">
+    <!-- `data-tab-code` is what makes a panel a TAB on the shell's Station Bar
+         (issue #1373): the console declares its overlays and the bar renders
+         them between this seat and its visitors. Both attributes carry
+         strings.csv IDS, not English — the shell resolves them at the render
+         site the same way it resolves a Station's own name off the wire. -->
+    <div class="overlay-panel" id="security-overlay"
+         data-tab-code="console.tactical.security.code"
+         data-tab-name="console.tactical.security">
       <button class="overlay-back" id="security-back" data-overlay-back data-i18n="console.common.back">&#8592; Back</button>
       <h2 data-i18n="console.tactical.security">Security</h2>
       <ph-security-teams id="security-teams"></ph-security-teams>
     </div>
-    <div class="overlay-panel" id="intel-overlay">
+    <div class="overlay-panel" id="intel-overlay"
+         data-tab-code="console.tactical.intel.code"
+         data-tab-name="console.tactical.intel">
       <button class="overlay-back" id="intel-back" data-overlay-back data-i18n="console.common.back">&#8592; Back</button>
       <h2 data-i18n="console.tactical.intel">Intel</h2>
       <ph-dossier-panel id="dossier-panel"></ph-dossier-panel>

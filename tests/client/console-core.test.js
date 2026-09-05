@@ -406,6 +406,38 @@ describe('initConsole — BroadcastChannel inbound context gating (#482)', () =>
 // under its actual System ids. `initConsole` normalises every inbound
 // payload before `render` sees it, so a console reading through `familyView`
 // gets the right data whichever shape the wire payload arrived in.
+// ── Overlay-tab seam, where there is no document (issue #1373) ───────────────
+//
+// The scan/post/select half of the seam is driven against a real DOM in
+// console-core-tabs.test.js. What belongs HERE is the contract this suite's
+// environment is: a console runtime built with no document — the shape every
+// Node-side consumer of `initConsole` sees — still installs both hooks and
+// declines rather than throwing.
+describe('initConsole — overlay tabs with no document', () => {
+  beforeEach(() => {
+    global.BroadcastChannel = function() { return { postMessage: vi.fn(), onmessage: null }; };
+  });
+
+  it('installs both inbound hooks regardless', () => {
+    initConsole({ name: 'tactical', render: () => {} });
+    expect(typeof window.__setConsoleOverlay).toBe('function');
+    expect(typeof window.__setConsoleTabBadge).toBe('function');
+  });
+
+  it('reports no open overlay and no known badge, without throwing', () => {
+    initConsole({ name: 'tactical', render: () => {} });
+    expect(window.__setConsoleOverlay('intel-overlay')).toBeNull();
+    expect(window.__setConsoleTabBadge('intel-overlay', 3)).toBe(false);
+  });
+
+  it('a state push still reaches render when nothing can be declared', () => {
+    const render = vi.fn();
+    initConsole({ name: 'tactical', render });
+    window.__updateConsole('tactical', JSON.stringify({ own_hull: { entries: [] } }));
+    expect(render).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('initConsole — payload shape normalisation (#925 regression)', () => {
   beforeEach(() => {
     global.BroadcastChannel = function() { return { postMessage: vi.fn(), onmessage: null }; };

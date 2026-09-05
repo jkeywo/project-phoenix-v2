@@ -132,6 +132,50 @@ entities:
       paths: [client.html, gui/client-router.js, gui/station-roster.js, gui/lobby-view.js, gui/client-lobby-render.js, gui/coordination-popup.js, gui/mount-plan.js, gui/connection-manager.js, assets/phone_border]
       tests: [npx vitest run, tests/smoke]
 
+  - component: client-console-overlay-tab-seam
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Console Overlay Tab Seam
+      summary: The declare/select contract between a console iframe and the shell's one Station Bar. A console marks each overlay panel it is willing to have opened from outside with a tab code and name, posts that declaration to the shell, and re-posts it whenever one of its badges changes; the shell renders the active console's declaration as tabs between the direct Station and its visiting Stations and opens the chosen panel back inside that same iframe. The console also posts its own-Station system rows for the bar's damage popup. Presentation only — nothing here is a ClientMessage, reaches the wire, or grants authority.
+      rationale:
+        - "[ai] The console DECLARES and the shell SELECTS, rather than the shell knowing which consoles have which overlays. A hull adds a surface by writing one attribute pair on the panel; nothing in the shell, the mount plan or the console registry learns a new name. That is why the declaration is scanned off the parsed document instead of being a per-console table."
+        - "[ai] Kept keyed by console because every mounted Station iframe runs initConsole at once and all of them post. A single slot would let whichever background console posted last decide what the bar shows. The shell renders only the active console's entry, and drops its held selection when that console's iframe reloads — a reloaded document has every panel closed, so a tab still shown as selected would be selected over nothing."
+        - "[ai] `__setConsoleOverlay` is SET, not toggle, unlike the console-side button convention it sits beside. The bar pushes a KNOWN selection; a toggle would make the shell read the iframe's DOM back first and land on the wrong panel whenever two pushes arrive in one frame."
+        - "[ai] Both tab labels cross the seam as strings.csv ids, not display text, and the shell resolves them at the render site through the same `wireText` rule it uses for a Station's own name. The no-English-in-markup rule does not stop at the network boundary."
+        - "[ai] An overlay tab is not a Station: it carries no health, rating, importance or ownership, and never enters the bar's ownership roll-call or its AI status line. It sits between the direct Station and its visitors because it belongs to that seat's own console."
+        - "[ai] The unread count is computed by the CONSOLE, not the shell, because only the console knows whether the seat is looking at the panel. Intel counts SUBJECTS that grew rather than individual facts — that is the number the tab can act on — and the baseline is taken while the panel is open, so reading is what clears it."
+        - "[ai] Posted only to an iframe parent. The Station Bar is a client.html surface; server.html, the wry host and separate-tab mode have no bar, and would each have to learn to ignore a message that can never mean anything to them."
+    architecture:
+      kind: client-shell
+      authority: non-authoritative
+      owns: [console-overlay-declaration-state]
+      reads: [client-presentation-state, session-station-ownership-state]
+      produces: [console-overlay-declaration-state]
+      runs_in: [phone-browser-runtime]
+    implementation:
+      status: declared
+      paths: [gui/console-core.js, gui/console-overlays.js, gui/iframe-bridge.js, gui/hero-bar.js, gui/intel-unread.js, gui/destroyer/tactical.html, gui/destroyer/tactical.console.js, client.html, assets/strings/strings.csv]
+      symbols: [setConsoleOverlay, openConsoleOverlayId, setOverlay, heroBarModel, renderHeroBarDom, intelUnreadCount, markIntelSeen]
+      tests: [npx vitest run, tests/smoke]
+
+  - state: console-overlay-declaration-state
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Console Overlay Declaration State
+      summary: Per-console, client-local record of the overlay panels a mounted console declared — panel id, tab code id, tab name id and current badge count — plus the own-Station system rows that console last reported and which single panel, in which console, is currently open. Rebuilt from scratch whenever a console iframe loads and never persisted; it decides what the Station Bar draws and nothing else.
+    architecture:
+      classification: local
+      owner: client-console-overlay-tab-seam
+      writers: [client-console-overlay-tab-seam]
+    implementation:
+      status: declared
+      paths: [gui/console-core.js, client.html]
+      tests: [npx vitest run]
+
   - component: client-settings-and-help-surface
     core:
       status: implemented

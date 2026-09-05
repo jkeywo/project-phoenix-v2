@@ -150,6 +150,7 @@ function translate(id, values = {}) {
   if (id === 'client.hero.ai_status') return `AI: ${values.stations}`;
   if (id === 'client.hero.health.readout') return `Hull ${values.pct}%`;
   if (id === 'client.hero.health.none') return 'No damage model';
+  if (id === 'client.hero.badge.unread') return `${values.count} unread`;
   return id.split('.').at(-1);
 }
 
@@ -336,9 +337,12 @@ it('reports the visited Station id to onActivate (the StationVisited contract)',
   });
   renderHeroBarDom({ ...elements, model, translate, onActivate });
   // client.html's onActivate forwards this exact id verbatim into
-  // send('StationVisited', { station }); pinning the argument pins that contract.
+  // send('StationVisited', { station }); pinning the argument pins that
+  // contract. The second argument is which KIND of tab was pressed (issue
+  // #1373) — the shell routes a Station to the console switch and an overlay
+  // to the console's own set-overlay hook.
   elements.tabsEl.querySelector('[data-station="navigation"]').click();
-  expect(onActivate).toHaveBeenCalledWith('navigation');
+  expect(onActivate).toHaveBeenCalledWith('navigation', 'station');
 });
 
 it('renders a neutral empty track for a Station with no damage model', () => {
@@ -580,8 +584,198 @@ describe('where the cog and help live', () => {
     // Arrow-right off the last tab wraps to the first tab, never onto help.
     const last = elements.tabsEl.querySelector('[data-station="comms"]');
     last.onkeydown({ key: 'ArrowRight', preventDefault() {} });
-    expect(onActivate).toHaveBeenCalledWith('helm');
+    expect(onActivate).toHaveBeenCalledWith('helm', 'station');
     expect(doc.activeElement).toBe(elements.tabsEl.querySelector('[data-station="helm"]'));
+  });
+});
+
+// ── Overlay tabs (issue #1373) ───────────────────────────────────────────────
+//
+// A console's overlay panels ride the same bar as its Stations, because they
+// are the same choice ("what am I looking at") — but they are not Stations.
+// These pin where they sit, what they carry that a Station tab does not, and
+// what they must NOT carry that a Station tab does.
+
+describe('overlay tabs', () => {
+  const overlays = [
+    { id: 'security-overlay', code: 'SEC', name: 'Security', badge: 0 },
+    { id: 'intel-overlay', code: 'INTL', name: 'Intel', badge: 0 },
+  ];
+
+  const build = (extra = {}) => heroBarModel({
+    directStation: 'helm', stations,
+    stationHosts: {
+      navigation: { station: 'navigation', host: 'helm', rating: 'Std' },
+      comms: { station: 'comms', host: 'helm', rating: 'Simple' },
+    },
+    stationHealth: { helm: 0.5 },
+    stationRatings: {}, activeStation: 'helm',
+    consoleTabs: overlays,
+    ...extra,
+  });
+
+  it('sits between the direct Station and its visitors', () => {
+    expect(build().tabs.map(tab => tab.id))
+      .toEqual(['helm', 'security-overlay', 'intel-overlay', 'navigation', 'comms']);
+  });
+
+  it('carries no health, rating, importance or ownership', () => {
+    const model = build();
+    const intel = model.tabs.find(tab => tab.id === 'intel-overlay');
+    expect(intel).toMatchObject({
+      kind: 'overlay', name: 'Intel', code: 'INTL',
+      rating: '', health: null, healthState: 'none', importance: null,
+      importanceState: 'none',
+    });
+    // An overlay is not a Station: it never appears in the ownership roll-call
+    // and can never be reported as AI-operated.
+    expect(model.ownership['intel-overlay']).toBeUndefined();
+    expect(model.aiStations.map(s => s.id)).not.toContain('intel-overlay');
+  });
+
+  it('marks Station tabs as such, so the shell can route an activation', () => {
+    expect(build().tabs.filter(tab => tab.kind === 'station').map(tab => tab.id))
+      .toEqual(['helm', 'navigation', 'comms']);
+  });
+
+  it('is the selected tab while its panel is open, and not otherwise', () => {
+    expect(build().selected).toBe('helm');
+    expect(build({ activeOverlay: 'intel-overlay' }).selected).toBe('intel-overlay');
+    // An id naming no declared overlay selects nothing new.
+    expect(build({ activeOverlay: 'nav-overlay' }).selected).toBe('helm');
+  });
+
+  it('shows nothing when the console declared none, or there is no seat', () => {
+    expect(build({ consoleTabs: [] }).tabs.map(t => t.id))
+      .toEqual(['helm', 'navigation', 'comms']);
+    expect(build({ consoleTabs: undefined }).tabs.map(t => t.id))
+      .toEqual(['helm', 'navigation', 'comms']);
+    // A spectator has no console for an overlay to be drawn inside.
+    expect(heroBarModel({
+      directStation: null, stations, stationRatings: {}, activeStation: null,
+      consoleTabs: overlays,
+    }).tabs).toEqual([]);
+  });
+
+  it('draws an overlay tab with its own data attributes, never data-station', () => {
+    const { elements } = heroDom();
+    renderHeroBarDom({ ...elements, model: build(), translate, onActivate: vi.fn() });
+    const intel = elements.tabsEl.querySelector('[data-tab-id="intel-overlay"]');
+    expect(intel.dataset.tabKind).toBe('overlay');
+    expect(intel.dataset.overlay).toBe('intel-overlay');
+    expect(intel.dataset.station).toBeUndefined();
+    // …and the Station tabs keep theirs, so "the tabs that are Stations" is
+    // still one selector.
+    expect([...elements.tabsEl.querySelectorAll('button[data-station]')]
+      .map(b => b.dataset.station)).toEqual(['helm', 'navigation', 'comms']);
+  });
+
+  it('tells the shell which kind of tab was pressed', () => {
+    const { elements } = heroDom();
+    const onActivate = vi.fn();
+    renderHeroBarDom({ ...elements, model: build(), translate, onActivate });
+    elements.tabsEl.querySelector('[data-tab-id="intel-overlay"]').click();
+    expect(onActivate).toHaveBeenCalledWith('intel-overlay', 'overlay');
+  });
+
+  it('roves the keyboard across overlay tabs as well as Station tabs', () => {
+    const { dom, elements } = heroDom();
+    const onActivate = vi.fn();
+    renderHeroBarDom({ ...elements, model: build(), translate, onActivate });
+    const helm = elements.tabsEl.querySelector('[data-tab-id="helm"]');
+    helm.onkeydown({ key: 'ArrowRight', preventDefault() {} });
+    expect(onActivate).toHaveBeenCalledWith('security-overlay', 'overlay');
+    expect(dom.window.document.activeElement)
+      .toBe(elements.tabsEl.querySelector('[data-tab-id="security-overlay"]'));
+  });
+
+  it('shows the short code on a phone bar and the panel name where there is room', () => {
+    const { elements } = heroDom();
+    const label = () => elements.tabsEl
+      .querySelector('[data-tab-id="intel-overlay"]').children[0].textContent;
+    renderHeroBarDom({ ...elements, model: build(), translate, onActivate: vi.fn(),
+      labelMode: 'code' });
+    expect(label()).toBe('INTL');
+    renderHeroBarDom({ ...elements, model: build(), translate, onActivate: vi.fn(),
+      labelMode: 'name' });
+    expect(label()).toBe('Intel');
+  });
+
+  it('leaves the neutral empty health track on an overlay tab', () => {
+    const { elements } = heroDom();
+    renderHeroBarDom({ ...elements, model: build(), translate, onActivate: vi.fn() });
+    const intel = elements.tabsEl.querySelector('[data-tab-id="intel-overlay"]');
+    expect(intel.dataset.health).toBe('none');
+    expect(intel.querySelector('.station-tab-health-fill').hidden).toBe(true);
+    // The seat's OWN health is unaffected by the overlay beside it.
+    expect(elements.tabsEl.querySelector('[data-tab-id="helm"]').dataset.healthValue).toBe('50');
+  });
+
+  it('preserves tab identity across a re-render, overlays included', () => {
+    const { elements } = heroDom();
+    const args = { ...elements, translate, onActivate: vi.fn() };
+    renderHeroBarDom({ ...args, model: build() });
+    const intel = elements.tabsEl.querySelector('[data-tab-id="intel-overlay"]');
+    intel.focus();
+    renderHeroBarDom({ ...args, model: build({ activeOverlay: 'intel-overlay' }) });
+    expect(elements.tabsEl.querySelector('[data-tab-id="intel-overlay"]')).toBe(intel);
+    expect(intel.getAttribute('aria-selected')).toBe('true');
+  });
+});
+
+describe('the unread badge', () => {
+  const withBadge = badge => heroBarModel({
+    directStation: 'tactical',
+    stations: [{ id: 'tactical', name: 'Tactical' }],
+    stationRatings: {}, activeStation: 'tactical',
+    consoleTabs: [{ id: 'intel-overlay', code: 'INTL', name: 'Intel', badge }],
+  });
+
+  it('draws nothing at zero — a badge reading 0 never goes away', () => {
+    const { elements } = heroDom();
+    renderHeroBarDom({ ...elements, model: withBadge(0), translate, onActivate: vi.fn() });
+    const intel = elements.tabsEl.querySelector('[data-tab-id="intel-overlay"]');
+    expect(intel.querySelector('.station-tab-badge').hidden).toBe(true);
+    expect(intel.dataset.badge).toBe('0');
+  });
+
+  it('draws the count, and reads it out with what it counts', () => {
+    const { elements } = heroDom();
+    renderHeroBarDom({ ...elements, model: withBadge(3), translate, onActivate: vi.fn() });
+    const badge = elements.tabsEl
+      .querySelector('[data-tab-id="intel-overlay"] .station-tab-badge');
+    expect(badge.hidden).toBe(false);
+    expect(badge.querySelector('.station-tab-badge-count').textContent).toBe('3');
+    // The digits are decoration; the hidden label is what is announced.
+    expect(badge.querySelector('.station-tab-badge-count').getAttribute('aria-hidden'))
+      .toBe('true');
+    expect(badge.querySelector('.station-tab-badge-label').textContent).toBe('3 unread');
+    // …and the tab states the count on itself. That attribute is what the
+    // stylesheet's `:not([data-badge="0"])` padding reservation selects on, so
+    // a badged tab holds a column back for the pill instead of letting it land
+    // on the label — without it "INTL" reads "INT" under the '3'.
+    const intel = elements.tabsEl.querySelector('[data-tab-id="intel-overlay"]');
+    expect(intel.dataset.badge).toBe('3');
+    expect(intel.matches('button:not([data-badge="0"])')).toBe(true);
+  });
+
+  it('clears back to nothing on the same button when the count drops to zero', () => {
+    const { elements } = heroDom();
+    const args = { ...elements, translate, onActivate: vi.fn() };
+    renderHeroBarDom({ ...args, model: withBadge(2) });
+    const intel = elements.tabsEl.querySelector('[data-tab-id="intel-overlay"]');
+    renderHeroBarDom({ ...args, model: withBadge(0) });
+    expect(elements.tabsEl.querySelector('[data-tab-id="intel-overlay"]')).toBe(intel);
+    expect(intel.querySelector('.station-tab-badge').hidden).toBe(true);
+    expect(intel.querySelector('.station-tab-badge-count').textContent).toBe('');
+  });
+
+  it('never appears on a Station tab', () => {
+    const { elements } = heroDom();
+    renderHeroBarDom({ ...elements, model: withBadge(4), translate, onActivate: vi.fn() });
+    const tactical = elements.tabsEl.querySelector('[data-tab-id="tactical"]');
+    expect(tactical.querySelector('.station-tab-badge').hidden).toBe(true);
+    expect(tactical.dataset.badge).toBe('0');
   });
 });
 
@@ -660,6 +854,76 @@ describe('client.html gives the bar the shape the labels assume', () => {
     const bar = narrow[0].match(/#station-hero\s*\{([^}]*)\}/);
     expect(bar ? bar[1] : '', 'the shared narrow block overrides the rail padding')
       .not.toMatch(/padding/);
+  });
+
+  // ── The overlay-tab seam's shell half (issue #1373) ───────────────────────
+  //
+  // The model above takes `consoleTabs` already chosen; choosing them is
+  // client.html's job, and it is the part AC3 is about. Its inline script is
+  // not importable, so these read the source for the two decisions that make
+  // the difference between a bar that recovers and one that shows a background
+  // console's tabs. tests/smoke/console-tabs.spec.js drives the real thing.
+
+  it('stores each console declaration under its own console name', () => {
+    // One iframe per Station is mounted at once and every one of them runs
+    // initConsole, so a single slot would let whichever posted last win.
+    expect(CLIENT_HTML).toMatch(/consoleTabsByConsole\[name\]\s*=/);
+    expect(CLIENT_HTML).toMatch(/consoleHullByConsole\[name\]\s*=/);
+  });
+
+  it("renders only the active console's declaration", () => {
+    expect(CLIENT_HTML).toMatch(/consoleTabs:\s*\(consoleTabsByConsole\[activeConsole\]/);
+  });
+
+  it('resolves the two tab labels through the string table, not raw', () => {
+    // The console posts strings.csv ids; no English crosses the seam.
+    const call = CLIENT_HTML.match(/consoleTabs:\s*\(consoleTabsByConsole\[activeConsole\][\s\S]*?\}\)\),/);
+    expect(call, 'no consoleTabs mapping').not.toBeNull();
+    expect(call[0]).toMatch(/code:\s*wireText\(tab\.code/);
+    expect(call[0]).toMatch(/name:\s*wireText\(tab\.name/);
+  });
+
+  it("lets the console's own declaration settle which panel is open", () => {
+    // The document is the truth about what is covering the console; the bar
+    // only lights a tab optimistically on the tap. A console reporting no open
+    // panel clears its OWN selection and says nothing about another's.
+    expect(CLIENT_HTML).toMatch(/const open = event\.data\.open \|\| null;/);
+    expect(CLIENT_HTML).toMatch(/if \(open\) openConsoleOverlay = \{ console: name, id: open \};/);
+    expect(CLIENT_HTML).toMatch(/else if \(openConsoleOverlay\.console === name\)/);
+  });
+
+  it("drops a console's selection when its iframe reloads", () => {
+    // A reloaded document has every panel closed, so a selection held over it
+    // would show a tab selected with nothing behind it.
+    const onLoad = CLIENT_HTML.match(/function _attachIframeLoadListener[\s\S]*?\n    \}\n/);
+    expect(onLoad, 'no iframe load listener').not.toBeNull();
+    expect(onLoad[0]).toMatch(/openConsoleOverlay\.console === consoleName/);
+  });
+
+  it('draws the unread badge as a hideable corner mark on the tab', () => {
+    const rule = CLIENT_HTML.match(/\.station-tab-badge\s*\{([^}]*)\}/);
+    expect(rule, 'no badge rule').not.toBeNull();
+    expect(rule[1]).toMatch(/position:\s*absolute/);
+    // The tab is a flex container, so `hidden` needs saying explicitly.
+    expect(CLIENT_HTML).toMatch(/\.station-tab-badge\[hidden\]\s*\{\s*display:\s*none/);
+  });
+
+  it('reserves a column for the badge rather than drawing it over the label', () => {
+    // The pill is absolutely positioned, and in the portrait strip the tab is
+    // `width: auto` — shrink-wrapped to its label with `overflow: hidden`. With
+    // nothing held back the pill lands ON the label: "INTL" renders "INT" under
+    // a '3' and a two-digit count eats two glyphs. `data-badge` is written on
+    // EVERY tab (renderHeroBarDom above), so `:not([data-badge="0"])` is exactly
+    // the badged ones and unbadged tabs keep their own padding.
+    const reserve = CLIENT_HTML.match(
+      /#station-hero-tabs button:not\(\[data-badge="0"\]\)\s*\{([^}]*)\}/,
+    );
+    expect(reserve, 'nothing reserves room for the unread badge').not.toBeNull();
+    const px = reserve[1].match(/padding-right:\s*(\d+)px/);
+    expect(px, 'the reservation is not a padding-right').not.toBeNull();
+    // Wide enough for a two-digit pill (~20px) plus its 2px offset — the badge
+    // counts dossier subjects, so two digits is the realistic ceiling.
+    expect(Number(px[1])).toBeGreaterThanOrEqual(24);
   });
 
   it('keeps the fixed chrome corner off the strip while the bar is the header', () => {

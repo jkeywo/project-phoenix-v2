@@ -417,6 +417,37 @@
        continuing condition reads on every tab without colour and alongside
        health. Never a sort key — importance never reorders tabs. */
     .station-tab-importance { font-size: var(--text-xs); color: var(--ink-dim); letter-spacing: 0.06em; }
+    /* Unread badge on an overlay tab (issue #1373). Pinned to the tab's top
+       corner rather than given a row of its own: the tabs are already as short
+       as the 44px touch floor allows, and a fourth stacked line would push the
+       label out of a phone strip. `hidden` is honoured explicitly because the
+       button is a flex container, whose `display` would otherwise win. */
+    .station-tab-badge {
+      position: absolute; top: 1px; right: 2px;
+      min-width: 14px; padding: 0 3px; border-radius: 7px;
+      font-size: var(--text-xs); line-height: 14px; text-align: center;
+      background: var(--signal); color: var(--surface-void); font-weight: 700;
+    }
+    .station-tab-badge[hidden] { display: none; }
+    /* …and the tab holds a column back for it. Pinning alone is not enough in
+       the strip: there the tab is `width: auto`, shrink-wrapped to its label
+       with `overflow: hidden`, so the pill lands ON the label's last glyphs —
+       "INTL" reading "INT" under a '3', "Comms" reading "Comm". `data-badge`
+       is written on every tab unconditionally (gui/hero-bar.js), so this
+       selector is exactly the badged ones and costs nothing on the rest; in
+       the landscape rail the tab is already full width, so all the reservation
+       does there is nudge the centred label a few pixels left. Padding rather
+       than an in-flow flex item beside the label, which would reflow the tab's
+       column and move the 44px touch floor the strip's height is derived from.
+       28px is the pill's own width at two digits (~20px) plus its 2px offset
+       and a glyph of clearance — two digits is the ceiling the count can
+       realistically reach, since it counts dossier SUBJECTS that grew. The
+       touch floor is restated here for the same reason the selected-tab rule
+       above restates it: a rule that re-sizes a control states the floor it
+       is sized to (tests/client/control-floors.test.js reads them all). */
+    #station-hero-tabs button:not([data-badge="0"]) {
+      padding-right: 28px; min-height: var(--control-hit-min);
+    }
     #station-hero-details { display: flex; flex-direction: column; flex: 0 0 auto; gap: 1px; }
     #station-hero-title { font-size: var(--text-md); font-weight: 700; }
     #station-hero-rating, #station-hero-ai { font-size: var(--text-xs); color: var(--ink-dim); }
@@ -451,6 +482,18 @@
       }
       /* Stretched across the rail rather than a 40px box floating in it. */
       #station-hero .settings-btn { width: auto; align-self: stretch; }
+      /* …and the diagnostics row off the rail's foot, for the same reason
+         #top-bar is pushed off the strip above. The rail's foot is where the
+         help button sits since issue #1372, and #conn-diag-row is anchored to
+         that same bottom-left corner at z-index 25 against the bar's 16 — so
+         its copy button was taking the tap meant for help. Pushed clear rather
+         than hidden: the readout is wanted in game too. Derived from the rail
+         width declared four lines up, so the two move together.
+         tests/smoke/hero-bar-responsive.spec.js hit-tests both buttons at all
+         three sizes, which is what caught it. */
+      #console-container.station-hero-visible ~ #conn-diag-row {
+        left: calc(132px + 0.75rem);
+      }
     }
     /* The narrow bar (issue #1372). Two shapes, one condition each, and the
        SAME pair `gui/hero-bar.js` exports as HERO_BAR_CODE_QUERY — the
@@ -475,6 +518,9 @@
         width: 96px; gap: 6px;
         padding: max(4px, env(safe-area-inset-top)) 6px
           max(4px, env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left));
+      }
+      #console-container.station-hero-visible ~ #conn-diag-row {
+        left: calc(96px + 0.75rem);
       }
     }
     @media (orientation: portrait) and (max-width: 599px) {
@@ -2572,6 +2618,22 @@
     /// (The flag itself lives in window.simState.redAlert — issue #819.)
     let bezelAlertOn = false;
 
+    /// Overlay tabs each mounted console declared (issue #1373), keyed by
+    /// console name. EVERY mounted console posts its own — one iframe per
+    /// Station is mounted at once and they all run `initConsole` — so the bar
+    /// reads only the active console's entry rather than whichever message
+    /// arrived last. A console with no overlay panels posts an empty list.
+    const consoleTabsByConsole = Object.create(null);
+    /// The own-Station system rows each console posted (issue #1373), keyed the
+    /// same way. Held for the per-system damage popup the bar's selected tab
+    /// opens (issue #1374); nothing in this slice draws them.
+    const consoleHullByConsole = Object.create(null);
+    /// Which overlay panel is open, and in which console. One at a time: the
+    /// panels cover the console, and the bar is a tablist with one selection.
+    /// `console` is carried alongside the id so switching Stations cannot leave
+    /// a stale selection pointing at another console's panel.
+    let openConsoleOverlay = { console: null, id: null };
+
     /// Console selected in the lobby detail panel. Null until the player picks one.
     /// Resets when the player releases their station.
     let lobbyConsole = null;
@@ -2613,6 +2675,32 @@
         : { changed: (name || null) !== activeConsole, next: name || null };
       if (!step.changed) return;
       activeConsole = step.next;
+      // An overlay belongs to the console it is drawn inside. Leaving that
+      // console closes it — both here, so the bar stops showing it selected,
+      // and in the iframe, so the panel is not still covering the console the
+      // next time the player comes back to it.
+      setConsoleOverlay(null, null);
+    }
+
+    /// Open exactly one console's overlay panel — or, with a null id, none.
+    /// The shell half of the seam gui/console-overlays.js owns inside the
+    /// iframe: the bar decides, the console obeys (issue #1373).
+    function setConsoleOverlay(consoleName, overlayId) {
+      const previous = openConsoleOverlay;
+      openConsoleOverlay = { console: overlayId ? consoleName : null,
+                             id: overlayId || null };
+      const setOverlay = window.iframeBridgeSetOverlay;
+      if (typeof setOverlay !== 'function') return;
+      if (previous.console && previous.console !== openConsoleOverlay.console) {
+        setOverlay($(consoleIframeId(previous.console)), null);
+      }
+      if (consoleName) setOverlay($(consoleIframeId(consoleName)), overlayId || null);
+    }
+
+    /// The overlay the ACTIVE console is showing, or null. The bar never
+    /// renders another console's selection.
+    function activeConsoleOverlay() {
+      return openConsoleOverlay.console === activeConsole ? openConsoleOverlay.id : null;
     }
 
     // -- Helpers -------------------------------------------------
@@ -3790,6 +3878,11 @@
         // snapshot that may be seconds old and owes nothing to the host having
         // answered anything.
         pushConsoleStateFor(consoleName, pushCause().IFRAME_LOAD);
+        // A reloaded document has every panel closed and re-posts its
+        // `console_tabs` from `initConsole`, so the shell drops the selection
+        // it was holding for this console rather than showing a tab as
+        // selected over a panel that is no longer open (issue #1373).
+        if (openConsoleOverlay.console === consoleName) setConsoleOverlay(null, null);
         // Re-apply the private Accessibility profile to this same-origin console
         // now that its document has (re)loaded — a reload otherwise resets the
         // iframe :root, losing the text-scale var until the next apply (#1102).
@@ -3874,6 +3967,19 @@
         stationImportance: window.simState && window.simState.stationImportance,
         stationRatings: window.simState && window.simState.stationRatings,
         activeStation: activeConsole,
+        // The active console's own overlay panels (issue #1373). The console
+        // posted string IDS for the two labels — the same convention the wire
+        // uses for a Station's name — so they are resolved here, at the render
+        // site, exactly where `stationLabel` resolves the Station names beside
+        // them. `wireText` substitutes only what the table actually holds, so a
+        // console that authored literal text still shows it.
+        consoleTabs: (consoleTabsByConsole[activeConsole] || []).map(tab => ({
+          id: tab.id,
+          code: wireText(tab.code, tab.code || ''),
+          name: wireText(tab.name, tab.name || tab.id),
+          badge: tab.badge,
+        })),
+        activeOverlay: activeConsoleOverlay(),
       });
       const heroVisible = !!(inGame && model.tabs.length);
       heroBarVisible = heroVisible;
@@ -3894,15 +4000,27 @@
         // two hidden twins — see gui/hero-bar.js.
         labelMode: (typeof window.heroBarLabelMode === 'function')
           ? window.heroBarLabelMode(window) : 'name',
-        onActivate: stationId => {
-          setActiveConsole(stationId);
+        onActivate: (tabId, kind) => {
+          // An overlay tab opens its panel inside the console that declared it
+          // and changes nothing else — same seat, same iframe, a surface in
+          // front of it (issue #1373).
+          if (kind === 'overlay') {
+            setConsoleOverlay(activeConsole, tabId);
+            scheduleRender();
+            return;
+          }
+          // A Station tab closes whatever overlay is open, which is what
+          // "selecting a station tab closes it" means even when the Station
+          // selected is the one already active.
+          setConsoleOverlay(null, null);
+          setActiveConsole(tabId);
           // Tell the host this Station's tab was visited (issue #1101), so it
           // clears the one-off `unread` importance flag authoritatively through
           // the next SimState — NOT an optimistic local clear. In-game only:
           // renderStationHero returns early outside a live game, so onActivate
           // never fires in the lobby. A continuing `critical` condition is
           // immune host-side, so this cannot lower an alert.
-          send('StationVisited', { station: stationId });
+          send('StationVisited', { station: tabId });
           scheduleRender();
         },
       });
@@ -3957,7 +4075,36 @@
     // All iframe consoles send {type:'console_action', payload:json} via
     // postMessage.  Dispatch is table-driven via gui/action-map.js (issue #455).
     window.addEventListener('message', (event) => {
-      if (!event.data || event.data.type !== 'console_action') return;
+      if (!event.data) return;
+      // A console declaring its overlay panels, and the own-Station system
+      // rows behind the bar's damage popup (issue #1373). Both are keyed by
+      // console because every mounted iframe posts its own — storing them in
+      // one slot would let a background console's declaration win the bar.
+      if (event.data.type === 'console_tabs') {
+        const name = event.data.console;
+        if (typeof name !== 'string' || name === '') return;
+        consoleTabsByConsole[name] = Array.isArray(event.data.tabs) ? event.data.tabs : [];
+        // The console's own document is the truth about which of its panels is
+        // covering it, so its declaration settles the selection this shell only
+        // set optimistically on the tap — and reports a panel closed from
+        // inside (the panel's Back button) rather than leaving a tab lit over
+        // nothing. A console reporting no open panel clears only ITS OWN
+        // selection; it says nothing about another console's.
+        const open = event.data.open || null;
+        if (open) openConsoleOverlay = { console: name, id: open };
+        else if (openConsoleOverlay.console === name) {
+          openConsoleOverlay = { console: null, id: null };
+        }
+        if (name === activeConsole) scheduleRender();
+        return;
+      }
+      if (event.data.type === 'console_hull') {
+        const name = event.data.console;
+        if (typeof name !== 'string' || name === '') return;
+        consoleHullByConsole[name] = Array.isArray(event.data.entries) ? event.data.entries : [];
+        return;
+      }
+      if (event.data.type !== 'console_action') return;
       let action;
       try { action = JSON.parse(event.data.payload); } catch (_) { return; }
       if (!action || !action.action) return;

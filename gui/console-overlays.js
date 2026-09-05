@@ -51,6 +51,55 @@ export function closeConsoleOverlays(doc) {
 }
 
 /**
+ * Open exactly `panelId` — or, with a nullish id, nothing. Every other panel
+ * closes either way.
+ *
+ * SET, not toggle, and that is the whole reason this exists beside the toggle
+ * below. The shell's Station Bar owns which overlay tab is selected (issue
+ * #1373) and pushes that answer in through `__setConsoleOverlay`; a toggle
+ * asked to reach a KNOWN state makes the caller read the DOM back first and
+ * lands on the wrong panel whenever two pushes arrive in one frame.
+ * `toggleConsoleOverlay` is expressed in terms of this one, so the open rule
+ * exists once and the two can never drift.
+ *
+ * @param {string|null|undefined} panelId
+ * @param {Document} [doc]
+ * @returns {string|null} the id actually opened, or null when nothing is open.
+ *   An id naming no panel in this document closes everything and returns null
+ *   rather than reporting an open panel that is not there.
+ */
+export function setConsoleOverlay(panelId, doc) {
+  const root = doc || (typeof document !== 'undefined' ? document : null);
+  if (!root) return null;
+  closeConsoleOverlays(root);
+  if (!panelId) return null;
+  const panel = root.getElementById(panelId);
+  if (!panel || !panel.classList.contains('overlay-panel')) return null;
+  panel.classList.add('open');
+  const toggle = root.querySelector('.overlay-toggle[data-overlay="' + panelId + '"]');
+  if (toggle) {
+    toggle.dataset.active = 'true';
+    toggle.classList.add('active');
+  }
+  return panelId;
+}
+
+/**
+ * Which panel is covering the console right now, or null.
+ *
+ * The console's own render asks this to learn whether the seat is LOOKING at a
+ * surface: Intel's unread badge clears on being read, not on the state that
+ * filled it (issue #1373), and "is the panel open" is a DOM fact this module
+ * already owns rather than something to re-derive per console.
+ */
+export function openConsoleOverlayId(doc) {
+  const root = doc || (typeof document !== 'undefined' ? document : null);
+  if (!root) return null;
+  const open = root.querySelector('.overlay-panel.open');
+  return open && open.id ? open.id : null;
+}
+
+/**
  * Open `panelId`, or close it if it is already open. Every other panel closes
  * either way.
  */
@@ -58,15 +107,8 @@ export function toggleConsoleOverlay(panelId, doc) {
   const root = doc || (typeof document !== 'undefined' ? document : null);
   if (!root) return;
   const panel = root.getElementById(panelId);
-  const toggle = root.querySelector('.overlay-toggle[data-overlay="' + panelId + '"]');
   const wasOpen = !!panel && panel.classList.contains('open');
-  closeConsoleOverlays(root);
-  if (wasOpen || !panel) return;
-  panel.classList.add('open');
-  if (toggle) {
-    toggle.dataset.active = 'true';
-    toggle.classList.add('active');
-  }
+  setConsoleOverlay(wasOpen ? null : panelId, root);
 }
 
 /**

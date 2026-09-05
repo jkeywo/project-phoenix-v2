@@ -126,6 +126,16 @@ test('the Station bar is a phone strip, a phone rail and a desktop rail', async 
   await expect.poll(() => captain.evaluate(
     () => document.getElementById('station-hero').getBoundingClientRect().width,
   )).toBe(132);
+  // The rail's WIDTH is a stylesheet rule and takes effect on the resize; the
+  // LABEL is a JS read of the same media query, applied on the render that
+  // follows the `change` event. Waiting only for the width reads the bar in
+  // between the two and finds the codes still there — so wait for the decision
+  // this phase is actually about. A rail that never switches fails here
+  // instead, which is the same failure by a clearer name.
+  await expect.poll(() => captain.evaluate(
+    () => [...document.querySelectorAll('#station-hero-tabs button[data-station]')]
+      .every((b) => b.children[0].textContent === b.title),
+  )).toBe(true);
 
   const desktop = await readBar();
   expect(desktop.containerDirection).toBe('row');

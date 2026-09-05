@@ -28,6 +28,9 @@
  *    Logs a console.warn (tagged with the console name) on parse failure.
  *  - BroadcastChannel listener on 'phoenix-console-state', filtering by
  *    `name` — for same-origin separate-tab mode (ADR-0001 §3 target 4).
+ *  - `window.__setConsoleOverlay(id|null)` / `window.__setConsoleTabBadge(id, n)`
+ *    plus the outbound `console_tabs` / `console_hull` posts — the Station Bar
+ *    overlay-tab seam (issue #1373). See the block above `sendAction`.
  *
  * @param {{ name: string, render: function(state: object): void,
  *           actionFamilies?: string[], getActionContext?: function(): string,
@@ -64,6 +67,10 @@ import { phAdoptConsoleStyles } from './components/ph-console-styles.js';
 // passes through, before `render` ever sees it. See normalizeConsolePayload's
 // own doc comment for the full contract.
 import { normalizeConsolePayload } from './console-payload.js';
+// The shell's Station Bar selects this console's overlay panels as tabs
+// (issue #1373). `setConsoleOverlay` is the SET half of the overlay module —
+// the bar pushes a known selection in, it does not ask the console to flip.
+import { openConsoleOverlayId, setConsoleOverlay } from './console-overlays.js';
 import { createSemanticActionRegistry } from './semantic-action-registry.js';
 import {
   CAPTAIN_ACTION_CONTEXT,
@@ -420,6 +427,8 @@ export function initConsole({
     render(s);
     _updateGmTakeover(s);
     _updateTutorialOverlay(s);
+    _publishConsoleHull(s);
+    _syncConsoleOverlay();
   };
 
   // Parent -> originating iframe final feedback.  The parent routes by the
@@ -440,6 +449,124 @@ export function initConsole({
       }
     };
   }
+
+  // ── Overlay tabs: this console declares them, the shell selects them ───
+  // (issue #1373, PRD #1371.)
+  //
+  // A console's overlay panels are surfaces it has no room for inline. Before
+  // this they were reached by a button inside the console's own header; the
+  // Station Bar is the one header now, so the console has to SAY what it has
+  // and the bar has to be able to open one.
+  //
+  // Three seams, all additions beside the existing pair:
+  //   out  `{type:'console_tabs', console, open, tabs:[{id,code,name,badge}]}`
+  //        — posted once the document is parsed, and again whenever a badge or
+  //        the open panel changes. `code` and `name` are strings.csv IDS, not
+  //        display text: the shell resolves them the same way it resolves a
+  //        Station's own name off the wire, so no English crosses this seam.
+  //   in   `__setConsoleOverlay(id|null)` — set, not toggle.
+  //   in   `__setConsoleTabBadge(id, n)` — called by the console's own render.
+  //
+  // `open` is what keeps the bar honest. The DOCUMENT is the truth about which
+  // panel is covering the console, and the shell is a remote control for it —
+  // so a panel closed from inside (the panel's own Back button, a toggle the
+  // console still draws) reports itself rather than leaving a tab lit over
+  // nothing. The shell may still light a tab optimistically on the tap; this
+  // is what it settles to.
+  //
+  // Posted ONLY to an iframe parent. That is the one context with a bar to
+  // render tabs: server.html, the wry host and separate-tab mode would each
+  // have to learn to ignore a message that can never mean anything to them.
+  var _consoleTabs = [];
+  var _lastHullSignature = null;
+  var _lastPostedOpen = null;
+
+  function _postToShell(message) {
+    var _win = (typeof window !== 'undefined') ? window : null;
+    if (!_win || _win === _win.parent) return false;
+    _win.parent.postMessage(message, '*');
+    return true;
+  }
+
+  function _currentOverlay() {
+    return (typeof document === 'undefined') ? null : openConsoleOverlayId(document);
+  }
+
+  function _postConsoleTabs() {
+    _lastPostedOpen = _currentOverlay();
+    _postToShell({
+      type: 'console_tabs',
+      console: name,
+      open: _lastPostedOpen,
+      tabs: _consoleTabs.map(function(tab) {
+        return { id: tab.id, code: tab.code, name: tab.name, badge: tab.badge };
+      }),
+    });
+  }
+
+  // Re-declare if the open panel moved without the shell asking — which is
+  // exactly what the panel's own Back button does. Cheap: a selector read and
+  // a string compare, on a push that already re-rendered the whole console.
+  function _syncConsoleOverlay() {
+    if (_currentOverlay() !== _lastPostedOpen) _postConsoleTabs();
+  }
+
+  // The declaration itself: every `.overlay-panel` that authored a tab code.
+  // A panel with no `data-tab-code` is not a tab — that is how a surface opts
+  // out (and how a console keeps a panel the bar should not offer).
+  function _publishConsoleTabs() {
+    if (typeof document === 'undefined' || !document.querySelectorAll) return;
+    _consoleTabs = Array.prototype.slice
+      .call(document.querySelectorAll('.overlay-panel[data-tab-code]'))
+      .filter(function(panel) { return !!panel.id; })
+      .map(function(panel) {
+        return {
+          id: panel.id,
+          code: panel.dataset.tabCode || '',
+          name: panel.dataset.tabName || panel.dataset.tabCode || '',
+          badge: 0,
+        };
+      });
+    _postConsoleTabs();
+  }
+
+  // The own-Station system rows, for the damage popup the bar's selected tab
+  // opens (issue #1374). Sent only when they actually change: `own_hull` is
+  // merged into every payload and a payload arrives ten times a second, so an
+  // unconditional post would be ten identical messages per second forever.
+  function _publishConsoleHull(s) {
+    var entries = (s && s.own_hull && Array.isArray(s.own_hull.entries))
+      ? s.own_hull.entries : [];
+    var signature = JSON.stringify(entries);
+    if (signature === _lastHullSignature) return;
+    _lastHullSignature = signature;
+    _postToShell({ type: 'console_hull', console: name, entries: entries });
+  }
+
+  // Set, not toggle (see gui/console-overlays.js). Re-renders afterwards
+  // because opening a panel is a state change the console's own render owes an
+  // answer to — Intel's badge clears the moment the seat looks at it, and the
+  // next state push is up to a tenth of a second away.
+  _root.__setConsoleOverlay = function(overlayId) {
+    if (typeof document === 'undefined') return null;
+    var opened = setConsoleOverlay(overlayId || null, document);
+    if (_latestState) render(_latestState);
+    _syncConsoleOverlay();
+    return opened;
+  };
+
+  // The console's own render reports what its tab should be carrying. Only a
+  // CHANGE re-posts, so a render that recomputes the same number costs nothing.
+  _root.__setConsoleTabBadge = function(overlayId, count) {
+    var id = String(overlayId || '');
+    var value = Number(count);
+    var badge = Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
+    var tab = _consoleTabs.find(function(entry) { return entry.id === id; });
+    if (!tab || tab.badge === badge) return false;
+    tab.badge = badge;
+    _postConsoleTabs();
+    return true;
+  };
 
   // ── Outbound: sendAction (ADR-0001 §1 + §3) ────────────────────────────
   // Builds the standard action envelope { action, console, ...payload },
@@ -571,9 +698,16 @@ export function initConsole({
   // t() inside the console's own render function instead.
   if (typeof document !== 'undefined') {
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', function() { applyToDom(document); });
+      document.addEventListener('DOMContentLoaded', function() {
+        applyToDom(document);
+        _publishConsoleTabs();
+      });
     } else {
       applyToDom(document);
+      // Same pass, and deliberately after it: the overlay declaration is read
+      // off the parsed document, so it belongs wherever "the DOM is ready"
+      // is already decided rather than in a second guess at the same question.
+      _publishConsoleTabs();
     }
   }
 

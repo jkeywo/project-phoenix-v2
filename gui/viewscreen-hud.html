@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Phoenix Viewscreen HUD</title>
+  <title data-i18n="server.hud_doc_title">Phoenix Viewscreen HUD</title>
   <!--
     The native host's viewscreen HUD overlay (issue #422's HTML overlay, ported
     to the native path). server.html renders this same #hud-overlay above its
@@ -15,6 +15,33 @@
     /gui/viewscreen-hud.html, so it references them relative as "borders/…".
     Driven from Rust by window.__updateHud(stateJson) (see the HUD-state push in
     src/native_host/panes/ultralight.rs).
+
+    The String Table reaches it the same way the border art does. This page is
+    SERVED by the host's own delivery server (host_lobby::document's
+    VIEWSCREEN_HUD_PATH), so it can import gui/ modules over http:// exactly as
+    the native lobby document does — see the module island at the bottom of
+    <body>, and src/native_host/host_lobby/host_lobby_link.js for the surface
+    that established the pattern.
+
+    Every display string this page writes of its own is a String Id resolved
+    from assets/strings/strings.csv: the six in the static markup (the document
+    title, the designation and the four slot labels) and the four runtime
+    status-slot values — server.hud_heading, server.hud_weapons_hot,
+    server.hud_clear and server.hud_hull. All ten are ids server.html's copy of
+    this overlay already renders through the same t(), so the two Viewscreens
+    read the same words: this one used to draw "HDG 090" and "HULL 84%" where
+    the web one drew the table's own "HEADING 090" and "HULL 84", and now both
+    draw the table's. What arrives FROM the host instead — ship_name,
+    condition, game_over_message — crosses localiseTree once at the wire
+    boundary, which resolves the ids among them and passes a scenario's
+    authored prose through untouched.
+
+    Two things server.html's viewscreen draws are simply absent here, and this
+    page carries neither the markup nor the ids for them: the ship's-computer
+    banner it renders from `computer_message` (server.html:1946-1951, 2710-2745,
+    issue #1342) and the post-mission report rows. Adding either changes what
+    the shared Viewscreen SHOWS, which is a different change from wiring the
+    table in — see the game-over overlay's own comment below.
   -->
   <!--
     No external font stylesheet: the native host is offline/LAN, and a
@@ -194,13 +221,13 @@
     <div class="vs-piece vs-cap top"></div>
     <div class="vs-piece vs-cap bottom"></div>
     <!-- Ship designation (top-centre, above cap) -->
-    <div class="vs-designation" id="hud-designation">PHOENIX</div>
+    <div class="vs-designation" id="hud-designation" data-i18n="server.hud_designation">PHOENIX</div>
     <!-- 4-slot status strip (bottom-centre, inside cap-bottom) -->
     <div class="vs-status-strip">
-      <div class="vs-status-slot"><div class="vs-slot-label">Nav</div><div class="vs-slot-value" id="v-nav">—</div></div>
-      <div class="vs-status-slot"><div class="vs-slot-label">Tac</div><div class="vs-slot-value" id="v-tac">—</div></div>
-      <div class="vs-status-slot"><div class="vs-slot-label">Eng</div><div class="vs-slot-value" id="v-eng">—</div></div>
-      <div class="vs-status-slot"><div class="vs-slot-label">Sys</div><div class="vs-slot-value" id="v-sys">—</div></div>
+      <div class="vs-status-slot"><div class="vs-slot-label" data-i18n="server.hud_nav">Nav</div><div class="vs-slot-value" id="v-nav">—</div></div>
+      <div class="vs-status-slot"><div class="vs-slot-label" data-i18n="server.hud_tac">Tac</div><div class="vs-slot-value" id="v-tac">—</div></div>
+      <div class="vs-status-slot"><div class="vs-slot-label" data-i18n="server.hud_eng">Eng</div><div class="vs-slot-value" id="v-eng">—</div></div>
+      <div class="vs-status-slot"><div class="vs-slot-label" data-i18n="server.hud_sys">Sys</div><div class="vs-slot-value" id="v-sys">—</div></div>
     </div>
   </div>
 
@@ -209,69 +236,212 @@
     mirroring server.html's viewscreen overlay. `__updateHud` fills the closing
     message and reveals this when the host enters GamePhase::GameOver (the HUD
     state carries `game_over_message` only then). The web host's report rows and
-    return-to-lobby button are deliberately left out here: the rows are always
-    strings.csv ids the native viewscreen has no table to resolve, and this
-    passive overlay takes no input — the operator consoles own return-to-lobby.
+    return-to-lobby button are still left out here, but only ONE of the two
+    reasons for that survives now that this page has a String Table: this
+    passive overlay takes no input, so the operator consoles own return-to-lobby.
+    The rows themselves are ordinary String Ids and this page could resolve
+    them; adding them would change what the shared Viewscreen SHOWS, which is a
+    separate change from wiring the table in.
   -->
   <div id="game-over-overlay" style="display:none;position:absolute;inset:0;z-index:85;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,0.88);color:#cde;font-family:'Chakra Petch',system-ui,monospace;text-align:center;padding:32px;">
     <div id="game-over-message" style="font-size:clamp(0.95rem,2.5vw,1.15rem);white-space:pre-wrap;line-height:1.7;max-width:64ch;letter-spacing:0.03em;"></div>
   </div>
 
+  <!--
+    TWO scripts, in this order, for the reason the native lobby document's
+    host_lobby_boot.js / host_lobby_link.js pair records: the second imports
+    from gui/, so it must be a MODULE, and a module is DEFERRED — it evaluates
+    after the document is parsed, which is not before the host starts pushing.
+    The first is therefore a classic script that installs `window.__updateHud`
+    at parse time and holds the newest state, so a push landing in that gap is
+    painted rather than thrown away.
+
+    The split between them is deliberate, and it is not "state here, drawing
+    there": the classic script owns the DOM plumbing AND a renderer that needs
+    no String Table, so the Viewscreen still shows its heading, its hull, its
+    red alert and its ending if the module never evaluates at all — an import
+    that 404s in a trimmed --client-dir, or an engine that refuses the module.
+    The module owns exactly one thing: choosing text through the table.
+    tests/client/viewscreen-hud.test.js runs both halves the way this document
+    does, including with the second one missing.
+  -->
   <script>
-    // Rust's ViewscreenHudState sends `condition` as a strings.csv id; the web
-    // host resolves it through localiseTree. The native overlay has no string
-    // table, so map the two ids the host emits and fall back to the raw value.
-    var HUD_CONDITION = {
-      'server.hud_nominal': 'NOMINAL',
-      'server.hud_alert': 'ALERT',
-    };
+    (function () {
+      // The newest HUD state the host pushed, and the localising renderer the
+      // module island installs over it — null until the island evaluates, and
+      // null for good if it cannot, which is what `renderRaw` below is for.
+      // State, not a queue: every push is a whole snapshot of the overlay, so
+      // an older one says nothing the newest one does not — which is also why
+      // the host side collapses to latest-wins (ViewscreenHudLatest in
+      // panes/ultralight.rs).
+      var hud = { json: null, render: null };
+      window.__phoenixHud = hud;
 
-    // Known built-in game-over message ids the native overlay maps itself; an
-    // authored scenario message is prose and passes through unchanged, and an
-    // unmapped id shows raw rather than being dropped.
-    var GAME_OVER = {
-      'server.game_over.ship_destroyed': 'SHIP DESTROYED',
-    };
+      // ── The DOM plumbing, shared by both renderers ──────────────────────
+      // Kept here rather than in the module so the fallback below and the
+      // localising renderer write the overlay through exactly the same calls;
+      // what differs between them is only which text they choose.
+      hud.setText = function (id, value) {
+        var el = document.getElementById(id);
+        if (el) el.textContent = value;
+      };
 
-    function setText(id, value) {
-      var el = document.getElementById(id);
-      if (el) el.textContent = value;
-    }
+      hud.setAlert = function (on) {
+        var overlay = document.getElementById('hud-overlay');
+        if (overlay) overlay.classList.toggle('alert-on', !!on);
+      };
 
-    // The one entry point Rust drives (see the HUD-state push in
-    // panes/ultralight.rs): a JSON ViewscreenHudState string.
-    window.__updateHud = function (json) {
-      var s;
-      try { s = JSON.parse(json); } catch (e) { return; }
-      var overlay = document.getElementById('hud-overlay');
-      if (overlay) overlay.classList.toggle('alert-on', !!s.red_alert);
+      // The game-over screen: revealed with the closing message when the host
+      // enters GamePhase::GameOver. `game_over_message` is null in every other
+      // phase, so this both shows the ending and clears it on a new run.
+      hud.showGameOver = function (message) {
+        var overlay = document.getElementById('game-over-overlay');
+        var msg = document.getElementById('game-over-message');
+        if (!overlay || !msg) return;
+        if (message != null) {
+          msg.textContent = message;
+          overlay.style.display = 'flex';
+        } else {
+          overlay.style.display = 'none';
+        }
+      };
+
+      // ── The fallback renderer ───────────────────────────────────────────
+      // Why a second renderer exists at all: the localising one lives in a
+      // MODULE with three imports, and a module whose import fails never
+      // evaluates. A --client-dir missing gui/strings.js or gui/host-channel.js,
+      // or an engine that refuses the module, would otherwise leave `render`
+      // null and every push a silent no-op — no heading, no hull, no red-alert
+      // vignette and no GAME-OVER SCREEN, on the one surface the whole room is
+      // watching. This is a classic script with no dependencies, so it cannot
+      // fail that way. The module island takes over the moment its imports
+      // resolve, which in the ordinary case is before the host's first push.
+      //
+      // It also stands in when the table itself failed to load, for the reason
+      // the module's applyToDom guard states: without a table t() renders every
+      // id as ⟨angle brackets⟩, and digits under the existing NAV/ENG labels
+      // beat a frame full of those.
+      //
+      // It draws only what needs no String Table — the alert state, the
+      // numbers, and the host's own strings written through raw. It carries no
+      // English of its own on purpose: a hardcoded fallback string here is
+      // precisely what AGENTS.md rule 11 forbids, and an unresolved id shown
+      // raw ("server.hud_nominal") is legibly broken in the same way ⟨…⟩ is.
+      hud.renderRaw = function (json) {
+        var s;
+        try { s = JSON.parse(json); } catch (e) { return; }
+        hud.setAlert(s.red_alert);
+        if (typeof s.heading === 'number') {
+          hud.setText('v-nav', String(s.heading).padStart(3, '0'));
+        }
+        // `v-tac` is skipped: its two values are words, and red alert is
+        // already shouted by the vignette and the swapped border art.
+        if (typeof s.hull_pct === 'number') {
+          hud.setText('v-eng', String(s.hull_pct));
+        }
+        if (typeof s.condition === 'string') hud.setText('v-sys', s.condition);
+        if (s.ship_name) hud.setText('hud-designation', s.ship_name);
+        hud.showGameOver(s.game_over_message);
+      };
+
+      hud.paint = function () {
+        if (hud.json === null) return;
+        try {
+          (hud.render || hud.renderRaw)(hud.json);
+        } catch (e) {
+          // A throw here would propagate out of the host's evaluate_script and
+          // be read as a failed push, which the host would retry with the same
+          // payload every frame, forever. Report and keep the surface alive —
+          // the same rule host_lobby_boot.js's paint() states.
+          console.error('[viewscreen-hud] render failed', e);
+        }
+      };
+
+      // The one entry point Rust drives (see the HUD-state push in
+      // panes/ultralight.rs): a JSON ViewscreenHudState string.
+      window.__updateHud = function (json) {
+        hud.json = json;
+        hud.paint();
+      };
+    })();
+  </script>
+
+  <script type="module">
+    // The module island. It imports the SHARED client modules over the host's
+    // own HTTP surface — this page is served at /gui/viewscreen-hud.html, so
+    // './strings-boot.js' is /gui/strings-boot.js and the table it loads is
+    // /assets/strings/strings.csv, published by this same process. Nothing
+    // here reaches the internet: a bridge machine with no route out still
+    // localises, exactly as the native lobby surface does.
+    import './strings-boot.js';
+    import { applyToDom, getTable, localiseTree, t } from './strings.js';
+    import { localiseHostPayload } from './host-channel.js';
+
+    // ONE guard for the whole page: with a table, this island localises the
+    // markup and installs the localising renderer; without one it does neither
+    // and the classic prelude's raw renderer stays in charge.
+    //
+    // The rule behind it, and this page is the one that needs it: `applyToDom`
+    // REPLACES each tagged element's textContent with `t(id)`, `t()` renders an
+    // id it cannot find as ⟨server.hud_nav⟩, and the same is true of the four
+    // status-slot values below. The English in the markup is this overlay's
+    // documented fallback for a table that would not load, so the substitution
+    // happens only when there is a table to substitute from. With one, this is
+    // server.html's own call over server.html's own ids; without one, the frame
+    // reads as it always did instead of filling with angle brackets.
+    const hasTable = getTable().size > 0;
+    if (hasTable) applyToDom(document);
+
+    // The wire boundary, in the same place and through the same module the web
+    // host puts it: server.html crosses `localiseHostPayload` once as the "hud"
+    // channel payload enters the page (gui/host-channel.js), and so does this.
+    // That is what retires the two hand-transcribed id maps this file used to
+    // carry beside the readout — `condition` arrives as a String Id
+    // (viewscreen_border.rs sends server.hud_nominal / server.hud_alert, never
+    // the English word) and `game_over_message` as either the built-in
+    // server.game_over.ship_destroyed or a scenario's own authored prose.
+    // `localiseTree` substitutes only what the table actually holds, so the
+    // prose passes through untouched and an id the table has lost shows raw
+    // rather than being dropped.
+    const strings = { localiseTree };
+    const hud = window.__phoenixHud;
+
+    // The four runtime status-slot values, through the same four ids
+    // server.html's `__updateHud` resolves (server.html:2688-2702). Their
+    // wording AND their number formatting live in the table's own values, so a
+    // copy edit moves both Viewscreens at once and neither page spells any of
+    // it out; tests/client/viewscreen-hud.test.js pins that by driving this
+    // renderer with an empty table and finding digits, not English.
+    //
+    // Everything else it writes came off the wire already localised, and the
+    // DOM plumbing is the prelude's, so this function is only the choice of
+    // text.
+    function renderLocalised(json) {
+      let s;
+      try { s = JSON.parse(localiseHostPayload(json, strings)); } catch (e) { return; }
+      hud.setAlert(s.red_alert);
       if (typeof s.heading === 'number') {
-        setText('v-nav', 'HDG ' + String(s.heading).padStart(3, '0'));
+        hud.setText('v-nav', t('server.hud_heading', { deg: String(s.heading).padStart(3, '0') }));
       }
-      setText('v-tac', s.red_alert ? 'WEAPONS HOT' : 'CLEAR');
+      hud.setText('v-tac', s.red_alert ? t('server.hud_weapons_hot') : t('server.hud_clear'));
       if (typeof s.hull_pct === 'number') {
-        setText('v-eng', 'HULL ' + s.hull_pct + '%');
+        hud.setText('v-eng', t('server.hud_hull', { pct: s.hull_pct }));
       }
       if (typeof s.condition === 'string') {
-        setText('v-sys', HUD_CONDITION[s.condition] || s.condition);
+        hud.setText('v-sys', s.condition);
       }
       if (s.ship_name) {
-        setText('hud-designation', s.ship_name);
+        hud.setText('hud-designation', s.ship_name);
       }
-      // Game-over screen: reveal the overlay with the closing message when the
-      // host enters GamePhase::GameOver. `game_over_message` is null in every
-      // other phase, so this both shows the ending and clears it on a new run.
-      var goOverlay = document.getElementById('game-over-overlay');
-      var goMsg = document.getElementById('game-over-message');
-      if (goOverlay && goMsg) {
-        if (s.game_over_message != null) {
-          goMsg.textContent = GAME_OVER[s.game_over_message] || s.game_over_message;
-          goOverlay.style.display = 'flex';
-        } else {
-          goOverlay.style.display = 'none';
-        }
-      }
-    };
+      hud.showGameOver(s.game_over_message);
+    }
+
+    if (hasTable) hud.render = renderLocalised;
+
+    // Paint whatever landed while this module was still being fetched — with
+    // the localising renderer if this island installed one, and otherwise
+    // repainting through the prelude's, which is idempotent.
+    hud.paint();
   </script>
 </body>
 </html>

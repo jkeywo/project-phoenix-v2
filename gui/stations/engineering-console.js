@@ -29,7 +29,6 @@
  * @property {string} ids.hullIntegrity           `ph-hull-integrity` id
  * @property {string} [ids.coreDamage]            ownerless "core" systems bar id
  * @property {string} ids.repairTeams             `ph-repair-teams` id
- * @property {string} [ids.stationDamage]         footer `ph-station-damage` id
  * @property {string} [ids.autoBadge]             the AUTO badge id
  * @property {function(object, {shields: object|null, power: object, repair: object}, Document, function): void} [tail]
  *   Bespoke per-hull rendering the shared core does not cover (Tractor,
@@ -113,12 +112,6 @@ export function makeEngineeringRender(variant) {
         damaged: r.damaged_systems || [],
         externally_committed_teams: r.external_dispatch?.target != null ? 1 : 0,
       };
-    }
-
-    // ── Station-damage footer ──────────────────────────────────────────
-    if (ids.stationDamage) {
-      const el = doc.getElementById(ids.stationDamage);
-      if (el) el.state = s.own_hull || null;
     }
 
     // ── AUTO badge ──────────────────────────────────────────────────────

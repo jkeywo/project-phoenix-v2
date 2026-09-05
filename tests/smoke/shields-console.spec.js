@@ -53,7 +53,6 @@ test('shields console: focused facing gets focused class', async ({ page }) => {
 test('shields console: hull bar reflects hull_integrity_pct', async ({ page }) => {
   await page.goto(CONSOLE_URL);
   await page.evaluate((s) => window.__updateConsole('shields', JSON.stringify(s)), NOMINAL_STATE);
-  await expect(page.locator('#hull-val')).toHaveText('78%');
   await expect(page.locator('#hull-tag')).toHaveText('78%');
 });
 
@@ -96,14 +95,13 @@ test('shields console: clicking focused facing clears focus via focused=false', 
   expect(JSON.parse(sent[0])).toMatchObject({ action: 'set_shield_focus', console: 'shields', arc_id: 'fore', focused: false });
 });
 
-test('shields console: header shows focused facing display', async ({ page }) => {
+test('shields console: metric row shows focused facing display', async ({ page }) => {
   await page.goto(CONSOLE_URL);
   await page.evaluate((s) => window.__updateConsole('shields', JSON.stringify(s)), { ...NOMINAL_STATE, focused_facing: 'Fore' });
   await expect(page.locator('#focus-display')).toHaveText('Fore');
-  await expect(page.locator('#footer-focus')).toHaveText('Fore');
 });
 
-test('shields console: grid status shown in footer', async ({ page }) => {
+test('shields console: grid status shown in the metric rows', async ({ page }) => {
   await page.goto(CONSOLE_URL);
   await page.evaluate((s) => window.__updateConsole('shields', JSON.stringify(s)), NOMINAL_STATE);
   await expect(page.locator('#footer-grid')).toHaveText(ts('component.shield_panel.grid_nominal'));

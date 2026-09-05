@@ -11,7 +11,6 @@ export const renderStation = makeSensorsRender({
   ids: {
     radar: 'sensor-radar',
     sensorPanel: 'sensor-panel',
-    stationDamage: 'station-damage',
     scanRange: 'scan-range-val',
     contactSub: 'contact-sub',
     targetName: 'tgt-name',

@@ -700,22 +700,14 @@ component.station_damage.bar_title,Station-damage bar tooltip. {name} is the own
 component.station_damage.default_label,Station-damage bar label before the console names the station it belongs to,Station
 console.comms.doc_title,Browser-tab title of the comms console page,[Project Phoenix - Comms Console]
 console.comms.screen_label,Phone-frame screen label of the comms console,Comms Console
-console.comms.title,comms console — main hero heading,COMMS
-console.comms.subtitle,comms console — hero sub-heading under the title,[CONTACTS & TRAFFIC]
-console.comms.station_footer,comms console — footer station name,COMMS STATION
 console.common.no_active_hail,Console footer when no hail is open,[NO ACTIVE HAIL]
 console.comms.contacts,"comms console — ""Contacts"" panel heading",Contacts
 console.comms.available_hails,"comms console — ""Available Hails"" panel heading",Available Hails
 console.comms.current_thread,"comms console — ""Current Thread"" panel heading",Current Thread
 console.helm.screen_label,Phone-frame screen label of the helm console,Helm Console
-console.helm.title,helm console — main hero heading,HELM
-console.helm.station_footer,helm console — footer station name,HELM STATION
 console.helm.under_tow,"helm console — indicator shown while this ship's tractor holds a target and the helm is under the tow's mass penalty (issue #1157)","[Under tow load]"
 console.navigation.doc_title,Browser-tab title of the navigation console page,[Project Phoenix - Navigation Console]
 console.navigation.screen_label,Phone-frame screen label of the navigation console,Navigation Console
-console.navigation.title,navigation console — main hero heading,NAVIGATION
-console.navigation.subtitle,navigation console — hero sub-heading under the title,[COURSE & WAYPOINTS]
-console.navigation.station_footer,navigation console — footer station name,NAVIGATION STATION
 console.navigation.selected,"navigation console — ""Selected"" metric label",Selected
 console.navigation.waypoint,"navigation console — ""Waypoint"" metric label",Waypoint
 console.navigation.contacts,"navigation console — ""Contacts"" metric label",Contacts
@@ -727,72 +719,45 @@ console.navigation.tap_to_place,navigation console — toast prompt shown while 
 console.navigation.waypoint_set,navigation console — toast confirming a waypoint was set,WAYPOINT SET
 console.power.doc_title,Browser-tab title of the power console page,[Project Phoenix - Power Console]
 console.power.screen_label,Phone-frame screen label of the power console,Power Console
-console.power.title,power console — main hero heading,POWER
-console.power.subtitle,power console — hero sub-heading under the title,[ALLOCATION & BATTERY]
-console.power.station_footer,power console — footer station name,POWER STATION
 console.repair.doc_title,Browser-tab title of the repair console page,[Project Phoenix - Repair Console]
 console.repair.screen_label,Phone-frame screen label of the repair console,Repair Console
-console.repair.title,repair console — main hero heading,REPAIR
-console.repair.subtitle,repair console — hero sub-heading under the title,[HULL & SYSTEM MAINTENANCE]
-console.repair.station_footer,repair console — footer station name,REPAIR STATION
 console.shields.doc_title,Browser-tab title of the shields console page,[Project Phoenix - Shields Console]
 console.shields.screen_label,Phone-frame screen label of the shields console,Shields Console
-console.shields.title,shields console — main hero heading,SHIELDS
-console.shields.subtitle,shields console — hero sub-heading under the title,DEFENSIVE GRID
-console.shields.station_footer,shields console — footer station name,SHIELDS STATION
 console.shields.hull,"shields console — ""Hull"" metric label",Hull
 console.shields.focus,"shields console — ""Focus"" metric label",Focus
 console.shields.grid,"shields console — ""Grid"" metric label",Grid
 console.tactical.doc_title,Browser-tab title of the tactical console page,[Project Phoenix - Tactical Console]
 console.tactical.screen_label,Phone-frame screen label of the tactical console,Tactical Console
-console.tactical.title,tactical console — main hero heading,TACTICAL
-console.tactical.subtitle,tactical console — hero sub-heading under the title,WEAPONS CONTROL
-console.tactical.station_footer,tactical console — footer station name,TACTICAL STATION
 console.captain.doc_title,Browser-tab title of the captain console page,[Project Phoenix — Captain Console]
 console.captain.screen_label,Phone-frame screen label of the captain console,Captain Console
-console.captain.title,captain console — main hero heading,CAPTAIN
-console.captain.subtitle,captain console — hero sub-heading under the title,COMMAND
 console.captain.command,"captain console — ""Command"" panel heading",Command
 console.cruiser_comms.doc_title,Browser-tab title of the comms console page,[Project Phoenix — Comms Console]
-console.cruiser_comms.subtitle,comms console — hero sub-heading under the title,[COMMUNICATIONS & NAV]
 console.comms.navigation,"comms console — ""Navigation"" panel heading",Navigation
 console.comms.comms,"comms console — ""Comms"" panel heading",Comms
 console.comms.messages.one,"comms console footer — message count, exactly one. {n} is the count",[{n} MESSAGE]
 console.comms.messages.other,"comms console footer — message count, zero or several. {n} is the count",[{n} MESSAGES]
 console.engineering.doc_title,Browser-tab title of the engineering console page,[Project Phoenix — Engineering Console]
 console.engineering.screen_label,Phone-frame screen label of the engineering console,Engineering Console
-console.engineering.title,engineering console — main hero heading,ENGINEERING
-console.engineering.subtitle,engineering console — hero sub-heading under the title,[POWER & REPAIR]
 console.engineering.power,"engineering console — ""Power"" panel heading",Power
 console.engineering.repair,"engineering console — ""Repair"" panel heading",Repair
 console.cruiser_helm.doc_title,Browser-tab title of the helm console page,[Project Phoenix — Helm Console]
-console.cruiser_helm.subtitle,helm console — hero sub-heading under the title,PILOTING
 console.destroyer_helm.doc_title,Browser-tab title of the helm console page,[Project Phoenix — Helm Console]
-console.destroyer_helm.subtitle,helm console — hero sub-heading under the title,[PILOTING]
 console.battleship_helm.doc_title,Browser-tab title of the helm console page,[Project Phoenix — Helm Console]
-console.battleship_helm.subtitle,helm console — hero sub-heading under the title,[PROPULSION & COURSE]
 console.science.doc_title,Browser-tab title of the science console page,[Project Phoenix — Science Console]
 console.science.screen_label,Phone-frame screen label of the science console,Science Console
-console.science.title,science console — main hero heading,SCIENCE
-console.science.subtitle,science console — hero sub-heading under the title,[SENSORS & SHIELDS]
 console.science.sensors,"science console — ""Sensors"" panel heading",Sensors
 console.science.shields,"science console — ""Shields"" panel heading",Shields
 console.cruiser_tactical.doc_title,Browser-tab title of the tactical console page,[Project Phoenix — Tactical Console]
-console.cruiser_tactical.subtitle,tactical console — hero sub-heading under the title,WEAPONS
 console.courier_captain.doc_title,Browser-tab title of the captain console page,[Project Phoenix — Courier Captain]
 console.courier_captain.screen_label,Phone-frame screen label of the captain console,Courier Captain
-console.captain.station_footer,captain console — footer station name,CAPTAIN STATION
 console.captain.shields_power,"captain console — ""Shields & Power"" panel heading",[Shields & Power]
 console.captain.repair,"captain console — ""Repair"" panel heading",Repair
 console.captain.navigation,"captain console — ""Navigation"" panel heading",Navigation
 console.captain.comms,"captain console — ""Comms"" panel heading",Comms
 console.command.doc_title,Browser-tab title of the command console page,[Project Phoenix — Command Console]
 console.command.screen_label,Phone-frame screen label of the command console,[Command]
-console.command.title,command console — main hero heading,[COMMAND]
-console.command.subtitle,command console — hero sub-heading under the title,[STATION DIRECTION]
 console.command.directing,"command console — label before the directed station's name",[Directing]
 console.command.stance_heading,command console — heading over the stance list,[Stance]
-console.command.station_footer,command console — footer station name,[COMMAND STATION]
 console.command.ai_directed,command console — persistent cue that the directed station is under AI control and can be commanded,[AI — DIRECTABLE]
 console.command.human_held,command console — cue that the directed station is human-held and off the command board,[CREWED — NOT DIRECTABLE]
 console.command.command_auto,command console — cue that Command itself is currently run by the ship AI,[COMMAND ON AI]
@@ -804,13 +769,9 @@ console.courier_tactical.screen_label,Phone-frame screen label of the tactical c
 console.tactical.weapons,"tactical console — ""Weapons"" panel heading",Weapons
 console.tactical.sensors,"tactical console — ""Sensors"" panel heading",Sensors
 console.tactical.helm,"tactical console — ""Helm"" panel heading",Helm
-console.destroyer_captain.subtitle,captain console — hero sub-heading under the title,[COMMAND & SENSORS]
-console.destroyer_engineering.subtitle,engineering console — hero sub-heading under the title,[SHIELDS · POWER · REPAIR]
 console.engineering.shields,"engineering console — ""Shields"" panel heading",Shields
 console.tactical.intel,"tactical console — ""Intel"" panel heading (issue #1030)",Intel
 console.common.no_waypoint,Console footer when no waypoint is set,NO WAYPOINT
-console.engineering.station_footer,engineering console — footer station name,ENGINEERING STATION
-console.science.station_footer,science console — footer station name,SCIENCE STATION
 console.common.active_hail,Comms footer while a hail with an unnamed sender is open,ACTIVE HAIL
 console.common.waypoint,Fallback name for an unnamed waypoint,WAYPOINT
 console.common.locked,Tactical footer when a target is locked but unnamed,LOCKED
@@ -819,7 +780,6 @@ console.navigation.custom,Navigation console — selected-entity readout for a c
 console.navigation.none,Navigation console — selected-entity readout when nothing is selected,NONE
 console.common.nav_toggle,Button that toggles the navigation chart overlay,Nav
 console.common.comms_toggle,Button that toggles the comms overlay,Comms
-console.common.intel_toggle,Button that toggles the intelligence-files overlay (issue #1030),Intel
 console.common.objectives_toggle,Button that toggles the objectives overlay,Objectives
 console.common.red_alert_badge,Badge shown while the ship is at red alert,Red Alert
 console.shields.threat_bearing,"Shields console — standing bearing of the nearest hostile in sensor range, the same fact the backfilled Shields focus AI reads",Threat Bearing
@@ -831,8 +791,6 @@ console.shield.shield_down,Shield status summary: shields collapsed,SHIELD DOWN
 console.shield.degraded,Shield status summary: one or more facings down,DEGRADED
 console.sensors.doc_title,Browser-tab title of the sensors console page,[Project Phoenix - Sensors Console]
 console.sensors.screen_label,Phone-frame screen label of the sensors console,Sensors Console
-console.sensors.title,sensors console — main hero heading,SENSORS
-console.sensors.subtitle,sensors console — hero sub-heading under the title,LONG-RANGE SCAN
 console.sensors.scan_summary,"sensors console — ""Scan Summary"" panel heading",Scan Summary
 console.sensors.scan_range,"sensors console — ""Scan Range"" metric label",Scan Range
 console.sensors.contacts,"sensors console — ""Contacts"" metric label",Contacts
@@ -840,7 +798,6 @@ console.sensors.target_analysis,"sensors console — ""Target Analysis"" panel h
 console.sensors.name,sensors console — target name metric label,Name
 console.sensors.kind,sensors console — target kind metric label,Kind
 console.sensors.shield_status,sensors console — target shield status metric label,Shield Status
-console.sensors.station_footer,sensors console — footer station name,SENSORS STATION
 console.common.cancel_impulse,Button that aborts an active impulse-drive charge,Cancel Impulse
 console.common.target,Fallback name for an unnamed locked target,TARGET
 console.repair.core,"The ship's core — the systems owned by no station. Names both the repair-target row and the core damage bar beside the station bars, on repair and engineering",Core
@@ -1371,9 +1328,6 @@ server.transport_pinned,"Host viewscreen connection diagnostics when this host w
 server.diag_copy,Button under the host viewscreen connection diagnostics that copies the whole readout for pasting into a bug report,[Copy diagnostics]
 server.diag_copied,Confirmation shown on the host copy-diagnostics button once the readout is on the clipboard,[Copied]
 client.doc_title,Browser-tab title of the client console page,[Project Phoenix — Console]
-console.battleship_captain.subtitle,battleship captain console — hero sub-heading under the title,[COMMAND & BATTLESPACE]
-console.courier_captain.subtitle,courier captain console — hero sub-heading under the title,COURIER COMMAND
-console.courier_tactical.subtitle,courier tactical console — hero sub-heading under the title,[HELM · WEAPONS · SENSORS]
 entity.alliance_courier.behaviour.doctrine.destroy_hostiles.text,assets/entities/alliance_courier.toml → [behaviour.doctrine] text,[Engage and destroy hostile ships]
 entity.alliance_courier.behaviour.doctrine.hold_station.text,assets/entities/alliance_courier.toml → [behaviour.doctrine] text,Hold station
 entity.alliance_destroyer.behaviour.doctrine.destroy_hostiles.text,assets/entities/alliance_destroyer.toml → [behaviour.doctrine] text,[Engage and destroy hostile ships]
@@ -2119,7 +2073,6 @@ component.security_teams.priority.urgent_objective,Security priority chip: work 
 component.security_teams.priority.threat_containment,Security priority chip: containing an active threat (issue #1346),[CONTAIN]
 component.security_teams.priority.optional,Security priority chip: worth doing when there is nothing better (issue #1346),[OPTIONAL]
 console.tactical.security,"tactical console — ""Security"" panel heading (issue #1346)",[Security]
-console.common.security_toggle,Button that toggles the Security teams overlay on the tactical console (issue #1346),[Security]
 world.falling_skyway.security.warning.picket_containment,"assets/worlds/falling_skyway.toml -> [[entity.overrides.security_target.action]] warning — locking out the Havelock picket's mounts from outside (issue #1349)","[Armed boat, crew aboard. Team works the mounts from the hull with her guns live.]"
 world.falling_skyway.security.warning.picket_boarding,"assets/worlds/falling_skyway.toml -> [[entity.overrides.security_target.action]] warning — going aboard the Havelock picket (issue #1349)","[Contested hatch. Once the team is inside, the boat's crew decide how this goes.]"
 world.falling_skyway.objective.picket.text,"assets/worlds/falling_skyway.toml -> add_objective text — the optional objective to get the Havelock picket out of the lane (issue #1349)",[Clear the Havelock picket from the corridor.]
@@ -2476,3 +2429,5 @@ world.falling_skyway.report.demolition.premature,"Post-mission report row outcom
 client.hero.badge.unread,"Station Bar per-tab unread badge, read out for assistive technology. {count} is the number of items on that surface the seat has not looked at yet (issue #1373)",[{count} unread]
 console.tactical.intel.code,Station Bar short code for the tactical console's Intel overlay tab — the abbreviation a phone-sized bar shows in place of the panel name (issue #1373),[INTL]
 console.tactical.security.code,Station Bar short code for the tactical console's Security overlay tab — the abbreviation a phone-sized bar shows in place of the panel name (issue #1373),[SEC]
+console.power.battery,Power console — label of the battery-charge readout at the head of the allocation controls (issue #1374),[Battery]
+client.station_damage.close,Station Bar per-system damage popup — accessible name and tooltip of the control that closes it (issue #1374),[Close]

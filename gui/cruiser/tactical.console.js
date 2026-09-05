@@ -17,7 +17,6 @@ export const renderStation = makeTacticalRender({
     radar: 'tactical-radar',
     phasers: 'phasers-controls',
     torpedo: 'torpedo-controls',
-    stationDamage: 'station-damage',
     autoBadge: 'tactical-auto-badge',
   },
   torpedoMaxDefault: 20,

@@ -19,7 +19,6 @@ export const renderStation = makeCommsRender({
     contactList: 'comms-contact-list',
     hailList: 'comms-hail-list',
     currentMessage: 'comms-current-message',
-    stationDamage: 'station-damage',
     autoBadge: 'comms-auto-badge',
   },
   // Station badge: the retired composite's comms_auto meant "station is

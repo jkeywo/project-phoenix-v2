@@ -22,10 +22,8 @@ const FIXTURE =
   '<ph-navigation-map id="navigation-map"></ph-navigation-map>' +
   '<ph-objective-list id="objective-list"></ph-objective-list>' +
   '<ph-civilian-traffic id="civilian-traffic"></ph-civilian-traffic>' +
-  '<ph-station-damage id="station-damage"></ph-station-damage>' +
   '<span id="nav-contact-count">0</span>' +
   '<span id="waypoint-name"></span>' +
-  '<span id="footer-target"></span>' +
   '<button id="btn-on-screen"></button>' +
   '<span id="navigation-auto-badge" hidden></span>';
 
@@ -52,14 +50,15 @@ describe('battleship navigation renderStation', () => {
     });
     expect(el('objective-list').state).toEqual({ objectives: [{ id: 'o1' }] });
     expect(el('civilian-traffic').state).toEqual({ civilians: [{ id: 'c1' }], auto: false });
-    expect(el('station-damage').state).toEqual({ pct: 1 });
     expect(el('nav-contact-count').textContent).toBe('2');
   });
 
-  it('shows the waypoint name in both the side panel and the footer', () => {
+  // The footer's second copy of this went with the footer (issue #1374): it
+  // said the same words as the Waypoint metric, one box away, so the strip
+  // took it with it rather than the readout moving somewhere new.
+  it('shows the waypoint name in the side panel', () => {
     renderStation(payload, document);
     expect(el('waypoint-name').textContent).toBe('Alpha Point');
-    expect(el('footer-target').textContent).toBe('Alpha Point');
   });
 
   it('falls back to a localized placeholder for an unnamed waypoint and for none set', () => {

@@ -10,7 +10,6 @@ export const renderStation = makeRepairRender({
     hullIntegrity: 'hull-integrity',
     coreDamage: 'core-damage',
     repairTeams: 'repair-teams',
-    stationDamage: 'station-damage',
     footerRight: 'footer-right',
     autoBadge: 'repair-auto-badge',
     dispatchPanel: 'dispatch-panel',

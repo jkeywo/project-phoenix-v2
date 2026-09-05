@@ -23,7 +23,6 @@ const FIXTURE =
   '<div id="power-data" hidden></div>' +
   '<ph-power-controls id="power-controls"></ph-power-controls>' +
   '<ph-battery-bar id="battery-bar"></ph-battery-bar>' +
-  '<ph-station-damage id="station-damage"></ph-station-damage>' +
   '<span id="power-auto-badge" hidden></span>' +
   '<span id="bat-val">0%</span>';
 
@@ -42,11 +41,10 @@ describe('battleship power renderStation', () => {
     draining: true,
   };
 
-  it('drives the controls, battery, station-damage and footer label', () => {
+  it('drives the controls, battery and footer label', () => {
     renderStation(payload, document);
     expect(el('power-controls').state).toEqual({ groups: payload.groups, auto: false });
     expect(el('battery-bar').state).toEqual({ level_pct: 30, charging: true, emergency_threshold_pct: 20 });
-    expect(el('station-damage').state).toEqual({ pct: 0.6 });
     expect(el('bat-val').textContent).toBe('30%');
   });
 

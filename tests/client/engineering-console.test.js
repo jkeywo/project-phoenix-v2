@@ -33,7 +33,6 @@ const CRUISER_FIXTURE =
   '<ph-hull-integrity id="hull-integrity"></ph-hull-integrity>' +
   '<ph-station-damage id="core-damage"></ph-station-damage>' +
   '<ph-repair-teams id="repair-teams"></ph-repair-teams>' +
-  '<ph-station-damage id="station-damage"></ph-station-damage>' +
   '<span id="engineering-auto-badge" hidden></span>';
 
 const DESTROYER_FIXTURE =
@@ -44,7 +43,6 @@ const DESTROYER_FIXTURE =
   '<ph-hull-integrity id="hull-integrity"></ph-hull-integrity>' +
   '<ph-station-damage id="core-damage"></ph-station-damage>' +
   '<ph-repair-teams id="repair-teams"></ph-repair-teams>' +
-  '<ph-station-damage id="station-damage"></ph-station-damage>' +
   '<span id="engineering-auto-badge" hidden></span>' +
   '<div id="tractor-panel" hidden>' +
     '<button id="tractor-btn"></button><span id="tractor-status"></span>' +
@@ -87,7 +85,6 @@ describe('cruiser engineering renderStation', () => {
       teams: [{ id: 't1' }], auto: true, targets: [{ id: 'dt1' }],
       damaged: [{ id: 'ds1' }], externally_committed_teams: 0,
     });
-    expect(el('station-damage').state).toEqual({ pct: 0.9 });
   });
 
   it('shows the AUTO badge only when power AND repair are both AI-run (no shields column to conjoin)', () => {

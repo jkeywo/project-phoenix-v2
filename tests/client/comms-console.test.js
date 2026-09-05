@@ -8,7 +8,7 @@
  * destroyer and courier have none). Each hull's `.html` imports its
  * `renderStation` from `gui/<class>/comms.console.js`; this suite imports
  * the SAME functions and drives them against a jsdom fixture, so the
- * contact-list/hail-list/current-message/station-damage contract is
+ * contact-list/hail-list/current-message contract is
  * asserted per hull without a browser.
  *
  * The custom-element modules are deliberately NOT imported: an un-upgraded
@@ -34,7 +34,6 @@ const FIXTURES = {
     '<ph-comms-contact-list id="comms-contact-list"></ph-comms-contact-list>' +
     '<ph-comms-hail-list id="comms-hail-list"></ph-comms-hail-list>' +
     '<ph-comms-current-message id="comms-current-message"></ph-comms-current-message>' +
-    '<ph-station-damage id="station-damage"></ph-station-damage>' +
     '<span id="footer-target"></span>' +
     '<span id="comms-auto-badge" hidden></span>',
   cruiser:
@@ -43,7 +42,6 @@ const FIXTURES = {
     '<ph-comms-current-message id="comms-current-message"></ph-comms-current-message>' +
     '<ph-navigation-map id="navigation-map"></ph-navigation-map>' +
     '<ph-navigation-map id="nav-overlay-map"></ph-navigation-map>' +
-    '<ph-station-damage id="station-damage"></ph-station-damage>' +
     '<span id="footer-target"></span>' +
     '<span id="footer-right"></span>' +
     '<span id="comms-auto-badge" hidden></span>',
@@ -64,12 +62,11 @@ describe('battleship comms renderStation', () => {
     comms_auto: true,
   };
 
-  it('drives the contact list, hail list, current message and station-damage from the flat payload', () => {
+  it('drives the contact list, hail list and current message from the flat payload', () => {
     battleshipRender(base, document);
     expect(el('comms-contact-list').state).toEqual({ contacts: [{ id: 'c1' }] });
     expect(el('comms-hail-list').state).toEqual({ ...base, selected_message_id: null });
     expect(el('comms-current-message').state).toEqual({ thread: { id: 'm2', is_read: false, sender_name: 'Ops' }, messages: base.messages, rejection: null });
-    expect(el('station-damage').state).toEqual({ pct: 0.9 });
   });
 
   it('owns local message selection and repaints the list, thread and footer together', () => {
@@ -144,7 +141,6 @@ describe('cruiser comms renderStation', () => {
     expect(el('comms-contact-list').state).toEqual({ contacts: [{ id: 'c1' }] });
     expect(el('comms-hail-list').state).toEqual({ ...comms, selected_message_id: null });
     expect(el('comms-current-message').state).toEqual({ thread: { id: 'm1', is_read: false }, messages: comms.messages, rejection: 'console.common.no_target' });
-    expect(el('station-damage').state).toEqual({ pct: 0.5 });
   });
 
   it('drives the navigation map and its overlay clone from the absorbed navigation system', () => {

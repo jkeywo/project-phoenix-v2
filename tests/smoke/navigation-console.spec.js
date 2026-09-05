@@ -117,7 +117,7 @@ test('navigation console: tapping a visible entity selects it and Set as Waypoin
   expect(parsed.source_uuid).toBe('station-alpha');
 });
 
-test('navigation console: waypoint state renders waypoint labels in the side panel and footer', async ({ page }) => {
+test('navigation console: waypoint state renders the waypoint label in the side panel', async ({ page }) => {
   await page.goto(CONSOLE_URL);
   await page.evaluate(() => {
     window.__updateConsole('navigation', JSON.stringify({
@@ -133,5 +133,4 @@ test('navigation console: waypoint state renders waypoint labels in the side pan
     }));
   });
   await expect(page.locator('#waypoint-name')).toHaveText('Bravo Station');
-  await expect(page.locator('#footer-target')).toHaveText('Bravo Station');
 });

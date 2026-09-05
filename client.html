@@ -86,6 +86,11 @@
        gui/client-lobby-render.js pairs with gui/lobby-view.js. -->
   <script type="module" src="gui/loading-render.js"></script>
   <script type="module" src="gui/coordination-popup.js"></script>
+  <!-- The Station Bar's per-system damage popup (issue #1374): the pure
+       "what does it say" half, plus the row-drawing component the retired
+       console footers used, now mounted once here instead of 22 times. -->
+  <script type="module" src="gui/components/ph-damage-detail.js"></script>
+  <script type="module" src="gui/station-damage-popup.js"></script>
   <!-- Per-tab session identity (issue: multiple clients on one desktop).
        localStorage is shared across all tabs of an origin, so every console
        tab read the same session-token and the host collapsed them onto one
@@ -650,6 +655,71 @@
     #coordination-popup .popup-body {
       font-size: var(--text-xl);
       color: var(--ink-dim);
+    }
+
+    /* -- Station damage popup (issue #1374) --------------------------
+       Every console used to end in a footer strip carrying a summed hull bar
+       you tapped for the Station's individual systems. The footers are gone
+       and the popup is here instead, opened by tapping the ALREADY SELECTED
+       Station tab on the bar — one surface for the whole fleet rather than
+       twenty-two copies of the same widget, and no console spends a row of a
+       phone screen on a readout looked at once a minute.
+
+       z-index 196 puts the scrim over the bar that opened it (16) and over the
+       cog (195), so a tap anywhere outside the card closes the popup rather
+       than landing on chrome behind it — and below the settings overlay
+       (1000), which is the one surface that outranks everything. */
+    #station-damage-popup {
+      position: fixed; inset: 0; z-index: 196;
+      display: flex; align-items: center; justify-content: center;
+      padding: var(--space-5);
+      background: rgba(var(--rgb-deep), 0.82);
+    }
+    #station-damage-popup[hidden] { display: none; }
+    #station-damage-popup .popup-card {
+      width: min(22rem, 100%);
+      max-height: 70vh;
+      overflow-y: auto;
+      background: var(--surface-panel);
+      border: 1px solid var(--cyan-dim);
+      box-shadow: 0 4px 20px rgba(var(--rgb-void), 0.6);
+      padding: var(--space-4);
+    }
+    #station-damage-popup .popup-head {
+      display: flex; align-items: center; gap: var(--space-3);
+      padding-bottom: var(--space-2);
+      margin-bottom: var(--space-3);
+      border-bottom: 1px solid var(--line-faint);
+    }
+    #station-damage-popup-title {
+      flex: 1; min-width: 0;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: var(--text-sm);
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--ink-dim);
+    }
+    #station-damage-popup-close {
+      flex: 0 0 auto;
+      min-width: var(--control-hit-min);
+      min-height: var(--control-hit-min);
+      padding: 0; margin: 0;
+      background: none;
+      border: 1px solid var(--edge);
+      border-radius: 3px;
+      color: var(--ink-faint);
+      font-family: 'Chakra Petch', sans-serif;
+      font-size: var(--text-lg);
+      line-height: 1;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+    #station-damage-popup-close:hover { color: var(--ink); border-color: var(--loaded); }
+    #station-damage-popup-empty {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: var(--text-xs);
+      letter-spacing: 0.12em;
+      color: var(--ink-faint);
     }
 
     /* -- The loading surfaces (issue #1368) --------------------------
@@ -2196,6 +2266,28 @@
     <div class="popup-body" id="popup-body"></div>
   </div>
 
+  <!-- The per-system damage popup the Station Bar's selected tab opens
+       (issue #1374), replacing the `ph-station-damage` bar every console
+       footer used to carry. The rows come from the active console's own
+       `console_hull` post (issue #1373); gui/station-damage-popup.js decides
+       what it says and ph-damage-detail draws the rows. -->
+  <div id="station-damage-popup" hidden>
+    <!-- The dialog role and aria-modal are set by that module beside its
+         `createFocusTrap` call, not here: a surface that declares itself a
+         modal owes the focus contract (issue #1174,
+         tests/client/modal-contract.test.js), and declaring it next to the
+         trap is what keeps the two from drifting apart. -->
+    <div class="popup-card" aria-labelledby="station-damage-popup-title">
+      <div class="popup-head">
+        <span id="station-damage-popup-title"></span>
+        <button type="button" id="station-damage-popup-close"
+                data-i18n-attr="title:client.station_damage.close,aria-label:client.station_damage.close">✕</button>
+      </div>
+      <ph-damage-detail id="station-damage-popup-detail"></ph-damage-detail>
+      <div id="station-damage-popup-empty" data-i18n="client.hero.health.none" hidden>No damage model</div>
+    </div>
+  </div>
+
   <!-- Phone bezel frame (issue #439). CSS-only red alert glow; no images.
        The .alert-on class drives the keyframe animation (see <style>).
        Hidden by default; render() flips aria-hidden once in-game. -->
@@ -2618,15 +2710,18 @@
     /// (The flag itself lives in window.simState.redAlert — issue #819.)
     let bezelAlertOn = false;
 
-    /// Overlay tabs each mounted console declared (issue #1373), keyed by
-    /// console name. EVERY mounted console posts its own — one iframe per
-    /// Station is mounted at once and they all run `initConsole` — so the bar
-    /// reads only the active console's entry rather than whichever message
-    /// arrived last. A console with no overlay panels posts an empty list.
+    /// Overlay tabs each mounted console declared (issue #1373), keyed by the
+    /// STATION whose iframe posted them (senderStationId, not the name the
+    /// document gave itself — one document can serve two Stations). EVERY
+    /// mounted console posts its own — one iframe per Station is mounted at
+    /// once and they all run `initConsole` — so the bar reads only the active
+    /// Station's entry rather than whichever message arrived last. A console
+    /// with no overlay panels posts an empty list.
     const consoleTabsByConsole = Object.create(null);
     /// The own-Station system rows each console posted (issue #1373), keyed the
-    /// same way. Held for the per-system damage popup the bar's selected tab
-    /// opens (issue #1374); nothing in this slice draws them.
+    /// same way. This is what the per-system damage popup draws (issue #1374):
+    /// tapping the bar's already-selected Station tab opens the active
+    /// console's rows, and a fresh post repaints an open popup in place.
     const consoleHullByConsole = Object.create(null);
     /// Which overlay panel is open, and in which console. One at a time: the
     /// panels cover the console, and the bar is a tablist with one selection.
@@ -2680,6 +2775,10 @@
       // and in the iframe, so the panel is not still covering the console the
       // next time the player comes back to it.
       setConsoleOverlay(null, null);
+      // The damage popup belongs to a Station too (issue #1374): it names one
+      // and lists that one's systems, so it cannot outlive a switch away from
+      // it — including the switch to `null` that leaving the game makes.
+      dismissStationDamagePopup();
     }
 
     /// Open exactly one console's overlay panel — or, with a null id, none.
@@ -4009,6 +4108,26 @@
             scheduleRender();
             return;
           }
+          // Tapping the tab that is ALREADY SELECTED opens that Station's
+          // per-system damage popup (issue #1374) — the surface the console
+          // footers' `ph-station-damage` bar used to be. "Already selected" is
+          // this seat's own tab with no overlay covering it: while an overlay
+          // IS open the bar's selection is the overlay, so the same tap means
+          // "come back to the console" and keeps doing that.
+          if (tabId === activeConsole && activeConsoleOverlay() === null) {
+            // The visit is still reported on this path. `unread` is edge-
+            // triggered host-side (src/station_importance.rs) whenever an
+            // objective attributed to a Station reaches a terminal status —
+            // including the Station this seat is already sitting at — and the
+            // bar draws that cue on every tab. Tapping your own tab was the
+            // gesture that cleared it before the popup existed, so it has to
+            // stay that as well, or the badge sticks until you leave the
+            // Station and come back.
+            send('StationVisited', { station: tabId });
+            showStationDamagePopup();
+            scheduleRender();
+            return;
+          }
           // A Station tab closes whatever overlay is open, which is what
           // "selecting a station tab closes it" means even when the Station
           // selected is the one already active.
@@ -4024,6 +4143,37 @@
           scheduleRender();
         },
       });
+    }
+
+    // -- Station damage popup (issue #1374) ------------------------------------
+    //
+    // The shell half of the surface the console footers used to carry. The
+    // popup itself — what it says, the focus contract around it, the scrim and
+    // close wiring — is gui/station-damage-popup.js; what stays here is only
+    // what the shell knows: which Station is selected and the rows that
+    // Station's console last posted.
+
+    /// The popup's input for whichever Station is selected right now.
+    function stationDamagePopupState() {
+      const station = ((uiState.shipStations && uiState.shipStations.stations) || [])
+        .find(st => st && st.id === activeConsole) || null;
+      return {
+        station: stationLabel(station) || activeConsole || '',
+        // A console posts these only when they CHANGE (gui/console-core.js), so
+        // an absent entry means "this console has not published a hull yet" —
+        // which the popup shows as the neutral no-damage-model state.
+        entries: consoleHullByConsole[activeConsole] || [],
+      };
+    }
+
+    function showStationDamagePopup() {
+      if (typeof window.openStationDamagePopup !== 'function') return;
+      window.openStationDamagePopup(document, stationDamagePopupState());
+    }
+
+    function dismissStationDamagePopup() {
+      if (typeof window.closeStationDamagePopup !== 'function') return;
+      window.closeStationDamagePopup(document);
     }
 
     // -- Coordination popup (issue #494) ---------------------------------------
@@ -4071,6 +4221,22 @@
       }
     }
 
+    /// Which STATION a console message came from (issue #1374). Resolved from
+    /// the sending frame via gui/console-mount.js, never from the name the
+    /// document gave itself: one console document can be mounted at two
+    /// Stations (`gui/cruiser/comms.html` serves the cruiser's `comms` and
+    /// `navigation` seats and both call themselves 'comms'), so the claim is
+    /// not a key. The shell mounted each iframe against a Station id, so it
+    /// knows; the claim is kept only as the fallback for the paths with no
+    /// iframe behind them.
+    function senderStationId(event) {
+      const claimed = (event.data && typeof event.data.console === 'string')
+        ? event.data.console : '';
+      if (typeof window.consoleStationIdForSource !== 'function') return claimed;
+      return window.consoleStationIdForSource(
+        document, uiState.shipStations, event.source, claimed);
+    }
+
     // -- Console action postMessage bridge (issue #422) ------------------------
     // All iframe consoles send {type:'console_action', payload:json} via
     // postMessage.  Dispatch is table-driven via gui/action-map.js (issue #455).
@@ -4078,11 +4244,12 @@
       if (!event.data) return;
       // A console declaring its overlay panels, and the own-Station system
       // rows behind the bar's damage popup (issue #1373). Both are keyed by
-      // console because every mounted iframe posts its own — storing them in
-      // one slot would let a background console's declaration win the bar.
+      // the STATION the shell mounted the sending frame at — every mounted
+      // iframe posts its own, so storing them in one slot would let a
+      // background console's declaration win the bar.
       if (event.data.type === 'console_tabs') {
-        const name = event.data.console;
-        if (typeof name !== 'string' || name === '') return;
+        const name = senderStationId(event);
+        if (name === '') return;
         consoleTabsByConsole[name] = Array.isArray(event.data.tabs) ? event.data.tabs : [];
         // The console's own document is the truth about which of its panels is
         // covering it, so its declaration settles the selection this shell only
@@ -4099,9 +4266,18 @@
         return;
       }
       if (event.data.type === 'console_hull') {
-        const name = event.data.console;
-        if (typeof name !== 'string' || name === '') return;
+        const name = senderStationId(event);
+        if (name === '') return;
         consoleHullByConsole[name] = Array.isArray(event.data.entries) ? event.data.entries : [];
+        // A console only re-posts when its rows CHANGE, and a change while the
+        // popup is open is exactly the moment a player is watching for — a
+        // system dropping under fire. Repaint in place rather than making them
+        // close and reopen it (issue #1374).
+        const popup = document.getElementById('station-damage-popup');
+        if (name === activeConsole && popup && !popup.hidden
+            && typeof window.renderStationDamagePopup === 'function') {
+          window.renderStationDamagePopup(document, stationDamagePopupState());
+        }
         return;
       }
       if (event.data.type !== 'console_action') return;

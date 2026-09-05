@@ -30,7 +30,6 @@
  * @property {string} [ids.camera]            `ph-camera-select` id
  * @property {string} [ids.redAlert]          `ph-red-alert` id
  * @property {string} [ids.objectives]        `ph-objective-list` id
- * @property {string} [ids.stationDamage]     `ph-station-damage` id
  * @property {string} [ids.autoBadge]         the AUTO badge id, if this hull mounts one
  * @property {function(Array): Array} [filterCameraViews]
  *   Transform the view's `camera_views` before handing them to the camera
@@ -110,13 +109,6 @@ export function makeCaptainRender(variant) {
     if (ids.objectives) {
       const el = doc.getElementById(ids.objectives);
       if (el) el.state = { objectives: view.objectives || [], boosted_objective_id: view.boosted_objective_id ?? null };
-    }
-
-    // ── Station-damage bar ───────────────────────────────────────────────
-    // Station-wide, read off the top-level payload (never per-system).
-    if (ids.stationDamage) {
-      const el = doc.getElementById(ids.stationDamage);
-      if (el) el.state = s.own_hull || null;
     }
 
     // ── Contact-count footer (battleship/cruiser pattern) ────────────────

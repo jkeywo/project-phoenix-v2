@@ -18,10 +18,8 @@
  * @property {string} ids.map                  `ph-navigation-map` id
  * @property {string} [ids.objectiveList]       `ph-objective-list` id
  * @property {string} [ids.civilianTraffic]     `ph-civilian-traffic` id
- * @property {string} [ids.stationDamage]       `ph-station-damage` id
  * @property {string} [ids.contactCount]        contact-count readout id
  * @property {string} [ids.waypointName]        waypoint-name readout id
- * @property {string} [ids.footer]              footer target-text id
  * @property {string} [ids.onScreenBtn]         the On-Screen button id (also the AUTO
  *   disable/readonly target — see `setAutoState`)
  * @property {string} [ids.autoBadge]           the AUTO badge id
@@ -69,10 +67,6 @@ export function makeNavigationRender(variant) {
       const el = doc.getElementById(ids.civilianTraffic);
       if (el) el.state = { civilians: s.civilians || [], auto: !!s.navigation_auto };
     }
-    if (ids.stationDamage) {
-      const el = doc.getElementById(ids.stationDamage);
-      if (el) el.state = s.own_hull || null;
-    }
     if (ids.contactCount) {
       const el = doc.getElementById(ids.contactCount);
       if (el) el.textContent = String((s.blips || []).length);
@@ -81,10 +75,6 @@ export function makeNavigationRender(variant) {
     const wpName = s.waypoint && s.waypoint.name ? s.waypoint.name : (s.waypoint ? t('console.common.waypoint') : t('console.navigation.not_set'));
     if (ids.waypointName) {
       const el = doc.getElementById(ids.waypointName);
-      if (el) el.textContent = wpName;
-    }
-    if (ids.footer) {
-      const el = doc.getElementById(ids.footer);
       if (el) el.textContent = wpName;
     }
 

@@ -9,29 +9,23 @@
     body { margin: 0; background: var(--surface-void); overflow: hidden; }
     .frame { height: 100%; }
     .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
-    .hero { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; align-self: flex-start; }
-    .hero h1 { margin: 0; font-size: var(--text-2xl); letter-spacing: 0.22em; color: var(--ink); }
-    .hero h1 .sub { display: block; font-family: "JetBrains Mono", monospace; font-size: var(--text-sm); color: var(--ink-faint); }
     .console-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 280px 1fr; gap: 16px; }
     .side-col, .main-col { min-height: 0; display: flex; flex-direction: column; gap: 12px; }
     .panel-col { min-height: 0; display: flex; flex-direction: column; gap: 8px; background: rgba(var(--rgb-panel), 0.6); border: 1px solid var(--edge); padding: 12px; overflow-y: auto; }
     .panel-col h2 { margin: 0; font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; }
     ph-comms-contact-list { flex: 1; min-height: 0; }
     ph-comms-current-message { flex: 1; min-height: 0; }
-    .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); padding: 6px 0; }
-    .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
-    .console-footer .spacer { flex: 1; }
-    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: var(--text-xl); } .hero h1 .sub { font-size: var(--text-xs); } .console-body { grid-template-columns: 1fr; gap: 8px; } }
+    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .console-body { grid-template-columns: 1fr; gap: 8px; } }
   </style>
 </head>
 <body>
   <div class="frame" data-screen-label="Comms Console" data-i18n-attr="data-screen-label:console.comms.screen_label">
     <div class="panel"></div>
     <div class="panel-inner">
-      <div class="hero">
-        <h1><span data-i18n="console.comms.title">COMMS</span><span class="sub" data-i18n="console.comms.subtitle">CONTACTS &amp; TRAFFIC</span></h1>
-        <span class="auto-badge" id="comms-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
-      </div>
+      <!-- No title row and no footer (issue #1374): the shell's Station Bar
+           names this seat and its selected tab opens the per-system damage
+           popup. The active hail the footer carried is the readout below,
+           at the head of the traffic column it describes. -->
       <div class="console-body">
         <div class="side-col">
           <div class="panel-col" style="flex:1">
@@ -40,6 +34,11 @@
           </div>
         </div>
         <div class="main-col">
+          <div class="readout">
+            <span id="footer-target" data-i18n="console.common.no_active_hail">NO ACTIVE HAIL</span>
+            <span class="spacer"></span>
+            <span class="auto-badge" id="comms-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
+          </div>
           <div class="panel-col">
             <h2 data-i18n="console.comms.available_hails">Available Hails</h2>
             <ph-comms-hail-list id="comms-hail-list"></ph-comms-hail-list>
@@ -50,20 +49,12 @@
           </div>
         </div>
       </div>
-      <footer class="console-footer footer-bar">
-        <span class="dot"></span>
-        <span data-i18n="console.comms.station_footer">COMMS STATION</span>
-        <span class="spacer"></span>
-        <span id="footer-target" data-i18n="console.common.no_active_hail">NO ACTIVE HAIL</span>
-        <ph-station-damage id="station-damage"></ph-station-damage>
-      </footer>
     </div>
   </div>
   <script type="module">
     import '../components/ph-comms-contact-list.js';
     import '../components/ph-comms-hail-list.js';
     import '../components/ph-comms-current-message.js';
-    import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
     // The render lives in gui/battleship/comms.console.js (issue #1235): one
     // shared Comms renderer, this hull's variant. s is a flat

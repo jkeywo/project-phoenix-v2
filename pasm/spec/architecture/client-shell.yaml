@@ -176,6 +176,35 @@ entities:
       paths: [gui/console-core.js, client.html]
       tests: [npx vitest run]
 
+  - component: client-station-damage-popup
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Station Damage Popup and Console Chrome
+      summary: One header for the whole fleet. No console document draws a title row, a footer strip or a station-damage bar of its own, and the shared console stylesheet reserves no settings-cog gutter; the shell's Station Bar names the seat, and tapping the tab that is ALREADY selected opens a popup listing that Station's individual systems, fed by the own-Station rows the console already posts. Readouts the footer carried that the bar cannot say — a locked target, an active hail, a battery percentage, a team count — move inside the console group that owns them; the AUTO badge moves beside the controls whose automation it reports. Presentation only, on the client, reading rows that already crossed the iframe seam.
+      rationale:
+        - "[ai] The footer was saying what the bar says. Every console ended in a strip carrying the Station's name, a status dot and a summed hull bar, directly under a bar that already named the Station and drew its health — two bands of a phone screen spent on one fact, in twenty-two slightly different spellings of the same markup."
+        - "[ai] The popup opens from the SELECTED tab rather than a control of its own because the seat has already said which Station it means by selecting it. A second tap is the cheapest gesture on the surface that already carries the Station's identity, and it costs no pixels at all."
+        - "[ai] 'Already selected' is this seat's own tab with NO overlay covering it. While an overlay is open the bar's selection is the overlay, so the same tap keeps its older meaning — come back to the console — and the popup stays out of the way of a player leaving a panel."
+        - "[ai] Opening the popup ADDS to what that tap did; it does not replace it. The tap on your own tab is also the StationVisited report that clears an unread importance cue, and unread is edge-triggered host-side on whichever Station an objective ends on — including the one the seat is already sitting at. A branch that opened the popup and returned would leave that cue lit until the player switched Station and came back."
+        - "[ai] The rows are not new state and no new message carries them. The console posts its own_hull rows as console_hull for the overlay-tab seam; the popup is a second reader of that same declaration, so a hull that changes under fire repaints an open popup in place."
+        - "[ai] The popup is a modal layer and takes the shared focus contract rather than hand-rolling one: it declares role=dialog beside its createFocusTrap call, so the declaration and the trap that makes it true cannot drift apart."
+        - "[ai] The cog gutter went with the cog. Issue 940 reserved 44px down the left of every console because the settings cog floated over the iframe; issue 1372 made the cog a child of the bar, after which the gutter was keeping a strip of every phone screen clear for a control that had left."
+        - "[ai] No console authors an overlay TOGGLE any more either. The bar offers those panels as tabs, and two affordances for one choice is how a tab and a button end up disagreeing about which panel is open; the panel's own Back button remains the in-console way out."
+        - "[ai] A two-way segment control lands in the shared console stylesheet unused, as a tablist with aria-selected rather than an active class, so the surfaces that need one next reach for the same thing instead of each inventing it — which is exactly how twenty-two different footers happened."
+        - "[ai] What a console posts is filed under the STATION whose iframe posted it, resolved from the sending window against the mount plan — never under the name the document gave itself. A console document is not a Station: the cruiser mounts gui/cruiser/comms.html at both its Comms and its Navigation seats, and both frames call themselves comms while carrying different own_hull rows. Keying on the claim collapses the two seats into one slot, so the Navigation tab's popup is permanently empty and the Comms tab's lists the wrong systems. The shell mounted each frame against a Station id, so it already holds the answer and has no reason to ask."
+    architecture:
+      kind: client-shell
+      authority: non-authoritative
+      reads: [console-overlay-declaration-state, client-presentation-state, session-station-ownership-state]
+      runs_in: [phone-browser-runtime]
+    implementation:
+      status: declared
+      paths: [gui/station-damage-popup.js, gui/console-mount.js, gui/console.css, gui/components/ph-damage-detail.js, gui/command-console.html, gui/battleship/, gui/courier/, gui/cruiser/, gui/destroyer/, client.html, assets/strings/strings.csv]
+      symbols: [stationDamagePopupModel, renderStationDamagePopup, openStationDamagePopup, closeStationDamagePopup, isStationDamagePopupOpen, stationIdForSource]
+      tests: [npx vitest run, tests/smoke]
+
   - component: client-settings-and-help-surface
     core:
       status: implemented

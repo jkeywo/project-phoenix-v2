@@ -33,7 +33,6 @@
  * @property {string} [ids.phasers]           `ph-phasers-controls` id, if the hull mounts phasers
  * @property {string} [ids.blasters]          `ph-blasters-controls` id, if the hull mounts blasters
  * @property {string} [ids.torpedo]           `ph-torpedo-controls` id, if the hull mounts tubes
- * @property {string} [ids.stationDamage]     `ph-station-damage` id
  * @property {string} [ids.autoBadge]         the AUTO badge id
  * @property {boolean} [blastersHideWhenEmpty] hide the blaster panel when there are no banks
  *   (the battleship pattern — a hull with no blaster mount shows nothing;
@@ -134,13 +133,6 @@ export function makeTacticalRender(variant) {
           target_uuid: w.target_uuid || null,
         };
       }
-    }
-
-    // ── Station-damage bar ───────────────────────────────────────────────
-    // Station-wide, read off the top-level payload (never per-system).
-    if (ids.stationDamage) {
-      const el = doc.getElementById(ids.stationDamage);
-      if (el) el.state = s.own_hull || null;
     }
 
     // ── Target footer ────────────────────────────────────────────────────

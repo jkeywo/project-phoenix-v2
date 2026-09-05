@@ -25,7 +25,6 @@ const FIXTURE =
   '<ph-hull-integrity id="hull-integrity"></ph-hull-integrity>' +
   '<ph-station-damage id="core-damage"></ph-station-damage>' +
   '<ph-repair-teams id="repair-teams"></ph-repair-teams>' +
-  '<ph-station-damage id="station-damage"></ph-station-damage>' +
   '<span id="footer-right"></span>' +
   '<span id="repair-auto-badge" hidden></span>' +
   '<div id="dispatch-panel" hidden>' +
@@ -47,7 +46,7 @@ describe('battleship repair renderStation', () => {
     own_hull: { pct: 0.8 },
   };
 
-  it('drives hull integrity, core damage, repair teams and station-damage', () => {
+  it('drives hull integrity, core damage and repair teams', () => {
     renderStation(payload, document);
     expect(el('hull-integrity').state).toEqual({ total_pct: 0.55, destroyed_pct: 0.05 });
     expect(el('core-damage').state).toEqual({ entries: [{ id: 'core-1' }] });
@@ -55,7 +54,6 @@ describe('battleship repair renderStation', () => {
       teams: payload.teams, auto: true, targets: [{ id: 'dt1' }],
       damaged: [{ id: 'ds1' }], externally_committed_teams: 0,
     });
-    expect(el('station-damage').state).toEqual({ pct: 0.8 });
   });
 
   it('renders the localized footer status with active/total team counts', () => {

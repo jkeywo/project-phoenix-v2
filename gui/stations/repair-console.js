@@ -21,7 +21,6 @@
  * @property {string} ids.hullIntegrity           `ph-hull-integrity` id
  * @property {string} [ids.coreDamage]            ownerless "core" systems bar id
  * @property {string} ids.repairTeams             `ph-repair-teams` id
- * @property {string} [ids.stationDamage]         footer `ph-station-damage` id
  * @property {string} [ids.footerRight]           footer active/total-teams status text id
  * @property {string} [ids.autoBadge]             the AUTO badge id
  * @property {string} [ids.dispatchPanel]         External-dispatch panel id (issue #1161),
@@ -67,11 +66,6 @@ export function makeRepairRender(variant) {
         damaged: s.damaged_systems || [],
         externally_committed_teams: s.external_dispatch?.target != null ? 1 : 0,
       };
-    }
-
-    if (ids.stationDamage) {
-      const el = doc.getElementById(ids.stationDamage);
-      if (el) el.state = s.own_hull || null;
     }
 
     if (ids.footerRight) {

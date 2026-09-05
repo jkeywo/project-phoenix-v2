@@ -29,7 +29,6 @@ const BATTLESHIP_FIXTURE =
   '<ph-helm-joystick id="helm-joystick"></ph-helm-joystick>' +
   '<ph-impulse-btn id="impulse-btn"></ph-impulse-btn>' +
   '<ph-boost-btn id="boost-btn"></ph-boost-btn>' +
-  '<ph-station-damage id="station-damage"></ph-station-damage>' +
   '<span id="helm-auto-badge" hidden></span>' +
   '<span id="footer-target"></span>';
 
@@ -39,7 +38,6 @@ const CRUISER_FIXTURE =
   '<ph-lateral-thrust-joystick id="lateral-thrust-joystick"></ph-lateral-thrust-joystick>' +
   '<ph-impulse-btn id="impulse-btn"></ph-impulse-btn>' +
   '<ph-boost-btn id="boost-btn"></ph-boost-btn>' +
-  '<ph-station-damage id="station-damage"></ph-station-damage>' +
   '<span id="helm-auto-badge" hidden></span>' +
   '<span id="footer-target"></span>';
 
@@ -49,7 +47,6 @@ const DESTROYER_FIXTURE =
   '<ph-lateral-thrust-joystick id="lateral-thrust-joystick"></ph-lateral-thrust-joystick>' +
   '<ph-impulse-btn id="impulse-btn"></ph-impulse-btn>' +
   '<ph-boost-btn id="boost-btn"></ph-boost-btn>' +
-  '<ph-station-damage id="station-damage"></ph-station-damage>' +
   '<span id="helm-auto-badge" hidden></span>' +
   '<span id="footer-target">NO TARGET</span>' +
   '<div id="dock-panel" hidden>' +
@@ -74,7 +71,6 @@ describe('battleship helm renderStation', () => {
     expect(el('helm-joystick').state).toEqual({ auto: true });
     expect(el('impulse-btn').state).toEqual({ state: 'charging', charge_pct: 40, auto: true });
     expect(el('boost-btn').state).toEqual({ available: true, active: false, recharge_pct: 80, auto: true });
-    expect(el('station-damage').state).toEqual({ pct: 0.9 });
     expect(el('helm-auto-badge').hidden).toBe(false);
   });
 

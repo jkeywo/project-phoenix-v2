@@ -21,7 +21,6 @@ const el = (id) => document.getElementById(id);
 const FIXTURE =
   '<ph-sensor-radar id="sensor-radar"></ph-sensor-radar>' +
   '<ph-sensor-panel id="sensor-panel"></ph-sensor-panel>' +
-  '<ph-station-damage id="station-damage"></ph-station-damage>' +
   '<span id="scan-range-val">0</span>' +
   '<span id="contact-sub">0</span>' +
   '<span id="tgt-name"></span>' +
@@ -49,7 +48,6 @@ describe('battleship sensors renderStation', () => {
 
   it('drives the scan summary and target analysis readouts', () => {
     renderStation(payload, document);
-    expect(el('station-damage').state).toEqual({ pct: 1 });
     expect(el('scan-range-val').textContent).toBe('6000');
     expect(el('contact-sub').textContent).toBe(t('console.common.contacts.one', { n: 1 }));
     expect(el('tgt-name').textContent).toBe('Raider');

@@ -24,7 +24,6 @@
  * @property {string} [ids.threatBearing]       threat-bearing value span id
  * @property {string} [ids.footer]              footer target-text id
  * @property {string} [ids.autoBadge]           the AUTO badge id
- * @property {string} [ids.stationDamage]       footer `ph-station-damage` id
  * @property {function(object, {sensors: object, shields: object}, Document, function): void} [tail]
  *   Bespoke per-hull rendering the shared core does not cover, called with
  *   `(s, views, doc, t)` after the common panels are set.
@@ -93,11 +92,6 @@ export function makeScienceRender(variant) {
     if (ids.autoBadge) {
       const el = doc.getElementById(ids.autoBadge);
       if (el) setAutoState(null, el, !!(sensors.sensors_auto && shields.shields_auto));
-    }
-
-    if (ids.stationDamage) {
-      const el = doc.getElementById(ids.stationDamage);
-      if (el) el.state = s.own_hull || null;
     }
 
     // ── Bespoke per-hull tail ────────────────────────────────────────────

@@ -15,7 +15,6 @@ export const renderStation = makeCommsRender({
     contactList: 'comms-contact-list',
     hailList: 'comms-hail-list',
     currentMessage: 'comms-current-message',
-    stationDamage: 'station-damage',
     autoBadge: 'comms-auto-badge',
   },
   tail: (s, view, doc, t, threadMsg) => {

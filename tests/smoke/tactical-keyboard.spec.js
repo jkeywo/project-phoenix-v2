@@ -74,11 +74,10 @@ test('Tactical console: every principal action fires from the keyboard, with no 
 
   // ── Tab walks between the console's components (AC #2) ──────────────────────
   // Roving tabindex leaves each composite a single Tab stop, so the sequence is
-  // one stop per component: the Intel toggle, the radar scope, then the three
-  // weapon toolbars.
-  await page.keyboard.press('Tab');
-  expect(await activeId(page)).toBe('#intel-toggle');
-
+  // one stop per component: the radar scope, then the three weapon toolbars.
+  // The Intel and Security toggles used to come first; since issue #1374 the
+  // console authors none — the shell's Station Bar offers those panels as tabs
+  // of its own — so the scope is the first thing a Tab lands on.
   await page.keyboard.press('Tab');
   expect(await activeId(page)).toBe('#tactical-radar');
 

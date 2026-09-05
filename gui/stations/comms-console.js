@@ -26,7 +26,6 @@
  * @property {string} [ids.contactList]       `ph-comms-contact-list` id
  * @property {string} [ids.hailList]          `ph-comms-hail-list` id
  * @property {string} [ids.currentMessage]    `ph-comms-current-message` id
- * @property {string} [ids.stationDamage]     `ph-station-damage` id
  * @property {string} [ids.autoBadge]         the AUTO badge id
  * @property {function(object, object): boolean} [autoState]
  *   Compute the AUTO badge state from `(s, view)`. Defaults to
@@ -111,13 +110,6 @@ export function makeCommsRender(variant) {
     if (ids.currentMessage) {
       const el = doc.getElementById(ids.currentMessage);
       if (el) el.state = { thread: threadMsg, messages: msgs, rejection: view.rejection };
-    }
-
-    // ── Station-damage bar ───────────────────────────────────────────────
-    // Station-wide, read off the top-level payload (never per-system).
-    if (ids.stationDamage) {
-      const el = doc.getElementById(ids.stationDamage);
-      if (el) el.state = s.own_hull || null;
     }
 
     // ── AUTO badge ───────────────────────────────────────────────────────

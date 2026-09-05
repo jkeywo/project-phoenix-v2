@@ -16,7 +16,6 @@ export const renderStation = makeTacticalRender({
     phasers: 'phasers-controls',
     blasters: 'blasters-controls',
     torpedo: 'torpedo-controls',
-    stationDamage: 'station-damage',
     autoBadge: 'tactical-auto-badge',
   },
   // The battleship mounts no blaster bank, so the panel stays hidden for it; a

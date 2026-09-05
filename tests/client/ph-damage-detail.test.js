@@ -27,6 +27,29 @@ describe('PhDamageDetail', () => {
     expect(el.shadowRoot).toBeDefined();
   });
 
+  it('goes away when a caller sets the hidden attribute', () => {
+    // The Station Bar's damage popup hides this element for a Station that
+    // owns no damageable systems (gui/station-damage-popup.js, issue #1374).
+    // `:host { display: block }` is an AUTHOR declaration and therefore beats
+    // the UA stylesheet's `[hidden] { display: none }`, so without a matching
+    // `:host([hidden])` rule the attribute is inert and the popup opens onto a
+    // box that only LOOKS empty because the row list happens to render at zero
+    // height today.
+    //
+    // Asserted against the declaration rather than `getComputedStyle`: jsdom
+    // does not cascade shadow-root styles at all, so a computed-style check
+    // reports `none` whether the rule is there or not and could never fail
+    // (nor could the popup suite's own `.hidden === true` assertion, which is
+    // about the attribute, not about what the attribute does).
+    const { el } = setup();
+    el.hidden = true;
+    expect(el.hasAttribute('hidden')).toBe(true);
+    // `data-ph-shared` is the adopted control family, appended ahead of the
+    // component's own sheet (gui/components/ph-console-styles.js).
+    const own = el.shadowRoot.querySelector('style:not([data-ph-shared])');
+    expect(own.textContent).toMatch(/:host\(\[hidden\]\)\s*\{[^}]*display:\s*none/);
+  });
+
   it('renders correct number of rows for entries', () => {
     const { el } = setup();
     el.state = {

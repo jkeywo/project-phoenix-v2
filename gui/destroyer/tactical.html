@@ -9,9 +9,6 @@
     body { font-size: var(--text-lg); margin: 0; background: var(--surface-void); overflow: hidden; }
     .frame { height: 100%; position: relative; }
     .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; position: relative; }
-    .hero { display: flex; align-items: baseline; justify-content: space-between; flex-shrink: 0; gap: 12px; padding: 4px 0; align-self: flex-start; }
-    .hero h1 { font-size: var(--text-2xl); letter-spacing: 0.22em; color: var(--ink); margin: 0; }
-    .hero h1 .sub { font-family: "JetBrains Mono", monospace; font-size: var(--text-sm); letter-spacing: 0.22em; color: var(--ink-faint); margin-top: 2px; font-weight: 400; }
     .command-advice { flex-shrink: 0; display: flex; align-items: baseline; gap: 12px; padding: 6px 12px; border: 1px dashed var(--edge); background: rgba(var(--rgb-panel), 0.4); font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); }
     .command-advice[hidden] { display: none; }
     .command-advice .advice-heading { font-family: "Chakra Petch", sans-serif; font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; }
@@ -23,47 +20,24 @@
     ph-tactical-radar, ph-phasers-controls, ph-blasters-controls, ph-torpedo-controls { flex-shrink: 0; }
     ph-tactical-radar { width: 100%; aspect-ratio: 1 / 1; }
     @media (orientation: landscape) { ph-tactical-radar { height: 100%; width: auto; } }
-    .hero-controls { display: flex; align-items: center; gap: 8px; }
-    .overlay-toggle { background: rgba(var(--rgb-panel), 0.85); border: 1px solid var(--edge); color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.2em; padding: 8px 16px; cursor: pointer; text-transform: uppercase; transition: all 0.15s ease; white-space: nowrap; min-height: var(--control-hit-min); }
-    .overlay-toggle:hover { background: rgba(var(--rgb-panel-up), 0.9); border-color: var(--ink-dim); }
-    .overlay-toggle[hidden] { display: none; }
-    .overlay-toggle.active { background: rgba(var(--rgb-cyan-dim), 0.9); border-color: var(--cyan); color: var(--cyan); }
-    .overlay-toggle .unread-badge { display: none; margin-left: 6px; background: var(--fire-bright); color: var(--surface-void); font-size: var(--text-xs); font-weight: 700; padding: 0 4px; border-radius: 2px; line-height: 1.4; }
-    .overlay-toggle .unread-badge.show { display: inline-block; }
     .overlay-back { position: absolute; top: 6px; left: 6px; z-index: 6; background: rgba(var(--rgb-panel), 0.85); border: 1px solid var(--edge); color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.2em; padding: 6px 14px; cursor: pointer; text-transform: uppercase; transition: all 0.15s ease; min-height: var(--control-hit-min); }
     .overlay-back:hover { background: rgba(var(--rgb-panel-up), 0.9); border-color: var(--ink-dim); }
     .overlay-panel { position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 5; background: rgba(var(--rgb-deep), 0.97); border: 1px solid var(--edge); display: none; flex-direction: column; padding: 16px; }
     .overlay-panel.open { display: flex; }
     .overlay-panel h2 { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
     .overlay-panel ph-dossier-panel { flex: 1; min-height: 0; }
-    .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); flex-shrink: 0; padding: 6px 0; }
-    .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
-    .console-footer .sep { color: var(--line-soft); }
-    .console-footer .spacer { flex: 1; }
-    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: var(--text-xl); } .hero h1 .sub { font-size: var(--text-xs); } .console-body .col { padding: 8px; } .overlay-toggle { font-size: var(--text-xs); padding: 6px 12px; } .overlay-panel { padding: 8px; } }
+    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .console-body .col { padding: 8px; } .overlay-panel { padding: 8px; } }
   </style>
 </head>
 <body>
   <div class="frame" data-screen-label="Tactical Console" data-i18n-attr="data-screen-label:console.tactical.screen_label">
     <div class="panel"></div>
     <div class="panel-inner">
-      <div class="hero">
-        <h1><span data-i18n="console.tactical.title">TACTICAL</span><span class="sub" data-i18n="console.cruiser_tactical.subtitle">WEAPONS</span></h1>
-        <div class="hero-controls">
-          <span class="auto-badge" id="tactical-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
-          <!-- Navigation and Comms are both complete hero-bar Stations now
-               (issues #1097, #1098) and no longer visit Tactical as overlays.
-               Intel is not a system and never moves — it stays here regardless
-               of which station is currently hosting Comms. -->
-          <!-- Security teams (issue #1346). Tactical owns the Security System on
-               this hull, and its panel is an overlay for the same reason Intel is:
-               the weapons column is what the seat looks at while fighting, and a
-               team crossing to a compartment is a minute-scale decision the player
-               opens deliberately. -->
-          <button class="overlay-toggle" id="security-toggle" data-overlay="security-overlay" data-active="false" data-i18n="console.common.security_toggle">Security</button>
-          <button class="overlay-toggle" id="intel-toggle" data-overlay="intel-overlay" data-active="false" data-i18n="console.common.intel_toggle">Intel</button>
-        </div>
-      </div>
+      <!-- No title row, no overlay toggles and no footer (issue #1374): the
+           shell's Station Bar names this seat, offers Security and Intel as
+           tabs of its own (issue #1373 — the panels below declare them), and
+           opens the per-system damage popup on its selected tab. The locked
+           target the footer named heads the weapons column it belongs to. -->
       <!-- Non-binding Command intent advice (issue #1108). Shown only while
            Command directs this Station and a human holds it: advisory, never a
            control. Populated from `s.command_advice` in render(). -->
@@ -75,21 +49,17 @@
       <div class="console-body">
         <div class="col">
           <h2 data-i18n="console.tactical.weapons">Weapons</h2>
+          <div class="readout">
+            <span id="footer-target" data-i18n="console.common.no_target">NO TARGET</span>
+            <span class="spacer"></span>
+            <span class="auto-badge" id="tactical-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
+          </div>
           <ph-tactical-radar id="tactical-radar"></ph-tactical-radar>
           <ph-phasers-controls id="phasers-controls"></ph-phasers-controls>
           <ph-blasters-controls id="blasters-controls"></ph-blasters-controls>
           <ph-torpedo-controls id="torpedo-controls"></ph-torpedo-controls>
         </div>
       </div>
-      <footer class="console-footer footer-bar">
-        <span class="dot"></span>
-        <span id="footer-status" data-i18n="console.tactical.station_footer">TACTICAL STATION</span>
-        <span class="sep">·</span>
-        <span id="footer-target" style="color:var(--ink-faint)" data-i18n="console.common.no_target">NO TARGET</span>
-        <span class="spacer"></span>
-        <ph-station-damage id="station-damage"></ph-station-damage>
-        <span id="footer-right" style="color:var(--ink-faint)">—</span>
-      </footer>
     </div>
     <!-- Intelligence files (issue #1030). Independent of Comms, which is now
          its own hero-bar console (issue #1098) rather than a toggle here. -->
@@ -122,7 +92,6 @@
     import '../components/ph-torpedo-controls.js';
     import '../components/ph-dossier-panel.js';
     import '../components/ph-security-teams.js';
-    import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
     import { initConsoleOverlays } from '../console-overlays.js';
     // The render lives in gui/destroyer/tactical.console.js (issue #1234): the
@@ -132,10 +101,11 @@
     // same renderStation.
     import { renderStation } from './tactical.console.js';
 
-    // One delegated listener drives every `data-overlay` toggle and every
-    // `data-overlay-back` button on the page (gui/console-overlays.js). Only
-    // the Intel toggle uses this pattern now — Navigation and Comms are both
-    // complete hero-bar Stations (issues #1097, #1098).
+    // One delegated listener drives every `data-overlay-back` button on the
+    // page (gui/console-overlays.js). Since issue #1374 no console authors an
+    // in-console `data-overlay` TOGGLE at all: the shell's Station Bar selects
+    // an overlay through `__setConsoleOverlay`, and the panel's own Back
+    // button is the only in-console way out of it.
     initConsoleOverlays();
 
     initConsole({ name: 'tactical', render: renderStation });

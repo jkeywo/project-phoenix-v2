@@ -18,7 +18,6 @@ export const renderStation = makeCaptainRender({
     camera: 'camera-select',
     redAlert: 'red-alert',
     objectives: 'objective-list',
-    stationDamage: 'station-damage',
     autoBadge: 'captain-auto-badge',
   },
   // Station badge: the retired composite's captain_auto meant "station

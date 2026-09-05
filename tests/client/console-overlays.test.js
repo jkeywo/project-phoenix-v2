@@ -7,9 +7,18 @@
  * Comms and Navigation used to be the module's main customers (issue #984),
  * routed through the now-retired gui/visiting-systems.js. Both are complete
  * hero-bar Stations now (issues #1097, #1098) and no longer use this pattern;
- * the destroyer Tactical console's Intel panel (issue #1030) is the one
- * surviving consumer, so these tests drive the real shipped markup through
- * the real module the same way the retired suite did for Comms/Navigation.
+ * the destroyer Tactical console's Intel and Security panels (issues #1030,
+ * #1346) are what ships today, so the PANEL half of these tests drives the
+ * real shipped markup the way the retired suite did for Comms/Navigation.
+ *
+ * The TOGGLE half drives a fixture instead, and that is a statement about the
+ * fleet rather than a shortcut: since issue #1374 no console this module
+ * drives authors a `data-overlay` toggle — the shell's Station Bar selects a
+ * panel through `setConsoleOverlay`, and the panel's Back button is the way
+ * out. The toggle convention is still supported for a surface the bar has no
+ * business offering, so it is still tested; there is simply no shipped markup
+ * left to test it against. `toggleFixtureDoc()` is that markup, written to
+ * the convention gui/console-overlays.js documents.
  */
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
@@ -30,15 +39,40 @@ function tacticalDoc() {
   return dom.window.document;
 }
 
+/**
+ * A console written to the toggle convention, for the half of the module no
+ * shipped document exercises any more (issue #1374). Deliberately the shape
+ * gui/console-overlays.js's own header documents, so a change to that
+ * convention breaks this rather than passing against a private variant.
+ */
+function toggleFixtureDoc() {
+  const dom = new JSDOM(`<!DOCTYPE html><body>
+    <button class="overlay-toggle" id="intel-toggle" data-overlay="intel-overlay" data-active="false">Intel</button>
+    <button class="overlay-toggle" id="security-toggle" data-overlay="security-overlay" data-active="false">Security</button>
+    <div class="overlay-panel" id="intel-overlay">
+      <button class="overlay-back" data-overlay-back>Back</button>
+    </div>
+    <div class="overlay-panel" id="security-overlay">
+      <button class="overlay-back" data-overlay-back>Back</button>
+    </div>
+  </body>`, { runScripts: 'outside-only' });
+  return dom.window.document;
+}
+
 describe('the destroyer Tactical console carries the Intel overlay markup', () => {
-  it('has the toggle and panel, matched by data-overlay', () => {
+  it('has both panels, closed, and no in-console toggle of its own', () => {
     const doc = tacticalDoc();
-    const toggle = doc.getElementById('intel-toggle');
-    const panel = doc.getElementById('intel-overlay');
-    expect(toggle).not.toBeNull();
-    expect(panel).not.toBeNull();
-    expect(panel.classList.contains('open')).toBe(false);
-    expect(toggle.dataset.overlay).toBe('intel-overlay');
+    for (const id of ['intel-overlay', 'security-overlay']) {
+      const panel = doc.getElementById(id);
+      expect(panel, `#${id} must be present`).not.toBeNull();
+      expect(panel.classList.contains('open')).toBe(false);
+    }
+    // Issue #1374: the bar owns the selection, so the console authors no
+    // toggle. Two affordances for one choice is how a tab and a button end up
+    // disagreeing about which panel is open.
+    expect(doc.querySelectorAll('.overlay-toggle').length).toBe(0);
+    expect(doc.getElementById('intel-toggle')).toBeNull();
+    expect(doc.getElementById('security-toggle')).toBeNull();
   });
 
   // Issue #1373: the panel itself is what declares a tab on the shell's
@@ -68,7 +102,7 @@ describe('the destroyer Tactical console carries the Intel overlay markup', () =
 
 describe('console overlays — one panel at a time', () => {
   it('a press opens the panel and lights the toggle', () => {
-    const doc = tacticalDoc();
+    const doc = toggleFixtureDoc();
     initConsoleOverlays(doc);
     doc.getElementById('intel-toggle').click();
     expect(doc.getElementById('intel-overlay').classList.contains('open')).toBe(true);
@@ -76,7 +110,7 @@ describe('console overlays — one panel at a time', () => {
   });
 
   it('a second press on the open panel closes it', () => {
-    const doc = tacticalDoc();
+    const doc = toggleFixtureDoc();
     initConsoleOverlays(doc);
     doc.getElementById('intel-toggle').click();
     expect(doc.getElementById('intel-overlay').classList.contains('open')).toBe(true);
@@ -94,11 +128,17 @@ describe('console overlays — one panel at a time', () => {
     expect(doc.getElementById('intel-overlay').classList.contains('open')).toBe(false);
   });
 
-  it('setConsoleOverlay opens exactly the named panel and lights its toggle', () => {
+  it('setConsoleOverlay opens exactly the named panel', () => {
     const doc = tacticalDoc();
     expect(setConsoleOverlay('intel-overlay', doc)).toBe('intel-overlay');
     expect(doc.getElementById('intel-overlay').classList.contains('open')).toBe(true);
+  });
+
+  it('lights the matching toggle where a console authors one', () => {
+    const doc = toggleFixtureDoc();
+    expect(setConsoleOverlay('intel-overlay', doc)).toBe('intel-overlay');
     expect(doc.getElementById('intel-toggle').classList.contains('active')).toBe(true);
+    expect(doc.getElementById('security-toggle').classList.contains('active')).toBe(false);
   });
 
   it('setConsoleOverlay is SET, not toggle: the same id twice leaves it open', () => {
@@ -122,6 +162,12 @@ describe('console overlays — one panel at a time', () => {
     setConsoleOverlay('intel-overlay', doc);
     expect(setConsoleOverlay(null, doc)).toBeNull();
     expect(doc.querySelectorAll('.overlay-panel.open').length).toBe(0);
+  });
+
+  it('setConsoleOverlay(null) unlights a toggle too', () => {
+    const doc = toggleFixtureDoc();
+    setConsoleOverlay('intel-overlay', doc);
+    expect(setConsoleOverlay(null, doc)).toBeNull();
     expect(doc.getElementById('intel-toggle').dataset.active).toBe('false');
   });
 
@@ -142,7 +188,7 @@ describe('console overlays — one panel at a time', () => {
   });
 
   it('closeConsoleOverlays unlights every toggle and closes every panel', () => {
-    const doc = tacticalDoc();
+    const doc = toggleFixtureDoc();
     initConsoleOverlays(doc);
     doc.getElementById('intel-toggle').click();
     closeConsoleOverlays(doc);

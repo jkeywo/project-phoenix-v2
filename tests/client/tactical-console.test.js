@@ -39,14 +39,12 @@ const FIXTURES = {
     '<ph-phasers-controls id="phasers-controls"></ph-phasers-controls>' +
     '<ph-blasters-controls id="blasters-controls" hidden></ph-blasters-controls>' +
     '<ph-torpedo-controls id="torpedo-controls"></ph-torpedo-controls>' +
-    '<ph-station-damage id="station-damage"></ph-station-damage>' +
     '<span id="footer-target"></span>' +
     '<span id="tactical-auto-badge" hidden></span>',
   cruiser:
     '<ph-tactical-radar id="tactical-radar"></ph-tactical-radar>' +
     '<ph-phasers-controls id="phasers-controls"></ph-phasers-controls>' +
     '<ph-torpedo-controls id="torpedo-controls"></ph-torpedo-controls>' +
-    '<ph-station-damage id="station-damage"></ph-station-damage>' +
     '<span id="footer-target"></span>' +
     '<span id="tactical-auto-badge" hidden></span>',
   destroyer:
@@ -54,7 +52,6 @@ const FIXTURES = {
     '<ph-phasers-controls id="phasers-controls"></ph-phasers-controls>' +
     '<ph-blasters-controls id="blasters-controls"></ph-blasters-controls>' +
     '<ph-torpedo-controls id="torpedo-controls"></ph-torpedo-controls>' +
-    '<ph-station-damage id="station-damage"></ph-station-damage>' +
     '<span id="footer-target"></span>' +
     '<span id="tactical-auto-badge" hidden></span>' +
     '<ph-dossier-panel id="dossier-panel"></ph-dossier-panel>' +
@@ -67,8 +64,7 @@ const FIXTURES = {
     '<ph-helm-joystick id="helm"></ph-helm-joystick>' +
     '<ph-lateral-thrust-joystick id="lateral"></ph-lateral-thrust-joystick>' +
     '<ph-impulse-btn id="impulse"></ph-impulse-btn>' +
-    '<ph-boost-btn id="boost"></ph-boost-btn>' +
-    '<ph-station-damage id="damage"></ph-station-damage>',
+    '<ph-boost-btn id="boost"></ph-boost-btn>',
 };
 
 // ── The one contract that used to diverge: both radar uuids, all four hulls ──
@@ -148,7 +144,6 @@ describe('battleship tactical renderStation', () => {
     expect(radar.phaser_arcs).toEqual(base.phaser_arcs);
     expect(el('phasers-controls').state).toEqual({ banks: [{ id: 'fore' }], target_valid: true, mode: 'Manual' });
     expect(el('torpedo-controls').state).toEqual({ tubes: [{ id: 't1' }], magazine: { current: 4, max: 12 }, target_uuid: 'enemy-1' });
-    expect(el('station-damage').state).toEqual({ pct: 0.8 });
     expect(el('footer-target').textContent).toBe('Raider');
   });
 
@@ -201,7 +196,6 @@ describe('cruiser tactical renderStation', () => {
     cruiserRender({ blips: [{ uuid: 'e4' }], target_uuid: 'e4', banks: [{ id: 'p' }], own_hull: { pct: 0.5 } }, document);
     expect(el('blasters-controls')).toBeNull();
     expect(el('phasers-controls').state.target_valid).toBe(true);
-    expect(el('station-damage').state).toEqual({ pct: 0.5 });
   });
 });
 
@@ -221,7 +215,6 @@ describe('destroyer tactical renderStation', () => {
     destroyerRender(payload, document);
     expect(el('blasters-controls').state).toEqual({ banks: [{ id: 'bp' }] });
     expect(el('blasters-controls').hidden).toBe(false);
-    expect(el('station-damage').state).toEqual({ pct: 1 });
   });
 
   it('renders the intel dossier tail', () => {
@@ -379,7 +372,6 @@ describe('courier tactical renderStation', () => {
     expect(el('lateral').state).toEqual({ auto: false });
     expect(el('impulse').state).toEqual({ state: 'charging', charge_pct: 50, auto: true });
     expect(el('boost').state).toEqual({ available: true, active: false, recharge_pct: 75, auto: true });
-    expect(el('damage').state).toEqual({ pct: 0.5 });
   });
 
   it('carries no phaser / torpedo / footer / auto-badge panel', () => {

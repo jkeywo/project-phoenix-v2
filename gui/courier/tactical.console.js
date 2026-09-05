@@ -42,7 +42,6 @@ export const renderStation = makeTacticalRender({
   ids: {
     radar: 'tactical-radar',
     blasters: 'blasters',
-    stationDamage: 'damage',
   },
   tail: (s, w, doc) => {
     const sensors = familyView(s, 'sensors');

@@ -7,7 +7,7 @@
  * Each hull's `.html` imports its `renderStation` from
  * `gui/<class>/captain.console.js`; this suite imports the SAME functions
  * and drives them against a jsdom fixture, so the camera/red-alert/
- * objectives/station-damage contract is asserted per hull without a browser.
+ * objectives contract is asserted per hull without a browser.
  *
  * The custom-element modules are deliberately NOT imported: an un-upgraded
  * `<ph-*>` element is a plain `HTMLUnknownElement`, so assigning `.state`
@@ -36,7 +36,6 @@ const FIXTURES = {
     '<ph-camera-select id="camera-select"></ph-camera-select>' +
     '<ph-red-alert id="red-alert"></ph-red-alert>' +
     '<ph-objective-list id="objective-list"></ph-objective-list>' +
-    '<ph-station-damage id="station-damage"></ph-station-damage>' +
     '<span id="footer-target"></span>' +
     '<span id="captain-auto-badge" hidden></span>' +
     '<div id="objectives" hidden></div>' +
@@ -46,7 +45,6 @@ const FIXTURES = {
     '<ph-camera-select id="camera-select"></ph-camera-select>' +
     '<ph-red-alert id="red-alert"></ph-red-alert>' +
     '<ph-objective-list id="objective-list"></ph-objective-list>' +
-    '<ph-station-damage id="station-damage"></ph-station-damage>' +
     '<span id="footer-target"></span>',
   destroyer:
     '<ph-camera-select id="camera-select"></ph-camera-select>' +
@@ -56,7 +54,6 @@ const FIXTURES = {
     '<ph-scan-readout id="scan-readout"></ph-scan-readout>' +
     '<ph-sensor-radar id="sensor-radar"></ph-sensor-radar>' +
     '<ph-sensor-panel id="sensor-panel"></ph-sensor-panel>' +
-    '<ph-station-damage id="station-damage"></ph-station-damage>' +
     '<span id="footer-target"></span>' +
     '<span id="captain-auto-badge" hidden></span>',
   courier:
@@ -71,8 +68,7 @@ const FIXTURES = {
     '<ph-repair-teams id="repair"></ph-repair-teams>' +
     '<ph-navigation-map id="nav"></ph-navigation-map>' +
     '<ph-comms-contact-list id="contacts"></ph-comms-contact-list>' +
-    '<ph-comms-current-message id="message"></ph-comms-current-message>' +
-    '<ph-station-damage id="damage"></ph-station-damage>',
+    '<ph-comms-current-message id="message"></ph-comms-current-message>',
 };
 
 // ── Battleship: the reference hull ───────────────────────────────────────────
@@ -88,12 +84,11 @@ describe('battleship captain renderStation', () => {
     captain_auto: true,
   };
 
-  it('drives camera, red-alert, objectives and station-damage from the flat payload', () => {
+  it('drives camera, red-alert and objectives from the flat payload', () => {
     battleshipRender(base, document);
     expect(el('camera-select').state).toEqual({ views: ['camera_fore', 'cinematic'], current_view: 'camera_fore', auto: true });
     expect(el('red-alert').state).toEqual({ active: true, hold: false, auto: false });
     expect(el('objective-list').state).toEqual({ objectives: base.objectives, boosted_objective_id: 'o1' });
-    expect(el('station-damage').state).toEqual({ pct: 0.8 });
   });
 
   it('shows the plain contact-count footer with no color tint', () => {
@@ -138,7 +133,6 @@ describe('cruiser captain renderStation', () => {
   it('drives the shared core from the flat payload', () => {
     cruiserRender(base, document);
     expect(el('camera-select').state).toEqual({ views: ['camera_fore'], current_view: 'camera_fore', auto: false });
-    expect(el('station-damage').state).toEqual({ pct: 1 });
   });
 
   it('tints the footer by contact count', () => {
@@ -171,7 +165,6 @@ describe('destroyer captain renderStation', () => {
     expect(el('camera-select').state).toEqual({ views: ['camera_fore'], current_view: 'camera_fore', auto: true });
     expect(el('red-alert').state).toEqual({ active: false, hold: false, auto: true });
     expect(el('objective-list').state).toEqual({ objectives: [{ id: 'o1' }], boosted_objective_id: null });
-    expect(el('station-damage').state).toEqual({ pct: 0.6 });
   });
 
   it('drives the sensor radar/panel, deadline list and scan readout from the sensors view', () => {
@@ -228,10 +221,9 @@ describe('courier captain renderStation', () => {
       .toEqual(el('camera').state.views);
   });
 
-  it('drives objectives under the courier-specific id and station-damage', () => {
+  it('drives objectives under the courier-specific id', () => {
     courierRender(payload, document);
     expect(el('objectives').state).toEqual({ objectives: [{ id: 'o1' }], boosted_objective_id: 'o1' });
-    expect(el('damage').state).toEqual({ pct: 0.4 });
   });
 
   it('drives shields, the threat-bearing readout, power, battery, hull and repair from the absorbed systems', () => {

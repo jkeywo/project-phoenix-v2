@@ -6,10 +6,18 @@
  * Pilot, courier Captain) before issue #984 grew it onto every destroyer
  * console for Comms and Navigation, which were human-seeking systems any
  * station could be asked to host. Both have since become complete hero-bar
- * Stations of their own (issues #1097, #1098) and no longer use this pattern;
- * the destroyer Tactical console's Intel panel (issue #1030) is the surviving
- * consumer. The mutual-exclusion rule stays here rather than back inline, so
- * a future surface that needs the same shape does not have to write it again.
+ * Stations of their own (issues #1097, #1098).
+ *
+ * SINCE ISSUE #1374 NO CONSOLE THIS MODULE DRIVES AUTHORS A TOGGLE. The
+ * shell's Station Bar is the selector — a console DECLARES its panels (issue
+ * #1373) and the bar pushes the answer back in through `__setConsoleOverlay` →
+ * `setConsoleOverlay` — and the panel's own Back button is the one in-console
+ * way out. (gui/cruiser/comms.html still has a chart button of its own, driven
+ * by that document's own script rather than this module; issue #1371's
+ * Navigation slice is where it and its panel get rebuilt.) The toggle half of
+ * the convention below is kept, tested and supported all the same: it is the
+ * shape a console reaches for when it needs a surface of its own that the bar
+ * has no business offering.
  *
  * THE CONVENTION, and it is the whole API:
  *
@@ -25,10 +33,9 @@
  *
  * The module reads the DOM and nothing else: no console payload, no simState,
  * no strings. Which toggles are VISIBLE was a separate question for the
- * human-seeking Comms/Navigation toggles this pattern used to cover; now that
- * both are complete hero-bar Stations (issues #1097, #1098), the surviving
- * consumer (Tactical's Intel panel) is never conditionally hidden, so nothing
- * in this module answers that question any more.
+ * human-seeking Comms/Navigation toggles this pattern used to cover; both are
+ * complete hero-bar Stations now (issues #1097, #1098), so nothing in this
+ * module answers that question any more.
  */
 
 /**

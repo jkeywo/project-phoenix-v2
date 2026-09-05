@@ -21,7 +21,6 @@ export const renderStation = makeCaptainRender({
     camera: 'camera',
     redAlert: 'red-alert',
     objectives: 'objectives',
-    stationDamage: 'damage',
   },
   // The Courier's compact bridge exposes only its Fore hull view and the
   // authored Cinematic view, even if the model carries extra markers.

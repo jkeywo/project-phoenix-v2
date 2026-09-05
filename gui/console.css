@@ -143,71 +143,131 @@ body .frame { height: 100dvh; }
   );
 }
 
-/* ── Settings-cog clearance (issue #940) ──────────────────────────
-   Every console is an iframe filling client.html's viewport, and that page
-   mounts a fixed settings cog over the top-left corner: `.settings-btn` is
-   2rem square at a 0.5rem inset, so it reaches 40px in from the top and 40px
-   in from the left of whatever console is showing. A console must therefore
-   start its content past that, or the gear sits on the first glyphs of the
-   console's own title.
+/* ── No cog gutter (issue #1374, retiring #940's) ─────────────────
+   Issue #940 reserved 44px down the LEFT of every `.panel-inner`, because the
+   settings cog was a fixed control floating over whichever console was
+   showing. Since issue #1372 the cog is a child of the shell's Station Bar
+   for the whole of play, so it floats over nothing: the gutter reserved a
+   strip of a phone screen for a control that is no longer there.
 
-   Reserved here once rather than in 22 per-console <style> blocks, and on the
-   LEFT rather than the top because vertical space is the scarce axis on a
-   phone in landscape. `body .panel-inner` (0,1,1) deliberately outranks the
-   per-console `.panel-inner` padding shorthands (0,1,0) whatever their source
-   order: a console must not be able to reclaim the corner by writing a
-   smaller padding, since the result is invisible until someone looks at that
-   one console in that one orientation.
+   Deliberately not replaced by a smaller value. A console starts at its own
+   padding now, and `tests/client/settings-panel.test.js` asserts that no
+   `body .panel-inner` rule reserves the corner again. */
 
-   The two values are the smallest that clears (44px, portrait) and the gutter
-   20 of the 22 consoles already author for themselves (52px, landscape) — so
-   landscape is unchanged for all but the two courier consoles, whose 32px was
-   8px short of clearing. tests/client/settings-panel.test.js recomputes the
-   cog's reach from client.html and fails if either value stops clearing it. */
-@media (orientation: portrait) {
-  body .panel-inner { padding: 14px 16px 12px 44px; gap: 10px; }
-}
-@media (orientation: landscape) {
-  body .panel-inner { padding: 16px 20px 14px 44px; gap: 12px; }
-}
+/* ── Readout line (issue #1374) ─────────────────────────────────
+   What is LEFT of the console footer after issue #1374 took the strip away.
 
-/* ── Header / footer strips ─────────────────────────────────── */
-.console-header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-}
-.console-header .meta,
-.console-header .complexity {
-  font-family: "JetBrains Mono", monospace;
-  font-size: var(--text-lg);
-  color: var(--ink-dim);
-  letter-spacing: 0.18em;
-}
-.console-header .complexity { color: var(--cyan); }
-.console-header h1 {
-  font-size: var(--text-display);
-  font-weight: 600;
-  letter-spacing: 0.32em;
-  color: var(--tactical);
-  text-shadow: 0 0 18px rgba(var(--rgb-tactical), 0.35);
-}
+   The footer said four things: which Station this was, a dot, one live
+   readout, and the station-damage bar. The first two the Station Bar now says
+   for every console at once; the bar's selected tab opens the damage popup.
+   The live readout — the locked target, the active hail, the waypoint, a
+   count — is the only part that was information, so it moves INSIDE the group
+   that owns it as one of these lines rather than sitting in a strip of its
+   own at the bottom of the screen.
 
-.console-footer {
-  font-family: "JetBrains Mono", monospace;
-  font-size: var(--text-lg);
-  color: var(--ink-faint);
-  letter-spacing: 0.22em;
+   Declared here once instead of in 22 per-console <style> blocks, which is
+   how the footer came to be written out twenty-two slightly different ways. */
+.readout {
   display: flex;
   align-items: center;
-  gap: 0.875rem;
+  gap: 0.75rem;
+  flex-shrink: 0;
+  font-family: "JetBrains Mono", monospace;
+  font-size: var(--text-xs);
+  letter-spacing: 0.12em;
+  color: var(--ink-faint);
 }
-.console-footer .dot {
-  width: 0.5rem; height: 0.5rem; border-radius: 50%;
-  background: var(--loaded);
-  box-shadow: 0 0 8px var(--loaded);
+.readout .spacer { flex: 1; }
+.readout .sep { color: var(--line-soft); }
+
+/* A column's heading with something on the end of it — the AUTO badge, or a
+   control that belongs to that column and nowhere else. It exists because the
+   alternative is a `.readout` of its own above the heading, which collapses to
+   nothing while the badge is hidden and leaves a blank band nobody can explain
+   (issue #1374). */
+.col-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
 }
-.console-footer .sep { color: var(--line-soft); }
+.col-head > h2 { flex: 1; min-width: 0; }
+
+/* The AUTO badge a Station shows while its systems are on the backfill AI.
+   It used to sit in each console's own title row with no styling at all —
+   inheriting whatever the row happened to set — and now sits inside the
+   component group that owns the automation, so it needs the same treatment
+   the components' own in-shadow `.auto-badge` carries.
+
+   `align-self: center` is what makes it safe to drop into ANY row. Every host
+   is a flex container, and a flex item's default `align-self: stretch` grows
+   the badge to the row's full height — so a badge sharing a row with a 44px
+   `--control-hit-min` button renders as a tall bordered box with AUTO pinned
+   to its top edge instead of the tight chip every other console shows.
+   Centring here rather than adding `align-items: center` to each host row is
+   what keeps the next console out of the same trap; it is a no-op inside
+   `.readout` and `.col-head`, which centre their children already. */
+.auto-badge {
+  font-size: var(--text-xs);
+  letter-spacing: 0.2em;
+  color: var(--reloading);
+  border: 1px solid var(--reloading);
+  padding: 0.1rem 0.4rem;
+  white-space: nowrap;
+  align-self: center;
+}
+.auto-badge[hidden] { display: none; }
+
+/* ── Segment control (issue #1374) ──────────────────────────────
+   A two-or-three-way "which of these am I looking at" switch INSIDE a
+   console, for the phone layouts where two panels cannot both be on screen
+   (Captain's TARGET | MISSION column, Engineering's system picker).
+
+   It is a tablist, not a set of buttons: the markup a console writes is
+
+     <div class="seg" role="tablist" aria-label="…">
+       <button class="seg-btn" role="tab" aria-selected="true"  …>…</button>
+       <button class="seg-btn" role="tab" aria-selected="false" …>…</button>
+     </div>
+
+   — the same role/aria contract the shell's own Station Bar uses, so
+   gui/roving-tabindex.js drives arrow-key movement between the segments and
+   the interaction floors are met by construction. The selected segment is
+   `aria-selected="true"`, never a `.active` class: one source of truth, and
+   the one assistive technology reads. */
+.seg {
+  display: flex;
+  flex-shrink: 0;
+  border: 1px solid var(--line-faint);
+  background: var(--bg-deep);
+}
+.seg-btn {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--control-hit-min);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0 0.75rem;
+  background: none;
+  border: 0;
+  border-right: 1px solid var(--line-faint);
+  color: var(--ink-faint);
+  font-family: "Chakra Petch", sans-serif;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.seg-btn:last-child { border-right: 0; }
+.seg-btn[aria-selected="true"] {
+  background: var(--cyan-dim);
+  color: var(--cyan);
+}
+.seg-btn:disabled { color: var(--line-soft); cursor: not-allowed; }
 
 /* ── Inset card (chamfered, smaller chamfer) ───────────────── */
 .inset {
@@ -274,48 +334,6 @@ body .frame { height: 100dvh; }
    The `.chip` tube selector that also lived here was a fourth scale of the
    same design that no markup in the repo used. Its one distinguishing state
    survives as `.btn.selected`. */
-
-/* ── Readout pill ────────────────────────────────────────────── */
-.readout {
-  display: flex; align-items: baseline; gap: 0.875rem;
-  padding: 1.125rem 1.75rem;
-  background: linear-gradient(180deg, rgba(var(--rgb-panel-up), 0.6), rgba(var(--rgb-deep), 0.4));
-  border-top: 1px solid var(--line-faint);
-  border-bottom: 1px solid var(--line-faint);
-}
-.readout .k {
-  font-family: "JetBrains Mono", monospace;
-  font-size: var(--text-lg);
-  color: var(--ink-faint);
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-}
-.readout .v {
-  font-family: "Chakra Petch", sans-serif;
-  font-size: var(--text-display);
-  font-weight: 600;
-  color: var(--ink);
-  letter-spacing: 0.06em;
-  font-variant-numeric: tabular-nums;
-}
-.readout .v.tactical { color: var(--tactical); }
-.readout .u {
-  font-family: "JetBrains Mono", monospace;
-  font-size: var(--text-lg);
-  color: var(--ink-faint);
-  letter-spacing: 0.2em;
-}
-.readout .spacer { flex: 1; }
-.readout .sub {
-  font-family: "JetBrains Mono", monospace;
-  font-size: var(--text-md);
-  color: var(--ink-faint);
-  letter-spacing: 0.18em;
-  line-height: 1.6;
-  text-align: right;
-}
-.readout .sub .ok { color: var(--loaded); }
-.readout .sub .warn { color: var(--reloading); }
 
 /* ── Tube status row ───────────────────────────────────────── */
 .tube-status-row {
@@ -406,41 +424,11 @@ body .frame { height: 100dvh; }
   margin-top: 0.25rem;
 }
 
-/* ── Title block / hero (orange bar) ─────────────────────────── */
-.hero {
-  display: flex; align-items: center; gap: 1.5rem;
-  padding: 1.25rem 0 1.5rem;
-  align-self: flex-start;
-}
-.hero .bar {
-  width: 0.5rem; align-self: stretch;
-  background: var(--tactical);
-  box-shadow: 0 0 14px var(--tactical);
-}
-.hero h1 {
-  font-size: var(--text-display);
-  font-weight: 600;
-  letter-spacing: 0.36em;
-  color: var(--tactical);
-  text-shadow: 0 0 24px rgba(var(--rgb-tactical), 0.5);
-}
-.hero h1 .sub {
-  display: block;
-  font-size: var(--text-lg);
-  letter-spacing: 0.32em;
-  color: var(--ink-dim);
-  margin-top: 0.25rem;
-  text-shadow: none;
-}
-.hero .spacer { flex: 1; }
-.hero .complexity {
-  font-family: "JetBrains Mono", monospace;
-  font-size: var(--text-lg);
-  color: var(--cyan);
-  letter-spacing: 0.22em;
-  border: 1px solid var(--cyan-dim);
-  padding: 0.5rem 0.875rem;
-}
+/* The `.hero` title block that used to live here is gone (issue #1374). Every
+   console had one and every console's said the same thing the shell's Station
+   Bar already says — the name of the seat you are sitting at — twice over on a
+   phone, in the scarcest space on the device. One header everywhere now, and
+   it is the bar. */
 
 /* ── Toggle / segmented mini ─────────────────────────────────── */
 .mini-toggle {

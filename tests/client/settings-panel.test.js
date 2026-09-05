@@ -764,30 +764,24 @@ describe('client.html', () => {
     ).toBeGreaterThanOrEqual(cogRect().bottom);
   });
 
-  // The consoles are iframes filling this page's viewport, so the cog floats
-  // over them. `gui/console.css` reserves the corner for all 22 at once, with
-  // a compound selector that the per-console `.panel-inner` padding shorthands
-  // cannot outrank — asserted here, because a bare `.panel-inner` reservation
-  // would be silently overridden by every console that has one.
-  it('reserves the cog corner in every console, in both orientations', () => {
-    const { right } = cogRect();
-    for (const orientation of ['portrait', 'landscape']) {
-      const m = CONSOLE_CSS.match(
-        new RegExp(
-          `@media\\s*\\(orientation:\\s*${orientation}\\)\\s*\\{\\s*` +
-            `body\\s+\\.panel-inner\\s*\\{[^}]*padding:\\s*\\d+px\\s+\\d+px\\s+\\d+px\\s+(\\d+)px`,
-        ),
-      );
-      expect(
-        m,
-        `console.css reserves no ${orientation} compact gutter for the cog ` +
-          '(or reserves it with a selector a console can outrank)',
-      ).not.toBeNull();
-      expect(
-        Number(m[1]),
-        `the ${orientation} console gutter is under the cog`,
-      ).toBeGreaterThanOrEqual(right);
-    }
+  // The consoles used to reserve that corner too — `gui/console.css` held a
+  // 44px left gutter on `body .panel-inner` in both orientations (issue #940),
+  // because the cog floated over whichever console iframe was showing.
+  //
+  // Since issue #1372 the cog is a CHILD of the bar for the whole of play, so
+  // it floats over no console at all, and issue #1374 took the gutter out: a
+  // strip of a phone screen was being kept clear for a control that had left.
+  // This is the inverse of the old assertion, and it is the one that matters
+  // now — the gutter cost every console 44px invisibly, so its return would be
+  // just as easy to miss as its absence once was.
+  it('no console reserves a cog gutter any more', () => {
+    const reservations = CONSOLE_CSS.match(/body\s+\.panel-inner\s*\{[^}]*\}/g) || [];
+    expect(
+      reservations,
+      'gui/console.css reserves the cog corner again — the cog has been a bar '
+        + 'child since #1372 and floats over no console, so this is 44px of '
+        + 'every phone screen kept clear for nothing',
+    ).toEqual([]);
   });
 
   // ── The bar owns the chrome in game (issue #1372) ─────────────────────────

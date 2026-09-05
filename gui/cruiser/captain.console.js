@@ -13,7 +13,6 @@ export const renderStation = makeCaptainRender({
     camera: 'camera-select',
     redAlert: 'red-alert',
     objectives: 'objective-list',
-    stationDamage: 'station-damage',
   },
   footer: { id: 'footer-target', colorize: true },
 });

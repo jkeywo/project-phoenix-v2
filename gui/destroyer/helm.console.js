@@ -24,7 +24,6 @@ export const renderStation = makeHelmRender({
     lateral: 'lateral-thrust-joystick',
     impulse: 'impulse-btn',
     boost: 'boost-btn',
-    stationDamage: 'station-damage',
     autoBadge: 'helm-auto-badge',
   },
   tail: (s, doc, t) => {

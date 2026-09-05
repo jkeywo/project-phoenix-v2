@@ -34,7 +34,6 @@ export const renderStation = makeTacticalRender({
     phasers: 'phasers-controls',
     blasters: 'blasters-controls',
     torpedo: 'torpedo-controls',
-    stationDamage: 'station-damage',
     autoBadge: 'tactical-auto-badge',
   },
   // The destroyer authored a blaster column — it stays in view even while empty.

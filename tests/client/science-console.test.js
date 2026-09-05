@@ -28,8 +28,7 @@ const FIXTURE =
   '<ph-shield-facings id="shield-facings"></ph-shield-facings>' +
   '<div id="threat-row"><span id="threat-bearing"></span></div>' +
   '<span id="footer-target"></span>' +
-  '<span id="science-auto-badge" hidden></span>' +
-  '<ph-station-damage id="station-damage"></ph-station-damage>';
+  '<span id="science-auto-badge" hidden></span>';
 
 describe('cruiser science renderStation', () => {
   beforeEach(() => mount(FIXTURE));
@@ -48,7 +47,6 @@ describe('cruiser science renderStation', () => {
     expect(el('sensor-panel').state).toEqual(payload.systems.sensors);
     expect(el('shield-panel').state).toEqual(payload.systems['shields-system']);
     expect(el('shield-facings').state).toEqual({ facings: [{ id: 'fwd' }], focused_facing: 'fwd', auto: true });
-    expect(el('station-damage').state).toEqual({ pct: 0.6 });
   });
 
   it('shows the active threat-bearing readout and clears it when Sensors holds no threat', () => {

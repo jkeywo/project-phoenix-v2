@@ -55,6 +55,7 @@ entities:
         - "Released, the seeded value is exactly the 1.0/0.0 the fire hosts inlined before this issue, so Red Alert's behaviour is unchanged when the hold is not engaged. The committed world digests are the standing proof, and the weapons-hold digest namespace folds nothing while no ship holds so that they can be."
         - "AI/human symmetry is structural rather than asserted: the NPC fire hosts respect the hold because they seed the same fact and resolve the same authored predicate, with no branch anywhere on who is flying."
         - "It rides the red-alert admitted-command target rather than declaring a system of its own, so every NPC whose Red Alert capability is already provisioned AI-only can be ordered to hold with no second capability to declare and no second consumer to register."
+        - "[ai] Issue #1396 moved the lever to POWER — see weapons-cold-fire-gate — and this state is now the SECOND occupant of the same rung rather than its owner. It survives the change untouched so that the scripted hold_fire() / release_fire() verbs keep suppressing fire in the window before issue #1398 re-implements them as power orders; dropping it in #1396 would have silently un-gated the two probe worlds and Falling Skyway's Havelock beat, because their scripts would go on setting a flag nothing read. #1398 removes it."
     architecture:
       classification: authoritative
       owner: host-weapons-hold-control-router
@@ -68,13 +69,49 @@ entities:
       symbols:
         - ShipWeaponsHold
         - WeaponsAlertPosture
-        - WEAPONS_HOLD_ALERT_FACT
+        - WEAPONS_COLD_ALERT_FACT
         - OWN_SHIP_WEAPONS_HOLD_FLAG
-      tests: [cargo test, "cargo test --lib a_weapons_hold_closes_every_shipped_fire_gate"]
+      tests: [cargo test, "cargo test --lib a_cold_weapons_group_closes_every_shipped_fire_gate"]
     evidence:
       - kind: test
-        reference: "src/entities/authored_ai_pins.rs::a_weapons_hold_closes_every_shipped_fire_gate"
-        summary: "The suppression claim resolved through the REAL shipped predicates on the REAL shipped hulls — the fleet baseline's threshold of 1 and the Harrow gun line's always-armed 0 — with every readiness reading favourable and the alert raised. The released rows in the same test are the byte-identical half."
+        reference: "src/entities/authored_ai_pins.rs::a_cold_weapons_group_closes_every_shipped_fire_gate"
+        summary: "The suppression claim resolved through the REAL shipped predicates on the REAL shipped hulls — the fleet baseline's threshold of 1 and the Harrow gun line's always-armed 0 — with every readiness reading favourable and the alert raised. The powered rows in the same test are the byte-identical half, and the hold is asserted on the same rung until #1398 retires it."
+
+  - component: weapons-cold-fire-gate
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Weapons Cold Fire Gate
+      summary: "The gate that makes a switched-off power group mean a silent gun (issue #1396). Each firing decision reads the power group its own [[system]] entry authors — ShipConfig::power_group_for, resolved against the ship's reactor by PowerSystem::is_group_cold through the shared system_power_group_is_cold helper — and folds the answer into the WeaponsAlertPosture the bank's or tube's authored fire predicate already resolves, at WEAPONS_COLD_ALERT_FACT, the rung below stood-down. The same reading refuses a HUMAN order at the applier (handle_fire_phaser, handle_fire_blaster, handle_fire_torpedo) with WeaponActionRefusal::PowerCold. The ship-level weapons doctrine (tick_weapons_arc_request) reads the whole gun line instead of one mount and stops asking Helm to swing a family into line only when every emitter the hull carries is on a group that is off."
+      rationale:
+        - "[ai] The reading is PER SYSTEM, not per ship, because [[system]].power_group is authored per system. A hull is free to put its tubes on a different group than its beams; the gate then closes on the half that is switched off and leaves the other half shooting. Every shipped hull puts all of it on weapons today, so a ship-wide shortcut would have passed every test and quietly contradicted the authoring granularity the TOML already has."
+        - "[ai] The gate is applied at BOTH origins. The authored-predicate half stops the AI asking; the applier half refuses a human's admitted order. A gate that lived only in the AI decider would constrain NPC crews and leave a player free to fire a gun the crew had switched off — the same defect issue #943 reported for torpedo conservation, fixed there the same way, downstream of admission where there is no source identity left to branch on."
+        - "[ai] It composes into the VALUE of the existing red_alert fact rather than adding a fact or a conjunct, for the reason the weapons-hold state gives above: every armed hull authors one predicate differing only in its threshold, so a second fact would mean re-authoring the whole fleet. Red Alert therefore cannot override cold — the cold rung is read before the alert, so raising the alert on a ship whose guns are off changes nothing."
+        - "[ai] PowerCold is kept apart from Offline in the refusal vocabulary: Offline is a system the crew have LOST, cold is one they switched off and can switch back on with one order. The wire carries only Applied/Refused, so the distinction costs no message vocabulary."
+        - "[ai] Absence fails OPEN, in both inputs: a ship with no reactor component, or a system its hull put on no power group, is not a ship with dead guns but one the question cannot be asked of. This is the same choice PowerSystem::is_group_cold makes for an untracked group, and it is what keeps the bare-App weapons fixtures — which spawn neither a ShipConfig nor a reactor — behaving exactly as they did."
+    architecture:
+      kind: subsystem
+      authority: authoritative
+      reads:
+        - ship-power-state
+        - ship-station-system-topology-state
+      runs_in:
+        - host-browser-runtime
+    implementation:
+      status: declared
+      paths: [src/console/weapons/server.rs, src/console/weapons/mod.rs, src/console/weapons/beam.rs, src/console/weapons/blaster.rs, src/console/weapons/torpedo.rs, src/console_ai/server.rs, src/ship/config.rs]
+      symbols:
+        - system_power_group_is_cold
+        - power_group_for
+        - WeaponsAlertPosture
+        - WEAPONS_COLD_ALERT_FACT
+        - WeaponActionRefusal
+      tests: [cargo test, tests/smoke/weapons-cold-fire-gate.spec.js]
+    evidence:
+      - kind: test
+        reference: "src/console/weapons/server_tests.rs::a_cold_weapons_group_holds_fire_and_power_gives_it_back"
+        summary: "A backfilled bank with every readiness reading favourable and the alert RAISED holds while its authored group is at level 0, and opens fire on the next AI tick after the group is powered back — one run, one thing changed."
 
   - component: host-weapons-hold-control-router
     core:

@@ -35,6 +35,17 @@ fn collect_arc_requests(
 /// `[[system]] id = "tactical"` block is DELETED to match production.
 fn test_ship_config() -> crate::ship_plugin::ShipConfigComponent {
     const TOML: &str = r#"
+# The shipped Alliance weapons group (issue #1396): coldable, so this hull can
+# be asked the fire-gate question at all. Inert unless a fixture also attaches a
+# `ShipPowerSystem` — with no reactor on the entity `system_power_group_is_cold`
+# fails open, which is why the other tests in this file are unaffected by every
+# mount below naming the group.
+[power_groups.weapons]
+label = "entity.test.power_groups.weapons.label"
+default_level = 2
+min_level = 0
+max_level = 4
+
 [[station]]
 id = "tactical"
 name = "Tactical"
@@ -58,51 +69,62 @@ torpedo_auto_fire = {}
 id = "phaser-port"
 kind = "phaser_bank"
 station = "tactical"
+power_group = "weapons"
 
 [[system]]
 id = "phaser-starboard"
 kind = "phaser_bank"
 station = "tactical"
+power_group = "weapons"
 
 [[system]]
 id = "tactical-radar"
 kind = "tactical_radar"
 station = "tactical"
+power_group = "weapons"
 
 [[system]]
 id = "phaser-control"
 kind = "phaser_control"
 station = "tactical"
+power_group = "weapons"
 
 [[system]]
 id = "torpedo-magazine"
 kind = "torpedo_magazine"
 station = "tactical"
+power_group = "weapons"
 
 [[system]]
 id = "torpedo-tube-fore-port"
 kind = "torpedo_tube"
 station = "tactical"
+power_group = "weapons"
 
 [[system]]
 id = "torpedo-tube-fore-starboard"
 kind = "torpedo_tube"
 station = "tactical"
+power_group = "weapons"
 
 [[system]]
 id = "torpedo-tube-aft"
 kind = "torpedo_tube"
 station = "tactical"
+power_group = "weapons"
 
 # Declared so `any_blaster_bank_operates_ai` (which reads the ship CONFIG, not
 # the `BlasterSystemResource` component) can see a blaster group on fixtures
 # that attach one. Inert for ships that attach none: the auto-fire query
 # requires `&BlasterSystemResource`, so a hull without the component is never
-# iterated.
+# iterated. On the `weapons` group like every other mount here and like the
+# shipped Destroyer's `blaster-port`/`blaster-starboard`, so the cold fire gate
+# (issue #1396) can be asked about a blaster bank at all.
 [[system]]
 id = "blaster-fore"
 kind = "blaster_bank"
 station = "tactical"
+power_group = "weapons"
 "#;
     crate::ship_plugin::ShipConfigComponent(
         crate::ship::config::parse_and_validate(
@@ -15390,6 +15412,695 @@ fn npc_weapons_fire_without_a_captain_raising_the_alert() {
             .is_firing(),
         "a Harrow has no bridge crew to call red alert; its authored \
          `min_alert_to_fire = 0` is what lets it open the engagement at all"
+    );
+}
+
+/// A hull that authors its one phaser bank onto a COLDABLE `weapons` power
+/// group — the shipped Alliance shape (`alliance_cruiser.toml`,
+/// `alliance_destroyer.toml`) cut down to the two things a fire gate reads: the
+/// group's `min_level = 0`, and the `[[system]].power_group` that puts the bank
+/// on it.
+///
+/// It also declares a SECOND system, `tactical-radar`, with the `power_group`
+/// line deliberately omitted — the shape every shipped NPC hull authors
+/// (`ship_harrow_cruiser.toml` puts none of its systems on a group). That is the
+/// arm `power_group_for` takes at runtime for the whole NPC fleet, so the
+/// fixture has to be able to express it rather than leaving it to the
+/// undeclared-system short-circuit.
+///
+/// Authored as TOML rather than hand-built so the test cannot express a hull the
+/// loader would reject.
+fn coldable_weapons_ship_config() -> crate::ship_plugin::ShipConfigComponent {
+    crate::ship_plugin::ShipConfigComponent(
+        crate::ship::config::parse_and_validate(
+            r#"
+[power_groups.weapons]
+label = "entity.test.power_groups.weapons.label"
+default_level = 2
+min_level = 0
+max_level = 4
+
+[[station]]
+id = "tactical"
+name = "Tactical"
+description = "Dummy"
+rank = "Ltn."
+
+[[system]]
+id = "phaser-fore"
+kind = "phaser_bank"
+station = "tactical"
+power_group = "weapons"
+
+# Declared on the hull, on NO power group — `power_group` omitted on purpose.
+[[system]]
+id = "tactical-radar"
+kind = "tactical_radar"
+station = "tactical"
+"#,
+            &["phaser_bank", "tactical_radar"],
+        )
+        .expect("the coldable-weapons test hull must be valid"),
+    )
+}
+
+/// That hull's reactor, with the weapons group at `level`. `0` is COLD.
+fn weapons_reactor_at(level: u8) -> crate::ship::power::ShipPowerSystem {
+    crate::ship::power::ShipPowerSystem(
+        crate::modifiers::power_system::PowerSystem::from_authored_groups(
+            &crate::modifiers::power_system::PowerConfig::default(),
+            &[crate::modifiers::power_system::AuthoredPowerGroup {
+                id: crate::core::messages::PowerGroupId("weapons".into()),
+                level,
+                floor: 0,
+            }],
+        ),
+    )
+}
+
+fn is_firing(app: &App, ship: Entity) -> bool {
+    app.world()
+        .get::<ActiveBeam>(ship)
+        .expect("the ship has a beam component")
+        .is_firing()
+}
+
+/// **Issue #1396, all three claims in one run.** A bank whose authored power
+/// group is at level 0 does not fire; RED ALERT does not give the fire back;
+/// power does, on the very next AI tick.
+///
+/// The subject is a Harrow gun line deliberately, as the weapons-hold pin's is:
+/// it authors `min_alert_to_fire = 0`, so it is the hull a restraint lever has
+/// to beat the hard way, and the red-alert claim is not vacuous on it — it would
+/// be shooting with the alert DOWN. Nothing about the world moves between the
+/// samples except one number in the reactor.
+#[test]
+fn a_cold_weapons_group_holds_fire_and_power_gives_it_back() {
+    let mut app = test_app();
+    app.init_resource::<crate::ai::server::AiTokenRegistry>();
+    let npc = spawn_policy_phaser_npc(
+        &mut app,
+        "cc000000-0000-0000-0000-0000000000a1",
+        "cc000000-0000-0000-0000-0000000000a2",
+        vec![(wide_bank("fore", 0.0), shipped_harrow_phaser_policy())],
+    );
+    app.world_mut().entity_mut(npc).insert((
+        coldable_weapons_ship_config(),
+        weapons_reactor_at(0),
+        // AT STATIONS with the guns switched off. The alert is up for the whole
+        // run, so every assertion below is also the "red alert does not override
+        // cold" claim.
+        crate::ship::state::ShipRedAlert(true),
+    ));
+
+    // Several shared AI ticks, not one: "held this frame" would also be
+    // satisfied by a bank that had not been offered a decision yet.
+    for _ in 0..6 {
+        app.update();
+        assert!(
+            !is_firing(&app, npc),
+            "weapons at level 0: the bank must HOLD. Every host readiness gate \
+             has passed — the target is designated, in range and in arc — and \
+             the hull is an always-armed one AT red alert, so the only thing \
+             refusing is the power its own `[[system]]` entry draws from."
+        );
+    }
+
+    // Engineering powers the group back. Nothing else about the world changes.
+    app.world_mut()
+        .entity_mut(npc)
+        .get_mut::<crate::ship::power::ShipPowerSystem>()
+        .expect("the ship has a reactor")
+        .0
+        .set_group_allocation(&crate::core::messages::PowerGroupId("weapons".into()), 2)
+        .expect("the weapons group is on this reactor");
+    // Two frames, because the deciders run on the ONE shared AI cadence
+    // (`ai_tick_ready`, issue #889) rather than per rendered frame — this is the
+    // very next AI tick, not a settling period.
+    app.update();
+    app.update();
+    assert!(
+        is_firing(&app, npc),
+        "power restored: the bank opens fire on the next shared AI tick. It was \
+         tracking all along, so there is no re-acquisition delay — only the gate \
+         had to open."
+    );
+}
+
+/// **The other origin.** A HUMAN's `FirePhaser` — pushed as the Tactical
+/// officer's own token through admission, exactly as `lock_and_fire` does — is
+/// refused while the bank's group is cold, and lights the beam once it is
+/// powered.
+///
+/// The AI half above proves the authored predicate never ASKS. This proves the
+/// applier would not honour it if something did, which is what stops a Tactical
+/// officer shooting a gun Engineering switched off. Both halves matter and
+/// neither implies the other: a gate that lived only in the AI decider is the
+/// shape issue #943 reported as a defect for torpedo conservation, and it was
+/// fixed there the same way — downstream of admission, where the source
+/// identity is already gone and there is nothing to branch on.
+#[test]
+fn a_human_fire_order_is_refused_while_the_group_is_cold() {
+    let mut app = test_app();
+    setup_weapons_world_with_entity(&mut app, 0.0, -20.0);
+    start_game_with_weapons(&mut app);
+    let ship = app
+        .world_mut()
+        .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
+        .single(app.world())
+        .expect("the fixture flies one local ship");
+    // Engineering has switched the weapons group off. `phaser-port` authors that
+    // group in `test_ship_config`, exactly as the shipped hulls do.
+    app.world_mut()
+        .entity_mut(ship)
+        .insert(weapons_reactor_at(0));
+
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::ControlSystem {
+            target: crate::ship::system_registry::tactical_radar_system_id(),
+            payload: SystemControlPayload::SetTarget {
+                uuid: "target-uuid".into(),
+            },
+        },
+    );
+    let _ = tick(&mut app);
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-port".into()),
+            payload: SystemControlPayload::FirePhaser,
+        },
+    );
+    let _ = tick(&mut app);
+    assert!(
+        active_beam_target_is_none(&mut app),
+        "weapons at level 0: the officer's own admitted order must light no \
+         beam. The lock is good and the bank is human-operated and off \
+         cooldown, so the only thing refusing is the power its `[[system]]` \
+         entry draws from."
+    );
+
+    // Engineering powers the group back; the IDENTICAL order is sent again.
+    app.world_mut()
+        .entity_mut(ship)
+        .get_mut::<crate::ship::power::ShipPowerSystem>()
+        .expect("the reactor is on the ship")
+        .0
+        .set_group_allocation(&crate::core::messages::PowerGroupId("weapons".into()), 2)
+        .expect("the weapons group is on this reactor");
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-port".into()),
+            payload: SystemControlPayload::FirePhaser,
+        },
+    );
+    let _ = tick(&mut app);
+    assert_eq!(
+        get_active_beam_target(&mut app).as_deref(),
+        Some("target-uuid"),
+        "the identical order lights the beam once the group is powered, so the \
+         refusal above was the power level and nothing else about the fixture"
+    );
+}
+
+/// The shared resolution every fire host reads through: the SYSTEM's authored
+/// group, this ship's reactor, and fail-open on either being absent.
+#[test]
+fn a_systems_cold_reading_comes_from_its_own_authored_power_group() {
+    use crate::console::weapons::system_power_group_is_cold;
+    let config = coldable_weapons_ship_config();
+    let cold = weapons_reactor_at(0);
+    let powered = weapons_reactor_at(2);
+    let bank = crate::ship::system_registry::phaser_bank_system_id("fore").unwrap();
+
+    assert!(system_power_group_is_cold(
+        Some(&config.0),
+        Some(&cold.0),
+        &bank
+    ));
+    assert!(!system_power_group_is_cold(
+        Some(&config.0),
+        Some(&powered.0),
+        &bank
+    ));
+    // DECLARED on the hull but on NO power group — `[[system]] tactical-radar`
+    // authors no `power_group`, so `power_group_for` reaches the system and
+    // finds `None`. Never cold: it is not on the reactor's books, so switching a
+    // group off cannot reach it. This is the arm every shipped NPC hull takes
+    // (none of the Harrow's systems name a group); if it ever read as cold, the
+    // whole NPC fleet would stop shooting.
+    //
+    // Pinned on the fixture first, so a later edit to the hull TOML cannot let
+    // this case quietly collapse into the undeclared-system one below.
+    let groupless = config
+        .0
+        .system(&SystemId("tactical-radar".into()))
+        .expect("the fixture hull DECLARES tactical-radar");
+    assert!(
+        groupless.power_group.is_none(),
+        "and declares it on no power group — that is the arm under test"
+    );
+    assert!(
+        config.0.system(&SystemId("phaser-aft".into())).is_none(),
+        "while phaser-aft is not declared at all — the other fail-open arm"
+    );
+    assert!(!system_power_group_is_cold(
+        Some(&config.0),
+        Some(&cold.0),
+        &SystemId("tactical-radar".into())
+    ));
+    // NOT DECLARED at all — a separate fail-open arm, pinned separately so it
+    // cannot stand in for the groupless-system one above. `power_group_for`
+    // short-circuits on the missing system rather than on a missing group.
+    assert!(!system_power_group_is_cold(
+        Some(&config.0),
+        Some(&cold.0),
+        &SystemId("phaser-aft".into())
+    ));
+    // Fail-open on absence, in both arguments — a fixture with no hull or no
+    // reactor is a ship the question cannot be asked of, not one with dead guns.
+    assert!(!system_power_group_is_cold(None, Some(&cold.0), &bank));
+    assert!(!system_power_group_is_cold(Some(&config.0), None, &bank));
+}
+
+/// A hold-to-fire blaster bank cut down to what a cold gate reads: a charge
+/// phase long enough for a fixture to switch the reactor off part-way through
+/// it (0.5 s = three 200 ms fixed steps), one volley step, and an arc and range
+/// that refuse nothing. Shaped after the Destroyer's `blaster-port`, which is
+/// the shipped hold-to-fire bank and authors `power_group = "weapons"`.
+fn cold_gate_blaster_bank() -> crate::weapons::blaster::BlasterBankConfig {
+    crate::weapons::blaster::BlasterBankConfig {
+        id: "fore".into(),
+        facing_deg: 0.0,
+        fire_arc_deg: 360.0,
+        volley_count: 1,
+        volley_interval_secs: 0.1,
+        cooldown_secs: 3.0,
+        charge_time_secs: 0.5,
+        projectile_speed: 40.0,
+        collision_radius: 1.5,
+        visual_scale: 1.0,
+        damage: 10,
+        shield_pierce: 0.0,
+        recoil_impulse: 0.0,
+        screenshake_magnitude: 0.0,
+        marker: None,
+        barrels: Vec::new(),
+        pattern: Vec::new(),
+        range: 200.0,
+    }
+}
+
+/// Hang that bank off the fixture's local ship and hand its fine system to a
+/// human, so an admitted `ChargeBlasterStart` from the `weapons` token reaches
+/// `handle_fire_blaster` the way a Tactical officer's does. `test_ship_config`
+/// already DECLARES `blaster-fore` on the coldable `weapons` group; this only
+/// gives the ship the runtime bank to go with it.
+fn give_local_ship_a_charging_blaster(app: &mut App) -> Entity {
+    let ship = app
+        .world_mut()
+        .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
+        .single(app.world())
+        .expect("the fixture flies one local ship");
+    app.world_mut()
+        .entity_mut(ship)
+        .insert(BlasterSystemResource(vec![
+            crate::weapons::blaster::BlasterSystem::new(cold_gate_blaster_bank()),
+        ]));
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&mut ShipSystemControlSources, With<crate::server_app::LocalShip>>();
+    if let Ok(mut cs) = q.single_mut(app.world_mut()) {
+        cs.0.set(
+            crate::ship::system_registry::blaster_bank_system_id("fore").unwrap(),
+            crate::ship::control_source::ControlSource::Human,
+        );
+    }
+    ship
+}
+
+/// Designate the fixture asteroid so the ship carries a frozen combat lock —
+/// the surface every blaster gate downstream of admission reads.
+fn designate_the_fixture_target(app: &mut App) {
+    push(
+        app,
+        "weapons",
+        ClientMessage::ControlSystem {
+            target: crate::ship::system_registry::tactical_radar_system_id(),
+            payload: SystemControlPayload::SetTarget {
+                uuid: "target-uuid".into(),
+            },
+        },
+    );
+    let _ = tick(app);
+}
+
+fn blaster_bank_state(app: &App, ship: Entity) -> crate::weapons::blaster::BlasterVolleyState {
+    app.world()
+        .get::<BlasterSystemResource>(ship)
+        .expect("the ship keeps its blaster bank")
+        .0[0]
+        .volley
+        .clone()
+}
+
+fn blaster_bank_is_fire_ready(app: &App, ship: Entity) -> bool {
+    app.world()
+        .get::<BlasterSystemResource>(ship)
+        .expect("the ship keeps its blaster bank")
+        .0[0]
+        .is_fire_ready()
+}
+
+fn blaster_bank_in_flight(app: &App, ship: Entity) -> usize {
+    app.world()
+        .get::<BlasterSystemResource>(ship)
+        .expect("the ship keeps its blaster bank")
+        .0[0]
+        .in_flight
+        .len()
+}
+
+fn set_weapons_group_level(app: &mut App, ship: Entity, level: u8) {
+    app.world_mut()
+        .entity_mut(ship)
+        .get_mut::<crate::ship::power::ShipPowerSystem>()
+        .expect("the reactor is on the ship")
+        .0
+        .set_group_allocation(
+            &crate::core::messages::PowerGroupId("weapons".into()),
+            level,
+        )
+        .expect("the weapons group is on this reactor");
+}
+
+/// The one `ActionFeedback` outcome the host sent for `correlation`.
+fn feedback_for(out: &[OutboundMessage], correlation: &str) -> Option<ActionFeedbackOutcome> {
+    out.iter().find_map(|m| match &m.msg {
+        ServerMessage::ActionFeedback {
+            correlation: c,
+            outcome,
+        } if c.as_str() == correlation => Some(*outcome),
+        _ => None,
+    })
+}
+
+/// **The interrupt arm of the cold gate (issue #1396).** A hold-to-fire bank
+/// that was already charging when Engineering switched its group off does not
+/// get to finish.
+///
+/// This is the only place in the slice where cold INTERRUPTS a decision already
+/// in flight rather than refusing an admitted command: `BlasterSystem::tick`
+/// completes a charge into a volley on its own, with no command behind it, so
+/// `handle_fire_blaster`'s gate never sees that shot and `tick_blaster_system`
+/// is the only thing that can stop it. The contract the production comment
+/// states is pinned in full — the charge is dropped, NO cooldown is burned, and
+/// powering the group back leaves the bank ready rather than punished for an
+/// order it never got to carry out.
+#[test]
+fn a_charge_in_flight_is_dropped_when_the_group_goes_cold_and_costs_no_cooldown() {
+    let mut app = test_app();
+    setup_weapons_world_with_entity(&mut app, 0.0, -20.0);
+    start_game_with_weapons(&mut app);
+    let ship = give_local_ship_a_charging_blaster(&mut app);
+    designate_the_fixture_target(&mut app);
+
+    // The group is powered for the charge start — no reactor on the entity yet,
+    // which `system_power_group_is_cold` reads as "not a question this ship can
+    // be asked", the same fail-open every other fixture in this file relies on.
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::ControlSystem {
+            target: crate::ship::system_registry::blaster_bank_system_id("fore").unwrap(),
+            payload: SystemControlPayload::ChargeBlasterStart,
+        },
+    );
+    let _ = tick(&mut app);
+    let charging = blaster_bank_state(&app, ship);
+    assert!(
+        charging.charging,
+        "precondition: the admitted ChargeBlasterStart must put the bank into \
+         its charge phase, or there is no in-flight decision to interrupt"
+    );
+    assert!(
+        charging.charge_elapsed > 0.0 && charging.charge_elapsed < 0.5,
+        "precondition: the charge must be PART WAY through (elapsed {}s of \
+         0.5s), or this test is about a charge that had not started",
+        charging.charge_elapsed
+    );
+
+    // Engineering switches the weapons group off mid-charge. Nothing else about
+    // the world moves.
+    app.world_mut()
+        .entity_mut(ship)
+        .insert(weapons_reactor_at(0));
+    let _ = tick(&mut app);
+
+    let cancelled = blaster_bank_state(&app, ship);
+    assert!(
+        !cancelled.charging,
+        "a bank whose group went cold mid-charge must drop the charge"
+    );
+    assert_eq!(
+        cancelled.charge_elapsed, 0.0,
+        "and drop it outright rather than parking a part-charge that resumes"
+    );
+
+    // Past the tick the charge WOULD have completed on (0.5s = three 200ms
+    // steps from the start), so "no volley" is a fact about the whole charge
+    // window rather than about the one tick the reactor changed on.
+    for _ in 0..4 {
+        let _ = tick(&mut app);
+        let held = blaster_bank_state(&app, ship);
+        assert_eq!(
+            held.pending_volley, 0,
+            "a cold bank must arm no volley: the charge is cancelled every tick \
+             the group stays off"
+        );
+        assert!(
+            !held.on_cooldown,
+            "and must burn NO cooldown for a volley it never fired — a bank \
+             punished with a cooldown here would still be unable to shoot for \
+             seconds after Engineering powered it back"
+        );
+    }
+    assert_eq!(
+        blaster_bank_in_flight(&app, ship),
+        0,
+        "and must have launched nothing"
+    );
+
+    // Engineering powers the group back. The bank is ready THAT INSTANT — no
+    // cooldown to sit out — and the next order it is given fires.
+    set_weapons_group_level(&mut app, ship, 2);
+    assert!(
+        blaster_bank_is_fire_ready(&app, ship),
+        "with the group powered the bank must be fire-ready again immediately"
+    );
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::ControlSystem {
+            target: crate::ship::system_registry::blaster_bank_system_id("fore").unwrap(),
+            payload: SystemControlPayload::ChargeBlasterStart,
+        },
+    );
+    for _ in 0..4 {
+        let _ = tick(&mut app);
+    }
+    assert!(
+        blaster_bank_state(&app, ship).on_cooldown,
+        "and the identical order now charges through to a volley — the bank was \
+         held by the power level and nothing else. `on_cooldown` is the evidence \
+         the volley dispatched (the fixture's target sits 20 units ahead, so an \
+         `in_flight` count is consumed by the collision pass)."
+    );
+}
+
+/// **The applier gate on the blaster family (issue #1396).** A cold group
+/// refuses an admitted `ChargeBlasterStart` — and deliberately still honours a
+/// `ChargeBlasterCancel`.
+///
+/// The phaser half of this claim is
+/// `a_human_fire_order_is_refused_while_the_group_is_cold`; the AC is "no bank
+/// fires", so the structurally identical gate on the blaster path needs its own
+/// pin. The carve-out is the part a compile pass cannot see: the gate is scoped
+/// to `is_charge_start`, because an order to STOP is not something a cold
+/// reactor has any business refusing.
+#[test]
+fn a_cold_group_refuses_a_blaster_charge_but_still_honours_a_cancel() {
+    let mut app = test_app();
+    setup_weapons_world_with_entity(&mut app, 0.0, -20.0);
+    start_game_with_weapons(&mut app);
+    let ship = give_local_ship_a_charging_blaster(&mut app);
+    designate_the_fixture_target(&mut app);
+    app.world_mut()
+        .entity_mut(ship)
+        .insert(weapons_reactor_at(0));
+
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::ControlSystemCorrelated {
+            correlation: ActionCorrelationId::new("blaster-cold").unwrap(),
+            target: crate::ship::system_registry::blaster_bank_system_id("fore").unwrap(),
+            payload: SystemControlPayload::ChargeBlasterStart,
+        },
+    );
+    let out = tick(&mut app);
+    assert_eq!(
+        feedback_for(&out, "blaster-cold"),
+        Some(ActionFeedbackOutcome::Refused),
+        "weapons at level 0: the officer's own admitted charge must be refused \
+         at the bank's owning consumer"
+    );
+    assert!(
+        !blaster_bank_state(&app, ship).charging,
+        "and must start no charge — a refusal that still armed the bank would \
+         fire the volley three ticks later with nothing left to refuse it"
+    );
+
+    // Engineering powers the group; the IDENTICAL order is accepted, which is
+    // what makes the refusal above the power level rather than the fixture.
+    set_weapons_group_level(&mut app, ship, 2);
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::ControlSystemCorrelated {
+            correlation: ActionCorrelationId::new("blaster-warm").unwrap(),
+            target: crate::ship::system_registry::blaster_bank_system_id("fore").unwrap(),
+            payload: SystemControlPayload::ChargeBlasterStart,
+        },
+    );
+    let out = tick(&mut app);
+    assert_eq!(
+        feedback_for(&out, "blaster-warm"),
+        Some(ActionFeedbackOutcome::Applied),
+        "the identical order is applied once the group is powered"
+    );
+    assert!(
+        blaster_bank_state(&app, ship).charging,
+        "and the bank is genuinely charging, so there is a live charge for the \
+         cancel below to be about"
+    );
+
+    // THE CARVE-OUT. The group goes cold with a charge live, and the crew send
+    // the cancel. `handle_fire_blaster` runs before `tick_blaster_system` in
+    // `SimSet::Physics`, so the cancel is answered on its own merits — a
+    // Refused here would mean the cold gate had swallowed an order to STOP.
+    app.world_mut()
+        .entity_mut(ship)
+        .insert(weapons_reactor_at(0));
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::ControlSystemCorrelated {
+            correlation: ActionCorrelationId::new("blaster-cancel-cold").unwrap(),
+            target: crate::ship::system_registry::blaster_bank_system_id("fore").unwrap(),
+            payload: SystemControlPayload::ChargeBlasterCancel,
+        },
+    );
+    let out = tick(&mut app);
+    assert_eq!(
+        feedback_for(&out, "blaster-cancel-cold"),
+        Some(ActionFeedbackOutcome::Applied),
+        "a ChargeBlasterCancel is an order to STOP: refusing it because the guns \
+         are off is nonsense, so the cold gate is scoped to the charge START"
+    );
+    assert!(
+        !blaster_bank_state(&app, ship).charging,
+        "and the charge really is stopped"
+    );
+}
+
+/// **The applier gate on the torpedo family (issue #1396).** A loaded tube whose
+/// authored group is at level 0 launches nothing and spends no round; the
+/// identical order empties it once the group is powered back.
+///
+/// Same reason the blaster pin above exists: the AC is "no bank fires", and
+/// `handle_fire_torpedo`'s gate is a third copy of the shape, keyed on
+/// `&cmd.target` rather than on a resolved bank id. A tube is also the one
+/// weapon here that spends a consumable, so "refused" has to mean the round is
+/// still aboard rather than fired into a gate.
+#[test]
+fn a_cold_group_refuses_a_torpedo_launch_and_spends_no_round() {
+    let mut app = test_app();
+    setup_weapons_world_with_entity(&mut app, 0.0, -20.0);
+    start_game_with_weapons(&mut app);
+    load_tube_now(&mut app, "fore_port");
+    let ship = app
+        .world_mut()
+        .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
+        .single(app.world())
+        .expect("the fixture flies one local ship");
+    // `torpedo-tube-fore-port` authors the coldable `weapons` group in
+    // `test_ship_config`, exactly as every shipped hull's tubes do.
+    app.world_mut()
+        .entity_mut(ship)
+        .insert(weapons_reactor_at(0));
+
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::ControlSystemCorrelated {
+            correlation: ActionCorrelationId::new("torpedo-cold").unwrap(),
+            target: crate::ship::system_registry::torpedo_tube_fore_port_system_id(),
+            payload: SystemControlPayload::FireTorpedo { target_uuid: None },
+        },
+    );
+    let out = tick(&mut app);
+    assert!(
+        !out.iter()
+            .any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
+        "weapons at level 0: a loaded tube must launch nothing"
+    );
+    assert_eq!(
+        feedback_for(&out, "torpedo-cold"),
+        Some(ActionFeedbackOutcome::Refused),
+        "and must say so at the tube's owning consumer"
+    );
+    assert_eq!(
+        app.world()
+            .get::<TorpedoSystemResource>(ship)
+            .expect("the fixture ship carries a torpedo system")
+            .0
+            .tube("fore_port")
+            .expect("the fixture hull authors a fore_port tube")
+            .loaded_count,
+        1,
+        "and the round must still be in the tube — a refusal that unloaded the \
+         tube would cost the ship a torpedo for a shot it never took"
+    );
+
+    // Engineering powers the group back; the IDENTICAL order empties the tube.
+    set_weapons_group_level(&mut app, ship, 2);
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::ControlSystemCorrelated {
+            correlation: ActionCorrelationId::new("torpedo-warm").unwrap(),
+            target: crate::ship::system_registry::torpedo_tube_fore_port_system_id(),
+            payload: SystemControlPayload::FireTorpedo { target_uuid: None },
+        },
+    );
+    let out = tick(&mut app);
+    assert!(
+        out.iter().any(
+            |m| matches!(&m.msg, ServerMessage::TorpedoLaunched { tube, .. } if tube == "fore_port")
+        ),
+        "the identical order launches once the group is powered, so the refusal \
+         above was the power level and nothing else about the fixture"
+    );
+    assert_eq!(
+        feedback_for(&out, "torpedo-warm"),
+        Some(ActionFeedbackOutcome::Applied),
+        "and is acknowledged as applied"
     );
 }
 

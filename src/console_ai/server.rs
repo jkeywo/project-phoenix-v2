@@ -1027,6 +1027,11 @@ pub(crate) fn ai_torpedo_auto_fire(
             // above into the one `red_alert` fact the tube's authored LAUNCH
             // predicate already reads.
             Option<&crate::ship::state::ShipWeaponsHold>,
+            // Issue #1396: this ship's reactor, so each TUBE's own authored
+            // power group can be read for COLD (level 0) and folded into that
+            // same fact. `Option<&_>`: a fixture with no reactor is not a ship
+            // with dead tubes.
+            Option<&crate::ship::power::ShipPowerSystem>,
             // Issue #1107: the ship's Command stance selections, so a directed
             // AI weapons Station's stance decides the launch posture in place of
             // the ship's own Red Alert. Absent reads as no direction.
@@ -1066,13 +1071,14 @@ pub(crate) fn ai_torpedo_auto_fire(
         mut admitted,
         red_alert_opt,
         weapons_hold_opt,
+        power_opt,
         stances_opt,
     ) in ships.iter_mut()
     {
-        // Read once per ship; seeded into every tube's launch snapshot. No Rust
+        // Read once per ship; folded into every tube's posture below. No Rust
         // rule consults it — the gate is the tube's authored predicate (#872),
-        // and the weapons hold folded in beside it rides that same predicate
-        // (#1041). The Command stance override (#1107) rides the same fact;
+        // and the restraint levers beside it ride that same predicate (#1041,
+        // #1396). The Command stance override (#1107) rides the same fact;
         // absent a direction it is `None` and the seeded value is unchanged.
         let stance_override = crate::console::command::server::weapons_station_stance_high_alert(
             stances_opt,
@@ -1081,11 +1087,24 @@ pub(crate) fn ai_torpedo_auto_fire(
             &control_sources.0,
             red_alert_opt.is_some_and(|r| r.0),
         );
-        let posture = crate::console::weapons::WeaponsAlertPosture::from_parts(
-            red_alert_opt,
-            weapons_hold_opt,
-            stance_override,
-        );
+        // One tube's posture (issue #1396). The alert, the hold and the stance
+        // are the ship's; COLD is a reading of the power group THIS tube's
+        // `[[system]]` entry authors, so it is resolved per tube inside the
+        // launch loop rather than once per ship.
+        let posture_for = |tube_id: &str| {
+            crate::console::weapons::WeaponsAlertPosture::from_parts(
+                red_alert_opt,
+                crate::ship::system_registry::torpedo_tube_system_id(tube_id).is_some_and(|sid| {
+                    crate::console::weapons::system_power_group_is_cold(
+                        Some(&ship_config.0),
+                        power_opt.map(|p| &p.0),
+                        &sid,
+                    )
+                }),
+                weapons_hold_opt,
+                stance_override,
+            )
+        };
         // The scenario flag chain, anchored at the layer that spawned this
         // ship (issue #891 stage 2).
         let flag_chain = ai_env.flag_chain(ship_entity);
@@ -1249,7 +1268,7 @@ pub(crate) fn ai_torpedo_auto_fire(
                 true,
                 target_facing_shields,
                 tubes_full,
-                posture,
+                posture_for(&tube_id),
             );
             if !crate::console::weapons::torpedo_tube_launch_policy_fires(
                 launch_policy,

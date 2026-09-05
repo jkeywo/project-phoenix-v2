@@ -65,8 +65,9 @@ pub struct BlasterBankAiPolicies(
 /// edge for blaster banks: the host resolves the bank's live readiness before
 /// calling this, so a `fact(...)` guard evaluates over real per-bank state while
 /// `policy.rs` stays Bevy-free.
-/// `posture` carries the SHIP-WIDE readings — the alert added by issue #872 and
-/// the weapons hold added by issue #1041; see
+/// `posture` carries the firing readings — the ship's alert (issue #872), the
+/// captain's hold (issue #1041) and whether THIS bank's authored power group is
+/// cold (issue #1396); see
 /// [`crate::console::weapons::seed_phaser_bank_facts`] and
 /// [`crate::console::weapons::WeaponsAlertPosture`] for the contract. Seeded
 /// unconditionally so an authored guard reads a real `0.0`, never an absent
@@ -136,6 +137,12 @@ pub(crate) fn handle_fire_blaster(
             Option<&crate::server_app::ShipSystemBlackboards>,
             &mut BlasterSystemResource,
             &crate::core::messages::AdmittedCommands,
+            // The cold-power gate's two inputs (issue #1396): the hull, which
+            // says which power group this bank draws from, and the reactor,
+            // which says what that group is at. Both `Option<&_>` — a fixture
+            // that spawns neither is a ship the question cannot be asked of.
+            Option<&crate::ship_plugin::ShipConfigComponent>,
+            Option<&crate::ship::power::ShipPowerSystem>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -145,7 +152,15 @@ pub(crate) fn handle_fire_blaster(
         ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
     >,
 ) {
-    for (control_sources, physics, blackboards_opt, mut blaster_res, admitted) in ship_q.iter_mut()
+    for (
+        control_sources,
+        physics,
+        blackboards_opt,
+        mut blaster_res,
+        admitted,
+        ship_config_opt,
+        power_opt,
+    ) in ship_q.iter_mut()
     {
         for cmd in admitted.0.iter() {
             // Accept FireBlaster (legacy), ChargeBlasterStart, and ChargeBlasterCancel.
@@ -192,6 +207,33 @@ pub(crate) fn handle_fire_blaster(
                     cmd,
                     &mut outbound,
                     WeaponActionResult::Refused(WeaponActionRefusal::Offline),
+                );
+                continue;
+            }
+
+            // COLD-POWER GATE (issue #1396), applied to BOTH origins for the
+            // same reason the arc check below is: downstream of admission there
+            // is no source identity left to branch on, and a gate that lived in
+            // the AI decider alone would leave a human free to charge a bank
+            // whose group the crew switched off.
+            //
+            // A CANCEL is deliberately NOT gated. It is an order to STOP, and
+            // refusing to stop because the guns are off is nonsense; a cold bank
+            // mid-charge is cancelled outright by `tick_blaster_system` anyway,
+            // so the two paths agree.
+            if is_charge_start
+                && bank_system_id.as_ref().is_some_and(|sid| {
+                    super::system_power_group_is_cold(
+                        ship_config_opt.map(|c| &c.0),
+                        power_opt.map(|p| &p.0),
+                        sid,
+                    )
+                })
+            {
+                super::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    WeaponActionResult::Refused(WeaponActionRefusal::PowerCold),
                 );
                 continue;
             }
@@ -320,6 +362,11 @@ pub(crate) fn tick_blaster_auto_fire(
             // Issue #1041: the captain's weapons hold, folded with the alert
             // above into the one `red_alert` fact the authored gate reads.
             Option<&crate::ship::state::ShipWeaponsHold>,
+            // Issue #1396: this ship's reactor, so each bank's OWN authored
+            // power group can be read for COLD (level 0) and folded into that
+            // same fact. `Option<&_>`: a fixture with no reactor is not a ship
+            // with dead guns.
+            Option<&crate::ship::power::ShipPowerSystem>,
             // Issue #1107: the ship's Command stance selections, so a directed
             // AI weapons Station's stance decides the fire posture in place of
             // the ship's own Red Alert. Absent reads as no direction.
@@ -357,13 +404,14 @@ pub(crate) fn tick_blaster_auto_fire(
         mut admitted,
         red_alert_opt,
         weapons_hold_opt,
+        power_opt,
         stances_opt,
     ) in ship_q.iter_mut()
     {
-        // Read once per ship; seeded into every bank's snapshot. No Rust rule
-        // consults it — the gate is the bank's authored predicate (#872), and
-        // the weapons hold folded in beside it rides that same predicate
-        // (#1041). The Command stance override (#1107) rides the same fact:
+        // Read once per ship; folded into every bank's posture below. No Rust
+        // rule consults it — the gate is the bank's authored predicate (#872),
+        // and the restraint levers beside it ride that same predicate (#1041,
+        // #1396). The Command stance override (#1107) rides the same fact:
         // absent a direction it is `None` and the seeded value is bit-for-bit
         // the pre-#1107 reading.
         let stance_override = ship_config_opt.and_then(|cfg| {
@@ -375,11 +423,6 @@ pub(crate) fn tick_blaster_auto_fire(
                 red_alert_opt.is_some_and(|r| r.0),
             )
         });
-        let posture = crate::console::weapons::WeaponsAlertPosture::from_parts(
-            red_alert_opt,
-            weapons_hold_opt,
-            stance_override,
-        );
         // The scenario flag chain, anchored at the layer that spawned this
         // ship (issue #891 stage 2).
         let flag_chain = ai_env.flag_chain(ship_entity);
@@ -414,13 +457,12 @@ pub(crate) fn tick_blaster_auto_fire(
             // Per-bank fine-system gate — skip banks whose fine system is not
             // AI-operated (offline/human), so one bank firing never depends on
             // another's control source.
-            if let Some(bank_sid) =
-                crate::ship::system_registry::blaster_bank_system_id(&bank.config.id)
-            {
+            let bank_sid = crate::ship::system_registry::blaster_bank_system_id(&bank.config.id);
+            if let Some(bank_sid) = bank_sid.as_ref() {
                 // Per-bank Control-Source gate through the shared AI host spine
                 // (issue #1208): skip offline/human banks. The per-bank FIRE
                 // resolution stays in `blaster_bank_policy_fires`.
-                if system_is_registered(control_sources, &bank_sid)
+                if system_is_registered(control_sources, bank_sid)
                     && !crate::ai::host::ai_operates(&control_sources.0, bank_sid.clone())
                 {
                     continue;
@@ -455,6 +497,27 @@ pub(crate) fn tick_blaster_auto_fire(
             let Some(policy) = bank_policies_opt.and_then(|p| p.0.get(&bank.config.id)) else {
                 continue;
             };
+            // This BANK's own posture (issue #1396): the ship's alert and the
+            // captain's hold are ship-wide, but COLD is a reading of the power
+            // group THIS bank's `[[system]]` entry authors, so a hull that put
+            // its artillery on a different group than its beams gates them
+            // independently. Resolved here, after the host readiness gates, so a
+            // bank that was never going to shoot this tick costs no lookup. A
+            // bank whose system id cannot be minted (an unregistered fixture
+            // bank) is never cold — the same fail-open the control-source gate
+            // above takes.
+            let posture = crate::console::weapons::WeaponsAlertPosture::from_parts(
+                red_alert_opt,
+                bank_sid.as_ref().is_some_and(|sid| {
+                    crate::console::weapons::system_power_group_is_cold(
+                        ship_config_opt.map(|c| &c.0),
+                        power_opt.map(|p| &p.0),
+                        sid,
+                    )
+                }),
+                weapons_hold_opt,
+                stance_override,
+            );
             let facts = seed_blaster_bank_facts(true, false, 0.0, in_range, in_arc, posture);
             if blaster_bank_policy_fires(policy, &facts, &flag_chain) {
                 banks_to_fire.push(bank.config.id.clone());
@@ -528,6 +591,12 @@ pub(crate) fn tick_blaster_system(
                 &mut ShipPhysics,
                 Option<&crate::server_app::ShipSystemBlackboards>,
                 &mut BlasterSystemResource,
+                // The cold-power reading (issue #1396): a charge already in
+                // flight when its group is switched off must not complete into
+                // a volley. `Option<&_>` — a fixture with neither is a ship the
+                // question cannot be asked of.
+                Option<&crate::ship_plugin::ShipConfigComponent>,
+                Option<&crate::ship::power::ShipPowerSystem>,
             ),
             With<crate::server_app::Ship>,
         >,
@@ -579,8 +648,16 @@ pub(crate) fn tick_blaster_system(
         .collect();
 
     let mut ship_q = ship_qs.p0();
-    for (source_uuid_opt, transform, markers_opt, mut physics, blackboards_opt, mut blaster_res) in
-        ship_q.iter_mut()
+    for (
+        source_uuid_opt,
+        transform,
+        markers_opt,
+        mut physics,
+        blackboards_opt,
+        mut blaster_res,
+        ship_config_opt,
+        power_opt,
+    ) in ship_q.iter_mut()
     {
         let source_uuid = source_uuid_opt
             .map(|u| u.0.as_str())
@@ -610,6 +687,25 @@ pub(crate) fn tick_blaster_system(
 
         for bank in blaster_res.0.iter_mut() {
             let bank_id = bank.config.id.clone();
+            // A hold-to-fire bank whose group went cold mid-charge does not get
+            // to finish (issue #1396). `tick` completes a charge into a volley
+            // on its own, with no admitted command behind it, so the applier's
+            // gate cannot see that shot — this is the only place it can be
+            // stopped. Cancelling costs the bank no cooldown, exactly as the
+            // crew's own `ChargeBlasterCancel` does, so powering the group back
+            // leaves the bank ready rather than punished.
+            //
+            // A volley already LAUNCHED is left alone: its rounds are spent, and
+            // its remaining shots are in flight rather than pending a decision.
+            if crate::ship::system_registry::blaster_bank_system_id(&bank_id).is_some_and(|sid| {
+                super::system_power_group_is_cold(
+                    ship_config_opt.map(|c| &c.0),
+                    power_opt.map(|p| &p.0),
+                    &sid,
+                )
+            }) {
+                bank.request_charge_cancel();
+            }
             let visual_scale = bank.config.visual_scale;
             let recoil_impulse = bank.config.recoil_impulse;
             // Read only by the server-gated screenshake push below (issue

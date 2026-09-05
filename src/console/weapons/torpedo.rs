@@ -90,13 +90,14 @@ pub fn seed_torpedo_tube_load_facts(
 /// gap in one go needs the stronger one. Note `target_facing_shields` beside it
 /// is an HP reading, not a boolean: `<= 0` means the striking arc is not
 /// blocking (down, or absent entirely).
-/// `posture` is the other SHIP-WIDE reading, added by issue #872 and widened by
-/// issue #1041 — this ship's own [`crate::ship::state::ShipRedAlert`] and
-/// [`crate::ship::state::ShipWeaponsHold`], folded into the one `red_alert` fact
-/// by [`crate::console::weapons::WeaponsAlertPosture`]. Seeded on the LAUNCH
+/// `posture` is the firing reading, added by issue #872 and widened by issues
+/// #1041 and #1396 — this ship's own [`crate::ship::state::ShipRedAlert`], the
+/// captain's [`crate::ship::state::ShipWeaponsHold`], and whether THIS tube's
+/// authored power group is cold, folded into the one `red_alert` fact by
+/// [`crate::console::weapons::WeaponsAlertPosture`]. Seeded on the LAUNCH
 /// snapshot only: loading a tube and granting a round from the magazine are not
-/// offensive fire and stay ungated — a held ship may fill its tubes, it simply
-/// will not shoot them.
+/// offensive fire and stay ungated — a restrained ship may fill its tubes, it
+/// simply will not shoot them.
 #[allow(clippy::too_many_arguments)]
 pub fn seed_torpedo_tube_launch_facts(
     loaded: bool,
@@ -588,6 +589,12 @@ pub(crate) fn handle_fire_torpedo(
             Option<&TorpedoMagazineAiPolicy>,
             Option<&crate::entities::spawner::BehaviourSection>,
             Option<&crate::world::server::EntityOriginLayer>,
+            // The cold-power gate's two inputs (issue #1396): the hull, which
+            // says which power group this tube draws from, and the reactor,
+            // which says what that group is at. Both `Option<&_>` — a fixture
+            // that spawns neither is a ship the question cannot be asked of.
+            Option<&crate::ship_plugin::ShipConfigComponent>,
+            Option<&crate::ship::power::ShipPowerSystem>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -622,6 +629,8 @@ pub(crate) fn handle_fire_torpedo(
         magazine_policy_opt,
         behaviour_opt,
         origin_layer_opt,
+        ship_config_opt,
+        power_opt,
     ) in ship_q.iter_mut()
     {
         // Per-entity component first; global Resource fallback for legacy tests.
@@ -724,6 +733,25 @@ pub(crate) fn handle_fire_torpedo(
                     cmd,
                     &mut outbound,
                     WeaponActionResult::Refused(WeaponActionRefusal::Offline),
+                );
+                continue;
+            }
+
+            // COLD-POWER GATE (issue #1396): a tube whose authored power group
+            // is at level 0 launches nothing. Placed with the other hardware
+            // gates and above the conservation one, and applied to both origins
+            // for the reason this function's own doc gives about #943 — a gate
+            // that lived in the AI decider alone would leave a human free to
+            // empty the tubes the crew had switched off.
+            if super::system_power_group_is_cold(
+                ship_config_opt.map(|c| &c.0),
+                power_opt.map(|p| &p.0),
+                &cmd.target,
+            ) {
+                super::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    WeaponActionResult::Refused(WeaponActionRefusal::PowerCold),
                 );
                 continue;
             }

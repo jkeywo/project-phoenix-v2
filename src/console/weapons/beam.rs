@@ -390,12 +390,13 @@ pub struct PhaserBankAiPolicies(
 /// closed. Nothing in this file tests it — the fire gate is an authored
 /// predicate on the bank, never a Rust rule.
 ///
-/// Since issue #1041 the reading is the ship's whole firing
-/// [`WeaponsAlertPosture`] rather than the bare alert: a captain who has called
-/// a weapons hold seeds a value below every authorable `min_alert_to_fire`
-/// floor, and one who has not seeds exactly the `1.0`/`0.0` this line always
-/// did. See that type for why the hold rides the existing fact instead of
-/// adding a second one.
+/// Since issue #1041 the reading is the bank's whole firing
+/// [`WeaponsAlertPosture`] rather than the bare alert: a bank that cannot shoot
+/// — its authored power group switched off (issue #1396), or the captain's hold
+/// called (retiring in #1398) — seeds a value below every authorable
+/// `min_alert_to_fire` floor, and a live one seeds exactly the `1.0`/`0.0` this
+/// line always did. See that type for why restraint rides the existing fact
+/// instead of adding a second one.
 #[allow(clippy::too_many_arguments)]
 pub fn seed_phaser_bank_facts(
     target_valid: bool,
@@ -747,6 +748,13 @@ pub(crate) fn handle_fire_phaser(
             &PhaserCooldown,
             &AdmittedCommands,
             Option<&PhaserCombatConfigResource>,
+            // The cold-power gate's two inputs (issue #1396): the hull, which
+            // says which power group this bank draws from, and the reactor,
+            // which says what that group is at. Both `Option<&_>` — a fixture
+            // that spawns neither is a ship the question cannot be asked of,
+            // not a ship with dead guns.
+            Option<&crate::ship_plugin::ShipConfigComponent>,
+            Option<&crate::ship::power::ShipPowerSystem>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -770,6 +778,8 @@ pub(crate) fn handle_fire_phaser(
         cooldown,
         admitted,
         combat_config_opt,
+        ship_config_opt,
+        power_opt,
     ) in ship_q.iter_mut()
     {
         for cmd in admitted.0.iter() {
@@ -817,6 +827,32 @@ pub(crate) fn handle_fire_phaser(
                     cmd,
                     &mut outbound,
                     WeaponActionResult::Refused(WeaponActionRefusal::Offline),
+                );
+                continue;
+            }
+
+            // COLD-POWER GATE (issue #1396). A bank whose authored power group
+            // is at level 0 does not fire, whoever pulled the trigger.
+            //
+            // Here rather than only in `ai_phaser_auto_fire` for the reason
+            // `handle_fire_torpedo` gives about the conservation channel (issue
+            // #943): a gate that lives in the AI decider alone constrains NPC
+            // crews and leaves a human player free to shoot anyway. This is
+            // downstream of admission, where the source identity is already
+            // gone, so there is nothing here to branch on — the AI simply never
+            // asks, because its authored predicate already read the same fact
+            // through [`super::WeaponsAlertPosture`].
+            if bank_system_id.as_ref().is_some_and(|sid| {
+                super::system_power_group_is_cold(
+                    ship_config_opt.map(|c| &c.0),
+                    power_opt.map(|p| &p.0),
+                    sid,
+                )
+            }) {
+                super::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    WeaponActionResult::Refused(WeaponActionRefusal::PowerCold),
                 );
                 continue;
             }
@@ -1044,13 +1080,17 @@ pub(crate) fn ai_phaser_auto_fire(
             Option<&PhaserCombatConfigResource>,
             Option<&PhaserBankAiPolicies>,
             Option<&crate::ship::state::ShipPhaserFrequency>,
-            // The three posture inputs are grouped into ONE Bundle query item so
-            // the tuple stays within Bevy's 15-element ceiling now the Command
+            // The posture inputs are grouped into ONE Bundle query item so the
+            // tuple stays within Bevy's 15-element ceiling now the Command
             // stance rides here too (issue #1107):
             //   - the ship's own red-alert state (issue #872), seeded as a typed
             //     fact for the bank's authored fire predicate;
             //   - the captain's weapons hold (issue #1041), folded into the same
             //     `red_alert` fact the bank's gate reads;
+            //   - the ship's reactor (issue #1396), so each bank's OWN authored
+            //     power group can be read for COLD (level 0) and folded into
+            //     that same fact — the bundle is why this reading costs the
+            //     outer tuple nothing;
             //   - the ship's Command stance selections (issue #1107), the seam
             //     that carries the migrated Red Alert branch onto the
             //     neutral-stance path. Every one is `Option<&_>` so a bare-`App`
@@ -1058,6 +1098,7 @@ pub(crate) fn ai_phaser_auto_fire(
             (
                 Option<&crate::ship::state::ShipRedAlert>,
                 Option<&crate::ship::state::ShipWeaponsHold>,
+                Option<&crate::ship::power::ShipPowerSystem>,
                 Option<&crate::console::command::server::ShipStationStances>,
             ),
         ),
@@ -1089,14 +1130,15 @@ pub(crate) fn ai_phaser_auto_fire(
         combat_config_opt,
         bank_policies_opt,
         phaser_freq_opt,
-        (red_alert_opt, weapons_hold_opt, stances_opt),
+        (red_alert_opt, weapons_hold_opt, power_opt, stances_opt),
     ) in ship_q.iter_mut()
     {
-        // Read once per ship, seeded into every bank's fact snapshot below.
+        // Read once per ship, folded into every bank's posture below.
         // NOT tested here: whether red alert gates fire is the authored
         // predicate's business (issue #872), and so is whether a weapons hold
-        // does (issue #1041) — the hold rides the same fact and the same
-        // authored predicate, which is exactly why no Rust branch appears here.
+        // does (issue #1041) or a cold power group does (issue #1396) — all
+        // three ride the same fact and the same authored predicate, which is
+        // exactly why no Rust branch appears here.
         //
         // The Command stance override (issue #1107) is computed the same way and
         // rides the same fact: when an AI-controlled weapons Station is directed
@@ -1112,11 +1154,25 @@ pub(crate) fn ai_phaser_auto_fire(
                 red_alert_opt.is_some_and(|r| r.0),
             )
         });
-        let posture = super::WeaponsAlertPosture::from_parts(
-            red_alert_opt,
-            weapons_hold_opt,
-            stance_override,
-        );
+        // One bank's posture (issue #1396). The alert, the hold and the stance
+        // are the ship's; COLD is a reading of the power group THIS bank's
+        // `[[system]]` entry authors, so the closure is resolved per bank rather
+        // than once per ship. A bank whose system id cannot be minted is never
+        // cold — the same fail-open the control-source gates take.
+        let posture_for = |bank_id: &str| {
+            super::WeaponsAlertPosture::from_parts(
+                red_alert_opt,
+                crate::ship::system_registry::phaser_bank_system_id(bank_id).is_some_and(|sid| {
+                    super::system_power_group_is_cold(
+                        ship_config_opt.map(|c| &c.0),
+                        power_opt.map(|p| &p.0),
+                        &sid,
+                    )
+                }),
+                weapons_hold_opt,
+                stance_override,
+            )
+        };
         // The scenario flag chain, anchored at the layer that spawned this
         // ship (issue #891 stage 2).
         let flag_chain = ai_env.flag_chain(ship_entity);
@@ -1204,7 +1260,7 @@ pub(crate) fn ai_phaser_auto_fire(
                 ready,
                 ready,
                 phaser_freq_opt.map(|f| f.0).unwrap_or(0.5),
-                posture,
+                posture_for(""),
             );
             (ready
                 && !cooldown.is_bank_active("")
@@ -1279,7 +1335,7 @@ pub(crate) fn ai_phaser_auto_fire(
                         range_ok,
                         arc_ok,
                         phaser_freq_opt.map(|f| f.0).unwrap_or(0.5),
-                        posture,
+                        posture_for(&b.id),
                     );
                     phaser_bank_policy_fires(policy, &facts, &flag_chain).then(|| b.id.clone())
                 })

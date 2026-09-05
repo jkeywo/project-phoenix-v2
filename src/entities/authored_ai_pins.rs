@@ -3036,44 +3036,64 @@ fn weapons_fire_guard_truth_table() {
     }
 }
 
-/// **The tactical restraint lever, against the SHIPPED fire gates (issue
-/// #1041).**
+/// **The tactical restraint lever, against the SHIPPED fire gates (issues #1041
+/// and #1396).**
 ///
-/// The claim the whole slice rests on: a weapons hold suppresses fire on every
-/// armed hull in the fleet **without one character of authored doctrine
+/// The claim the whole slice rests on: a COLD weapons group — the power group a
+/// mount's `[[system]]` entry authors, commanded to level 0 — suppresses fire on
+/// every armed hull in the fleet **without one character of authored doctrine
 /// changing**. It is proved here rather than in the weapons module because the
 /// thing being proved is a property of the CONTENT — every shipped bank's
 /// authored `min_alert_to_fire` — and content is what this file pins.
 ///
 /// Read the rows as a ladder. `min_alert_to_fire` is a floor on how hot the ship
-/// must be before a bank opens up; the hold seeds a rung below stood-down, so it
-/// sits under every floor the fleet authors, the always-armed `0` included. That
-/// last row is the one that matters: seeding a plain `0.0` for a hold would have
-/// left the Harrow gun line firing through the captain's order, because
-/// `0 >= 0`.
+/// must be before a bank opens up; a switched-off group seeds a rung below
+/// stood-down, so it sits under every floor the fleet authors, the always-armed
+/// `0` included. That last row is the one that matters: seeding a plain `0.0`
+/// for a cold group would have left the Harrow gun line firing with no power in
+/// its guns, because `0 >= 0`.
+///
+/// The captain's hold (issue #1041) is asserted on the same rung in passing: it
+/// retires in #1398, and until it does the two levers must stay
+/// indistinguishable to the authored predicate.
 #[test]
-fn a_weapons_hold_closes_every_shipped_fire_gate() {
-    use crate::console::weapons::{WeaponsAlertPosture, WEAPONS_HOLD_ALERT_FACT};
+fn a_cold_weapons_group_closes_every_shipped_fire_gate() {
+    use crate::console::weapons::{WeaponsAlertPosture, WEAPONS_COLD_ALERT_FACT};
 
-    let held = WeaponsAlertPosture {
+    let cold = WeaponsAlertPosture {
         red_alert: true,
-        weapons_hold: true,
+        weapons_cold: true,
+        weapons_hold: false,
         stance_high_alert: None,
     };
     assert_eq!(
-        held.alert_fact_value(),
-        WEAPONS_HOLD_ALERT_FACT,
-        "a hold outranks the alert in the seeded value — the whole point is that \
-         a ship can be AT stations with its guns cold"
+        cold.alert_fact_value(),
+        WEAPONS_COLD_ALERT_FACT,
+        "cold outranks the alert in the seeded value — the whole point is that a \
+         ship can be AT stations with its guns switched off, and RAISING the \
+         alert must not give the fire back"
     );
-    // The released half of the byte-identical claim, at the source: with no
-    // hold the seeded value is exactly the 1.0/0.0 every host inlined before
-    // this issue, so a run in which nobody holds fire cannot have moved.
+    // The captain's hold, retiring in #1398, occupies the same rung — so the
+    // scripted `hold_fire()` verb keeps working until its power re-implementation
+    // lands, and the value it seeds is the one this constant now names.
+    assert_eq!(
+        WeaponsAlertPosture {
+            red_alert: true,
+            weapons_cold: false,
+            weapons_hold: true,
+            stance_high_alert: None,
+        }
+        .alert_fact_value(),
+        WEAPONS_COLD_ALERT_FACT,
+    );
+    // The live half of the byte-identical claim, at the source: with power on
+    // and no hold the seeded value is exactly the 1.0/0.0 every host inlined
+    // before these issues, so a run in which nothing goes cold cannot have moved.
     assert_eq!(WeaponsAlertPosture::alert(true).alert_fact_value(), 1.0);
     assert_eq!(WeaponsAlertPosture::alert(false).alert_fact_value(), 0.0);
 
     let held_snapshot = |extra: &[(&str, f64)]| {
-        let mut pairs = vec![("red_alert", held.alert_fact_value())];
+        let mut pairs = vec![("red_alert", cold.alert_fact_value())];
         pairs.extend_from_slice(extra);
         facts(&pairs)
     };
@@ -3087,10 +3107,10 @@ fn a_weapons_hold_closes_every_shipped_fire_gate() {
         let p = fleet_baseline_policy(kind);
         assert!(
             param(&p, "min_alert_to_fire") >= 0.0,
-            "{kind}: the hold sits below every AUTHORABLE floor, so a hull that \
-             authored a negative threshold would shoot through the captain's \
-             order. No shipped hull does, and this is the assertion that keeps \
-             it that way."
+            "{kind}: a cold group sits below every AUTHORABLE floor, so a hull \
+             that authored a negative threshold would shoot with no power in its \
+             guns. No shipped hull does, and this is the assertion that keeps it \
+             that way."
         );
         assert_eq!(
             resolve(
@@ -3107,9 +3127,9 @@ fn a_weapons_hold_closes_every_shipped_fire_gate() {
             ),
             None,
             "{kind}/{channel}: EVERY readiness reading favourable, the alert \
-             raised, and the ship still holds — because the captain called a \
-             weapons hold. This is the suppression AC, resolved through the \
-             shipped predicate with no new vocabulary in it."
+             raised, and the ship still holds — because the group this mount \
+             draws from is at level 0. This is the suppression AC, resolved \
+             through the shipped predicate with no new vocabulary in it."
         );
     }
 
@@ -3117,7 +3137,9 @@ fn a_weapons_hold_closes_every_shipped_fire_gate() {
     //
     // The hull with no captain to call an alert is also the hull a scenario is
     // most likely to order to hold fire, and it is the one a naive "seed zero"
-    // implementation would have missed entirely.
+    // implementation would have missed entirely. (Its banks author no power
+    // group today, so nothing can take them cold — the pin is about the LADDER,
+    // which is what a hull gaining one would rely on.)
     let harrow = entity("ship_harrow_patrol");
     let bank = harrow
         .weapons_console
@@ -3135,17 +3157,17 @@ fn a_weapons_hold_closes_every_shipped_fire_gate() {
     assert_eq!(
         resolve(&hp, "phaser_fire", &held_snapshot(&[])),
         None,
-        "the always-armed threshold of 0 is exactly what a hold has to beat, and \
-         it does — `-1 >= 0` is false. A hold seeded as a plain 0.0 would have \
-         left this hull shooting."
+        "the always-armed threshold of 0 is exactly what a cold group has to \
+         beat, and it does — `-1 >= 0` is false. Seeded as a plain 0.0 it would \
+         have left this hull shooting."
     );
-    // …and releasing it restores the always-armed behaviour byte for byte.
+    // …and powering it back restores the always-armed behaviour byte for byte.
     for alert in [0.0, 1.0] {
         assert_eq!(
             resolve(&hp, "phaser_fire", &facts(&[("red_alert", alert)])),
             Some(AiPolicyVerb::FirePhaser),
-            "released, the Harrow fires with the alert at {alert} exactly as it \
-             did before this issue existed"
+            "powered, the Harrow fires with the alert at {alert} exactly as it \
+             did before these issues existed"
         );
     }
 }

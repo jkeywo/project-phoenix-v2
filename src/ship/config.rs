@@ -587,6 +587,19 @@ impl ShipConfig {
             .iter()
             .filter(move |system| system.power_group.as_ref() == Some(id))
     }
+
+    /// The power group one system draws from — its authored
+    /// `[[system]].power_group` (issue #1396).
+    ///
+    /// The inverse of [`Self::systems_in_power_group`], and the reading a
+    /// runtime gate wants: given the system a shot is authorised against, which
+    /// group's level decides whether it has the power to fire at all. `None` for
+    /// a system the hull put on no group — such a system is not on the reactor's
+    /// books and no power order can reach it.
+    pub fn power_group_for(&self, id: &SystemId) -> Option<&PowerGroupId> {
+        self.system(id)
+            .and_then(|system| system.power_group.as_ref())
+    }
 }
 
 /// Parse and validate the station/system ship config sections from TOML.

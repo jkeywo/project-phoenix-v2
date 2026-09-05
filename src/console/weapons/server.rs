@@ -438,10 +438,11 @@ pub struct WeaponsDoctrineAiPolicy(pub crate::ai::policy::AiPolicy);
 ///   guard in the fleet is written against, so a doctrine can present a
 ///   different family before and after the captain calls stations. Since issue
 ///   #1041 it is seeded from the ship's whole firing
-///   [`WeaponsAlertPosture`], so a hull under a weapons hold stops asking Helm
-///   to swing a gun into line as well as holding its fire — one posture, one
-///   value, rather than the same fact meaning two things on one ship in one
-///   tick.
+///   [`WeaponsAlertPosture`], so a hull that cannot shoot — every emitter on a
+///   power group switched off (issue #1396), or under the captain's hold —
+///   stops asking Helm to swing a gun into line as well as holding its fire:
+///   one posture, one value, rather than the same fact meaning two things on
+///   one ship in one tick.
 ///
 /// Every emitter's arc, range and online state is a HOST reading resolved after
 /// the order comes back, never a fact: which families are *capable* is not a
@@ -463,53 +464,82 @@ pub fn seed_weapons_doctrine_facts(
     facts
 }
 
-/// The ship-wide firing posture every weapons host seeds the `red_alert` fact
-/// from (issue #1041): its Red Alert, and whether its captain has called a
-/// **weapons hold**.
+/// The firing posture every weapons host seeds the `red_alert` fact from
+/// (issue #1041): the ship's Red Alert, and whether the firing system can shoot
+/// at all — since issue #1396, whether its authored power group is COLD.
 ///
 /// # Why a posture rather than a second fact
 ///
-/// Issue #1041's acceptance criteria require the hold to compose with the
-/// authored fire gate **with no new doctrine vocabulary**. Every armed hull in
-/// the fleet writes exactly one gate —
+/// Issue #1041's acceptance criteria require the restraint lever to compose with
+/// the authored fire gate **with no new doctrine vocabulary**. Every armed hull
+/// in the fleet writes exactly one gate —
 /// `when = "fact(red_alert) >= param(min_alert_to_fire)"` — and differs only in
 /// the threshold: an Alliance hull with a captain's console authors `1`, the
 /// always-armed Harrow gun line authors `0` (issue #872). A second fact would
 /// mean editing every one of those predicates to AND it in, which is precisely
 /// the vocabulary change the AC forbids, and a hull whose author forgot would
-/// silently ignore the captain's order.
+/// silently ignore the order.
 ///
-/// So the hold is composed into the VALUE of the fact the gate already reads.
+/// So restraint is composed into the VALUE of the fact the gate already reads.
 /// [`Self::alert_fact_value`] is the whole mechanism:
 ///
 /// | posture | fact | `>= 0` (Harrow) | `>= 1` (Alliance) |
 /// |---|---|---|---|
 /// | stood down | `0.0` | fires | holds |
 /// | red alert | `1.0` | fires | fires |
-/// | **weapons hold** | [`WEAPONS_HOLD_ALERT_FACT`] | **holds** | **holds** |
+/// | **weapons cold** | [`WEAPONS_COLD_ALERT_FACT`] | **holds** | **holds** |
+/// | **weapons hold** (retiring, #1398) | [`WEAPONS_COLD_ALERT_FACT`] | **holds** | **holds** |
 ///
 /// Read the numbers as a LADDER rather than as a boolean with a sentinel bolted
 /// on: `min_alert_to_fire` is a floor on how hot the ship must be before a bank
-/// will open up, and a weapons hold is a rung BELOW stood-down — colder than
-/// cold, because a stood-down ship is merely not expecting trouble while a held
-/// one has been ordered not to shoot. Sitting under every authored floor is what
+/// will open up, and a switched-off gun is a rung BELOW stood-down — colder than
+/// cold, because a stood-down ship is merely not expecting trouble while a cold
+/// group has no power to shoot with. Sitting under every authored floor is what
 /// makes the lever work on the always-armed hulls too, which a `0.0` could not
-/// do: `0 >= 0` is true, and a Harrow under orders would have kept firing. That
-/// is the AI/human symmetry half of the AC — the NPC fire hosts respect the hold
+/// do: `0 >= 0` is true, and a Harrow with dead guns would have kept firing.
+/// That is the AI/human symmetry half of the AC — the NPC fire hosts respect it
 /// identically because they read the same seeded fact through the same authored
 /// predicate, not because anything checks who is flying.
 ///
+/// # Per SYSTEM, not per ship (issue #1396)
+///
+/// [`Self::weapons_cold`] is a reading of ONE firing system's own
+/// `[[system]].power_group`, resolved through
+/// [`system_power_group_is_cold`], so the posture is built inside each host's
+/// per-bank / per-tube loop rather than once per ship. A hull is free to author
+/// its tubes onto a different group than its beams; the gate then closes on the
+/// half that is switched off and leaves the other half shooting. Every shipped
+/// hull puts all of it on `weapons` today, so the fleet behaves as if the
+/// reading were ship-wide — but the authoring granularity is the system's, and
+/// so is the gate's.
+///
+/// # The captain's weapons hold is still here, until #1398
+///
+/// [`Self::weapons_hold`] rides the same rung as the cold reading. Issue #1396
+/// adds power as the restraint lever; issue #1398 removes
+/// [`crate::ship::state::ShipWeaponsHold`], re-points the Rhai `hold_fire()` /
+/// `release_fire()` verbs at power orders, and deletes this field. Dropping the
+/// hold half HERE would silently un-gate the two probe worlds and Falling
+/// Skyway's Havelock beat in the window between the two issues, because their
+/// scripts would go on setting a flag nothing read.
+///
 /// # Why Red Alert's own behaviour cannot have moved
 ///
-/// With the hold released this returns exactly `1.0` / `0.0` — bit for bit the
-/// expression each host inlined before this issue. Nothing else in the fire path
-/// changed, so a run in which nobody engages a hold folds the same digest it
-/// always did; the committed world anchors are the standing proof.
+/// With nothing holding and nothing cold this returns exactly `1.0` / `0.0` —
+/// bit for bit the expression each host inlined before #1041. Nothing else in
+/// the fire path changed, so a run in which no group goes cold folds the same
+/// digest it always did; the committed world anchors are the standing proof.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct WeaponsAlertPosture {
     /// This ship's own [`crate::ship::state::ShipRedAlert`].
     pub red_alert: bool,
-    /// This ship's own [`crate::ship::state::ShipWeaponsHold`].
+    /// True when the power group this firing system authors is at level 0 —
+    /// switched off, not turned down (issue #1396). Read through
+    /// [`system_power_group_is_cold`], so a hull that authors no group for the
+    /// system, or a fixture that spawns no reactor, reads `false`.
+    pub weapons_cold: bool,
+    /// This ship's own [`crate::ship::state::ShipWeaponsHold`] — the captain's
+    /// lever, retiring in issue #1398. Same rung as `weapons_cold`.
     pub weapons_hold: bool,
     /// A Command stance directing this weapons Station's alert posture (issue
     /// #1107), overriding the ship's own Red Alert for the fire gate. `None`
@@ -518,26 +548,62 @@ pub struct WeaponsAlertPosture {
     pub stance_high_alert: Option<bool>,
 }
 
-/// The `red_alert` fact value seeded at a weapons host while the ship is under a
-/// weapons hold — one rung BELOW stood-down, so it fails every `>= threshold`
+/// The `red_alert` fact value seeded at a weapons host while the firing system
+/// cannot shoot — one rung BELOW stood-down, so it fails every `>= threshold`
 /// gate a hull can author, the always-armed `0` included.
+///
+/// Named for the cold-power reading since issue #1396 (it was
+/// `WEAPONS_HOLD_ALERT_FACT`), and **the value is unchanged**: power at 0 is the
+/// same rung the captain's hold occupied, which is what lets the restraint lever
+/// move from a hidden toggle to the reactor without re-authoring a single
+/// `min_alert_to_fire` in the fleet.
 ///
 /// Not authored TOML on purpose: it is not a tunable but the bottom of the
 /// ladder the authored `min_alert_to_fire` floors sit on, and a designer moving
 /// it could only ever break the lever. `authored_ai_pins` pins every shipped
 /// bank's threshold at or above zero so this stays true of the shipped fleet.
-pub const WEAPONS_HOLD_ALERT_FACT: f64 = -1.0;
+pub const WEAPONS_COLD_ALERT_FACT: f64 = -1.0;
+
+/// Is the power group authored on `system_id` switched off on this ship?
+///
+/// The one place the fire path turns `[[system]].power_group` into a yes/no
+/// (issue #1396). Two readings compose here and neither is hardcoded: the hull's
+/// TOML says which group a gun draws from, and the ship's own reactor says what
+/// that group is at. No Rust constant names a group — a hull that puts its tubes
+/// on `ordnance` gets exactly the gate its author asked for.
+///
+/// **Fails open on absence**, in both arguments, exactly as the `Option<&_>`
+/// posture components beside it do: a bare-`App` fixture with no reactor and no
+/// ship config is not a ship with cold guns, it is a ship the question cannot be
+/// asked of, and a fire path that refused there would silently break ~2500 unit
+/// fixtures rather than gate anything. A system whose hull authors no
+/// `power_group` is likewise never cold: it is not on the reactor's books at
+/// all. [`crate::modifiers::power_system::PowerSystem::is_group_cold`] makes the
+/// same choice one level down for a group the reactor does not track.
+pub fn system_power_group_is_cold(
+    ship_config: Option<&crate::ship::config::ShipConfig>,
+    power: Option<&crate::modifiers::power_system::PowerSystem>,
+    system_id: &crate::core::messages::SystemId,
+) -> bool {
+    let (Some(ship_config), Some(power)) = (ship_config, power) else {
+        return false;
+    };
+    ship_config
+        .power_group_for(system_id)
+        .is_some_and(|group| power.is_group_cold(group))
+}
 
 impl WeaponsAlertPosture {
-    /// Read the posture off one ship's two optional components. Absent reads as
-    /// "not at alert" / "not holding" — the same fail-open reading the hosts
-    /// used before #1041, so a bare-`App` fixture that spawns neither behaves
-    /// exactly as it did.
+    /// Read the posture off one ship's alert, one system's cold reading and the
+    /// captain's hold. Absent reads as "not at alert" / "not holding" — the same
+    /// fail-open reading the hosts used before #1041, so a bare-`App` fixture
+    /// that spawns neither behaves exactly as it did.
     pub fn from_components(
         red_alert: Option<&crate::ship::state::ShipRedAlert>,
+        weapons_cold: bool,
         weapons_hold: Option<&crate::ship::state::ShipWeaponsHold>,
     ) -> Self {
-        Self::from_parts(red_alert, weapons_hold, None)
+        Self::from_parts(red_alert, weapons_cold, weapons_hold, None)
     }
 
     /// As [`from_components`](Self::from_components) but with a Command stance
@@ -545,21 +611,25 @@ impl WeaponsAlertPosture {
     /// `from_components`, so every pre-#1107 call site keeps its behaviour.
     pub fn from_parts(
         red_alert: Option<&crate::ship::state::ShipRedAlert>,
+        weapons_cold: bool,
         weapons_hold: Option<&crate::ship::state::ShipWeaponsHold>,
         stance_high_alert: Option<bool>,
     ) -> Self {
         Self {
             red_alert: red_alert.is_some_and(|r| r.0),
+            weapons_cold,
             weapons_hold: weapons_hold.is_some_and(|h| h.0),
             stance_high_alert,
         }
     }
 
-    /// A posture with no hold — the shorthand every test written before #1041
-    /// keeps working through, and the one the byte-identical claim rests on.
+    /// A posture with live guns and no hold — the shorthand every test written
+    /// before #1041 keeps working through, and the one the byte-identical claim
+    /// rests on.
     pub fn alert(red_alert: bool) -> Self {
         Self {
             red_alert,
+            weapons_cold: false,
             weapons_hold: false,
             stance_high_alert: None,
         }
@@ -568,14 +638,18 @@ impl WeaponsAlertPosture {
     /// The value seeded for the `red_alert` fact. See the type docs for the
     /// ladder this implements.
     ///
-    /// A weapons hold still wins over everything (the captain's restraint lever
-    /// is absolute). Otherwise a Command stance override, when present, decides
-    /// the posture in place of the ship's own Red Alert — this is the seam the
-    /// migrated Red Alert fire branch travels through (issue #1107). With no
-    /// override the reading is the pre-#1107 `red_alert` value, bit for bit.
+    /// A gun that cannot shoot wins over everything: a cold power group (issue
+    /// #1396), or the captain's hold beside it until #1398, sits under every
+    /// authored floor, so **Red Alert cannot override it** — raising the alert on
+    /// a ship whose weapons are switched off changes the fact from
+    /// [`WEAPONS_COLD_ALERT_FACT`] to nothing at all. Otherwise a Command stance
+    /// override, when present, decides the posture in place of the ship's own Red
+    /// Alert — the seam the migrated Red Alert fire branch travels through (issue
+    /// #1107). With no override the reading is the pre-#1107 `red_alert` value,
+    /// bit for bit.
     pub fn alert_fact_value(self) -> f64 {
-        if self.weapons_hold {
-            WEAPONS_HOLD_ALERT_FACT
+        if self.weapons_cold || self.weapons_hold {
+            WEAPONS_COLD_ALERT_FACT
         } else if let Some(high) = self.stance_high_alert {
             if high {
                 1.0
@@ -826,9 +900,12 @@ fn tick_weapons_arc_request(
             Option<&torpedo::TorpedoSystemResource>,
             Option<&WeaponsDoctrineAiPolicy>,
             Option<&crate::ship::state::ShipRedAlert>,
-            // The restraint lever (issue #1041). `Option` for the same reason
-            // as the alert beside it: a bare-`App` fixture spawns neither.
+            // The restraint levers: the captain's hold (issue #1041, retiring in
+            // #1398) and the reactor the emitters' authored power groups are read
+            // against (issue #1396). `Option` for the same reason as the alert
+            // beside them: a bare-`App` fixture spawns none of the three.
             Option<&crate::ship::state::ShipWeaponsHold>,
+            Option<&crate::ship::power::ShipPowerSystem>,
             &mut WeaponsArcRequestState,
         ),
         With<crate::server_app::Ship>,
@@ -866,6 +943,7 @@ fn tick_weapons_arc_request(
         doctrine_opt,
         red_alert_opt,
         weapons_hold_opt,
+        power_opt,
         mut state,
     ) in ship_q.iter_mut()
     {
@@ -1012,9 +1090,51 @@ fn tick_weapons_arc_request(
                 )
             })
             .unwrap_or(0);
+        // COLD, for a decision that is about the WHOLE gun line (issue #1396).
+        //
+        // The three fire hosts read one emitter's own authored power group,
+        // because each of them is deciding one bank's or one tube's shot. This
+        // host decides which FAMILY the hull turns to present, and there is a
+        // single fact to seed it from, so the reading has to be a ship-wide one:
+        // the doctrine stops asking Helm to swing a gun into line only when
+        // there is no gun left that could fire — every emitter this hull carries
+        // is on a group that is switched off. A hull with one family cold and
+        // another live still turns, and the cold family's own fire gate is what
+        // keeps it silent when it gets there.
+        //
+        // A hull whose emitters author no power group at all (every NPC hull
+        // today) yields an empty `all`, which `is_empty` rejects rather than
+        // letting a vacuous truth silence the doctrine.
+        let emitter_sids: Vec<crate::core::messages::SystemId> = combat_config_opt
+            .iter()
+            .flat_map(|cc| {
+                cc.0.banks
+                    .iter()
+                    .filter_map(|b| crate::ship::system_registry::phaser_bank_system_id(&b.id))
+            })
+            .chain(blaster_opt.iter().flat_map(|res| {
+                res.0.iter().filter_map(|bs| {
+                    crate::ship::system_registry::blaster_bank_system_id(&bs.config.id)
+                })
+            }))
+            .chain(torpedo_opt.iter().flat_map(|res| {
+                res.0
+                    .tubes
+                    .iter()
+                    .filter_map(|t| crate::ship::system_registry::torpedo_tube_system_id(&t.id))
+            }))
+            .collect();
+        let every_emitter_cold = !emitter_sids.is_empty()
+            && emitter_sids.iter().all(|sid| {
+                system_power_group_is_cold(Some(&ship_config.0), power_opt.map(|p| &p.0), sid)
+            });
         let doctrine_facts = seed_weapons_doctrine_facts(
             target_facing_shields,
-            WeaponsAlertPosture::from_components(red_alert_opt, weapons_hold_opt),
+            WeaponsAlertPosture::from_components(
+                red_alert_opt,
+                every_emitter_cold,
+                weapons_hold_opt,
+            ),
         );
         let flag_chain = ai_env.flag_chain(ship_entity);
         let order = doctrine_opt

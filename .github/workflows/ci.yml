@@ -466,13 +466,13 @@ jobs:
   # TWO TIERS, ONE SUITE. Every spec lives here all the time; what changes is how
   # many of them a given run selects.
   #
-  #   @core — one breadth test per feature area (47 of 247), tagged in the spec
+  #   @core — one breadth test per feature area (48 of 248), tagged in the spec
   #           itself with `{ tag: '@core' }`. Boot, join, seats, one action
   #           envelope per console, the sim reaching a crew, both transport
   #           paths, saves, mod packs, fleet, GM, keyboard, and the one test that
   #           draws a frame. If a feature exists, @core touches it once, so a
   #           change that breaks a whole feature cannot pass this tier.
-  #   full  — all 247, including every edge, refusal and per-arc variant. What
+  #   full  — all 248, including every edge, refusal and per-arc variant. What
   #           @core cannot catch is a regression confined to one variant of a
   #           feature whose breadth test still passes; the nightly is the net.
   #

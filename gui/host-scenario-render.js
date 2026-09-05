@@ -22,6 +22,13 @@
  * `#scenario-loading` placeholder that stands in for both "still loading" and
  * "this manifest publishes nothing".
  *
+ * Since issue #1362 it also owns `#ship-list` — a SECOND column, on a surface
+ * that carries one. That is the whole of the staged layout's mechanism here:
+ * the hulls go into their own column and the World rows stay in theirs, so
+ * choosing a World reveals the hulls BESIDE the list rather than in place of
+ * it. See `SHIP_LIST_ID` for why the column is found by id rather than passed
+ * as an option, and the `ship-picker` branch for what each surface gets.
+ *
  * It does NOT touch anything else in `#scenario-panel`. The mod-pack upload
  * and the save importer are static markup with page-lifetime handlers and a
  * demo-build removal rule of their own, which is why `SCENARIO_ENTRY_SELECTOR`
@@ -42,6 +49,17 @@
  * `t` is passed in for the reason `renderHostLobby` takes it: `server.html`
  * holds a classic-script `t()` closed over `window.phStrings`, and the native
  * lobby document imports `gui/strings.js` directly.
+ *
+ * ## The column is rebuilt, so focus is carried across the rebuild
+ *
+ * Every stage below replaces every control it owns, and Back's own click is
+ * what re-renders — so without help the operator's activation of a control
+ * destroys the node they were standing on, focus falls to `<body>`, and the
+ * next Tab restarts at the top of the document. `gui/host-landing-render.js`
+ * carries the menu across its rebuild for the same reason and states the case
+ * at length. Here it is Back that earns it, because Back is a step BACKWARDS
+ * and the place to put the operator is known: the World row they released,
+ * whose id rides on the Back control itself.
  */
 
 /** Lifecycle class worn by every element this renderer creates. */
@@ -61,6 +79,18 @@ export const SCENARIO_ENTRY_CLASS = 'scenario-entry';
  * renderer replaces.)
  */
 export const SCENARIO_ENTRY_SELECTOR = '.scenario-entry, ph-ship-picker, #scenario-loading';
+
+/**
+ * The column a surface offers for the HULL stage, when it has one (issue #1362).
+ *
+ * Looked up by id and simply absent on a surface that does not carry it, which
+ * is this module's usual two-document guard rather than a new option threaded
+ * through every caller. A document WITH it gets the design's staged layout —
+ * the hulls beside the World rows that led to them — and a document without it
+ * gets what the picker always did: the hull cards in the world column, under
+ * the rows rather than instead of them.
+ */
+export const SHIP_LIST_ID = 'ship-list';
 
 /** Remove every element this renderer owns, leaving static controls alone. */
 export function clearScenarioEntries(worldList) {
@@ -94,6 +124,7 @@ export function appendScenarioEntry(worldList, el) {
  *   selectShip?: (templatePath: string) => void,
  *   autoSelectShip?: (templatePath: string) => void,
  *   shipStillNeeded?: () => boolean,
+ *   backToWorlds?: () => void,
  * }} [hooks]
  *   `tData` resolves authored data labels (a world's `[[available_ships]]
  *   label` is a string id, not prose — issue #949); `selectScenario` /
@@ -104,6 +135,13 @@ export function appendScenarioEntry(worldList, el) {
  *   change which path the web host takes; `shipStillNeeded` is re-checked
  *   after the `ph-ship-picker` module has loaded, because that load is async
  *   and another participant may have locked the hull while it was in flight.
+ *
+ *   `backToWorlds` steps out of the hull stage (issue #1362). It is a hook and
+ *   not a branch here for the reason every other side effect is: releasing a
+ *   locked World is an ARBITER move, and the two surfaces reach two different
+ *   arbiters — the page's own on the web, the host process's on native. A
+ *   surface that supplies none gets no Back control at all, which is the
+ *   honest rendering of "there is nothing behind it".
  * @param {{ownPanelVisibility?: boolean}} [opts] `ownPanelVisibility` makes
  *   this renderer show and hide `#scenario-panel` itself. It is the native
  *   lobby surface's option (issue #1328) and is the exact sibling of
@@ -119,7 +157,93 @@ export function renderHostScenarios(doc, vm, t, hooks, opts) {
 
   const worldList = doc.getElementById('world-list');
   const label = doc.getElementById('world-list-label');
+  // The hull column, on a surface that carries one (issue #1362). Absent is a
+  // supported document rather than a broken one — see SHIP_LIST_ID.
+  const shipList = doc.getElementById(SHIP_LIST_ID);
+  const shipLabel = doc.getElementById('ship-list-label');
   if (!worldList) return;
+
+  // ── Where the operator is standing, captured before this render moves it ──
+  //
+  // Every branch below rebuilds `#world-list` from scratch and empties the
+  // hull column, so an operator on the keyboard loses their place by
+  // activating the very control they had reached: the focused node is removed,
+  // focus falls to `<body>`, and the next Tab restarts at the top of the
+  // document. `gui/host-landing-render.js` solves exactly this for the menu it
+  // rebuilds, and says why in more detail — this is that pattern on the column
+  // beside it (issue #1362).
+  //
+  // Back is the case worth the code, because it is a step BACKWARDS: the place
+  // to put the operator is KNOWN — the World row they just released — where a
+  // forward click leaves them somewhere that does not exist yet. The row's id
+  // travels on the Back control itself (see `back.dataset.scenarioId`), so
+  // this stays as stateless as the rest of the module: no remembered previous
+  // view model, just the document saying what it was showing a moment ago.
+  const wasFocused = doc.activeElement;
+  const backHadFocus = !!(wasFocused && wasFocused.classList
+    && wasFocused.classList.contains('scenario-back'));
+  const backFromScenarioId = (backHadFocus && wasFocused.dataset)
+    ? (wasFocused.dataset.scenarioId || null)
+    : null;
+  // Claimed as the rows are built, so the match is made once rather than by
+  // re-querying the column this function has just written.
+  let refocusRow = null;
+  let firstRow = null;
+
+  /**
+   * Hand focus back to the World row the operator released, and only when this
+   * render is what took it.
+   *
+   * `doc.activeElement === doc.body` is the whole condition, for the reason
+   * the landing renderer gives it: it means the rebuild above dropped focus
+   * and nothing else has claimed it since, so a render that lands while the
+   * operator is somewhere else does not yank them back to the list.
+   */
+  function restoreFocusAfterBack(target) {
+    if (!backHadFocus) return;
+    if (doc.activeElement !== doc.body) return;
+    if (target && typeof target.focus === 'function') target.focus();
+  }
+
+  /** One World row, for whichever of the two stages is drawing the column. */
+  function worldButton(sc) {
+    const btn = doc.createElement('button');
+    btn.className = 'world-btn ' + SCENARIO_ENTRY_CLASS + (sc.selected ? ' active' : '');
+    btn.dataset.path = sc.world;
+    btn.dataset.scenarioId = sc.scenarioId;
+    // The row's own name, in a span of its own so the hull count beside it is
+    // a sibling and not part of the title.
+    const name = doc.createElement('span');
+    name.className = 'world-btn-name';
+    name.textContent = tData(sc.label) || sc.scenarioId;
+    btn.appendChild(name);
+    // How many hulls this World offers, BEFORE it is chosen (issue #1362).
+    // Null means the World publishes no curated list, which reads as
+    // unrestricted rather than as none — so nothing is drawn instead of a "0"
+    // that would be the one wrong answer. `hullCountLabel` is an {id, params}
+    // pair; the count decided which id, the string table decides the words.
+    if (sc.hullCountLabel) {
+      const chip = doc.createElement('span');
+      chip.className = 'world-btn-hulls' + (sc.hasChoice ? ' on' : '');
+      chip.textContent = t(sc.hullCountLabel.id, sc.hullCountLabel.params);
+      btn.appendChild(chip);
+    }
+    // The row an operator is standing in, for a reader who cannot see the
+    // accent. Set only on the chosen one, never as `aria-current="false"`.
+    if (sc.selected) btn.setAttribute('aria-current', 'true');
+    btn.addEventListener('click', function () {
+      if (h.selectScenario) h.selectScenario(sc.scenarioId);
+    });
+    if (!firstRow) firstRow = btn;
+    if (backFromScenarioId != null && sc.scenarioId === backFromScenarioId) refocusRow = btn;
+    return btn;
+  }
+
+  // The hull column is rebuilt by every stage, not only by the one that fills
+  // it: a Back out of the hulls, a world load, or another participant winning
+  // the pick all leave this stage, and a column still holding last stage's
+  // cards is a control an operator can still press.
+  if (shipList) clearScenarioEntries(shipList);
 
   // The panel's own show/hide, for the surface that asked to own it. Written
   // before anything else so a frame that both hides the panel and clears it
@@ -153,16 +277,12 @@ export function renderHostScenarios(doc, vm, t, hooks, opts) {
     if (label) label.textContent = t(vm.labelId);
     clearScenarioEntries(worldList);
     vm.entries.forEach(function (sc) {
-      const btn = doc.createElement('button');
-      btn.className = 'world-btn ' + SCENARIO_ENTRY_CLASS;
-      btn.dataset.path = sc.world;
-      btn.dataset.scenarioId = sc.scenarioId;
-      btn.textContent = tData(sc.label) || sc.scenarioId;
-      btn.addEventListener('click', function () {
-        if (h.selectScenario) h.selectScenario(sc.scenarioId);
-      });
-      appendScenarioEntry(worldList, btn);
+      appendScenarioEntry(worldList, worldButton(sc));
     });
+    // The stage a Back lands on. `firstRow` is the fallback for a Back that
+    // carried no id — a surface whose view model does not publish one — and is
+    // the top of the list, which is where a reader starts anyway.
+    restoreFocusAfterBack(refocusRow || firstRow);
     return;
   }
 
@@ -170,15 +290,68 @@ export function renderHostScenarios(doc, vm, t, hooks, opts) {
     // Ship stage — the locked scenario's offered hulls, via ph-ship-picker.
     // The specifier is relative to THIS module rather than to the page, which
     // is what lets two documents at two depths load one component.
-    if (label) label.textContent = t(vm.labelId);
-    clearScenarioEntries(worldList);
+    //
+    // WHERE the hulls go is the document's answer, not an option a caller has
+    // to remember to pass. A surface carrying `#ship-list` gets the design's
+    // staged layout — the hulls in their own column, the World rows still
+    // standing in theirs with the chosen one marked, so the operator can see
+    // the path they took and step back along it (issue #1362). A surface
+    // without it keeps what the picker always did: the world column becomes
+    // the hull column. That is not a lesser rendering of the same idea, it is
+    // the only honest one on a document with one column to draw in.
+    const host = shipList || worldList;
+    const beside = !!shipList;
+    if (beside) {
+      if (label) label.textContent = t(vm.worldLabelId || 'server.select_world');
+      if (shipLabel) shipLabel.textContent = t(vm.labelId);
+      clearScenarioEntries(worldList);
+      vm.entries.forEach(function (sc) {
+        appendScenarioEntry(worldList, worldButton(sc));
+      });
+    } else {
+      if (label) label.textContent = t(vm.labelId);
+      clearScenarioEntries(worldList);
+    }
+
+    // The step back out of the hull stage, drawn only when a surface has an
+    // arbiter to answer it. Appended BEFORE the picker exists so the column's
+    // order does not depend on how long the dynamic import took; the card grid
+    // is inserted above it when it lands.
+    let back = null;
+    if (h.backToWorlds) {
+      back = doc.createElement('button');
+      back.type = 'button';
+      back.className = 'scenario-back ' + SCENARIO_ENTRY_CLASS;
+      back.textContent = t('server.back_to_worlds');
+      // Where back goes, carried on the control that goes there. This is the
+      // whole of how the next render knows which World row to hand focus to,
+      // and it is written on the DOM rather than remembered in a module
+      // variable for the reason nothing else here is remembered: two surfaces
+      // call this function over two documents, and a module-level memory would
+      // be one document answering for the other.
+      if (vm.scenarioId) back.dataset.scenarioId = vm.scenarioId;
+      back.addEventListener('click', function () { h.backToWorlds(); });
+      if (beside) host.appendChild(back);
+      else appendScenarioEntry(host, back);
+      // A re-render of the hull stage itself — a phone locking a hull, a
+      // catalog rebuild — deletes and recreates this control too, so the
+      // operator standing on it is put back on the one that replaced it.
+      restoreFocusAfterBack(back);
+    }
+
     import('./components/ph-ship-picker.js').then(function () {
       // Won meanwhile: the import is async and the arbiter is first-valid-wins,
       // so a phone (or the host's own second click) may have locked the hull
       // while the component was loading.
       if (h.shipStillNeeded && !h.shipStillNeeded()) return;
+      // Gone meanwhile: a Back (or a world load) between this render and the
+      // import landing has already emptied the column, and re-parenting a
+      // detached Back button would resurrect the stage the operator just left.
+      if (back && !back.parentNode) return;
       const picker = doc.createElement('ph-ship-picker');
-      appendScenarioEntry(worldList, picker);
+      if (back) host.insertBefore(picker, back);
+      else if (beside) host.appendChild(picker);
+      else appendScenarioEntry(host, picker);
       picker.state = { ships: vm.ships };
       picker.addEventListener('ship-selected', function (e) {
         if (h.selectShip) h.selectShip(e.detail.template_path);
@@ -203,5 +376,6 @@ if (typeof window !== 'undefined') {
     appendScenarioEntry,
     SCENARIO_ENTRY_CLASS,
     SCENARIO_ENTRY_SELECTOR,
+    SHIP_LIST_ID,
   };
 }

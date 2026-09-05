@@ -243,6 +243,102 @@ describe('renderHostLanding — New Game', () => {
   });
 });
 
+describe('renderHostLanding — one rung deeper (issue #1362)', () => {
+  // Choosing a World reveals the hull column BESIDE the World list. This
+  // renderer's whole part in that is two writes — a second class and a larger
+  // depth — because which columns those reveal, and whether the track slides
+  // at all, is gui/host-landing.css's business at each breakpoint.
+  const openVm = () => landingViewModel({ openEntryId: 'new_game' });
+  const deepVm = () => landingViewModel({ openEntryId: 'new_game', deepStage: 'ship-picker' });
+
+  it('marks the root deep as well as open, two columns along', () => {
+    const doc = landingDoc();
+    renderHostLanding(doc, deepVm(), t);
+    const root = doc.getElementById('landing-panel');
+    expect(root.classList.contains('is-open')).toBe(true);
+    expect(root.classList.contains('is-deep')).toBe(true);
+    expect(root.classList.contains('is-idle')).toBe(false);
+    expect(root.dataset.landingStage).toBe('ship-picker');
+    expect(root.style.getPropertyValue('--landing-depth')).toBe('2');
+  });
+
+  it('takes `is-deep` off again on the way back to the World list', () => {
+    // The failure this catches is the sticky one: a class added by a deeper
+    // stage and never removed leaves the hull column on screen over a picker
+    // that has already gone back to worlds.
+    const doc = landingDoc();
+    const root = doc.getElementById('landing-panel');
+    renderHostLanding(doc, deepVm(), t);
+    renderHostLanding(doc, openVm(), t);
+    expect(root.classList.contains('is-deep')).toBe(false);
+    expect(root.classList.contains('is-open')).toBe(true);
+    expect(root.style.getPropertyValue('--landing-depth')).toBe('1');
+
+    renderHostLanding(doc, landingViewModel(), t);
+    expect(root.classList.contains('is-deep')).toBe(false);
+    expect(root.classList.contains('is-open')).toBe(false);
+    expect(root.classList.contains('is-idle')).toBe(true);
+  });
+
+  it('KEEPS the picker docked through the deeper rung', () => {
+    // The load-bearing one. The dock used to be conditioned on the stage being
+    // called 'world-picker', so the hull stage would have undocked
+    // `#scenario-panel` — carrying the World list off the screen at the exact
+    // moment the operator needs it to step back along. It reads a field on the
+    // row instead.
+    const doc = landingDoc();
+    renderHostLanding(doc, openVm(), t);
+    renderHostLanding(doc, deepVm(), t);
+    const picker = doc.getElementById('scenario-panel');
+    expect(picker.parentElement).toBe(doc.getElementById('landing-mid'));
+    expect(picker.classList.contains(PICKER_DOCKED_CLASS)).toBe(true);
+    expect(picker.querySelector('#world-list')).not.toBe(null);
+  });
+
+  it('docks it when the deeper rung is the FIRST thing rendered', () => {
+    // A render that arrives with a World already locked — the module island's
+    // first call after a pick came in from a phone.
+    const doc = landingDoc();
+    renderHostLanding(doc, deepVm(), t);
+    expect(doc.getElementById('scenario-panel').parentElement)
+      .toBe(doc.getElementById('landing-mid'));
+  });
+
+  it('makes the receding menu INACTIVE, not merely faint', () => {
+    // gui/host-landing.css dims this column to 42% one rung deep. Dimmed LIVE
+    // controls would be text far under the contrast floor the same sheet holds
+    // these labels to at rest; the floor's one exemption is text in an
+    // inactive component, so the column is made genuinely inactive — the sheet
+    // drops the pointer, this drops the keyboard. Back is the way out of a
+    // deep stage, so nothing an operator needs goes with it.
+    const doc = landingDoc();
+    const menu = doc.getElementById('landing-menu');
+    renderHostLanding(doc, deepVm(), t);
+    expect(menu.hasAttribute('inert')).toBe(true);
+  });
+
+  it('gives the menu back on the way out of the deep stage', () => {
+    // The sticky-attribute failure, the exact sibling of the `is-deep` one
+    // above: a menu left inert after a Back is a front door nothing can open.
+    const doc = landingDoc();
+    const menu = doc.getElementById('landing-menu');
+    renderHostLanding(doc, deepVm(), t);
+    renderHostLanding(doc, openVm(), t);
+    expect(menu.hasAttribute('inert')).toBe(false);
+    renderHostLanding(doc, landingViewModel(), t);
+    expect(menu.hasAttribute('inert')).toBe(false);
+  });
+
+  it('leaves the hull column to the picker`s own renderer', () => {
+    // `#landing-ship` is a column this renderer draws nothing into: what goes
+    // in it is the ph-ship-picker gui/host-scenario-render.js mounts, so there
+    // is one implementation of a hull card and not two.
+    const doc = landingDoc();
+    renderHostLanding(doc, deepVm(), t);
+    expect(doc.getElementById('ship-list').children).toHaveLength(0);
+  });
+});
+
 describe('undockPicker', () => {
   it('returns the picker to the body whatever the landing is doing', () => {
     // The page-lifecycle escape hatch: driveWorldLoad hides the landing

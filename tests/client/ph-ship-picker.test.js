@@ -133,6 +133,40 @@ describe('PhShipPicker', () => {
     expect(el.shadowRoot.textContent).toContain('120');
   });
 
+  it('names the three readings a host picks a hull by (issue #1362)', () => {
+    // Registry, mass and power rating, each a LABELLED stat. The registry used
+    // to be a bare `#AEV-1864` beside the class badge, which named itself to a
+    // reader who already knew what it was and to nobody else.
+    const { el } = setup();
+    el.state = {
+      ships: [
+        { template_path: 'assets/entities/alliance_cruiser.toml', label: 'X', hull_id: 'AEV-1864', mass: 24000, power_rating: 90 },
+      ]
+    };
+    const labels = [...el.shadowRoot.querySelectorAll('.ship-stat-label')].map((n) => n.textContent.trim());
+    expect(labels).toEqual([
+      t('component.ship_picker.registry'),
+      t('component.ship_picker.mass'),
+      t('component.ship_picker.power'),
+    ]);
+    const values = [...el.shadowRoot.querySelectorAll('.ship-stat-value')].map((n) => n.textContent.trim());
+    expect(values).toEqual(['#AEV-1864', '24000', '90']);
+  });
+
+  it('draws only the readings it has, rather than a labelled blank', () => {
+    // `hull_id` is optional in the template, and neither it nor `mass` has
+    // arrived until the entity template has been delivered — the browser
+    // fetches it asynchronously and the card renders before it lands.
+    const { el } = setup();
+    el.state = {
+      ships: [
+        { template_path: 'assets/entities/alliance_cruiser.toml', label: 'X', power_rating: 90 },
+      ]
+    };
+    const labels = [...el.shadowRoot.querySelectorAll('.ship-stat-label')].map((n) => n.textContent.trim());
+    expect(labels).toEqual([t('component.ship_picker.power')]);
+  });
+
   it('dispatches ship-selected event with template_path on card click', async () => {
     const { el } = setup();
     el.state = {

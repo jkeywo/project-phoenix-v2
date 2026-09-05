@@ -39,12 +39,19 @@
  * ── The document says which stage; this sheet says what that looks like ────
  *
  * `gui/host-landing-render.js` writes exactly two things about layout: the
- * class `is-idle`/`is-open` and the custom property `--landing-depth`. Every
- * arrangement below is chosen HERE, per breakpoint, so a window resize or an
- * orientation change relays out with no script running at all. Wide and
- * landscape puts the columns abreast with the menu centred until a stage
- * opens; narrow or portrait shows one pane at a time and slides the track by
- * the depth.
+ * classes `is-idle`/`is-open`/`is-deep` and the custom property
+ * `--landing-depth`. Every arrangement below is chosen HERE, per breakpoint,
+ * so a window resize or an orientation change relays out with no script
+ * running at all. Wide and landscape puts the columns abreast with the menu
+ * centred until a stage opens; narrow or portrait shows one pane at a time and
+ * slides the track by the depth.
+ *
+ * `is-deep` is the SECOND rung of an already-open route (issue #1362): New
+ * Game reveals the World list, and choosing a World reveals the hull column
+ * beside it. It is written from the DEPTH and not from a stage name, so a
+ * route that later grows a third rung needs no new class here — and it is
+ * additive rather than a replacement for `is-open`, because the middle column
+ * has to stay on screen for the operator to step back into.
  *
  * ── NO RAW HEX, NO LITERAL TYPE SIZES ──────────────────────────────────────
  *
@@ -240,7 +247,8 @@
   justify-content: center;
   transition: margin-left 0.5s cubic-bezier(0.22, 0.72, 0.2, 1), opacity 0.38s ease;
 }
-.landing-col-mid {
+.landing-col-mid,
+.landing-col-ship {
   width: 416px;
   flex: 0 0 416px;
   opacity: 0;
@@ -250,7 +258,8 @@
               transform 0.34s cubic-bezier(0.22, 0.72, 0.2, 1),
               visibility 0s linear 0.5s;
 }
-.is-open .landing-col-mid {
+.is-open .landing-col-mid,
+.is-deep .landing-col-ship {
   opacity: 1;
   visibility: visible;
   transform: none;
@@ -258,6 +267,20 @@
               transform 0.38s cubic-bezier(0.22, 0.72, 0.2, 1) 0.12s,
               visibility 0s;
 }
+/* One rung deeper, the menu recedes without leaving: the operator can still
+   read the route they came in by, which is the whole point of not replacing a
+   column with the next one (issue #1362).
+
+   `pointer-events: none` is not decoration to match the dimming — it is what
+   MAKES the dimming legal. 42% opacity puts these labels far under the 4.5:1
+   floor this sheet argues for at .landing-mi, and the one exemption the
+   contrast floor grants is text in an INACTIVE user-interface component. So
+   the column is genuinely inactive while deep: this drops the pointer, and
+   `gui/host-landing-render.js` writes `inert` on #landing-menu from the same
+   depth to drop the keyboard too. Back is the way out of a deep stage, which
+   is why nothing is lost by it — and a dimmed control that still answered a
+   click would be the worse of the two readings anyway. */
+.is-deep .landing-col-menu { opacity: 0.42; pointer-events: none; }
 
 /* ── Identity lockup ──────────────────────────────────────────────────── */
 .landing-lockup {
@@ -452,6 +475,71 @@
   overflow: visible;
 }
 
+/* ── The hull column ──────────────────────────────────────────────────── */
+/*
+ * Column C (issue #1362). Choosing a World reveals the hulls BESIDE the World
+ * list rather than in place of it, so the operator can see the path they took
+ * and step back along it — which is why this is a column of the landing's own
+ * and not more markup inside the borrowed `#scenario-panel`: that panel is one
+ * node that docks into ONE column, and stacking the hulls under the world rows
+ * inside it would be the replacement this slice exists to undo.
+ *
+ * What is drawn INSIDE `#ship-list` is not here. `ph-ship-picker` dresses its
+ * own cards in its shadow root and `.scenario-back` is the picker's control,
+ * styled in gui/host-scenarios.css beside the world rows it steps back to —
+ * both appear on a surface with no landing at all, so neither can live in the
+ * landing's sheet.
+ *
+ * The chamfer, the rule under the heading and the panel fill are the same
+ * three the docked picker wears one column to the left, for the obvious reason:
+ * they are two panes of one stage and a second set of values would read as two
+ * different screens.
+ */
+.landing-ship-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  background: rgba(var(--rgb-base), 0.88);
+  border: 1px solid var(--edge-faint);
+  box-sizing: border-box;
+  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+}
+.landing-ship-head {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px 0;
+}
+.landing-ship-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+  /* --text-lg, the rung #world-list-label's sibling heading takes: the two
+     column headings are read together and one of them larger would be a
+     hierarchy that is not there. */
+  font-size: var(--text-lg);
+  line-height: 1;
+  letter-spacing: var(--tracking);
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+/* The design's accent rule under the heading, fading out to the right. Drawn
+   with --cyan, the accent BOUNDARY rung, rather than --signal: it is a
+   divider, and the foreground rung beside a heading would out-shout it. */
+.landing-ship-rule {
+  height: 1px;
+  background: linear-gradient(to right, var(--cyan), rgba(var(--rgb-cyan), 0));
+}
+.landing-ship-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 18px 18px;
+  display: flex;
+  flex-direction: column;
+}
+
 /* ── Wide and landscape: columns abreast, the menu centred until open ──── */
 /*
  * A percentage margin resolves against the track — whose width IS the stage's
@@ -461,6 +549,43 @@
 @media (min-width: 1000px) and (orientation: landscape) {
   .is-idle .landing-col-menu { margin-left: calc(50% - 176px); }
   .is-open .landing-col-menu { margin-left: 0; }
+  /* Three columns at their drawn width want about 1300px of stage, and this
+     breakpoint opens at 1000 (issue #1362). `.landing-stage` clips, so without
+     this the hull column would simply not be on the screen on a laptop — the
+     one failure mode a picker must not have. The drawn width becomes a CAP
+     rather than a fixed size: the columns shrink to fit and never grow past
+     what the design draws. The menu column does not shrink; it holds the
+     entries at a size a host reads across a room. */
+  .landing-col-mid { flex: 1 1 416px; min-width: 0; max-width: 416px; }
+  /* The hull column takes a share of the track only once the route is DEEP,
+     and the reason is that `visibility: hidden` is not `display: none`: the
+     column stays in the flow to slide in FROM, so a share handed to it
+     unconditionally is a share taken from the World column at every width a
+     laptop actually has, for a column that is not on screen. Shrink-to-fit
+     alone put the World list at 346px on a 1280 and 383px on a 1366 — the
+     docked `#scenario-panel` fitting the world rows, the join QR and the save
+     catalogue into what was left — while the hulls held the difference off
+     screen. So: two columns on the World stage, three on the hull stage, and
+     the cap is what keeps the third honest when all three really are up. */
+  .landing-col-ship {
+    flex: 0 1 0;
+    min-width: 0;
+    max-width: 0;
+    /* The collapse is a zero-length transition with the FADE's delay on it, so
+       a Back does not pull the box out from under a column the operator can
+       still see: the hulls fade and slide out over their own 0.34s, and only
+       then does the track re-flow and the World column take the width back.
+       The other three are restated because this is a shorthand and would
+       otherwise drop them for this column alone. Entering the deep stage takes
+       its transition from the `.is-deep` rule above, which names none of these
+       — the box has to be there BEFORE there is anything to fade into. */
+    transition: opacity 0.34s ease,
+                transform 0.34s cubic-bezier(0.22, 0.72, 0.2, 1),
+                flex-basis 0s linear 0.34s,
+                max-width 0s linear 0.34s,
+                visibility 0s linear 0.5s;
+  }
+  .is-deep .landing-col-ship { flex: 1 1 416px; max-width: 416px; }
 }
 
 /* ── Narrow or portrait: one pane at a time ───────────────────────────── */
@@ -494,14 +619,26 @@
 
   .landing-stage { left: 0; top: 64px; bottom: 44px; }
   .landing-stage-inner { inset: 16px; }
+  /* Three columns, so one step is a third of the track (issue #1362 added the
+     hull column; it was two and a half before). The step is written as the
+     reciprocal of the column count in both places — a track N panes wide slid
+     by 100/N per rung — so the two numbers cannot drift apart the way a
+     hand-tuned pair would. */
   .landing-track {
-    width: 200%;
+    width: 300%;
     gap: 0;
-    transform: translateX(calc(var(--landing-depth, 0) * -50%));
+    transform: translateX(calc(var(--landing-depth, 0) * -33.3333%));
   }
-  .landing-col { flex: 0 0 50%; width: auto; padding-right: 16px; overflow-y: auto; }
+  .landing-col { flex: 0 0 33.3333%; width: auto; padding-right: 16px; overflow-y: auto; }
   .landing-col-menu { justify-content: flex-start; margin-left: 0; }
-  .landing-col-mid { transform: none; }
+  .landing-col-mid, .landing-col-ship { transform: none; }
+  /* One pane at a time is already the whole of the receding here, and dimming
+     a column nobody can see would only follow the operator back to it. The
+     INACTIVITY is not reset with it: the menu is off screen at this depth
+     either way, and `inert` is written from the depth rather than from a
+     breakpoint, so a pointer that could still reach it would be the one
+     disagreement between the two. */
+  .is-deep .landing-col-menu { opacity: 1; }
 
   .landing-lockup { align-items: center; gap: 14px; margin-bottom: 22px; }
   .landing-logo, .is-open .landing-logo { width: clamp(112px, 34vw, 156px); }
@@ -538,6 +675,7 @@
   .landing-track,
   .landing-col-menu,
   .landing-col-mid,
+  .landing-col-ship,
   .landing-logo,
   .landing-mi,
   .landing-icon-btn {

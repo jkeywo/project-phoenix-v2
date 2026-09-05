@@ -1428,6 +1428,27 @@
                driveWorldLoad() down exactly the path it always did. -->
           <section id="landing-mid" class="landing-col landing-col-mid"></section>
 
+          <!-- Column C — the hulls the chosen World offers (issue #1362).
+               BESIDE column B and not instead of it: the World list stays on
+               screen with the chosen row marked, so the operator can see the
+               path they took and step back along it in one click.
+
+               #ship-list is EMPTY here for the reason #landing-menu is: what
+               goes in it is data. gui/host-scenario-render.js finds this
+               column by id and mounts the same ph-ship-picker it always did,
+               so a surface that does not carry the column keeps the picker's
+               older single-column rendering rather than needing an option
+               passed to it. -->
+          <section id="landing-ship" class="landing-col landing-col-ship">
+            <div class="landing-ship-panel">
+              <div class="landing-ship-head">
+                <h2 id="ship-list-label" class="landing-ship-title" data-i18n="server.select_ship">Select a ship</h2>
+                <span class="landing-ship-rule"></span>
+              </div>
+              <div id="ship-list" class="landing-ship-body"></div>
+            </div>
+          </section>
+
         </div>
       </div>
     </div>
@@ -5126,8 +5147,31 @@
     window.__hostRenderLanding = function() {
       if (_landingDismissed) return;
       if (!window.hostLanding || !window.hostLandingRender) return;
+      // How deep the open route is, asked of the PICKER's own view model
+      // rather than remembered here (issue #1362). `scenarioCatalogView` is
+      // pure and reads the same three values renderScenarioLockState() passes
+      // it, so there is no second copy of "which stage the picker is on" to
+      // fall out of step with the first — and no ordering hazard between the
+      // two renders. The landing ignores any stage name New Game's row does
+      // not list, so 'scenario-list', 'ship-auto' and 'locked' all read as
+      // "not deep" without this page naming any of them.
+      let deepStage = null;
+      if (window.hostScenarios) {
+        deepStage = window.hostScenarios.scenarioCatalogView(
+          _scenarioCatalog, _preSelection, _worldLoadStarted,
+        ).stage;
+      }
+      // NOTHING here writes `_landingOpenEntry`. This function is a pure read
+      // of the two memories above it, and the one place that used to break
+      // that — opening New Game when it noticed a locked World — now sits in
+      // `arbiterSelectScenario`, where the page actually LEARNS a World was
+      // locked. A render that wrote the caller's open-entry memory made the
+      // New Game toggle dead: the click set the memory to null and this put it
+      // straight back in the same frame, so the entry rebuilt the menu, re-ran
+      // the focus carry, and changed nothing an operator could see.
       const vm = window.hostLanding.landingViewModel({
         openEntryId: _landingOpenEntry,
+        deepStage: deepStage,
         platform: 'web',
         build: landingBuildId(),
       });
@@ -5313,7 +5357,58 @@
       const r = window.scenarioArbiter.selectScenario(_preSelection, _scenarioCatalog, scenarioId);
       if (r.outcome !== 'accepted') return;
       _preSelection = r.selection;
+      // A World locked while the front door was still on its menu — a PHONE
+      // picked it, which the first-valid-wins arbiter has always allowed —
+      // opens New Game, because the hull column is a column of the LANDING and
+      // a landing that has not opened New Game is a hull stage nobody can see
+      // or step back out of (issue #1362).
+      //
+      // It belongs HERE, at the moment the page learns a World was locked, and
+      // not inside __hostRenderLanding: a render that writes this memory
+      // fights the click that owns it. `nextOpenEntry('new_game','new_game')`
+      // is null — the second click on an open entry closes it — and a render
+      // that restored 'new_game' turned the entry into a control that rebuilt
+      // the menu and did nothing else. Closing New Game with a World locked
+      // means what it meant in #1360: the picker undocks and folds away behind
+      // the landing, the selection is untouched, and re-opening the entry
+      // brings the operator back to the rung they left. Releasing the World is
+      // Back's job, and Back is in the hull column where the operator is.
+      //
+      // Guarded on `null` so it never overrules an operator who has some other
+      // entry open, and on `_landingDismissed` so a selection made after the
+      // landing is gone cannot bring it back — `hideLanding()` clears the
+      // memory for good, and this must not un-clear it.
+      if (_landingOpenEntry == null && !_landingDismissed) _landingOpenEntry = 'new_game';
       renderScenarioLockState();
+      broadcastScenarioCatalog();
+    }
+    /**
+     * Release the locked World and go back to the list (issue #1362).
+     *
+     * The one move first-valid-wins has never had, and it is a HOST move
+     * rather than a participant one: `select_scenario` is what a phone may
+     * send, and letting a phone un-choose would turn "first valid request
+     * wins" into "last request wins" for anyone who kept sending. So this is
+     * not an action-map verb and not in gui/scenario-arbiter.js — it is the
+     * same shape as `__hostChooseNewSession`'s reset a few lines above, which
+     * clears exactly these fields for exactly this reason.
+     *
+     * Both fields go, not only the scenario: a hull is scoped to the World
+     * that offered it (#754 AC4), so a template path left behind would name a
+     * hull the next World may not offer at all.
+     *
+     * Once the world load has started there is nothing to release — the
+     * selection is spent — and the same `_worldLoadStarted` guard every other
+     * arbiter entry point takes says so here.
+     */
+    function arbiterReleaseScenario() {
+      if (_worldLoadStarted) return;
+      if (_preSelection.scenario_id == null) return;
+      _preSelection = { scenario_id: null, template_path: null };
+      renderScenarioLockState();
+      // Phones are looking at the same picker: the catalog message carries the
+      // lock state, so they follow the host back to the World list rather than
+      // sitting on a hull stage the host has left.
       broadcastScenarioCatalog();
     }
     function arbiterSelectShip(templatePath) {
@@ -5443,12 +5538,32 @@
         // The single-hull auto-resolve calls this page's arbiter DIRECTLY, as
         // it always has — not through the action map a click goes through.
         autoSelectShip: arbiterSelectShip,
-        shipStillNeeded: function () { return _preSelection.template_path == null; },
+        // Re-checked after the ph-ship-picker module has loaded, because that
+        // load is async. BOTH halves of the selection are asked about: a hull
+        // locked meanwhile is the case this hook was written for (#917), and a
+        // World RELEASED meanwhile is the one issue #1362 added — an operator
+        // who presses Back while the component is still in flight must not
+        // have the cards arrive on top of the World list they went back to.
+        shipStillNeeded: function () {
+          return _preSelection.scenario_id != null && _preSelection.template_path == null;
+        },
+        // One click back out of the hull stage (issue #1362). Releasing the
+        // locked World is this page's own arbiter state, so it is answered
+        // here rather than in the renderer — the native surface reaches a
+        // different arbiter and supplies its own hook, or none.
+        backToWorlds: arbiterReleaseScenario,
       });
       // No `ownPanelVisibility`: on this page #scenario-panel's show/hide is
       // page lifecycle (driveWorldLoad hides it, the return to lobby shows it),
       // never a payload-driven render. The native surface has no such lifecycle
       // and asks the renderer to own it instead.
+      //
+      // The landing follows the picker's stage: which column of the landing is
+      // open is a function of where the picker is (issue #1362), so the render
+      // that moved the picker is the one that has to say so. `__hostRenderLanding`
+      // re-derives the stage from the same pure view model rather than being
+      // handed one, and returns immediately once the landing is dismissed.
+      if (window.__hostRenderLanding) window.__hostRenderLanding();
     }
 
     // Which scenario manifest to load: the base catalog (assets/scenarios.toml)

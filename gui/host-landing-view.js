@@ -18,15 +18,29 @@
  * switch", all six would collide in the same handful of lines. So an entry is
  * a ROW in [`LANDING_ENTRIES`], carrying everything about itself:
  *
- *   | field       | what it decides |
- *   |-------------|-----------------|
- *   | `id`        | the machine key a click reports and a hook dispatches on |
- *   | `labelId`   | the string id of the entry's name |
- *   | `descId`    | the string id of the line under it |
- *   | `stage`     | which contextual stage opening it reveals, or `null` for an entry that does nothing yet |
- *   | `platforms` | which hosts offer it at all — `['native']` is how #1365's Exit to Desktop arrives without a build check anywhere in this file |
+ *   | field         | what it decides |
+ *   |---------------|-----------------|
+ *   | `id`          | the machine key a click reports and a hook dispatches on |
+ *   | `labelId`     | the string id of the entry's name |
+ *   | `descId`      | the string id of the line under it |
+ *   | `stage`       | which contextual stage opening it reveals, or `null` for an entry that does nothing yet |
+ *   | `deeper`      | the stages this entry can descend INTO once open, in order — absent for an entry that is only one column deep |
+ *   | `docksPicker` | this entry's stage is the EXISTING `#scenario-panel` node moved into the middle column, rather than markup of its own |
+ *   | `platforms`   | which hosts offer it at all — `['native']` is how #1365's Exit to Desktop arrives without a build check anywhere in this file |
  *
  * Adding an entry is adding a row. Nothing below reads an id by name.
+ *
+ * ## A ladder is a field, not a second entry (issue #1362)
+ *
+ * New Game asks two questions: choose a World, then choose a hull. The second
+ * is not another menu ROW — the menu still has five — it is one rung deeper
+ * inside the entry that is already open, and the operator has to be able to
+ * see the World list they came through and step back along it. So `deeper` is
+ * an ordered list of stage names ON THE ROW, and the caller says which of them
+ * it is currently on (`deepStage`). The DEPTH the stylesheet slides by falls
+ * out of the position in that list, so an entry that grows a third rung adds a
+ * string to its own array and neither this module, the renderer, nor the
+ * stylesheet learns a new name.
  *
  * ## Only one entry works in this slice, and that is deliberate
  *
@@ -55,6 +69,16 @@ export const LANDING_ENTRIES = [
     labelId: 'server.landing.new_game',
     descId: 'server.landing.new_game_desc',
     stage: 'world-picker',
+    // Choosing a World asks a second question, and its answer is a column
+    // further along the same track rather than a different route (issue
+    // #1362). The name matches the stage `gui/host-scenarios.js` reports, so
+    // the host hands this module the picker's own answer instead of
+    // translating between two vocabularies for the same thing.
+    deeper: ['ship-picker'],
+    // Both rungs are drawn by the picker that already exists: the middle
+    // column holds the live `#scenario-panel`, and the hull column holds the
+    // `ph-ship-picker` its renderer mounts. Nothing here re-implements either.
+    docksPicker: true,
     platforms: ['web', 'native'],
   },
   {
@@ -141,11 +165,20 @@ export function nextOpenEntry(openEntryId, entryId, entries) {
  *
  * @param {{
  *   openEntryId?: string|null,
+ *   deepStage?: string|null,
  *   platform?: 'web'|'native',
  *   build?: string,
  *   dismissed?: boolean,
  *   entries?: Array<object>,
  * }} [input]
+ *   `deepStage` is how far along the open entry's `deeper` ladder the surface
+ *   is (issue #1362). It is an input for the same reason `openEntryId` is: the
+ *   answer is not this module's to hold. For New Game it is the picker's OWN
+ *   stage — `scenarioCatalogView().stage` — passed through unchanged, so the
+ *   two models agree by sharing a value rather than by a mapping somebody has
+ *   to keep in step. A name the open entry does not list (or one on an entry
+ *   that has no ladder) reads as "not deep", never as a stage nothing can draw.
+ *
  *   `openEntryId` is the caller's own memory of which entry is open — held by
  *   the caller rather than here for the reason `scenarioCatalogView` takes
  *   `locked` rather than deriving it: the surfaces that drive this each own
@@ -169,6 +202,8 @@ export function nextOpenEntry(openEntryId, entryId, entries) {
  *   stage: string,
  *   dismissed: boolean,
  *   openEntryId: string|null,
+ *   deepStage: string|null,
+ *   docksPicker: boolean,
  *   depth: number,
  *   rootClass: string,
  *   identity: {titleId: string, taglineId: string, logoAltId: string, platformLabelId: string},
@@ -193,6 +228,15 @@ export function landingViewModel(input) {
     return e.id === opts.openEntryId && !!e.stage;
   }) || null);
 
+  // How far along the OPEN entry's own ladder the surface says it is. The
+  // position in `deeper` is the answer to both questions the renderer has —
+  // which stage is showing, and how many columns the track has slid — so a
+  // name the row does not list is simply -1 and the entry sits at its first
+  // rung. Nothing here knows what 'ship-picker' means.
+  const rungs = (open && Array.isArray(open.deeper)) ? open.deeper : [];
+  const rung = opts.deepStage == null ? -1 : rungs.indexOf(opts.deepStage);
+  const deepStage = rung >= 0 ? rungs[rung] : null;
+
   const entries = list.map(function (entry, i) {
     return {
       id: entry.id,
@@ -211,15 +255,28 @@ export function landingViewModel(input) {
     // `dismissed` outranks every other stage, and is a stage rather than a
     // flag beside one so that a renderer switching on `vm.stage` cannot be
     // shown the landing and told it is gone in the same breath.
-    stage: dismissed ? 'dismissed' : open ? open.stage : 'idle',
+    stage: dismissed ? 'dismissed' : open ? (deepStage || open.stage) : 'idle',
     dismissed: dismissed,
     openEntryId: open ? open.id : null,
+    // Which rung of the open entry's ladder, as a name, for a caller that
+    // needs to tell the two apart without comparing `stage` to a literal.
+    deepStage: deepStage,
+    // Whether this stage is served by the borrowed `#scenario-panel` node —
+    // a fact about the ROW, so the renderer never asks "is the stage called
+    // world-picker" and a future entry that borrows the same panel says so on
+    // its own line (issue #1362).
+    docksPicker: !!(open && open.docksPicker),
     // The track's offset, as a number the stylesheet reads through a custom
     // property. The DOCUMENT says only how deep it is; which columns that
     // slides, and whether it slides at all, is the stylesheet's business at
-    // each breakpoint (issue #1360's responsiveness rule).
-    depth: open ? 1 : 0,
-    rootClass: open ? 'is-open' : 'is-idle',
+    // each breakpoint (issue #1360's responsiveness rule). One per rung: the
+    // open entry's own column is 1, and each `deeper` stage adds another.
+    depth: open ? 1 + (rung + 1) : 0,
+    // Space-separated, and the renderer splits it: `is-deep` is a SECOND fact
+    // about the same root (open, and more than one column along), not a
+    // replacement for the first. Written from the depth rather than from a
+    // stage name, so a third rung needs no new class.
+    rootClass: open ? (rung >= 0 ? 'is-open is-deep' : 'is-open') : 'is-idle',
     identity: {
       titleId: 'server.landing.title',
       taglineId: 'server.landing.tagline',

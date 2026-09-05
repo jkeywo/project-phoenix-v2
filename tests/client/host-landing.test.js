@@ -25,7 +25,18 @@ import {
 
 /** A table this suite owns, so a shipped-menu edit cannot silently retune it. */
 const TABLE = [
-  { id: 'alpha', labelId: 'x.alpha', descId: 'x.alpha_desc', stage: 'stage-a', platforms: ['web', 'native'] },
+  {
+    id: 'alpha',
+    labelId: 'x.alpha',
+    descId: 'x.alpha_desc',
+    stage: 'stage-a',
+    // A TWO-rung ladder, so "how deep" is exercised past the one rung New Game
+    // actually ships with — the depth has to be the position in the list and
+    // not a boolean somebody wrote as one (issue #1362).
+    deeper: ['stage-a2', 'stage-a3'],
+    docksPicker: true,
+    platforms: ['web', 'native'],
+  },
   { id: 'beta', labelId: 'x.beta', descId: 'x.beta_desc', stage: null, platforms: ['web', 'native'] },
   { id: 'gamma', labelId: 'x.gamma', descId: 'x.gamma_desc', stage: 'stage-c', platforms: ['native'] },
 ];
@@ -187,6 +198,121 @@ describe('landingViewModel', () => {
     expect(vm.entries.find((e) => e.id === 'new_game').selected).toBe(true);
     expect(vm.entries.filter((e) => e.inert).map((e) => e.id))
       .toEqual(['load_game', 'join_peer', 'connect_host', 'load_mod_pack']);
+  });
+});
+
+describe('landingViewModel — an open entry with a ladder (issue #1362)', () => {
+  // New Game asks two questions: choose a World, then choose a hull. The
+  // second is not a second menu ENTRY, it is a rung inside the one already
+  // open — so the depth, the classes and the stage all come from the row's own
+  // `deeper` list, and nothing in the module knows what any of those names
+  // mean.
+
+  const open = (deepStage) => landingViewModel({ entries: TABLE, openEntryId: 'alpha', deepStage });
+
+  it('stays at its first rung when the caller names no deeper stage', () => {
+    const vm = open(null);
+    expect(vm.stage).toBe('stage-a');
+    expect(vm.deepStage).toBe(null);
+    expect(vm.depth).toBe(1);
+    expect(vm.rootClass).toBe('is-open');
+  });
+
+  it('reports the deeper stage, one more column along, and says it is deep', () => {
+    const vm = open('stage-a2');
+    expect(vm.stage).toBe('stage-a2');
+    expect(vm.deepStage).toBe('stage-a2');
+    expect(vm.depth).toBe(2);
+    // Additive, not a replacement: the middle column has to stay on screen for
+    // the operator to step back into, so `is-open` is still true.
+    expect(vm.rootClass).toBe('is-open is-deep');
+  });
+
+  it('counts the rungs, so a second one is a third column and not the same one', () => {
+    const vm = open('stage-a3');
+    expect(vm.stage).toBe('stage-a3');
+    expect(vm.depth).toBe(3);
+    expect(vm.rootClass).toBe('is-open is-deep');
+  });
+
+  it('ignores a deeper stage this entry does not list, rather than drawing it', () => {
+    // The host hands over the PICKER's own stage unfiltered, which is also
+    // 'scenario-list' or 'locked' most of the time. A name the row does not
+    // know reads as "not deep" — never as a stage nothing can draw.
+    for (const name of ['stage-c', 'scenario-list', 'locked', 'nonesuch']) {
+      const vm = open(name);
+      expect(vm.stage).toBe('stage-a');
+      expect(vm.depth).toBe(1);
+      expect(vm.deepStage).toBe(null);
+    }
+  });
+
+  it('ignores it entirely on an entry with no ladder at all', () => {
+    const vm = landingViewModel({ entries: TABLE, platform: 'native', openEntryId: 'gamma', deepStage: 'stage-a2' });
+    expect(vm.stage).toBe('stage-c');
+    expect(vm.depth).toBe(1);
+    expect(vm.deepStage).toBe(null);
+  });
+
+  it('is not deep with nothing open, whatever the caller says the picker is doing', () => {
+    const vm = landingViewModel({ entries: TABLE, deepStage: 'stage-a2' });
+    expect(vm.stage).toBe('idle');
+    expect(vm.depth).toBe(0);
+    expect(vm.rootClass).toBe('is-idle');
+  });
+
+  it('is not deep once the landing is dismissed', () => {
+    const vm = landingViewModel({ entries: TABLE, openEntryId: 'alpha', deepStage: 'stage-a2', dismissed: true });
+    expect(vm.stage).toBe('dismissed');
+    expect(vm.depth).toBe(0);
+    expect(vm.deepStage).toBe(null);
+    expect(vm.rootClass).toBe('is-idle');
+  });
+
+  it('says whether the open entry borrows the picker, as a fact about the row', () => {
+    // The renderer moves `#scenario-panel` on this and never on a comparison
+    // of `stage` to a name — a stage-name test would have undocked the picker
+    // the moment the hull rung opened, taking the World list with it.
+    expect(open(null).docksPicker).toBe(true);
+    expect(open('stage-a2').docksPicker).toBe(true);
+    expect(landingViewModel({ entries: TABLE, platform: 'native', openEntryId: 'gamma' }).docksPicker).toBe(false);
+    expect(landingViewModel({ entries: TABLE }).docksPicker).toBe(false);
+    expect(landingViewModel({ entries: TABLE, openEntryId: 'alpha', dismissed: true }).docksPicker).toBe(false);
+  });
+});
+
+describe('the shipped New Game ladder (issue #1362)', () => {
+  it('descends into the picker`s OWN stage name, so the two models share a value', () => {
+    // The host passes `scenarioCatalogView().stage` straight through. If this
+    // row ever spelled the rung differently, the landing would sit at depth 1
+    // while the picker showed hulls, and nothing would say so.
+    const vm = landingViewModel({ openEntryId: 'new_game', deepStage: 'ship-picker' });
+    expect(vm.stage).toBe('ship-picker');
+    expect(vm.depth).toBe(2);
+    expect(vm.rootClass).toBe('is-open is-deep');
+    expect(vm.docksPicker).toBe(true);
+  });
+
+  it('stays on the World picker for every other stage the picker reports', () => {
+    for (const stage of ['scenario-list', 'scenario-empty', 'ship-auto', 'locked']) {
+      const vm = landingViewModel({ openEntryId: 'new_game', deepStage: stage });
+      expect(vm.stage).toBe('world-picker');
+      expect(vm.depth).toBe(1);
+    }
+  });
+
+  it('descends on both platforms, because both reach the same picker', () => {
+    for (const platform of ['web', 'native']) {
+      const vm = landingViewModel({ platform, openEntryId: 'new_game', deepStage: 'ship-picker' });
+      expect(vm.depth).toBe(2);
+    }
+  });
+
+  it('gives no other shipped entry a ladder yet, which is the honest tracer', () => {
+    const withLadders = LANDING_ENTRIES
+      .filter((e) => Array.isArray(e.deeper) && e.deeper.length)
+      .map((e) => e.id);
+    expect(withLadders).toEqual(['new_game']);
   });
 });
 

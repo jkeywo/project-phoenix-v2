@@ -687,6 +687,8 @@ component.ship_picker.class.destroyer,Lobby ship picker — hull class badge on 
 component.ship_picker.class.unknown,Lobby ship picker — hull class badge when the entity template authors no class,[UNKNOWN]
 component.ship_picker.empty,Lobby ship picker when the locked scenario offers no playable hull,[No ships available]
 component.ship_picker.label,Accessible name (aria-label) for the lobby ship picker — the keyboard/pointer hull chooser (issue #1178),Ship selection
+component.ship_picker.registry,Lobby ship picker — stat label above a hull's registry number,[Registry]
+component.ship_picker.mass,Lobby ship picker — stat label above a hull's authored mass,[Mass]
 component.ship_picker.power,Lobby ship picker — stat label above a hull's power rating,[Power]
 component.ship_picker.stations,Lobby ship picker — stat label above a hull's station count,[Stations]
 component.station_damage.popup_title,Station-damage popup heading. {name} is the owning station (or the ship core),[{name} Systems]
@@ -1189,6 +1191,9 @@ server.landing.load_mod_pack_desc,Landing screen menu — the line under Load mo
 server.select_world,Host lobby — heading over the scenario picker,[Select a world]
 server.select_ship,Host lobby — picker heading after a world with multiple ships is chosen,[Select a ship]
 server.no_scenarios,Host scenario picker — shown when the pre-load catalog is empty,[No scenarios available]
+server.hulls_offered.one,"Host scenario picker — a World row's count of the hulls it offers, exactly one. {n} is the count",[{n} hull]
+server.hulls_offered.other,"Host scenario picker — a World row's count of the hulls it offers, zero or several. {n} is the count",[{n} hulls]
+server.back_to_worlds,Host scenario picker — step back out of the hull stage to the World list,[Back]
 server.loading,Host page — generic loading label,Loading…
 server.crew,Host lobby — crew count label,Crew
 server.spectator,Host lobby — tag on spectating players,Spectator

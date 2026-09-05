@@ -108,10 +108,17 @@ impl ScenarioPayload {
 /// Build the publishable form of one hull entry.
 ///
 /// `template_path` and `label` come from the world's own `[[available_ships]]`
-/// entry; `class`, `hull_id`, `power_rating` and `name` are enrichment read
-/// from the cached entity template and are simply absent when the template has
-/// not been delivered yet (the browser fetches asynchronously) or does not
+/// entry; `class`, `hull_id`, `mass`, `power_rating` and `name` are enrichment
+/// read from the cached entity template and are simply absent when the template
+/// has not been delivered yet (the browser fetches asynchronously) or does not
 /// declare them.
+///
+/// `mass` is the one of those with no `Option` behind it: an entity that
+/// authors none still takes [`crate::entities::config::default_mass`] (issue
+/// #1154), so a hull whose template IS cached always has a mass to publish. It
+/// joins the wire in issue #1362, where the hull card reads a hull by its
+/// Registry, its Mass and its Power rating — the first and last were already
+/// published and the middle one had never left the server.
 pub fn ship_payload(ship: &AvailableShipEntry) -> ShipPayload {
     let mut out = ShipPayload::default();
     out.push_text("template_path", ship.template_path.clone());
@@ -127,6 +134,8 @@ pub fn ship_payload(ship: &AvailableShipEntry) -> ShipPayload {
         if let Some(ref hull_id) = cfg.hull_id {
             out.push_text("hull_id", hull_id.clone());
         }
+        out.entries
+            .push(("mass", PayloadValue::Number(cfg.mass as f64)));
         if let Some(rating) = cfg.power_rating {
             out.entries
                 .push(("power_rating", PayloadValue::Number(rating as f64)));

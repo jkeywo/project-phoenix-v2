@@ -47,10 +47,12 @@ describe('scenarioCatalogView', () => {
     const vm = scenarioCatalogView(CATALOG, EMPTY_SEL, false);
     expect(vm.stage).toBe('scenario-list');
     expect(vm.labelId).toBe('server.select_world');
-    expect(vm.entries).toEqual([
-      { scenarioId: 'default', world: 'assets/worlds/default.toml', label: 'Starbase Alpha' },
-      { scenarioId: 'combat_test', world: 'assets/worlds/combat_test.toml', label: 'Combat Test' },
+    expect(vm.entries.map((e) => [e.scenarioId, e.world, e.label])).toEqual([
+      ['default', 'assets/worlds/default.toml', 'Starbase Alpha'],
+      ['combat_test', 'assets/worlds/combat_test.toml', 'Combat Test'],
     ]);
+    // Nothing is chosen yet, so no row is.
+    expect(vm.entries.every((e) => e.selected === false)).toBe(true);
   });
 
   it('reports an empty catalog distinctly from a populated one', () => {
@@ -75,7 +77,50 @@ describe('scenarioCatalogView', () => {
   it('treats a locked scenario id absent from the catalog as offering no ships', () => {
     const sel = { scenario_id: 'unknown', template_path: null };
     const vm = scenarioCatalogView(CATALOG, sel, false);
-    expect(vm).toEqual({ stage: 'ship-picker', labelId: 'server.select_ship', ships: [] });
+    expect(vm.stage).toBe('ship-picker');
+    expect(vm.labelId).toBe('server.select_ship');
+    expect(vm.ships).toEqual([]);
+    // The World rows still come, and none of them is the one that was locked.
+    expect(vm.entries.map((e) => e.scenarioId)).toEqual(['default', 'combat_test']);
+    expect(vm.entries.every((e) => e.selected === false)).toBe(true);
+  });
+
+  it('keeps the World rows through the hull stage, with the chosen one marked', () => {
+    // Issue #1362. The hull stage used to carry the hulls and nothing else,
+    // and the renderer put them where the World list had been — so an
+    // operator who mis-clicked had no list to read and no row to go back to.
+    const sel = { scenario_id: 'default', template_path: null };
+    const vm = scenarioCatalogView(CATALOG, sel, false);
+    expect(vm.scenarioId).toBe('default');
+    expect(vm.worldLabelId).toBe('server.select_world');
+    expect(vm.entries.map((e) => [e.scenarioId, e.selected])).toEqual([
+      ['default', true],
+      ['combat_test', false],
+    ]);
+  });
+
+  it('says on every World row how many hulls it offers, before it is chosen', () => {
+    // The row a click will ask a second question about, and the row that goes
+    // straight through, were the same button until issue #1362. The count is
+    // an {id, params} pair with a plural id, not prose: the count decides
+    // which id, the string table decides the words.
+    const vm = scenarioCatalogView(CATALOG, EMPTY_SEL, false);
+    expect(vm.entries.map((e) => [e.hullCount, e.hasChoice, e.hullCountLabel])).toEqual([
+      [2, true, { id: 'server.hulls_offered.other', params: { n: 2 } }],
+      [1, false, { id: 'server.hulls_offered.one', params: { n: 1 } }],
+    ]);
+  });
+
+  it('draws no count at all for a World that publishes no curated hull list', () => {
+    // Not "0 hulls": an empty `ships` is what `curatedShipsFor` reads as
+    // UNRESTRICTED — every hull the world itself holds — so a zero would be
+    // the one reading an operator must not take from the row. Silence is the
+    // honest rendering of "not known from here".
+    const open = [{ id: 'open', world: 'assets/worlds/open.toml', label: 'Open' }];
+    const vm = scenarioCatalogView(open, EMPTY_SEL, false);
+    expect(vm.entries[0].hullCount).toBe(0);
+    expect(vm.entries[0].hullCountLabel).toBe(null);
+    expect(vm.entries[0].hasChoice).toBe(false);
   });
 
   it('normalizes a null/undefined preSelection to the empty shape', () => {

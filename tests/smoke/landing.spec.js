@@ -126,8 +126,17 @@ test('choosing a world from the landing reaches the lobby it always reached',
     // Single-hull scenarios auto-resolve (issue #917); multi-hull ones offer a
     // ph-ship-picker. Either way the landing goes and the lobby arrives, which
     // is the whole of "exactly the lobby it reaches today".
-    const shipCard = page.locator('#scenario-panel ph-ship-picker .ship-card').first();
+    //
+    // The picker mounts in `#landing-ship` since issue #1362 — a column of the
+    // landing's own beside the World list — so this is no longer scoped to
+    // `#scenario-panel`. When it IS the hull stage, the two things that slice
+    // claimed are checked on the way past: the World rows are still standing,
+    // and the landing has slid one column further rather than swapped one.
+    const shipCard = page.locator('ph-ship-picker .ship-card').first();
     if (await shipCard.isVisible({ timeout: 10_000 }).catch(() => false)) {
+      await expect(page.locator('#landing-ship ph-ship-picker')).toBeVisible();
+      await expect(page.locator(SCENARIO_BUTTONS).first()).toBeVisible();
+      await expect(page.locator('#landing-panel')).toHaveClass(/is-deep/);
       await shipCard.click();
     }
 

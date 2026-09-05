@@ -113,7 +113,10 @@ test('demo manifest (?manifest=assets/scenarios.demo.toml): host offers its two 
   // Both curated hulls appear in authored order. Choose the Destroyer
   // explicitly: a two-hull catalogue no longer takes the one-hull auto-select
   // path through renderScenarioLockState.
-  const picker = serverPage.locator('#scenario-panel ph-ship-picker');
+  // The hull column is `#landing-ship` since issue #1362 — beside the World
+  // list rather than inside `#scenario-panel` where the picker used to
+  // replace it.
+  const picker = serverPage.locator('#landing-ship ph-ship-picker');
   await picker.waitFor({ state: 'visible', timeout: 30_000 });
   const cards = picker.locator('.ship-card');
   await expect(cards).toHaveCount(2);

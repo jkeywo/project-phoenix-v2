@@ -89,6 +89,17 @@ export const LANDING_ENTRY_ATTR = 'data-landing-entry';
 /** The class `#scenario-panel` wears while it is docked in the landing. */
 export const PICKER_DOCKED_CLASS = 'landing-docked';
 
+/**
+ * Every lifecycle class this renderer can write on `#landing-panel`.
+ *
+ * Removed in full before the view model's own are added, so a stage that no
+ * longer applies cannot be left behind by a shorter `rootClass`. Named as a
+ * list rather than inline in the call for the reason the entry SELECTOR is
+ * named: the stylesheet and this module have to agree on the set, and one
+ * place to read it is what makes that checkable.
+ */
+export const LANDING_ROOT_CLASSES = ['is-idle', 'is-open', 'is-deep'];
+
 /** Remove every entry this renderer owns, leaving anything else alone. */
 export function clearLandingEntries(menu) {
   menu.querySelectorAll(LANDING_ENTRY_SELECTOR).forEach(function (el) { el.remove(); });
@@ -154,8 +165,15 @@ export function renderHostLanding(doc, vm, t, hooks, opts) {
     // Written before anything else so a frame that both dismisses the landing
     // and rewrites its text paints once.
     if (ownPanelVisibility) root.style.display = vm.stage === 'dismissed' ? 'none' : '';
-    root.classList.remove('is-idle', 'is-open');
-    root.classList.add(vm.rootClass);
+    // `rootClass` may name more than one class — `is-open is-deep` is the
+    // staged New Game (issue #1362) — so it is split rather than added whole:
+    // `classList.add` throws on a string with a space in it. Everything this
+    // renderer can write is removed first, so a stage that no longer applies
+    // cannot be left behind by a shorter one.
+    root.classList.remove(...LANDING_ROOT_CLASSES);
+    String(vm.rootClass || '').split(/\s+/).forEach(function (name) {
+      if (name) root.classList.add(name);
+    });
     root.dataset.landingStage = vm.stage;
     root.style.setProperty('--landing-depth', String(vm.depth));
   }
@@ -256,6 +274,27 @@ export function renderHostLanding(doc, vm, t, hooks, opts) {
     if (refocus && doc.activeElement === doc.body && typeof refocus.focus === 'function') {
       refocus.focus();
     }
+
+    // ── A receding column is an INACTIVE one, not a faint one ──────────
+    //
+    // `gui/host-landing.css` dims this column to 42% one rung deep, which is
+    // the design's recession and is also far under the 4.5:1 floor the same
+    // sheet holds these labels to at rest. The contrast floor exempts exactly
+    // one kind of text — text in an inactive user-interface component — so
+    // the column is made inactive rather than left as live controls nobody
+    // can read: the sheet drops the pointer, this drops the keyboard. Back is
+    // the documented way out of a deep stage, so the menu is not the exit
+    // being closed off.
+    //
+    // Written from the DEPTH, the same fact the stylesheet slides by, rather
+    // than from the name `is-deep`: a route that grows a third rung is still
+    // "deeper than its first column" without this module learning a name.
+    // Written after the rebuild so the focus carry above is never asked to
+    // land on a node this line has just made unfocusable.
+    if (typeof menu.setAttribute === 'function') {
+      if (vm.depth > 1) menu.setAttribute('inert', '');
+      else menu.removeAttribute('inert');
+    }
   }
 
   // ── The middle column ───────────────────────────────────────────────
@@ -271,11 +310,18 @@ export function renderHostLanding(doc, vm, t, hooks, opts) {
   // explicit `z-index: 200`, so where it sits among the body's children
   // decides neither its box nor its paint order. That is what lets this be
   // stateless — no remembered parent to go stale between two documents.
+  //
+  // The condition is `vm.docksPicker`, a FACT ABOUT THE ROW, and not a
+  // comparison of `vm.stage` to 'world-picker' (issue #1362). The staged New
+  // Game is two stages deep and the picker has to stay put across both — a
+  // stage-name test would have undocked it the moment the hulls appeared,
+  // taking the World list with it. It also keeps the rule readable by a future
+  // entry: an entry that borrows this panel says so on its own line.
   if (dockPicker) {
     const mid = doc.getElementById('landing-mid');
     const picker = doc.getElementById('scenario-panel');
     if (mid && picker) {
-      if (vm.stage === 'world-picker') {
+      if (vm.docksPicker) {
         if (picker.parentElement !== mid) mid.appendChild(picker);
         picker.classList.add(PICKER_DOCKED_CLASS);
       } else if (picker.parentElement === mid) {
@@ -314,5 +360,6 @@ if (typeof window !== 'undefined') {
     LANDING_ENTRY_SELECTOR,
     LANDING_ENTRY_ATTR,
     PICKER_DOCKED_CLASS,
+    LANDING_ROOT_CLASSES,
   };
 }

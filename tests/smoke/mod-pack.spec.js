@@ -258,7 +258,9 @@ test('upload after world load is ignored: the panel is hidden and no pack is app
   await buttons.first().click();
 
   const destroyer = page.locator(
-    '#scenario-panel ph-ship-picker .ship-card[data-template="assets/entities/alliance_destroyer.toml"]',
+    // `#landing-ship` since issue #1362: the hulls are a column beside the
+    // World list now, not a replacement for it inside `#scenario-panel`.
+    '#landing-ship ph-ship-picker .ship-card[data-template="assets/entities/alliance_destroyer.toml"]',
   );
   await destroyer.waitFor({ state: 'visible', timeout: 30_000 });
   await destroyer.click();

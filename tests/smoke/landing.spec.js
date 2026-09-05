@@ -65,9 +65,12 @@ test('the landing is the first paint, and New Game opens the World picker',
     // ── The menu ─────────────────────────────────────────────────────────
     //
     // Read as ids, not as English, and not as a pinned count: the six sibling
-    // slices each ADD a row, so a spec that pinned "five entries" would fail on
-    // the next one for no reason. What must hold is that New Game is offered
-    // and is the only entry that is not inert.
+    // slices each ADD a row or activate one, so a spec that pinned "five
+    // entries" — or "one live entry" — would fail on the next one for no
+    // reason. What must hold is that New Game is offered and live, and that the
+    // rows still WAITING for a slice are the ones that say so. Since issue
+    // #1364 that is Load mod pack alone: Load Game got its stage in #1363 and
+    // both join routes got theirs in #1364.
     await expect(page.locator(`${MENU} [data-landing-entry]`).first())
       .toBeVisible({ timeout: 30_000 });
     // `toContainText`, not `toHaveText`: the button also carries its ordinal
@@ -75,8 +78,10 @@ test('the landing is the first paint, and New Game opens the World picker',
     // still in its `[bracketed]` draft phase, and `[New Game]` read as a
     // pattern is a character class that matches nearly anything.
     await expect(page.locator(NEW_GAME)).toContainText(ts('server.landing.new_game'));
-    await expect(page.locator(`${MENU} [data-landing-entry]:not([aria-disabled="true"])`))
-      .toHaveCount(1);
+    await expect(page.locator(`${NEW_GAME}[aria-disabled="true"]`)).toHaveCount(0);
+    expect(await page.locator(`${MENU} [data-landing-entry][aria-disabled="true"]`)
+      .evaluateAll((els) => els.map((el) => el.getAttribute('data-landing-entry'))))
+      .toEqual(['load_mod_pack']);
 
     // ── New Game ─────────────────────────────────────────────────────────
     //
@@ -149,4 +154,29 @@ test('choosing a world from the landing reaches the lobby it always reached',
     expect(await page.evaluate(
       () => document.getElementById('scenario-panel').parentElement === document.body,
     )).toBe(true);
+
+    // ── Round two: the landing that comes BACK (issue #1364) ─────────────
+    //
+    // Return to Lobby re-shows this same landing over a world that is ALREADY
+    // loaded into the running engine, and that is the one state the join routes
+    // cannot be offered in: `is_browser_gm` is read once, inside `wasm_init`,
+    // so Join as Peer here would compose the document as a Game Master page
+    // over an app Bevy built as a `BrowserHost` — blanking the viewscreen and
+    // removing the crew QR for the rest of the session, with no way back but a
+    // reload. Only a real page can show that the second landing is the first
+    // one again minus those two rows; the vitest suite proves the decision, not
+    // the round trip.
+    await page.evaluate(() => window.__hostReturnToLobby());
+    await expect(page.locator('#landing-panel')).toBeVisible({ timeout: 30_000 });
+    // The viewscreen is still a viewscreen, and this page is still a host.
+    await expect(page.locator('#canvas')).toBeVisible();
+    expect(await page.evaluate(
+      () => document.documentElement.classList.contains('phoenix-gm-page'),
+    )).toBe(false);
+    // ...and the rows that would have changed that are inert IN PLACE, rather
+    // than gone from the menu.
+    expect(await page.locator(`${MENU} [data-landing-entry][aria-disabled="true"]`)
+      .evaluateAll((els) => els.map((el) => el.getAttribute('data-landing-entry'))))
+      .toEqual(['join_peer', 'connect_host', 'load_mod_pack']);
+    await expect(page.locator(`${NEW_GAME}[aria-disabled="true"]`)).toHaveCount(0);
   });

@@ -21,7 +21,36 @@ import {
   landingEntries,
   nextOpenEntry,
   landingViewModel,
+  landingJoinAttempt,
 } from '../../gui/host-landing-view.js';
+
+/**
+ * The authored join-code format, as `landingJoinAttempt` is handed it.
+ *
+ * A fabricated table rather than the shipped JSON, for the reason this file
+ * owns its own entry TABLE: what is under test is the decision, and a suite
+ * that read the shipped format would start failing the day a designer renamed
+ * a denied word. The two namespace GUIDs are this fixture's own and the
+ * suffix rules are the shipped shape — eight letters, `0`→`O`, `1`→`I`.
+ */
+const JOIN_DATA = {
+  format_version: 1,
+  namespaces: {
+    client: '11111111-1111-4111-8111-111111111111',
+    server: '22222222-2222-4222-8222-222222222222',
+  },
+  version: { guid: '33333333-3333-4333-8333-333333333333' },
+  suffix: {
+    length: 8,
+    alphabet: 'ABCDEFGHIJKMNOPQRSTUVWXYZ',
+    strip: ' -_',
+    normalise: { 0: 'O', 1: 'I', L: 'I' },
+  },
+  deny: ['BADWORD'],
+};
+
+/** The shipped Join as Peer / Connect to Host descriptors. */
+const joinOf = (id) => LANDING_ENTRIES.find((e) => e.id === id).join;
 
 /** A table this suite owns, so a shipped-menu edit cannot silently retune it. */
 const TABLE = [
@@ -48,40 +77,94 @@ describe('the shipped entry table', () => {
     ]);
   });
 
-  it('gives New Game and Load Game a stage — the rest render and are inert', () => {
-    // The honest shape of a tracer: the three without a stage each have a
-    // sibling issue that gives them one, and until then they must not pretend.
-    // Load Game joined in issue #1363, and joined by growing a stage on its
-    // own row rather than by anything below it learning its name.
+  it('leaves only Load mod pack without a stage, and it renders inert', () => {
+    // The honest shape of a tracer: the row without a stage has a sibling
+    // issue that gives it one, and until then it must not pretend. Load Game
+    // joined in issue #1363 and both join routes in #1364, each by growing a
+    // stage on its own row rather than by anything below it learning its name.
     const staged = LANDING_ENTRIES.filter((e) => e.stage).map((e) => e.id);
-    expect(staged).toEqual(['new_game', 'load_game']);
+    expect(staged).toEqual(['new_game', 'load_game', 'join_peer', 'connect_host']);
+    expect(LANDING_ENTRIES.filter((e) => !e.stage).map((e) => e.id))
+      .toEqual(['load_mod_pack']);
   });
 
   it('names the panel each staged row borrows, as an element id on the row', () => {
-    // Two borrowers now, which is why the field is an id rather than the
+    // Three borrowers now, which is why the field is an id rather than the
     // boolean it was while only the picker docked: the renderer reads the row
-    // and moves the node it names, and a third borrower needs no new branch.
+    // and moves the node it names, and a fourth borrower needs no new branch.
+    // The two join routes name the SAME node, because they ask one question
+    // and differ only in what a good answer means (issue #1364).
     expect(LANDING_ENTRIES.filter((e) => e.docks).map((e) => [e.id, e.docks])).toEqual([
       ['new_game', 'scenario-panel'],
       ['load_game', 'save-slots-panel'],
+      ['join_peer', 'landing-join-panel'],
+      ['connect_host', 'landing-join-panel'],
     ]);
   });
 
-  it('records Load Game\'s native gap as an unserved STAGE, not an unoffered row', () => {
-    // #1363's AC5 is unbuilt, and this is where that is written down. The two
-    // fields say different things: `platforms` is what a surface does not
-    // offer (Connect to Host, for ever), `stagePlatforms` is what it cannot
-    // open yet (Load Game, until the native save-catalogue channel lands).
+  it('gives both join routes one stage name and their own join descriptor', () => {
+    // The load-bearing claim of issue #1364: what makes Join as Peer different
+    // from Connect to Host is DATA on the row — which typed namespace a bare
+    // suffix composes into, which surface words a refusal, and which action a
+    // good code runs — and not a branch in the view model, the renderer or the
+    // stylesheet, all three of which see one `join-code` stage.
+    const peer = LANDING_ENTRIES.find((e) => e.id === 'join_peer');
+    const client = LANDING_ENTRIES.find((e) => e.id === 'connect_host');
+    expect([peer.stage, client.stage]).toEqual(['join-code', 'join-code']);
+    expect(peer.join.namespace).toBe('server');
+    expect(peer.join.surface).toBe('server');
+    expect(peer.join.action).toBe('boot-game-master');
+    expect(client.join.namespace).toBe('client');
+    expect(client.join.surface).toBe('client');
+    expect(client.join.action).toBe('open-client-page');
+    // Two routes, two actions: a shared action would be one of them quietly
+    // doing the other's job.
+    expect(peer.join.action).not.toBe(client.join.action);
+  });
+
+  it('gives every join row the three string ids its panel is written from', () => {
+    for (const entry of LANDING_ENTRIES.filter((e) => e.join)) {
+      for (const key of ['roleId', 'blurbId', 'submitId']) {
+        expect(typeof entry.join[key], `${entry.id}.${key}`).toBe('string');
+        expect(entry.join[key].length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('records both native gaps as unserved STAGES, not as unoffered rows', () => {
+    // #1363's AC5 and #1364's native half are unbuilt, and this is where that
+    // is written down. The two fields say different things: `platforms` is what
+    // a surface does not offer (Connect to Host, for ever, because a native
+    // host has no join leg), `stagePlatforms` is what it cannot open yet — Load
+    // Game until the native save-catalogue channel lands, Join as Peer until
+    // something on that surface can answer a Game Master profile at all.
     const load = LANDING_ENTRIES.find((e) => e.id === 'load_game');
     expect(load.platforms).toEqual(['web', 'native']);
     expect(load.stagePlatforms).toEqual(['web']);
+    const peer = LANDING_ENTRIES.find((e) => e.id === 'join_peer');
+    expect(peer.platforms).toEqual(['web', 'native']);
+    expect(peer.stagePlatforms).toEqual(['web']);
     const connect = LANDING_ENTRIES.find((e) => e.id === 'connect_host');
     expect(connect.platforms).toEqual(['web']);
     expect(connect.stagePlatforms).toBeUndefined();
-    // Nothing else in the shipped table is gated this way; a second one would
-    // be a second unfinished AC and should arrive with its own test.
+    // Nothing else in the shipped table is gated this way; a third would be a
+    // third unfinished AC and should arrive with its own test.
     expect(LANDING_ENTRIES.filter((e) => e.stagePlatforms).map((e) => e.id))
-      .toEqual(['load_game']);
+      .toEqual(['load_game', 'join_peer']);
+  });
+
+  it('marks both join routes as pre-boot stages, and nothing else', () => {
+    // Issue #1364's blocking constraint, written on the rows that carry it:
+    // the Game Master profile is read once inside `wasm_init`, and Connect to
+    // Host leaves the page altogether — neither survives a world being loaded,
+    // and the landing DOES come back over one (issue #756). New Game and Load
+    // Game are the routes round two exists for, so they must not pick this up.
+    expect(LANDING_ENTRIES.filter((e) => e.stagePreBoot).map((e) => e.id))
+      .toEqual(['join_peer', 'connect_host']);
+    // Every row with a code field is one of them: a third join route arriving
+    // without this is a third way to swap a profile that cannot be swapped.
+    expect(LANDING_ENTRIES.filter((e) => e.join).map((e) => e.id))
+      .toEqual(['join_peer', 'connect_host']);
   });
 
   it('does not offer Exit to Desktop, which is a native-only row for #1365', () => {
@@ -159,6 +242,91 @@ describe('landingEntries — a stage this surface cannot serve yet', () => {
   });
 });
 
+describe('landingEntries — a stage this surface can no longer open', () => {
+  // `stagePreBoot` is the third member of the family, and the one that is about
+  // TIME rather than platform: the landing comes back after a Game Over with a
+  // world already loaded (issue #756), and a route that decides a BOOT profile
+  // has nothing left to decide by then. Same strip, same vocabulary — a second
+  // way of saying "inert" is a second answer for `nextOpenEntry` to disagree
+  // with.
+  const TIMED = [
+    { id: 'alpha', labelId: 'x.a', descId: 'x.a_desc', stage: 'stage-a', docks: 'panel-a', deeper: ['stage-a2'], join: { namespace: 'server' }, stagePreBoot: true },
+    { id: 'beta', labelId: 'x.b', descId: 'x.b_desc', stage: 'stage-b' },
+  ];
+
+  it('keeps the row and takes its stage away once a world has booted', () => {
+    const booted = landingEntries('web', TIMED, { booted: true });
+    expect(booted.map((e) => e.id)).toEqual(['alpha', 'beta']);
+    const alpha = booted.find((e) => e.id === 'alpha');
+    expect(alpha.stage).toBe(null);
+    expect(alpha.docks).toBe(null);
+    expect(alpha.deeper).toBe(null);
+    // The code field goes with the stage: there is nothing to type into.
+    expect(alpha.join).toBe(null);
+    // ...and the shipped row is untouched, as it is for the platform gap.
+    expect(TIMED[0].stage).toBe('stage-a');
+  });
+
+  it('leaves every row alone before the boot, and with no options at all', () => {
+    expect(landingEntries('web', TIMED, { booted: false }).find((e) => e.id === 'alpha'))
+      .toBe(TIMED[0]);
+    expect(landingEntries('web', TIMED).find((e) => e.id === 'alpha')).toBe(TIMED[0]);
+  });
+
+  it('leaves a row without the field open after the boot — the permissive default', () => {
+    expect(landingEntries('web', TIMED, { booted: true }).find((e) => e.id === 'beta').stage)
+      .toBe('stage-b');
+  });
+
+  it('refuses the press too, so the two memories cannot disagree', () => {
+    expect(nextOpenEntry(null, 'alpha', landingEntries('web', TIMED, { booted: true })))
+      .toBe(null);
+    expect(nextOpenEntry(null, 'alpha', landingEntries('web', TIMED))).toBe('alpha');
+  });
+});
+
+describe('a booted surface offers no join stage', () => {
+  // The shipped claim behind issue #1364's "no runtime Boot Profile swap", and
+  // the case the first landing cannot make: `is_browser_gm` is read once,
+  // inside `wasm_init`, so on the landing that RETURNS after a Game Over both
+  // join routes must be unopenable — one because the profile it sets would
+  // never be read, the other because leaving the page would discard the world
+  // behind it.
+  it('marks both join rows inert, and leaves New Game and Load Game alone', () => {
+    const vm = landingViewModel({ platform: 'web', booted: true });
+    const inert = Object.fromEntries(vm.entries.map((e) => [e.id, e.inert]));
+    expect(inert.join_peer).toBe(true);
+    expect(inert.connect_host).toBe(true);
+    expect(inert.new_game).toBe(false);
+    expect(inert.load_game).toBe(false);
+    // The menu is not one row shorter: an operator finds the route where they
+    // left it, saying it cannot be taken now.
+    expect(vm.entries.map((e) => e.id)).toEqual(
+      landingViewModel({ platform: 'web' }).entries.map((e) => e.id),
+    );
+  });
+
+  it('renders no code field even when a join row is remembered as open', () => {
+    // The page's open-entry memory outlives a round: `_landingOpenEntry` is
+    // this page's, and a stage the surface can no longer open reads as closed
+    // rather than as a field that would run the action behind it.
+    const vm = landingViewModel({ platform: 'web', openEntryId: 'join_peer', booted: true });
+    expect(vm.openEntryId).toBe(null);
+    expect(vm.join).toBe(null);
+    expect(vm.docks).toBe(null);
+    expect(vm.stage).toBe('idle');
+  });
+
+  it('still opens both of them before the boot, which is the whole of the slice', () => {
+    for (const id of ['join_peer', 'connect_host']) {
+      const vm = landingViewModel({ platform: 'web', openEntryId: id });
+      expect(vm.openEntryId).toBe(id);
+      expect(vm.stage).toBe('join-code');
+      expect(vm.join.action).toBe(joinOf(id).action);
+    }
+  });
+});
+
 describe('nextOpenEntry', () => {
   it('opens an entry that has a stage', () => {
     expect(nextOpenEntry(null, 'alpha', TABLE)).toBe('alpha');
@@ -189,8 +357,13 @@ describe('nextOpenEntry', () => {
     // at a time, because there is one middle column (issue #1363).
     expect(nextOpenEntry('new_game', 'load_game')).toBe('load_game');
     expect(nextOpenEntry('load_game', 'load_game')).toBe(null);
-    // ...and the entries that have no stage yet stay inert through the default.
-    expect(nextOpenEntry(null, 'join_peer')).toBe(null);
+    // Both join routes open the same stage, and opening one still CLOSES the
+    // other: one middle column, one open stage (issue #1364).
+    expect(nextOpenEntry(null, 'join_peer')).toBe('join_peer');
+    expect(nextOpenEntry('join_peer', 'connect_host')).toBe('connect_host');
+    expect(nextOpenEntry('join_peer', 'join_peer')).toBe(null);
+    // ...and the entry that has no stage yet stays inert through the default.
+    expect(nextOpenEntry(null, 'load_mod_pack')).toBe(null);
   });
 });
 
@@ -273,7 +446,7 @@ describe('landingViewModel', () => {
     expect(vm.stage).toBe('world-picker');
     expect(vm.entries.find((e) => e.id === 'new_game').selected).toBe(true);
     expect(vm.entries.filter((e) => e.inert).map((e) => e.id))
-      .toEqual(['join_peer', 'connect_host', 'load_mod_pack']);
+      .toEqual(['load_mod_pack']);
   });
 
   it('opens Load Game onto the save catalogue, borrowing its panel (issue #1363)', () => {
@@ -499,5 +672,197 @@ describe('landingViewModel — a dismissed landing', () => {
   it('still lists the menu, so a landing shown again needs no second decision', () => {
     const vm = landingViewModel({ entries: TABLE, platform: 'native', dismissed: true });
     expect(vm.entries.map((e) => e.id)).toEqual(['alpha', 'beta', 'gamma']);
+  });
+});
+
+describe('landingJoinAttempt — judging a typed code (issue #1364)', () => {
+  // AC4: "a refused code explains what is wrong with it, reusing the existing
+  // join-code error strings". Every case below asserts a `strings.csv` id that
+  // already existed before this slice — a new sentence here would be a second
+  // wording for a failure the phone already words.
+  const peer = () => joinOf('join_peer');
+  const client = () => joinOf('connect_host');
+
+  it('accepts a bare suffix, composing it into the ROW’s namespace', () => {
+    const attempt = landingJoinAttempt(peer(), 'quarking', JOIN_DATA);
+    expect(attempt.ok).toBe(true);
+    expect(attempt.namespace).toBe('server');
+    expect(attempt.action).toBe('boot-game-master');
+    // The structured code, not the letters: both legs downstream want the whole
+    // identifier, and composing it once here is what stops each of them doing
+    // it differently.
+    expect(attempt.code).toBe(
+      '22222222-2222-4222-8222-222222222222_33333333-3333-4333-8333-333333333333_QUARKING',
+    );
+  });
+
+  it('composes the SAME letters into the client namespace on the other route', () => {
+    // One field, two meanings, and the meaning is the row's. This is the whole
+    // reason the namespace is data rather than a constant in the page.
+    const attempt = landingJoinAttempt(client(), 'quarking', JOIN_DATA);
+    expect(attempt.ok).toBe(true);
+    expect(attempt.namespace).toBe('client');
+    expect(attempt.action).toBe('open-client-page');
+    expect(attempt.code.startsWith('11111111-')).toBe(true);
+  });
+
+  it('canonicalises what a player typed, exactly as the phone’s field does', () => {
+    // Lower case, the spacing somebody adds reading a code aloud, and the
+    // confusable digits. Not re-implemented here — this is gui/join-code.js
+    // answering, which is the point of importing it rather than parsing again.
+    const attempt = landingJoinAttempt(peer(), ' quark-1ng ', JOIN_DATA);
+    expect(attempt.ok).toBe(true);
+    expect(attempt.code.endsWith('_QUARKING')).toBe(true);
+  });
+
+  it('reports an empty field, a wrong length, a bad character and a denied word', () => {
+    expect(landingJoinAttempt(peer(), '', JOIN_DATA).errorId).toBe('client.join.error_empty');
+    expect(landingJoinAttempt(peer(), 'QUARK', JOIN_DATA).errorId).toBe('client.join.error_length');
+    expect(landingJoinAttempt(peer(), 'QUARKIN$', JOIN_DATA).errorId)
+      .toBe('client.join.error_charset');
+    expect(landingJoinAttempt(peer(), 'BADWORDS', JOIN_DATA).errorId)
+      .toBe('client.join.error_denied');
+  });
+
+  it('reports a paste that lost a part as malformed rather than as letters', () => {
+    const half = '22222222-2222-4222-8222-222222222222_QUARKING';
+    expect(landingJoinAttempt(peer(), half, JOIN_DATA).errorId)
+      .toBe('client.join.error_malformed');
+  });
+
+  it('refuses a CREW code pasted into Join as Peer, in the HOST’s wording', () => {
+    // The refusal that has to be worded per surface (issue #1114): read out on
+    // a viewscreen, the phone's sentence for this is the exact inverse of what
+    // happened. The row carries `surface: 'server'` so it is not.
+    const crew = '11111111-1111-4111-8111-111111111111'
+      + '_33333333-3333-4333-8333-333333333333_QUARKING';
+    expect(landingJoinAttempt(peer(), crew, JOIN_DATA).errorId)
+      .toBe('server.fleet.error_wrong_type');
+  });
+
+  it('refuses a FLEET code pasted into Connect to Host, in the phone’s wording', () => {
+    const fleet = '22222222-2222-4222-8222-222222222222'
+      + '_33333333-3333-4333-8333-333333333333_QUARKING';
+    expect(landingJoinAttempt(client(), fleet, JOIN_DATA).errorId)
+      .toBe('client.join.error_wrong_type');
+  });
+
+  it('refuses a GUID belonging to no Phoenix namespace as not-Phoenix', () => {
+    const alien = '44444444-4444-4444-8444-444444444444'
+      + '_33333333-3333-4333-8333-333333333333_QUARKING';
+    expect(landingJoinAttempt(peer(), alien, JOIN_DATA).errorId)
+      .toBe('client.join.error_not_phoenix');
+  });
+
+  it('says the SERVICE is unreachable when the authored table never loaded', () => {
+    // Not a refusal of the code — it was never judged. Sending an operator back
+    // to retype letters that were already right is the one failure the reason
+    // map exists to prevent.
+    expect(landingJoinAttempt(peer(), 'QUARKING', null).errorId)
+      .toBe('client.join.error_unreachable');
+    expect(landingJoinAttempt(null, 'QUARKING', JOIN_DATA).errorId)
+      .toBe('client.join.error_unreachable');
+  });
+
+  it('answers a table it cannot read rather than throwing at the page', () => {
+    // A half-fetched or malformed format table makes gui/join-code.js throw
+    // rather than half-answer, deliberately. The landing turns that into the
+    // sentence an unreachable service gets, because the operator's remedy is
+    // identical — and because a throw here would abandon a click handler
+    // mid-way and leave the panel saying nothing at all.
+    expect(landingJoinAttempt(peer(), 'QUARKING', { format_version: 1 }).errorId)
+      .toBe('client.join.error_unreachable');
+  });
+});
+
+describe('landingViewModel — the join stage (issue #1364)', () => {
+  it('carries the open row’s join descriptor, and null on every other stage', () => {
+    expect(landingViewModel({ openEntryId: 'join_peer' }).join.action)
+      .toBe('boot-game-master');
+    expect(landingViewModel({ openEntryId: 'connect_host' }).join.action)
+      .toBe('open-client-page');
+    expect(landingViewModel({ openEntryId: 'new_game' }).join).toBe(null);
+    expect(landingViewModel({ openEntryId: 'load_game' }).join).toBe(null);
+    expect(landingViewModel({}).join).toBe(null);
+  });
+
+  it('borrows one panel for both routes, under one stage name', () => {
+    for (const id of ['join_peer', 'connect_host']) {
+      const vm = landingViewModel({ openEntryId: id });
+      expect(vm.stage).toBe('join-code');
+      expect(vm.docks).toBe('landing-join-panel');
+      expect(vm.depth).toBe(1);
+      expect(vm.rootClass).toBe('is-open');
+    }
+  });
+
+  it('fills in what the FIELD says, which is the same on every join route', () => {
+    // "Join code", "eight letters", "or paste the whole code" are facts about
+    // the authored format and not about the route, so both rows get them and
+    // neither repeats them.
+    for (const id of ['join_peer', 'connect_host']) {
+      const vm = landingViewModel({ openEntryId: id });
+      expect(vm.join.labelId).toBe('server.landing.join_code_label');
+      expect(vm.join.placeholderId).toBe('server.landing.join_code_placeholder');
+      expect(vm.join.hintId).toBe('server.landing.join_code_hint');
+    }
+    // ...while what the ROUTE says is the row's own.
+    expect(landingViewModel({ openEntryId: 'join_peer' }).join.roleId)
+      .toBe('server.landing.join_peer_role');
+    expect(landingViewModel({ openEntryId: 'connect_host' }).join.roleId)
+      .toBe('server.landing.connect_host_role');
+  });
+
+  it('lets a row override a field default rather than being overwritten by it', () => {
+    // The merge order, pinned: the shared defaults go UNDER the row. A route
+    // whose code is not eight letters has to be able to say so.
+    const own = [{
+      id: 'own',
+      labelId: 'x',
+      descId: 'y',
+      stage: 'join-code',
+      join: { namespace: 'server', surface: 'server', action: 'a', hintId: 'x.own_hint' },
+    }];
+    expect(landingViewModel({ entries: own, openEntryId: 'own' }).join.hintId)
+      .toBe('x.own_hint');
+  });
+
+  it('folds the caller’s last refusal onto it, and carries null when there is none', () => {
+    const refused = landingViewModel({
+      openEntryId: 'join_peer', joinErrorId: 'client.join.error_length',
+    });
+    expect(refused.join.errorId).toBe('client.join.error_length');
+    expect(landingViewModel({ openEntryId: 'join_peer' }).join.errorId).toBe(null);
+  });
+
+  it('says a joining host is NOT hosting, from a field on the row', () => {
+    // A peer awaiting a code has opened no session of its own, and saying so is
+    // `statusId` on the row rather than a comparison of the open id to a name.
+    expect(landingViewModel({ openEntryId: 'join_peer' }).status.sessionId)
+      .toBe('server.landing.status_peer');
+    expect(landingViewModel({ openEntryId: 'connect_host' }).status.sessionId)
+      .toBe('server.landing.status_client');
+    // The routes that ARE hosting keep the default, so the field is worn only
+    // by the rows that need it.
+    expect(landingViewModel({ openEntryId: 'new_game' }).status.sessionId)
+      .toBe('server.landing.status_hosting');
+    expect(landingViewModel({ openEntryId: 'load_game' }).status.sessionId)
+      .toBe('server.landing.status_hosting');
+  });
+
+  it('takes the join descriptor away with the stage where it cannot be served', () => {
+    // Join as Peer is offered on the native menu and cannot be opened there:
+    // the Game Master profile is a BROWSER profile. A row whose stage is gone
+    // must not still carry a code field for something to find.
+    const native = landingEntries('native', LANDING_ENTRIES)
+      .find((e) => e.id === 'join_peer');
+    expect(native.stage).toBe(null);
+    expect(native.docks).toBe(null);
+    expect(native.join).toBe(null);
+    const vm = landingViewModel({ platform: 'native', openEntryId: 'join_peer' });
+    expect(vm.stage).toBe('idle');
+    expect(vm.join).toBe(null);
+    // ...and the shipped row is untouched: the copy is the surface's view of it.
+    expect(joinOf('join_peer').action).toBe('boot-game-master');
   });
 });

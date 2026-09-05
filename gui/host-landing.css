@@ -91,7 +91,8 @@
  *
  * Type: the canvas's 11px goes to --text-xs, 13px to --text-md, 15px to
  * --text-lg and 17px to --text-xl (the ramp has no 17 and the host surface is
- * a television across a room, so it rounds UP). The 32px wordmark keeps its
+ * a television across a room, so it rounds UP) — and, since issue #1364, the
+ * join field's 22px to --text-2xl by the same rule. The 32px wordmark keeps its
  * viewport scaling with ramp rungs at the ends of the clamp, which is the form
  * #1357's table asks for rather than collapsing it to one fixed rung.
  *
@@ -511,6 +512,181 @@
   background: rgba(var(--rgb-base), 0.88);
   overflow-y: auto;
   clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+}
+
+/* ── The docked join-code panel ───────────────────────────────────────── */
+/*
+ * The stage BOTH join routes open (issue #1364), and the third panel this
+ * column borrows. Written beside the other two rather than folded into either,
+ * for the reason the catalogue's block is written beside the picker's: they are
+ * alternative middle columns and one node docks at a time.
+ *
+ * ONE panel for two routes, not two. Join as Peer and Connect to Host ask the
+ * operator the same question — eight letters — and differ only in what a good
+ * answer means, which is a `join` descriptor on each row and not a second set
+ * of rules here. A stylesheet that drew them separately would be the place the
+ * two came to look like different screens.
+ *
+ * `display: none` at rest is what keeps this panel from ever being a layer of
+ * its own: it is on screen exactly while `gui/host-landing-render.js` has it
+ * docked, which is the whole of "the code is typed on the landing". It is
+ * declared here and not in server.html's inline sheet because, unlike
+ * `#save-slots-panel`, this node has no life outside the landing — there is no
+ * undocked geometry for it to wear.
+ *
+ * The chamfer, the edge rule and the panel fill are the picker's and the
+ * catalogue's, unchanged: three stages of one landing.
+ */
+#landing-join-panel { display: none; }
+#landing-join-panel.landing-docked {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+  /* No cog above this column — the rail holds the keep-out, exactly as it does
+     for the two panels above. */
+  padding: 20px 18px 18px;
+  border: 1px solid var(--edge-faint);
+  background: rgba(var(--rgb-base), 0.88);
+  overflow-y: auto;
+  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+}
+
+/* Which role this code joins AS, and what that means. The design's accent
+   sidebar: a lit ground with the accent BOUNDARY down its left edge, which is
+   --cyan — --signal is the foreground on top of it and never the rule. */
+.landing-join-role {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  background: var(--cyan-deep);
+  border-left: 3px solid var(--cyan);
+}
+.landing-join-role-k {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: var(--text-xs);
+  line-height: 1;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--signal);
+}
+.landing-join-role-v {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--ink-dim);
+}
+
+/*
+ * The field.
+ *
+ * The design draws eight separate cells with a caret walking along them. This
+ * is ONE field, and that is a decision rather than a shortcut: the design's own
+ * hint offers "or paste the whole code", and a pasted structured code is two
+ * identifiers and a suffix — far more than eight cells can hold. One field
+ * takes both routes, and `gui/join-code.js` already tells them apart. What
+ * survives from the canvas is the cell's TREATMENT — a card fill, a control
+ * border, and the accent as the typed letters.
+ *
+ * The type size is the canvas's 22px, which the ramp has no rung for; it rounds
+ * UP to --text-2xl, the way this sheet's 17px rounds up to --text-xl, because
+ * these letters are read aloud across a room as often as they are typed.
+ */
+.landing-join-code {
+  width: 100%;
+  box-sizing: border-box;
+  height: 62px;
+  min-height: var(--control-hit-min);
+  padding: 0 16px;
+  background: var(--surface-card);
+  /* --edge-strong, not --edge-control: the same measurement the menu entries
+     record above — WCAG 1.4.11 judges a control boundary against the ADJACENT
+     colour, which here is this field's own --surface-card fill. */
+  border: 1px solid var(--edge-strong);
+  color: var(--signal);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: var(--text-2xl);
+  line-height: 1;
+  letter-spacing: var(--tracking);
+  text-transform: uppercase;
+  clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px);
+}
+.landing-join-code::placeholder {
+  color: var(--ink-faint);
+  letter-spacing: var(--tracking);
+  text-transform: none;
+}
+/* The chamfer eats an outset ring — see this sheet's siblings and
+   tests/client/control-floors.test.js — so the ring is drawn inside the box.
+   `:focus` as well as `:focus-visible`, because a field an operator has clicked
+   into is one they are typing in and the caret alone is a thin promise on a
+   television. */
+.landing-join-code:focus-visible,
+.landing-join-code:focus {
+  outline: none;
+  border-color: var(--cyan);
+  background: var(--cyan-deep);
+  box-shadow: inset 0 0 0 var(--focus-ring-width) var(--focus-ring);
+}
+
+.landing-join-hint {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--ink-faint);
+}
+
+/* A refusal. --fire because it is the one thing on this panel the operator has
+   to act on, and the row collapses whenever there is nothing to say: an alert
+   region that always had a box would be a permanent warning. */
+.landing-join-error {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  letter-spacing: var(--tracking);
+  color: var(--fire);
+}
+.landing-join-error:empty { display: none; }
+
+.landing-join-foot { margin-top: auto; display: flex; align-items: center; gap: 12px; }
+.landing-join-cta {
+  flex: 1;
+  height: 52px;
+  min-height: var(--control-hit-min);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 16px;
+  background: var(--cyan-deep);
+  border: 1px solid var(--cyan);
+  color: var(--signal);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--text-md);
+  line-height: 1;
+  letter-spacing: var(--tracking);
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.18s, border-color 0.18s;
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+}
+.landing-join-cta:hover { background: var(--cyan-dim); border-color: var(--signal); }
+.landing-join-cta:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 var(--focus-ring-width) var(--focus-ring);
 }
 
 /* ── The hull column ──────────────────────────────────────────────────── */

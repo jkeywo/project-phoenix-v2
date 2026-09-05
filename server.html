@@ -29,10 +29,46 @@
   <script>
     // Explicit production rendererless GM route (#1291). This is evaluated
     // before boot and is independent of the WebDriver automation probe.
-    window.__phoenixGmPage = new URLSearchParams(location.search).get('gm') === '1';
-    if (window.__phoenixGmPage) {
-      document.documentElement.classList.add('phoenix-gm-page');
-      document.documentElement.dataset.phoenixBootRequest = 'browser-game-master';
+    //
+    // ── The BOOT REQUEST, and why it is a function now (issue #1364) ──────
+    //
+    // Nothing has booted while the landing's FIRST paint is on screen:
+    // `is_browser_gm` is read from a thread-local INSIDE `wasm_init`
+    // (src/server/bridge.rs), and `wasm_init` runs from `startServer()` — after
+    // a world is committed, not at page load. So the profile can still be
+    // chosen after this script has run, which is what lets the landing's Join
+    // as Peer set it in place instead of navigating to `?gm=1` and reloading.
+    //
+    // "First paint" is meant literally, and is the whole extent of the licence:
+    // the landing COMES BACK after a Game Over with a world already loaded
+    // (issue #756), and by then the request is a dead letter — `wasm_init`
+    // throws-to-unwind and runs once. That second landing is why Join as Peer
+    // carries `stagePreBoot` in gui/host-landing-view.js: the route is gone
+    // once this page has booted, rather than setting a request nothing reads
+    // over an app Bevy already built as a `BrowserHost`.
+    //
+    // ONE spelling of "request the Game Master profile", called from two
+    // places: this line for the query parameter, which keeps every existing
+    // link and bookmark working, and the landing's join hook. A second copy
+    // would be the flag and the class disagreeing the first time either moved.
+    //
+    // It TAKES BACK as well as asks, on the one argument, for the same reason:
+    // the landing commits the request before joining — `__hostSetFleetRole`
+    // navigates to `?gm=1` unless the flag is already up, so the role a member
+    // joins with cannot be chosen after the fact — and a fleet that refuses the
+    // code must leave no trace of a profile the operator never got. An
+    // `undo` spelled out at the call site would be the second copy this is one
+    // function to avoid.
+    window.__phoenixRequestGameMaster = function (wanted) {
+      const on = wanted !== false;
+      window.__phoenixGmPage = on;
+      document.documentElement.classList.toggle('phoenix-gm-page', on);
+      if (on) document.documentElement.dataset.phoenixBootRequest = 'browser-game-master';
+      else delete document.documentElement.dataset.phoenixBootRequest;
+    };
+    window.__phoenixGmPage = false;
+    if (new URLSearchParams(location.search).get('gm') === '1') {
+      window.__phoenixRequestGameMaster();
     }
   </script>
   <link rel="icon" type="image/x-icon" href="assets/favicon.ico" />
@@ -1583,6 +1619,44 @@
        its contents, importer included, once WASM can answer wasm_list_save_slots. -->
   <aside id="save-slots-panel"></aside>
 
+  <!-- The join-code stage (issue #1364), and the THIRD panel the landing's
+       middle column borrows. A body-level sibling of the two above it for the
+       same reason they are siblings of each other: one node docks at a time,
+       and a panel nested inside another would travel with it.
+
+       Both join routes borrow this one node — Join as Peer and Connect to Host
+       — because they ask the same question and differ only in what a good
+       answer means. Which of them is showing is `gui/host-landing-view.js`'s
+       `join` descriptor on the open row, and every string below is written by
+       gui/host-landing-render.js from it: there is no `data-i18n` here and no
+       English, because the same element says "Game master peer" on one route
+       and "Crew console client" on the other.
+
+       It carries no <form>. A form's implicit submit is a page navigation, and
+       this panel's whole point is that Join as Peer does not reload the page —
+       the field's Return key and the button both reach the one hook instead. -->
+  <aside id="landing-join-panel">
+    <div class="landing-join-role">
+      <span id="landing-join-role" class="landing-join-role-k"></span>
+      <span id="landing-join-blurb" class="landing-join-role-v"></span>
+    </div>
+    <label id="landing-join-label" class="landing-eyebrow" for="landing-join-code"></label>
+    <!-- No `maxlength`. The other route through this one field is a paste of
+         the whole structured code — two identifiers and a suffix — and a bound
+         invented here would truncate it into a `malformed` refusal that says
+         nothing about truncation. This is the same reasoning the settings cog's
+         fleet field records, and the same conclusion. -->
+    <input id="landing-join-code" class="landing-join-code" type="text"
+      autocomplete="off" autocapitalize="characters" spellcheck="false" />
+    <p id="landing-join-hint" class="landing-join-hint"></p>
+    <!-- `role="alert"` so a refusal is announced rather than left for a reader
+         to go looking for: the field keeps focus after a failed attempt. -->
+    <p id="landing-join-error" class="landing-join-error" role="alert"></p>
+    <div class="landing-join-foot">
+      <button id="landing-join-submit" class="landing-join-cta" type="button"></button>
+    </div>
+  </aside>
+
   <!-- ── HTML Lobby Panel (issue #436) ──────────────────────────────────── -->
   <div id="lobby-panel" class="lobby-panel" style="display:none;">
     <!-- Background overlay -->
@@ -2932,6 +3006,19 @@
     // module has not run and window.rendezvousTransport does not exist yet.
     // Same hazard the ICE-config latch below exists for.
     let rendezvousBase = null;
+    // ...and the latch that says it has been (issue #1364). `rendezvousBase` is
+    // resolved after initHostTransport's `await getIceServers()` — a network
+    // fetch to the ICE/TURN worker — so "the page has loaded" and "this host
+    // can dial" are two different moments, and any join fired between them is a
+    // silent no-op: `__hostFleetJoin`'s first guard reads this very variable.
+    // `joinFleetFromFragment` never needed the latch because it is CALLED from
+    // inside initHostTransport, one line after the assignment; the landing's
+    // join is fired by an operator and has no such ordering, which is why it
+    // waits on this as well as on the WASM exports. Shaped like the ICE latch
+    // below it: a promise resolved once, so waiting is the same whether the
+    // transport came up before the operator typed or after.
+    let _resolveTransportReady;
+    const transportReady = new Promise(resolve => { _resolveTransportReady = resolve; });
     // Held so a second entry into initHostTransport() cannot register a SECOND
     // host record and mint a second code while the first is still live.
     // Recovering from a LOST service is the transport's own business — it
@@ -4465,15 +4552,35 @@
      * judges it against `claimSlot` and, if valid, seats this host AS that slot and
      * broadcasts the fleet-wide recovery. A frozen fleet answers an ordinary join
      * `recovery-only`, so a replacement must pass the slot it means to recover.
+     *
+     * Resolves `{ok, reason}` and not a bare boolean (issue #1364). The reason
+     * is a MACHINE reason on the shared vocabulary of `gui/join-code.js`, so a
+     * caller that has to word the failure passes it to `reasonStringId` rather
+     * than inventing a sentence — which is exactly what the landing's Join as
+     * Peer does, having no fleet panel to fall back on while the landing is up.
+     * `false` said "it did not happen" and nothing about why: the three guards
+     * below are silent no-ops otherwise, and the first of them (no
+     * `rendezvousBase`) is reachable simply by typing a code before the ICE
+     * fetch has come back.
      */
     window.__hostFleetJoin = async function(code, claim = null) {
-      if (fleetHandle || !window.fleetSession || !rendezvousBase) return false;
+      // Already in a fleet: not a refusal of this code, so it says so rather
+      // than borrowing a sentence about the letters.
+      if (fleetHandle) return { ok: false, reason: 'already-hosting' };
+      // No transport to dial with — the module never loaded, or the ICE fetch
+      // this host's `rendezvousBase` waits behind has not come back yet. Both
+      // are the join SERVICE being out of reach from here.
+      if (!window.fleetSession || !rendezvousBase) return { ok: false, reason: 'unreachable' };
       // This host presents its own stamp below, so its content identity must be
       // established first — otherwise it declares an empty one and is refused
       // by a lead that knows perfectly well what it is running.
       await pushScenarioManifest();
       const data = await fleetData();
-      if (!data || fleetHandle) return false;
+      // The authored format table is what a code is judged against; without it
+      // nothing can be composed or checked, which is the same unreachable.
+      if (!data) return { ok: false, reason: 'unreachable' };
+      // ...and an await is long enough for another route to have joined.
+      if (fleetHandle) return { ok: false, reason: 'already-hosting' };
       fleetFault = null;
       fleetNotice = null;
       let handle = null;
@@ -4548,7 +4655,7 @@
       if (refusal) {
         try { handle.close(); } catch (e) { /* nothing was ever opened */ }
         leaveFleet(refusal);
-        return false;
+        return { ok: false, reason: refusal };
       }
       adoptFleet(handle);
       rememberGmIdentity(identityCode, {
@@ -4559,7 +4666,12 @@
       });
       fleetSuffix = handle.code ? handle.code.suffix : null;
       paintFleetPanel();
-      return true;
+      // The link is open and no refusal came back with it. A refusal that
+      // arrives LATER — the lead's content-stamp verdict, `fleet-full`,
+      // `recovery-only` — is the ordinary in-fleet path and still reports
+      // through `leaveFleet` to the fleet panel; this answers the attempt, not
+      // the membership.
+      return { ok: true, reason: null };
     };
 
     /** The operator's admission lever. Lead only; inert once frozen. */
@@ -4765,6 +4877,12 @@
       rendezvousBase = transport
         ? transport.rendezvousBaseFromLocation(location.search)
         : null;
+      // Resolved HERE and not at the end of this function: what a join waits
+      // for is this variable being decided, and a transport module that failed
+      // to load decides it as `null` — which `__hostFleetJoin` then reports as
+      // `unreachable` rather than leaving an operator with no sentence at all
+      // (issue #1364).
+      _resolveTransportReady();
       if (window.transportLevers) {
         transportLevers = window.transportLevers.transportLeversFromLocation(location.search);
       }
@@ -5214,6 +5332,185 @@
     // two documents is a second authority the first time either forgets it.
     let _landingOpenEntry = null;
     let _landingDismissed = false;
+    /** The string id of the last join refusal, or null (issue #1364). */
+    let _landingJoinError = null;
+
+    /**
+     * How long a landing join waits for this host's transport and exports
+     * before answering anyway (issue #1364).
+     *
+     * Not a protocol timeout — nothing is retried and nothing is abandoned on
+     * the wire. It is the bound on SILENCE: past it, `__hostFleetJoin` runs and
+     * reports `unreachable` from its own guards, so an operator whose ICE fetch
+     * is hanging (the 2026-08 TURN-worker failure mode) gets a sentence under
+     * the field instead of a button that does nothing for ever. Generous
+     * because the honest answer on a slow network is "still connecting", and
+     * the wrong answer costs a retyped code.
+     */
+    const LANDING_JOIN_WAIT_MS = 15_000;
+
+    /**
+     * The two things a fleet join needs from this page, waited for together.
+     *
+     * `hostStampField()` is the delivery stamp, which arrives with the WASM
+     * EXPORTS (`TrunkApplicationStarted`), and `transportReady` is
+     * `rendezvousBase`, which arrives with initHostTransport's ICE fetch. They
+     * are independent: a warm WASM cache and a slow ICE worker put the exports
+     * first, which is precisely the window in which the old code fired a join
+     * that `__hostFleetJoin` dropped on its `!rendezvousBase` guard with no log
+     * and no UI. `joinFleetFromFragment` waits on the stamp alone because it is
+     * CALLED from inside initHostTransport, one line after `rendezvousBase` is
+     * assigned; an operator's click has no such ordering, so it waits on both.
+     */
+    function landingJoinReady() {
+      const stamp = hostStampField() ? Promise.resolve() : new Promise(function (resolve) {
+        window.addEventListener('TrunkApplicationStarted', function () { resolve(); }, { once: true });
+      });
+      const bound = new Promise(function (resolve) { setTimeout(resolve, LANDING_JOIN_WAIT_MS); });
+      return Promise.race([Promise.all([stamp, transportReady]), bound]);
+    }
+
+    /**
+     * What a good join code DOES, keyed by the open row's own `action`.
+     *
+     * A table and not a switch, for the reason the menu itself is a table: a
+     * third route that also takes a code adds a row in
+     * gui/host-landing-view.js and an entry here, and neither this function nor
+     * the renderer nor the view model learns its name. The two actions are
+     * genuinely different code paths — one boots this page as a Game Master
+     * peer, the other leaves for the console page — so what is shared is the
+     * field, the parsing and the refusal, which is exactly what
+     * `landingJoinAttempt` already covers.
+     *
+     * `full` is the structured code `landingJoinAttempt` composed, never the
+     * raw letters: both legs downstream want the whole identifier.
+     */
+    const LANDING_JOIN_ACTIONS = {
+      /**
+       * Join as Peer. The Game Master profile is a BOOT decision and nothing
+       * has booted while this row's stage can be opened — `is_browser_gm` is
+       * read inside `wasm_init`, which `startServer()` calls after a world is
+       * committed — so the request is simply set here, in place, and
+       * `finishInit` selects the profile from it exactly as it does for
+       * `?gm=1`. No page reload, and no second composition of an app Bevy could
+       * not swap anyway. "While this row's stage can be opened" is the whole
+       * licence and is enforced on the ROW (`stagePreBoot`), because the landing
+       * does come back with a world already loaded after a Game Over; the guard
+       * below is the belt to that braces, so a caller reaching this table by
+       * another path than the menu cannot make the swap either.
+       *
+       * ORDER, and why it is this one. `__hostSetFleetRole` is the single owner
+       * of `fleetRole` and NAVIGATES to `?gm=1` whenever the role and
+       * `__phoenixGmPage` disagree, so the request must be committed before the
+       * role; and the role must be set before the join, because
+       * `createFleetMember` is handed `fleetRole` and a peer that joined as a
+       * ship cannot be promoted afterwards. That is why this commits first and
+       * takes the request BACK on a refusal rather than deferring it: a deferred
+       * commit would either reload the page on the role change or join the
+       * fleet as the wrong kind of peer.
+       *
+       * Then the join, down the same wire the URL-fragment route uses, once
+       * this page can actually make one — see `landingJoinReady`, which waits
+       * for the delivery stamp AND the transport rather than for the stamp
+       * alone. A refusal is worded under the field from the machine reason the
+       * fleet gave, because the fleet panel that normally carries one is
+       * `#overlay`'s child and the GM page hides `#overlay`: the surface that
+       * would report the failure is removed by the same request that starts the
+       * attempt, so this route has to answer for itself.
+       *
+       * Only then does the landing move to the World picker. A fleet MEMBER
+       * picks its own scenario and its own hull — that is why `fleetJoinUrl`
+       * deliberately drops `?scenario` from the invitation it publishes — so a
+       * code alone cannot boot anything, and the honest next question is which
+       * World the fleet is flying. Choosing it reaches `driveWorldLoad` and
+       * `startPhoenix` down the path every other route takes.
+       */
+      'boot-game-master': function (full) {
+        // The row's `stagePreBoot` should have made this unreachable; if a
+        // world IS loaded, say so rather than composing a GM document over an
+        // app that booted as a `BrowserHost`.
+        if (_worldLoadedIntoBevy) {
+          _landingJoinError = 'server.landing.join_after_boot';
+          window.__hostRenderLanding();
+          return;
+        }
+        // A page already on `?gm=1` was composed as a GM page by the URL, not
+        // by this attempt, so a refusal must not take that away from it.
+        const requested = !!window.__phoenixGmPage;
+        const refuse = function (reason) {
+          if (!requested) {
+            // Undo in the mirror order: the flag has to be down before the role
+            // moves, or `__hostSetFleetRole` navigates on the way back out.
+            window.__phoenixRequestGameMaster(false);
+            if (typeof window.__hostSetFleetRole === 'function') {
+              window.__hostSetFleetRole('ship');
+            }
+          }
+          // The landing is still on the join stage — nothing moved it — so the
+          // sentence lands under the field the code was typed into, with the
+          // eight letters still in it.
+          _landingJoinError = window.joinCode.reasonStringId(reason, 'server');
+          window.__hostRenderLanding();
+        };
+        window.__phoenixRequestGameMaster();
+        if (typeof window.__hostSetFleetRole === 'function') window.__hostSetFleetRole('gm');
+        landingJoinReady()
+          .then(function () { return window.__hostFleetJoin(full); })
+          .then(function (result) {
+            if (result && result.ok) showLandingAtPicker();
+            else refuse(result ? result.reason : 'unknown');
+          })
+          .catch(function (error) {
+            // A throw is the one outcome with no machine reason of its own, and
+            // an unhandled rejection here is the silence this whole path exists
+            // to remove — so it is caught and worded rather than logged only.
+            console.warn('[landing] fleet join failed', error);
+            refuse('unknown');
+          });
+      },
+      /**
+       * Connect to Host. A crew code names a ship to take a seat on, and the
+       * page that does that is the console page — so this hands the code over
+       * in the fragment and leaves, which is the same URL a QR encodes for a
+       * phone (`joinUrlForCode`) rather than a second shape of invitation.
+       *
+       * This is the one route in the slice that navigates, and it navigates to
+       * a DIFFERENT page. AC1's "no page reload" is about Join as Peer, which
+       * boots this one in place.
+       */
+      'open-client-page': function (full) {
+        const transport = window.rendezvousTransport;
+        if (!transport) return;
+        window.location.assign(
+          transport.joinUrlForCode(location.href, full, rendezvousBase),
+        );
+      },
+    };
+
+    /**
+     * An operator pressed Join (or Return) on the landing's code field.
+     *
+     * Nothing is judged here: `landingJoinAttempt` reads the row's own
+     * namespace and surface and answers with either a structured code or the
+     * `strings.csv` id of a refusal the phone's entry field already uses. This
+     * only remembers the refusal so the next render can show it, or runs the
+     * action the row named.
+     */
+    function submitLandingJoin(join, typed) {
+      if (!window.hostLanding) return;
+      fleetData().then(function (data) {
+        const attempt = window.hostLanding.landingJoinAttempt(join, typed, data);
+        if (!attempt.ok) {
+          _landingJoinError = attempt.errorId;
+          window.__hostRenderLanding();
+          return;
+        }
+        _landingJoinError = null;
+        const run = LANDING_JOIN_ACTIONS[attempt.action];
+        if (run) run(attempt.code);
+        else window.__hostRenderLanding();
+      });
+    }
 
     function landingBuildId() {
       const meta = document.querySelector('meta[name="phoenix-build-id"]');
@@ -5257,15 +5554,25 @@
         deepStage: deepStage,
         platform: 'web',
         build: landingBuildId(),
+        joinErrorId: _landingJoinError,
+        // Round two: the landing is back (`showLandingAtPicker`) over a world
+        // that is already loaded into a running engine, so every route whose
+        // row says it is a PRE-BOOT one renders inert (issue #1364). This
+        // page's own lifecycle flag, passed in for the reason `_landingOpenEntry`
+        // is — the module holds no memory of either.
+        booted: _worldLoadedIntoBevy,
       });
       window.hostLandingRender.renderHostLanding(document, vm, t, {
         pick: function (entryId) {
-          // The WEB menu, not the shipped table: a row this surface offers but
-          // cannot open yet comes back from `landingEntries` with its stage
-          // taken away (`stagePlatforms`), and the judge of a click has to be
-          // looking at the same menu the view model above rendered.
+          // The WEB menu AS IT IS NOW, not the shipped table: a row this
+          // surface offers but cannot open — yet (`stagePlatforms`) or any
+          // longer (`stagePreBoot`) — comes back from `landingEntries` with its
+          // stage taken away, and the judge of a click has to be looking at the
+          // same menu the view model above rendered. The two calls take the
+          // same arguments for exactly that reason.
           const next = window.hostLanding.nextOpenEntry(
-            _landingOpenEntry, entryId, window.hostLanding.landingEntries('web'),
+            _landingOpenEntry, entryId,
+            window.hostLanding.landingEntries('web', null, { booted: _worldLoadedIntoBevy }),
           );
           // A click on one of the entries whose slice has not landed yet
           // returns the open entry unchanged, and the view model is a pure
@@ -5277,8 +5584,16 @@
           // change something (New Game), which this cannot skip.
           if (next === _landingOpenEntry) return;
           _landingOpenEntry = next;
+          // A refusal describes ONE attempt on ONE route. Leaving it behind
+          // when the stage changes would put "that is a crew code" over the
+          // field that wants a crew code (issue #1364).
+          _landingJoinError = null;
           window.__hostRenderLanding();
         },
+        // A typed join code, carried back with the row's own `join` descriptor
+        // rather than with its entry id — so what happens next is the row's
+        // decision and not a comparison made here (issue #1364).
+        submitJoin: submitLandingJoin,
         // Fullscreen is implemented ONCE, in gui/page-chrome.js's
         // initFullscreen, which binds #fullscreen-btn. That button lives in
         // #top-bar over the Bevy canvas and is buried under this panel, so the
@@ -5307,6 +5622,7 @@
     function hideLanding() {
       _landingDismissed = true;
       _landingOpenEntry = null;
+      _landingJoinError = null;
       if (window.hostLandingRender) window.hostLandingRender.undockLandingPanels(document);
       const panel = document.getElementById('landing-panel');
       if (panel) panel.style.display = 'none';
@@ -5327,6 +5643,7 @@
       const panel = document.getElementById('landing-panel');
       if (panel) panel.style.display = '';
       _landingOpenEntry = 'new_game';
+      _landingJoinError = null;
       window.__hostRenderLanding();
     }
 

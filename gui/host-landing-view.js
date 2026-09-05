@@ -28,10 +28,13 @@
  *   | `docks`       | this entry's stage is an EXISTING panel node — named by element id — moved into the middle column, rather than markup of its own |
  *   | `platforms`   | which hosts offer it at all — `['native']` is how #1365's Exit to Desktop arrives without a build check anywhere in this file |
  *   | `stagePlatforms` | which of those hosts can actually OPEN its stage — absent means all of them |
+ *   | `stagePreBoot` | its stage opens only BEFORE this host has booted a world — absent means at any point in the session (issue #1364) |
+ *   | `statusId`    | what the status bar says while this entry is open, for a route that is not "hosting" |
+ *   | `join`        | this entry's stage is a JOIN CODE field: which typed namespace a bare suffix composes into, which surface words a refusal, which action a good code runs, and the four string ids the panel is written from (issue #1364) |
  *
  * Adding an entry is adding a row. Nothing below reads an id by name.
  *
- * The last two are deliberately not one field, because they say different
+ * `platforms` and `stagePlatforms` are deliberately not one field, because they say different
  * things and a slice that conflated them would lose a row rather than record a
  * gap. `platforms` is DOCTRINE: this surface does not offer this route and
  * never will — `connect_host` is absent from the native menu because a native
@@ -39,6 +42,16 @@
  * WORK NOT DONE: the route belongs here, this surface cannot serve it yet, so
  * the row renders and is inert exactly like a row whose `stage` is still
  * `null`. Load Game is the first of those — see its row, and #1363's AC5.
+ *
+ * `stagePreBoot` is the third of that family and says WHEN rather than where:
+ * the landing comes back after a Game Over (`showLandingAtPicker`, issue #756),
+ * and by then this page has a world loaded into a running Bevy that was
+ * composed from a boot profile. A route whose whole job is to decide that
+ * profile — or to leave the page entirely — cannot be offered on that second
+ * landing, so both join rows carry it. Like the other two, it takes the STAGE
+ * away and leaves the row: an operator who used Join as Peer before the mission
+ * should find it where they left it, saying it is not available now, rather
+ * than find the menu silently one row shorter.
  *
  * ## A ladder is a field, not a second entry (issue #1362)
  *
@@ -54,13 +67,25 @@
  *
  * ## An entry with no stage is inert, and that is deliberate
  *
- * `new_game` carries `stage: 'world-picker'` and, since issue #1363,
- * `load_game` carries `stage: 'save-catalogue'`; the other three carry `stage:
- * null` and are inert — they render, and clicking them changes nothing. An
- * inert entry that silently pretended to open something would be worse than a
- * button that plainly does not work yet, and each of the three has a sibling
- * issue that gives it a stage of its own. [`nextOpenEntry`] is where "inert"
- * is enforced, in one place, rather than at each caller.
+ * `new_game` carries `stage: 'world-picker'`, `load_game` carries `stage:
+ * 'save-catalogue'` (issue #1363) and both join routes carry `stage:
+ * 'join-code'` (issue #1364); `load_mod_pack` alone still carries `stage: null`
+ * and is inert — it renders, and clicking it changes nothing. An inert entry
+ * that silently pretended to open something would be worse than a button that
+ * plainly does not work yet, and it has a sibling issue that gives it a stage
+ * of its own. [`nextOpenEntry`] is where "inert" is enforced, in one place,
+ * rather than at each caller.
+ *
+ * ## Two rows, one stage, one panel (issue #1364)
+ *
+ * Join as Peer and Connect to Host both open `join-code` and both borrow
+ * `#landing-join-panel`, because they ask the operator the same question —
+ * eight letters — and differ only in what a good answer MEANS. That difference
+ * is the row's `join` descriptor and nothing else: which typed namespace the
+ * suffix composes into, which surface's wording a refusal takes, and which
+ * action the caller runs. A third route that also wants a code adds a row with
+ * a `join` on it; nothing here, in the renderer or in the stylesheet learns its
+ * name.
  *
  * A row can also be inert on ONE surface: [`landingEntries`] takes the `stage`
  * away from a row whose `stagePlatforms` does not list the platform asking, so
@@ -70,6 +95,15 @@
  * the list [`landingEntries`] gave them rather than the raw table: the judge of
  * a click has to be looking at the same menu the operator is.
  */
+
+// The join code's own module, imported rather than reimplemented: it already
+// canonicalises what a player typed, tells a bare suffix from a pasted
+// structured code, and maps every machine reason to the `strings.csv` id the
+// phone's entry field renders. A second parser on the landing would be a second
+// answer to "what is wrong with this code" (issue #1364's AC4). It is pure — no
+// DOM, no transport — which is what makes importing it here safe for the two
+// surfaces that load this file as a module.
+import { parseJoinCode, reasonStringId } from './join-code.js';
 
 /**
  * The menu, one row per entry, in the order they are offered.
@@ -155,8 +189,56 @@ export const LANDING_ENTRIES = [
     id: 'join_peer',
     labelId: 'server.landing.join_peer',
     descId: 'server.landing.join_peer_desc',
-    stage: null,
+    // Issue #1364. The join itself is not new — `__hostFleetJoin` has answered
+    // a typed fleet code since #1114 — and neither is the Game Master profile.
+    // What this row adds is WHERE the code is typed: the front door, instead of
+    // a field behind the settings cog or a hand-edited `#fragment`.
+    stage: 'join-code',
+    docks: 'landing-join-panel',
+    // Offered on BOTH, because "join someone else's session as a game master"
+    // is a route a native build has every business showing.
     platforms: ['web', 'native'],
+    // ...but only the browser host can OPEN it, and this is `stagePlatforms`
+    // rather than `platforms` for the same reason Load Game's is: the route
+    // belongs here and the work does not exist yet, which is a gap to record on
+    // the row and not a claim that native hosts never game-master.
+    //
+    // What a slice closing it has to buy: the Game Master profile is a BROWSER
+    // profile (`BootProfile::BrowserGameMaster`, selected in `wasm_init` from a
+    // thread-local only `wasm_prepare_game_master` sets), the native lobby
+    // document carries no `#landing-join-panel`, and `HostLobbyBridge` has no
+    // channel to carry a typed code back to the host process. None of those is
+    // a port of this row.
+    stagePlatforms: ['web'],
+    // ...and only before this host has booted a world. The Game Master profile
+    // is read INSIDE `wasm_init` (`is_browser_gm`, src/server/bridge.rs), which
+    // throws-to-unwind and runs exactly once per page: after it, the request
+    // this route sets is a dead letter and setting it would only compose the
+    // document as a GM page over an app Bevy already built as a `BrowserHost`.
+    // That is the runtime profile swap issue #1364 says cannot happen, and the
+    // landing DOES come back with a world loaded — Return to Lobby lands on the
+    // World picker (issue #756). A reload is the honest way to change profile,
+    // so the row says the stage is a pre-boot one and the operator is not
+    // offered a lever that cannot move.
+    stagePreBoot: true,
+    statusId: 'server.landing.status_peer',
+    join: {
+      // A bare suffix typed here is a FLEET code, so it composes into the
+      // server namespace — the same one `joinFleetFromFragment` parses with,
+      // because they are two doors onto one join.
+      namespace: 'server',
+      // ...and a refusal is read on a viewscreen, where several of the phone's
+      // sentences are actively wrong. `reasonStringId`'s server surface is what
+      // says "that is a crew code" instead of its inverse (issue #1114).
+      surface: 'server',
+      // Which of the caller's join actions a good code runs. A NAME, not a
+      // function, because this module is pure and the two actions live where
+      // the page lifecycle does.
+      action: 'boot-game-master',
+      roleId: 'server.landing.join_peer_role',
+      blurbId: 'server.landing.join_peer_blurb',
+      submitId: 'server.landing.join_peer_submit',
+    },
   },
   {
     // WEB ONLY, and this is the doctrine rather than a gap (issues #1361,
@@ -167,8 +249,29 @@ export const LANDING_ENTRIES = [
     id: 'connect_host',
     labelId: 'server.landing.connect_host',
     descId: 'server.landing.connect_host_desc',
-    stage: null,
+    stage: 'join-code',
+    docks: 'landing-join-panel',
     platforms: ['web'],
+    // Pre-boot for a different reason than its sibling: this route LEAVES the
+    // page (`joinUrlForCode`), and on the landing that comes back after a Game
+    // Over leaving means discarding a loaded world, a lobby of connected phones
+    // and whatever fleet this host is in — none of which the operator asked to
+    // end by typing a crew code. Round two is a re-selection, not a fresh page.
+    stagePreBoot: true,
+    statusId: 'server.landing.status_client',
+    // The same panel, the same field, a different answer: a crew code names a
+    // ship to take a seat on, so this route hands the code to the CLIENT page
+    // rather than booting anything here. That is a navigation and the one place
+    // in this slice where a page is left — see `joinUrlForCode`, which is
+    // already how a QR sends a phone to exactly that URL.
+    join: {
+      namespace: 'client',
+      surface: 'client',
+      action: 'open-client-page',
+      roleId: 'server.landing.connect_host_role',
+      blurbId: 'server.landing.connect_host_blurb',
+      submitId: 'server.landing.connect_host_submit',
+    },
   },
   {
     id: 'load_mod_pack',
@@ -186,6 +289,21 @@ const PLATFORM_LABEL = {
 };
 
 /**
+ * What every join route says about the FIELD itself (issue #1364).
+ *
+ * "Join code", "eight letters", "or paste the whole code" are facts about the
+ * authored format and not about the route, so both rows share them and neither
+ * repeats them. A row may still override any of the three by naming it in its
+ * own `join`, which is what a third route with a different kind of code would
+ * do — the defaults are merged UNDER the row, never over it.
+ */
+const JOIN_CODE_FIELD = {
+  labelId: 'server.landing.join_code_label',
+  placeholderId: 'server.landing.join_code_placeholder',
+  hintId: 'server.landing.join_code_hint',
+};
+
+/**
  * The entries a given platform offers, each carrying only what that platform
  * can actually do with it.
  *
@@ -200,20 +318,97 @@ const PLATFORM_LABEL = {
  * the whole vocabulary of "renders, and clicking it changes nothing". Nothing
  * downstream learns a platform name — the view model marks it `inert`, the
  * renderer writes `aria-disabled`, and [`nextOpenEntry`] refuses to open it,
- * all off the one field the three of them already read. `docks` and `deeper`
- * go with it: a stage nothing can open has neither a panel nor a ladder.
+ * all off the one field the three of them already read. `docks`, `deeper` and
+ * `join` go with it: a stage nothing can open has no panel, no ladder and no
+ * code field.
+ *
+ * `opts.booted` is that same pass asked about TIME rather than platform (issue
+ * #1364): this surface has a world loaded into a running engine, so every row
+ * carrying `stagePreBoot` loses its stage by exactly the mechanism above. One
+ * strip with two reasons and not two strips, because "renders, and clicking it
+ * changes nothing" has to mean one thing downstream — a second vocabulary for
+ * it would be a second answer for `nextOpenEntry` to disagree with.
+ *
+ * @param {'web'|'native'} platform which host is asking.
+ * @param {Array<object>|null} [entries] a table to use instead of the shipped one.
+ * @param {{booted?: boolean}} [opts] `booted` is "this host has already
+ *   committed to a world" — the caller's own lifecycle, held there for the
+ *   reason `openEntryId` is.
  */
-export function landingEntries(platform, entries) {
+export function landingEntries(platform, entries, opts) {
   const list = Array.isArray(entries) ? entries : LANDING_ENTRIES;
+  const booted = !!(opts && opts.booted);
   return list.filter(function (entry) {
     if (!entry || !entry.id) return false;
     if (!Array.isArray(entry.platforms)) return true;
     return entry.platforms.indexOf(platform) !== -1;
   }).map(function (entry) {
-    if (!entry.stage || !Array.isArray(entry.stagePlatforms)) return entry;
-    if (entry.stagePlatforms.indexOf(platform) !== -1) return entry;
-    return Object.assign({}, entry, { stage: null, docks: null, deeper: null });
+    if (!entry.stage) return entry;
+    const platformGap = Array.isArray(entry.stagePlatforms)
+      && entry.stagePlatforms.indexOf(platform) === -1;
+    const bootGap = booted && entry.stagePreBoot === true;
+    if (!platformGap && !bootGap) return entry;
+    return Object.assign({}, entry, {
+      stage: null, docks: null, deeper: null, join: null,
+    });
   });
+}
+
+/**
+ * Judge a typed join code against the open row's `join` descriptor.
+ *
+ * The whole of "a refused code explains what is wrong with it" (issue #1364's
+ * AC4), and pure, so that every refusal is a test rather than a claim about a
+ * click handler. Three things can be wrong and each has an existing sentence:
+ *
+ *   - the code does not parse — empty, the wrong length, a character outside
+ *     the alphabet, a word on the deny-list, a paste that lost a part. That is
+ *     `parseJoinCode`'s verdict, verbatim;
+ *   - the code parses but belongs to the OTHER typed namespace: a crew code
+ *     typed into Join as Peer, or a fleet code typed into Connect to Host. The
+ *     format exists precisely so this is answerable, and `wrong-type` is the
+ *     answer — worded per surface, so a viewscreen is not told its own fleet
+ *     code is a fleet code;
+ *   - the authored format table has not loaded, so nothing can be judged at
+ *     all. That is the join SERVICE being unreachable and says so, rather than
+ *     sending an operator back to retype a code that was already right.
+ *
+ * `data` is the parsed `assets/join/join-codes.json` the caller already holds —
+ * passed in rather than read from this module's globals, exactly as every
+ * function in `gui/join-code.js` takes one, so a test never depends on an
+ * installed table.
+ *
+ * @param {{namespace: string, surface: string, action: string}|null} join the
+ *   open row's descriptor. Absent — a stage that is not a code field — is not
+ *   an error the operator made, so it reports the service reason rather than
+ *   inventing a fourth failure nobody can act on.
+ * @param {string} raw what the operator typed or pasted.
+ * @param {object|null} data the authored join-code format table.
+ * @returns {{ok: true, code: string, action: string, namespace: string}
+ *          |{ok: false, errorId: string}}
+ */
+export function landingJoinAttempt(join, raw, data) {
+  const surface = (join && join.surface) || 'client';
+  if (!join || !data) return { ok: false, errorId: reasonStringId('unreachable', surface) };
+  let parsed;
+  try {
+    parsed = parseJoinCode(raw, join.namespace, data);
+  } catch (_) {
+    // A table this build does not speak throws rather than half-answering; the
+    // operator's remedy is the same as an unreachable service's.
+    return { ok: false, errorId: reasonStringId('unreachable', surface) };
+  }
+  if (!parsed.ok) return { ok: false, errorId: reasonStringId(parsed.reason, surface) };
+  // A PASTED full code carries its own namespace and may not be this route's.
+  // A bare suffix cannot get here wrong — it was composed into `join.namespace`
+  // above — so this branch is exactly the paste case, which is the one the
+  // typed format was invented to answer.
+  if (parsed.namespace !== join.namespace) {
+    return { ok: false, errorId: reasonStringId('wrong-type', surface) };
+  }
+  return {
+    ok: true, code: parsed.full, action: join.action, namespace: parsed.namespace,
+  };
 }
 
 /**
@@ -255,7 +450,9 @@ export function nextOpenEntry(openEntryId, entryId, entries) {
  *   platform?: 'web'|'native',
  *   build?: string,
  *   dismissed?: boolean,
+ *   booted?: boolean,
  *   entries?: Array<object>,
+ *   joinErrorId?: string|null,
  * }} [input]
  *   `deepStage` is how far along the open entry's `deeper` ladder the surface
  *   is (issue #1362). It is an input for the same reason `openEntryId` is: the
@@ -284,12 +481,26 @@ export function nextOpenEntry(openEntryId, entryId, entries) {
  *   The host PAGE passes nothing and keeps `hideLanding()`, which is its own
  *   lifecycle and not this model's.
  *
+ *   `booted` is the OTHER half of that lifecycle and the one `dismissed` cannot
+ *   answer: the landing is back on screen (so it is not dismissed) but a world
+ *   is already loaded into a running engine behind it — the Return to Lobby
+ *   round two of issue #756. It reaches [`landingEntries`], where it takes the
+ *   stage off every `stagePreBoot` row, and nothing else here reads it: which
+ *   routes that silences is on the rows, not in this function.
+ *
+ *   `joinErrorId` is the string id of the last refusal the open join stage
+ *   collected (issue #1364), and it is an input for the same reason
+ *   `openEntryId` is: the attempt is made by whoever owns the field, so the
+ *   memory of how it went is theirs too. [`landingJoinAttempt`] is what turns a
+ *   code into one, so the caller never words a refusal itself.
+ *
  * @returns {{
  *   stage: string,
  *   dismissed: boolean,
  *   openEntryId: string|null,
  *   deepStage: string|null,
  *   docks: string|null,
+ *   join: object|null,
  *   depth: number,
  *   rootClass: string,
  *   identity: {titleId: string, taglineId: string, logoAltId: string, platformLabelId: string},
@@ -301,7 +512,7 @@ export function landingViewModel(input) {
   const opts = input || {};
   const platform = opts.platform === 'native' ? 'native' : 'web';
   const dismissed = !!opts.dismissed;
-  const list = landingEntries(platform, opts.entries);
+  const list = landingEntries(platform, opts.entries, { booted: !!opts.booted });
 
   // An `openEntryId` naming an entry this platform does not offer (or an
   // entry that never had a stage) reads as closed rather than as a stage
@@ -356,6 +567,15 @@ export function landingViewModel(input) {
     // a second boolean beside the first would be the switch this table exists
     // to avoid.
     docks: (open && open.docks) || null,
+    // The open row's join descriptor, with the caller's last refusal folded
+    // onto it (issue #1364). A COPY of the row's own object rather than a
+    // hand-listed set of fields, so a route that grows a field on its `join`
+    // reaches the renderer without this line learning its name — the same
+    // reason `docks` is an id and not a boolean. `null` for every stage that is
+    // not a code field, which is the whole condition the renderer reads.
+    join: (open && open.join)
+      ? Object.assign({}, JOIN_CODE_FIELD, open.join, { errorId: opts.joinErrorId || null })
+      : null,
     // The track's offset, as a number the stylesheet reads through a custom
     // property. The DOCUMENT says only how deep it is; which columns that
     // slides, and whether it slides at all, is the stylesheet's business at
@@ -376,7 +596,14 @@ export function landingViewModel(input) {
     entries: entries,
     status: {
       platformLabelId: PLATFORM_LABEL[platform],
-      sessionId: open ? 'server.landing.status_hosting' : 'server.landing.status_no_session',
+      // What the open route calls itself, from the ROW, falling back to
+      // "hosting" for the routes that are hosting (issue #1364). Joining is not
+      // hosting — a peer awaiting a code has opened no session of its own — and
+      // saying so is one field on a row rather than a comparison of `open.id`
+      // to a name here.
+      sessionId: open
+        ? (open.statusId || 'server.landing.status_hosting')
+        : 'server.landing.status_no_session',
       build: { id: 'server.landing.build', params: { build: opts.build || 'dev' } },
     },
   };
@@ -385,5 +612,7 @@ export function landingViewModel(input) {
 // Expose for the classic-script consumer (server.html is not a module) — the
 // same self-registering pattern window.hostScenarios uses.
 if (typeof window !== 'undefined') {
-  window.hostLanding = { LANDING_ENTRIES, landingEntries, nextOpenEntry, landingViewModel };
+  window.hostLanding = {
+    LANDING_ENTRIES, landingEntries, nextOpenEntry, landingViewModel, landingJoinAttempt,
+  };
 }

@@ -57,6 +57,15 @@
  * rebuild and re-focused after it, and only when the rebuild is what took
  * focus away (see below).
  *
+ * ## The join field's value is the operator's, not the view model's
+ *
+ * The join-code stage (issue #1364) is written from `vm.join` like everything
+ * else here, with one exception that is deliberate: this never writes
+ * `#landing-join-code`'s value. Every render is a rebuild, and a rebuild that
+ * restored the value would fight somebody mid-word while one that cleared it
+ * would delete the eight letters a refusal is about. The sentences around the
+ * field are this module's; what is in it is theirs.
+ *
  * ## What it does NOT draw
  *
  * The settings cog. `gui/server-settings.js` mounts its own `#server-settings-btn`
@@ -129,6 +138,7 @@ function setText(doc, id, text) {
  * @param {{
  *   pick?: (entryId: string) => void,
  *   toggleFullscreen?: () => void,
+ *   submitJoin?: (join: object, typed: string) => void,
  * }} [hooks]
  *   `pick` carries an operator's click on a menu entry back to whoever owns
  *   the open-entry memory — which is the caller, not this module (see
@@ -137,6 +147,13 @@ function setText(doc, id, text) {
  *   view model's decision (`nextOpenEntry`) and not a second judgement made
  *   here. `toggleFullscreen` reaches `gui/page-chrome.js`'s one fullscreen
  *   implementation; absent, the control renders and does nothing.
+ *
+ *   `submitJoin` carries a typed join code back with the open row's own `join`
+ *   descriptor (issue #1364) — the descriptor and not the entry id, so the
+ *   caller dispatches on the row's `action` and never on which entry it came
+ *   from. Nothing is judged here: whether eight letters are a code at all is
+ *   `landingJoinAttempt`'s answer, and this module has no more business
+ *   parsing one than it has deciding whether an entry may open.
  * @param {{dockPanels?: boolean, ownPanelVisibility?: boolean}} [opts]
  *   `dockPanels: false` leaves every borrowed panel where it is, for a surface
  *   that composes the middle column some other way. `server.html` passes
@@ -305,6 +322,60 @@ export function renderHostLanding(doc, vm, t, hooks, opts) {
       else menu.removeAttribute('inert');
     }
   }
+
+  // ── The join-code stage (issue #1364) ───────────────────────────────
+  //
+  // Two rows open this one panel — Join as Peer and Connect to Host — and every
+  // word in it comes off the open row's `join` descriptor, so the panel does
+  // not know which route it is serving and would serve a third without an edit.
+  //
+  // The FIELD'S VALUE IS NEVER WRITTEN HERE, and that is the load-bearing part
+  // of this block rather than a shortcut. This function runs again on every
+  // menu click and on every refusal, so a render that restored the value would
+  // fight an operator who is mid-word, and one that cleared it would delete
+  // eight letters the moment their first attempt was refused — at exactly the
+  // point they need to see what they typed. The operator owns the field; this
+  // owns the sentences around it.
+  //
+  // `onclick`/`onkeydown` are assigned rather than added, for the same reason
+  // the fullscreen control's is: this is STATIC markup and every render would
+  // otherwise leave one more listener behind, so the third attempt would join
+  // three times.
+  const join = vm.join || null;
+  setText(doc, 'landing-join-role', join ? t(join.roleId) : '');
+  setText(doc, 'landing-join-blurb', join ? t(join.blurbId) : '');
+  setText(doc, 'landing-join-label', join ? t(join.labelId) : '');
+  setText(doc, 'landing-join-hint', join ? t(join.hintId) : '');
+  setText(doc, 'landing-join-submit', join ? t(join.submitId) : '');
+  // A refusal, in the words `gui/join-code.js` already gives the phone. Empty
+  // when there is none, so a stale sentence cannot outlive the attempt it
+  // described.
+  setText(doc, 'landing-join-error', join && join.errorId ? t(join.errorId) : '');
+
+  const field = doc.getElementById('landing-join-code');
+  const submit = doc.getElementById('landing-join-submit');
+  // What both triggers do. Named once so the button and the Return key cannot
+  // come to mean two different things — a code typed and submitted with the
+  // keyboard is the ordinary case on a surface driven from across a room.
+  const sendJoin = function () {
+    if (!join || !h.submitJoin) return;
+    h.submitJoin(join, field ? String(field.value || '') : '');
+  };
+  if (field) {
+    if (join) {
+      field.placeholder = t(join.placeholderId);
+      field.setAttribute('aria-label', t(join.labelId));
+    }
+    // `keydown` and not `keypress`: the latter is deprecated and absent from
+    // several remotes' key emulation.
+    field.onkeydown = function (event) {
+      if (event && event.key === 'Enter') {
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        sendJoin();
+      }
+    };
+  }
+  if (submit) submit.onclick = sendJoin;
 
   // ── The middle column ───────────────────────────────────────────────
   //

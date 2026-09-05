@@ -44,36 +44,34 @@ const SRC = fs.readFileSync(path.join(HERE, '../../server.html'), 'utf-8');
 const t = (id, params) => (params ? `${id}:${JSON.stringify(params)}` : id);
 
 /**
- * server.html's real landing, picker and save-catalogue markup, in a fresh
- * document.
+ * server.html's real landing, picker, save-catalogue and join markup, in a
+ * fresh document.
  *
- * All three, because the middle column's whole job is to hold ONE of the two
- * live panels the menu's staged rows borrow — `#scenario-panel` for New Game
- * (issue #1362) and `#save-slots-panel` for Load Game (issue #1363). A landing
- * without both beside it could not test that opening one puts the other back.
+ * All four, because the middle column's whole job is to hold ONE of the live
+ * panels the menu's staged rows borrow — `#scenario-panel` for New Game (issue
+ * #1362), `#save-slots-panel` for Load Game (issue #1363) and
+ * `#landing-join-panel` for both join routes (issue #1364). A landing without
+ * them beside it could not test that opening one puts the others back.
  */
 function landingDoc() {
   const parsed = new DOMParser().parseFromString(SRC, 'text/html');
-  const landing = parsed.getElementById('landing-panel');
-  const picker = parsed.getElementById('scenario-panel');
-  const saves = parsed.getElementById('save-slots-panel');
-  if (!landing) throw new Error('#landing-panel not found in server.html');
-  if (!picker) throw new Error('#scenario-panel not found in server.html');
-  if (!saves) throw new Error('#save-slots-panel not found in server.html');
   const doc = document.implementation.createHTMLDocument('');
-  doc.body.appendChild(doc.importNode(landing, true));
-  doc.body.appendChild(doc.importNode(picker, true));
-  doc.body.appendChild(doc.importNode(saves, true));
+  for (const id of ['landing-panel', 'scenario-panel', 'save-slots-panel', 'landing-join-panel']) {
+    const node = parsed.getElementById(id);
+    if (!node) throw new Error(`#${id} not found in server.html`);
+    doc.body.appendChild(doc.importNode(node, true));
+  }
   return doc;
 }
 
 /** A recording hook set — what each surface supplies in its own way. */
 function hooks() {
-  const calls = { pick: [], fullscreen: 0 };
+  const calls = { pick: [], fullscreen: 0, join: [] };
   return [
     {
       pick: (id) => calls.pick.push(id),
       toggleFullscreen: () => { calls.fullscreen += 1; },
+      submitJoin: (join, typed) => calls.join.push([join.action, typed]),
     },
     calls,
   ];
@@ -143,7 +141,7 @@ describe('renderHostLanding — the idle landing', () => {
     const list = entries(doc);
     expect(list.filter((el) => el.getAttribute('aria-disabled') === 'true')
       .map((el) => el.getAttribute(LANDING_ENTRY_ATTR)))
-      .toEqual(['join_peer', 'connect_host', 'load_mod_pack']);
+      .toEqual(['load_mod_pack']);
     expect(list.every((el) => el.disabled === false)).toBe(true);
   });
 
@@ -725,5 +723,195 @@ describe('renderHostLanding — the native viewscreen (issue #1361)', () => {
     expect(() => {
       renderHostLanding(doc, nativeVm({ dismissed: true }), t, {}, { ownPanelVisibility: true });
     }).not.toThrow();
+  });
+});
+
+describe('renderHostLanding — the join-code stage (issue #1364)', () => {
+  const peerVm = (joinErrorId) => landingViewModel({ openEntryId: 'join_peer', joinErrorId });
+  const clientVm = () => landingViewModel({ openEntryId: 'connect_host' });
+  const newVm = () => landingViewModel({ openEntryId: 'new_game' });
+
+  it('reveals the EXISTING join panel by moving it into the middle column', () => {
+    const doc = landingDoc();
+    renderHostLanding(doc, peerVm(), t);
+    const panel = doc.getElementById('landing-join-panel');
+    expect(panel.parentElement).toBe(doc.getElementById('landing-mid'));
+    expect(panel.classList.contains(LANDING_DOCKED_CLASS)).toBe(true);
+    expect(doc.getElementById('landing-panel').dataset.landingStage).toBe('join-code');
+  });
+
+  it('writes what THIS route joins as, and rewrites it for the other one', () => {
+    // The load-bearing claim: one panel, two routes, and the difference is the
+    // row's `join` descriptor rather than a second set of markup. The failure
+    // this catches is the sticky one — a panel that still says "Game master
+    // peer" over a field that now wants a crew code.
+    const doc = landingDoc();
+    renderHostLanding(doc, peerVm(), t);
+    expect(text(doc, 'landing-join-role')).toBe('server.landing.join_peer_role');
+    expect(text(doc, 'landing-join-blurb')).toBe('server.landing.join_peer_blurb');
+    expect(text(doc, 'landing-join-submit')).toBe('server.landing.join_peer_submit');
+
+    renderHostLanding(doc, clientVm(), t);
+    expect(text(doc, 'landing-join-role')).toBe('server.landing.connect_host_role');
+    expect(text(doc, 'landing-join-blurb')).toBe('server.landing.connect_host_blurb');
+    expect(text(doc, 'landing-join-submit')).toBe('server.landing.connect_host_submit');
+  });
+
+  it('writes the field`s own label, placeholder and hint from the view model', () => {
+    const doc = landingDoc();
+    renderHostLanding(doc, peerVm(), t);
+    expect(text(doc, 'landing-join-label')).toBe('server.landing.join_code_label');
+    expect(text(doc, 'landing-join-hint')).toBe('server.landing.join_code_hint');
+    const field = doc.getElementById('landing-join-code');
+    expect(field.placeholder).toBe('server.landing.join_code_placeholder');
+    expect(field.getAttribute('aria-label')).toBe('server.landing.join_code_label');
+  });
+
+  it('shows the refusal the view model carries, and clears it again', () => {
+    // AC4. The sentence is a `strings.csv` id chosen by `landingJoinAttempt`;
+    // this only puts it on screen, and takes it off when the attempt it
+    // described is no longer the last one.
+    const doc = landingDoc();
+    renderHostLanding(doc, peerVm('client.join.error_length'), t);
+    expect(text(doc, 'landing-join-error')).toBe('client.join.error_length');
+    renderHostLanding(doc, peerVm(), t);
+    expect(text(doc, 'landing-join-error')).toBe('');
+  });
+
+  it('carries the typed code back with the ROW`s descriptor, judging nothing', () => {
+    const doc = landingDoc();
+    const [h, calls] = hooks();
+    renderHostLanding(doc, peerVm(), t, h);
+    doc.getElementById('landing-join-code').value = 'quarking';
+    doc.getElementById('landing-join-submit').click();
+    expect(calls.join).toEqual([['boot-game-master', 'quarking']]);
+
+    // The other route, same field, same button: what differs is the descriptor
+    // the hook is handed, which is what the caller dispatches on.
+    renderHostLanding(doc, clientVm(), t, h);
+    doc.getElementById('landing-join-submit').click();
+    expect(calls.join[1]).toEqual(['open-client-page', 'quarking']);
+  });
+
+  it('reports nonsense too, because judging a code is not this module`s job', () => {
+    // The exact sibling of "reports every click, including the inert entries":
+    // whether eight letters are a code is `landingJoinAttempt`'s answer, and a
+    // second judgement here would be a place for the two to disagree.
+    const doc = landingDoc();
+    const [h, calls] = hooks();
+    renderHostLanding(doc, peerVm(), t, h);
+    doc.getElementById('landing-join-code').value = '???';
+    doc.getElementById('landing-join-submit').click();
+    expect(calls.join).toEqual([['boot-game-master', '???']]);
+  });
+
+  it('submits on Return as well, so the field can be driven entirely by keys', () => {
+    const doc = landingDoc();
+    const [h, calls] = hooks();
+    renderHostLanding(doc, peerVm(), t, h);
+    const field = doc.getElementById('landing-join-code');
+    field.value = 'QUARKING';
+    field.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(calls.join).toEqual([['boot-game-master', 'QUARKING']]);
+    // ...and only on Return: every other key is somebody typing.
+    field.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'A', bubbles: true }));
+    expect(calls.join).toHaveLength(1);
+  });
+
+  it('binds the submit once per render, not once more each time', () => {
+    // The static-markup hazard the fullscreen control has: this function runs
+    // again on every menu click and on every refusal, so an accumulated
+    // listener would join three times on the third attempt.
+    const doc = landingDoc();
+    const [h, calls] = hooks();
+    renderHostLanding(doc, peerVm(), t, h);
+    renderHostLanding(doc, peerVm('client.join.error_length'), t, h);
+    renderHostLanding(doc, peerVm(), t, h);
+    doc.getElementById('landing-join-submit').click();
+    expect(calls.join).toHaveLength(1);
+  });
+
+  it('never writes the field`s value, so a refusal does not delete what was typed', () => {
+    // The one thing this renderer deliberately does not own. A render that
+    // cleared the value would take away the eight letters at the exact moment
+    // the operator needs to see what is wrong with them.
+    const doc = landingDoc();
+    const field = doc.getElementById('landing-join-code');
+    renderHostLanding(doc, peerVm(), t);
+    field.value = 'QUARKING';
+    renderHostLanding(doc, peerVm('client.join.error_denied'), t);
+    expect(field.value).toBe('QUARKING');
+    renderHostLanding(doc, clientVm(), t);
+    expect(field.value).toBe('QUARKING');
+  });
+
+  it('empties every join sentence when the stage closes', () => {
+    // A panel undocked with last week's role still written in it would say the
+    // wrong thing the instant something else showed it.
+    const doc = landingDoc();
+    renderHostLanding(doc, peerVm('client.join.error_empty'), t);
+    renderHostLanding(doc, landingViewModel(), t);
+    for (const id of ['landing-join-role', 'landing-join-blurb', 'landing-join-label',
+      'landing-join-hint', 'landing-join-error', 'landing-join-submit']) {
+      expect(text(doc, id), id).toBe('');
+    }
+  });
+
+  it('swaps the join panel against the other borrowed panels rather than stacking', () => {
+    const doc = landingDoc();
+    const mid = doc.getElementById('landing-mid');
+    renderHostLanding(doc, newVm(), t);
+    renderHostLanding(doc, peerVm(), t);
+    expect(mid.children).toHaveLength(1);
+    expect(doc.getElementById('landing-join-panel').parentElement).toBe(mid);
+    expect(doc.getElementById('scenario-panel').parentElement).toBe(doc.body);
+
+    renderHostLanding(doc, newVm(), t);
+    expect(mid.children).toHaveLength(1);
+    expect(doc.getElementById('scenario-panel').parentElement).toBe(mid);
+    expect(doc.getElementById('landing-join-panel').parentElement).toBe(doc.body);
+  });
+
+  it('KEEPS the one panel docked across a swap between the two join routes', () => {
+    // Both rows name the same node, so moving from Join as Peer to Connect to
+    // Host must not undock and re-dock it — that would drop what was typed with
+    // the element, and it is the case a per-id undock would have got wrong.
+    const doc = landingDoc();
+    const mid = doc.getElementById('landing-mid');
+    renderHostLanding(doc, peerVm(), t);
+    const panel = doc.getElementById('landing-join-panel');
+    renderHostLanding(doc, clientVm(), t);
+    expect(doc.getElementById('landing-join-panel')).toBe(panel);
+    expect(panel.parentElement).toBe(mid);
+    expect(mid.children).toHaveLength(1);
+  });
+
+  it('returns the join panel to the body on undockLandingPanels, unasked', () => {
+    const doc = landingDoc();
+    renderHostLanding(doc, peerVm(), t);
+    undockLandingPanels(doc);
+    const panel = doc.getElementById('landing-join-panel');
+    expect(panel.parentElement).toBe(doc.body);
+    expect(panel.classList.contains(LANDING_DOCKED_CLASS)).toBe(false);
+  });
+
+  it('does nothing on a document that carries no join panel at all', () => {
+    // The two-document contract: the native lobby document has no
+    // `#landing-join-panel`, because the Game Master profile is a browser
+    // profile. The render must leave the rest of the landing intact.
+    const doc = landingDoc();
+    doc.getElementById('landing-join-panel').remove();
+    expect(() => renderHostLanding(doc, peerVm(), t, hooks()[0])).not.toThrow();
+    expect(doc.getElementById('landing-panel').dataset.landingStage).toBe('join-code');
+    expect(doc.getElementById('landing-mid').children).toHaveLength(0);
+  });
+
+  it('draws nothing at all for a surface whose menu has no join route', () => {
+    // The native landing: the row is offered, its stage is taken away by
+    // `stagePlatforms`, so `vm.join` is null and every sentence stays empty.
+    const doc = landingDoc();
+    renderHostLanding(doc, landingViewModel({ platform: 'native', openEntryId: 'join_peer' }), t);
+    expect(text(doc, 'landing-join-role')).toBe('');
+    expect(doc.getElementById('landing-join-panel').parentElement).toBe(doc.body);
   });
 });

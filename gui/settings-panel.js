@@ -468,13 +468,14 @@ export function mountSettings({
   readOperatorProfileFile: _readOperatorProfileFile,
   doc: _doc,
   isDemo: _isDemo,
+  buttonContainer: _buttonContainer,
 } = {}) {
   const doc = _doc || (typeof document !== 'undefined' ? document : null);
   if (!doc) {
     return {
       open() {}, close() {}, rebuildContent() {},
       selectTab() {}, isOpen: () => false, proposeSemanticBinding() {},
-      updateGamepadState() {},
+      updateGamepadState() {}, setButtonContainer() {}, openTab() {},
     };
   }
   const win = doc.defaultView || (typeof window !== 'undefined' ? window : null);
@@ -560,6 +561,11 @@ export function mountSettings({
     overlayId: 'settings-overlay',
     buttonClass: 'settings-btn',
     overlayClass: 'settings-overlay',
+    // Where the cog is BORN. It moves afterwards — client.html re-parents it
+    // into the Station bar for the duration of play through
+    // `setButtonContainer` below (issue #1372) — so this is only the home it
+    // has before the first render, which is the lobby's.
+    container: _buttonContainer || null,
     // The gear sits over consoles that have their own click handling; the
     // host page has no such layer beneath its cog, so this stays client-only.
     stopPropagationOnToggle: true,
@@ -1156,6 +1162,15 @@ export function mountSettings({
     close: shell.close,
     isOpen: shell.isOpen,
     selectTab,
+    // The one cog node, re-parented (issue #1372). Exposed rather than letting
+    // the page reach for `#settings-btn` itself, so the shell that owns the
+    // button owns every move of it.
+    setButtonContainer: shell.setButtonContainer,
+    /** Open Settings directly on one tab — the Station-help button's route. */
+    openTab: (id) => {
+      selectTab(id);
+      if (!shell.isOpen()) shell.open();
+    },
     proposeSemanticBinding: semanticControls.proposeBinding,
     updateGamepadState,
     rebuildContent: () => {

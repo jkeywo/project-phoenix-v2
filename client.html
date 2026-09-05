@@ -240,6 +240,29 @@
       position: fixed; top: 0.75rem; right: 0.75rem; z-index: 20;
       display: flex; align-items: center; gap: 0.5rem; font-family: monospace;
     }
+    /* This corner and the Station bar must not share pixels (issue #1372).
+       In portrait the bar is a full-width strip across the very top and its
+       LAST item is the help button, so a corner pinned at `top: 0.75rem` and
+       z-index 20 lands square on the help button's ink — above the bar's 16 —
+       and swallows the taps meant for it. That is the same "a control buried
+       under chrome" failure #939 and #940 fixed for the cog; it went unnoticed
+       here only because the bar's right end used to hold nothing but text.
+       Dropped BELOW the strip rather than hidden: link state and the fullscreen
+       toggle are wanted in game too, and floating over console content at the
+       top-right is what this corner already does in landscape. Landscape needs
+       no offset at all — there the bar is a rail down the LEFT — so the rule is
+       scoped rather than given a second number to keep in step.
+       tests/smoke/hero-bar-responsive.spec.js hit-tests the centre of both
+       buttons so the collision cannot come back unseen. */
+    @media (orientation: portrait) {
+      #console-container.station-hero-visible ~ #top-bar {
+        /* Written from the strip's CAUSE, not from the 53px it happens to
+           measure: the touch floor its tallest child carries, the 4px of
+           padding above and below it, its 1px bottom border, and 4px of air.
+           Raise the floor and this clears the taller strip on its own. */
+        top: calc(var(--control-hit-min) + 4px + 4px + 1px + 4px);
+      }
+    }
     #conn-label { font-size: var(--text-sm); color: var(--fire-hot); }
     #conn-dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--loaded); flex-shrink: 0; }
     #retry-now-btn {
@@ -334,13 +357,36 @@
       display: block;
     }
     #station-hero[aria-hidden="true"] { display: none; }
+    /* The ONE header (PRD #1371). The cog leads it and the help button closes
+       it — both re-parented in from the page body by placeShellChrome() — with
+       the Station tabs between them. 52px in portrait is not a round number
+       picked for looks: it is the 44px touch floor its tallest child carries,
+       plus the 4px of padding above and below.
+
+       `box-sizing` is declared HERE rather than left to the page. Only `body`
+       sets it and it does not inherit, so a `content-box` bar read `min-height`
+       as 52px of CONTENT and drew a 61px strip — the padding and the border
+       stacked on top of the number that was supposed to contain them. The
+       landscape block below always declared it, which is exactly why the rail
+       measured right while the strip did not. Counted properly the strip
+       settles at 53px: the 44px tab, 4px above and below it, and the border. */
     #station-hero {
+      box-sizing: border-box;
       display: flex; gap: 10px;
       align-items: center; flex: 0 0 auto; padding: 4px 10px;
-      min-height: var(--control-hit-min); z-index: 16;
+      min-height: 52px; z-index: 16;
       background: var(--surface-panel); border-bottom: 1px solid var(--edge-strong);
       font-family: 'Chakra Petch', monospace;
     }
+    /* The cog and the help button, while they are the bar's children. The
+       page-body rule below them is `position: fixed` at the viewport's corner;
+       in here they are ordinary flex items, and `relative` is kept so the 44px
+       hit-target pseudo-element still has them as its containing block. */
+    #station-hero .settings-btn {
+      position: relative; top: auto; left: auto; z-index: auto;
+      flex: 0 0 auto; background: none; border-color: transparent;
+    }
+    #station-hero .settings-btn:hover { border-color: var(--loaded); }
     #station-hero-tabs { display: flex; flex: 1 1 auto; gap: 4px; overflow-x: auto; min-width: 0; }
     #station-hero-tabs button {
       position: relative; overflow: hidden;
@@ -377,8 +423,14 @@
     @media (orientation: landscape) {
       #console-container.station-hero-visible { flex-direction: row; }
       #station-hero {
-        width: clamp(88px, 12vw, 112px); height: 100%; min-height: 0;
-        box-sizing: border-box; align-items: stretch; gap: 4px;
+        /* A COLUMN, not the row the strip is: the rail runs cog at the top,
+           tabs down the middle, help at the bottom. Before the cog and help
+           joined it the bar had two children and could afford to stay a row
+           with the details block rotated beside the tabs; four children in a
+           96px rail cannot. */
+        flex-direction: column;
+        width: 132px; height: 100%; min-height: 0;
+        align-items: stretch; gap: 4px;
         padding: max(4px, env(safe-area-inset-top)) 4px
           max(4px, env(safe-area-inset-bottom)) max(4px, env(safe-area-inset-left));
         border-right: 1px solid var(--edge-strong); border-bottom: 0;
@@ -388,10 +440,61 @@
         min-height: 0; align-items: stretch;
       }
       #station-hero-tabs button { width: 100%; flex: 0 0 auto; }
+      /* Ordinary horizontal text at the foot of the rail. It used to be rotated
+         because it stood BESIDE a column of tabs with only a sliver of width;
+         under the column above it has the rail's full 132px and reads
+         normally. Wrapped rather than clipped — a Station name is two words at
+         most and the rail is not short of height. */
       #station-hero-details {
-        writing-mode: vertical-rl; transform: rotate(180deg);
-        flex-direction: row; align-items: center; overflow: hidden;
-        max-height: 100%; white-space: nowrap;
+        align-items: center; text-align: center; overflow: hidden;
+        flex: 0 0 auto; white-space: normal; overflow-wrap: anywhere;
+      }
+      /* Stretched across the rail rather than a 40px box floating in it. */
+      #station-hero .settings-btn { width: auto; align-self: stretch; }
+    }
+    /* The narrow bar (issue #1372). Two shapes, one condition each, and the
+       SAME pair `gui/hero-bar.js` exports as HERO_BAR_CODE_QUERY — the
+       stylesheet narrows the bar and the script switches the tabs to the hull's
+       short codes off one answer, so the two can never disagree about whether
+       there is room for full Station names.
+
+       The landscape half reuses the 500px height threshold this page already
+       draws for the lobby's Station descriptions further down: a phone held
+       sideways has no vertical room, a landscape desktop has hundreds of spare
+       pixels.
+
+       PADDING is written once per shape and never in the shared block below.
+       A `padding` shorthand there matches a phone held sideways too, and — at
+       the same specificity, later in the sheet — it flattened the rail's
+       `env(safe-area-inset-*)` guards to plain pixels, drawing the cog and the
+       tabs under the notch and the home indicator on exactly the devices those
+       guards exist for. The two shapes want different insets anyway: a strip
+       has no notch beside it, a rail is pressed against one. */
+    @media (orientation: landscape) and (max-height: 500px) {
+      #station-hero {
+        width: 96px; gap: 6px;
+        padding: max(4px, env(safe-area-inset-top)) 6px
+          max(4px, env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left));
+      }
+    }
+    @media (orientation: portrait) and (max-width: 599px) {
+      #station-hero { gap: 6px; padding: 4px 6px; }
+    }
+    @media (orientation: portrait) and (max-width: 599px),
+           (orientation: landscape) and (max-height: 500px) {
+      /* Tighter than the wide bar: every pixel taken back here is a pixel the
+         tabs get, and the tabs are the whole point of the strip. */
+      #station-hero-tabs button { padding: 3px 6px 8px; min-width: 0; }
+      /* The selected tab already says which Station this is, so the title and
+         its rating are a second copy of it in the space the tabs need. Dropped
+         outright rather than hidden from sight only — nothing reads them. */
+      #station-hero-title, #station-hero-rating { display: none; }
+      /* The AI roll-call is NOT dropped with them. It is a live region, and the
+         only channel that says which Stations the ship is flying itself, so it
+         keeps announcing from off-screen. */
+      #station-hero-ai {
+        position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+        overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
       }
     }
     /* --- Phone-bezel red alert glow animation -----------------------------
@@ -941,13 +1044,14 @@
       z-index: 5;
       overflow: hidden;
       /* Top padding clears the settings cog (issue #940): `.settings-btn` is
-         2rem square at a 0.5rem inset, so it reaches 40px down from the top
-         and the lobby's first row — #lobby-header, holding #ship-name — has to
-         start below that or the gear clips its first characters. Cleared on
-         the top rather than the left so the header stays aligned with the
-         station list beneath it; 4px of slack over the 40px the cog reaches.
+         40px of ink by 44px tall at a 4px inset, so it reaches 48px down from
+         the top and the lobby's first row — #lobby-header, holding #ship-name —
+         has to start below that or the gear clips its first characters.
+         Cleared on the top rather than the left so the header stays aligned
+         with the station list beneath it, and it clears the help button beside
+         the cog at the same stroke since the two are the same height.
          Pinned by tests/client/settings-panel.test.js. */
-      padding: 44px 12px 6px;
+      padding: 48px 12px 6px;
       background: var(--surface-abyss);
       color: var(--ink);
       font-family: 'Chakra Petch', system-ui, sans-serif;
@@ -959,7 +1063,7 @@
     #spectator-ui.active {
       display: flex; flex-direction: column; gap: 12px;
       position: fixed; inset: 0; z-index: 6; overflow: auto;
-      padding: 44px 12px 12px;
+      padding: 48px 12px 12px;
       background: var(--surface-abyss); color: var(--ink);
       font-family: 'Chakra Petch', system-ui, sans-serif;
     }
@@ -1008,11 +1112,11 @@
        thing on this surface that is chrome rather than content. It comes
        straight back as the bar's own inset, at the artboard's slightly wider
        --space-6, and that extra 4px is doing a second job: the settings cog is
-       44px of THUMB at a 0.5rem inset (the touch floor raised it past the 2rem
-       box its own rule declares), so it reaches down over the bar's top-left
+       40px of ink and 44px of THUMB at a 4px inset (issue #1372 sized it for
+       the Station bar it now leads), so it reaches down over the bar's top-left
        corner exactly as the artboard draws it, and the wider inset is what
        keeps it off the ship name's first characters. The TOP padding on
-       #lobby-ui.active is untouched — it is that same clearance, and
+       #lobby-ui.active is that same clearance, raised to 48px with the cog, and
        tests/client/settings-panel.test.js measures it. */
     #lobby-header {
       display: flex; align-items: center; justify-content: space-between;
@@ -1453,14 +1557,26 @@
        (180), #waiting-overlay (185), #scenario-picker-overlay (186) and
        #game-over-overlay (190), so the gear has to clear all four. It stays
        BELOW #asset-loading (200), which is a genuine "nothing is ready yet"
-       screen. The overlay it opens is 1000, above everything. */
+       screen. The overlay it opens is 1000, above everything.
+
+       This rule is the PAGE-BODY home, which the cog and the help button keep
+       for the lobby and for the four full-viewport surfaces they must stack
+       above. In game both are re-parented into #station-hero and the rule above
+       that one turns the fixed corner off (issue #1372).
+
+       40px of INK, 44px of TARGET. The drawn box is 40 wide so two of them plus
+       the tabs fit across a 390px phone; the pseudo-element below widens the
+       hit area back to the platform floor without widening the picture — the
+       same escape gui/components/ph-console-styles.js documents for the power
+       pips. The 4px inset keeps the pair inside the clearances the lobby and
+       gui/console.css already reserve. */
     .settings-btn {
       position: fixed;
-      top: 0.5rem;
-      left: 0.5rem;
+      top: 4px;
+      left: 4px;
       z-index: 195;
-      width: 2rem;
-      height: 2rem;
+      width: 40px;
+      height: 44px;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -1474,8 +1590,27 @@
       cursor: pointer;
       user-select: none;
       touch-action: manipulation;
-      padding: 0; min-height: var(--control-hit-min);
+      /* Both zeroed explicitly. The page's shared `button` rule carries a
+         vertical margin, and this box's whole job is to be exactly the
+         rectangle its top/left/width/height declare — the lobby's clearance and
+         the bar's 52px strip are both computed from those four numbers. */
+      padding: 0; margin: 0; min-height: var(--control-hit-min);
     }
+    /* The touch target, centred on the ink and never smaller than it. */
+    .settings-btn::after {
+      content: '';
+      position: absolute;
+      left: 50%; top: 50%;
+      transform: translate(-50%, -50%);
+      width: max(100%, var(--control-hit-min));
+      height: max(100%, var(--control-hit-min));
+    }
+    /* The help button sits beside the cog in the body corner (and last in the
+       bar). 48px = the cog's 4px inset + its 40px of ink + a 4px gap, which is
+       exactly the width the two 44px targets need to stop overlapping — an
+       expanded target that laps its neighbour's steals taps that belonged to
+       the neighbour. */
+    .help-btn { left: 48px; }
     .settings-btn:hover { color: var(--ink); border-color: var(--loaded); }
     .settings-btn:active { background: rgba(var(--rgb-panel-up), 0.85); }
     .settings-overlay {
@@ -1939,6 +2074,16 @@
     <button id="fullscreen-btn" title="Toggle fullscreen" data-i18n-attr="title:client.fullscreen_tip">⛶</button>
   </div>
 
+  <!-- Station help (issue #1372). The cog's twin: one node, born here in the
+       page body beside it, re-parented into #station-hero as the bar's LAST
+       item for the duration of play and back here for the lobby and the
+       full-viewport surfaces. It opens the same Settings dialog the cog does,
+       straight onto its Station Help tab, so there is one help surface on the
+       phone rather than a second one that would drift from it. -->
+  <button id="help-btn" class="settings-btn help-btn" type="button"
+          aria-haspopup="dialog"
+          data-i18n-attr="title:client.hero.help.label,aria-label:client.hero.help.label">?</button>
+
   <!-- Asset loading overlay: shown during GamePhase::Loading while the
        server pre-caches GLB models, radar icons, and rig sidecars. -->
   <div id="asset-loading">
@@ -2232,6 +2377,29 @@
     let preloadFraction = null;
     /// True while the page is asking the guest for a join code.
     let joinPromptOpen = false;
+
+    // -- Shell chrome placement (issue #1372) --------------------------------
+    // The settings cog and the help button are ONE node each, moved between the
+    // Station bar and the page body rather than duplicated. Three facts decide
+    // where they belong this frame, and none of them is `inGame` alone: the
+    // game shell stays mounted through GameOver, and a pre-play surface can
+    // cover a live bar. Each slot is recorded by whichever part of the page
+    // already knows the fact, and gui/hero-bar.js's `heroChromeSlot` is the one
+    // place the three are weighed up. Declared HERE, above the first
+    // applyPrePlaySurfaces() call, because setConnectionStatus() makes that
+    // call while this script is still evaluating.
+    /// Whether #station-hero is showing tabs this frame.
+    let heroBarVisible = false;
+    /// Which pre-play surface applyPrePlaySurfaces() last raised, if any.
+    let prePlaySurface = null;
+    /// Whether the post-play #game-over-overlay is up.
+    let gameOverVisible = false;
+    /// The mounted settings panel (issue #940), or null before the connection
+    /// bootstrap runs. handleMessage repaints it when `DebugState` arrives.
+    /// Hoisted up here with the chrome slots above: placeShellChrome() asks it
+    /// to move its own cog, and the first call lands while this script is
+    /// still evaluating.
+    let settingsPanel = null;
     /// The last link state setConnectionStatus() was told about. It decides no
     /// surface — see loadingContext() — only whether a loading surface that is
     /// already up says it is retrying (issue #1368).
@@ -2330,6 +2498,10 @@
         const pctEl = document.getElementById('asset-loading-pct');
         if (pctEl) pctEl.textContent = String(view.pct);
       }
+      // The cog and the help button stack ABOVE these surfaces, so a raised one
+      // sends them back to the page body (issue #1372).
+      prePlaySurface = view.surface || null;
+      placeShellChrome();
       return view;
     }
 
@@ -2403,9 +2575,6 @@
     /// Console selected in the lobby detail panel. Null until the player picks one.
     /// Resets when the player releases their station.
     let lobbyConsole = null;
-    /// The mounted settings panel (issue #940), or null before the connection
-    /// bootstrap runs. handleMessage repaints it when `DebugState` arrives.
-    let settingsPanel = null;
     /// Parent-owned, client-local semantic binding profile. The operator
     /// profile persists it; console iframe module instances are separate
     /// realms, so updates are explicitly copied
@@ -2839,6 +3008,10 @@
       // module 4, user story 17) rather than a bare line of text.
       const gameOverEl = document.getElementById('game-over-overlay');
       const gameOverMsgEl = document.getElementById('game-over-message');
+      // Reset first: the overlay is a full-viewport surface the cog has to
+      // stack above (issue #1372), and a stale `true` from the previous run
+      // would strand the chrome in the page body for the whole next mission.
+      gameOverVisible = false;
       if (gameOverEl && gameOverMsgEl && typeof window.gameOverView === 'function') {
         const ls = window.lobbyState;
         const gv = window.gameOverView({
@@ -2855,6 +3028,7 @@
           // exactly as they were.
           report: ls ? ls.gameOverReport : [],
         });
+        gameOverVisible = !!gv.visible;
         if (gv.visible) {
           gameOverEl.dataset.outcome = gv.outcome;
           const scenarioEl = document.getElementById('game-over-scenario');
@@ -2922,6 +3096,11 @@
         if (inGame) renderGame(s);
         else if (!(window.lobbyState && window.lobbyState.waitingForScenario)) renderLobby(s);
       }
+
+      // Last, because it is the only point in the frame where all three facts
+      // it weighs — bar visible, pre-play surface, game-over overlay — have
+      // been settled (issue #1372).
+      placeShellChrome();
     }
 
     // Render the crew-public Spectator summary surface (issue #1105) from the
@@ -3631,6 +3810,55 @@
       pushActiveConsoleState(pushCause().RENDER);
     }
 
+    function placeShellChrome() {
+      // `document.getElementById` rather than the `$` shorthand: the first call
+      // arrives from setConnectionStatus() -> applyPrePlaySurfaces() while this
+      // script is still evaluating, which is before `$` itself is defined.
+      const bar = document.getElementById('station-hero');
+      const tabsEl = document.getElementById('station-hero-tabs');
+      const help = document.getElementById('help-btn');
+      const slot = (typeof window.heroChromeSlot === 'function')
+        ? window.heroChromeSlot({ heroVisible: heroBarVisible, prePlaySurface, gameOverVisible })
+        : 'body';
+      const inBar = slot === 'bar' && !!bar;
+      // The cog is the overlay shell's node, so the shell moves it — the page
+      // never reaches for #settings-btn itself.
+      if (settingsPanel && typeof settingsPanel.setButtonContainer === 'function') {
+        settingsPanel.setButtonContainer(inBar ? bar : null, inBar ? tabsEl : null);
+      }
+      if (help) {
+        const host = inBar ? bar : document.body;
+        // Last item in the bar, so the tabs keep the middle; ordinary body
+        // child otherwise. Skipped when it is already there — re-parenting a
+        // node blurs it, and this runs on every render.
+        if (help.parentNode !== host) host.appendChild(help);
+        else if (inBar && help.nextSibling) host.appendChild(help);
+      }
+    }
+
+    // Rotating the phone, or dragging a desktop window across the threshold,
+    // changes how much room the bar has and therefore whether its tabs read as
+    // short codes or full names. Watched through the media query itself rather
+    // than a `resize` listener: it fires once per crossing instead of once per
+    // pixel, and it is the very query the stylesheet resizes the bar with.
+    (function watchBarWidth() {
+      // Deferred to DOMContentLoaded: this classic script runs BEFORE the
+      // `type="module"` gui/ island that publishes the query, and the query
+      // string lives there so the stylesheet and the label decision cannot
+      // drift apart. Module scripts have all executed by the time this fires.
+      const install = () => {
+        const query = (typeof window.matchMedia === 'function' && window.HERO_BAR_CODE_QUERY)
+          ? window.matchMedia(window.HERO_BAR_CODE_QUERY) : null;
+        if (!query) return;
+        const onChange = () => scheduleRender();
+        if (typeof query.addEventListener === 'function') query.addEventListener('change', onChange);
+        else if (typeof query.addListener === 'function') query.addListener(onChange);
+      };
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', install, { once: true });
+      } else install();
+    })();
+
     function renderStationHero(s, inGame) {
       const root = $('station-hero');
       const tabsEl = $('station-hero-tabs');
@@ -3648,6 +3876,7 @@
         activeStation: activeConsole,
       });
       const heroVisible = !!(inGame && model.tabs.length);
+      heroBarVisible = heroVisible;
       root.setAttribute('aria-hidden', heroVisible ? 'false' : 'true');
       root.parentElement?.classList.toggle('station-hero-visible', heroVisible);
       if (!inGame || !model.tabs.length) return;
@@ -3658,6 +3887,13 @@
         aiEl: $('station-hero-ai'),
         model,
         translate: t,
+        // Short codes on a phone-sized bar, full names anywhere with room
+        // (issue #1372). Read from the viewport through the same media query
+        // the stylesheet narrows the bar with, so the label and the width it
+        // has to fit into are always the same decision. One label per tab, not
+        // two hidden twins — see gui/hero-bar.js.
+        labelMode: (typeof window.heroBarLabelMode === 'function')
+          ? window.heroBarLabelMode(window) : 'name',
         onActivate: stationId => {
           setActiveConsole(stationId);
           // Tell the host this Station's tab was visited (issue #1101), so it
@@ -4174,6 +4410,24 @@
           getManual: () => (window.simState ? window.simState.shipManual : null),
           myToken: myToken,
         });
+        // The help button is the cog's twin (issue #1372): the same Settings
+        // dialog, opened straight onto its Station Help tab, so the phone has
+        // one help surface rather than a second that would drift from it.
+        // stopPropagation for the same reason the cog does it — both sit over
+        // consoles that have their own click handling.
+        const helpBtn = document.getElementById('help-btn');
+        if (helpBtn) {
+          helpBtn.addEventListener('click', (e) => {
+            if (e && typeof e.preventDefault === 'function') e.preventDefault();
+            if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+            if (settingsPanel && typeof settingsPanel.openTab === 'function') {
+              settingsPanel.openTab('station-help');
+            }
+          });
+        }
+        // The cog is born in the page body; put both where this frame wants
+        // them without waiting for the next state push.
+        placeShellChrome();
       }
 
       if (gamepadInputRuntime) {

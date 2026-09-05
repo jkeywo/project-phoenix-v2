@@ -243,6 +243,73 @@ describe('mountSettings — cog and overlay', () => {
   });
 });
 
+// ── One cog, moved (issue #1372) ─────────────────────────────────────────────
+//
+// The bar became the page's only header, so the cog it leads and the `?` that
+// closes it are the SAME nodes the lobby uses, re-parented — not a second pair
+// hidden behind a media query. Two copies would drift: the focus trap, the
+// aria-expanded state and the open/close toggle all live on one button.
+
+describe('the cog moves between the bar and the page body', () => {
+  let doc;
+  beforeEach(() => { doc = makeDoc(); });
+
+  it('is born under a caller-supplied container when one is given', () => {
+    const bar = makeEl(doc, 'nav');
+    mount(doc, { buttonContainer: bar });
+    expect(findBtn(doc).parentNode).toBe(bar);
+  });
+
+  it('defaults to the page body, which is where the lobby wants it', () => {
+    mount(doc);
+    expect(findBtn(doc).parentNode).toBe(doc.body);
+  });
+
+  it('re-parents the one node rather than creating a second', () => {
+    const bar = makeEl(doc, 'nav');
+    const inst = mount(doc);
+    const cog = findBtn(doc);
+
+    inst.setButtonContainer(bar);
+    expect(cog.parentNode).toBe(bar);
+    expect(findBtn(doc)).toBe(cog);
+
+    inst.setButtonContainer(null);
+    expect(cog.parentNode).toBe(doc.body);
+    expect(findBtn(doc)).toBe(cog);
+  });
+
+  it('still toggles its overlay after the move', () => {
+    const bar = makeEl(doc, 'nav');
+    const inst = mount(doc);
+    inst.setButtonContainer(bar);
+    findBtn(doc).click();
+    expect(findOverlay(doc).hidden).toBe(false);
+    findBtn(doc).click();
+    expect(findOverlay(doc).hidden).toBe(true);
+  });
+
+  it('opens Settings straight onto one tab for the help button', () => {
+    const inst = mount(doc);
+    expect(inst.isOpen()).toBe(false);
+    inst.openTab('station-help');
+    expect(inst.isOpen()).toBe(true);
+    expect(
+      tabBarOf(doc).children.find((c) => c.classList.contains('active'))
+        .getAttribute('data-tab'),
+    ).toBe('station-help');
+
+    // Already open on another tab: switch, do not close.
+    inst.selectTab('audio');
+    inst.openTab('station-help');
+    expect(inst.isOpen()).toBe(true);
+    expect(
+      tabBarOf(doc).children.find((c) => c.classList.contains('active'))
+        .getAttribute('data-tab'),
+    ).toBe('station-help');
+  });
+});
+
 function allText(el) {
   let text = el.textContent ? [el.textContent] : [];
   for (const child of el.children || []) text = text.concat(allText(child));
@@ -626,11 +693,25 @@ describe('client.html', () => {
     expect(btn).toBeLessThan(zIndexOf(/#asset-loading\s*\{[^}]*z-index:\s*(\d+)/));
   });
 
-  it('sits top-left, mirroring the host page rather than sharing #status corner', () => {
-    const rule = CLIENT_HTML.match(/\.settings-btn\s*\{([^}]*)\}/);
+  /**
+   * The UNQUALIFIED `.settings-btn` rule — the page-body home, the one that
+   * fixes the cog to the viewport corner.
+   *
+   * Anchored to the start of a line on purpose. Since issue #1372 the cog is
+   * one node that MOVES: `#station-hero .settings-btn` turns the fixed corner
+   * off again while the bar owns it, and a bare `.settings-btn {` search would
+   * find that override first and measure a rectangle of `auto`s.
+   */
+  function settingsBtnRule() {
+    const rule = CLIENT_HTML.match(/(?:^|\n)\s*\.settings-btn\s*\{([^}]*)\}/);
     expect(rule, '.settings-btn rule not found').not.toBeNull();
-    expect(rule[1]).toMatch(/top:/);
-    expect(rule[1]).not.toMatch(/bottom:/);
+    return rule[1];
+  }
+
+  it('sits top-left, mirroring the host page rather than sharing #status corner', () => {
+    const rule = settingsBtnRule();
+    expect(rule).toMatch(/top:/);
+    expect(rule).not.toMatch(/bottom:/);
   });
 
   // ── Clearance ─────────────────────────────────────────────────────────────
@@ -661,10 +742,9 @@ describe('client.html', () => {
       'client.html restyles the root font-size, so the rem maths below is wrong',
     ).toBeNull();
 
-    const rule = CLIENT_HTML.match(/\.settings-btn\s*\{([^}]*)\}/);
-    expect(rule, '.settings-btn rule not found').not.toBeNull();
+    const rule = settingsBtnRule();
     const px = (prop) => {
-      const m = rule[1].match(new RegExp(`${prop}:\\s*([\\d.]+)(rem|px)`));
+      const m = rule.match(new RegExp(`${prop}:\\s*([\\d.]+)(rem|px)`));
       expect(m, `.settings-btn declares no ${prop}`).not.toBeNull();
       return Number(m[1]) * (m[2] === 'rem' ? ROOT_FONT_PX : 1);
     };
@@ -708,6 +788,70 @@ describe('client.html', () => {
         `the ${orientation} console gutter is under the cog`,
       ).toBeGreaterThanOrEqual(right);
     }
+  });
+
+  // ── The bar owns the chrome in game (issue #1372) ─────────────────────────
+  //
+  // The clearance tests above pin where the cog sits while it is a page-body
+  // control. These pin the other half: that it stops being one for the
+  // duration of play, and that the help button travels with it.
+
+  it('declares the help button beside the cog with no English of its own', () => {
+    const btn = CLIENT_HTML.match(/<button id="help-btn"[\s\S]*?<\/button>/);
+    expect(btn, 'client.html declares no #help-btn').not.toBeNull();
+    // Same class, so it takes the cog's size, corner and stacking in one go.
+    expect(btn[0]).toMatch(/class="settings-btn help-btn"/);
+    expect(btn[0]).toMatch(/aria-haspopup="dialog"/);
+    // Its label is a string id, not a word: the glyph is all the markup holds.
+    expect(btn[0]).toMatch(/data-i18n-attr="[^"]*title:client\.hero\.help\.label/);
+    expect(btn[0]).toMatch(/data-i18n-attr="[^"]*aria-label:client\.hero\.help\.label/);
+  });
+
+  it('routes the help button to the Station Help tab of the one dialog', () => {
+    expect(CLIENT_HTML).toContain("settingsPanel.openTab('station-help')");
+  });
+
+  it('moves the one cog into the bar rather than hiding a second copy', () => {
+    // The page asks the overlay shell to move its own button — it never
+    // reaches for #settings-btn itself, which is what keeps the focus trap,
+    // the toggle and aria-expanded on one node.
+    expect(CLIENT_HTML).toContain('settingsPanel.setButtonContainer(');
+    expect(CLIENT_HTML).not.toMatch(/getElementById\('settings-btn'\)/);
+    // Cog first (inserted before the tab list), help last (appended).
+    expect(CLIENT_HTML).toMatch(
+      /setButtonContainer\(inBar \? bar : null, inBar \? tabsEl : null\)/,
+    );
+    expect(CLIENT_HTML).toMatch(/if \(help\.parentNode !== host\) host\.appendChild\(help\)/);
+  });
+
+  it('weighs the game-over and pre-play surfaces, not just "in game"', () => {
+    // vis.game stays true through GameOver and the pre-play surfaces cover a
+    // live bar, so the slot decision reads all three facts.
+    expect(CLIENT_HTML).toMatch(
+      /heroChromeSlot\(\{ heroVisible: heroBarVisible, prePlaySurface, gameOverVisible \}\)/,
+    );
+    expect(CLIENT_HTML).toMatch(/prePlaySurface = view\.surface \|\| null;/);
+    expect(CLIENT_HTML).toMatch(/gameOverVisible = !!gv\.visible;/);
+  });
+
+  it('turns the fixed corner off while the bar holds the chrome', () => {
+    const rule = CLIENT_HTML.match(/#station-hero \.settings-btn\s*\{([^}]*)\}/);
+    expect(rule, 'no in-bar rule for the cog').not.toBeNull();
+    expect(rule[1]).toMatch(/position:\s*relative/);
+    expect(rule[1]).toMatch(/top:\s*auto/);
+    expect(rule[1]).toMatch(/left:\s*auto/);
+  });
+
+  it('draws 40px of ink and offers 44px of target', () => {
+    const rule = settingsBtnRule();
+    expect(rule).toMatch(/width:\s*40px/);
+    // The drawn box is narrower than the platform floor on purpose — two of
+    // these plus the tabs have to cross a 390px phone — so the target is
+    // widened behind it, the escape ph-console-styles.js documents.
+    const target = CLIENT_HTML.match(/\.settings-btn::after\s*\{([^}]*)\}/);
+    expect(target, 'no expanded touch target behind the cog').not.toBeNull();
+    expect(target[1]).toMatch(/width:\s*max\(100%,\s*var\(--control-hit-min\)\)/);
+    expect(target[1]).toMatch(/height:\s*max\(100%,\s*var\(--control-hit-min\)\)/);
   });
 
   // The client has no WASM, so the meta tag is the ONLY thing that can tell it

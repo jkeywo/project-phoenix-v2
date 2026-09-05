@@ -53,7 +53,14 @@ export function heroBarModel({ directStation, stations, stationSystems,
       // each with its own lifecycle. Absent (Station resolved / never marked) is
       // the neutral state. Never derived from health or blackboards.
       const importance = (stationImportance && stationImportance[id]) || null;
-      return { id, name: st.name || id, rating, health,
+      // The hull's authored abbreviation (`[[station]] short_code`), already on
+      // the wire inside `shipStations.stations`. Carried verbatim — never
+      // derived by truncating the name, which would invent a label the hull did
+      // not author and would differ between hulls that share a Station id.
+      // Empty when the hull authored none; `renderHeroBarDom` falls back to the
+      // full name rather than showing a blank tab.
+      const code = typeof st.short_code === 'string' ? st.short_code : '';
+      return { id, name: st.name || id, code, rating, health,
         healthState: heroBarHealthState(health), importance,
         importanceState: heroBarImportanceState(importance), selected: id === selected };
     }),
@@ -103,6 +110,64 @@ export function heroBarImportanceState(importance) {
   return 'none';
 }
 
+/**
+ * The one media query that decides whether the bar has room for full Station
+ * names, kept HERE so the JS read and the stylesheet's own rules cannot drift:
+ * `client.html` writes the same two conditions and this string is what its
+ * `matchMedia` listener watches.
+ *
+ * Two conditions, because the bar has two shapes:
+ *   - portrait, where the bar is a horizontal strip as wide as the viewport and
+ *     a phone (<600px) cannot fit six full names without scrolling;
+ *   - landscape, where the bar is a left rail and a phone held sideways
+ *     (<=500px tall — the same threshold client.html already uses to drop the
+ *     lobby's Station descriptions) gets the narrow 96px rail.
+ * A tablet or desktop matches neither and shows names.
+ */
+export const HERO_BAR_CODE_QUERY =
+  '(orientation: portrait) and (max-width: 599px),'
+  + ' (orientation: landscape) and (max-height: 500px)';
+
+/**
+ * Which label a tab shows: the hull's `short_code` on a phone-sized bar, the
+ * full Station name anywhere with room. One answer for the whole bar, read from
+ * the viewport — never two hidden twins in the DOM, which would double the
+ * accessible name of every tab.
+ *
+ * @param {{matchMedia?: function}|null} win
+ * @returns {'code'|'name'}
+ */
+export function heroBarLabelMode(win) {
+  const query = win && typeof win.matchMedia === 'function'
+    ? win.matchMedia(HERO_BAR_CODE_QUERY) : null;
+  return query && query.matches ? 'code' : 'name';
+}
+
+/**
+ * Where the shell chrome — the settings cog and the help button — lives this
+ * frame.
+ *
+ * The cog is ONE node that moves, not two that hide each other: in game it is
+ * the bar's first item, and everywhere else it is the page-body `position:
+ * fixed` control it has always been, stacked above the full-viewport surfaces.
+ *
+ * `heroVisible` alone is not enough to say "the bar is the chrome". The game
+ * shell stays mounted through `GameOver`, and the waiting / scenario-picker /
+ * asset-loading surfaces cover it while the phase is still in play — a cog
+ * parented into a bar underneath one of those is a cog nobody can reach, which
+ * is the exact failure issue #939 shipped on the host page.
+ *
+ * @param {{heroVisible: boolean, prePlaySurface: (string|null),
+ *          gameOverVisible: boolean}} state
+ * @returns {'bar'|'body'}
+ */
+export function heroChromeSlot({ heroVisible, prePlaySurface, gameOverVisible } = {}) {
+  if (!heroVisible) return 'body';
+  if (prePlaySurface) return 'body';
+  if (gameOverVisible) return 'body';
+  return 'bar';
+}
+
 /** Roving-tab keyboard rule used by the DOM shell and unit tests. */
 export function heroBarKeyTarget(ids, current, key) {
   if (!ids?.length) return null;
@@ -120,7 +185,7 @@ export function heroBarKeyTarget(ids, current, key) {
  * keeps keyboard focus stable while unrelated blackboard values change.
  */
 export function renderHeroBarDom({ tabsEl, titleEl, ratingEl, aiEl, model,
-  translate, onActivate }) {
+  translate, onActivate, labelMode = 'name' }) {
   const existing = new Map(
     [...tabsEl.querySelectorAll('button[data-station]')]
       .map(button => [button.dataset.station, button]),
@@ -145,6 +210,7 @@ export function renderHeroBarDom({ tabsEl, titleEl, ratingEl, aiEl, model,
         tabsEl.ownerDocument.createElement('span'),
         tabsEl.ownerDocument.createElement('span'),
         tabsEl.ownerDocument.createElement('span'),
+        tabsEl.ownerDocument.createElement('span'),
       );
       // The damage indicator remains separate from importance, but becomes a
       // compact progress strip instead of a visible text row. Its hidden label
@@ -160,11 +226,25 @@ export function renderHeroBarDom({ tabsEl, titleEl, ratingEl, aiEl, model,
       // `data-importance` attribute — never sharing health's element or
       // attribute, so the two streams coexist on one tab (AC4).
       button.children[2].className = 'station-tab-importance';
+      // The full Station name, always in the tree and never drawn. In code mode
+      // the visible glyph group is hidden from assistive technology and this
+      // carries the name instead, so shrinking the bar changes what the tab
+      // LOOKS like and nothing about what it is ANNOUNCED as.
+      button.children[3].className = 'station-tab-name visually-hidden';
     }
     existing.delete(tab.id);
     button.setAttribute('aria-selected', tab.id === model.selected ? 'true' : 'false');
     button.tabIndex = tab.id === model.selected ? 0 : -1;
-    button.children[0].textContent = tab.name;
+    // Phone bars show the hull's authored short code; anything with room shows
+    // the name. A Station whose hull authored no code keeps its name rather
+    // than rendering an empty tab.
+    const showCode = labelMode === 'code' && !!tab.code;
+    const visibleLabel = button.children[0];
+    visibleLabel.textContent = showCode ? tab.code : tab.name;
+    if (showCode) visibleLabel.setAttribute('aria-hidden', 'true');
+    else visibleLabel.removeAttribute('aria-hidden');
+    button.children[3].textContent = showCode ? tab.name : '';
+    button.title = tab.name;
     const healthEl = button.children[1];
     const healthFill = healthEl.querySelector('.station-tab-health-fill');
     const healthLabel = healthEl.querySelector('.station-tab-health-label');
@@ -215,4 +295,7 @@ if (typeof window !== 'undefined') {
   window.heroBarModel = heroBarModel;
   window.heroBarKeyTarget = heroBarKeyTarget;
   window.renderHeroBarDom = renderHeroBarDom;
+  window.heroBarLabelMode = heroBarLabelMode;
+  window.heroChromeSlot = heroChromeSlot;
+  window.HERO_BAR_CODE_QUERY = HERO_BAR_CODE_QUERY;
 }

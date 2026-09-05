@@ -1,6 +1,12 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { JSDOM } from 'jsdom';
 import { describe, expect, it, vi } from 'vitest';
-import { heroBarHealthState, heroBarImportanceState, heroBarKeyTarget, heroBarModel, renderHeroBarDom } from '../../gui/hero-bar.js';
+import {
+  HERO_BAR_CODE_QUERY, heroBarHealthState, heroBarImportanceState, heroBarKeyTarget,
+  heroBarLabelMode, heroBarModel, heroChromeSlot, renderHeroBarDom,
+} from '../../gui/hero-bar.js';
 import { reconcileActiveConsole } from '../../gui/lobby-state.js';
 
 const stations = [
@@ -420,5 +426,252 @@ describe('keyboard roving focus', () => {
   it('supports Home and End', () => {
     expect(heroBarKeyTarget(ids, 'navigation', 'Home')).toBe('helm');
     expect(heroBarKeyTarget(ids, 'navigation', 'End')).toBe('comms');
+  });
+});
+
+// ── The bar as the page's only chrome (issue #1372) ──────────────────────────
+//
+// The bar gained the settings cog as its first item and a help button as its
+// last, and its tabs shrink to the hull's authored short codes when the bar is
+// phone-sized. Three separate contracts, tested separately: what the MODEL
+// carries, what the DOM DRAWS at each label mode, and where the chrome LIVES.
+
+describe('short codes', () => {
+  const coded = [
+    { id: 'helm', name: 'Helm', short_code: 'HLM' },
+    { id: 'navigation', name: 'Navigation', human_seeking: true, short_code: 'NAV' },
+    // Authored with no code at all — the TOML default is an empty string.
+    { id: 'comms', name: 'Comms', human_seeking: true, short_code: '' },
+  ];
+  const model = () => heroBarModel({
+    directStation: 'helm', stations: coded,
+    stationHosts: {
+      navigation: { station: 'navigation', host: 'helm', rating: 'Std' },
+      comms: { station: 'comms', host: 'helm', rating: 'Simple' },
+    },
+    stationRatings: {}, activeStation: 'helm',
+  });
+
+  it('carries the hull-authored code verbatim rather than truncating the name', () => {
+    const tabs = model().tabs;
+    expect(tabs.map(tab => tab.code)).toEqual(['HLM', 'NAV', '']);
+    // Never a derived abbreviation: an unauthored code stays empty so the
+    // renderer can fall back to the name instead of inventing one.
+    expect(tabs.map(tab => tab.name)).toEqual(['Helm', 'Navigation', 'Comms']);
+  });
+
+  it('draws codes in code mode and names in name mode, off one shared model', () => {
+    const { elements } = heroDom();
+    const labels = () => [...elements.tabsEl.querySelectorAll('button[data-station]')]
+      .map(button => button.children[0].textContent);
+
+    renderHeroBarDom({ ...elements, model: model(), translate, onActivate: vi.fn(),
+      labelMode: 'code' });
+    // The code-less Station keeps its name — a blank tab is not a label.
+    expect(labels()).toEqual(['HLM', 'NAV', 'Comms']);
+
+    renderHeroBarDom({ ...elements, model: model(), translate, onActivate: vi.fn(),
+      labelMode: 'name' });
+    expect(labels()).toEqual(['Helm', 'Navigation', 'Comms']);
+  });
+
+  it('defaults to names when no label mode is given', () => {
+    const { elements } = heroDom();
+    renderHeroBarDom({ ...elements, model: model(), translate, onActivate: vi.fn() });
+    expect(elements.tabsEl.querySelector('[data-station="helm"]').children[0].textContent)
+      .toBe('Helm');
+  });
+
+  it('announces the full Station name in both modes', () => {
+    const { elements } = heroDom();
+    const helm = () => elements.tabsEl.querySelector('[data-station="helm"]');
+
+    renderHeroBarDom({ ...elements, model: model(), translate, onActivate: vi.fn(),
+      labelMode: 'code' });
+    // The glyph group is hidden from assistive technology and the full name
+    // rides a visually-hidden span, so shrinking the bar changes what the tab
+    // looks like and nothing about what it is announced as.
+    expect(helm().children[0].getAttribute('aria-hidden')).toBe('true');
+    expect(helm().querySelector('.station-tab-name').textContent).toBe('Helm');
+    expect(helm().title).toBe('Helm');
+    // Health still reads from the same tab: the label change takes nothing.
+    expect(helm().querySelector('.station-tab-health')).not.toBeNull();
+
+    renderHeroBarDom({ ...elements, model: model(), translate, onActivate: vi.fn(),
+      labelMode: 'name' });
+    expect(helm().children[0].hasAttribute('aria-hidden')).toBe(false);
+    expect(helm().querySelector('.station-tab-name').textContent).toBe('');
+  });
+});
+
+describe('label mode', () => {
+  const stubWindow = matches => ({ matchMedia: query => ({ query, matches }) });
+
+  it('asks for codes on a phone-sized bar and names anywhere with room', () => {
+    expect(heroBarLabelMode(stubWindow(true))).toBe('code');
+    expect(heroBarLabelMode(stubWindow(false))).toBe('name');
+  });
+
+  it('falls back to names where matchMedia is unavailable', () => {
+    expect(heroBarLabelMode(null)).toBe('name');
+    expect(heroBarLabelMode({})).toBe('name');
+  });
+
+  it('watches the two shapes the bar actually has', () => {
+    // Portrait strip narrower than a phone, and the left rail on a phone held
+    // sideways. client.html's stylesheet narrows the bar on the same pair.
+    expect(HERO_BAR_CODE_QUERY).toContain('(orientation: portrait) and (max-width: 599px)');
+    expect(HERO_BAR_CODE_QUERY).toContain('(orientation: landscape) and (max-height: 500px)');
+  });
+});
+
+describe('where the cog and help live', () => {
+  it('joins the bar only when the bar is the surface a player can see', () => {
+    expect(heroChromeSlot({ heroVisible: true, prePlaySurface: null, gameOverVisible: false }))
+      .toBe('bar');
+  });
+
+  it('goes back to the page body in the lobby', () => {
+    expect(heroChromeSlot({ heroVisible: false, prePlaySurface: null, gameOverVisible: false }))
+      .toBe('body');
+  });
+
+  it('goes back to the page body under every full-viewport surface', () => {
+    // The game shell stays mounted through GameOver and under the pre-play
+    // surfaces, so `heroVisible` alone would strand the cog beneath a panel it
+    // is supposed to stack above — the failure issue #939 shipped on the host.
+    for (const surface of ['waiting-overlay', 'scenario-picker-overlay', 'asset-loading']) {
+      expect(heroChromeSlot({ heroVisible: true, prePlaySurface: surface, gameOverVisible: false }),
+        'cog buried under ' + surface).toBe('body');
+    }
+    expect(heroChromeSlot({ heroVisible: true, prePlaySurface: null, gameOverVisible: true }))
+      .toBe('body');
+  });
+
+  it('keeps roving arrows on the Station tabs and off the chrome', () => {
+    const { dom, elements } = heroDom();
+    const doc = dom.window.document;
+    // The bar as client.html assembles it: cog first, tab list, help last, with
+    // only the tabs inside the roving container.
+    const bar = doc.createElement('nav');
+    const cog = doc.createElement('button');
+    cog.id = 'settings-btn';
+    const help = doc.createElement('button');
+    help.id = 'help-btn';
+    elements.tabsEl.replaceWith(bar);
+    bar.append(cog, elements.tabsEl, help);
+
+    const model = heroBarModel({
+      directStation: 'helm', stations,
+      stationHosts: {
+        navigation: { station: 'navigation', host: 'helm', rating: 'Std' },
+        comms: { station: 'comms', host: 'helm', rating: 'Simple' },
+      },
+      stationRatings: {}, activeStation: 'comms',
+    });
+    const onActivate = vi.fn();
+    renderHeroBarDom({ ...elements, model, translate, onActivate, labelMode: 'code' });
+
+    // The chrome is not a tab: the reconcile neither adopts nor removes it.
+    expect(bar.children[0]).toBe(cog);
+    expect(bar.children[2]).toBe(help);
+    expect(elements.tabsEl.querySelectorAll('button[data-station]').length).toBe(3);
+
+    // Arrow-right off the last tab wraps to the first tab, never onto help.
+    const last = elements.tabsEl.querySelector('[data-station="comms"]');
+    last.onkeydown({ key: 'ArrowRight', preventDefault() {} });
+    expect(onActivate).toHaveBeenCalledWith('helm');
+    expect(doc.activeElement).toBe(elements.tabsEl.querySelector('[data-station="helm"]'));
+  });
+});
+
+// ── The shape client.html gives the bar (issue #1372) ────────────────────────
+//
+// The label decision above is a JS read of a media query; the bar's width is a
+// stylesheet rule. They are one decision split across two files, so this reads
+// client.html and checks the halves say the same thing. Source text, not
+// layout — tests/smoke/hero-bar-responsive.spec.js measures the real boxes.
+
+describe('client.html gives the bar the shape the labels assume', () => {
+  const CLIENT_HTML = fs.readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), '../../client.html'),
+    'utf-8',
+  );
+
+  it('narrows on exactly the query gui/hero-bar.js switches labels on', () => {
+    // Both conditions, in the same stylesheet block, so a phone can never get
+    // a bar too narrow for the names it is still being told to draw.
+    for (const condition of HERO_BAR_CODE_QUERY.split(',').map((part) => part.trim())) {
+      expect(CLIENT_HTML, `no stylesheet rule for ${condition}`).toContain(condition);
+    }
+  });
+
+  it('is a 52px strip in portrait: a 44px touch floor between 4px margins', () => {
+    const rule = CLIENT_HTML.match(/#station-hero\s*\{([^}]*)\}/);
+    expect(rule, 'no #station-hero rule').not.toBeNull();
+    expect(rule[1]).toMatch(/min-height:\s*52px/);
+    expect(rule[1]).toMatch(/padding:\s*4px/);
+    // …and counts the padding and the border INSIDE that number. `box-sizing`
+    // is set on `body` alone and does not inherit, so a bar that leaves it
+    // unsaid reads 52px as content and draws a 61px strip.
+    expect(rule[1], 'the strip does not count its own padding').toMatch(
+      /box-sizing:\s*border-box/,
+    );
+  });
+
+  it('is a left rail of 132px, narrowing to 96px on a phone held sideways', () => {
+    const landscape = CLIENT_HTML.match(
+      /@media \(orientation: landscape\)\s*\{[\s\S]*?#station-hero\s*\{([^}]*)\}/,
+    );
+    expect(landscape, 'no landscape rail rule').not.toBeNull();
+    expect(landscape[1]).toMatch(/width:\s*132px/);
+    const phone = CLIENT_HTML.match(
+      /@media \(orientation: landscape\) and \(max-height: 500px\)\s*\{\s*#station-hero\s*\{([^}]*)\}/,
+    );
+    expect(phone, 'no narrow rail rule').not.toBeNull();
+    expect(phone[1]).toMatch(/width:\s*96px/);
+    // The rail is pressed against the notch and the home indicator on exactly
+    // the devices this query selects, so its padding keeps the env() guards
+    // the wider rail declares. A flat shorthand here — or, as it was, in the
+    // block the two narrow shapes share — draws the cog under the notch.
+    expect(phone[1], 'the narrow rail lost its safe-area insets').toMatch(
+      /env\(safe-area-inset-top\)/,
+    );
+    expect(phone[1]).toMatch(/env\(safe-area-inset-bottom\)/);
+    expect(phone[1]).toMatch(/env\(safe-area-inset-left\)/);
+  });
+
+  it('drops the title and rating on a narrow bar but keeps the AI live region', () => {
+    const narrow = CLIENT_HTML.match(
+      /@media \(orientation: portrait\) and \(max-width: 599px\),[\s\S]*?\n    \}\n/,
+    );
+    expect(narrow, 'no narrow-bar block').not.toBeNull();
+    expect(narrow[0]).toMatch(/#station-hero-title,\s*#station-hero-rating\s*\{\s*display:\s*none/);
+    // The AI roll-call is the only channel naming the Stations the ship flies
+    // itself, so it is hidden from sight and NOT from a screen reader.
+    const ai = narrow[0].match(/#station-hero-ai\s*\{([^}]*)\}/);
+    expect(ai, 'the AI live region is not handled on a narrow bar').not.toBeNull();
+    expect(ai[1]).toMatch(/clip:\s*rect\(0, 0, 0, 0\)/);
+    expect(ai[1]).not.toMatch(/display:\s*none/);
+    // Padding is NOT written here. This block matches a phone held sideways
+    // too, at the same specificity as the rail's own rule and later in the
+    // sheet, so a `padding` shorthand in it silently replaces the rail's
+    // env() guards with flat pixels.
+    const bar = narrow[0].match(/#station-hero\s*\{([^}]*)\}/);
+    expect(bar ? bar[1] : '', 'the shared narrow block overrides the rail padding')
+      .not.toMatch(/padding/);
+  });
+
+  it('keeps the fixed chrome corner off the strip while the bar is the header', () => {
+    // #top-bar is z-index 20 against the bar's 16 and shares its top-right
+    // corner, which is where the help button now lives. Pushed below the strip
+    // in portrait; in landscape the bar is a left rail and needs no offset.
+    const offset = CLIENT_HTML.match(
+      /@media \(orientation: portrait\)\s*\{\s*#console-container\.station-hero-visible ~ #top-bar\s*\{([^}]*)\}/,
+    );
+    expect(offset, 'nothing moves #top-bar off the Station strip').not.toBeNull();
+    // Derived from the touch floor that sets the strip's height, so raising
+    // the floor moves the corner with it rather than leaving it half-buried.
+    expect(offset[1]).toMatch(/top:\s*calc\(var\(--control-hit-min\)/);
   });
 });

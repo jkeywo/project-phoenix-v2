@@ -126,8 +126,20 @@ test('choosing a world from the landing reaches the lobby it always reached',
     // Single-hull scenarios auto-resolve (issue #917); multi-hull ones offer a
     // ph-ship-picker. Either way the landing goes and the lobby arrives, which
     // is the whole of "exactly the lobby it reaches today".
+    //
+    // RACE, not a poll: `isVisible()` does NOT wait — it answers about this
+    // instant and ignores a `timeout` passed to it. Asking it straight after the
+    // world click therefore always said "no picker", the ship was never chosen,
+    // and the assertions below then failed on a landing that was right to still
+    // be up. So wait for whichever of the two outcomes this world produces, and
+    // click only if it was the picker.
     const shipCard = page.locator('#scenario-panel ph-ship-picker .ship-card').first();
-    if (await shipCard.isVisible({ timeout: 10_000 }).catch(() => false)) {
+    const landingGone = page.locator('#landing-panel');
+    await Promise.race([
+      shipCard.waitFor({ state: 'visible', timeout: 60_000 }),
+      landingGone.waitFor({ state: 'hidden', timeout: 60_000 }),
+    ]);
+    if (await shipCard.isVisible()) {
       await shipCard.click();
     }
 

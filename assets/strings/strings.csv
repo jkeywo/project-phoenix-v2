@@ -740,6 +740,9 @@ console.engineering.doc_title,Browser-tab title of the engineering console page,
 console.engineering.screen_label,Phone-frame screen label of the engineering console,Engineering Console
 console.engineering.power,"engineering console — ""Power"" panel heading",Power
 console.engineering.repair,"engineering console — ""Repair"" panel heading",Repair
+console.engineering.operations,"engineering console — ""Operations"" panel heading, over the Tractor and Umbilical controls (issue #1383)","[Operations]"
+console.engineering.seg.ops,"Destroyer engineering console phone segment — OPS tab label, showing the Operations column (Tractor, Umbilical) (issue #1383)","[OPS]"
+console.engineering.seg.label,"Destroyer engineering console phone segment — tablist aria-label naming what REPAIR | OPS switches between (issue #1383)","[Engineering view]"
 console.cruiser_helm.doc_title,Browser-tab title of the helm console page,[Project Phoenix — Helm Console]
 console.destroyer_helm.doc_title,Browser-tab title of the helm console page,[Project Phoenix — Helm Console]
 console.battleship_helm.doc_title,Browser-tab title of the helm console page,[Project Phoenix — Helm Console]

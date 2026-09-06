@@ -26,8 +26,8 @@
  * @property {function(object): object} weaponsView
  *   Given the (already shape-normalised) console payload, return the weapons
  *   "view" the radar/phaser/blaster/torpedo panels read from. A flat-family
- *   hull (battleship, cruiser) returns `s` itself; a system-id-keyed hull
- *   (destroyer, courier) returns `familyView(s, 'tactical')`.
+ *   hull (battleship) returns `s` itself; a system-id-keyed hull (cruiser
+ *   since issue #1389, destroyer, courier) returns `familyView(s, 'tactical')`.
  * @property {object} ids                     element ids present in this hull's markup
  * @property {string} ids.radar               the `ph-tactical-radar` id (always present)
  * @property {string} [ids.phasers]           `ph-phasers-controls` id, if the hull mounts phasers

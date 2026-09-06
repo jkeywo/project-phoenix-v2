@@ -19,11 +19,16 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { t } from '../../gui/strings.js';
 import { renderStation as battleshipRender } from '../../gui/battleship/tactical.console.js';
-import { renderStation as cruiserRender } from '../../gui/cruiser/tactical.console.js';
+import { renderStation as rawCruiserRender } from '../../gui/cruiser/tactical.console.js';
 import { renderStation as rawDestroyerRender } from '../../gui/destroyer/tactical.console.js';
 import { renderStation as rawCourierRender } from '../../gui/courier/tactical.console.js';
 import { withConsoleFamilyProjection } from './console-family-fixture.js';
 
+// The cruiser joined the keyed hulls in issue #1389: authoring a Security
+// System on Tactical made that seat span two Console Families, so the host
+// builds it the system-id-keyed payload and its weapons view is selected by
+// family like the destroyer's.
+const cruiserRender = (payload, doc) => rawCruiserRender(withConsoleFamilyProjection(payload), doc);
 const destroyerRender = (payload, doc) => rawDestroyerRender(withConsoleFamilyProjection(payload), doc);
 const courierRender = (payload, doc) => rawCourierRender(withConsoleFamilyProjection(payload), doc);
 
@@ -46,7 +51,8 @@ const FIXTURES = {
     '<ph-phasers-controls id="phasers-controls"></ph-phasers-controls>' +
     '<ph-torpedo-controls id="torpedo-controls"></ph-torpedo-controls>' +
     '<span id="footer-target"></span>' +
-    '<span id="tactical-auto-badge" hidden></span>',
+    '<span id="tactical-auto-badge" hidden></span>' +
+    '<ph-security-teams id="security-teams"></ph-security-teams>',
   destroyer:
     '<ph-tactical-radar id="tactical-radar"></ph-tactical-radar>' +
     '<ph-phasers-controls id="phasers-controls"></ph-phasers-controls>' +
@@ -81,7 +87,7 @@ describe('inner-radar target contract — both uuids set on all four hulls (#123
     {
       hull: 'cruiser',
       render: cruiserRender,
-      payload: { blips: [{ uuid: 'cr-1' }], target_uuid: 'cr-1' },
+      payload: { systems: { 'tactical-radar': { blips: [{ uuid: 'cr-1' }], target_uuid: 'cr-1' } } },
       uuid: 'cr-1',
     },
     {
@@ -110,7 +116,7 @@ describe('inner-radar target contract — both uuids set on all four hulls (#123
 
     it(`${c.hull}: both radar uuids are null when nothing is locked`, () => {
       mount(FIXTURES[c.hull]);
-      const cleared = c.hull === 'battleship' || c.hull === 'cruiser'
+      const cleared = c.hull === 'battleship'
         ? { blips: [] }
         : { systems: { 'tactical-radar': { blips: [] } } };
       c.render(cleared, document);
@@ -176,27 +182,70 @@ describe('battleship tactical renderStation', () => {
   });
 });
 
-// ── Cruiser: the `var t` shadowing regression ────────────────────────────────
+// ── Cruiser: the `var t` shadowing regression + the Security tail (#1389) ────
 describe('cruiser tactical renderStation', () => {
   beforeEach(() => mount(FIXTURES.cruiser));
+
+  /** A keyed cruiser payload: one Tactical view, optionally a Security one. */
+  const keyed = (weapons, extra = {}) => ({
+    systems: { 'tactical-radar': weapons, ...(extra.systems || {}) },
+    ...Object.fromEntries(Object.entries(extra).filter(([k]) => k !== 'systems')),
+  });
 
   it('renders a LOCKED footer for an unnamed lock without throwing (old var-t shadow bug)', () => {
     // The old inline render did `var t = getElementById('torpedo-controls')`,
     // shadowing the String Table t(); `t('console.common.locked')` then threw
     // because a DOM element is not callable. This must resolve to real text.
-    expect(() => cruiserRender({ blips: [{ uuid: 'e2' }], target_uuid: 'e2' }, document)).not.toThrow();
+    expect(() => cruiserRender(keyed({ blips: [{ uuid: 'e2' }], target_uuid: 'e2' }), document)).not.toThrow();
     expect(el('footer-target').textContent).toBe(t('console.common.locked'));
   });
 
   it('shows the target name when one is present', () => {
-    cruiserRender({ blips: [{ uuid: 'e3' }], target_uuid: 'e3', target_name: 'Corsair' }, document);
+    cruiserRender(keyed({ blips: [{ uuid: 'e3' }], target_uuid: 'e3', target_name: 'Corsair' }), document);
     expect(el('footer-target').textContent).toBe('Corsair');
   });
 
   it('carries no blaster panel and still renders the core', () => {
-    cruiserRender({ blips: [{ uuid: 'e4' }], target_uuid: 'e4', banks: [{ id: 'p' }], own_hull: { pct: 0.5 } }, document);
+    cruiserRender(keyed({ blips: [{ uuid: 'e4' }], target_uuid: 'e4', banks: [{ id: 'p' }] }, { own_hull: { pct: 0.5 } }), document);
     expect(el('blasters-controls')).toBeNull();
     expect(el('phasers-controls').state.target_valid).toBe(true);
+  });
+
+  // ── Security (issue #1389) ─────────────────────────────────────────────
+  // Tactical owns the Security System on this hull, so its published view
+  // arrives under this station's payload keyed by the system's own id, and the
+  // tail feeds the panel the SEC tab shows — whole, with nothing re-derived.
+  it('feeds the Security panel the published Security-family view', () => {
+    const security = {
+      system_id: 'security',
+      range: 400,
+      teams: [{ teamIdx: 0, state: 'available' }],
+      targets: [{ uuid: 'tether-head', in_range: true, actions: [{ id: 'assist_evacuation' }] }],
+      refusal: null,
+    };
+    cruiserRender(
+      keyed({ blips: [], target_uuid: null }, { systems: { security } }),
+      document,
+    );
+    expect(el('security-teams').state).toEqual(security);
+  });
+
+  it('gives the Security panel an empty view when the hull publishes none', () => {
+    cruiserRender(keyed({ blips: [], target_uuid: null }), document);
+    expect(el('security-teams').state).toEqual({});
+  });
+
+  it('still renders the weapons panels while a Security view rides alongside', () => {
+    cruiserRender(
+      keyed(
+        { blips: [{ uuid: 'e5' }], target_uuid: 'e5', banks: [{ id: 'fore' }], tubes: [{ id: 't1' }] },
+        { systems: { security: { teams: [], targets: [] } } },
+      ),
+      document,
+    );
+    expect(el('tactical-radar').state.target_uuid).toBe('e5');
+    expect(el('phasers-controls').state.banks).toEqual([{ id: 'fore' }]);
+    expect(el('torpedo-controls').state.tubes).toEqual([{ id: 't1' }]);
   });
 });
 

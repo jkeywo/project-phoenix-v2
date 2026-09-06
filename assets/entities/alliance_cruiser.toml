@@ -353,6 +353,32 @@ repair_team_count = 2
 travel_duration_secs = 5
 repair_rate_hp_per_sec = 0.5
 
+# Security teams (issue #1389, PRD #1371). The cruiser musters the same two
+# teams the Alliance Destroyer does, dispatched and recalled independently from
+# whichever station the `[[system]] kind = "security"` block at the end of the
+# system list gives them to — Tactical, on this hull as on that one — with no
+# Duty Officer standing between the seat and the order.
+#
+# What a team may DO once it gets somewhere is authored on the TARGET, never
+# here: this table is only the hull's own half — how many people it can send,
+# how long they take to get across and come back, and how far they can reach. A
+# hull that authors no `[security]` table musters nobody.
+#
+# [ai] All four carried across from `alliance_destroyer.toml` unchanged, and
+# unratified there too. The crossing is a transfer to another structure under
+# way rather than a run down a corridor, so it is slower than this hull's own
+# `[repair] travel_duration_secs = 5`, and the asymmetry (out slower than back)
+# is the encumbrance of going equipped. `range = 400` is the reach the destroyer
+# shares with its `[repair.external_dispatch]`; when this hull gains that table
+# (issue #1391) the two must match for the same reason — a repair team and a
+# security team cross the same gap by the same means, and two different reaches
+# on one hull would be a difference the crew could see and nobody could explain.
+[security]
+team_count = 2
+deploy_duration_secs = 8.0
+withdraw_duration_secs = 6.0
+range = 400.0
+
 [weapons_console]
 power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
 torpedo_arc_color = [ 1, 0.55, 0.2, 0.15 ]
@@ -1610,6 +1636,29 @@ human_seeking = true
 id = "viewscreen"
 kind = "viewscreen"
 station = "captain"
+
+# ── Security (issue #1389) ───────────────────────────────────────────────────
+#
+# TACTICAL owns the Security teams on this hull, the same authoring decision the
+# Alliance Destroyer made and for the same reason: the seat that already holds
+# the combat lock and reads the tactical picture is the seat that knows which
+# compartment is worth risking people on, and this hull's Engineering officer
+# already carries the power plan and the damage-control sweep. `kind =
+# "security"` is generic — another hull may hang it off Command or Engineering
+# — so this line is the only thing that would move.
+#
+# NO POWER GROUP, deliberately. Security is people: a Power officer who robs a
+# group does not stop a boarding party crossing, and hanging the teams off
+# `helm` with the couplings would have made "the drive is browned out" mean
+# "nobody can fight a fire". No `[[hull.system_hull]]` compartment either, for
+# the reason written out beside the hull table above — this hull's `[repair]`
+# teams carry none and neither do these, so the ratified durability ladder and
+# the destroyed sum the cruiser balance gate measures are both untouched. The
+# engine lever is there for a hull that wants it.
+[[system]]
+id = "security"
+kind = "security"
+station = "tactical"
 
 [cinematic_camera]
 position = [0, 8, 15]

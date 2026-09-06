@@ -1234,6 +1234,67 @@ fn the_alliance_destroyer_exposes_two_tactical_owned_security_teams() {
     );
 }
 
+/// Issue #1389, read off the shipped hull the same way: the Alliance Cruiser
+/// musters Security too, on the same terms and under the same seat. `kind =
+/// "security"` was generic from the day it landed — nothing in the engine
+/// mentions a hull — so this is the proof the claim was true, taken from the
+/// second hull to make it rather than from the code that would have to change if
+/// it were not.
+///
+/// The `[security]` table and its `[[system]]` partner PAIR: `load_entity_config`
+/// refuses a hull that authors one without the other (and a `kind = "security"`
+/// block with no station), so reaching the assertions below at all is that
+/// validation passing on the shipped cruiser.
+#[test]
+fn the_alliance_cruiser_exposes_two_tactical_owned_security_teams() {
+    let entity = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .expect("the shipped cruiser parses — which is the [security]/[[system]] pairing check");
+
+    let security = entity
+        .security
+        .as_ref()
+        .expect("the cruiser authors a [security] table");
+    assert_eq!(
+        security.team_count, 2,
+        "the same two teams the destroyer musters"
+    );
+    security.validate().expect("the authored terms are usable");
+
+    let ship = entity
+        .ship_config
+        .as_ref()
+        .expect("the cruiser authors a system topology");
+    let system = ship
+        .systems
+        .iter()
+        .find(|s| s.kind == crate::ship::system_registry::SECURITY_KIND)
+        .expect("the cruiser authors a kind = \"security\" [[system]]");
+    assert_eq!(
+        system.station.as_ref().map(|s| s.0.as_str()),
+        Some("tactical"),
+        "Tactical owns Security on this hull too"
+    );
+    assert_eq!(
+        system.power_group, None,
+        "Security is people: no power group to brown out"
+    );
+    // No damage compartment, for the reason spelled out on the destroyer above —
+    // and with more force here, because THIS is the hull whose bow hold moved a
+    // shipped balance run when a fourth box was added. `npm run balance:cruiser`
+    // is a blocking gate on this hull's ladder; a box authored here would move
+    // the destroyed sum it measures.
+    assert!(
+        entity
+            .hull
+            .as_ref()
+            .is_some_and(|hull| !hull.system_hull.iter().any(|e| e.system_id.0 == "security")),
+        "the cruiser's Security System must author no [[hull.system_hull]] box: a muster \
+         space is not armour, and adding one silently widens this hull's damage pool"
+    );
+}
+
 /// AC3, read off the shipped world: Falling Skyway authors a complete Security
 /// path — a target, an action from the required vocabulary, an authored duration,
 /// risk and priority, and a `outcome_flag` the scenario script hangs its

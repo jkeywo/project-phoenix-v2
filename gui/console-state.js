@@ -705,7 +705,9 @@ export function targetFactsFor(state, uuid, range) {
 
 /**
  * Payload contract for the Tactical/Weapons console iframe (issue #827).
- * Rendered by gui/battleship/tactical.html and gui/cruiser/tactical.html.
+ * Rendered flat by gui/battleship/tactical.html; every other Tactical seat
+ * (cruiser since issue #1389, destroyer, courier) reads the same shape as the
+ * `tactical` family view inside its keyed payload.
  *
  * @typedef {{ target_uuid: string|null, target_name: string|null,
  *             banks: Array, tubes: Array, torpedo_count: number,
@@ -2367,7 +2369,7 @@ function projectSystemFamilies(systemIds, state) {
  * family. `systems` holds one per-family view (a *ConsolePayload above)
  * under EACH owning fine-system id — a console selects an actual id through
  * `system_families`, never through a station-role key. Rendered by
- * gui/cruiser/{comms,engineering,science}.html,
+ * gui/cruiser/{comms,engineering,science,tactical}.html,
  * gui/destroyer/{captain,engineering,tactical}.html and
  * gui/courier/{captain,pilot,tactical}.html.
  *

@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="../console.css">
   <style>
     body { font-size: var(--text-lg); margin: 0; background: var(--surface-void); overflow: hidden; }
-    .frame { height: 100%; }
+    .frame { height: 100%; position: relative; }
     .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
     .console-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
     /* The scope is square by gui/console.css's one `.scope-cell` rule
@@ -17,7 +17,20 @@
        same thing in two places and had to be re-derived every time the chrome
        above it changed. */
     ph-phasers-controls, ph-torpedo-controls { flex-shrink: 0; }
-    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } }
+    /* The Security overlay (issue #1389). A full-frame panel over the console,
+       selected from the shell's Station Bar and closed by its own Back button —
+       the convention gui/console-overlays.js documents, and the same block
+       gui/destroyer/tactical.html carries. It lives in this document rather
+       than gui/console.css because the two Tactical seats are the only consoles
+       in the fleet that author overlay panels at all; if a third ever does, the
+       block belongs in the shared stylesheet rather than in a third copy. */
+    .overlay-back { position: absolute; top: 6px; left: 6px; z-index: 6; background: rgba(var(--rgb-panel), 0.85); border: 1px solid var(--edge); color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.2em; padding: 6px 14px; cursor: pointer; text-transform: uppercase; transition: all 0.15s ease; min-height: var(--control-hit-min); }
+    .overlay-back:hover { background: rgba(var(--rgb-panel-up), 0.9); border-color: var(--ink-dim); }
+    .overlay-panel { position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 5; background: rgba(var(--rgb-deep), 0.97); border: 1px solid var(--edge); display: none; flex-direction: column; padding: 16px; }
+    .overlay-panel.open { display: flex; }
+    .overlay-panel h2 { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
+    .overlay-panel ph-security-teams { flex: 1; min-height: 0; }
+    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .overlay-panel { padding: 8px; } }
   </style>
 </head>
 <body>
@@ -41,17 +54,44 @@
         <ph-torpedo-controls id="torpedo-controls"></ph-torpedo-controls>
       </div>
     </div>
+    <!-- Security teams (issue #1389): the team list, their assignments and
+         progress, and the eligible targets/actions to send them to. The hull
+         authors `[security]` + `[[system]] kind = "security" station =
+         "tactical"`, so this seat OWNS the system the panel commands.
+
+         `data-tab-code` is what makes a panel a TAB on the shell's Station Bar
+         (issue #1373): the console declares its overlays and the bar renders
+         them between this seat and its visitors. Both attributes carry
+         strings.csv IDS, not English — the shell resolves them at the render
+         site the same way it resolves a Station's own name off the wire. -->
+    <div class="overlay-panel" id="security-overlay"
+         data-tab-code="console.tactical.security.code"
+         data-tab-name="console.tactical.security">
+      <button class="overlay-back" id="security-back" data-overlay-back data-i18n="console.common.back">&#8592; Back</button>
+      <h2 data-i18n="console.tactical.security">Security</h2>
+      <ph-security-teams id="security-teams"></ph-security-teams>
+    </div>
   </div>
   <script type="module">
     import '../components/ph-tactical-radar.js';
     import '../components/ph-phasers-controls.js';
     import '../components/ph-torpedo-controls.js';
+    import '../components/ph-security-teams.js';
     import { initConsole } from '../console-core.js';
+    import { initConsoleOverlays } from '../console-overlays.js';
     // The render lives in gui/cruiser/tactical.console.js (issue #1234): the
     // shared Tactical renderer + this hull's variant. The old inline render's
     // `var t = getElementById('torpedo-controls')` shadowed the String Table
     // `t()` and threw on an unnamed lock — the shared footer uses the real `t`.
     import { renderStation } from './tactical.console.js';
+
+    // One delegated listener drives every `data-overlay-back` button on the
+    // page (gui/console-overlays.js). Since issue #1374 no console authors an
+    // in-console `data-overlay` TOGGLE at all: the shell's Station Bar selects
+    // an overlay through `__setConsoleOverlay`, and the panel's own Back
+    // button is the only in-console way out of it.
+    initConsoleOverlays();
+
     initConsole({ name: 'tactical', render: renderStation });
   </script>
 </body>

@@ -29,15 +29,21 @@ import {
   setConsoleOverlay, toggleConsoleOverlay,
 } from '../../gui/console-overlays.js';
 
-/** The destroyer Tactical console's own HTML, in a live DOM. */
-function tacticalDoc() {
-  const file = path.join(process.cwd(), 'gui', 'destroyer', 'tactical.html');
+/** One shipped console's own HTML, in a live DOM. */
+function consoleDoc(...relative) {
+  const file = path.join(process.cwd(), 'gui', ...relative);
   const html = fs.readFileSync(file, 'utf8');
   // Scripts stay off: the console module imports web components and
   // console-core, none of which this module needs to be exercised.
   const dom = new JSDOM(html, { runScripts: 'outside-only' });
   return dom.window.document;
 }
+
+/** The destroyer Tactical console's own HTML, in a live DOM. */
+const tacticalDoc = () => consoleDoc('destroyer', 'tactical.html');
+
+/** The cruiser Tactical console's own HTML, in a live DOM (issue #1389). */
+const cruiserTacticalDoc = () => consoleDoc('cruiser', 'tactical.html');
 
 /**
  * A console written to the toggle convention, for the half of the module no
@@ -97,6 +103,42 @@ describe('the destroyer Tactical console carries the Intel overlay markup', () =
     for (const id of ['nav-toggle', 'nav-overlay', 'comms-toggle', 'comms-overlay']) {
       expect(doc.getElementById(id), `#${id} must be gone`).toBeNull();
     }
+  });
+});
+
+describe('the cruiser Tactical console carries the Security overlay markup (#1389)', () => {
+  it('has the panel, closed, holding the team surface, with no toggle of its own', () => {
+    const doc = cruiserTacticalDoc();
+    const panel = doc.getElementById('security-overlay');
+    expect(panel, '#security-overlay must be present').not.toBeNull();
+    expect(panel.classList.contains('open')).toBe(false);
+    expect(panel.querySelector('ph-security-teams#security-teams')).not.toBeNull();
+    // Issue #1374: the bar owns the selection, so the console authors no
+    // toggle — its Back button is the only in-console way out.
+    expect(doc.querySelectorAll('.overlay-toggle').length).toBe(0);
+    expect(panel.querySelector('[data-overlay-back]')).not.toBeNull();
+  });
+
+  it('declares the overlay as a Station Bar tab, by string id', () => {
+    const doc = cruiserTacticalDoc();
+    const security = doc.getElementById('security-overlay');
+    expect(security.dataset.tabCode).toBe('console.tactical.security.code');
+    expect(security.dataset.tabName).toBe('console.tactical.security');
+    // The scan console-core runs is exactly this selector. Security is the ONLY
+    // tab this hull's Tactical seat declares: the Intel panel is the cruiser
+    // Tactical relayout's (issue #1393), not this slice's.
+    expect([...doc.querySelectorAll('.overlay-panel[data-tab-code]')].map(p => p.id))
+      .toEqual(['security-overlay']);
+  });
+
+  it('opens on the bar\'s selection and closes on its own Back button', () => {
+    const doc = cruiserTacticalDoc();
+    initConsoleOverlays(doc);
+    expect(setConsoleOverlay('security-overlay', doc)).toBe('security-overlay');
+    expect(openConsoleOverlayId(doc)).toBe('security-overlay');
+
+    doc.querySelector('#security-overlay [data-overlay-back]').click();
+    expect(openConsoleOverlayId(doc)).toBeNull();
   });
 });
 

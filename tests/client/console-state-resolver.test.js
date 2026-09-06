@@ -12,6 +12,9 @@ const FAMILY_BY_ID = {
   'blaster-fore': 'tactical', sensors: 'sensors', 'sensor-radar': 'sensors',
   'shields-system': 'shields', 'power-reactor': 'power', 'power-battery': 'power',
   repair: 'repair', navigation: 'navigation', comms: 'comms',
+  'phaser-aft': 'tactical', 'torpedo-magazine': 'tactical',
+  'torpedo-tube-fore-port': 'tactical', 'torpedo-tube-fore-starboard': 'tactical',
+  'torpedo-tube-aft': 'tactical', security: 'security',
 };
 
 function stateFor(stationSystems, extra = {}) {
@@ -141,6 +144,38 @@ describe('buildConsoleStateInner metadata routing', () => {
     expect(JSON.parse(window.buildConsoleStateInner('captain', {}))).toEqual({});
     expect(JSON.parse(window.buildConsoleStateInner('sensors', {}))).toEqual({});
     expect(JSON.parse(window.buildConsoleStateInner('command', {}))).toEqual({});
+  });
+
+  // Issue #1389: the cruiser's Tactical seat used to own one family and take
+  // the flat payload. Authoring a Security System on it in
+  // `assets/entities/alliance_cruiser.toml` flips the SHAPE — two families now,
+  // so the seat gets the system-id-keyed payload with a Security view under the
+  // system's own id. This is why `gui/cruiser/tactical.console.js` reads its
+  // weapons view through `familyView` rather than treating the payload as flat,
+  // and it is the general rule for any hull that adds Security to a
+  // single-family seat.
+  it('flips a single-family Tactical seat to the keyed shape when the hull authors Security', () => {
+    const weapons = [
+      'tactical-radar', 'phaser-control', 'phaser-fore', 'phaser-aft',
+      'torpedo-magazine', 'torpedo-tube-fore-port', 'torpedo-tube-fore-starboard',
+      'torpedo-tube-aft',
+    ];
+
+    const before = JSON.parse(window.buildConsoleStateInner('tactical', stateFor({ tactical: weapons })));
+    expect(before).not.toHaveProperty('systems');
+    expect(before).toHaveProperty('banks');
+
+    const after = JSON.parse(window.buildConsoleStateInner(
+      'tactical',
+      stateFor({ tactical: [...weapons, 'security'] }),
+    ));
+    expect(Object.keys(after.systems)).toEqual([...weapons, 'security']);
+    expect(after.system_families.security).toBe('security');
+    // The weapons view is still there, reachable by family rather than at the
+    // top level, and the Security view is its own thing beside it.
+    expect(after.systems['tactical-radar']).toHaveProperty('banks');
+    expect(after.systems.security).not.toBe(after.systems['tactical-radar']);
+    expect(after.systems.security).toMatchObject({ teams: [], targets: [], refusal: null });
   });
 
   it('follows a System moved between Stations with no code change', () => {

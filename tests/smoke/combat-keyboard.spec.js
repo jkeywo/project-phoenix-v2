@@ -142,8 +142,13 @@ test('Combat family: fire a weapon, adjust shields, order a repair — all from 
   await expect.poll(() => page.evaluate(() => window.__sent.some((a) => a.action === 'set_power')))
     .toBe(true);
 
-  // Order a repair: the idle team's dispatch button is a native control (AC — order a repair).
+  // Order a repair: the roster is a list of selectable cards (issue #1384) —
+  // Enter opens the idle team's card, then its one destination is the next
+  // Tab stop, and Enter there is the native button's own click (AC — order a
+  // repair).
   expect(await tabToHost(page, 'PH-REPAIR-TEAMS')).toBe(true);
+  await page.keyboard.press('Enter');               // opens the team's card
+  await page.keyboard.press('Tab');                 // → its one destination (Core)
   await page.keyboard.press('Enter');               // dispatch_repair_team
   await expect.poll(() => page.evaluate(() => window.__sent.some((a) => a.action === 'dispatch_repair_team')))
     .toBe(true);

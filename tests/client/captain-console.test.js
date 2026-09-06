@@ -237,6 +237,7 @@ describe('courier captain renderStation', () => {
     expect(el('repair').state).toEqual({
       teams: [{ id: 't1' }], auto: false, targets: [{ id: 'x' }],
       damaged: [{ id: 'y' }], externally_committed_teams: 0,
+      external_dispatch: null,
     });
   });
 

@@ -20,11 +20,12 @@ function repairState(overrides = {}) {
       overall_hull: { current: 80, max: 100, pct: 0.8 },
       travel_duration_secs: 5.0,
       repair_auto: false,
-      // Issue #1015: the tap-to-prioritise list. Worst-first, as the host folds
-      // it; `prioritised` is the host's own resolved pin, and `prioritisable`
-      // is projected from the owner's candidate predicate — the component
-      // treats it as the SOLE enablement fact, so a row without it renders
-      // disabled and its tap resolves to nothing.
+      // Issue #1015: the tap-to-prioritise list, re-homed by #1384 into the
+      // on-site team's own card. Worst-first, as the host folds it;
+      // `prioritised` is the host's own resolved pin, and `prioritisable` is
+      // projected from the owner's candidate predicate — the component treats
+      // it as the SOLE enablement fact, so a row without it renders disabled
+      // and its tap resolves to nothing.
       damaged_systems: [
         { system_id: 'aux-sensor', display_name: 'Auxiliary Sensor', tier: 'Destroyed', current: 0, max_hp: 10, damage_pct: 1.0, prioritised: false, in_progress: false, prioritisable: true },
         { system_id: 'hull-plating', display_name: 'Hull Plating', tier: 'Disabled', current: 2, max_hp: 20, damage_pct: 0.9, prioritised: false, in_progress: true, prioritisable: false },
@@ -40,7 +41,21 @@ function repairState(overrides = {}) {
   );
 }
 
-test('repair console: renders overall hull and dispatch targets', async ({ page }) => {
+/** One on-site team, so the card that carries the damaged list can be opened. */
+function onSiteState(overrides = {}) {
+  return repairState(Object.assign({
+    teams: [
+      { id: 0, label: 'Team 1', status: 'repairing', target: 'Helm', progress_pct: 1 },
+      { id: 1, label: 'Team 2', status: 'idle', target: '', progress_pct: 0 },
+    ],
+  }, overrides));
+}
+
+/** Open one team's card the way a player does (issue #1384). */
+const selectTeam = (page, id) =>
+  page.locator(`ph-repair-teams .card[data-team-id="${id}"] .card-top`).click();
+
+test('repair console: renders overall hull and the collapsed team roster', async ({ page }) => {
   await page.goto(CONSOLE_URL);
   await page.evaluate((s) => window.__updateConsole('repair', JSON.stringify(s)), repairState());
 
@@ -48,7 +63,11 @@ test('repair console: renders overall hull and dispatch targets', async ({ page 
   const width = await fill.evaluate((el) => el.style.width);
   expect(width).toBe('80%');
   await expect(page.locator('ph-repair-teams .card')).toHaveCount(2);
+  // Nothing is dispatchable until a team is selected: the roster is a summary.
+  await expect(page.locator('ph-repair-teams .btn')).toHaveCount(0);
+  await selectTeam(page, 0);
   await expect(page.locator('ph-repair-teams .card[data-team-id="0"] .btn')).toHaveCount(3);
+  await expect(page.locator('ph-repair-teams .card[data-team-id="1"] .btn')).toHaveCount(0);
 });
 
 test('repair console: Core bar hides when there are no damageable core systems', async ({ page }) => {
@@ -74,7 +93,9 @@ test('repair console: dispatch buttons call __sendAction with correct envelope',
     window.__sendAction = (json) => window.__sent.push(json);
   });
   await page.evaluate((s) => window.__updateConsole('repair', JSON.stringify(s)), repairState());
+  await selectTeam(page, 0);
   await page.locator('ph-repair-teams .card[data-team-id="0"] .btn[data-target="helm"]').click();
+  await selectTeam(page, 1);
   await page.locator('ph-repair-teams .card[data-team-id="1"] .btn[data-target="tactical"]').click();
 
   const sent = await page.evaluate(() => window.__sent);
@@ -83,11 +104,48 @@ test('repair console: dispatch buttons call __sendAction with correct envelope',
   expect(JSON.parse(sent[1])).toMatchObject({ action: 'dispatch_repair_team', console: 'repair', team_idx: 1, target: 'tactical' });
 });
 
-test('repair console: damaged-systems list renders worst-first and highlights the host pin', async ({ page }) => {
+test('repair console: selecting a second team closes the first card', async ({ page }) => {
   await page.goto(CONSOLE_URL);
   await page.evaluate((s) => window.__updateConsole('repair', JSON.stringify(s)), repairState());
+  await selectTeam(page, 0);
+  await selectTeam(page, 1);
+  await expect(page.locator('ph-repair-teams .card[data-team-id="0"] .card-top'))
+    .toHaveAttribute('aria-expanded', 'false');
+  await expect(page.locator('ph-repair-teams .card[data-team-id="0"] .btn')).toHaveCount(0);
+  await expect(page.locator('ph-repair-teams .card[data-team-id="1"] .card-top'))
+    .toHaveAttribute('aria-expanded', 'true');
+});
 
-  const rows = page.locator('ph-repair-teams .dmg-row');
+test('repair console: an idle card offers the field target and sends the fieldless dispatch', async ({ page }) => {
+  await page.goto(CONSOLE_URL);
+  await page.evaluate(() => {
+    window.__sent = [];
+    window.__sendAction = (json) => window.__sent.push(json);
+  });
+  await page.evaluate(
+    (s) => window.__updateConsole('repair', JSON.stringify(s)),
+    repairState({ external_dispatch: { range: 800, target: null, target_name: null, refusal: null } }),
+  );
+  await selectTeam(page, 0);
+  // The three ship destinations plus the field target.
+  await expect(page.locator('ph-repair-teams .card[data-team-id="0"] .btn')).toHaveCount(4);
+  await page.locator('ph-repair-teams .card[data-team-id="0"] .field-btn').click();
+
+  const sent = await page.evaluate(() => window.__sent);
+  expect(sent).toHaveLength(1);
+  // Fieldless: no team index and no target — the host resolves both (#1161).
+  expect(JSON.parse(sent[0])).toMatchObject({ action: 'dispatch_external_repair', console: 'repair' });
+});
+
+test('repair console: the on-site card lists its systems worst-first and highlights the host pin', async ({ page }) => {
+  await page.goto(CONSOLE_URL);
+  await page.evaluate((s) => window.__updateConsole('repair', JSON.stringify(s)), onSiteState());
+
+  // Nothing until the on-site team's card is open: the standalone list is gone.
+  await expect(page.locator('ph-repair-teams .dmg-row')).toHaveCount(0);
+  await selectTeam(page, 0);
+
+  const rows = page.locator('ph-repair-teams .card[data-team-id="0"] .dmg-row');
   await expect(rows).toHaveCount(3);
   await expect(rows.nth(0)).toHaveAttribute('data-system-id', 'aux-sensor');
   await expect(rows.nth(2)).toHaveAttribute('data-system-id', 'core');
@@ -99,13 +157,14 @@ test('repair console: damaged-systems list renders worst-first and highlights th
   await expect(page.locator('ph-repair-teams .priority-btn')).toHaveCount(0);
 });
 
-test('repair console: tapping a damaged system sends set_repair_target_priority', async ({ page }) => {
+test('repair console: tapping a system in the on-site card sends set_repair_target_priority', async ({ page }) => {
   await page.goto(CONSOLE_URL);
   await page.evaluate(() => {
     window.__sent = [];
     window.__sendAction = (json) => window.__sent.push(json);
   });
-  await page.evaluate((s) => window.__updateConsole('repair', JSON.stringify(s)), repairState());
+  await page.evaluate((s) => window.__updateConsole('repair', JSON.stringify(s)), onSiteState());
+  await selectTeam(page, 0);
   await page.locator('ph-repair-teams .dmg-row[data-system-id="aux-sensor"]').click();
 
   const sent = await page.evaluate(() => window.__sent);
@@ -119,7 +178,8 @@ test('repair console: tapping a damaged system sends set_repair_target_priority'
 
 test('repair console: a row a team is already on is shown but not offered', async ({ page }) => {
   await page.goto(CONSOLE_URL);
-  await page.evaluate((s) => window.__updateConsole('repair', JSON.stringify(s)), repairState());
+  await page.evaluate((s) => window.__updateConsole('repair', JSON.stringify(s)), onSiteState());
+  await selectTeam(page, 0);
 
   // `hull-plating` is the in_progress row. A tap on it is structurally a no-op —
   // the host's sweep never offers the system a team is standing on as a
@@ -131,12 +191,16 @@ test('repair console: a row a team is already on is shown but not offered', asyn
     .toBeEnabled();
 });
 
-test('repair console: the damaged-systems section hides on an intact ship', async ({ page }) => {
+test('repair console: an on-site card is not even a toggle on an intact ship', async ({ page }) => {
   await page.goto(CONSOLE_URL);
-  await page.evaluate((s) => window.__updateConsole('repair', JSON.stringify(s)), repairState({ damaged_systems: [] }));
+  await page.evaluate((s) => window.__updateConsole('repair', JSON.stringify(s)), onSiteState({ damaged_systems: [] }));
+  const top = page.locator('ph-repair-teams .card[data-team-id="0"] .card-top');
+  // Not merely "opens onto nothing": a summary with no body behind it is a
+  // readout, so the tap never happens and the chrome never claims it did.
+  await expect(top).toBeDisabled();
+  await expect(top).toHaveAttribute('aria-expanded', 'false');
   await expect(page.locator('ph-repair-teams .dmg-row')).toHaveCount(0);
-  // Zero rows is not the same claim as "the section went away": the heading and
-  // its container are what a player sees on an intact ship, and without this the
-  // test passes just as happily against a visible, empty [DAMAGED SYSTEMS] box.
-  await expect(page.locator('ph-repair-teams #damaged')).toBeHidden();
+  // Zero rows is not the same claim as "the section went away": an empty
+  // [DAMAGED SYSTEMS] box inside the card would pass a count-only assertion.
+  await expect(page.locator('ph-repair-teams .card[data-team-id="0"] .card-body')).toBeHidden();
 });

@@ -65,6 +65,11 @@ export function makeRepairRender(variant) {
         targets: s.dispatch_targets || [],
         damaged: s.damaged_systems || [],
         externally_committed_teams: s.external_dispatch?.target != null ? 1 : 0,
+        // The field destination an open idle card offers (issue #1384). The
+        // whole view, not just the committed count: the card names the target
+        // when the host has named one, and renders the row as a readout rather
+        // than a control while a team is already out there.
+        external_dispatch: s.external_dispatch || null,
       };
     }
 

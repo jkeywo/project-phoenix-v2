@@ -133,6 +133,12 @@ entities:
       rationale:
         - Engineering should not see exact non-core damage details before a team arrives on site.
         - Engineering should still be able to act proactively based on aggregate cues and crew coordination.
+        - "[ai] The roster asks WHICH TEAM first (issue #1384). A team card is a summary — name, status, progress — until the seat selects it, and only then does it open onto that team's own verbs: destinations for an idle team, the on-site systems for a team already working. Before this every idle team rendered its whole destination row at once, under a separate always-visible damaged list, so a three-team hull spent most of a phone column on controls for teams nobody was thinking about."
+        - "[ai] Only a card with something behind it is a toggle. A team with no verb to offer — travelling, returning, an idle slot already committed to the field, an on-site team the host is showing no rows for — renders its summary as a disabled readout with no caret, so tapping it cannot rotate a caret, paint a selected border or report an expanded region that stays hidden. This is the same rule that keeps RECALL off the card: a control that does nothing is worse than no control, and that includes a control whose only job is to open an empty box."
+        - "[ai] The damaged-systems list is not a panel of its own any more; it belongs to the card whose team can act on it. It was already the host's per-SYSTEM on-site projection (core detail plus whatever a team is standing on), so re-homing it changed which card draws it, not what the seat may see. Nothing filters it per team: the console cannot honestly say which on-site team owns which row, and `prioritisable` remains the host's sole enablement verdict."
+        - "[ai] Which card is open is client-local presentation state, not a semantic action. It steers no command and the host has no opinion about it, so routing it through the wire would only make opening a card cost a round trip. It survives state pushes and is dropped when the team it names leaves the roster."
+        - "[ai] The field destination sends the fieldless external-dispatch command and can never send its recall counterpart. While a team is already abroad — exactly the state in which the shared dispatch/recall action flips to RECALL — the row renders as a disabled readout, so recall is structurally unreachable from a destination list rather than merely spelled differently. Internal RECALL is absent for the plainer reason that the host has no such verb yet."
+        - "[ai] An idle card names the field destination generically. The host populates the target name only once a team is working abroad, which is never the moment a seat is choosing where to send one, so the row reads as the field target rather than inventing a name the projection does not carry."
     architecture:
       kind: client-interface
       authority: non-authoritative
@@ -160,6 +166,10 @@ entities:
         - gui/battleship/repair.html
         - gui/cruiser/engineering.html
         - gui/destroyer/engineering.html
+        - gui/components/ph-repair-teams.js
+        - gui/stations/repair-console.js
+        - gui/stations/engineering-console.js
+        - gui/courier/captain.console.js
         - gui/console-state.js
         - gui/repair-dispatch.js
         - gui/repair-button.js
@@ -167,10 +177,17 @@ entities:
         - buildRepairConsoleState
         - repairCoreAndTargets
         - dispatchRepairTeam
+        - PhRepairTeams
+        - makeRepairRender
+        - makeEngineeringRender
       tests:
         - tests/client/console-state.test.js
         - tests/client/repair-button.test.js
         - tests/client/repair-dispatch.test.js
+        - tests/client/ph-repair-teams.test.js
+        - tests/client/repair-console.test.js
+        - tests/client/engineering-console.test.js
+        - tests/smoke/repair-console.spec.js
     evidence:
       - kind: test
         reference: tests/client/repair-dispatch.test.js
@@ -186,6 +203,8 @@ entities:
       confidence: confirmed
       title: Repair UI State
       summary: Local client-only state for the repair console presentation.
+      rationale:
+        - "[ai] Extended in issue #1384 to include which repair-team card the seat currently has open. Held in the ph-repair-teams element, never sent, never restored: a card is open because this player tapped it, and closing the console closes it."
     architecture:
       classification: local-view
       owner: repair-console-interface
@@ -195,6 +214,7 @@ entities:
         - gui/battleship/repair.html
         - gui/cruiser/engineering.html
         - gui/destroyer/engineering.html
+        - gui/components/ph-repair-teams.js
         - gui/console-state.js
 
   - component: host-damage-state

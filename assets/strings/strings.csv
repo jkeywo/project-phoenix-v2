@@ -685,6 +685,8 @@ component.repair_teams.prioritise_title,Tooltip on a tappable damaged-systems ro
 component.repair_teams.prioritised_title,Tooltip on the damaged-systems row already queued to be fixed next. {name} is the system name,[{name} is queued next]
 component.repair_teams.working_title,Tooltip on the damaged-systems row a repair team is already on site at. That row is not tappable — it is nobody's NEXT job. {name} is the system name,[A team is already on {name}]
 component.repair_teams.unavailable_title,Tooltip on a damaged system outside every on-site repair team's current sweep group. {name} is the system name,[No on-site team can take {name} next]
+component.repair_teams.dispatch_to,Heading over the destination list inside a selected idle repair team's card,[DISPATCH TO]
+component.repair_teams.field_target,Destination row for a repair off the ship when no team is abroad yet and the host has therefore named no field target,[FIELD TARGET]
 component.ship_picker.class.battleship,Lobby ship picker — hull class badge on a battleship card,[BATTLESHIP]
 component.ship_picker.class.courier,Lobby ship picker — hull class badge on a courier card,[COURIER]
 component.ship_picker.class.cruiser,Lobby ship picker — hull class badge on a cruiser card,[CRUISER]

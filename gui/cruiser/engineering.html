@@ -12,7 +12,11 @@
     .console-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     .console-body .col { display: flex; flex-direction: column; background: rgba(var(--rgb-panel), 0.6); border: 1px solid var(--edge); padding: 12px; min-height: 0; overflow-y: auto; }
     .console-body .col h2 { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
-    ph-power-controls, ph-repair-teams, ph-hull-integrity { flex: 1; min-height: 0; }
+    ph-power-controls, ph-repair-teams { flex: 1; min-height: 0; }
+    /* The hull bar is one strip of readout, so it takes its own height and
+       leaves the rest of the Repair column to the team roster (issue #1384) —
+       the same split the destroyer's Engineering seat takes. */
+    ph-hull-integrity { flex: 0 0 auto; }
     /* Battery bar sits at the bottom of the Power column, under the (growing) power controls. */
     ph-battery-bar { flex: 0 0 auto; margin-top: 8px; }
     @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .console-body { grid-template-columns: 1fr; gap: 8px; } .console-body .col { padding: 8px; } }

@@ -2523,6 +2523,106 @@ fn a_lobby_round_trip_disarms_a_predicate_held_gm_fire() {
     );
 }
 
+/// Issue #1304: an armed Skip goes at the same run boundary, and the panel says
+/// so.
+///
+/// The Fire test above is the mild version of this. A Skip arm is waiting on
+/// the WORLD -- for an occurrence that may be minutes away -- so it is far more
+/// likely than a Fire to be alive when a mission ends, and an arm that outlived
+/// the run would silently swallow the NEXT mission's first occurrence of that
+/// event with no grant, no `LoggedGmAction`, no activity-feed row and nobody
+/// attributed for the silence.
+#[test]
+fn a_lobby_round_trip_disarms_a_waiting_gm_skip() {
+    use crate::world::config::{scripted_trigger, GmEventControls, TriggerCondition};
+
+    const EVENT: &str = "base-world::courier_lost";
+
+    let mut app = test_app();
+    start_game(&mut app);
+
+    let mut trigger = scripted_trigger(TriggerCondition::OnDestroyed {
+        entity_name: "courier".to_string(),
+    });
+    trigger.id = Some("courier_lost".to_string());
+    let mut controls = GmEventControls::fire_only(
+        "courier_lost".to_string(),
+        "world.gm.event.courier_lost".to_string(),
+    );
+    controls.skip = true;
+    trigger.gm_controls = Some(controls);
+    let mut runtime = crate::world::server::WorldContentRuntime::default();
+    runtime
+        .trigger_states
+        .push(crate::world::content::TriggerState {
+            trigger,
+            fired: false,
+            origin_layer: None,
+            seen_destroyed: Default::default(),
+            last_fired_elapsed: None,
+        });
+    runtime.pending_gm_event_skips.insert(EVENT.to_string());
+    app.insert_resource(runtime)
+        .init_resource::<crate::gm_action::GmActionLog>()
+        .init_resource::<crate::gm_action::LocalGmActionRefusals>()
+        .init_resource::<crate::gm_event::LastGmMissionProjection>()
+        .add_message::<crate::console_bridge::GmMissionChanged>()
+        .add_systems(PostUpdate, crate::gm_event::publish_mission_projection);
+
+    app.update();
+    assert!(
+        app.world_mut()
+            .resource_mut::<bevy::ecs::message::Messages<crate::console_bridge::GmMissionChanged>>()
+            .drain()
+            .last()
+            .expect("round one publishes the panel")
+            .payload
+            .events
+            .iter()
+            .all(|event| event.skip_armed && !event.armed),
+        "the run under way holds the Skip arm, and only that lever"
+    );
+
+    push(
+        &mut app,
+        crate::console_bridge::LOCAL_CONSOLE_TOKEN,
+        ClientMessage::ReturnToLobby,
+    );
+    let mut republished: Vec<Vec<(String, bool)>> = Vec::new();
+    for _ in 0..3 {
+        app.update();
+        republished.extend(
+            app.world_mut()
+                .resource_mut::<bevy::ecs::message::Messages<
+                    crate::console_bridge::GmMissionChanged,
+                >>()
+                .drain()
+                .map(|message| {
+                    message
+                        .payload
+                        .events
+                        .iter()
+                        .map(|event| (event.id.clone(), event.skip_armed))
+                        .collect()
+                }),
+        );
+    }
+
+    assert_eq!(phase_of(&app), GamePhase::Lobby);
+    assert!(
+        app.world()
+            .resource::<crate::world::server::WorldContentRuntime>()
+            .pending_gm_event_skips
+            .is_empty(),
+        "the arm is part of the per-run GM lane the reset clears"
+    );
+    assert_eq!(
+        republished,
+        vec![vec![(EVENT.to_string(), false)]],
+        "the panel is republished reporting the event as disarmed"
+    );
+}
+
 /// The reach added above is the host page's alone. A phone sending the
 /// same un-gated `ReturnToLobby` mid-mission must be ignored by the real
 /// app, or the settings-cog feature would hand every handset an abort.

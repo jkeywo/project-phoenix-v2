@@ -606,6 +606,69 @@ pub(crate) fn register_trigger_builders(
         },
     );
 
+    // 16. The Skip-next lever on a GM-operable ORDINARY event (issue #1304).
+    //
+    // `on_destroyed("courier", "on_lost").gm_controls("courier_lost", "…").skip()`
+    // adds the third lever to the control set the line before it declared. It
+    // is a sibling modifier rather than a `gm_controls` parameter for exactly
+    // the reason `.when(…)` and `.repeat()` are siblings of their conditions:
+    // an author who wants a lever says so, and a signature change would be a
+    // breaking edit to every world that already declares a control set.
+    //
+    // What it authorises: a GM may ARM the next matching occurrence so it
+    // advances the ordinary lifecycle — a once-only event is spent, a repeating
+    // one enters its ordinary cooldown — WITHOUT running the handler. The crew
+    // see nothing, which is the point; the record of what a GM did lives on the
+    // GM's own feed.
+    //
+    // Two load-time errors rather than a silently inert declaration:
+    //
+    // * no control set to attach it to. `.skip()` names a lever OF a
+    //   declaration, so `on_destroyed(e, "h").skip()` is not "a trigger with a
+    //   Skip" but a trigger with no GM identity at all — nothing a mission
+    //   panel could list and nothing a GM action could name. (This is the one
+    //   ordering constraint among the trigger modifiers; `.when(…)` and
+    //   `.repeat()` set trigger-level fields that exist unconditionally.)
+    // * a `TriggerCondition::Manual` condition — the `gm_event(…)` shorthand.
+    //   A manual event has no automatic occurrence, so its Skip could never be
+    //   consumed. Shared with the load-time validation pass through
+    //   `GmEventControls::validate_skip_condition` so the two cannot drift.
+    let s = state.clone();
+    host_fn!(
+        engine,
+        "skip",
+        receiver = "trigger",
+        category = "trigger",
+        params = [],
+        summary = "Add the Skip-next lever to the GM control set just declared: \
+                  `on_destroyed(e, \"h\").gm_controls(id, label).skip()` lets a \
+                  Game Master arm the NEXT matching occurrence to advance the \
+                  ordinary lifecycle without running the handler. Needs a \
+                  preceding `gm_controls(...)` and an automatic condition.",
+        move |handle: &mut TriggerHandle| -> Result<TriggerHandle, Box<EvalAltResult>> {
+            let mut st = s.lock().expect("builder state lock");
+            let index = handle.index;
+            match st.script_triggers.get_mut(index) {
+                Some(t) if t.trigger.gm_controls.is_none() => Err(raise(
+                    "skip(): this registration declares no GM controls; write \
+                     `.gm_controls(id, label).skip()` so the lever has an event \
+                     identity to belong to"
+                        .to_string(),
+                )),
+                Some(t) => {
+                    GmEventControls::validate_skip_condition(&t.trigger.condition)
+                        .map_err(|message| raise(format!("skip(): {message}")))?;
+                    t.trigger.gm_controls.as_mut().expect("checked above").skip = true;
+                    Ok(*handle)
+                }
+                // Unreachable through the front-end, exactly as in `when` below.
+                None => Err(raise(format!(
+                    "skip(): trigger handle {index} names no registered trigger"
+                ))),
+            }
+        },
+    );
+
     // The trigger-LEVEL predicate gate, chained onto whichever registration just
     // ran: `on_all_destroyed("hostiles", "h").when("counter(waves) >= 8")`.
     //
@@ -1463,6 +1526,108 @@ mod tests {
                 .as_ref()
                 .map(|c| c.id.as_str()),
             Some("a"),
+        );
+    }
+
+    // -- skip(): the Skip-next lever (issue #1304) ----------------------------
+
+    /// `.skip()` turns on exactly one field of the control set the line before
+    /// it declared, and leaves the condition, the lifecycle and Fire alone.
+    #[test]
+    fn skip_adds_one_lever_to_the_declaration_before_it() {
+        let controls = script_triggers(
+            r#"on_destroyed("courier", "h")
+                   .gm_controls("evac", "world.gm.event.evac").skip();
+               fn h(ctx) { }"#,
+        )[0]
+        .trigger
+        .gm_controls
+        .clone()
+        .expect("a control set");
+        assert!(controls.skip, "Skip is what this modifier turns on");
+        assert!(controls.fire, "and it leaves the declared Fire alone");
+        assert!(!controls.pause, "Pause (#1303) is not declared here");
+
+        let mut expected = crate::world::config::scripted_trigger(TriggerCondition::OnDestroyed {
+            entity_name: "courier".into(),
+        });
+        expected.id = Some("evac".into());
+        let mut with_skip = crate::world::config::GmEventControls::fire_only(
+            "evac".into(),
+            "world.gm.event.evac".into(),
+        );
+        with_skip.skip = true;
+        expected.gm_controls = Some(with_skip);
+        assert_builds_with(
+            r#"on_destroyed("courier", "h")
+                   .gm_controls("evac", "world.gm.event.evac").skip()"#,
+            expected,
+        );
+    }
+
+    /// It composes with the other trigger modifiers in any order, exactly as
+    /// they compose with each other -- with the ONE ordering constraint the
+    /// lever's meaning imposes: it must follow the declaration it belongs to.
+    #[test]
+    fn skip_composes_with_the_other_modifiers_and_needs_its_declaration_first() {
+        let one = script_triggers(
+            r#"on_flag_set("alarm", "h")
+                   .gm_controls("evac", "world.gm.event.evac").skip().repeat();
+               fn h(ctx) { }"#,
+        );
+        let other = script_triggers(
+            r#"on_flag_set("alarm", "h")
+                   .repeat().gm_controls("evac", "world.gm.event.evac").skip();
+               fn h(ctx) { }"#,
+        );
+        assert_eq!(one[0].trigger, other[0].trigger);
+        assert!(one[0].trigger.repeat);
+        assert!(one[0]
+            .trigger
+            .gm_controls
+            .as_ref()
+            .is_some_and(|controls| controls.skip));
+
+        // A lever with no declaration to belong to names no event at all, so it
+        // is a load-time error rather than a trigger with a silent Skip.
+        let compiled = compile_scripts(&[ScriptSource {
+            path: "w.toml#script.setup".to_string(),
+            source: r#"on_flag_set("alarm", "h").skip(); fn h(ctx) { }"#.to_string(),
+        }]);
+        assert!(
+            compiled
+                .findings
+                .iter()
+                .any(|finding| finding.severity == crate::world::validate::Severity::Error),
+            "a Skip with no gm_controls must be refused at load: {:?}",
+            compiled.findings
+        );
+    }
+
+    /// A manual `gm_event` has no automatic occurrence, so a Skip on it could
+    /// never be consumed: a mission-panel button an operator can press for ever
+    /// with no possible effect. Refused at load rather than shipped inert.
+    #[test]
+    fn skip_on_a_manual_gm_event_is_a_blocking_finding() {
+        let compiled = compile_scripts(&[ScriptSource {
+            path: "w.toml#script.setup".to_string(),
+            source: r#"gm_event("a", "world.gm.event.a", "h").skip(); fn h(ctx) { }"#.to_string(),
+        }]);
+        assert!(
+            compiled
+                .findings
+                .iter()
+                .any(|finding| finding.severity == crate::world::validate::Severity::Error),
+            "a Skip on a manual event must be refused at load: {:?}",
+            compiled.findings
+        );
+        assert!(
+            compiled.script_triggers.iter().all(|st| st
+                .trigger
+                .gm_controls
+                .as_ref()
+                .is_none_or(|controls| !controls.skip)),
+            "and must not register a half-built lever"
         );
     }
 }

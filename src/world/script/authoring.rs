@@ -247,6 +247,11 @@ mod tests {
         // `gm_controls`, and exposed for its reason: whether a Game Master may
         // suspend an automatic moment is the author's judgement.
         ("trigger", "pauseable", &[]),
+        // The Skip-next lever on that declaration (issue #1304). Exposed for
+        // the same reason again: which occurrences a Game Master may quietly
+        // spend is the author's judgement, and the mission panel can only offer
+        // what a scenario declares.
+        ("trigger", "skip", &[]),
         ("trigger", "when", &["predicate"]),
         ("trigger", "repeat", &[]),
         ("trigger", "repeatable", &[]),

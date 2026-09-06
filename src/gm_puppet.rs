@@ -250,7 +250,8 @@ pub fn validate_station_action(
         | GmAction::FireGmEvent { .. }
         | GmAction::ApplyDirectEffect { .. }
         | GmAction::SpawnPaletteEntity { .. }
-        | GmAction::SetEventPaused { .. } => return Ok(()),
+        | GmAction::SetEventPaused { .. }
+        | GmAction::ArmGmEventSkip { .. } => return Ok(()),
         GmAction::SetStationPuppet { station, .. }
         | GmAction::IssueStationCommand { station, .. } => station,
     };
@@ -299,7 +300,8 @@ pub fn validate_station_action(
         | GmAction::FireGmEvent { .. }
         | GmAction::ApplyDirectEffect { .. }
         | GmAction::SpawnPaletteEntity { .. }
-        | GmAction::SetEventPaused { .. } => unreachable!(),
+        | GmAction::SetEventPaused { .. }
+        | GmAction::ArmGmEventSkip { .. } => unreachable!(),
     }
 }
 
@@ -996,6 +998,7 @@ station = "tactical"
                     requested_active: true,
                     outcome: GmActionOutcome::Pending,
                     tick: 12,
+                    lever: None,
                     reason: None,
                     order: Some(order),
                     target: None,

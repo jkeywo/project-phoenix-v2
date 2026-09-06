@@ -213,6 +213,22 @@ pub struct WorldContentRuntime {
     /// paused, because Fire is the lever a GM reaches for precisely when the
     /// automatic opportunity has gone.
     pub paused_gm_events: std::collections::BTreeSet<String>,
+    /// Layer-qualified ids of GM `Skip` requests that have crossed their
+    /// canonical apply boundary and are waiting for the AUTOMATIC occurrence
+    /// they will stand in front of (issue #1304).
+    ///
+    /// A `BTreeSet` for [`Self::pending_gm_event_fires`]' reasons, and cross-tick
+    /// far more emphatically than that set is: a Fire arm is normally consumed
+    /// the tick it lands, while a Skip arm waits for the world to produce an
+    /// occurrence that may be many minutes away or may never come at all. So it
+    /// is captured, folded and replayed exactly as the Fire set is.
+    ///
+    /// The two sets are read and consumed independently, which is what makes
+    /// "Fire does not consume an armed Skip" true by construction rather than
+    /// by a rule somebody has to remember: the manual pass in
+    /// [`tick_trigger_pipeline`] touches only the Fire set, and the automatic
+    /// evaluation loop touches only this one.
+    pub pending_gm_event_skips: std::collections::BTreeSet<String>,
 }
 
 /// Bevy resource wrapping the server-side objective manager.
@@ -2443,6 +2459,19 @@ pub(crate) fn tick_trigger_pipeline(
             },
         );
 
+        // An armed Skip whose event no longer exists cannot ever be honoured,
+        // and authoritative state must not accumulate it — the Fire pass's rule
+        // below, through the one `live_event_ids` both levers share. Nothing
+        // else drops a Skip: a spent once-only event can be re-armed by
+        // `reset_trigger`, and a `when` that reads false is a moment, not an
+        // answer.
+        if pass == 1 && !runtime.pending_gm_event_skips.is_empty() {
+            let live = crate::gm_event::live_event_ids(&runtime.trigger_states);
+            runtime
+                .pending_gm_event_skips
+                .retain(|id| live.contains(id));
+        }
+
         // The GM's armed Fires (issue #1301). Only in the first pass: a Fire is
         // one authored occurrence, and letting it re-enter a chaining pass
         // would let one press run a repeatable handler several times in a tick.
@@ -2486,11 +2515,7 @@ pub(crate) fn tick_trigger_pipeline(
             }
             // An armed id that names no live trigger at all cannot ever be
             // honoured, and authoritative state must not accumulate it.
-            let live: std::collections::BTreeSet<String> = runtime
-                .trigger_states
-                .iter()
-                .filter_map(crate::gm_event::state_event_id)
-                .collect();
+            let live = crate::gm_event::live_event_ids(&runtime.trigger_states);
             runtime
                 .pending_gm_event_fires
                 .retain(|id| live.contains(id) && !consumed.contains(id));

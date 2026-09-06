@@ -995,6 +995,18 @@ fn fold_scenario_triggers(world: &World, mut acc: u64) -> u64 {
             acc = fold_str(acc, id);
         }
     }
+    // The armed Skips (issue #1304), folded on identical terms and behind their
+    // own emptiness check for the identical reason. Under its own label rather
+    // than sharing the Fire block's, so two peers that arm the SAME event on
+    // different levers disagree here — they are about to run different
+    // missions, one with the occurrence and one without it.
+    if !runtime.pending_gm_event_skips.is_empty() {
+        acc = fold_str(acc, "scenario-gm-event-skips");
+        acc = fold_u64(acc, runtime.pending_gm_event_skips.len() as u64);
+        for id in &runtime.pending_gm_event_skips {
+            acc = fold_str(acc, id);
+        }
+    }
     acc
 }
 

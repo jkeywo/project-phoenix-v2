@@ -162,6 +162,22 @@ pub enum GmAction {
         event: String,
         active: bool,
     },
+    /// Arm a Skip of the NEXT matching occurrence of one authored, GM-operable
+    /// event (issue #1304).
+    ///
+    /// `event` is the same layer-qualified stable id [`Self::FireGmEvent`]
+    /// names, and for the same reasons. Applying it ARMS the event; the
+    /// ordinary trigger pipeline then lets the next occurrence advance the
+    /// ordinary lifecycle and drops the fired record before dispatch, so the
+    /// handler does not run and the crew see nothing happen.
+    ///
+    /// APPENDED after every earlier variant, never inserted: the grant is
+    /// postcard-encoded into the deterministic digest, which writes an enum by
+    /// variant index, so inserting here would silently move the digest of every
+    /// past run that recorded a later action.
+    ArmGmEventSkip {
+        event: String,
+    },
 }
 
 /// WHICH lever of the authored-event control family one durable result records
@@ -258,7 +274,8 @@ impl GmAction {
             | Self::FireGmEvent { .. }
             | Self::ApplyDirectEffect { .. }
             | Self::SpawnPaletteEntity { .. }
-            | Self::SetEventPaused { .. } => None,
+            | Self::SetEventPaused { .. }
+            | Self::ArmGmEventSkip { .. } => None,
             Self::SetStationPuppet { ship, .. } | Self::IssueStationCommand { ship, .. } => {
                 Some(ship)
             }
@@ -275,9 +292,9 @@ impl GmAction {
     /// no single stable target", not "unknown".
     pub fn target_id(&self) -> Option<&str> {
         match self {
-            Self::FireGmEvent { event } | Self::SetEventPaused { event, .. } => {
-                Some(event.as_str())
-            }
+            Self::FireGmEvent { event }
+            | Self::SetEventPaused { event, .. }
+            | Self::ArmGmEventSkip { event } => Some(event.as_str()),
             Self::ApplyDirectEffect { target, .. } => Some(target.as_str()),
             // The palette id, not the derived instance name: the durable fact
             // has to say WHAT the operator placed, and the instance name is
@@ -298,7 +315,9 @@ impl GmAction {
             // The qualified id shape is checked here rather than only against
             // the live table so a malformed one is refused as an invalid
             // ACTION, not mistaken for an unknown event.
-            Self::FireGmEvent { event } | Self::SetEventPaused { event, .. }
+            Self::FireGmEvent { event }
+            | Self::SetEventPaused { event, .. }
+            | Self::ArmGmEventSkip { event }
                 if bounded(event)
                     && event.contains("::")
                     && !event.ends_with("::")
@@ -358,7 +377,9 @@ impl GmAction {
             Self::SetSessionPaused { .. } => GmActionKind::SessionPause,
             Self::SetStationPuppet { .. } => GmActionKind::StationPuppet,
             Self::IssueStationCommand { .. } => GmActionKind::StationCommand,
-            Self::FireGmEvent { .. } | Self::SetEventPaused { .. } => GmActionKind::EventControl,
+            Self::FireGmEvent { .. } | Self::SetEventPaused { .. } | Self::ArmGmEventSkip { .. } => {
+                GmActionKind::EventControl
+            }
             Self::ApplyDirectEffect { .. } => GmActionKind::DirectEffect,
             Self::SpawnPaletteEntity { .. } => GmActionKind::WorldSpawn,
         }
@@ -374,7 +395,8 @@ impl GmAction {
             | Self::SetStationPuppet { .. }
             | Self::IssueStationCommand { .. }
             | Self::ApplyDirectEffect { .. }
-            | Self::SpawnPaletteEntity { .. } => None,
+            | Self::SpawnPaletteEntity { .. }
+            | Self::ArmGmEventSkip { .. } => None,
         }
     }
 
@@ -386,9 +408,29 @@ impl GmAction {
             | Self::FireGmEvent { .. }
             | Self::ApplyDirectEffect { .. }
             | Self::SpawnPaletteEntity { .. }
+            | Self::ArmGmEventSkip { .. }
             // Not session pause: a paused EVENT stops one authored condition
             // being evaluated and leaves the simulation running.
             | Self::SetEventPaused { .. } => None,
+        }
+    }
+
+    /// Which lever of the event-control family this action pulls, for the
+    /// durable result.
+    ///
+    /// `None` is Fire — see [`crate::gm_event::GmEventLever`] for why the
+    /// family's first lever is the absent one rather than a named variant, and
+    /// why every family that carries no lever at all answers the same way.
+    pub fn event_lever(&self) -> Option<crate::gm_event::GmEventLever> {
+        match self {
+            Self::ArmGmEventSkip { .. } => Some(crate::gm_event::GmEventLever::SkipNext),
+            Self::FireGmEvent { .. }
+            | Self::SetEventPaused { .. }
+            | Self::SetSessionPaused { .. }
+            | Self::SetStationPuppet { .. }
+            | Self::IssueStationCommand { .. }
+            | Self::ApplyDirectEffect { .. }
+            | Self::SpawnPaletteEntity { .. } => None,
         }
     }
 
@@ -405,7 +447,8 @@ impl GmAction {
             Self::IssueStationCommand { .. }
             | Self::FireGmEvent { .. }
             | Self::ApplyDirectEffect { .. }
-            | Self::SpawnPaletteEntity { .. } => true,
+            | Self::SpawnPaletteEntity { .. }
+            | Self::ArmGmEventSkip { .. } => true,
         }
     }
 }
@@ -509,7 +552,7 @@ pub struct GmActionRefusal {
     /// pause-only refusal byte-identical to its pre-#1301 shape.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
-    /// Which lever of the event-control family the refused action pulled
+    /// Which of Fire's siblings the refused action pulled
     /// ([`GmAction::verb`]) — `None` for every family that has none (issue
     /// #1303).
     ///
@@ -520,6 +563,17 @@ pub struct GmActionRefusal {
     /// `true` for a Fire and the requested absolute state for a Pause.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verb: Option<GmEventVerb>,
+    /// Which lever of the event-control family the refused action pulled
+    /// (issue #1304), or `None` for a Fire, a Pause and for every family that
+    /// has no lever at all — see [`crate::gm_event::GmEventLever`].
+    ///
+    /// It rides the refusal for [`Self::target`]'s reason: a refusal replaces
+    /// the grant that never existed, so without it every GM's feed would report
+    /// a refused Skip as a refused Fire — the wrong sentence about the wrong
+    /// button. `default` keeps an older peer's frame readable and
+    /// `skip_serializing_if` keeps every pre-#1304 refusal byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lever: Option<crate::gm_event::GmEventLever>,
 }
 
 impl GmActionRefusal {
@@ -534,6 +588,7 @@ impl GmActionRefusal {
         )
         .with_target(self.target.clone())
         .with_verb(self.verb)
+        .with_lever(self.lever)
     }
 }
 
@@ -605,11 +660,19 @@ pub fn validate_fleet_frame(
             if refusal.action_kind.carries_target() != refusal.target.is_some() {
                 return Err(GmActionRefusalReason::InvalidAction);
             }
-            // And the verb travels with it (issue #1303), on the same rule:
-            // an event-control refusal that names no lever is republished as a
-            // refused Fire on every other GM's feed, and a verb on a family
-            // that has none is a claim about a lever that does not exist.
-            if (refusal.action_kind == GmActionKind::EventControl) != refusal.verb.is_some() {
+            // `verb` (issue #1303, Fire/Pause) and `lever` (issue #1304, Skip)
+            // both belong to the EventControl family only, and between them
+            // name exactly one control: a refusal outside the family naming
+            // either could only be published as a sentence about an event
+            // nobody named, and one inside naming neither is republished as a
+            // refused Fire on every other GM's feed, because Fire is the only
+            // event-control verb a fact with neither field could ever have
+            // recorded.
+            let is_event_control = refusal.action_kind == GmActionKind::EventControl;
+            if !is_event_control && (refusal.verb.is_some() || refusal.lever.is_some()) {
+                return Err(GmActionRefusalReason::InvalidAction);
+            }
+            if is_event_control && refusal.verb.is_none() && refusal.lever.is_none() {
                 return Err(GmActionRefusalReason::InvalidAction);
             }
         }
@@ -720,9 +783,8 @@ pub struct LoggedGmAction {
     /// its pre-#1310 shape, so no existing world's digest moves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effect: Option<crate::gm_effect::GmDirectEffectResult>,
-    /// Which lever of the event-control family produced this fact
-    /// ([`GmAction::verb`]) — `None` for every family that has none (issue
-    /// #1303).
+    /// Which of Fire's siblings produced this fact ([`GmAction::verb`]) —
+    /// `None` for every family that has none (issue #1303).
     ///
     /// It rides the durable result for [`Self::target`]'s reason, sharpened by
     /// the lane that has no grant at all: a local ingress refusal is built from
@@ -734,6 +796,19 @@ pub struct LoggedGmAction {
     /// byte-identical to its pre-#1303 shape.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verb: Option<GmEventVerb>,
+    /// Which lever of the event-control family produced this fact (issue
+    /// #1304): `Some(SkipNext)` for an arm-the-next-occurrence Skip, `None` for
+    /// a Fire, a Pause and for every family that pulls no lever at all.
+    ///
+    /// The family is deliberately ONE [`GmActionKind`] — the GM contract calls
+    /// Fire, Pause and Skip three levers of one event control, and the mission
+    /// panel's result feed selects on that kind — so the discriminant the
+    /// activity feed needs has to ride the result itself. `Option` plus
+    /// `skip_serializing_if` is [`Self::effect`]'s device for [`Self::effect`]'s
+    /// reason: a Fire's fact stays byte-identical to its pre-#1304 shape, so no
+    /// existing world's digest moves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lever: Option<crate::gm_event::GmEventLever>,
 }
 
 impl LoggedGmAction {
@@ -757,12 +832,19 @@ impl LoggedGmAction {
             target: None,
             effect: None,
             verb: None,
+            lever: None,
         }
     }
 
     /// Attach the action's stable target identity to a refusal built above.
     pub fn with_target(mut self, target: Option<String>) -> Self {
         self.target = target;
+        self
+    }
+
+    /// Attach the event-control lever the action pulled to a fact built above.
+    pub fn with_lever(mut self, lever: Option<crate::gm_event::GmEventLever>) -> Self {
+        self.lever = lever;
         self
     }
 
@@ -800,6 +882,7 @@ impl LoggedGmAction {
         )
         .with_target(request.action.target_id().map(str::to_string))
         .with_verb(request.action.verb())
+        .with_lever(request.action.event_lever())
     }
 }
 
@@ -1319,6 +1402,10 @@ impl GmActionJournal {
         // set-state reduces to the same No-op on every peer even when the live
         // trigger table is not available to this reducer (issue #1303).
         let mut paused_events = std::collections::BTreeSet::new();
+        // The same discipline for Skip (issue #1304): a second arm of an event
+        // this prefix has already armed reduces to the same No-op on every
+        // peer, whether or not the live trigger table is available here.
+        let mut armed_skips = std::collections::BTreeSet::new();
         let mut entries = Vec::new();
         for (index, grant) in self.grants.iter().take(end).enumerate() {
             let requested_active = grant.action.requested_active();
@@ -1348,6 +1435,9 @@ impl GmActionJournal {
                             } else {
                                 paused_events.remove(event);
                             }
+                        }
+                        GmAction::ArmGmEventSkip { event } => {
+                            armed_skips.insert(event.clone());
                         }
                         // A placement has no latch to fold forward: each
                         // grant is its own spawn, and the world it produced is
@@ -1381,6 +1471,13 @@ impl GmActionJournal {
                     }
                     GmActionOutcome::Applied
                 }
+                GmAction::ArmGmEventSkip { event } if armed_skips.contains(event) => {
+                    GmActionOutcome::NoOp
+                }
+                GmAction::ArmGmEventSkip { event } => {
+                    armed_skips.insert(event.clone());
+                    GmActionOutcome::Applied
+                }
                 GmAction::SetSessionPaused { active } if paused == *active => GmActionOutcome::NoOp,
                 GmAction::SetSessionPaused { active } => {
                     paused = *active;
@@ -1425,6 +1522,7 @@ impl GmActionJournal {
                 target: grant.action.target_id().map(str::to_string),
                 effect: None,
                 verb: grant.action.verb(),
+                lever: grant.action.event_lever(),
             });
         }
         GmActionLog { entries, paused }
@@ -1441,6 +1539,10 @@ impl GmActionJournal {
         // set-state reduces to the same No-op on every peer even when the live
         // trigger table is not available to this reducer (issue #1303).
         let mut paused_events = std::collections::BTreeSet::new();
+        // The same discipline for Skip (issue #1304): a second arm of an event
+        // this prefix has already armed reduces to the same No-op on every
+        // peer, whether or not the live trigger table is available here.
+        let mut armed_skips = std::collections::BTreeSet::new();
         let mut entries = Vec::new();
         for grant in self.grants.iter().take(end) {
             let requested_active = grant.action.requested_active();
@@ -1465,6 +1567,13 @@ impl GmActionJournal {
                     }
                     GmActionOutcome::Applied
                 }
+                GmAction::ArmGmEventSkip { event } if armed_skips.contains(event) => {
+                    GmActionOutcome::NoOp
+                }
+                GmAction::ArmGmEventSkip { event } => {
+                    armed_skips.insert(event.clone());
+                    GmActionOutcome::Applied
+                }
                 GmAction::SetSessionPaused { active } if paused == *active => GmActionOutcome::NoOp,
                 GmAction::SetSessionPaused { active } => {
                     paused = *active;
@@ -1509,6 +1618,7 @@ impl GmActionJournal {
                 target: grant.action.target_id().map(str::to_string),
                 effect: None,
                 verb: grant.action.verb(),
+                lever: grant.action.event_lever(),
             });
         }
         GmActionLog { entries, paused }
@@ -1965,6 +2075,7 @@ pub fn apply_due_actions(
                             target: grant.action.target_id().map(str::to_string),
                             effect: None,
                             verb: grant.action.verb(),
+                            lever: grant.action.event_lever(),
                         })
                         .expect("live GM result matches its canonical grant");
                     continue;
@@ -2052,6 +2163,58 @@ pub fn apply_due_actions(
                     }
                 }
             }
+            // A Skip ARMS the event, exactly as a Fire does and in the same
+            // PreUpdate reducer, and for the same reason: the ordinary
+            // FixedUpdate trigger pipeline is the only thing that may decide
+            // an authored occurrence happened, so the lever it pulls has to be
+            // a fact that pipeline reads rather than a second evaluator here.
+            // Everything that decides the RESULT is revalidated at this agreed
+            // apply tick, so every peer commits the same answer.
+            GmAction::ArmGmEventSkip { event } => {
+                let states_and_pending = content
+                    .as_deref_mut()
+                    .map(|content| (&content.trigger_states, &mut content.pending_gm_event_skips));
+                match states_and_pending {
+                    // No world at all: nothing is operable, which is the same
+                    // answer a GM gets for an id that names no live event.
+                    None => (
+                        GmActionOutcome::Refused,
+                        Some(GmActionRefusalReason::UnknownGmEvent),
+                    ),
+                    Some((states, pending)) => {
+                        match crate::gm_event::skippable_index(states, event) {
+                            // No live event answers to that name, or the one
+                            // that does declares no Skip. `UnknownGmEvent` is
+                            // deliberately the one answer to both, exactly as
+                            // it is for Fire: from where the operator stands
+                            // there is nothing here to skip.
+                            None => (
+                                GmActionOutcome::Refused,
+                                Some(GmActionRefusalReason::UnknownGmEvent),
+                            ),
+                            // A spent once-only event has no next occurrence to
+                            // stand in front of, and an event whose Skip is
+                            // already armed does not need a second one: one arm
+                            // consumes one occurrence no matter how many GMs
+                            // press the button. Both are deterministic No-ops
+                            // rather than refusals — nothing is wrong with the
+                            // request, there is simply nothing left for it to
+                            // change.
+                            Some(index)
+                                if !crate::world::content::manual_fire_is_still_live(
+                                    &states[index],
+                                ) || pending.contains(event) =>
+                            {
+                                (GmActionOutcome::NoOp, None)
+                            }
+                            Some(_) => {
+                                pending.insert(event.clone());
+                                (GmActionOutcome::Applied, None)
+                            }
+                        }
+                    }
+                }
+            }
             GmAction::SetSessionPaused { active } if paused.0 == *active => {
                 (GmActionOutcome::NoOp, None)
             }
@@ -2088,6 +2251,7 @@ pub fn apply_due_actions(
                         target: grant.action.target_id().map(str::to_string),
                         effect: None,
                         verb: grant.action.verb(),
+                        lever: grant.action.event_lever(),
                     };
                     journal
                         .record_applied_result(result)
@@ -2160,6 +2324,7 @@ pub fn apply_due_actions(
                             target: grant.action.target_id().map(str::to_string),
                             effect: None,
                             verb: grant.action.verb(),
+                            lever: grant.action.event_lever(),
                         };
                         journal
                             .record_applied_result(result)
@@ -2251,6 +2416,7 @@ pub fn apply_due_actions(
                 target: grant.action.target_id().map(str::to_string),
                 effect: resolved_effect,
                 verb: grant.action.verb(),
+                lever: grant.action.event_lever(),
             })
             .expect("live GM result matches its canonical grant");
     }
@@ -2337,6 +2503,7 @@ pub(crate) fn refusal_for(
         reason,
         target: proposal.action.target_id().map(str::to_string),
         verb: proposal.action.verb(),
+        lever: proposal.action.event_lever(),
     }
 }
 
@@ -2960,6 +3127,363 @@ station = "helm"
         assert!(projected
             .iter()
             .all(|entry| entry.target.as_deref() == Some("base-world::breach_alarm")));
+    }
+
+    // -- Arming a Skip of the next occurrence (issue #1304) ------------------
+
+    /// The Skip lever's counterpart to `manual_event_state`: an ORDINARY
+    /// condition-bearing event, because a Skip stands in front of an automatic
+    /// occurrence and a `TriggerCondition::Manual` event has none.
+    fn skippable_event_state(
+        id: &str,
+        repeat: bool,
+        skip: bool,
+    ) -> crate::world::content::TriggerState {
+        let mut state = manual_event_state(id, None, repeat, true);
+        state.trigger.condition = crate::world::config::TriggerCondition::OnDestroyed {
+            entity_name: "courier".to_string(),
+        };
+        state.trigger.gm_controls.as_mut().expect("controls").skip = skip;
+        state
+    }
+
+    fn skip_grant(sequence: u64, apply_tick: u64, correlation: &str, event: &str) -> GmActionGrant {
+        GmActionGrant {
+            from: HostSlot(1),
+            sequenced_by: HostSlot(1),
+            operator_id: "gm-1".into(),
+            correlation: GmActionId::new(correlation).unwrap(),
+            recovery_generation: 0,
+            apply_tick,
+            order: GmActionOrder::new(HostSlot(1), sequence),
+            action: GmAction::ArmGmEventSkip {
+                event: event.into(),
+            },
+        }
+    }
+
+    fn armed_skips(app: &App) -> Vec<String> {
+        app.world()
+            .resource::<crate::world::server::WorldContentRuntime>()
+            .pending_gm_event_skips
+            .iter()
+            .cloned()
+            .collect()
+    }
+
+    /// The idempotency contract, in the exact words of the acceptance criterion:
+    /// repeated arm requests are deterministic and report Applied then No-op.
+    #[test]
+    fn a_second_skip_arm_of_the_same_event_is_a_deterministic_no_op() {
+        let mut app = fire_app(
+            5,
+            vec![skippable_event_state("evac", false, true)],
+            [
+                skip_grant(1, 5, "skip-a", "base-world::evac"),
+                skip_grant(2, 5, "skip-b", "base-world::evac"),
+            ],
+        );
+        app.update();
+
+        assert_eq!(
+            outcomes(&app),
+            vec![
+                (GmActionOutcome::Applied, None),
+                (GmActionOutcome::NoOp, None)
+            ]
+        );
+        assert_eq!(
+            armed_skips(&app),
+            vec!["base-world::evac".to_string()],
+            "one arm consumes one occurrence, no matter how many GMs pressed"
+        );
+    }
+
+    /// Unknown ids and events that declare no Skip are the same answer, decided
+    /// against the LIVE table at the apply tick — `fireable_index`'s rule for
+    /// `skippable_index`, so an operator gets the same sentence for "nothing
+    /// answers to that name" and "that event has no such lever".
+    #[test]
+    fn a_skip_that_names_no_skippable_event_is_refused_at_the_apply_boundary() {
+        let mut app = fire_app(
+            2,
+            vec![
+                skippable_event_state("evac", false, true),
+                // Listed and fireable, but declares no Skip control.
+                skippable_event_state("lockdown", false, false),
+            ],
+            [
+                skip_grant(1, 2, "skip-a", "base-world::missing"),
+                skip_grant(2, 2, "skip-b", "base-world::lockdown"),
+                skip_grant(3, 2, "skip-c", "base-world::evac"),
+            ],
+        );
+        app.update();
+
+        assert_eq!(
+            outcomes(&app),
+            vec![
+                (
+                    GmActionOutcome::Refused,
+                    Some(GmActionRefusalReason::UnknownGmEvent)
+                ),
+                (
+                    GmActionOutcome::Refused,
+                    Some(GmActionRefusalReason::UnknownGmEvent)
+                ),
+                (GmActionOutcome::Applied, None),
+            ]
+        );
+        assert_eq!(armed_skips(&app), vec!["base-world::evac".to_string()]);
+    }
+
+    /// A spent once-only event has no next occurrence to stand in front of, so
+    /// arming a Skip on it is a No-op; a repeatable one always has another.
+    #[test]
+    fn skipping_a_spent_one_shot_is_a_no_op_and_a_repeatable_one_arms() {
+        let mut spent = skippable_event_state("evac", false, true);
+        spent.fired = true;
+        let mut reusable = skippable_event_state("sweep", true, true);
+        reusable.fired = true;
+        let mut app = fire_app(
+            9,
+            vec![spent, reusable],
+            [
+                skip_grant(1, 9, "skip-a", "base-world::evac"),
+                skip_grant(2, 9, "skip-b", "base-world::sweep"),
+            ],
+        );
+        app.update();
+
+        assert_eq!(
+            outcomes(&app),
+            vec![
+                (GmActionOutcome::NoOp, None),
+                (GmActionOutcome::Applied, None)
+            ]
+        );
+        assert_eq!(armed_skips(&app), vec!["base-world::sweep".to_string()]);
+    }
+
+    /// The two levers are orthogonal at the apply boundary as well as in the
+    /// pipeline: arming one never touches the other's set, and one event can
+    /// carry both arms at once.
+    #[test]
+    fn a_fire_and_a_skip_arm_two_independent_sets_on_one_event() {
+        let mut app = fire_app(
+            4,
+            vec![skippable_event_state("evac", true, true)],
+            [
+                fire_grant(1, 4, "fire-a", "base-world::evac"),
+                skip_grant(2, 4, "skip-a", "base-world::evac"),
+            ],
+        );
+        app.update();
+
+        assert_eq!(
+            outcomes(&app),
+            vec![
+                (GmActionOutcome::Applied, None),
+                (GmActionOutcome::Applied, None)
+            ],
+            "neither lever reduces the other to a No-op"
+        );
+        assert_eq!(armed(&app), vec!["base-world::evac".to_string()]);
+        assert_eq!(armed_skips(&app), vec!["base-world::evac".to_string()]);
+    }
+
+    /// An armed Skip is untouched by the one Pause that exists on this branch:
+    /// the session pause reducer runs in the same PreUpdate pass and writes
+    /// nothing but its own flag. (#1303's per-event Pause is the other half of
+    /// the contract's "an armed skip survives Pause" and lands with that lever.)
+    #[test]
+    fn a_session_pause_leaves_an_armed_skip_exactly_where_it_was() {
+        let pause = |sequence: u64, correlation: &str, active: bool| GmActionGrant {
+            from: HostSlot(1),
+            sequenced_by: HostSlot(1),
+            operator_id: "gm-1".into(),
+            correlation: GmActionId::new(correlation).unwrap(),
+            recovery_generation: 0,
+            apply_tick: 7,
+            order: GmActionOrder::new(HostSlot(1), sequence),
+            action: GmAction::SetSessionPaused { active },
+        };
+        let mut app = fire_app(
+            7,
+            vec![skippable_event_state("evac", false, true)],
+            [
+                skip_grant(1, 7, "skip-a", "base-world::evac"),
+                pause(2, "pause-a", true),
+                pause(3, "resume-a", false),
+            ],
+        );
+        app.update();
+
+        assert_eq!(
+            outcomes(&app),
+            vec![
+                (GmActionOutcome::Applied, None),
+                (GmActionOutcome::Applied, None),
+                (GmActionOutcome::Applied, None),
+            ]
+        );
+        assert_eq!(
+            armed_skips(&app),
+            vec!["base-world::evac".to_string()],
+            "an armed Skip survives a Pause/Resume cycle"
+        );
+    }
+
+    /// Every durable result says WHICH lever produced it, on every lane that
+    /// can produce one. Without it the activity feed reports a Skip as a Fire:
+    /// the opposite sentence about the same button.
+    #[test]
+    fn a_skip_result_carries_the_lever_on_the_grant_and_both_refusal_lanes() {
+        let mut app = fire_app(
+            1,
+            vec![skippable_event_state("evac", false, true)],
+            [
+                skip_grant(1, 1, "skip-a", "base-world::evac"),
+                fire_grant(2, 1, "fire-a", "base-world::evac"),
+            ],
+        );
+        app.update();
+
+        let journal = app.world().resource::<GmActionJournal>();
+        let results = journal.applied_results();
+        assert_eq!(results[0].action_kind, GmActionKind::EventControl);
+        assert_eq!(
+            results[0].lever,
+            Some(crate::gm_event::GmEventLever::SkipNext)
+        );
+        assert_eq!(results[0].target.as_deref(), Some("base-world::evac"));
+        assert_eq!(
+            results[1].lever, None,
+            "a Fire keeps the absent lever every pre-#1304 fact has"
+        );
+        // Both levers reach the mission panel's ONE result feed, because the
+        // contract calls them levers of one control rather than two families.
+        assert_eq!(
+            projected_results(
+                GmActionKind::EventControl,
+                &journal.applied_log(),
+                &LocalGmActionRefusals::default(),
+            )
+            .len(),
+            2
+        );
+
+        let skip = GmAction::ArmGmEventSkip {
+            event: "base-world::evac".into(),
+        };
+        // Ingress lane.
+        let request = GmActionRequest {
+            operator_id: "gm-2".into(),
+            correlation: GmActionId::new("skip-b").unwrap(),
+            action: skip.clone(),
+        };
+        let ingress =
+            LoggedGmAction::refused_request(&request, 10, GmActionRefusalReason::OperatorMismatch);
+        assert_eq!(ingress.action_kind, GmActionKind::EventControl);
+        assert_eq!(ingress.target.as_deref(), Some("base-world::evac"));
+        assert_eq!(ingress.lever, Some(crate::gm_event::GmEventLever::SkipNext));
+
+        // Owner lane: the replicated refusal frame and the fact derived from it.
+        let refusal = refusal_for(
+            HostSlot(1),
+            &GmActionProposal {
+                from: HostSlot(2),
+                operator_id: "gm-1".into(),
+                correlation: GmActionId::new("skip-c").unwrap(),
+                action: skip,
+            },
+            11,
+            GmActionRefusalReason::JournalFull,
+        );
+        assert_eq!(refusal.lever, Some(crate::gm_event::GmEventLever::SkipNext));
+        assert_eq!(
+            refusal.logged().lever,
+            Some(crate::gm_event::GmEventLever::SkipNext)
+        );
+    }
+
+    /// The pure reducer reaches the same Applied/No-op ladder without a live
+    /// world, so a peer that reconstructs an applied frontier from grants alone
+    /// agrees with the one that watched them apply.
+    #[test]
+    fn the_pure_reducer_agrees_about_a_repeated_skip_arm() {
+        let mut journal = GmActionJournal::default();
+        journal
+            .insert(skip_grant(1, 1, "skip-a", "base-world::evac"))
+            .unwrap();
+        journal
+            .insert(skip_grant(2, 1, "skip-b", "base-world::evac"))
+            .unwrap();
+        journal
+            .insert(skip_grant(3, 1, "skip-c", "base-world::sweep"))
+            .unwrap();
+        journal.restore_applied_frontier(3).unwrap();
+
+        let log = journal.applied_log();
+        assert_eq!(
+            log.entries()
+                .iter()
+                .map(|entry| entry.outcome)
+                .collect::<Vec<_>>(),
+            vec![
+                GmActionOutcome::Applied,
+                GmActionOutcome::NoOp,
+                GmActionOutcome::Applied,
+            ]
+        );
+        assert!(log
+            .entries()
+            .iter()
+            .all(|entry| entry.lever == Some(crate::gm_event::GmEventLever::SkipNext)));
+    }
+
+    /// A lever belongs to exactly one family: a Station or Pause refusal that
+    /// carries one is a malformed frame, not a fact to project.
+    #[test]
+    fn a_replicated_refusal_carrying_a_lever_outside_the_event_family_is_refused() {
+        let roster = crate::lockstep::FleetRoster::with_participants_and_gms(
+            Vec::new(),
+            vec![HostSlot(1), HostSlot(2)],
+            vec![crate::lockstep::FleetGm {
+                host: HostSlot(2),
+                operator_id: "gm-1".into(),
+            }],
+            HostSlot(1),
+            HostSlot(1),
+        )
+        .unwrap();
+        let mut refusal = refusal_for(
+            HostSlot(1),
+            &GmActionProposal {
+                from: HostSlot(2),
+                operator_id: "gm-1".into(),
+                correlation: GmActionId::new("skip-d").unwrap(),
+                action: GmAction::ArmGmEventSkip {
+                    event: "base-world::evac".into(),
+                },
+            },
+            3,
+            GmActionRefusalReason::JournalFull,
+        );
+        assert_eq!(refusal.lever, Some(crate::gm_event::GmEventLever::SkipNext));
+        assert_eq!(
+            validate_fleet_frame(&GmActionFrame::Refused(refusal.clone()), &roster),
+            Ok(())
+        );
+
+        refusal.action_kind = GmActionKind::SessionPause;
+        refusal.target = None;
+        assert_eq!(
+            validate_fleet_frame(&GmActionFrame::Refused(refusal), &roster),
+            Err(GmActionRefusalReason::InvalidAction),
+            "a lever on a family that pulls none could only publish a sentence \
+             about an event nobody named"
+        );
     }
 
     /// A world-less peer (the pure fixtures and the replay harness) refuses
@@ -4069,6 +4593,7 @@ station = "helm"
             reason: GmActionRefusalReason::JournalFull,
             target: None,
             verb: None,
+            lever: None,
         };
         assert_eq!(
             validate_fleet_frame(&GmActionFrame::Refused(refused.clone()), &roster),
@@ -4211,6 +4736,7 @@ station = "helm"
             target: None,
             effect: None,
             verb: None,
+            lever: None,
         };
         let pause = LoggedGmAction {
             operator_id: "gm-1".into(),
@@ -4224,6 +4750,7 @@ station = "helm"
             target: None,
             effect: None,
             verb: None,
+            lever: None,
         };
         let station_refused = LoggedGmAction::refused(
             "gm-1".into(),
@@ -4245,6 +4772,7 @@ station = "helm"
             target: None,
             effect: None,
             verb: None,
+            lever: None,
         };
         let log = GmActionLog {
             entries: vec![pause, station_applied.clone(), station_pending],
@@ -4275,6 +4803,7 @@ station = "helm"
                 reason: None,
                 order: Some(pause.order),
                 target: None,
+                lever: None,
                 effect: None,
                 verb: None,
             }),
@@ -4878,6 +5407,7 @@ station = "helm"
             requested_active: true,
             tick: 3,
             reason: GmActionRefusalReason::UnknownEntity,
+            lever: None,
             target: None,
             verb: None,
         };

@@ -123,7 +123,13 @@ pub fn validate_script_triggers(
 ///    control set that reaches this pass from anywhere other than the
 ///    `gm_event` host fn (issue #1302's `gm_controls` on an ordinary trigger)
 ///    meets the same rule;
-/// 2. two events authored with the SAME id in one compiled set.
+/// 2. two events authored with the SAME id in one compiled set;
+/// 3. a Skip lever declared on a `TriggerCondition::Manual` event (issue
+///    #1304) — the exact rule
+///    [`GmEventControls::validate_skip_condition`] defines, checked again here
+///    for (1)'s reason. A manual event has no automatic occurrence, so its
+///    Skip could never be consumed: it would publish a mission-panel button an
+///    operator can press for ever with no possible effect.
 ///
 /// (2) is an error rather than a tolerated duplicate, and this is deliberately
 /// stricter than `ResetTrigger`'s `Trigger::id` lookup, which re-arms EVERY
@@ -155,6 +161,18 @@ pub fn validate_gm_events(script_triggers: &[ScriptTrigger]) -> Vec<WorldFinding
         if let Err(message) =
             crate::world::config::GmEventControls::validate_authored(&controls.id, &controls.label)
         {
+            findings.push(gm_event_finding(&st.source_path, &controls.id, message));
+            continue;
+        }
+        let skip_placement = controls
+            .skip
+            .then(|| {
+                crate::world::config::GmEventControls::validate_skip_condition(
+                    &st.trigger.condition,
+                )
+            })
+            .unwrap_or(Ok(()));
+        if let Err(message) = skip_placement {
             findings.push(gm_event_finding(&st.source_path, &controls.id, message));
             continue;
         }
@@ -873,6 +891,44 @@ mod tests {
             assert_eq!(findings[0].category, INVALID_GM_EVENT);
             assert!(crate::world::validate::has_error(&findings));
         }
+    }
+
+    /// Issue #1304: a Skip lever on a manual event is refused by THIS pass too,
+    /// not only by the `.skip()` host fn -- a control set that reaches here from
+    /// anywhere meets the same rule, which is what keeps the two from drifting.
+    ///
+    /// The same manual event WITHOUT the lever stays clean: the finding is
+    /// about a lever that could never be consumed, not about manual events.
+    #[test]
+    fn a_skip_lever_on_a_manual_event_blocks_activation_at_the_validation_pass_too() {
+        let mut skippable_manual =
+            gm_event_trigger("breach", "world.gm.event.breach", "w.toml#script.s");
+        skippable_manual
+            .trigger
+            .gm_controls
+            .as_mut()
+            .expect("controls")
+            .skip = true;
+        let findings = validate_gm_events(&[skippable_manual.clone()]);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].category, INVALID_GM_EVENT);
+        assert_eq!(findings[0].source.reference, "breach");
+        assert!(crate::world::validate::has_error(&findings));
+
+        // The same lever on an event that HAS occurrences is clean.
+        let mut automatic = skippable_manual;
+        automatic.trigger.condition = crate::world::config::TriggerCondition::OnDestroyed {
+            entity_name: "courier".to_string(),
+        };
+        assert!(validate_gm_events(&[automatic]).is_empty());
+
+        // And a manual event that declares no Skip is clean, as it always was.
+        assert!(validate_gm_events(&[gm_event_trigger(
+            "breach",
+            "world.gm.event.breach",
+            "w.toml#script.s"
+        )])
+        .is_empty());
     }
 
     /// Issue #1302: the id space is ONE space across both authoring surfaces.

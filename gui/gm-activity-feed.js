@@ -72,6 +72,13 @@ function normaliseAction(value) {
   if (value.type === 'fire_gm_event' && typeof value.event === 'string' && value.event.length > 0) {
     return { type: value.type, event: value.event };
   }
+  // The next occurrence of one authored GM event was armed to be skipped
+  // (issue #1304). Its own row, not a flag on the Fire above: the two levers do
+  // opposite things to the same event and owe the feed opposite sentences.
+  if (value.type === 'arm_gm_event_skip'
+      && typeof value.event === 'string' && value.event.length > 0) {
+    return { type: value.type, event: value.event };
+  }
   // One directed world effect landed (issue #1310). Amounts are milli-HP, the
   // same unit the action carries, so the feed and the panel that submitted it
   // never disagree by a rounding step.
@@ -383,6 +390,8 @@ export function createGmActivityFeed({
           action = t('server.gm.activity.action.force_start');
         } else if (detail.action.type === 'fire_gm_event') {
           action = t('server.gm.activity.action.fire_gm_event', { event: detail.action.event });
+        } else if (detail.action.type === 'arm_gm_event_skip') {
+          action = t('server.gm.activity.action.arm_gm_event_skip', { event: detail.action.event });
         } else if (detail.action.type === 'apply_direct_effect') {
           action = t(
             `server.gm.activity.action.apply_direct_${detail.action.heal ? 'heal' : 'damage'}`,

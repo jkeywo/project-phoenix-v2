@@ -1174,7 +1174,14 @@ pub struct GmEventControls {
     /// snapshotted and folded, while this is authored config the content digest
     /// already answers for.
     pub pause: bool,
-    /// The arm-the-next-occurrence Skip lever (issue #1304). Always false here.
+    /// The arm-the-next-occurrence Skip lever (issue #1304), declared by the
+    /// `.skip()` authoring modifier.
+    ///
+    /// It is only meaningful beside a condition that can OCCUR: an armed Skip
+    /// is consumed by the next automatic firing, and a
+    /// [`TriggerCondition::Manual`] event has none — which is why declaring it
+    /// on one is a load-time error rather than a lever that could never do
+    /// anything.
     pub skip: bool,
 }
 
@@ -1218,6 +1225,33 @@ impl GmEventControls {
     /// belongs to the run.
     pub fn declares_pause(&self) -> bool {
         self.pause
+    }
+
+    /// Whether this control set declares the Skip lever (issue #1304).
+    pub fn declares_skip(&self) -> bool {
+        self.skip
+    }
+
+    /// The one place "may this trigger carry a Skip lever" is decided, shared
+    /// by the `.skip()` host fn and the load-time validation pass so the two
+    /// cannot drift — [`Self::validate_authored`]'s rule, for its reason.
+    ///
+    /// A Skip advances the lifecycle of an occurrence that would otherwise have
+    /// fired. [`TriggerCondition::Manual`] has no automatic occurrence at all,
+    /// so a Skip there is a mission-panel button an operator can press for ever
+    /// with no possible effect. Refusing it at authoring time is the same
+    /// judgement `gm_controls` twice already gets: an author who wrote
+    /// something inert should be told, not shipped.
+    pub fn validate_skip_condition(condition: &TriggerCondition) -> Result<(), String> {
+        match condition {
+            TriggerCondition::Manual => Err(
+                "skip() needs an automatic condition to stand in front of: a manual \
+                 gm_event has no occurrence to skip, so the lever could never be \
+                 consumed"
+                    .to_string(),
+            ),
+            _ => Ok(()),
+        }
     }
 
     /// The control set both authoring surfaces build today: Fire, nothing else.

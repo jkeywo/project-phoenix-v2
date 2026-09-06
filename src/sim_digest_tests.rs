@@ -1512,6 +1512,85 @@ fn a_paused_gm_event_moves_the_digest_and_an_empty_set_leaves_it_alone() {
     );
 }
 
+/// A GM-operable event's ARMED Skip is folded under its own label, and an empty
+/// set folds nothing (issue #1304).
+///
+/// The label matters as much as the contents: two peers that arm the same event
+/// on DIFFERENT levers are about to run different missions -- one in which the
+/// occurrence happens and one in which it does not -- so the fold must separate
+/// them rather than reduce both to "base-world::evac is armed".
+#[test]
+fn an_armed_gm_skip_moves_the_digest_and_never_collapses_onto_an_armed_fire() {
+    let gm_event = |id: &str| {
+        let mut state = trigger_state("raider");
+        state.trigger.id = Some(id.into());
+        let mut controls = crate::world::config::GmEventControls::fire_only(
+            id.into(),
+            format!("world.gm.event.{id}"),
+        );
+        controls.skip = true;
+        state.trigger.gm_controls = Some(controls);
+        state
+    };
+    let table = || vec![gm_event("evac"), gm_event("sweep")];
+
+    let mut idle_world = scenario_world();
+    idle_world
+        .resource_mut::<WorldContentRuntime>()
+        .trigger_states = table();
+    idle_world
+        .resource_mut::<WorldContentRuntime>()
+        .pending_gm_event_fires
+        .clear();
+    let idle = world_digest(&idle_world);
+
+    let mut skipped = scenario_world();
+    skipped.resource_mut::<WorldContentRuntime>().trigger_states = table();
+    skipped
+        .resource_mut::<WorldContentRuntime>()
+        .pending_gm_event_fires
+        .clear();
+    skipped
+        .resource_mut::<WorldContentRuntime>()
+        .pending_gm_event_skips
+        .insert("base-world::evac".into());
+    let armed_skip = world_digest(&skipped);
+    assert_ne!(
+        idle, armed_skip,
+        "an armed Skip is authoritative pending work"
+    );
+
+    // WHICH event, exactly as for a Fire.
+    let mut other = scenario_world();
+    other.resource_mut::<WorldContentRuntime>().trigger_states = table();
+    other
+        .resource_mut::<WorldContentRuntime>()
+        .pending_gm_event_fires
+        .clear();
+    other
+        .resource_mut::<WorldContentRuntime>()
+        .pending_gm_event_skips
+        .insert("base-world::sweep".into());
+    assert_ne!(armed_skip, world_digest(&other));
+
+    // And WHICH LEVER: the same id armed for Fire is a different world.
+    let mut fired = scenario_world();
+    fired.resource_mut::<WorldContentRuntime>().trigger_states = table();
+    fired
+        .resource_mut::<WorldContentRuntime>()
+        .pending_gm_event_fires
+        .clear();
+    fired
+        .resource_mut::<WorldContentRuntime>()
+        .pending_gm_event_fires
+        .insert("base-world::evac".into());
+    assert_ne!(
+        armed_skip,
+        world_digest(&fired),
+        "a Fire and a Skip on one event are opposite futures, not one fact"
+    );
+}
+
 /// The cooldown stamp folds as present-or-absent and never by value: a restore
 /// reconstructs the mission-clock anchor by `f32` subtraction, so its readings
 /// are not bit-exact across a resume. See `fold_scenario_triggers`.

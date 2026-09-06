@@ -122,6 +122,22 @@ function fireGmEvent(data = {}, action = {}) {
   }, { ships: [], links: [] });
 }
 
+/** One Skip-next arm on an authored GM event (issue #1304): the Fire's twin. */
+function armGmEventSkip(data = {}, action = {}) {
+  return entry('gm_action', {
+    type: 'gm_action',
+    data: {
+      operator: { id: 'gm-alpha', name: 'Morgan' },
+      correlation: 'skip-1',
+      action: { type: 'arm_gm_event_skip', event: 'base-world::courier_lost', ...action },
+      outcome: 'applied',
+      reason: null,
+      order: { sequence: 6, origin: 1 },
+      ...data,
+    },
+  }, { ships: [], links: [] });
+}
+
 /** One directed world effect (issue #1310), the fourth action family. */
 function applyDirectEffect(data = {}, action = {}) {
   return entry('gm_action', {
@@ -302,6 +318,15 @@ describe('GM activity feed pure adapter', () => {
       .toBeUndefined();
   });
 
+  it('accepts an armed Skip and keeps it distinct from a Fire', () => {
+    const parsed = parseGmActivityFeed(payload([armGmEventSkip()]));
+    expect(parsed.entries).toHaveLength(1);
+    expect(parsed.entries[0].detail.data.action)
+      .toEqual({ type: 'arm_gm_event_skip', event: 'base-world::courier_lost' });
+    expect(parseGmActivityFeed(payload([armGmEventSkip({}, { event: '' })])))
+      .toBeUndefined();
+  });
+
   it('accepts a directed world effect and rejects a malformed one', () => {
     const parsed = parseGmActivityFeed(payload([applyDirectEffect()]));
     expect(parsed.entries).toHaveLength(1);
@@ -393,6 +418,23 @@ describe('GM activity feed presentation and selection links', () => {
     // And both ids this branch composes resolve against the shipped table.
     expect(realStrings.get('server.gm.activity.action.fire_gm_event')).toContain('{event}');
     expect(realStrings.has('server.gm.activity.action_reason.unknown-gm-event')).toBe(true);
+  });
+
+  it('says a Skip was armed, never that the event was fired', () => {
+    expect(harness.feed.update(payload([fireGmEvent(), armGmEventSkip()], 16))).toBe(true);
+    const rows = [...document.querySelectorAll('[data-category="gm_action"]')];
+    expect(rows).toHaveLength(2);
+    const sentences = rows.map((row) => row.textContent).join(' | ');
+    expect(sentences)
+      .toContain('server.gm.activity.action.arm_gm_event_skip:base-world::courier_lost');
+    expect(sentences)
+      .toContain('server.gm.activity.action.fire_gm_event:base-world::breach_alarm');
+    // The two levers do opposite things: neither may borrow the other's
+    // sentence, and neither may fall back to the pause family's.
+    const skipRow = rows.find((row) => row.textContent.includes('courier_lost'));
+    expect(skipRow.textContent).not.toContain('action.fire_gm_event');
+    expect(skipRow.textContent).not.toContain('server.gm.activity.action.resume');
+    expect(realStrings.get('server.gm.activity.action.arm_gm_event_skip')).toContain('{event}');
   });
 
   it('names the damaged entity, the hull that landed and the lethal outcome', () => {

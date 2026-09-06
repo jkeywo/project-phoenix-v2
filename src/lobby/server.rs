@@ -1236,6 +1236,12 @@ pub fn handle_return_to_lobby_system(
             // to say why, and the mission panel would open showing it paused
             // against an empty result feed.
             content.paused_gm_events.clear();
+            // The armed Skips go with them (issue #1304), for the same reason
+            // and more urgently: a Skip arm is waiting on the world, so one
+            // that outlived the run would silently swallow the NEXT mission's
+            // first occurrence of that event — with no grant, no
+            // `LoggedGmAction` and no operator behind the silence.
+            content.pending_gm_event_skips.clear();
         }
         // A resolved directed effect is the same kind of pending effect and
         // goes at the same boundary (issue #1310): the grant that authorised it

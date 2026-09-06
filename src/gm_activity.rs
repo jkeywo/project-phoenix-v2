@@ -161,6 +161,16 @@ pub enum GmActivityAction {
         event: String,
         active: bool,
     },
+    /// One authored GM-operable event had its next occurrence armed for Skip
+    /// (issue #1304). `event` is the same layer-qualified stable id a Fire
+    /// names — a different lever on the same control, and a different sentence,
+    /// which is exactly why it is a variant rather than a flag on the Fire row.
+    ///
+    /// The crew never see this either, and in the strongest sense: what the GM
+    /// bought is that NOTHING happens where something would have.
+    ArmGmEventSkip {
+        event: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -403,6 +413,10 @@ fn action_key(action: &GmActivityAction) -> (u8, bool, &str) {
         GmActivityAction::ApplyDirectEffect { entity, heal, .. } => (3, *heal, entity.as_str()),
         GmActivityAction::SpawnPaletteEntity { palette } => (4, false, palette.as_str()),
         GmActivityAction::SetEventPaused { event, active } => (5, *active, event.as_str()),
+        // Its own rank rather than the Fire's, so two rows about one event at
+        // one tick and order sort by WHICH lever was pulled — the levers do
+        // opposite things and their rows must not collapse onto each other.
+        GmActivityAction::ArmGmEventSkip { event } => (6, false, event.as_str()),
     }
 }
 
@@ -1245,11 +1259,23 @@ fn terminal_action_entries(
                             event: fact.target.clone()?,
                             active: fact.requested_active,
                         },
-                        // An event-control fact with no verb is the same
-                        // hypothetical hole as one with no target, and is
+                        // An event-control fact with no verb pulled the Skip
+                        // lever instead (issue #1304): `verb` covers only Fire
+                        // and Pause, so `lever` is the field that names the
+                        // rest of the family. A fact naming neither is the
+                        // same hypothetical hole as one with no target, and is
                         // dropped rather than rendered under a lever nobody
                         // pulled.
-                        (crate::gm_action::GmActionKind::EventControl, None) => return None,
+                        (crate::gm_action::GmActionKind::EventControl, None) => {
+                            match fact.lever {
+                                Some(crate::gm_event::GmEventLever::SkipNext) => {
+                                    GmActivityAction::ArmGmEventSkip {
+                                        event: fact.target.clone()?,
+                                    }
+                                }
+                                None => return None,
+                            }
+                        }
                         // Same rule as the event family: every producer of a
                         // world-spawn fact attaches the palette id and
                         // `validate_fleet_frame` refuses a replicated refusal

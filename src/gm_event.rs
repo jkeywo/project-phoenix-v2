@@ -24,8 +24,21 @@
 //!   per-run authoritative state on
 //!   [`WorldContentRuntime::paused_gm_events`](crate::world::server::WorldContentRuntime::paused_gm_events),
 //!   not part of the control set: the set says which levers exist.
+//! * `.skip()` adds the third lever, Skip-next, to a control set either
+//!   surface declared (issue #1304). An armed Skip is consumed by the next
+//!   AUTOMATIC occurrence that would actually have fired — the ordinary
+//!   evaluator advances the ordinary lifecycle (a once-only event is spent, a
+//!   repeating one enters its ordinary cooldown) and the fired record is
+//!   dropped before handler dispatch, so nothing runs and the crew see
+//!   nothing. It is deliberately orthogonal to the other two levers: a Fire
+//!   consumes only
+//!   [`crate::world::server::WorldContentRuntime::pending_gm_event_fires`], a
+//!   Pause only toggles
+//!   [`WorldContentRuntime::paused_gm_events`](crate::world::server::WorldContentRuntime::paused_gm_events),
+//!   and neither touches
+//!   [`WorldContentRuntime::pending_gm_event_skips`](crate::world::server::WorldContentRuntime::pending_gm_event_skips).
 //!
-//! #1304 turns on Skip. Nothing that DECIDES anything about
+//! Nothing that DECIDES anything about
 //! a Fire reads `Trigger::condition` — not this module, not the `FireGmEvent`
 //! admission, not the apply-tick revalidation, and not the eligibility gates of
 //! the trigger pipeline's manual pass
@@ -101,6 +114,26 @@ pub fn state_event_id(state: &TriggerState) -> Option<String> {
         .map(|controls| qualified_event_id(state.origin_layer.as_deref(), &controls.id))
 }
 
+/// Which lever of the event-control family one durable result reports.
+///
+/// `None` on a [`crate::gm_action::LoggedGmAction`] is **Fire** — the lever the
+/// family shipped with (#1301) and the shape every pre-#1304 fact already has
+/// on the wire, so a world that only ever fired keeps the digest it had. A new
+/// lever names itself instead, which is what lets ONE
+/// [`crate::gm_action::GmActionKind::EventControl`] carry the whole family the
+/// GM contract describes rather than splitting the mission panel's result feed
+/// across one kind per button.
+///
+/// Variants are APPEND-ONLY: the durable result is postcard-encoded into the
+/// deterministic digest, which writes an enum by VARIANT INDEX.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GmEventLever {
+    /// Arm the next matching automatic occurrence to advance the ordinary
+    /// lifecycle WITHOUT running the handler (issue #1304).
+    SkipNext,
+}
+
 /// One controllable event as the GM mission panel sees it.
 ///
 /// Absolute: the panel never accumulates, so a reconnecting or restored GM sees
@@ -130,6 +163,14 @@ pub struct GmMissionEvent {
     /// A Fire has been granted and applied but its handler has not run yet —
     /// normally the same tick, but a `when` predicate or a cooldown can hold it.
     pub armed: bool,
+    /// A Skip has been granted and applied and the occurrence it will consume
+    /// has not happened yet (issue #1304).
+    ///
+    /// Separate from [`Self::armed`] because the two levers are orthogonal and
+    /// live on different clocks: a Fire arm is normally consumed the same tick,
+    /// while a Skip arm waits for the world to produce the occurrence it
+    /// stands in front of — which may be many minutes, or never.
+    pub skip_armed: bool,
 }
 
 /// Absolute GM mission-panel projection: the controllable events, plus the
@@ -151,6 +192,7 @@ pub fn controllable_events(
     states: &[TriggerState],
     pending_fires: &std::collections::BTreeSet<String>,
     paused_events: &std::collections::BTreeSet<String>,
+    pending_skips: &std::collections::BTreeSet<String>,
 ) -> Vec<GmMissionEvent> {
     states
         .iter()
@@ -159,6 +201,7 @@ pub fn controllable_events(
             let id = qualified_event_id(state.origin_layer.as_deref(), &controls.id);
             let armed = pending_fires.contains(&id);
             let paused = paused_events.contains(&id);
+            let skip_armed = pending_skips.contains(&id);
             Some(GmMissionEvent {
                 id,
                 label: controls.label.clone(),
@@ -169,9 +212,20 @@ pub fn controllable_events(
                 spent: state.fired && !state.trigger.repeat,
                 armed,
                 paused,
+                skip_armed,
             })
         })
         .collect()
+}
+
+/// Every qualified id the LIVE trigger table can still answer to.
+///
+/// The one producer of the "an arm that names no live trigger cannot ever be
+/// honoured" set, shared by the Fire and Skip cleanups in
+/// [`crate::world::server::tick_trigger_pipeline`] so the two levers can never
+/// disagree about which ids a layer unload took with it.
+pub fn live_event_ids(states: &[TriggerState]) -> std::collections::BTreeSet<String> {
+    states.iter().filter_map(state_event_id).collect()
 }
 
 /// Resolve one qualified id to its `trigger_states` index.
@@ -216,6 +270,24 @@ pub fn pausable_index(states: &[TriggerState], qualified: &str) -> Option<usize>
         .then_some(index)
 }
 
+/// Whether the named event exists AND declares the Skip lever (issue #1304).
+///
+/// [`fireable_index`]'s twin, and revalidated at the same agreed apply tick for
+/// the same reason: the answer must be identical on every peer, and a layer
+/// carrying the event can be unloaded between request and application. The two
+/// levers are read separately rather than through one "is operable" predicate
+/// because an author may declare either without the other, and a GM who presses
+/// a button a scenario never authored must get a refusal, not the other lever.
+pub fn skippable_index(states: &[TriggerState], qualified: &str) -> Option<usize> {
+    let index = find_event(states, qualified)?;
+    states[index]
+        .trigger
+        .gm_controls
+        .as_ref()
+        .is_some_and(GmEventControls::declares_skip)
+        .then_some(index)
+}
+
 /// Page-local last-published mission projection. Presentation only: the
 /// authoritative facts are the trigger table and the GM action journal.
 #[derive(Resource, Clone, Debug, Default)]
@@ -226,11 +298,12 @@ pub fn projection(
     states: &[TriggerState],
     pending_fires: &std::collections::BTreeSet<String>,
     paused_events: &std::collections::BTreeSet<String>,
+    pending_skips: &std::collections::BTreeSet<String>,
     log: &crate::gm_action::GmActionLog,
     refusals: &crate::gm_action::LocalGmActionRefusals,
 ) -> GmMissionProjection {
     GmMissionProjection {
-        events: controllable_events(states, pending_fires, paused_events),
+        events: controllable_events(states, pending_fires, paused_events, pending_skips),
         results: crate::gm_action::projected_results(
             crate::gm_action::GmActionKind::EventControl,
             log,
@@ -254,15 +327,16 @@ pub fn publish_mission_projection(
 ) {
     let empty_states: Vec<TriggerState> = Vec::new();
     let empty_ids = std::collections::BTreeSet::new();
-    let (states, fires, paused) = match runtime.as_deref() {
+    let (states, fires, paused, skips) = match runtime.as_deref() {
         Some(runtime) => (
             runtime.trigger_states.as_slice(),
             &runtime.pending_gm_event_fires,
             &runtime.paused_gm_events,
+            &runtime.pending_gm_event_skips,
         ),
-        None => (empty_states.as_slice(), &empty_ids, &empty_ids),
+        None => (empty_states.as_slice(), &empty_ids, &empty_ids, &empty_ids),
     };
-    let next = projection(states, fires, paused, &log, &refusals);
+    let next = projection(states, fires, paused, skips, &log, &refusals);
     if last.0.as_ref() == Some(&next) {
         return;
     }
@@ -298,7 +372,12 @@ mod tests {
             state("breach", None, false, false),
             state("breach", Some("assets/worlds/layer.toml"), false, false),
         ];
-        let events = controllable_events(&states, &Default::default(), &Default::default());
+        let events = controllable_events(
+            &states,
+            &Default::default(),
+            &Default::default(),
+            &Default::default(),
+        );
         assert_eq!(
             events.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
             vec!["base-world::breach", "assets/worlds/layer.toml::breach"],
@@ -316,7 +395,13 @@ mod tests {
         let mut plain = state("breach", None, false, false);
         plain.trigger.gm_controls = None;
         let states = vec![plain];
-        assert!(controllable_events(&states, &Default::default(), &Default::default()).is_empty());
+        assert!(controllable_events(
+            &states,
+            &Default::default(),
+            &Default::default(),
+            &Default::default(),
+        )
+        .is_empty());
         assert_eq!(find_event(&states, "base-world::breach"), None);
         assert_eq!(fireable_index(&states, "base-world::breach"), None);
     }
@@ -327,7 +412,13 @@ mod tests {
         listed.trigger.gm_controls.as_mut().expect("controls").fire = false;
         let states = vec![listed];
         assert_eq!(
-            controllable_events(&states, &Default::default(), &Default::default()).len(),
+            controllable_events(
+                &states,
+                &Default::default(),
+                &Default::default(),
+                &Default::default(),
+            )
+            .len(),
             1
         );
         assert_eq!(find_event(&states, "base-world::breach"), Some(0));
@@ -340,7 +431,12 @@ mod tests {
             state("once", None, false, true),
             state("again", None, true, true),
         ];
-        let events = controllable_events(&states, &Default::default(), &Default::default());
+        let events = controllable_events(
+            &states,
+            &Default::default(),
+            &Default::default(),
+            &Default::default(),
+        );
         assert!(events[0].spent && !events[0].repeatable);
         assert!(!events[1].spent && events[1].repeatable);
     }
@@ -363,7 +459,12 @@ mod tests {
         };
         let states = vec![automatic("evac", true), automatic("silent", false)];
 
-        let events = controllable_events(&states, &Default::default(), &Default::default());
+        let events = controllable_events(
+            &states,
+            &Default::default(),
+            &Default::default(),
+            &Default::default(),
+        );
         assert_eq!(
             events.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
             vec!["base-world::evac", "base-world::silent"],
@@ -383,7 +484,35 @@ mod tests {
         // every trigger every shipped world already authors.
         let mut plain = automatic("evac", true);
         plain.trigger.gm_controls = None;
-        assert!(controllable_events(&[plain], &Default::default(), &Default::default()).is_empty());
+        assert!(controllable_events(
+            &[plain],
+            &Default::default(),
+            &Default::default(),
+            &Default::default(),
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn an_armed_fire_is_projected_until_the_pipeline_runs_it() {
+        let states = vec![state("breach", None, false, false)];
+        let pending = std::collections::BTreeSet::from(["base-world::breach".to_string()]);
+        assert!(
+            controllable_events(
+                &states,
+                &pending,
+                &Default::default(),
+                &Default::default(),
+            )[0]
+            .armed
+        );
+        assert!(!controllable_events(
+            &states,
+            &Default::default(),
+            &Default::default(),
+            &Default::default(),
+        )[0]
+        .armed);
     }
 
     /// Issue #1303: the Pause LEVER and the paused STATE are two facts, and
@@ -424,7 +553,7 @@ mod tests {
         );
 
         let paused = std::collections::BTreeSet::from(["base-world::breach".to_string()]);
-        let events = controllable_events(&states, &Default::default(), &paused);
+        let events = controllable_events(&states, &Default::default(), &paused, &Default::default());
         assert_eq!(
             events
                 .iter()
@@ -444,15 +573,116 @@ mod tests {
         let mut spent = state("breach", None, false, true);
         spent.trigger.gm_controls.as_mut().expect("controls").pause = true;
         let states = vec![spent];
-        assert!(controllable_events(&states, &Default::default(), &Default::default())[0].spent);
+        assert!(
+            controllable_events(
+                &states,
+                &Default::default(),
+                &Default::default(),
+                &Default::default(),
+            )[0]
+            .spent
+        );
         assert_eq!(pausable_index(&states, "base-world::breach"), Some(0));
     }
 
+    /// Issue #1304: the Skip lever is declared, resolved and projected
+    /// independently of Fire. A control set may carry either, both or neither,
+    /// and the panel must be able to tell which — an event that declares only
+    /// Skip is listed and skippable but NOT fireable, and the reverse.
     #[test]
-    fn an_armed_fire_is_projected_until_the_pipeline_runs_it() {
+    fn the_skip_lever_is_declared_and_resolved_independently_of_fire() {
+        let lever = |id: &str, fire: bool, skip: bool| {
+            let mut st = state(id, None, false, false);
+            st.trigger.condition = TriggerCondition::OnDestroyed {
+                entity_name: "courier".to_string(),
+            };
+            let controls = st.trigger.gm_controls.as_mut().expect("controls");
+            controls.fire = fire;
+            controls.skip = skip;
+            st
+        };
+        let states = vec![
+            lever("both", true, true),
+            lever("fire_only", true, false),
+            lever("skip_only", false, true),
+        ];
+
+        let events = controllable_events(
+            &states,
+            &Default::default(),
+            &Default::default(),
+            &Default::default(),
+        );
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| (event.fire, event.skip))
+                .collect::<Vec<_>>(),
+            vec![(true, true), (true, false), (false, true)],
+            "the panel is told exactly which levers each event declares"
+        );
+
+        assert_eq!(skippable_index(&states, "base-world::both"), Some(0));
+        assert_eq!(
+            skippable_index(&states, "base-world::fire_only"),
+            None,
+            "a listed event without Skip is not skippable"
+        );
+        assert_eq!(skippable_index(&states, "base-world::skip_only"), Some(2));
+        assert_eq!(
+            fireable_index(&states, "base-world::skip_only"),
+            None,
+            "and declaring Skip does not imply Fire"
+        );
+        assert_eq!(skippable_index(&states, "base-world::missing"), None);
+
+        // A trigger that declares nothing is unaddressable by either lever.
+        let mut plain = lever("both", true, true);
+        plain.trigger.gm_controls = None;
+        assert_eq!(skippable_index(&[plain], "base-world::both"), None);
+    }
+
+    /// The two arms are projected from two sets, so an event can be armed on
+    /// one lever, the other, both or neither — which is what makes "Fire does
+    /// not consume an armed Skip" visible on the panel rather than merely true
+    /// in the simulation.
+    #[test]
+    fn an_armed_skip_is_projected_beside_an_armed_fire_and_never_instead_of_it() {
         let states = vec![state("breach", None, false, false)];
-        let pending = std::collections::BTreeSet::from(["base-world::breach".to_string()]);
-        assert!(controllable_events(&states, &pending, &Default::default())[0].armed);
-        assert!(!controllable_events(&states, &Default::default(), &Default::default())[0].armed);
+        let armed = std::collections::BTreeSet::from(["base-world::breach".to_string()]);
+        let none = std::collections::BTreeSet::new();
+
+        let neither = &controllable_events(&states, &none, &none, &none)[0];
+        assert!(!neither.armed && !neither.skip_armed);
+
+        let skip_only = &controllable_events(&states, &none, &none, &armed)[0];
+        assert!(!skip_only.armed && skip_only.skip_armed);
+
+        let fire_only = &controllable_events(&states, &armed, &none, &none)[0];
+        assert!(fire_only.armed && !fire_only.skip_armed);
+
+        let both = &controllable_events(&states, &armed, &none, &armed)[0];
+        assert!(both.armed && both.skip_armed);
+    }
+
+    /// The one live-id set both cleanups read. An event with no control set has
+    /// no qualified id at all, so it can never appear here — which is what
+    /// keeps a Skip arm from being retained against a trigger no GM can name.
+    #[test]
+    fn live_event_ids_names_every_addressable_event_and_nothing_else() {
+        let mut plain = state("silent", None, false, false);
+        plain.trigger.gm_controls = None;
+        let states = vec![
+            state("breach", None, false, false),
+            state("breach", Some("assets/worlds/layer.toml"), false, false),
+            plain,
+        ];
+        assert_eq!(
+            live_event_ids(&states).into_iter().collect::<Vec<_>>(),
+            vec![
+                "assets/worlds/layer.toml::breach".to_string(),
+                "base-world::breach".to_string(),
+            ],
+        );
     }
 }

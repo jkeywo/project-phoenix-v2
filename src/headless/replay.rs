@@ -1284,6 +1284,109 @@ mod tests {
         );
     }
 
+    /// An armed Skip replays through the SAME canonical lane a Fire does
+    /// (issue #1304): the artifact carries the grant, `apply_due_actions`
+    /// re-resolves it against the replayed world's own trigger table at the
+    /// recorded apply tick, and the replayed peer ends up armed on the same
+    /// lever, for the same event, as the recorded one.
+    #[test]
+    fn an_armed_gm_event_skip_replays_through_the_canonical_journal() {
+        let event = "base-world::courier_lost";
+        let mut source = GmActionJournal::default();
+        source
+            .insert(crate::gm_action::GmActionGrant {
+                from: HostSlot(1),
+                sequenced_by: HostSlot(1),
+                operator_id: "gm-one".into(),
+                correlation: crate::gm_action::GmActionId::new("replay-skip-1").unwrap(),
+                recovery_generation: 0,
+                apply_tick: 0,
+                order: crate::gm_action::GmActionOrder::new(HostSlot(1), 1),
+                action: crate::gm_action::GmAction::ArmGmEventSkip {
+                    event: event.into(),
+                },
+            })
+            .unwrap();
+        source.restore_applied_frontier(1).unwrap();
+        validate_gm_action_journal(&source).expect("a Skip journal is canonical");
+
+        let mut trigger = crate::world::config::scripted_trigger(
+            crate::world::config::TriggerCondition::OnDestroyed {
+                entity_name: "courier".to_string(),
+            },
+        );
+        trigger.id = Some("courier_lost".into());
+        let mut controls = crate::world::config::GmEventControls::fire_only(
+            "courier_lost".into(),
+            "world.gm.event.courier_lost".into(),
+        );
+        controls.skip = true;
+        trigger.gm_controls = Some(controls);
+        let runtime = crate::world::server::WorldContentRuntime {
+            trigger_states: vec![crate::world::content::TriggerState {
+                trigger,
+                fired: false,
+                origin_layer: None,
+                seen_destroyed: Default::default(),
+                last_fired_elapsed: None,
+            }],
+            ..Default::default()
+        };
+
+        let mut app = App::new();
+        app.insert_resource(SimTick(0));
+        app.insert_resource(GmActionJournal::default());
+        app.insert_resource(crate::gm_action::GmActionLog::default());
+        app.insert_resource(crate::gm_action::SimulationPaused(false));
+        app.insert_resource(runtime);
+        app.add_systems(PreUpdate, crate::gm_action::apply_due_actions);
+        seed_replay_initial_state(&mut app, &source);
+
+        let mut sim = PhoenixSim {
+            app,
+            max_frames: 1,
+            frames: 0,
+            expected_commands: 0,
+            applied: 0,
+            submitted: 0,
+            tail: true,
+            gm_actions: source,
+            final_tick: Some(0),
+            ledger: DigestLedger::new(0),
+        };
+        sim.step();
+
+        let entry = &sim
+            .app
+            .world()
+            .resource::<crate::gm_action::GmActionLog>()
+            .entries()[0];
+        assert_eq!(entry.outcome, crate::gm_action::GmActionOutcome::Applied);
+        assert_eq!(entry.target.as_deref(), Some(event));
+        assert_eq!(
+            entry.lever,
+            Some(crate::gm_event::GmEventLever::SkipNext),
+            "the replayed fact says which lever, not just which event"
+        );
+        let replayed = sim
+            .app
+            .world()
+            .resource::<crate::world::server::WorldContentRuntime>();
+        assert_eq!(
+            replayed
+                .pending_gm_event_skips
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>(),
+            vec![event.to_string()],
+            "the replayed peer arms exactly what the recorded one armed"
+        );
+        assert!(
+            replayed.pending_gm_event_fires.is_empty(),
+            "and arms nothing on the other lever"
+        );
+    }
+
     /// A directed world effect replays through the SAME canonical lane every
     /// other GM action uses (issue #1310): the artifact carries the grant,
     /// `apply_due_actions` re-resolves it against the replayed world's own

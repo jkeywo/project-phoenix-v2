@@ -5,6 +5,7 @@ import {
   createGmMissionPanel,
   eventIsFireable,
   eventIsPausable,
+  eventIsSkippable,
   parseGmMissionPayload,
 } from '../../gui/gm-mission-panel.js';
 import { t } from '../../gui/strings.js';
@@ -14,6 +15,7 @@ function mount({
   operator = { id: 'gm-a', name: 'Alex' },
   submitFireEvent = vi.fn(() => true),
   submitSetEventPaused = vi.fn(() => true),
+  submitArmSkip = vi.fn(() => true),
   capacity,
   timeoutMs,
   schedule = vi.fn(),
@@ -26,6 +28,7 @@ function mount({
     t,
     submitFireEvent,
     submitSetEventPaused,
+    submitArmSkip,
     getOperator: () => operator,
     getOperatorName: (id) => ({ 'gm-a': 'Alex', 'gm-b': 'Blair' }[id] || id),
     correlation: () => queue.shift(),
@@ -35,7 +38,7 @@ function mount({
     ...(capacity == null ? {} : { capacity }),
     ...(timeoutMs == null ? {} : { timeoutMs }),
   });
-  return { panel, submitFireEvent, submitSetEventPaused, schedule, cancelSchedule };
+  return { panel, submitFireEvent, submitSetEventPaused, submitArmSkip, schedule, cancelSchedule };
 }
 
 function event(overrides = {}) {
@@ -49,6 +52,7 @@ function event(overrides = {}) {
     spent: false,
     armed: false,
     paused: false,
+    skip_armed: false,
     ...overrides,
   };
 }
@@ -69,6 +73,7 @@ function result(overrides = {}) {
 const rows = () => [...document.querySelectorAll('#gm-mission-events .gm-mission-event')];
 const fireButton = (id) => document.querySelector(`button[data-role="fire"][data-event-id="${id}"]`);
 const pauseButton = (id) => document.querySelector(`button[data-role="pause"][data-event-id="${id}"]`);
+const skipButton = (id) => document.querySelector(`button[data-role="skip"][data-event-id="${id}"]`);
 const logRows = () => [...document.querySelectorAll('#gm-mission-log .gm-mission-log-entry')];
 
 describe('GM mission panel', () => {
@@ -97,14 +102,29 @@ describe('GM mission panel', () => {
         { events: [event({ id: '' })], results: [] },
         { events: [event({ label: 123 })], results: [] },
         { events: [{ ...event(), spent: 'yes' }], results: [] },
+        { events: [{ ...event(), skip_armed: 'yes' }], results: [] },
         { events: [], results: [{ ...result(), outcome: 'maybe' }] },
         { events: [], results: [{ ...result(), tick: -1 }] },
+        // A lever only one side knows is not degraded to a Fire.
+        { events: [], results: [{ ...result(), lever: 'pause' }] },
         { events: [] },
         'not json',
         null,
       ]) {
         expect(parseGmMissionPayload(broken)).toBeUndefined();
       }
+    });
+
+    it('rejects a result payload that names neither lever it could have been', () => {
+      const withoutEither = { ...result() };
+      delete withoutEither.verb;
+      expect(parseGmMissionPayload({ events: [], results: [withoutEither] })).toBeUndefined();
+      expect(parseGmMissionPayload({
+        events: [], results: [result({ verb: 'skip' })],
+      })).toBeUndefined();
+      const withoutPaused = { ...event() };
+      delete withoutPaused.paused;
+      expect(parseGmMissionPayload({ events: [withoutPaused], results: [] })).toBeUndefined();
     });
   });
 
@@ -316,6 +336,8 @@ describe('GM mission panel', () => {
       fireable: 0,
       pausable: 0,
       paused: 0,
+      skippable: 0,
+      armedSkips: 0,
       pending: 0,
       authoritative: 0,
     });
@@ -429,18 +451,6 @@ describe('GM mission panel', () => {
     expect(texts[1]).not.toContain(t('server.gm.mission.verb_fire'));
   });
 
-  it('rejects a result payload that does not say which lever it was', () => {
-    const withoutVerb = { ...result() };
-    delete withoutVerb.verb;
-    expect(parseGmMissionPayload({ events: [], results: [withoutVerb] })).toBeUndefined();
-    expect(parseGmMissionPayload({
-      events: [], results: [result({ verb: 'skip' })],
-    })).toBeUndefined();
-    const withoutPaused = { ...event() };
-    delete withoutPaused.paused;
-    expect(parseGmMissionPayload({ events: [withoutPaused], results: [] })).toBeUndefined();
-  });
-
   it('shows a reconnecting GM the paused state without any local history', () => {
     // A GM that joins mid-mission mounts a brand-new panel and is handed the
     // absolute projection. Nothing here accumulated the Pause, so what the row
@@ -471,10 +481,194 @@ describe('GM mission panel', () => {
 
     const feedback = document.getElementById('gm-mission-feedback');
     expect(feedback.dataset.verb).toBe('pause');
+    expect(feedback.dataset.lever).toBe('pause');
     expect(feedback.textContent).toContain(t('server.gm.mission.pause_accessibility', {
       label: t('server.gm.mission.heading'),
     }));
     expect(feedback.textContent).not.toContain(t('server.gm.mission.fire'));
+  });
+
+  // ── Skip-next (issue #1304) ──────────────────────────────────────────────
+
+  it('offers Skip only on events that declare it, beside an untouched Fire', () => {
+    const { panel } = mount();
+    panel.update({
+      events: [
+        event({ skip: true }),
+        event({ id: 'base-world::sweep' }),
+        event({ id: 'base-world::silent', fire: false, skip: true }),
+      ],
+      results: [],
+    });
+
+    expect(skipButton('base-world::breach_alarm')).not.toBeNull();
+    expect(fireButton('base-world::breach_alarm')).not.toBeNull();
+    expect(skipButton('base-world::sweep')).toBeNull();
+    // A lever is a lever: an event may declare Skip and no Fire.
+    expect(skipButton('base-world::silent')).not.toBeNull();
+    expect(fireButton('base-world::silent')).toBeNull();
+    expect(panel.state()).toMatchObject({ events: 3, fireable: 2, skippable: 2 });
+    expect(eventIsSkippable(event({ skip: true }))).toBe(true);
+    expect(eventIsSkippable(event())).toBe(false);
+    expect(eventIsSkippable(event({ skip: true, spent: true }))).toBe(false);
+  });
+
+  it('arms exactly the qualified id the projection published, on its own seam', () => {
+    const { panel, submitArmSkip, submitFireEvent } = mount();
+    panel.update({ events: [event({ skip: true })], results: [] });
+
+    skipButton('base-world::breach_alarm').click();
+
+    expect(submitArmSkip).toHaveBeenCalledWith({
+      event: 'base-world::breach_alarm',
+      correlation: 'gm-fire-1',
+    });
+    expect(submitFireEvent).not.toHaveBeenCalled();
+    expect(logRows()).toHaveLength(1);
+    expect(logRows()[0].dataset.lever).toBe('skip');
+    expect(logRows()[0].textContent)
+      .toBe(t('server.gm.mission.skip_result_pending', {
+        name: 'Alex',
+        event: 'base-world::breach_alarm',
+        correlation: 'gm-fire-1',
+      }));
+  });
+
+  it('announces the arm by its own accessible name, not the Fire one', () => {
+    const { panel } = mount();
+    panel.update({ events: [event({ skip: true })], results: [] });
+
+    skipButton('base-world::breach_alarm').click();
+
+    const spoken = t('server.gm.mission.skip_accessibility', {
+      label: t('server.gm.mission.heading'),
+    });
+    const feedback = document.getElementById('gm-mission-feedback');
+    expect(feedback.dataset.lever).toBe('skip');
+    expect(feedback.textContent).toContain(spoken);
+    expect(skipButton('base-world::breach_alarm').getAttribute('aria-label')).toBe(spoken);
+  });
+
+  it('reports an armed Skip in its own state span and stays pressable', () => {
+    const { panel } = mount();
+    panel.update({ events: [event({ skip: true, skip_armed: true })], results: [] });
+
+    expect(rows()[0].dataset.skipArmed).toBe('true');
+    expect(rows()[0].querySelector('.gm-mission-event-skip-state').textContent)
+      .toBe(t('server.gm.mission.state_skip_armed'));
+    // The Fire lifecycle span is untouched by the other lever's state.
+    expect(rows()[0].querySelector('.gm-mission-event-state').textContent)
+      .toBe(t('server.gm.mission.state_ready'));
+    // Re-arming is a deterministic No-op the simulation reports, and the
+    // acceptance criterion asks for that answer to be VISIBLE.
+    expect(skipButton('base-world::breach_alarm').disabled).toBe(false);
+    expect(panel.state().armedSkips).toBe(1);
+  });
+
+  it('renders an authoritative Skip result with its own sentence', () => {
+    const { panel } = mount();
+    panel.update({
+      events: [event({ skip: true, skip_armed: true })],
+      results: [
+        result({ correlation: 'gm-fire-1', verb: undefined, lever: 'skip-next' }),
+        result({
+          correlation: 'gm-fire-2', outcome: 'no-op', verb: undefined, lever: 'skip-next',
+        }),
+        result({ correlation: 'gm-fire-3' }),
+      ],
+    });
+
+    expect(logRows()).toHaveLength(3);
+    expect(logRows()[0].dataset.lever).toBe('skip');
+    expect(logRows()[0].textContent).toBe(t('server.gm.mission.skip_result_applied', {
+      name: 'Alex',
+      event: 'base-world::breach_alarm',
+      tick: '42',
+      correlation: 'gm-fire-1',
+    }));
+    expect(logRows()[1].textContent).toBe(t('server.gm.mission.skip_result_no_op', {
+      name: 'Alex',
+      event: 'base-world::breach_alarm',
+      tick: '42',
+      correlation: 'gm-fire-2',
+    }));
+    // A Fire in the same feed keeps the sentence it always had.
+    expect(logRows()[2].dataset.lever).toBe('fire');
+    expect(logRows()[2].textContent).toBe(t('server.gm.mission.result_applied', {
+      name: 'Alex',
+      verb: t('server.gm.mission.verb_fire'),
+      event: 'base-world::breach_alarm',
+      tick: '42',
+      correlation: 'gm-fire-3',
+    }));
+  });
+
+  it('keeps an in-flight Skip from disabling the Fire beside it', () => {
+    const { panel, submitFireEvent } = mount();
+    panel.update({ events: [event({ skip: true })], results: [] });
+
+    skipButton('base-world::breach_alarm').click();
+
+    expect(skipButton('base-world::breach_alarm').disabled).toBe(true);
+    expect(fireButton('base-world::breach_alarm').disabled).toBe(false);
+    fireButton('base-world::breach_alarm').click();
+    expect(submitFireEvent).toHaveBeenCalledWith({
+      event: 'base-world::breach_alarm',
+      correlation: 'gm-fire-2',
+    });
+    expect(panel.state().pending).toBe(2);
+  });
+
+  it('never submits a Skip an event does not declare, however it is driven', () => {
+    const { panel, submitArmSkip } = mount();
+    panel.update({
+      events: [event(), event({ id: 'base-world::sweep', skip: true, spent: true })],
+      results: [],
+    });
+
+    expect(panel.armSkip('base-world::breach_alarm')).toBe(false);
+    expect(panel.armSkip('base-world::sweep')).toBe(false);
+    expect(panel.armSkip('base-world::not-authored')).toBe(false);
+    expect(submitArmSkip).not.toHaveBeenCalled();
+  });
+
+  it('shows a reconnecting GM exactly the armed Skip a live one sees', () => {
+    // The projection is absolute, so a GM that reconnects mid-mission is
+    // handed the same page: nothing here accumulates, and nothing is inferred
+    // from a press this browser happened to make.
+    const { panel } = mount();
+    panel.update({
+      events: [event({ skip: true, skip_armed: true })],
+      results: [result({ verb: undefined, lever: 'skip-next' })],
+    });
+
+    expect(rows()[0].dataset.skipArmed).toBe('true');
+    expect(panel.state()).toMatchObject({ armedSkips: 1, pending: 0, authoritative: 1 });
+
+    // And the moment the world consumes it, the same absolute push says so.
+    panel.update({
+      events: [event({ skip: true, skip_armed: false })],
+      results: [result({ verb: undefined, lever: 'skip-next' })],
+    });
+    expect(rows()[0].dataset.skipArmed).toBe('false');
+    expect(rows()[0].querySelector('.gm-mission-event-skip-state').textContent)
+      .toBe(t('server.gm.mission.state_skip_ready'));
+    expect(panel.state().armedSkips).toBe(0);
+  });
+
+  it('holds Skip apart from Fire and Pause: three independent levers on one event', () => {
+    const { panel, submitFireEvent, submitSetEventPaused, submitArmSkip } = mount();
+    panel.update({ events: [event({ pause: true, skip: true })], results: [] });
+
+    fireButton('base-world::breach_alarm').click();
+    pauseButton('base-world::breach_alarm').click();
+    skipButton('base-world::breach_alarm').click();
+
+    expect(submitFireEvent).toHaveBeenCalledTimes(1);
+    expect(submitSetEventPaused).toHaveBeenCalledTimes(1);
+    expect(submitArmSkip).toHaveBeenCalledTimes(1);
+    expect(panel.state().pending).toBe(3);
+    expect(logRows().map((row) => row.dataset.lever)).toEqual(['fire', 'pause', 'skip']);
   });
 
   it('never settles a same-correlation result attributed to another operator', () => {

@@ -679,6 +679,10 @@ pub fn encode_mesh_frame(frame: &crate::lockstep::MeshFrame) -> Result<String, s
                     // terms: `null` for every family without one, and an
                     // absent key reads the same way.
                     "verb": refusal.verb,
+                    // Which lever the refused action pulled (issue #1304),
+                    // `null` for a Fire, a Pause and for every family that
+                    // pulls none. Same reading rule as `target` above.
+                    "lever": refusal.lever,
                 }),
             ),
         },
@@ -904,6 +908,16 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
                             .get("verb")
                             .cloned()
                             .and_then(|value| serde_json::from_value(value).ok()),
+                        // The event-control lever (issue #1304), on the same
+                        // terms: absent or `null` is Fire, which is what a peer
+                        // that predates the Skip lever sends. An unrecognised
+                        // spelling fails the whole frame rather than degrading
+                        // to Fire — reporting a refused Skip as a refused Fire
+                        // would be the opposite sentence about the same button.
+                        lever: match body.get("lever") {
+                            None | Some(serde_json::Value::Null) => None,
+                            Some(value) => Some(serde_json::from_value(value.clone()).ok()?),
+                        },
                     })
                 }
                 _ => return None,
@@ -1118,6 +1132,16 @@ pub fn decode_gm_action_request(raw: &str) -> Option<crate::gm_action::GmActionR
         // smuggle a second target past the narrow ingress.
         "fire_gm_event" if object.len() == 4 && object.contains_key("event") => {
             crate::gm_action::GmAction::FireGmEvent {
+                event: bounded_gm_event_id(object.get("event")?.as_str()?)?,
+            }
+        }
+        // The Skip lever (issue #1304) on the same exact narrow shape: one
+        // stable layer-qualified event id and nothing else. A separate wire
+        // verb rather than a `lever` field on `fire_gm_event`, so a page that
+        // means to fire can never arm a skip by mistyping one value — the two
+        // levers do opposite things to the same event.
+        "arm_gm_event_skip" if object.len() == 4 && object.contains_key("event") => {
+            crate::gm_action::GmAction::ArmGmEventSkip {
                 event: bounded_gm_event_id(object.get("event")?.as_str()?)?,
             }
         }
@@ -1603,6 +1627,7 @@ mod mesh_frame_tests {
                 reason: crate::gm_action::GmActionRefusalReason::WrongPhase,
                 target: None,
                 verb: None,
+                lever: None,
             },
         ));
         // A refused Fire crosses the same lane still naming the event it tried
@@ -1619,11 +1644,74 @@ mod mesh_frame_tests {
                 reason: crate::gm_action::GmActionRefusalReason::UnknownGmEvent,
                 target: Some("base-world::breach_alarm".into()),
                 verb: Some(crate::gm_action::GmEventVerb::Fire),
+                lever: None,
             },
         ));
-        for frame in [proposal, refusal, refused_fire] {
+        // And a refused SKIP crosses it naming both the event and the lever
+        // (issue #1304): without the lever every GM's feed would report it as a
+        // refused Fire, the opposite sentence about the same button.
+        let refused_skip = MeshFrame::GmAction(crate::gm_action::GmActionFrame::Refused(
+            crate::gm_action::GmActionRefusal {
+                sequenced_by: HostSlot(1),
+                requester: HostSlot(2),
+                operator_id: "gm-1".into(),
+                correlation: crate::gm_action::GmActionId::new("skip-1").unwrap(),
+                action_kind: crate::gm_action::GmActionKind::EventControl,
+                requested_active: true,
+                tick: 419,
+                reason: crate::gm_action::GmActionRefusalReason::UnknownGmEvent,
+                target: Some("base-world::breach_alarm".into()),
+                verb: None,
+                lever: Some(crate::gm_event::GmEventLever::SkipNext),
+            },
+        ));
+        for frame in [proposal, refusal, refused_fire, refused_skip] {
             let text = super::encode_mesh_frame(&frame).unwrap();
             assert_eq!(super::decode_mesh_frame(&text), Some(frame));
+        }
+    }
+
+    /// The Skip ingress (issue #1304): its own verb on the same exact narrow
+    /// shape, so a page that means to fire cannot arm a skip by getting one
+    /// value wrong -- the two levers do opposite things to the same event.
+    #[test]
+    fn arming_a_skip_uses_its_own_verb_on_the_same_exact_typed_ingress() {
+        let request = super::decode_gm_action_request(
+            r#"{"operator_id":"gm-1","correlation":"skip-3","action":"arm_gm_event_skip","event":"base-world::courier_lost"}"#,
+        )
+        .expect("valid skip request");
+        assert_eq!(
+            request.action,
+            crate::gm_action::GmAction::ArmGmEventSkip {
+                event: "base-world::courier_lost".into(),
+            }
+        );
+        assert_eq!(
+            request.action.kind(),
+            crate::gm_action::GmActionKind::EventControl,
+            "one family, three levers"
+        );
+        assert_eq!(
+            request.action.event_lever(),
+            Some(crate::gm_event::GmEventLever::SkipNext),
+            "and the durable result must be able to say WHICH lever"
+        );
+        assert_eq!(request.action.target_id(), Some("base-world::courier_lost"));
+        assert_eq!(request.action.requested_pause(), None);
+
+        for refused in [
+            // An unqualified id cannot name one event across layers.
+            r#"{"operator_id":"gm-1","correlation":"skip-3","action":"arm_gm_event_skip","event":"courier_lost"}"#,
+            r#"{"operator_id":"gm-1","correlation":"skip-3","action":"arm_gm_event_skip","event":""}"#,
+            r#"{"operator_id":"gm-1","correlation":"skip-3","action":"arm_gm_event_skip","event":"base-world::"}"#,
+            // A second field is a wider mutation surface, not a Skip.
+            r#"{"operator_id":"gm-1","correlation":"skip-3","action":"arm_gm_event_skip","event":"base-world::a","count":2}"#,
+            r#"{"operator_id":"gm-1","correlation":"skip-3","action":"arm_gm_event_skip"}"#,
+        ] {
+            assert!(
+                super::decode_gm_action_request(refused).is_none(),
+                "must fail closed: {refused}"
+            );
         }
     }
 
@@ -1871,6 +1959,7 @@ mod mesh_frame_tests {
                 reason: crate::gm_action::GmActionRefusalReason::UnknownGmEvent,
                 target: Some("base-world::breach_alarm".into()),
                 verb: Some(crate::gm_action::GmEventVerb::Pause),
+                lever: None,
             },
         ));
         let text = super::encode_mesh_frame(&refusal).expect("encodes");

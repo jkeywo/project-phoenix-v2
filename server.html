@@ -337,7 +337,8 @@
       display: flex; flex-wrap: wrap; align-items: center; gap: .75rem;
     }
     .gm-mission-event-label { flex: 1 1 12rem; }
-    .gm-mission-event-state { color: var(--ink-muted); }
+    .gm-mission-event-state, .gm-mission-event-skip-state { color: var(--ink-muted); }
+    .gm-mission-event[data-skip-armed="true"] .gm-mission-event-skip-state { color: var(--fire-bright); }
     .gm-mission-event[data-spent="true"] .gm-mission-event-state { color: var(--fire-bright); }
     /* A standing GM Pause (issue #1303) reads at a glance, because it changes
        what every other line on the row means: a "Ready" event whose condition
@@ -1965,12 +1966,13 @@
           <ol id="gm-session-log" role="log" aria-labelledby="gm-session-log-heading"
             aria-live="polite" aria-relevant="additions text"></ol>
         </section>
-        <!-- The mission panel (issues #1301 and #1303): every GM-operable
-             authored event the loaded scenario declares, with the levers it
-             declared. Rows and their Fire / Pause controls are built by
-             gui/gm-mission-panel.js from the absolute `gm_mission` Host Channel
-             projection, so an empty scenario renders the empty sentence and
-             nothing else, and an event that declares no Pause has no toggle. -->
+        <!-- The mission panel (issues #1301, #1303 and #1304): every
+             GM-operable authored event the loaded scenario declares, with the
+             levers it declared. Rows and their Fire / Pause / Skip-next
+             controls are built by gui/gm-mission-panel.js from the absolute
+             `gm_mission` Host Channel projection, so an empty scenario renders
+             the empty sentence and nothing else, and an event that declares
+             one lever gets one button. -->
         <section id="gm-mission-panel" role="region" aria-labelledby="gm-mission-heading">
           <h2 id="gm-mission-heading" data-i18n="server.gm.mission.heading"></h2>
           <ul id="gm-mission-events" role="list"></ul>
@@ -2719,6 +2721,9 @@
       submitSetEventPaused: (request) =>
         typeof window.__hostSetGmEventPaused === 'function'
           && window.__hostSetGmEventPaused(request),
+      submitArmSkip: (request) =>
+        typeof window.__hostArmGmEventSkip === 'function'
+          && window.__hostArmGmEventSkip(request),
       getOperator: () => typeof window.__hostLocalGm === 'function'
         ? window.__hostLocalGm() : null,
       getOperatorName: (id) => typeof window.__hostGmName === 'function'
@@ -3946,6 +3951,32 @@
           operator_id: gm.id,
           correlation: request.correlation,
           action: 'fire_gm_event',
+          event: request.event,
+        })) !== false;
+      } catch (_) {
+        return false;
+      }
+    };
+
+    /**
+     * Submit one attributed Skip-next arm on an authored GM event (#1304).
+     *
+     * The Fire seam's twin, and deliberately a separate wire verb: the two
+     * levers do opposite things to the same event, so a page that means to fire
+     * must not be able to arm a skip by getting one field wrong. `event` is
+     * still the layer-qualified id read out of the authoritative projection.
+     */
+    window.__hostArmGmEventSkip = function(request) {
+      const gm = localGm();
+      if (!gm || !request || typeof request !== 'object'
+          || typeof request.event !== 'string' || !request.event
+          || typeof request.correlation !== 'string' || !request.correlation
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      try {
+        return window.wasm_submit_gm_action(JSON.stringify({
+          operator_id: gm.id,
+          correlation: request.correlation,
+          action: 'arm_gm_event_skip',
           event: request.event,
         })) !== false;
       } catch (_) {

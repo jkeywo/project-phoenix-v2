@@ -85,6 +85,36 @@ fn lockdown(ctx) { ctx.flags.increment("lockdowns", 1); }
 '''
 "#;
 
+/// The issue #1304 half: ORDINARY condition-bearing triggers declaring the Skip
+/// lever beside the Fire one.
+///
+/// `evac` is one-shot and `sweep` is repeatable, because the acceptance
+/// criterion is about the LIFECYCLE a skipped occurrence advances: the one-shot
+/// must end up spent and the repeatable one must end up merely cooled down and
+/// able to fire again. `lockdown` declares Fire and no Skip, so "only events
+/// declaring Skip expose it" is a fixture fact rather than an assertion about
+/// an absence nothing could have produced.
+const SCRIPT_GM_SKIPPABLE_EVENTS: &str = r#"[script]
+setup = '''
+on_destroyed("courier", "evac").gm_controls("evac", "world.gm.event.evac").skip();
+on_destroyed("raider", "sweep").gm_controls("sweep", "world.gm.event.sweep").repeat().skip();
+on_destroyed("scout", "lockdown").gm_controls("lockdown", "world.gm.event.lockdown");
+fn evac(ctx) { ctx.flags.increment("evacs", 1); }
+fn sweep(ctx) { ctx.flags.increment("sweeps", 1); }
+fn lockdown(ctx) { ctx.flags.increment("lockdowns", 1); }
+'''
+"#;
+
+/// `a_paused_event_leaves_an_armed_skip_exactly_where_it_was`: one event
+/// declaring BOTH the Pause and the Skip lever, so a Pause/Resume cycle can be
+/// exercised against an arm sitting on the OTHER lever.
+const SCRIPT_GM_PAUSABLE_AND_SKIPPABLE_EVENT: &str = r#"[script]
+setup = '''
+on_destroyed("courier", "evac").gm_controls("evac", "world.gm.event.evac").pauseable().skip();
+fn evac(ctx) { ctx.flags.increment("evacs", 1); }
+'''
+"#;
+
 /// `a_gm_fire_held_by_a_false_predicate_lands_when_the_predicate_holds`.
 const SCRIPT_GM_EVENT_GATED: &str = r#"[script]
 setup = '''
@@ -1667,6 +1697,44 @@ fn set_gm_event_paused(app: &mut App, correlation: &str, event: &str, active: bo
     app.update();
 }
 
+/// Grant one Skip arm on `event` at the app's current tick and step once.
+fn arm_gm_event_skip(app: &mut App, correlation: &str, event: &str) {
+    let tick = app.world().resource::<crate::sim_tick::SimTick>().0;
+    let sequence = app
+        .world()
+        .resource::<crate::gm_action::GmActionJournal>()
+        .next_sequence();
+    let grant = crate::gm_action::GmActionGrant {
+        from: crate::command_admission::log::HostSlot(1),
+        sequenced_by: crate::command_admission::log::HostSlot(1),
+        operator_id: "gm-1".into(),
+        correlation: crate::gm_action::GmActionId::new(correlation).unwrap(),
+        recovery_generation: 0,
+        apply_tick: tick,
+        order: crate::gm_action::GmActionOrder::new(
+            crate::command_admission::log::HostSlot(1),
+            sequence,
+        ),
+        action: crate::gm_action::GmAction::ArmGmEventSkip {
+            event: event.into(),
+        },
+    };
+    app.world_mut()
+        .resource_mut::<crate::gm_action::GmActionJournal>()
+        .insert(grant)
+        .expect("canonical grant");
+    app.update();
+}
+
+fn armed_skips(app: &App) -> Vec<String> {
+    app.world()
+        .resource::<WorldContentRuntime>()
+        .pending_gm_event_skips
+        .iter()
+        .cloned()
+        .collect()
+}
+
 fn gm_outcomes(app: &App) -> Vec<crate::gm_action::GmActionOutcome> {
     app.world()
         .resource::<crate::gm_action::GmActionJournal>()
@@ -2067,6 +2135,7 @@ fn only_a_declared_pause_control_is_toggleable_and_the_projection_says_so() {
         &runtime.trigger_states,
         &runtime.pending_gm_event_fires,
         &runtime.paused_gm_events,
+        &runtime.pending_gm_event_skips,
     );
     assert_eq!(
         events
@@ -2079,6 +2148,406 @@ fn only_a_declared_pause_control_is_toggleable_and_the_projection_says_so() {
             ("base-world::lockdown", false, false),
         ],
         "the projection is absolute, so a reconnecting GM reads the same toggles",
+    );
+}
+
+/// Issue #1304, the whole vertical slice in one run: an armed Skip lets the
+/// NEXT automatic occurrence advance the ordinary lifecycle without running the
+/// handler, and only that one.
+///
+/// The two halves of the lifecycle criterion are both here, because they are
+/// the same latch read two ways: the one-shot `evac` is SPENT afterwards (its
+/// occurrence is gone for good, and the crew never saw it), while the
+/// repeatable `sweep` is merely cooled down and fires normally the very next
+/// time its condition occurs. Nothing about the skipped occurrence is special
+/// downstream — `evaluate_single_trigger` advanced the latch exactly as it
+/// always does, and the only thing the Skip changed is that the fired record
+/// never reached dispatch.
+#[test]
+fn an_armed_skip_spends_one_occurrence_and_runs_no_handler() {
+    let mut app = gm_event_app(SCRIPT_GM_SKIPPABLE_EVENTS);
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .trigger_states
+            .len(),
+        3
+    );
+
+    arm_gm_event_skip(&mut app, "skip-1", "base-world::evac");
+    arm_gm_event_skip(&mut app, "skip-2", "base-world::sweep");
+    assert_eq!(
+        armed_skips(&app),
+        vec![
+            "base-world::evac".to_string(),
+            "base-world::sweep".to_string()
+        ],
+        "both arms wait for the world; nothing has occurred yet"
+    );
+    assert_eq!(
+        gm_outcomes(&app),
+        vec![
+            crate::gm_action::GmActionOutcome::Applied,
+            crate::gm_action::GmActionOutcome::Applied,
+        ]
+    );
+
+    // The one-shot event's condition occurs. The handler must not run.
+    destroy_named(&mut app, "courier");
+    {
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert_eq!(
+            runtime.flags.counter("evacs"),
+            0,
+            "the skipped occurrence ran no handler"
+        );
+        assert!(
+            runtime.trigger_states[0].fired,
+            "but it advanced the ordinary lifecycle exactly as a firing does"
+        );
+        assert!(
+            runtime.trigger_states[0].last_fired_elapsed.is_some(),
+            "including the cooldown stamp a repeat trigger measures from"
+        );
+        assert_eq!(
+            runtime
+                .pending_gm_event_skips
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>(),
+            vec!["base-world::sweep".to_string()],
+            "the arm is consumed by the occurrence it stood in front of, and \
+             only that one"
+        );
+    }
+
+    // The repeatable event's condition occurs: skipped once, then ordinary.
+    destroy_named(&mut app, "raider");
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("sweeps"),
+        0,
+        "the repeatable event's next occurrence was skipped too"
+    );
+    assert!(armed_skips(&app).is_empty(), "one arm, one occurrence");
+
+    destroy_named(&mut app, "raider");
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("sweeps"),
+        1,
+        "a repeating event skipped once enters ordinary cooldown and fires the \
+         next time its condition occurs"
+    );
+
+    // And the once-only one is spent for good: its occurrence is gone.
+    assert!(
+        crate::gm_event::controllable_events(
+            &app.world().resource::<WorldContentRuntime>().trigger_states,
+            &Default::default(),
+            &Default::default(),
+            &Default::default(),
+        )[0]
+        .spent
+    );
+}
+
+/// A skipped occurrence is not a firing, so it reaches no history seam: the
+/// balance/activity record must not report a `TriggerFired` for something the
+/// crew were deliberately not shown.
+#[test]
+fn a_skipped_occurrence_is_not_recorded_as_a_trigger_fire() {
+    let mut app = gm_event_app(SCRIPT_GM_SKIPPABLE_EVENTS);
+    arm_gm_event_skip(&mut app, "skip-1", "base-world::evac");
+    let mut cursor = app
+        .world()
+        .resource::<Messages<crate::core::balance::BalanceEvent>>()
+        .get_cursor();
+    destroy_named(&mut app, "courier");
+    let messages = app
+        .world()
+        .resource::<Messages<crate::core::balance::BalanceEvent>>();
+    let facts: Vec<_> = cursor.read(messages).cloned().collect();
+    assert!(
+        !facts.iter().any(|fact| matches!(
+            fact,
+            crate::core::balance::BalanceEvent::TriggerFired { trigger_id, .. }
+                if trigger_id == "evac"
+        )),
+        "a skipped occurrence produced no fire record: {facts:?}"
+    );
+}
+
+/// Fire does not consume an armed Skip, and an armed Skip does not swallow a
+/// Fire: the two levers read two sets, so a GM who arms a Skip and then presses
+/// Fire on a repeatable event gets the handler AND keeps the arm for the
+/// automatic occurrence still to come.
+#[test]
+fn a_fire_neither_consumes_nor_is_consumed_by_an_armed_skip() {
+    let mut app = gm_event_app(SCRIPT_GM_SKIPPABLE_EVENTS);
+
+    arm_gm_event_skip(&mut app, "skip-1", "base-world::sweep");
+    fire_gm_event(&mut app, "fire-1", "base-world::sweep");
+    {
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert_eq!(
+            runtime.flags.counter("sweeps"),
+            1,
+            "the Fire ran the ordinary handler"
+        );
+        assert!(
+            runtime.pending_gm_event_fires.is_empty(),
+            "and consumed its OWN arm"
+        );
+        assert_eq!(
+            runtime
+                .pending_gm_event_skips
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>(),
+            vec!["base-world::sweep".to_string()],
+            "while leaving the Skip armed for the occurrence still to come"
+        );
+    }
+
+    // That occurrence arrives and is the one the Skip consumes.
+    destroy_named(&mut app, "raider");
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("sweeps"),
+        1,
+        "the automatic occurrence the GM armed a Skip for ran nothing"
+    );
+    assert!(armed_skips(&app).is_empty());
+}
+
+/// A suppressed moment is not an occurrence: an event whose condition matched
+/// but whose lifecycle declined to fire it consumes no arm, so the Skip is
+/// still there for the occurrence that actually happens.
+///
+/// Driven through the ordinary one-shot latch — `lockdown` fires normally, so a
+/// LATER match of the same condition is declined by the spent latch and must
+/// leave a Skip armed elsewhere untouched.
+#[test]
+fn an_arm_survives_ticks_in_which_nothing_it_names_occurs() {
+    let mut app = gm_event_app(SCRIPT_GM_SKIPPABLE_EVENTS);
+    arm_gm_event_skip(&mut app, "skip-1", "base-world::evac");
+
+    // Something else entirely happens, repeatedly.
+    destroy_named(&mut app, "scout");
+    destroy_named(&mut app, "scout");
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("lockdowns"),
+        1,
+        "the unrelated one-shot fired once and is now spent"
+    );
+    assert_eq!(
+        armed_skips(&app),
+        vec!["base-world::evac".to_string()],
+        "an arm is spent by ITS event's occurrence and by nothing else"
+    );
+}
+
+/// An event that declares no Skip is unaddressable by an `ArmGmEventSkip`, and
+/// so is one no world authors — the criterion that keeps every trigger every
+/// shipped world already authors out of the GM's hands.
+#[test]
+fn an_event_that_declares_no_skip_refuses_the_arm_and_runs_normally() {
+    let mut app = gm_event_app(SCRIPT_GM_SKIPPABLE_EVENTS);
+
+    arm_gm_event_skip(&mut app, "skip-1", "base-world::lockdown");
+    arm_gm_event_skip(&mut app, "skip-2", "base-world::missing");
+    assert_eq!(
+        gm_outcomes(&app),
+        vec![
+            crate::gm_action::GmActionOutcome::Refused,
+            crate::gm_action::GmActionOutcome::Refused,
+        ]
+    );
+    assert!(armed_skips(&app).is_empty());
+
+    destroy_named(&mut app, "scout");
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("lockdowns"),
+        1,
+        "an event with no Skip lever runs its handler exactly as it always did"
+    );
+}
+
+/// An armed Skip survives a per-event Pause/Resume cycle on the SAME event
+/// untouched (issues #1303 and #1304 together): Pause gates only the automatic
+/// EVALUATION, and consuming a Skip happens strictly inside that evaluation's
+/// result, so a trigger that is never evaluated can never spend the arm
+/// waiting on it.
+#[test]
+fn a_paused_event_leaves_an_armed_skip_exactly_where_it_was() {
+    let mut app = gm_event_app(SCRIPT_GM_PAUSABLE_AND_SKIPPABLE_EVENT);
+
+    arm_gm_event_skip(&mut app, "skip-1", "base-world::evac");
+    assert_eq!(armed_skips(&app), vec!["base-world::evac".to_string()]);
+
+    set_gm_event_paused(&mut app, "pause-1", "base-world::evac", true);
+    // The occurrence happens while paused. Nothing is evaluated, so nothing
+    // can consume the arm either.
+    destroy_named(&mut app, "courier");
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("evacs"),
+        0,
+        "a paused event runs no handler, GM-armed occurrence or not"
+    );
+    assert_eq!(
+        armed_skips(&app),
+        vec!["base-world::evac".to_string()],
+        "the arm is exactly where it was: Pause gates evaluation, not the arm"
+    );
+
+    set_gm_event_paused(&mut app, "resume-1", "base-world::evac", false);
+    assert!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .paused_gm_events
+            .is_empty()
+    );
+    assert_eq!(
+        armed_skips(&app),
+        vec!["base-world::evac".to_string()],
+        "resuming does not itself consume the arm -- only a real occurrence does"
+    );
+
+    // The next genuine occurrence consumes it, exactly as an unpaused Skip
+    // would: no handler runs, and the arm is spent.
+    destroy_named(&mut app, "courier");
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("evacs"),
+        0,
+        "the resumed occurrence is still skipped, not fired"
+    );
+    assert!(
+        armed_skips(&app).is_empty(),
+        "and the arm is finally spent by the occurrence it was waiting for"
+    );
+}
+
+/// The whole slice is a pure function of the seeded setup and the canonical
+/// grants, and a resume in the middle of it changes nothing (issue #1304).
+///
+/// Three runs of the SAME fixture and the SAME grant. Two of them are played
+/// straight through and must agree bit-for-bit in the world digest — an armed
+/// Skip is folded authoritative state, so a peer that disagreed about one would
+/// be about to run a different mission. The third is captured while the arm is
+/// still waiting on the world, restored into a freshly-loaded world that has
+/// nothing armed, and only then given the occurrence: it must reach the same
+/// SCENARIO state as the runs that never paused, which is the durable half of
+/// the arm being real state rather than a live-process convenience.
+///
+/// The resumed run is compared on the trigger table rather than on the whole
+/// world digest because `restore` writes every subsystem this reduced harness
+/// does not run — the digests of a restored and a never-saved world differ here
+/// for reasons that have nothing to do with this lever. The cooldown stamp is
+/// read present-or-absent for `fold_scenario_triggers`' own reason: a restore
+/// reconstructs the mission-clock anchor by `f32` subtraction, so its readings
+/// are deliberately not bit-exact across a resume.
+#[test]
+fn an_armed_skip_is_identical_across_same_seed_runs_and_across_a_resume() {
+    fn armed() -> App {
+        let mut app = gm_event_app(SCRIPT_GM_SKIPPABLE_EVENTS);
+        arm_gm_event_skip(&mut app, "skip-1", "base-world::evac");
+        app
+    }
+    fn consumed(mut app: App) -> App {
+        destroy_named(&mut app, "courier");
+        assert_eq!(
+            app.world()
+                .resource::<WorldContentRuntime>()
+                .flags
+                .counter("evacs"),
+            0,
+            "the occurrence the GM armed a Skip for ran no handler"
+        );
+        assert!(app
+            .world()
+            .resource::<WorldContentRuntime>()
+            .pending_gm_event_skips
+            .is_empty());
+        app
+    }
+
+    /// The scenario lifecycle a resume has to reproduce: which events are
+    /// latched, which carry a cooldown stamp, and what is still armed.
+    fn lifecycle(app: &App) -> (Vec<(Option<String>, bool, bool)>, Vec<String>) {
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        (
+            runtime
+                .trigger_states
+                .iter()
+                .map(|state| {
+                    (
+                        state.trigger.id.clone(),
+                        state.fired,
+                        state.last_fired_elapsed.is_some(),
+                    )
+                })
+                .collect(),
+            runtime.pending_gm_event_skips.iter().cloned().collect(),
+        )
+    }
+
+    let first = consumed(armed());
+    let second = consumed(armed());
+    let expected = crate::sim_digest::world_digest(first.world());
+    assert_eq!(
+        expected,
+        crate::sim_digest::world_digest(second.world()),
+        "two same-seed runs of one armed Skip agree exactly"
+    );
+
+    // A save taken while the arm is waiting, restored into a world that was
+    // loaded fresh and has nothing armed.
+    let payload = crate::snapshot::capture(armed().world());
+    assert_eq!(
+        payload
+            .scenario
+            .as_ref()
+            .expect("a world was loaded")
+            .pending_gm_event_skips,
+        vec!["base-world::evac".to_string()],
+    );
+    let mut resumed = gm_event_app(SCRIPT_GM_SKIPPABLE_EVENTS);
+    assert!(
+        armed_skips(&resumed).is_empty(),
+        "a fresh load arms nothing"
+    );
+    let report = crate::snapshot::restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+    assert_eq!(
+        armed_skips(&resumed),
+        vec!["base-world::evac".to_string()],
+        "the resumed run is owed the silence the operator already bought"
+    );
+
+    let resumed = consumed(resumed);
+    assert_eq!(
+        lifecycle(&resumed),
+        lifecycle(&first),
+        "and reaches the same scenario state as the runs that never paused"
     );
 }
 
@@ -2096,6 +2565,7 @@ fn an_automatic_event_without_controls_is_invisible_and_unfireable() {
             &runtime.trigger_states,
             &runtime.pending_gm_event_fires,
             &runtime.paused_gm_events,
+            &runtime.pending_gm_event_skips,
         )
         .into_iter()
         .map(|event| event.id)

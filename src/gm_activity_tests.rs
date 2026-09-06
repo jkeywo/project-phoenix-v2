@@ -444,6 +444,7 @@ fn logged(
         target: None,
         effect: None,
         verb: None,
+        lever: None,
     }
 }
 
@@ -544,6 +545,56 @@ fn a_fired_gm_event_is_attributed_by_the_event_it_fired() {
     );
     assert_eq!(detail.outcome, GmActivityActionOutcome::Applied);
     assert_eq!(entries[0].category, GmActivityCategory::GmAction);
+}
+
+/// The event-control family is ONE kind carrying levers, so the feed reads
+/// WHICH lever off the durable result (issue #1304).
+///
+/// The two rows must not collapse onto each other: a Fire makes something
+/// happen and a Skip buys silence where something would have. Reporting one as
+/// the other is the worst available answer -- worse than dropping the row --
+/// because it tells every GM the opposite of what their colleague did.
+#[test]
+fn a_skip_arm_is_attributed_by_its_lever_and_never_as_a_fire() {
+    let row = |correlation: &str, lever: Option<crate::gm_event::GmEventLever>| {
+        let mut fact = logged(
+            "gm-alpha",
+            correlation,
+            crate::gm_action::GmActionOutcome::Applied,
+            None,
+        );
+        fact.action_kind = crate::gm_action::GmActionKind::EventControl;
+        fact.target = Some("base-world::courier_lost".into());
+        fact.lever = lever;
+        fact
+    };
+
+    let mut state = GmActivityState::default();
+    assert!(terminal_action_entries(&mut state, None, None, None, None).is_empty());
+    let mut results = crate::gm_action::LocalGmActionRefusals::default();
+    results.push(row("skip-1", Some(crate::gm_event::GmEventLever::SkipNext)));
+    results.push(row("fire-1", None));
+
+    let entries = terminal_action_entries(&mut state, None, Some(&results), None, None);
+    let actions: Vec<GmActivityAction> = entries
+        .iter()
+        .map(|entry| match &entry.detail {
+            GmActivityDetail::GmAction(detail) => detail.action.clone(),
+            other => panic!("expected GM action detail, got {other:?}"),
+        })
+        .collect();
+    assert!(
+        actions.contains(&GmActivityAction::ArmGmEventSkip {
+            event: "base-world::courier_lost".into(),
+        }),
+        "the Skip names its own lever: {actions:?}"
+    );
+    assert!(
+        actions.contains(&GmActivityAction::FireGmEvent {
+            event: "base-world::courier_lost".into(),
+        }),
+        "and the absent lever is still a Fire: {actions:?}"
+    );
 }
 
 /// A directed world effect is attributed by WHAT it hit and by what the hull

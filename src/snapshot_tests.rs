@@ -390,6 +390,128 @@ fn paused_gm_events_round_trip_with_their_authored_trigger_table() {
         .is_empty());
 }
 
+/// A GM Skip that crossed its apply boundary and is still waiting for the
+/// occurrence it stands in front of survives capture and restore (issue #1304).
+///
+/// Format 23's reason, and the sharper half of format 19's: a Skip arm is
+/// waiting on the WORLD, so it routinely outlives any number of saves, and a
+/// resume that forgot one runs in full the occurrence the GM decided the crew
+/// would not see -- with the journal still reporting the arm Applied and no
+/// re-press able to undo a moment that has already passed.
+///
+/// It is captured beside the Fire set and never merged with it: the two levers
+/// are opposite futures for one event, so the payload has to be able to say
+/// that `evac` is armed for Skip while `breach` is armed for Fire.
+#[test]
+fn an_armed_gm_event_skip_round_trips_beside_an_armed_fire() {
+    fn gm_event(id: &str) -> crate::world::content::TriggerState {
+        let mut trigger = crate::world::config::scripted_trigger(
+            crate::world::config::TriggerCondition::OnDestroyed {
+                entity_name: "courier".to_string(),
+            },
+        );
+        trigger.id = Some(id.to_string());
+        let mut controls = crate::world::config::GmEventControls::fire_only(
+            id.to_string(),
+            format!("world.gm.event.{id}"),
+        );
+        controls.skip = true;
+        trigger.gm_controls = Some(controls);
+        crate::world::content::TriggerState {
+            trigger,
+            fired: false,
+            origin_layer: None,
+            seen_destroyed: Default::default(),
+            last_fired_elapsed: None,
+        }
+    }
+    fn table() -> crate::world::server::WorldContentRuntime {
+        crate::world::server::WorldContentRuntime {
+            trigger_states: vec![gm_event("breach"), gm_event("evac"), gm_event("sweep")],
+            ..Default::default()
+        }
+    }
+
+    let mut live = App::new();
+    live.add_plugins(MinimalPlugins);
+    live.world_mut().insert_resource(SimTick(21));
+    let mut runtime = table();
+    runtime
+        .pending_gm_event_fires
+        .insert("base-world::breach".into());
+    runtime
+        .pending_gm_event_skips
+        .insert("base-world::sweep".into());
+    runtime
+        .pending_gm_event_skips
+        .insert("base-world::evac".into());
+    live.world_mut().insert_resource(runtime);
+
+    let payload = capture(live.world());
+    let scenario = payload.scenario.as_ref().expect("a world was loaded");
+    assert_eq!(
+        scenario.pending_gm_event_skips,
+        vec![
+            "base-world::evac".to_string(),
+            "base-world::sweep".to_string()
+        ],
+        "each armed Skip is captured, sorted, by its layer-qualified id"
+    );
+    assert_eq!(
+        scenario.pending_gm_event_fires,
+        vec!["base-world::breach".to_string()],
+        "and the Fire set is untouched by it"
+    );
+
+    let mut resumed = App::new();
+    resumed.add_plugins(MinimalPlugins);
+    resumed.world_mut().insert_resource(SimTick(999));
+    resumed.world_mut().insert_resource(table());
+    assert!(resumed
+        .world()
+        .resource::<crate::world::server::WorldContentRuntime>()
+        .pending_gm_event_skips
+        .is_empty());
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+    let restored = resumed
+        .world()
+        .resource::<crate::world::server::WorldContentRuntime>();
+    assert_eq!(
+        restored
+            .pending_gm_event_skips
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>(),
+        vec![
+            "base-world::evac".to_string(),
+            "base-world::sweep".to_string()
+        ],
+    );
+    assert_eq!(
+        restored
+            .pending_gm_event_fires
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>(),
+        vec!["base-world::breach".to_string()],
+        "the two levers come back apart, not merged"
+    );
+
+    // A world with no armed Skip writes the field out of the payload entirely,
+    // which is what keeps every pre-#1304 scenario's capture byte-identical.
+    let mut idle = App::new();
+    idle.add_plugins(MinimalPlugins);
+    idle.world_mut().insert_resource(SimTick(21));
+    idle.world_mut().insert_resource(table());
+    assert!(capture(idle.world())
+        .scenario
+        .expect("a world was loaded")
+        .pending_gm_event_skips
+        .is_empty());
+}
+
 #[test]
 fn station_puppet_membership_round_trips_at_the_authoritative_boundary() {
     let target = crate::gm_puppet::StationPuppetTarget::new(

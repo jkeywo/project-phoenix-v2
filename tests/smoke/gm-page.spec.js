@@ -239,6 +239,34 @@ fn on_quiet(ctx) { }
 """
 `;
 
+// Issue #1304: an ORDINARY condition-bearing trigger declaring BOTH levers, so
+// a browser test can press one and watch the other stay available. The courier
+// is never destroyed in this spec — the point is the arm itself, which waits on
+// an occurrence that never comes, exactly as it does in a real mission.
+const GM_SKIPPABLE_EVENT_WORLD = `
+[global]
+seed = 1304
+title = "GM skip-next smoke fixture"
+description = "gm_controls().skip() on an automatic trigger, coverage for issue 1304."
+
+[[entity]]
+template_path = "assets/entities/alliance_courier.toml"
+name = "entity.alliance_courier.display_name"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+[script]
+setup = """
+on_destroyed("entity.alliance_courier.display_name", "on_raider_lost")
+    .gm_controls("raider_lost", "world.smoke_gm.event.raider_lost")
+    .repeat()
+    .skip();
+on_world_loaded("on_quiet");
+fn on_raider_lost(ctx) { ctx.flags.increment("raider_losses", 1); }
+fn on_quiet(ctx) { }
+"""
+`;
+
 // One selectable damageable hull and nothing else, so a browser test can name
 // the target it aims at without depending on which blip the map happens to
 // order first (issue #1310).
@@ -724,6 +752,78 @@ test('an automatic event declaring gm_controls is listed and fireable, and an un
   expect(errors).toEqual([]);
 });
 
+/// Issue #1304 exit evidence in a real browser: an authored trigger that
+/// declares `.skip()` offers a Skip control beside its Fire, arming it reports
+/// Applied against the authoritative projection, a second arm reports the
+/// deterministic No-op, and the Fire beside it never stops being available —
+/// which is the visible half of "Fire does not consume an armed Skip".
+///
+/// Nothing here injects a Host Channel payload: every row, every state sentence
+/// and every result comes from the running simulation's own projection.
+test('a GM arms a Skip of an authored event and a second arm reports the No-op', { tag: '@core' }, async ({ context }) => {
+  test.setTimeout(90_000);
+  await context.route('**/assets/worlds/default.toml', (route) =>
+    route.fulfill({ contentType: 'text/plain', body: GM_SKIPPABLE_EVENT_WORLD }),
+  );
+
+  const page = await context.newPage();
+  const errors = captureServerPageErrors(page);
+  await page.goto('/?gm=1&scenario=assets/worlds/default.toml');
+  await waitForWasmReady(page);
+  await page.evaluate(() => window.__hostFleetOpen());
+  await page.waitForFunction(() => {
+    const state = window.__hostGmStartState?.();
+    return state?.admitted === true
+      && state.presentationReady === true
+      && state.localValidation === true;
+  }, undefined, { timeout: 30_000 });
+  await page.evaluate(() => document.getElementById('gm-ready-btn').click());
+  await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
+
+  const row = page.locator('#gm-mission-events .gm-mission-event[data-event-id="base-world::raider_lost"]');
+  await expect(row).toBeVisible({ timeout: 30_000 });
+  await expect(row.locator('.gm-mission-event-label'))
+    .toHaveText(ts('world.smoke_gm.event.raider_lost'));
+  await expect(row.locator('.gm-mission-event-skip-state'))
+    .toHaveText(ts('server.gm.mission.state_skip_ready'));
+  expect(await page.evaluate(() => window.__hostGmMissionState())).toMatchObject({
+    events: 1,
+    fireable: 1,
+    skippable: 1,
+    armedSkips: 0,
+  });
+
+  const skip = row.locator('button[data-role="skip"]');
+  const fire = row.locator('button[data-role="fire"]');
+  await expect(skip).toBeEnabled();
+  await skip.click();
+
+  // The authoritative projection reports the arm, and the panel says so.
+  const applied = page.locator('#gm-mission-log .gm-mission-log-entry[data-outcome="applied"]');
+  await expect(applied).toHaveCount(1, { timeout: 30_000 });
+  await expect(applied).toContainText('base-world::raider_lost');
+  await expect(applied).toHaveAttribute('data-lever', 'skip');
+  await expect(row).toHaveAttribute('data-skip-armed', 'true', { timeout: 30_000 });
+  await expect(row.locator('.gm-mission-event-skip-state'))
+    .toHaveText(ts('server.gm.mission.state_skip_armed'));
+  expect(await page.evaluate(() => window.__hostGmMissionState())).toMatchObject({
+    armedSkips: 1,
+    pending: 0,
+  });
+
+  // Fire is untouched by the armed Skip: the two levers are independent.
+  await expect(fire).toBeEnabled();
+
+  // A second arm is a deterministic No-op, and the operator can SEE it.
+  await expect(skip).toBeEnabled();
+  await skip.click();
+  const noOp = page.locator('#gm-mission-log .gm-mission-log-entry[data-outcome="no-op"]');
+  await expect(noOp).toHaveCount(1, { timeout: 30_000 });
+  await expect(noOp).toContainText('base-world::raider_lost');
+  await expect(row).toHaveAttribute('data-skip-armed', 'true');
+
+  expect(errors).toEqual([]);
+});
 
 // Direct Entity damage and healing (issue #1310). A NEW feature needs a NEW
 // @core test (AGENTS.md Testing Strategy). Nothing here injects a Host Channel

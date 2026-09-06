@@ -593,7 +593,18 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// event-control result in it is a Fire by construction, so defaulting the
 /// lever would republish a restored run's Pauses and Resumes as fires of the
 /// same events.
-pub const SNAPSHOT_FORMAT: u32 = 22;
+///
+/// Format 23 carries the armed GM event Skips (issue #1304) — renumbered from
+/// 21 to 23 on rebase, since #1305 and #1303 had already claimed 21 and 22 on
+/// the branch this landed on. Format 19's gap in the other direction: a
+/// format-22 capture taken after the Skip crossed its PreUpdate apply boundary
+/// records an Applied arm that no restored peer will honour, so the occurrence
+/// the GM bought silence for happens in full — the loudest possible way to
+/// lose a decision the operator already made, and one no re-press can undo
+/// once the moment has passed. Durable results also gained the event-control
+/// LEVER, without which a restored feed reports every Skip as a Fire of the
+/// same event: the opposite sentence about the same button.
+pub const SNAPSHOT_FORMAT: u32 = 23;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -2110,6 +2121,20 @@ pub struct ScenarioState {
     /// [`Self::pending_gm_event_fires`]' reason.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub paused_gm_events: Vec<String>,
+    /// `WorldContentRuntime::pending_gm_event_skips` (issue #1304): the
+    /// layer-qualified ids of GM Skips that have crossed their canonical apply
+    /// boundary and whose occurrence has not happened yet.
+    ///
+    /// It travels for [`Self::pending_gm_event_fires`]' reason, and it is the
+    /// LONGER-lived of the two: a Fire arm is normally consumed the tick it
+    /// lands, while a Skip arm is waiting on the world and can legitimately
+    /// outlive any number of saves. A resume without it runs the occurrence the
+    /// GM decided the crew would not see, with the journal still reporting the
+    /// arm Applied.
+    ///
+    /// Sorted in the `BTreeSet`'s own order, for the field above's reason.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_gm_event_skips: Vec<String>,
 }
 
 /// One scenario trigger's runtime state — the three fields a run *changes*.
@@ -2818,6 +2843,8 @@ fn capture_scenario(world: &World) -> Option<ScenarioState> {
     let pending_gm_event_fires: Vec<String> =
         runtime.pending_gm_event_fires.iter().cloned().collect();
     let paused_gm_events: Vec<String> = runtime.paused_gm_events.iter().cloned().collect();
+    let pending_gm_event_skips: Vec<String> =
+        runtime.pending_gm_event_skips.iter().cloned().collect();
 
     let mut entity_groups: Vec<(String, Vec<String>)> = runtime
         .entity_groups
@@ -2891,6 +2918,8 @@ fn capture_scenario(world: &World) -> Option<ScenarioState> {
         // payload — for every world that authors no pausable event, which is
         // every shipped world today.
         paused_gm_events,
+        // And the armed Skips (issue #1304), on identical terms.
+        pending_gm_event_skips,
     })
 }
 
@@ -5616,6 +5645,8 @@ fn restore_scenario(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
         // walk's rule: the freshly-loaded world has none, and the capture's set
         // is the complete authoritative statement of what is still owed a run.
         runtime.pending_gm_event_fires = stored.pending_gm_event_fires.iter().cloned().collect();
+        // And the armed Skips (issue #1304), on identical terms.
+        runtime.pending_gm_event_skips = stored.pending_gm_event_skips.iter().cloned().collect();
 
         // The GM's armed placements (issue #1305), on the same rule and for the
         // same reason: the freshly-loaded world has none, and the capture's

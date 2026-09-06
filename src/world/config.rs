@@ -1026,6 +1026,87 @@ pub enum TriggerCondition {
         entity_name: String,
         waypoint: Option<String>,
     },
+    /// Never fires from a world event (issue #1301). The only thing that can
+    /// fire it is an explicit, attributed GM `FireGmEvent` action, which arms
+    /// the trigger through [`crate::world::server::WorldContentRuntime`]'s
+    /// pending-fire set; the ordinary evaluator then runs the ordinary
+    /// handler and consumes the ordinary lifecycle.
+    ///
+    /// It is the condition the `gm_event(id, label, handler)` authoring
+    /// shorthand builds. A `Manual` trigger without
+    /// [`Trigger::gm_controls`] is inert by construction, which is exactly
+    /// what "missing controls are invisible and unavailable" means.
+    Manual,
+}
+
+/// GM operability metadata attached to one authored trigger (issue #1301).
+///
+/// `gm_event(id, label, handler)` builds it with `fire` alone. Issue #1302
+/// gives an ORDINARY (condition-bearing) trigger the same struct through a
+/// `gm_controls` declaration, and #1303/#1304 turn on the two remaining
+/// levers, so nothing here is specific to the manual shorthand: a control set
+/// is `(stable id, String Table label, which levers)` regardless of what the
+/// trigger's condition is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GmEventControls {
+    /// Author-stable id, unique within its layer. Layer qualification happens
+    /// at read time from the trigger state's `origin_layer`
+    /// ([`crate::gm_event::qualified_event_id`]) rather than being baked in
+    /// here, so the same authored unit merged as a layer and as a base world
+    /// keeps one authored identity and two qualified ones.
+    pub id: String,
+    /// String Table id for the operator-facing label. Never English.
+    pub label: String,
+    /// The explicit Fire lever. `gm_event` implies it.
+    pub fire: bool,
+    /// The persistent manual Pause lever (issue #1303). Always false here.
+    pub pause: bool,
+    /// The arm-the-next-occurrence Skip lever (issue #1304). Always false here.
+    pub skip: bool,
+}
+
+impl GmEventControls {
+    /// The one place the authored id/label shape is decided, shared by the
+    /// Rhai host fn and the load-time validation pass so neither can drift.
+    pub fn validate_authored(id: &str, label: &str) -> Result<(), String> {
+        let bounded = |value: &str| {
+            !value.is_empty() && value.len() <= 128 && !value.chars().any(char::is_control)
+        };
+        if !bounded(id) {
+            return Err(format!(
+                "gm_event id must be 1..=128 bytes of control-free text, got {id:?}"
+            ));
+        }
+        // `::` is the layer qualifier this id is joined with; an authored id
+        // carrying one could name a different layer's event.
+        if id.contains("::") || id.contains(char::is_whitespace) {
+            return Err(format!(
+                "gm_event id must not contain '::' or whitespace, got {id:?}"
+            ));
+        }
+        if !bounded(label) {
+            return Err(format!(
+                "gm_event label must be a 1..=128 byte String Table id, got {label:?}"
+            ));
+        }
+        Ok(())
+    }
+
+    /// Whether this control set declares the Fire lever.
+    pub fn declares_fire(&self) -> bool {
+        self.fire
+    }
+
+    /// The manual-only shorthand's control set: Fire, nothing else.
+    pub fn manual_fire(id: String, label: String) -> Self {
+        Self {
+            id,
+            label,
+            fire: true,
+            pause: false,
+            skip: false,
+        }
+    }
 }
 
 /// An action to execute when a trigger fires.
@@ -1237,6 +1318,10 @@ pub struct Trigger {
     /// (may re-fire every tick its condition holds). Ignored for once-only
     /// triggers.
     pub cooldown_secs: Option<f32>,
+    /// GM operability metadata (issue #1301). `None` — the default and the
+    /// value every existing world builds — means the trigger is invisible and
+    /// unavailable to a GM, which is the contract's deliberate default.
+    pub gm_controls: Option<GmEventControls>,
 }
 
 // -- Parser helpers -----------------------------------------------------------
@@ -1671,6 +1756,7 @@ pub(crate) fn scripted_trigger(condition: TriggerCondition) -> Trigger {
         id: None,
         repeat: false,
         cooldown_secs: None,
+        gm_controls: None,
     }
 }
 

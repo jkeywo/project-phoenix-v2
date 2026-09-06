@@ -552,7 +552,17 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// way. Nothing in the payload distinguishes that save from one taken with the
 /// lever never pulled, so both are refused by `Versions::check`, which names the
 /// dimension — the same answer every rung above gives.
-pub const SNAPSHOT_FORMAT: u32 = 20;
+///
+/// Format 19 carries the armed GM event Fires and each authored trigger's arm
+/// latch (issue #1301). It is the same cross-schedule gap one rung further: a
+/// format-18 capture taken after the Fire crossed its PreUpdate apply boundary
+/// but before `tick_trigger_pipeline` ran the handler records an Applied Fire
+/// with nothing that will ever run it, and the journal's idempotency makes a
+/// second Fire of that one-shot a No-op — so the event becomes permanently
+/// unreachable rather than merely late. Durable results also gained the
+/// action's stable target identity, without which a restored feed cannot say
+/// WHICH event a logged Fire fired.
+pub const SNAPSHOT_FORMAT: u32 = 19;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -2020,6 +2030,22 @@ pub struct ScenarioState {
         skip_serializing_if = "crate::world::workforce::WorkforceRegister::is_empty"
     )]
     pub workforce: crate::world::workforce::WorkforceRegister,
+    /// `WorldContentRuntime::pending_gm_event_fires` (issue #1301): the
+    /// layer-qualified ids of GM Fires that have crossed their canonical apply
+    /// boundary and whose handler has not run yet.
+    ///
+    /// It has to travel for [`Self::deadlines`]' reason, sharpened: the
+    /// authoritative fact that the Fire was Applied lives in the GM action
+    /// journal, which this payload already carries, so a resume WITHOUT this
+    /// field reports an event fired that never ran its handler — and, because a
+    /// second Fire of the same one-shot reduces to a No-op against that same
+    /// journal, the GM could never make it run either.
+    ///
+    /// A `BTreeSet` in the runtime, written here in its own sorted order: this
+    /// is the one collection on this struct whose order is neither authored nor
+    /// a queue, so sorting IS its identity rather than a payload convention.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_gm_event_fires: Vec<String>,
 }
 
 /// One scenario trigger's runtime state — the three fields a run *changes*.
@@ -2715,6 +2741,9 @@ fn capture_scenario(world: &World) -> Option<ScenarioState> {
 
     let triggers = runtime.triggers.capture();
 
+    let pending_gm_event_fires: Vec<String> =
+        runtime.pending_gm_event_fires.iter().cloned().collect();
+
     let mut entity_groups: Vec<(String, Vec<String>)> = runtime
         .entity_groups
         .iter()
@@ -2775,6 +2804,10 @@ fn capture_scenario(world: &World) -> Option<ScenarioState> {
         // payload — for every world that authors no `[[workforce]]`, which is
         // every shipped world but Falling Skyway.
         workforce: runtime.workforce.clone(),
+        // The GM's armed Fires (issue #1301). Empty — and so absent from the
+        // payload — for every world that authors no GM-operable event, which is
+        // every shipped world today.
+        pending_gm_event_fires,
     })
 }
 
@@ -5494,6 +5527,11 @@ fn restore_scenario(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
                 }
             });
         }
+
+        // The GM's armed Fires (issue #1301). Wholesale replacement, on this
+        // walk's rule: the freshly-loaded world has none, and the capture's set
+        // is the complete authoritative statement of what is still owed a run.
+        runtime.pending_gm_event_fires = stored.pending_gm_event_fires.iter().cloned().collect();
 
         runtime.entity_groups = stored
             .entity_groups

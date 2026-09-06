@@ -163,7 +163,8 @@ pub fn entity_name_from_condition(condition: &TriggerCondition) -> Option<String
         | TriggerCondition::OnFlagSet { .. }
         | TriggerCondition::OnFlagCleared { .. }
         | TriggerCondition::OnAllDestroyed { .. }
-        | TriggerCondition::OnWorldLoaded => None,
+        | TriggerCondition::OnWorldLoaded
+        | TriggerCondition::Manual => None,
     }
 }
 
@@ -304,6 +305,57 @@ pub fn evaluate_single_trigger(
         origin_layer: state.origin_layer.clone(),
         entity_name: entity_name_from_condition(&state.trigger.condition),
     })
+}
+
+/// Fire one GM-armed trigger through the ORDINARY lifecycle (issue #1301).
+///
+/// This is the manual half of [`evaluate_single_trigger`]: it applies exactly
+/// the same gates, in the same order, minus the event match — which for a
+/// [`TriggerCondition::Manual`] trigger is what the GM's typed `FireGmEvent`
+/// action stands in for. The gates matter and are not ceremony:
+///
+/// * a spent once-only trigger cannot fire again, so a second Fire of a
+///   one-shot `gm_event` is a No-op rather than a second handler run;
+/// * a `when` predicate that reads false suppresses the firing WITHOUT
+///   consuming the arm, exactly as it suppresses an automatic firing without
+///   consuming the trigger — so a Fire during a false predicate lands the
+///   moment the predicate holds instead of being silently lost;
+/// * `cooldown_secs` still spaces a repeatable event.
+///
+/// Returns `Some(FiredTrigger)` when the trigger actually fired, in which case
+/// the caller must run its handler exactly as it runs an automatic one.
+pub fn fire_manual_trigger(
+    state: &mut TriggerState,
+    flag_chain: &[&FlagStore],
+    current_elapsed: f32,
+) -> Option<FiredTrigger> {
+    if state.fired && !state.trigger.repeat {
+        return None;
+    }
+    if let Some(pred) = &state.trigger.when {
+        if !pred.evaluate(flag_chain) {
+            return None;
+        }
+    }
+    if !cooldown_elapsed(state, current_elapsed) {
+        return None;
+    }
+    state.fired = true;
+    state.last_fired_elapsed = Some(current_elapsed);
+    Some(FiredTrigger {
+        origin_layer: state.origin_layer.clone(),
+        entity_name: entity_name_from_condition(&state.trigger.condition),
+    })
+}
+
+/// Whether an armed Fire is still live against this trigger.
+///
+/// A spent once-only trigger can never fire again, so keeping its arm queued
+/// would leave a permanently undeliverable request in authoritative state.
+/// Every other reason [`fire_manual_trigger`] declines (a false `when`, a
+/// cooldown) is temporary, and the arm is deliberately retained across it.
+pub fn manual_fire_is_still_live(state: &TriggerState) -> bool {
+    !state.fired || state.trigger.repeat
 }
 
 /// Strip leading `parent:` tokens from `name` and walk `layer_chain`

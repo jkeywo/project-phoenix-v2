@@ -106,6 +106,22 @@ function gmAction(outcome = 'applied', overrides = {}) {
   }, { ships: [], links: [], ...overrides });
 }
 
+/** One Fire of an authored GM event (issue #1301), the third action family. */
+function fireGmEvent(data = {}, action = {}) {
+  return entry('gm_action', {
+    type: 'gm_action',
+    data: {
+      operator: { id: 'gm-alpha', name: 'Morgan' },
+      correlation: 'fire-1',
+      action: { type: 'fire_gm_event', event: 'base-world::breach_alarm', ...action },
+      outcome: 'applied',
+      reason: null,
+      order: { sequence: 5, origin: 1 },
+      ...data,
+    },
+  }, { ships: [], links: [] });
+}
+
 function allCategories() {
   return [
     damage(),
@@ -210,6 +226,20 @@ describe('GM activity feed pure adapter', () => {
     const parsed = parseGmActivityFeed(payload([{ ...damage(), attention_score: 100 }]));
     expect(parsed.entries[0]).not.toHaveProperty('attention_score');
   });
+
+  it('accepts a fired GM event and rejects a nameless one', () => {
+    const parsed = parseGmActivityFeed(payload([fireGmEvent()]));
+    expect(parsed.entries).toHaveLength(1);
+    expect(parsed.entries[0].detail.data.action)
+      .toEqual({ type: 'fire_gm_event', event: 'base-world::breach_alarm' });
+    // Strictness is payload-wide and deliberate: an unnamed or unknown action
+    // rejects the whole absolute page rather than rendering a wrong sentence.
+    // That is exactly why the browser must carry the same action vocabulary
+    // Rust publishes — a variant known to only one side freezes the feed.
+    expect(parseGmActivityFeed(payload([fireGmEvent({}, { event: '' })]))).toBeUndefined();
+    expect(parseGmActivityFeed(payload([fireGmEvent({}, { type: 'fire_unknown' })])))
+      .toBeUndefined();
+  });
 });
 
 describe('GM activity feed presentation and selection links', () => {
@@ -230,6 +260,28 @@ describe('GM activity feed presentation and selection links', () => {
       .toContain('Morgan');
     expect(document.querySelector('[data-category="connection"]').textContent)
       .toContain('Ari');
+  });
+
+  it('names the fired event and its refusal reason from the String Table', () => {
+    const refused = fireGmEvent({
+      correlation: 'fire-2',
+      outcome: 'refused',
+      reason: 'unknown-gm-event',
+    });
+    expect(harness.feed.update(payload([fireGmEvent(), refused], 16))).toBe(true);
+    const rows = [...document.querySelectorAll('[data-category="gm_action"]')];
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent)
+      .toContain('server.gm.activity.action.fire_gm_event:base-world::breach_alarm');
+    expect(rows[0].textContent).toContain('server.gm.activity.action_outcome.applied');
+    expect(rows[1].textContent).toContain('server.gm.activity.action_reason.unknown-gm-event');
+    // A Fire must never borrow the pause family's sentence.
+    for (const row of rows) {
+      expect(row.textContent).not.toContain('server.gm.activity.action.resume');
+    }
+    // And both ids this branch composes resolve against the shipped table.
+    expect(realStrings.get('server.gm.activity.action.fire_gm_event')).toContain('{event}');
+    expect(realStrings.has('server.gm.activity.action_reason.unknown-gm-event')).toBe(true);
   });
 
   it('drives category plus ship filters and clear resets both', () => {

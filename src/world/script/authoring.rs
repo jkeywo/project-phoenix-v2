@@ -233,8 +233,14 @@ mod tests {
         ("", "on_exited_region", &["entity", "handler"]),
         ("", "on_waypoint_reached", &["entity", "handler"]),
         ("", "on_hull_below", &["entity", "threshold", "handler"]),
+        // The manual-only GM authoring shorthand and its lifecycle modifier
+        // (issue #1301). Deliberately exposed: deciding which moments a Game
+        // Master can reach for is the author's judgement, and the mission panel
+        // can only list what a scenario declares.
+        ("", "gm_event", &["id", "label", "handler"]),
         ("trigger", "when", &["predicate"]),
         ("trigger", "repeat", &[]),
+        ("trigger", "repeatable", &[]),
         // ctx.flags.*
         ("flags", "increment", &["name", "by"]),
         // ctx.effects.*
@@ -335,6 +341,18 @@ mod tests {
                 "{}.{} has no summary",
                 hf.receiver,
                 hf.name
+            );
+            // A wrapped summary must use the `\` string continuation, which
+            // eats the newline AND the following indentation. Writing the
+            // wrap without it bakes the source indentation into the text the
+            // scenario editor shows an author, so forbid the run of spaces
+            // that can only come from that mistake.
+            assert!(
+                !hf.summary.contains("  "),
+                "{}.{} summary has baked-in wrap indentation: {:?}",
+                hf.receiver,
+                hf.name,
+                hf.summary
             );
             for param in hf.params {
                 assert!(

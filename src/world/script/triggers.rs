@@ -34,7 +34,9 @@ use std::sync::{Arc, Mutex};
 
 use rhai::{EvalAltResult, ImmutableString, Position};
 
-use crate::world::config::{reject_world_history, scripted_trigger, TriggerCondition};
+use crate::world::config::{
+    reject_world_history, scripted_trigger, GmEventControls, TriggerCondition,
+};
 use crate::world::script::effects::RealLit;
 use crate::world::script::engine::{BuilderState, ScriptTrigger};
 use crate::world::script::registry::{host_fn, HostRegistry};
@@ -372,6 +374,91 @@ pub(crate) fn register_trigger_builders(
                 },
                 &handler,
             ))
+        },
+    );
+
+    // 13. The manual-only GM authoring shorthand (issue #1301, PRD #930 M2).
+    //
+    // `gm_event("breach_alarm", "world.gm.event.breach_alarm", "on_breach")`
+    // authors an event with NO automatic condition at all: the only thing that
+    // can cause it is a GM pressing Fire in the mission panel. That is why it
+    // does not take a condition and why it needs no separate `gm_controls`
+    // declaration — a manual event that could not be fired would be an event
+    // nothing could ever cause, so Fire is implied rather than authored.
+    //
+    // It is one-shot by default, exactly like every other registration here, and
+    // `.repeatable()` below makes it a reusable quick tool. `.when(…)` composes
+    // too, with its ordinary meaning: a false reading suppresses the firing
+    // without consuming the Fire, so the event lands when the predicate holds.
+    //
+    // The `label` is a String Table id, never English, because the mission panel
+    // renders it to an operator. The id is the author's stable handle; it is
+    // qualified by the layer that authored it at read time
+    // (`crate::gm_event::qualified_event_id`), so two layers may each author
+    // `breach_alarm` without colliding. Both are validated HERE, at the
+    // authoring boundary, so a malformed one is a load-time finding that blocks
+    // activation rather than an event that silently never appears.
+    let s = state.clone();
+    host_fn!(
+        engine,
+        "gm_event",
+        receiver = "",
+        category = "trigger",
+        params = ["id", "label", "handler"],
+        summary = "Author a GM-only manual event: no automatic condition, an \
+                  implied Fire control in the GM mission panel, and a String \
+                  Table `label`. One-shot unless `.repeatable()`.",
+        move |id: ImmutableString,
+              label: ImmutableString,
+              handler: ImmutableString|
+              -> Result<TriggerHandle, Box<EvalAltResult>> {
+            GmEventControls::validate_authored(&id, &label).map_err(raise)?;
+            let handle = push_trigger(&s, TriggerCondition::Manual, &handler);
+            let mut st = s.lock().expect("builder state lock");
+            let trigger = &mut st.script_triggers[handle.index].trigger;
+            // The authored id doubles as the ordinary `Trigger::id`, so a
+            // scenario can `reset_trigger` a spent GM event and the balance
+            // feed attributes its fire by the same name the GM pressed.
+            trigger.id = Some(id.to_string());
+            trigger.gm_controls = Some(GmEventControls::manual_fire(
+                id.to_string(),
+                label.to_string(),
+            ));
+            Ok(handle)
+        },
+    );
+
+    // The GM-event lifecycle modifier (issue #1301).
+    //
+    // Spelled `repeatable()` rather than reusing `repeat()` because it says the
+    // thing the GM contract says — "a reusable quick tool" — at the one call
+    // site an operator's mental model is the subject. It sets the SAME
+    // `Trigger::repeat` field, so there is one lifecycle policy and not two, and
+    // it is registered on `TriggerHandle` like every other modifier so the two
+    // spellings compose with `.when(…)` in either order.
+    let s = state.clone();
+    host_fn!(
+        engine,
+        "repeatable",
+        receiver = "trigger",
+        category = "trigger",
+        params = [],
+        summary = "Make a `gm_event` a reusable GM quick tool instead of a \
+                  one-shot: `gm_event(id, label, h).repeatable()`. The same \
+                  lifecycle field `.repeat()` sets.",
+        move |handle: &mut TriggerHandle| -> Result<TriggerHandle, Box<EvalAltResult>> {
+            let mut st = s.lock().expect("builder state lock");
+            let index = handle.index;
+            match st.script_triggers.get_mut(index) {
+                Some(t) => {
+                    t.trigger.repeat = true;
+                    Ok(*handle)
+                }
+                // Unreachable through the front-end, exactly as in `when` below.
+                None => Err(raise(format!(
+                    "repeatable(): trigger handle {index} names no registered trigger"
+                ))),
+            }
         },
     );
 
@@ -948,5 +1035,77 @@ mod tests {
                 },
             ]
         );
+    }
+
+    // ── gm_event: the manual-only GM shorthand (issue #1301) ─────────────────
+
+    #[test]
+    fn gm_event_builds_a_manual_trigger_with_an_implied_fire_control() {
+        let mut expected = crate::world::config::scripted_trigger(TriggerCondition::Manual);
+        expected.id = Some("breach_alarm".into());
+        expected.gm_controls = Some(crate::world::config::GmEventControls::manual_fire(
+            "breach_alarm".into(),
+            "world.gm.event.breach_alarm".into(),
+        ));
+        assert_builds_with(
+            r#"gm_event("breach_alarm", "world.gm.event.breach_alarm", "h")"#,
+            expected,
+        );
+    }
+
+    #[test]
+    fn a_gm_event_is_one_shot_until_repeatable_says_otherwise() {
+        let once = script_triggers(r#"gm_event("a", "world.gm.event.a", "h"); fn h(ctx) { }"#);
+        assert!(!once[0].trigger.repeat, "gm_event is one-shot by default");
+
+        let reusable = script_triggers(
+            r#"gm_event("a", "world.gm.event.a", "h").repeatable(); fn h(ctx) { }"#,
+        );
+        assert!(
+            reusable[0].trigger.repeat,
+            "repeatable() makes it a reusable quick tool"
+        );
+        // `repeatable()` sets the SAME lifecycle field `.repeat()` does, and the
+        // two compose with `.when(…)` in either order.
+        let chained = script_triggers(
+            r#"gm_event("a", "world.gm.event.a", "h").repeatable().when("flag(ready)");
+               fn h(ctx) { }"#,
+        );
+        assert!(chained[0].trigger.repeat);
+        assert!(chained[0].trigger.when.is_some());
+        let reversed = script_triggers(
+            r#"gm_event("a", "world.gm.event.a", "h").when("flag(ready)").repeatable();
+               fn h(ctx) { }"#,
+        );
+        assert_eq!(chained[0].trigger, reversed[0].trigger);
+    }
+
+    /// A malformed id or label is a LOAD-TIME finding, not an event that
+    /// silently never appears in the mission panel.
+    #[test]
+    fn a_malformed_gm_event_identity_is_a_blocking_finding() {
+        for source in [
+            r#"gm_event("", "world.gm.event.a", "h"); fn h(ctx) { }"#,
+            r#"gm_event("a::b", "world.gm.event.a", "h"); fn h(ctx) { }"#,
+            r#"gm_event("a b", "world.gm.event.a", "h"); fn h(ctx) { }"#,
+            r#"gm_event("a", "", "h"); fn h(ctx) { }"#,
+        ] {
+            let compiled = compile_scripts(&[ScriptSource {
+                path: "w.toml#script.setup".to_string(),
+                source: source.to_string(),
+            }]);
+            assert!(
+                compiled
+                    .findings
+                    .iter()
+                    .any(|finding| finding.severity == crate::world::validate::Severity::Error),
+                "`{source}` must be refused at load: {:?}",
+                compiled.findings
+            );
+            assert!(
+                compiled.script_triggers.is_empty(),
+                "`{source}` must not register a half-built event"
+            );
+        }
     }
 }

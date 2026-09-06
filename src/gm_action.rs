@@ -89,6 +89,18 @@ pub enum GmAction {
         target: crate::core::messages::SystemId,
         payload: crate::gm_puppet::CanonicalSystemCommandPayload,
     },
+    /// Fire one authored, GM-operable event (issue #1301).
+    ///
+    /// `event` is the layer-qualified stable id
+    /// ([`crate::gm_event::qualified_event_id`]), never an index and never a
+    /// script path: the trigger table is rebuilt by replaying the same load, so
+    /// an index is not an identity across a layer load/unload, while the
+    /// qualified id is. Applying it ARMS the event; the ordinary trigger
+    /// pipeline then runs the ordinary handler and consumes the ordinary
+    /// lifecycle, so a GM Fire and an automatic firing are the same event.
+    FireGmEvent {
+        event: String,
+    },
 }
 
 /// Presentation/result family for a typed GM action. The complete action stays
@@ -100,6 +112,9 @@ pub enum GmActionKind {
     SessionPause,
     StationPuppet,
     StationCommand,
+    /// The authored-event control family (issue #1301): Fire today, Pause
+    /// (#1303) and Skip (#1304) next, all naming the same qualified event id.
+    EventControl,
 }
 
 /// Validated browser ingress before its technical slot and deterministic order
@@ -135,10 +150,26 @@ impl GmActionProposal {
 impl GmAction {
     pub fn ship_key(&self) -> Option<&crate::command_admission::log::ShipKey> {
         match self {
-            Self::SetSessionPaused { .. } => None,
+            Self::SetSessionPaused { .. } | Self::FireGmEvent { .. } => None,
             Self::SetStationPuppet { ship, .. } | Self::IssueStationCommand { ship, .. } => {
                 Some(ship)
             }
+        }
+    }
+
+    /// The stable target identity this action names, for the durable result.
+    ///
+    /// Only the event-control family has one today: a Station action's target
+    /// is already two fields (`ship`, `station`) that the activity feed does
+    /// not render, and inventing a joined spelling for them here would be a
+    /// second identity for the same thing. `None` therefore means "this family
+    /// carries no single stable target", not "unknown".
+    pub fn target_id(&self) -> Option<&str> {
+        match self {
+            Self::FireGmEvent { event } => Some(event.as_str()),
+            Self::SetSessionPaused { .. }
+            | Self::SetStationPuppet { .. }
+            | Self::IssueStationCommand { .. } => None,
         }
     }
 
@@ -148,6 +179,17 @@ impl GmAction {
         };
         match self {
             Self::SetSessionPaused { .. } => Ok(()),
+            // The qualified id shape is checked here rather than only against
+            // the live table so a malformed one is refused as an invalid
+            // ACTION, not mistaken for an unknown event.
+            Self::FireGmEvent { event }
+                if bounded(event)
+                    && event.contains("::")
+                    && !event.ends_with("::")
+                    && !event.starts_with("::") =>
+            {
+                Ok(())
+            }
             Self::SetStationPuppet { ship, station, .. }
                 if bounded(&ship.0) && bounded(&station.0) =>
             {
@@ -175,20 +217,25 @@ impl GmAction {
             Self::SetSessionPaused { .. } => GmActionKind::SessionPause,
             Self::SetStationPuppet { .. } => GmActionKind::StationPuppet,
             Self::IssueStationCommand { .. } => GmActionKind::StationCommand,
+            Self::FireGmEvent { .. } => GmActionKind::EventControl,
         }
     }
 
     pub fn requested_pause(&self) -> Option<bool> {
         match self {
             Self::SetSessionPaused { active } => Some(*active),
-            Self::SetStationPuppet { .. } | Self::IssueStationCommand { .. } => None,
+            Self::SetStationPuppet { .. }
+            | Self::IssueStationCommand { .. }
+            | Self::FireGmEvent { .. } => None,
         }
     }
 
     pub fn requested_active(&self) -> bool {
         match self {
             Self::SetSessionPaused { active } | Self::SetStationPuppet { active, .. } => *active,
-            Self::IssueStationCommand { .. } => true,
+            // A Fire is always a request to make something happen. There is no
+            // "un-fire", so the flag is a constant rather than a policy.
+            Self::IssueStationCommand { .. } | Self::FireGmEvent { .. } => true,
         }
     }
 }
@@ -281,6 +328,17 @@ pub struct GmActionRefusal {
     pub requested_active: bool,
     pub tick: u64,
     pub reason: GmActionRefusalReason,
+    /// The stable target identity the refused action named, when its family has
+    /// one ([`GmAction::target_id`]) — the layer-qualified event id for the
+    /// event-control family (issue #1301), `None` for every older family.
+    ///
+    /// A refusal replaces the grant that never existed, so without this the
+    /// terminal answer to "fire base-world::breach_alarm" would name no event
+    /// at all on any GM's activity feed or mission panel. `default` keeps an
+    /// older peer's refusal frame readable, and `skip_serializing_if` keeps a
+    /// pause-only refusal byte-identical to its pre-#1301 shape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
 }
 
 impl GmActionRefusal {
@@ -293,6 +351,7 @@ impl GmActionRefusal {
             self.tick,
             self.reason,
         )
+        .with_target(self.target.clone())
     }
 }
 
@@ -356,6 +415,14 @@ pub fn validate_fleet_frame(
             if roster.gm_operator(refusal.requester) != Some(refusal.operator_id.as_str()) {
                 return Err(GmActionRefusalReason::OperatorMismatch);
             }
+            // A refusal is the terminal answer to a NAMED action, so its target
+            // must match what its family carries: an event-control refusal with
+            // no event could only be published as a fire of the empty id, and a
+            // pause refusal with one would invent a second identity for a family
+            // that has none. Both are malformed frames, not facts to project.
+            if (refusal.action_kind == GmActionKind::EventControl) != refusal.target.is_some() {
+                return Err(GmActionRefusalReason::InvalidAction);
+            }
         }
     }
     Ok(())
@@ -394,6 +461,16 @@ pub enum GmActionRefusalReason {
     JournalFull,
     WrongPhase,
     UnreadableRequest,
+    /// No live authored event carries this layer-qualified id, or the one that
+    /// does declares no Fire control (issue #1301). Both are the same answer to
+    /// a GM: nothing here is operable under that name at this apply tick.
+    ///
+    /// Appended rather than grouped with its Station-shaped neighbours on
+    /// purpose: the durable journal is folded into the deterministic digest
+    /// through postcard, which encodes an enum by VARIANT INDEX, so inserting a
+    /// reason in the middle would silently move the digest of every past run
+    /// that recorded one of the reasons after it.
+    UnknownGmEvent,
 }
 
 /// One terminal fact in the GM command log and local activity projection.
@@ -409,6 +486,19 @@ pub struct LoggedGmAction {
     pub reason: Option<GmActionRefusalReason>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub order: Option<GmActionOrder>,
+    /// The stable target identity of the action that produced this fact, when
+    /// its family has one ([`GmAction::target_id`]) — the layer-qualified event
+    /// id for the event-control family (issue #1301), `None` for every family
+    /// that existed before it.
+    ///
+    /// It rides the durable result rather than being looked up from the grant
+    /// because the activity feed and the mission panel both read the RESULT
+    /// surface, which is bounded and outlives the journal window a supplemental
+    /// local refusal can fall outside of. `skip_serializing_if` keeps a
+    /// pause-only journal byte-identical to its pre-#1301 shape, so no existing
+    /// world's digest moves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
 }
 
 impl LoggedGmAction {
@@ -429,7 +519,37 @@ impl LoggedGmAction {
             tick,
             reason: Some(reason),
             order: None,
+            target: None,
         }
+    }
+
+    /// Attach the action's stable target identity to a refusal built above.
+    pub fn with_target(mut self, target: Option<String>) -> Self {
+        self.target = target;
+        self
+    }
+
+    /// The durable fact for a request [`submit_local`] refused at ingress,
+    /// before any grant existed.
+    ///
+    /// It is derived from the REQUEST rather than assembled field by field at
+    /// the call site so an ingress refusal cannot quietly lose the identity the
+    /// operator named: `action_kind`, `requested_active` and `target` all come
+    /// from the one action, and a new action family gets all three for free.
+    pub fn refused_request(
+        request: &GmActionRequest,
+        tick: u64,
+        reason: GmActionRefusalReason,
+    ) -> Self {
+        Self::refused(
+            request.operator_id.clone(),
+            request.correlation.clone(),
+            request.action.kind(),
+            request.action.requested_active(),
+            tick,
+            reason,
+        )
+        .with_target(request.action.target_id().map(str::to_string))
     }
 }
 
@@ -815,6 +935,7 @@ impl GmActionJournal {
             || result.requested_active != grant.action.requested_active()
             || result.tick != grant.apply_tick
             || result.order != Some(grant.order)
+            || result.target.as_deref() != grant.action.target_id()
         {
             return Err("GM applied result does not match its canonical grant");
         }
@@ -940,6 +1061,10 @@ impl GmActionJournal {
         }
         let mut paused = self.initial_paused;
         let mut puppets = std::collections::BTreeSet::new();
+        // Which one-shot events this canonical prefix has already spent, so a
+        // second Fire reduces to the same No-op on every peer even when the
+        // live trigger table is not available to this reducer.
+        let mut fired_events = std::collections::BTreeSet::new();
         let mut entries = Vec::new();
         for (index, grant) in self.grants.iter().take(end).enumerate() {
             let requested_active = grant.action.requested_active();
@@ -960,6 +1085,9 @@ impl GmActionJournal {
                                 puppets.remove(&key);
                             }
                         }
+                        GmAction::FireGmEvent { event } => {
+                            fired_events.insert(event.clone());
+                        }
                         GmAction::IssueStationCommand { .. } => {}
                     }
                 }
@@ -967,6 +1095,13 @@ impl GmActionJournal {
                 continue;
             }
             let outcome = match &grant.action {
+                GmAction::FireGmEvent { event } if fired_events.contains(event) => {
+                    GmActionOutcome::NoOp
+                }
+                GmAction::FireGmEvent { event } => {
+                    fired_events.insert(event.clone());
+                    GmActionOutcome::Applied
+                }
                 GmAction::SetSessionPaused { active } if paused == *active => GmActionOutcome::NoOp,
                 GmAction::SetSessionPaused { active } => {
                     paused = *active;
@@ -1000,6 +1135,7 @@ impl GmActionJournal {
                 tick: grant.apply_tick,
                 reason: None,
                 order: Some(grant.order),
+                target: grant.action.target_id().map(str::to_string),
             });
         }
         GmActionLog { entries, paused }
@@ -1011,10 +1147,18 @@ impl GmActionJournal {
     fn derived_log_prefix(&self, end: usize) -> GmActionLog {
         let mut paused = self.initial_paused;
         let mut puppets = std::collections::BTreeSet::new();
+        let mut fired_events = std::collections::BTreeSet::new();
         let mut entries = Vec::new();
         for grant in self.grants.iter().take(end) {
             let requested_active = grant.action.requested_active();
             let outcome = match &grant.action {
+                GmAction::FireGmEvent { event } if fired_events.contains(event) => {
+                    GmActionOutcome::NoOp
+                }
+                GmAction::FireGmEvent { event } => {
+                    fired_events.insert(event.clone());
+                    GmActionOutcome::Applied
+                }
                 GmAction::SetSessionPaused { active } if paused == *active => GmActionOutcome::NoOp,
                 GmAction::SetSessionPaused { active } => {
                     paused = *active;
@@ -1048,6 +1192,7 @@ impl GmActionJournal {
                 tick: grant.apply_tick,
                 reason: None,
                 order: Some(grant.order),
+                target: grant.action.target_id().map(str::to_string),
             });
         }
         GmActionLog { entries, paused }
@@ -1284,6 +1429,10 @@ pub fn apply_due_actions(
     mut paused: ResMut<SimulationPaused>,
     mut puppets: Option<ResMut<crate::gm_puppet::StationPuppets>>,
     mut station_commands: Option<ResMut<crate::gm_puppet::PendingGmStationCommands>>,
+    // The live authored-trigger table (issue #1301). `Option` for the same
+    // reason every other product resource here is: the pure journal fixtures
+    // and the replay harness run this exact production reducer without a world.
+    mut content: Option<ResMut<crate::world::server::WorldContentRuntime>>,
     ships: Query<
         (
             &crate::entities::spawner::EntityUuid,
@@ -1317,6 +1466,49 @@ pub fn apply_due_actions(
             losses.as_deref(),
         );
         let (outcome, reason) = match &grant.action {
+            // Fire ARMS the event; it never calls a handler here. The Rhai
+            // runtime lives behind `tick_trigger_pipeline`'s FixedUpdate
+            // parameter set, which this PreUpdate system deliberately does not
+            // hold — and building a second route into a scripted handler is the
+            // one shape that would make a GM fire differ from an automatic one.
+            // Everything that decides the RESULT is revalidated here, at the
+            // agreed apply tick, so every peer commits the same answer.
+            GmAction::FireGmEvent { event } => {
+                let states_and_pending = content
+                    .as_deref_mut()
+                    .map(|content| (&content.trigger_states, &mut content.pending_gm_event_fires));
+                match states_and_pending {
+                    // No world at all: nothing is operable, which is the same
+                    // answer a GM gets for an id that names no live event.
+                    None => (
+                        GmActionOutcome::Refused,
+                        Some(GmActionRefusalReason::UnknownGmEvent),
+                    ),
+                    Some((states, pending)) => {
+                        match crate::gm_event::fireable_index(states, event) {
+                            None => (
+                                GmActionOutcome::Refused,
+                                Some(GmActionRefusalReason::UnknownGmEvent),
+                            ),
+                            // A spent once-only event, or one whose Fire is
+                            // already armed and not yet run, is a deterministic
+                            // No-op: the handler runs exactly once per authored
+                            // lifecycle no matter how many GMs press the button.
+                            Some(index)
+                                if !crate::world::content::manual_fire_is_still_live(
+                                    &states[index],
+                                ) || pending.contains(event) =>
+                            {
+                                (GmActionOutcome::NoOp, None)
+                            }
+                            Some(_) => {
+                                pending.insert(event.clone());
+                                (GmActionOutcome::Applied, None)
+                            }
+                        }
+                    }
+                }
+            }
             GmAction::SetSessionPaused { active } if paused.0 == *active => {
                 (GmActionOutcome::NoOp, None)
             }
@@ -1350,6 +1542,7 @@ pub fn apply_due_actions(
                         tick: grant.apply_tick,
                         reason: Some(reason),
                         order: Some(grant.order),
+                        target: grant.action.target_id().map(str::to_string),
                     };
                     journal
                         .record_applied_result(result)
@@ -1419,6 +1612,7 @@ pub fn apply_due_actions(
                             tick: grant.apply_tick,
                             reason: Some(GmActionRefusalReason::UnknownStation),
                             order: Some(grant.order),
+                            target: grant.action.target_id().map(str::to_string),
                         };
                         journal
                             .record_applied_result(result)
@@ -1507,6 +1701,7 @@ pub fn apply_due_actions(
                 tick: grant.apply_tick,
                 reason,
                 order: Some(grant.order),
+                target: grant.action.target_id().map(str::to_string),
             })
             .expect("live GM result matches its canonical grant");
     }
@@ -1569,7 +1764,10 @@ pub enum GmActionSubmission {
     Refused(GmActionRefusal),
 }
 
-fn refusal_for(
+/// The one owner-lane refusal constructor. Every field — the identity, the
+/// kind, the requested value and the action's stable target — is read from the
+/// proposal so no refusing branch can assemble a partial answer.
+pub(crate) fn refusal_for(
     owner: HostSlot,
     proposal: &GmActionProposal,
     tick: u64,
@@ -1584,6 +1782,7 @@ fn refusal_for(
         requested_active: proposal.action.requested_active(),
         tick,
         reason,
+        target: proposal.action.target_id().map(str::to_string),
     }
 }
 
@@ -1889,6 +2088,310 @@ station = "helm"
             sources,
         ));
         app
+    }
+
+    // -- Firing an authored GM event (issue #1301) ---------------------------
+
+    fn manual_event_state(
+        id: &str,
+        layer: Option<&str>,
+        repeat: bool,
+        fire: bool,
+    ) -> crate::world::content::TriggerState {
+        let mut trigger =
+            crate::world::config::scripted_trigger(crate::world::config::TriggerCondition::Manual);
+        trigger.id = Some(id.to_string());
+        trigger.repeat = repeat;
+        let mut controls = crate::world::config::GmEventControls::manual_fire(
+            id.to_string(),
+            format!("world.gm.event.{id}"),
+        );
+        controls.fire = fire;
+        trigger.gm_controls = Some(controls);
+        crate::world::content::TriggerState {
+            trigger,
+            fired: false,
+            origin_layer: layer.map(str::to_string),
+            seen_destroyed: Default::default(),
+            last_fired_elapsed: None,
+        }
+    }
+
+    fn fire_grant(sequence: u64, apply_tick: u64, correlation: &str, event: &str) -> GmActionGrant {
+        GmActionGrant {
+            from: HostSlot(1),
+            sequenced_by: HostSlot(1),
+            operator_id: "gm-1".into(),
+            correlation: GmActionId::new(correlation).unwrap(),
+            recovery_generation: 0,
+            apply_tick,
+            order: GmActionOrder::new(HostSlot(1), sequence),
+            action: GmAction::FireGmEvent {
+                event: event.into(),
+            },
+        }
+    }
+
+    fn fire_app(
+        tick: u64,
+        states: Vec<crate::world::content::TriggerState>,
+        grants: impl IntoIterator<Item = GmActionGrant>,
+    ) -> App {
+        let mut journal = GmActionJournal::default();
+        for grant in grants {
+            journal.insert(grant).unwrap();
+        }
+        let runtime = crate::world::server::WorldContentRuntime {
+            trigger_states: states,
+            ..Default::default()
+        };
+        let mut app = App::new();
+        app.insert_resource(crate::sim_tick::SimTick(tick))
+            .insert_resource(SimulationPaused(false))
+            .insert_resource(journal)
+            .init_resource::<GmActionLog>()
+            .insert_resource(runtime)
+            .add_systems(Update, apply_due_actions);
+        app
+    }
+
+    fn outcomes(app: &App) -> Vec<(GmActionOutcome, Option<GmActionRefusalReason>)> {
+        app.world()
+            .resource::<GmActionJournal>()
+            .applied_results()
+            .iter()
+            .map(|result| (result.outcome, result.reason))
+            .collect()
+    }
+
+    fn armed(app: &App) -> Vec<String> {
+        app.world()
+            .resource::<crate::world::server::WorldContentRuntime>()
+            .pending_gm_event_fires
+            .iter()
+            .cloned()
+            .collect()
+    }
+
+    /// The whole idempotency contract in one run: the first Fire arms the
+    /// event, and a SECOND Fire -- a different correlation, so not a retry --
+    /// is a deterministic No-op rather than a second arm.
+    #[test]
+    fn a_second_fire_of_an_armed_event_is_a_deterministic_no_op() {
+        let mut app = fire_app(
+            5,
+            vec![manual_event_state("breach", None, false, true)],
+            [
+                fire_grant(1, 5, "fire-a", "base-world::breach"),
+                fire_grant(2, 5, "fire-b", "base-world::breach"),
+            ],
+        );
+        app.update();
+
+        assert_eq!(
+            outcomes(&app),
+            vec![
+                (GmActionOutcome::Applied, None),
+                (GmActionOutcome::NoOp, None)
+            ]
+        );
+        assert_eq!(
+            armed(&app),
+            vec!["base-world::breach".to_string()],
+            "one arm, no matter how many GMs pressed the button"
+        );
+    }
+
+    /// A spent once-only event revalidates as a No-op at the apply boundary,
+    /// which is what stops a delayed grant re-running a lifecycle the trigger
+    /// pipeline has already consumed.
+    #[test]
+    fn firing_a_spent_one_shot_event_is_a_no_op_and_a_repeatable_one_re_arms() {
+        let mut spent = manual_event_state("breach", None, false, true);
+        spent.fired = true;
+        let mut reusable = manual_event_state("scan", None, true, true);
+        reusable.fired = true;
+        let mut app = fire_app(
+            9,
+            vec![spent, reusable],
+            [
+                fire_grant(1, 9, "fire-a", "base-world::breach"),
+                fire_grant(2, 9, "fire-b", "base-world::scan"),
+            ],
+        );
+        app.update();
+
+        assert_eq!(
+            outcomes(&app),
+            vec![
+                (GmActionOutcome::NoOp, None),
+                (GmActionOutcome::Applied, None)
+            ]
+        );
+        assert_eq!(armed(&app), vec!["base-world::scan".to_string()]);
+    }
+
+    /// Unknown, wrong-layer and control-less ids are all the same answer: a
+    /// canonical refusal, decided against the LIVE table at the apply tick.
+    #[test]
+    fn a_fire_that_names_no_operable_event_is_refused_at_the_apply_boundary() {
+        let mut app = fire_app(
+            2,
+            vec![
+                manual_event_state("breach", Some("assets/worlds/layer.toml"), false, true),
+                manual_event_state("locked", None, false, false),
+            ],
+            [
+                fire_grant(1, 2, "fire-a", "base-world::missing"),
+                // Right authored id, wrong layer.
+                fire_grant(2, 2, "fire-b", "base-world::breach"),
+                // Listed, but declares no Fire control.
+                fire_grant(3, 2, "fire-c", "base-world::locked"),
+            ],
+        );
+        app.update();
+
+        assert_eq!(
+            outcomes(&app),
+            vec![
+                (
+                    GmActionOutcome::Refused,
+                    Some(GmActionRefusalReason::UnknownGmEvent)
+                ),
+                (
+                    GmActionOutcome::Refused,
+                    Some(GmActionRefusalReason::UnknownGmEvent)
+                ),
+                (
+                    GmActionOutcome::Refused,
+                    Some(GmActionRefusalReason::UnknownGmEvent)
+                ),
+            ]
+        );
+        assert!(armed(&app).is_empty());
+    }
+
+    /// Every durable result names the event it fired, so the activity feed and
+    /// the mission panel can attribute it without re-reading the journal.
+    #[test]
+    fn a_fire_result_carries_its_stable_event_identity() {
+        let mut app = fire_app(
+            1,
+            vec![manual_event_state("breach", None, false, true)],
+            [fire_grant(1, 1, "fire-a", "base-world::breach")],
+        );
+        app.update();
+
+        let journal = app.world().resource::<GmActionJournal>();
+        let result = &journal.applied_results()[0];
+        assert_eq!(result.action_kind, GmActionKind::EventControl);
+        assert_eq!(result.target.as_deref(), Some("base-world::breach"));
+        assert!(result.requested_active, "a Fire is always a request to act");
+        // And the projection seam the mission panel reads selects exactly it.
+        let projected = projected_results(
+            GmActionKind::EventControl,
+            &journal.applied_log(),
+            &LocalGmActionRefusals::default(),
+        );
+        assert_eq!(projected.len(), 1);
+        assert_eq!(projected[0].target.as_deref(), Some("base-world::breach"));
+        assert!(
+            projected_results(
+                GmActionKind::SessionPause,
+                &journal.applied_log(),
+                &LocalGmActionRefusals::default()
+            )
+            .is_empty(),
+            "an event result must not leak into the Session feed"
+        );
+    }
+
+    /// A Fire refused BEFORE it could become a grant still names the event it
+    /// tried to fire, on both lanes that can refuse one: the local browser
+    /// ingress and the owner's canonical decision. Without the identity the
+    /// operator gets "someone fired ''" in the feed and the mission panel.
+    #[test]
+    fn a_refused_fire_still_names_the_event_on_both_refusal_lanes() {
+        let fire = GmAction::FireGmEvent {
+            event: "base-world::breach_alarm".into(),
+        };
+
+        // Ingress: the operator claim does not match the frozen slot binding,
+        // exactly as `drain_gm_action_input` sees it in the browser.
+        let mut world = admitted_world();
+        let request = GmActionRequest {
+            operator_id: "gm-2".into(),
+            correlation: GmActionId::new("fire-a").unwrap(),
+            action: fire.clone(),
+        };
+        assert_eq!(
+            submit_local(&mut world, request.clone()),
+            Err(GmActionRefusalReason::OperatorMismatch)
+        );
+        let ingress =
+            LoggedGmAction::refused_request(&request, 10, GmActionRefusalReason::OperatorMismatch);
+        assert_eq!(ingress.action_kind, GmActionKind::EventControl);
+        assert_eq!(ingress.target.as_deref(), Some("base-world::breach_alarm"));
+
+        // Owner lane: the same identity survives the replicated refusal frame
+        // and the durable fact derived from it.
+        let proposal = GmActionProposal {
+            from: HostSlot(2),
+            operator_id: "gm-1".into(),
+            correlation: GmActionId::new("fire-b").unwrap(),
+            action: fire,
+        };
+        let refusal = refusal_for(
+            HostSlot(1),
+            &proposal,
+            11,
+            GmActionRefusalReason::JournalFull,
+        );
+        assert_eq!(refusal.target.as_deref(), Some("base-world::breach_alarm"));
+        assert_eq!(
+            refusal.logged().target.as_deref(),
+            Some("base-world::breach_alarm")
+        );
+
+        // And both reach the mission panel's feed as event results, not as
+        // targetless rows the Session feed would have to explain.
+        let mut refusals = LocalGmActionRefusals::default();
+        refusals.push(ingress);
+        refusals.push(refusal.logged());
+        let projected = projected_results(
+            GmActionKind::EventControl,
+            &GmActionLog::default(),
+            &refusals,
+        );
+        assert_eq!(projected.len(), 2);
+        assert!(projected
+            .iter()
+            .all(|entry| entry.target.as_deref() == Some("base-world::breach_alarm")));
+    }
+
+    /// A world-less peer (the pure fixtures and the replay harness) refuses
+    /// rather than panicking or silently succeeding.
+    #[test]
+    fn a_fire_without_a_loaded_world_is_refused_rather_than_lost() {
+        let mut journal = GmActionJournal::default();
+        journal
+            .insert(fire_grant(1, 3, "fire-a", "base-world::breach"))
+            .unwrap();
+        let mut app = App::new();
+        app.insert_resource(crate::sim_tick::SimTick(3))
+            .insert_resource(SimulationPaused(false))
+            .insert_resource(journal)
+            .init_resource::<GmActionLog>()
+            .add_systems(Update, apply_due_actions);
+        app.update();
+
+        assert_eq!(
+            outcomes(&app),
+            vec![(
+                GmActionOutcome::Refused,
+                Some(GmActionRefusalReason::UnknownGmEvent)
+            )]
+        );
     }
 
     #[test]
@@ -2431,11 +2934,32 @@ station = "helm"
             requested_active: true,
             tick: 7,
             reason: GmActionRefusalReason::JournalFull,
+            target: None,
         };
         assert_eq!(
             validate_fleet_frame(&GmActionFrame::Refused(refused.clone()), &roster),
             Ok(())
         );
+        // A replicated refusal must carry exactly the target its family has:
+        // an event-control refusal names its event, and no other family does.
+        let mut targetless_fire = refused.clone();
+        targetless_fire.action_kind = GmActionKind::EventControl;
+        assert_eq!(
+            validate_fleet_frame(&GmActionFrame::Refused(targetless_fire.clone()), &roster),
+            Err(GmActionRefusalReason::InvalidAction)
+        );
+        targetless_fire.target = Some("base-world::breach_alarm".into());
+        assert_eq!(
+            validate_fleet_frame(&GmActionFrame::Refused(targetless_fire), &roster),
+            Ok(())
+        );
+        let mut targeted_pause = refused.clone();
+        targeted_pause.target = Some("base-world::breach_alarm".into());
+        assert_eq!(
+            validate_fleet_frame(&GmActionFrame::Refused(targeted_pause), &roster),
+            Err(GmActionRefusalReason::InvalidAction)
+        );
+
         let mut forged_refusal = refused;
         forged_refusal.sequenced_by = HostSlot(2);
         assert_eq!(
@@ -2528,6 +3052,7 @@ station = "helm"
             tick: 41,
             reason: None,
             order: Some(GmActionOrder::new(HostSlot(1), 1)),
+            target: None,
         };
         let pause = LoggedGmAction {
             operator_id: "gm-1".into(),
@@ -2538,6 +3063,7 @@ station = "helm"
             tick: 40,
             reason: None,
             order: Some(GmActionOrder::new(HostSlot(1), 0)),
+            target: None,
         };
         let station_refused = LoggedGmAction::refused(
             "gm-1".into(),
@@ -2556,6 +3082,7 @@ station = "helm"
             tick: 43,
             reason: None,
             order: Some(GmActionOrder::new(HostSlot(1), 2)),
+            target: None,
         };
         let log = GmActionLog {
             entries: vec![pause, station_applied.clone(), station_pending],
@@ -2585,6 +3112,7 @@ station = "helm"
                 tick: pause.apply_tick,
                 reason: None,
                 order: Some(pause.order),
+                target: None,
             }),
             Err("pending GM result is not a Station command"),
         );

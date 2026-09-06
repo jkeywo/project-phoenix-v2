@@ -1178,6 +1178,94 @@ mod tests {
         );
     }
 
+    /// A Fire replays through the SAME canonical lane every other GM action
+    /// uses (issue #1301): the artifact carries the grant, `apply_due_actions`
+    /// revalidates it against the replayed world's own trigger table, and the
+    /// durable result carries the event it named. Nothing about the event
+    /// family needs a second replay path.
+    #[test]
+    fn a_fired_gm_event_replays_through_the_canonical_journal() {
+        let event = "base-world::breach_alarm";
+        let mut source = GmActionJournal::default();
+        source
+            .insert(crate::gm_action::GmActionGrant {
+                from: HostSlot(1),
+                sequenced_by: HostSlot(1),
+                operator_id: "gm-one".into(),
+                correlation: crate::gm_action::GmActionId::new("replay-fire-1").unwrap(),
+                recovery_generation: 0,
+                apply_tick: 0,
+                order: crate::gm_action::GmActionOrder::new(HostSlot(1), 1),
+                action: crate::gm_action::GmAction::FireGmEvent {
+                    event: event.into(),
+                },
+            })
+            .unwrap();
+        // The recording APPLIED the Fire, which is the prefix a replay adopts.
+        source.restore_applied_frontier(1).unwrap();
+        validate_gm_action_journal(&source).expect("a Fire journal is canonical");
+
+        let mut trigger =
+            crate::world::config::scripted_trigger(crate::world::config::TriggerCondition::Manual);
+        trigger.id = Some("breach_alarm".into());
+        trigger.gm_controls = Some(crate::world::config::GmEventControls::manual_fire(
+            "breach_alarm".into(),
+            "world.gm.event.breach_alarm".into(),
+        ));
+        let runtime = crate::world::server::WorldContentRuntime {
+            trigger_states: vec![crate::world::content::TriggerState {
+                trigger,
+                fired: false,
+                origin_layer: None,
+                seen_destroyed: Default::default(),
+                last_fired_elapsed: None,
+            }],
+            ..Default::default()
+        };
+
+        let mut app = App::new();
+        app.insert_resource(SimTick(0));
+        app.insert_resource(GmActionJournal::default());
+        app.insert_resource(crate::gm_action::GmActionLog::default());
+        app.insert_resource(crate::gm_action::SimulationPaused(false));
+        app.insert_resource(runtime);
+        app.add_systems(PreUpdate, crate::gm_action::apply_due_actions);
+        seed_replay_initial_state(&mut app, &source);
+
+        let mut sim = PhoenixSim {
+            app,
+            max_frames: 1,
+            frames: 0,
+            expected_commands: 0,
+            applied: 0,
+            submitted: 0,
+            tail: true,
+            gm_actions: source,
+            final_tick: Some(0),
+            ledger: DigestLedger::new(0),
+        };
+        sim.step();
+
+        let entry = &sim
+            .app
+            .world()
+            .resource::<crate::gm_action::GmActionLog>()
+            .entries()[0];
+        assert_eq!(entry.outcome, crate::gm_action::GmActionOutcome::Applied);
+        assert_eq!(entry.target.as_deref(), Some(event));
+        assert_eq!(
+            sim.app
+                .world()
+                .resource::<crate::world::server::WorldContentRuntime>()
+                .pending_gm_event_fires
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>(),
+            vec![event.to_string()],
+            "the replayed peer arms exactly what the recorded one armed"
+        );
+    }
+
     #[test]
     fn an_applied_gm_frontier_cannot_cross_the_recorded_final_tick() {
         let mut captured = artifact();

@@ -931,6 +931,21 @@ fn fold_scenario_triggers(world: &World, mut acc: u64) -> u64 {
             }
         }
     }
+    // The GM-operable half (issue #1301), folded ONLY when a world authors one.
+    // A trigger's control set is authored config that `snapshot::content_digest`
+    // answers for, exactly as the condition's fields are; what a RUN moves is
+    // which Fires are armed and not yet run, and that is what folds. Keeping the
+    // whole block behind an emptiness check is what leaves every existing
+    // world's digest at the value it had before this issue, so no cross-target
+    // ledger needed re-blessing.
+    if !runtime.pending_gm_event_fires.is_empty() {
+        acc = fold_str(acc, "scenario-gm-event-fires");
+        acc = fold_u64(acc, runtime.pending_gm_event_fires.len() as u64);
+        // A `BTreeSet`, so this walk is already the sorted one every peer makes.
+        for id in &runtime.pending_gm_event_fires {
+            acc = fold_str(acc, id);
+        }
+    }
     acc
 }
 
@@ -956,6 +971,7 @@ fn trigger_condition_code(condition: &crate::world::config::TriggerCondition) ->
         C::OnEnteredRegion { .. } => 9,
         C::OnExitedRegion { .. } => 10,
         C::OnWaypointReached { .. } => 11,
+        C::Manual => 12,
     }
 }
 

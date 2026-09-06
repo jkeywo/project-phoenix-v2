@@ -11,6 +11,7 @@ import {
   waitForWasmReady,
   waitForJoinCode,
 } from './fixtures';
+import { ts } from './strings';
 
 const GM_FIELD_PATH = 'assets/entities/smoke_gm_asteroid_field.toml';
 const GM_ROCK_PATH = 'assets/entities/smoke_gm_ordinary_asteroid.toml';
@@ -188,6 +189,30 @@ template_path = "${GM_REGION_PATH}"
 name = "entity.region_nebula.name"
 transform = { position = [160.0, 0.0, 0.0] }
 `;
+// Issue #1301: a manual-only `gm_event` with an implied Fire control, plus one
+// ordinary entity so the GM-only session has a world to run. The handler's own
+// effect is covered by the Rust pipeline tests; what this spec is here for is
+// the browser half — the row's String Table label, its Fire control, the
+// attributed Applied result, and the one-shot lifecycle closing behind it.
+const GM_EVENT_WORLD = `
+[global]
+seed = 1301
+title = "GM event smoke fixture"
+description = "Manual gm_event Fire coverage for issue 1301."
+
+[[entity]]
+template_path = "assets/entities/alliance_courier.toml"
+name = "entity.alliance_courier.display_name"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+[script]
+setup = """
+gm_event("breach_alarm", "world.smoke_gm.event.breach_alarm", "on_breach_alarm");
+fn on_breach_alarm(ctx) { ctx.flags.increment("breach_alarms", 1); }
+"""
+`;
+
 async function selectAndWait(client, station) {
   await client.send('SelectStation', { station });
   await client.page.waitForFunction(
@@ -482,6 +507,65 @@ test('a GM compares Truth and Crew Knowledge for the one connected fleet ship', 
 
   expect(shipErrors).toEqual([]);
   expect(gmErrors).toEqual([]);
+});
+
+/// Issue #1301 exit evidence in a real browser: an authored `gm_event` reaches
+/// the GM mission panel with its String Table label and an implied Fire, one
+/// press runs the ordinary handler through the ordinary trigger pipeline, and
+/// the one-shot lifecycle closes behind it so a second Fire is unavailable.
+test('a manual gm_event is listed, fired once, and then spent in the GM mission panel', async ({ context }) => {
+  test.setTimeout(90_000);
+  await context.route('**/assets/worlds/default.toml', (route) =>
+    route.fulfill({ contentType: 'text/plain', body: GM_EVENT_WORLD }),
+  );
+
+  const page = await context.newPage();
+  const errors = captureServerPageErrors(page);
+  await page.goto('/?gm=1&scenario=assets/worlds/default.toml');
+  await waitForWasmReady(page);
+  await page.evaluate(() => window.__hostFleetOpen());
+  await page.waitForFunction(() => {
+    const state = window.__hostGmStartState?.();
+    return state?.admitted === true
+      && state.presentationReady === true
+      && state.localValidation === true;
+  }, undefined, { timeout: 30_000 });
+  await page.evaluate(() => document.getElementById('gm-ready-btn').click());
+  await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
+
+  // The authored event reaches the panel from the authoritative projection —
+  // nothing in this spec injects a Host Channel payload.
+  const row = page.locator('#gm-mission-events .gm-mission-event[data-event-id="base-world::breach_alarm"]');
+  await expect(row).toBeVisible({ timeout: 30_000 });
+  await expect(row.locator('.gm-mission-event-label'))
+    .toHaveText(ts('world.smoke_gm.event.breach_alarm'));
+  await expect(row.locator('.gm-mission-event-state'))
+    .toHaveText(ts('server.gm.mission.state_ready'));
+  await expect(page.locator('#gm-mission-empty')).toBeHidden();
+  expect(await page.evaluate(() => window.__hostGmMissionState())).toMatchObject({
+    events: 1,
+    fireable: 1,
+  });
+
+  const fire = row.locator('button[data-role="fire"]');
+  await expect(fire).toBeEnabled();
+  await fire.click();
+
+  // One attributed Applied result, and the authored one-shot lifecycle spent.
+  const applied = page.locator('#gm-mission-log .gm-mission-log-entry[data-outcome="applied"]');
+  await expect(applied).toHaveCount(1, { timeout: 30_000 });
+  await expect(applied).toContainText('base-world::breach_alarm');
+  await expect(row).toHaveAttribute('data-spent', 'true', { timeout: 30_000 });
+  await expect(row.locator('.gm-mission-event-state'))
+    .toHaveText(ts('server.gm.mission.state_spent'));
+  await expect(fire).toBeDisabled();
+  expect(await page.evaluate(() => window.__hostGmMissionState())).toMatchObject({
+    events: 1,
+    fireable: 0,
+    pending: 0,
+  });
+
+  expect(errors).toEqual([]);
 });
 
 test('authored field and layer fixture supports aggregate and Region inspection end to end', async ({ context }) => {

@@ -244,7 +244,9 @@ pub fn validate_station_action(
 ) -> Result<(), crate::gm_action::GmActionRefusalReason> {
     use crate::gm_action::{GmAction, GmActionRefusalReason};
     let station = match action {
-        GmAction::SetSessionPaused { .. } => return Ok(()),
+        // Neither family names a Station, so Station admission has nothing to
+        // say about it and defers to its own reducer.
+        GmAction::SetSessionPaused { .. } | GmAction::FireGmEvent { .. } => return Ok(()),
         GmAction::SetStationPuppet { station, .. }
         | GmAction::IssueStationCommand { station, .. } => station,
     };
@@ -289,7 +291,7 @@ pub fn validate_station_action(
                 .then_some(())
                 .ok_or(GmActionRefusalReason::SystemOutsideStation)
         }
-        GmAction::SetSessionPaused { .. } => unreachable!(),
+        GmAction::SetSessionPaused { .. } | GmAction::FireGmEvent { .. } => unreachable!(),
     }
 }
 
@@ -988,6 +990,7 @@ station = "tactical"
                     tick: 12,
                     reason: None,
                     order: Some(order),
+                    target: None,
                 })
                 .unwrap();
             let provisional_log = journal.applied_log();

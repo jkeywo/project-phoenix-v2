@@ -92,6 +92,93 @@ fn paused_state_and_the_future_gm_frontier_round_trip_together() {
     );
 }
 
+/// A GM Fire that crossed its apply boundary but whose handler has not run yet
+/// survives capture and restore (issue #1301).
+///
+/// This is the exact cross-schedule gap format 19 exists to close. The journal
+/// already says the Fire was Applied, and its idempotency makes a second Fire
+/// of a one-shot event a No-op — so a resume that forgot the arm would leave an
+/// authored event reported as fired, never run, and permanently unreachable.
+#[test]
+fn an_armed_gm_event_fire_round_trips_with_its_authored_trigger_table() {
+    fn manual_event(id: &str) -> crate::world::content::TriggerState {
+        let mut trigger =
+            crate::world::config::scripted_trigger(crate::world::config::TriggerCondition::Manual);
+        trigger.id = Some(id.to_string());
+        trigger.gm_controls = Some(crate::world::config::GmEventControls::manual_fire(
+            id.to_string(),
+            format!("world.gm.event.{id}"),
+        ));
+        crate::world::content::TriggerState {
+            trigger,
+            fired: false,
+            origin_layer: None,
+            seen_destroyed: Default::default(),
+            last_fired_elapsed: None,
+        }
+    }
+    fn table() -> crate::world::server::WorldContentRuntime {
+        crate::world::server::WorldContentRuntime {
+            trigger_states: vec![manual_event("breach"), manual_event("sweep")],
+            ..Default::default()
+        }
+    }
+
+    let mut live = App::new();
+    live.add_plugins(MinimalPlugins);
+    live.world_mut().insert_resource(SimTick(21));
+    let mut runtime = table();
+    runtime
+        .pending_gm_event_fires
+        .insert("base-world::breach".into());
+    live.world_mut().insert_resource(runtime);
+
+    let payload = capture(live.world());
+    let scenario = payload.scenario.as_ref().expect("a world was loaded");
+    assert_eq!(
+        scenario.pending_gm_event_fires,
+        vec!["base-world::breach".to_string()],
+        "the armed Fire is captured, sorted, by its layer-qualified id"
+    );
+
+    let mut resumed = App::new();
+    resumed.add_plugins(MinimalPlugins);
+    resumed.world_mut().insert_resource(SimTick(999));
+    // A freshly-loaded world rebuilds the same table with nothing armed, which
+    // is what makes the restored reading unambiguous evidence.
+    resumed.world_mut().insert_resource(table());
+    assert!(resumed
+        .world()
+        .resource::<crate::world::server::WorldContentRuntime>()
+        .pending_gm_event_fires
+        .is_empty());
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+    assert_eq!(
+        resumed
+            .world()
+            .resource::<crate::world::server::WorldContentRuntime>()
+            .pending_gm_event_fires
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>(),
+        vec!["base-world::breach".to_string()],
+    );
+
+    // A world with no armed Fire writes the field out of the payload entirely,
+    // which is what keeps every pre-#1301 scenario's capture byte-identical.
+    let mut idle = App::new();
+    idle.add_plugins(MinimalPlugins);
+    idle.world_mut().insert_resource(SimTick(21));
+    idle.world_mut().insert_resource(table());
+    assert!(capture(idle.world())
+        .scenario
+        .expect("a world was loaded")
+        .pending_gm_event_fires
+        .is_empty());
+}
+
 #[test]
 fn station_puppet_membership_round_trips_at_the_authoritative_boundary() {
     let target = crate::gm_puppet::StationPuppetTarget::new(

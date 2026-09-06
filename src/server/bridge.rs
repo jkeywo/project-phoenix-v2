@@ -55,8 +55,8 @@ use {
     crate::boot::{BootPlan, BootProfile, WorldIngest},
     crate::console_bridge::{
         AiChatterEvent, AudioConfigChanged, AudioCueEvent, GmActivityFeedChanged,
-        GmEntityProjectionChanged, GmSessionChanged, GmStationProjectionChanged, HudStateChanged,
-        LobbyStateChanged,
+        GmEntityProjectionChanged, GmMissionChanged, GmSessionChanged, GmStationProjectionChanged,
+        HudStateChanged, LobbyStateChanged,
     },
     crate::core::codec::{self, JsonCodec, MessageCodec},
     crate::core::messages::{self, DeliveryClass},
@@ -1001,10 +1001,13 @@ pub mod host_channels {
     pub const GM_STATION: &str = "gm_station";
     /// Authoritative pause state plus attributed typed-action results.
     pub const GM_SESSION: &str = "gm_session";
+    /// The GM-operable authored-event registry and its attributed results
+    /// (issue #1301) — what the mission panel lists and fires.
+    pub const GM_MISSION: &str = "gm_mission";
 
     /// Every registered host channel name. The JS dispatcher table in
     /// `server.html` must have a handler per entry.
-    pub const ALL: [&str; 11] = [
+    pub const ALL: [&str; 12] = [
         HUD,
         LOBBY,
         CHATTER,
@@ -1016,6 +1019,7 @@ pub mod host_channels {
         GM_ACTIVITY,
         GM_STATION,
         GM_SESSION,
+        GM_MISSION,
     ];
 }
 
@@ -1449,6 +1453,7 @@ pub fn wasm_init() {
             flush_outbound,
             flush_host_channels
                 .after(crate::gm_action::publish_session_projection)
+                .after(crate::gm_event::publish_mission_projection)
                 .after(crate::gm_activity::publish_frame_activity),
             publish_sim_tick,
             publish_god_mode,
@@ -2181,23 +2186,19 @@ fn drain_gm_action_input(world: &mut World) {
         pending.drain(..).collect::<Vec<_>>()
     });
     for request in requests {
-        let operator_id = request.operator_id.clone();
-        let correlation = request.correlation.clone();
-        let action_kind = request.action.kind();
-        let requested_active = request.action.requested_active();
+        // `submit_local` consumes the request, so the refusal is built from a
+        // retained copy rather than from hand-picked fields: an ingress refusal
+        // must carry the SAME attributed identity — operator, correlation, kind
+        // and the action's stable target — that a canonical one does.
+        let refused = request.clone();
         if let Err(reason) = crate::gm_action::submit_local(world, request) {
             let tick = world
                 .get_resource::<crate::sim_tick::SimTick>()
                 .map_or(0, |tick| tick.0);
             world
                 .resource_mut::<crate::gm_action::LocalGmActionRefusals>()
-                .push(crate::gm_action::LoggedGmAction::refused(
-                    operator_id,
-                    correlation,
-                    action_kind,
-                    requested_active,
-                    tick,
-                    reason,
+                .push(crate::gm_action::LoggedGmAction::refused_request(
+                    &refused, tick, reason,
                 ));
         }
     }
@@ -4852,10 +4853,11 @@ fn flush_host_channels(
     mut gm_activity: MessageReader<GmActivityFeedChanged>,
     mut gm_station: MessageReader<GmStationProjectionChanged>,
     mut gm_session: MessageReader<GmSessionChanged>,
+    mut gm_mission: MessageReader<GmMissionChanged>,
 ) {
     // Declarative channel table: name → drained JSON payloads. Adding a
     // message channel = one row here (see `host_channels`).
-    let message_batches: [(&str, Vec<String>); 9] = [
+    let message_batches: [(&str, Vec<String>); 10] = [
         (
             host_channels::HUD,
             hud.read().map(|m| m.json.clone()).collect(),
@@ -4905,6 +4907,13 @@ fn flush_host_channels(
             gm_session
                 .read()
                 .filter_map(|event| codec::encode_gm_session_projection(&event.payload).ok())
+                .collect(),
+        ),
+        (
+            host_channels::GM_MISSION,
+            gm_mission
+                .read()
+                .filter_map(|event| codec::encode_gm_mission_projection(&event.payload).ok())
                 .collect(),
         ),
     ];
@@ -5807,6 +5816,7 @@ spawn_on = "game_start"
                 host_channels::GM_ACTIVITY,
                 host_channels::GM_STATION,
                 host_channels::GM_SESSION,
+                host_channels::GM_MISSION,
             ]
         );
     }

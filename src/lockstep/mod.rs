@@ -891,6 +891,15 @@ pub fn register_lockstep(app: &mut App) {
                 StateClass::Presentation,
                 "gm-action-state",
             )
+            // The GM mission panel's last published page-local projection
+            // (issue #1301). `Presentation` for its Session twin's exact
+            // reason: it is a de-duplication cache for a Host Channel push,
+            // derived entirely from the authored trigger table and the GM
+            // action log, both of which are already classified.
+            .declare_state::<crate::gm_event::LastGmMissionProjection>(
+                StateClass::Presentation,
+                "gm-action-state",
+            )
             // The digest exchange's own records. `Derived` — they are folds OF
             // the authoritative state and a count of the barrier's decisions, so
             // folding them would fold their inputs a second time, and a peer's
@@ -920,7 +929,9 @@ pub fn register_lockstep(app: &mut App) {
         .init_resource::<crate::gm_action::GmActionLog>()
         .init_resource::<crate::gm_action::LocalGmActionRefusals>()
         .init_resource::<crate::gm_action::LastGmSessionProjection>()
+        .init_resource::<crate::gm_event::LastGmMissionProjection>()
         .add_message::<crate::console_bridge::GmSessionChanged>()
+        .add_message::<crate::console_bridge::GmMissionChanged>()
         .add_systems(
             PreUpdate,
             // `drive_recovery` (issue #1118) sits between applying the inbox and
@@ -971,7 +982,13 @@ pub fn register_lockstep(app: &mut App) {
                 .chain()
                 .after(crate::sim_tick::advance_sim_tick),
         )
-        .add_systems(PostUpdate, crate::gm_action::publish_session_projection)
+        .add_systems(
+            PostUpdate,
+            (
+                crate::gm_action::publish_session_projection,
+                crate::gm_event::publish_mission_projection,
+            ),
+        )
         // The host-loss Backfill flip (issue #1119). In `SimSet::Input`, at the
         // agreed tick, on the lost ship — the same phase the ordinary rating
         // change and the human-seeking resolver run in. Ordered
@@ -1804,16 +1821,12 @@ pub fn apply_mesh_inbox(
                         let decision = match sequenced {
                             Ok(grant) => crate::gm_action::GmActionFrame::Granted(grant),
                             Err(reason) => {
-                                let refusal = crate::gm_action::GmActionRefusal {
-                                    sequenced_by: owner,
-                                    requester: proposal.from,
-                                    operator_id: proposal.operator_id.clone(),
-                                    correlation: proposal.correlation.clone(),
-                                    action_kind: proposal.action.kind(),
-                                    requested_active: proposal.action.requested_active(),
-                                    tick: now,
-                                    reason,
-                                };
+                                // Built by the shared constructor, so a remote
+                                // proposal's refusal names the same identity —
+                                // including the action's stable target — that a
+                                // locally-submitted one does.
+                                let refusal =
+                                    crate::gm_action::refusal_for(owner, &proposal, now, reason);
                                 start_admission.gm_results.push(refusal.logged());
                                 crate::gm_action::GmActionFrame::Refused(refusal)
                             }

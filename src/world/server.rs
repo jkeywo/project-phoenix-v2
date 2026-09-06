@@ -160,6 +160,22 @@ pub struct WorldContentRuntime {
     // four they are NOT empty at a tick boundary (they are snapshotted /
     // carried across ticks), so they are deferred state rather than a transient
     // inter-system queue.
+    /// Layer-qualified ids of GM `Fire` requests that have crossed their
+    /// canonical apply boundary and are waiting for the trigger pipeline to
+    /// run their handler (issue #1301).
+    ///
+    /// A `BTreeSet` rather than a `HashSet` or a `Vec`: it is authoritative
+    /// state that is captured, folded and replayed, so its iteration order must
+    /// be identical on every peer and its contents must not carry a duplicate
+    /// (a second Fire of an already-armed event is a No-op, not a second run).
+    ///
+    /// It is genuinely cross-tick rather than a transient inter-system queue:
+    /// [`crate::gm_action::apply_due_actions`] arms it in `PreUpdate` at the
+    /// grant's exact apply tick, while a `when` predicate or a cooldown can
+    /// legitimately hold the entry for many ticks before the pipeline can honour
+    /// it. So, like `pending_world_events` and `pending_delayed_actions`, it
+    /// lives here and is snapshotted.
+    pub pending_gm_event_fires: std::collections::BTreeSet<String>,
 }
 
 /// Bevy resource wrapping the server-side objective manager.
@@ -2184,7 +2200,10 @@ pub(crate) fn tick_trigger_pipeline(
     // preloaded config cache first and, on native, falls back to the
     // filesystem — reproducing the old cfg-split inline block on both targets.
     let template_loader = crate::entities::loader::WasmTemplateLoader;
-    if buffer.0.is_empty() && runtime.pending_delayed_actions.is_empty() {
+    if buffer.0.is_empty()
+        && runtime.pending_delayed_actions.is_empty()
+        && runtime.pending_gm_event_fires.is_empty()
+    {
         return;
     }
 
@@ -2297,6 +2316,59 @@ pub(crate) fn tick_trigger_pipeline(
                 )
             },
         );
+
+        // The GM's armed Fires (issue #1301). Only in the first pass: a Fire is
+        // one authored occurrence, and letting it re-enter a chaining pass
+        // would let one press run a repeatable handler several times in a tick.
+        //
+        // Iterated over `trigger_states` in table order rather than over the
+        // pending set, so the intra-tick order of a manual fire is the same
+        // authored order an automatic one has, on every peer. Entries leave the
+        // set when they are consumed by an actual firing, or when the event
+        // they name can no longer take one — a spent once-only trigger, or an
+        // id whose layer has been unloaded. Everything else (a `when` that
+        // currently reads false, a cooldown that has not elapsed) deliberately
+        // KEEPS the arm, so a Fire during a suppressed moment lands when the
+        // moment arrives instead of being silently dropped.
+        if pass == 1 && !runtime.pending_gm_event_fires.is_empty() {
+            let mut consumed: Vec<String> = Vec::new();
+            for (idx, origin) in trigger_origins.iter().enumerate() {
+                let Some(event_id) = crate::gm_event::state_event_id(&runtime.trigger_states[idx])
+                else {
+                    continue;
+                };
+                if !runtime.pending_gm_event_fires.contains(&event_id) {
+                    continue;
+                }
+                if !crate::world::content::manual_fire_is_still_live(&runtime.trigger_states[idx]) {
+                    consumed.push(event_id);
+                    continue;
+                }
+                let (flag_chain, _) = layered_flag_chain_with_paths(
+                    origin.as_deref(),
+                    &runtime.flags,
+                    world_layers.layer_map.as_deref(),
+                );
+                if let Some(ft) = crate::world::content::fire_manual_trigger(
+                    &mut runtime.trigger_states[idx],
+                    &flag_chain,
+                    current_elapsed,
+                ) {
+                    consumed.push(event_id);
+                    fired.push((idx, ft));
+                }
+            }
+            // An armed id that names no live trigger at all cannot ever be
+            // honoured, and authoritative state must not accumulate it.
+            let live: std::collections::BTreeSet<String> = runtime
+                .trigger_states
+                .iter()
+                .filter_map(crate::gm_event::state_event_id)
+                .collect();
+            runtime
+                .pending_gm_event_fires
+                .retain(|id| live.contains(id) && !consumed.contains(id));
+        }
 
         if fired.is_empty() {
             break;

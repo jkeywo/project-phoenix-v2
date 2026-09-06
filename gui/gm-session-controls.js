@@ -8,6 +8,10 @@ import {
 } from './action-feedback.js';
 import { createSemanticActionRegistry } from './semantic-action-registry.js';
 import {
+  GM_ACTION_REFUSAL_REASON_LABELS,
+  LOCAL_INGRESS_REFUSAL,
+} from './gm-action-reasons.js';
+import {
   GM_ACTION_CONTEXT,
   GM_PAUSE_ACTION_ID,
   GM_RESUME_ACTION_ID,
@@ -17,21 +21,15 @@ import {
 export const GM_SESSION_FEED_CAPACITY = 32;
 
 const RESULT_OUTCOMES = new Set(['applied', 'no-op', 'refused']);
-const LOCAL_INGRESS_REFUSAL = 'ingress-rejected';
 
-/** Rust wire identities stay machine-readable while their copy is localised. */
-export const GM_ACTION_REFUSAL_REASON_LABELS = Object.freeze({
-  'not-in-fleet': 'server.gm.session.reason.not_in_fleet',
-  'not-game-master': 'server.gm.session.reason.not_game_master',
-  'operator-mismatch': 'server.gm.session.reason.operator_mismatch',
-  'invalid-operator': 'server.gm.session.reason.invalid_operator',
-  'origin-mismatch': 'server.gm.session.reason.origin_mismatch',
-  'conflicting-grant': 'server.gm.session.reason.conflicting_grant',
-  'non-contiguous-sequence': 'server.gm.session.reason.non_contiguous_sequence',
-  'journal-full': 'server.gm.session.reason.journal_full',
-  'unreadable-request': 'server.gm.session.reason.unreadable_request',
-  'wrong-phase': 'server.gm.session.reason.wrong_phase',
-});
+/**
+ * Rust wire identities stay machine-readable while their copy is localised.
+ *
+ * Re-exported from the shared table (issue #1301) rather than kept here: the
+ * mission panel reads the same reasons, and two copies would let one surface
+ * localise a refusal the other spelled out in wire text.
+ */
+export { GM_ACTION_REFUSAL_REASON_LABELS };
 
 function parseResult(value) {
   if (!value || typeof value !== 'object'

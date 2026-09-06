@@ -441,6 +441,7 @@ fn logged(
             crate::command_admission::log::HostSlot(1),
             7,
         )),
+        target: None,
     }
 }
 
@@ -507,6 +508,39 @@ fn terminal_gm_actions_attribute_exact_outcomes_dedup_and_rebase_on_restore() {
         .is_empty(),
         "the restore hook rebases rather than replaying old pause or start rows"
     );
+}
+
+/// A fired GM event reaches the activity feed as the thing it is, naming the
+/// event it fired (issue #1301). Crew see only the fictional consequence the
+/// handler produced; this row is what tells the GMs who caused it.
+#[test]
+fn a_fired_gm_event_is_attributed_by_the_event_it_fired() {
+    let mut state = GmActivityState::default();
+    assert!(terminal_action_entries(&mut state, None, None, None, None).is_empty());
+    let mut results = crate::gm_action::LocalGmActionRefusals::default();
+    let mut fact = logged(
+        "gm-alpha",
+        "fire-1",
+        crate::gm_action::GmActionOutcome::Applied,
+        None,
+    );
+    fact.action_kind = crate::gm_action::GmActionKind::EventControl;
+    fact.target = Some("base-world::breach_alarm".into());
+    results.push(fact);
+
+    let entries = terminal_action_entries(&mut state, None, Some(&results), None, None);
+    let GmActivityDetail::GmAction(detail) = &entries[0].detail else {
+        panic!("expected GM action detail")
+    };
+    assert_eq!(
+        detail.action,
+        GmActivityAction::FireGmEvent {
+            event: "base-world::breach_alarm".into(),
+        },
+        "an event fire must not be reported as a session pause"
+    );
+    assert_eq!(detail.outcome, GmActivityActionOutcome::Applied);
+    assert_eq!(entries[0].category, GmActivityCategory::GmAction);
 }
 
 #[test]

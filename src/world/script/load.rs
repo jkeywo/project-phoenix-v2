@@ -29,7 +29,7 @@ use vellum_script::ScriptSource;
 
 use crate::world::script::engine::{loading_engine, BuilderState, Registration, ScriptTrigger};
 use crate::world::script::validate::{
-    validate_deadline_handlers, validate_flag_opassign, validate_on_pick_fns,
+    validate_deadline_handlers, validate_flag_opassign, validate_gm_events, validate_on_pick_fns,
     validate_registrations, validate_script_triggers,
 };
 use crate::world::validate::{Severity, SourceLocation, WorldFinding};
@@ -370,6 +370,12 @@ pub fn load_world_scripts(
         &compiled.script_triggers,
         &compiled.defined_fns,
     ));
+    // And the GM-operable events among them (issue #1301): a malformed or
+    // duplicated qualified id is an error finding, so a world whose mission
+    // panel could not address what it lists never activates.
+    compiled
+        .findings
+        .extend(validate_gm_events(&compiled.script_triggers));
     // And the named-deadline pairing (issue #1024): every `on_deadline(id, fn)`
     // must name a `[[deadline]]` this world authored AND a fn that exists, and
     // every authored `[[deadline]]` must have exactly one handler. All three are

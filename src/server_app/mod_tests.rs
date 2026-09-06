@@ -2311,6 +2311,205 @@ fn same_frame_gm_proposal_and_return_leave_the_reset_lane_empty() {
     );
 }
 
+/// Issue #1301: the run-boundary reset has to drop the MISSION projection's
+/// de-duplication cache, not just the session one.
+///
+/// The authored trigger table is built once in `Startup`, so its rows, their
+/// one-shot latches and the pending-fire set are identical either side of a
+/// lobby round-trip; a run in which the GM took no Fire also leaves the
+/// event-control result feed empty in both rounds. The two projections are then
+/// byte-identical, and a surviving cache would suppress the only push that
+/// repopulates a GM page whose panel reset itself to empty on the Lobby
+/// transition — leaving the GM staring at "this scenario authors no events" for
+/// the whole of round two. A non-empty result feed would hide this, so this run
+/// deliberately fires nothing.
+#[test]
+fn a_fireless_run_still_republishes_the_mission_panel_after_a_lobby_round_trip() {
+    use crate::world::config::{scripted_trigger, GmEventControls, TriggerCondition};
+
+    fn authored_events(app: &mut App) -> Vec<Vec<String>> {
+        app.world_mut()
+            .resource_mut::<bevy::ecs::message::Messages<crate::console_bridge::GmMissionChanged>>()
+            .drain()
+            .map(|message| {
+                assert!(
+                    message.payload.results.is_empty(),
+                    "this run takes no Fire, so the result feed must stay empty"
+                );
+                message
+                    .payload
+                    .events
+                    .iter()
+                    .map(|event| event.id.clone())
+                    .collect()
+            })
+            .collect()
+    }
+
+    let mut app = test_app();
+    start_game(&mut app);
+
+    let mut trigger = scripted_trigger(TriggerCondition::Manual);
+    trigger.id = Some("breach_alarm".to_string());
+    trigger.gm_controls = Some(GmEventControls::manual_fire(
+        "breach_alarm".to_string(),
+        "world.gm.event.breach_alarm".to_string(),
+    ));
+    let mut runtime = crate::world::server::WorldContentRuntime::default();
+    runtime
+        .trigger_states
+        .push(crate::world::content::TriggerState {
+            trigger,
+            fired: false,
+            origin_layer: None,
+            seen_destroyed: Default::default(),
+            last_fired_elapsed: None,
+        });
+    app.insert_resource(runtime)
+        .init_resource::<crate::gm_action::GmActionLog>()
+        .init_resource::<crate::gm_action::LocalGmActionRefusals>()
+        .init_resource::<crate::gm_event::LastGmMissionProjection>()
+        .add_message::<crate::console_bridge::GmMissionChanged>()
+        .add_systems(PostUpdate, crate::gm_event::publish_mission_projection);
+
+    app.update();
+    assert_eq!(
+        authored_events(&mut app),
+        vec![vec!["base-world::breach_alarm".to_string()]],
+        "round one publishes the authored event once"
+    );
+    app.update();
+    assert!(
+        authored_events(&mut app).is_empty(),
+        "an unchanged projection is not republished"
+    );
+
+    push(
+        &mut app,
+        crate::console_bridge::LOCAL_CONSOLE_TOKEN,
+        ClientMessage::ReturnToLobby,
+    );
+    // Drained every frame: `Messages` keeps only two frames of history, and the
+    // republish lands on whichever frame the reset does.
+    let mut republished = Vec::new();
+    for _ in 0..3 {
+        app.update();
+        republished.extend(authored_events(&mut app));
+    }
+    assert_eq!(phase_of(&app), GamePhase::Lobby);
+    assert_eq!(
+        republished,
+        vec![vec!["base-world::breach_alarm".to_string()]],
+        concat!(
+            "the panel cleared itself on the Lobby transition, so an identical ",
+            "round-two projection still has to be published",
+        )
+    );
+}
+
+/// Issue #1301: the arm goes with the grant that authorised it.
+///
+/// `when` deliberately KEEPS a Fire across a suppressed firing, so an armed id
+/// can outlive many ticks — and `init_world_runtime` is a `Startup` system, so
+/// `WorldContentRuntime` (trigger table AND `pending_gm_event_fires`) survives a
+/// lobby round-trip untouched. The run-boundary reset clears the journal, the
+/// log, the refusals and both projections; leaving the arm behind would mean
+/// round two's ordinary trigger pipeline running an authored handler with no
+/// grant, no `LoggedGmAction`, no activity-feed row and nobody attributed for
+/// it, while the panel showed the event as armed against an empty result feed
+/// and a fresh Fire returned an unexplained No-op.
+#[test]
+fn a_lobby_round_trip_disarms_a_predicate_held_gm_fire() {
+    use crate::world::config::{scripted_trigger, GmEventControls, TriggerCondition};
+
+    const EVENT: &str = "base-world::scuttle";
+
+    let mut app = test_app();
+    start_game(&mut app);
+
+    let mut trigger = scripted_trigger(TriggerCondition::Manual);
+    trigger.id = Some("scuttle".to_string());
+    // The exact case the arm exists for: the Fire applied, the gate withheld
+    // the firing, and the entry waits for the predicate to hold.
+    trigger.when = Some(crate::world::flags::parse_predicate("flag(armed)").unwrap());
+    trigger.gm_controls = Some(GmEventControls::manual_fire(
+        "scuttle".to_string(),
+        "world.gm.event.scuttle".to_string(),
+    ));
+    let mut runtime = crate::world::server::WorldContentRuntime::default();
+    runtime
+        .trigger_states
+        .push(crate::world::content::TriggerState {
+            trigger,
+            fired: false,
+            origin_layer: None,
+            seen_destroyed: Default::default(),
+            last_fired_elapsed: None,
+        });
+    runtime.pending_gm_event_fires.insert(EVENT.to_string());
+    app.insert_resource(runtime)
+        .init_resource::<crate::gm_action::GmActionLog>()
+        .init_resource::<crate::gm_action::LocalGmActionRefusals>()
+        .init_resource::<crate::gm_event::LastGmMissionProjection>()
+        .add_message::<crate::console_bridge::GmMissionChanged>()
+        .add_systems(PostUpdate, crate::gm_event::publish_mission_projection);
+
+    app.update();
+    assert!(
+        app.world_mut()
+            .resource_mut::<bevy::ecs::message::Messages<crate::console_bridge::GmMissionChanged>>()
+            .drain()
+            .last()
+            .expect("round one publishes the panel")
+            .payload
+            .events
+            .iter()
+            .all(|event| event.armed),
+        "the run under way holds the arm"
+    );
+
+    push(
+        &mut app,
+        crate::console_bridge::LOCAL_CONSOLE_TOKEN,
+        ClientMessage::ReturnToLobby,
+    );
+    // Drained every frame: `Messages` keeps only two frames of history, and the
+    // republish lands on whichever frame the reset does.
+    let mut republished: Vec<Vec<(String, bool)>> = Vec::new();
+    for _ in 0..3 {
+        app.update();
+        republished.extend(
+            app.world_mut()
+                .resource_mut::<bevy::ecs::message::Messages<
+                    crate::console_bridge::GmMissionChanged,
+                >>()
+                .drain()
+                .map(|message| {
+                    message
+                        .payload
+                        .events
+                        .iter()
+                        .map(|event| (event.id.clone(), event.armed))
+                        .collect()
+                }),
+        );
+    }
+
+    assert_eq!(phase_of(&app), GamePhase::Lobby);
+    assert!(
+        app.world()
+            .resource::<crate::world::server::WorldContentRuntime>()
+            .pending_gm_event_fires
+            .is_empty(),
+        "the arm is part of the per-run GM lane the reset clears"
+    );
+    assert_eq!(
+        republished,
+        vec![vec![(EVENT.to_string(), false)]],
+        "the panel is republished reporting the event as disarmed"
+    );
+}
+
 /// The reach added above is the host page's alone. A phone sending the
 /// same un-gated `ReturnToLobby` mid-mission must be ignored by the real
 /// app, or the settings-cog feature would hand every handset an abort.

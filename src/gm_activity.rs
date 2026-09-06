@@ -119,8 +119,16 @@ pub struct GmActivityConnection {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum GmActivityAction {
-    SetSessionPaused { active: bool },
+    SetSessionPaused {
+        active: bool,
+    },
     ForceStart,
+    /// One authored GM-operable event was fired (issue #1301). `event` is its
+    /// layer-qualified stable id; the crew see only the fictional consequence
+    /// the handler produces, while the GM feed names the operator who caused it.
+    FireGmEvent {
+        event: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -349,10 +357,13 @@ fn link_id(entry: &GmActivityEntry, role: GmActivityLinkRole) -> Option<&str> {
         .map(|link| link.entity.entity_id.as_str())
 }
 
-fn action_key(action: &GmActivityAction) -> (u8, bool) {
+fn action_key(action: &GmActivityAction) -> (u8, bool, &str) {
     match action {
-        GmActivityAction::SetSessionPaused { active } => (0, *active),
-        GmActivityAction::ForceStart => (1, false),
+        GmActivityAction::SetSessionPaused { active } => (0, *active, ""),
+        GmActivityAction::ForceStart => (1, false, ""),
+        // The event id is the third component so two Fires committed at the
+        // same tick and order still sort deterministically by WHAT they fired.
+        GmActivityAction::FireGmEvent { event } => (2, false, event.as_str()),
     }
 }
 
@@ -1057,6 +1068,7 @@ fn refusal_reason(reason: crate::gm_action::GmActionRefusalReason) -> &'static s
         Reason::JournalFull => "journal-full",
         Reason::WrongPhase => "wrong-phase",
         Reason::UnreadableRequest => "unreadable-request",
+        Reason::UnknownGmEvent => "unknown-gm-event",
     }
 }
 
@@ -1145,8 +1157,25 @@ fn terminal_action_entries(
                 detail: GmActivityDetail::GmAction(GmActivityGmAction {
                     operator: gm_operator(&fact.operator_id, roster),
                     correlation: fact.correlation.as_str().to_owned(),
-                    action: GmActivityAction::SetSessionPaused {
-                        active: fact.requested_active,
+                    // The event-control family names WHAT it fired; every older
+                    // family keeps the exact row shape it already published.
+                    action: match fact.action_kind {
+                        crate::gm_action::GmActionKind::EventControl => {
+                            GmActivityAction::FireGmEvent {
+                                // Every producer of an event-control fact
+                                // attaches the qualified id and
+                                // `validate_fleet_frame` refuses a replicated
+                                // refusal without one, so `None` is
+                                // unreachable. Dropping that row rather than
+                                // publishing an empty id keeps one hypothetical
+                                // hole from making the whole absolute page
+                                // unparseable for every GM's feed.
+                                event: fact.target.clone()?,
+                            }
+                        }
+                        _ => GmActivityAction::SetSessionPaused {
+                            active: fact.requested_active,
+                        },
                     },
                     outcome: gm_outcome(fact.outcome)?,
                     reason: fact.reason.map(refusal_reason).map(str::to_owned),

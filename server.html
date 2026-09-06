@@ -325,6 +325,31 @@
     .gm-session-log-entry[data-outcome="pending"] { color: var(--ink-muted); }
     .gm-session-log-entry[data-outcome="refused"],
     .gm-session-log-entry[data-outcome="timed-out"] { color: var(--fire-bright); }
+    /* The mission panel (issue #1301). Same control ladder as the session
+       block above and for its reason: a filled control on --surface-panel-up
+       takes --edge-bright, which is the rung that clears 3:1 against it. */
+    #gm-mission-panel {
+      max-width: 44rem; padding: 1.5rem; border: 1px solid var(--edge-control);
+      display: grid; gap: .9rem;
+    }
+    #gm-mission-events { margin: 0; padding: 0; list-style: none; display: grid; gap: .5rem; }
+    .gm-mission-event {
+      display: flex; flex-wrap: wrap; align-items: center; gap: .75rem;
+    }
+    .gm-mission-event-label { flex: 1 1 12rem; }
+    .gm-mission-event-state { color: var(--ink-muted); }
+    .gm-mission-event[data-spent="true"] .gm-mission-event-state { color: var(--fire-bright); }
+    .gm-mission-event button {
+      min-width: 6rem; padding: .5rem .9rem; color: var(--ink-primary);
+      background: var(--surface-panel-up); border: 1px solid var(--edge-bright);
+      font: inherit; cursor: pointer;
+    }
+    .gm-mission-event button:disabled { opacity: .45; cursor: default; }
+    #gm-mission-feedback[data-state="Refused"] { color: var(--fire-bright); }
+    #gm-mission-log { margin: 0; padding-left: 1.5rem; max-height: 12rem; overflow-y: auto; }
+    .gm-mission-log-entry[data-outcome="pending"] { color: var(--ink-muted); }
+    .gm-mission-log-entry[data-outcome="refused"],
+    .gm-mission-log-entry[data-outcome="timed-out"] { color: var(--fire-bright); }
     #gm-workspace {
       display: grid; grid-template-columns: minmax(20rem, 2fr) minmax(18rem, 1fr);
       gap: 1rem; min-height: 28rem;
@@ -446,7 +471,7 @@
     }
     @media (max-height: 800px) {
       #gm-console { gap: .9rem; }
-      #gm-session-controls, #gm-entity-card { padding: 1rem; }
+      #gm-session-controls, #gm-mission-panel, #gm-entity-card { padding: 1rem; }
       #gm-station-controls { padding: 1rem; }
       #gm-station-frame { height: clamp(20rem, 55vh, 32rem); }
       #gm-knowledge-panel { padding: 1rem; }
@@ -1879,6 +1904,21 @@
           <ol id="gm-session-log" role="log" aria-labelledby="gm-session-log-heading"
             aria-live="polite" aria-relevant="additions text"></ol>
         </section>
+        <!-- The mission panel (issue #1301): every GM-operable authored event
+             the loaded scenario declares, with the levers it declared. Rows and
+             their Fire controls are built by gui/gm-mission-panel.js from the
+             absolute `gm_mission` Host Channel projection, so an empty scenario
+             renders the empty sentence and nothing else. -->
+        <section id="gm-mission-panel" role="region" aria-labelledby="gm-mission-heading">
+          <h2 id="gm-mission-heading" data-i18n="server.gm.mission.heading"></h2>
+          <ul id="gm-mission-events" role="list"></ul>
+          <p id="gm-mission-empty" role="status" aria-live="polite"
+            data-i18n="server.gm.mission.empty"></p>
+          <p id="gm-mission-feedback" role="status" aria-live="polite" aria-atomic="true"></p>
+          <h3 id="gm-mission-log-heading" data-i18n="server.gm.mission.log_heading"></h3>
+          <ol id="gm-mission-log" role="log" aria-labelledby="gm-mission-log-heading"
+            aria-live="polite" aria-relevant="additions text"></ol>
+        </section>
         <div id="gm-workspace">
           <section id="gm-map-panel" role="region" aria-labelledby="gm-map-heading">
             <h2 id="gm-map-heading" data-i18n="server.gm.map.heading"></h2>
@@ -2489,6 +2529,7 @@
     import { createGmActivityFeed } from './gui/gm-activity-feed.js';
     import { createGmLocalProjection } from './gui/gm-local-projection.js';
     import { createGmSessionControls } from './gui/gm-session-controls.js';
+    import { createGmMissionPanel } from './gui/gm-mission-panel.js';
     import { createGmStationPuppet } from './gui/gm-station-puppet.js';
     import { createGmRolePresets } from './gui/gm-role-presets.js';
     import { createGmKnowledgeCompare } from './gui/gm-knowledge-compare.js';
@@ -2531,6 +2572,22 @@
     window.__hostGmSessionRefresh = gmSessionControls.refreshAdmission;
     window.__hostGmSessionReset = gmSessionControls.reset;
     window.__hostGmSessionState = gmSessionControls.state;
+    const gmMissionPanel = createGmMissionPanel({
+      doc: document,
+      win: window,
+      t,
+      actionFeedback: hostActionFeedback,
+      submitFireEvent: (request) =>
+        typeof window.__hostFireGmEvent === 'function'
+          && window.__hostFireGmEvent(request),
+      getOperator: () => typeof window.__hostLocalGm === 'function'
+        ? window.__hostLocalGm() : null,
+      getOperatorName: (id) => typeof window.__hostGmName === 'function'
+        ? window.__hostGmName(id) : id,
+    });
+    window.__hostGmMissionRefresh = gmMissionPanel.refreshAdmission;
+    window.__hostGmMissionReset = gmMissionPanel.reset;
+    window.__hostGmMissionState = gmMissionPanel.state;
     window.__hostGmActivityState = gmActivity.state;
     const gmStationPuppet = createGmStationPuppet({
       doc: document,
@@ -2594,6 +2651,7 @@
           }
         },
         gm_session:   function(p) { gmSessionControls.update(p); },
+        gm_mission:   function(p) { gmMissionPanel.update(p); },
       },
       strings: { t, has, localiseTree },
     });
@@ -2964,6 +3022,11 @@
     if (s.phase === 'Lobby' && _lobbyPrevPhase !== 'Lobby'
         && typeof window.__hostGmSessionReset === 'function') {
       window.__hostGmSessionReset();
+      // The mission panel shares that run boundary: its local Pending presses
+      // and its event list both belong to the run that just ended (#1301).
+      if (typeof window.__hostGmMissionReset === 'function') {
+        window.__hostGmMissionReset();
+      }
     }
     // Manual capture is a running-World affordance. Drive it from Rust's
     // authoritative phase before any optional view-model module can defer the
@@ -3676,6 +3739,31 @@
       }
     };
 
+    /**
+     * Submit one attributed Fire of an authored GM-operable event (#1301).
+     *
+     * `event` is the layer-qualified id the mission panel read out of the
+     * authoritative projection; this seam never composes one, so the GM cannot
+     * name an event the simulation did not publish.
+     */
+    window.__hostFireGmEvent = function(request) {
+      const gm = localGm();
+      if (!gm || !request || typeof request !== 'object'
+          || typeof request.event !== 'string' || !request.event
+          || typeof request.correlation !== 'string' || !request.correlation
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      try {
+        return window.wasm_submit_gm_action(JSON.stringify({
+          operator_id: gm.id,
+          correlation: request.correlation,
+          action: 'fire_gm_event',
+          event: request.event,
+        })) !== false;
+      } catch (_) {
+        return false;
+      }
+    };
+
     /** Submit one absolute Station takeover membership assignment. */
     window.__hostSetStationPuppet = function(request) {
       const gm = localGm();
@@ -4129,6 +4217,9 @@
       const resultEl = document.getElementById('gm-start-result');
       if (typeof window.__hostGmSessionRefresh === 'function') {
         window.__hostGmSessionRefresh();
+      }
+      if (typeof window.__hostGmMissionRefresh === 'function') {
+        window.__hostGmMissionRefresh();
       }
       if (typeof window.__hostGmStationRefresh === 'function') {
         window.__hostGmStationRefresh();

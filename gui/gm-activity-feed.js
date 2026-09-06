@@ -62,6 +62,12 @@ function normaliseAction(value) {
   if (value.type === 'set_session_paused' && typeof value.active === 'boolean') {
     return { type: value.type, active: value.active };
   }
+  // One authored GM event was fired (issue #1301). `event` is its
+  // layer-qualified stable id, which the feed renders verbatim: it is the same
+  // identity the mission panel's Fire control and the command log carry.
+  if (value.type === 'fire_gm_event' && typeof value.event === 'string' && value.event.length > 0) {
+    return { type: value.type, event: value.event };
+  }
   return undefined;
 }
 
@@ -332,9 +338,17 @@ export function createGmActivityFeed({
           state: t(`server.gm.activity.connection_state.${detail.state}`),
         });
       case 'gm_action': {
-        const action = detail.action.type === 'force_start'
-          ? t('server.gm.activity.action.force_start')
-          : t(`server.gm.activity.action.${detail.action.active ? 'pause' : 'resume'}`);
+        // One branch per published action family. Pause/Resume is the fallback
+        // only because it is the one family whose sentence is chosen by
+        // `active` rather than by the discriminant itself.
+        let action;
+        if (detail.action.type === 'force_start') {
+          action = t('server.gm.activity.action.force_start');
+        } else if (detail.action.type === 'fire_gm_event') {
+          action = t('server.gm.activity.action.fire_gm_event', { event: detail.action.event });
+        } else {
+          action = t(`server.gm.activity.action.${detail.action.active ? 'pause' : 'resume'}`);
+        }
         return t('server.gm.activity.gm_action_detail', {
           operator: detail.operator.name || detail.operator.id,
           action,

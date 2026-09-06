@@ -670,6 +670,11 @@ pub fn encode_mesh_frame(frame: &crate::lockstep::MeshFrame) -> Result<String, s
                     "action_kind": refusal.action_kind,
                     "requested_active": refusal.requested_active,
                     "reason": refusal.reason,
+                    // The stable target the refused action named (issue #1301),
+                    // `null` for every family that has none. The decoder reads
+                    // an absent key the same way, so a refusal minted by a peer
+                    // that predates the event-control family still decodes.
+                    "target": refusal.target,
                 }),
             ),
         },
@@ -878,6 +883,14 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
                         requested_active: body.get("requested_active")?.as_bool()?,
                         tick,
                         reason: serde_json::from_value(body.get("reason")?.clone()).ok()?,
+                        // Absent, `null` or unbounded all read as "this family
+                        // named no stable target": a peer that predates issue
+                        // #1301 omits the key, and the bound is the same one
+                        // every other GM id crosses this ingress under.
+                        target: body
+                            .get("target")
+                            .and_then(serde_json::Value::as_str)
+                            .and_then(bounded_gm_target_id),
                     })
                 }
                 _ => return None,
@@ -1087,6 +1100,14 @@ pub fn decode_gm_action_request(raw: &str) -> Option<crate::gm_action::GmActionR
                 active: object.get("active")?.as_bool()?,
             }
         }
+        // Exactly `{operator_id, correlation, action, event}` — the same
+        // per-shape field-count guard every arm here carries, so a Fire cannot
+        // smuggle a second target past the narrow ingress.
+        "fire_gm_event" if object.len() == 4 && object.contains_key("event") => {
+            crate::gm_action::GmAction::FireGmEvent {
+                event: bounded_gm_event_id(object.get("event")?.as_str()?)?,
+            }
+        }
         "issue_station_command"
             if object.len() == 7
                 && object.contains_key("ship")
@@ -1121,6 +1142,15 @@ pub fn decode_gm_action_request(raw: &str) -> Option<crate::gm_action::GmActionR
         .then_some(request)
 }
 
+/// One layer-qualified GM event id: an ordinary bounded target id that also
+/// carries its `<layer>::<authored id>` qualifier. An unqualified id is refused
+/// at the ingress rather than resolved, because it cannot name one event once
+/// two layers each author the same authored id.
+fn bounded_gm_event_id(value: &str) -> Option<String> {
+    bounded_gm_target_id(value)
+        .filter(|value| value.contains("::") && !value.ends_with("::") && !value.starts_with("::"))
+}
+
 fn bounded_gm_target_id(value: &str) -> Option<String> {
     (!value.is_empty() && value.len() <= 128 && !value.chars().any(char::is_control))
         .then(|| value.to_string())
@@ -1141,6 +1171,13 @@ pub fn decode_canonical_system_command(
 
 pub fn encode_gm_session_projection(
     projection: &crate::gm_action::GmSessionProjection,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(projection)
+}
+
+/// Encode the absolute GM mission-panel projection (issue #1301).
+pub fn encode_gm_mission_projection(
+    projection: &crate::gm_event::GmMissionProjection,
 ) -> Result<String, serde_json::Error> {
     serde_json::to_string(projection)
 }
@@ -1464,9 +1501,25 @@ mod mesh_frame_tests {
                 requested_active: true,
                 tick: 419,
                 reason: crate::gm_action::GmActionRefusalReason::WrongPhase,
+                target: None,
             },
         ));
-        for frame in [proposal, refusal] {
+        // A refused Fire crosses the same lane still naming the event it tried
+        // to fire (issue #1301); every GM must read the same attributed answer.
+        let refused_fire = MeshFrame::GmAction(crate::gm_action::GmActionFrame::Refused(
+            crate::gm_action::GmActionRefusal {
+                sequenced_by: HostSlot(1),
+                requester: HostSlot(2),
+                operator_id: "gm-1".into(),
+                correlation: crate::gm_action::GmActionId::new("fire-1").unwrap(),
+                action_kind: crate::gm_action::GmActionKind::EventControl,
+                requested_active: true,
+                tick: 419,
+                reason: crate::gm_action::GmActionRefusalReason::UnknownGmEvent,
+                target: Some("base-world::breach_alarm".into()),
+            },
+        ));
+        for frame in [proposal, refusal, refused_fire] {
             let text = super::encode_mesh_frame(&frame).unwrap();
             assert_eq!(super::decode_mesh_frame(&text), Some(frame));
         }
@@ -1588,6 +1641,48 @@ mod mesh_frame_tests {
         for refused in [
             r#"{"operator_id":"gm-1","correlation":"take-17","action":"set_station_puppet","ship":"ship-1","station":"captain","active":true,"authority":"human"}"#,
             r#"{"operator_id":"gm-1","correlation":"command-17","action":"issue_station_command","ship":"ship-1","station":"captain","target":"red-alert","payload":{"type":"NotACommand"}}"#,
+        ] {
+            assert!(
+                super::decode_gm_action_request(refused).is_none(),
+                "must fail closed: {refused}"
+            );
+        }
+    }
+
+    /// The Fire ingress (issue #1301) shares the exact same narrow shape: one
+    /// stable layer-qualified event id, nothing else, and a per-shape field
+    /// count so a second target cannot ride along.
+    #[test]
+    fn firing_an_authored_gm_event_uses_the_same_exact_typed_ingress() {
+        let request = super::decode_gm_action_request(
+            r#"{"operator_id":"gm-1","correlation":"fire-3","action":"fire_gm_event","event":"base-world::breach_alarm"}"#,
+        )
+        .expect("valid fire request");
+        assert_eq!(
+            request.action,
+            crate::gm_action::GmAction::FireGmEvent {
+                event: "base-world::breach_alarm".into(),
+            }
+        );
+        assert_eq!(
+            request.action.kind(),
+            crate::gm_action::GmActionKind::EventControl
+        );
+        assert_eq!(
+            request.action.target_id(),
+            Some("base-world::breach_alarm"),
+            "the durable result must be able to say WHICH event was fired"
+        );
+        assert_eq!(request.action.requested_pause(), None);
+
+        for refused in [
+            // An unqualified id cannot name one event across layers.
+            r#"{"operator_id":"gm-1","correlation":"fire-3","action":"fire_gm_event","event":"breach_alarm"}"#,
+            r#"{"operator_id":"gm-1","correlation":"fire-3","action":"fire_gm_event","event":""}"#,
+            r#"{"operator_id":"gm-1","correlation":"fire-3","action":"fire_gm_event","event":"base-world::"}"#,
+            // A second field is a wider mutation surface, not a Fire.
+            r#"{"operator_id":"gm-1","correlation":"fire-3","action":"fire_gm_event","event":"base-world::a","handler":"anything"}"#,
+            r#"{"operator_id":"gm-1","correlation":"fire-3","action":"fire_gm_event"}"#,
         ] {
             assert!(
                 super::decode_gm_action_request(refused).is_none(),

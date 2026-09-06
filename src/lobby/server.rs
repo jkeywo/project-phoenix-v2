@@ -1147,6 +1147,8 @@ pub fn handle_return_to_lobby_system(
     mut gm_log: Option<ResMut<crate::gm_action::GmActionLog>>,
     mut gm_results: Option<ResMut<crate::gm_action::LocalGmActionRefusals>>,
     mut gm_projection: Option<ResMut<crate::gm_action::LastGmSessionProjection>>,
+    mut gm_mission_projection: Option<ResMut<crate::gm_event::LastGmMissionProjection>>,
+    mut content: Option<ResMut<crate::world::server::WorldContentRuntime>>,
     mut paused: Option<ResMut<crate::gm_action::SimulationPaused>>,
     mut virtual_time: Option<ResMut<Time<bevy::time::Virtual>>>,
 ) {
@@ -1178,6 +1180,29 @@ pub fn handle_return_to_lobby_system(
         }
         if let Some(projection) = gm_projection.as_deref_mut() {
             *projection = Default::default();
+        }
+        // The mission twin's cache has to go with it. `publish_mission_projection`
+        // suppresses a push whose projection equals the cached one, and the
+        // authored trigger table is built once in Startup: after a lobby
+        // round-trip in which no Fire was taken, round two's projection is
+        // byte-identical to round one's, so a stale cache would leave the GM
+        // page's reset-to-empty mission panel with nothing to repopulate it for
+        // the whole of the next mission.
+        if let Some(projection) = gm_mission_projection.as_deref_mut() {
+            *projection = Default::default();
+        }
+        // The arm itself, not just the cache of it: an armed Fire is a GM
+        // command's pending effect, and the grant that authorised it was
+        // cleared three lines up. `init_world_runtime` is a Startup system, so
+        // the trigger table and this set both outlive the run; an arm that a
+        // false `when` predicate or an unelapsed cooldown legitimately held
+        // would otherwise run its authored handler in the NEXT run with no
+        // grant, no `LoggedGmAction`, no activity-feed row and no operator
+        // behind it — while the panel showed it armed against an empty feed.
+        // `as_deref_mut` only in here, so a frame with no return-to-lobby does
+        // not mark `WorldContentRuntime` changed.
+        if let Some(content) = content.as_deref_mut() {
+            content.pending_gm_event_fires.clear();
         }
         if let Some(paused) = paused.as_deref_mut() {
             paused.0 = false;

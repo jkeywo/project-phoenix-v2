@@ -33,6 +33,26 @@ fn observe(ctx) { }
 '''
 "#;
 
+/// `a_gm_fire_runs_the_ordinary_handler_exactly_once` (issue #1301): one
+/// manual-only GM event and one repeatable quick tool, both counting their own
+/// fires so a second Fire is visible as a number rather than an absence.
+const SCRIPT_GM_EVENTS: &str = r#"[script]
+setup = '''
+gm_event("breach_alarm", "world.gm.event.breach_alarm", "breach");
+gm_event("sweep", "world.gm.event.sweep", "sweep").repeatable();
+fn breach(ctx) { ctx.flags.increment("breaches", 1); }
+fn sweep(ctx) { ctx.flags.increment("sweeps", 1); }
+'''
+"#;
+
+/// `a_gm_fire_held_by_a_false_predicate_lands_when_the_predicate_holds`.
+const SCRIPT_GM_EVENT_GATED: &str = r#"[script]
+setup = '''
+gm_event("scuttle", "world.gm.event.scuttle", "scuttle").when("flag(armed)");
+fn scuttle(ctx) { ctx.flags.increment("scuttles", 1); }
+'''
+"#;
+
 /// `scripted_open_comms_queues_on_the_runtime_through_the_live_pipeline`.
 const SCRIPT_ON_DESTROYED_OPENS_COMMS: &str = r#"[script]
 setup = 'on_destroyed("raider", "hail"); fn hail(ctx) { ctx.effects.open_comms(#{ from: "axiom", node_fn: "hail_axiom", display_name: "Axiom Control", urgent: true }); } fn hail_axiom(ctx) { #{ message: "Axiom Station, go ahead.", responses: [] } }'
@@ -888,6 +908,7 @@ fn scripted_flag_write_chains_a_declarative_on_flag_set() {
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
+                gm_controls: None,
             },
             fired: false,
             origin_layer: None,
@@ -953,6 +974,7 @@ fn scripted_flag_clear_chains_a_declarative_on_flag_cleared() {
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
+                gm_controls: None,
             },
             fired: false,
             origin_layer: None,
@@ -1020,6 +1042,7 @@ fn scripted_flag_increment_chains_a_declarative_on_flag_set() {
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
+                gm_controls: None,
             },
             fired: false,
             origin_layer: None,
@@ -1210,6 +1233,7 @@ fn a_scripted_destroy_chains_on_destroyed_in_the_same_tick() {
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
+                gm_controls: None,
             },
             fired: false,
             origin_layer: None,
@@ -1296,6 +1320,7 @@ fn a_scripted_destroy_of_the_last_group_member_fires_on_all_destroyed() {
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
+                gm_controls: None,
             },
             fired: false,
             origin_layer: None,
@@ -1368,6 +1393,7 @@ fn a_scripted_destroy_of_an_unknown_name_warns_and_keeps_the_rest_of_the_call() 
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
+                gm_controls: None,
             },
             fired: false,
             origin_layer: None,
@@ -1514,6 +1540,205 @@ fn compile_and_init_wire_a_scripted_trigger_into_the_runtime() {
             entity_name: "raider".to_string()
         }
     );
+}
+
+/// Build the `ai_trigger_test_app` harness with the typed GM action reducer in
+/// front of it (issue #1301), so a Fire crosses its canonical apply boundary in
+/// the same step the trigger pipeline honours it — the exact production order
+/// (`PreUpdate` `apply_due_actions`, then `FixedUpdate` `tick_trigger_pipeline`).
+fn gm_event_app(world_toml: &str) -> App {
+    let mut sr = compile_fixture_scripts(world_toml);
+    let mut app = ai_trigger_test_app();
+    app.add_message::<crate::core::balance::BalanceEvent>()
+        .insert_resource(crate::sim_tick::SimTick(1))
+        .insert_resource(crate::gm_action::SimulationPaused(false))
+        .init_resource::<crate::gm_action::GmActionJournal>()
+        .init_resource::<crate::gm_action::GmActionLog>()
+        .add_systems(
+            Update,
+            crate::gm_action::apply_due_actions.before(collect_world_events),
+        );
+    {
+        let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+        runtime.trigger_states = Vec::new();
+        merge_script_triggers(&mut runtime, &mut sr, None);
+    }
+    app.world_mut().insert_resource(sr);
+    app
+}
+
+/// Grant one Fire of `event` at the app's current tick and step once.
+fn fire_gm_event(app: &mut App, correlation: &str, event: &str) {
+    let tick = app.world().resource::<crate::sim_tick::SimTick>().0;
+    let sequence = app
+        .world()
+        .resource::<crate::gm_action::GmActionJournal>()
+        .next_sequence();
+    let grant = crate::gm_action::GmActionGrant {
+        from: crate::command_admission::log::HostSlot(1),
+        sequenced_by: crate::command_admission::log::HostSlot(1),
+        operator_id: "gm-1".into(),
+        correlation: crate::gm_action::GmActionId::new(correlation).unwrap(),
+        recovery_generation: 0,
+        apply_tick: tick,
+        order: crate::gm_action::GmActionOrder::new(
+            crate::command_admission::log::HostSlot(1),
+            sequence,
+        ),
+        action: crate::gm_action::GmAction::FireGmEvent {
+            event: event.into(),
+        },
+    };
+    app.world_mut()
+        .resource_mut::<crate::gm_action::GmActionJournal>()
+        .insert(grant)
+        .expect("canonical grant");
+    app.update();
+}
+
+fn gm_outcomes(app: &App) -> Vec<crate::gm_action::GmActionOutcome> {
+    app.world()
+        .resource::<crate::gm_action::GmActionJournal>()
+        .applied_results()
+        .iter()
+        .map(|result| result.outcome)
+        .collect()
+}
+
+/// Issue #1301, the whole vertical slice in one run: a typed GM Fire arms an
+/// authored `gm_event`, the ORDINARY trigger pipeline runs the ORDINARY handler,
+/// and a second Fire of the spent one-shot is a deterministic No-op that runs
+/// nothing — while a `repeatable()` event runs again.
+#[test]
+fn a_gm_fire_runs_the_ordinary_handler_exactly_once() {
+    let mut app = gm_event_app(SCRIPT_GM_EVENTS);
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .trigger_states
+            .len(),
+        2
+    );
+
+    fire_gm_event(&mut app, "fire-1", "base-world::breach_alarm");
+    {
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert_eq!(
+            runtime.flags.counter("breaches"),
+            1,
+            "the ordinary handler ran through the ordinary pipeline"
+        );
+        assert!(
+            runtime.pending_gm_event_fires.is_empty(),
+            "the arm is consumed by the firing it caused"
+        );
+        assert!(runtime.trigger_states[0].fired, "the one-shot latch is set");
+    }
+
+    // A SECOND Fire, with its own correlation, is not a retry — and must still
+    // run nothing, because the authored lifecycle is spent.
+    fire_gm_event(&mut app, "fire-2", "base-world::breach_alarm");
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("breaches"),
+        1,
+        "a second Fire of a one-shot event must not run its handler again"
+    );
+    assert_eq!(
+        gm_outcomes(&app),
+        vec![
+            crate::gm_action::GmActionOutcome::Applied,
+            crate::gm_action::GmActionOutcome::NoOp,
+        ]
+    );
+
+    // The reusable quick tool is the other half of the contract.
+    fire_gm_event(&mut app, "fire-3", "base-world::sweep");
+    fire_gm_event(&mut app, "fire-4", "base-world::sweep");
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("sweeps"),
+        2,
+        "a repeatable gm_event is a reusable quick tool"
+    );
+    assert_eq!(
+        gm_outcomes(&app),
+        vec![
+            crate::gm_action::GmActionOutcome::Applied,
+            crate::gm_action::GmActionOutcome::NoOp,
+            crate::gm_action::GmActionOutcome::Applied,
+            crate::gm_action::GmActionOutcome::Applied,
+        ]
+    );
+}
+
+/// A fired GM event reaches the shared history seam with its authored id, so
+/// the balance/activity record says which event a GM caused.
+#[test]
+fn a_gm_fire_is_recorded_on_the_ordinary_trigger_fire_seam() {
+    let mut app = gm_event_app(SCRIPT_GM_EVENTS);
+    let mut cursor = app
+        .world()
+        .resource::<Messages<crate::core::balance::BalanceEvent>>()
+        .get_cursor();
+    fire_gm_event(&mut app, "fire-1", "base-world::breach_alarm");
+    let messages = app
+        .world()
+        .resource::<Messages<crate::core::balance::BalanceEvent>>();
+    let facts: Vec<_> = cursor.read(messages).cloned().collect();
+    assert!(
+        facts.iter().any(|fact| matches!(
+            fact,
+            crate::core::balance::BalanceEvent::TriggerFired { trigger_id, .. }
+                if trigger_id == "breach_alarm"
+        )),
+        "a GM fire is an ordinary trigger fire in the record: {facts:?}"
+    );
+}
+
+/// `when` keeps its documented meaning on a manual event: a false reading
+/// suppresses the firing WITHOUT consuming the Fire, so the GM's press lands
+/// the moment the predicate holds instead of being silently lost.
+#[test]
+fn a_gm_fire_held_by_a_false_predicate_lands_when_the_predicate_holds() {
+    let mut app = gm_event_app(SCRIPT_GM_EVENT_GATED);
+
+    fire_gm_event(&mut app, "fire-1", "base-world::scuttle");
+    {
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert_eq!(runtime.flags.counter("scuttles"), 0, "the gate holds");
+        assert_eq!(
+            runtime
+                .pending_gm_event_fires
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>(),
+            vec!["base-world::scuttle".to_string()],
+            "the arm is retained across a suppressed firing"
+        );
+    }
+    assert_eq!(
+        gm_outcomes(&app),
+        vec![crate::gm_action::GmActionOutcome::Applied],
+        "the ACTION applied; what the gate withheld is the firing"
+    );
+
+    app.world_mut()
+        .resource_mut::<WorldContentRuntime>()
+        .flags
+        .set_flag("armed");
+    app.update();
+    let runtime = app.world().resource::<WorldContentRuntime>();
+    assert_eq!(
+        runtime.flags.counter("scuttles"),
+        1,
+        "the retained arm fires the moment the predicate holds"
+    );
+    assert!(runtime.pending_gm_event_fires.is_empty());
 }
 
 #[test]
@@ -1848,6 +2073,7 @@ fn on_waypoint_reached_trigger_fires() {
             id: None,
             repeat: false,
             cooldown_secs: None,
+            gm_controls: None,
         },
         fired: false,
         origin_layer: None,
@@ -1892,6 +2118,7 @@ fn on_waypoint_reached_trigger_ignores_a_different_waypoint() {
             id: None,
             repeat: false,
             cooldown_secs: None,
+            gm_controls: None,
         },
         fired: false,
         origin_layer: None,
@@ -1936,6 +2163,7 @@ fn on_waypoint_reached_without_waypoint_fires_on_any_waypoint() {
             id: None,
             repeat: false,
             cooldown_secs: None,
+            gm_controls: None,
         },
         fired: false,
         origin_layer: None,
@@ -1981,6 +2209,7 @@ fn on_waypoint_reached_trigger_ignores_a_different_ship() {
             id: None,
             repeat: false,
             cooldown_secs: None,
+            gm_controls: None,
         },
         fired: false,
         origin_layer: None,
@@ -2024,6 +2253,7 @@ fn on_entity_destroyed_trigger_fires() {
             id: None,
             repeat: false,
             cooldown_secs: None,
+            gm_controls: None,
         },
         fired: false,
         origin_layer: None,
@@ -2428,6 +2658,7 @@ fn on_all_destroyed_trigger_fires_after_all_named_entities_die_across_ticks() {
             id: None,
             repeat: false,
             cooldown_secs: None,
+            gm_controls: None,
         },
         fired: false,
         origin_layer: None,
@@ -2491,6 +2722,7 @@ fn when_predicate_suppresses_the_fire_but_keeps_the_trigger_live() {
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
+                gm_controls: None,
             },
             fired: false,
             origin_layer: None,
@@ -2547,6 +2779,7 @@ fn delayed_set_flag_action_fires_on_flag_set_trigger_on_the_next_tick() {
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
+                gm_controls: None,
             },
             fired: false,
             origin_layer: None,
@@ -2602,6 +2835,7 @@ fn no_op_reset_of_already_set_flag_does_not_emit_transition() {
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
+                gm_controls: None,
             },
             fired: false,
             origin_layer: None,
@@ -2653,6 +2887,7 @@ fn delayed_clear_flag_action_fires_on_flag_cleared_trigger_on_the_next_tick() {
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
+                gm_controls: None,
             },
             fired: false,
             origin_layer: None,
@@ -2721,6 +2956,7 @@ fn parent_prefix_in_when_predicate_reads_loader_layer_flag() {
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
+                gm_controls: None,
             },
             fired: false,
             origin_layer: Some(layer_path.clone()),
@@ -2779,6 +3015,7 @@ fn same_named_flag_in_sub_world_does_not_fire_base_world_on_flag_set() {
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
+                gm_controls: None,
             },
             fired: false,
             origin_layer: None,
@@ -2870,6 +3107,7 @@ fn on_entity_attacked_trigger_fires() {
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
+                gm_controls: None,
             },
             fired: false,
             origin_layer: None,
@@ -6521,6 +6759,7 @@ fn trigger_from_layer_missing_in_layer_map_reads_base_flags() {
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
+                gm_controls: None,
             },
             fired: false,
             // Not present in WorldLayerMap — e.g. state surviving an
@@ -6728,6 +6967,7 @@ fn delayed_queue_dispatches_every_action_variant_in_queue_order() {
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
+                gm_controls: None,
             },
             fired: false,
             origin_layer: None,
@@ -6905,6 +7145,7 @@ fn pending_world_loaded_event_fires_on_world_loaded_trigger() {
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
+                gm_controls: None,
             },
             fired: false,
             origin_layer: None,
@@ -7065,6 +7306,7 @@ fn on_world_loaded_fires_again_after_unload_and_reload() {
                 id: None,
                 repeat: true,
                 cooldown_secs: None,
+                gm_controls: None,
             },
             fired: false,
             origin_layer: None,
@@ -7329,6 +7571,7 @@ fn install_region_trigger_gated(
             id: None,
             repeat: false,
             cooldown_secs: None,
+            gm_controls: None,
         },
         fired: false,
         origin_layer: None,
@@ -7907,6 +8150,7 @@ fn destroy_entity_action_despawns_and_emits_chained_event() {
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
+                gm_controls: None,
             },
             fired: false,
             origin_layer: None,
@@ -8252,6 +8496,7 @@ fn on_timer_trigger_fires() {
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
+                gm_controls: None,
             },
             fired: false,
             origin_layer: None,
@@ -8290,6 +8535,7 @@ fn on_timer_trigger_does_not_fire_before_after_secs_elapses() {
                 id: None,
                 repeat: false,
                 cooldown_secs: None,
+                gm_controls: None,
             },
             fired: false,
             origin_layer: None,

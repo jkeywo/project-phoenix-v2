@@ -543,6 +543,7 @@ pub fn render_condition(condition: &TriggerCondition) -> String {
         TriggerCondition::OnFlagSet { name } => format!("on_flag_set({name})"),
         TriggerCondition::OnFlagCleared { name } => format!("on_flag_cleared({name})"),
         TriggerCondition::OnWorldLoaded => "on_world_loaded".to_string(),
+        TriggerCondition::Manual => "gm_event".to_string(),
         TriggerCondition::OnEnteredRegion { entity_name } => {
             format!("on_entered_region({entity_name})")
         }
@@ -719,6 +720,7 @@ mod tests {
                 id: id.map(str::to_string),
                 repeat,
                 cooldown_secs: None,
+                gm_controls: None,
             },
             fired,
             origin_layer: None,

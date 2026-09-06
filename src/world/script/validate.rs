@@ -24,6 +24,10 @@ use crate::world::validate::{Severity, SourceLocation, WorldFinding};
 /// Category slug for a handler that resolves to no defined function.
 pub const UNRESOLVED_SCRIPT_FN: &str = "unresolved-script-fn";
 
+/// Category slug for a malformed or duplicated GM-operable event id
+/// (issue #1301).
+pub const INVALID_GM_EVENT: &str = "invalid-gm-event";
+
 /// Category slug for a compound assignment (`+=`, `-=`, `*=`, …) whose target is
 /// the script `flags` accessor — `flags.<name> += n` or `flags[expr] += n`
 /// (issue #994).
@@ -100,6 +104,68 @@ pub fn validate_script_triggers(
                 &st.handler,
                 &st.source_path,
                 "scripted trigger",
+            ));
+        }
+    }
+    findings
+}
+
+/// Prove every GM-operable event's authored identity is valid and unique
+/// (issue #1301).
+///
+/// Two error findings, both on the same authoring-validation channel every
+/// other pass here uses, so the atomic activation gate
+/// (`world::validate::has_error`) blocks the world rather than shipping a
+/// mission panel that cannot address what it lists:
+///
+/// 1. a malformed id or label — the exact shape
+///    [`GmEventControls::validate_authored`] defines, checked again here so a
+///    control set that reaches this pass from anywhere other than the
+///    `gm_event` host fn (issue #1302's `gm_controls` on an ordinary trigger)
+///    meets the same rule;
+/// 2. two events authored with the SAME id in one compiled set.
+///
+/// (2) is an error rather than a tolerated duplicate, and this is deliberately
+/// stricter than `ResetTrigger`'s `Trigger::id` lookup, which re-arms EVERY
+/// trigger sharing an id on purpose. A GM action names exactly one event and
+/// must get exactly one handler run; "fire whichever of these two the table
+/// happens to hold first" is not a contract an operator can act on. Ids are
+/// qualified by their origin layer at read time, so this pass only has to make
+/// them unique within one compiled set — which is precisely the set it sees.
+fn gm_event_finding(source_path: &str, id: &str, message: String) -> WorldFinding {
+    WorldFinding {
+        severity: Severity::Error,
+        category: INVALID_GM_EVENT,
+        message,
+        source: SourceLocation {
+            file: source_path.to_string(),
+            line: None,
+            reference: id.to_string(),
+        },
+    }
+}
+
+pub fn validate_gm_events(script_triggers: &[ScriptTrigger]) -> Vec<WorldFinding> {
+    let mut findings = Vec::new();
+    let mut seen: BTreeSet<&str> = BTreeSet::new();
+    for st in script_triggers {
+        let Some(controls) = st.trigger.gm_controls.as_ref() else {
+            continue;
+        };
+        if let Err(message) =
+            crate::world::config::GmEventControls::validate_authored(&controls.id, &controls.label)
+        {
+            findings.push(gm_event_finding(&st.source_path, &controls.id, message));
+            continue;
+        }
+        if !seen.insert(controls.id.as_str()) {
+            findings.push(gm_event_finding(
+                &st.source_path,
+                &controls.id,
+                format!(
+                    "duplicate GM event id '{}': a GM action names exactly one event",
+                    controls.id
+                ),
             ));
         }
     }
@@ -750,6 +816,63 @@ mod tests {
         assert_eq!(findings[0].category, UNRESOLVED_SCRIPT_FN);
         assert_eq!(findings[0].source.reference, "missing");
         assert!(crate::world::validate::has_error(&findings));
+    }
+
+    // ── GM-operable event identity (issue #1301) ─────────────────────────────
+
+    fn gm_event_trigger(id: &str, label: &str, path: &str) -> ScriptTrigger {
+        let mut trigger =
+            crate::world::config::scripted_trigger(crate::world::config::TriggerCondition::Manual);
+        trigger.id = Some(id.to_string());
+        trigger.gm_controls = Some(crate::world::config::GmEventControls::manual_fire(
+            id.to_string(),
+            label.to_string(),
+        ));
+        ScriptTrigger {
+            trigger,
+            handler: "h".to_string(),
+            source_path: path.to_string(),
+        }
+    }
+
+    #[test]
+    fn distinct_gm_event_ids_are_clean_and_ordinary_triggers_are_ignored() {
+        let sts = vec![
+            gm_event_trigger("breach", "world.gm.event.breach", "w.toml#script.s"),
+            gm_event_trigger("sweep", "world.gm.event.sweep", "w.toml#script.s"),
+            script_trigger("on_loaded", "w.toml#script.s"),
+        ];
+        assert!(validate_gm_events(&sts).is_empty());
+    }
+
+    /// Deliberately stricter than `ResetTrigger`'s tolerant `Trigger::id`
+    /// lookup, which re-arms EVERY trigger sharing an id on purpose: a GM
+    /// action names exactly one event and must get exactly one handler run.
+    #[test]
+    fn a_duplicate_gm_event_id_blocks_activation() {
+        let sts = vec![
+            gm_event_trigger("breach", "world.gm.event.breach", "w.toml#script.a"),
+            gm_event_trigger("breach", "world.gm.event.other", "w.toml#script.b"),
+        ];
+        let findings = validate_gm_events(&sts);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].category, INVALID_GM_EVENT);
+        assert_eq!(findings[0].source.reference, "breach");
+        assert_eq!(findings[0].source.file, "w.toml#script.b");
+        assert!(crate::world::validate::has_error(&findings));
+    }
+
+    /// A control set that reaches this pass from anywhere but the `gm_event`
+    /// host fn — issue #1302's `gm_controls` on an ordinary trigger — meets the
+    /// same identity rule.
+    #[test]
+    fn a_malformed_gm_event_identity_blocks_activation_at_the_validation_pass_too() {
+        for (id, label) in [("a::b", "world.gm.event.a"), ("ok", "")] {
+            let findings = validate_gm_events(&[gm_event_trigger(id, label, "w.toml#script.s")]);
+            assert_eq!(findings.len(), 1, "{id:?}/{label:?} must be refused");
+            assert_eq!(findings[0].category, INVALID_GM_EVENT);
+            assert!(crate::world::validate::has_error(&findings));
+        }
     }
 
     // ── `flags` compound-assignment lint (issue #994) ─────────────────────────

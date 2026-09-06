@@ -953,6 +953,7 @@ fn trigger_state(name: &str) -> TriggerState {
             id: None,
             repeat: false,
             cooldown_secs: None,
+            gm_controls: None,
         },
         fired: false,
         origin_layer: None,
@@ -1280,6 +1281,72 @@ fn a_reshaped_trigger_table_of_the_same_size_moves_the_digest() {
         "an anonymous row is keyed by the KIND of trigger occupying it, so a \
          swap is caught without an authored id to lean on"
     );
+}
+
+/// A GM-operable event's ARMED Fire is folded; its authored control set is not
+/// (issue #1301).
+///
+/// The control set is authored config that `snapshot::content_digest` answers
+/// for, exactly as a condition's fields are. What a RUN moves is which Fires
+/// have crossed their apply boundary and are waiting for the pipeline — so two
+/// peers that disagree about that disagree about what is about to happen, and
+/// this is the fold that says so. It is deliberately absent while the set is
+/// empty, which is why no existing world's digest moved when it landed.
+#[test]
+fn an_armed_gm_fire_moves_the_digest_and_an_empty_set_leaves_it_alone() {
+    let gm_event = |id: &str| {
+        let mut state = trigger_state("raider");
+        state.trigger.condition = TriggerCondition::Manual;
+        state.trigger.id = Some(id.into());
+        state.trigger.gm_controls = Some(crate::world::config::GmEventControls::manual_fire(
+            id.into(),
+            format!("world.gm.event.{id}"),
+        ));
+        state
+    };
+
+    let mut world = scenario_world();
+    world.resource_mut::<WorldContentRuntime>().trigger_states =
+        vec![gm_event("breach"), gm_event("sweep")];
+    let idle = world_digest(&world);
+
+    // An empty pending set folds nothing at all: a world that authors GM events
+    // but has none armed digests exactly as it would have before this issue.
+    let mut plain = scenario_world();
+    plain.resource_mut::<WorldContentRuntime>().trigger_states =
+        vec![gm_event("breach"), gm_event("sweep")];
+    plain
+        .resource_mut::<WorldContentRuntime>()
+        .pending_gm_event_fires
+        .clear();
+    assert_eq!(world_digest(&plain), idle);
+
+    world
+        .resource_mut::<WorldContentRuntime>()
+        .pending_gm_event_fires
+        .insert("base-world::breach".into());
+    let armed = world_digest(&world);
+    assert_ne!(idle, armed, "an armed Fire is authoritative pending work");
+
+    // WHICH event is armed is part of it: two peers holding one arm each on
+    // different events are about to run different missions.
+    let mut other = scenario_world();
+    other.resource_mut::<WorldContentRuntime>().trigger_states =
+        vec![gm_event("breach"), gm_event("sweep")];
+    other
+        .resource_mut::<WorldContentRuntime>()
+        .pending_gm_event_fires
+        .insert("base-world::sweep".into());
+    assert_ne!(armed, world_digest(&other));
+
+    // And the Manual condition is its own kind, so a manual row cannot be
+    // mistaken for the automatic one it replaced in a reshaped table.
+    let mut swapped = scenario_world();
+    let mut automatic = gm_event("breach");
+    automatic.trigger.condition = TriggerCondition::OnWorldLoaded;
+    swapped.resource_mut::<WorldContentRuntime>().trigger_states =
+        vec![automatic, gm_event("sweep")];
+    assert_ne!(idle, world_digest(&swapped));
 }
 
 /// The cooldown stamp folds as present-or-absent and never by value: a restore

@@ -108,3 +108,11 @@ pub struct GmStationProjectionChanged {
 pub struct GmSessionChanged {
     pub payload: crate::gm_action::GmSessionProjection,
 }
+
+/// Absolute controllable-event registry and its bounded attributed result feed
+/// for the GM mission panel (issue #1301). Local Host Channel only, like every
+/// other GM projection; the Fire grants themselves cross the typed host mesh.
+#[derive(Message, Clone, Debug)]
+pub struct GmMissionChanged {
+    pub payload: crate::gm_event::GmMissionProjection,
+}

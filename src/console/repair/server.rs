@@ -438,6 +438,14 @@ fn publish_repair_blackboard(
         &crate::entities::spawner::EntityUuid,
         &crate::entities::spawner::EntityName,
     )>,
+    // The abroad card's bar (issue #1386). The target's OWN infrastructure
+    // condition track, republished every tick because that is the work the team
+    // is doing — `InfrastructureSnapshot` mints its fraction at spawn/welcome
+    // only, which never moves while a crew watch a repair.
+    conditions: Query<(
+        &crate::entities::spawner::EntityUuid,
+        &crate::infrastructure::InfrastructureCondition,
+    )>,
 ) {
     for (teams_opt, hull_opt, config_opt, repair_queue_ref, external_opt, mut blackboards) in
         ship_q.iter_mut()
@@ -509,6 +517,8 @@ fn publish_repair_blackboard(
             external_dispatch_target,
             external_dispatch_target_name,
             external_dispatch_refusal,
+            external_dispatch_team_idx,
+            external_dispatch_target_condition,
         ) = match external_opt {
             Some(external) => {
                 let target = external.dispatched_target.clone();
@@ -518,14 +528,28 @@ fn publish_repair_blackboard(
                         .find(|(id, _)| &id.0 == uuid)
                         .map(|(_, name)| name.0.clone())
                 });
+                // `None` when the target carries no condition track at all — a
+                // dispatch to such a target holds the team but banks nothing
+                // (`apply_external_repair`), and the card must not draw a bar
+                // for work that cannot happen.
+                let target_condition = target.as_ref().and_then(|uuid| {
+                    conditions
+                        .iter()
+                        .find(|(id, _)| &id.0 == uuid)
+                        .map(|(_, condition)| condition.0.condition_fraction())
+                });
                 (
                     Some(external.config.range),
                     target,
                     target_name,
                     external.last_refusal.map(|r| r.string_id().to_string()),
+                    // Which team went, published only while one is actually out
+                    // there — the console derives the whole ABROAD card from it.
+                    external.abroad_team().map(|idx| idx as u8),
+                    target_condition,
                 )
             }
-            None => (None, None, None, None),
+            None => (None, None, None, None, None, None),
         };
 
         let bb = RepairBlackboard {
@@ -547,6 +571,8 @@ fn publish_repair_blackboard(
             external_dispatch_target,
             external_dispatch_target_name,
             external_dispatch_refusal,
+            external_dispatch_team_idx,
+            external_dispatch_target_condition,
         };
 
         blackboards.0.insert(
@@ -1028,10 +1054,9 @@ pub fn operate_repair_ai(
         // to be sent anywhere. The human dispatch router reads the same source,
         // so a team sent to an ally cannot be undercut by whichever path did not
         // know about it (AGENTS.md rule 6).
-        let committed = external_dispatch
-            .map(|e| e.committed_repair_teams())
-            .unwrap_or(0);
-        let free_teams: Vec<usize> = teams.0.free_team_indices(committed);
+        let free_teams: Vec<usize> = teams
+            .0
+            .free_team_indices(external_dispatch.and_then(|e| e.abroad_team()));
         if free_teams.is_empty() {
             continue;
         }

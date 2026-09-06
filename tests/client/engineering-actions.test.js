@@ -336,7 +336,11 @@ describe('Engineering, Power, and Repair semantic actions', () => {
     expect(sendAction).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps the externally committed idle slot out of pointer and parameter-free dispatch', () => {
+  // Issue #1386: the abroad team is excluded BY NAME off the claim. Before the
+  // claim named its team this mirrored the host's truncation rule instead, which
+  // was only ever right because nobody could choose which team went — and would
+  // now exclude whichever slot happened to sit at the end of the idle list.
+  it('keeps the team named by the field claim out of pointer and parameter-free dispatch', () => {
     const sendAction = vi.fn();
     const view = {
       ...repair(),
@@ -345,22 +349,107 @@ describe('Engineering, Power, and Repair semantic actions', () => {
         { id: 1, status: 'idle' },
         { id: 2, status: 'idle' },
       ],
-      external_dispatch: { target: 'ally-1' },
+      external_dispatch: { target: 'ally-1', team_idx: 1 },
     };
     const actions = registry({ getState: () => view, sendAction });
 
+    // Parameter-free picks the lowest idle team that is not the one abroad —
+    // team 2, not team 1, which is the whole point of naming it.
     expect(actions.activate(REPAIR_DISPATCH_ACTION_ID, {
       context: REPAIR_ACTION_CONTEXT, source: 'gamepad',
     })).toMatchObject({ handled: true });
     expect(sendAction).toHaveBeenLastCalledWith('dispatch_repair_team', expect.objectContaining({
-      team_idx: 1, target: 'core',
+      team_idx: 2, target: 'core',
     }));
 
     expect(actions.activate(REPAIR_DISPATCH_ACTION_ID, {
       context: REPAIR_ACTION_CONTEXT,
-      detail: { team_idx: 2, target: 'core' },
+      detail: { team_idx: 1, target: 'core' },
     })).toMatchObject({ handled: false });
     expect(sendAction).toHaveBeenCalledTimes(1);
+  });
+
+  // Issue #1386: the field target is reachable by NAMING it, and only by naming
+  // it. It is not in `dispatch_targets` and never will be — the host builds that
+  // list out of the hull's own stations — so a parameter-free activation still
+  // picks a station rather than quietly sending a team off the ship.
+  it('routes a named field dispatch and never picks it parameter-free', () => {
+    const sendAction = vi.fn();
+    const view = {
+      ...repair(),
+      teams: [{ id: 0, status: 'idle' }, { id: 1, status: 'idle' }],
+      external_dispatch: { range: 800, target: null, target_name: null, team_idx: null },
+    };
+    const actions = registry({ getState: () => view, sendAction });
+
+    expect(actions.activate(REPAIR_DISPATCH_ACTION_ID, {
+      context: REPAIR_ACTION_CONTEXT,
+      detail: { team_idx: 1, target: 'external' },
+    })).toMatchObject({ handled: true });
+    expect(sendAction).toHaveBeenLastCalledWith('dispatch_repair_team', expect.objectContaining({
+      team_idx: 1, target: 'external', control_system_id: 'repair',
+    }));
+
+    sendAction.mockClear();
+    expect(actions.activate(REPAIR_DISPATCH_ACTION_ID, {
+      context: REPAIR_ACTION_CONTEXT, source: 'gamepad',
+    })).toMatchObject({ handled: true });
+    expect(sendAction).toHaveBeenLastCalledWith('dispatch_repair_team', expect.objectContaining({
+      target: 'core',
+    }));
+  });
+
+  it('refuses a field dispatch with no capability, or while another team is abroad', () => {
+    const sendAction = vi.fn();
+    // A hull that authored no `[repair.external_dispatch]` carries no view at
+    // all, so there is nowhere to send anyone.
+    let view = { ...repair(), teams: [{ id: 0, status: 'idle' }] };
+    const actions = registry({ getState: () => view, sendAction });
+    expect(actions.activate(REPAIR_DISPATCH_ACTION_ID, {
+      context: REPAIR_ACTION_CONTEXT,
+      detail: { team_idx: 0, target: 'external' },
+    })).toMatchObject({ claimed: true, handled: false });
+
+    // …and the claim stays single: the crew recall before sending a second.
+    view = {
+      ...repair(),
+      teams: [{ id: 0, status: 'idle' }, { id: 1, status: 'idle' }],
+      external_dispatch: { range: 800, target: 'ally-1', team_idx: 1 },
+    };
+    expect(actions.activate(REPAIR_DISPATCH_ACTION_ID, {
+      context: REPAIR_ACTION_CONTEXT,
+      detail: { team_idx: 0, target: 'external' },
+    })).toMatchObject({ claimed: true, handled: false });
+    expect(sendAction).not.toHaveBeenCalled();
+  });
+
+  // Issue #1386: ONE recall verb. The abroad team's wire status is `Idle` — it
+  // never walked anywhere on this hull — so the claim is the only thing that can
+  // say it is recallable.
+  it('recalls the team abroad, whose wire status is idle', () => {
+    const sendAction = vi.fn();
+    const view = {
+      ...repair(),
+      teams: [{ id: 0, status: 'idle' }, { id: 1, status: 'idle' }],
+      external_dispatch: { range: 800, target: 'ally-1', team_idx: 1 },
+    };
+    const actions = registry({ getState: () => view, sendAction });
+
+    expect(actions.activate(REPAIR_RECALL_ACTION_ID, {
+      context: REPAIR_ACTION_CONTEXT,
+      detail: { team_idx: 1 },
+    })).toMatchObject({ handled: true });
+    expect(sendAction).toHaveBeenLastCalledWith('recall_repair_team', expect.objectContaining({
+      team_idx: 1, control_system_id: 'repair',
+    }));
+
+    // The other idle team still has nothing to recall.
+    sendAction.mockClear();
+    expect(actions.activate(REPAIR_RECALL_ACTION_ID, {
+      context: REPAIR_ACTION_CONTEXT,
+      detail: { team_idx: 0 },
+    })).toMatchObject({ claimed: true, handled: false });
+    expect(sendAction).not.toHaveBeenCalled();
   });
 
   it('derives all three auxiliary toggles from authoritative family state', () => {

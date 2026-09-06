@@ -2326,6 +2326,58 @@ fn recall_repair_team_control_system_round_trips() {
     );
 }
 
+/// DispatchRepairTeam naming the FIELD target round-trips (issue #1386) — the
+/// field row on a repair team's own card.
+///
+/// The `External` arm carries no uuid: the destination is Tactical's lock, which
+/// the server resolves exactly as it does for the fieldless
+/// `DispatchExternalRepair`, so the only thing the console says is which team
+/// crosses over. Pinned beside the station form because `repair-dispatch.js`
+/// builds all three arms through one `repairTargetFor`.
+#[test]
+fn dispatch_repair_team_to_the_field_target_round_trips() {
+    let msg = ClientMessage::ControlSystem {
+        target: SystemId(crate::ship::system_registry::REPAIR_SYSTEM_ID.into()),
+        payload: SystemControlPayload::DispatchRepairTeam {
+            team_idx: 2,
+            target: crate::core::messages::RepairTarget::External,
+        },
+    };
+    assert_client_roundtrip(&JsonCodec, msg.clone());
+    assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+
+    let encoded = JsonCodec.encode_client(&msg).unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"type":"ControlSystem","data":{"target":"repair","payload":{"type":"DispatchRepairTeam","data":{"team_idx":2,"target":{"type":"External"}}}}}"#,
+        "RepairTarget::External wire shape must match what repair-dispatch.js sends"
+    );
+
+    // The two older arms are unmoved by the new one.
+    let station = ClientMessage::ControlSystem {
+        target: SystemId(crate::ship::system_registry::REPAIR_SYSTEM_ID.into()),
+        payload: SystemControlPayload::DispatchRepairTeam {
+            team_idx: 0,
+            target: crate::core::messages::RepairTarget::Station(StationId("helm".into())),
+        },
+    };
+    assert_eq!(
+        JsonCodec.encode_client(&station).unwrap(),
+        r#"{"type":"ControlSystem","data":{"target":"repair","payload":{"type":"DispatchRepairTeam","data":{"team_idx":0,"target":{"type":"Station","data":"helm"}}}}}"#,
+    );
+    let core = ClientMessage::ControlSystem {
+        target: SystemId(crate::ship::system_registry::REPAIR_SYSTEM_ID.into()),
+        payload: SystemControlPayload::DispatchRepairTeam {
+            team_idx: 0,
+            target: crate::core::messages::RepairTarget::Core,
+        },
+    };
+    assert_eq!(
+        JsonCodec.encode_client(&core).unwrap(),
+        r#"{"type":"ControlSystem","data":{"target":"repair","payload":{"type":"DispatchRepairTeam","data":{"team_idx":0,"target":{"type":"Core"}}}}}"#,
+    );
+}
+
 /// SetRepairTargetPriority command round-trip (issue #1015) — the repair
 /// console's damaged-systems taps. Unlike `SetRepairPriority` above it
 /// carries no ordinal at all: the host resolves which team's sweep covers
@@ -2769,6 +2821,10 @@ fn repair_blackboard_external_dispatch_fields_round_trip_and_are_additive() {
         external_dispatch_target: Some("00000000-0000-8000-8000-000000000042".into()),
         external_dispatch_target_name: Some("world.probe_external_repair.entity.ally.name".into()),
         external_dispatch_refusal: Some("repair.dispatch.refused.out_of_range".into()),
+        // Which team went, and how the target it is working is doing (issue
+        // #1386) — the two fields the ABROAD card is drawn from.
+        external_dispatch_team_idx: Some(2),
+        external_dispatch_target_condition: Some(0.42),
         ..Default::default()
     });
     let json = serde_json::to_string(&dispatching).unwrap();
@@ -2785,6 +2841,16 @@ fn repair_blackboard_external_dispatch_fields_round_trip_and_are_additive() {
         "a repair blackboard with no dispatch capability must carry no absent-field noise: \
          {json}"
     );
+
+    // A payload written before #1386 — capability present, nobody abroad —
+    // still decodes, and reads as no team abroad rather than as team 0.
+    let older = r#"{"kind":"Repair","data":{"teams":[],"travel_duration_secs":5.0,"external_dispatch_range":800.0}}"#;
+    let decoded = serde_json::from_str::<SystemBlackboard>(older).unwrap();
+    let SystemBlackboard::Repair(bb) = decoded else {
+        panic!("expected a repair blackboard");
+    };
+    assert_eq!(bb.external_dispatch_team_idx, None);
+    assert_eq!(bb.external_dispatch_target_condition, None);
 }
 
 /// The start/stop transfer commands (issue #1160).

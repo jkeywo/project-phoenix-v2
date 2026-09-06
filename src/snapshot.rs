@@ -519,7 +519,23 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// Station command queue. A format-17 capture taken after PreUpdate but before
 /// the command's FixedUpdate delivery can otherwise say Applied while losing
 /// the only source-stripped payload that continues that effect.
-pub const SNAPSHOT_FORMAT: u32 = 18;
+///
+/// Format 19 carries WHICH repair team is abroad on a field repair (issue
+/// #1386). Until now the external claim was a count and the team it meant was
+/// re-derived by truncating the idle list, so a save recorded only the target;
+/// a seat can choose the team now, and the claim names it. There is no honest
+/// migration for a format-18 record holding a live claim: the truncation rule
+/// that used to name the team read the WHOLE idle list, which the record does
+/// not carry, and defaulting the index to 0 would resume the wrong slot as
+/// abroad while leaving the real one double-booked — a divergence the digest
+/// would then report as corruption of a save that is perfectly intact. The
+/// format gate refuses it rather than guessing, which is why
+/// [`crate::console::repair::ExternalRepairSaveState::team_idx`] is mandatory
+/// with no serde default. A format-18 save with NO live claim is refused by the
+/// same gate, on the same rule every other bump on this ladder keeps: the
+/// version is a statement about the rules the save was written under, not about
+/// which of its rows happen to be empty.
+pub const SNAPSHOT_FORMAT: u32 = 19;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -846,8 +862,8 @@ pub struct EntityState {
     /// predates this vocabulary refuses the template outright.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dock: Option<crate::dock::DockSaveState>,
-    /// The ship's external repair-dispatch state (issue #1161) — which ally or
-    /// structure a repair team is working abroad, if any.
+    /// The ship's external repair-dispatch state (issues #1161, #1386) — which
+    /// ally or structure a repair team is working abroad, and which team it is.
     ///
     /// A **projection**, not the whole
     /// [`crate::console::repair::external_server::ExternalRepairDispatch`]
@@ -859,8 +875,12 @@ pub struct EntityState {
     /// out helping an ally (and, with it, one more free team than the hull really
     /// has). `deny_unknown_fields` on the repair table means a build predating
     /// `[repair.external_dispatch]` refuses the template outright rather than
-    /// writing a same-content-digest save to disagree with, which is why this did
-    /// not bump [`SNAPSHOT_FORMAT`].
+    /// writing a same-content-digest save to disagree with, which is why #1161
+    /// did not bump [`SNAPSHOT_FORMAT`].
+    ///
+    /// Issue #1386 DID bump it, because the projection widened to name the team
+    /// holding the claim and no earlier record carries one — see format 19 on
+    /// [`SNAPSHOT_FORMAT`]'s ladder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_repair: Option<crate::console::repair::ExternalRepairSaveState>,
     /// The ship's transfer-umbilical state (issue #1160) — whether the flow is

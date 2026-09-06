@@ -106,40 +106,55 @@ impl RepairTeams {
         self.slots.iter().position(|s| matches!(s, TeamSlot::Idle))
     }
 
-    /// Which teams may be given new internal work, ascending, with `committed`
-    /// of them held back for an external operation (issue #1027).
+    /// Which teams may be given new internal work, ascending, with the team
+    /// held abroad by an external dispatch left out (issues #1027, #1386).
     ///
     /// **The one place "which teams are available" is answered.** The AI
     /// dispatcher and a human at the repair console both read it, so a
     /// field-repair's commitment cannot be undercut by whichever path happened
     /// not to know about it.
     ///
-    /// The commitment eats from the **top** of the idle list, so the teams that
-    /// remain are still the lowest-numbered ones: the AI's deterministic visit
-    /// order is unchanged, and a ship with spare capacity behaves exactly as it
-    /// did before commitments existed. Held back rather than dispatched — a
-    /// committed team is still `Idle` in every readout, because it has not gone
-    /// anywhere. It is simply spoken for.
-    pub fn free_team_indices(&self, committed: u8) -> Vec<usize> {
-        let mut idle: Vec<usize> = self
-            .slots
+    /// `abroad` NAMES the excluded slot rather than counting it. Until #1386 the
+    /// commitment was a count that ate from the **top** of the idle list, which
+    /// answered "how many are spoken for" and left "which one" to be guessed
+    /// identically by four separate readers — and the guess was only ever right
+    /// because nobody could choose. Now that a seat picks the team that crosses
+    /// over, the answer has to name it. Held back rather than dispatched, as
+    /// before: an abroad team is still `Idle` in every readout, because the slot
+    /// machinery models a walk across this hull and it has not taken one.
+    pub fn free_team_indices(&self, abroad: Option<usize>) -> Vec<usize> {
+        self.slots
             .iter()
             .enumerate()
-            .filter_map(|(i, slot)| matches!(slot, TeamSlot::Idle).then_some(i))
-            .collect();
-        idle.truncate(idle.len().saturating_sub(usize::from(committed)));
+            .filter_map(|(i, slot)| {
+                (matches!(slot, TeamSlot::Idle) && abroad != Some(i)).then_some(i)
+            })
+            .collect()
+    }
+
+    /// [`Self::free_team_indices`] with a further `reserved` teams held back
+    /// from the **end** of the list (issue #1162's critical-repair reserve).
+    ///
+    /// A reserve is a COUNT and stays one: it says "keep a team spare for the
+    /// hull's own knocked-out systems" and names no slot, unlike the external
+    /// claim above it. Eating from the top of the idle list keeps the
+    /// lowest-numbered teams available, so the AI's deterministic visit order is
+    /// unchanged.
+    pub fn free_team_indices_reserving(&self, abroad: Option<usize>, reserved: u8) -> Vec<usize> {
+        let mut idle = self.free_team_indices(abroad);
+        idle.truncate(idle.len().saturating_sub(usize::from(reserved)));
         idle
     }
 
-    /// Whether `team_idx` is one of the `committed` teams held back for an
-    /// external operation (issue #1027), and so may not be given new work.
+    /// Whether `team_idx` is the team held abroad by an external dispatch
+    /// (issues #1027, #1386), and so may not be given new internal work.
     ///
     /// Only ever true of an idle team: a team already out on an internal job was
-    /// never part of the commitment, and recalling or redirecting it stays the
-    /// console's business.
-    pub fn is_committed_to_operation(&self, team_idx: usize, committed: u8) -> bool {
-        matches!(self.slots.get(team_idx), Some(TeamSlot::Idle))
-            && !self.free_team_indices(committed).contains(&team_idx)
+    /// never the one abroad, and recalling or redirecting it stays the console's
+    /// business. Checking the slot as well as the index is what keeps that true
+    /// of a stale claim naming a slot that has since been dispatched internally.
+    pub fn is_committed_to_operation(&self, team_idx: usize, abroad: Option<usize>) -> bool {
+        matches!(self.slots.get(team_idx), Some(TeamSlot::Idle)) && abroad == Some(team_idx)
     }
 
     /// Dispatch the team at `team_idx` to the given system.

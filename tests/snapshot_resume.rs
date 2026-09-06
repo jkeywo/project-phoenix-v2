@@ -6930,6 +6930,159 @@ fn a_save_written_before_the_weapons_hold_is_refused_on_format() {
     );
 }
 
+// ── Issue #1386: the team abroad on a field repair survives the save ─────────
+
+/// Frames to run before the field-repair capture. Far enough in that
+/// `GameStart` has spawned the roster and every hull carries its components.
+const FIELD_REPAIR_CAPTURE_AT: u64 = 60;
+
+/// Put one ship's repair team abroad on a named target, and say which ship and
+/// which target it was.
+///
+/// Written straight onto the component the way `power_all_weapons_down` writes
+/// the reactor above: what this test is about is the SAVE boundary, not the
+/// admission path (`console::repair::external_server`'s own tests drive the two
+/// dispatch verbs end to end), and reaching the same state through commands
+/// would only add a lock, a separation and a tick budget to a claim about serde.
+///
+/// Team **1** on purpose. `ExternalRepairSaveState::team_idx` has no serde
+/// default and `ExternalRepairDispatch::new` starts at 0, so a claim naming team
+/// 0 would round-trip identically whether the field travelled or was dropped —
+/// the assertion would prove nothing. `alliance_destroyer` authors
+/// `repair_team_count = 2`, so team 1 is a real slot on the hull that carries the
+/// capability.
+fn send_a_team_abroad(world: &mut bevy::prelude::World) -> (String, String) {
+    use project_phoenix::console::repair::ExternalRepairDispatch;
+    use project_phoenix::entities::spawner::EntityUuid;
+
+    // Any other entity in the world stands in for the ally: the claim records a
+    // uuid, and nothing about the save boundary asks what is at the far end.
+    let mut uuids = world.query::<&EntityUuid>();
+    let mut ids: Vec<String> = uuids.iter(world).map(|u| u.0.clone()).collect();
+    ids.sort();
+
+    let mut operators = world.query::<(&EntityUuid, &mut ExternalRepairDispatch)>();
+    let (ship, target) = {
+        let (uuid, _) = operators
+            .iter_mut(world)
+            .next()
+            .expect("combat_test fields a destroyer, which authors [repair.external_dispatch]");
+        let ship = uuid.0.clone();
+        let target = ids
+            .iter()
+            .find(|id| **id != ship)
+            .expect("the world holds more than one entity")
+            .clone();
+        (ship, target)
+    };
+    let (_, mut dispatch) = operators
+        .iter_mut(world)
+        .find(|(uuid, _)| uuid.0 == ship)
+        .expect("the operator is still there");
+    dispatch.claim(1, Some(target.clone()));
+    (ship, target)
+}
+
+/// Every live external-repair claim in a payload, as `(ship, target, team)`.
+fn abroad_claims(payload: &PhoenixSnapshot) -> Vec<(String, String, u8)> {
+    let mut rows: Vec<(String, String, u8)> = payload
+        .entities
+        .iter()
+        .filter_map(|e| {
+            let claim = e.external_repair.as_ref()?;
+            let target = claim.dispatched_target.clone()?;
+            Some((e.uuid.clone(), target, claim.team_idx))
+        })
+        .collect();
+    rows.sort();
+    rows
+}
+
+/// The same, read back off the live components rather than the payload.
+fn live_abroad_claims(world: &mut bevy::prelude::World) -> Vec<(String, String, u8)> {
+    use project_phoenix::console::repair::ExternalRepairDispatch;
+    use project_phoenix::entities::spawner::EntityUuid;
+
+    let mut query = world.query::<(&EntityUuid, &ExternalRepairDispatch)>();
+    let mut rows: Vec<(String, String, u8)> = query
+        .iter(world)
+        .filter_map(|(uuid, dispatch)| {
+            let team = dispatch.abroad_team()? as u8;
+            Some((uuid.0.clone(), dispatch.dispatched_target.clone()?, team))
+        })
+        .collect();
+    rows.sort();
+    rows
+}
+
+/// **Issue #1386.** A crew that sent their SECOND repair team to help an ally
+/// get that team back — not the first one, and not a hull with one more free
+/// team than it really has.
+///
+/// Sharp for the reason the hold-fire and power-down tests above are: the
+/// resumed app does not start from the save. It boots the same world file, whose
+/// destroyer spawns with both teams home and no claim at all, and only then has
+/// the capture laid over it.
+#[test]
+fn the_team_abroad_on_a_field_repair_comes_back_with_the_claim() {
+    let mut live = boot(&combat_test_args());
+    step(&mut live, FIELD_REPAIR_CAPTURE_AT);
+
+    let (ship, target) = send_a_team_abroad(live.world_mut());
+    let payload = capture(live.world());
+    assert_eq!(
+        abroad_claims(&payload),
+        vec![(ship.clone(), target.clone(), 1)],
+        "the capture records WHICH team is abroad beside the target it is working"
+    );
+
+    let mut resumed = boot_to_restore_point(&combat_test_args(), &payload);
+    assert!(
+        live_abroad_claims(resumed.world_mut()).is_empty(),
+        "precondition: the freshly booted world has nobody abroad, so nothing below          can be satisfied by a bootstrap coincidence"
+    );
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+
+    assert_eq!(
+        live_abroad_claims(resumed.world_mut()),
+        vec![(ship, target, 1)],
+        "the claim comes back naming the same team on the same target"
+    );
+}
+
+/// A save written before the abroad team was named is refused on **format**.
+///
+/// There is no honest migration. The rule that used to say which team a claim
+/// meant read the whole idle list and took the top of it, and a format-18
+/// payload carries neither that list nor the answer; defaulting the index to 0
+/// would resume the wrong slot as abroad while leaving the real one double-booked
+/// — a divergence the digest would then report as corruption of a save that is
+/// perfectly intact. Refusing on the dimension that actually moved is the only
+/// thing that can say what happened.
+#[test]
+fn a_save_written_before_the_abroad_team_was_named_is_refused_on_format() {
+    let mut live = boot(&combat_test_args());
+    step(&mut live, FIELD_REPAIR_CAPTURE_AT);
+    send_a_team_abroad(live.world_mut());
+
+    let payload = capture(live.world());
+    let digest = world_digest(live.world());
+    let current = current_versions(COMBAT_TEST);
+
+    let previous = Versions::new(SNAPSHOT_FORMAT - 1, SIMULATION_RULES, current.content);
+    let run = run_for(payload, digest, SEED, COMBAT_TEST, previous);
+    let store = FileStore::new(scratch("external-repair-team-format"));
+    save_to(&store, "autosave", &run).expect("the save is written");
+
+    let refusal = load_from(&store, "autosave", &current).expect_err("this build refuses it");
+    assert!(
+        matches!(refusal, LoadRefusal::Moved(Moved::Format { .. })),
+        "the refusal names the dimension that moved: {refusal}"
+    );
+}
+
 // ── Issues #1107–#1109: a Command stance survives the save ───────────────────
 
 /// The saved Command stance selections in a payload, flattened to

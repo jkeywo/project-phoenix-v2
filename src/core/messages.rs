@@ -2167,6 +2167,21 @@ pub struct WorldData {
 pub enum RepairTarget {
     Station(StationId),
     Core,
+    /// **The field target off the ship** (issue #1386): whatever Tactical
+    /// currently holds locked, worked by a team sent abroad.
+    ///
+    /// Carries no uuid on purpose. The destination is not the console's to
+    /// choose — the server resolves it off this ship's own `TacticalRadarSelection`
+    /// exactly as the fieldless [`SystemControlPayload::DispatchExternalRepair`]
+    /// always has — so a `DispatchRepairTeam { team_idx, target: External }` says
+    /// only WHICH TEAM crosses over, which is the one part of the order nothing
+    /// server-side can resolve for itself.
+    ///
+    /// Unlike its two siblings this arm is NOT resolved by the repair router's
+    /// `resolve_repair_target`: an abroad team does not travel to a hull system,
+    /// so `handle_external_repair_commands` commits it to the ship's one external
+    /// claim instead. See `crate::console::repair::external_server`.
+    External,
 }
 
 /// Typed payload sent to a specific ship system through
@@ -2287,6 +2302,18 @@ pub enum SystemControlPayload {
     },
     LoadTube,
     UnloadTube,
+    /// Send one NAMED repair team to a destination: a station, the ownerless
+    /// `core` bucket, or — since issue #1386 — the field target off the ship
+    /// ([`RepairTarget::External`]).
+    ///
+    /// The three arms take two different routes on the host and that is
+    /// deliberate. A station or `core` order is a walk across this hull, applied
+    /// by `handle_dispatch_repair_team` through `RepairTeams::dispatch`; the
+    /// field order is a CLAIM against the ship's one external dispatch, applied
+    /// by `handle_external_repair_commands` alongside the fieldless
+    /// [`SystemControlPayload::DispatchExternalRepair`] the AI emits. One verb,
+    /// one console shape, because a seat choosing where to send a team should
+    /// not have to know which of those two things it is asking for.
     DispatchRepairTeam {
         team_idx: u8,
         target: RepairTarget,
@@ -2295,12 +2322,18 @@ pub enum SystemControlPayload {
     /// (issue #1385), sending it back to standby. Targets the `repair` system,
     /// so it takes exactly the admission path `DispatchRepairTeam` takes.
     ///
-    /// Internal teams only. The team abroad on a field repair is recalled by
-    /// [`SystemControlPayload::RecallExternalRepair`], which carries no index
-    /// because a ship dispatches one team abroad at a time; this one NAMES its
-    /// team, for the same reason the internal dispatch does — a hull has
+    /// **The one recall verb** since issue #1386: it brings back whatever the
+    /// named team is doing. A `Travelling` or `Repairing` team walks home
+    /// through the state machine below; the team abroad on a field repair has
+    /// its claim cleared instead, which is the same effect
+    /// [`SystemControlPayload::RecallExternalRepair`] has — that fieldless
+    /// sibling stays for the AI / operate-directive vocabulary, which names no
+    /// team because the host picked one.
+    ///
+    /// It NAMES its team for the reason the internal dispatch does — a hull has
     /// several teams out on several jobs and nothing server-side can say which
-    /// of them is meant.
+    /// of them is meant — and naming it is what lets ONE console control cover
+    /// both kinds of job.
     ///
     /// Recall is a return TRIP, not a teleport: a `Travelling` team turns round
     /// where it stands (its `remaining` is however far it had already come) and
@@ -2311,8 +2344,9 @@ pub enum SystemControlPayload {
     /// A recalled team is orderable again on the very next tick — a dispatch
     /// queues onto its `Returning` slot — but it is not `Idle` until it is home.
     ///
-    /// A team that is `Idle` or already `Returning` has nothing to recall, and
-    /// the order is refused rather than silently reshaping the slot.
+    /// A team that is `Idle` (and not the one abroad) or already `Returning`
+    /// has nothing to recall, and the order is refused rather than silently
+    /// reshaping the slot.
     RecallRepairTeam {
         team_idx: u8,
     },
@@ -5482,10 +5516,33 @@ pub struct RepairBlackboard {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_dispatch_target_name: Option<String>,
     /// The `strings.csv` id of the last dispatch refusal (issue #1161) — no free
-    /// team, no designated target, or out of range — the console resolves
-    /// through `t()`. `None` when idle or working cleanly.
+    /// team, no designated target, out of range, the named team busy, or another
+    /// team already abroad — the console resolves through `t()`. `None` when idle
+    /// or working cleanly.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_dispatch_refusal: Option<String>,
+    /// **Which team is abroad** (issue #1386) — the slot index the ship's one
+    /// external claim currently holds, or `None` when nobody is out there.
+    ///
+    /// This replaces the console's old inference. Until #1386 the claim was a
+    /// COUNT and every reader reconstructed "which slot" by truncating the idle
+    /// list, so three separate client call sites each rebuilt the same guess and
+    /// any of them could disagree with the host. The claim names its team now, so
+    /// the card that shows ABROAD is the card of the team that actually went.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_dispatch_team_idx: Option<u8>,
+    /// The condition fraction (0.0–1.0) of the target a team is working abroad
+    /// (issue #1386), or `None` when no team is out or the target carries no
+    /// infrastructure condition track.
+    ///
+    /// Published per tick by the repair owner, because the abroad card's bar IS
+    /// this track: a team abroad has no travel or repair progress of its own to
+    /// show — it is already there — so the honest thing to draw is the work it is
+    /// doing. `InfrastructureSnapshot`'s own condition fraction is minted at
+    /// spawn/welcome only, which is exactly the wrong cadence for a bar that is
+    /// supposed to climb while the crew watch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_dispatch_target_condition: Option<f32>,
 }
 
 /// Raw sim truth for the Comms system, published each tick into the ship

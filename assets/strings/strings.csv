@@ -636,7 +636,6 @@ component.repair_teams.title,Repair teams panel heading,REPAIR TEAMS
 component.repair_teams.empty,Repair panel when the ship has no repair teams,[NO REPAIR TEAMS]
 component.repair_teams.no_targets,Repair team row when nothing needs repair,[No repair targets]
 component.repair_teams.target,Repair team row: current assignment. {target} is the system name,Target: {target}
-component.repair_teams.external_commitment,Repair team row when its otherwise-idle slot is reserved by a live field-repair dispatch,[Committed to field repair]
 component.sensor_panel.no_target,Sensor detail panel when no target is locked,NO TARGET
 component.sensor_panel.brg,Sensor readout key: bearing to target,BRG
 component.sensor_panel.rng,Sensor readout key: range to target,RNG
@@ -683,6 +682,7 @@ component.repair_teams.status.idle,Repair team status badge: waiting for dispatc
 component.repair_teams.status.travelling,Repair team status badge: moving to its target,TRAVELLING
 component.repair_teams.status.repairing,Repair team status badge: actively repairing,REPAIRING
 component.repair_teams.status.returning,Repair team status badge: returning to standby,RETURNING
+component.repair_teams.status.abroad,"Repair team status badge: the team is off the ship working the field target Tactical has locked (issue #1386)",ABROAD
 component.repair_teams.damaged_title,Repair console heading over the list of damaged systems a player can tap to prioritise,[DAMAGED SYSTEMS]
 component.repair_teams.tier.damaged,Damage tier chip on a damaged-systems row: lightly damaged,[DMG]
 component.repair_teams.tier.disabled,Damage tier chip on a damaged-systems row: badly damaged and offline,[DISABLED]
@@ -1475,6 +1475,8 @@ console.dock.docked,"Helm console — dock status prefix when the two hulls are 
 repair.dispatch.refused.no_free_team,"External repair-dispatch refusal — every repair team is already out on a job or spoken for, so none is free to send abroad (issue #1161)","[No team free to dispatch.]"
 repair.dispatch.refused.no_target,"External repair-dispatch refusal — the ship has designated no target, so there is nowhere to send a team (issue #1161)","[No target — designate an ally or structure.]"
 repair.dispatch.refused.out_of_range,"External repair-dispatch refusal — the designated target is past the authored dispatch range (issue #1161)","[Out of range — close on the target.]"
+repair.dispatch.refused.team_busy,"External repair-dispatch refusal — the named repair team is already out on an internal job, so it cannot cross over (issue #1386)","[That team is busy — pick another.]"
+repair.dispatch.refused.already_abroad,"External repair-dispatch refusal — another repair team already holds the ship's one field-repair claim; recall it before sending a second (issue #1386)","[Another team is already abroad — recall it first.]"
 console.repair.dispatch,"Repair console — External repair-dispatch panel heading (issue #1161)","[Field Repair]"
 console.repair.dispatch.send,"Repair console — button that dispatches a repair team to the designated target (issue #1161)","[Dispatch]"
 console.repair.dispatch.recall,"Repair console — button that recalls a dispatched repair team home (issue #1161)","[Recall]"

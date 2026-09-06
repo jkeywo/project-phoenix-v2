@@ -11,6 +11,7 @@
  */
 
 import { familySystemId, familyView } from '../console-payload.js';
+import { EXTERNAL_REPAIR_TARGET } from '../repair-dispatch.js';
 import { createSemanticActionRegistry } from '../semantic-action-registry.js';
 
 export const POWER_ACTION_CONTEXT = 'power';
@@ -232,51 +233,80 @@ function choosePowerChange(view, direction, detail) {
   return null;
 }
 
+// Which slot the ship's one field-repair claim holds, or `null` (issue #1386).
+// Authoritative: the host names it on the repair blackboard. Before #1386 this
+// was reconstructed here (and in three other places) by truncating the idle
+// list, which was only ever right because nobody could choose which team went.
+function abroadTeamId(view) {
+  const idx = view && view.external_dispatch ? view.external_dispatch.team_idx : null;
+  return Number.isInteger(idx) ? idx : null;
+}
+
 function chooseRepairDispatch(view, detail) {
   if (!view || view.repair_auto) return null;
   const teams = Array.isArray(view.teams) ? view.teams : [];
   const targets = Array.isArray(view.dispatch_targets) ? view.dispatch_targets : [];
   const requestedTeam = detail && Number.isInteger(detail.team_idx) ? detail.team_idx : null;
   const requestedTarget = detail && typeof detail.target === 'string' ? detail.target : null;
-  // A live field-repair dispatch reserves one otherwise-Idle slot. The
-  // authoritative RepairTeams pool keeps the lowest-numbered idle slots free
-  // and takes commitments from the end of that list; mirror that ordering so
-  // parameter-free input does not select a slot the owner must refuse.
-  const idle = teams.filter((entry) => (
-    entry && Number.isInteger(entry.id) && entry.status === 'idle'
+  // The team abroad is Idle on the wire but is not available: it is already
+  // somewhere. Excluded BY NAME off the claim, so parameter-free input does not
+  // select the one slot the owner must refuse.
+  const abroad = abroadTeamId(view);
+  const available = teams.filter((entry) => (
+    entry && Number.isInteger(entry.id) && entry.status === 'idle' && entry.id !== abroad
   ));
-  const externallyCommitted = view.external_dispatch?.target != null ? 1 : 0;
-  const available = idle.slice(0, idle.length - Math.min(idle.length, externallyCommitted));
   const team = requestedTeam == null
     ? available[0]
     : available.find((entry) => entry.id === requestedTeam);
+  if (!team) return null;
+  // The field target is not in `dispatch_targets` and never will be — the host
+  // builds that list out of the hull's own stations, and this destination is off
+  // the ship (issue #1386). It is reachable only by naming it, so a
+  // parameter-free activation still picks a station: "send somebody somewhere"
+  // should not quietly mean "send somebody to whatever Tactical is looking at".
+  if (requestedTarget === EXTERNAL_REPAIR_TARGET) {
+    // Offered only on a hull that authored the capability, and only while the
+    // one claim is free — the two stale-UI cases the owner refuses.
+    const canReachTheField = view.external_dispatch != null && abroad == null;
+    return canReachTheField
+      ? { team_idx: team.id, target: EXTERNAL_REPAIR_TARGET }
+      : null;
+  }
   const target = requestedTarget == null
     ? targets.find((entry) => entry && typeof entry.id === 'string' && entry.id)
     : targets.find((entry) => entry && entry.id === requestedTarget);
-  return team && target ? { team_idx: team.id, target: target.id } : null;
+  return target ? { team_idx: team.id, target: target.id } : null;
 }
 
-// Which teams a recall may name (issue #1385). A team is recallable exactly
-// while it is out on an internal job — travelling to a station or working on
-// site. An idle team has nothing to recall and a returning one is already on
-// its way, so both are refused by the owner; mirroring that reading here keeps
-// a parameter-free activation from selecting a slot the host must refuse. It is
-// a reading of the AUTHORITATIVE status, not a second copy of the host's rule:
-// the owner still decides, and still answers on the feedback seam.
-function isRecallableTeam(entry) {
+// Which teams a recall may name (issues #1385, #1386). A team is recallable
+// exactly while it is OUT — travelling to a station, working on site, or abroad
+// on the field target. An idle team has nothing to recall and a returning one is
+// already on its way, so both are refused by the owner; mirroring that reading
+// here keeps a parameter-free activation from selecting a slot the host must
+// refuse. It is a reading of the AUTHORITATIVE status and the AUTHORITATIVE
+// claim, not a second copy of the host's rule: the owner still decides, and
+// still answers on the feedback seam.
+//
+// The abroad team has to be named separately because its wire status is `Idle`:
+// it never walked anywhere on this hull, so the slot machinery has nothing to
+// say about it and the claim is the only thing that does.
+function isRecallableTeam(entry, abroad) {
   return !!entry
     && Number.isInteger(entry.id)
-    && (entry.status === 'travelling' || entry.status === 'repairing');
+    && (entry.status === 'travelling'
+      || entry.status === 'repairing'
+      || (entry.status === 'idle' && entry.id === abroad));
 }
 
 function chooseRepairRecall(view, detail) {
   if (!view || view.repair_auto) return null;
   const teams = Array.isArray(view.teams) ? view.teams : [];
+  const abroad = abroadTeamId(view);
   const requested = detail && Number.isInteger(detail.team_idx) ? detail.team_idx : null;
   const candidates = requested == null
     ? teams
     : teams.filter((entry) => entry && entry.id === requested);
-  const team = candidates.find(isRecallableTeam);
+  const team = candidates.find((entry) => isRecallableTeam(entry, abroad));
   return team ? { team_idx: team.id } : null;
 }
 

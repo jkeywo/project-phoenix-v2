@@ -260,40 +260,137 @@ describe('PhRepairTeams', () => {
       .toBe(t('console.repair.dispatch'));
   });
 
-  it('sends the fieldless dispatch_external_repair from the field row', () => {
+  // Issue #1386: the field row is one destination among the stations and sends
+  // the SAME verb, naming this card's own team. Before it sent the fieldless
+  // command and the host picked whoever was free.
+  it('sends a named dispatch to the field target from the field row', () => {
     const sendAction = vi.fn();
     const { el } = setup({ sendAction });
     el.state = {
-      teams: [{ id: 0, label: 'T1', status: 'idle' }],
+      teams: [
+        { id: 0, label: 'T1', status: 'idle' },
+        { id: 1, label: 'T2', status: 'idle' },
+      ],
       targets: [{ id: 'helm', label: 'Helm', damage_pct: 0.4 }],
-      external_dispatch: { range: 800, target: null, target_name: null },
+      external_dispatch: { range: 800, target: null, target_name: null, team_idx: null },
     };
-    select(el, 0);
-    card(el, 0).querySelector('.field-btn').click();
-    expect(sendAction).toHaveBeenCalledWith('dispatch_external_repair', {});
+    select(el, 1);
+    card(el, 1).querySelector('.field-btn').click();
+    expect(sendAction).toHaveBeenCalledWith(
+      'dispatch_repair_team',
+      expect.objectContaining({ team_idx: 1, target: 'external' }),
+    );
   });
 
-  // The EXTERNAL recall must not be reachable from a destination list: while a
-  // team is abroad the field row is a readout, so no tap on it can reach the
-  // recall half of the shared dispatch/recall action. The card’s own RECALL
-  // (issue #1385) is a different verb on a different row and never appears on
-  // an idle card at all.
-  it('never offers the external recall: the field row is a readout while a team is abroad', () => {
+  // The EXTERNAL recall must not be reachable from a destination list: while
+  // ANOTHER team already holds the ship's one claim the field row is a readout,
+  // and it carries that refusal's own text so the crew are told what to do
+  // instead. The way back is the abroad card's own RECALL row.
+  it('makes the field row a readout with the refusal text while another team is abroad', () => {
     const sendAction = vi.fn();
     const { el } = setup({ sendAction });
     el.state = {
-      teams: [{ id: 0, label: 'T1', status: 'idle' }],
+      teams: [
+        { id: 0, label: 'T1', status: 'idle' },
+        { id: 1, label: 'T2', status: 'idle' },
+      ],
       targets: [{ id: 'helm', label: 'Helm', damage_pct: 0.4 }],
-      external_dispatch: { range: 800, target: 'uuid-1', target_name: 'console.repair.dispatch' },
+      external_dispatch: {
+        range: 800, target: 'uuid-1', target_name: 'console.repair.dispatch', team_idx: 1,
+      },
     };
     select(el, 0);
     const field = card(el, 0).querySelector('.field-btn');
     expect(field.disabled).toBe(true);
-    expect(field.title).toBe(t('console.repair.dispatch.working'));
+    expect(field.title).toBe(t('repair.dispatch.refused.already_abroad'));
     field.click();
     expect(sendAction).not.toHaveBeenCalled();
     expect(el.shadowRoot.textContent).not.toContain(t('console.repair.dispatch.recall'));
     expect(card(el, 0).querySelector('.recall-btn')).toBeNull();
+  });
+
+  // ── The team abroad (issue #1386) ────────────────────────────────────────
+
+  const ABROAD_STATE = {
+    teams: [
+      { id: 0, label: 'T1', status: 'idle' },
+      { id: 1, label: 'T2', status: 'idle' },
+    ],
+    targets: [{ id: 'helm', label: 'Helm', damage_pct: 0.4 }],
+    external_dispatch: {
+      range: 800,
+      target: 'uuid-1',
+      target_name: 'console.repair.dispatch',
+      team_idx: 1,
+      target_condition: 0.6,
+    },
+  };
+
+  it('paints the team named by the claim ABROAD, with the target it is working', () => {
+    const { el } = setup();
+    el.state = ABROAD_STATE;
+
+    const abroad = card(el, 1);
+    expect(abroad.textContent).toContain(t('component.repair_teams.status.abroad'));
+    expect(abroad.textContent).toContain(
+      t('component.repair_teams.target', { target: t('console.repair.dispatch') }),
+    );
+    // …and the OTHER idle team is untouched: the claim names one slot, so no
+    // second card may read as if it had gone anywhere.
+    expect(card(el, 0).textContent).toContain(t('component.repair_teams.status.idle'));
+  });
+
+  it('fills the abroad card\u2019s bar from the target\u2019s own condition track', () => {
+    const { el } = setup();
+    el.state = ABROAD_STATE;
+
+    const fill = card(el, 1).querySelector('.progress-fill');
+    expect(fill.classList.contains('abroad')).toBe(true);
+    expect(fill.style.width).toBe('60%');
+
+    // A target with no condition track banks nothing, so the bar draws nothing
+    // rather than inventing a number.
+    el.state = {
+      ...ABROAD_STATE,
+      external_dispatch: { ...ABROAD_STATE.external_dispatch, target_condition: null },
+    };
+    expect(card(el, 1).querySelector('.progress-fill').style.width).toBe('0%');
+  });
+
+  it('offers the abroad team RECALL \u2014 the one recall verb, naming its team', () => {
+    const sendAction = vi.fn();
+    const { el } = setup({ sendAction });
+    el.state = ABROAD_STATE;
+
+    const top = select(el, 1);
+    expect(top.disabled).toBe(false);
+    expect(top.getAttribute('aria-expanded')).toBe('true');
+    const recall = card(el, 1).querySelector('.recall-btn');
+    expect(recall).not.toBeNull();
+    recall.click();
+    expect(sendAction).toHaveBeenCalledWith(
+      'recall_repair_team',
+      expect.objectContaining({ team_idx: 1 }),
+    );
+    // No destinations on an abroad card: it is already somewhere.
+    expect(card(el, 1).querySelector('.field-btn')).toBeNull();
+    expect(card(el, 1).querySelectorAll('.btn').length).toBe(1);
+  });
+
+  // The claim names an index, and the SLOT still has to agree. A stale claim
+  // naming a team the host has since sent across this hull must not paint that
+  // team ABROAD while it walks.
+  it('ignores a claim naming a team that is out on an internal job', () => {
+    const { el } = setup();
+    el.state = {
+      ...ABROAD_STATE,
+      teams: [
+        { id: 0, label: 'T1', status: 'idle' },
+        { id: 1, label: 'T2', status: 'travelling', target: 'Helm', progress_pct: 0.3 },
+      ],
+    };
+    expect(card(el, 1).textContent).toContain(t('component.repair_teams.status.travelling'));
+    expect(card(el, 1).textContent).not.toContain(t('component.repair_teams.status.abroad'));
   });
 
   it('disables the field row while repair is on AUTO', () => {
@@ -308,7 +405,10 @@ describe('PhRepairTeams', () => {
     expect(card(el, 0).querySelector('.field-btn').disabled).toBe(true);
   });
 
-  it('keeps an externally committed idle slot visible but offers it nothing', () => {
+  // A hull with no field-repair capability at all: every idle team is an
+  // ordinary idle team, and none of them is painted ABROAD off a claim that
+  // does not exist.
+  it('offers every idle team its destinations when the hull cannot dispatch abroad', () => {
     const { el } = setup();
     el.state = {
       teams: [
@@ -316,16 +416,10 @@ describe('PhRepairTeams', () => {
         { id: 1, label: 'T2', status: 'idle' },
       ],
       targets: [{ id: 'helm', label: 'Helm', damage_pct: 0.4 }],
-      externally_committed_teams: 1,
     };
-    expect(card(el, 1).textContent).toContain(t('component.repair_teams.external_commitment'));
-    const top = card(el, 1).querySelector('.card-top');
-    expect(top.disabled).toBe(true);
+    expect(el.shadowRoot.textContent).not.toContain(t('component.repair_teams.status.abroad'));
     select(el, 1);
-    expect(card(el, 1).querySelector('.card-body').hidden).toBe(true);
-    expect(top.getAttribute('aria-expanded')).toBe('false');
-    expect(card(el, 1).classList.contains('selected')).toBe(false);
-    expect(card(el, 1).querySelectorAll('.btn').length).toBe(0);
+    expect(card(el, 1).querySelectorAll('.btn').length).toBe(1);
     select(el, 0);
     expect(card(el, 0).querySelectorAll('.btn').length).toBe(1);
   });

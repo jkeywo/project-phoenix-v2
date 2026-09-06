@@ -12,21 +12,24 @@
 //!
 //! A team held against a NAMED target the crew designate from the repair
 //! console is unavailable to the hull's own damage-control sweep: the human
-//! dispatch router and the repair AI both read
-//! [`ExternalRepairDispatch::committed_repair_teams`] off the same idle pool, so
-//! a team sent to an ally cannot be undercut by whichever path did not know
-//! about it. This was one of two external-commitment sources until #1166 (S12)
-//! dissolved the operations coordinator; it is now the only one.
+//! dispatch router and the repair AI both ask
+//! [`ExternalRepairDispatch::abroad_team`] which slot is spoken for, so a team
+//! sent to an ally cannot be undercut by whichever path did not know about it.
+//! Until #1386 that answer was a COUNT and every reader truncated the idle list
+//! to guess which slot it meant; naming the team is what lets a seat choose one.
+//! This was one of two external-commitment sources until #1166 (S12) dissolved
+//! the operations coordinator; it is now the only one.
 
 use bevy::prelude::*;
 
 use crate::command_admission::ai_emit::emit_ai_command;
 use crate::console::repair::external::{
-    dispatch_status, ExternalRepairConfig, ExternalRepairRefusal,
+    dispatch_status, named_dispatch_status, ExternalRepairConfig, ExternalRepairRefusal,
 };
 use crate::console::weapons::beam::TacticalRadarSelection;
 use crate::core::messages::{
-    AdmittedCommands, SystemAffinity, SystemBlackboard, SystemControlPayload,
+    AdmittedCommands, RepairTarget, SystemAffinity, SystemBlackboard, SystemControlPayload,
+    TeamSlot,
 };
 use crate::core::task_lifecycle::{
     TaskLifecycleRequest, TaskSlot, TaskTerminalReason, TASK_VERB_EXTERNAL_REPAIR,
@@ -62,6 +65,15 @@ pub struct ExternalRepairDispatch {
     /// The target-uuid a team is working abroad this tick, or `None` when the
     /// team is home. Present only while a dispatch is live.
     pub dispatched_target: Option<String>,
+    /// **Which** of this ship's repair teams is the one abroad (issue #1386),
+    /// meaningful only while `dispatched_target` is `Some` — the two are set and
+    /// cleared together, which is why this is a plain `u8` rather than a second
+    /// `Option` that could disagree with the first.
+    ///
+    /// Read it through [`Self::abroad_team`], never directly: that accessor is
+    /// where "meaningful only while a claim is live" is enforced once instead of
+    /// at every call site.
+    pub team_idx: u8,
     /// Why the last dispatch could not form, or why a live dispatch was brought
     /// home — the reason the console shows, retained until the operator
     /// dispatches or recalls again. `None` when idle or working cleanly.
@@ -74,36 +86,70 @@ impl ExternalRepairDispatch {
         Self {
             config,
             dispatched_target: None,
+            team_idx: 0,
             last_refusal: None,
         }
     }
 
-    /// How many of this ship's repair teams are held back by an external
-    /// dispatch (issue #1161) — **the count this slice adds to the internal-
-    /// sweep availability answer.**
+    /// **The one team this ship is holding abroad**, or `None` when nobody is
+    /// out there — the answer the internal-sweep availability question is asked
+    /// with (issues #1161, #1386).
     ///
-    /// One team per live dispatch (a ship designates one target at a time).
-    /// Derived from the live `dispatched_target` rather than stored, which is
-    /// what makes "returned on recall or drift" true by construction: a team
-    /// brought home commits nothing, so there is no release step to forget. The
-    /// team never moves in the [`crate::modifiers::repair_teams::RepairTeams`] readout — it
-    /// is still `Idle`, simply spoken for.
-    pub fn committed_repair_teams(&self) -> u8 {
-        u8::from(self.dispatched_target.is_some())
+    /// Derived from the live `dispatched_target` rather than stored separately,
+    /// which is what makes "returned on recall or drift" true by construction: a
+    /// team brought home commits nothing, so there is no release step to forget.
+    /// The team never moves in the
+    /// [`crate::modifiers::repair_teams::RepairTeams`] readout — it is still
+    /// `Idle`, simply spoken for.
+    ///
+    /// Until #1386 this was a COUNT (`committed_repair_teams`) and every reader
+    /// truncated the idle list to guess which slot it meant. Naming the team is
+    /// what lets a seat choose one.
+    pub fn abroad_team(&self) -> Option<usize> {
+        self.dispatched_target
+            .is_some()
+            .then_some(self.team_idx as usize)
     }
 
-    /// The persistable half — the dispatched target — for the snapshot payload
-    /// (issue #1161). The authored config rides the template and is re-derived
-    /// on spawn, so it is deliberately not here, exactly as `TractorSaveState`
-    /// leaves the coupling terms out.
+    /// Commit the claim: `team_idx` is now working `target` (issue #1386). The
+    /// two move together, here, so no caller can set one without the other.
+    pub fn claim(&mut self, team_idx: u8, target: Option<String>) {
+        self.dispatched_target = target;
+        self.team_idx = team_idx;
+        self.last_refusal = None;
+    }
+
+    /// Release the claim and bring the team home (issue #1386). The index is
+    /// cleared WITH the target, the mirror of [`Self::claim`] setting the two
+    /// together: an idle record then has exactly one shape, so
+    /// [`Self::save_state`] on a hull holding nobody equals
+    /// [`ExternalRepairSaveState::default`] and `capture_external_repair`'s
+    /// "a hull that CAN dispatch and has sent nobody captures nothing" holds
+    /// after a recall as much as before the first dispatch.
+    ///
+    /// It cannot move the digest: `fold_external_repair_namespace` skips a
+    /// record with no `dispatched_target` entirely, so the index it would have
+    /// folded is one nobody reads.
+    pub fn release(&mut self, refusal: Option<ExternalRepairRefusal>) {
+        self.dispatched_target = None;
+        self.team_idx = 0;
+        self.last_refusal = refusal;
+    }
+
+    /// The persistable half — the dispatched target and the team holding it —
+    /// for the snapshot payload (issues #1161, #1386). The authored config rides
+    /// the template and is re-derived on spawn, so it is deliberately not here,
+    /// exactly as `TractorSaveState` leaves the coupling terms out.
     pub fn save_state(&self) -> ExternalRepairSaveState {
         ExternalRepairSaveState {
             dispatched_target: self.dispatched_target.clone(),
+            team_idx: self.team_idx,
         }
     }
 
-    /// Reseed the dispatched target from a restored snapshot (issue #1161), onto
-    /// a record that already carries its authored config from the fresh spawn.
+    /// Reseed the dispatched target and the team holding it from a restored
+    /// snapshot (issue #1161), onto a record that already carries its authored
+    /// config from the fresh spawn.
     ///
     /// The last refusal is deliberately NOT restored: it is a projection the
     /// next tick re-derives (a resumed dispatch that comes back out of range
@@ -111,27 +157,54 @@ impl ExternalRepairDispatch {
     /// crew a reason for a condition that no longer holds.
     pub fn restore(&mut self, save: &ExternalRepairSaveState) {
         self.dispatched_target = save.dispatched_target.clone();
+        self.team_idx = save.team_idx;
         self.last_refusal = None;
     }
 }
 
 /// The snapshot-carried half of an [`ExternalRepairDispatch`] (issue #1161): the
-/// dispatched target, and nothing else.
+/// dispatched target and the team working it, and nothing else.
 ///
 /// `Default` is the idle record — no team abroad — which is what a hull that
-/// authored external dispatch and never used it captures, so a resume of such a
-/// ship restores byte-identically and folds the same number.
+/// authored external dispatch captures whether it never used it or brought its
+/// team home again ([`ExternalRepairDispatch::release`] clears the index with
+/// the target for exactly that reason), so a resume of such a ship restores
+/// byte-identically and folds the same number.
+///
+/// `team_idx` is **mandatory** (issue #1386), with no serde default. A claim
+/// always names a team, and a record that carried one without naming it is a
+/// save written under the old commitment model whose team cannot be inferred:
+/// defaulting it to 0 would silently resume the wrong slot as abroad and leave
+/// the real one double-booked. `SNAPSHOT_FORMAT` moved for exactly that, so such
+/// a save is refused on format before this decode is ever reached.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ExternalRepairSaveState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dispatched_target: Option<String>,
+    pub team_idx: u8,
 }
 
 // ── The dispatch / recall commands ───────────────────────────────────────────
 
-/// Take this tick's `DispatchExternalRepair` / `RecallExternalRepair` commands
-/// for the repair system and decide, at dispatch time, whether a team may cross
-/// over (issue #1161).
+/// Take this tick's field-repair dispatch commands for the repair system and
+/// decide, at dispatch time, whether a team may cross over (issues #1161,
+/// #1386).
+///
+/// # Two dispatch verbs, one commit site
+///
+/// `DispatchExternalRepair` is FIELDLESS and means "send somebody": the server
+/// picks the lowest free team. It is the AI / operate-directive vocabulary
+/// (#1162), and it is what today's implicit rule always was, now written down.
+/// `DispatchRepairTeam { team_idx, target: External }` NAMES its team and is
+/// what a seat sends from that team's own card (#1386) — the same shape a
+/// station dispatch takes, so choosing a destination is one decision on the
+/// console whichever side of the hull it lands on. Both resolve HERE, against
+/// the same lock, the same reach and the same claim, so neither can express
+/// something the other cannot see.
+///
+/// `RecallExternalRepair` stays for the directive path. The named recall,
+/// `RecallRepairTeam`, is `super::dispatch::handle_recall_repair_team`'s — one
+/// verb for a team whatever it is doing.
 ///
 /// Runs in `SimSet::Input`, so `dispatched_target` is set before the internal
 /// dispatch router and the repair AI read the committed count in
@@ -175,8 +248,22 @@ pub fn handle_external_repair_commands(
             command: crate::core::messages::AdmittedCommand,
             lock: Option<String>,
             operator_pos: Vec3,
-            has_free_team: bool,
             range: f32,
+            /// `Some(idx)` for a NAMED dispatch, `None` for the fieldless verb.
+            /// This is what selects which pure verdict answers below — a named
+            /// order can be refused two ways the fieldless one structurally
+            /// cannot (issue #1386).
+            named: Option<u8>,
+            /// The slot that would actually cross over: the named one, or (for
+            /// the fieldless verb) the team already abroad re-pointing at a new
+            /// lock, else the lowest free team. `None` only when the fieldless
+            /// verb found nobody, which the verdict reads as `NoFreeTeam`.
+            chosen: Option<u8>,
+            /// Whether the NAMED slot is `Idle` — false for a busy team and for
+            /// a slot this hull does not have.
+            team_is_idle: bool,
+            /// Whoever currently holds this ship's one external claim.
+            abroad: Option<u8>,
         },
         Recall {
             command: crate::core::messages::AdmittedCommand,
@@ -200,59 +287,82 @@ pub fn handle_external_repair_commands(
         .filter_map(
             |(entity, admitted, dispatch, selection, transform, teams)| {
                 let mut request = None;
+                // Whoever holds this ship's one external claim right now — the
+                // team the availability answer excludes, and the team a named
+                // dispatch of ANOTHER slot is refused against (issue #1386).
+                let abroad = dispatch.and_then(|d| d.abroad_team()).map(|idx| idx as u8);
                 for cmd in admitted.for_target(REPAIR_SYSTEM_ID) {
-                    match &cmd.payload {
-                        SystemControlPayload::DispatchExternalRepair => {
-                            // The team-availability answer: this dispatch is now
-                            // the only external claim on the idle pool, so "is a
-                            // team free" is exactly `free_team_indices(0)`.
-                            let has_free_team = teams
-                                .map(|t| !t.0.free_team_indices(0).is_empty())
-                                .unwrap_or(false);
-                            let next = if let Some(dispatch) = dispatch {
-                                Request::Dispatch {
-                                    command: cmd.clone(),
-                                    lock: selection.and_then(|s| s.0.clone()),
-                                    operator_pos: transform.translation,
-                                    has_free_team,
-                                    range: dispatch.config.range,
-                                }
-                            } else {
-                                // Correlated external commands are protocol-
-                                // allowlisted for the Repair owner. A hull that
-                                // omits the optional capability must therefore
-                                // still terminate the promise explicitly.
-                                Request::Unavailable {
-                                    command: cmd.clone(),
-                                }
-                            };
-                            if let Some(previous) = request.replace(next) {
-                                crate::command_admission::finish_admitted_action_feedback(
-                                    &mut outbound,
-                                    previous.command(),
-                                    crate::core::messages::ActionFeedbackOutcome::Refused,
-                                );
+                    // The three field-repair verbs this system answers, read off
+                    // the payload once. `Send(None)` is the fieldless dispatch
+                    // (the server picks the team); `Send(Some(idx))` names its
+                    // slot (issue #1386); everything else on the repair system
+                    // belongs to another applier and is not this system's to
+                    // report on.
+                    enum Verb {
+                        Send(Option<u8>),
+                        BringHome,
+                    }
+                    let verb = match &cmd.payload {
+                        SystemControlPayload::DispatchExternalRepair => Verb::Send(None),
+                        SystemControlPayload::DispatchRepairTeam {
+                            team_idx,
+                            target: RepairTarget::External,
+                        } => Verb::Send(Some(*team_idx)),
+                        SystemControlPayload::RecallExternalRepair => Verb::BringHome,
+                        _ => continue,
+                    };
+                    let next = match (verb, dispatch) {
+                        // Correlated external commands are protocol-allowlisted
+                        // for the Repair owner. A hull that omits the optional
+                        // capability must therefore still terminate the promise
+                        // explicitly.
+                        (_, None) => Request::Unavailable {
+                            command: cmd.clone(),
+                        },
+                        (Verb::BringHome, Some(_)) => Request::Recall {
+                            command: cmd.clone(),
+                        },
+                        (Verb::Send(named), Some(dispatch)) => {
+                            // The team-availability answer, asked the one way
+                            // (rule 6): the idle pool minus whoever is already
+                            // abroad. A fieldless re-dispatch onto a fresh lock
+                            // keeps the team already out there rather than
+                            // spending a second one — the claim stays single.
+                            let free_team = teams.and_then(|t| {
+                                t.0.free_team_indices(abroad.map(usize::from))
+                                    .first()
+                                    .map(|&idx| idx as u8)
+                            });
+                            let chosen = named.or(abroad).or(free_team);
+                            // Only a NAMED order can name a busy slot; the
+                            // fieldless verb picked a free one by construction
+                            // and reports `NoFreeTeam` when it could not.
+                            let team_is_idle = named
+                                .and_then(|idx| teams.map(|t| (t, idx)))
+                                .is_some_and(|(t, idx)| {
+                                    matches!(
+                                        t.0.slots().get(usize::from(idx)),
+                                        Some(TeamSlot::Idle)
+                                    )
+                                });
+                            Request::Dispatch {
+                                command: cmd.clone(),
+                                lock: selection.and_then(|s| s.0.clone()),
+                                operator_pos: transform.translation,
+                                range: dispatch.config.range,
+                                named,
+                                chosen,
+                                team_is_idle,
+                                abroad,
                             }
                         }
-                        SystemControlPayload::RecallExternalRepair => {
-                            let next = if dispatch.is_some() {
-                                Request::Recall {
-                                    command: cmd.clone(),
-                                }
-                            } else {
-                                Request::Unavailable {
-                                    command: cmd.clone(),
-                                }
-                            };
-                            if let Some(previous) = request.replace(next) {
-                                crate::command_admission::finish_admitted_action_feedback(
-                                    &mut outbound,
-                                    previous.command(),
-                                    crate::core::messages::ActionFeedbackOutcome::Refused,
-                                );
-                            }
-                        }
-                        _ => {}
+                    };
+                    if let Some(previous) = request.replace(next) {
+                        crate::command_admission::finish_admitted_action_feedback(
+                            &mut outbound,
+                            previous.command(),
+                            crate::core::messages::ActionFeedbackOutcome::Refused,
+                        );
                     }
                 }
                 request.map(|r| (entity, r))
@@ -300,11 +410,29 @@ pub fn handle_external_repair_commands(
         match request {
             Request::Dispatch {
                 lock,
-                has_free_team,
                 range,
+                named,
+                chosen,
+                team_is_idle,
+                abroad,
                 ..
             } => {
-                match dispatch_status(*has_free_team, lock.as_deref(), separation, *range) {
+                // A named order answers through the named verdict, which reports
+                // the two staleness cases the fieldless one cannot have (issue
+                // #1386); the fieldless verb keeps the availability question it
+                // has always asked, now answered by whether a team was found.
+                let verdict = match named {
+                    Some(team_idx) => named_dispatch_status(
+                        *team_is_idle,
+                        *abroad,
+                        *team_idx,
+                        lock.as_deref(),
+                        separation,
+                        *range,
+                    ),
+                    None => dispatch_status(chosen.is_some(), lock.as_deref(), separation, *range),
+                };
+                match verdict {
                     Ok(()) => {
                         // The activation opens at COMMIT, not at every tick a
                         // team is still out there working (issue #1345) — the
@@ -330,8 +458,15 @@ pub fn handle_external_repair_commands(
                                 },
                             );
                         }
-                        dispatch.dispatched_target = lock.clone();
-                        dispatch.last_refusal = None;
+                        // The verdict passed, so a team was resolved: the named
+                        // one, or the one the fieldless verb found. Both arms
+                        // above are unreachable with `chosen` empty — a named
+                        // order sets it to the slot it names, and the fieldless
+                        // one is refused `NoFreeTeam` when nothing was found —
+                        // and the fallback is written rather than panicked
+                        // because a claim on the lowest slot is the honest
+                        // answer if it ever were.
+                        dispatch.claim(chosen.unwrap_or(0), lock.clone());
                         crate::command_admission::finish_admitted_action_feedback(
                             &mut outbound,
                             request.command(),
@@ -370,8 +505,7 @@ pub fn handle_external_repair_commands(
                 // Recall brings the team home and stops the work, leaving what it
                 // already did on the target. A deliberate recall is not a
                 // refusal, so the reason clears.
-                dispatch.dispatched_target = None;
-                dispatch.last_refusal = None;
+                dispatch.release(None);
                 crate::command_admission::finish_admitted_action_feedback(
                     &mut outbound,
                     request.command(),
@@ -455,8 +589,7 @@ pub fn tick_external_repair(
             let Ok((mut dispatch, uuid)) = dispatches.get_mut(row.entity) else {
                 continue;
             };
-            dispatch.dispatched_target = None;
-            dispatch.last_refusal = Some(refusal);
+            dispatch.release(Some(refusal));
             // This system only ever CLOSES a dispatch (it never opens one — that
             // is `handle_external_repair_commands`' job at commit time), so every
             // row it walks was live and the terminal is unconditional (issue
@@ -479,7 +612,12 @@ pub fn tick_external_repair(
 
 /// The lifecycle slot a hull's external repair-team dispatch occupies (issue
 /// #1345) — its uuid, the repair system, and the external-repair verb.
-fn dispatch_slot(uuid: Option<&EntityUuid>) -> TaskSlot {
+///
+/// `pub(crate)` since issue #1386: `super::dispatch::handle_recall_repair_team`
+/// closes this same activation when a named recall releases the claim, and two
+/// spellings of one slot identity is exactly the drift that would let a timeline
+/// carry an End nothing ever opened.
+pub(crate) fn dispatch_slot(uuid: Option<&EntityUuid>) -> TaskSlot {
     TaskSlot::new(
         uuid.map(|u| u.0.clone()).unwrap_or_default(),
         REPAIR_SYSTEM_ID,
@@ -516,6 +654,12 @@ fn terminal_reason_for(refusal: ExternalRepairRefusal) -> TaskTerminalReason {
         ExternalRepairRefusal::NoFreeTeam => TaskTerminalReason::NotCapable,
         ExternalRepairRefusal::NoTarget => TaskTerminalReason::NoSuchTarget,
         ExternalRepairRefusal::OutOfRange => TaskTerminalReason::OutOfRange,
+        // Named-dispatch refusals (issue #1386), unreachable here for the same
+        // reason the two above are: they are commit-time answers to an order
+        // that claimed nothing, so there is no activation for them to end.
+        ExternalRepairRefusal::TeamBusy | ExternalRepairRefusal::AlreadyAbroad => {
+            TaskTerminalReason::NotCapable
+        }
     }
 }
 
@@ -588,19 +732,6 @@ pub fn apply_external_repair(
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub struct ExternalRepairAiDispatched;
 
-/// Teams to hold back from a backfill field-repair dispatch (issue #1162): the
-/// standing-dispatch commitment PLUS one reserved per outstanding CRITICAL
-/// (Disabled/Destroyed) local repair. Pure (AGENTS.md rule 10) so the "without
-/// starving critical repairs" policy is unit-testable Bevy-free.
-///
-/// Folded into the SAME [`crate::modifiers::repair_teams::RepairTeams::free_team_indices`]
-/// availability answer the standing external dispatch already eats from — it
-/// only makes the host MORE conservative than the applier's own `has_free_team`
-/// gate, so an AI decision to dispatch is always one the applier admits.
-fn dispatch_committed_teams(external_committed: u8, critical_local_repairs: u8) -> u8 {
-    external_committed.saturating_add(critical_local_repairs)
-}
-
 /// The count of outstanding CRITICAL (Disabled/Destroyed) local repair requests
 /// on `queue` — one team is reserved per such request (issue #1162).
 fn critical_local_repairs(queue: Option<&RepairRequestQueue>) -> u8 {
@@ -641,9 +772,11 @@ fn resolve_field_repair_target(name: &str, runtime: Option<&WorldContentRuntime>
 /// the symmetric command: it reserves one idle team for each of the hull's own
 /// outstanding CRITICAL (Disabled/Destroyed) repair requests, folding that
 /// reserve into the SAME shared free-team availability answer
-/// (`RepairTeams::free_team_indices`) the operations commitment and any standing
-/// external dispatch already eat from. It never dispatches a team the local
-/// damage-control sweep needs to bring a knocked-out system back. Because the
+/// (`RepairTeams::free_team_indices_reserving`) the standing external claim
+/// already eats from. It never dispatches a team the local damage-control sweep
+/// needs to bring a knocked-out system back. The claim NAMES its team (issue
+/// #1386) while the reserve stays a count, which is the honest shape of each: one
+/// says who is out, the other says how many to keep spare. Because the
 /// reserve only makes the host MORE conservative than the applier's own
 /// `has_free_team` check, an AI decision to dispatch is always one the applier
 /// admits. Decides ONLY on the shared AI cadence (rule 7).
@@ -708,12 +841,14 @@ pub fn operate_external_repair_ai(
                 // external dispatch commitment, PLUS this host's own reserve of
                 // one team per outstanding critical local repair — so helping an
                 // ally never leaves a knocked-out system of our own unswept.
-                let committed = dispatch_committed_teams(
-                    dispatch.committed_repair_teams(),
-                    critical_local_repairs(repair_queue),
-                );
                 let has_free_team = teams
-                    .map(|t| !t.0.free_team_indices(committed).is_empty())
+                    .map(|t| {
+                        !t.0.free_team_indices_reserving(
+                            dispatch.abroad_team(),
+                            critical_local_repairs(repair_queue),
+                        )
+                        .is_empty()
+                    })
                     .unwrap_or(false);
                 // Dispatch once the ordered ally is locked and a team is free
                 // beyond every other claim. Idempotent — a team already working
@@ -1000,12 +1135,33 @@ mod tests {
         })
     }
 
+    /// The claim NAMES its team (issue #1386) and only while it is live: an
+    /// idle record holds nobody abroad, because `claim` and `release` set and
+    /// clear the target and the index together.
     #[test]
-    fn a_live_dispatch_commits_one_team_and_an_idle_record_commits_none() {
+    fn a_live_claim_names_its_team_and_an_idle_record_holds_nobody() {
         let mut r = record();
-        assert_eq!(r.committed_repair_teams(), 0);
-        r.dispatched_target = Some("ally-1".into());
-        assert_eq!(r.committed_repair_teams(), 1);
+        assert_eq!(r.abroad_team(), None);
+
+        r.claim(2, Some("ally-1".into()));
+        assert_eq!(r.abroad_team(), Some(2));
+        assert_eq!(r.dispatched_target.as_deref(), Some("ally-1"));
+
+        r.release(None);
+        assert_eq!(r.abroad_team(), None);
+    }
+
+    /// A recalled (or drifted-out) claim leaves the record in the ONE idle
+    /// shape, index included — otherwise `capture_external_repair` compares a
+    /// `{ None, N }` record against the idle default, finds them unequal and
+    /// writes a snapshot row for a hull holding nobody abroad.
+    #[test]
+    fn a_released_claim_returns_the_record_to_the_idle_default() {
+        let mut r = record();
+        r.claim(2, Some("ally-1".into()));
+        r.release(None);
+        assert_eq!(r.save_state(), ExternalRepairSaveState::default());
+        assert_eq!(r.team_idx, 0);
     }
 
     fn critical_entry() -> crate::console::repair::server::RepairQueueEntry {
@@ -1048,36 +1204,42 @@ mod tests {
         );
     }
 
-    /// The reserve folds into the SAME `free_team_indices` answer: a one-team
-    /// hull with a critical local repair outstanding has NO team free to
-    /// dispatch, but frees it the moment the local critical repair clears.
+    /// The reserve folds into the SAME availability answer: a one-team hull with
+    /// a critical local repair outstanding has NO team free to dispatch, but
+    /// frees it the moment the local critical repair clears.
     #[test]
     fn a_one_team_hull_reserves_its_last_team_for_a_critical_local_repair() {
         use crate::modifiers::repair_teams::RepairTeams;
         let teams = RepairTeams::new(1);
 
         // A critical local repair reserves the one team → none free to dispatch.
-        let committed = dispatch_committed_teams(0, 1);
         assert!(
-            teams.free_team_indices(committed).is_empty(),
+            teams.free_team_indices_reserving(None, 1).is_empty(),
             "the last team must be reserved for a critical local repair"
         );
 
         // With no critical local repair, the one team is dispatchable.
-        let committed = dispatch_committed_teams(0, 0);
         assert!(
-            !teams.free_team_indices(committed).is_empty(),
+            !teams.free_team_indices_reserving(None, 0).is_empty(),
             "with the local sweep clear the free team is available to help the ally"
         );
+
+        // And the team already abroad is excluded BY NAME, not by count (issue
+        // #1386): a two-team hull with team 0 out there offers team 1 and only
+        // team 1, whichever end of the list the reserve would have eaten.
+        let two = RepairTeams::new(2);
+        assert_eq!(two.free_team_indices(Some(0)), vec![1]);
+        assert_eq!(two.free_team_indices(Some(1)), vec![0]);
     }
 
     #[test]
-    fn save_state_carries_the_dispatched_target_only() {
+    fn save_state_carries_the_dispatched_target_and_the_team_working_it() {
         let mut r = record();
-        r.dispatched_target = Some("ally-1".into());
+        r.claim(3, Some("ally-1".into()));
         r.last_refusal = Some(ExternalRepairRefusal::OutOfRange);
         let save = r.save_state();
         assert_eq!(save.dispatched_target.as_deref(), Some("ally-1"));
+        assert_eq!(save.team_idx, 3);
     }
 
     #[test]
@@ -1086,13 +1248,15 @@ mod tests {
     }
 
     #[test]
-    fn restore_reseeds_the_target_and_clears_any_stale_refusal() {
+    fn restore_reseeds_the_target_and_its_team_and_clears_any_stale_refusal() {
         let mut r = record();
         r.last_refusal = Some(ExternalRepairRefusal::NoFreeTeam);
         r.restore(&ExternalRepairSaveState {
             dispatched_target: Some("ally-2".into()),
+            team_idx: 1,
         });
         assert_eq!(r.dispatched_target.as_deref(), Some("ally-2"));
+        assert_eq!(r.abroad_team(), Some(1));
         assert!(r.last_refusal.is_none());
     }
 
@@ -1107,13 +1271,24 @@ mod tests {
     fn app_with(target_at: Option<Vec3>, free_teams: usize) -> (App, Entity) {
         let mut app = App::new();
         app.init_resource::<EffectQueue<TaskLifecycleRequest>>();
+        app.add_message::<crate::lobby::OutboundMessage>();
         app.add_systems(
             Update,
-            (handle_external_repair_commands, tick_external_repair).chain(),
+            (
+                handle_external_repair_commands,
+                // The named recall lives with the internal one (issue #1386):
+                // ONE verb answers `RecallRepairTeam` whatever the team is
+                // doing, so the field claim's release is exercised through the
+                // system that actually owns it rather than a stand-in.
+                super::super::dispatch::handle_recall_repair_team,
+                tick_external_repair,
+            )
+                .chain(),
         );
         let operator = app
             .world_mut()
             .spawn((
+                crate::server_app::Ship,
                 EntityUuid(OPERATOR.into()),
                 Transform::from_translation(Vec3::ZERO),
                 TacticalRadarSelection(Some(ALLY.into())),
@@ -1317,6 +1492,203 @@ mod tests {
                 .as_deref(),
             Some(ALLY_TWO)
         );
+    }
+
+    // ── The NAMED dispatch and the one recall (issue #1386) ─────────────────
+
+    fn admit(app: &mut App, operator: Entity, payload: SystemControlPayload) {
+        app.world_mut()
+            .entity_mut(operator)
+            .get_mut::<AdmittedCommands>()
+            .unwrap()
+            .0
+            .push(crate::core::messages::AdmittedCommand {
+                target: repair_system_id(),
+                payload,
+                response_token: None,
+                feedback_correlation: None,
+            });
+    }
+
+    fn admit_named_dispatch(app: &mut App, operator: Entity, team_idx: u8) {
+        admit(
+            app,
+            operator,
+            SystemControlPayload::DispatchRepairTeam {
+                team_idx,
+                target: crate::core::messages::RepairTarget::External,
+            },
+        );
+    }
+
+    fn claim(app: &App, operator: Entity) -> (Option<String>, Option<usize>) {
+        let dispatch = app
+            .world()
+            .entity(operator)
+            .get::<ExternalRepairDispatch>()
+            .unwrap();
+        (dispatch.dispatched_target.clone(), dispatch.abroad_team())
+    }
+
+    fn refusal(app: &App, operator: Entity) -> Option<ExternalRepairRefusal> {
+        app.world()
+            .entity(operator)
+            .get::<ExternalRepairDispatch>()
+            .unwrap()
+            .last_refusal
+    }
+
+    /// The whole point of the slice: the seat picks WHICH team crosses over, and
+    /// the claim records that team rather than a count somebody has to guess
+    /// from.
+    #[test]
+    fn a_named_dispatch_sends_the_team_the_seat_chose() {
+        let (mut app, operator) = app_with(Some(Vec3::new(100.0, 0.0, 0.0)), 3);
+        admit_named_dispatch(&mut app, operator, 2);
+        app.update();
+
+        assert_eq!(claim(&app, operator), (Some(ALLY.into()), Some(2)));
+        // …and that team, not the top of the idle list, is the one the hull's
+        // own sweep may no longer have.
+        let teams = app
+            .world()
+            .entity(operator)
+            .get::<ShipRepairTeams>()
+            .unwrap();
+        assert_eq!(teams.0.free_team_indices(Some(2)), vec![0, 1]);
+        assert_eq!(
+            drain_lifecycle(&mut app),
+            vec![TaskLifecycleRequest::Start {
+                slot: dispatch_slot_for_test(),
+                target: Some(ALLY.into()),
+            }]
+        );
+    }
+
+    /// The fieldless verb still means "send somebody", and the rule it always
+    /// followed implicitly — the lowest free team — is now written down on the
+    /// claim for the console to read.
+    #[test]
+    fn the_fieldless_verb_records_the_lowest_free_team_it_picked() {
+        let (mut app, operator) = app_with(Some(Vec3::new(100.0, 0.0, 0.0)), 3);
+        // Team 0 is out on an internal job, so the lowest FREE team is 1.
+        app.world_mut()
+            .entity_mut(operator)
+            .get_mut::<ShipRepairTeams>()
+            .unwrap()
+            .0
+            .dispatch(
+                0,
+                crate::core::messages::SystemId("helm".into()),
+                "H".into(),
+            );
+        admit_dispatch(&mut app, operator);
+        app.update();
+
+        assert_eq!(claim(&app, operator), (Some(ALLY.into()), Some(1)));
+    }
+
+    /// A named dispatch of a team that is already out on an internal job sends
+    /// nobody and says why — the console only offers the field row on idle
+    /// cards, so this is the stale-UI case.
+    #[test]
+    fn naming_a_busy_team_is_refused_team_busy_and_sends_nobody() {
+        let (mut app, operator) = app_with(Some(Vec3::new(100.0, 0.0, 0.0)), 2);
+        app.world_mut()
+            .entity_mut(operator)
+            .get_mut::<ShipRepairTeams>()
+            .unwrap()
+            .0
+            .dispatch(
+                1,
+                crate::core::messages::SystemId("helm".into()),
+                "H".into(),
+            );
+        admit_named_dispatch(&mut app, operator, 1);
+        app.update();
+
+        assert_eq!(claim(&app, operator), (None, None));
+        assert_eq!(
+            refusal(&app, operator),
+            Some(ExternalRepairRefusal::TeamBusy)
+        );
+        assert!(
+            drain_lifecycle(&mut app).is_empty(),
+            "a refusal at dispatch time claims nothing, so it opens nothing"
+        );
+    }
+
+    /// The claim stays single: a second team cannot be sent while one is out
+    /// there. The crew recall first.
+    #[test]
+    fn naming_a_second_team_while_one_is_abroad_is_refused_already_abroad() {
+        let (mut app, operator) = app_with(Some(Vec3::new(100.0, 0.0, 0.0)), 3);
+        admit_named_dispatch(&mut app, operator, 2);
+        app.update();
+        drain_lifecycle(&mut app);
+
+        admit_named_dispatch(&mut app, operator, 0);
+        app.update();
+
+        assert_eq!(
+            claim(&app, operator),
+            (Some(ALLY.into()), Some(2)),
+            "the team already abroad stays abroad — a refusal sends nobody and recalls nobody"
+        );
+        assert_eq!(
+            refusal(&app, operator),
+            Some(ExternalRepairRefusal::AlreadyAbroad)
+        );
+        assert!(drain_lifecycle(&mut app).is_empty());
+    }
+
+    /// `RecallRepairTeam` is the ONE recall verb (issue #1386): naming the team
+    /// abroad releases the claim, exactly as `RecallExternalRepair` does, and
+    /// reports the same terminal.
+    #[test]
+    fn the_named_recall_brings_the_abroad_team_home() {
+        let (mut app, operator) = app_with(Some(Vec3::new(100.0, 0.0, 0.0)), 3);
+        admit_named_dispatch(&mut app, operator, 2);
+        app.update();
+        drain_lifecycle(&mut app);
+
+        admit(
+            &mut app,
+            operator,
+            SystemControlPayload::RecallRepairTeam { team_idx: 2 },
+        );
+        app.update();
+
+        assert_eq!(claim(&app, operator), (None, None));
+        assert_eq!(
+            drain_lifecycle(&mut app),
+            vec![TaskLifecycleRequest::End {
+                slot: dispatch_slot_for_test(),
+                reason: TaskTerminalReason::Released,
+            }]
+        );
+    }
+
+    /// …and naming a DIFFERENT idle team leaves the claim alone. The abroad
+    /// team's slot reads `Idle` like every other idle slot, so a recall that
+    /// matched on status rather than on the claim's own index would bring home
+    /// whichever team the seat tapped.
+    #[test]
+    fn the_named_recall_of_another_idle_team_leaves_the_claim_alone() {
+        let (mut app, operator) = app_with(Some(Vec3::new(100.0, 0.0, 0.0)), 3);
+        admit_named_dispatch(&mut app, operator, 2);
+        app.update();
+        drain_lifecycle(&mut app);
+
+        admit(
+            &mut app,
+            operator,
+            SystemControlPayload::RecallRepairTeam { team_idx: 0 },
+        );
+        app.update();
+
+        assert_eq!(claim(&app, operator), (Some(ALLY.into()), Some(2)));
+        assert!(drain_lifecycle(&mut app).is_empty());
     }
 
     /// A target that drifts past the authored range ends a live dispatch with

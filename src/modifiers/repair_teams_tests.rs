@@ -416,7 +416,7 @@ fn a_recalled_team_takes_new_work_but_is_not_idle_yet() {
     teams.recall(0);
 
     assert!(
-        teams.free_team_indices(0).is_empty(),
+        teams.free_team_indices(None).is_empty(),
         "not idle while walking"
     );
     teams.dispatch(0, sid("tactical"), "Tactical".to_string());
@@ -1697,56 +1697,92 @@ fn tick_preserves_display_name_through_travelling_to_repairing() {
     );
 }
 
-// ── Issue #1027: teams committed to an external field-repair ──
+// ── Issues #1027/#1386: the team committed to an external field-repair ──
 
 #[test]
-fn a_commitment_holds_back_teams_from_the_top_of_the_idle_list() {
+fn the_abroad_team_is_excluded_by_name_from_the_free_list() {
     let teams = RepairTeams::new(4);
     assert_eq!(
-        teams.free_team_indices(0),
+        teams.free_team_indices(None),
         vec![0, 1, 2, 3],
-        "a ship committing nothing behaves exactly as it did before commitments existed"
+        "a ship holding nobody abroad behaves exactly as it did before claims existed"
     );
     assert_eq!(
-        teams.free_team_indices(2),
-        vec![0, 1],
-        "a commitment eats from the TOP, so what remains is still the lowest-numbered teams              and the AI's deterministic visit order is untouched"
+        teams.free_team_indices(Some(0)),
+        vec![1, 2, 3],
+        "the team that actually went is the one withheld — issue #1386 made the claim name it, \
+         so the answer no longer depends on where in the idle list it happened to sit"
     );
-    assert!(
-        teams.free_team_indices(4).is_empty(),
-        "a ship that has committed every team has none left for its own damage — that is the              capacity-as-cost trade, not a bug"
+    assert_eq!(
+        teams.free_team_indices(Some(2)),
+        vec![0, 1, 3],
+        "…including a team in the MIDDLE of the list, which the old truncating count could \
+         never have named"
     );
-    assert!(
-        teams.free_team_indices(9).is_empty(),
-        "…and over-committing saturates rather than underflowing"
+    assert_eq!(
+        teams.free_team_indices(Some(9)),
+        vec![0, 1, 2, 3],
+        "a claim naming a slot this hull does not have withholds nobody rather than panicking"
     );
 }
 
 #[test]
-fn a_commitment_only_ever_holds_back_idle_teams() {
+fn the_reserve_is_still_a_count_and_eats_from_the_top() {
+    let teams = RepairTeams::new(4);
+    assert_eq!(
+        teams.free_team_indices_reserving(None, 2),
+        vec![0, 1],
+        "a reserve names no slot, so it eats from the TOP and what remains is still the \
+         lowest-numbered teams — the AI's deterministic visit order is untouched"
+    );
+    assert_eq!(
+        teams.free_team_indices_reserving(Some(0), 2),
+        vec![1],
+        "the named claim comes out first, then the count out of what is left"
+    );
+    assert!(
+        teams.free_team_indices_reserving(None, 4).is_empty(),
+        "a ship that has reserved every team has none left for its own damage — that is the \
+         capacity-as-cost trade, not a bug"
+    );
+    assert!(
+        teams.free_team_indices_reserving(None, 9).is_empty(),
+        "…and over-reserving saturates rather than underflowing"
+    );
+}
+
+#[test]
+fn a_claim_only_ever_holds_back_an_idle_team() {
     let mut teams = RepairTeams::new(3);
     teams.dispatch(0, sid("helm"), "Helm".into());
     assert_eq!(
-        teams.free_team_indices(1),
+        teams.free_team_indices(Some(2)),
         vec![1],
-        "team 0 is out on an internal job and was never part of the commitment, so the              commitment comes out of the two that are still idle"
+        "team 0 is out on an internal job and was never part of the claim, so what remains is \
+         the other idle team"
     );
     assert!(
-        !teams.is_committed_to_operation(0, 1),
-        "a team already travelling is not held by the operation — recalling or redirecting it              stays the console's business"
+        !teams.is_committed_to_operation(0, Some(2)),
+        "a team already travelling is not held by the claim — recalling or redirecting it \
+         stays the console's business"
     );
-    assert!(!teams.is_committed_to_operation(1, 1));
+    assert!(!teams.is_committed_to_operation(1, Some(2)));
     assert!(
-        teams.is_committed_to_operation(2, 1),
-        "the highest-numbered idle team is the one spoken for"
+        teams.is_committed_to_operation(2, Some(2)),
+        "the team the claim names is the one spoken for"
+    );
+    assert!(
+        !teams.is_committed_to_operation(0, Some(0)),
+        "a stale claim naming a slot that has since been dispatched internally holds nobody: \
+         the slot check is what keeps the two readings from disagreeing"
     );
 }
 
 #[test]
 fn a_committed_team_is_still_idle_in_every_readout() {
     // The teams never leave the hull. Nothing is dispatched, nothing
-    // travels, and the console goes on showing three idle teams — they are
-    // simply not available to be sent anywhere.
+    // travels, and the console goes on showing three idle teams — the one
+    // abroad is simply not available to be sent anywhere.
     let teams = RepairTeams::new(3);
     assert!(
         teams
@@ -1755,9 +1791,14 @@ fn a_committed_team_is_still_idle_in_every_readout() {
             .all(|slot| matches!(slot, TeamSlot::Idle)),
         "precondition"
     );
-    assert_eq!(teams.free_team_indices(3).len(), 0);
+    assert_eq!(teams.free_team_indices(Some(1)), vec![0, 2]);
     assert!(
-        teams.slots().iter().all(|slot| matches!(slot, TeamSlot::Idle)),
-        "asking which teams are free must not MOVE any of them: the commitment is a              reservation the readers honour, not a dispatch, which is what lets it be derived              fresh from the live hold every tick and released by the hold simply settling"
+        teams
+            .slots()
+            .iter()
+            .all(|slot| matches!(slot, TeamSlot::Idle)),
+        "asking which teams are free must not MOVE any of them: the claim is a reservation the \
+         readers honour, not a dispatch, which is what lets it be derived fresh from the live \
+         hold every tick and released by the hold simply settling"
     );
 }

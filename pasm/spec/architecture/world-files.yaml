@@ -390,14 +390,57 @@ entities:
         - ExternalRepairConfig
         - ExternalRepairRefusal
         - dispatch_status
+        - named_dispatch_status
         - ExternalRepairDispatch
         - ExternalRepairSaveState
         - handle_external_repair_commands
         - tick_external_repair
         - apply_external_repair
         - register_external_repair
-      messages: [DispatchExternalRepair, RecallExternalRepair]
+      messages: [DispatchExternalRepair, RecallExternalRepair, DispatchRepairTeam]
       tests: [cargo test]
+
+  - component: named-external-repair-claim
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Named External Repair Claim
+      summary: "The ship's one field-repair claim NAMES the team holding it (issue #1386): ExternalRepairDispatch carries a team_idx beside its dispatched target, a human sends DispatchRepairTeam { team_idx, target: External } from that team's own card, and the one RecallRepairTeam verb brings the team back whatever it is doing."
+      rationale:
+        - "[ai] THE DISPATCH RECORD LEARNS THE TEAM, rather than a new TeamSlot variant. #1027 modelled the commitment as a COUNT and free_team_indices truncated the idle tail to honour it, so four readers — the human router, the repair AI, the visibility publisher and the console — each re-derived WHICH team it meant, and the derivation was only ever right because nobody could choose. ExternalRepairDispatch now carries team_idx beside dispatched_target (set and cleared together, through claim/release, so no caller can move one without the other), free_team_indices and is_committed_to_operation take the excluded index by NAME, and the AI's one-team-per-critical-local-repair reserve keeps its own count-shaped answer in free_team_indices_reserving. No travel machinery and no fifth slot state: the team never walked anywhere on this hull, so its wire TeamSlot stays Idle and the console derives ABROAD from the published claim."
+        - "[ai] THE WIRE ARM CARRIES NO UUID. RepairTarget::External names the destination without naming a target, because the destination is not the console's to choose — the server resolves it off this ship's own Tactical lock exactly as the fieldless DispatchExternalRepair always has. What the console adds is the one part nothing server-side can resolve: which team crosses over. The two verbs meet in handle_external_repair_commands, so neither can express something the other cannot see; the fieldless one stays for the AI / operate-directive vocabulary and means the server picks the lowest free team, which is today's implicit rule written down."
+        - "[ai] TWO REFUSALS THE FIELDLESS VERB STRUCTURALLY CANNOT HAVE. named_dispatch_status reports TeamBusy for a named team that is not idle (a slot this hull does not have reads the same way — a team that is not there cannot go) and AlreadyAbroad for a named dispatch while a DIFFERENT team holds the claim; the claim stays single, so the crew recall first, and a refusal sends nobody. The team the seat tapped is reported before the ship-wide claim, because a seat told 'another team is already out there' about a team that could not have gone anyway would recall the wrong team. Acquisition is delegated to dispatch_status rather than restated, so NoTarget still precedes OutOfRange by construction. Re-pointing the team ALREADY abroad is not a refusal: that is the same same-claim re-target the fieldless verb has always allowed."
+        - "[ai] ONE RECALL VERB, ROUTED IN THE APPLIER THAT OWNS THE SLOT. RecallRepairTeam (#1385) now releases the claim when it names the abroad team, and handle_recall_repair_team is the single system that answers it — two would report the correlated feedback twice, and the second would report Refused for a team the first had just brought home. Physics is late enough: the claim's only same-tick readers are tick_external_repair / apply_external_repair in Modifiers, so a team recalled this tick banks nothing more, exactly as RecallExternalRepair in Input does. That fieldless recall stays for the directive path, which names no team because the host picked one. handle_dispatch_repair_team skips RepairTarget::External without a second verdict for the mirror-image reason."
+        - "[ai] THE TEAM FOLDS AND IT PERSISTS. team_idx joins dispatched_target in the external-repair digest namespace: two hosts that disagree about which slot is abroad disagree about which team this hull has free for its own sweep, so the next internal dispatch lands on a different system and reaches EntitySystemHull a tick later as a divergence nothing upstream could explain. The empty-walk affordance is untouched — a hull dispatching nobody still folds nothing. ExternalRepairSaveState.team_idx is MANDATORY with no serde default and SNAPSHOT_FORMAT moved for it: the rule that used to say which team a claim meant read the whole idle list, which no earlier record carries, so defaulting the index to 0 would resume the wrong slot as abroad and leave the real one double-booked. Refusing on the dimension that moved is the only honest answer."
+    architecture:
+      kind: dispatch-policy
+      authority: authoritative
+      reads: [external-repair-dispatch-state, repair-team-state, tactical-radar-blackboard-state]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: observed
+      paths:
+        - src/console/repair/external.rs
+        - src/console/repair/external_server.rs
+        - src/console/repair/dispatch.rs
+        - src/modifiers/repair_teams.rs
+        - src/core/messages.rs
+        - src/snapshot.rs
+        - src/sim_digest.rs
+      symbols:
+        - named_dispatch_status
+        - RepairTarget
+        - ExternalRepairDispatch
+        - ExternalRepairSaveState
+        - handle_external_repair_commands
+        - handle_recall_repair_team
+        - free_team_indices
+        - free_team_indices_reserving
+        - is_committed_to_operation
+        - fold_external_repair_namespace
+      messages: [DispatchRepairTeam, RecallRepairTeam]
+      tests: [cargo test, npx vitest run, npx playwright test]
 
   - state: external-repair-dispatch-state
     core:
@@ -409,11 +452,12 @@ entities:
       rationale:
         - "[ai] FOLDED into the authoritative-state digest, in a namespace of its own keyed on the minted entity id: the uuid of the target a team is working abroad, for every ship actually dispatching one. This is the divergence signal a resume must survive with the tractor's reason turned to repair: two hosts that disagreed would disagree both about whether the ally's condition is rising and about whether this hull has a team free. The authored reach and rate are content, which content_digest is answerable for, and the last refusal is a projection the next tick re-derives, so neither is folded."
         - "[ai] A ship dispatching NOBODY folds NOTHING — not even a row, the operations namespace's empty-walk affordance, exactly as the tractor namespace takes it. That is what lets a shipped hull gain a `[repair.external_dispatch]` table later without moving any committed world's digest, and it is why the demo destroyer stays byte-identical while the probe tender carries the capability."
-        - "[ai] Snapshotted as a PROJECTION rather than whole: the dispatched target travels (ExternalRepairSaveState), while the authored reach and rate ride the template and are re-derived on spawn — writing them into a save would put content into the one artefact content_digest is answerable for. The last refusal is not persisted: a resumed dispatch that comes back out of range refuses again on its first tick. The repair table sets deny_unknown_fields, so a build predating `[repair.external_dispatch]` refuses the template outright rather than writing a same-content-digest save to disagree with — which is why this did not bump SNAPSHOT_FORMAT."
+        - "[ai] Snapshotted as a PROJECTION rather than whole: the dispatched target travels (ExternalRepairSaveState), while the authored reach and rate ride the template and are re-derived on spawn — writing them into a save would put content into the one artefact content_digest is answerable for. The last refusal is not persisted: a resumed dispatch that comes back out of range refuses again on its first tick. The repair table sets deny_unknown_fields, so a build predating `[repair.external_dispatch]` refuses the template outright rather than writing a same-content-digest save to disagree with — which is why #1161 did not bump SNAPSHOT_FORMAT."
+        - "[ai] Issue #1386 widened both halves and DID bump the format. The live state gained team_idx — which team is abroad, meaningful only while dispatched_target is Some, read through abroad_team() so that rule is enforced in one place — and it folds beside the target for the same divergence reason the target itself does. The save projection carries it MANDATORY, with no serde default: a claim always names a team, and the truncation rule that used to name it read a whole idle list no record carries, so there is nothing to migrate from. See named-external-repair-claim for the whole decision."
     architecture:
       classification: authoritative
       owner: external-repair-dispatcher
-      writers: [external-repair-dispatcher]
+      writers: [external-repair-dispatcher, named-external-repair-claim]
       replicas: [external-repair-published-state]
     implementation:
       status: declared
@@ -432,6 +476,7 @@ entities:
       summary: The client-visible projection of a ship's external repair dispatch — the authored reach, the target a team is working abroad and its name id, and why the last dispatch was refused. Carried on the repair blackboard the repair console already reads, populated only by a hull that can dispatch, and by nobody else.
       rationale:
         - "[ai] Carried as fields on the existing RepairBlackboard, not a new SystemBlackboard variant, because external dispatch is a repair-CONSOLE capability rather than a `[[system]]` of its own — the console reads it under the same `repair` blackboard it already renders teams and hull from. Every field is serde-default and skipped when absent, so a hull that authored no `[repair.external_dispatch]` puts exactly the payload on the wire it did before this existed, and a payload predating the fields decodes rather than being refused whole."
+        - "[ai] Issue #1386 adds the two fields the ABROAD card is drawn from: external_dispatch_team_idx (which slot the claim holds, so the card that says ABROAD is the card of the team that actually went — the console used to reconstruct it by truncating the idle list in three separate places) and external_dispatch_target_condition (the target's own condition fraction, republished every tick by the repair owner because that IS the work the team is doing; InfrastructureSnapshot mints its fraction at spawn/welcome only, which never moves while a crew watch a repair). Both are whole-target scalars naming no system, so the #737 projection passes them to the Engineering holder with the rest and withholds them from everyone else."
         - "[ai] NO ENGLISH CROSSES THE WIRE. The target's name is a world entity name id and every refusal is a strings.csv id (`repair.dispatch.refused.*`) the console resolves through t(); the refusal is a match in Rust rather than a composed `repair.dispatch.refused.{...}`, so check-strings can see every id a new variant needs a row for. The console shows the reason a refused dispatch carries, which is the AC a no-team / no-target / out-of-range dispatch is proved against. The fields are whole-ship scalars/ids revealing no per-system detail, so the #737 visibility projection passes them through to the engineering holder and withholds them from everyone else with the rest of the working state."
     architecture:
       classification: client-projection

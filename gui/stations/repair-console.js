@@ -64,11 +64,11 @@ export function makeRepairRender(variant) {
         auto: !!s.repair_auto,
         targets: s.dispatch_targets || [],
         damaged: s.damaged_systems || [],
-        externally_committed_teams: s.external_dispatch?.target != null ? 1 : 0,
-        // The field destination an open idle card offers (issue #1384). The
-        // whole view, not just the committed count: the card names the target
-        // when the host has named one, and renders the row as a readout rather
-        // than a control while a team is already out there.
+        // The field destination an open idle card offers (issue #1384), and
+        // WHICH team is abroad on it (issue #1386). The whole view: three
+        // renderers used to rebuild a 0/1 committed count beside it and the
+        // card guessed which slot that meant, which was only ever right
+        // because nobody could choose. The claim names its team now.
         external_dispatch: s.external_dispatch || null,
       };
     }

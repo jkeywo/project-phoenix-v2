@@ -116,7 +116,11 @@ test('repair console: selecting a second team closes the first card', async ({ p
     .toHaveAttribute('aria-expanded', 'true');
 });
 
-test('repair console: an idle card offers the field target and sends the fieldless dispatch', async ({ page }) => {
+// Issue #1386: the field target is a destination like any other, and the seat
+// says WHICH team crosses over. The @core breadth test for per-team field
+// dispatch: this is the whole feature in one pass — choose a team, send it off
+// the ship, and get a command naming that team.
+test('repair console: an idle card sends a NAMED dispatch to the field target', { tag: '@core' }, async ({ page }) => {
   await page.goto(CONSOLE_URL);
   await page.evaluate(() => {
     window.__sent = [];
@@ -124,17 +128,69 @@ test('repair console: an idle card offers the field target and sends the fieldle
   });
   await page.evaluate(
     (s) => window.__updateConsole('repair', JSON.stringify(s)),
-    repairState({ external_dispatch: { range: 800, target: null, target_name: null, refusal: null } }),
+    repairState({
+      external_dispatch: {
+        range: 800, target: null, target_name: null, refusal: null, team_idx: null,
+      },
+    }),
   );
-  await selectTeam(page, 0);
+  await selectTeam(page, 1);
   // The three ship destinations plus the field target.
-  await expect(page.locator('ph-repair-teams .card[data-team-id="0"] .btn')).toHaveCount(4);
-  await page.locator('ph-repair-teams .card[data-team-id="0"] .field-btn').click();
+  await expect(page.locator('ph-repair-teams .card[data-team-id="1"] .btn')).toHaveCount(4);
+  await page.locator('ph-repair-teams .card[data-team-id="1"] .field-btn').click();
 
   const sent = await page.evaluate(() => window.__sent);
   expect(sent).toHaveLength(1);
-  // Fieldless: no team index and no target — the host resolves both (#1161).
-  expect(JSON.parse(sent[0])).toMatchObject({ action: 'dispatch_external_repair', console: 'repair' });
+  // The same verb the station buttons beside it send, naming THIS card's team.
+  // Only the destination is the host's to resolve — it is Tactical's lock — so
+  // `external` carries no id of its own (#1386).
+  expect(JSON.parse(sent[0])).toMatchObject({
+    action: 'dispatch_repair_team', console: 'repair', team_idx: 1, target: 'external',
+  });
+});
+
+// The other half of the same claim: once a team IS abroad its card says so, and
+// the ONE recall verb brings it home. Its wire slot is still `Idle` — it never
+// walked anywhere on this hull — so everything here is derived from the claim
+// the host published, not from the slot.
+test('repair console: the abroad card shows the target it works and recalls it', { tag: '@core' }, async ({ page }) => {
+  await page.goto(CONSOLE_URL);
+  await page.evaluate(() => {
+    window.__sent = [];
+    window.__sendAction = (json) => window.__sent.push(json);
+  });
+  await page.evaluate(
+    (s) => window.__updateConsole('repair', JSON.stringify(s)),
+    repairState({
+      external_dispatch: {
+        range: 800,
+        target: 'uuid-ally',
+        target_name: 'console.repair.dispatch',
+        refusal: null,
+        team_idx: 1,
+        target_condition: 0.35,
+      },
+    }),
+  );
+
+  const abroad = page.locator('ph-repair-teams .card[data-team-id="1"]');
+  await expect(abroad.locator('.status-badge')).toHaveText('ABROAD');
+  // The bar is the TARGET's condition track: a team abroad is already there, so
+  // its own travel/repair progress would be nothing to look at.
+  await expect(abroad.locator('.progress-fill')).toHaveClass(/abroad/);
+  expect(await abroad.locator('.progress-fill').evaluate((el) => el.style.width)).toBe('35%');
+
+  // The other idle team may not be sent while the claim is held, and is told why.
+  await selectTeam(page, 0);
+  await expect(page.locator('ph-repair-teams .card[data-team-id="0"] .field-btn')).toBeDisabled();
+
+  await selectTeam(page, 1);
+  await abroad.locator('.recall-btn').click();
+  const sent = await page.evaluate(() => window.__sent);
+  expect(sent).toHaveLength(1);
+  expect(JSON.parse(sent[0])).toMatchObject({
+    action: 'recall_repair_team', console: 'repair', team_idx: 1,
+  });
 });
 
 test('repair console: the on-site card lists its systems worst-first and highlights the host pin', async ({ page }) => {

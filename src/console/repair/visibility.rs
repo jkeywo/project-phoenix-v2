@@ -505,6 +505,14 @@ impl HullVisibility {
             external_dispatch_target: bb.external_dispatch_target.clone(),
             external_dispatch_target_name: bb.external_dispatch_target_name.clone(),
             external_dispatch_refusal: bb.external_dispatch_refusal.clone(),
+            // Which of this viewer's OWN teams went abroad, and how the target
+            // it is working is doing (issue #1386). Passed through on the same
+            // reading `teams` is: a seat that already chose where to send its
+            // teams learns nothing new from being told which one it picked, and
+            // the target's condition is a single whole-target scalar naming no
+            // system of anyone's.
+            external_dispatch_team_idx: bb.external_dispatch_team_idx,
+            external_dispatch_target_condition: bb.external_dispatch_target_condition,
         }
     }
 
@@ -547,6 +555,8 @@ fn withheld_repair_blackboard(bb: &RepairBlackboard) -> RepairBlackboard {
         external_dispatch_target: None,
         external_dispatch_target_name: None,
         external_dispatch_refusal: None,
+        external_dispatch_team_idx: None,
+        external_dispatch_target_condition: None,
     }
 }
 
@@ -1225,6 +1235,46 @@ mod tests {
         assert_eq!(p.damageable_systems, bb.damageable_systems);
         assert_eq!(p.teams, bb.teams);
         assert_eq!(p.travel_duration_secs, bb.travel_duration_secs);
+        // The external field-repair view, whole for the Engineering holder this
+        // projection is built for: whole-ship (and whole-TARGET) scalars and
+        // ids that name no system of anyone's. Issue #1386 added the last two —
+        // which of this seat's own teams went, and how the target it is working
+        // is doing — and a seat that chose where to send its teams learns
+        // nothing new from being told which one it picked.
+        assert_eq!(p.external_dispatch_range, bb.external_dispatch_range);
+        assert_eq!(p.external_dispatch_target, bb.external_dispatch_target);
+        assert_eq!(
+            p.external_dispatch_target_name,
+            bb.external_dispatch_target_name
+        );
+        assert_eq!(p.external_dispatch_refusal, bb.external_dispatch_refusal);
+        assert_eq!(p.external_dispatch_team_idx, bb.external_dispatch_team_idx);
+        assert_eq!(
+            p.external_dispatch_target_condition,
+            bb.external_dispatch_target_condition
+        );
+    }
+
+    /// …and a recipient who is not the Engineering holder is told nothing about
+    /// the claim at all: the withheld payload clears the team and the target's
+    /// condition with the rest of Engineering's working state (issue #1386).
+    #[test]
+    fn a_withheld_blackboard_clears_the_field_claim_too() {
+        let mut bb = bb_with_queue(queue(&[("helm", 40.0)]));
+        bb.external_dispatch_range = Some(800.0);
+        bb.external_dispatch_target = Some("ally-1".into());
+        bb.external_dispatch_team_idx = Some(1);
+        bb.external_dispatch_target_condition = Some(0.5);
+
+        let withheld = super::withheld_repair_blackboard(&bb);
+        assert_eq!(withheld.external_dispatch_range, None);
+        assert_eq!(withheld.external_dispatch_target, None);
+        assert_eq!(withheld.external_dispatch_team_idx, None);
+        assert_eq!(withheld.external_dispatch_target_condition, None);
+        assert_eq!(
+            withheld.travel_duration_secs, bb.travel_duration_secs,
+            "the ship constant is kept, so a console shown this again renders no nonsense bar"
+        );
     }
 
     #[test]

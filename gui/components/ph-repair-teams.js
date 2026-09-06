@@ -5,11 +5,11 @@
 import '../strings-boot.js';
 import { t } from '../strings.js';
 import {
-  EXTERNAL_REPAIR_TOGGLE_ACTION_ID,
   REPAIR_DISPATCH_ACTION_ID,
   REPAIR_PRIORITY_ACTION_ID,
   REPAIR_RECALL_ACTION_ID,
 } from '../stations/engineering-actions.js';
+import { EXTERNAL_REPAIR_TARGET } from '../repair-dispatch.js';
 import { activateEngineeringAction } from '../stations/engineering-action-control.js';
 import { PhElement, phDefine } from './ph-element.js';
 
@@ -37,6 +37,13 @@ import { PhElement, phDefine } from './ph-element.js';
  *   - **travelling** → RECALL (issue #1385). A team that has been sent to the
  *     wrong station is the one thing a seat wants to undo, and undoing it early
  *     is cheap: the walk back is only as long as the walk out so far.
+ *   - **abroad** (issue #1386) → the team the crew sent to the field target:
+ *     RECALL, the target it is working, and the TARGET'S OWN condition track as
+ *     the bar. A team abroad has no travel or repair progress of its own to show
+ *     — it is already there — so the honest thing to draw is the work it is
+ *     doing. This is a CLIENT-derived status: the wire slot stays `Idle`,
+ *     because the team never walked anywhere on this hull, and the repair
+ *     blackboard names which slot the claim holds.
  *   - **returning** → status and progress only. It is already coming home, so
  *     the host refuses a recall, and a button that sends nothing is worse than
  *     no button.
@@ -108,12 +115,16 @@ export class PhRepairTeams extends PhElement {
     .status-badge.travelling { color: var(--reloading); border-color: var(--reloading); }
     .status-badge.repairing { color: var(--loaded); border-color: var(--loaded); }
     .status-badge.returning { color: var(--cyan); border-color: var(--cyan); }
+    /* Off the ship entirely (issue #1386) — its own colour, because "away
+       helping someone else" is not a rung on the internal travel cycle. */
+    .status-badge.abroad { color: var(--science); border-color: var(--science); }
     .target-label { font-size: var(--text-xs); color: var(--ink-dim); }
     .progress-wrap { width: 100%; height: 0.4rem; background: var(--bg-deep); border: 1px solid var(--line-faint); overflow: hidden; }
     .progress-fill { height: 100%; background: linear-gradient(90deg, var(--loaded-dim), var(--loaded)); transition: none; }
     .progress-fill.repairing { background: linear-gradient(90deg, var(--loaded-dim), var(--loaded)); }
     .progress-fill.travelling { background: linear-gradient(90deg, var(--reloading-dim), var(--reloading)); }
     .progress-fill.returning { background: linear-gradient(90deg, var(--cyan-dim), var(--cyan)); }
+    .progress-fill.abroad { background: linear-gradient(90deg, var(--cyan-dim), var(--science)); }
     /* The open half of a selected card. Hidden — not merely empty — whenever
        the selected team has no verb to offer, so a returning team's card does
        not open onto a blank box. */
@@ -183,14 +194,52 @@ export class PhRepairTeams extends PhElement {
    */
   get selectedTeamId() { return this.#selectedTeamId; }
 
+  /**
+   * Which slot the ship's one field-repair claim holds, or `null` (issue
+   * #1386). Authoritative: the host names it on the repair blackboard, and the
+   * console no longer reconstructs it by truncating the idle list.
+   */
+  static abroadTeamId(external) {
+    return external && Number.isInteger(external.team_idx) ? external.team_idx : null;
+  }
+
+  /**
+   * Whether this team is the one abroad.
+   *
+   * The wire status is checked as well as the index, for the same reason the
+   * host's own `is_committed_to_operation` checks the slot: a claim naming a
+   * team that has since been given an internal job would otherwise paint a card
+   * ABROAD while its team walks across this hull.
+   */
+  static isAbroad(team, external) {
+    return !!team
+      && (team.status || 'idle') === 'idle'
+      && team.id === PhRepairTeams.abroadTeamId(external);
+  }
+
+  /**
+   * The 0–1 the bar fills to: a team's own travel/repair progress, or — for the
+   * team abroad — the TARGET's condition track, which is the work it is
+   * actually doing (issue #1386). `null` there means the target carries no
+   * condition track at all, so there is nothing honest to draw and the bar stays
+   * empty rather than inventing a number.
+   */
+  static progressFor(team, external) {
+    if (PhRepairTeams.isAbroad(team, external)) {
+      return external.target_condition != null ? external.target_condition : 0;
+    }
+    return team && team.progress_pct != null ? team.progress_pct : 0;
+  }
+
   #startAnimLoop() {
     if (this.#animFrame) return;
     const step = () => {
       const s = this.#state || {};
       const teams = Array.isArray(s.teams) ? s.teams : [];
+      const external = s.external_dispatch || null;
       let needsUpdate = false;
       teams.forEach(t => {
-        const target = t.progress_pct != null ? t.progress_pct : 0;
+        const target = PhRepairTeams.progressFor(t, external);
         const current = this.#displayProgress.get(t.id) ?? target;
         if (Math.abs(current - target) > 0.001) {
           const next = current + (target - current) * 0.15;
@@ -304,13 +353,17 @@ export class PhRepairTeams extends PhElement {
    * Build the DISPATCH TO destinations for one open idle card: one button per
    * damageable station/Core, plus the field target on a hull that has one.
    *
-   * The field row always sends `dispatch_external_repair` and never its recall
-   * counterpart. It is rendered as a disabled readout while a team is already
-   * working abroad — exactly the state in which the shared dispatch/recall
-   * action flips to RECALL — so the EXTERNAL recall cannot be reached from a
-   * destination list at all, rather than merely being spelled differently. The
-   * card's own RECALL (issue #1385) is a different verb on a different row: it
-   * names an internal team and never touches the field commitment.
+   * The field row is one destination among the stations (issue #1386): it
+   * sends the same `DispatchRepairTeam` they do, naming THIS card's team and
+   * the `external` target, so choosing where to send a team is one decision
+   * whichever side of the hull it lands on. It is still never a recall — a card
+   * offers destinations, and the way back is the RECALL row below, which now
+   * covers the abroad team too.
+   *
+   * While another team already holds the ship's one claim the row is a disabled
+   * readout carrying that refusal's own text, so the crew are told the thing
+   * they have to do (recall the other team) rather than watching a live-looking
+   * button be refused.
    *
    * @returns {boolean} whether the card has any destination to offer
    */
@@ -361,14 +414,15 @@ export class PhRepairTeams extends PhElement {
         b.querySelector('.label').textContent = fieldLabel;
         b.addEventListener('click', () => {
           if (b.disabled) return;
-          // Fieldless on purpose: the host resolves which team crosses and
-          // which designated target it crosses to (issue #1161). Sending a
-          // NAMED team is a change of commitment model, not of this button.
+          // The same verb the station buttons beside it send (issue #1386):
+          // this card's team, and `external` for the destination. Only the
+          // DESTINATION is the host's to resolve — it is whatever Tactical has
+          // locked — which is why the target carries no id of its own.
           activateEngineeringAction(
             this,
-            EXTERNAL_REPAIR_TOGGLE_ACTION_ID,
-            {},
-            'dispatch_external_repair',
+            REPAIR_DISPATCH_ACTION_ID,
+            { team_idx: teamId, target: EXTERNAL_REPAIR_TARGET },
+            'dispatch_repair_team',
           );
         });
         drow.appendChild(b);
@@ -381,19 +435,24 @@ export class PhRepairTeams extends PhElement {
     });
     const fieldBtn = drow.querySelector('.field-btn');
     if (fieldBtn) {
-      fieldBtn.title = fieldWorking ? t('console.repair.dispatch.working') : '';
+      // The host's own refusal id, not a second wording of it: the crew read
+      // the same sentence whether they got here by tapping or by reading.
+      fieldBtn.title = fieldWorking
+        ? t('repair.dispatch.refused.already_abroad')
+        : (external && external.refusal ? t(external.refusal) : '');
     }
     return targets.length > 0 || fieldLabel != null;
   }
 
   /**
-   * Build the RECALL control inside one open card whose team is out on an
-   * internal job (issue #1385).
+   * Build the RECALL control inside one open card whose team is OUT — travelling
+   * to a station, working one, or abroad on the field target (issues #1385,
+   * #1386).
    *
-   * It names its team, unlike the fieldless external dispatch above it: a ship
-   * sends one team abroad at a time, but every internal team can be out on a
-   * different job at once, so nothing server-side could resolve which of them
-   * "come home" meant.
+   * One control, one verb, whatever the team is doing. It names its team, which
+   * is what lets it cover both: a ship sends one team abroad at a time, but
+   * every internal team can be out on a different job at once, so nothing
+   * server-side could resolve which of them "come home" meant.
    *
    * WHETHER a recall is possible is not decided here. The card offers the
    * control off the authoritative status alone — travelling or on site — and
@@ -429,14 +488,6 @@ export class PhRepairTeams extends PhElement {
     const teams = Array.isArray(s.teams) ? s.teams : [];
     const auto = !!s.auto;
     const external = s.external_dispatch || null;
-    const idleTeams = teams.filter((team) => team && team.status === 'idle');
-    const committed = Math.min(
-      idleTeams.length,
-      Math.max(0, Math.trunc(Number(s.externally_committed_teams) || 0)),
-    );
-    const externallyCommittedIds = new Set(
-      idleTeams.slice(idleTeams.length - committed).map((team) => team.id),
-    );
     const container = this.shadowRoot.getElementById('teams-container');
     const badge = this.shadowRoot.getElementById('auto-badge');
     badge.style.display = auto ? 'inline' : 'none';
@@ -508,23 +559,26 @@ export class PhRepairTeams extends PhElement {
         }
       }
 
-      const status = team.status || 'idle';
+      // The wire slot of the team abroad reads `Idle` — it never walked
+      // anywhere on this hull — so ABROAD is derived here from the claim the
+      // host published (issue #1386) rather than being a fifth `TeamSlot`.
+      const isAbroad = PhRepairTeams.isAbroad(team, external);
+      const status = isAbroad ? 'abroad' : (team.status || 'idle');
       const isIdle = status === 'idle';
-      const externallyCommitted = isIdle && externallyCommittedIds.has(team.id);
       const selected = this.#selectedTeamId === team.id;
       // Whether this team has a card body AT ALL — settled before any chrome is
       // drawn, because the caret, the selected border and `aria-expanded` are
       // promises about the body and must not outrun it. An idle slot always has
-      // one (destinations, or the note saying why there are none) unless its
-      // slot is already spoken for by the field. A team out on an internal job
-      // — travelling or on site — always has one too since issue #1385, because
-      // RECALL is a verb it can always use; on site that verb shares the card
-      // with the damaged rows the host is showing this seat. A returning team
-      // and an externally committed slot have no body: the host refuses a
-      // recall for the first and the field owns the second, and a toggle whose
-      // only job is to open an empty box is worse than no toggle.
-      const canRecall = status === 'travelling' || status === 'repairing';
-      const hasBody = isIdle ? !externallyCommitted : canRecall;
+      // one (destinations, or the note saying why there are none). A team out
+      // on a job always has one too since issue #1385, because RECALL is a verb
+      // it can always use; on site that verb shares the card with the damaged
+      // rows the host is showing this seat. Since issue #1386 the team abroad is
+      // one of those — one recall verb covers the field claim as well — so the
+      // returning team is the only status left with no body at all: the host
+      // refuses its recall, and a toggle whose only job is to open an empty box
+      // is worse than no toggle.
+      const canRecall = status === 'travelling' || status === 'repairing' || isAbroad;
+      const hasBody = isIdle || canRecall;
       const open = selected && hasBody;
 
       const cardTop = card.querySelector('.card-top');
@@ -545,9 +599,17 @@ export class PhRepairTeams extends PhElement {
       // The collapsed summary keeps every READOUT — where the team is, or that
       // its slot is spoken for — and offers no verb at all.
       const label = card.querySelector('.target-label');
-      if (externallyCommitted) {
+      if (isAbroad) {
+        // The same "Target: …" readout an internal job gets, off the name id
+        // the host resolved for the claim. It falls back to the generic field
+        // label rather than to an em dash, because there IS a destination — the
+        // seat simply has no name for it.
         label.style.display = 'block';
-        label.textContent = t('component.repair_teams.external_commitment');
+        label.textContent = t('component.repair_teams.target', {
+          target: external && external.target_name
+            ? t(external.target_name)
+            : t('component.repair_teams.field_target'),
+        });
       } else if (!isIdle) {
         label.style.display = 'block';
         label.textContent = t('component.repair_teams.target', { target: team.target || '—' });
@@ -614,7 +676,7 @@ export class PhRepairTeams extends PhElement {
 
       const fill = card.querySelector('.progress-fill');
       fill.className = 'progress-fill ' + status;
-      const targetPct = team.progress_pct != null ? team.progress_pct : 0;
+      const targetPct = PhRepairTeams.progressFor(team, external);
       if (!this.#displayProgress.has(team.id)) {
         this.#displayProgress.set(team.id, targetPct);
       }

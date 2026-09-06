@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  EXTERNAL_REPAIR_TARGET,
   REPAIR_SYSTEM_ID,
   repairTargetFor,
   dispatchRepairTeamPayload,
@@ -18,6 +19,21 @@ describe('repair-dispatch target mapping', () => {
 
   it('maps a station id to RepairTarget::Station', () => {
     expect(repairTargetFor('helm')).toEqual({ type: 'Station', data: 'helm' });
+  });
+
+  // Issue #1386: the field target off the ship. No uuid — the destination is
+  // Tactical's lock, which the host resolves for itself; the console says only
+  // which team crosses over.
+  it('maps the field target to RepairTarget::External with no operand', () => {
+    expect(repairTargetFor('external')).toEqual({ type: 'External' });
+    expect(repairTargetFor(EXTERNAL_REPAIR_TARGET)).toEqual({ type: 'External' });
+  });
+
+  it('builds the DispatchRepairTeam payload for the field target', () => {
+    expect(dispatchRepairTeamPayload(2, EXTERNAL_REPAIR_TARGET)).toEqual({
+      type: 'DispatchRepairTeam',
+      data: { team_idx: 2, target: { type: 'External' } },
+    });
   });
 
   it('rejects an empty target', () => {

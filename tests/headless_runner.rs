@@ -23400,21 +23400,40 @@ fn external_dispatch_of(app: &mut App) -> project_phoenix::console::repair::Exte
         .clone()
 }
 
+/// The repair channel as the tender's host PUBLISHES it (issue #1386) — the
+/// payload the console renders, never the component behind it. The whole ABROAD
+/// card is drawn from two fields on this blackboard, so the test that proves a
+/// named team crossed over has to read it here rather than off
+/// [`external_dispatch_of`]'s component.
+fn published_repair(app: &mut App) -> project_phoenix::core::messages::RepairBlackboard {
+    use project_phoenix::core::messages::{SystemBlackboard, SystemId};
+    use project_phoenix::server_app::ShipSystemBlackboards;
+
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
+    let boards = q.iter(app.world()).next().expect("the tender publishes");
+    let key = SystemId(project_phoenix::ship::system_registry::REPAIR_SYSTEM_ID.to_string());
+    match boards.0.get(&key) {
+        Some(SystemBlackboard::Repair(bb)) => bb.clone(),
+        other => panic!("expected a repair blackboard, got {other:?}"),
+    }
+}
+
 /// The one availability answer both the human console and the repair AI read:
 /// how many of the tender's teams are free for its OWN damage-control sweep,
 /// with any external commitment already withdrawn (issue #1161, rule 6).
 fn operator_free_team_count(app: &mut App) -> usize {
     let op = tractor_operator(app);
-    let committed = app
+    let abroad = app
         .world()
         .get::<project_phoenix::console::repair::ExternalRepairDispatch>(op)
-        .map(|d| d.committed_repair_teams())
-        .unwrap_or(0);
+        .and_then(|d| d.abroad_team());
     let teams = app
         .world()
         .get::<project_phoenix::console::repair::server::ShipRepairTeams>(op)
         .expect("the tender carries repair teams");
-    teams.0.free_team_indices(committed).len()
+    teams.0.free_team_indices(abroad).len()
 }
 
 /// Send a dispatch/recall through the real admission path and give it the ticks
@@ -23608,6 +23627,134 @@ fn a_dispatched_team_raises_an_allys_condition_while_the_hulls_own_repairs_slow(
     assert!(
         (condition_of(&mut app, ALLY) - banked).abs() < 1.0,
         "a team dropped out of range stops working the ally where it left off"
+    );
+}
+
+/// AC (issue #1386): Engineering sends a CHOSEN team to Tactical's lock, and the
+/// hull records which team went — proved end to end through the ordinary
+/// admitted-command path, with the same `DispatchRepairTeam` a station dispatch
+/// uses and `RepairTarget::External` for the destination.
+///
+/// The one recall verb then brings that team home. `RecallRepairTeam` names the
+/// team and `handle_recall_repair_team` releases the claim, so a seat that can
+/// see which team is abroad does not also have to know that recalling it is a
+/// different command from recalling a team walking across the hull.
+#[test]
+fn a_named_team_crosses_to_the_locked_target_and_the_one_recall_brings_it_home() {
+    use project_phoenix::console::repair::ExternalRepairRefusal;
+    use project_phoenix::core::messages::{RepairTarget, SystemControlPayload};
+
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&external_repair_args(dt)).expect("app should build");
+    run(&mut app, 60);
+    let ally = scan_uuid_named(&mut app, ALLY);
+    place_operator(&mut app, Vec3::ZERO);
+    set_tractor_lock(&mut app, Some(ally.clone()));
+    run(&mut app, 1);
+
+    send_repair(
+        &mut app,
+        SystemControlPayload::DispatchRepairTeam {
+            team_idx: 0,
+            target: RepairTarget::External,
+        },
+    );
+    let d = external_dispatch_of(&mut app);
+    assert_eq!(
+        d.dispatched_target.as_deref(),
+        Some(ally.as_str()),
+        "the NAMED team crossed to the designated ally"
+    );
+    assert_eq!(
+        d.abroad_team(),
+        Some(0),
+        "…and the claim records WHICH team went, rather than a count somebody has to guess from"
+    );
+    assert!(
+        d.last_refusal.is_none(),
+        "a clean dispatch carries no refusal"
+    );
+    assert_eq!(
+        operator_free_team_count(&mut app),
+        0,
+        "the team the seat chose is the one withdrawn from the tender's own sweep"
+    );
+
+    // The two fields the ABROAD card is drawn from ride the repair blackboard
+    // the console reads — proved off the HOST's own publish, not the component
+    // behind it. The card says which team went, and its bar is the TARGET's own
+    // condition track, republished every tick because that is the work.
+    let bb = published_repair(&mut app);
+    assert_eq!(
+        bb.external_dispatch_team_idx,
+        Some(0),
+        "the published claim NAMES the team, so the card that says ABROAD is the          card of the team that actually went"
+    );
+    let at_dispatch = bb
+        .external_dispatch_target_condition
+        .expect("a live claim on a target with a condition track publishes its fraction");
+    run(&mut app, 60);
+    let while_working = published_repair(&mut app)
+        .external_dispatch_target_condition
+        .expect("…and keeps publishing it every tick while the team is over there");
+    assert!(
+        while_working > at_dispatch,
+        "the abroad card's bar RISES while the team works — {at_dispatch} then {while_working}"
+    );
+
+    // A second named dispatch of the SAME team is the stale-UI double tap: the
+    // claim is already this team's, so it re-points rather than being refused.
+    send_repair(
+        &mut app,
+        SystemControlPayload::DispatchRepairTeam {
+            team_idx: 0,
+            target: RepairTarget::External,
+        },
+    );
+    assert_eq!(external_dispatch_of(&mut app).abroad_team(), Some(0));
+
+    // Naming a team this hull does not have sends nobody and says why — the
+    // tender musters one team, so slot 1 is a team that cannot go.
+    send_repair(
+        &mut app,
+        SystemControlPayload::DispatchRepairTeam {
+            team_idx: 1,
+            target: RepairTarget::External,
+        },
+    );
+    let d = external_dispatch_of(&mut app);
+    assert_eq!(
+        d.abroad_team(),
+        Some(0),
+        "a refusal sends nobody and recalls nobody"
+    );
+    assert_eq!(d.last_refusal, Some(ExternalRepairRefusal::TeamBusy));
+
+    // The ONE recall verb, naming the team abroad, ends the field repair.
+    send_repair(
+        &mut app,
+        SystemControlPayload::RecallRepairTeam { team_idx: 0 },
+    );
+    let d = external_dispatch_of(&mut app);
+    assert!(
+        d.dispatched_target.is_none(),
+        "RecallRepairTeam brought the abroad team home, the same effect \
+         RecallExternalRepair has — one verb for a team wherever it is"
+    );
+    assert_eq!(d.abroad_team(), None);
+    assert_eq!(
+        operator_free_team_count(&mut app),
+        1,
+        "the recalled team is back in the tender's own sweep"
+    );
+    let bb = published_repair(&mut app);
+    assert_eq!(
+        bb.external_dispatch_team_idx, None,
+        "…and the published claim names nobody, so no card draws ABROAD"
+    );
+    assert_eq!(
+        bb.external_dispatch_target_condition, None,
+        "…nor the ally's bar, which was only ever the work in progress"
     );
 }
 

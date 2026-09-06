@@ -1635,6 +1635,12 @@ export function buildRepairConsoleState(state, systemIds = []) {
         target:      bb.external_dispatch_target ?? null,
         target_name: bb.external_dispatch_target_name ?? null,
         refusal:     bb.external_dispatch_refusal ?? null,
+        // WHICH team is abroad, and how the target it is working is doing
+        // (issue #1386). The team index is authoritative — the console used to
+        // reconstruct it by truncating the idle list, which was only ever right
+        // because nobody could choose which team went.
+        team_idx:    bb.external_dispatch_team_idx ?? null,
+        target_condition: bb.external_dispatch_target_condition ?? null,
       },
     });
   }

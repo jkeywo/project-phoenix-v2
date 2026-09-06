@@ -243,7 +243,7 @@ describe('courier captain renderStation', () => {
     expect(el('hull').state).toEqual({ total_pct: 0.7, destroyed_pct: 0.1 });
     expect(el('repair').state).toEqual({
       teams: [{ id: 't1' }], auto: false, targets: [{ id: 'x' }],
-      damaged: [{ id: 'y' }], externally_committed_teams: 0,
+      damaged: [{ id: 'y' }],
       external_dispatch: null,
     });
   });

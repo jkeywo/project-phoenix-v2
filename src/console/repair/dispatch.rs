@@ -105,6 +105,14 @@ pub fn register_repair_dispatch(app: &mut App) {
 /// `RepairTarget::Core` dispatches to `SystemId("core")`, the repair bucket for
 /// ownerless ship-wide systems.
 ///
+/// `RepairTarget::External` is NOT this router's arm (issue #1386). A team sent
+/// to the field target does not walk to a hull system — it is committed to the
+/// ship's one external claim by
+/// [`super::external_server::handle_external_repair_commands`], which runs in
+/// `SimSet::Input` and has already answered the order (and reported it on the
+/// feedback seam) by the time this system runs in `SimSet::Physics`. Skipping it
+/// here without a second verdict is what keeps ONE answer per command.
+///
 /// Per-entity (issue #830): iterates every `Ship` (player + NPC) and applies
 /// each ship's own admitted `DispatchRepairTeam` commands to its own
 /// `ShipRepairTeams` component. The global `ShipRepairTeams` Resource and its
@@ -132,9 +140,7 @@ pub fn handle_dispatch_repair_team(
     mut outbound: Option<ResMut<Messages<crate::lobby::OutboundMessage>>>,
 ) {
     for (admitted, ship_config, mut teams, hull_opt, external_dispatch) in ship_query.iter_mut() {
-        let committed = external_dispatch
-            .map(|e| e.committed_repair_teams())
-            .unwrap_or(0);
+        let abroad = external_dispatch.and_then(|e| e.abroad_team());
         // Look up a human-readable display name for a SystemId. Prefer the
         // ship's `EntitySystemHull` entry (populated from TOML with the
         // designer-authored display name), and fall back to the raw SystemId
@@ -155,6 +161,12 @@ pub fn handle_dispatch_repair_team(
                 target: repair_target,
             } = &cmd.payload
             {
+                // The field target is the external claim's, not this router's —
+                // see the doc above. No feedback here: `SimSet::Input` already
+                // finished this command's promise (issue #1386).
+                if matches!(repair_target, RepairTarget::External) {
+                    continue;
+                }
                 // `None` ⇒ the order names no work: a station with no damaged
                 // owned system whose own name is a hull row (see
                 // `resolve_repair_target`). Skip the command and leave the slot
@@ -183,7 +195,7 @@ pub fn handle_dispatch_repair_team(
                 // left exactly as it was.
                 if teams
                     .0
-                    .is_committed_to_operation(*team_idx as usize, committed)
+                    .is_committed_to_operation(*team_idx as usize, abroad)
                 {
                     crate::command_admission::finish_admitted_action_feedback(
                         &mut outbound,
@@ -214,28 +226,93 @@ pub fn handle_dispatch_repair_team(
 /// `command_admission::policy::is_command_authorized` turns on the target and
 /// not on the payload variant.
 ///
-/// INTERNAL teams only. The team abroad on a field repair is recalled by
-/// `RecallExternalRepair` in
-/// [`super::external_server`], which is a different commitment with a different
-/// state of its own; this handler only ever touches the ship's own
-/// `ShipRepairTeams`.
+/// **One verb for whatever the team is doing** (issue #1386, amending #1385,
+/// whose doc here said INTERNAL teams only). A `Travelling` or `Repairing` team
+/// walks home through `RepairTeams::recall`; the team holding this ship's
+/// external claim has that claim released instead, which is the same effect
+/// `RecallExternalRepair` has — that fieldless sibling stays in
+/// [`super::external_server`] for the AI / operate-directive vocabulary, which
+/// names no team because the host picked one.
 ///
-/// Nothing is resolved here: unlike the dispatch beside it there is no target
-/// to look up, because a recall names the team and the team already knows where
-/// it is. `RepairTeams::recall` owns the whole transition (and reports whether
-/// there was one), so the handler is exactly the admitted-command loop plus the
-/// Applied/Refused feedback the console correlates against.
+/// The two used to be different buttons because the external commitment was a
+/// COUNT and nothing could say which team it meant. Now that it names its team
+/// (#1386), asking the seat which of two recalls it wants would be asking it to
+/// know something the card already tells it.
+///
+/// The claim is released HERE rather than in `handle_external_repair_commands`
+/// so that exactly one system answers a `RecallRepairTeam` — two would report
+/// the correlated feedback twice, and the second would report `Refused` for a
+/// team the first had just brought home. Physics is late enough: the claim's
+/// only same-tick reader downstream is `tick_external_repair`/
+/// `apply_external_repair` in `SimSet::Modifiers`, so a team recalled this tick
+/// banks nothing more, exactly as `RecallExternalRepair` in Input does.
+///
+/// Nothing else is resolved here: unlike the dispatch beside it there is no
+/// target to look up, because a recall names the team and the team already knows
+/// where it is.
 ///
 /// Runs in the same `SimSet::Physics` tuple as the dispatch, `.after`
 /// `operate_repair_ai`, so a human recall cannot race the AI's own same-tick
 /// dispatch: the AI emits first, then both orders are applied in command order.
 pub fn handle_recall_repair_team(
-    mut ship_query: Query<(&AdmittedCommands, &mut ShipRepairTeams), With<crate::server_app::Ship>>,
+    mut ship_query: Query<
+        (
+            &AdmittedCommands,
+            &mut ShipRepairTeams,
+            Option<&crate::entities::spawner::EntityUuid>,
+            // Issue #1386: the ship's one external claim, so this verb can end a
+            // field repair as well as an internal job.
+            Option<&mut super::external_server::ExternalRepairDispatch>,
+        ),
+        With<crate::server_app::Ship>,
+    >,
     mut outbound: Option<ResMut<Messages<crate::lobby::OutboundMessage>>>,
+    // The task timeline (issue #1345). `Option` for the reason every other
+    // repair system takes it as one: a reduced test app runs the applier
+    // without `InfrastructurePlugin`'s queues and must be a no-op, not a panic.
+    mut lifecycle: Option<
+        ResMut<crate::effect_queue::EffectQueue<crate::core::task_lifecycle::TaskLifecycleRequest>>,
+    >,
 ) {
-    for (admitted, mut teams) in ship_query.iter_mut() {
+    for (admitted, mut teams, uuid, mut external) in ship_query.iter_mut() {
         for cmd in admitted.for_target(REPAIR_SYSTEM_ID) {
             if let SystemControlPayload::RecallRepairTeam { team_idx } = &cmd.payload {
+                // The abroad team first: its slot reads `Idle`, so falling
+                // through to `RepairTeams::recall` would refuse the one recall
+                // the crew can see a reason for.
+                let abroad = external
+                    .as_deref()
+                    .and_then(|e| e.abroad_team())
+                    .is_some_and(|idx| idx == *team_idx as usize);
+                if abroad {
+                    // Reported BEFORE the claim clears, the ordering
+                    // `handle_external_repair_commands` keeps for the same
+                    // terminal (issue #1345): a deliberate recall is a release,
+                    // not a failure. A hull with no uuid is reported for by
+                    // nobody — `push_lifecycle`'s rule — but its team still
+                    // comes home, because the claim is the simulation and the
+                    // timeline is only the story of it.
+                    if let (Some(queue), Some(uuid)) = (lifecycle.as_deref_mut(), uuid) {
+                        queue
+                            .0
+                            .push(crate::core::task_lifecycle::TaskLifecycleRequest::End {
+                                // The dispatcher's OWN slot fn, not a second
+                                // spelling of it: two would let a timeline carry
+                                // an End nothing ever opened.
+                                slot: super::external_server::dispatch_slot(Some(uuid)),
+                                reason: crate::core::task_lifecycle::TaskTerminalReason::Released,
+                            });
+                    }
+                    if let Some(external) = external.as_deref_mut() {
+                        external.release(None);
+                    }
+                    crate::command_admission::finish_admitted_action_feedback(
+                        &mut outbound,
+                        cmd,
+                        crate::core::messages::ActionFeedbackOutcome::Applied,
+                    );
+                    continue;
+                }
                 // `false` covers every "there is nothing to recall" case in one
                 // reading — no such slot, an idle team, a team already on its
                 // way home — and leaves the slot untouched, which is the same
@@ -374,6 +451,11 @@ fn resolve_repair_target(
     hull: Option<&crate::ship::damage::SystemHull>,
 ) -> Option<SystemId> {
     match target {
+        // Not this resolver's arm — the caller skips it before ever asking (see
+        // `handle_dispatch_repair_team`). Named here rather than caught by a
+        // wildcard so a future `RepairTarget` variant still fails to compile
+        // until someone decides what a repair team walks to for it.
+        RepairTarget::External => None,
         RepairTarget::Core => Some(SystemId("core".into())),
         RepairTarget::Station(station_id) => {
             let Some(hull) = hull else {

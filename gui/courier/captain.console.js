@@ -70,10 +70,10 @@ export const renderStation = makeCaptainRender({
         auto: !!repair.repair_auto,
         targets: repair.dispatch_targets || [],
         damaged: repair.damaged_systems || [],
-        externally_committed_teams: repair.external_dispatch?.target != null ? 1 : 0,
-        // The field destination an open idle card offers (issue #1384) — the
-        // same shape the Repair and Engineering renderers hand the component,
-        // so the compact Captain composite renders the identical card.
+        // The field destination an open idle card offers (issue #1384) and the
+        // team abroad on it (issue #1386) — the same shape the Repair and
+        // Engineering renderers hand the component, so the compact Captain
+        // composite renders the identical card.
         external_dispatch: repair.external_dispatch || null,
       };
     }

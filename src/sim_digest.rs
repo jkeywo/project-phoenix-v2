@@ -1823,7 +1823,7 @@ fn fold_external_repair_namespace(world: &World, mut acc: u64) -> u64 {
         // — the empty case, not a distinct one.
         return acc;
     };
-    let mut rows: Vec<(FoldKey, bevy::ecs::entity::EntityIndex, String)> = query
+    let mut rows: Vec<(FoldKey, bevy::ecs::entity::EntityIndex, String, u8)> = query
         .iter(world)
         .filter_map(|(entity, uuid, dispatch)| {
             dispatch.dispatched_target.as_ref().map(|target| {
@@ -1831,6 +1831,7 @@ fn fold_external_repair_namespace(world: &World, mut acc: u64) -> u64 {
                     FoldKey::from_world_id(Namespace::Entity, &uuid.0),
                     entity.index(),
                     target.clone(),
+                    dispatch.team_idx,
                 )
             })
         })
@@ -1842,9 +1843,17 @@ fn fold_external_repair_namespace(world: &World, mut acc: u64) -> u64 {
 
     acc = fold_str(acc, "external-repair-namespace");
     acc = fold_u64(acc, rows.len() as u64);
-    for (key, _, target) in rows {
+    for (key, _, target, team_idx) in rows {
         acc = fold_str(acc, &key.id);
         acc = fold_str(acc, &target);
+        // WHICH team is abroad, beside the target it is working (issue #1386).
+        // It has to fold for the reason the target does: two hosts that disagree
+        // about it disagree about which slot this hull has free for its own
+        // damage-control sweep, and therefore about where the next internal
+        // dispatch lands. The empty-walk affordance is untouched — a ship
+        // dispatching nobody still folds nothing at all, so `dispatched_target`
+        // folds exactly as it did.
+        acc = fold_u64(acc, u64::from(team_idx));
     }
     acc
 }

@@ -110,9 +110,9 @@ export function makeEngineeringRender(variant) {
         auto: !!r.repair_auto,
         targets: r.dispatch_targets || [],
         damaged: r.damaged_systems || [],
-        externally_committed_teams: r.external_dispatch?.target != null ? 1 : 0,
-        // The field destination an open idle card offers (issue #1384) — the
-        // same shape `gui/stations/repair-console.js` hands the component.
+        // The field destination an open idle card offers (issue #1384) and the
+        // team abroad on it (issue #1386) — the same shape
+        // `gui/stations/repair-console.js` hands the component.
         external_dispatch: r.external_dispatch || null,
       };
     }

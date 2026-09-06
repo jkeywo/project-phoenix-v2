@@ -1566,6 +1566,38 @@ describe('buildRepairConsoleState', () => {
     },
   });
 
+  // ── Issues #1161/#1386: the external field-repair view ────────────────────
+
+  it('carries the field claim through, naming the team and the target condition', () => {
+    const s = parse(buildRepairConsoleState(projectedState([
+      { system_id: 'core', display_name: 'Core', current: 4, max_hp: 10 },
+    ], {
+      external_dispatch_range: 800,
+      external_dispatch_target: 'uuid-1',
+      external_dispatch_target_name: 'world.probe.entity.ally.name',
+      external_dispatch_team_idx: 2,
+      external_dispatch_target_condition: 0.42,
+    })));
+    expect(s.external_dispatch).toEqual({
+      range: 800,
+      target: 'uuid-1',
+      target_name: 'world.probe.entity.ally.name',
+      refusal: null,
+      team_idx: 2,
+      target_condition: 0.42,
+    });
+  });
+
+  it('reads no team abroad as null rather than as team 0', () => {
+    // A hull that CAN dispatch but is holding nobody: the two #1386 fields are
+    // absent, and `0` would be a card painted ABROAD for a team standing at home.
+    const s = parse(buildRepairConsoleState(projectedState([
+      { system_id: 'core', display_name: 'Core', current: 4, max_hp: 10 },
+    ], { external_dispatch_range: 800 })));
+    expect(s.external_dispatch.team_idx).toBeNull();
+    expect(s.external_dispatch.target_condition).toBeNull();
+  });
+
   it('renders only the system_hull rows the host sent — it never invents the rest', () => {
     // Engineering pre-arrival: core + its own `repair`, no helm-radar row.
     const s = parse(parse(JSON.stringify(buildRepairConsoleState(projectedState([

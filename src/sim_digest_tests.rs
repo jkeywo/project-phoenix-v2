@@ -334,6 +334,76 @@ fn only_a_held_tractor_moves_the_digest_and_the_target_is_what_moves_it() {
     );
 }
 
+/// A tender, optionally holding one named team abroad on a named target.
+fn spawn_tender(world: &mut World, uuid: &str, abroad: Option<(u8, &str)>) {
+    let mut dispatch = crate::console::repair::ExternalRepairDispatch::new(
+        crate::console::repair::ExternalRepairConfig {
+            range: 600.0,
+            repair_rate: 8.0,
+        },
+    );
+    if let Some((team_idx, target)) = abroad {
+        dispatch.claim(team_idx, Some(target.to_string()));
+    }
+    world.spawn((EntityUuid(uuid.to_string()), dispatch));
+}
+
+/// **Issues #1161, #1386.** A hull holding nobody abroad folds nothing at all —
+/// the empty-walk affordance that lets a shipped hull gain
+/// `[repair.external_dispatch]` without moving any committed world's digest —
+/// and a live claim folds BOTH what it is working and WHICH team is doing it.
+///
+/// The team has to fold for the reason the target does. Two hosts that disagree
+/// about which slot is abroad disagree about which team this hull has free for
+/// its own damage-control sweep, so the next internal dispatch lands on a
+/// different system, and that reaches `EntitySystemHull` and therefore the
+/// digest one tick later — as a divergence nothing upstream could explain.
+#[test]
+fn a_field_repair_folds_its_target_and_the_team_working_it() {
+    let id = "00000000-0000-8000-8000-000000000001";
+
+    let mut idle = fold_world();
+    spawn_tender(&mut idle, id, None);
+    assert_eq!(
+        fold_external_repair_namespace(&idle, FOLD_SEED),
+        FOLD_SEED,
+        "a hull dispatching nobody folds nothing — a folded row here would have moved every \
+         committed world's digest for state none of them carry"
+    );
+
+    let mut team_zero = fold_world();
+    spawn_tender(&mut team_zero, id, Some((0, "ally-A")));
+    let mut team_zero_again = fold_world();
+    spawn_tender(&mut team_zero_again, id, Some((0, "ally-A")));
+    let mut team_one = fold_world();
+    spawn_tender(&mut team_one, id, Some((1, "ally-A")));
+    let mut other_ally = fold_world();
+    spawn_tender(&mut other_ally, id, Some((0, "ally-B")));
+
+    assert_ne!(
+        world_digest(&idle),
+        world_digest(&team_zero),
+        "sending a team abroad must move the digest — nothing else records that the ally's \
+         condition is climbing and this hull is a team short"
+    );
+    assert_eq!(
+        world_digest(&team_zero),
+        world_digest(&team_zero_again),
+        "two hosts with the same team on the same target must agree"
+    );
+    assert_ne!(
+        world_digest(&team_zero),
+        world_digest(&team_one),
+        "…and a host that thinks a DIFFERENT team went must fold to a different number \
+         (issue #1386: the claim names its team, so the digest has to see it)"
+    );
+    assert_ne!(
+        world_digest(&team_zero),
+        world_digest(&other_ally),
+        "…as must a host that thinks the team is working someone else"
+    );
+}
+
 /// A docker, optionally mated to a named berth.
 fn spawn_docker(world: &mut World, uuid: &str, docked_to: Option<&str>) {
     let mut control = DockControl::new(

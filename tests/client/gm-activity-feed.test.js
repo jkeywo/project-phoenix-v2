@@ -122,6 +122,30 @@ function fireGmEvent(data = {}, action = {}) {
   }, { ships: [], links: [] });
 }
 
+/** One directed world effect (issue #1310), the fourth action family. */
+function applyDirectEffect(data = {}, action = {}) {
+  return entry('gm_action', {
+    type: 'gm_action',
+    data: {
+      operator: { id: 'gm-alpha', name: 'Morgan' },
+      correlation: 'hit-1',
+      action: {
+        type: 'apply_direct_effect',
+        entity: 'npc-1',
+        heal: false,
+        applied_milli_hp: 25000,
+        discarded_milli_hp: 0,
+        destroyed: false,
+        ...action,
+      },
+      outcome: 'applied',
+      reason: null,
+      order: { sequence: 6, origin: 1 },
+      ...data,
+    },
+  }, { ships: [], links: [] });
+}
+
 function allCategories() {
   return [
     damage(),
@@ -240,6 +264,28 @@ describe('GM activity feed pure adapter', () => {
     expect(parseGmActivityFeed(payload([fireGmEvent({}, { type: 'fire_unknown' })])))
       .toBeUndefined();
   });
+
+  it('accepts a directed world effect and rejects a malformed one', () => {
+    const parsed = parseGmActivityFeed(payload([applyDirectEffect()]));
+    expect(parsed.entries).toHaveLength(1);
+    expect(parsed.entries[0].detail.data.action).toEqual({
+      type: 'apply_direct_effect',
+      entity: 'npc-1',
+      heal: false,
+      applied_milli_hp: 25000,
+      discarded_milli_hp: 0,
+      destroyed: false,
+    });
+    for (const broken of [
+      { entity: '' },
+      { heal: 'yes' },
+      { applied_milli_hp: -1 },
+      { discarded_milli_hp: 1.5 },
+      { destroyed: null },
+    ]) {
+      expect(parseGmActivityFeed(payload([applyDirectEffect({}, broken)]))).toBeUndefined();
+    }
+  });
 });
 
 describe('GM activity feed presentation and selection links', () => {
@@ -282,6 +328,35 @@ describe('GM activity feed presentation and selection links', () => {
     // And both ids this branch composes resolve against the shipped table.
     expect(realStrings.get('server.gm.activity.action.fire_gm_event')).toContain('{event}');
     expect(realStrings.has('server.gm.activity.action_reason.unknown-gm-event')).toBe(true);
+  });
+
+  it('names the damaged entity, the hull that landed and the lethal outcome', () => {
+    const lethal = applyDirectEffect({ correlation: 'hit-2' }, {
+      applied_milli_hp: 30000,
+      discarded_milli_hp: 60000,
+      destroyed: true,
+    });
+    const heal = applyDirectEffect({ correlation: 'heal-1' }, {
+      heal: true,
+      applied_milli_hp: 5500,
+    });
+    expect(harness.feed.update(payload([applyDirectEffect(), lethal, heal], 16))).toBe(true);
+    const rows = [...document.querySelectorAll('[data-category="gm_action"]')];
+    expect(rows).toHaveLength(3);
+    expect(rows[0].textContent)
+      .toContain('server.gm.activity.action.apply_direct_damage:npc-1/25');
+    expect(rows[1].textContent).toContain('server.gm.activity.action.direct_effect_lethal');
+    expect(rows[1].textContent)
+      .toContain('server.gm.activity.action.direct_effect_discarded:60');
+    // Healing is its own sentence, and a fractional amount survives the unit
+    // conversion rather than being rounded to a whole hull point.
+    expect(rows[2].textContent)
+      .toContain('server.gm.activity.action.apply_direct_heal:npc-1/5.5');
+    for (const row of rows) {
+      expect(row.textContent).not.toContain('server.gm.activity.action.resume');
+    }
+    expect(realStrings.get('server.gm.activity.action.apply_direct_damage')).toContain('{entity}');
+    expect(realStrings.get('server.gm.activity.action.apply_direct_heal')).toContain('{amount}');
   });
 
   it('drives category plus ship filters and clear resets both', () => {

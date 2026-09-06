@@ -59,6 +59,16 @@ pub struct GmEntityStatus {
     pub hull_percent: Option<u8>,
     pub condition_percent: Option<u8>,
     pub destroyed: bool,
+    /// Absolute hull totals in milli-HP (issue #1310), present exactly when
+    /// `hull_percent` is.
+    ///
+    /// A percentage cannot answer "would 40 points kill this", which is the one
+    /// question a GM about to press Damage needs answered, and it cannot be
+    /// converted into one without the maximum. Both are carried in the same
+    /// unit the action itself uses so the page compares like with like rather
+    /// than reconstructing hull points from a rounded percent.
+    pub hull_current_milli_hp: Option<u32>,
+    pub hull_max_milli_hp: Option<u32>,
 }
 
 /// Authored radar presentation, narrowed to the public map vocabulary.
@@ -96,6 +106,15 @@ pub struct GmEntityProjection {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 pub struct GmEntityProjectionPayload {
     pub entities: Vec<GmEntityProjection>,
+    /// Bounded attributed results of the directed world-effect family (issue
+    /// #1310), carried on the entity surface rather than a channel of its own.
+    ///
+    /// The panel that submits these effects is the entity inspector: it selects
+    /// its target from this exact payload, so the answer belongs beside the
+    /// thing it was aimed at. `publish_local_projection` compares the whole
+    /// payload, so a new result republishes it the same way a moved ship does.
+    #[serde(default)]
+    pub results: Vec<crate::gm_action::LoggedGmAction>,
 }
 
 /// One authored Station interface on a fleet/player ship. `console` is copied
@@ -249,6 +268,9 @@ fn broad_status(
         hull_percent,
         condition_percent,
         destroyed: hull.is_some_and(|hull| hull.0.total_current() <= 0.0),
+        hull_current_milli_hp: hull
+            .map(|hull| crate::gm_effect::hp_to_milli(hull.0.total_current())),
+        hull_max_milli_hp: hull.map(|hull| crate::gm_effect::hp_to_milli(hull.0.total_max())),
     }
 }
 
@@ -259,6 +281,8 @@ fn hull_status(hull: &EntitySystemHull) -> GmEntityStatus {
         hull_percent: Some(percent(total_current, total_max)),
         condition_percent: None,
         destroyed: total_current <= 0.0,
+        hull_current_milli_hp: Some(crate::gm_effect::hp_to_milli(total_current)),
+        hull_max_milli_hp: Some(crate::gm_effect::hp_to_milli(total_max)),
     }
 }
 
@@ -343,6 +367,8 @@ fn publish_local_projection(
     factions: Option<Res<FactionRegistryResource>>,
     world_content: Option<Res<WorldContentRuntime>>,
     world_setup: Option<Res<WorldResource>>,
+    action_log: Res<GmActionLog>,
+    local_refusals: Res<LocalGmActionRefusals>,
     mut previous: Local<Option<GmEntityProjectionPayload>>,
     mut changed: MessageWriter<GmEntityProjectionChanged>,
 ) {
@@ -479,6 +505,11 @@ fn publish_local_projection(
 
     let next = GmEntityProjectionPayload {
         entities: projected,
+        results: crate::gm_action::projected_results(
+            crate::gm_action::GmActionKind::DirectEffect,
+            &action_log,
+            &local_refusals,
+        ),
     };
     if previous.as_ref() != Some(&next) {
         changed.write(GmEntityProjectionChanged {

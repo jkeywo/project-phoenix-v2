@@ -38,6 +38,7 @@
 //! | `GmActionJournal` | [`PhoenixSnapshot::gm_actions`] |
 //! | `StationPuppets` | [`PhoenixSnapshot::gm_puppets`] |
 //! | accepted pending GM Station commands | [`PhoenixSnapshot::gm_station_commands`] |
+//! | armed GM direct damage/heal effects | [`PhoenixSnapshot::gm_direct_effects`] |
 //! | `SimRng`'s six stream positions | [`PhoenixSnapshot::rng`] (`SimRngState`) |
 //! | `WorldIdMint`'s tick + per-namespace counters | [`PhoenixSnapshot::mint`] |
 //! | `GamePhase` | [`PhoenixSnapshot::phase`] |
@@ -562,7 +563,17 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// unreachable rather than merely late. Durable results also gained the
 /// action's stable target identity, without which a restored feed cannot say
 /// WHICH event a logged Fire fired.
-pub const SNAPSHOT_FORMAT: u32 = 19;
+///
+/// Format 20 carries the armed GM direct damage/heal effects (issue #1310).
+/// The same cross-schedule gap again, and the same consequence: a format-19
+/// capture taken after the effect crossed its PreUpdate apply boundary but
+/// before `SimSet::Damage` landed it records an Applied hit — with an exact
+/// hull amount and a lethal flag on the durable result — that no restored peer
+/// will ever apply, and the journal's idempotency makes a second press of the
+/// same correlation a duplicate rather than a retry. Durable results also
+/// gained the resolved effect itself, without which a restored feed cannot say
+/// how much a logged hit landed or discarded.
+pub const SNAPSHOT_FORMAT: u32 = 20;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -2376,6 +2387,12 @@ pub struct PhoenixSnapshot {
     /// reducer but not yet copied into this tick's `AdmittedCommands` buffer.
     #[serde(default)]
     pub gm_station_commands: crate::gm_puppet::PendingGmStationCommands,
+    /// Direct damage/heal effects already resolved by the canonical GM reducer
+    /// but not yet landed by this tick's damage phase (issue #1310). Same
+    /// cross-schedule reason as `gm_station_commands`, with the durable result
+    /// already claiming an exact hull amount and a lethal flag.
+    #[serde(default)]
+    pub gm_direct_effects: crate::gm_effect::PendingGmDirectEffects,
     pub rng: Option<SimRngState>,
     pub mint: Option<WorldIdMintState>,
     pub phase: Option<GamePhase>,
@@ -2540,6 +2557,10 @@ pub fn capture(world: &World) -> PhoenixSnapshot {
             .unwrap_or_default(),
         gm_station_commands: world
             .get_resource::<crate::gm_puppet::PendingGmStationCommands>()
+            .cloned()
+            .unwrap_or_default(),
+        gm_direct_effects: world
+            .get_resource::<crate::gm_effect::PendingGmDirectEffects>()
             .cloned()
             .unwrap_or_default(),
         rng: world.get_resource::<SimRng>().map(SimRng::state),
@@ -5293,6 +5314,7 @@ fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut
     // Unlike ordinary network receipt queues, these payloads already passed
     // live Station/System admission and are part of the captured boundary.
     world.insert_resource(snapshot.gm_station_commands.clone());
+    world.insert_resource(snapshot.gm_direct_effects.clone());
     // Consumer reply routes are transient and reconstructed from the accepted
     // pending commands above.  A pre-restore route must never settle a command
     // belonging to the new continuation.

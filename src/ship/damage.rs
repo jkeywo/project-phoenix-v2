@@ -386,6 +386,88 @@ impl SystemHull {
         self.entries.values().map(|e| e.current).sum()
     }
 
+    /// Distribute `amount` of healing across systems below their max HP,
+    /// weighted by their MISSING HP, spilling to further weighted selections
+    /// when one fills up. Returns the amount actually restored.
+    ///
+    /// The exact mirror of [`Self::apply_damage`] (issue #1310): same walk over
+    /// `order`, same `unit_f32` draw against a running weight total, same
+    /// spill-until-exhausted loop, with `max - current` in place of `current`.
+    /// A whole-entity heal has to choose systems the same way a whole-entity
+    /// hit does, or one mechanic would answer "which system" with two rules.
+    ///
+    /// A system at 0 HP has the largest possible headroom and is therefore the
+    /// most likely to be picked: [`Self::restore`] is already documented as the
+    /// one route back out of `Destroyed`, and this is that route applied to the
+    /// whole hull rather than to one named system.
+    ///
+    /// Callers that must report what they discarded clamp against
+    /// [`Self::total_missing`] first; this function simply stops when there is
+    /// nothing left to fill.
+    pub fn restore_distributed(&mut self, mut amount: f32, rng: &mut Pcg32) -> f32 {
+        let mut restored = 0.0f32;
+        while amount > 0.0 {
+            let total: f32 = self
+                .order
+                .iter()
+                .filter_map(|id| self.entries.get(id))
+                .map(|entry| (entry.max - entry.current).max(0.0))
+                .sum();
+            if total == 0.0 {
+                break;
+            }
+            let mut r = unit_f32(rng) * total;
+            let mut chosen_id: Option<SystemId> = None;
+            for id in &self.order {
+                let entry = self
+                    .entries
+                    .get(id)
+                    .expect("SystemHull invariant: order and entries agree");
+                let missing = (entry.max - entry.current).max(0.0);
+                if missing <= 0.0 {
+                    continue;
+                }
+                r -= missing;
+                if r < 0.0 {
+                    chosen_id = Some(id.clone());
+                    break;
+                }
+            }
+            // Float-precision safety: fall back to the last system with room,
+            // exactly as the damage walk falls back to the last live one.
+            let idx = chosen_id.unwrap_or_else(|| {
+                self.order
+                    .iter()
+                    .rev()
+                    .find(|id| {
+                        self.entries
+                            .get(*id)
+                            .is_some_and(|e| (e.max - e.current) > 0.0)
+                    })
+                    .cloned()
+                    .expect("total > 0.0 implies at least one entry with headroom")
+            });
+            let entry = self
+                .entries
+                .get_mut(&idx)
+                .expect("SystemHull invariant: order and entries agree");
+            let filled = amount.min((entry.max - entry.current).max(0.0));
+            entry.current += filled;
+            amount -= filled;
+            restored += filled;
+        }
+        restored
+    }
+
+    /// Sum of headroom (`max - current`) across all systems — what a heal can
+    /// absorb before the rest of it is discarded (issue #1310).
+    pub fn total_missing(&self) -> f32 {
+        self.entries
+            .values()
+            .map(|e| (e.max - e.current).max(0.0))
+            .sum()
+    }
+
     /// Sum of max HP across all systems.
     pub fn total_max(&self) -> f32 {
         self.entries.values().map(|e| e.max).sum()
@@ -924,6 +1006,46 @@ mod tests {
         assert!(near(hull.current_for(&sid("tactical")).unwrap(), 0.0));
         assert!(near(hull.current_for(&sid("power")).unwrap(), 0.0));
         assert!(near(hull.current_for(&sid("shields")).unwrap(), 0.0));
+    }
+
+    /// Issue #1310: whole-hull healing is the mirror of whole-hull damage —
+    /// it fills every system that has room, in one deterministic walk, and
+    /// stops when there is nothing left to fill.
+    #[test]
+    fn restore_distributed_fills_the_whole_hull_and_stops_at_the_maxima() {
+        let mut hull = four_console_hull();
+        let mut rng = test_rng();
+        hull.apply_damage(100.0, &mut rng); // wipe all four
+        assert!(near(hull.total_current(), 0.0));
+        assert!(near(hull.total_missing(), 100.0));
+
+        let restored = hull.restore_distributed(60.0, &mut rng);
+        assert!(near(restored, 60.0));
+        assert!(near(hull.total_current(), 60.0));
+        for (_, current, max) in hull.entries() {
+            assert!(current <= max, "no system exceeds its own maximum");
+        }
+
+        // More than the headroom fills what is left and reports only that.
+        let restored = hull.restore_distributed(500.0, &mut rng);
+        assert!(near(restored, 40.0));
+        assert!(near(hull.total_current(), hull.total_max()));
+        assert!(near(hull.total_missing(), 0.0));
+
+        // An undamaged hull absorbs nothing at all.
+        assert!(near(hull.restore_distributed(10.0, &mut rng), 0.0));
+    }
+
+    /// A destroyed system has the largest headroom, so the mirror walk brings
+    /// it back — the whole-hull form of `restore`'s documented revival.
+    #[test]
+    fn restore_distributed_revives_a_destroyed_system() {
+        let mut hull = four_console_hull();
+        let mut rng = test_rng();
+        hull.set_hp(&sid("helm"), 0.0);
+        assert_eq!(hull.tier_for(&sid("helm")), DamageTier::Destroyed);
+        hull.restore_distributed(25.0, &mut rng);
+        assert_eq!(hull.tier_for(&sid("helm")), DamageTier::Operational);
     }
 
     // Cycle 7: restore is clamped to max HP

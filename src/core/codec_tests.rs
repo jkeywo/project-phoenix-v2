@@ -1028,6 +1028,8 @@ fn encode_gm_entity_projection_pins_the_local_host_channel_shape() {
                     hull_percent: Some(73),
                     condition_percent: None,
                     destroyed: false,
+                    hull_current_milli_hp: Some(146_000),
+                    hull_max_milli_hp: Some(200_000),
                 },
                 current_target: Some(crate::gm_projection::GmEntityReference {
                     entity_id: "00000000-0000-0000-0000-000000000002".into(),
@@ -1051,6 +1053,8 @@ fn encode_gm_entity_projection_pins_the_local_host_channel_shape() {
                     hull_percent: None,
                     condition_percent: None,
                     destroyed: false,
+                    hull_current_milli_hp: None,
+                    hull_max_milli_hp: None,
                 },
                 current_target: None,
                 geometry: Some(crate::regions::shape::RegionShape::Torus {
@@ -1065,10 +1069,11 @@ fn encode_gm_entity_projection_pins_the_local_host_channel_shape() {
                 },
             },
         ],
+        results: Vec::new(),
     };
     assert_eq!(
         encode_gm_entity_projection(&payload).unwrap(),
-        r#"{"entities":[{"entity_id":"00000000-0000-0000-0000-000000000001","name":"Axiom","kind":"player_ship","position":[12.0,0.0,-8.0],"faction":{"entity_id":"aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa","name":"faction.alliance.display_name"},"status":{"hull_percent":73,"condition_percent":null,"destroyed":false},"current_target":{"entity_id":"00000000-0000-0000-0000-000000000002","name":"Raider"},"geometry":null,"radar":{"icon":"playerShip","colour":[0.2,0.8,1.0],"size":4.0,"region_colour":null}},{"entity_id":"00000000-0000-0000-0000-000000000003","name":"entity.asteroid_belt.display_name","kind":"asteroid_field","position":[100.0,0.0,200.0],"faction":null,"status":{"hull_percent":null,"condition_percent":null,"destroyed":false},"current_target":null,"geometry":{"type":"torus","inner_radius":25.0,"outer_radius":125.0},"radar":{"icon":null,"colour":null,"size":null,"region_colour":[0.4,0.35,0.3]}}]}"#
+        r#"{"entities":[{"entity_id":"00000000-0000-0000-0000-000000000001","name":"Axiom","kind":"player_ship","position":[12.0,0.0,-8.0],"faction":{"entity_id":"aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa","name":"faction.alliance.display_name"},"status":{"hull_percent":73,"condition_percent":null,"destroyed":false,"hull_current_milli_hp":146000,"hull_max_milli_hp":200000},"current_target":{"entity_id":"00000000-0000-0000-0000-000000000002","name":"Raider"},"geometry":null,"radar":{"icon":"playerShip","colour":[0.2,0.8,1.0],"size":4.0,"region_colour":null}},{"entity_id":"00000000-0000-0000-0000-000000000003","name":"entity.asteroid_belt.display_name","kind":"asteroid_field","position":[100.0,0.0,200.0],"faction":null,"status":{"hull_percent":null,"condition_percent":null,"destroyed":false,"hull_current_milli_hp":null,"hull_max_milli_hp":null},"current_target":null,"geometry":{"type":"torus","inner_radius":25.0,"outer_radius":125.0},"radar":{"icon":null,"colour":null,"size":null,"region_colour":[0.4,0.35,0.3]}}],"results":[]}"#
     );
 }
 

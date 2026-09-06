@@ -503,6 +503,18 @@ fn format_17_without_apply_outcomes_or_pending_station_commands_is_refused() {
 }
 
 #[test]
+fn format_19_without_the_armed_direct_effects_is_refused() {
+    let previous = vellum_save::Versions::new(19, SIMULATION_RULES, 0);
+    let current = vellum_save::Versions::new(SNAPSHOT_FORMAT, SIMULATION_RULES, 0);
+    assert!(matches!(
+        previous
+            .check(&current)
+            .expect_err("format 19 records an Applied hit nothing will ever land"),
+        vellum_save::Moved::Format { .. },
+    ));
+}
+
+#[test]
 fn snapshot_at_an_exact_gm_boundary_preserves_the_still_unapplied_frontier() {
     let mut live = App::new();
     live.add_plugins(MinimalPlugins);
@@ -570,5 +582,136 @@ fn restoring_running_state_does_not_release_an_unrelated_virtual_time_hold() {
             .resource::<Time<bevy::time::Virtual>>()
             .is_paused(),
         "snapshot restore must not release a recovery/model/peer hold owned by the next gate"
+    );
+}
+
+/// An armed GM direct effect crosses the capture boundary and lands EXACTLY
+/// once, identically, on the live world and on a fresh restore (issue #1310).
+///
+/// This is the cross-schedule gap format 20 exists for: the grant is already
+/// Applied in the journal — with an exact hull amount and a lethal flag on its
+/// durable result — but `SimSet::Damage` has not run yet, so a capture that
+/// dropped the arm would resume a world claiming damage nobody will ever apply.
+#[test]
+fn an_armed_direct_effect_survives_capture_and_lands_once_on_both_sides() {
+    use bevy::ecs::system::RunSystemOnce;
+
+    fn bootstrap() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<crate::lobby::server::OutboundMessage>();
+        app.world_mut()
+            .register_component::<crate::ship::state::ShipPhysics>();
+        app.world_mut()
+            .register_component::<crate::entities::spawner::EntitySystemHull>();
+        app.world_mut()
+            .register_component::<crate::ship::state::ShipWeaponsHold>();
+        app.world_mut()
+            .register_component::<crate::console::command::server::ShipStationStances>();
+        app.world_mut()
+            .register_component::<crate::ship_plugin::ShipSystemControlSources>();
+        app.world_mut()
+            .register_component::<crate::ship::state::ShipRedAlert>();
+        app.world_mut().insert_resource(SimTick(42));
+        app.world_mut().insert_resource(SimulationPaused(false));
+        app.world_mut().insert_resource(GmActionJournal::default());
+        app.world_mut()
+            .insert_resource(crate::gm_action::GmActionLog::default());
+        app.world_mut()
+            .insert_resource(crate::gm_effect::PendingGmDirectEffects::default());
+        app.world_mut().insert_resource(crate::sim_rng::SimRng::new(
+            4242,
+            crate::sim_rng::SeedSource::Cli,
+        ));
+        let system = SystemId("captain".into());
+        app.world_mut().spawn((
+            crate::entities::spawner::EntityUuid("npc-1".into()),
+            crate::entities::spawner::EntitySystemHull(
+                crate::ship::damage::SystemHull::from_config(&[(system, 100.0)]),
+            ),
+        ));
+        app
+    }
+
+    let mut live = bootstrap();
+    live.world_mut()
+        .resource_mut::<GmActionJournal>()
+        .insert(crate::gm_action::GmActionGrant {
+            from: HostSlot(1),
+            sequenced_by: HostSlot(1),
+            operator_id: "gm-1".into(),
+            correlation: GmActionId::new("recover-due-effect").unwrap(),
+            recovery_generation: 0,
+            apply_tick: 42,
+            order: GmActionOrder::new(HostSlot(1), 1),
+            action: GmAction::ApplyDirectEffect {
+                target: "npc-1".into(),
+                scope: crate::gm_effect::GmDirectEffectScope::Entity,
+                effect: crate::gm_effect::GmDirectEffectKind::Damage,
+                amount_milli_hp: 40_000,
+            },
+        })
+        .unwrap();
+    live.world_mut()
+        .run_system_once(crate::gm_action::apply_due_actions)
+        .unwrap();
+    assert_eq!(
+        live.world()
+            .resource::<crate::gm_effect::PendingGmDirectEffects>()
+            .entries()
+            .len(),
+        1,
+        "the due effect is resolved before the damage phase runs",
+    );
+
+    let boundary = capture(live.world());
+    assert!(
+        boundary
+            .entities
+            .iter()
+            .any(|entity| entity.uuid == "npc-1"),
+        "captured entities: {:?}",
+        boundary
+            .entities
+            .iter()
+            .map(|entity| entity.uuid.clone())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(boundary.gm_direct_effects.entries().len(), 1);
+
+    let report = restore(live.world_mut(), &boundary);
+    assert!(report.is_complete(), "source gaps: {:?}", report.gaps);
+    let mut recovered = bootstrap();
+    let report = restore(recovered.world_mut(), &boundary);
+    assert!(report.is_complete(), "recovered gaps: {:?}", report.gaps);
+    assert_eq!(
+        crate::sim_digest::world_digest(live.world()),
+        crate::sim_digest::world_digest(recovered.world()),
+        "the resolved-but-unapplied effect participates in the recovery digest",
+    );
+
+    for app in [&mut live, &mut recovered] {
+        app.world_mut()
+            .run_system_once(crate::gm_effect::apply_gm_direct_effects)
+            .unwrap();
+    }
+    for app in [&mut live, &mut recovered] {
+        let mut query = app
+            .world_mut()
+            .query::<&crate::entities::spawner::EntitySystemHull>();
+        let hull = query.single(app.world()).unwrap();
+        assert!(
+            (hull.0.total_current() - 60.0).abs() < 0.01,
+            "the restored damage phase applies the resolved amount exactly once"
+        );
+        assert!(app
+            .world()
+            .resource::<crate::gm_effect::PendingGmDirectEffects>()
+            .is_empty());
+    }
+    assert_eq!(
+        crate::sim_digest::world_digest(live.world()),
+        crate::sim_digest::world_digest(recovered.world()),
+        "both continuations retain identical hulls and digest",
     );
 }

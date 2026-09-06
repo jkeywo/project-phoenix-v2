@@ -13,6 +13,12 @@ const ENTITY_KINDS = new Set([
 ]);
 const REGION_KINDS = new Set(['hazard', 'region', 'asteroid_field']);
 
+function normaliseMilliHp(value) {
+  if (value === null) return null;
+  if (!Number.isSafeInteger(value) || value < 0) return undefined;
+  return value;
+}
+
 function normalisePercent(value) {
   if (value === null) return null;
   if (!Number.isInteger(value) || value < 0 || value > 100) return undefined;
@@ -80,6 +86,11 @@ function normaliseEntity(value) {
   const status = value && value.status;
   const hullPercent = status && normalisePercent(status.hull_percent);
   const conditionPercent = status && normalisePercent(status.condition_percent);
+  // Absolute hull totals (issue #1310). Present exactly when the percentage
+  // is, so a payload that carries one and not the other is rejected outright
+  // rather than leaving a damage control unable to preview its own lethality.
+  const hullCurrent = status && normaliseMilliHp(status.hull_current_milli_hp);
+  const hullMax = status && normaliseMilliHp(status.hull_max_milli_hp);
   const geometry = normaliseGeometry(value && value.geometry);
   const radar = normaliseRadar(value && value.radar);
   if (!value || typeof value !== 'object'
@@ -91,6 +102,10 @@ function normaliseEntity(value) {
       || !status || typeof status !== 'object'
       || hullPercent === undefined
       || conditionPercent === undefined
+      || hullCurrent === undefined
+      || hullMax === undefined
+      || (hullPercent === null) !== (hullCurrent === null)
+      || (hullPercent === null) !== (hullMax === null)
       || geometry === undefined
       || radar === undefined
       || REGION_KINDS.has(value.kind) !== (geometry !== null)
@@ -111,6 +126,8 @@ function normaliseEntity(value) {
       hull_percent: hullPercent,
       condition_percent: conditionPercent,
       destroyed: status.destroyed,
+      hull_current_milli_hp: hullCurrent,
+      hull_max_milli_hp: hullMax,
     },
     current_target: currentTarget,
     geometry,
@@ -198,7 +215,15 @@ export function buildGmMapState(entities) {
   };
 }
 
-export function createGmLocalProjection({ doc = document, t = (id) => id } = {}) {
+export function createGmLocalProjection({
+  doc = document,
+  t = (id) => id,
+  // Absolute selection push for surfaces that act ON the selected entity
+  // (issue #1310). It fires wherever the inspector re-renders — a click, a
+  // projection refresh, an entity leaving the world — so a consumer never has
+  // to poll `state()` or listen to the map component itself.
+  onSelectionChanged = () => {},
+} = {}) {
   const pending = doc.getElementById('gm-entity-pending');
   const map = doc.getElementById('gm-entity-map');
   let entities = [];
@@ -214,10 +239,19 @@ export function createGmLocalProjection({ doc = document, t = (id) => id } = {})
     return entities.find((entity) => entity.entity_id === selectedId) || null;
   }
 
+  function announceSelection(entity) {
+    try {
+      onSelectionChanged(entity);
+    } catch (_) {
+      // A consumer that throws must not take the map down with it.
+    }
+  }
+
   function setSelected(id) {
     const next = id == null ? null : entities.find((entity) => entity.entity_id === id) || null;
     selectedId = next ? next.entity_id : null;
     inspector.render(next);
+    announceSelection(next);
     return id == null || !!next;
   }
 
@@ -257,7 +291,9 @@ export function createGmLocalProjection({ doc = document, t = (id) => id } = {})
         map.navigationSelect({ uuid: null });
       }
     }
-    inspector.render(selectedEntity());
+    const current = selectedEntity();
+    inspector.render(current);
+    announceSelection(current);
     return true;
   }
 

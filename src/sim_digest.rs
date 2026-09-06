@@ -533,6 +533,18 @@ fn fold_run_scope(world: &World, mut acc: u64) -> u64 {
         Some(commands) => fold_serde(acc, commands),
         None => fold_str(acc, "gm-station-commands:absent"),
     };
+    // Armed GM direct effects (issue #1310), folded ONLY when a GM has actually
+    // aimed one. `pending_gm_event_fires`' rule, for its reason: every world
+    // that never uses the surface keeps the digest it had before this landed,
+    // so no cross-target ledger needed re-blessing. An absent resource and an
+    // empty one are deliberately the same fold, because they are the same fact.
+    if let Some(effects) = world
+        .get_resource::<crate::gm_effect::PendingGmDirectEffects>()
+        .filter(|effects| !effects.is_empty())
+    {
+        acc = fold_str(acc, "gm-direct-effects");
+        acc = fold_serde(acc, effects);
+    }
 
     // SimRng: the FULL state, not a probe draw. `RunFingerprint` takes one draw
     // per stream because it has no serde shape to lean on; the record puts

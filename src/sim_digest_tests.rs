@@ -1942,3 +1942,57 @@ fn insertion_order_does_not_reach_the_fold() {
          fold to the same number"
     );
 }
+
+/// An armed GM direct effect is authoritative pending work, and an empty queue
+/// folds nothing at all (issue #1310) — so no world that never uses the surface
+/// moved its digest when this landed, and no cross-target ledger needed
+/// re-blessing.
+#[test]
+fn an_armed_direct_effect_moves_the_digest_and_an_empty_queue_leaves_it_alone() {
+    let effect =
+        |sequence: u64, target: &str, amount: u32| crate::gm_effect::PendingGmDirectEffect {
+            tick: 12,
+            order: crate::gm_action::GmActionOrder::new(
+                crate::command_admission::HostSlot(1),
+                sequence,
+            ),
+            target: target.into(),
+            scope: crate::gm_effect::GmDirectEffectScope::Entity,
+            kind: crate::gm_effect::GmDirectEffectKind::Damage,
+            amount_milli_hp: amount,
+        };
+
+    let mut world = fold_world();
+    let bare = world_digest(&world);
+    world.insert_resource(crate::gm_effect::PendingGmDirectEffects::default());
+    assert_eq!(
+        world_digest(&world),
+        bare,
+        "an empty queue and no queue are the same fact"
+    );
+
+    world
+        .resource_mut::<crate::gm_effect::PendingGmDirectEffects>()
+        .push(effect(1, "npc-1", 25_000));
+    let armed = world_digest(&world);
+    assert_ne!(
+        bare, armed,
+        "an armed effect is unapplied authoritative work"
+    );
+
+    // WHAT it will do is part of it: two peers holding different amounts, or
+    // aiming at different hulls, are about to fold different worlds.
+    let mut other = fold_world();
+    other.insert_resource(crate::gm_effect::PendingGmDirectEffects::default());
+    other
+        .resource_mut::<crate::gm_effect::PendingGmDirectEffects>()
+        .push(effect(1, "npc-1", 25_001));
+    assert_ne!(armed, world_digest(&other));
+
+    let mut elsewhere = fold_world();
+    elsewhere.insert_resource(crate::gm_effect::PendingGmDirectEffects::default());
+    elsewhere
+        .resource_mut::<crate::gm_effect::PendingGmDirectEffects>()
+        .push(effect(1, "npc-2", 25_000));
+    assert_ne!(armed, world_digest(&elsewhere));
+}

@@ -106,6 +106,9 @@ pub mod entities;
 /// Minimal peer-local authoritative projection for the rendererless GM page.
 pub mod gm_action;
 pub mod gm_activity;
+/// Direct/internal GM damage and healing, applied through the ordinary damage
+/// lifecycle (issue #1310).
+pub mod gm_effect;
 pub mod gm_event;
 pub mod gm_join;
 pub mod gm_projection;

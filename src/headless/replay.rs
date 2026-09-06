@@ -1284,6 +1284,93 @@ mod tests {
         );
     }
 
+    /// A directed world effect replays through the SAME canonical lane every
+    /// other GM action uses (issue #1310): the artifact carries the grant,
+    /// `apply_due_actions` re-resolves it against the replayed world's own
+    /// hulls at the recorded apply tick, and the durable result carries both
+    /// the entity it named and the amounts it resolved. Nothing about the
+    /// effect family needs a second replay path.
+    #[test]
+    fn a_direct_effect_replays_through_the_canonical_journal() {
+        let mut source = GmActionJournal::default();
+        source
+            .insert(crate::gm_action::GmActionGrant {
+                from: HostSlot(1),
+                sequenced_by: HostSlot(1),
+                operator_id: "gm-one".into(),
+                correlation: crate::gm_action::GmActionId::new("replay-hit-1").unwrap(),
+                recovery_generation: 0,
+                apply_tick: 0,
+                order: crate::gm_action::GmActionOrder::new(HostSlot(1), 1),
+                action: crate::gm_action::GmAction::ApplyDirectEffect {
+                    target: "npc-1".into(),
+                    scope: crate::gm_effect::GmDirectEffectScope::Entity,
+                    effect: crate::gm_effect::GmDirectEffectKind::Damage,
+                    amount_milli_hp: 250_000,
+                },
+            })
+            .unwrap();
+        // The recording APPLIED the hit, which is the prefix a replay adopts.
+        source.restore_applied_frontier(1).unwrap();
+        validate_gm_action_journal(&source).expect("an effect journal is canonical");
+
+        let mut app = App::new();
+        app.insert_resource(SimTick(0));
+        app.insert_resource(GmActionJournal::default());
+        app.insert_resource(crate::gm_action::GmActionLog::default());
+        app.insert_resource(crate::gm_action::SimulationPaused(false));
+        app.insert_resource(crate::gm_effect::PendingGmDirectEffects::default());
+        app.world_mut().spawn((
+            crate::entities::spawner::EntityUuid("npc-1".into()),
+            crate::entities::spawner::EntitySystemHull(
+                crate::ship::damage::SystemHull::from_config(&[(SystemId("captain".into()), 80.0)]),
+            ),
+        ));
+        app.add_systems(PreUpdate, crate::gm_action::apply_due_actions);
+        seed_replay_initial_state(&mut app, &source);
+
+        let mut sim = PhoenixSim {
+            app,
+            max_frames: 1,
+            frames: 0,
+            expected_commands: 0,
+            applied: 0,
+            submitted: 0,
+            tail: true,
+            gm_actions: source,
+            final_tick: Some(0),
+            ledger: DigestLedger::new(0),
+        };
+        sim.step();
+
+        let entry = &sim
+            .app
+            .world()
+            .resource::<crate::gm_action::GmActionLog>()
+            .entries()[0];
+        assert_eq!(entry.outcome, crate::gm_action::GmActionOutcome::Applied);
+        assert_eq!(entry.target.as_deref(), Some("npc-1"));
+        assert_eq!(
+            entry.effect,
+            Some(crate::gm_effect::GmDirectEffectResult {
+                kind: crate::gm_effect::GmDirectEffectKind::Damage,
+                applied_milli_hp: 80_000,
+                discarded_milli_hp: 170_000,
+                destroyed: true,
+            }),
+            "the replayed peer re-resolves the same clamp and the same lethality"
+        );
+        assert_eq!(
+            sim.app
+                .world()
+                .resource::<crate::gm_effect::PendingGmDirectEffects>()
+                .entries()
+                .len(),
+            1,
+            "the replayed peer arms exactly what the recorded one armed"
+        );
+    }
+
     #[test]
     fn an_applied_gm_frontier_cannot_cross_the_recorded_final_tick() {
         let mut captured = artifact();

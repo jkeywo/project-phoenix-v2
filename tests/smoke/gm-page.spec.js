@@ -239,6 +239,22 @@ fn on_quiet(ctx) { }
 """
 `;
 
+// One selectable damageable hull and nothing else, so a browser test can name
+// the target it aims at without depending on which blip the map happens to
+// order first (issue #1310).
+const GM_DIRECT_EFFECT_WORLD = `
+[global]
+seed = 1310
+title = "GM direct effect smoke fixture"
+description = "Direct Entity damage and healing coverage for issue 1310."
+
+[[entity]]
+template_path = "assets/entities/alliance_courier.toml"
+name = "entity.alliance_courier.display_name"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+`;
+
 async function selectAndWait(client, station) {
   await client.send('SelectStation', { station });
   await client.page.waitForFunction(
@@ -645,6 +661,103 @@ test('an automatic event declaring gm_controls is listed and fireable, and an un
   expect(await page.evaluate(() => window.__hostGmMissionState())).toMatchObject({
     events: 1,
     fireable: 0,
+    pending: 0,
+  });
+
+  expect(errors).toEqual([]);
+});
+
+// Direct Entity damage and healing (issue #1310). A NEW feature needs a NEW
+// @core test (AGENTS.md Testing Strategy). Nothing here injects a Host Channel
+// payload: the target, its absolute hull, the overflow preview and every
+// result row come from the authoritative projection the running simulation
+// publishes.
+test('a GM damages and repairs one Entity through the typed action path', { tag: '@core' }, async ({ context }) => {
+  test.setTimeout(90_000);
+  await context.route('**/assets/worlds/default.toml', (route) =>
+    route.fulfill({ contentType: 'text/plain', body: GM_DIRECT_EFFECT_WORLD }),
+  );
+
+  const page = await context.newPage();
+  const errors = captureServerPageErrors(page);
+  await page.goto('/?gm=1&scenario=assets/worlds/default.toml');
+  await waitForWasmReady(page);
+  await page.evaluate(() => window.__hostFleetOpen());
+  await page.waitForFunction(() => {
+    const state = window.__hostGmStartState?.();
+    return state?.admitted === true
+      && state.presentationReady === true
+      && state.localValidation === true;
+  }, undefined, { timeout: 30_000 });
+  await page.evaluate(() => document.getElementById('gm-ready-btn').click());
+  await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
+  await page.waitForFunction(() => {
+    const map = document.getElementById('gm-entity-map');
+    return !map?.hidden && (map.state?.blips?.length ?? 0) > 0;
+  }, undefined, { timeout: 30_000 });
+
+  // Nothing is aimable until an entity is selected, and the panel says so.
+  const panel = page.locator('#gm-effect-panel');
+  await expect(panel).toHaveAttribute('data-damageable', 'false');
+  await expect(page.locator('#gm-effect-empty')).toHaveText(ts('server.gm.effect.empty'));
+  await expect(page.locator('#gm-effect-controls')).toBeHidden();
+
+  // The map selection IS the target picker: no second identity is composed.
+  const map = page.locator('#gm-entity-map');
+  await map.focus();
+  await map.press('ArrowRight');
+  await expect(panel).toHaveAttribute('data-damageable', 'true', { timeout: 30_000 });
+  await expect(page.locator('#gm-effect-controls')).toBeVisible();
+  const targetId = await page.locator('#gm-entity-card').getAttribute('data-entity-id');
+  expect(targetId).toMatch(/^[0-9a-f-]{36}$/i);
+
+  const hullBefore = await page.evaluate(() => {
+    const surface = document.getElementById('gm-entity-map');
+    const id = document.getElementById('gm-entity-card').dataset.entityId;
+    return surface.state.blips.find((blip) => blip.uuid === id).hull_percent;
+  });
+  expect(hullBefore).toBe(100);
+
+  // A modest hit: applied whole, nothing discarded, nothing destroyed.
+  await page.locator('#gm-effect-amount').fill('5');
+  await expect(page.locator('#gm-effect-damage')).toBeEnabled();
+  await page.locator('#gm-effect-damage').click();
+
+  const applied = page.locator('#gm-effect-log .gm-effect-log-entry[data-outcome="applied"]');
+  await expect(applied).toHaveCount(1, { timeout: 30_000 });
+  await expect(applied).toHaveAttribute('data-entity', targetId);
+  await expect(applied).toHaveAttribute('data-effect', 'damage');
+  await expect(applied).toHaveAttribute('data-applied', '5000');
+  await expect(applied).toHaveAttribute('data-discarded', '0');
+  await expect(applied).toHaveAttribute('data-destroyed', 'false');
+
+  // The crew-facing consequence is the ORDINARY damage row, from the same
+  // unconditional balance event a beam hit produces.
+  await expect(page.locator('#gm-activity-list [data-category="damage"]').first())
+    .toBeVisible({ timeout: 30_000 });
+  // And the GM's own attributed row names what it hit.
+  await expect(
+    page.locator('#gm-activity-list [data-category="gm_action"]').filter({ hasText: targetId }),
+  ).toHaveCount(1, { timeout: 30_000 });
+
+  await page.waitForFunction((id) => {
+    const surface = document.getElementById('gm-entity-map');
+    return (surface.state.blips.find((blip) => blip.uuid === id)?.hull_percent ?? 100) < 100;
+  }, targetId, { timeout: 30_000 });
+
+  // A repair far beyond the maxima clamps and REPORTS what it threw away.
+  await page.locator('#gm-effect-amount').fill('9999');
+  await expect(page.locator('#gm-effect-warning')).toHaveAttribute('data-discarded', /\d+/);
+  await expect(page.locator('#gm-effect-heal')).toBeEnabled();
+  await page.locator('#gm-effect-heal').click();
+  const healed = page.locator('#gm-effect-log .gm-effect-log-entry[data-effect="heal"]');
+  await expect(healed).toHaveCount(1, { timeout: 30_000 });
+  await expect(healed).toHaveAttribute('data-outcome', 'applied');
+  expect(Number(await healed.getAttribute('data-discarded'))).toBeGreaterThan(0);
+
+  expect(await page.evaluate(() => window.__hostGmEffectState())).toMatchObject({
+    selected: targetId,
+    damageable: true,
     pending: 0,
   });
 

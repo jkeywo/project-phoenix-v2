@@ -3,8 +3,8 @@
  *
  * Rust's `GmActionRefusalReason` spellings stay machine-readable on the wire
  * while their copy is localised, and every GM surface reads the SAME table:
- * the Session controls (#1292) and the mission panel (#1301) must not drift
- * into two vocabularies for one refusal. A reason with no row here falls back
+ * the Session controls (#1292), the mission panel (#1301) and the direct-effect
+ * panel (#1310) must not drift into three vocabularies for one refusal. A reason with no row here falls back
  * to the surface's own `reason_unknown` sentence, which preserves the
  * diagnostic identity rather than hiding it.
  */
@@ -20,6 +20,8 @@ export const GM_ACTION_REFUSAL_REASON_LABELS = Object.freeze({
   'unreadable-request': 'server.gm.session.reason.unreadable_request',
   'wrong-phase': 'server.gm.session.reason.wrong_phase',
   'unknown-gm-event': 'server.gm.session.reason.unknown_gm_event',
+  'unknown-entity': 'server.gm.session.reason.unknown_entity',
+  'target-not-damageable': 'server.gm.session.reason.target_not_damageable',
 });
 
 /** The immediate browser-to-WASM ingress refusal, which has no wire reason. */

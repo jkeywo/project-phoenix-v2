@@ -1108,6 +1108,30 @@ pub fn decode_gm_action_request(raw: &str) -> Option<crate::gm_action::GmActionR
                 event: bounded_gm_event_id(object.get("event")?.as_str()?)?,
             }
         }
+        // Exactly `{operator_id, correlation, action, entity, effect, amount}`
+        // (issue #1310). The amount arrives as milli-HP so the browser cannot
+        // hand the journal a float it would then have to round; `scope` is not
+        // on the wire at all while `Entity` is the only one, so a client cannot
+        // name a scope this build does not implement.
+        "apply_direct_effect"
+            if object.len() == 6
+                && object.contains_key("entity")
+                && object.contains_key("effect")
+                && object.contains_key("amount_milli_hp") =>
+        {
+            let effect = match object.get("effect")?.as_str()? {
+                "damage" => crate::gm_effect::GmDirectEffectKind::Damage,
+                "heal" => crate::gm_effect::GmDirectEffectKind::Heal,
+                _ => return None,
+            };
+            let amount = object.get("amount_milli_hp")?.as_u64()?;
+            crate::gm_action::GmAction::ApplyDirectEffect {
+                target: bounded_gm_target_id(object.get("entity")?.as_str()?)?,
+                scope: crate::gm_effect::GmDirectEffectScope::Entity,
+                effect,
+                amount_milli_hp: u32::try_from(amount).ok().filter(|amount| *amount > 0)?,
+            }
+        }
         "issue_station_command"
             if object.len() == 7
                 && object.contains_key("ship")
@@ -1699,5 +1723,63 @@ mod mesh_frame_tests {
         let text = super::encode_mesh_frame(&tick_frame()).expect("encodes");
         assert!(!text.contains("response_token"), "{text}");
         assert!(!text.contains("token"), "{text}");
+    }
+
+    /// The direct-effect ingress (issue #1310): one entity identity, one kind,
+    /// one positive integer amount in milli-HP, and a per-shape field count so
+    /// nothing wider can ride in behind it.
+    #[test]
+    fn a_direct_effect_uses_the_same_exact_typed_ingress() {
+        let request = super::decode_gm_action_request(
+            r#"{"operator_id":"gm-1","correlation":"hit-4","action":"apply_direct_effect","entity":"npc-1","effect":"damage","amount_milli_hp":25000}"#,
+        )
+        .expect("valid direct-effect request");
+        assert_eq!(
+            request.action,
+            crate::gm_action::GmAction::ApplyDirectEffect {
+                target: "npc-1".into(),
+                scope: crate::gm_effect::GmDirectEffectScope::Entity,
+                effect: crate::gm_effect::GmDirectEffectKind::Damage,
+                amount_milli_hp: 25_000,
+            }
+        );
+        assert_eq!(
+            request.action.kind(),
+            crate::gm_action::GmActionKind::DirectEffect
+        );
+        assert_eq!(
+            request.action.target_id(),
+            Some("npc-1"),
+            "the durable result must be able to say WHAT was hit"
+        );
+
+        let heal = super::decode_gm_action_request(
+            r#"{"operator_id":"gm-1","correlation":"heal-4","action":"apply_direct_effect","entity":"npc-1","effect":"heal","amount_milli_hp":1}"#,
+        )
+        .expect("valid heal request");
+        assert!(matches!(
+            heal.action,
+            crate::gm_action::GmAction::ApplyDirectEffect {
+                effect: crate::gm_effect::GmDirectEffectKind::Heal,
+                ..
+            }
+        ));
+
+        for refused in [
+            // A signed amount is not the vocabulary: the sign is the kind.
+            r#"{"operator_id":"gm-1","correlation":"x","action":"apply_direct_effect","entity":"npc-1","effect":"damage","amount_milli_hp":-5}"#,
+            r#"{"operator_id":"gm-1","correlation":"x","action":"apply_direct_effect","entity":"npc-1","effect":"damage","amount_milli_hp":0}"#,
+            r#"{"operator_id":"gm-1","correlation":"x","action":"apply_direct_effect","entity":"npc-1","effect":"damage","amount_milli_hp":2.5}"#,
+            r#"{"operator_id":"gm-1","correlation":"x","action":"apply_direct_effect","entity":"","effect":"damage","amount_milli_hp":5}"#,
+            r#"{"operator_id":"gm-1","correlation":"x","action":"apply_direct_effect","entity":"npc-1","effect":"vaporise","amount_milli_hp":5}"#,
+            // A scope this build does not implement cannot be named from here.
+            r#"{"operator_id":"gm-1","correlation":"x","action":"apply_direct_effect","entity":"npc-1","effect":"damage","amount_milli_hp":5,"scope":"system"}"#,
+            r#"{"operator_id":"gm-1","correlation":"x","action":"apply_direct_effect","entity":"npc-1","effect":"damage"}"#,
+        ] {
+            assert!(
+                super::decode_gm_action_request(refused).is_none(),
+                "must fail closed: {refused}"
+            );
+        }
     }
 }

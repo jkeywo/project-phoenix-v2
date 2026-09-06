@@ -246,7 +246,9 @@ pub fn validate_station_action(
     let station = match action {
         // Neither family names a Station, so Station admission has nothing to
         // say about it and defers to its own reducer.
-        GmAction::SetSessionPaused { .. } | GmAction::FireGmEvent { .. } => return Ok(()),
+        GmAction::SetSessionPaused { .. }
+        | GmAction::FireGmEvent { .. }
+        | GmAction::ApplyDirectEffect { .. } => return Ok(()),
         GmAction::SetStationPuppet { station, .. }
         | GmAction::IssueStationCommand { station, .. } => station,
     };
@@ -291,7 +293,9 @@ pub fn validate_station_action(
                 .then_some(())
                 .ok_or(GmActionRefusalReason::SystemOutsideStation)
         }
-        GmAction::SetSessionPaused { .. } | GmAction::FireGmEvent { .. } => unreachable!(),
+        GmAction::SetSessionPaused { .. }
+        | GmAction::FireGmEvent { .. }
+        | GmAction::ApplyDirectEffect { .. } => unreachable!(),
     }
 }
 
@@ -991,6 +995,7 @@ station = "tactical"
                     reason: None,
                     order: Some(order),
                     target: None,
+                    effect: None,
                 })
                 .unwrap();
             let provisional_log = journal.applied_log();

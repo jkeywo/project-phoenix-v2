@@ -30,7 +30,13 @@ function entity(overrides = {}) {
       entity_id: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
       name: 'Alliance',
     },
-    status: { hull_percent: 73, condition_percent: null, destroyed: false },
+    status: {
+      hull_percent: 73,
+      condition_percent: null,
+      destroyed: false,
+      hull_current_milli_hp: 73_000,
+      hull_max_milli_hp: 100_000,
+    },
     current_target: null,
     geometry: null,
     radar: {
@@ -50,7 +56,13 @@ function region(overrides = {}) {
     kind: 'region',
     position: [100, 0, -20],
     faction: null,
-    status: { hull_percent: null, condition_percent: null, destroyed: false },
+    status: {
+      hull_percent: null,
+      condition_percent: null,
+      destroyed: false,
+      hull_current_milli_hp: null,
+      hull_max_milli_hp: null,
+    },
     geometry: { type: 'sphere', radius: 30 },
     radar: { icon: null, colour: null, size: null, region_colour: [0.1, 0.7, 0.5] },
     ...overrides,
@@ -61,7 +73,7 @@ function payload(entities) {
   return JSON.stringify({ entities });
 }
 
-function mount() {
+function mount({ onSelectionChanged } = {}) {
   document.body.innerHTML = `
     <p id="gm-entity-pending"></p>
     <div id="gm-entity-map"></div>
@@ -96,6 +108,7 @@ function mount() {
   const projection = createGmLocalProjection({
     doc: document,
     t: (id, params = {}) => `${id}:${Object.values(params).join('/')}`,
+    ...(onSelectionChanged ? { onSelectionChanged } : {}),
   });
   return { map, projection, getMapState: () => mapState };
 }
@@ -104,6 +117,49 @@ describe('GM omniscient local projection', () => {
   let harness;
 
   beforeEach(() => { harness = mount(); });
+
+  it('carries the absolute hull totals a direct-effect preview needs', () => {
+    const parsed = parseGmEntityProjection({ entities: [entity()] });
+    expect(parsed[0].status.hull_current_milli_hp).toBe(73_000);
+    expect(parsed[0].status.hull_max_milli_hp).toBe(100_000);
+    // Present exactly when the percentage is: a payload carrying one without
+    // the other would leave a damage control unable to preview its lethality.
+    expect(parseGmEntityProjection({
+      entities: [entity({ status: {
+        hull_percent: 73,
+        condition_percent: null,
+        destroyed: false,
+        hull_current_milli_hp: null,
+        hull_max_milli_hp: null,
+      } })],
+    })).toBeUndefined();
+    expect(parseGmEntityProjection({
+      entities: [entity({ status: {
+        hull_percent: 73,
+        condition_percent: null,
+        destroyed: false,
+        hull_current_milli_hp: -1,
+        hull_max_milli_hp: 100_000,
+      } })],
+    })).toBeUndefined();
+  });
+
+  it('announces the current selection to surfaces that act on it', () => {
+    const onSelectionChanged = vi.fn();
+    harness = mount({ onSelectionChanged });
+    harness.projection.update(payload([entity()]));
+    expect(onSelectionChanged).toHaveBeenLastCalledWith(null);
+
+    harness.projection.select(PLAYER_ID);
+    expect(onSelectionChanged).toHaveBeenLastCalledWith(
+      expect.objectContaining({ entity_id: PLAYER_ID }),
+    );
+
+    // An entity leaving the world clears the selection through the same seam,
+    // so no surface can keep aiming at something that is gone.
+    harness.projection.update(payload([]));
+    expect(onSelectionChanged).toHaveBeenLastCalledWith(null);
+  });
 
   it('strictly normalises the public map DTO and drops unknown detail', () => {
     const parsed = parseGmEntityProjection({
@@ -144,7 +200,13 @@ describe('GM omniscient local projection', () => {
       name: 'Raider',
       kind: 'npc_ship',
       position: [100, 0, 40],
-      status: { hull_percent: 0, condition_percent: null, destroyed: true },
+      status: {
+        hull_percent: 0,
+        condition_percent: null,
+        destroyed: true,
+        hull_current_milli_hp: 0,
+        hull_max_milli_hp: 100_000,
+      },
     });
     const state = buildGmMapState([entity(), npc]);
     expect(state).toMatchObject({ interaction: 'inspect', show_ship_marker: false });
@@ -173,7 +235,13 @@ describe('GM omniscient local projection', () => {
     const structure = entity({
       entity_id: '00000000-0000-4000-8000-000000000006',
       kind: 'structure',
-      status: { hull_percent: 80, condition_percent: 64, destroyed: false },
+      status: {
+        hull_percent: 80,
+        condition_percent: 64,
+        destroyed: false,
+        hull_current_milli_hp: 80_000,
+        hull_max_milli_hp: 100_000,
+      },
       radar: { icon: 'station', colour: [0.3, 0.6, 0.9], size: 12, region_colour: null },
     });
     const state = buildGmMapState([entity(), structure, hazard, field]);
@@ -212,7 +280,13 @@ describe('GM omniscient local projection', () => {
 
     harness.projection.update(payload([entity({
       position: [25, 3, -12],
-      status: { hull_percent: 41, condition_percent: null, destroyed: false },
+      status: {
+        hull_percent: 41,
+        condition_percent: null,
+        destroyed: false,
+        hull_current_milli_hp: 41_000,
+        hull_max_milli_hp: 100_000,
+      },
     })]));
     expect(harness.projection.state().selectedId).toBe(PLAYER_ID);
     expect(harness.getMapState().blips[0]).toMatchObject({ world_x: 25, world_z: -12 });

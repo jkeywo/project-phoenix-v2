@@ -1149,6 +1149,7 @@ pub fn handle_return_to_lobby_system(
     mut gm_projection: Option<ResMut<crate::gm_action::LastGmSessionProjection>>,
     mut gm_mission_projection: Option<ResMut<crate::gm_event::LastGmMissionProjection>>,
     mut content: Option<ResMut<crate::world::server::WorldContentRuntime>>,
+    mut gm_direct_effects: Option<ResMut<crate::gm_effect::PendingGmDirectEffects>>,
     mut paused: Option<ResMut<crate::gm_action::SimulationPaused>>,
     mut virtual_time: Option<ResMut<Time<bevy::time::Virtual>>>,
 ) {
@@ -1203,6 +1204,13 @@ pub fn handle_return_to_lobby_system(
         // not mark `WorldContentRuntime` changed.
         if let Some(content) = content.as_deref_mut() {
             content.pending_gm_event_fires.clear();
+        }
+        // A resolved directed effect is the same kind of pending effect and
+        // goes at the same boundary (issue #1310): the grant that authorised it
+        // was cleared with the journal above, so an arm that outlived the run
+        // would land attributed damage in the NEXT one with nobody behind it.
+        if let Some(effects) = gm_direct_effects.as_deref_mut() {
+            *effects = Default::default();
         }
         if let Some(paused) = paused.as_deref_mut() {
             paused.0 = false;

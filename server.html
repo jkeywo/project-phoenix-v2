@@ -350,6 +350,31 @@
     .gm-mission-log-entry[data-outcome="pending"] { color: var(--ink-muted); }
     .gm-mission-log-entry[data-outcome="refused"],
     .gm-mission-log-entry[data-outcome="timed-out"] { color: var(--fire-bright); }
+    /* Direct damage/repair on the selected entity (issue #1310). */
+    #gm-effect-panel {
+      border-top: 1px solid var(--edge-control); padding-top: .9rem;
+      display: grid; gap: .6rem; min-width: 0;
+    }
+    #gm-effect-controls { display: grid; gap: .6rem; }
+    /* The id selector above outranks the UA `[hidden]{display:none}` default,
+       so the block the panel hides that way needs its own rule -- the same
+       pattern `#gm-map-panel[hidden]` and friends below follow. */
+    #gm-effect-controls[hidden] { display: none; }
+    #gm-effect-amount-label { display: flex; align-items: center; gap: .5rem; }
+    #gm-effect-amount { width: 7rem; font: inherit; padding: .3rem .4rem; }
+    #gm-effect-actions { display: flex; flex-wrap: wrap; gap: .6rem; }
+    #gm-effect-actions button {
+      min-width: 6rem; padding: .5rem .9rem; color: var(--ink-primary);
+      background: var(--surface-panel-up); border: 1px solid var(--edge-bright);
+      font: inherit; cursor: pointer;
+    }
+    #gm-effect-actions button:disabled { opacity: .45; cursor: default; }
+    #gm-effect-warning[data-lethal="true"] { color: var(--fire-bright); }
+    #gm-effect-feedback[data-state="Refused"] { color: var(--fire-bright); }
+    #gm-effect-log { margin: 0; padding-left: 1.5rem; max-height: 10rem; overflow-y: auto; }
+    .gm-effect-log-entry[data-outcome="pending"] { color: var(--ink-muted); }
+    .gm-effect-log-entry[data-outcome="refused"],
+    .gm-effect-log-entry[data-outcome="timed-out"] { color: var(--fire-bright); }
     #gm-workspace {
       display: grid; grid-template-columns: minmax(20rem, 2fr) minmax(18rem, 1fr);
       gap: 1rem; min-height: 28rem;
@@ -471,7 +496,7 @@
     }
     @media (max-height: 800px) {
       #gm-console { gap: .9rem; }
-      #gm-session-controls, #gm-mission-panel, #gm-entity-card { padding: 1rem; }
+      #gm-session-controls, #gm-mission-panel, #gm-entity-card, #gm-effect-panel { padding: 1rem; }
       #gm-station-controls { padding: 1rem; }
       #gm-station-frame { height: clamp(20rem, 55vh, 32rem); }
       #gm-knowledge-panel { padding: 1rem; }
@@ -1942,6 +1967,38 @@
               <meter id="gm-entity-hull" min="0" max="100" value="0"
                 aria-labelledby="gm-entity-status-label gm-entity-status"></meter>
             </article>
+            <!-- Direct damage and repair on the selected entity (issue #1310).
+                 The controls are built by gui/gm-direct-effect-panel.js from the
+                 same absolute `gm_entity` projection the inspector above reads,
+                 so the thing a GM aims at and the thing it reports about are
+                 one selection. Amounts are hull POINTS here and milli-HP
+                 everywhere below the input. -->
+            <section id="gm-effect-panel" role="region" aria-labelledby="gm-effect-heading">
+              <h3 id="gm-effect-heading" data-i18n="server.gm.effect.heading"></h3>
+              <p id="gm-effect-empty" role="status" aria-live="polite"
+                data-i18n="server.gm.effect.empty"></p>
+              <div id="gm-effect-controls" hidden>
+                <p id="gm-effect-target"></p>
+                <p id="gm-effect-hull"></p>
+                <label id="gm-effect-amount-label" for="gm-effect-amount">
+                  <span data-i18n="server.gm.effect.amount_label"></span>
+                  <input id="gm-effect-amount" type="number" min="0" step="1" value="10">
+                </label>
+                <div id="gm-effect-actions">
+                  <button id="gm-effect-damage" type="button"
+                    data-i18n="server.gm.effect.damage"></button>
+                  <button id="gm-effect-heal" type="button"
+                    data-i18n="server.gm.effect.heal"></button>
+                </div>
+                <p id="gm-effect-warning" role="status" aria-live="polite"
+                  aria-atomic="true"></p>
+              </div>
+              <p id="gm-effect-feedback" role="status" aria-live="polite"
+                aria-atomic="true"></p>
+              <h4 id="gm-effect-log-heading" data-i18n="server.gm.effect.log_heading"></h4>
+              <ol id="gm-effect-log" role="log" aria-labelledby="gm-effect-log-heading"
+                aria-live="polite" aria-relevant="additions text"></ol>
+            </section>
           </section>
           <section id="gm-activity" role="region" aria-labelledby="gm-activity-heading">
             <h2 id="gm-activity-heading" data-i18n="server.gm.activity.heading"></h2>
@@ -2528,6 +2585,7 @@
     import './gui/components/ph-navigation-map.js';
     import { createGmActivityFeed } from './gui/gm-activity-feed.js';
     import { createGmLocalProjection } from './gui/gm-local-projection.js';
+    import { createGmDirectEffectPanel } from './gui/gm-direct-effect-panel.js';
     import { createGmSessionControls } from './gui/gm-session-controls.js';
     import { createGmMissionPanel } from './gui/gm-mission-panel.js';
     import { createGmStationPuppet } from './gui/gm-station-puppet.js';
@@ -2539,7 +2597,17 @@
     } from './gui/action-feedback.js';
     import { createHostActionRegistry } from './gui/host-actions.js';
     import { t, has, localiseTree } from './gui/strings.js';
-    const gmProjection = createGmLocalProjection({ doc: document, t });
+    // Late-bound because the panel needs the projection's selection and the
+    // projection needs the panel's `select`; the closure resolves at call time,
+    // after both exist.
+    let gmDirectEffect = null;
+    const gmProjection = createGmLocalProjection({
+      doc: document,
+      t,
+      onSelectionChanged: (entity) => {
+        if (gmDirectEffect) gmDirectEffect.select(entity);
+      },
+    });
     const gmActivity = createGmActivityFeed({
       doc: document,
       t,
@@ -2627,6 +2695,24 @@
     // own selection independent of gmStationPuppet's takeover selection.
     const gmKnowledgeCompare = createGmKnowledgeCompare({ doc: document, t });
     window.__hostGmKnowledgeState = gmKnowledgeCompare.state;
+    // Direct damage/repair on the selected entity (issue #1310). Its
+    // authoritative results ride the same `gm_entity` projection the map does.
+    gmDirectEffect = createGmDirectEffectPanel({
+      doc: document,
+      win: window,
+      t,
+      actionFeedback: hostActionFeedback,
+      submitDirectEffect: (request) =>
+        typeof window.__hostApplyDirectEffect === 'function'
+          && window.__hostApplyDirectEffect(request),
+      getOperator: () => typeof window.__hostLocalGm === 'function'
+        ? window.__hostLocalGm() : null,
+      getOperatorName: (id) => typeof window.__hostGmName === 'function'
+        ? window.__hostGmName(id) : id,
+    });
+    window.__hostGmEffectRefresh = gmDirectEffect.refreshAdmission;
+    window.__hostGmEffectReset = gmDirectEffect.reset;
+    window.__hostGmEffectState = gmDirectEffect.state;
     window.__hostSemanticActions = hostSemanticActions;
     window.__hostActionFeedback = hostActionFeedback;
     const hostChannelDispatch = createHostChannel({
@@ -2643,6 +2729,9 @@
             gmActivity.reconcileAvailability();
             gmKnowledgeCompare.updateTruth(gmProjection.state().entities);
           }
+          // The directed-effect results ride the same payload, so they fold
+          // even if the entity list itself was rejected as malformed.
+          if (gmDirectEffect) gmDirectEffect.update(p);
         },
         gm_activity:  function(p) { gmActivity.update(p); },
         gm_station:   function(p) {
@@ -3026,6 +3115,11 @@
       // and its event list both belong to the run that just ended (#1301).
       if (typeof window.__hostGmMissionReset === 'function') {
         window.__hostGmMissionReset();
+      }
+      // So does the direct-effect panel (#1310): a pending press belongs to
+      // the run whose grant would have authorised it.
+      if (typeof window.__hostGmEffectReset === 'function') {
+        window.__hostGmEffectReset();
       }
     }
     // Manual capture is a running-World affordance. Drive it from Rust's
@@ -3764,6 +3858,36 @@
       }
     };
 
+    /**
+     * Submit one attributed direct damage or repair effect (issue #1310).
+     *
+     * `entity` is the stable identity the GM selected out of the authoritative
+     * map projection; this seam never composes one, so a GM cannot name a
+     * target the simulation did not publish. The amount crosses as milli-HP so
+     * the journal never has to round a float typed into a box.
+     */
+    window.__hostApplyDirectEffect = function(request) {
+      const gm = localGm();
+      if (!gm || !request || typeof request !== 'object'
+          || typeof request.entity !== 'string' || !request.entity
+          || (request.effect !== 'damage' && request.effect !== 'heal')
+          || !Number.isSafeInteger(request.amount_milli_hp) || request.amount_milli_hp <= 0
+          || typeof request.correlation !== 'string' || !request.correlation
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      try {
+        return window.wasm_submit_gm_action(JSON.stringify({
+          operator_id: gm.id,
+          correlation: request.correlation,
+          action: 'apply_direct_effect',
+          entity: request.entity,
+          effect: request.effect,
+          amount_milli_hp: request.amount_milli_hp,
+        })) !== false;
+      } catch (_) {
+        return false;
+      }
+    };
+
     /** Submit one absolute Station takeover membership assignment. */
     window.__hostSetStationPuppet = function(request) {
       const gm = localGm();
@@ -4223,6 +4347,9 @@
       }
       if (typeof window.__hostGmStationRefresh === 'function') {
         window.__hostGmStationRefresh();
+      }
+      if (typeof window.__hostGmEffectRefresh === 'function') {
+        window.__hostGmEffectRefresh();
       }
       if (!controls || !readyBtn || !forceBtn) return;
       const gm = localGm();

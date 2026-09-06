@@ -368,6 +368,64 @@ pub fn with_stream<R>(
     }
 }
 
+/// The per-site constant the GM's direct damage/heal effects draw under
+/// (issue #1310).
+pub const GM_DIRECT_EFFECT_EVENT: &str = "gm-direct-effect";
+
+/// Borrow a generator for ONE discrete, canonically-ordered simulation event.
+///
+/// # Why this is not a ninth [`SimStream`]
+///
+/// A [`SimStream`] is a running position: its sequence is a function of how
+/// many times its own call site has drawn, which is the right model for a site
+/// that fires per landing tick. A GM direct effect is not that. It is a single
+/// authorised grant with a canonical total order of its own
+/// ([`crate::gm_action::GmActionOrder`]), applied exactly once on every peer,
+/// so keying its generator on that ordinal gives a STRONGER isolation than a
+/// stream does: two GM effects cannot reorder each other, and neither can move
+/// a weapon's sequence by existing.
+///
+/// It also costs nothing to declare. [`SimRngState`] serialises one generator
+/// per [`SimStream::ALL`] entry and [`crate::sim_digest`] folds the whole
+/// state, so a ninth stream would move EVERY world's tick-0 digest and reject
+/// every previously recorded snapshot — the re-bless [`SimStream`]'s own docs
+/// describe. An event generator adds no position to that state at all, so a
+/// world in which no GM ever presses a button is byte-identical to what it was
+/// before this issue.
+///
+/// The master seed still comes from [`SimRng`], so the numbers are a function
+/// of the run's seed exactly like every stream's are. `name` picks the PCG
+/// increment (the same `stream_selector` a stream's name picks, so this
+/// sequence is disjoint from all of them) and `ordinal` moves the seed, so
+/// each event gets its own start within that increment.
+///
+/// `Option<&SimRng>` and the OS fallback for [`with_stream`]'s exact reasons.
+#[allow(clippy::disallowed_methods)]
+pub fn with_event_generator<R>(
+    sim_rng: Option<&SimRng>,
+    name: &str,
+    ordinal: u64,
+    f: impl FnOnce(&mut Pcg32) -> R,
+) -> R {
+    let master = match sim_rng {
+        Some(sim) => sim.seed(),
+        None => rand::random::<u64>(),
+    };
+    f(&mut event_generator(master, name, ordinal))
+}
+
+/// The generator for one named event of `master` at `ordinal`.
+///
+/// `Pcg32::seeded` runs the seed through SplitMix64, so the golden-ratio
+/// multiply here only needs to make two adjacent ordinals differ in many bits
+/// before that happens rather than be a hash in its own right.
+fn event_generator(master: u64, name: &str, ordinal: u64) -> Pcg32 {
+    Pcg32::seeded(
+        master ^ ordinal.wrapping_mul(0x9e37_79b9_7f4a_7c15),
+        stream_selector(name),
+    )
+}
+
 /// A throwaway OS-seeded generator, for unit tests that need *a* generator and
 /// do not care which numbers come out of it.
 ///

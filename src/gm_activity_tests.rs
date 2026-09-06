@@ -442,6 +442,7 @@ fn logged(
             7,
         )),
         target: None,
+        effect: None,
     }
 }
 
@@ -541,6 +542,82 @@ fn a_fired_gm_event_is_attributed_by_the_event_it_fired() {
     );
     assert_eq!(detail.outcome, GmActivityActionOutcome::Applied);
     assert_eq!(entries[0].category, GmActivityCategory::GmAction);
+}
+
+/// A directed world effect is attributed by WHAT it hit and by what the hull
+/// actually did with the amount — never reported as a session pause, and never
+/// dropped for want of a resolved effect (issue #1310).
+#[test]
+fn a_direct_effect_is_attributed_by_its_target_and_its_resolved_amounts() {
+    let mut state = GmActivityState::default();
+    assert!(terminal_action_entries(&mut state, None, None, None, None).is_empty());
+    let mut results = crate::gm_action::LocalGmActionRefusals::default();
+    let mut fact = logged(
+        "gm-alpha",
+        "hit-1",
+        crate::gm_action::GmActionOutcome::Applied,
+        None,
+    );
+    fact.action_kind = crate::gm_action::GmActionKind::DirectEffect;
+    fact.target = Some("npc-1".into());
+    fact.effect = Some(crate::gm_effect::GmDirectEffectResult {
+        kind: crate::gm_effect::GmDirectEffectKind::Damage,
+        applied_milli_hp: 25_000,
+        discarded_milli_hp: 5_000,
+        destroyed: true,
+    });
+    results.push(fact);
+
+    let entries = terminal_action_entries(&mut state, None, Some(&results), None, None);
+    let GmActivityDetail::GmAction(detail) = &entries[0].detail else {
+        panic!("expected GM action detail")
+    };
+    assert_eq!(
+        detail.action,
+        GmActivityAction::ApplyDirectEffect {
+            entity: "npc-1".into(),
+            heal: false,
+            applied_milli_hp: 25_000,
+            discarded_milli_hp: 5_000,
+            destroyed: true,
+        }
+    );
+    assert_eq!(detail.outcome, GmActivityActionOutcome::Applied);
+    assert_eq!(entries[0].category, GmActivityCategory::GmAction);
+}
+
+/// A refusal settled before any hull was read carries no resolved effect. The
+/// row still renders — with zeroes — rather than dropping the operator press.
+#[test]
+fn a_refused_direct_effect_still_names_the_target_it_was_aimed_at() {
+    let mut state = GmActivityState::default();
+    assert!(terminal_action_entries(&mut state, None, None, None, None).is_empty());
+    let mut results = crate::gm_action::LocalGmActionRefusals::default();
+    let mut fact = logged(
+        "gm-alpha",
+        "hit-2",
+        crate::gm_action::GmActionOutcome::Refused,
+        Some(crate::gm_action::GmActionRefusalReason::UnknownEntity),
+    );
+    fact.action_kind = crate::gm_action::GmActionKind::DirectEffect;
+    fact.target = Some("npc-gone".into());
+    results.push(fact);
+
+    let entries = terminal_action_entries(&mut state, None, Some(&results), None, None);
+    let GmActivityDetail::GmAction(detail) = &entries[0].detail else {
+        panic!("expected GM action detail")
+    };
+    assert_eq!(
+        detail.action,
+        GmActivityAction::ApplyDirectEffect {
+            entity: "npc-gone".into(),
+            heal: false,
+            applied_milli_hp: 0,
+            discarded_milli_hp: 0,
+            destroyed: false,
+        }
+    );
+    assert_eq!(detail.reason.as_deref(), Some("unknown-entity"));
 }
 
 #[test]

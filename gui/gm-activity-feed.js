@@ -1,4 +1,8 @@
 import { wireText } from './strings.js';
+// The milli-HP unit is spelled once, in the module that owns the directed
+// world-effect vocabulary (issue #1310); a second conversion here is exactly
+// how the feed and the panel that submitted the effect would come to disagree.
+import { hullPoints } from './gm-direct-effect-panel.js';
 
 /** Strict page-local adapter for the one bounded GM activity feed. */
 
@@ -67,6 +71,24 @@ function normaliseAction(value) {
   // identity the mission panel's Fire control and the command log carry.
   if (value.type === 'fire_gm_event' && typeof value.event === 'string' && value.event.length > 0) {
     return { type: value.type, event: value.event };
+  }
+  // One directed world effect landed (issue #1310). Amounts are milli-HP, the
+  // same unit the action carries, so the feed and the panel that submitted it
+  // never disagree by a rounding step.
+  if (value.type === 'apply_direct_effect'
+      && typeof value.entity === 'string' && value.entity.length > 0
+      && typeof value.heal === 'boolean'
+      && Number.isSafeInteger(value.applied_milli_hp) && value.applied_milli_hp >= 0
+      && Number.isSafeInteger(value.discarded_milli_hp) && value.discarded_milli_hp >= 0
+      && typeof value.destroyed === 'boolean') {
+    return {
+      type: value.type,
+      entity: value.entity,
+      heal: value.heal,
+      applied_milli_hp: value.applied_milli_hp,
+      discarded_milli_hp: value.discarded_milli_hp,
+      destroyed: value.destroyed,
+    };
   }
   return undefined;
 }
@@ -346,6 +368,22 @@ export function createGmActivityFeed({
           action = t('server.gm.activity.action.force_start');
         } else if (detail.action.type === 'fire_gm_event') {
           action = t('server.gm.activity.action.fire_gm_event', { event: detail.action.event });
+        } else if (detail.action.type === 'apply_direct_effect') {
+          action = t(
+            `server.gm.activity.action.apply_direct_${detail.action.heal ? 'heal' : 'damage'}`,
+            {
+              entity: detail.action.entity,
+              amount: hullPoints(detail.action.applied_milli_hp),
+            },
+          );
+          if (detail.action.destroyed) {
+            action += t('server.gm.activity.action.direct_effect_lethal');
+          }
+          if (detail.action.discarded_milli_hp > 0) {
+            action += t('server.gm.activity.action.direct_effect_discarded', {
+              amount: hullPoints(detail.action.discarded_milli_hp),
+            });
+          }
         } else {
           action = t(`server.gm.activity.action.${detail.action.active ? 'pause' : 'resume'}`);
         }

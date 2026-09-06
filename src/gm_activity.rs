@@ -129,6 +129,19 @@ pub enum GmActivityAction {
     FireGmEvent {
         event: String,
     },
+    /// One directed world effect landed on a named entity (issue #1310).
+    ///
+    /// The crew never see this row: they see the ordinary damage and
+    /// destruction consequences the same balance events produce for a beam
+    /// hit. What this adds, on the GM's own feed, is who caused it and what
+    /// the hull actually absorbed against what was asked for.
+    ApplyDirectEffect {
+        entity: String,
+        heal: bool,
+        applied_milli_hp: u32,
+        discarded_milli_hp: u32,
+        destroyed: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -364,6 +377,11 @@ fn action_key(action: &GmActivityAction) -> (u8, bool, &str) {
         // The event id is the third component so two Fires committed at the
         // same tick and order still sort deterministically by WHAT they fired.
         GmActivityAction::FireGmEvent { event } => (2, false, event.as_str()),
+        // Same reason as the Fire above: the entity id disambiguates two
+        // effects committed at one tick and order. `heal` rides the boolean
+        // slot the pause row already uses, so damage and healing on one target
+        // never collapse onto each other.
+        GmActivityAction::ApplyDirectEffect { entity, heal, .. } => (3, *heal, entity.as_str()),
     }
 }
 
@@ -1069,6 +1087,8 @@ fn refusal_reason(reason: crate::gm_action::GmActionRefusalReason) -> &'static s
         Reason::WrongPhase => "wrong-phase",
         Reason::UnreadableRequest => "unreadable-request",
         Reason::UnknownGmEvent => "unknown-gm-event",
+        Reason::UnknownEntity => "unknown-entity",
+        Reason::TargetNotDamageable => "target-not-damageable",
     }
 }
 
@@ -1160,6 +1180,25 @@ fn terminal_action_entries(
                     // The event-control family names WHAT it fired; every older
                     // family keeps the exact row shape it already published.
                     action: match fact.action_kind {
+                        // The directed world-effect family names WHAT it hit
+                        // and WHAT the hull did with it. A fact whose result
+                        // carries no resolved effect (a refusal settled before
+                        // any hull was read) still renders, with zeroes, rather
+                        // than dropping the operator's row.
+                        crate::gm_action::GmActionKind::DirectEffect => {
+                            let effect = fact.effect;
+                            GmActivityAction::ApplyDirectEffect {
+                                entity: fact.target.clone()?,
+                                heal: effect.is_some_and(|effect| {
+                                    effect.kind == crate::gm_effect::GmDirectEffectKind::Heal
+                                }),
+                                applied_milli_hp: effect
+                                    .map_or(0, |effect| effect.applied_milli_hp),
+                                discarded_milli_hp: effect
+                                    .map_or(0, |effect| effect.discarded_milli_hp),
+                                destroyed: effect.is_some_and(|effect| effect.destroyed),
+                            }
+                        }
                         crate::gm_action::GmActionKind::EventControl => {
                             GmActivityAction::FireGmEvent {
                                 // Every producer of an event-control fact

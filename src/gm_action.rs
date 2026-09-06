@@ -101,6 +101,25 @@ pub enum GmAction {
     FireGmEvent {
         event: String,
     },
+    /// Apply an absolute direct/internal damage or heal amount to one Entity
+    /// (issue #1310).
+    ///
+    /// `target` is the stable `EntityUuid`, never a Bevy `Entity`: a grant can
+    /// be sequenced for a future boundary, and an entity index is not an
+    /// identity across one. `scope` is `Entity` for now and is where issue
+    /// #1311's Station/System narrowing lands, so that slice appends a variant
+    /// rather than adding a second action family for the same mechanic.
+    ///
+    /// The amount is absolute milli-HP, and it is what the OPERATOR asked for.
+    /// What actually lands is resolved against the live hull at the agreed
+    /// apply tick and reported on the durable result, so a stale request is
+    /// clamped rather than misapplied.
+    ApplyDirectEffect {
+        target: String,
+        scope: crate::gm_effect::GmDirectEffectScope,
+        effect: crate::gm_effect::GmDirectEffectKind,
+        amount_milli_hp: u32,
+    },
 }
 
 /// Presentation/result family for a typed GM action. The complete action stays
@@ -115,6 +134,22 @@ pub enum GmActionKind {
     /// The authored-event control family (issue #1301): Fire today, Pause
     /// (#1303) and Skip (#1304) next, all naming the same qualified event id.
     EventControl,
+    /// The directed world-effect family (issue #1310): absolute direct damage
+    /// and healing on a named Entity today, Station/System scopes (#1311) and
+    /// the disable/restore latch (#1312) next.
+    DirectEffect,
+}
+
+impl GmActionKind {
+    /// Whether this family's actions name one stable target identity.
+    ///
+    /// [`GmAction::target_id`] is the producer; this is the same fact stated
+    /// about the FAMILY, which is all a refusal has left once the action itself
+    /// is gone. A refusal that disagrees with it is malformed — see
+    /// [`validate_fleet_frame`].
+    pub fn carries_target(self) -> bool {
+        matches!(self, Self::EventControl | Self::DirectEffect)
+    }
 }
 
 /// Validated browser ingress before its technical slot and deterministic order
@@ -150,7 +185,9 @@ impl GmActionProposal {
 impl GmAction {
     pub fn ship_key(&self) -> Option<&crate::command_admission::log::ShipKey> {
         match self {
-            Self::SetSessionPaused { .. } | Self::FireGmEvent { .. } => None,
+            Self::SetSessionPaused { .. }
+            | Self::FireGmEvent { .. }
+            | Self::ApplyDirectEffect { .. } => None,
             Self::SetStationPuppet { ship, .. } | Self::IssueStationCommand { ship, .. } => {
                 Some(ship)
             }
@@ -159,14 +196,16 @@ impl GmAction {
 
     /// The stable target identity this action names, for the durable result.
     ///
-    /// Only the event-control family has one today: a Station action's target
-    /// is already two fields (`ship`, `station`) that the activity feed does
-    /// not render, and inventing a joined spelling for them here would be a
-    /// second identity for the same thing. `None` therefore means "this family
-    /// carries no single stable target", not "unknown".
+    /// The event-control family names an authored event and the directed
+    /// world-effect family names an entity uuid. A Station action's target is
+    /// already two fields (`ship`, `station`) that the activity feed does not
+    /// render, and inventing a joined spelling for them here would be a second
+    /// identity for the same thing. `None` therefore means "this family carries
+    /// no single stable target", not "unknown".
     pub fn target_id(&self) -> Option<&str> {
         match self {
             Self::FireGmEvent { event } => Some(event.as_str()),
+            Self::ApplyDirectEffect { target, .. } => Some(target.as_str()),
             Self::SetSessionPaused { .. }
             | Self::SetStationPuppet { .. }
             | Self::IssueStationCommand { .. } => None,
@@ -190,6 +229,15 @@ impl GmAction {
             {
                 Ok(())
             }
+            // A zero amount is refused as an INVALID action rather than
+            // accepted as a guaranteed No-op: an operator who typed nothing has
+            // not asked for anything, and the empty press should never reach the
+            // journal in the first place.
+            Self::ApplyDirectEffect {
+                target,
+                amount_milli_hp,
+                ..
+            } if bounded(target) && *amount_milli_hp > 0 => Ok(()),
             Self::SetStationPuppet { ship, station, .. }
                 if bounded(&ship.0) && bounded(&station.0) =>
             {
@@ -218,6 +266,7 @@ impl GmAction {
             Self::SetStationPuppet { .. } => GmActionKind::StationPuppet,
             Self::IssueStationCommand { .. } => GmActionKind::StationCommand,
             Self::FireGmEvent { .. } => GmActionKind::EventControl,
+            Self::ApplyDirectEffect { .. } => GmActionKind::DirectEffect,
         }
     }
 
@@ -226,7 +275,8 @@ impl GmAction {
             Self::SetSessionPaused { active } => Some(*active),
             Self::SetStationPuppet { .. }
             | Self::IssueStationCommand { .. }
-            | Self::FireGmEvent { .. } => None,
+            | Self::FireGmEvent { .. }
+            | Self::ApplyDirectEffect { .. } => None,
         }
     }
 
@@ -234,8 +284,12 @@ impl GmAction {
         match self {
             Self::SetSessionPaused { active } | Self::SetStationPuppet { active, .. } => *active,
             // A Fire is always a request to make something happen. There is no
-            // "un-fire", so the flag is a constant rather than a policy.
-            Self::IssueStationCommand { .. } | Self::FireGmEvent { .. } => true,
+            // "un-fire", so the flag is a constant rather than a policy — and a
+            // direct effect carries its own sign in `GmDirectEffectKind`, not
+            // in this boolean.
+            Self::IssueStationCommand { .. }
+            | Self::FireGmEvent { .. }
+            | Self::ApplyDirectEffect { .. } => true,
         }
     }
 }
@@ -420,7 +474,7 @@ pub fn validate_fleet_frame(
             // no event could only be published as a fire of the empty id, and a
             // pause refusal with one would invent a second identity for a family
             // that has none. Both are malformed frames, not facts to project.
-            if (refusal.action_kind == GmActionKind::EventControl) != refusal.target.is_some() {
+            if refusal.action_kind.carries_target() != refusal.target.is_some() {
                 return Err(GmActionRefusalReason::InvalidAction);
             }
         }
@@ -471,6 +525,17 @@ pub enum GmActionRefusalReason {
     /// reason in the middle would silently move the digest of every past run
     /// that recorded one of the reasons after it.
     UnknownGmEvent,
+    /// No entity carries this uuid at the apply tick (issue #1310). Appended
+    /// for [`Self::UnknownGmEvent`]'s reason, which every future reason shares.
+    UnknownEntity,
+    /// The named entity exists but has no hull a direct effect could touch —
+    /// a nav beacon, a planet, an authored marker: anything whose template
+    /// carries no `[hull]` section and therefore no `EntitySystemHull` at all,
+    /// and equally anything whose `[hull]` declares no systems (#1310).
+    /// Distinct from [`Self::UnknownEntity`] on purpose: the operator is
+    /// looking at a live thing on the map, and "nothing answers to that
+    /// identity" would be a lie about their own selection.
+    TargetNotDamageable,
 }
 
 /// One terminal fact in the GM command log and local activity projection.
@@ -499,6 +564,17 @@ pub struct LoggedGmAction {
     /// world's digest moves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
+    /// What a directed world effect actually did (issue #1310): the milli-HP
+    /// that landed, the milli-HP discarded against the target's maxima, and
+    /// whether the hit was lethal.
+    ///
+    /// Resolved at the agreed apply tick and carried on the RESULT for
+    /// [`Self::target`]'s reason — the activity feed and the entity panel both
+    /// read the bounded result surface, not the journal. `Option` plus
+    /// `skip_serializing_if` keeps every older family's fact byte-identical to
+    /// its pre-#1310 shape, so no existing world's digest moves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect: Option<crate::gm_effect::GmDirectEffectResult>,
 }
 
 impl LoggedGmAction {
@@ -520,12 +596,19 @@ impl LoggedGmAction {
             reason: Some(reason),
             order: None,
             target: None,
+            effect: None,
         }
     }
 
     /// Attach the action's stable target identity to a refusal built above.
     pub fn with_target(mut self, target: Option<String>) -> Self {
         self.target = target;
+        self
+    }
+
+    /// Attach a resolved directed-effect result to a fact built above.
+    pub fn with_effect(mut self, effect: Option<crate::gm_effect::GmDirectEffectResult>) -> Self {
+        self.effect = effect;
         self
     }
 
@@ -1088,7 +1171,8 @@ impl GmActionJournal {
                         GmAction::FireGmEvent { event } => {
                             fired_events.insert(event.clone());
                         }
-                        GmAction::IssueStationCommand { .. } => {}
+                        GmAction::IssueStationCommand { .. }
+                        | GmAction::ApplyDirectEffect { .. } => {}
                     }
                 }
                 entries.push(result.clone());
@@ -1125,6 +1209,12 @@ impl GmActionJournal {
                     }
                 }
                 GmAction::IssueStationCommand { .. } => GmActionOutcome::Applied,
+                // A directed effect's real answer is a function of the live
+                // hull, which this reducer does not have. Production always
+                // records the actual apply-boundary result above, so this arm
+                // is only ever reached by the pure-fixture path — and the
+                // honest answer there is "the grant was admitted".
+                GmAction::ApplyDirectEffect { .. } => GmActionOutcome::Applied,
             };
             entries.push(LoggedGmAction {
                 operator_id: grant.operator_id.clone(),
@@ -1136,6 +1226,7 @@ impl GmActionJournal {
                 reason: None,
                 order: Some(grant.order),
                 target: grant.action.target_id().map(str::to_string),
+                effect: None,
             });
         }
         GmActionLog { entries, paused }
@@ -1182,6 +1273,12 @@ impl GmActionJournal {
                     }
                 }
                 GmAction::IssueStationCommand { .. } => GmActionOutcome::Applied,
+                // A directed effect's real answer is a function of the live
+                // hull, which this reducer does not have. Production always
+                // records the actual apply-boundary result above, so this arm
+                // is only ever reached by the pure-fixture path — and the
+                // honest answer there is "the grant was admitted".
+                GmAction::ApplyDirectEffect { .. } => GmActionOutcome::Applied,
             };
             entries.push(LoggedGmAction {
                 operator_id: grant.operator_id.clone(),
@@ -1193,6 +1290,7 @@ impl GmActionJournal {
                 reason: None,
                 order: Some(grant.order),
                 target: grant.action.target_id().map(str::to_string),
+                effect: None,
             });
         }
         GmActionLog { entries, paused }
@@ -1433,6 +1531,23 @@ pub fn apply_due_actions(
     // reason every other product resource here is: the pure journal fixtures
     // and the replay harness run this exact production reducer without a world.
     mut content: Option<ResMut<crate::world::server::WorldContentRuntime>>,
+    // The directed world-effect arm (issue #1310). `Option` for the same
+    // reason: the pure journal fixtures and the replay harness run this exact
+    // production reducer without a world to damage.
+    mut direct_effects: Option<ResMut<crate::gm_effect::PendingGmDirectEffects>>,
+    // Every IDENTIFIED entity in the world, not just ships and not just hulls:
+    // a GM may damage a structure or an authored asteroid, and anything
+    // carrying an `EntitySystemHull` is a legitimate target. The hull is
+    // `Option` so that "no such entity" and "that entity cannot be damaged"
+    // stay DIFFERENT answers — `HullSpawn` inserts `EntitySystemHull` only for
+    // a template with a `[hull]` section, so a nav beacon or a planet is a live
+    // thing with no hull at all, and telling its operator that nothing in the
+    // world answers to its identity would be a lie. Read-only here — the effect
+    // is applied in the ordinary damage phase, never from PreUpdate.
+    hulls: Query<(
+        &crate::entities::spawner::EntityUuid,
+        Option<&crate::entities::spawner::EntitySystemHull>,
+    )>,
     ships: Query<
         (
             &crate::entities::spawner::EntityUuid,
@@ -1456,8 +1571,16 @@ pub fn apply_due_actions(
     }
     let now = tick.as_deref().map_or(0, |tick| tick.0);
     let due = journal.pending_through(now).to_vec();
+    // `(current, max)` per directed-effect target as this drain has left it.
+    // Keyed by uuid and walked in canonical grant order, so every peer builds
+    // the same projection from the same starting hulls.
+    let mut projected_hulls: std::collections::BTreeMap<String, (f32, f32)> =
+        std::collections::BTreeMap::new();
     for grant in due {
         let requested_active = grant.action.requested_active();
+        // Only the directed world-effect family fills this in; every other
+        // family's durable fact keeps its exact pre-#1310 shape.
+        let mut resolved_effect: Option<crate::gm_effect::GmDirectEffectResult> = None;
         let station_grant_after_loss = station_grant_outlives_operator(
             &grant,
             &journal,
@@ -1466,6 +1589,89 @@ pub fn apply_due_actions(
             losses.as_deref(),
         );
         let (outcome, reason) = match &grant.action {
+            // A directed effect is RESOLVED here, at the agreed apply tick, and
+            // applied by the ordinary damage phase. Same division as a Fire and
+            // for the same reason: this PreUpdate reducer holds none of the
+            // destruction lifecycle's parameters, and a second damage path is
+            // exactly what would make a GM hit differ from a beam hit.
+            GmAction::ApplyDirectEffect {
+                target,
+                scope,
+                effect,
+                amount_milli_hp,
+            } => {
+                let found = hulls.iter().find(|(uuid, _)| uuid.0 == *target);
+                match (direct_effects.as_deref_mut(), found) {
+                    // No arm queue at all: nothing downstream could ever apply
+                    // this, so refusing is the only honest terminal answer.
+                    (None, _) => (
+                        GmActionOutcome::Refused,
+                        Some(GmActionRefusalReason::SystemUnavailable),
+                    ),
+                    // Nothing in the world carries this uuid — the target was
+                    // despawned, or never existed.
+                    (_, None) => (
+                        GmActionOutcome::Refused,
+                        Some(GmActionRefusalReason::UnknownEntity),
+                    ),
+                    // The entity is right there and simply has nothing to
+                    // damage: a beacon or a planet with no `[hull]` section at
+                    // all, or an authored `[hull]` that declares no systems.
+                    // Two spellings of one fact, and both owe the operator the
+                    // same answer — which is not "that does not exist".
+                    (Some(_), Some((_, None))) => (
+                        GmActionOutcome::Refused,
+                        Some(GmActionRefusalReason::TargetNotDamageable),
+                    ),
+                    (Some(_), Some((_, Some(hull)))) if hull.0.is_empty() => (
+                        GmActionOutcome::Refused,
+                        Some(GmActionRefusalReason::TargetNotDamageable),
+                    ),
+                    (Some(pending), Some((_, Some(hull)))) => {
+                        // Measured against what the grants canonically BEFORE
+                        // this one left, not against the untouched hull: two
+                        // GMs pressing one target on one boundary must get two
+                        // honest answers, and the reducer may not mutate the
+                        // world to find that out. The projection is the
+                        // `fired_events` discipline `log_prefix` already uses.
+                        let (current, max) =
+                            *projected_hulls.entry(target.clone()).or_insert_with(|| {
+                                pending.project_totals(
+                                    target,
+                                    hull.0.total_current(),
+                                    hull.0.total_max(),
+                                )
+                            });
+                        let resolution = crate::gm_effect::resolve_direct_effect(
+                            *effect,
+                            *amount_milli_hp,
+                            current,
+                            max,
+                        );
+                        resolved_effect = Some(resolution);
+                        if resolution.applied_milli_hp == 0 {
+                            // A full hull asked to heal, or a wreck asked to
+                            // take more damage. Deterministic on every peer,
+                            // and it still reports the discarded remainder.
+                            (GmActionOutcome::NoOp, None)
+                        } else {
+                            projected_hulls.insert(
+                                target.clone(),
+                                crate::gm_effect::totals_after(&resolution, current, max),
+                            );
+                            pending.push(crate::gm_effect::PendingGmDirectEffect {
+                                tick: grant.apply_tick,
+                                order: grant.order,
+                                target: target.clone(),
+                                scope: *scope,
+                                kind: *effect,
+                                amount_milli_hp: resolution.applied_milli_hp,
+                            });
+                            (GmActionOutcome::Applied, None)
+                        }
+                    }
+                }
+            }
             // Fire ARMS the event; it never calls a handler here. The Rhai
             // runtime lives behind `tick_trigger_pipeline`'s FixedUpdate
             // parameter set, which this PreUpdate system deliberately does not
@@ -1543,6 +1749,7 @@ pub fn apply_due_actions(
                         reason: Some(reason),
                         order: Some(grant.order),
                         target: grant.action.target_id().map(str::to_string),
+                        effect: None,
                     };
                     journal
                         .record_applied_result(result)
@@ -1613,6 +1820,7 @@ pub fn apply_due_actions(
                             reason: Some(GmActionRefusalReason::UnknownStation),
                             order: Some(grant.order),
                             target: grant.action.target_id().map(str::to_string),
+                            effect: None,
                         };
                         journal
                             .record_applied_result(result)
@@ -1702,6 +1910,7 @@ pub fn apply_due_actions(
                 reason,
                 order: Some(grant.order),
                 target: grant.action.target_id().map(str::to_string),
+                effect: resolved_effect,
             })
             .expect("live GM result matches its canonical grant");
     }
@@ -1741,6 +1950,10 @@ pub fn apply_due_actions(
 
 /// Reset the replicated GM lane at a new fleet/run boundary.
 pub fn reset(world: &mut World) {
+    // The armed direct effects go with the journal that authorised them: an
+    // arm that outlived its run would land damage in the NEXT one, attributed
+    // to nobody and reported on no feed (issue #1310).
+    crate::gm_effect::reset(world);
     world.insert_resource(GmActionJournal::default());
     world.insert_resource(GmActionLog::default());
     world.insert_resource(LocalGmActionRefusals::default());
@@ -3053,6 +3266,7 @@ station = "helm"
             reason: None,
             order: Some(GmActionOrder::new(HostSlot(1), 1)),
             target: None,
+            effect: None,
         };
         let pause = LoggedGmAction {
             operator_id: "gm-1".into(),
@@ -3064,6 +3278,7 @@ station = "helm"
             reason: None,
             order: Some(GmActionOrder::new(HostSlot(1), 0)),
             target: None,
+            effect: None,
         };
         let station_refused = LoggedGmAction::refused(
             "gm-1".into(),
@@ -3083,6 +3298,7 @@ station = "helm"
             reason: None,
             order: Some(GmActionOrder::new(HostSlot(1), 2)),
             target: None,
+            effect: None,
         };
         let log = GmActionLog {
             entries: vec![pause, station_applied.clone(), station_pending],
@@ -3113,6 +3329,7 @@ station = "helm"
                 reason: None,
                 order: Some(pause.order),
                 target: None,
+                effect: None,
             }),
             Err("pending GM result is not a Station command"),
         );
@@ -3304,5 +3521,429 @@ station = "helm"
             submit_local(&mut world, request),
             Ok(GmActionSubmission::Granted(_))
         ));
+    }
+
+    // -- Directed world effects (issue #1310) --------------------------------
+
+    fn effect_grant(
+        sequence: u64,
+        apply_tick: u64,
+        correlation: &str,
+        target: &str,
+        effect: crate::gm_effect::GmDirectEffectKind,
+        amount_milli_hp: u32,
+    ) -> GmActionGrant {
+        GmActionGrant {
+            from: HostSlot(1),
+            sequenced_by: HostSlot(1),
+            operator_id: "gm-1".into(),
+            correlation: GmActionId::new(correlation).unwrap(),
+            recovery_generation: 0,
+            apply_tick,
+            order: GmActionOrder::new(HostSlot(1), sequence),
+            action: GmAction::ApplyDirectEffect {
+                target: target.into(),
+                scope: crate::gm_effect::GmDirectEffectScope::Entity,
+                effect,
+                amount_milli_hp,
+            },
+        }
+    }
+
+    /// A world of hulls, plus any number of hull-less entities a GM might also
+    /// select off the same map.
+    ///
+    /// `hull_less` spawns BOTH shapes a hull-less entity takes in production,
+    /// because they reach the reducer down different paths and must come out
+    /// with the same answer: `"<uuid>"` carries an `EntitySystemHull` that
+    /// declares no systems (an authored empty `[hull]`), and
+    /// `"<uuid>-componentless"` carries no `EntitySystemHull` component at all
+    /// — the shape `HullSpawn` produces for every template with no `[hull]`
+    /// section, which is what a nav beacon and a planet actually are.
+    fn effect_app(
+        tick: u64,
+        hulls: &[(&str, f32, f32)],
+        hull_less: &[&str],
+        grants: impl IntoIterator<Item = GmActionGrant>,
+    ) -> App {
+        let mut journal = GmActionJournal::default();
+        for grant in grants {
+            journal.insert(grant).unwrap();
+        }
+        let mut app = App::new();
+        app.insert_resource(crate::sim_tick::SimTick(tick))
+            .insert_resource(SimulationPaused(false))
+            .insert_resource(journal)
+            .init_resource::<GmActionLog>()
+            .init_resource::<crate::gm_effect::PendingGmDirectEffects>()
+            .add_systems(Update, apply_due_actions);
+        for (uuid, max, current) in hulls {
+            let system = crate::core::messages::SystemId("captain".into());
+            let mut hull = crate::ship::damage::SystemHull::from_config(&[(system.clone(), *max)]);
+            hull.set_hp(&system, *current);
+            app.world_mut().spawn((
+                crate::entities::spawner::EntityUuid((*uuid).into()),
+                crate::entities::spawner::EntitySystemHull(hull),
+            ));
+        }
+        for uuid in hull_less {
+            app.world_mut().spawn((
+                crate::entities::spawner::EntityUuid((*uuid).into()),
+                crate::entities::spawner::EntitySystemHull(
+                    crate::ship::damage::SystemHull::default(),
+                ),
+            ));
+            app.world_mut()
+                .spawn(crate::entities::spawner::EntityUuid(format!(
+                    "{uuid}-componentless"
+                )));
+        }
+        app
+    }
+
+    fn armed_effects(app: &App) -> Vec<crate::gm_effect::PendingGmDirectEffect> {
+        app.world()
+            .resource::<crate::gm_effect::PendingGmDirectEffects>()
+            .entries()
+            .to_vec()
+    }
+
+    fn effect_results(app: &App) -> Vec<Option<crate::gm_effect::GmDirectEffectResult>> {
+        app.world()
+            .resource::<GmActionJournal>()
+            .applied_results()
+            .iter()
+            .map(|result| result.effect)
+            .collect()
+    }
+
+    /// The whole resolve-then-arm contract: a valid amount arms exactly what
+    /// the durable result claims, stated in the same unit.
+    #[test]
+    fn a_direct_hit_arms_the_amount_its_durable_result_reports() {
+        let mut app = effect_app(
+            5,
+            &[("npc-1", 100.0, 100.0)],
+            &[],
+            [effect_grant(
+                1,
+                5,
+                "hit-a",
+                "npc-1",
+                crate::gm_effect::GmDirectEffectKind::Damage,
+                25_000,
+            )],
+        );
+        app.update();
+
+        assert_eq!(outcomes(&app), vec![(GmActionOutcome::Applied, None)]);
+        let armed = armed_effects(&app);
+        assert_eq!(armed.len(), 1);
+        assert_eq!(armed[0].target, "npc-1");
+        assert_eq!(armed[0].amount_milli_hp, 25_000);
+        assert_eq!(armed[0].tick, 5);
+        assert_eq!(
+            effect_results(&app)[0],
+            Some(crate::gm_effect::GmDirectEffectResult {
+                kind: crate::gm_effect::GmDirectEffectKind::Damage,
+                applied_milli_hp: 25_000,
+                discarded_milli_hp: 0,
+                destroyed: false,
+            })
+        );
+    }
+
+    /// Healing beyond the maxima is clamped at the apply tick and the discarded
+    /// remainder is REPORTED rather than silently absorbed -- and the arm
+    /// carries only what will actually land.
+    #[test]
+    fn a_heal_beyond_the_maxima_clamps_and_reports_the_discarded_overflow() {
+        let mut app = effect_app(
+            3,
+            &[("npc-1", 100.0, 60.0)],
+            &[],
+            [effect_grant(
+                1,
+                3,
+                "heal-a",
+                "npc-1",
+                crate::gm_effect::GmDirectEffectKind::Heal,
+                250_000,
+            )],
+        );
+        app.update();
+
+        assert_eq!(outcomes(&app), vec![(GmActionOutcome::Applied, None)]);
+        assert_eq!(armed_effects(&app)[0].amount_milli_hp, 40_000);
+        assert_eq!(
+            effect_results(&app)[0],
+            Some(crate::gm_effect::GmDirectEffectResult {
+                kind: crate::gm_effect::GmDirectEffectKind::Heal,
+                applied_milli_hp: 40_000,
+                discarded_milli_hp: 210_000,
+                destroyed: false,
+            })
+        );
+    }
+
+    /// Damage that empties the hull is reported as lethal BEFORE the damage
+    /// phase runs -- the metadata a confirmation surface previews from.
+    #[test]
+    fn damage_that_empties_the_hull_is_reported_lethal_at_the_apply_boundary() {
+        let mut app = effect_app(
+            1,
+            &[("npc-1", 100.0, 30.0)],
+            &[],
+            [effect_grant(
+                1,
+                1,
+                "kill",
+                "npc-1",
+                crate::gm_effect::GmDirectEffectKind::Damage,
+                90_000,
+            )],
+        );
+        app.update();
+
+        let result = effect_results(&app)[0].expect("a resolved effect");
+        assert!(result.destroyed);
+        assert_eq!(result.applied_milli_hp, 30_000);
+        assert_eq!(result.discarded_milli_hp, 60_000);
+    }
+
+    /// Nothing to change is a No-op on every peer, not a refusal and not a
+    /// silent success: a full hull cannot be healed and a wreck cannot be
+    /// damaged further.
+    #[test]
+    fn an_effect_with_nothing_to_change_is_a_deterministic_no_op() {
+        let mut app = effect_app(
+            2,
+            &[("full", 100.0, 100.0), ("wreck", 100.0, 0.0)],
+            &[],
+            [
+                effect_grant(
+                    1,
+                    2,
+                    "heal-full",
+                    "full",
+                    crate::gm_effect::GmDirectEffectKind::Heal,
+                    5_000,
+                ),
+                effect_grant(
+                    2,
+                    2,
+                    "hit-wreck",
+                    "wreck",
+                    crate::gm_effect::GmDirectEffectKind::Damage,
+                    5_000,
+                ),
+            ],
+        );
+        app.update();
+
+        assert_eq!(
+            outcomes(&app),
+            vec![(GmActionOutcome::NoOp, None), (GmActionOutcome::NoOp, None)]
+        );
+        assert!(
+            armed_effects(&app).is_empty(),
+            "a No-op arms no work for the damage phase"
+        );
+        for result in effect_results(&app) {
+            let result = result.expect("a No-op still reports what it discarded");
+            assert_eq!(result.applied_milli_hp, 0);
+            assert_eq!(result.discarded_milli_hp, 5_000);
+        }
+    }
+
+    /// Every stale-or-undamageable target shape is a canonical refusal decided
+    /// against the LIVE world at the apply tick, never at request time — and
+    /// the two refusals say DIFFERENT things. Only an identity nothing carries
+    /// is `UnknownEntity`; a beacon a GM can see and select is refused as
+    /// undamageable whether its template authored an empty `[hull]` or, as
+    /// every shipped beacon and planet does, no `[hull]` section at all.
+    #[test]
+    fn a_vanished_or_hull_less_target_is_refused_at_the_apply_boundary() {
+        let mut app = effect_app(
+            4,
+            &[("npc-1", 100.0, 100.0)],
+            &["beacon"],
+            [
+                effect_grant(
+                    1,
+                    4,
+                    "gone",
+                    "npc-missing",
+                    crate::gm_effect::GmDirectEffectKind::Damage,
+                    1_000,
+                ),
+                effect_grant(
+                    2,
+                    4,
+                    "beacon",
+                    "beacon",
+                    crate::gm_effect::GmDirectEffectKind::Damage,
+                    1_000,
+                ),
+                effect_grant(
+                    3,
+                    4,
+                    "beacon-no-hull-section",
+                    "beacon-componentless",
+                    crate::gm_effect::GmDirectEffectKind::Damage,
+                    1_000,
+                ),
+            ],
+        );
+        app.update();
+
+        assert_eq!(
+            outcomes(&app),
+            vec![
+                (
+                    GmActionOutcome::Refused,
+                    Some(GmActionRefusalReason::UnknownEntity)
+                ),
+                (
+                    GmActionOutcome::Refused,
+                    Some(GmActionRefusalReason::TargetNotDamageable)
+                ),
+                (
+                    GmActionOutcome::Refused,
+                    Some(GmActionRefusalReason::TargetNotDamageable)
+                ),
+            ]
+        );
+        assert!(armed_effects(&app).is_empty());
+    }
+
+    /// Two GMs pressing the same target on the same boundary each get an
+    /// HONEST answer: the second is measured against what the first left, so
+    /// the durable results describe two different hits rather than the same one
+    /// twice, and only one of them can claim the kill.
+    #[test]
+    fn simultaneous_effects_on_one_target_resolve_against_each_other() {
+        let mut app = effect_app(
+            7,
+            &[("npc-1", 100.0, 100.0)],
+            &[],
+            [
+                effect_grant(
+                    1,
+                    7,
+                    "hit-a",
+                    "npc-1",
+                    crate::gm_effect::GmDirectEffectKind::Damage,
+                    60_000,
+                ),
+                effect_grant(
+                    2,
+                    7,
+                    "hit-b",
+                    "npc-1",
+                    crate::gm_effect::GmDirectEffectKind::Damage,
+                    60_000,
+                ),
+            ],
+        );
+        app.update();
+
+        assert_eq!(
+            armed_effects(&app)
+                .iter()
+                .map(|effect| (effect.order.sequence, effect.amount_milli_hp))
+                .collect::<Vec<_>>(),
+            vec![(1, 60_000), (2, 40_000)],
+            "the damage phase drains these in order and the second only has 40 left"
+        );
+        let results = effect_results(&app);
+        assert_eq!(results[0].expect("resolved").destroyed, false);
+        let second = results[1].expect("resolved");
+        assert!(second.destroyed, "the second press is the one that kills");
+        assert_eq!(second.discarded_milli_hp, 20_000);
+    }
+
+    /// The typed vocabulary: what a direct effect is, what it names, and what
+    /// it refuses without ever reaching the world.
+    #[test]
+    fn a_direct_effect_names_its_entity_and_refuses_an_empty_request() {
+        let action = GmAction::ApplyDirectEffect {
+            target: "npc-1".into(),
+            scope: crate::gm_effect::GmDirectEffectScope::Entity,
+            effect: crate::gm_effect::GmDirectEffectKind::Damage,
+            amount_milli_hp: 1,
+        };
+        assert_eq!(action.kind(), GmActionKind::DirectEffect);
+        assert!(GmActionKind::DirectEffect.carries_target());
+        assert_eq!(action.target_id(), Some("npc-1"));
+        assert_eq!(action.ship_key(), None);
+        assert!(action.requested_active());
+        assert_eq!(action.requested_pause(), None);
+        assert_eq!(action.validate(), Ok(()));
+
+        let empty = GmAction::ApplyDirectEffect {
+            target: "npc-1".into(),
+            scope: crate::gm_effect::GmDirectEffectScope::Entity,
+            effect: crate::gm_effect::GmDirectEffectKind::Damage,
+            amount_milli_hp: 0,
+        };
+        assert_eq!(empty.validate(), Err(GmActionRefusalReason::InvalidAction));
+
+        let nameless = GmAction::ApplyDirectEffect {
+            target: String::new(),
+            scope: crate::gm_effect::GmDirectEffectScope::Entity,
+            effect: crate::gm_effect::GmDirectEffectKind::Heal,
+            amount_milli_hp: 10,
+        };
+        assert_eq!(
+            nameless.validate(),
+            Err(GmActionRefusalReason::InvalidAction)
+        );
+    }
+
+    /// A replicated refusal must name the entity it refused, for the same
+    /// reason an event-control refusal must name its event.
+    #[test]
+    fn a_targetless_direct_effect_refusal_is_a_malformed_frame() {
+        let roster = crate::lockstep::FleetRoster::with_participants_and_gms(
+            Vec::new(),
+            vec![HostSlot(1), HostSlot(2)],
+            vec![
+                crate::lockstep::FleetGm {
+                    host: HostSlot(1),
+                    operator_id: "gm-1".into(),
+                },
+                crate::lockstep::FleetGm {
+                    host: HostSlot(2),
+                    operator_id: "gm-2".into(),
+                },
+            ],
+            HostSlot(1),
+            HostSlot(1),
+        )
+        .unwrap();
+        let refusal = GmActionRefusal {
+            sequenced_by: HostSlot(1),
+            requester: HostSlot(2),
+            operator_id: "gm-2".into(),
+            correlation: GmActionId::new("effect-refusal").unwrap(),
+            action_kind: GmActionKind::DirectEffect,
+            requested_active: true,
+            tick: 3,
+            reason: GmActionRefusalReason::UnknownEntity,
+            target: None,
+        };
+        assert_eq!(
+            validate_fleet_frame(&GmActionFrame::Refused(refusal.clone()), &roster),
+            Err(GmActionRefusalReason::InvalidAction)
+        );
+        let named = GmActionRefusal {
+            target: Some("npc-1".into()),
+            ..refusal
+        };
+        assert_eq!(
+            validate_fleet_frame(&GmActionFrame::Refused(named), &roster),
+            Ok(())
+        );
     }
 }

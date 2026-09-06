@@ -882,6 +882,15 @@ pub fn register_lockstep(app: &mut App) {
                 StateClass::Presentation,
                 "gm-action-state",
             )
+            // Directed world effects resolved at a canonical apply boundary and
+            // not yet landed by the damage phase (issue #1310). `Folded` for
+            // `PendingGmStationCommands`' reason: the grant that authorised it
+            // is already applied, so a peer that lost the arm across a snapshot
+            // would keep a hull nobody else kept.
+            .declare_state::<crate::gm_effect::PendingGmDirectEffects>(
+                StateClass::Folded,
+                "gm-action-state",
+            )
             .declare_state::<crate::gm_action::GmActionLog>(StateClass::Derived, "gm-action-state")
             .declare_state::<crate::gm_action::LocalGmActionRefusals>(
                 StateClass::Presentation,
@@ -925,6 +934,7 @@ pub fn register_lockstep(app: &mut App) {
         .init_resource::<crate::gm_action::GmActionJournal>()
         .init_resource::<crate::gm_puppet::StationPuppets>()
         .init_resource::<crate::gm_puppet::PendingGmStationCommands>()
+        .init_resource::<crate::gm_effect::PendingGmDirectEffects>()
         .init_resource::<crate::gm_puppet::StationPuppetActivity>()
         .init_resource::<crate::gm_action::GmActionLog>()
         .init_resource::<crate::gm_action::LocalGmActionRefusals>()

@@ -53,6 +53,7 @@ impl Plugin for ShipPlugin {
             .init_resource::<crate::gm_puppet::StationPuppets>()
             .init_resource::<crate::gm_puppet::PreviousStationPuppetTargets>()
             .init_resource::<crate::gm_puppet::PendingGmStationCommands>()
+            .init_resource::<crate::gm_effect::PendingGmDirectEffects>()
             .init_resource::<crate::gm_puppet::PendingGmStationFeedbackRoutes>()
             .init_resource::<crate::gm_puppet::StationPuppetActivity>()
             .configure_sets(
@@ -339,6 +340,14 @@ impl Plugin for ShipPlugin {
             FixedUpdate,
             crate::gm_puppet::admit_station_puppet_commands
                 .in_set(crate::gm_puppet::StationPuppetAdmissionSet),
+        )
+        // Directed GM damage/healing lands in the ordinary damage phase (issue
+        // #1310), beside beam, blaster, collision and region damage, so tiers,
+        // destruction, repair, balance events and world triggers all see it as
+        // exactly what it is: hull damage.
+        .add_systems(
+            FixedUpdate,
+            crate::gm_effect::apply_gm_direct_effects.in_set(crate::sim_sets::SimSet::Damage),
         )
         .add_systems(
             FixedUpdate,

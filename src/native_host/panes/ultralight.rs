@@ -34,6 +34,16 @@
 //! nothing else: a `PaneInput` back into the exact view call it stands for, a
 //! `PaneKind` into a `PaneSpec`, a `DirtyRect` into a `FrameRect`.
 //!
+//! Slice 4 took the last direct reach: no system outside [`drive_panes`] calls
+//! a view any more. Input, the two script slots and a resize are **queued** as
+//! [`PaneCommand`]s on [`PaneHost::send`] and applied at the top of
+//! [`drive_panes`], before the iteration that renders them — which, because
+//! every producing system is `.chain()`ed ahead of it, is the same frame and the
+//! same order as the direct calls were. Slice 5 moves that queue onto a channel
+//! and the loop onto its own thread; the only commands still applied where they
+//! are raised are `Create` and `Close`, whose answers this frame's Bevy work
+//! reads (a minted camera to despawn, a canvas and its pool to drop).
+//!
 //! One thing moved *into* the surface with them: whether the page is
 //! transparent, and so which copy it makes. The copy loop used to ask the pane
 //! window "are you the HUD?"; a surface now carries the answer it was minted
@@ -85,6 +95,7 @@
 //! cargo. [`stage_sdk`] does it, and `phoenix-host` calls it at startup; see
 //! `docs/delivery-checklist.md` for the packaging half.
 
+use std::collections::VecDeque;
 use std::sync::mpsc::{channel, Receiver, Sender};
 
 use bevy::asset::RenderAssetUsages;
@@ -110,8 +121,8 @@ use super::document::pane_drain_script;
 use super::frame_stats::{PaneFrameSample, PaneFrameStats};
 use super::mirror::VIEW_CRASH_COPY_FAILURES;
 use super::pane_thread::{
-    FrameRect, NoFrameSink, PaneCommand, PaneEvent, PaneFrameSink, PaneInput, PaneKeyCode,
-    PaneKind, PaneLoop, PaneRuntime, PaneSpecOwned, PaneThreadSample, PaneView,
+    FrameRect, LoopControl, NoFrameSink, PaneCommand, PaneEvent, PaneFrameSink, PaneInput,
+    PaneKeyCode, PaneKind, PaneLoop, PaneRuntime, PaneSpecOwned, PaneThreadSample, PaneView,
 };
 use super::placement::{home_for_pane, PaneHome, PaneTile};
 use super::recovery::{service_faults, PaneFault};
@@ -692,6 +703,22 @@ pub struct PaneHost {
     /// routing this machine's input, and turning a published frame into a
     /// texture upload.
     pane_loop: PaneLoop<UltralightHost>,
+    /// What the systems around the loop have asked it to do, not yet done
+    /// (issue #1404, slice 4).
+    ///
+    /// Every system that used to reach into a view — the pointer, touch, focus
+    /// and keyboard routes, the gamepad slot, a resize — now pushes a
+    /// [`PaneCommand`] here instead, and [`drive_panes`] drains it in FIFO order
+    /// at the top of the frame, before the iteration that would show the result.
+    /// All of those systems are `.chain()`ed ahead of `drive_panes`, so a
+    /// command raised this frame is applied this frame, in the order it was
+    /// raised: the queue changes *where* the call is made, not when it lands or
+    /// what order a pane's stream arrives in. That is the point of this slice —
+    /// an ordering bug shows up here, with no thread to blame for it.
+    ///
+    /// Slice 5 replaces the `VecDeque` with the sending half of a channel to the
+    /// pane thread. Nothing else about these call sites changes then.
+    commands: VecDeque<PaneCommand>,
     windows: Vec<PaneWindow>,
     /// Each **tiled** pane's slot on the primary window, so a recreated pane
     /// rebuilds where its predecessor sat (issue #1125).
@@ -760,21 +787,37 @@ impl PaneHost {
         self.focus.focused()
     }
 
+    /// Queue one instruction for the loop (issue #1404, slice 4).
+    ///
+    /// The only way anything outside [`drive_panes`] reaches a view. Cheap and
+    /// infallible by construction — a `VecDeque` this frame, a channel send on
+    /// the day the loop is on its own thread — so a caller never has to decide
+    /// what to do about a command it could not deliver.
+    fn send(&mut self, cmd: PaneCommand) {
+        self.commands.push_back(cmd);
+    }
+
     /// Give a pane's view keyboard focus and take it from whatever held it,
     /// keeping Ultralight's single-focused-view invariant in step with the model.
     fn focus_view(&mut self, previous: Option<PaneId>, next: Option<PaneId>) {
         if previous == next {
             return;
         }
-        // Unfocus BEFORE focus, and both through the input seam: on the pane
-        // thread these are two messages in one FIFO, and a focus that arrived
-        // before the unfocus it replaces would leave Ultralight's
-        // single-focused-view invariant pointing at nothing.
-        if let Some(view) = previous.and_then(|p| self.pane_loop.view_mut(p)) {
-            view.input(&PaneInput::Unfocus);
+        // Unfocus BEFORE focus, and both through the input seam: they are two
+        // messages in one FIFO, and a focus that arrived before the unfocus it
+        // replaces would leave Ultralight's single-focused-view invariant
+        // pointing at nothing.
+        if let Some(id) = previous {
+            self.send(PaneCommand::Input {
+                id,
+                input: PaneInput::Unfocus,
+            });
         }
-        if let Some(view) = next.and_then(|p| self.pane_loop.view_mut(p)) {
-            view.input(&PaneInput::Focus);
+        if let Some(id) = next {
+            self.send(PaneCommand::Input {
+                id,
+                input: PaneInput::Focus,
+            });
         }
     }
 
@@ -1375,14 +1418,21 @@ fn init_pane_host(world: &mut World) {
             .unwrap_or((1, 1));
         pane_loop.adopt(id, kind, view, size);
     }
+    // Queued rather than called (issue #1404, slice 4): the seat building no
+    // longer reaches into a view either, so the opening focus is the first
+    // command `drive_panes` drains — before the first iteration, and so before
+    // the first frame any of these surfaces produces.
+    let mut commands = VecDeque::new();
     if let Some(first) = focus.focused() {
-        if let Some(view) = pane_loop.view_mut(first) {
-            view.input(&PaneInput::Focus);
-        }
+        commands.push_back(PaneCommand::Input {
+            id: first,
+            input: PaneInput::Focus,
+        });
     }
     let (recycle_tx, recycle_rx) = channel();
     world.insert_non_send_resource(PaneHost {
         pane_loop,
+        commands,
         windows,
         tiles,
         primary_window: primary_entity,
@@ -1608,7 +1658,8 @@ fn read_pads(
 /// latency guarantee lives: the page's `requestAnimationFrame` poll of
 /// `navigator.getGamepads()` is serviced inside `update`, so a snapshot set this
 /// frame is read by the page this frame. Chained ahead of `drive_panes` so the
-/// slot is current before the iteration that reads it.
+/// [`PaneCommand::SetGamepadScript`] it queues (issue #1404, slice 4) is drained
+/// into the slot before the iteration that reads it.
 fn push_gamepads_to_panes(
     host: Option<NonSendMut<PaneHost>>,
     pads: Query<(Entity, &Gamepad)>,
@@ -1639,11 +1690,7 @@ fn push_gamepads_to_panes(
         let json = super::gamepad::gamepad_snapshot_json(&readings);
         Some(format!("window.__phoenixSetGamepads({json})"))
     };
-    host.pane_loop.apply(
-        PaneCommand::SetGamepadScript(script),
-        &mut NoFrameSink,
-        &mut Vec::new(),
-    );
+    host.send(PaneCommand::SetGamepadScript(script));
 }
 
 /// Follow each OS window's size: resize every surface's Ultralight view and its
@@ -1719,10 +1766,10 @@ fn resize_pane_surfaces(
         }
     }
     let mut changed = false;
-    // Split the borrow: the pane windows and the loop that owns their views are
-    // two fields of the host, and a resize touches both.
+    // Split the borrow: the pane windows and the command queue are two fields of
+    // the host, and a resize touches both.
     let host = &mut *host;
-    let pane_loop = &mut host.pane_loop;
+    let queue = &mut host.commands;
     for (i, pane) in host.windows.iter_mut().enumerate() {
         let Some((origin, size)) = targets[i] else {
             continue;
@@ -1756,16 +1803,19 @@ fn resize_pane_surfaces(
         // which frames are about which surface. All three (view, asset, node)
         // must agree, or a copy writes a buffer of the wrong length into the
         // image the next frame.
-        pane_loop.apply(
-            PaneCommand::Resize {
-                id: pane.id,
-                width: size.0,
-                height: size.1,
-                epoch: pane.epoch,
-            },
-            &mut NoFrameSink,
-            &mut Vec::new(),
-        );
+        //
+        // Queued, not applied (issue #1404, slice 4): the asset is minted and
+        // the epoch bumped here, and the view is moved when `drive_panes` drains
+        // this — which, because this system is chained ahead of it, is still
+        // before the iteration that would copy at the new size. This system runs
+        // before the input group, so the resize is also ahead of this frame's
+        // clicks in the queue, exactly as the direct call was ahead of them.
+        queue.push_back(PaneCommand::Resize {
+            id: pane.id,
+            width: size.0,
+            height: size.1,
+            epoch: pane.epoch,
+        });
         // The old length is worthless now; a returning buffer of that length is
         // dropped by the copy loop's drain.
         pane.staging = pane_staging_pool(size, pane.is_hud_overlay());
@@ -1864,18 +1914,22 @@ fn route_pointer_input(
     // a move in the same frame.
     if mouse.just_pressed(MouseButton::Left) {
         if let Some((_, _, _, Some(hit))) = cursor {
-            if let Some(view) = host.pane_loop.view_mut(hit.pane) {
-                // Move then down, in that order and into the same pane's stream:
-                // Ultralight decides what is under the pointer from the move.
-                view.input(&PaneInput::MouseMove {
+            // Move then down, in that order and into the same pane's stream:
+            // Ultralight decides what is under the pointer from the move.
+            host.send(PaneCommand::Input {
+                id: hit.pane,
+                input: PaneInput::MouseMove {
                     x: hit.local_x,
                     y: hit.local_y,
-                });
-                view.input(&PaneInput::MouseDown {
+                },
+            });
+            host.send(PaneCommand::Input {
+                id: hit.pane,
+                input: PaneInput::MouseDown {
                     x: hit.local_x,
                     y: hit.local_y,
-                });
-            }
+                },
+            });
             host.mouse_capture.press(hit.pane);
         }
     }
@@ -1891,19 +1945,21 @@ fn route_pointer_input(
             // the edge resolves correctly.
             if host.router.placement(captured).map(|p| p.window) == Some(key) {
                 if let Some((lx, ly)) = host.router.project_into_pane(captured, x, y) {
-                    if let Some(view) = host.pane_loop.view_mut(captured) {
-                        view.input(&PaneInput::MouseMove { x: lx, y: ly });
-                    }
+                    host.send(PaneCommand::Input {
+                        id: captured,
+                        input: PaneInput::MouseMove { x: lx, y: ly },
+                    });
                 }
             }
         }
     } else if let Some((_, _, _, Some(hit))) = cursor {
-        if let Some(view) = host.pane_loop.view_mut(hit.pane) {
-            view.input(&PaneInput::MouseMove {
+        host.send(PaneCommand::Input {
+            id: hit.pane,
+            input: PaneInput::MouseMove {
                 x: hit.local_x,
                 y: hit.local_y,
-            });
-        }
+            },
+        });
     }
 
     // Release: the captured pane gets the mouse_up, and the capture is released
@@ -1916,21 +1972,23 @@ fn route_pointer_input(
                 .filter(|(key, ..)| host.router.placement(captured).map(|p| p.window) == Some(*key))
                 .and_then(|(_, x, y, _)| host.router.project_into_pane(captured, x, y))
                 .unwrap_or((0, 0));
-            if let Some(view) = host.pane_loop.view_mut(captured) {
-                view.input(&PaneInput::MouseUp { x: lx, y: ly });
-            }
+            host.send(PaneCommand::Input {
+                id: captured,
+                input: PaneInput::MouseUp { x: lx, y: ly },
+            });
         }
     }
 
     // Scroll goes to the pane under the cursor.
     if scroll.delta != Vec2::ZERO {
         if let Some((_, _, _, Some(hit))) = cursor {
-            if let Some(view) = host.pane_loop.view_mut(hit.pane) {
-                view.input(&PaneInput::Scroll {
+            host.send(PaneCommand::Input {
+                id: hit.pane,
+                input: PaneInput::Scroll {
                     dx: scroll.delta.x as i32,
                     dy: scroll.delta.y as i32,
-                });
-            }
+                },
+            });
         }
     }
 }
@@ -2000,36 +2058,43 @@ fn route_touch_input(
                         if host.focus.focus(hit.pane) {
                             host.focus_view(previous, Some(hit.pane));
                         }
-                        if let Some(view) = host.pane_loop.view_mut(hit.pane) {
-                            // The focus above, then move, then down — one pane's
-                            // stream, in the order the page must see them.
-                            view.input(&PaneInput::MouseMove {
+                        // The focus above, then move, then down — one pane's
+                        // stream, in the order the page must see them, which is
+                        // the order they are queued in.
+                        host.send(PaneCommand::Input {
+                            id: hit.pane,
+                            input: PaneInput::MouseMove {
                                 x: hit.local_x,
                                 y: hit.local_y,
-                            });
-                            view.input(&PaneInput::MouseDown {
+                            },
+                        });
+                        host.send(PaneCommand::Input {
+                            id: hit.pane,
+                            input: PaneInput::MouseDown {
                                 x: hit.local_x,
                                 y: hit.local_y,
-                            });
-                        }
+                            },
+                        });
                     }
                 }
             }
             TouchPhase::Moved => {
                 if let Some(pane) = host.contacts.pane_for(touch.id) {
                     if let Some((lx, ly)) = host.router.project_into_pane(pane, phys.0, phys.1) {
-                        if let Some(view) = host.pane_loop.view_mut(pane) {
-                            view.input(&PaneInput::MouseMove { x: lx, y: ly });
-                        }
+                        host.send(PaneCommand::Input {
+                            id: pane,
+                            input: PaneInput::MouseMove { x: lx, y: ly },
+                        });
                     }
                 }
             }
             TouchPhase::Ended | TouchPhase::Canceled => {
                 if let Some(pane) = host.contacts.end(touch.id) {
                     if let Some((lx, ly)) = host.router.project_into_pane(pane, phys.0, phys.1) {
-                        if let Some(view) = host.pane_loop.view_mut(pane) {
-                            view.input(&PaneInput::MouseUp { x: lx, y: ly });
-                        }
+                        host.send(PaneCommand::Input {
+                            id: pane,
+                            input: PaneInput::MouseUp { x: lx, y: ly },
+                        });
                     }
                 }
             }
@@ -2082,9 +2147,11 @@ fn forward_keyboard_text(
     mut keys: MessageReader<KeyboardInput>,
 ) {
     // `NonSendMut` rather than a shared borrow (issue #1404): a key now travels
-    // as a `PaneInput` through the view seam, and delivering one takes `&mut`.
-    // Nothing about the layout or the focus is changed here — the focused pane
-    // is read once, before the batch.
+    // as a `PaneInput`, and queueing one takes `&mut`. Nothing about the layout
+    // or the focus is changed here — the focused pane is read once, before the
+    // batch. This system is chained LAST of the input group, so a click's focus
+    // change is already ahead of these keys in the queue, which is the order
+    // Ultralight needs: it drops input into an unfocused view.
     let Some(mut host) = host else {
         return;
     };
@@ -2097,33 +2164,31 @@ fn forward_keyboard_text(
         let Some(pane) = focused else {
             continue;
         };
-        let Some(view) = host.pane_loop.view_mut(pane) else {
-            continue;
-        };
         // `key_char` is what actually puts a character into a field; the
         // editing keys below are raw key-downs. Both shapes are the protocol's,
         // and the adapter turns them back into the same view calls this made
         // directly before (issue #1404).
+        let mut send = |input: PaneInput| host.send(PaneCommand::Input { id: pane, input });
         match &key.logical_key {
-            Key::Character(text) => view.input(&PaneInput::KeyChar(text.to_string())),
-            Key::Space => view.input(&PaneInput::KeyChar(" ".to_string())),
-            Key::Backspace => view.input(&PaneInput::Key(PaneKeyCode::Back)),
-            Key::Enter => view.input(&PaneInput::Key(PaneKeyCode::Return)),
+            Key::Character(text) => send(PaneInput::KeyChar(text.to_string())),
+            Key::Space => send(PaneInput::KeyChar(" ".to_string())),
+            Key::Backspace => send(PaneInput::Key(PaneKeyCode::Back)),
+            Key::Enter => send(PaneInput::Key(PaneKeyCode::Return)),
             // Caret movement and forward-delete: without these the caret cannot
             // move within a field and forward-delete is unavailable, so a comms
             // reply or a waypoint name can only be typed and back-spaced. Each
             // maps cleanly to an Ultralight virtual key and is forwarded as a raw
             // key-down like the arms above (issue #1124).
-            Key::ArrowLeft => view.input(&PaneInput::Key(PaneKeyCode::Left)),
-            Key::ArrowRight => view.input(&PaneInput::Key(PaneKeyCode::Right)),
-            Key::ArrowUp => view.input(&PaneInput::Key(PaneKeyCode::Up)),
-            Key::ArrowDown => view.input(&PaneInput::Key(PaneKeyCode::Down)),
-            Key::Home => view.input(&PaneInput::Key(PaneKeyCode::Home)),
-            Key::End => view.input(&PaneInput::Key(PaneKeyCode::End)),
-            Key::Delete => view.input(&PaneInput::Key(PaneKeyCode::Delete)),
+            Key::ArrowLeft => send(PaneInput::Key(PaneKeyCode::Left)),
+            Key::ArrowRight => send(PaneInput::Key(PaneKeyCode::Right)),
+            Key::ArrowUp => send(PaneInput::Key(PaneKeyCode::Up)),
+            Key::ArrowDown => send(PaneInput::Key(PaneKeyCode::Down)),
+            Key::Home => send(PaneInput::Key(PaneKeyCode::Home)),
+            Key::End => send(PaneInput::Key(PaneKeyCode::End)),
+            Key::Delete => send(PaneInput::Key(PaneKeyCode::Delete)),
             // Ctrl+Tab is inter-pane focus; a bare Tab is the page's own field
             // traversal.
-            Key::Tab if !ctrl => view.input(&PaneInput::Key(PaneKeyCode::Tab)),
+            Key::Tab if !ctrl => send(PaneInput::Key(PaneKeyCode::Tab)),
             _ => {}
         }
     }
@@ -2290,6 +2355,17 @@ impl Drop for ImageUploadSink<'_> {
 /// issue #1404's slice 3 is the Bevy half: retire and open panes, set the
 /// iteration's slots, hand [`PaneLoop::iterate`] a sink over the staging pools,
 /// and turn the events it produced into operator log lines, faults and stats.
+///
+/// Since slice 4 it is also the **only** place a view is reached: everything the
+/// chained systems ahead of it asked for is queued on [`PaneHost::commands`] and
+/// drained here, in FIFO order, before the iteration that renders it. Two
+/// commands are still applied where they are raised rather than queued —
+/// [`PaneCommand::Create`] in [`open_pending_views`] and [`PaneCommand::Close`]
+/// in [`retire_closed_panes`] — because this frame's Bevy work consumes their
+/// answers: a create that failed has a minted camera to despawn and a fault to
+/// raise, and a close has a canvas and a staging pool going with it. Slice 5,
+/// which reads a `Created` event a frame later, is where those two join the
+/// queue.
 fn drive_panes(
     host: Option<NonSendMut<PaneHost>>,
     bus: Option<Res<PaneBusResource>>,
@@ -2321,6 +2397,45 @@ fn drive_panes(
     let Some(mut host) = host else {
         return;
     };
+    let mut events: Vec<PaneEvent> = Vec::new();
+    // The HUD overlay (issue #422, native port) is driven by the host's
+    // `HudStateChanged`, cached in `ViewscreenHudLatest` so a state that arrived
+    // before the page loaded still reaches it. Held as a latest-wins SLOT: the
+    // loop pushes whatever it holds into the overlay each iteration the document
+    // is ready, which is exactly what this loop did inline before. The escaping
+    // stays here, because `serde_json` belongs to the codec and the adapter, not
+    // to the SDK-free policy.
+    //
+    // Queued like everything else (issue #1404, slice 4), and queued *before*
+    // the drain below so this frame's readout is in the slot for this frame's
+    // iteration.
+    host.send(PaneCommand::SetHudScript(hud_latest.json.as_ref().map(
+        |json| {
+            let arg = serde_json::to_string(json).unwrap_or_else(|_| "\"{}\"".into());
+            format!("window.__updateHud({arg})")
+        },
+    )));
+    // Everything the chained systems ahead of this one asked for, applied in the
+    // order they asked for it and before anything is pumped, rendered or copied
+    // (issue #1404, slice 4). That is where the direct calls used to happen, so
+    // this frame's clicks still land in this frame's render and the pad snapshot
+    // still precedes the `update` the page reads it in.
+    //
+    // `NoFrameSink` is safe for every command that reaches this queue: none of
+    // them can produce a frame, and `Close` — the one command whose sink call
+    // matters — is applied by `retire_closed_panes` alongside the pool it drops.
+    // Nothing sends `Shutdown` until there is a thread to stop.
+    {
+        let host = &mut *host;
+        while let Some(cmd) = host.commands.pop_front() {
+            let control = host.pane_loop.apply(cmd, &mut NoFrameSink, &mut events);
+            debug_assert_eq!(
+                control,
+                LoopControl::Continue,
+                "nothing queues a shutdown while the loop runs on this thread"
+            );
+        }
+    }
     // The bus is OPTIONAL because the host-lobby surface (issue #1325) is not a
     // participant: `phoenix-host --client-dir dist --world <w>` with no --pane
     // has a pane host, one window and nothing on the pane bus at all.
@@ -2355,7 +2470,6 @@ fn drive_panes(
     // own their textures are two fields of the host, and one iteration touches
     // both — the loop drives, the sink publishes.
     let host = &mut *host;
-    let mut events: Vec<PaneEvent> = Vec::new();
     host.pane_loop.set_measure(clock);
     // The two message routes, re-read every frame rather than captured once: a
     // host with no `--pane` has no bus at all (the lobby surface is not a
@@ -2363,22 +2477,6 @@ fn drive_panes(
     host.pane_loop.set_bus(bus.as_ref().map(|b| b.0.clone()));
     host.pane_loop
         .set_lobby(lobby.as_ref().map(|l| l.0.clone()));
-    // The HUD overlay (issue #422, native port) is driven by the host's
-    // `HudStateChanged`, cached in `ViewscreenHudLatest` so a state that arrived
-    // before the page loaded still reaches it. Held as a latest-wins SLOT: the
-    // loop pushes whatever it holds into the overlay each iteration the document
-    // is ready, which is exactly what this loop did inline before. The escaping
-    // stays here, because `serde_json` belongs to the codec and the adapter, not
-    // to the SDK-free policy.
-    host.pane_loop.apply(
-        PaneCommand::SetHudScript(hud_latest.json.as_ref().map(|json| {
-            let arg = serde_json::to_string(json).unwrap_or_else(|_| "\"{}\"".into());
-            format!("window.__updateHud({arg})")
-        })),
-        &mut NoFrameSink,
-        &mut events,
-    );
-
     // Buffers the render world (or a discarded frame) finished with since the
     // last pass go back to their own pane's pool first, so this frame's copies
     // have something to take. A buffer whose length no longer matches its pane —

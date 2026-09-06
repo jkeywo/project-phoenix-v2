@@ -21,9 +21,14 @@
 //! with an SDK and a GPU. That is the same split the rest of
 //! [`super`] is built on.
 //!
-//! In *this* slice nothing is sent anywhere: [`super::ultralight`] implements
-//! the traits and calls through them, so the calls, and their order, are exactly
-//! what they were.
+//! There is still no thread. Since slice 4 the commands are **queued** by the
+//! Bevy systems that raise them — a `VecDeque` on `PaneHost` — and drained
+//! through [`PaneLoop::apply`] at the top of `drive_panes`, before the
+//! iteration that would show the result. Those systems are chained ahead of it,
+//! so a command raised in a frame is applied in that frame, in the order it was
+//! raised: the queue changes where the call is made, not when it lands. Slice 5
+//! moves the queue onto a channel and the loop onto its own thread, and only
+//! then does a command cost a period of latency.
 //!
 //! # Latest-wins slots, not queued pushes
 //!
@@ -717,15 +722,16 @@ impl<R: PaneRuntime> PaneLoop<R> {
         self.panes.iter().any(|p| p.id == id)
     }
 
-    /// One pane's view, for a caller that still delivers input by reaching for
-    /// it rather than by sending [`PaneCommand::Input`].
+    /// One pane's view — **for this crate's tests only** since slice 4.
     ///
-    /// Slice 4 turns those call sites into commands. Until it does, this is the
-    /// same call in the same frame in the same order — which is the point: the
-    /// intra-frame order of a `MouseMove` before its `MouseDown`, and of a
-    /// `Focus` before the keys aimed at the pane it just gave focus to, is not
-    /// something a refactor may quietly reorder.
-    pub fn view_mut(&mut self, id: PaneId) -> Option<&mut R::View> {
+    /// Every shipping caller now sends [`PaneCommand::Input`] instead, so no
+    /// code outside [`PaneLoop`] reaches a view at all; what is left is the
+    /// tests below, which arrange a double's next repaint and read back what it
+    /// was given. It stays `pub(crate)` rather than being deleted for that
+    /// reason, and cannot widen again: on the day the loop is on its own thread
+    /// there is no `&mut` to hand out.
+    #[cfg(test)]
+    pub(crate) fn view_mut(&mut self, id: PaneId) -> Option<&mut R::View> {
         self.panes
             .iter_mut()
             .find(|p| p.id == id)
@@ -1040,6 +1046,20 @@ pub(crate) mod doubles {
     use super::super::surface::RecordingSurface;
     use super::*;
 
+    /// How one input names itself in the shared phase log.
+    fn input_kind(input: &PaneInput) -> &'static str {
+        match input {
+            PaneInput::MouseMove { .. } => "mousemove",
+            PaneInput::MouseDown { .. } => "mousedown",
+            PaneInput::MouseUp { .. } => "mouseup",
+            PaneInput::Scroll { .. } => "scroll",
+            PaneInput::Key(_) => "key",
+            PaneInput::KeyChar(_) => "keychar",
+            PaneInput::Focus => "focus",
+            PaneInput::Unfocus => "unfocus",
+        }
+    }
+
     /// A [`PaneView`] that records instead of rendering.
     #[derive(Debug, Default)]
     pub(crate) struct RecordingView {
@@ -1142,10 +1162,19 @@ pub(crate) mod doubles {
         }
 
         fn resize(&mut self, width: u32, height: u32) {
+            self.trace("resize");
             self.resizes.push((width, height));
         }
 
         fn input(&mut self, input: &PaneInput) {
+            // `input:<pane>:<kind>` rather than the usual `<what>:<pane>`: a
+            // queue's claim is about the order of one pane's stream, so which
+            // input it was has to be in the line.
+            if let Some(trace) = &self.trace {
+                trace
+                    .borrow_mut()
+                    .push(format!("input:{}:{}", self.label, input_kind(input)));
+            }
             self.inputs.push(input.clone());
         }
 
@@ -2126,6 +2155,164 @@ mod loop_tests {
         assert!(out
             .iter()
             .any(|e| matches!(e, PaneEvent::Refused { id, .. } if *id == console)));
+    }
+
+    /// Drain a queue of commands the way `drive_panes` does: FIFO, through
+    /// [`PaneLoop::apply`], before the iteration.
+    fn drain(
+        driver: &mut PaneLoop<RecordingRuntime>,
+        queue: &mut std::collections::VecDeque<PaneCommand>,
+        out: &mut Vec<PaneEvent>,
+    ) {
+        while let Some(cmd) = queue.pop_front() {
+            assert_eq!(
+                driver.apply(cmd, &mut NoFrameSink, out),
+                LoopControl::Continue,
+                "nothing a Bevy system queues stops the loop"
+            );
+        }
+    }
+
+    #[test]
+    fn a_drained_queue_delivers_its_inputs_in_order_and_before_the_iteration() {
+        // Slice 4's whole claim: a queue between the system and the view changes
+        // WHERE the call is made, not when it lands nor in what order. The
+        // systems that fill it are chained ahead of `drive_panes`, so every
+        // command raised in a frame is applied in that frame, before the
+        // `update` and the render that show it.
+        let (runtime, trace) = RecordingRuntime::traced();
+        let mut driver = PaneLoop::new(runtime);
+        let mut out = Vec::new();
+        driver.apply(
+            create(CONSOLE, PaneKind::Console),
+            &mut NoFrameSink,
+            &mut out,
+        );
+        driver.view_mut(CONSOLE).unwrap().paint = Some(FrameRect::full(WIDTH, HEIGHT));
+
+        // The order a click-and-type raises them in: focus, then the move that
+        // decides what is under the pointer, then the press, then the keys.
+        let sent = [
+            PaneInput::Focus,
+            PaneInput::MouseMove { x: 1, y: 1 },
+            PaneInput::MouseDown { x: 1, y: 1 },
+            PaneInput::KeyChar("a".to_string()),
+        ];
+        let mut queue: std::collections::VecDeque<PaneCommand> = sent
+            .iter()
+            .cloned()
+            .map(|input| PaneCommand::Input { id: CONSOLE, input })
+            .collect();
+
+        trace.borrow_mut().clear();
+        out.clear();
+        let mut sink = RecordingSink::new();
+        drain(&mut driver, &mut queue, &mut out);
+        driver.iterate(&mut sink, &mut out);
+
+        assert_eq!(
+            driver.view_mut(CONSOLE).unwrap().inputs,
+            sent.to_vec(),
+            "the queue is a FIFO, and one pane's stream is its order"
+        );
+        assert_eq!(
+            *trace.borrow(),
+            vec![
+                format!("input:{CONSOLE}:focus"),
+                format!("input:{CONSOLE}:mousemove"),
+                format!("input:{CONSOLE}:mousedown"),
+                format!("input:{CONSOLE}:keychar"),
+                "update".to_string(),
+                "render".to_string(),
+                format!("copy:{CONSOLE}"),
+            ],
+            "every input landed before the update and the render that show it"
+        );
+        assert_eq!(sink.published.len(), 1, "and this frame drew");
+    }
+
+    #[test]
+    fn a_queued_gamepad_snapshot_is_in_the_slot_before_the_update_that_reads_it() {
+        // The pad slot is filled by a system chained ahead of `drive_panes` and
+        // drained with everything else, so it is in place for the pre-update
+        // push — the phase whose whole reason is that a console polls the pads
+        // inside `Renderer::update`.
+        let (runtime, trace) = RecordingRuntime::traced();
+        let mut driver = PaneLoop::new(runtime);
+        let mut out = Vec::new();
+        driver.apply(
+            create(CONSOLE, PaneKind::Console),
+            &mut NoFrameSink,
+            &mut out,
+        );
+        driver.view_mut(CONSOLE).unwrap().paint = Some(FrameRect::full(WIDTH, HEIGHT));
+        let mut sink = RecordingSink::new();
+        // One iteration to settle the load edge: nothing is pushed into a
+        // document that has not finished loading.
+        driver.iterate(&mut sink, &mut out);
+
+        let mut queue = std::collections::VecDeque::from([PaneCommand::SetGamepadScript(Some(
+            "window.__phoenixSetGamepads([])".to_string(),
+        ))]);
+        trace.borrow_mut().clear();
+        out.clear();
+        drain(&mut driver, &mut queue, &mut out);
+        driver.iterate(&mut sink, &mut out);
+
+        assert_eq!(
+            *trace.borrow(),
+            vec![
+                format!("push:{CONSOLE}"),
+                "update".to_string(),
+                "render".to_string(),
+                format!("copy:{CONSOLE}"),
+            ],
+            "queued this frame, pushed this frame, and ahead of the update"
+        );
+    }
+
+    #[test]
+    fn a_resize_queued_after_an_input_is_applied_after_it() {
+        // The two are raised by different systems, and the resize's system runs
+        // first — but what decides which the view sees first is the queue, not
+        // which system pushed. A resize that overtook an input would deliver a
+        // click at coordinates the view had already moved past.
+        let (runtime, trace) = RecordingRuntime::traced();
+        let mut driver = PaneLoop::new(runtime);
+        let mut out = Vec::new();
+        driver.apply(
+            create(CONSOLE, PaneKind::Console),
+            &mut NoFrameSink,
+            &mut out,
+        );
+
+        let mut queue = std::collections::VecDeque::from([
+            PaneCommand::Input {
+                id: CONSOLE,
+                input: PaneInput::MouseMove { x: 2, y: 2 },
+            },
+            PaneCommand::Resize {
+                id: CONSOLE,
+                width: WIDTH * 2,
+                height: HEIGHT,
+                epoch: 3,
+            },
+        ]);
+        trace.borrow_mut().clear();
+        out.clear();
+        drain(&mut driver, &mut queue, &mut out);
+
+        assert_eq!(
+            *trace.borrow(),
+            vec![
+                format!("input:{CONSOLE}:mousemove"),
+                format!("resize:{CONSOLE}"),
+            ]
+        );
+        assert_eq!(
+            driver.view_mut(CONSOLE).unwrap().resizes,
+            vec![(WIDTH * 2, HEIGHT)]
+        );
     }
 
     #[test]

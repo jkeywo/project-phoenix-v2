@@ -785,18 +785,16 @@ describe('buildWeaponsConsoleState', () => {
   });
 });
 
-describe('buildCommandConsoleState (issue #1107)', () => {
-  const withBlackboard = (bb) => ({ blackboards: { command: bb } });
+describe('buildCommandConsoleState (issues #1107, #1381)', () => {
+  const withBlackboard = (bb, redAlert = false) => ({ blackboards: { command: bb }, redAlert });
 
   it('returns valid JSON with safe defaults when no blackboard has arrived', () => {
     const s = parse(buildCommandConsoleState(EMPTY));
-    expect(s.command_system_id).toBeNull();
-    expect(s.directed_station).toBe('');
-    expect(s.directed_station_ai).toBe(false);
-    expect(s.stances).toEqual([]);
+    expect(s.red_alert).toBe(false);
+    expect(s.stations).toEqual([]);
   });
 
-  it('projects the directed station, its AI state and the stance list', () => {
+  it('renders one card for the singular command_target, listing standard stances only (criterion 1, 2)', () => {
     const bb = {
       command_system_id: 'command',
       directed_station: 'tactical',
@@ -806,25 +804,108 @@ describe('buildCommandConsoleState (issue #1107)', () => {
       selected_stance: 'tactical-normal',
       stances: [
         { id: 'tactical-weapons-free', label: 'lbl.wf', kind: 'standard', high_alert: true },
+        { id: 'tactical-hold', label: 'lbl.hold', kind: 'standard', high_alert: false },
         { id: 'tactical-normal', label: 'lbl.n', kind: 'normal_alert_neutral', high_alert: false },
         { id: 'tactical-high', label: 'lbl.h', kind: 'high_alert_neutral', high_alert: true },
       ],
     };
     const s = parse(buildCommandConsoleState(withBlackboard(bb)));
-    expect(s.directed_station).toBe('tactical');
-    expect(s.directed_station_name).toBe('Tactical');
-    expect(s.directed_station_ai).toBe(true);
-    expect(s.selected_stance).toBe('tactical-normal');
-    expect(s.stances).toHaveLength(3);
-    expect(s.stances[0].kind).toBe('standard');
+    expect(s.stations).toHaveLength(1);
+    const card = s.stations[0];
+    expect(card.directed_station).toBe('tactical');
+    expect(card.directed_station_name).toBe('Tactical');
+    expect(card.directed_station_ai).toBe(true);
+    expect(card.selected_stance).toBe('tactical-normal');
+    // The two neutral entries are folded into `default_stance` instead of
+    // appearing as ordinary buttons.
+    expect(card.stances).toHaveLength(2);
+    expect(card.stances.every((st) => st.kind === 'standard')).toBe(true);
   });
 
-  it('carries the human-held (off the board) state through', () => {
+  it('resolves the Default row to the normal-alert neutral stance off red alert (criterion 2)', () => {
+    const bb = {
+      directed_station: 'tactical', directed_station_ai: true, selected_stance: 'tactical-weapons-free',
+      stances: [
+        { id: 'tactical-weapons-free', label: 'lbl.wf', kind: 'standard', high_alert: true },
+        { id: 'tactical-normal', label: 'lbl.n', kind: 'normal_alert_neutral', high_alert: false },
+        { id: 'tactical-high', label: 'lbl.h', kind: 'high_alert_neutral', high_alert: true },
+      ],
+    };
+    const s = parse(buildCommandConsoleState(withBlackboard(bb, false)));
+    expect(s.red_alert).toBe(false);
+    expect(s.stations[0].default_stance.id).toBe('tactical-normal');
+    // The stance in force is a standard one, not either neutral kind.
+    expect(s.stations[0].default_selected).toBe(false);
+  });
+
+  it('resolves the Default row to the high-alert neutral stance at red alert, from state.redAlert alone (criterion 2)', () => {
+    const bb = {
+      directed_station: 'tactical', directed_station_ai: true, selected_stance: 'tactical-high',
+      stances: [
+        { id: 'tactical-weapons-free', label: 'lbl.wf', kind: 'standard', high_alert: true },
+        { id: 'tactical-normal', label: 'lbl.n', kind: 'normal_alert_neutral', high_alert: false },
+        { id: 'tactical-high', label: 'lbl.h', kind: 'high_alert_neutral', high_alert: true },
+      ],
+    };
+    const s = parse(buildCommandConsoleState(withBlackboard(bb, true)));
+    expect(s.red_alert).toBe(true);
+    expect(s.stations[0].default_stance.id).toBe('tactical-high');
+    expect(s.stations[0].default_selected).toBe(true);
+  });
+
+  it('marks the Default row selected for EITHER neutral kind, so it keeps tracking across an alert change with no new command', () => {
+    // Client-side red_alert has already flipped; the SERVER's own
+    // reconciliation (`command_stance::selection_after_alert_change`) is what
+    // eventually moves `selected_stance` to the new neutral — this only pins
+    // that the row still reads as "in force" through that gap rather than as
+    // unselected.
+    const bb = {
+      directed_station: 'tactical', directed_station_ai: true, selected_stance: 'tactical-normal',
+      stances: [
+        { id: 'tactical-normal', label: 'lbl.n', kind: 'normal_alert_neutral', high_alert: false },
+        { id: 'tactical-high', label: 'lbl.h', kind: 'high_alert_neutral', high_alert: true },
+      ],
+    };
+    const s = parse(buildCommandConsoleState(withBlackboard(bb, true)));
+    expect(s.stations[0].default_selected).toBe(true);
+  });
+
+  it('carries the human-held (off the board) state through, with no neutral catalogue to resolve a Default from', () => {
     const s = parse(buildCommandConsoleState(withBlackboard({
       directed_station: 'tactical', directed_station_name: 'Tactical',
       directed_station_ai: false, selected_stance: '', stances: [],
     })));
-    expect(s.directed_station_ai).toBe(false);
+    expect(s.stations[0].directed_station_ai).toBe(false);
+    expect(s.stations[0].default_stance).toBeNull();
+  });
+
+  // command_auto — per-card, keyed by that card's own system id (issue #1381
+  // fix round): the live control-source correction, same pattern as
+  // repair_auto above, applied per-card instead of a dead top-level overlay.
+  it('command_auto is true when controlSources for this card\'s system id is Ai', () => {
+    const s = parse(buildCommandConsoleState({
+      blackboards: { command: { directed_station: 'tactical', directed_station_ai: true, selected_stance: '', stances: [] } },
+      controlSources: { command: 'Ai' },
+    }));
+    expect(s.stations[0].command_auto).toBe(true);
+  });
+
+  it('command_auto is false when controlSources for this card\'s system id is Human, even when the raw blackboard says command_auto: true (the live correction wins)', () => {
+    const s = parse(buildCommandConsoleState({
+      blackboards: { command: {
+        directed_station: 'tactical', directed_station_ai: true, selected_stance: '', stances: [],
+        command_auto: true,
+      } },
+      controlSources: { command: 'Human' },
+    }));
+    expect(s.stations[0].command_auto).toBe(false);
+  });
+
+  it('command_auto is false when controlSources is absent', () => {
+    const s = parse(buildCommandConsoleState(withBlackboard({
+      directed_station: 'tactical', directed_station_ai: true, selected_stance: '', stances: [],
+    })));
+    expect(s.stations[0].command_auto).toBe(false);
   });
 });
 

@@ -846,14 +846,27 @@ export function buildCaptainConsoleState(state, systemIds = []) {
 }
 
 /**
- * Payload contract for the Command console iframe (issue #1107). Rendered by
- * gui/command-console.html.
+ * Payload contract for the Command console iframe (issues #1107, #1381).
+ * Rendered by gui/command-console.html.
  *
+ * One card per directable station: `stations` holds one entry per Command
+ * blackboard this Station owns — exactly one today, since exactly one
+ * Station on a shipped hull ever authors `command_target` — so a hull
+ * authoring more than one Command-family instance renders one card each with
+ * no further change. `red_alert` is the client's own alert flag
+ * (`state.redAlert`, never the Captain blackboard and never a new wire
+ * field), read once here so every card resolves the SAME Default stance.
+ *
+ * @typedef {{ id: string, label: string, kind: string,
+ *             high_alert: boolean }} CommandStanceOption
  * @typedef {{ command_system_id: string, directed_station: string,
  *             directed_station_name: string, directed_station_ai: boolean,
  *             command_auto: boolean, selected_stance: string,
- *             stances: Array<{id: string, label: string, kind: string,
- *                             high_alert: boolean}> }} CommandConsolePayload
+ *             stances: CommandStanceOption[],
+ *             default_stance: CommandStanceOption|null,
+ *             default_selected: boolean }} CommandStationCard
+ * @typedef {{ red_alert: boolean,
+ *             stations: CommandStationCard[] }} CommandConsolePayload
  */
 
 /**
@@ -917,29 +930,58 @@ function authoredSystemIdOfKind(state, kind, preferredIds = []) {
 }
 
 /**
- * Command console. Returns JSON of {@link CommandConsolePayload}.
+ * Command console (issue #1381). Returns JSON of {@link CommandConsolePayload}.
  *
- * Reads the `Command` blackboard variant under the authored instance id. It
- * carries the directed proving Station, whether it is currently AI-controlled
- * (and therefore directable), the selectable stances and the stance in force.
- * The persistent non-colour automation cue the console renders is derived from
- * `directed_station_ai` / `command_auto` — never from a colour change.
+ * One card per `Command` blackboard this Station owns, walked through the
+ * SAME `blackboardsOfKind` every other multi-instance builder in this file
+ * uses (see `buildHelmConsoleState`'s `HelmEngine` read) — never a hardcoded
+ * single card, so the singular `command_target` every shipped hull authors
+ * today renders through the general N-card path rather than a special case
+ * of it. Each card carries the directed proving Station, whether it is
+ * currently AI-controlled (and therefore directable), the STANDARD stances
+ * only (issue #1381 criterion 2 — the two alert-neutral fallbacks are folded
+ * into `default_stance` instead of appearing as ordinary buttons) and the
+ * stance in force.
  *
- * @param {{ blackboards?, blackboardKinds? }} state
+ * The synthesized Default row resolves to whichever neutral stance matches
+ * `red_alert` — the client's own alert flag, never the Captain blackboard and
+ * never a new wire field — and `src/ship/command_stance.rs
+ * ::selection_after_alert_change` already keeps the server-side selection
+ * tracking it across an alert change with no command from this console.
+ * `default_selected` marks the row whenever the stance in force is EITHER
+ * neutral kind (not only the one `red_alert` currently picks), so the row
+ * stays visibly current through that reconciliation.
+ *
+ * @param {{ blackboards?, blackboardKinds?, redAlert? }} state
  * @param {string[]} [systemIds] authored Command-family ids for this Station
  */
 export function buildCommandConsoleState(state, systemIds = []) {
-  const entry = blackboardOfKind(state, 'Command', systemIds);
-  const bb = entry?.data || null;
-  return JSON.stringify({
-    command_system_id:      bb?.command_system_id     ?? entry?.systemId ?? systemIds[0] ?? null,
-    directed_station:       bb?.directed_station       ?? '',
-    directed_station_name:  bb?.directed_station_name  ?? '',
-    directed_station_ai:    bb?.directed_station_ai    ?? false,
-    command_auto:           bb?.command_auto           ?? false,
-    selected_stance:        bb?.selected_stance        ?? '',
-    stances:                bb?.stances                ?? [],
+  const redAlert = !!state.redAlert;
+  const neutralKind = redAlert ? 'high_alert_neutral' : 'normal_alert_neutral';
+  const entries = blackboardsOfKind(state, 'Command', systemIds);
+  const stations = entries.map(entry => {
+    const bb = entry.data || {};
+    const allStances = bb.stances ?? [];
+    const defaultStance = allStances.find(st => st.kind === neutralKind) ?? null;
+    const selectedKind = allStances.find(st => st.id === bb.selected_stance)?.kind ?? null;
+    return {
+      command_system_id:     bb.command_system_id     ?? entry.systemId,
+      directed_station:      bb.directed_station       ?? '',
+      directed_station_name: bb.directed_station_name  ?? '',
+      directed_station_ai:   bb.directed_station_ai    ?? false,
+      // Command's own automation cue is per-card (issue #1381): the live
+      // control-source truth for THIS card's system id, the same pattern
+      // `repair_auto` uses (see `buildRepairConsoleState` above) — never the
+      // raw blackboard field, which can lag a control-source change that
+      // landed on a live projection this tick.
+      command_auto:          state.controlSources?.[entry.systemId] === 'Ai',
+      selected_stance:       bb.selected_stance         ?? '',
+      stances:               allStances.filter(st => st.kind === 'standard'),
+      default_stance:        defaultStance,
+      default_selected:      selectedKind === 'normal_alert_neutral' || selectedKind === 'high_alert_neutral',
+    };
   });
+  return JSON.stringify({ red_alert: redAlert, stations });
 }
 
 /**
@@ -2213,7 +2255,11 @@ const FAMILY_BUILDERS = Object.freeze({
   shields: Object.freeze({ build: buildShieldsConsoleState, autoField: 'shields_auto', autoScope: 'first' }),
   power: Object.freeze({ build: buildPowerConsoleState, autoField: 'power_auto', autoScope: 'first' }),
   repair: Object.freeze({ build: buildRepairConsoleState, autoField: 'repair_auto', autoScope: 'first' }),
-  command: Object.freeze({ build: buildCommandConsoleState, autoField: 'command_auto' }),
+  // No `autoField` here: the per-card `command_auto` above (keyed by each
+  // card's own `command_system_id`) is already authoritative, so the generic
+  // top-level overlay in `buildFamilyConsoleView` would only ever write a
+  // dead `view.command_auto` key nothing reads (issue #1381 fix round).
+  command: Object.freeze({ build: buildCommandConsoleState }),
   tractor: Object.freeze({ build: buildTractorConsoleState, autoField: 'tractor_auto', autoScope: 'first' }),
   umbilical: Object.freeze({ build: buildUmbilicalConsoleState, autoField: 'umbilical_auto', autoScope: 'first' }),
   security: Object.freeze({ build: buildSecurityConsoleState, autoField: 'security_auto', autoScope: 'first' }),

@@ -72,8 +72,12 @@ describe('buildConsoleStateInner metadata routing', () => {
       blackboardKinds: { 'orders-array-alpha': 'Command' },
     };
     const payload = JSON.parse(window.buildConsoleStateInner('bridge-orders', state));
-    expect(payload.command_system_id).toBe('orders-array-alpha');
-    expect(payload.directed_station).toBe('tactical');
+    // Command's flat view is `{ red_alert, stations: [...] }` (issue #1381) —
+    // one card per directable station rather than a single flat object, so
+    // the per-blackboard fields live on `stations[0]`, matching
+    // tests/client/console-state.test.js and tests/client/command-console.test.js.
+    expect(payload.stations[0].command_system_id).toBe('orders-array-alpha');
+    expect(payload.stations[0].directed_station).toBe('tactical');
     expect(payload.system_ids).toEqual(['orders-array-alpha']);
   });
 

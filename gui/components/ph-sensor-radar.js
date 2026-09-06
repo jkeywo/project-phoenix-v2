@@ -1,12 +1,13 @@
 import './ph-radar.js';
 // strings-boot first: its top-level await delays this module's evaluation —
 // and therefore this element's registration and upgrade — until the string
-// table is loaded, so the constructor's template t() calls never see an
-// empty table. No-op in Node tests (setup-strings.js loads the table there).
+// table is loaded, so the t() call inside the template's shared ON SCREEN
+// fragment never sees an empty table. No-op in Node tests (setup-strings.js
+// loads the table there).
 import '../strings-boot.js';
-import { t } from '../strings.js';
 import {
-  SCOPE_CHROME_CSS, scopeChromeMarkup, updateScopeChrome,
+  SCOPE_CHROME_CSS, SCOPE_ON_SCREEN_CSS, scopeChromeMarkup, scopeOnScreenMarkup,
+  updateScopeChrome, setScopeOnScreen,
 } from './ph-scope-chrome.js';
 import { PhElement, phDefine } from './ph-element.js';
 import {
@@ -21,26 +22,11 @@ export class PhSensorRadar extends PhElement {
       ':host { display: block; width: 100%; height: 100%; position: relative; }',
       'ph-radar { display: block; width: 100%; height: 100%; }',
       SCOPE_CHROME_CSS,
-      '.on-screen-btn {',
-      '  position: absolute; bottom: 6%; right: 6%;',
-      '  pointer-events: auto; z-index: 10;',
-      '  font-family: \'JetBrains Mono\', monospace; font-size: var(--text-xs);',
-      '  letter-spacing: 0.15em; color: var(--ink-dim); background: rgba(var(--rgb-deep), 0.85);',
-      '  border: 1px solid var(--line-faint); border-radius: 2px; padding: 2px 12px;',
-      '  cursor: pointer; text-transform: uppercase;',
-      '  transition: border-color 0.15s, color 0.15s, background 0.15s;',
-      /* The touch floor (PRD #1023 module 3). inline-flex because min-height
-         does nothing to an inline box, and the label has to stay centred in a
-         control that is now taller than its own text. */
-      '  display: inline-flex; align-items: center; justify-content: center;',
-      '  min-height: var(--control-hit-min);',
-      '}',
-      '.on-screen-btn:hover { border-color: var(--cyan); }',
-      '.on-screen-btn.active { border-color: var(--cyan); color: var(--cyan); background: rgba(var(--rgb-cyan), 0.18); }',
+      SCOPE_ON_SCREEN_CSS,
       '</style>',
       '<ph-radar id="inner-radar"></ph-radar>',
       scopeChromeMarkup(''),
-      '<button class="on-screen-btn" id="on-screen-btn" type="button">' + t('console.common.on_screen') + '</button>',
+      scopeOnScreenMarkup(''),
     ].join('\n');
   }
 
@@ -104,10 +90,7 @@ export class PhSensorRadar extends PhElement {
       headingDeg: val?.ship_heading, speed: val?.ship_speed,
     });
 
-    const btn = this.shadowRoot.getElementById('on-screen-btn');
-    if (btn) {
-      btn.classList.toggle('active', !!val?.on_screen_active);
-    }
+    setScopeOnScreen(this.shadowRoot, val?.on_screen_active);
   }
 }
 

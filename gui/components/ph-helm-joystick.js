@@ -29,8 +29,15 @@ export class PhHelmJoystick extends PhElement {
     :host * { box-sizing: border-box; }
     .header { display: flex; justify-content: space-between; align-items: center; width: 100%; font-size: var(--text-sm); letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; margin-bottom: 0.5rem; }
     .auto-badge { font-size: var(--text-xs); color: var(--reloading); border: 1px solid var(--reloading); padding: 0.1rem 0.4rem; letter-spacing: 0.2em; }
+    /* 240px is the dial's SIZE, not its width: min(240px, 100%), so a rail
+       narrower than the dial makes a smaller dial instead of a dial hanging
+       out over whatever is beside the rail (issue #1375). Every pointer
+       calculation below already measures the well's own rect, so a smaller
+       dial is simply a smaller dial. The rail it sits in keeps a floor
+       (--scope-rail-min in gui/console.css) so the dial cannot shrink past
+       the point where the inset rings and the 56px nub stop making a dial. */
     .well {
-      position: relative; width: 240px; height: 240px; border-radius: 50%;
+      position: relative; width: min(240px, 100%); aspect-ratio: 1 / 1; height: auto; border-radius: 50%;
       background: radial-gradient(circle at center, var(--surface-panel) 0%, var(--surface-panel) 75%, var(--surface-abyss) 100%);
       border: 1px solid var(--line-faint); box-shadow: inset 0 0 0 4px var(--surface-panel), inset 0 0 0 5px rgba(var(--rgb-cyan), 0.35);
       cursor: grab; touch-action: none; flex-shrink: 0;

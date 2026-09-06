@@ -27,8 +27,12 @@ export class PhLateralThrustJoystick extends PhElement {
     :host * { box-sizing: border-box; }
     .header { display: flex; justify-content: space-between; align-items: center; width: 100%; font-size: var(--text-sm); letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; margin-bottom: 0.3rem; }
     .auto-badge { font-size: var(--text-xs); color: var(--reloading); border: 1px solid var(--reloading); padding: 0.1rem 0.4rem; letter-spacing: 0.2em; }
+    /* 180px is the pad's SIZE, not its width — see the note on
+       ph-helm-joystick's well (issue #1375). The drag maths reads the track's
+       own rect, so a narrower rail gives a shorter throw rather than a pad
+       hanging out over the scope beside it. */
     .track {
-      position: relative; width: 180px; height: 32px; border-radius: 16px;
+      position: relative; width: min(180px, 100%); height: 32px; border-radius: 16px;
       background: linear-gradient(to right, var(--surface-panel) 0%, var(--surface-panel) 50%, var(--surface-panel) 100%);
       border: 1px solid var(--line-faint); cursor: grab; touch-action: none; flex-shrink: 0;
     }

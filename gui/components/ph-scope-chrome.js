@@ -22,8 +22,41 @@
 //
 // It is scope chrome by the same definition: an overlay drawn over the scope
 // that must not stop the scope being readable. See `applyArcCompositeCap`.
+//
+// ── And why the ON SCREEN button (issue #1375) ─────────────────────────────
+//
+// Because the corner block's story repeated itself one component later: helm
+// and sensors each carried a byte-identical `.on-screen-btn` rule and button,
+// pinning the same control to the same `bottom: 6%; right: 6%` in two shadow
+// roots — the fourth corner of the same four-cornered square, written twice.
+// It is one of the four slots `SCOPE_CORNER_CSS` names, so it is declared with
+// them rather than beside them.
 import { t } from '../strings.js';
 import { phColor } from './ph-console-styles.js';
+
+/**
+ * The four corners of a square scope (issue #1375).
+ *
+ * A scope is a circle inscribed in a square whose edges it touches, so the
+ * four corners are the only part of the cell the picture never reaches: dead
+ * space by construction, and therefore the one place chrome can stand without
+ * being asked to move aside for a contact. Three corners hold the readouts;
+ * the fourth holds ON SCREEN where a console has one.
+ *
+ * The offsets live here, once, as a vocabulary of four SLOTS rather than as
+ * four `top`/`left` pairs each component writes for itself. That is the whole
+ * reason the fourth corner needed inventing at all: ph-helm-radar and
+ * ph-sensor-radar each carried a byte-identical `bottom: 6%; right: 6%` block
+ * for the same button — the exact disease this module already existed to cure
+ * for the other three.
+ */
+export const SCOPE_CORNER_CSS = [
+  '.scope-corner { position: absolute; z-index: 10; }',
+  '.scope-corner.top-left { top: 4%; left: 6%; }',
+  '.scope-corner.top-right { top: 4%; right: 6%; text-align: right; }',
+  '.scope-corner.bottom-left { bottom: 6%; left: 6%; }',
+  '.scope-corner.bottom-right { bottom: 6%; right: 6%; }',
+].join('\n');
 
 /**
  * The corner-label rules, written once.
@@ -33,14 +66,12 @@ import { phColor } from './ph-console-styles.js';
  * a bare `0.65rem` against the console's `clamp(11px, 3vw, 15px)` root did.
  */
 export const SCOPE_CHROME_CSS = [
+  SCOPE_CORNER_CSS,
   '.corner-label {',
-  '  position: absolute; pointer-events: none; z-index: 10;',
+  '  pointer-events: none;',
   '  font-family: var(--font-mono); font-size: var(--text-xs);',
   '  letter-spacing: var(--tracking); color: var(--edge-strong);',
   '}',
-  '.corner-label.top-left { top: 4%; left: 6%; }',
-  '.corner-label.top-right { top: 4%; right: 6%; text-align: right; }',
-  '.corner-label.bottom-left { bottom: 6%; left: 6%; }',
 ].join('\n');
 
 /**
@@ -49,10 +80,65 @@ export const SCOPE_CHROME_CSS = [
  */
 export function scopeChromeMarkup(indent = '  ') {
   return [
-    indent + '<div class="corner-label top-left" id="label-pos"></div>',
-    indent + '<div class="corner-label top-right" id="label-bearing"></div>',
-    indent + '<div class="corner-label bottom-left" id="label-speed"></div>',
+    indent + '<div class="scope-corner corner-label top-left" id="label-pos"></div>',
+    indent + '<div class="scope-corner corner-label top-right" id="label-bearing"></div>',
+    indent + '<div class="scope-corner corner-label bottom-left" id="label-speed"></div>',
   ].join('\n');
+}
+
+/**
+ * The fourth corner's occupant: ON SCREEN, the one control that lives ON a
+ * scope rather than beside it.
+ *
+ * Included next to `SCOPE_CHROME_CSS` by a scope that HAS the button. A
+ * tactical scope does not — a weapons officer does not choose the viewscreen —
+ * so its fourth corner stays empty rather than being filled for symmetry, and
+ * the rules for a button that is not in the document are not shipped into its
+ * shadow root either.
+ */
+export const SCOPE_ON_SCREEN_CSS = [
+  '.on-screen-btn {',
+  '  pointer-events: auto;',
+  '  font-family: var(--font-mono); font-size: var(--text-xs);',
+  '  letter-spacing: 0.15em; color: var(--ink-dim); background: rgba(var(--rgb-deep), 0.85);',
+  '  border: 1px solid var(--line-faint); border-radius: 2px; padding: 2px 12px;',
+  '  cursor: pointer; text-transform: uppercase;',
+  '  transition: border-color 0.15s, color 0.15s, background 0.15s;',
+  // The touch floor (PRD #1023 module 3). inline-flex because min-height does
+  // nothing to an inline box, and the label has to stay centred in a control
+  // that is now taller than its own text.
+  '  display: inline-flex; align-items: center; justify-content: center;',
+  '  min-height: var(--control-hit-min);',
+  '}',
+  '.on-screen-btn:hover { border-color: var(--cyan); }',
+  '.on-screen-btn.active { border-color: var(--cyan); color: var(--cyan); background: rgba(var(--rgb-cyan), 0.18); }',
+].join('\n');
+
+/**
+ * The ON SCREEN button as markup, in the fourth corner.
+ *
+ * The id stays `on-screen-btn`: two component suites and
+ * tests/smoke/sensors-console.spec.js reach for it inside the shadow root. It
+ * is NOT the light-DOM `#btn-on-screen` gui/battleship/navigation.html writes
+ * and `console-core.js`'s Navigation adapter gates `supportsChart` on — two
+ * different controls, in two different trees, with two deliberately different
+ * ids.
+ */
+export function scopeOnScreenMarkup(indent = '  ') {
+  const open = '<button class="scope-corner bottom-right on-screen-btn" id="on-screen-btn" type="button">';
+  return indent + open + t('console.common.on_screen') + '</button>';
+}
+
+/**
+ * Mark the ON SCREEN button as the live viewscreen source, or not.
+ *
+ * @param {ShadowRoot|Element} root
+ * @param {boolean} active
+ */
+export function setScopeOnScreen(root, active) {
+  if (!root || typeof root.getElementById !== 'function') return;
+  const btn = root.getElementById('on-screen-btn');
+  if (btn) btn.classList.toggle('active', !!active);
 }
 
 /**

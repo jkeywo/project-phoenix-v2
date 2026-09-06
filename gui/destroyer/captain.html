@@ -9,9 +9,11 @@
     body { font-size: var(--text-lg); margin: 0; background: var(--surface-void); overflow: hidden; }
     .frame { height: 100%; position: relative; }
     .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
-    .console-body { flex: 1; min-height: 0; }
-    .console-body .sensors-col { display: flex; }
-    .console-body .sensors-col ph-sensor-radar { width: 100%; height: 100%; }
+    /* The one rail this scope sits beside (issue #1375): the command column.
+       The square left of it is gui/console.css's one `.scope-cell` rule, which
+       replaces the pair of aspect-ratio spellings — one per orientation — this
+       document used to carry for the same square. */
+    .console-body { --scope-rail-end: 380px; }
     .console-body .cmd-col { display: flex; flex-direction: column; min-height: 0; }
     .cmd-col .controls-row { display: flex; gap: 12px; flex-shrink: 0; }
     .cmd-col .controls-row > * { flex: 1; min-width: 0; }
@@ -24,15 +26,19 @@
 
     @media (orientation: portrait) {
       .panel-inner { padding: 10px 12px; gap: 8px; }
-      .console-body { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
-      .console-body .sensors-col { width: 100%; aspect-ratio: 1 / 1; flex-shrink: 0; }
-      .console-body .cmd-col { flex: 1; }
+      .console-body { overflow-y: auto; }
       .cmd-col .controls-row { gap: 8px; }
+      /* Stacked under the square, the command column is as tall as what it
+         holds rather than as tall as what is left over (issue #1375), so these
+         two have no leftover to take a share of: `flex: 1` is a flex-basis of
+         0, which contributes nothing to the column's own intrinsic height and
+         left ph-sensor-panel drawn 21px past the column's bottom edge.
+         Content-sized, the column measures them honestly and the page scroller
+         above takes whatever that adds up to. */
+      ph-objective-list, ph-sensor-panel { flex: 0 0 auto; }
     }
 
     @media (orientation: landscape) {
-      .console-body { display: grid; grid-template-columns: auto 1fr; gap: 16px; }
-      .console-body .sensors-col { height: 100%; aspect-ratio: 1 / 1; }
       .console-body .cmd-col { overflow-y: auto; }
     }
   </style>
@@ -45,8 +51,8 @@
            names this seat and its selected tab opens the per-system damage
            popup the footer's `ph-station-damage` used to. The locked sensor
            target the footer named heads the command column it belongs to. -->
-      <div class="console-body">
-        <div class="sensors-col">
+      <div class="console-body scope-row">
+        <div class="sensors-col scope-cell">
           <ph-sensor-radar id="sensor-radar"></ph-sensor-radar>
         </div>
         <div class="cmd-col">

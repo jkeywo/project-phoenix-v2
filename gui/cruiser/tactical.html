@@ -10,8 +10,12 @@
     .frame { height: 100%; }
     .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
     .console-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
-    ph-tactical-radar { width: 100%; aspect-ratio: 1 / 1; }
-    @media (orientation: landscape) { ph-tactical-radar { height: 100%; width: auto; } }
+    /* The scope is square by gui/console.css's one `.scope-cell` rule
+       (issue #1375): side = min(free width, free height), so it fills the
+       width in this stacked column and the column's height in landscape. The
+       per-orientation aspect-ratio pair this document used to carry said the
+       same thing in two places and had to be re-derived every time the chrome
+       above it changed. */
     ph-phasers-controls, ph-torpedo-controls { flex-shrink: 0; }
     @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } }
   </style>
@@ -30,7 +34,9 @@
           <span class="spacer"></span>
           <span class="auto-badge" id="tactical-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
         </div>
-        <ph-tactical-radar id="tactical-radar"></ph-tactical-radar>
+        <div class="scope-cell">
+          <ph-tactical-radar id="tactical-radar"></ph-tactical-radar>
+        </div>
         <ph-phasers-controls id="phasers-controls"></ph-phasers-controls>
         <ph-torpedo-controls id="torpedo-controls"></ph-torpedo-controls>
       </div>

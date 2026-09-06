@@ -17,9 +17,13 @@
     .console-body { flex: 1; min-height: 0; }
     .console-body .col { display: flex; flex-direction: column; background: rgba(var(--rgb-panel), 0.6); border: 1px solid var(--edge); padding: 12px; min-height: 0; overflow-y: auto; height: 100%; }
     .console-body .col h2 { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
-    ph-tactical-radar, ph-phasers-controls, ph-blasters-controls, ph-torpedo-controls { flex-shrink: 0; }
-    ph-tactical-radar { width: 100%; aspect-ratio: 1 / 1; }
-    @media (orientation: landscape) { ph-tactical-radar { height: 100%; width: auto; } }
+    ph-phasers-controls, ph-blasters-controls, ph-torpedo-controls { flex-shrink: 0; }
+    /* The scope is square by gui/console.css's one `.scope-cell` rule
+       (issue #1375): side = min(free width, free height), so it fills the
+       width in this stacked column and the column's height in landscape. The
+       per-orientation aspect-ratio pair this document used to carry said the
+       same thing in two places and had to be re-derived every time the chrome
+       above it changed. */
     .overlay-back { position: absolute; top: 6px; left: 6px; z-index: 6; background: rgba(var(--rgb-panel), 0.85); border: 1px solid var(--edge); color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.2em; padding: 6px 14px; cursor: pointer; text-transform: uppercase; transition: all 0.15s ease; min-height: var(--control-hit-min); }
     .overlay-back:hover { background: rgba(var(--rgb-panel-up), 0.9); border-color: var(--ink-dim); }
     .overlay-panel { position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 5; background: rgba(var(--rgb-deep), 0.97); border: 1px solid var(--edge); display: none; flex-direction: column; padding: 16px; }
@@ -54,7 +58,9 @@
             <span class="spacer"></span>
             <span class="auto-badge" id="tactical-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
           </div>
-          <ph-tactical-radar id="tactical-radar"></ph-tactical-radar>
+          <div class="scope-cell">
+            <ph-tactical-radar id="tactical-radar"></ph-tactical-radar>
+          </div>
           <ph-phasers-controls id="phasers-controls"></ph-phasers-controls>
           <ph-blasters-controls id="blasters-controls"></ph-blasters-controls>
           <ph-torpedo-controls id="torpedo-controls"></ph-torpedo-controls>

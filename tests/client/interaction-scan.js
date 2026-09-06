@@ -33,9 +33,81 @@
  * The scanning primitives (comment stripping, the console-surface enumerators)
  * are shared with css-scan.js rather than re-derived here.
  */
+import fs from 'node:fs';
+import path from 'node:path';
 import { readStripped, componentFiles, consoleDocuments, rel } from './css-scan.js';
 
 const NATIVE_CONTROL = /^(button|select|textarea|input|a)$/;
+
+/**
+ * The body of `export function NAME(…) { … }`, or `''`.
+ *
+ * Brace-matched from the signature's opening `{`. Naive about braces inside
+ * strings, which is safe for what it is asked to read: a markup helper returns
+ * concatenated HTML fragments, and HTML has no braces.
+ */
+function exportedFunctionBody(source, name) {
+  const sig = new RegExp(`export\\s+function\\s+${name}\\s*\\(`).exec(source);
+  if (!sig) return '';
+  const open = source.indexOf('{', sig.index + sig[0].length);
+  if (open < 0) return '';
+  let depth = 0;
+  for (let i = open; i < source.length; i += 1) {
+    if (source[i] === '{') depth += 1;
+    else if (source[i] === '}') {
+      depth -= 1;
+      if (depth === 0) return source.slice(open + 1, i);
+    }
+  }
+  return '';
+}
+
+/**
+ * The markup a component's SHARED FRAGMENTS write into its template.
+ *
+ * A shadow root inherits custom properties but not markup, so chrome common to
+ * several components is factored into a fragment module that returns the
+ * markup as a string — gui/components/ph-scope-chrome.js writes the corner
+ * readouts and the ON SCREEN button for every scope in the fleet. Read as one
+ * file, ph-helm-radar.js then looks like an interactive surface with no
+ * focusable control in it, because its one <button> is a `scopeOnScreenMarkup()`
+ * call away.
+ *
+ * So the scan follows exactly one hop, and only a hop the component actually
+ * takes: an imported identifier ending in `Markup` that appears as a CALL in
+ * this source contributes that helper's body to the surface. A fragment's other
+ * exports are not pulled in, so a scope that does NOT ask for the ON SCREEN
+ * button does not silently inherit a focus target it never renders.
+ *
+ * The same one-hop reasoning `focusFamilyAdoption` already applies to `extends`.
+ *
+ * @param {string} source  the component's own text
+ * @param {string} dir     the directory its relative imports resolve against
+ */
+export function sharedMarkup(source, dir) {
+  const out = [];
+  const importRe = /import\s*\{([^}]*)\}\s*from\s*['"](\.[^'"]*\.js)['"]/g;
+  let m;
+  while ((m = importRe.exec(source)) !== null) {
+    const names = m[1]
+      .split(',')
+      .map((n) => n.trim().split(/\s+as\s+/).pop().trim())
+      .filter((n) => /Markup$/.test(n) && new RegExp(`\\b${n}\\s*\\(`).test(source));
+    if (names.length === 0) continue;
+    const target = path.resolve(dir, m[2]);
+    if (!fs.existsSync(target)) continue;
+    const fragment = fs.readFileSync(target, 'utf8');
+    for (const name of names) out.push(exportedFunctionBody(fragment, name));
+  }
+  return out.filter(Boolean).join('\n');
+}
+
+/** A surface's full text: the file, plus whatever its markup fragments add. */
+export function surfaceSource(file) {
+  const raw = fs.readFileSync(file, 'utf8');
+  const shared = sharedMarkup(raw, path.dirname(file));
+  return shared ? `${raw}\n${shared}` : raw;
+}
 
 /** Does this text carry an accessible name — literal text or a string id? */
 function textNames(text) {

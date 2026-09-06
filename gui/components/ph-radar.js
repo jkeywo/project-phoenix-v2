@@ -322,19 +322,30 @@ export class PhRadar extends PhElement {
     const readout = plan.length > 0 ? scaleReadout(range) : '';
     if (!readout) return;
 
-    // Against the outer ring on the forward-starboard diagonal, where the
-    // corner labels are not and where a contact clamped to the rim is least
-    // likely to be — the same reasoning that put the three corner readouts in
-    // corners.
+    // Against the outer ring on the AFT-PORT diagonal — the bottom-left — and
+    // reading outwards from it, where a contact clamped to the rim is least
+    // likely to be. The same reasoning that put the three corner readouts in
+    // corners, with one correction (issue #1375).
+    //
+    // It used to sit on the aft-starboard diagonal, which is the corner ON
+    // SCREEN now occupies. That button is ~90px of near-opaque chrome anchored
+    // 6% in from the bottom-right, so on a 350px scope its inner corner reaches
+    // to radius 128 of 175 — comfortably over the 0.707R point the readout was
+    // painted at, and the scale simply disappeared underneath it.
+    //
+    // Aft-PORT shares its corner with the speed readout instead, and the two
+    // provably clear each other at every scope size: the corner label's top
+    // edge sits at 0.94S − lineHeight and this baseline at 0.8536S, so the gap
+    // is 0.0864S − 10 CSS px, positive for any scope wider than 116px.
     const font = this.#labelFontPx(px);
     const diagonal = Math.SQRT1_2;
     ctx.save();
     ctx.font = font + 'px ' + this.#labelFontFamily();
-    ctx.textAlign = 'right';
+    ctx.textAlign = 'left';
     ctx.textBaseline = 'bottom';
     this.#paintHaloed(
       ctx, readout,
-      cx + R * diagonal - LABEL_GAP_CSS * px,
+      cx - R * diagonal + LABEL_GAP_CSS * px,
       cy + R * diagonal - LABEL_GAP_CSS * px,
       px, 'rgba(var(--rgb-edge-strong), 0.95)',
     );

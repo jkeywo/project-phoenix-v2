@@ -154,6 +154,158 @@ body .frame { height: 100dvh; }
    padding now, and `tests/client/settings-panel.test.js` asserts that no
    `body .panel-inner` rule reserves the corner again. */
 
+/* ── The scope cell, and the row a scope sits in (issue #1375) ───
+   ONE rule for every scope in the fleet: a square whose side is the smaller
+   of the free width and the free height, filling the width in portrait and
+   the height in landscape, with the circle touching the square's edges and
+   the four corners left over for chrome.
+
+   It replaces eight per-console spellings of the same idea. Every hull had
+   worked out its own `aspect-ratio: 1 / 1` variant — `width: 100%` here,
+   `height: 100%; width: auto` in a landscape media query there, `.radar-col`
+   with a third arrangement — and each one carried a comment explaining why
+   THAT console's arithmetic had to change when issue #1374 removed the title
+   row. Eight copies of one rule is eight chances for a hull's scope to stop
+   being square, which is what a min/max clamp does the moment one of the two
+   axes is measured against the wrong box.
+
+   `container-type: size` is what lets the rule be written as the sentence it
+   is. `min(100cqw, 100cqh)` IS "the smaller of the free width and the free
+   height": the cell is the slot the layout left over, and the square is
+   whatever fits in it. Doing the same with min/max clamps means relying on an
+   aspect-ratio box transferring a max-height back into a width, which works
+   but reads as arithmetic rather than as the design rule.
+
+   The cell's own `aspect-ratio` is not the square — the CHILD is the square.
+   The ratio is the cell's PREFERRED height where nothing else supplies one
+   (a scope stacked above its controls in a scrolling column: as tall as it is
+   wide, so the scope fills the width). Given a definite height — a grid row,
+   a flex track — that height wins and the scope fills it instead. Both arms
+   of "portrait fills the width, landscape fills the height" fall out of the
+   one declaration rather than out of a media query. */
+.scope-cell {
+  min-width: 0;
+  min-height: 0;
+  /* In a plain COLUMN — a scope stacked above the controls it belongs to —
+     the scope is not the item that gives way: a scope squeezed to nothing is
+     not a smaller picture, it is no picture, and where a column genuinely
+     cannot hold both, the column scrolls.
+
+     Beside a rail it is different, and `.scope-row` below overrides this: a
+     row too narrow for rails-plus-square has to take the shortfall from
+     BOTH, because a rail that never yields is a rail that pushes the scope
+     to nothing. See the note on that rule. */
+  flex-shrink: 0;
+  aspect-ratio: 1 / 1;
+  max-height: 100%;
+  container-type: size;
+  display: grid;
+  place-items: center;
+  /* The scope's corner readouts are `z-index: 10` inside its shadow root. With
+     no stacking context of its own the cell lets them escape into the root
+     context and paint over whatever the console layers above them — which is
+     why three helm documents had each discovered `isolation` separately. */
+  isolation: isolate;
+}
+
+.scope-cell > * {
+  width: min(100cqw, 100cqh);
+  height: min(100cqw, 100cqh);
+  aspect-ratio: 1 / 1;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+/* A row with a scope in it and up to two control rails beside it.
+   `--scope-rail-start` / `--scope-rail-end` are the two side-column widths: a
+   console SETS the rails it has, says nothing about the one it hasn't, and
+   writes no track list of its own.
+
+   FLEX rather than grid, and that is the whole reason the two properties can
+   be optional. A three-track grid still HAS its first track when the start
+   rail is zero, so a console with one rail auto-places its scope into the
+   empty one and its controls into the scope's; a flex line only contains the
+   children that exist, and `gap` only falls between them. The rails are then
+   matched by where they sit relative to the scope — first child, or a sibling
+   after it — rather than by a per-hull class name. */
+.scope-row {
+  --scope-rail-start: 0px;
+  --scope-rail-end: 0px;
+  --scope-rail-min: 0px;
+  --scope-gutter: 16px;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  gap: var(--scope-gutter);
+}
+
+.scope-row > * { min-width: 0; min-height: 0; }
+
+/* Landscape: the scope takes the width the rails leave and the row's full
+   height, so `.scope-cell` reads min(what's left, the panel) and the square
+   fills the height.
+
+   `flex: 1 1 auto`, NOT `1 1 0`, and the difference is the whole behaviour of
+   a narrow screen. Shrinking is weighted by BASE SIZE × shrink factor, so a
+   zero base size is a zero shrink weight: such a cell is not in the shrink
+   distribution at all. It receives only the POSITIVE free space left after
+   every rail has taken its full basis, which means it reaches 0px before a
+   rail gives up its first pixel — the opposite of protecting the scope.
+   `auto` makes the cell's base size the square it wants: the row's height is
+   definite and the item stretches to it, and `.scope-cell`'s `aspect-ratio`
+   transfers that height into the base width. Both sides then participate, so
+   a row too narrow for rails-plus-square shares the shortfall and the frame
+   still does not overflow.
+
+   `--scope-rail-min` is the floor for a rail whose content has a size of its
+   own — a joystick disc, a pad — which shrinking past would push the widget
+   out over the scope beside it. It inherits, so a console whose two rails
+   need different floors sets the property again on the one that needs more,
+   and a rail of plain readouts leaves it at 0 and shrinks freely. */
+.scope-row > .scope-cell { flex: 1 1 auto; }
+.scope-row > :not(.scope-cell):first-child {
+  flex: 0 1 var(--scope-rail-start);
+  min-width: var(--scope-rail-min);
+}
+.scope-row > .scope-cell ~ :not(.scope-cell) {
+  flex: 0 1 var(--scope-rail-end);
+  min-width: var(--scope-rail-min);
+}
+
+/* A phone held upright has no room for a rail beside a square, so the row
+   becomes a stack: the scope fills the width and the rails follow it down the
+   page at their natural heights. A flex-basis is a HEIGHT once the direction
+   turns, so the rails' widths are cleared here rather than left to be read as
+   the wrong axis — and the two rules are repeated verbatim so they match on
+   specificity, which a media query does not add to.
+
+   The rail floor goes with them. Stacked, a rail is the full width of the
+   column and has nothing to be pushed out over; left standing it would be a
+   horizontal minimum wider than a narrow phone.
+
+   `0 0 auto`, and the zero SHRINK factor is the load-bearing half. A rail is a
+   column of fixed-size widgets — a joystick disc, a pair of buttons — over a
+   `min-height: 0` box, so a shrinkable rail does not refuse the shortfall: it
+   takes it, ends up shorter than the widgets inside it, and those widgets paint
+   on out past its border and off the bottom of the screen. Measured on
+   destroyer/helm at 375x812 before this was `0 0`: the joystick column stood
+   253px tall around a 284px dial and IMPULSE/BOOST finished 15px below the
+   viewport with `body { overflow: hidden }` and no scroller to reach them.
+   Un-shrinkable, a rail is exactly as tall as what it holds, and a stack too
+   tall for the row overflows it honestly — which is what a console's own
+   `.console-body { overflow-y: auto }` in its portrait block is for, and why a
+   console whose portrait stack can outgrow the page must declare one. */
+@media (orientation: portrait) {
+  .scope-row {
+    --scope-gutter: 8px;
+    flex-direction: column;
+  }
+  .scope-row > .scope-cell { flex: 0 0 auto; }
+  .scope-row > :not(.scope-cell):first-child,
+  .scope-row > .scope-cell ~ :not(.scope-cell) { flex: 0 0 auto; min-width: 0; }
+}
+
 /* ── Readout line (issue #1374) ─────────────────────────────────
    What is LEFT of the console footer after issue #1374 took the strip away.
 

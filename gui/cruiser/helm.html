@@ -10,35 +10,24 @@
     body { font-size: var(--text-lg); margin: 0; background: var(--surface-void); overflow: hidden; }
     .frame { height: 100%; }
     .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
-    .console-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 300px; gap: 16px; }
-    .console-body .radar-col { display: flex; flex-direction: column; min-height: 0; }
+    /* The one rail this scope sits beside (issue #1375): 300px holds
+       ph-helm-joystick's fixed 240px disc plus this hull's lateral pad with the
+       column's own padding around them. The square left of it is
+       gui/console.css's one `.scope-cell` rule, so this document states its
+       rail and says nothing else about the scope's size — no aspect-ratio of
+       its own, and no landscape variant of one. */
+    .console-body { --scope-rail-end: 300px; }
     .console-body .ctrl-col { display: flex; flex-direction: column; gap: 12px; min-height: 0; background: rgba(var(--rgb-panel), 0.6); border: 1px solid var(--edge); padding: 12px; }
-    ph-helm-radar { flex: 1; min-height: 0; }
     ph-helm-joystick { flex: 1; min-height: 0; }
     .btn-row { display: flex; gap: 8px; }
     .btn-row > * { flex: 1; }
-    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .console-body { grid-template-columns: 1fr; gap: 8px; } .console-body .ctrl-col { padding: 8px; } }
-    /* Landscape used to float the title row as a bar over the top of the
-       chart so the scope kept the panel's whole height, with the control
-       column pushed clear of it. Issue #1374 deleted the title row, so the
-       chart has that height outright and the column needs no offset: what
-       survives here is the track sizing and the radar's own.
-
-       The radar takes its width from its (definite) height, so a bare `1fr`
-       track picks that width up as its automatic minimum and the grid overflows
-       — at 650x450 the tracks came out `310px 300px` in a 584px box and the
-       BOOST button was clipped off the frame. `minmax(0, 1fr)` is what lets the
-       track shrink below that; the max-width clamp then letterboxes the radar
-       rather than pushing the controls out. */
-    @media (orientation: landscape) {
-      .console-body { grid-template-columns: minmax(0, 1fr) 300px; }
-      .console-body .radar-col { align-items: center; }
-      /* `isolation` matters: ph-helm-radar's readouts are `z-index: 10` inside
-         its shadow root, and the host is only `position: relative` — with no
-         stacking context of its own they escape into the root stacking
-         context and paint over whatever the console layers above them. */
-      ph-helm-radar { flex: none; width: auto; height: 100%; aspect-ratio: 1 / 1; max-width: 100%; max-height: 100%; isolation: isolate; }
-    }
+    /* `overflow-y: auto` for the same reason destroyer/helm carries it (issue
+       #1375): stacked under a full-width square, the control rail stands at
+       its content's height — a 240px dial, a thrust pad, two buttons — and the
+       three of them are taller than a phone's portrait page. Without a
+       scroller here `body { overflow: hidden }` would cut IMPULSE and BOOST
+       off at the bottom edge. */
+    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .console-body { overflow-y: auto; } .console-body .ctrl-col { padding: 8px; } }
   </style>
 </head>
 <body>
@@ -50,8 +39,8 @@
            popup the footer's `ph-station-damage` used to. The contact count
            the footer carried heads the control column the AUTO badge belongs
            to. -->
-      <div class="console-body">
-        <div class="radar-col">
+      <div class="console-body scope-row">
+        <div class="radar-col scope-cell">
           <ph-helm-radar id="helm-radar"></ph-helm-radar>
         </div>
         <div class="ctrl-col">

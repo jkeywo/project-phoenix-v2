@@ -37,7 +37,8 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import {
-  evaluateSurface, focusFamilyAdoption, componentFiles, consoleDocuments, rel,
+  evaluateSurface, focusFamilyAdoption, surfaceSource,
+  componentFiles, consoleDocuments, rel,
 } from './interaction-scan.js';
 
 // ── The tracer ────────────────────────────────────────────────────────────
@@ -127,7 +128,7 @@ describe('the focusability floor', () => {
   for (const { file, isDocument } of surfaces()) {
     const name = rel(file);
     if (isSkipped(name)) continue;
-    const result = evaluateSurface(fs.readFileSync(file, 'utf8'), { isDocument });
+    const result = evaluateSurface(surfaceSource(file), { isDocument });
     if (!result.hasSurface) continue;
     it(`${name} exposes a focusable control for every interactive affordance`, () => {
       expect(result.floors.focusability).toEqual([]);
@@ -139,7 +140,7 @@ describe('the keyboard-reachability floor', () => {
   for (const { file, isDocument } of surfaces()) {
     const name = rel(file);
     if (isSkipped(name)) continue;
-    const result = evaluateSurface(fs.readFileSync(file, 'utf8'), { isDocument });
+    const result = evaluateSurface(surfaceSource(file), { isDocument });
     if (!result.hasSurface) continue;
     it(`${name} strands no control out of the tab order`, () => {
       expect(result.floors.reachability).toEqual([]);
@@ -151,7 +152,7 @@ describe('the accessible-name and role floor', () => {
   for (const { file, isDocument } of surfaces()) {
     const name = rel(file);
     if (isSkipped(name)) continue;
-    const result = evaluateSurface(fs.readFileSync(file, 'utf8'), { isDocument });
+    const result = evaluateSurface(surfaceSource(file), { isDocument });
     if (!result.hasSurface) continue;
     it(`${name} names every control and roles every composite`, () => {
       expect(result.floors.naming).toEqual([]);
@@ -169,7 +170,7 @@ describe('the tracer console passes with no allow-list entries', () => {
       const isDocument = name.endsWith('.html');
       const file = [...componentFiles(), ...consoleDocuments()].find((f) => rel(f) === name);
       expect(file, `${name} not found on the console surface`).toBeTruthy();
-      const result = evaluateSurface(fs.readFileSync(file, 'utf8'), { isDocument });
+      const result = evaluateSurface(surfaceSource(file), { isDocument });
       expect(result.floors).toEqual({ focusability: [], reachability: [], naming: [] });
     });
   }
@@ -206,7 +207,7 @@ describe('the interaction allow-list is honest', () => {
     for (const [path] of DEBT_BY_PATH) {
       const file = componentFiles().find((f) => rel(f) === path);
       if (!file) continue; // the existence test above reports a missing path
-      const result = evaluateSurface(fs.readFileSync(file, 'utf8'), { isDocument: false });
+      const result = evaluateSurface(surfaceSource(file), { isDocument: false });
       if (result.conformant) stale.push(path);
     }
     expect(stale, 'these no longer violate any floor — remove them from DEBT').toEqual([]);

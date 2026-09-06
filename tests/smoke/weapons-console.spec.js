@@ -56,10 +56,13 @@ test('tactical console: __updateConsole renders phaser banks, torpedo tubes and 
 });
 
 test('tactical console: FIRE buttons call __sendAction with correct envelopes', { tag: '@core' }, async ({ page }) => {
-  // ph-tactical-radar is a square (aspect-ratio 1/1) that eats most of the
-  // vertical space at the default 1280×720 viewport, pushing the phaser and
-  // torpedo controls low enough that the console's outer .frame overlay
-  // intercepts clicks on them. Widen the viewport so both rows are on screen.
+  // The scope is a square (gui/console.css's `.scope-cell`, issue #1375) that
+  // eats most of the vertical space at the default 1280×720 viewport,
+  // pushing the phaser and torpedo controls low enough that the console's
+  // outer .frame overlay intercepts clicks on them. Widen the viewport so both
+  // rows are on screen. Issue #1378 rebuilds this console as a three-track row
+  // — weapons left, scope centre, torpedoes right — after which the
+  // controls sit beside the square rather than under it and this line can go.
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto(CONSOLE_URL);
 

@@ -10,27 +10,17 @@
     body { margin: 0; background: var(--surface-void); overflow: hidden; }
     .frame { height: 100%; }
     .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
-    .console-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 300px; gap: 16px; }
+    /* The one rail this scope sits beside (issue #1375): 300px holds
+       ph-helm-joystick's fixed 240px disc with the column's own padding around
+       it. The square left of it is gui/console.css's one `.scope-cell` rule,
+       so this document states its rail and says nothing else about the scope's
+       size — no aspect-ratio of its own, and no landscape variant of one. */
+    .console-body { --scope-rail-end: 300px; }
     .ctrl-col { min-height: 0; display: flex; flex-direction: column; gap: 12px; background: rgba(var(--rgb-panel), 0.6); border: 1px solid var(--edge); padding: 12px; }
-    ph-helm-radar, ph-helm-joystick { flex: 1; min-height: 0; }
+    ph-helm-joystick { flex: 1; min-height: 0; }
     .btn-row { display: flex; gap: 8px; }
     .btn-row > * { flex: 1; }
-    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .console-body { grid-template-columns: 1fr; gap: 8px; } .ctrl-col { padding: 8px; } }
-    /* Landscape used to float the title row as a bar over the top of the chart
-       so the scope kept the panel's whole height, with the control column
-       pushed clear of it. Issue #1374 deleted the title row, so the chart has
-       that height outright and the column needs no offset: what survives here
-       is only the radar's own sizing.
-
-       The radar takes its width from its (definite) height, so a bare `1fr`
-       track picks that width up as its automatic minimum and the grid overflows
-       its container. `minmax(0, 1fr)` is what lets the track shrink below that;
-       the max-width clamp then letterboxes the radar rather than pushing the
-       controls out. */
-    @media (orientation: landscape) {
-      .console-body { grid-template-columns: minmax(0, 1fr) 300px; }
-      ph-helm-radar { width: auto; height: 100%; aspect-ratio: 1 / 1; max-width: 100%; max-height: 100%; justify-self: center; isolation: isolate; }
-    }
+    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .ctrl-col { padding: 8px; } }
   </style>
 </head>
 <body>
@@ -41,8 +31,10 @@
            names this seat and its selected tab opens the per-system damage
            popup. The contact count the footer carried is the readout at the
            head of the control column the automation badge belongs to. -->
-      <div class="console-body">
-        <ph-helm-radar id="helm-radar"></ph-helm-radar>
+      <div class="console-body scope-row">
+        <div class="scope-cell">
+          <ph-helm-radar id="helm-radar"></ph-helm-radar>
+        </div>
         <div class="ctrl-col">
           <div class="readout">
             <span id="footer-target" data-i18n="console.common.no_target">NO TARGET</span>

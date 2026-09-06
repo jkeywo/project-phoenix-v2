@@ -5,7 +5,15 @@
  * The PRD asks for three things of the hardened scope, and names the test for
  * each: "rings present at the configured ranges, labels haloed and
  * non-overlapping for a clustered fixture, arc alpha capped under stacked
- * overlays". Those are the three describes below.
+ * overlays". Those are the first three describes below.
+ *
+ * The fourth is issue #1375's, and it is the SHAPE contract rather than the
+ * draw contract: a scope is a square whose circle touches its edges, so its
+ * chrome lives in the four corners the circle cannot reach and the scale
+ * readout stays on the ring between them. Those assertions read the mounted
+ * shadow DOM, the console documents on disk and the same draw log, for the
+ * same reason — a scope that has stopped being square still calls every
+ * function it called yesterday.
  *
  * Every assertion reads the DRAW LOG or the rendered attributes — the radii the
  * scope actually stroked, the coordinates it actually painted text at, the
@@ -20,11 +28,18 @@
  * CSS pixel — is therefore 2, and every authored size is multiplied by it.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
 import { t } from '../../gui/strings.js';
 import '../../gui/components/ph-radar.js';
 import '../../gui/components/ph-tactical-radar.js';
+import '../../gui/components/ph-helm-radar.js';
+import '../../gui/components/ph-sensor-radar.js';
 import { makeRadarCtx, strokedArcRadii, paintedText, haloedText } from './radar-canvas-stub.js';
 import { ringPlan, ringStep, ARC_COMPOSITE_MAX } from '../../gui/components/ph-scope-chrome.js';
+import {
+  GUI, readStripped, cssRules, consoleDocuments, rel,
+} from './css-scan.js';
 
 const CSS_SIZE = 300;
 const DPR = 2;
@@ -208,9 +223,13 @@ function overlaps(a, b) {
  * The contact labels only.
  *
  * The scale readout is painted with the same call, and it is deliberately NOT
- * part of the de-collision pass: it is anchored to the scope's rim rather than
- * to a contact, and it is drawn right-aligned from a bottom baseline, so the
- * box arithmetic below would not describe it correctly anyway.
+ * part of the de-collision pass: it is anchored to the scope's RIM rather than
+ * to a contact, so a contact label crowding it is the scope being full, not a
+ * de-collision failure. Since issue #1375 it is drawn left-aligned from a
+ * bottom baseline on the aft-port diagonal -- exactly the geometry `labelBox`
+ * above models -- so the clearance it does owe is to the speed readout sharing
+ * that corner, and `the scale readout stays on the ring, clear of all four
+ * corners` below is where that is pinned.
  */
 function contactLabels(ctx, fixture) {
   const wanted = new Set(fixture.blips.map((b) => b.label));
@@ -368,5 +387,262 @@ describe('overlapping firing arcs stay translucent however many stack', () => {
       .querySelectorAll('path');
     expect(parseFloat(faint.getAttribute('fill-opacity')))
       .toBeLessThan(parseFloat(strong.getAttribute('fill-opacity')));
+  });
+});
+
+// ── 4. A square with four dead corners (issue #1375) ───────────────────────
+//
+// The scope is a circle inscribed in a square whose edges it touches. That
+// makes the four corners the only part of the cell the picture never reaches,
+// and therefore the only place chrome can stand without covering a contact:
+// three readouts and, where a console has one, ON SCREEN. The scale readout is
+// the exception that proves the rule — it names the outer ring, so it stays ON
+// the ring, and the corners are what it has to keep clear of.
+
+/** The four corner slots, in the order a reader would name them. */
+const CORNERS = ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
+
+/** Mount one scope element and hand back its shadow root. */
+function mount(tag) {
+  document.body.innerHTML = '<' + tag + ' id="scope-under-test"></' + tag + '>';
+  return document.getElementById('scope-under-test').shadowRoot;
+}
+
+/** Which corner slot each piece of chrome in this scope occupies. */
+function cornersOf(root) {
+  return [...root.querySelectorAll('.scope-corner')].map((el) => ({
+    id: el.id,
+    corner: CORNERS.filter((c) => el.classList.contains(c)),
+  }));
+}
+
+describe('a scope keeps its chrome in the corners the circle cannot reach', () => {
+  it('puts the three readouts and ON SCREEN in four DISTINCT corners', () => {
+    const chrome = cornersOf(mount('ph-helm-radar'));
+    // Every piece names exactly one slot — a corner class is a position, and
+    // two of them on one element is two positions.
+    for (const piece of chrome) expect(piece.corner.length).toBe(1);
+    expect(chrome.map((p) => p.id + '@' + p.corner[0]).sort()).toEqual([
+      'label-bearing@top-right',
+      'label-pos@top-left',
+      'label-speed@bottom-left',
+      'on-screen-btn@bottom-right',
+    ]);
+  });
+
+  it('gives the sensors scope the same four corners, from the same fragment', () => {
+    // Sensors used to carry its own byte-identical copy of the ON SCREEN block.
+    // Two copies of one control is how the two scopes' fourth corners end up in
+    // different places, so the test is that they agree — not merely that each
+    // has a button somewhere.
+    const helm = cornersOf(mount('ph-helm-radar'));
+    const sensors = cornersOf(mount('ph-sensor-radar'));
+    expect(sensors).toEqual(helm);
+  });
+
+  it('leaves the fourth corner EMPTY on a scope with no ON SCREEN', () => {
+    // A weapons officer does not choose the viewscreen, so the tactical scope
+    // has no such button — and the shared fragment must not hand it one for
+    // the sake of symmetry.
+    const root = mount('ph-tactical-radar');
+    expect(root.getElementById('on-screen-btn')).toBeNull();
+    expect(cornersOf(root).map((p) => p.corner[0]).sort())
+      .toEqual(['bottom-left', 'top-left', 'top-right']);
+  });
+
+  it('keeps the shadow-DOM button id distinct from the light-DOM chart one', () => {
+    // `console-core.js` resolves the Navigation adapter's `supportsChart` from
+    // `#btn-on-screen`, a LIGHT-DOM id that only gui/battleship/navigation.html
+    // writes. The scope's own button is `#on-screen-btn` inside a shadow root.
+    // Collapsing the two ids would make every console with a scope claim to
+    // support a chart it does not have.
+    const root = mount('ph-helm-radar');
+    expect(root.getElementById('on-screen-btn')).not.toBeNull();
+    expect(root.getElementById('btn-on-screen')).toBeNull();
+
+    const core = fs.readFileSync(path.join(GUI, 'console-core.js'), 'utf8');
+    expect(core).toContain("getElementById('btn-on-screen')");
+    const navigation = fs.readFileSync(path.join(GUI, 'battleship', 'navigation.html'), 'utf8');
+    expect(navigation).toContain('id="btn-on-screen"');
+  });
+
+  it('declares the ON SCREEN button once, not once per scope that shows it', () => {
+    // The corner offsets and the button's own rules live in ph-scope-chrome.js.
+    // A component that writes either for itself again is the duplication this
+    // slice removed, and it is invisible until the two copies disagree.
+    for (const file of ['ph-helm-radar.js', 'ph-sensor-radar.js']) {
+      const source = readStripped(path.join(GUI, 'components', file));
+      expect(source, file + ' writes its own ON SCREEN rules')
+        .not.toMatch(/\.on-screen-btn\s*\{/);
+      expect(source, file + ' writes its own ON SCREEN markup')
+        .not.toMatch(/<button/);
+    }
+  });
+});
+
+describe('the scale readout stays on the ring, clear of all four corners', () => {
+  /** The scale readout's paint anchor for a 500-unit scope. */
+  function scaleAnchor() {
+    const ctx = scope().draw({ range: 500, blips: [] });
+    const hits = paintedText(ctx)
+      .filter((p) => p.text === t('console.radar.scale', { range: '500' }));
+    expect(hits.length).toBe(1);
+    return hits[0];
+  }
+
+  it('paints it against the outer ring rather than out in a corner', () => {
+    const readout = scaleAnchor();
+    // Just inside the outermost stroked radius — on the ring it names, not out
+    // at the corner where a corner label would be.
+    const radius = Math.hypot(readout.x - R, readout.y - R);
+    expect(radius).toBeLessThan(R);
+    expect(radius).toBeGreaterThan(R * 0.9);
+  });
+
+  it('keeps out of the corner ON SCREEN occupies', () => {
+    // It used to be painted on the aft-STARBOARD diagonal — the bottom-right —
+    // which is the corner the fourth slot's button now stands in. That button
+    // is opaque enough to hide the readout completely, so the scale moved to
+    // the aft-port diagonal, sharing its corner with the shortest of the three
+    // readouts instead.
+    const readout = scaleAnchor();
+    expect(readout.x).toBeLessThan(R);       // port half
+    expect(readout.y).toBeGreaterThan(R);    // aft half
+  });
+
+  it('clears the speed readout in that corner at every scope size', () => {
+    // The two are anchored differently — the corner label at a PERCENTAGE of
+    // the scope's side, the scale at a fixed offset from the ring — so they
+    // close on each other as the scope shrinks. The gap is
+    // 0.0864·side − lineHeight/px, which stays positive for any scope a phone
+    // would render; this pins the arithmetic at the anchor the draw log shows.
+    const readout = scaleAnchor();
+    const sideCss = CSS_SIZE;
+    const speedLabelTopCss = sideCss * 0.94 - LINE_HEIGHT / PX;
+    expect(readout.y / PX).toBeLessThan(speedLabelTopCss);
+  });
+});
+
+describe('one rule makes every scope square', () => {
+  const CONSOLE_CSS = path.join(GUI, 'console.css');
+  const SCOPES = 'ph-helm-radar, ph-tactical-radar, ph-sensor-radar, ph-courier-radar';
+
+  it('states the square as min(free width, free height) in gui/console.css', () => {
+    const rules = cssRules(readStripped(CONSOLE_CSS));
+    const cell = rules.find((r) => r.selector === '.scope-cell > *');
+    expect(cell, 'gui/console.css declares no .scope-cell child rule').toBeDefined();
+    // The side is the SMALLER of the two axes of the slot the layout left over,
+    // written as that sentence rather than as a min/max clamp to unpick.
+    expect(cell.body.replace(/\s+/g, ' ')).toMatch(/width:\s*min\(100cqw,\s*100cqh\)/);
+    const slot = rules.find((r) => r.selector === '.scope-cell');
+    expect(slot.body).toMatch(/container-type:\s*size/);
+  });
+
+  it('mounts every scope in the fleet inside a .scope-cell', () => {
+    const parser = new DOMParser();
+    const mounted = [];
+    for (const file of consoleDocuments()) {
+      const doc = parser.parseFromString(fs.readFileSync(file, 'utf8'), 'text/html');
+      for (const el of doc.querySelectorAll(SCOPES)) {
+        const tag = el.tagName.toLowerCase();
+        mounted.push(rel(file) + ' :: ' + tag);
+        expect(
+          !!el.parentElement && el.parentElement.classList.contains('scope-cell'),
+          rel(file) + ' mounts <' + tag + '> outside a .scope-cell',
+        ).toBe(true);
+      }
+    }
+    // The sweep is worthless if it found nothing to sweep.
+    expect(mounted.length).toBeGreaterThanOrEqual(10);
+  });
+
+  it('leaves no console document declaring a scope aspect-ratio of its own', () => {
+    // Eight documents each worked out their own `aspect-ratio: 1 / 1` variant,
+    // and each carried a comment explaining why THAT console's arithmetic had
+    // to change when the chrome above the scope did. One rule, or eight
+    // chances for a hull's scope to stop being square.
+    const strays = [];
+    for (const file of consoleDocuments()) {
+      for (const rule of cssRules(readStripped(file))) {
+        if (!/aspect-ratio/.test(rule.body)) continue;
+        strays.push(rel(file) + ' :: ' + rule.selector);
+      }
+    }
+    expect(strays).toEqual([]);
+  });
+
+  it('names the two side-column widths instead of spelling out a track list', () => {
+    // `--scope-rail-start` / `--scope-rail-end` are the only thing a console
+    // says about the row its scope sits in; the row itself is written once.
+    const rules = cssRules(readStripped(CONSOLE_CSS));
+    const row = rules.find((r) => r.selector === '.scope-row');
+    expect(row).toBeDefined();
+    expect(row.body).toMatch(/--scope-rail-start:/);
+    expect(row.body).toMatch(/--scope-rail-end:/);
+
+    const railed = [];
+    for (const file of consoleDocuments()) {
+      const source = readStripped(file);
+      if (!/--scope-rail-(start|end)\s*:/.test(source)) continue;
+      railed.push(rel(file));
+      expect(source, rel(file) + ' still writes its own scope track list')
+        .not.toMatch(/grid-template-columns/);
+    }
+    expect(railed.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it('gives the scope cell a shrink weight so a narrow row does not land on it', () => {
+    // The bug this pins is a `flex: 1 1 0` on the cell. Flex shrinking is
+    // weighted by BASE SIZE, so a zero base size is a zero shrink weight: the
+    // cell then takes only the positive free space left over after every rail
+    // has claimed its full basis, and reaches 0px before a rail gives up a
+    // pixel. `auto` makes the base size the square the row's height gives it,
+    // which is what puts the cell and the rails in the same distribution.
+    //
+    // Text, not layout: jsdom has no layout engine. The result this produces
+    // is measured in a browser by tests/smoke/scope-responsive.spec.js, which
+    // is the half of the contract that catches a 66x66 scope.
+    const rules = cssRules(readStripped(CONSOLE_CSS));
+    const cell = rules.find((r) => r.selector === '.scope-row > .scope-cell');
+    expect(cell, 'gui/console.css declares no landscape .scope-cell flex').toBeDefined();
+    expect(cell.body.replace(/\s+/g, ' ')).toMatch(/flex:\s*1\s+1\s+auto/);
+    expect(cell.body, 'a zero flex basis takes the cell out of the shrink distribution')
+      .not.toMatch(/flex:\s*1\s+1\s+0/);
+  });
+
+  it('lets a rail holding a sized widget declare the floor it shrinks to', () => {
+    // The other half of sharing the shortfall: a rail that shrinks past its
+    // content pushes that content out SIDEWAYS over the scope, because a
+    // console column does not clip. `--scope-rail-min` is that floor, 0 by
+    // default so a rail of plain readouts keeps shrinking, and it inherits so
+    // a console with two rails can raise it on the one that needs more.
+    const rules = cssRules(readStripped(CONSOLE_CSS));
+    const row = rules.find((r) => r.selector === '.scope-row');
+    expect(row.body).toMatch(/--scope-rail-min:\s*0px/);
+    for (const selector of [
+      '.scope-row > :not(.scope-cell):first-child',
+      '.scope-row > .scope-cell ~ :not(.scope-cell)',
+    ]) {
+      const rail = rules.find((r) => r.selector === selector);
+      expect(rail, 'gui/console.css declares no rule for ' + selector).toBeDefined();
+      expect(rail.body, selector + ' has no floor to stop shrinking at')
+        .toMatch(/min-width:\s*var\(--scope-rail-min\)/);
+    }
+  });
+
+  it('keeps the Helm joystick widgets sized to their rail rather than over it', () => {
+    // The Destroyer's Helm is the one console with a scope BETWEEN two control
+    // rails, and both rails hold a widget with a size of its own. Those sizes
+    // are maxima — `min(<size>, 100%)` — so a rail at its floor renders a
+    // smaller control; a bare `width: <size>` renders the same control hanging
+    // over the scope, which no size assertion can see.
+    for (const [file, size] of [
+      ['components/ph-helm-joystick.js', '240px'],
+      ['components/ph-lateral-thrust-joystick.js', '180px'],
+    ]) {
+      const source = fs.readFileSync(path.join(GUI, file), 'utf8');
+      expect(source, file + ' pins its widget to a fixed width')
+        .toMatch(new RegExp('width:\\s*min\\(' + size + ',\\s*100%\\)'));
+    }
   });
 });

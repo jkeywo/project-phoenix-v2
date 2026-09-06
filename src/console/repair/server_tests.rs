@@ -323,6 +323,348 @@ fn dispatch_sends_team_to_travelling() {
     );
 }
 
+// ── Recall tests (issue #1385) ──────────────────────────────────────────
+
+fn recall(app: &mut App, token: &str, team_idx: u8) {
+    push(
+        app,
+        token,
+        ClientMessage::ControlSystem {
+            target: crate::ship::system_registry::repair_system_id(),
+            payload: SystemControlPayload::RecallRepairTeam { team_idx },
+        },
+    );
+    tick(app);
+}
+
+fn team_is_returning(teams: &ShipRepairTeams, idx: usize) -> bool {
+    matches!(teams.0.slots()[idx], TeamSlot::Returning { .. })
+}
+
+fn travelling_elapsed(teams: &ShipRepairTeams, idx: usize) -> Option<f32> {
+    match &teams.0.slots()[idx] {
+        TeamSlot::Travelling { elapsed, .. } => Some(*elapsed),
+        _ => None,
+    }
+}
+
+fn returning_remaining(teams: &ShipRepairTeams, idx: usize) -> Option<f32> {
+    match &teams.0.slots()[idx] {
+        TeamSlot::Returning { remaining, .. } => Some(*remaining),
+        _ => None,
+    }
+}
+
+/// The Repair holder recalls a team that is still en route → it turns round.
+#[test]
+fn recall_turns_a_travelling_team_home() {
+    let mut app = test_app();
+    start_game(&mut app);
+    damage_owned_fine_systems(&mut app, &["helm-engine-port"]);
+    dispatch_local(
+        &mut app,
+        0,
+        SystemId("helm-engine-port".into()),
+        "Port Engine",
+    );
+    // Let it get some way there first: the walk back is exactly as long as the
+    // walk out so far, so recalling on the dispatch tick itself lands the team
+    // home the same tick and would prove nothing about the return trip.
+    for _ in 0..4 {
+        tick(&mut app);
+    }
+    assert!(team_is_travelling(&local_teams(&mut app), 0));
+
+    recall(&mut app, "eng", 0);
+
+    let teams = local_teams(&mut app);
+    assert!(
+        team_is_returning(&teams, 0),
+        "a recalled travelling team walks home: {:?}",
+        teams.0.slots()[0]
+    );
+    // Recall never queues onward work — that is what separates it from the
+    // redirect a dispatch to a DIFFERENT system produces.
+    assert!(matches!(
+        &teams.0.slots()[0],
+        TeamSlot::Returning {
+            queued_system_id: None,
+            ..
+        }
+    ));
+}
+
+/// The ARRIVAL BOUNDARY: a recall admitted on the very tick the team would
+/// otherwise land. This is the recall's load-bearing ordering — the reason
+/// `tick_repair_teams` is pinned `.after(handle_recall_repair_team)` alongside
+/// the other three appliers (see the AC4 DETERMINISM comment in
+/// `RepairPlugin::build`). The appliers' order among THEMSELVES is a digest
+/// divergence too, and is pinned by the `.chain()` on the tuple in
+/// `register_repair_dispatch` —
+/// `same_tick_recall_and_target_priority_resolve_in_the_chained_order` covers
+/// that one.
+///
+/// Recall-first — the pinned order — turns the team round where it stands, so
+/// the walk home is only as long as the walk out so far and this tick's own
+/// advance has already come off it. Tick-first would instead have landed the
+/// team (`Repairing`, opening the on-site information gate for that tick) and
+/// then walked it home the FULL `travel_duration`, or advanced the walk out
+/// before turning it round — either way a different slot from identical input.
+#[test]
+fn recall_on_the_arrival_tick_turns_the_team_round_before_it_lands() {
+    let mut app = test_app();
+    start_game(&mut app);
+    damage_owned_fine_systems(&mut app, &["helm-engine-port"]);
+    dispatch_local(
+        &mut app,
+        0,
+        SystemId("helm-engine-port".into()),
+        "Port Engine",
+    );
+
+    let travel = local_teams(&mut app).0.timings().travel_duration;
+    // Walk out until ONE more tick would arrive, measuring the per-tick
+    // advance from the walk itself rather than assuming the harness step —
+    // so this asserts on the boundary without baking a tick count.
+    let mut previous = 0.0_f32;
+    let mut at_recall = None;
+    for _ in 0..60 {
+        let before = travelling_elapsed(&local_teams(&mut app), 0).unwrap_or(0.0);
+        tick(&mut app);
+        let teams = local_teams(&mut app);
+        let elapsed = travelling_elapsed(&teams, 0)
+            .unwrap_or_else(|| panic!("the team must still be walking out: {:?}", teams.0.slots()));
+        // The 1.01 is float headroom, not a fudge of the boundary: it makes the
+        // estimate of "one more tick lands it" round the safe way, so the loop
+        // can never walk PAST the arrival tick and find the team on site.
+        if elapsed + (elapsed - before) * 1.01 >= travel {
+            previous = before;
+            at_recall = Some(elapsed);
+            break;
+        }
+    }
+    let at_recall = at_recall.expect("the team must reach the tick before arrival");
+    let dt = at_recall - previous;
+
+    recall(&mut app, "eng", 0);
+
+    let teams = local_teams(&mut app);
+    let remaining = returning_remaining(&teams, 0).unwrap_or_else(|| {
+        panic!(
+            "a recall on the arrival tick must turn the team round, not land it: {:?}",
+            teams.0.slots()[0]
+        )
+    });
+    // The recall wrote `remaining = at_recall`; the tick that followed it in
+    // the same run took one step off. Tick-first would read `at_recall + dt`
+    // (advanced, then turned round) or `travel` (arrived, then sent home).
+    assert!(
+        (remaining - previous).abs() < dt / 2.0,
+        "the walk home must be the walk out so far minus this tick: \
+         remaining {remaining}, expected ~{previous} (travel {travel}, dt {dt})"
+    );
+}
+
+/// A team already on site is recalled the same way, and is orderable again on
+/// the next tick even though the walk home has not finished.
+#[test]
+fn recall_sends_an_on_site_team_home_and_it_takes_new_work_at_once() {
+    let mut app = test_app();
+    start_game(&mut app);
+    damage_owned_fine_systems(&mut app, &["helm-engine-port", "tactical-radar"]);
+    dispatch_local(
+        &mut app,
+        0,
+        SystemId("helm-engine-port".into()),
+        "Port Engine",
+    );
+    // The fixture's travel is five seconds and the harness advances 0.2s a
+    // tick; leave headroom rather than baking an off-by-one boundary.
+    for _ in 0..40 {
+        if matches!(
+            local_teams(&mut app).0.slots()[0],
+            TeamSlot::Repairing { .. }
+        ) {
+            break;
+        }
+        tick(&mut app);
+    }
+    assert!(matches!(
+        local_teams(&mut app).0.slots()[0],
+        TeamSlot::Repairing { .. }
+    ));
+
+    recall(&mut app, "eng", 0);
+    assert!(team_is_returning(&local_teams(&mut app), 0));
+
+    push(
+        &mut app,
+        "eng",
+        ClientMessage::ControlSystem {
+            target: crate::ship::system_registry::repair_system_id(),
+            payload: SystemControlPayload::DispatchRepairTeam {
+                team_idx: 0,
+                target: RepairTarget::Station(StationId("tactical".into())),
+            },
+        },
+    );
+    tick(&mut app);
+    let expected = Some(SystemId("tactical-radar".into()));
+    assert!(
+        matches!(
+            &local_teams(&mut app).0.slots()[0],
+            TeamSlot::Returning { queued_system_id, .. } if *queued_system_id == expected
+        ),
+        "a recalled team accepts the next order immediately: {:?}",
+        local_teams(&mut app).0.slots()[0]
+    );
+}
+
+/// Recall is INTERNAL-teams only, and only for a team that is actually out: an
+/// idle slot is left exactly as it was.
+#[test]
+fn recall_of_an_idle_team_changes_nothing() {
+    let mut app = test_app();
+    start_game(&mut app);
+
+    recall(&mut app, "eng", 0);
+
+    assert!(
+        team_is_idle(&local_teams(&mut app), 0),
+        "an idle team has nothing to recall"
+    );
+}
+
+/// Non-Repair console holder sending `RecallRepairTeam` is ignored, exactly as
+/// it is for the dispatch: admission turns on the target system, so both
+/// payloads meet the same station-tenure gate.
+#[test]
+fn non_repair_sender_cannot_recall() {
+    let mut app = test_app();
+    start_game(&mut app);
+    damage_owned_fine_systems(&mut app, &["helm-engine-port"]);
+    dispatch_local(
+        &mut app,
+        0,
+        SystemId("helm-engine-port".into()),
+        "Port Engine",
+    );
+
+    recall(&mut app, "captain", 0);
+
+    assert!(
+        team_is_travelling(&local_teams(&mut app), 0),
+        "team 0 should still be travelling after a non-Repair recall"
+    );
+}
+
+/// Two teams on site in ONE station group, a recall of team 0 and a
+/// damaged-systems tap naming a third system of that group — all on one tick.
+///
+/// This is the edge the applier tuple's `.chain()` exists for. Every applier
+/// writes `ShipRepairTeams`, and `handle_set_repair_target_priority` resolves
+/// WHICH SLOT it writes out of that same component
+/// (`RepairTeams::prioritise_system` → `priority_team_for_system`), so without
+/// an explicit edge the executor decides which team takes the pin:
+///
+/// - recall first — the pinned reading: slot 0 is already `Returning`, so its
+///   system has left `on_site_systems()`, and the tap resolves to the only
+///   team still on site. Team 1 takes the pin.
+/// - tap first: `priority_team_for_system` finds slot 0 (lowest index whose
+///   sweep group covers the target) and pins team 0; the recall then rewrites
+///   that slot and throws the pin away with it, leaving team 1 unpinned.
+///
+/// `priority_system_id` steers `next_sweep_target`, so the two readings have
+/// team 1 repair a DIFFERENT system next — that folds into `EntitySystemHull`
+/// and so into the sim digest, i.e. two hosts of one fleet diverging from
+/// identical input. Exactly the issue #785 failure class the sibling
+/// `tick_repair_teams` edge was pinned for.
+#[test]
+fn same_tick_recall_and_target_priority_resolve_in_the_chained_order() {
+    let mut app = test_app();
+    start_game(&mut app);
+    // Three damaged systems in the helm sweep group: one under each team, and
+    // `helm-engine-starboard` as the third the tap can name.
+    damage_owned_fine_systems_to(
+        &mut app,
+        &[
+            ("helm-thrust", 0.2),
+            ("helm-engine-port", 0.5),
+            ("helm-engine-starboard", 0.6),
+        ],
+    );
+    dispatch_local(&mut app, 0, SystemId("helm-thrust".into()), "Thrusters");
+    dispatch_local(
+        &mut app,
+        1,
+        SystemId("helm-engine-port".into()),
+        "Port Engine",
+    );
+    // Both teams left on the same tick with the same travel time, so they land
+    // together. Headroom rather than an off-by-one boundary, as elsewhere.
+    for _ in 0..40 {
+        let teams = local_teams(&mut app);
+        if matches!(teams.0.slots()[0], TeamSlot::Repairing { .. })
+            && matches!(teams.0.slots()[1], TeamSlot::Repairing { .. })
+        {
+            break;
+        }
+        tick(&mut app);
+    }
+    let teams = local_teams(&mut app);
+    assert!(
+        matches!(
+            (&teams.0.slots()[0], &teams.0.slots()[1]),
+            (
+                TeamSlot::Repairing { system_id: Some(a), .. },
+                TeamSlot::Repairing { system_id: Some(b), .. },
+            ) if a.0 == "helm-thrust" && b.0 == "helm-engine-port"
+        ),
+        "fixture precondition: both teams on site in the helm group, got {:?}",
+        teams.0.slots()
+    );
+
+    // ONE tick carrying both orders.
+    push(
+        &mut app,
+        "eng",
+        ClientMessage::ControlSystem {
+            target: crate::ship::system_registry::repair_system_id(),
+            payload: SystemControlPayload::RecallRepairTeam { team_idx: 0 },
+        },
+    );
+    push(
+        &mut app,
+        "eng",
+        ClientMessage::ControlSystem {
+            target: crate::ship::system_registry::repair_system_id(),
+            payload: SystemControlPayload::SetRepairTargetPriority {
+                system_id: SystemId("helm-engine-starboard".into()),
+            },
+        },
+    );
+    tick(&mut app);
+
+    let teams = local_teams(&mut app);
+    assert!(
+        team_is_returning(&teams, 0),
+        "the recall applies: team 0 walks home, got {:?}",
+        teams.0.slots()[0]
+    );
+    assert!(
+        matches!(
+            &teams.0.slots()[1],
+            TeamSlot::Repairing {
+                priority_system_id: Some(pinned),
+                ..
+            } if pinned.0 == "helm-engine-starboard"
+        ),
+        "the tap resolves AFTER the recall, so the one team still on site takes \
+         the pin (tap-first would have pinned team 0 and lost it), got {:?}",
+        teams.0.slots()[1]
+    );
+}
+
 #[test]
 fn correlated_internal_repair_actions_finish_at_the_repair_owner() {
     let mut app = test_app();
@@ -443,6 +785,36 @@ fn correlated_internal_repair_actions_finish_at_the_repair_owner() {
         feedback_count(
             &tick(&mut app),
             "repair-dispatch-refused",
+            ActionFeedbackOutcome::Refused,
+        ),
+        1,
+    );
+
+    // Issue #1385: RECALL is correlated on the same seam. Team 0 is on site, so
+    // the first order applies and the second — it is already walking home — is
+    // refused rather than silently reshaping the slot.
+    send(
+        &mut app,
+        "repair-recall-applied",
+        SystemControlPayload::RecallRepairTeam { team_idx: 0 },
+    );
+    assert_eq!(
+        feedback_count(
+            &tick(&mut app),
+            "repair-recall-applied",
+            ActionFeedbackOutcome::Applied,
+        ),
+        1,
+    );
+    send(
+        &mut app,
+        "repair-recall-refused",
+        SystemControlPayload::RecallRepairTeam { team_idx: 0 },
+    );
+    assert_eq!(
+        feedback_count(
+            &tick(&mut app),
+            "repair-recall-refused",
             ActionFeedbackOutcome::Refused,
         ),
         1,

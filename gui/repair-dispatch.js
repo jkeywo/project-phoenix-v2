@@ -73,6 +73,46 @@ export function dispatchRepairTeam(teamIdx, target, send, controlSystemId = REPA
 }
 
 /**
+ * Build the `RecallRepairTeam` payload without sending it (issue #1385).
+ *
+ * INTERNAL teams only. It names its team where the fieldless
+ * `RecallExternalRepair` beside it carries nothing at all: a ship dispatches one
+ * team abroad at a time, but every internal team can be out on a different job
+ * at once, so nothing server-side could resolve which of them "come home" meant.
+ *
+ * Nothing here decides whether the team CAN be recalled. The host owns that
+ * rule — a team that is idle or already walking home is refused, with the same
+ * correlated feedback every other Engineering verb reports — and the card
+ * offers the control off the authoritative status rather than off a second
+ * reading of the rule.
+ *
+ * @param {number} teamIdx repair team slot index
+ * @returns {{type: string, data: object}}
+ */
+export function recallRepairTeamPayload(teamIdx) {
+  if (!Number.isInteger(teamIdx) || teamIdx < 0 || teamIdx > 255) {
+    throw new TypeError('repair-dispatch: team_idx must be an integer 0-255');
+  }
+  return {
+    type: 'RecallRepairTeam',
+    data: { team_idx: teamIdx },
+  };
+}
+
+/**
+ * Recall one internally dispatched repair team through the explicit command
+ * gateway.
+ *
+ * @param {number} teamIdx
+ * @param {((type: string, data?: object) => void)} [send]
+ * @param {string} [controlSystemId] exact authored Repair owner
+ * @returns {object|null} the envelope that was sent, or null when offline.
+ */
+export function recallRepairTeam(teamIdx, send, controlSystemId = REPAIR_SYSTEM_ID) {
+  return sendControlSystem(controlSystemId, recallRepairTeamPayload(teamIdx), send);
+}
+
+/**
  * Build the `SetRepairPriority` payload without sending it. Exposed so tests
  * can assert on the exact wire shape.
  *

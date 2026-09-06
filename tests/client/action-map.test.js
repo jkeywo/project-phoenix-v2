@@ -8,7 +8,7 @@ describe('ACTION_MAP', () => {
     expect(Object.isFrozen(ACTION_MAP)).toBe(true);
   });
 
-  it('contains exactly the 53 expected action keys', () => {
+  it('contains exactly the 54 expected action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
       'cancel_impulse',
       'charge_blaster_cancel',
@@ -28,6 +28,7 @@ describe('ACTION_MAP', () => {
       'load_tube',
       'order_civilian',
       'recall_external_repair',
+      'recall_repair_team',
       'recall_security_team',
       'release_tractor',
       'respond_to_message',
@@ -746,6 +747,42 @@ describe('dispatch_repair_team', () => {
         type: 'DispatchRepairTeam',
         data: { team_idx: 1, target: { type: 'Core' } },
       },
+    });
+  });
+});
+
+describe('recall_repair_team', () => {
+  it('names only the team (issue #1385)', () => {
+    const send = mkSend();
+    ACTION_MAP.recall_repair_team({ action: 'recall_repair_team', team_idx: 1 }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'repair',
+      payload: { type: 'RecallRepairTeam', data: { team_idx: 1 } },
+    });
+  });
+
+  it('routes through the correlated envelope when the card correlated it', () => {
+    const send = mkSend();
+    ACTION_MAP.recall_repair_team(
+      { action: 'recall_repair_team', team_idx: 0, correlation: 'abc123' },
+      send,
+    );
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
+      correlation: 'abc123',
+      target: 'repair',
+      payload: { type: 'RecallRepairTeam', data: { team_idx: 0 } },
+    });
+  });
+
+  it('addresses the exact authored Repair owner when the console names one', () => {
+    const send = mkSend();
+    ACTION_MAP.recall_repair_team(
+      { action: 'recall_repair_team', team_idx: 2, control_system_id: 'damage_control' },
+      send,
+    );
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'damage_control',
+      payload: { type: 'RecallRepairTeam', data: { team_idx: 2 } },
     });
   });
 });

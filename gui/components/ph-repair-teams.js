@@ -8,6 +8,7 @@ import {
   EXTERNAL_REPAIR_TOGGLE_ACTION_ID,
   REPAIR_DISPATCH_ACTION_ID,
   REPAIR_PRIORITY_ACTION_ID,
+  REPAIR_RECALL_ACTION_ID,
 } from '../stations/engineering-actions.js';
 import { activateEngineeringAction } from '../stations/engineering-action-control.js';
 import { PhElement, phDefine } from './ph-element.js';
@@ -29,13 +30,16 @@ import { PhElement, phDefine } from './ph-element.js';
  *   - **idle** → DISPATCH TO: one destination per damageable station, Core,
  *     and — on a hull that authored `[repair.external_dispatch]` — the field
  *     target off the ship.
- *   - **on site** (`repairing`) → the damaged systems the host is willing to
- *     show this seat, tappable to become that team's next job. This is the
- *     list that used to sit below the roster; it now belongs to the card whose
- *     team can actually act on it.
- *   - **travelling / returning** → status and progress only. RECALL is a verb
- *     the host does not have for internal teams yet, and a button that sends
- *     nothing is worse than no button.
+ *   - **on site** (`repairing`) → RECALL, plus the damaged systems the host is
+ *     willing to show this seat, tappable to become that team's next job. That
+ *     list used to sit below the roster; it now belongs to the card whose team
+ *     can actually act on it.
+ *   - **travelling** → RECALL (issue #1385). A team that has been sent to the
+ *     wrong station is the one thing a seat wants to undo, and undoing it early
+ *     is cheap: the walk back is only as long as the walk out so far.
+ *   - **returning** → status and progress only. It is already coming home, so
+ *     the host refuses a recall, and a button that sends nothing is worse than
+ *     no button.
  *
  * The same rule governs the summary line itself: a card with no body to open
  * onto is not offered as a toggle at all — its summary is a disabled readout
@@ -111,13 +115,19 @@ export class PhRepairTeams extends PhElement {
     .progress-fill.travelling { background: linear-gradient(90deg, var(--reloading-dim), var(--reloading)); }
     .progress-fill.returning { background: linear-gradient(90deg, var(--cyan-dim), var(--cyan)); }
     /* The open half of a selected card. Hidden — not merely empty — whenever
-       the selected team has no verb to offer, so a travelling team's card does
+       the selected team has no verb to offer, so a returning team's card does
        not open onto a blank box. */
     .card-body { display: flex; flex-direction: column; gap: 0.3rem; border-top: 1px solid var(--line-faint); padding-top: 0.35rem; }
     .card-body[hidden] { display: none; }
     .body-head { font-size: var(--text-xs); letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
     .body-note { font-size: var(--text-xs); color: var(--ink-dim); }
     .dispatch-row { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+    /* RECALL sits on its own row so it is never mistaken for one more
+       destination, and stretches the card's full width because it is the only
+       verb a team already out on a job has. */
+    .recall-row { display: flex; }
+    .recall-row[hidden] { display: none; }
+    .recall-row .btn { flex: 1; }
     .empty { font-size: var(--text-xs); color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
     /* On-site systems (issue #1015's list, re-homed by #1384). Rows are
        buttons: tapping one asks the host to make that system the next job of
@@ -297,9 +307,10 @@ export class PhRepairTeams extends PhElement {
    * The field row always sends `dispatch_external_repair` and never its recall
    * counterpart. It is rendered as a disabled readout while a team is already
    * working abroad — exactly the state in which the shared dispatch/recall
-   * action flips to RECALL — so the recall the roster is not allowed to offer
-   * yet cannot be reached from a card at all, rather than merely being spelled
-   * differently.
+   * action flips to RECALL — so the EXTERNAL recall cannot be reached from a
+   * destination list at all, rather than merely being spelled differently. The
+   * card's own RECALL (issue #1385) is a different verb on a different row: it
+   * names an internal team and never touches the field commitment.
    *
    * @returns {boolean} whether the card has any destination to offer
    */
@@ -375,6 +386,44 @@ export class PhRepairTeams extends PhElement {
     return targets.length > 0 || fieldLabel != null;
   }
 
+  /**
+   * Build the RECALL control inside one open card whose team is out on an
+   * internal job (issue #1385).
+   *
+   * It names its team, unlike the fieldless external dispatch above it: a ship
+   * sends one team abroad at a time, but every internal team can be out on a
+   * different job at once, so nothing server-side could resolve which of them
+   * "come home" meant.
+   *
+   * WHETHER a recall is possible is not decided here. The card offers the
+   * control off the authoritative status alone — travelling or on site — and
+   * the host still owns the rule and answers on the correlated feedback seam.
+   * AUTO greys it for the same reason it greys every other verb on this panel:
+   * the seat is not the one giving orders.
+   */
+  #renderRecallRow(row, teamId, auto) {
+    let btn = row.querySelector('.recall-btn');
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn armed recall-btn';
+      btn.dataset.recall = String(teamId);
+      btn.innerHTML = '<span class="btn-bg"></span><span class="led on"></span><span class="label"></span>';
+      btn.querySelector('.label').textContent = t('component.repair_teams.recall');
+      btn.addEventListener('click', () => {
+        if (btn.disabled) return;
+        activateEngineeringAction(
+          this,
+          REPAIR_RECALL_ACTION_ID,
+          { team_idx: teamId },
+          'recall_repair_team',
+        );
+      });
+      row.appendChild(btn);
+    }
+    btn.disabled = auto;
+  }
+
   #render() {
     const s = this.#state || {};
     const teams = Array.isArray(s.teams) ? s.teams : [];
@@ -446,6 +495,7 @@ export class PhRepairTeams extends PhElement {
             <div class="body-note"></div>
             <div class="dispatch-row"></div>
             <div class="damaged-list"></div>
+            <div class="recall-row" hidden></div>
           </div>
         `;
         card.querySelector('.card-top').addEventListener('click', () => {
@@ -466,13 +516,15 @@ export class PhRepairTeams extends PhElement {
       // drawn, because the caret, the selected border and `aria-expanded` are
       // promises about the body and must not outrun it. An idle slot always has
       // one (destinations, or the note saying why there are none) unless its
-      // slot is already spoken for by the field; an on-site team has one only
-      // while the host is showing this seat rows to tap. Travelling, returning
-      // and externally committed teams have none — same rule the RECALL verb
-      // obeys, applied to the toggle itself.
-      const hasBody = isIdle
-        ? !externallyCommitted
-        : status === 'repairing' && damaged.length > 0;
+      // slot is already spoken for by the field. A team out on an internal job
+      // — travelling or on site — always has one too since issue #1385, because
+      // RECALL is a verb it can always use; on site that verb shares the card
+      // with the damaged rows the host is showing this seat. A returning team
+      // and an externally committed slot have no body: the host refuses a
+      // recall for the first and the field owns the second, and a toggle whose
+      // only job is to open an empty box is worse than no toggle.
+      const canRecall = status === 'travelling' || status === 'repairing';
+      const hasBody = isIdle ? !externallyCommitted : canRecall;
       const open = selected && hasBody;
 
       const cardTop = card.querySelector('.card-top');
@@ -509,7 +561,9 @@ export class PhRepairTeams extends PhElement {
       const note = card.querySelector('.body-note');
       const drow = card.querySelector('.dispatch-row');
       const dlist = card.querySelector('.damaged-list');
+      const rrow = card.querySelector('.recall-row');
       const clearRow = () => { drow.innerHTML = ''; delete drow.dataset.sig; };
+      const clearRecall = () => { rrow.hidden = true; rrow.innerHTML = ''; };
 
       if (open && isIdle) {
         const hasDestinations = this.#renderDispatchRow(drow, team.id, targets, external, auto);
@@ -520,25 +574,41 @@ export class PhRepairTeams extends PhElement {
         note.textContent = hasDestinations ? '' : t('component.repair_teams.no_targets');
         dlist.style.display = 'none';
         dlist.innerHTML = '';
+        clearRecall();
       } else if (open) {
-        // `hasBody` already established this is an on-site team with rows.
+        // `hasBody` already established this team is out on an internal job, so
+        // it always has RECALL. The damaged rows are the on-site half and are
+        // drawn only when the team has actually arrived AND the host is showing
+        // this seat something to tap — a travelling team's card is RECALL and
+        // nothing else, because #737's information gate has not opened yet.
         clearRow();
         drow.style.display = 'none';
         note.style.display = 'none';
         note.textContent = '';
-        head.textContent = t('component.repair_teams.damaged_title');
-        head.style.display = 'block';
-        dlist.style.display = 'flex';
-        this.#renderOnSiteSystems(dlist, damaged, auto);
+        const onSiteRows = status === 'repairing' ? damaged : [];
+        if (onSiteRows.length > 0) {
+          head.textContent = t('component.repair_teams.damaged_title');
+          head.style.display = 'block';
+          dlist.style.display = 'flex';
+          this.#renderOnSiteSystems(dlist, onSiteRows, auto);
+        } else {
+          head.textContent = '';
+          head.style.display = 'none';
+          dlist.style.display = 'none';
+          dlist.innerHTML = '';
+        }
+        rrow.hidden = false;
+        this.#renderRecallRow(rrow, team.id, auto);
       } else {
-        // Closed — either unselected, or a team with no body to open onto
-        // (travelling, returning, a slot committed to the field, an on-site
-        // team the host is showing no rows for). Emptied rather than merely
-        // hidden, so a closed card holds no control a query could still find.
+        // Closed — either unselected, or a team with no body to open onto (a
+        // returning team, a slot committed to the field). Emptied rather than
+        // merely hidden, so a closed card holds no control a query could still
+        // find.
         clearRow();
         dlist.innerHTML = '';
         note.textContent = '';
         head.textContent = '';
+        clearRecall();
       }
       body.hidden = !open;
 

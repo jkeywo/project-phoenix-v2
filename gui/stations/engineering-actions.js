@@ -21,6 +21,7 @@ export const CAPTAIN_ENGINEERING_ACTION_CONTEXT = 'captain';
 export const POWER_DECREASE_ACTION_ID = 'power.decrease-allocation';
 export const POWER_INCREASE_ACTION_ID = 'power.increase-allocation';
 export const REPAIR_DISPATCH_ACTION_ID = 'repair.dispatch-team';
+export const REPAIR_RECALL_ACTION_ID = 'repair.recall-team';
 export const REPAIR_PRIORITY_ACTION_ID = 'repair.prioritise-system';
 export const TRACTOR_TOGGLE_ACTION_ID = 'engineering.tractor';
 export const UMBILICAL_TOGGLE_ACTION_ID = 'engineering.umbilical';
@@ -99,6 +100,19 @@ export const REPAIR_DISPATCH_ACTION = action(
   keyboard('KeyD', { shiftKey: true }),
   dpad('dpad-up'),
 );
+// Internal recall (issue #1385). Its own identity rather than a mode of the
+// dispatch above: dispatch chooses a destination for a team that is standing
+// still, recall chooses nothing at all for a team that is already moving, and
+// folding them into one toggle would make the parameter-free activation depend
+// on which team the pointer last happened to open.
+export const REPAIR_RECALL_ACTION = action(
+  REPAIR_RECALL_ACTION_ID,
+  REPAIR_CONTEXTS,
+  'repair',
+  'recall_team',
+  keyboard('KeyR', { shiftKey: true }),
+  button('right-shoulder'),
+);
 export const REPAIR_PRIORITY_ACTION = action(
   REPAIR_PRIORITY_ACTION_ID,
   REPAIR_CONTEXTS,
@@ -136,6 +150,7 @@ export const ENGINEERING_ACTIONS = Object.freeze([
   POWER_DECREASE_ACTION,
   POWER_INCREASE_ACTION,
   REPAIR_DISPATCH_ACTION,
+  REPAIR_RECALL_ACTION,
   REPAIR_PRIORITY_ACTION,
   TRACTOR_TOGGLE_ACTION,
   UMBILICAL_TOGGLE_ACTION,
@@ -241,6 +256,30 @@ function chooseRepairDispatch(view, detail) {
   return team && target ? { team_idx: team.id, target: target.id } : null;
 }
 
+// Which teams a recall may name (issue #1385). A team is recallable exactly
+// while it is out on an internal job — travelling to a station or working on
+// site. An idle team has nothing to recall and a returning one is already on
+// its way, so both are refused by the owner; mirroring that reading here keeps
+// a parameter-free activation from selecting a slot the host must refuse. It is
+// a reading of the AUTHORITATIVE status, not a second copy of the host's rule:
+// the owner still decides, and still answers on the feedback seam.
+function isRecallableTeam(entry) {
+  return !!entry
+    && Number.isInteger(entry.id)
+    && (entry.status === 'travelling' || entry.status === 'repairing');
+}
+
+function chooseRepairRecall(view, detail) {
+  if (!view || view.repair_auto) return null;
+  const teams = Array.isArray(view.teams) ? view.teams : [];
+  const requested = detail && Number.isInteger(detail.team_idx) ? detail.team_idx : null;
+  const candidates = requested == null
+    ? teams
+    : teams.filter((entry) => entry && entry.id === requested);
+  const team = candidates.find(isRecallableTeam);
+  return team ? { team_idx: team.id } : null;
+}
+
 function chooseRepairPriority(view, detail) {
   if (!view || view.repair_auto) return null;
   const rows = Array.isArray(view.damaged_systems) ? view.damaged_systems : [];
@@ -292,6 +331,20 @@ export function registerEngineeringActions(registry, options = {}) {
     const controlSystemId = ownerSystemId(state, view, 'repair');
     return selected && controlSystemId
       ? send(actionId, correlation, inputMs, 'dispatch_repair_team', {
+          ...selected, control_system_id: controlSystemId,
+        })
+      : false;
+  });
+
+  registry.register(REPAIR_RECALL_ACTION, ({
+    actionId, correlation, inputMs, detail,
+  } = {}) => {
+    const state = getState();
+    const view = repairActionView(state);
+    const selected = chooseRepairRecall(view, detail);
+    const controlSystemId = ownerSystemId(state, view, 'repair');
+    return selected && controlSystemId
+      ? send(actionId, correlation, inputMs, 'recall_repair_team', {
           ...selected, control_system_id: controlSystemId,
         })
       : false;

@@ -164,12 +164,13 @@ impl Plugin for RepairPlugin {
                     .before(crate::ship_plugin::flush_coordination_popups),
                 // AC4 DETERMINISM (issue #785) — pin the remaining intra-Physics
                 // edge. `operate_repair_ai` (decide/emit) →
-                // `handle_dispatch_repair_team` + `handle_set_repair_priority` +
+                // `handle_dispatch_repair_team` + `handle_recall_repair_team` +
+                // `handle_set_repair_priority` +
                 // `handle_set_repair_target_priority` (apply) →
                 // `tick_repair_teams` (advance) must run in that order every
                 // tick. #830 pinned only the first edge, so `tick_repair_teams`
-                // stayed ambiguous against the appliers even though all three
-                // mutate `ShipRepairTeams`: Bevy's parallel executor then
+                // stayed ambiguous against the appliers even though every one of
+                // them mutates `ShipRepairTeams`: Bevy's parallel executor then
                 // serialised them run-varyingly, and a dispatch landing BEFORE
                 // the tick let a `Returning { remaining }` slot hit
                 // `remaining <= 0` and flip straight to `Travelling` instead of
@@ -177,9 +178,22 @@ impl Plugin for RepairPlugin {
                 // cause of `all_busy_teams_ignore_further_dispatches` flaking.
                 // Production was weaker than its own `npc_repair_app` fixture,
                 // which already `.chain()`s the quartet; this closes the gap.
+                //
+                // EVERY applier belongs on this list, and issue #1385's recall is
+                // the fourth. Its load-bearing pair is not the dispatch beside it
+                // in the applier tuple but this edge: recall a team on the tick it
+                // would otherwise arrive and recall-first turns it round where it
+                // stands (`Returning { remaining: elapsed }`), while tick-first
+                // lands it on site (`Repairing`, which also opens issue #737's
+                // on-site information gate and `on_site_systems` for that tick)
+                // and only then walks it home the full `travel_duration`.
+                // Different slot, different arrival time, different visibility
+                // projection — i.e. two hosts of one fleet folding different
+                // `ShipRepairTeams` state into the digest from identical input.
                 tick_repair_teams
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(super::dispatch::handle_dispatch_repair_team)
+                    .after(super::dispatch::handle_recall_repair_team)
                     .after(super::dispatch::handle_set_repair_priority)
                     .after(super::dispatch::handle_set_repair_target_priority),
                 operate_repair_ai

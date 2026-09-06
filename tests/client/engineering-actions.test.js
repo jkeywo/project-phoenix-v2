@@ -14,6 +14,7 @@ import {
   REPAIR_ACTION_CONTEXT,
   REPAIR_DISPATCH_ACTION_ID,
   REPAIR_PRIORITY_ACTION_ID,
+  REPAIR_RECALL_ACTION_ID,
   TRACTOR_TOGGLE_ACTION_ID,
   UMBILICAL_TOGGLE_ACTION_ID,
 } from '../../gui/stations/engineering-actions.js';
@@ -58,8 +59,8 @@ const repair = () => ({
 });
 
 describe('Engineering, Power, and Repair semantic actions', () => {
-  it('publishes seven authoritative actions with exactly two slots and shipped contexts', () => {
-    expect(ENGINEERING_ACTIONS).toHaveLength(7);
+  it('publishes eight authoritative actions with exactly two slots and shipped contexts', () => {
+    expect(ENGINEERING_ACTIONS).toHaveLength(8);
     for (const action of ENGINEERING_ACTIONS) {
       expect(action.authoritativeFeedback).toBe(true);
       expect(action.bindings).toHaveLength(2);
@@ -68,6 +69,8 @@ describe('Engineering, Power, and Repair semantic actions', () => {
     expect(ENGINEERING_ACTIONS.find((a) => a.id === POWER_INCREASE_ACTION_ID).contexts)
       .toEqual([POWER_ACTION_CONTEXT, ENGINEERING_ACTION_CONTEXT, CAPTAIN_ENGINEERING_ACTION_CONTEXT]);
     expect(ENGINEERING_ACTIONS.find((a) => a.id === REPAIR_DISPATCH_ACTION_ID).contexts)
+      .toEqual([REPAIR_ACTION_CONTEXT, ENGINEERING_ACTION_CONTEXT, CAPTAIN_ENGINEERING_ACTION_CONTEXT]);
+    expect(ENGINEERING_ACTIONS.find((a) => a.id === REPAIR_RECALL_ACTION_ID).contexts)
       .toEqual([REPAIR_ACTION_CONTEXT, ENGINEERING_ACTION_CONTEXT, CAPTAIN_ENGINEERING_ACTION_CONTEXT]);
     expect(ENGINEERING_ACTIONS.find((a) => a.id === TRACTOR_TOGGLE_ACTION_ID).contexts)
       .toEqual([ENGINEERING_ACTION_CONTEXT]);
@@ -233,6 +236,60 @@ describe('Engineering, Power, and Repair semantic actions', () => {
     ]);
     expect(view.teams[0].status).toBe('idle');
     expect(view.damaged_systems[1]).not.toHaveProperty('prioritised');
+  });
+
+  // Issue #1385: RECALL is its own semantic identity, and it selects off the
+  // authoritative STATUS — a team out on a job — rather than off which card the
+  // pointer happens to have open.
+  it('recalls the exact team a card names and the first team out otherwise', () => {
+    const sendAction = vi.fn();
+    const view = {
+      ...repair(),
+      teams: [
+        { id: 0, status: 'idle' },
+        { id: 1, status: 'travelling' },
+        { id: 2, status: 'repairing' },
+      ],
+    };
+    const actions = registry({ getState: () => view, sendAction });
+
+    expect(actions.activate(REPAIR_RECALL_ACTION_ID, {
+      context: REPAIR_ACTION_CONTEXT,
+      detail: { team_idx: 2 },
+    })).toMatchObject({ handled: true });
+    expect(sendAction).toHaveBeenLastCalledWith('recall_repair_team', expect.objectContaining({
+      team_idx: 2, control_system_id: 'repair', semantic_action: REPAIR_RECALL_ACTION_ID,
+    }));
+
+    // Parameter-free (a key or a pad): the first team that is actually out.
+    expect(actions.activate(REPAIR_RECALL_ACTION_ID, {
+      context: REPAIR_ACTION_CONTEXT, source: 'gamepad',
+    })).toMatchObject({ handled: true });
+    expect(sendAction).toHaveBeenLastCalledWith('recall_repair_team', expect.objectContaining({
+      team_idx: 1,
+    }));
+    // Nothing local changed: the slot's status is still the host's to move.
+    expect(view.teams[1].status).toBe('travelling');
+  });
+
+  it('refuses a recall of a team with nothing to recall, and every recall on AUTO', () => {
+    const sendAction = vi.fn();
+    let view = {
+      ...repair(),
+      teams: [{ id: 0, status: 'idle' }, { id: 1, status: 'returning' }],
+    };
+    const actions = registry({ getState: () => view, sendAction });
+
+    for (const detail of [{ team_idx: 0 }, { team_idx: 1 }, { team_idx: 9 }, undefined]) {
+      expect(actions.activate(REPAIR_RECALL_ACTION_ID, {
+        context: REPAIR_ACTION_CONTEXT, detail,
+      })).toMatchObject({ claimed: true, handled: false });
+    }
+
+    view = { ...view, repair_auto: true, teams: [{ id: 0, status: 'travelling' }] };
+    expect(actions.activate(REPAIR_RECALL_ACTION_ID, { context: REPAIR_ACTION_CONTEXT }))
+      .toMatchObject({ handled: false });
+    expect(sendAction).not.toHaveBeenCalled();
   });
 
   it('gives Courier Captain the same parameter-free internal Repair path', () => {

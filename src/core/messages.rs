@@ -2291,6 +2291,31 @@ pub enum SystemControlPayload {
         team_idx: u8,
         target: RepairTarget,
     },
+    /// Recall one of the ship's OWN repair teams from the job it is on
+    /// (issue #1385), sending it back to standby. Targets the `repair` system,
+    /// so it takes exactly the admission path `DispatchRepairTeam` takes.
+    ///
+    /// Internal teams only. The team abroad on a field repair is recalled by
+    /// [`SystemControlPayload::RecallExternalRepair`], which carries no index
+    /// because a ship dispatches one team abroad at a time; this one NAMES its
+    /// team, for the same reason the internal dispatch does — a hull has
+    /// several teams out on several jobs and nothing server-side can say which
+    /// of them is meant.
+    ///
+    /// Recall is a return TRIP, not a teleport: a `Travelling` team turns round
+    /// where it stands (its `remaining` is however far it had already come) and
+    /// a `Repairing` team walks back the full travel time, both landing in
+    /// `TeamSlot::Returning` with nothing queued behind them. That is the same
+    /// meaning `RepairTeams::dispatch` has always given a re-dispatch to the
+    /// team's own current system, and the same shape `RecallSecurityTeam` has.
+    /// A recalled team is orderable again on the very next tick — a dispatch
+    /// queues onto its `Returning` slot — but it is not `Idle` until it is home.
+    ///
+    /// A team that is `Idle` or already `Returning` has nothing to recall, and
+    /// the order is refused rather than silently reshaping the slot.
+    RecallRepairTeam {
+        team_idx: u8,
+    },
     SetPowerGroupAllocation {
         group: PowerGroupId,
         level: u8,

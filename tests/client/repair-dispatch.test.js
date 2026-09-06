@@ -4,6 +4,8 @@ import {
   repairTargetFor,
   dispatchRepairTeamPayload,
   dispatchRepairTeam,
+  recallRepairTeamPayload,
+  recallRepairTeam,
   setRepairTargetPriorityPayload,
   setRepairTargetPriority,
 } from '../../gui/repair-dispatch.js';
@@ -46,6 +48,22 @@ describe('repair-dispatch target mapping', () => {
     expect(Object.keys(payload.data)).toEqual(['system_id']);
   });
 
+  // Issue #1385: the internal RECALL names its team, where the fieldless
+  // external recall beside it names nothing — a ship sends one team abroad at a
+  // time, but every internal team can be out on a different job at once.
+  it('builds the RecallRepairTeam payload naming only the team', () => {
+    const payload = recallRepairTeamPayload(2);
+    expect(payload).toEqual({ type: 'RecallRepairTeam', data: { team_idx: 2 } });
+    expect(Object.keys(payload.data)).toEqual(['team_idx']);
+  });
+
+  it('rejects a team index that is not a slot number', () => {
+    expect(() => recallRepairTeamPayload(1.5)).toThrow(TypeError);
+    expect(() => recallRepairTeamPayload(-1)).toThrow(TypeError);
+    expect(() => recallRepairTeamPayload(256)).toThrow(TypeError);
+    expect(() => recallRepairTeamPayload(undefined)).toThrow(TypeError);
+  });
+
   it('rejects an empty system id', () => {
     expect(() => setRepairTargetPriorityPayload('')).toThrow(TypeError);
     expect(() => setRepairTargetPriorityPayload(undefined)).toThrow(TypeError);
@@ -75,6 +93,40 @@ describe('repair-dispatch sends through the command gateway', () => {
       {
         target: 'repair',
         payload: { type: 'SetRepairTargetPriority', data: { system_id: 'hull-plating' } },
+      },
+    ]]);
+  });
+
+  it('sends RecallRepairTeam through the same gateway and repair owner', () => {
+    const calls = [];
+    const env = recallRepairTeam(1, (type, data) => calls.push([type, data]));
+    expect(calls).toEqual([[
+      'ControlSystem',
+      {
+        target: 'repair',
+        payload: { type: 'RecallRepairTeam', data: { team_idx: 1 } },
+      },
+    ]]);
+    expect(env.type).toBe('ControlSystem');
+  });
+
+  it('addresses the exact authored Repair owner a console names', () => {
+    const calls = [];
+    recallRepairTeam(0, (type, data) => calls.push([type, data]), 'damage_control');
+    expect(calls[0][1].target).toBe('damage_control');
+  });
+
+  it('is the path the recall_repair_team console action takes', () => {
+    const calls = [];
+    ACTION_MAP.recall_repair_team(
+      { action: 'recall_repair_team', team_idx: 3 },
+      (type, data) => calls.push([type, data]),
+    );
+    expect(calls).toEqual([[
+      'ControlSystem',
+      {
+        target: 'repair',
+        payload: { type: 'RecallRepairTeam', data: { team_idx: 3 } },
       },
     ]]);
   });

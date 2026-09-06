@@ -191,16 +191,71 @@ test('repair console: a row a team is already on is shown but not offered', asyn
     .toBeEnabled();
 });
 
-test('repair console: an on-site card is not even a toggle on an intact ship', async ({ page }) => {
+// Issue #1385: an on-site team with no visible rows still has one verb, so its
+// card opens onto RECALL alone. A RETURNING team is the case with no body at
+// all — the host refuses a recall for a team already walking home — and that is
+// where the "a summary with nothing behind it is a readout" rule now lives.
+test('repair console: an on-site card with no visible rows opens onto RECALL alone', async ({ page }) => {
   await page.goto(CONSOLE_URL);
   await page.evaluate((s) => window.__updateConsole('repair', JSON.stringify(s)), onSiteState({ damaged_systems: [] }));
+  const card = page.locator('ph-repair-teams .card[data-team-id="0"]');
+  await card.locator('.card-top').click();
+  await expect(card.locator('.card-body')).toBeVisible();
+  await expect(page.locator('ph-repair-teams .dmg-row')).toHaveCount(0);
+  // Zero rows is not the same claim as "the section went away": an empty
+  // [DAMAGED SYSTEMS] heading over nothing would pass a count-only assertion.
+  await expect(card.locator('.body-head')).toHaveText('');
+  await expect(card.locator('.recall-btn')).toHaveCount(1);
+});
+
+test('repair console: a returning team is not offered as a toggle at all', async ({ page }) => {
+  await page.goto(CONSOLE_URL);
+  await page.evaluate(
+    (s) => window.__updateConsole('repair', JSON.stringify(s)),
+    repairState({
+      teams: [
+        { id: 0, label: 'Team 1', status: 'returning', target: 'Helm', progress_pct: 0.9 },
+        { id: 1, label: 'Team 2', status: 'idle', target: '', progress_pct: 0 },
+      ],
+    }),
+  );
   const top = page.locator('ph-repair-teams .card[data-team-id="0"] .card-top');
   // Not merely "opens onto nothing": a summary with no body behind it is a
   // readout, so the tap never happens and the chrome never claims it did.
   await expect(top).toBeDisabled();
   await expect(top).toHaveAttribute('aria-expanded', 'false');
-  await expect(page.locator('ph-repair-teams .dmg-row')).toHaveCount(0);
-  // Zero rows is not the same claim as "the section went away": an empty
-  // [DAMAGED SYSTEMS] box inside the card would pass a count-only assertion.
   await expect(page.locator('ph-repair-teams .card[data-team-id="0"] .card-body')).toBeHidden();
+});
+
+test('repair console: RECALL on a team out on a job sends recall_repair_team', { tag: '@core' }, async ({ page }) => {
+  await page.goto(CONSOLE_URL);
+  await page.evaluate(() => {
+    window.__sent = [];
+    window.__sendAction = (json) => window.__sent.push(json);
+  });
+  await page.evaluate(
+    (s) => window.__updateConsole('repair', JSON.stringify(s)),
+    repairState({
+      teams: [
+        { id: 0, label: 'Team 1', status: 'travelling', target: 'Helm', progress_pct: 0.3 },
+        { id: 1, label: 'Team 2', status: 'idle', target: '', progress_pct: 0 },
+      ],
+    }),
+  );
+  // Nothing until the card is open: the roster is a summary (issue #1384).
+  await expect(page.locator('ph-repair-teams .recall-btn')).toHaveCount(0);
+  await selectTeam(page, 0);
+  const card = page.locator('ph-repair-teams .card[data-team-id="0"]');
+  // A travelling team has exactly one verb, and no destinations to confuse it
+  // with: RECALL is not one more place to send it.
+  await expect(card.locator('.btn')).toHaveCount(1);
+  await card.locator('.recall-btn').click();
+
+  const sent = await page.evaluate(() => window.__sent);
+  expect(sent).toHaveLength(1);
+  // Names its team, unlike the fieldless external recall: a hull can have every
+  // internal team out on a different job at once.
+  expect(JSON.parse(sent[0])).toMatchObject({
+    action: 'recall_repair_team', console: 'repair', team_idx: 0,
+  });
 });

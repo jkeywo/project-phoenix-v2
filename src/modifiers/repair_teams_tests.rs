@@ -348,6 +348,108 @@ fn recall_while_repairing_sets_returning_no_queue() {
     ));
 }
 
+// ── The explicit RECALL verb (issue #1385) ─────────────────────────────────
+//
+// `recall` is the transition the two tests above reach by re-dispatching a team
+// to the system it is already at, named as its own verb so a caller that means
+// "come back" does not have to know where the team currently is. These pin that
+// it produces the SAME slot as that re-dispatch, and that it is a no-op — and
+// says so — for a team with nothing to recall.
+
+#[test]
+fn recall_turns_a_travelling_team_round_where_it_stands() {
+    let mut teams = RepairTeams::new(1);
+    let mut hull = hull_damaged(10.0);
+    teams.dispatch(0, sid("helm"), "Helm".to_string());
+    teams.tick(3.0, &mut hull, None);
+
+    assert!(teams.recall(0), "a travelling team can be recalled");
+    let expected = Some(sid("helm"));
+    assert!(
+        matches!(
+            &teams.slots()[0],
+            TeamSlot::Returning {
+                remaining,
+                system_id,
+                queued_system_id: None,
+                ..
+            } if (*remaining - 3.0).abs() < 1e-4 && *system_id == expected
+        ),
+        "recall mid-travel walks back exactly as far as it had come, with nothing queued: {:?}",
+        &teams.slots()[0]
+    );
+}
+
+#[test]
+fn recall_walks_an_on_site_team_the_full_way_home() {
+    let mut teams = RepairTeams::new(1);
+    let mut hull = hull_damaged(1.0);
+    teams.dispatch(0, sid("helm"), "Helm".to_string());
+    teams.tick(5.0, &mut hull, None); // travel → Repairing
+    assert!(matches!(&teams.slots()[0], TeamSlot::Repairing { .. }));
+
+    assert!(teams.recall(0), "an on-site team can be recalled");
+    let travel = teams.timings().travel_duration;
+    assert!(
+        matches!(
+            &teams.slots()[0],
+            TeamSlot::Returning {
+                remaining,
+                queued_system_id: None,
+                ..
+            } if (*remaining - travel).abs() < 1e-4
+        ),
+        "recall from on site is the full walk home: {:?}",
+        &teams.slots()[0]
+    );
+}
+
+/// A recalled team is orderable on the very next order — a dispatch queues onto
+/// its `Returning` slot and runs when it gets home — but it is NOT idle in the
+/// meantime, because the walk back is the travel cost issue #737 made real.
+#[test]
+fn a_recalled_team_takes_new_work_but_is_not_idle_yet() {
+    let mut teams = RepairTeams::new(1);
+    let mut hull = hull_damaged(10.0);
+    teams.dispatch(0, sid("helm"), "Helm".to_string());
+    teams.tick(2.0, &mut hull, None);
+    teams.recall(0);
+
+    assert!(
+        teams.free_team_indices(0).is_empty(),
+        "not idle while walking"
+    );
+    teams.dispatch(0, sid("tactical"), "Tactical".to_string());
+    let expected = Some(sid("tactical"));
+    assert!(matches!(
+        &teams.slots()[0],
+        TeamSlot::Returning { queued_system_id, .. } if *queued_system_id == expected
+    ));
+    teams.tick(2.0, &mut hull, None); // home, then straight back out
+    assert!(matches!(&teams.slots()[0], TeamSlot::Travelling { .. }));
+}
+
+#[test]
+fn recall_of_a_team_with_nothing_to_recall_changes_nothing() {
+    let mut teams = RepairTeams::new(1);
+    let mut hull = hull_damaged(10.0);
+
+    assert!(!teams.recall(0), "an idle team has nothing to recall");
+    assert!(matches!(&teams.slots()[0], TeamSlot::Idle));
+
+    assert!(!teams.recall(7), "no such slot on a one-team ship");
+
+    teams.dispatch(0, sid("helm"), "Helm".to_string());
+    teams.tick(2.0, &mut hull, None);
+    teams.recall(0);
+    let before = teams.slots()[0].clone();
+    assert!(
+        !teams.recall(0),
+        "a team already on its way home is not recalled again"
+    );
+    assert_eq!(teams.slots()[0], before);
+}
+
 #[test]
 fn partial_hp_restored_before_recall_is_preserved() {
     let mut teams = RepairTeams::new(1);

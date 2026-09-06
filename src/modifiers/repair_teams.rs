@@ -234,6 +234,56 @@ impl RepairTeams {
         }
     }
 
+    /// Recall the team at `team_idx` from whatever internal job it is on
+    /// (issue #1385), sending it home with nothing queued behind it.
+    ///
+    /// This is the transition [`Self::dispatch`] has always produced when a
+    /// working team is re-dispatched to the system it is already at, named as
+    /// its own verb so a caller that means "come back" does not have to know
+    /// (and re-supply) where the team currently is:
+    ///
+    /// - `Travelling { elapsed: t }` → `Returning { remaining: t }`, no queue —
+    ///   the team turns round where it stands, so a recall a second after the
+    ///   order costs a second to undo.
+    /// - `Repairing` → `Returning { remaining: travel_duration }`, no queue —
+    ///   it is on site, so the walk home is the full trip.
+    ///
+    /// A recall is a return TRIP, never a teleport. The team is orderable again
+    /// immediately (a dispatch queues onto a `Returning` slot) but it is not
+    /// `Idle` until it arrives, which is what keeps a repair team's travel time
+    /// the real cost issue #737 made it.
+    ///
+    /// Returns `false` — changing nothing — for a team that is `Idle` or
+    /// already `Returning`, and for an index this ship has no slot for.
+    pub fn recall(&mut self, team_idx: usize) -> bool {
+        let travel_duration = self.timings.travel_duration;
+        let Some(slot) = self.slots.get_mut(team_idx) else {
+            return false;
+        };
+        let (remaining, system_id, display_name) = match slot.clone() {
+            TeamSlot::Travelling {
+                system_id,
+                display_name,
+                elapsed,
+                ..
+            } => (elapsed, system_id, display_name),
+            TeamSlot::Repairing {
+                system_id,
+                display_name,
+                ..
+            } => (travel_duration, system_id, display_name),
+            TeamSlot::Idle | TeamSlot::Returning { .. } => return false,
+        };
+        *slot = TeamSlot::Returning {
+            remaining,
+            system_id,
+            display_name,
+            queued_system_id: None,
+            queued_display_name: None,
+        };
+        true
+    }
+
     /// Set the priority for the team at `team_idx`. Only takes effect when the
     /// team is in `Repairing` state. Returns `true` if the priority was set,
     /// `false` if the team is not in `Repairing` state (or the index is out of

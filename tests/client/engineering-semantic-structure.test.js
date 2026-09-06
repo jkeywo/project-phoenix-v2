@@ -8,7 +8,9 @@ const source = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
 describe('Engineering-family visible-control semantic structure', () => {
   for (const [file, actions] of [
     ['gui/components/ph-power-controls.js', ['POWER_DECREASE_ACTION_ID', 'POWER_INCREASE_ACTION_ID']],
-    ['gui/components/ph-repair-teams.js', ['REPAIR_DISPATCH_ACTION_ID', 'REPAIR_PRIORITY_ACTION_ID']],
+    ['gui/components/ph-repair-teams.js', [
+      'REPAIR_DISPATCH_ACTION_ID', 'REPAIR_PRIORITY_ACTION_ID', 'REPAIR_RECALL_ACTION_ID',
+    ]],
     ['gui/battleship/repair.html', ['EXTERNAL_REPAIR_TOGGLE_ACTION_ID']],
     ['gui/destroyer/engineering.html', [
       'TRACTOR_TOGGLE_ACTION_ID', 'UMBILICAL_TOGGLE_ACTION_ID', 'EXTERNAL_REPAIR_TOGGLE_ACTION_ID',
@@ -49,7 +51,8 @@ describe('Engineering-family visible-control semantic structure', () => {
     for (const action of [
       'engage_tractor:', 'release_tractor:', 'dispatch_external_repair:',
       'recall_external_repair:', 'start_transfer:', 'stop_transfer:',
-      'dispatch_repair_team:', 'set_repair_target_priority:', 'set_power:',
+      'dispatch_repair_team:', 'recall_repair_team:', 'set_repair_target_priority:',
+      'set_power:',
     ]) {
       const start = text.indexOf(action);
       expect(start).toBeGreaterThan(-1);

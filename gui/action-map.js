@@ -15,7 +15,12 @@
  *   window.ACTION_MAP  (for inspection / extension)
  */
 
-import { dispatchRepairTeam, setRepairPriority, setRepairTargetPriority } from './repair-dispatch.js';
+import {
+  dispatchRepairTeam,
+  recallRepairTeam,
+  setRepairPriority,
+  setRepairTargetPriority,
+} from './repair-dispatch.js';
 import { dispatchSecurityTeam, recallSecurityTeam } from './security-dispatch.js';
 import {
   sendHelmInput,
@@ -467,6 +472,24 @@ export const ACTION_MAP = Object.freeze({
       ? (_type, data) => send('ControlSystemCorrelated', { correlation: a.correlation, ...data })
       : send;
     dispatchRepairTeam(a.team_idx, a.target, route, controlSystemId(a, 'repair'));
+  },
+
+  /**
+   * Recall one of the ship's OWN repair teams to standby (issue #1385) — the
+   * RECALL control on a travelling or on-site team's card.
+   *
+   * Names its team, where `recall_external_repair` below is fieldless: a ship
+   * dispatches one team abroad at a time, but every internal team can be out on
+   * a different job at once. The host decides whether there is anything to
+   * recall and answers on the correlated feedback seam, so this sends the order
+   * exactly as the card issued it.
+   */
+  recall_repair_team: (a, send) => {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    const route = correlated
+      ? (_type, data) => send('ControlSystemCorrelated', { correlation: a.correlation, ...data })
+      : send;
+    recallRepairTeam(a.team_idx, route, controlSystemId(a, 'repair'));
   },
 
   /**

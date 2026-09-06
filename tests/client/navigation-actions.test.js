@@ -245,6 +245,7 @@ describe('Navigation semantic actions', () => {
       'power.increase-allocation',
       'repair.dispatch-team',
       'repair.prioritise-system',
+      'repair.recall-team',
       'science.shield-focus',
       'sensors.scan',
       'sensors.target-selection',
@@ -275,6 +276,7 @@ describe('Navigation semantic actions', () => {
       'repair.dispatch-team',
       'repair.external-dispatch',
       'repair.prioritise-system',
+      'repair.recall-team',
       'science.shield-focus',
     ].sort());
     expect(idsFor(catalogue, 'sensors')).toEqual([

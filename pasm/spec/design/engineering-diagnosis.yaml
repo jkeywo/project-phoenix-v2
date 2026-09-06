@@ -14,6 +14,7 @@ entities:
         - prioritise on-site repair work
       player_verbs:
         - dispatch-repair-team
+        - recall-repair-team
         - prioritise-onsite-repair
       protected_decisions:
         - repair-team-dispatch
@@ -81,6 +82,30 @@ entities:
         - team-travels-to-target
       produces_facts:
         - assigned repair team has arrived at the target station
+
+  - verb: recall-repair-team
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Recall Repair Team
+      summary: Engineering calls one of its own teams off the job it is on and sends it back to standby.
+      rationale:
+        - "[ai] Issue #1385. Dispatch without recall makes the FIRST choice the only choice: a team sent to the wrong station on a stale reading is gone for a full round trip plus a sweep, and the only way to move it was to re-dispatch it to the system it was already at and hope the player knew that collapsed to a return. Naming the verb makes triage revisable, which is what makes repair-team-dispatch a decision rather than a commitment."
+        - "[ai] It costs the walk back, so it is cheap early and dear late — recalling a team a second after the order costs a second, recalling one already on site costs the full travel time. That keeps repair-team-capacity a real constraint: a recall frees a team eventually, never now."
+    game_design:
+      architecture_links:
+        - repair-console-interface
+        - recall-repair-team-command
+        - host-repair-router
+      owner_role: engineering
+      eligibility:
+        - the named team is travelling to a target or working on site
+      costs:
+        - the team’s return travel time
+      resolution: host-authoritative
+      outputs:
+        - team-travels-home
 
   - verb: prioritise-onsite-repair
     core:

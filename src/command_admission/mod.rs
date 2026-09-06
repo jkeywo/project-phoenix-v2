@@ -177,6 +177,7 @@ pub(crate) fn supports_correlated_action_feedback_for_kind(
             && matches!(
                 payload,
                 SystemControlPayload::DispatchRepairTeam { .. }
+                    | SystemControlPayload::RecallRepairTeam { .. }
                     | SystemControlPayload::SetRepairTargetPriority { .. }
                     | SystemControlPayload::DispatchExternalRepair
                     | SystemControlPayload::RecallExternalRepair

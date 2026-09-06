@@ -40,11 +40,51 @@ pub fn register_repair_dispatch(app: &mut App) {
     ));
     app.add_systems(
         FixedUpdate,
+        // CHAINED, not merely grouped (issue #1385). Every applier here takes
+        // `&mut ShipRepairTeams`, so an unordered pair leaves the executor to
+        // pick who writes first — and for this quartet that choice is
+        // observable, because `handle_set_repair_target_priority` resolves
+        // WHICH SLOT it writes out of the very component the others just
+        // rewrote. `RepairTeams::prioritise_system` picks the first `Repairing`
+        // slot whose sweep group covers the tapped system and whose
+        // `sweep_candidates` (built against the `on_site_systems()` exclusion
+        // set) still contain it, so a dispatch or a recall landing first can
+        // move the pin onto a DIFFERENT team, not just change the feedback the
+        // tap emits.
+        //
+        // Concretely, with teams 0 and 1 both `Repairing` in one station group
+        // and a third damaged system C in it, a same-tick
+        // `RecallRepairTeam { team_idx: 0 }` + `SetRepairTargetPriority { C }`:
+        // priority-first pins team 0 and the recall then throws that pin away
+        // with the slot, leaving team 1 unpinned; recall-first drops team 0's
+        // system out of the occupied set and pins team 1 instead. A
+        // `priority_system_id` steers `next_sweep_target`, so the two orderings
+        // have team 1 repair a different system next — that folds into
+        // `EntitySystemHull` and therefore into the digest (`crate::sim_digest`),
+        // i.e. two hosts of one fleet diverging from identical input. The
+        // correlated Applied/Refused feedback flips with it. This is the same
+        // #785 failure class the sibling `tick_repair_teams` edge was pinned
+        // for, and chaining closes the pre-existing dispatch↔target-priority
+        // hole in the same stroke.
+        //
+        // The order itself is the intended reading: dispatch, then recall
+        // (so a recall means "undo the order I can see", including one given on
+        // this very tick), then the two priority writers.
+        //
+        // This is NOT the recall's only observable ordering, and not even the
+        // load-bearing one. That is the recall against `tick_repair_teams`,
+        // which is pinned where the other three appliers are pinned — see the
+        // AC4 DETERMINISM comment in `super::server`'s `RepairPlugin::build`.
+        // A recall on the tick a team would otherwise arrive resolves to a
+        // different slot, a different arrival time and a different on-site
+        // visibility projection depending on that edge.
         (
             handle_dispatch_repair_team,
+            handle_recall_repair_team,
             handle_set_repair_priority,
             handle_set_repair_target_priority,
         )
+            .chain()
             .in_set(crate::sim_sets::SimSet::Physics)
             .after(super::server::operate_repair_ai)
             .after(AdmissionSet),
@@ -158,6 +198,57 @@ pub fn handle_dispatch_repair_team(
                     &mut outbound,
                     cmd,
                     crate::core::messages::ActionFeedbackOutcome::Applied,
+                );
+            }
+        }
+    }
+}
+
+/// Handle `RecallRepairTeam` messages from the Repair console (issue #1385).
+///
+/// Reads `ClientMessage::ControlSystem { target: "repair", payload:
+/// RecallRepairTeam { team_idx } }` from `AdmittedCommands`. Admission upstream
+/// has already checked exactly what it checks for `DispatchRepairTeam` — same
+/// target system, therefore the same station-ownership and the same
+/// `accept_human_input` gate, because
+/// `command_admission::policy::is_command_authorized` turns on the target and
+/// not on the payload variant.
+///
+/// INTERNAL teams only. The team abroad on a field repair is recalled by
+/// `RecallExternalRepair` in
+/// [`super::external_server`], which is a different commitment with a different
+/// state of its own; this handler only ever touches the ship's own
+/// `ShipRepairTeams`.
+///
+/// Nothing is resolved here: unlike the dispatch beside it there is no target
+/// to look up, because a recall names the team and the team already knows where
+/// it is. `RepairTeams::recall` owns the whole transition (and reports whether
+/// there was one), so the handler is exactly the admitted-command loop plus the
+/// Applied/Refused feedback the console correlates against.
+///
+/// Runs in the same `SimSet::Physics` tuple as the dispatch, `.after`
+/// `operate_repair_ai`, so a human recall cannot race the AI's own same-tick
+/// dispatch: the AI emits first, then both orders are applied in command order.
+pub fn handle_recall_repair_team(
+    mut ship_query: Query<(&AdmittedCommands, &mut ShipRepairTeams), With<crate::server_app::Ship>>,
+    mut outbound: Option<ResMut<Messages<crate::lobby::OutboundMessage>>>,
+) {
+    for (admitted, mut teams) in ship_query.iter_mut() {
+        for cmd in admitted.for_target(REPAIR_SYSTEM_ID) {
+            if let SystemControlPayload::RecallRepairTeam { team_idx } = &cmd.payload {
+                // `false` covers every "there is nothing to recall" case in one
+                // reading — no such slot, an idle team, a team already on its
+                // way home — and leaves the slot untouched, which is the same
+                // nothing-happens a dispatch to an undamaged station produces.
+                let applied = teams.0.recall(*team_idx as usize);
+                crate::command_admission::finish_admitted_action_feedback(
+                    &mut outbound,
+                    cmd,
+                    if applied {
+                        crate::core::messages::ActionFeedbackOutcome::Applied
+                    } else {
+                        crate::core::messages::ActionFeedbackOutcome::Refused
+                    },
                 );
             }
         }

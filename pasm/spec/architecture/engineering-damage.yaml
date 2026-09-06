@@ -42,6 +42,8 @@ entities:
       summary: Repair teams travel to a target, repair at authored rate while on site, then return; Core is a valid repair target alongside station-owned systems.
       rationale:
         - "Issue #785 pinned the cycle's intra-Physics ordering explicitly: operate_repair_ai (decide/emit) → handle_dispatch_repair_team + handle_set_repair_priority + handle_set_repair_target_priority (apply) → tick_repair_teams (advance). #830 had pinned only the first edge, leaving tick_repair_teams ambiguous against the appliers even though all three mutate ShipRepairTeams; Bevy's parallel executor then serialised them run-varyingly, and a dispatch landing BEFORE the tick let a Returning { remaining } slot hit remaining <= 0 and flip straight to Travelling instead of staying Returning. That system-order ambiguity — not map iteration order — was the root cause of the intermittent all_busy_teams_ignore_further_dispatches failure. RepairPlugin::build now declares tick_repair_teams .after(handle_dispatch_repair_team).after(handle_set_repair_priority).after(handle_set_repair_target_priority), matching the .chain() its own npc_repair_app fixture already used, so the cycle advances deterministically every tick."
+        - "[ai] Issue #1385 adds the FOURTH applier, handle_recall_repair_team, to that same list: tick_repair_teams is declared .after it as well. The #785 rule is every ShipRepairTeams applier before the advance, not those three by name, and a new verb that writes the component joins it. The recall's load-bearing pair is this edge rather than any pair inside the applier tuple: a recall admitted on the tick a team would otherwise arrive resolves recall-first to Returning { remaining: elapsed } — the walk out so far, less this tick's advance — and tick-first to a team that LANDED (Repairing, which also opens issue #737's on-site information gate and on_site_systems for that tick) and then walks home the full travel_duration. Different slot, different arrival time and a different visibility projection from identical input, i.e. a digest divergence between two hosts of one fleet, which no ambiguity check in this repo would have caught."
+        - "[ai] Issue #1385 also CHAINS the applier tuple itself in register_repair_dispatch (dispatch → recall → set_priority → set_target_priority) instead of pinning one pair. Grouping four systems that all take &mut ShipRepairTeams orders none of them, and the order is observable because handle_set_repair_target_priority resolves WHICH SLOT it writes out of that same component: RepairTeams::prioritise_system → priority_team_for_system takes the first Repairing slot whose sweep group covers the tapped system and whose sweep_candidates — built against the on_site_systems() exclusion set — still contain it. With two teams on site in one group and a third damaged system C, a same-tick RecallRepairTeam { team_idx: 0 } + SetRepairTargetPriority { C } pins team 0 and loses the pin with the recalled slot if the tap runs first, and pins team 1 if the recall runs first (its system leaves the occupied set). priority_system_id steers next_sweep_target, so team 1 repairs a DIFFERENT system next and the divergence reaches EntitySystemHull and the digest — the same #785 class as the tick edge above, and it already existed for dispatch vs. set_target_priority before the recall verb was added. Chaining closes both holes; the chosen order is the intended reading, where a recall undoes an order the player can see including one given on this very tick."
     architecture:
       kind: lifecycle-policy
       authority: authoritative
@@ -134,10 +136,12 @@ entities:
         - Engineering should not see exact non-core damage details before a team arrives on site.
         - Engineering should still be able to act proactively based on aggregate cues and crew coordination.
         - "[ai] The roster asks WHICH TEAM first (issue #1384). A team card is a summary — name, status, progress — until the seat selects it, and only then does it open onto that team's own verbs: destinations for an idle team, the on-site systems for a team already working. Before this every idle team rendered its whole destination row at once, under a separate always-visible damaged list, so a three-team hull spent most of a phone column on controls for teams nobody was thinking about."
-        - "[ai] Only a card with something behind it is a toggle. A team with no verb to offer — travelling, returning, an idle slot already committed to the field, an on-site team the host is showing no rows for — renders its summary as a disabled readout with no caret, so tapping it cannot rotate a caret, paint a selected border or report an expanded region that stays hidden. This is the same rule that keeps RECALL off the card: a control that does nothing is worse than no control, and that includes a control whose only job is to open an empty box."
+        - "[ai] Only a card with something behind it is a toggle. A team with no verb to offer — a returning team, an idle slot already committed to the field — renders its summary as a disabled readout with no caret, so tapping it cannot rotate a caret, paint a selected border or report an expanded region that stays hidden. A control that does nothing is worse than no control, and that includes a control whose only job is to open an empty box."
         - "[ai] The damaged-systems list is not a panel of its own any more; it belongs to the card whose team can act on it. It was already the host's per-SYSTEM on-site projection (core detail plus whatever a team is standing on), so re-homing it changed which card draws it, not what the seat may see. Nothing filters it per team: the console cannot honestly say which on-site team owns which row, and `prioritisable` remains the host's sole enablement verdict."
         - "[ai] Which card is open is client-local presentation state, not a semantic action. It steers no command and the host has no opinion about it, so routing it through the wire would only make opening a card cost a round trip. It survives state pushes and is dropped when the team it names leaves the roster."
-        - "[ai] The field destination sends the fieldless external-dispatch command and can never send its recall counterpart. While a team is already abroad — exactly the state in which the shared dispatch/recall action flips to RECALL — the row renders as a disabled readout, so recall is structurally unreachable from a destination list rather than merely spelled differently. Internal RECALL is absent for the plainer reason that the host has no such verb yet."
+        - "[ai] The field destination sends the fieldless external-dispatch command and can never send its recall counterpart. While a team is already abroad — exactly the state in which the shared dispatch/recall action flips to RECALL — the row renders as a disabled readout, so the EXTERNAL recall is structurally unreachable from a destination list rather than merely spelled differently."
+        - "[ai] Issue #1385 gave the internal teams their own RECALL, and it is the card’s verb for a team that is OUT: travelling or on site. It is a separate command from the external recall beside it and NAMES its team, because a hull can have every internal team out on a different job at once while it sends only one abroad. It is offered off the authoritative status alone — the owner still decides whether there is anything to recall and answers on the correlated feedback seam — and a returning team is not offered it at all, which is the one status that now has no card body."
+        - "[ai] Recall is a return TRIP, not a teleport, so the card keeps showing the team on its way home rather than snapping it to standby. That is the same meaning a re-dispatch to a team’s own current system has always had, and it keeps travel time the real cost issue #737 made it: an early recall is cheap because the walk back is only as long as the walk out so far."
         - "[ai] An idle card names the field destination generically. The host populates the target name only once a team is working abroad, which is never the moment a seat is choosing where to send one, so the row reads as the field target rather than inventing a name the projection does not carry."
     architecture:
       kind: client-interface
@@ -153,6 +157,7 @@ entities:
         - repair-ui-state
       sends:
         - dispatch-repair-team-command
+        - recall-repair-team-command
         - onsite-repair-priority-command
       depends_on:
         - client-network-interface
@@ -396,6 +401,7 @@ entities:
         - coordination-delivery-state
       consumes:
         - dispatch-repair-team-command
+        - recall-repair-team-command
         - onsite-repair-priority-command
         - ai-repair-request-signal
       depends_on:
@@ -411,6 +417,7 @@ entities:
         - src/console/repair/server.rs
       symbols:
         - handle_dispatch_repair_team
+        - handle_recall_repair_team
         - handle_set_repair_priority
         - handle_set_repair_target_priority
         - register_repair_dispatch
@@ -419,6 +426,7 @@ entities:
         - RepairHumanAlerted
       messages:
         - DispatchRepairTeam
+        - RecallRepairTeam
         - SetRepairPriority
         - SetRepairTargetPriority
         - DeliveredCoordination
@@ -434,6 +442,14 @@ entities:
           top-level `use crate::command_admission::AdmissionSet;` and pins the
           router `.after(AdmissionSet)`, so it can only ever read commands that
           admission already validated.
+      - kind: test
+        reference: same_tick_recall_and_target_priority_resolve_in_the_chained_order
+        summary: >-
+          Two teams on site in one station group, a same-tick recall of team 0
+          and a damaged-systems tap naming a third system of that group: the
+          chained applier tuple makes the tap resolve after the recall, so the
+          team still on site takes the pin instead of the executor deciding
+          which team gets it.
       - kind: test
         reference: ai_repair_deliveries_merge_in_the_repair_owned_queue
         summary: >-
@@ -964,6 +980,42 @@ entities:
       messages:
         - DispatchRepairTeam
       tests:
+        - tests/client/action-map.test.js
+
+  - message: recall-repair-team-command
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Recall Repair Team Command
+      summary: Client-to-host request to bring one internally dispatched repair team back to standby.
+      rationale:
+        - "[ai] Issue #1385. It NAMES its team, where the fieldless external DispatchExternalRepair/RecallExternalRepair pair names nothing: a ship sends one team abroad at a time, but every internal team can be out on a different job at once, so no server-side lock could resolve which of them a recall meant."
+        - "[ai] Internal teams only, and no new state: it drives the SAME Travelling/Repairing → Returning transition RepairTeams::dispatch has always produced for a re-dispatch to the team’s own current system, so the slot shape, its wire projection and the digest fold are untouched. What is new is a verb a caller can use without already knowing where the team is."
+        - "[ai] It takes the ordinary repair-target admission path, so a human at the station and an AI operating it are admitted identically, and a team that is Idle or already Returning is REFUSED on the correlated feedback seam rather than silently reshaped."
+    architecture:
+      authority: request
+      producer:
+        - repair-console-interface
+      consumer:
+        - host-command-admission
+        - host-repair-router
+      validator:
+        - host-command-admission
+      trust_boundary: client-to-host
+      payload: recall-repair-team
+    implementation:
+      status: declared
+      paths:
+        - src/core/messages.rs
+        - src/core/codec.rs
+        - src/console/repair/dispatch.rs
+        - gui/repair-dispatch.js
+        - gui/action-map.js
+      messages:
+        - RecallRepairTeam
+      tests:
+        - tests/client/repair-dispatch.test.js
         - tests/client/action-map.test.js
 
   - message: onsite-repair-priority-command

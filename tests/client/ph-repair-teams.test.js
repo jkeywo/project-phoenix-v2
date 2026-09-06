@@ -273,11 +273,12 @@ describe('PhRepairTeams', () => {
     expect(sendAction).toHaveBeenCalledWith('dispatch_external_repair', {});
   });
 
-  // RECALL is not a verb this roster may offer — the internal one does not
-  // exist yet, and the external one must not be reachable from a destination
-  // list. While a team is abroad the row is a readout, so no tap on any card
-  // can reach the recall half of the shared dispatch/recall action.
-  it('never offers recall: the field row is a readout while a team is abroad', () => {
+  // The EXTERNAL recall must not be reachable from a destination list: while a
+  // team is abroad the field row is a readout, so no tap on it can reach the
+  // recall half of the shared dispatch/recall action. The card’s own RECALL
+  // (issue #1385) is a different verb on a different row and never appears on
+  // an idle card at all.
+  it('never offers the external recall: the field row is a readout while a team is abroad', () => {
     const sendAction = vi.fn();
     const { el } = setup({ sendAction });
     el.state = {
@@ -292,6 +293,7 @@ describe('PhRepairTeams', () => {
     field.click();
     expect(sendAction).not.toHaveBeenCalled();
     expect(el.shadowRoot.textContent).not.toContain(t('console.repair.dispatch.recall'));
+    expect(card(el, 0).querySelector('.recall-btn')).toBeNull();
   });
 
   it('disables the field row while repair is on AUTO', () => {
@@ -328,7 +330,7 @@ describe('PhRepairTeams', () => {
     expect(card(el, 0).querySelectorAll('.btn').length).toBe(1);
   });
 
-  // ── A travelling team: status only, no verb yet ───────────────────────────
+  // ── A team out on a job: RECALL, and on site the rows too ─────────────
 
   it('renders a busy team with its target name and no dispatch row', () => {
     const { el } = setup();
@@ -340,7 +342,11 @@ describe('PhRepairTeams', () => {
     expect(card(el, 0).querySelectorAll('.btn').length).toBe(0);
   });
 
-  it('offers a travelling team no controls at all when it is selected', () => {
+  // Issue #1385: a team sent to the wrong station is the one order a seat wants
+  // to undo, and undoing it early is cheap — the walk back is only as long as
+  // the walk out so far. The card offers RECALL and nothing else: the on-site
+  // rows belong to a team that has actually arrived.
+  it('offers a travelling team RECALL and no other control', () => {
     const { el } = setup();
     el.state = {
       teams: [{ id: 0, label: 'T1', status: 'travelling', target: 'Helm', progress_pct: 0.3 }],
@@ -348,31 +354,73 @@ describe('PhRepairTeams', () => {
       damaged: [{ system_id: 'core', display_name: 'Core', tier: 'Damaged', damage_pct: 0.3, prioritisable: true }],
     };
     select(el, 0);
-    expect(card(el, 0).querySelector('.card-body').hidden).toBe(true);
-    expect(card(el, 0).querySelectorAll('.btn').length).toBe(0);
+    expect(card(el, 0).querySelector('.card-body').hidden).toBe(false);
+    const btns = card(el, 0).querySelectorAll('.btn');
+    expect(btns.length).toBe(1);
+    expect(btns[0].classList.contains('recall-btn')).toBe(true);
+    expect(btns[0].querySelector('.label').textContent)
+      .toBe(t('component.repair_teams.recall'));
     expect(card(el, 0).querySelectorAll('.dmg-row').length).toBe(0);
+    expect(card(el, 0).querySelector('.dispatch-row').style.display).toBe('none');
+  });
+
+  it('sends recall_repair_team naming the card team', () => {
+    const sendAction = vi.fn();
+    const { el } = setup({ sendAction });
+    el.state = {
+      teams: [
+        { id: 0, label: 'T1', status: 'idle' },
+        { id: 1, label: 'T2', status: 'travelling', target: 'Helm', progress_pct: 0.3 },
+      ],
+      targets: [{ id: 'helm', label: 'Helm', damage_pct: 0.4 }],
+    };
+    select(el, 1);
+    card(el, 1).querySelector('.recall-btn').click();
+    expect(sendAction).toHaveBeenCalledWith('recall_repair_team', { team_idx: 1 });
+  });
+
+  it('offers an on-site team RECALL alongside its damaged rows', () => {
+    const { el } = setup();
+    el.state = {
+      teams: [{ id: 0, label: 'T1', status: 'repairing', target: 'Helm', progress_pct: 0.5 }],
+      damaged: [{ system_id: 'core', display_name: 'Core', tier: 'Damaged', damage_pct: 0.3, prioritisable: true }],
+    };
+    select(el, 0);
+    expect(card(el, 0).querySelectorAll('.dmg-row').length).toBe(1);
+    expect(card(el, 0).querySelector('.recall-btn')).not.toBeNull();
+  });
+
+  // AUTO is the seat saying it is not the one giving orders, so RECALL greys
+  // with every other verb on the panel rather than staying live.
+  it('disables RECALL while repair is on AUTO', () => {
+    const sendAction = vi.fn();
+    const { el } = setup({ sendAction });
+    el.state = {
+      teams: [{ id: 0, label: 'T1', status: 'travelling', target: 'Helm', progress_pct: 0.3 }],
+      auto: true,
+    };
+    select(el, 0);
+    const btn = card(el, 0).querySelector('.recall-btn');
+    expect(btn.disabled).toBe(true);
+    btn.click();
+    expect(sendAction).not.toHaveBeenCalled();
+  });
+
+  it('leaves no recall control behind on a card the player closed', () => {
+    const { el } = setup();
+    el.state = {
+      teams: [{ id: 0, label: 'T1', status: 'travelling', target: 'Helm', progress_pct: 0.3 }],
+    };
+    select(el, 0);
+    expect(card(el, 0).querySelector('.recall-btn')).not.toBeNull();
+    select(el, 0);
+    expect(card(el, 0).querySelector('.recall-btn')).toBeNull();
   });
 
   // The card must not SAY it opened when it did not: a rotated caret, the cyan
   // selected border and `aria-expanded="true"` over a hidden region are three
-  // ways of promising a body that is not there. A team with no verb is not
-  // offered as a toggle in the first place.
-  it('does not offer a travelling team as a toggle at all', () => {
-    const { el } = setup();
-    el.state = {
-      teams: [{ id: 0, label: 'T1', status: 'travelling', target: 'Helm', progress_pct: 0.3 }],
-      targets: [{ id: 'helm', label: 'Helm', damage_pct: 0.4 }],
-      damaged: [{ system_id: 'core', display_name: 'Core', tier: 'Damaged', damage_pct: 0.3, prioritisable: true }],
-    };
-    const top = card(el, 0).querySelector('.card-top');
-    expect(top.disabled).toBe(true);
-    expect(card(el, 0).querySelector('.caret').style.visibility).toBe('hidden');
-    select(el, 0);
-    expect(top.getAttribute('aria-expanded')).toBe('false');
-    expect(card(el, 0).classList.contains('selected')).toBe(false);
-    expect(card(el, 0).querySelector('.card-body').hidden).toBe(true);
-  });
-
+  // ways of promising a body that is not there. A returning team is already on
+  // its way home, so the host refuses a recall and the card offers no toggle.
   it('does not offer a returning team as a toggle at all', () => {
     const { el } = setup();
     el.state = {
@@ -390,7 +438,7 @@ describe('PhRepairTeams', () => {
   it('makes a card a toggle again once its team has something to open onto', () => {
     const { el } = setup();
     const rows = [{ system_id: 'core', display_name: 'Core', tier: 'Damaged', damage_pct: 0.3, prioritisable: true }];
-    el.state = { teams: [{ id: 0, label: 'T1', status: 'travelling', target: 'Helm', progress_pct: 0.3 }], damaged: rows };
+    el.state = { teams: [{ id: 0, label: 'T1', status: 'returning', progress_pct: 0.9 }], damaged: rows };
     expect(card(el, 0).querySelector('.card-top').disabled).toBe(true);
     el.state = { teams: [{ id: 0, label: 'T1', status: 'repairing', target: 'Helm', progress_pct: 0.2 }], damaged: rows };
     const top = card(el, 0).querySelector('.card-top');
@@ -506,14 +554,20 @@ describe('PhRepairTeams', () => {
     expect(rows[2].querySelector('.pct').textContent).toBe('30%');
   });
 
-  it('does not offer an on-site card as a toggle while the visible systems are intact', () => {
+  // Before issue #1385 an on-site team with no visible rows had no body at all.
+  // It still has no rows — the host is showing this seat none — but it does now
+  // have a verb, so the card opens onto RECALL alone rather than not opening.
+  it('opens an on-site card onto RECALL alone while the visible systems are intact', () => {
     const { el } = onSite({ damaged: [] });
     const top = card(el, 0).querySelector('.card-top');
-    expect(top.disabled).toBe(true);
-    expect(top.getAttribute('aria-expanded')).toBe('false');
-    expect(card(el, 0).classList.contains('selected')).toBe(false);
-    expect(card(el, 0).querySelector('.card-body').hidden).toBe(true);
+    expect(top.disabled).toBe(false);
+    expect(top.getAttribute('aria-expanded')).toBe('true');
+    expect(card(el, 0).querySelector('.card-body').hidden).toBe(false);
     expect(el.shadowRoot.querySelectorAll('.dmg-row').length).toBe(0);
+    expect(card(el, 0).querySelector('.recall-btn')).not.toBeNull();
+    // Zero rows is not the same claim as "the section went away": an empty
+    // [DAMAGED SYSTEMS] heading over nothing would pass a count-only check.
+    expect(card(el, 0).querySelector('.body-head').textContent).toBe('');
   });
 
   it('sends set_repair_target_priority with the tapped system id', () => {

@@ -2301,6 +2301,31 @@ fn set_repair_priority_control_system_round_trips() {
     );
 }
 
+/// RecallRepairTeam command round-trip (issue #1385) — the RECALL control on an
+/// internal repair team's card.
+///
+/// It names its team, where the external `RecallExternalRepair` beside it
+/// carries no fields: a ship dispatches one team abroad at a time, but it can
+/// have every internal team out on a different job at once, so nothing
+/// server-side could resolve which of them "come home" meant.
+#[test]
+fn recall_repair_team_control_system_round_trips() {
+    let msg = ClientMessage::ControlSystem {
+        target: SystemId(crate::ship::system_registry::REPAIR_SYSTEM_ID.into()),
+        payload: SystemControlPayload::RecallRepairTeam { team_idx: 1 },
+    };
+    assert_client_roundtrip(&JsonCodec, msg.clone());
+    assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+
+    // Pin the on-the-wire JSON shape — repair-dispatch.js depends on this.
+    let encoded = JsonCodec.encode_client(&msg).unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"type":"ControlSystem","data":{"target":"repair","payload":{"type":"RecallRepairTeam","data":{"team_idx":1}}}}"#,
+        "RecallRepairTeam wire shape must match what repair-dispatch.js sends"
+    );
+}
+
 /// SetRepairTargetPriority command round-trip (issue #1015) — the repair
 /// console's damaged-systems taps. Unlike `SetRepairPriority` above it
 /// carries no ordinal at all: the host resolves which team's sweep covers

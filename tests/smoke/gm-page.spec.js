@@ -213,6 +213,32 @@ fn on_breach_alarm(ctx) { ctx.flags.increment("breach_alarms", 1); }
 """
 `;
 
+// Issue #1302: an ORDINARY condition-bearing trigger that declares gm_controls,
+// beside one that declares nothing. The declared event's condition (the courier
+// being destroyed) never occurs in this spec, which is the whole point — the GM
+// fires it anyway, and the undeclared trigger never reaches the panel at all.
+const GM_AUTOMATIC_EVENT_WORLD = `
+[global]
+seed = 1302
+title = "GM automatic event smoke fixture"
+description = "gm_controls on an automatic trigger, coverage for issue 1302."
+
+[[entity]]
+template_path = "assets/entities/alliance_courier.toml"
+name = "entity.alliance_courier.display_name"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+[script]
+setup = """
+on_destroyed("entity.alliance_courier.display_name", "on_courier_lost")
+    .gm_controls("courier_lost", "world.smoke_gm.event.courier_lost");
+on_world_loaded("on_quiet");
+fn on_courier_lost(ctx) { ctx.flags.increment("courier_losses", 1); }
+fn on_quiet(ctx) { }
+"""
+`;
+
 async function selectAndWait(client, station) {
   await client.send('SelectStation', { station });
   await client.page.waitForFunction(
@@ -558,6 +584,63 @@ test('a manual gm_event is listed, fired once, and then spent in the GM mission 
   await expect(row).toHaveAttribute('data-spent', 'true', { timeout: 30_000 });
   await expect(row.locator('.gm-mission-event-state'))
     .toHaveText(ts('server.gm.mission.state_spent'));
+  await expect(fire).toBeDisabled();
+  expect(await page.evaluate(() => window.__hostGmMissionState())).toMatchObject({
+    events: 1,
+    fireable: 0,
+    pending: 0,
+  });
+
+  expect(errors).toEqual([]);
+});
+
+/// Issue #1302 exit evidence in a real browser: an ORDINARY authored trigger
+/// that declares gm_controls reaches the GM mission panel under its String
+/// Table label, a Fire runs it even though its automatic condition has not
+/// occurred, and the trigger beside it that declares no controls never appears.
+test('an automatic event declaring gm_controls is listed and fireable, and an undeclared one is not', { tag: '@core' }, async ({ context }) => {
+  test.setTimeout(90_000);
+  await context.route('**/assets/worlds/default.toml', (route) =>
+    route.fulfill({ contentType: 'text/plain', body: GM_AUTOMATIC_EVENT_WORLD }),
+  );
+
+  const page = await context.newPage();
+  const errors = captureServerPageErrors(page);
+  await page.goto('/?gm=1&scenario=assets/worlds/default.toml');
+  await waitForWasmReady(page);
+  await page.evaluate(() => window.__hostFleetOpen());
+  await page.waitForFunction(() => {
+    const state = window.__hostGmStartState?.();
+    return state?.admitted === true
+      && state.presentationReady === true
+      && state.localValidation === true;
+  }, undefined, { timeout: 30_000 });
+  await page.evaluate(() => document.getElementById('gm-ready-btn').click());
+  await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
+
+  const row = page.locator('#gm-mission-events .gm-mission-event[data-event-id="base-world::courier_lost"]');
+  await expect(row).toBeVisible({ timeout: 30_000 });
+  await expect(row.locator('.gm-mission-event-label'))
+    .toHaveText(ts('world.smoke_gm.event.courier_lost'));
+  await expect(row.locator('.gm-mission-event-state'))
+    .toHaveText(ts('server.gm.mission.state_ready'));
+
+  // The world authors TWO triggers; only the one declaring gm_controls is
+  // addressable, which is what "invisible and unavailable" has to mean.
+  expect(await page.evaluate(() => window.__hostGmMissionState())).toMatchObject({
+    events: 1,
+    fireable: 1,
+  });
+
+  // The courier is alive and stays alive: the automatic condition never occurs.
+  const fire = row.locator('button[data-role="fire"]');
+  await expect(fire).toBeEnabled();
+  await fire.click();
+
+  const applied = page.locator('#gm-mission-log .gm-mission-log-entry[data-outcome="applied"]');
+  await expect(applied).toHaveCount(1, { timeout: 30_000 });
+  await expect(applied).toContainText('base-world::courier_lost');
+  await expect(row).toHaveAttribute('data-spent', 'true', { timeout: 30_000 });
   await expect(fire).toBeDisabled();
   expect(await page.evaluate(() => window.__hostGmMissionState())).toMatchObject({
     events: 1,

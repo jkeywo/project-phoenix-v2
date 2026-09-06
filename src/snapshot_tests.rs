@@ -101,11 +101,13 @@ fn paused_state_and_the_future_gm_frontier_round_trip_together() {
 /// authored event reported as fired, never run, and permanently unreachable.
 #[test]
 fn an_armed_gm_event_fire_round_trips_with_its_authored_trigger_table() {
-    fn manual_event(id: &str) -> crate::world::content::TriggerState {
-        let mut trigger =
-            crate::world::config::scripted_trigger(crate::world::config::TriggerCondition::Manual);
+    fn gm_event(
+        id: &str,
+        condition: crate::world::config::TriggerCondition,
+    ) -> crate::world::content::TriggerState {
+        let mut trigger = crate::world::config::scripted_trigger(condition);
         trigger.id = Some(id.to_string());
-        trigger.gm_controls = Some(crate::world::config::GmEventControls::manual_fire(
+        trigger.gm_controls = Some(crate::world::config::GmEventControls::fire_only(
             id.to_string(),
             format!("world.gm.event.{id}"),
         ));
@@ -117,9 +119,21 @@ fn an_armed_gm_event_fire_round_trips_with_its_authored_trigger_table() {
             last_fired_elapsed: None,
         }
     }
+    // One manual event (issue #1301) and one ORDINARY condition-bearing event
+    // declaring the same control set (issue #1302), because the armed set is
+    // keyed by qualified id and knows nothing about either condition — a
+    // capture that started reading `Trigger::condition` would break here.
     fn table() -> crate::world::server::WorldContentRuntime {
         crate::world::server::WorldContentRuntime {
-            trigger_states: vec![manual_event("breach"), manual_event("sweep")],
+            trigger_states: vec![
+                gm_event("breach", crate::world::config::TriggerCondition::Manual),
+                gm_event(
+                    "sweep",
+                    crate::world::config::TriggerCondition::OnDestroyed {
+                        entity_name: "courier".to_string(),
+                    },
+                ),
+            ],
             ..Default::default()
         }
     }
@@ -130,6 +144,9 @@ fn an_armed_gm_event_fire_round_trips_with_its_authored_trigger_table() {
     let mut runtime = table();
     runtime
         .pending_gm_event_fires
+        .insert("base-world::sweep".into());
+    runtime
+        .pending_gm_event_fires
         .insert("base-world::breach".into());
     live.world_mut().insert_resource(runtime);
 
@@ -137,8 +154,12 @@ fn an_armed_gm_event_fire_round_trips_with_its_authored_trigger_table() {
     let scenario = payload.scenario.as_ref().expect("a world was loaded");
     assert_eq!(
         scenario.pending_gm_event_fires,
-        vec!["base-world::breach".to_string()],
-        "the armed Fire is captured, sorted, by its layer-qualified id"
+        vec![
+            "base-world::breach".to_string(),
+            "base-world::sweep".to_string()
+        ],
+        "each armed Fire is captured, sorted, by its layer-qualified id — the \
+         manual event and the automatic one on identical terms"
     );
 
     let mut resumed = App::new();
@@ -163,7 +184,10 @@ fn an_armed_gm_event_fire_round_trips_with_its_authored_trigger_table() {
             .iter()
             .cloned()
             .collect::<Vec<_>>(),
-        vec!["base-world::breach".to_string()],
+        vec![
+            "base-world::breach".to_string(),
+            "base-world::sweep".to_string()
+        ],
     );
 
     // A world with no armed Fire writes the field out of the payload entirely,

@@ -1039,14 +1039,17 @@ pub enum TriggerCondition {
     Manual,
 }
 
-/// GM operability metadata attached to one authored trigger (issue #1301).
+/// GM operability metadata attached to one authored trigger (issues #1301,
+/// #1302).
 ///
-/// `gm_event(id, label, handler)` builds it with `fire` alone. Issue #1302
-/// gives an ORDINARY (condition-bearing) trigger the same struct through a
-/// `gm_controls` declaration, and #1303/#1304 turn on the two remaining
-/// levers, so nothing here is specific to the manual shorthand: a control set
-/// is `(stable id, String Table label, which levers)` regardless of what the
-/// trigger's condition is.
+/// Two authoring surfaces build it, and they build the SAME struct: the
+/// `gm_event(id, label, handler)` manual-only shorthand, whose Fire is implied
+/// rather than authored, and `<registration>.gm_controls(id, label)`, which
+/// attaches it to an ORDINARY condition-bearing trigger (issue #1302).
+/// #1303/#1304 turn on the two remaining levers. Nothing here is specific to
+/// either surface: a control set is `(stable id, String Table label, which
+/// levers)` regardless of what the trigger's condition is, which is what makes
+/// the whole id/registry/lookup/apply seam condition-agnostic.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GmEventControls {
     /// Author-stable id, unique within its layer. Layer qualification happens
@@ -1057,7 +1060,8 @@ pub struct GmEventControls {
     pub id: String,
     /// String Table id for the operator-facing label. Never English.
     pub label: String,
-    /// The explicit Fire lever. `gm_event` implies it.
+    /// The explicit Fire lever. `gm_event` implies it; `gm_controls` declares
+    /// it.
     pub fire: bool,
     /// The persistent manual Pause lever (issue #1303). Always false here.
     pub pause: bool,
@@ -1066,27 +1070,28 @@ pub struct GmEventControls {
 }
 
 impl GmEventControls {
-    /// The one place the authored id/label shape is decided, shared by the
-    /// Rhai host fn and the load-time validation pass so neither can drift.
+    /// The one place the authored id/label shape is decided, shared by BOTH
+    /// Rhai host fns (`gm_event` and `gm_controls`) and the load-time
+    /// validation pass so none of the three can drift.
     pub fn validate_authored(id: &str, label: &str) -> Result<(), String> {
         let bounded = |value: &str| {
             !value.is_empty() && value.len() <= 128 && !value.chars().any(char::is_control)
         };
         if !bounded(id) {
             return Err(format!(
-                "gm_event id must be 1..=128 bytes of control-free text, got {id:?}"
+                "GM event id must be 1..=128 bytes of control-free text, got {id:?}"
             ));
         }
         // `::` is the layer qualifier this id is joined with; an authored id
         // carrying one could name a different layer's event.
         if id.contains("::") || id.contains(char::is_whitespace) {
             return Err(format!(
-                "gm_event id must not contain '::' or whitespace, got {id:?}"
+                "GM event id must not contain '::' or whitespace, got {id:?}"
             ));
         }
         if !bounded(label) {
             return Err(format!(
-                "gm_event label must be a 1..=128 byte String Table id, got {label:?}"
+                "GM event label must be a 1..=128 byte String Table id, got {label:?}"
             ));
         }
         Ok(())
@@ -1097,8 +1102,16 @@ impl GmEventControls {
         self.fire
     }
 
-    /// The manual-only shorthand's control set: Fire, nothing else.
-    pub fn manual_fire(id: String, label: String) -> Self {
+    /// The control set both authoring surfaces build today: Fire, nothing else.
+    ///
+    /// Deliberately NOT named for the manual shorthand (it was `manual_fire`
+    /// while #1301 was its only caller): issue #1302 builds the identical set
+    /// for an ordinary condition-bearing trigger, and a constructor named for
+    /// one of its two callers would read as a claim about the condition that
+    /// is simply not true. #1303/#1304 add their levers as sibling authoring
+    /// modifiers rather than widening either declaration's parameter list, so
+    /// this stays the one starting point.
+    pub fn fire_only(id: String, label: String) -> Self {
         Self {
             id,
             label,

@@ -420,7 +420,7 @@ pub(crate) fn register_trigger_builders(
             // scenario can `reset_trigger` a spent GM event and the balance
             // feed attributes its fire by the same name the GM pressed.
             trigger.id = Some(id.to_string());
-            trigger.gm_controls = Some(GmEventControls::manual_fire(
+            trigger.gm_controls = Some(GmEventControls::fire_only(
                 id.to_string(),
                 label.to_string(),
             ));
@@ -457,6 +457,90 @@ pub(crate) fn register_trigger_builders(
                 // Unreachable through the front-end, exactly as in `when` below.
                 None => Err(raise(format!(
                     "repeatable(): trigger handle {index} names no registered trigger"
+                ))),
+            }
+        },
+    );
+
+    // 14. The GM operability declaration on an ORDINARY event (issue #1302).
+    //
+    // `on_destroyed("courier", "on_lost").gm_controls("courier_lost",
+    // "world.gm.event.courier_lost")` keeps its automatic condition and ALSO
+    // becomes something a Game Master can reach for in the mission panel.
+    //
+    // It is a trigger-level modifier, not a parameter of thirteen registration
+    // fns, for exactly the reason `.when(…)` is: GM operability is orthogonal
+    // to every condition, and thirteen `_gm` overloads would say one thing
+    // thirteen times. Nothing downstream of here knows which surface authored
+    // the control set — `state_event_id`, `controllable_events`,
+    // `fireable_index`, `manual_fire_is_still_live` and every eligibility gate
+    // in `fire_manual_trigger` read `Trigger::gm_controls` and the lifecycle
+    // fields, never the condition — so a Fire on an automatic event bypasses
+    // that condition and runs the ordinary handler through the ordinary
+    // lifecycle by construction rather than by a second code path. The one
+    // deliberate read is `fire_manual_trigger` naming the condition's SUBJECT
+    // on the `FiredTrigger` it returns, so the record of a GM fire is
+    // indistinguishable from the record of the occurrence it stood in for; see
+    // the module docs on `crate::gm_event`.
+    //
+    // Fire is the ONLY lever it declares. #1303's Pause and #1304's Skip arrive
+    // as sibling modifiers on this same handle rather than as extra parameters
+    // here, matching how `.repeat()` and `.when()` are siblings: an author who
+    // wants them says so, and a signature change two issues from now is not a
+    // breaking edit to every world that already declares a control set.
+    //
+    // Declaring twice is a load-time error rather than a last-writer-wins
+    // overwrite. `gm_event(…).gm_controls(…)` is the interesting case: the
+    // shorthand already implied Fire under a DIFFERENT authored id, so silently
+    // keeping one of the two would publish a mission-panel row under an id the
+    // author did not expect and leave the other unaddressable.
+    let s = state.clone();
+    host_fn!(
+        engine,
+        "gm_controls",
+        receiver = "trigger",
+        category = "trigger",
+        params = ["id", "label"],
+        summary = "Make the ORDINARY registration just authored GM-operable: \
+                  `on_destroyed(e, \"h\").gm_controls(\"courier_lost\", \
+                  \"world.gm.event.courier_lost\")` adds a Fire control to the GM \
+                  mission panel under a stable id and a String Table label, \
+                  leaving the automatic condition untouched. Chains with \
+                  `.when(…)` and `.repeat()`, in any order.",
+        move |handle: &mut TriggerHandle,
+              id: ImmutableString,
+              label: ImmutableString|
+              -> Result<TriggerHandle, Box<EvalAltResult>> {
+            GmEventControls::validate_authored(&id, &label).map_err(raise)?;
+            let mut st = s.lock().expect("builder state lock");
+            let index = handle.index;
+            match st.script_triggers.get_mut(index) {
+                Some(t) if t.trigger.gm_controls.is_some() => Err(raise(format!(
+                    "gm_controls(\"{id}\", …): this registration already declares \
+                     GM controls (id '{}'); a trigger has one control set, and \
+                     `gm_event` already implies Fire",
+                    t.trigger
+                        .gm_controls
+                        .as_ref()
+                        .map(|c| c.id.as_str())
+                        .unwrap_or_default(),
+                ))),
+                Some(t) => {
+                    // The authored id doubles as the ordinary `Trigger::id`,
+                    // exactly as `gm_event` sets it: a scenario can
+                    // `reset_trigger` a spent GM-controlled event, and the
+                    // balance feed attributes its fire — automatic or GM — by
+                    // the one name the operator pressed.
+                    t.trigger.id = Some(id.to_string());
+                    t.trigger.gm_controls = Some(GmEventControls::fire_only(
+                        id.to_string(),
+                        label.to_string(),
+                    ));
+                    Ok(*handle)
+                }
+                // Unreachable through the front-end, exactly as in `when` below.
+                None => Err(raise(format!(
+                    "gm_controls(): trigger handle {index} names no registered trigger"
                 ))),
             }
         },
@@ -1043,7 +1127,7 @@ mod tests {
     fn gm_event_builds_a_manual_trigger_with_an_implied_fire_control() {
         let mut expected = crate::world::config::scripted_trigger(TriggerCondition::Manual);
         expected.id = Some("breach_alarm".into());
-        expected.gm_controls = Some(crate::world::config::GmEventControls::manual_fire(
+        expected.gm_controls = Some(crate::world::config::GmEventControls::fire_only(
             "breach_alarm".into(),
             "world.gm.event.breach_alarm".into(),
         ));
@@ -1107,5 +1191,146 @@ mod tests {
                 "`{source}` must not register a half-built event"
             );
         }
+    }
+
+    // ── gm_controls: GM operability on an ORDINARY event (issue #1302) ────────
+
+    /// The identity rule is ONE rule: the same four malformed shapes
+    /// `gm_event` refuses are refused on this surface too, and the trigger the
+    /// registration already pushed is left carrying NO control set — the
+    /// half-built event the atomic activation gate then blocks the world over.
+    #[test]
+    fn a_malformed_gm_controls_identity_is_a_blocking_finding() {
+        for source in [
+            r#"on_world_loaded("h").gm_controls("", "world.gm.event.a"); fn h(ctx) { }"#,
+            r#"on_world_loaded("h").gm_controls("a::b", "world.gm.event.a"); fn h(ctx) { }"#,
+            r#"on_world_loaded("h").gm_controls("a b", "world.gm.event.a"); fn h(ctx) { }"#,
+            r#"on_world_loaded("h").gm_controls("a", ""); fn h(ctx) { }"#,
+        ] {
+            let compiled = compile_scripts(&[ScriptSource {
+                path: "w.toml#script.setup".to_string(),
+                source: source.to_string(),
+            }]);
+            assert!(
+                compiled
+                    .findings
+                    .iter()
+                    .any(|finding| finding.severity == crate::world::validate::Severity::Error),
+                "`{source}` must be refused at load: {:?}",
+                compiled.findings
+            );
+            assert!(
+                compiled
+                    .script_triggers
+                    .iter()
+                    .all(|st| st.trigger.gm_controls.is_none()),
+                "`{source}` must not register a half-built control set"
+            );
+        }
+    }
+
+    /// The declaration keeps the automatic condition and adds exactly the Fire
+    /// lever — the same control set `gm_event` implies, under an authored id.
+    #[test]
+    fn gm_controls_keeps_the_condition_and_adds_an_authored_fire_control() {
+        let mut expected = crate::world::config::scripted_trigger(TriggerCondition::OnHullBelow {
+            entity_name: "courier".into(),
+            threshold: 0.4,
+        });
+        expected.id = Some("breach_alarm".into());
+        expected.gm_controls = Some(crate::world::config::GmEventControls::fire_only(
+            "breach_alarm".into(),
+            "world.gm.event.breach_alarm".into(),
+        ));
+        assert_builds_with(
+            r#"on_hull_below("courier", flt("0.4"), "h")
+                   .gm_controls("breach_alarm", "world.gm.event.breach_alarm")"#,
+            expected,
+        );
+
+        let controls = script_triggers(
+            r#"on_hull_below("courier", flt("0.4"), "h")
+                   .gm_controls("breach_alarm", "world.gm.event.breach_alarm");
+               fn h(ctx) { }"#,
+        )[0]
+        .trigger
+        .gm_controls
+        .clone()
+        .expect("a control set");
+        assert!(controls.fire, "Fire is what this declaration turns on");
+        assert!(
+            !controls.pause && !controls.skip,
+            "Pause (#1303) and Skip (#1304) are not declared here"
+        );
+    }
+
+    /// It is a trigger-level modifier like `.when(…)` and `.repeat()`, so the
+    /// three compose in any order and say the same sentence.
+    #[test]
+    fn gm_controls_composes_with_the_other_trigger_modifiers_in_any_order() {
+        let one = script_triggers(
+            r#"on_flag_set("alarm", "h")
+                   .gm_controls("evac", "world.gm.event.evac").repeat().when("flag(ready)");
+               fn h(ctx) { }"#,
+        );
+        let other = script_triggers(
+            r#"on_flag_set("alarm", "h")
+                   .when("flag(ready)").repeat().gm_controls("evac", "world.gm.event.evac");
+               fn h(ctx) { }"#,
+        );
+        assert_eq!(one[0].trigger, other[0].trigger);
+        assert!(one[0].trigger.repeat);
+        assert!(one[0].trigger.when.is_some());
+        assert_eq!(
+            one[0].trigger.condition,
+            TriggerCondition::OnFlagSet {
+                name: "alarm".into()
+            },
+            "the automatic condition is untouched by the declaration"
+        );
+    }
+
+    /// One trigger, one control set. Declaring twice is a load-time error
+    /// rather than a last-writer-wins overwrite that would publish a panel row
+    /// under an id the author did not expect.
+    #[test]
+    fn a_second_gm_controls_declaration_on_one_trigger_is_a_blocking_finding() {
+        for source in [
+            r#"on_world_loaded("h").gm_controls("a", "world.gm.event.a")
+                   .gm_controls("b", "world.gm.event.b"); fn h(ctx) { }"#,
+            // `gm_event` already implied Fire under its OWN authored id.
+            r#"gm_event("a", "world.gm.event.a", "h")
+                   .gm_controls("b", "world.gm.event.b"); fn h(ctx) { }"#,
+        ] {
+            let compiled = compile_scripts(&[ScriptSource {
+                path: "w.toml#script.setup".to_string(),
+                source: source.to_string(),
+            }]);
+            assert!(
+                compiled
+                    .findings
+                    .iter()
+                    .any(|finding| finding.severity == crate::world::validate::Severity::Error),
+                "`{source}` must be refused at load: {:?}",
+                compiled.findings
+            );
+        }
+
+        // The FIRST declaration survives untouched — the refusal is not a
+        // half-applied overwrite.
+        let compiled = compile_scripts(&[ScriptSource {
+            path: "w.toml#script.setup".to_string(),
+            source: r#"on_world_loaded("h").gm_controls("a", "world.gm.event.a")
+                           .gm_controls("b", "world.gm.event.b"); fn h(ctx) { }"#
+                .to_string(),
+        }]);
+        assert_eq!(
+            compiled.script_triggers[0]
+                .trigger
+                .gm_controls
+                .as_ref()
+                .map(|c| c.id.as_str()),
+            Some("a"),
+        );
     }
 }

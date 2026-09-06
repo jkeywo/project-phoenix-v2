@@ -1183,8 +1183,27 @@ mod tests {
     /// revalidates it against the replayed world's own trigger table, and the
     /// durable result carries the event it named. Nothing about the event
     /// family needs a second replay path.
+    ///
+    /// Run over BOTH authoring surfaces (issue #1302). The revalidation reads
+    /// `fireable_index` and `manual_fire_is_still_live`, neither of which looks
+    /// at `Trigger::condition`, so a manual event and an ordinary
+    /// condition-bearing one that declares `gm_controls` must replay
+    /// identically — and a future change that special-cased
+    /// `TriggerCondition::Manual` would be caught here rather than as a
+    /// divergence in somebody's mission.
     #[test]
     fn a_fired_gm_event_replays_through_the_canonical_journal() {
+        for condition in [
+            crate::world::config::TriggerCondition::Manual,
+            crate::world::config::TriggerCondition::OnDestroyed {
+                entity_name: "courier".to_string(),
+            },
+        ] {
+            replays_through_the_canonical_journal(condition);
+        }
+    }
+
+    fn replays_through_the_canonical_journal(condition: crate::world::config::TriggerCondition) {
         let event = "base-world::breach_alarm";
         let mut source = GmActionJournal::default();
         source
@@ -1205,10 +1224,9 @@ mod tests {
         source.restore_applied_frontier(1).unwrap();
         validate_gm_action_journal(&source).expect("a Fire journal is canonical");
 
-        let mut trigger =
-            crate::world::config::scripted_trigger(crate::world::config::TriggerCondition::Manual);
+        let mut trigger = crate::world::config::scripted_trigger(condition);
         trigger.id = Some("breach_alarm".into());
-        trigger.gm_controls = Some(crate::world::config::GmEventControls::manual_fire(
+        trigger.gm_controls = Some(crate::world::config::GmEventControls::fire_only(
             "breach_alarm".into(),
             "world.gm.event.breach_alarm".into(),
         ));

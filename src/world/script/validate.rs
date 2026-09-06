@@ -824,7 +824,7 @@ mod tests {
         let mut trigger =
             crate::world::config::scripted_trigger(crate::world::config::TriggerCondition::Manual);
         trigger.id = Some(id.to_string());
-        trigger.gm_controls = Some(crate::world::config::GmEventControls::manual_fire(
+        trigger.gm_controls = Some(crate::world::config::GmEventControls::fire_only(
             id.to_string(),
             label.to_string(),
         ));
@@ -873,6 +873,38 @@ mod tests {
             assert_eq!(findings[0].category, INVALID_GM_EVENT);
             assert!(crate::world::validate::has_error(&findings));
         }
+    }
+
+    /// Issue #1302: the id space is ONE space across both authoring surfaces.
+    /// A manual `gm_event` and an automatic `gm_controls` declaration that
+    /// collide are the same ambiguity as two manual ones — a GM action naming
+    /// `breach` would have two handlers it could run — so the same pass refuses
+    /// it, and it does not matter which surface authored which row.
+    #[test]
+    fn a_manual_and_an_automatic_event_may_not_share_one_authored_id() {
+        let mut automatic = gm_event_trigger("breach", "world.gm.event.breach", "w.toml#script.b");
+        automatic.trigger.condition = crate::world::config::TriggerCondition::OnDestroyed {
+            entity_name: "courier".to_string(),
+        };
+        let findings = validate_gm_events(&[
+            gm_event_trigger("breach", "world.gm.event.breach", "w.toml#script.a"),
+            automatic,
+        ]);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].category, INVALID_GM_EVENT);
+        assert_eq!(findings[0].source.reference, "breach");
+        assert!(crate::world::validate::has_error(&findings));
+
+        // Two DISTINCT ids on the two surfaces are perfectly ordinary.
+        let mut automatic = gm_event_trigger("evac", "world.gm.event.evac", "w.toml#script.b");
+        automatic.trigger.condition = crate::world::config::TriggerCondition::OnDestroyed {
+            entity_name: "courier".to_string(),
+        };
+        assert!(validate_gm_events(&[
+            gm_event_trigger("breach", "world.gm.event.breach", "w.toml#script.a"),
+            automatic,
+        ])
+        .is_empty());
     }
 
     // ── `flags` compound-assignment lint (issue #994) ─────────────────────────

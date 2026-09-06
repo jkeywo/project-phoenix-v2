@@ -2351,7 +2351,7 @@ fn a_fireless_run_still_republishes_the_mission_panel_after_a_lobby_round_trip()
 
     let mut trigger = scripted_trigger(TriggerCondition::Manual);
     trigger.id = Some("breach_alarm".to_string());
-    trigger.gm_controls = Some(GmEventControls::manual_fire(
+    trigger.gm_controls = Some(GmEventControls::fire_only(
         "breach_alarm".to_string(),
         "world.gm.event.breach_alarm".to_string(),
     ));
@@ -2432,7 +2432,7 @@ fn a_lobby_round_trip_disarms_a_predicate_held_gm_fire() {
     // The exact case the arm exists for: the Fire applied, the gate withheld
     // the firing, and the entry waits for the predicate to hold.
     trigger.when = Some(crate::world::flags::parse_predicate("flag(armed)").unwrap());
-    trigger.gm_controls = Some(GmEventControls::manual_fire(
+    trigger.gm_controls = Some(GmEventControls::fire_only(
         "scuttle".to_string(),
         "world.gm.event.scuttle".to_string(),
     ));

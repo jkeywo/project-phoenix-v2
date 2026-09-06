@@ -2434,6 +2434,7 @@ server.gm.session.result_no_op,No-op GM session result. {name} is the operator; 
 server.gm.session.result_refused,Refused GM session result. {name} is the operator; {state} the requested state; {tick} the authoritative tick; {correlation} the request identity; {reason} the refusal reason,[{name} requested {state} at tick {tick}. Refused: {reason} ({correlation}).]
 server.gm.session.reason.unknown_gm_event,Localized GM action refusal when no live authored event carries the named id or it declares no Fire control,[No operable event answers to that name]
 world.smoke_gm.event.breach_alarm,Smoke-fixture GM event label proving a gm_event renders its String Table label in the mission panel,[Sound the breach alarm]
+world.smoke_gm.event.courier_lost,Smoke-fixture GM event label proving an ORDINARY authored trigger that declares gm_controls renders its String Table label in the mission panel,[Declare the courier lost]
 server.gm.mission.heading,Accessible heading for the GM mission panel listing controllable authored events,[Mission events]
 server.gm.mission.empty,Shown when the loaded scenario authors no GM-operable events,[This scenario authors no Game Master events.]
 server.gm.mission.log_heading,Accessible heading for the bounded attributed GM event-control result feed,[Event activity]

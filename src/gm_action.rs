@@ -2102,7 +2102,7 @@ station = "helm"
             crate::world::config::scripted_trigger(crate::world::config::TriggerCondition::Manual);
         trigger.id = Some(id.to_string());
         trigger.repeat = repeat;
-        let mut controls = crate::world::config::GmEventControls::manual_fire(
+        let mut controls = crate::world::config::GmEventControls::fire_only(
             id.to_string(),
             format!("world.gm.event.{id}"),
         );

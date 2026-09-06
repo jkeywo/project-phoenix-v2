@@ -1298,7 +1298,7 @@ fn an_armed_gm_fire_moves_the_digest_and_an_empty_set_leaves_it_alone() {
         let mut state = trigger_state("raider");
         state.trigger.condition = TriggerCondition::Manual;
         state.trigger.id = Some(id.into());
-        state.trigger.gm_controls = Some(crate::world::config::GmEventControls::manual_fire(
+        state.trigger.gm_controls = Some(crate::world::config::GmEventControls::fire_only(
             id.into(),
             format!("world.gm.event.{id}"),
         ));
@@ -1347,6 +1347,31 @@ fn an_armed_gm_fire_moves_the_digest_and_an_empty_set_leaves_it_alone() {
     swapped.resource_mut::<WorldContentRuntime>().trigger_states =
         vec![automatic, gm_event("sweep")];
     assert_ne!(idle, world_digest(&swapped));
+
+    // Issue #1302: an ORDINARY condition-bearing event declaring the same
+    // control set folds on identical terms. The armed set is keyed by qualified
+    // id and the fold never reads `Trigger::condition`, so two peers that
+    // disagree about an automatic event's pending Fire disagree in the digest
+    // exactly as they do about a manual one's — the guard against a future
+    // change that folds only `TriggerCondition::Manual` arms.
+    let mut ordinary = scenario_world();
+    let mut evac = gm_event("evac");
+    evac.trigger.condition = TriggerCondition::OnDestroyed {
+        entity_name: "courier".into(),
+    };
+    ordinary
+        .resource_mut::<WorldContentRuntime>()
+        .trigger_states = vec![evac];
+    let ordinary_idle = world_digest(&ordinary);
+    ordinary
+        .resource_mut::<WorldContentRuntime>()
+        .pending_gm_event_fires
+        .insert("base-world::evac".into());
+    assert_ne!(
+        ordinary_idle,
+        world_digest(&ordinary),
+        "an armed Fire on an AUTOMATIC event is authoritative pending work too"
+    );
 }
 
 /// The cooldown stamp folds as present-or-absent and never by value: a restore

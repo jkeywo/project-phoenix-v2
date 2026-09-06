@@ -1,5 +1,5 @@
 //! GM-operable authored events: identity, registry and mission projection
-//! (issue #1301, PRD #930 milestone M2).
+//! (issues #1301 and #1302, PRD #930 milestone M2).
 //!
 //! # What an "event control" is
 //!
@@ -9,13 +9,40 @@
 //! and Skip. Missing controls are invisible and unavailable — the default for
 //! every trigger every shipped world already authors.
 //!
-//! `gm_event(id, label, handler)` is the manual-only shorthand: it builds a
+//! Two authoring surfaces declare one:
+//!
+//! * `gm_event(id, label, handler)` is the manual-only shorthand. It builds a
+//!   [`TriggerCondition::Manual`](crate::world::config::TriggerCondition::Manual)
+//!   trigger whose only possible cause is a GM Fire, and implies the Fire
+//!   control without a redundant declaration (issue #1301).
+//! * `<registration>.gm_controls(id, label)` attaches the SAME control set to an
+//!   ORDINARY condition-bearing trigger, which keeps its automatic condition and
+//!   also becomes GM-operable (issue #1302).
+//!
+//! #1303 and #1304 turn on Pause and Skip. Nothing that DECIDES anything about
+//! a Fire reads `Trigger::condition` — not this module, not the `FireGmEvent`
+//! admission, not the apply-tick revalidation, and not the eligibility gates of
+//! the trigger pipeline's manual pass
+//! ([`fire_manual_trigger`](crate::world::content::fire_manual_trigger) and
+//! [`manual_fire_is_still_live`](crate::world::content::manual_fire_is_still_live),
+//! which key off the once/repeat latch, the `when` predicate and the cooldown).
+//! That is the point and not an accident: it is what makes "Fire bypasses the
+//! condition and executes the ordinary handler and lifecycle" true by
+//! construction rather than by a second code path that could drift from the
+//! automatic one.
+//!
+//! The condition IS read at exactly one place on the manual path, and it has to
+//! be: the `FiredTrigger` `fire_manual_trigger` returns names the condition's
+//! subject through
+//! [`entity_name_from_condition`](crate::world::content::entity_name_from_condition),
+//! so a GM-fired `on_destroyed("courier", …)` is recorded against the courier
+//! exactly as the automatic occurrence would have been (a
 //! [`TriggerCondition::Manual`](crate::world::config::TriggerCondition::Manual)
-//! trigger whose only possible cause is a GM Fire, and implies the Fire control
-//! without a redundant `gm_controls` declaration. Issue #1302 attaches the same
-//! struct to ordinary condition-bearing triggers; #1303 and #1304 turn on Pause
-//! and Skip. Nothing in this module is specific to the manual shorthand, which
-//! is the point: the id/registry/lookup seam is condition-agnostic.
+//! event names nobody, because it is about nobody). "Bypasses the condition" is
+//! a claim about what may CAUSE a firing, never about what the firing then says
+//! happened — the record must not be able to tell a GM's Fire from the world's
+//! own occurrence, and reading the subject off the condition is exactly what
+//! keeps the two identical.
 //!
 //! # Identity is layer-qualified, and derived rather than stored
 //!
@@ -216,7 +243,7 @@ mod tests {
         let mut trigger = scripted_trigger(TriggerCondition::Manual);
         trigger.id = Some(id.to_string());
         trigger.repeat = repeat;
-        trigger.gm_controls = Some(GmEventControls::manual_fire(
+        trigger.gm_controls = Some(GmEventControls::fire_only(
             id.to_string(),
             format!("world.gm.event.{id}"),
         ));
@@ -277,6 +304,47 @@ mod tests {
         let events = controllable_events(&states, &Default::default());
         assert!(events[0].spent && !events[0].repeatable);
         assert!(!events[1].spent && events[1].repeatable);
+    }
+
+    /// Issue #1302: nothing in this module reads the condition, and this is the
+    /// assertion that says so rather than leaving it to inspection. An ORDINARY
+    /// condition-bearing trigger carrying the same control set is listed,
+    /// resolved and fireable on exactly the same terms as a manual one — and a
+    /// declaration WITHOUT Fire is still listed and still not fireable, whatever
+    /// its condition.
+    #[test]
+    fn an_automatic_event_is_listed_and_fireable_on_the_same_terms_as_a_manual_one() {
+        let automatic = |id: &str, fire: bool| {
+            let mut st = state(id, None, false, false);
+            st.trigger.condition = TriggerCondition::OnDestroyed {
+                entity_name: "courier".to_string(),
+            };
+            st.trigger.gm_controls.as_mut().expect("controls").fire = fire;
+            st
+        };
+        let states = vec![automatic("evac", true), automatic("silent", false)];
+
+        let events = controllable_events(&states, &Default::default());
+        assert_eq!(
+            events.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+            vec!["base-world::evac", "base-world::silent"],
+        );
+        assert_eq!(
+            state_event_id(&states[0]).as_deref(),
+            Some("base-world::evac"),
+        );
+        assert_eq!(fireable_index(&states, "base-world::evac"), Some(0));
+        assert_eq!(
+            fireable_index(&states, "base-world::silent"),
+            None,
+            "a listed automatic event without Fire is not fireable"
+        );
+
+        // And an automatic trigger that declares nothing is invisible, which is
+        // every trigger every shipped world already authors.
+        let mut plain = automatic("evac", true);
+        plain.trigger.gm_controls = None;
+        assert!(controllable_events(&[plain], &Default::default()).is_empty());
     }
 
     #[test]

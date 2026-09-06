@@ -45,6 +45,26 @@ fn sweep(ctx) { ctx.flags.increment("sweeps", 1); }
 '''
 "#;
 
+/// The issue #1302 half: ORDINARY condition-bearing triggers, two of which
+/// declare `gm_controls` and one of which deliberately does not, so "an event
+/// without controls is invisible and unavailable" is a fixture fact rather than
+/// an assertion about an absence nothing could have produced.
+///
+/// `on_destroyed` is the condition because it is the one this harness can make
+/// occur on demand (an `AiEntityDestroyed` message plus a `name_to_uuid` row),
+/// which is what lets one test drive the SAME trigger both ways round: fired by
+/// a GM against an unmet condition, and fired by the world.
+const SCRIPT_GM_AUTOMATIC_EVENTS: &str = r#"[script]
+setup = '''
+on_destroyed("courier", "evac").gm_controls("evac", "world.gm.event.evac");
+on_destroyed("raider", "lockdown").gm_controls("lockdown", "world.gm.event.lockdown");
+on_destroyed("scout", "silent");
+fn evac(ctx) { ctx.flags.increment("evacs", 1); }
+fn lockdown(ctx) { ctx.flags.increment("lockdowns", 1); }
+fn silent(ctx) { ctx.flags.increment("silents", 1); }
+'''
+"#;
+
 /// `a_gm_fire_held_by_a_false_predicate_lands_when_the_predicate_holds`.
 const SCRIPT_GM_EVENT_GATED: &str = r#"[script]
 setup = '''
@@ -1739,6 +1759,217 @@ fn a_gm_fire_held_by_a_false_predicate_lands_when_the_predicate_holds() {
         "the retained arm fires the moment the predicate holds"
     );
     assert!(runtime.pending_gm_event_fires.is_empty());
+}
+
+/// Destroy the named entity, so an `on_destroyed` condition occurs naturally.
+fn destroy_named(app: &mut App, name: &str) {
+    let uuid = format!("uuid-1302-{name}");
+    app.world_mut()
+        .resource_mut::<WorldContentRuntime>()
+        .name_to_uuid
+        .insert(name.to_string(), uuid.clone());
+    app.world_mut()
+        .resource_mut::<Messages<AiEntityDestroyed>>()
+        .write(AiEntityDestroyed { entity_uuid: uuid });
+    app.update();
+}
+
+/// Issue #1302, the whole point of the issue in one run: an ORDINARY
+/// condition-bearing trigger that declares `gm_controls` can be Fired by a GM
+/// while its condition has not occurred, and the Fire runs the ORDINARY handler
+/// through the ORDINARY once/repeat lifecycle.
+///
+/// The second half is the edge #1301's manual-only events could not reach at
+/// all, because a `TriggerCondition::Manual` never occurs on its own: the
+/// authored lifecycle is ONE latch shared by both causes, so a GM Fire spends
+/// the automatic occurrence that would otherwise have followed.
+#[test]
+fn a_gm_fire_bypasses_an_unmet_condition_and_spends_the_automatic_occurrence() {
+    let mut app = gm_event_app(SCRIPT_GM_AUTOMATIC_EVENTS);
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .trigger_states
+            .len(),
+        3
+    );
+
+    // Nothing named `courier` has been destroyed, and nothing ever will be
+    // before this Fire: the condition is unmet the whole time.
+    fire_gm_event(&mut app, "fire-1", "base-world::evac");
+    {
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert_eq!(
+            runtime.flags.counter("evacs"),
+            1,
+            "Fire bypasses the automatic condition and runs the ordinary handler"
+        );
+        assert!(
+            runtime.trigger_states[0].fired,
+            "and consumes the ordinary one-shot latch"
+        );
+        assert!(runtime.pending_gm_event_fires.is_empty());
+    }
+    assert_eq!(
+        gm_outcomes(&app),
+        vec![crate::gm_action::GmActionOutcome::Applied]
+    );
+
+    // The lifecycle is ONE latch, not two: the occurrence the GM pre-empted
+    // cannot run the handler a second time.
+    destroy_named(&mut app, "courier");
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("evacs"),
+        1,
+        "a one-shot event a GM already fired is spent for the world too"
+    );
+}
+
+/// The same latch, the other way round: an event the WORLD already fired is a
+/// deterministic No-op when a GM presses Fire afterwards — the revalidation
+/// `apply_due_actions` does at the agreed apply tick reads the same
+/// `manual_fire_is_still_live` gate on every peer.
+#[test]
+fn an_automatic_event_that_already_fired_refuses_to_fire_again_for_a_gm() {
+    let mut app = gm_event_app(SCRIPT_GM_AUTOMATIC_EVENTS);
+
+    destroy_named(&mut app, "raider");
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("lockdowns"),
+        1,
+        "the ordinary condition fired the ordinary handler"
+    );
+
+    fire_gm_event(&mut app, "fire-1", "base-world::lockdown");
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("lockdowns"),
+        1,
+        "a spent one-shot runs nothing for a GM either"
+    );
+    assert_eq!(
+        gm_outcomes(&app),
+        vec![crate::gm_action::GmActionOutcome::NoOp]
+    );
+}
+
+/// An ordinary trigger that declares NO `gm_controls` is invisible to the
+/// mission panel and unaddressable by a `FireGmEvent` — the criterion that
+/// keeps every trigger every shipped world already authors out of the GM's
+/// hands.
+#[test]
+fn an_automatic_event_without_controls_is_invisible_and_unfireable() {
+    let mut app = gm_event_app(SCRIPT_GM_AUTOMATIC_EVENTS);
+
+    let listed: Vec<String> = {
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        crate::gm_event::controllable_events(
+            &runtime.trigger_states,
+            &runtime.pending_gm_event_fires,
+        )
+        .into_iter()
+        .map(|event| event.id)
+        .collect()
+    };
+    assert_eq!(
+        listed,
+        vec![
+            "base-world::evac".to_string(),
+            "base-world::lockdown".to_string()
+        ],
+        "only the two declared events are listed, in authored table order"
+    );
+
+    // The undeclared one cannot even be named: `silent` has no qualified id.
+    fire_gm_event(&mut app, "fire-1", "base-world::silent");
+    let results = app
+        .world()
+        .resource::<crate::gm_action::GmActionJournal>()
+        .applied_results()
+        .to_vec();
+    assert_eq!(results.len(), 1);
+    assert_eq!(
+        results[0].outcome,
+        crate::gm_action::GmActionOutcome::Refused
+    );
+    assert_eq!(
+        results[0].reason,
+        Some(crate::gm_action::GmActionRefusalReason::UnknownGmEvent)
+    );
+    assert_eq!(results[0].target.as_deref(), Some("base-world::silent"));
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("silents"),
+        0,
+        "a refused Fire runs no handler at all"
+    );
+
+    // And the ordinary condition still works on it — it is a perfectly good
+    // trigger, just not a GM-operable one.
+    destroy_named(&mut app, "scout");
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("silents"),
+        1,
+    );
+}
+
+/// A GM fire of an AUTOMATIC event reaches the shared history seam under its
+/// authored id, exactly as the automatic occurrence would have — so the record
+/// says which authored event happened, and the attribution of WHO caused it
+/// lives on the GM action journal beside it rather than in a second trigger id.
+///
+/// The recorded SUBJECT is the condition's own entity, which is the one place
+/// the manual path deliberately reads `Trigger::condition` (`FiredTrigger` is
+/// built through `entity_name_from_condition`). "Fire bypasses the condition"
+/// is a claim about what may CAUSE a firing, never about what the firing then
+/// says happened: nothing downstream may be able to tell a GM's Fire of
+/// `on_destroyed("courier", …)` from the courier actually dying, and a future
+/// change that stopped naming the subject would make GM-caused history a
+/// second, thinner shape.
+#[test]
+fn a_gm_fire_of_an_automatic_event_is_recorded_under_its_authored_id() {
+    let mut app = gm_event_app(SCRIPT_GM_AUTOMATIC_EVENTS);
+    // The courier is alive and stays alive — this row is only what lets the
+    // seam resolve the condition's subject to a uuid, exactly as it would on
+    // the tick the courier really died.
+    app.world_mut()
+        .resource_mut::<WorldContentRuntime>()
+        .name_to_uuid
+        .insert("courier".to_string(), "uuid-1302-courier".to_string());
+    let mut cursor = app
+        .world()
+        .resource::<Messages<crate::core::balance::BalanceEvent>>()
+        .get_cursor();
+    fire_gm_event(&mut app, "fire-1", "base-world::evac");
+    let messages = app
+        .world()
+        .resource::<Messages<crate::core::balance::BalanceEvent>>();
+    let facts: Vec<_> = cursor.read(messages).cloned().collect();
+    assert!(
+        facts.iter().any(|fact| matches!(
+            fact,
+            crate::core::balance::BalanceEvent::TriggerFired {
+                trigger_id,
+                entity,
+                ..
+            } if trigger_id == "evac" && entity.as_deref() == Some("uuid-1302-courier")
+        )),
+        "a GM fire is an ordinary trigger fire in the record, named against the \
+         condition's own subject: {facts:?}"
+    );
 }
 
 #[test]

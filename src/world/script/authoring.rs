@@ -238,6 +238,11 @@ mod tests {
         // Master can reach for is the author's judgement, and the mission panel
         // can only list what a scenario declares.
         ("", "gm_event", &["id", "label", "handler"]),
+        // The GM operability declaration on an ORDINARY event (issue #1302).
+        // Exposed for the same reason: which automatic moments a Game Master
+        // may reach for is the author's judgement, and the mission panel can
+        // only list what a scenario declares.
+        ("trigger", "gm_controls", &["id", "label"]),
         ("trigger", "when", &["predicate"]),
         ("trigger", "repeat", &[]),
         ("trigger", "repeatable", &[]),

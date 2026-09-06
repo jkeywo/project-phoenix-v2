@@ -386,7 +386,21 @@
       #gm-entity-map { height: 24rem; }
     }
     #gm-station-controls {
-      width: min(76rem, 100%); min-height: 0; padding: 1.25rem;
+      /* NOT `min-height: 0` (issue #1318 gate pass, finding 2): this section
+         is a flex item of `#gm-console` (flex-direction: column), and an
+         explicit `min-height: 0` discards a flex item's automatic minimum
+         size — its own content's min-content height — in favour of letting
+         the item shrink to nothing. `#gm-console` scrolls its overflow
+         (`overflow-y: auto`) rather than needing its children to shrink to
+         fit, so nothing here wants that: once `#gm-knowledge-panel` gave
+         `#gm-console` genuinely overflowing content for the first time, this
+         section (holding the multi-hundred-pixel `#gm-station-frame` iframe)
+         collapsed to a sliver while its content kept painting past that box,
+         landing UNDER the next section in normal flow — `#gm-station-toggle`
+         intercepted by `#gm-knowledge-panel`'s own subtree
+         (tests/smoke/gm-m1-exit.spec.js). Default `min-height: auto` sizes
+         this section to its content like every sibling section already does. */
+      width: min(76rem, 100%); padding: 1.25rem;
       box-sizing: border-box; border: 1px solid var(--edge-control);
       display: grid; grid-template-columns: minmax(13rem, 20rem) 1fr;
       grid-template-rows: auto auto auto auto;
@@ -408,11 +422,34 @@
     }
     #gm-station-activity-heading, #gm-station-activity { grid-column: 1 / -1; }
     #gm-station-activity { margin: 0; max-height: 10rem; overflow-y: auto; }
+    /* Truth / Crew Knowledge / Difference comparison (issue #1318). One
+       identity-keyed table per category; the Difference column is always a
+       text label (never colour alone — the T2 device floor requires
+       non-colour state, see gm-t2-device-and-milestone-boundaries). */
+    #gm-knowledge-panel {
+      width: min(76rem, 100%); box-sizing: border-box; padding: 1.25rem;
+      border: 1px solid var(--edge-control); display: grid; gap: .9rem;
+    }
+    #gm-knowledge-panel[hidden] { display: none; }
+    #gm-knowledge-select {
+      min-height: 2.75rem; padding: .55rem .75rem; color: var(--ink);
+      background: var(--surface-panel-up); border: 1px solid var(--edge-bright);
+      font: inherit;
+    }
+    #gm-knowledge-hint { color: var(--ink-dim); margin: 0; }
+    .gm-knowledge-category { display: grid; gap: .4rem; }
+    .gm-knowledge-summary { color: var(--ink-dim); margin: 0; }
+    .gm-knowledge-category table { width: 100%; border-collapse: collapse; }
+    .gm-knowledge-category th, .gm-knowledge-category td {
+      text-align: left; padding: .35rem .6rem; border-bottom: 1px solid var(--edge-faint);
+      vertical-align: top;
+    }
     @media (max-height: 800px) {
       #gm-console { gap: .9rem; }
       #gm-session-controls, #gm-entity-card { padding: 1rem; }
       #gm-station-controls { padding: 1rem; }
       #gm-station-frame { height: clamp(20rem, 55vh, 32rem); }
+      #gm-knowledge-panel { padding: 1rem; }
     }
     /* The fleet panel (issue #1114). Below the crew QR, deliberately quieter
        than it: the code above admits PLAYERS and is read across a room, this
@@ -1906,6 +1943,74 @@
           <ol id="gm-station-activity" role="log" aria-labelledby="gm-station-activity-heading"
             aria-live="polite" aria-relevant="additions text"></ol>
         </section>
+        <!-- Truth / Crew Knowledge / Difference comparison for one selected
+             ship (issue #1318). Selection here is independent of the Station
+             takeover control above: comparing a ship never opens its Station
+             iframe (AC #2 — Station-private detail stays absent unless the
+             GM opens that authentic interface instead). -->
+        <p id="gm-knowledge-pending" role="status" data-i18n="server.gm.knowledge.pending"></p>
+        <section id="gm-knowledge-panel" hidden role="region" aria-labelledby="gm-knowledge-heading">
+          <h2 id="gm-knowledge-heading" data-i18n="server.gm.knowledge.heading"></h2>
+          <p id="gm-knowledge-hint" data-i18n="server.gm.knowledge.hint"></p>
+          <label for="gm-knowledge-select" data-i18n="server.gm.knowledge.select_label"></label>
+          <select id="gm-knowledge-select"></select>
+          <section class="gm-knowledge-category" aria-labelledby="gm-knowledge-contacts-heading">
+            <h3 id="gm-knowledge-contacts-heading" data-i18n="server.gm.knowledge.contacts_heading"></h3>
+            <p id="gm-knowledge-contacts-summary" class="gm-knowledge-summary" role="status" aria-live="polite"></p>
+            <p id="gm-knowledge-contacts-empty" data-i18n="server.gm.knowledge.contacts_empty"></p>
+            <table id="gm-knowledge-contacts-table" hidden aria-labelledby="gm-knowledge-contacts-heading">
+              <thead><tr>
+                <th data-i18n="server.gm.knowledge.column.identity"></th>
+                <th data-i18n="server.gm.knowledge.column.truth"></th>
+                <th data-i18n="server.gm.knowledge.column.crew"></th>
+                <th data-i18n="server.gm.knowledge.column.difference"></th>
+              </tr></thead>
+              <tbody id="gm-knowledge-contacts-rows"></tbody>
+            </table>
+          </section>
+          <section class="gm-knowledge-category" aria-labelledby="gm-knowledge-objectives-heading">
+            <h3 id="gm-knowledge-objectives-heading" data-i18n="server.gm.knowledge.objectives_heading"></h3>
+            <p id="gm-knowledge-objectives-summary" class="gm-knowledge-summary" role="status" aria-live="polite"></p>
+            <p id="gm-knowledge-objectives-empty" data-i18n="server.gm.knowledge.objectives_empty"></p>
+            <table id="gm-knowledge-objectives-table" hidden aria-labelledby="gm-knowledge-objectives-heading">
+              <thead><tr>
+                <th data-i18n="server.gm.knowledge.column.identity"></th>
+                <th data-i18n="server.gm.knowledge.column.truth"></th>
+                <th data-i18n="server.gm.knowledge.column.crew"></th>
+                <th data-i18n="server.gm.knowledge.column.difference"></th>
+              </tr></thead>
+              <tbody id="gm-knowledge-objectives-rows"></tbody>
+            </table>
+          </section>
+          <section class="gm-knowledge-category" aria-labelledby="gm-knowledge-comms-messages-heading">
+            <h3 id="gm-knowledge-comms-messages-heading" data-i18n="server.gm.knowledge.comms_messages_heading"></h3>
+            <p id="gm-knowledge-comms-messages-summary" class="gm-knowledge-summary" role="status" aria-live="polite"></p>
+            <p id="gm-knowledge-comms-messages-empty" data-i18n="server.gm.knowledge.comms_empty"></p>
+            <table id="gm-knowledge-comms-messages-table" hidden aria-labelledby="gm-knowledge-comms-messages-heading">
+              <thead><tr>
+                <th data-i18n="server.gm.knowledge.column.identity"></th>
+                <th data-i18n="server.gm.knowledge.column.truth"></th>
+                <th data-i18n="server.gm.knowledge.column.crew"></th>
+                <th data-i18n="server.gm.knowledge.column.difference"></th>
+              </tr></thead>
+              <tbody id="gm-knowledge-comms-messages-rows"></tbody>
+            </table>
+          </section>
+          <section class="gm-knowledge-category" aria-labelledby="gm-knowledge-comms-contacts-heading">
+            <h3 id="gm-knowledge-comms-contacts-heading" data-i18n="server.gm.knowledge.comms_contacts_heading"></h3>
+            <p id="gm-knowledge-comms-contacts-summary" class="gm-knowledge-summary" role="status" aria-live="polite"></p>
+            <p id="gm-knowledge-comms-contacts-empty" data-i18n="server.gm.knowledge.comms_empty"></p>
+            <table id="gm-knowledge-comms-contacts-table" hidden aria-labelledby="gm-knowledge-comms-contacts-heading">
+              <thead><tr>
+                <th data-i18n="server.gm.knowledge.column.identity"></th>
+                <th data-i18n="server.gm.knowledge.column.truth"></th>
+                <th data-i18n="server.gm.knowledge.column.crew"></th>
+                <th data-i18n="server.gm.knowledge.column.difference"></th>
+              </tr></thead>
+              <tbody id="gm-knowledge-comms-contacts-rows"></tbody>
+            </table>
+          </section>
+        </section>
       </main>
 
       <!-- Game-over overlay: shown when GamePhase::GameOver via __updateHud.
@@ -2386,6 +2491,7 @@
     import { createGmSessionControls } from './gui/gm-session-controls.js';
     import { createGmStationPuppet } from './gui/gm-station-puppet.js';
     import { createGmRolePresets } from './gui/gm-role-presets.js';
+    import { createGmKnowledgeCompare } from './gui/gm-knowledge-compare.js';
     import {
       ActionFeedbackLifecycle,
       emitActionFeedbackTransition,
@@ -2458,6 +2564,12 @@
     window.__hostGmRolePresetsSetAvailable = gmRolePresets.setAvailablePresets;
     window.__hostGmRolePresetsRestore = gmRolePresets.restore;
     window.__hostGmRolePresetsState = gmRolePresets.state;
+    // Truth / Crew Knowledge / Difference comparison (issue #1318). A pure
+    // consumer of the other two controllers' already-parsed public state —
+    // never re-parses the raw Host Channel payload itself — and keeps its
+    // own selection independent of gmStationPuppet's takeover selection.
+    const gmKnowledgeCompare = createGmKnowledgeCompare({ doc: document, t });
+    window.__hostGmKnowledgeState = gmKnowledgeCompare.state;
     window.__hostSemanticActions = hostSemanticActions;
     window.__hostActionFeedback = hostActionFeedback;
     const hostChannelDispatch = createHostChannel({
@@ -2470,10 +2582,17 @@
         audio_level:  function(p) { window.__audioLevel(p); },
         shake:        function(p) { window.__applyShake(p[0], p[1]); },
         gm_entity:    function(p) {
-          if (gmProjection.update(p)) gmActivity.reconcileAvailability();
+          if (gmProjection.update(p)) {
+            gmActivity.reconcileAvailability();
+            gmKnowledgeCompare.updateTruth(gmProjection.state().entities);
+          }
         },
         gm_activity:  function(p) { gmActivity.update(p); },
-        gm_station:   function(p) { gmStationPuppet.update(p); },
+        gm_station:   function(p) {
+          if (gmStationPuppet.update(p)) {
+            gmKnowledgeCompare.updateStations(gmStationPuppet.state().projection);
+          }
+        },
         gm_session:   function(p) { gmSessionControls.update(p); },
       },
       strings: { t, has, localiseTree },

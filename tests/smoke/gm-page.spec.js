@@ -397,7 +397,91 @@ test('rendererless GM maps and inspects stable local ship truth', { tag: '@core'
     };
   });
   expect(second).toEqual({ id: first.id, selected: first.id, mapHasId: true });
+
   expect(errors).toEqual([]);
+});
+
+// Truth / Crew Knowledge / Difference comparison panel (issue #1318). A NEW
+// feature needs a NEW @core test (AGENTS.md Testing Strategy). This does NOT
+// reuse the rendererless GM boot above: that profile opens its OWN fleet as
+// lead with no ship host ever joining it, so `roster.len() == 0` and
+// `spawn_game_start_entities` never marks any GameStart row `is_fleet_ship`
+// (src/server_app/world_setup.rs) — no `Ship`/`FleetSlotOf` entity, therefore
+// no row `gm_station`'s ships query (src/gm_projection.rs) can ever find, no
+// matter how long the wait or whether an ordinary (station-less) crew member
+// also connects to that same solo GM host. A `selectedShipId` needs a REAL
+// fleet ship, which needs a SHIP host (not `?gm=1`) to open the fleet and the
+// GM to join it — the same topology "a GM reaches and operates a spatial Helm
+// Station" below uses, trimmed to the minimum this panel needs: no crew, no
+// station takeover, since the lone host's own GameStart ship spawns and
+// Backfills every station whether or not anyone ever connects to fly it.
+// Fuller coverage of the panel's individual fixes (finding 1: no raw Truth
+// String Table id leaks; finding 2: no double-resolved `⟨...⟩` wrapper) lives
+// at the pure/DOM-controller level in tests/client/gm-knowledge-compare.test.js;
+// what only a real end-to-end run proves is that the actual WASM wiring
+// renders something at all (issue #1318 review, finding 6).
+test('a GM compares Truth and Crew Knowledge for the one connected fleet ship', { tag: '@core' }, async ({ context }) => {
+  test.setTimeout(60_000);
+
+  const ship = await context.newPage();
+  const shipErrors = captureServerPageErrors(ship);
+  await ship.goto('/?scenario=assets/worlds/default.toml');
+  await waitForWasmReady(ship);
+
+  await ship.evaluate(() => window.__hostFleetOpen());
+  await waitForJoinCode(ship, 'fleet-code', 30_000);
+  const fleetCode = await ship.locator('#fleet-code').textContent();
+
+  const gm = await context.newPage();
+  const gmErrors = captureServerPageErrors(gm);
+  await gm.goto('/?scenario=assets/worlds/default.toml');
+  await waitForWasmReady(gm);
+  await joinFleetAsGm(gm, fleetCode);
+
+  await gm.evaluate(() => document.getElementById('gm-ready-btn').click());
+  await Promise.all([
+    ship.waitForFunction(() => window.__saveSlotsPhase === 'InProgress', undefined, {
+      timeout: 30_000,
+    }),
+    gm.waitForFunction(() => window.__saveSlotsPhase === 'InProgress', undefined, {
+      timeout: 30_000,
+    }),
+  ]);
+
+  await gm.waitForFunction(() => {
+    const panel = document.getElementById('gm-knowledge-panel');
+    return !!panel && !panel.hidden && !!window.__hostGmKnowledgeState?.().selectedShipId;
+  }, undefined, { timeout: 30_000 });
+  // `publish_sensors_blackboard` (src/ship/sensors.rs) computes every ship's
+  // Sensors blackboard regardless of locality, so `default.toml`'s starbase
+  // and patrol raider — within this world's default radar range from the
+  // spawn point — join the Sensors-contacts category from the first tick.
+  // Comms is NOT the same: `console::comms::server.rs`'s blackboard system
+  // clones its one shared `local_bb` onto the process's OWN local ship only
+  // and gives every OTHER ship an empty default — and the GM peer never has
+  // a local ship (AGENTS.md), so this ship's Comms blackboard, Truth AND Crew
+  // Knowledge alike, stays the "equal empty" state on a GM's own instance
+  // until a per-ship Comms filter (#1063/#1065/#1070) lands. That is exactly
+  // the "equal" state this comparison must cover, not a bug to route around —
+  // so this test asserts on the category the current architecture actually
+  // populates (Sensors) and leaves Comms to fold into the same leak check
+  // without requiring it non-empty.
+  await gm.waitForFunction(() => {
+    const rows = document.getElementById('gm-knowledge-contacts-rows');
+    return !!rows && rows.children.length > 0;
+  }, undefined, { timeout: 30_000 });
+  const knowledgeTruthTexts = await gm.evaluate(() => [
+    ...document.getElementById('gm-knowledge-comms-contacts-rows').children,
+    ...document.getElementById('gm-knowledge-contacts-rows').children,
+  ].map((row) => row.children[1].textContent));
+  expect(knowledgeTruthTexts.length).toBeGreaterThan(0);
+  for (const text of knowledgeTruthTexts) {
+    expect(text).not.toMatch(/^world\./);
+    expect(text).not.toContain('⟨');
+  }
+
+  expect(shipErrors).toEqual([]);
+  expect(gmErrors).toEqual([]);
 });
 
 test('authored field and layer fixture supports aggregate and Region inspection end to end', async ({ context }) => {
@@ -1252,6 +1336,71 @@ test('a GM reaches and operates a spatial Helm Station at 1280x720, then release
     .locator('#gm-takeover-banner');
   await expect(clearedBanner).toBeHidden({ timeout: 20_000 });
   await expect(helmAfterRelease.locator('#helm-ui')).toHaveClass(/active/);
+
+  // Truth / Crew Knowledge / Difference comparison panel (issue #1318): a
+  // presentation-only reuse of the same two Host Channels this test already
+  // exercised above (`gm_entity` for Truth, `gm_station` for this ship's own
+  // replica), asserted here after Helm release so it never depends on — or
+  // interferes with — the takeover control checked earlier. AC #2 (selecting
+  // another ship recomputes the view) is pinned with real production
+  // fixtures at the pure/DOM-controller level in
+  // tests/client/gm-knowledge-compare.test.js — the smoke scenario has a
+  // single player ship, so there is no second ship here to switch to. What
+  // ONLY this test can prove is that the real WASM wiring, running the real
+  // localised/unlocalised Host Channel payloads through the panel, renders a
+  // comparison that never leaks a raw Truth String Table id (finding 1) or a
+  // double-resolved `⟨...⟩` wrapper (finding 2) into a rendered cell.
+  await gm.waitForFunction(() => {
+    const panel = document.getElementById('gm-knowledge-panel');
+    return !!panel && !panel.hidden && !!window.__hostGmKnowledgeState?.().selectedShipId;
+  }, undefined, { timeout: 30_000 });
+  const knowledge = await gm.evaluate(() => ({
+    selected: window.__hostGmKnowledgeState().selectedShipId,
+    shipIds: window.__hostGmKnowledgeState().shipIds,
+    pendingHidden: document.getElementById('gm-knowledge-pending').hidden,
+  }));
+  expect(knowledge.pendingHidden).toBe(true);
+  expect(knowledge.shipIds).toContain(knowledge.selected);
+
+  // Wait for at least one real row so the assertions below inspect actual
+  // rendered cells rather than an empty table. `publish_sensors_blackboard`
+  // (src/ship/sensors.rs) computes every ship's Sensors blackboard regardless
+  // of locality, so `default.toml`'s starbase and patrol raider — within this
+  // world's default radar range — join the Sensors-contacts category from
+  // the first tick. Comms-contacts is NOT the same category to wait on here:
+  // `console::comms::server.rs`'s blackboard system clones its one shared
+  // `local_bb` onto the process's OWN local ship only and gives every OTHER
+  // ship an empty default, and the GM peer observing this fleet ship never
+  // has a local ship of its own (AGENTS.md) — real crew aboard the SHIP's own
+  // process does not change what the GM's own process computes. So Comms
+  // stays the "equal empty" state on a GM's own instance until a per-ship
+  // Comms filter (#1063/#1065/#1070) lands; that is a state this comparison
+  // must cover; not a bug to route around.
+  await gm.waitForFunction(() => {
+    const rows = document.getElementById('gm-knowledge-contacts-rows');
+    return !!rows && rows.children.length > 0;
+  }, undefined, { timeout: 30_000 });
+  const knowledgeCells = await gm.evaluate(() => ({
+    commsContactTruthTexts: [...document.getElementById('gm-knowledge-comms-contacts-rows').children]
+      .map((row) => row.children[1].textContent),
+    // Objectives may legitimately be empty at this point in the scenario (no
+    // scenario trigger has fired yet) — assert whatever IS rendered never
+    // leaks a raw Truth id (finding 1) or a double-resolved wrapper
+    // (finding 2); real coverage of both fixes' actual bug lives in the
+    // pure/DOM-level tests in tests/client/gm-knowledge-compare.test.js.
+    contactTruthTexts: [...document.getElementById('gm-knowledge-contacts-rows').children]
+      .map((row) => row.children[1].textContent),
+    objectiveCellTexts: [...document.getElementById('gm-knowledge-objectives-rows').children]
+      .flatMap((row) => [row.children[1].textContent, row.children[2].textContent]),
+  }));
+  expect(knowledgeCells.contactTruthTexts.length).toBeGreaterThan(0);
+  for (const text of [...knowledgeCells.commsContactTruthTexts, ...knowledgeCells.contactTruthTexts]) {
+    expect(text).not.toMatch(/^world\./);
+    expect(text).not.toContain('⟨');
+  }
+  for (const text of knowledgeCells.objectiveCellTexts) {
+    expect(text).not.toContain('⟨');
+  }
 
   expect(shipErrors).toEqual([]);
   expect(gmErrors, gmErrorDetails.join('\n')).toEqual([]);

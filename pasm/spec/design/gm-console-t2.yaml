@@ -178,17 +178,23 @@ entities:
 
   - component: gm-t2-performing-surface
     core:
-      status: accepted
+      status: partially-implemented
       confidence: confirmed
       title: Comms Studio, Crew-Knowledge Comparison, and Role Presets
       summary: "M3 lets a GM send bounded free-form in-character text through the normal Comms path using an existing sender identity, selected recipient ships, and authored routing visibility; exact text is logged. Template quick picks and scripted hail initiation are optional accelerators, and T2 neither invents identities nor drafts replies. Per-ship knowledge panes show the contact picture, Objectives, and Comms from the same projections the crew receives, with local Truth, Crew Knowledge, and Difference views; Station-private detail remains protected unless the GM opens its authentic Station interface. Each GM chooses and may live-switch a scenario-authored role preset that filters contacts, panels, quick actions, and later attention, defaults to All, permits duplicates, and persists only with that reconnectable GM identity."
       rationale:
         - "Role presets are personal presentation, not authority. All GMs remain peers and simultaneous actions keep the same attributed deterministic result contract."
+        - "[ai] Issue #1318 (Crew-Knowledge Comparison) implemented 2026-09-06: a pure gui/gm-knowledge-compare.js diff/projection module plus a GM page panel compose Truth (the omniscient gm_entity payload), Crew Knowledge (the selected ship's own buildSensorsConsoleState/buildCommsConsoleState/ClientSimState.objectives, fed by the gm_station raw replica through the existing buildGmStationConsoleInput fold), and an identity-keyed Difference — inventing no second knowledge model and reading no Station-private field (console_hull, non-Sensors/Comms blackboards). T2 has no fog-of-war/confidence model yet (issues #1063/#1065/#1070), so Objectives and Comms diff as equal today by construction; only Contacts can differ, via the selected ship's own sensors radar range/tag filters. Comms studio (#1317) and role presets (#1319) remain open."
     architecture:
       kind: gm-presentation
       authority: non-authoritative
       coordinates: [gm-milestone-performing]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [gui/gm-knowledge-compare.js, gui/gm-local-projection.js, gui/gm-station-puppet.js, gui/console-state.js, assets/strings/strings.csv, server.html]
+      symbols: [diffByIdentity, truthContactRows, crewContactRows, objectiveRows, commsMessageRows, commsContactRows, buildKnowledgeCompare, createGmKnowledgeCompare]
+      tests: [npx vitest run tests/client/gm-knowledge-compare.test.js, tests/smoke/gm-page.spec.js]
 
   - component: gm-t2-role-presets
     core:

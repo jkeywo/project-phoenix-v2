@@ -749,8 +749,6 @@ console.destroyer_helm.doc_title,Browser-tab title of the helm console page,[Pro
 console.battleship_helm.doc_title,Browser-tab title of the helm console page,[Project Phoenix — Helm Console]
 console.science.doc_title,Browser-tab title of the science console page,[Project Phoenix — Science Console]
 console.science.screen_label,Phone-frame screen label of the science console,Science Console
-console.science.sensors,"science console — ""Sensors"" panel heading",Sensors
-console.science.shields,"science console — ""Shields"" panel heading",Shields
 console.cruiser_tactical.doc_title,Browser-tab title of the tactical console page,[Project Phoenix — Tactical Console]
 console.courier_captain.doc_title,Browser-tab title of the captain console page,[Project Phoenix — Courier Captain]
 console.courier_captain.screen_label,Phone-frame screen label of the captain console,Courier Captain

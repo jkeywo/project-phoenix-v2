@@ -37,7 +37,17 @@ export class PhSensorPanel extends PhElement {
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; font-size: var(--text-sm); letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
+    /* flex-wrap (issue #1394): a rail beside a scope can resolve this panel
+       narrower than "SCAN RANGE <value>" plus "<n> CONTACTS" fit on one
+       line — the cruiser Science console's target-card rail does, at
+       812x375. Without wrap the two groups don't shrink to fit (there is
+       nothing in either to shrink); the browser instead breaks the first
+       group's own text mid-phrase and the second group's box then overlaps
+       the wrapped remainder. Wrapping the row lets each group fall to its own
+       full-width line intact instead — this panel embeds into any rail width
+       an embedder gives it, so the header has to survive whatever that width
+       turns out to be. */
+    .header { display: flex; flex-wrap: wrap; row-gap: 0.15rem; justify-content: space-between; align-items: center; font-size: var(--text-sm); letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
     .header .v { color: var(--cyan); font-weight: 600; }
     .blip-count { font-size: var(--text-xs); color: var(--ink-dim); }
     .target-card { background: var(--bg-card); border: 1px solid var(--line-faint); padding: 0.5rem; }

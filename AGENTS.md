@@ -205,8 +205,8 @@ cargo build --release --features host --bin phoenix-host
 #                   pump / render / copy phases, pixels copied, Image assets
 #                   re-uploaded, fixed-tick catch-up, and the residual left to
 #                   the render thread (src/native_host/panes/frame_stats.rs).
-#                   PHOENIX_FRAME_EXPERIMENTS=untracked,noforce,novsync,raf33
-#                   switches one suspected cost off per run for an A/B; the
+#                   PHOENIX_FRAME_EXPERIMENTS=novsync,raf33 switches one
+#                   suspected cost off per run for an A/B; the
 #                   toggles are scaffolding for the multi-screen frame-rate
 #                   work and go once the fixes land.
 #   THE CREW LOBBY IS ON THE VIEWSCREEN (issue #1325), with no flag, given a

@@ -236,9 +236,9 @@ SIMULATION
                           re-uploaded, fixed-tick catch-up, and the residual
                           left to the render thread. A diagnostic for the
                           multi-screen bridge. The PHOENIX_FRAME_EXPERIMENTS
-                          environment variable (a comma list of untracked,
-                          noforce, novsync, raf33) switches one suspected cost
-                          off per run so the lines can be compared.
+                          environment variable (a comma list of novsync,
+                          raf33) switches one suspected cost off per run so
+                          the lines can be compared.
 
 MOD PACKS (issue #1366)
     --mod-pack-dir <DIR>  Scan this directory for mod-pack .zip archives and

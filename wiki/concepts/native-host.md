@@ -598,9 +598,9 @@ the ship.
 and forced whole, megapixels copied, `Image` assets Bevy was told changed
 (each one is a full GPU texture re-creation on the render thread),
 `FixedUpdate` ticks per frame and their cost, and the residual the render
-thread accounts for. The `PHOENIX_FRAME_EXPERIMENTS` variable (`untracked`,
-`noforce`, `novsync`, `raf33`) switches one suspected cost off per run so the
-lines can be compared; the toggles are scaffolding for the multi-screen
+thread accounts for. The `PHOENIX_FRAME_EXPERIMENTS` variable (`novsync`,
+`raf33`) switches one suspected cost off per run so the lines can be
+compared; the toggles are scaffolding for the multi-screen
 frame-rate investigation and go once the fixes land. Every clock read is
 presentation time, in `Update` or around the fixed loop —
 `tests/native_headless_digest.rs` stands guard that none reaches authoritative

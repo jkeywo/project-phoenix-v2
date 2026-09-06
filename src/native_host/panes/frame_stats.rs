@@ -4,12 +4,13 @@
 //! The native host draws every Station console through an embedded, CPU-
 //! rasterised Ultralight view, pumped on the Bevy main thread once a frame
 //! (`ultralight::drive_panes`). With three extra screens open that frame was
-//! observed at roughly 10 fps, and four mechanisms plausibly share the blame:
-//! the pane textures re-uploaded whole every frame, the whole-surface copy a
-//! push forces, four vsynced swapchains acquired one after another on the
-//! render thread, and the fixed-tick catch-up a slow frame unpacks into. They
-//! are fixed in different places at different costs, so the first change is
-//! the measurement that says which of them is actually paying: this module.
+//! measured at ~5.7 fps (2026-09-06, four-screen rig), and this line is what
+//! said where it went: ~50 ms of scalar pixel copy, ~50 ms of Ultralight
+//! rasterisation and 25–50 ms of synchronous JS pushes of backed-up snapshots,
+//! all on the main thread, against a render-thread residual of only 15–20 ms.
+//! The copy and the push backlog are fixed (issues #1402, #1403); the line
+//! stays, because the rasterisation floor (#1405) and the dedicated pane
+//! thread (#1404) are judged by it too.
 //!
 //! # What is measured
 //!
@@ -22,8 +23,8 @@
 //!   (the rest of the copy loop, chiefly marking the `Image` asset changed);
 //! * how many panes copied, how many were forced whole, and the pixels copied
 //!   per frame;
-//! * how many `Image` assets Bevy was told changed per frame — the number that
-//!   says whether every pane texture is being re-created on the GPU;
+//! * how many `Image` assets Bevy was told changed per frame — each one is a
+//!   full GPU texture re-creation on the render thread;
 //! * how many `FixedUpdate` ticks a frame unpacked into and what they cost;
 //! * the **residual**: frame period minus everything above. With pipelined
 //!   rendering the main thread blocks until the render thread has finished
@@ -48,10 +49,16 @@
 //!
 //! | name | what it changes | what it tests |
 //! |---|---|---|
-//! | `untracked` | the pane's `Image` is fetched untracked and marked changed only when something was copied | the per-frame texture re-creation |
-//! | `noforce` | a push no longer forces a whole-surface copy; Ultralight's dirty bounds decide | the forced full copy |
 //! | `novsync` | Station windows present with `AutoNoVsync` | serialised vblank waits across monitors |
 //! | `raf33` | console pages run their render loop at 33 ms instead of 16 | page-side raster and script cost |
+//!
+//! Two earlier toggles — `untracked` (fetch the pane image untracked) and
+//! `noforce` (trust Ultralight's dirty bounds over a push) — were measured
+//! and retired: neither moved the frame, because every console repaints
+//! nearly its whole surface every frame. Both remaining ones measured *worse*
+//! than the baseline on the four-screen rig (CPU contention once the render
+//! thread stops blocking; a slower page loop makes each push dearer) and are
+//! kept only so the raster work in #1405 can re-check them.
 //!
 //! They are scaffolding, not features: once the measurement has picked the
 //! fixes, the fixes land as ordinary code and the toggles go with them.
@@ -84,10 +91,6 @@ pub const EXPERIMENT_FRAME_MS: u32 = 33;
 /// The diagnostic A/B toggles — see the module note's table.
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PaneExperiments {
-    /// Fetch the pane image untracked; mark it changed only after a real copy.
-    pub untracked: bool,
-    /// Never force a whole-surface copy on the strength of a push.
-    pub noforce: bool,
     /// Station windows present with `AutoNoVsync`.
     pub novsync: bool,
     /// Console pages run their render loop at [`EXPERIMENT_FRAME_MS`].
@@ -96,7 +99,7 @@ pub struct PaneExperiments {
 
 impl PaneExperiments {
     /// Every name [`parse`](Self::parse) accepts, in display order.
-    pub const NAMES: [&'static str; 4] = ["untracked", "noforce", "novsync", "raf33"];
+    pub const NAMES: [&'static str; 2] = ["novsync", "raf33"];
 
     /// Parse a comma-separated list of experiment names. Whitespace and case
     /// are forgiven; an unknown name is refused, because a run that silently
@@ -109,8 +112,6 @@ impl PaneExperiments {
                 continue;
             }
             match name.to_ascii_lowercase().as_str() {
-                "untracked" => out.untracked = true,
-                "noforce" => out.noforce = true,
                 "novsync" => out.novsync = true,
                 "raf33" => out.raf33 = true,
                 other => {
@@ -140,7 +141,7 @@ impl PaneExperiments {
 
     /// The names switched on, in [`NAMES`](Self::NAMES) order.
     pub fn active(&self) -> Vec<&'static str> {
-        [self.untracked, self.noforce, self.novsync, self.raf33]
+        [self.novsync, self.raf33]
             .into_iter()
             .zip(Self::NAMES)
             .filter_map(|(on, name)| on.then_some(name))
@@ -428,9 +429,8 @@ pub fn mark_fixed_loop_end(stats: Option<ResMut<PaneFrameStats>>, tick: Option<R
 }
 
 /// Count the `Image` assets Bevy was told changed. Each such event is a full
-/// GPU texture re-creation on the render thread, so this is the number the
-/// `untracked` experiment — and any fix that keeps a pane texture in place —
-/// is judged by.
+/// GPU texture re-creation on the render thread, so this is the number any fix
+/// that keeps a pane texture in place (#1404) is judged by.
 pub fn count_image_modified(
     mut events: MessageReader<AssetEvent<Image>>,
     stats: Option<ResMut<PaneFrameStats>>,
@@ -510,21 +510,23 @@ mod tests {
             PaneExperiments::default()
         );
         assert!(PaneExperiments::parse(" , ").unwrap().is_empty());
-        let both = PaneExperiments::parse(" untracked, NOVSYNC ").unwrap();
-        assert!(both.untracked && both.novsync && !both.noforce && !both.raf33);
-        assert_eq!(both.active(), vec!["untracked", "novsync"]);
-        assert_eq!(both.to_string(), "untracked,novsync");
+        let both = PaneExperiments::parse(" raf33, NOVSYNC ").unwrap();
+        assert!(both.novsync && both.raf33);
+        assert_eq!(both.active(), vec!["novsync", "raf33"]);
+        assert_eq!(both.to_string(), "novsync,raf33");
         assert_eq!(PaneExperiments::default().to_string(), "none");
         let all = PaneExperiments::parse(&PaneExperiments::NAMES.join(",")).unwrap();
         assert_eq!(all.active(), PaneExperiments::NAMES.to_vec());
     }
 
     #[test]
-    fn an_unknown_experiment_is_refused_and_names_the_known_ones() {
-        let err = PaneExperiments::parse("untracked,novsinc").unwrap_err();
-        assert!(err.contains("novsinc"), "{err}");
-        for name in PaneExperiments::NAMES {
-            assert!(err.contains(name), "{err} should name {name}");
+    fn an_unknown_or_retired_experiment_is_refused_and_names_the_known_ones() {
+        for retired in ["untracked", "noforce", "novsinc"] {
+            let err = PaneExperiments::parse(&format!("raf33,{retired}")).unwrap_err();
+            assert!(err.contains(retired), "{err}");
+            for name in PaneExperiments::NAMES {
+                assert!(err.contains(name), "{err} should name {name}");
+            }
         }
     }
 

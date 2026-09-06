@@ -135,6 +135,16 @@ opt-level = 3
 lto = true
 codegen-units = 1
 panic = "abort"
+
+# A release-class build for on-rig measurement (`--frame-stats`, issue #1402):
+# the same optimisation level as `release` without the fat LTO and single
+# codegen unit that make every `release` relink of this crate an hour. The
+# numbers it produces are for comparing one change against the last one, not
+# for a baseline file — record those from `release`.
+[profile.measure]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
 strip = true
 
 [features]

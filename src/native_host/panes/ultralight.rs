@@ -84,7 +84,7 @@ use vellum_ultralight::runtime::{
 use vellum_ultralight::staging;
 
 use super::document::pane_drain_script;
-use super::frame_stats::{PaneExperiments, PaneFrameSample, PaneFrameStats};
+use super::frame_stats::{PaneFrameSample, PaneFrameStats};
 use super::placement::{home_for_pane, PaneHome, PaneTile};
 use super::recovery::{service_faults, PaneFault};
 use super::registry::PaneId;
@@ -356,6 +356,24 @@ impl PaneSurface for UltralightPaneSurface {
 /// half a second at 60 fps: long enough not to fire on a blip, short enough that
 /// a dead console flips its station to Backfill promptly.
 const VIEW_CRASH_COPY_FAILURES: u32 = 30;
+
+/// The texture a pane's pixels are copied into, by whether the page is
+/// transparent (issue #1402).
+///
+/// An opaque page — every Station console, the lobby surface — is copied
+/// **verbatim** from Ultralight's premultiplied-BGRA surface with
+/// `copy_frame_bgra`, so its texture is `Bgra8UnormSrgb` and no byte is
+/// swizzled or divided on the way. Only the transparent HUD overlay needs
+/// straight alpha, and pays for it with `copy_frame` into `Rgba8UnormSrgb`.
+/// Both `Image::new_fill` sites and the copy loop decide through this one
+/// predicate, so the format and the copy cannot come apart.
+const fn pane_texture_format(transparent: bool) -> TextureFormat {
+    if transparent {
+        TextureFormat::Rgba8UnormSrgb
+    } else {
+        TextureFormat::Bgra8UnormSrgb
+    }
+}
 
 /// One pane on screen: its view, its texture, where it sits, and which window it
 /// is composited on.
@@ -938,7 +956,7 @@ fn init_pane_host(world: &mut World) {
             },
             TextureDimension::D2,
             &fill,
-            TextureFormat::Rgba8UnormSrgb,
+            pane_texture_format(seat.hud),
             RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
         );
         let handle = world.resource_mut::<Assets<Image>>().add(image);
@@ -1800,8 +1818,6 @@ fn drive_panes(
     // `--frame-stats` (see `super::frame_stats`): present only on a host asked
     // to measure, in which case the five phases below are stamped and recorded.
     mut stats: Option<ResMut<PaneFrameStats>>,
-    // The diagnostic A/B toggles that go with it; absent means none.
-    experiments: Option<Res<PaneExperiments>>,
 ) {
     let Some(mut host) = host else {
         return;
@@ -1839,7 +1855,6 @@ fn drive_panes(
     let stamp = |on: bool| on.then(Instant::now);
     let elapsed_ms =
         |from: Option<Instant>| from.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
-    let experiments = experiments.as_deref().copied().unwrap_or_default();
 
     let phase = stamp(clock);
     host.runtime.update();
@@ -1925,16 +1940,7 @@ fn drive_panes(
     let mut forced = 0usize;
     let mut pixels = 0u64;
     for (index, pane) in host.windows.iter_mut().enumerate() {
-        // `untracked` (frame experiment): fetch without telling Bevy the asset
-        // changed, and say so below only when something was actually copied.
-        // A tracked `get_mut` re-creates the pane's GPU texture in full
-        // whether or not a pixel moved.
-        let image = if experiments.untracked {
-            images.get_mut_untracked(&pane.image)
-        } else {
-            images.get_mut(&pane.image)
-        };
-        let Some(image) = image else {
+        let Some(image) = images.get_mut(&pane.image) else {
             continue;
         };
         let Some(data) = image.data.as_mut() else {
@@ -1943,18 +1949,22 @@ fn drive_panes(
         // A push we just made is trusted on its own regardless of what the
         // surface reports: a plain attribute write is real DOM state that
         // changed and Ultralight's dirty-bounds tracking does not always flag
-        // it. The `noforce` frame experiment switches that trust off to
-        // measure what it costs.
-        let force = pushed_this_frame[index] && !experiments.noforce;
+        // it.
+        let force = pushed_this_frame[index];
         let copy_started = stamp(clock);
-        let outcome = pane.surface.view.copy_frame(data, force);
+        // The HUD overlay is the one transparent surface and takes the
+        // straight-alpha copy; every console is opaque and is moved verbatim
+        // into its BGRA texture — see `pane_texture_format`.
+        let outcome = if pane.is_hud_overlay() {
+            pane.surface.view.copy_frame(data, force)
+        } else {
+            pane.surface.view.copy_frame_bgra(data, force)
+        };
         copy_ms += elapsed_ms(copy_started);
-        let mut painted = false;
         match outcome {
             Ok(rect) => {
                 pane.copy_failures = 0;
                 if let Some(rect) = rect {
-                    painted = true;
                     copied += 1;
                     if force {
                         forced += 1;
@@ -1995,11 +2005,6 @@ fn drive_panes(
                     }
                 }
             }
-        }
-        if experiments.untracked && painted {
-            // Now Bevy is told: this is the `Modified` the untracked fetch
-            // above withheld, issued only for a frame that copied something.
-            let _ = images.get_mut(&pane.image);
         }
     }
     let publish_ms = (elapsed_ms(phase) - copy_ms).max(0.0);
@@ -2339,7 +2344,8 @@ fn make_pane_view(
         },
         TextureDimension::D2,
         &[0, 0, 0, 255],
-        TextureFormat::Rgba8UnormSrgb,
+        // `transparent: false` above: an opaque console, copied verbatim.
+        pane_texture_format(false),
         RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
     );
     let handle = images.add(image);

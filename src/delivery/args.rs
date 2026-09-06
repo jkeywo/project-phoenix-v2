@@ -121,6 +121,11 @@ pub struct SimArgs {
     /// `assets/strings/strings.csv` rather than in Rust. A crew member's own
     /// name is neither — it is operator input.
     pub panes: Vec<String>,
+    /// Log a one-line per-second breakdown of where each frame goes
+    /// (`--frame-stats`) — see `native_host::panes::frame_stats`. A
+    /// diagnostic on the windowed host; meaningless without a simulation
+    /// running, which is why it lives here and is refused without one.
+    pub frame_stats: bool,
     /// The rendezvous service to register with, so browser clients can join
     /// this native host over the WebSocket game relay (issue #1113). `None`
     /// keeps the pre-#1113 behaviour: a host nobody can connect to, which is
@@ -224,6 +229,16 @@ SIMULATION
                           local slot; incompatible saves are refused before run
     --log <SPEC>          Log filter, e.g. info,ai=debug,admit=trace
     --log-entity <NAMES>  Restrict logging to these entity names
+    --frame-stats         Log, once a second at info level (so with --log
+                          info), one line saying where each frame went: the
+                          Bevy frame time, the embedded panes' update / pump /
+                          render / copy phases, pixels copied, Image assets
+                          re-uploaded, fixed-tick catch-up, and the residual
+                          left to the render thread. A diagnostic for the
+                          multi-screen bridge. The PHOENIX_FRAME_EXPERIMENTS
+                          environment variable (a comma list of untracked,
+                          noforce, novsync, raf33) switches one suspected cost
+                          off per run so the lines can be compared.
 
 MOD PACKS (issue #1366)
     --mod-pack-dir <DIR>  Scan this directory for mod-pack .zip archives and
@@ -334,6 +349,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
     let mut confirm_delete = false;
     let mut resume_slot: Option<String> = None;
     let mut panes: Vec<String> = Vec::new();
+    let mut frame_stats = false;
     let mut mod_pack_dir: Option<String> = None;
     let mut setup = false;
     let mut profile: Option<String> = None;
@@ -386,6 +402,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
             "--confirm-delete" => confirm_delete = true,
             "--resume-save" => resume_slot = Some(value_for(&arg, &mut it)?),
             "--pane" => panes.push(value_for(&arg, &mut it)?),
+            "--frame-stats" => frame_stats = true,
             "--mod-pack-dir" => mod_pack_dir = Some(value_for(&arg, &mut it)?),
             "--rendezvous" => rendezvous = Some(value_for(&arg, &mut it)?),
             "--origin" => origin = Some(value_for(&arg, &mut it)?),
@@ -447,6 +464,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
             ("--solo", solo),
             ("--save-dir", save_dir_given),
             ("--pane", !panes.is_empty()),
+            ("--frame-stats", frame_stats),
             ("--mod-pack-dir", mod_pack_dir.is_some()),
             ("--rendezvous", rendezvous.is_some()),
             ("--origin", origin.is_some()),
@@ -546,6 +564,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
             resume_slot,
             mod_pack_dir,
             panes,
+            frame_stats,
             rendezvous,
             origin,
         })
@@ -561,6 +580,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
             ("--solo", solo),
             ("--save-dir", save_dir_given),
             ("--pane", !panes.is_empty()),
+            ("--frame-stats", frame_stats),
             ("--rendezvous", rendezvous.is_some()),
             ("--origin", origin.is_some()),
         ] {
@@ -975,6 +995,24 @@ mod tests {
         let err = parse(&["--world", "w.toml", "--pane", "Ada"]).unwrap_err();
         assert!(err.contains("--pane"), "{err}");
         assert!(err.contains("--client-dir"), "{err}");
+    }
+
+    #[test]
+    fn frame_stats_rides_with_the_simulation_and_is_refused_without_one() {
+        assert!(
+            run(&["--world", "w.toml", "--frame-stats"])
+                .sim
+                .unwrap()
+                .frame_stats
+        );
+        assert!(run(&["--lobby", "--frame-stats"]).sim.unwrap().frame_stats);
+        assert!(!run(&["--world", "w.toml"]).sim.unwrap().frame_stats);
+        // A delivery-only host has no frame to account for.
+        let err = parse(&["--frame-stats"]).unwrap_err();
+        assert!(err.contains("--frame-stats"), "{err}");
+        // Nor does the enumerate-and-exit diagnostic.
+        let err = parse(&["--setup", "--frame-stats"]).unwrap_err();
+        assert!(err.contains("--frame-stats"), "{err}");
     }
 
     #[test]

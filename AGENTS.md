@@ -200,6 +200,15 @@ cargo build --release --features host --bin phoenix-host
 #                   is_command_authorized entirely and carries mission-abort
 #                   authority — three separate gates enforce that.
 #   --log / --log-entity  same grammar as phoenix-headless
+#   --frame-stats   log, once a second at info (so with --log info), where each
+#                   frame went: Bevy frame time, the embedded panes' update /
+#                   pump / render / copy phases, pixels copied, Image assets
+#                   re-uploaded, fixed-tick catch-up, and the residual left to
+#                   the render thread (src/native_host/panes/frame_stats.rs).
+#                   PHOENIX_FRAME_EXPERIMENTS=untracked,noforce,novsync,raf33
+#                   switches one suspected cost off per run for an A/B; the
+#                   toggles are scaffolding for the multi-screen frame-rate
+#                   work and go once the fixes land.
 #   THE CREW LOBBY IS ON THE VIEWSCREEN (issue #1325), with no flag, given a
 #     build with --features ultralight and a --client-dir bundle whose
 #     index.html is a host page (i.e. one `trunk build` wrote). It is the same

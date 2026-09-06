@@ -105,7 +105,15 @@
   // because that module captures `window.requestAnimationFrame` once and
   // delegates to it whenever the document is visible (which a pane always is).
   // Replacing it afterwards would leave that captured reference in charge.
-  var FRAME_MS = 16;
+  //
+  // 16 ms is the engine's own animation-timer cadence. A host running the
+  // frame-cost experiments (PHOENIX_FRAME_EXPERIMENTS=raf33, see
+  // src/native_host/panes/frame_stats.rs) sets window.PhoenixPaneFrameMs
+  // ahead of this script to try a slower loop; nothing else sets it.
+  var FRAME_MS =
+    typeof window.PhoenixPaneFrameMs === 'number' && window.PhoenixPaneFrameMs > 0
+      ? window.PhoenixPaneFrameMs
+      : 16;
   try {
     window.requestAnimationFrame = function (cb) {
       return setTimeout(function () {

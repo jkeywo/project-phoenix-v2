@@ -179,6 +179,18 @@ pub struct NativeHostConfig {
     /// digest comparison, where an unpinned executor makes the claim a race
     /// rather than a measurement (see `tests/native_headless_digest.rs`).
     pub deterministic: bool,
+    /// Log a one-line per-second frame-cost breakdown (`--frame-stats`) — see
+    /// [`panes::frame_stats`](crate::native_host::panes::frame_stats). Inert
+    /// on the Contract and Offscreen surfaces: there is no frame to account
+    /// for, and the test compositions must not read a clock they did not ask
+    /// for.
+    pub frame_stats: bool,
+    /// The diagnostic A/B toggles read from `PHOENIX_FRAME_EXPERIMENTS`, or
+    /// none. Applied only to a windowed host, like [`frame_stats`](Self::frame_stats);
+    /// the one that reaches the pane document (`raf33`) is applied by the
+    /// caller when it publishes the panes, because that happens before this
+    /// builder runs.
+    pub experiments: crate::native_host::panes::frame_stats::PaneExperiments,
     /// The pane bus, and the Station panes `--pane` opened on it (issue #1122).
     ///
     /// `opened` may be empty (issue #1331): a host with a client bundle carries
@@ -249,6 +261,8 @@ impl NativeHostConfig {
             solo: false,
             curated_ships: Vec::new(),
             deterministic: false,
+            frame_stats: false,
+            experiments: Default::default(),
             panes: None,
             bridge_profile: None,
             host_lobby: None,
@@ -917,6 +931,26 @@ pub fn build_native_host_app(
             focused_mode: bevy::winit::UpdateMode::Continuous,
             unfocused_mode: bevy::winit::UpdateMode::Continuous,
         });
+    }
+
+    // The frame-cost measurement and the A/B toggles it is read against (see
+    // `panes::frame_stats`). Both need a real frame to account for, so the
+    // Contract and Offscreen surfaces — the test compositions — get neither,
+    // whatever the config says.
+    if cfg.surface == NativeRenderSurface::Window {
+        if !cfg.experiments.is_empty() {
+            crate::pinfo!(
+                cfg.log,
+                crate::logging::LogCat::Lobby,
+                "frame experiments on ({}): {}",
+                crate::native_host::panes::frame_stats::EXPERIMENTS_ENV,
+                cfg.experiments
+            );
+            app.insert_resource(cfg.experiments);
+        }
+        if cfg.frame_stats {
+            app.add_plugins(crate::native_host::panes::frame_stats::PaneFrameStatsPlugin);
+        }
     }
 
     if cfg.solo {

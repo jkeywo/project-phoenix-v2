@@ -363,9 +363,37 @@ const PEERJS_SCRIPT_MARKER: &str = "peerjs";
 /// they are still published one per pane, at one path each, because a path is
 /// what gets withdrawn when a pane closes.
 pub fn build_pane_document(client_index_html: &str) -> Result<String, DocumentError> {
+    build_pane_document_with(client_index_html, &PaneDocumentOptions::default())
+}
+
+/// Host-side knobs a pane document is built with.
+///
+/// The default is exactly the document [`build_pane_document`] builds; every
+/// field is a diagnostic the host may set for one run, never something a page
+/// could ask for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PaneDocumentOptions {
+    /// Run the page's render loop at this interval instead of `pane_boot.js`'s
+    /// own 16 ms — the `raf33` frame experiment
+    /// (`super::frame_stats::PaneExperiments`). Injected as
+    /// `window.PhoenixPaneFrameMs` ahead of the boot script, which reads it
+    /// once when it installs the timer.
+    pub frame_ms: Option<u32>,
+}
+
+/// [`build_pane_document`] with [`PaneDocumentOptions`].
+pub fn build_pane_document_with(
+    client_index_html: &str,
+    options: &PaneDocumentOptions,
+) -> Result<String, DocumentError> {
     let head_end = find_tag_end(client_index_html, "<head").ok_or(DocumentError::NoHead)?;
+    let frame_ms = match options.frame_ms {
+        Some(ms) => format!("window.PhoenixPaneFrameMs = {ms};\n"),
+        None => String::new(),
+    };
     let boot = format!(
-        "\n<script>\n{}\n{}</script>\n",
+        "\n<script>\n{}{}\n{}</script>\n",
+        frame_ms,
         queue_shim(PANE_OUT_NAMESPACE),
         PANE_BOOT_JS,
     );
@@ -794,6 +822,34 @@ mod tests {
         assert_eq!(fragment_encode("Ada-1.0~x_y"), "Ada-1.0~x_y");
         // Non-ASCII goes out as UTF-8 bytes, which decodeURIComponent restores.
         assert_eq!(fragment_encode("é"), "%C3%A9");
+    }
+
+    #[test]
+    fn a_frame_interval_is_injected_ahead_of_the_boot_script_and_nowhere_by_default() {
+        // The `raf33` frame experiment: the boot script reads
+        // `window.PhoenixPaneFrameMs` once, when it installs its rAF timer, so
+        // the assignment has to come first — and a document built with no
+        // options is byte-for-byte the one `build_pane_document` builds.
+        // `pane_boot.js` itself names the global it reads, so the absence being
+        // asserted is the ASSIGNMENT, which only the host injects.
+        let plain = build_pane_document(CLIENT).unwrap();
+        assert!(!plain.contains("PhoenixPaneFrameMs = "));
+        assert_eq!(
+            plain,
+            build_pane_document_with(CLIENT, &PaneDocumentOptions::default()).unwrap()
+        );
+
+        let slow =
+            build_pane_document_with(CLIENT, &PaneDocumentOptions { frame_ms: Some(33) }).unwrap();
+        let set = slow
+            .find("window.PhoenixPaneFrameMs = 33;")
+            .expect("the interval is set");
+        let boot = slow.find("__phoenixPane").expect("the boot script follows");
+        assert!(
+            set < boot,
+            "the interval must be set before pane_boot.js reads it"
+        );
+        assert_eq!(slow.matches("PhoenixPaneFrameMs = ").count(), 1);
     }
 
     #[test]

@@ -328,6 +328,24 @@ fn main() {
     cfg.solo = sim.solo;
     cfg.log_spec = sim.log_spec.clone();
     cfg.surface = project_phoenix::boot::NativeRenderSurface::Window;
+    cfg.frame_stats = sim.frame_stats;
+    // The A/B toggles the frame-stats line is read against, from the
+    // environment rather than a flag: they are measurement scaffolding, not an
+    // operator control, and a misspelt one is refused rather than ignored — a
+    // run that silently measured the baseline would be worse than no run.
+    cfg.experiments = match native_host::panes::frame_stats::PaneExperiments::from_env() {
+        Ok(experiments) => experiments,
+        Err(e) => {
+            eprintln!(
+                "phoenix-host: {}: {e}",
+                native_host::panes::frame_stats::EXPERIMENTS_ENV
+            );
+            std::process::exit(2);
+        }
+    };
+    if !cfg.experiments.is_empty() {
+        eprintln!("phoenix-host: frame experiments: {}", cfg.experiments);
+    }
     // The catalogue restriction applies to what this process FLIES as well as to
     // what it publishes (issue #917's native half): with a curating `--manifest`
     // in force the default hull is drawn from that manifest's allowlist, so one
@@ -476,7 +494,11 @@ fn main() {
             ClientSource::Hosted => unreachable!("both arms above require a --client-dir bundle"),
         };
         match std::fs::read_to_string(&index) {
-            Ok(html) => match panes.publish(&html, &server.hosted_documents()) {
+            Ok(html) => match panes.publish_with(
+                &html,
+                &server.hosted_documents(),
+                &cfg.experiments.document_options(),
+            ) {
                 Ok(()) => {
                     for pane in &panes.opened {
                         // Deliberately NOT the pane's URL. It carries this

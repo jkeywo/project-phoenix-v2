@@ -62,6 +62,8 @@
 //! cargo. [`stage_sdk`] does it, and `phoenix-host` calls it at startup; see
 //! `docs/delivery-checklist.md` for the packaging half.
 
+use std::time::Instant;
+
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::{ClearColorConfig, RenderTarget};
 use bevy::core_pipeline::core_2d::graph::Core2d;
@@ -82,6 +84,7 @@ use vellum_ultralight::runtime::{
 use vellum_ultralight::staging;
 
 use super::document::pane_drain_script;
+use super::frame_stats::{PaneExperiments, PaneFrameSample, PaneFrameStats};
 use super::placement::{home_for_pane, PaneHome, PaneTile};
 use super::recovery::{service_faults, PaneFault};
 use super::registry::PaneId;
@@ -1794,6 +1797,11 @@ fn drive_panes(
     mut images: ResMut<Assets<Image>>,
     mut commands: Commands,
     log: Option<Res<LogFilterConfig>>,
+    // `--frame-stats` (see `super::frame_stats`): present only on a host asked
+    // to measure, in which case the five phases below are stamped and recorded.
+    mut stats: Option<ResMut<PaneFrameStats>>,
+    // The diagnostic A/B toggles that go with it; absent means none.
+    experiments: Option<Res<PaneExperiments>>,
 ) {
     let Some(mut host) = host else {
         return;
@@ -1824,8 +1832,20 @@ fn drive_panes(
             &log,
         );
     }
-    host.runtime.update();
+    // Presentation time, never simulation time: an unmeasured host reads no
+    // clock here at all, and a measured one stamps nothing the simulation can
+    // observe — see the module note in `super::frame_stats`.
+    let clock = stats.is_some();
+    let stamp = |on: bool| on.then(Instant::now);
+    let elapsed_ms =
+        |from: Option<Instant>| from.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
+    let experiments = experiments.as_deref().copied().unwrap_or_default();
 
+    let phase = stamp(clock);
+    host.runtime.update();
+    let update_ms = elapsed_ms(phase);
+
+    let phase = stamp(clock);
     let mut pushed_this_frame = vec![false; host.windows.len()];
     for (index, pane) in host.windows.iter_mut().enumerate() {
         // A load that has finished is what makes pushes legal. Asking the view
@@ -1893,10 +1913,28 @@ fn drive_panes(
         }
     }
 
-    host.runtime.render();
+    let pump_ms = elapsed_ms(phase);
 
+    let phase = stamp(clock);
+    host.runtime.render();
+    let render_ms = elapsed_ms(phase);
+
+    let phase = stamp(clock);
+    let mut copy_ms = 0.0;
+    let mut copied = 0usize;
+    let mut forced = 0usize;
+    let mut pixels = 0u64;
     for (index, pane) in host.windows.iter_mut().enumerate() {
-        let Some(image) = images.get_mut(&pane.image) else {
+        // `untracked` (frame experiment): fetch without telling Bevy the asset
+        // changed, and say so below only when something was actually copied.
+        // A tracked `get_mut` re-creates the pane's GPU texture in full
+        // whether or not a pixel moved.
+        let image = if experiments.untracked {
+            images.get_mut_untracked(&pane.image)
+        } else {
+            images.get_mut(&pane.image)
+        };
+        let Some(image) = image else {
             continue;
         };
         let Some(data) = image.data.as_mut() else {
@@ -1905,9 +1943,25 @@ fn drive_panes(
         // A push we just made is trusted on its own regardless of what the
         // surface reports: a plain attribute write is real DOM state that
         // changed and Ultralight's dirty-bounds tracking does not always flag
-        // it.
-        match pane.surface.view.copy_frame(data, pushed_this_frame[index]) {
-            Ok(_) => pane.copy_failures = 0,
+        // it. The `noforce` frame experiment switches that trust off to
+        // measure what it costs.
+        let force = pushed_this_frame[index] && !experiments.noforce;
+        let copy_started = stamp(clock);
+        let outcome = pane.surface.view.copy_frame(data, force);
+        copy_ms += elapsed_ms(copy_started);
+        let mut painted = false;
+        match outcome {
+            Ok(rect) => {
+                pane.copy_failures = 0;
+                if let Some(rect) = rect {
+                    painted = true;
+                    copied += 1;
+                    if force {
+                        forced += 1;
+                    }
+                    pixels += rect.pixel_count();
+                }
+            }
             Err(e) => {
                 pane.copy_failures += 1;
                 crate::pwarn!(
@@ -1942,6 +1996,25 @@ fn drive_panes(
                 }
             }
         }
+        if experiments.untracked && painted {
+            // Now Bevy is told: this is the `Modified` the untracked fetch
+            // above withheld, issued only for a frame that copied something.
+            let _ = images.get_mut(&pane.image);
+        }
+    }
+    let publish_ms = (elapsed_ms(phase) - copy_ms).max(0.0);
+    if let Some(stats) = stats.as_mut() {
+        stats.record_pane(PaneFrameSample {
+            update_ms,
+            pump_ms,
+            render_ms,
+            copy_ms,
+            publish_ms,
+            panes: host.windows.len(),
+            copied,
+            forced,
+            pixels,
+        });
     }
 
     // Service every faulted pane — a page that stopped draining (inbox overflow)

@@ -2,7 +2,7 @@
 title: Native Host
 type: concept
 tags: [native, viewscreen, lobby, scenario-selection, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile, saved-layouts, media-devices, camera, microphone, saves]
-sources: [src/native_host/mod.rs, src/native_host/direct_join.rs, src/native_host/join_codes.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/lobby/handler.rs, src/content_ledger.rs, tests/fixtures/scenario-arbiter-parity.json, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/layout_store.rs, src/native_host/layout_store_systems.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs, src/delivery/args.rs, src/save_slots_store.rs]
+sources: [src/native_host/mod.rs, src/native_host/direct_join.rs, src/native_host/join_codes.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/lobby/handler.rs, src/content_ledger.rs, tests/fixtures/scenario-arbiter-parity.json, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/layout_store.rs, src/native_host/layout_store_systems.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/frame_stats.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs, src/delivery/args.rs, src/save_slots_store.rs]
 updated: 2026-09-02
 ---
 
@@ -590,6 +590,21 @@ seam is not bypassed either. A frame pushes at most
 loop runs in `Update` on the Bevy main thread, which is the thread `FixedUpdate`
 runs `SimSet` on, so page JavaScript time is *simulation* time for everyone on
 the ship.
+
+**Measuring that frame (`--frame-stats`).** A windowed host run with
+`--frame-stats --log info` logs one line a second from
+`src/native_host/panes/frame_stats.rs`: the Bevy frame period, the five
+`drive_panes` phases (update / pump / render / copy / publish), panes copied
+and forced whole, megapixels copied, `Image` assets Bevy was told changed
+(each one is a full GPU texture re-creation on the render thread),
+`FixedUpdate` ticks per frame and their cost, and the residual the render
+thread accounts for. The `PHOENIX_FRAME_EXPERIMENTS` variable (`untracked`,
+`noforce`, `novsync`, `raf33`) switches one suspected cost off per run so the
+lines can be compared; the toggles are scaffolding for the multi-screen
+frame-rate investigation and go once the fixes land. Every clock read is
+presentation time, in `Update` or around the fixed loop —
+`tests/native_headless_digest.rs` stands guard that none reaches authoritative
+state.
 
 ### The identity is in the URL, not in the page
 

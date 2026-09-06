@@ -79,6 +79,7 @@
 //! compiles.
 
 pub mod document;
+pub mod frame_stats;
 pub mod gamepad;
 pub mod identity;
 pub mod os_prefs;
@@ -94,10 +95,7 @@ pub mod ultralight;
 
 use crate::delivery::serve::HostedDocuments;
 
-use document::{
-    build_pane_document, connectable_host_addr, mint_document_nonce, pane_document_path,
-    DocumentError,
-};
+use document::{connectable_host_addr, mint_document_nonce, pane_document_path, DocumentError};
 
 /// One pane the operator asked for, the identity it was given, and the
 /// unguessable path segment its document is published under.
@@ -203,6 +201,23 @@ impl LocalPanes {
         client_index_html: &str,
         documents: &HostedDocuments,
     ) -> Result<(), DocumentError> {
+        self.publish_with(
+            client_index_html,
+            documents,
+            &document::PaneDocumentOptions::default(),
+        )
+    }
+
+    /// [`publish`](Self::publish) with host-side document options — today only
+    /// the `raf33` frame experiment's render-loop interval
+    /// ([`frame_stats::PaneExperiments::document_options`]). The default
+    /// options build byte-for-byte the document `publish` builds.
+    pub fn publish_with(
+        &self,
+        client_index_html: &str,
+        documents: &HostedDocuments,
+        options: &document::PaneDocumentOptions,
+    ) -> Result<(), DocumentError> {
         // Read the host machine's OS accessibility preferences ONCE and seed
         // every pane's document with them (issue #1127), so a pane's private
         // profile initialises from the OS exactly as a browser's does from
@@ -213,7 +228,7 @@ impl LocalPanes {
         // back after a crash (#1125) sees the same OS layer it first loaded.
         let os_prefs = os_prefs::query_os_accessibility_prefs();
         let body = document::inject_os_accessibility_defaults(
-            &build_pane_document(client_index_html)?,
+            &document::build_pane_document_with(client_index_html, options)?,
             &os_prefs,
         );
         self.bus.attach_documents(documents.clone());

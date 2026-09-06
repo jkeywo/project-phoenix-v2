@@ -92,9 +92,12 @@
 //! row needs to follow a cable.
 
 use bevy::prelude::*;
-use bevy::window::{Monitor, MonitorSelection, PrimaryMonitor, PrimaryWindow, Window, WindowMode};
+use bevy::window::{
+    Monitor, MonitorSelection, PresentMode, PrimaryMonitor, PrimaryWindow, Window, WindowMode,
+};
 
 use crate::logging::{LogCat, LogFilterConfig};
+use crate::native_host::panes::frame_stats::PaneExperiments;
 
 use super::bridge_layout::BridgeLayout;
 use super::bridge_profile::{
@@ -563,6 +566,12 @@ pub fn apply_bridge_profile(world: &mut World) {
         return;
     }
     let log = world.get_resource::<LogFilterConfig>().cloned();
+    // The `novsync` frame experiment (`panes::frame_stats`) opens Station
+    // windows without a vblank wait; every other run takes the default.
+    let station_present_mode = world.get_resource::<PaneExperiments>().map_or(
+        PresentMode::default(),
+        PaneExperiments::station_present_mode,
+    );
 
     // The monitors as winit reports them, paired with their entities. Cloned out
     // so no query borrow is held while we mutate windows and spawn below.
@@ -822,6 +831,7 @@ pub fn apply_bridge_profile(world: &mut World) {
                     title: format!("{} — Station", super::WINDOW_TITLE),
                     name: Some(format!("phoenix-station-{}", spawn.identity)),
                     mode: WindowMode::BorderlessFullscreen(MonitorSelection::Entity(spawn.monitor)),
+                    present_mode: station_present_mode,
                     ..default()
                 },
                 BridgeSurface {
@@ -936,13 +946,19 @@ fn follow_layout_viewscreen(
 /// `Commands` rather than `&mut World` because [`follow_layout_stations`] is an
 /// ordinary system. One constructor, so a console opened at boot and one opened
 /// from the lobby are the same kind of window.
-fn spawn_station_window(commands: &mut Commands, monitor: Entity, identity: &str) -> Entity {
+fn spawn_station_window(
+    commands: &mut Commands,
+    monitor: Entity,
+    identity: &str,
+    present_mode: PresentMode,
+) -> Entity {
     commands
         .spawn((
             Window {
                 title: format!("{} — Station", super::WINDOW_TITLE),
                 name: Some(format!("phoenix-station-{identity}")),
                 mode: WindowMode::BorderlessFullscreen(MonitorSelection::Entity(monitor)),
+                present_mode,
                 ..default()
             },
             BridgeSurface {
@@ -1101,6 +1117,9 @@ fn follow_layout_stations(
     layout: Option<ResMut<BridgeLayoutResource>>,
     surfaces: Option<ResMut<BridgeStationSurfaces>>,
     bus: Option<Res<crate::native_host::panes::PaneBusResource>>,
+    // The `novsync` frame experiment, for a Station window opened here — the
+    // same present mode `apply_bridge_profile` gives one opened at boot.
+    experiments: Option<Res<PaneExperiments>>,
     // The Station windows this pass has already opened, so one whose display
     // came back on a new `Monitor` entity can be re-anchored to it — see the
     // existing-surface arm below.
@@ -1349,7 +1368,15 @@ fn follow_layout_stations(
                 surface.panes = panes;
             }
             None => {
-                let window = spawn_station_window(&mut commands, *entity, identity.as_str());
+                let window = spawn_station_window(
+                    &mut commands,
+                    *entity,
+                    identity.as_str(),
+                    experiments.as_deref().map_or(
+                        PresentMode::default(),
+                        PaneExperiments::station_present_mode,
+                    ),
+                );
                 crate::pinfo!(
                     log,
                     LogCat::Lobby,

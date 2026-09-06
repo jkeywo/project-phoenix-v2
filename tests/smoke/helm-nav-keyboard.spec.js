@@ -52,25 +52,37 @@ test('Helm console: a course change fires from the keyboard, with no pointer', a
   await instrument(page);
 
   // helm_auto:false so the stick answers to the operator, not the autopilot.
+  // thrust_system_id/steering_system_id: the HELM_THRUST_ACTION/HELM_STEERING_ACTION
+  // adapters (gui/stations/helm-actions.js, since c3d18aed's neutral-gated Helm
+  // steering) refuse to fire without a control_system_id to stamp the outbound
+  // command with — a real console derives these from the authored world, but
+  // this fixture builds its payload by hand, so it has to supply them itself.
+  // Pre-existing gap unrelated to issue #1376, found while confirming this spec
+  // stays green for the Helm layout change.
   await page.evaluate(() => window.__updateConsole('helm', JSON.stringify({
     blips: [], range: 500, x: 0, z: 0, ship_heading: 0, speed: 0,
     helm_auto: false, lateral_auto: false,
+    thrust_system_id: 'thrust', steering_system_id: 'steering',
     impulse_charge_progress: 0, boost_enabled: true, boost_active: false, boost_battery: 1,
   })));
 
   // ── Tab reaches the joystick — it is a real Tab stop (AC #1) ────────────────
   expect(await tabTo(page, '#helm-joystick')).toBe(true);
 
-  // ── ArrowUp flies forward: the SAME set_helm the pointer drag emits ─────────
+  // ── ArrowUp flies forward: the SAME set_helm_thrust the pointer drag emits ──
+  // (the joystick's two axes are independently gated continuous semantic
+  // actions — HELM_THRUST_ACTION/HELM_STEERING_ACTION — each its own
+  // 'set_helm_thrust'/'set_helm_steering' envelope with a `value` field, not
+  // one combined 'set_helm' action; see gui/stations/helm-actions.js.)
   await page.keyboard.down('ArrowUp');
   await expect.poll(() => page.evaluate(
-    () => window.__sent.some((a) => a.action === 'set_helm' && a.thrust > 0)
+    () => window.__sent.some((a) => a.action === 'set_helm_thrust' && a.value > 0)
   )).toBe(true);
   await page.keyboard.up('ArrowUp');
 
-  const helm = await page.evaluate(() => window.__sent.find((a) => a.action === 'set_helm' && a.thrust > 0));
-  expect(helm).toMatchObject({ action: 'set_helm', console: 'helm' });
-  expect(helm.thrust).toBeGreaterThan(0);
+  const helm = await page.evaluate(() => window.__sent.find((a) => a.action === 'set_helm_thrust' && a.value > 0));
+  expect(helm).toMatchObject({ action: 'set_helm_thrust', console: 'helm' });
+  expect(helm.value).toBeGreaterThan(0);
 
   // Not one pointer event was used to get here.
   expect(await page.evaluate(() => window.__pointerEvents)).toBe(0);
@@ -108,4 +120,31 @@ test('Navigation console: a map contact is selected and made a waypoint from the
 
   // Not one pointer event was used to get here.
   expect(await page.evaluate(() => window.__pointerEvents)).toBe(0);
+});
+
+// Issue #1376 review — the key-binding hints (ph-impulse-btn/ph-boost-btn's
+// `.binding` span, "CTRL"/"SHIFT") were given a phone media query with no
+// automated coverage anywhere in the suite. Mirrors
+// hero-bar-responsive.spec.js's pattern: resize, then read a real
+// getComputedStyle rather than trusting the stylesheet text alone.
+test('Impulse/Boost binding hints hide on a phone and show on desktop', async ({ page }) => {
+  await page.goto('/gui/destroyer/helm.html');
+  await page.waitForFunction(() => !!customElements.get('ph-impulse-btn') && !!customElements.get('ph-boost-btn'));
+
+  const bindingDisplay = () => page.evaluate(() => {
+    const read = (tag) => {
+      const el = document.querySelector(tag);
+      const binding = el && el.shadowRoot && el.shadowRoot.getElementById('binding');
+      return binding ? getComputedStyle(binding).display : null;
+    };
+    return { impulse: read('ph-impulse-btn'), boost: read('ph-boost-btn') };
+  });
+
+  // Phone, portrait: a touch screen has no CTRL/SHIFT to hold, so both hints hide.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(bindingDisplay).toEqual({ impulse: 'none', boost: 'none' });
+
+  // Desktop, landscape: a keyboard is assumed, so both hints show.
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await expect.poll(bindingDisplay).toEqual({ impulse: 'inline', boost: 'inline' });
 });

@@ -306,6 +306,37 @@ body .frame { height: 100dvh; }
   .scope-row > .scope-cell ~ :not(.scope-cell) { flex: 0 0 auto; min-width: 0; }
 }
 
+/* A fifth shape beside the plain stack above (issue #1376): the Helm
+   documents put THREE things in their `.scope-row` — a movement rail, the
+   scope, the joystick rail — and on a phone the two rails do not stack under
+   the scope, they share ONE ROW below it. Stacking all three (the shape
+   every other `.scope-row` console still uses) stood 1035px tall on an 812px
+   phone with nothing but a scroller to reach BOOST; this is the fix, and it
+   lives here rather than in each Helm document so `.not.toMatch(/grid-
+   template-columns/)` in tests/client/radar-scope-contract.test.js keeps
+   meaning what it says — no console spells out its own track list, this
+   included.
+
+   A console opts in with `.helm-scope-row` alongside `.scope-row`, and keys
+   its three children with the class names already established for them
+   (`.radar-col`/`.scope-cell`, `.movement-col`, `.joystick-col` — see any of
+   gui/{battleship,cruiser,destroyer}/helm.html). Grid, not flex: two of the
+   three children share a row while the third spans full width above them, a
+   shape flex's single-axis wrapping cannot express. The landscape rail
+   properties (`--scope-rail-start/-end/-min`) are unrelated to this — they
+   stay in force for landscape, and portrait ignores them here exactly as it
+   already did in the plain stack above. */
+@media (orientation: portrait) {
+  .helm-scope-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: min-content 1fr;
+  }
+  .helm-scope-row > .scope-cell { grid-column: 1 / -1; grid-row: 1; width: 100%; }
+  .helm-scope-row > .movement-col { grid-column: 1; grid-row: 2; }
+  .helm-scope-row > .joystick-col { grid-column: 2; grid-row: 2; }
+}
+
 /* ── Readout line (issue #1374) ─────────────────────────────────
    What is LEFT of the console footer after issue #1374 took the strip away.
 

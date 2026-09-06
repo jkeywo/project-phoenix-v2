@@ -15,7 +15,35 @@
        (issue #1375): side = min(free width, free height). Two scopes stacked in
        one column is exactly the shape that used to need its own copy of the
        aspect-ratio pair. */
-    .sticks { display:grid; grid-template-columns:1fr 1fr; gap:8px; }.buttons { display:flex; gap:8px; }.buttons > * { flex:1; }
+    /* This column has no scope (issue #1376): the courier's radars belong to
+       the Weapons/Sensors column beside it, so the "scope in the centre"
+       shape the other three Helm documents follow does not apply here. What
+       DOES carry over is the left/right split — lateral + impulse/boost left,
+       joystick right — and hiding the binding hints on phones, which is
+       handled inside ph-impulse-btn/ph-boost-btn themselves. */
+    .helm-body { display: flex; gap: 8px; flex: 1; min-height: 0; }
+    /* No `min-width: 0` here (issue #1376 review): this column's own content
+       — the lateral pad and the IMPULSE/BOOST row — needs a floor of its own
+       just as much as the joystick's dial does, and a bare `min-width: 0`
+       let flex crush it to illegible slivers instead of respecting one. Left
+       at the flex default (`auto`), it cannot shrink below its content's own
+       minimum, so a genuine shortfall (a very narrow landscape strip) grows
+       `.helm-body` past its box instead — which is what `.col`'s existing
+       `overflow: auto` is for, a scroll on the one column rather than a
+       crushed dial or crushed buttons. */
+    .helm-left { flex: 1 1 0; display: flex; flex-direction: column; justify-content: center; gap: 8px; }
+    /* 160px is the same floor the fleet's other rails carry (see
+       gui/console.css's `--scope-rail-min` note): below it ph-helm-joystick's
+       inset rings and 56px nub stop reading as a dial. Found in review: with
+       no floor the 50/50 split shrank the well to ~90-100px at 568x320 with
+       PORT/STBD unreadable, a regression against main's pre-#1376 ~150px. */
+    .helm-body > ph-helm-joystick { flex: 1 1 0; min-width: 160px; }
+    /* Wraps for the same reason the other three Helm documents' button row
+       does (issue #1376): this column is half of a half-page `.col`, so
+       IMPULSE and BOOST side by side have less room than either the type
+       wants — measured at 375px wide, ~77px each wrapped "IMPULSE DRIVE"
+       onto two lines. Stacked, each button gets the column's full width. */
+    .buttons { display:flex; flex-wrap: wrap; gap:8px; }.buttons > * { flex: 1 1 6rem; }
     @media (orientation: portrait) { .panel-inner { padding:10px; }.body { grid-template-columns:1fr; overflow:auto; } }
   </style>
 </head>
@@ -27,7 +55,7 @@
            popup the footer's `ph-station-damage` used to. -->
       <div class="body">
         <div class="col" role="region" tabindex="0" aria-labelledby="courier-tactical-heading" data-semantic-action-context="tactical"><h2 id="courier-tactical-heading" data-i18n="console.tactical.weapons">Weapons</h2><div class="scope-cell"><ph-tactical-radar id="tactical-radar"></ph-tactical-radar></div><ph-blasters-controls id="blasters"></ph-blasters-controls><h2 data-i18n="console.tactical.sensors">Sensors</h2><div class="scope-cell"><ph-sensor-radar id="sensor-radar"></ph-sensor-radar></div><ph-sensor-panel id="sensor-panel"></ph-sensor-panel></div>
-        <div class="col" role="region" tabindex="0" aria-labelledby="courier-helm-heading" data-semantic-action-context="helm"><h2 id="courier-helm-heading" data-i18n="console.tactical.helm">Helm</h2><div class="sticks"><ph-helm-joystick id="helm"></ph-helm-joystick><ph-lateral-thrust-joystick id="lateral"></ph-lateral-thrust-joystick></div><div class="buttons"><ph-impulse-btn id="impulse"></ph-impulse-btn><ph-boost-btn id="boost"></ph-boost-btn></div></div>
+        <div class="col" role="region" tabindex="0" aria-labelledby="courier-helm-heading" data-semantic-action-context="helm"><h2 id="courier-helm-heading" data-i18n="console.tactical.helm">Helm</h2><div class="helm-body"><div class="helm-left"><ph-lateral-thrust-joystick id="lateral"></ph-lateral-thrust-joystick><div class="buttons"><ph-impulse-btn id="impulse"></ph-impulse-btn><ph-boost-btn id="boost"></ph-boost-btn></div></div><ph-helm-joystick id="helm"></ph-helm-joystick></div></div>
       </div>
     </div>
   </div>

@@ -190,6 +190,41 @@ describe('PhHelmJoystick', () => {
     well.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }));
   });
 
+  it('derives radius from a smaller measured rect (issue #1376): same clamp, scaled nub', () => {
+    mockRAF();
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
+    el.state = { auto: false };
+    // A rail shrunk well below the 240px dial — e.g. a narrow landscape
+    // phone — still derives radius from the MEASURED rect (issue #1375/#1376):
+    // radius = min(120,120)/2 - 28 = 32, a quarter of the 240px case's 92.
+    stubWellRect(el, 120, 120);
+    const well = el.shadowRoot.getElementById('well');
+    const nub = el.shadowRoot.getElementById('nub');
+
+    // Drag exactly one radius to the right (dx=1, dy=0): the nub should move
+    // 32px — the smaller well's own radius — not the 240px well's 92px.
+    well.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 1, clientX: 92, clientY: 60 }));
+    tickRaf();
+    expect(parseFloat(nub.style.marginLeft)).toBeCloseTo(32, 5);
+    expect(parseFloat(nub.style.marginTop)).toBeCloseTo(0, 5);
+
+    // Dragging far outside the smaller well still clamps normalized axes to
+    // [-1, 1] on release — the clamp is relative to the measured radius, not
+    // a hardcoded distance.
+    well.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientX: 500, clientY: -300 }));
+    tickRaf();
+    well.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }));
+
+    expect(activateSemanticAction).toHaveBeenCalledTimes(2);
+    expect(activateSemanticAction.mock.calls.map((call) => call[0])).toEqual([
+      HELM_THRUST_ACTION_ID, HELM_STEERING_ACTION_ID,
+    ]);
+    for (const [, options] of activateSemanticAction.mock.calls) {
+      expect(Math.abs(options.value)).toBeLessThanOrEqual(1);
+    }
+  });
+
   it('snaps back nub to center on release', () => {
     mockRAF();
     const { el } = setup();

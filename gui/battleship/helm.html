@@ -10,17 +10,43 @@
     body { margin: 0; background: var(--surface-void); overflow: hidden; }
     .frame { height: 100%; }
     .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
-    /* The one rail this scope sits beside (issue #1375): 300px holds
-       ph-helm-joystick's fixed 240px disc with the column's own padding around
-       it. The square left of it is gui/console.css's one `.scope-cell` rule,
-       so this document states its rail and says nothing else about the scope's
-       size — no aspect-ratio of its own, and no landscape variant of one. */
-    .console-body { --scope-rail-end: 300px; }
-    .ctrl-col { min-height: 0; display: flex; flex-direction: column; gap: 12px; background: rgba(var(--rgb-panel), 0.6); border: 1px solid var(--edge); padding: 12px; }
-    ph-helm-joystick { flex: 1; min-height: 0; }
-    .btn-row { display: flex; gap: 8px; }
-    .btn-row > * { flex: 1; }
-    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .ctrl-col { padding: 8px; } }
+    /* The two rails this scope sits between (issue #1376: every Helm document
+       lays out lateral + impulse/boost left, the scope centre, the joystick
+       right). The right rail is 240px — ph-helm-joystick's fixed disc, same as
+       every other hull. `--scope-rail-min: 160px` is the SAME floor
+       destroyer's and cruiser's rails carry (see the `.scope-row` comment in
+       gui/console.css): it inherits onto both rails, and without it a narrow
+       landscape window shrinks the joystick rail past the point where the
+       inset rings and the 56px nub still read as a dial (found in review:
+       ~100px well at 480x400, versus the floor-protected ~160px on the other
+       hulls at the same size). The left rail's own content — the readout and
+       the IMPULSE/BOOST row — has no fixed-size widget, so the floor costs it
+       nothing: `.btn-row{flex-wrap:wrap}` already wraps the buttons onto their
+       own line rather than being squeezed illegible. The square between the
+       rails is gui/console.css's one `.scope-cell` rule — no aspect-ratio of
+       its own, and no landscape variant of one. */
+    .console-body { --scope-rail-start: 200px; --scope-rail-end: 240px; --scope-rail-min: 160px; }
+    .console-body .ctrl-col { display: flex; flex-direction: column; justify-content: space-evenly; gap: 12px; min-height: 0; background: rgba(var(--rgb-panel), 0.6); border: 1px solid var(--edge); padding: 12px; }
+    /* Wraps because this rail shrinks (the floor above is 160px): IMPULSE and
+       BOOST side by side want ~216px of type, so on a narrow landscape screen
+       they stack instead of running out past the rail and over the scope. */
+    .btn-row { display: flex; flex-wrap: wrap; gap: 8px; }
+    .btn-row > * { flex: 1 1 6rem; }
+    /* Portrait (issue #1376, John's 2026-09-06 decision): nothing scrolls.
+       Same one-row-under-the-scope layout as destroyer's and cruiser's, for
+       fleet consistency, though battleship's shorter left rail (no lateral
+       pad) already fit an 812px page under the old stacked order.
+       `.helm-scope-row` (gui/console.css) is the shared rule this document
+       opts into rather than spelling out a grid track list of its own.
+       `overflow-y: auto` is the same safety net #1375 gave the other Helm
+       documents, kept here though it does not trigger at 375x812 or 390x844
+       (proved by screenshot, issue #1376 commit) — a console whose stack
+       outgrows some future viewport falls back on it instead of clipping. */
+    @media (orientation: portrait) {
+      .panel-inner { padding: 10px 12px; gap: 8px; }
+      .console-body { overflow-y: auto; }
+      .console-body .ctrl-col { padding: 8px; }
+    }
   </style>
 </head>
 <body>
@@ -30,22 +56,24 @@
       <!-- No title row and no footer (issue #1374): the shell's Station Bar
            names this seat and its selected tab opens the per-system damage
            popup. The contact count the footer carried is the readout at the
-           head of the control column the automation badge belongs to. -->
-      <div class="console-body scope-row">
-        <div class="scope-cell">
-          <ph-helm-radar id="helm-radar"></ph-helm-radar>
-        </div>
-        <div class="ctrl-col">
+           head of the movement column the automation badge belongs to. -->
+      <div class="console-body scope-row helm-scope-row">
+        <div class="ctrl-col movement-col">
           <div class="readout">
             <span id="footer-target" data-i18n="console.common.no_target">NO TARGET</span>
             <span class="spacer"></span>
             <span class="auto-badge" id="helm-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
           </div>
-          <ph-helm-joystick id="helm-joystick"></ph-helm-joystick>
           <div class="btn-row">
             <ph-impulse-btn id="impulse-btn"></ph-impulse-btn>
             <ph-boost-btn id="boost-btn"></ph-boost-btn>
           </div>
+        </div>
+        <div class="radar-col scope-cell">
+          <ph-helm-radar id="helm-radar"></ph-helm-radar>
+        </div>
+        <div class="ctrl-col joystick-col">
+          <ph-helm-joystick id="helm-joystick"></ph-helm-joystick>
         </div>
       </div>
     </div>

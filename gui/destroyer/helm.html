@@ -49,14 +49,29 @@
     .tow-load-label { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); letter-spacing: 0.14em; color: var(--reloading); }
     .tow-load-target { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }
 
-    /* `overflow-y: auto` because this is the console with the most to stack
-       (issue #1375): scope, then a 240px dial, then a thrust pad and two
-       buttons. Portrait rails stand at their content's height rather than
-       shrinking under it, so on a 375x812 phone the three of them are taller
-       than the row — and without a scroller here `body { overflow: hidden }`
-       simply cuts IMPULSE and BOOST off at the bottom edge. battleship/sensors
-       and destroyer/captain carry the same line for the same reason. */
-    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .console-body { overflow-y: auto; } .console-body .ctrl-col { padding: 8px; } .console-body .radar-col { order: -2; } .console-body .joystick-col { order: -1; } }
+    /* Portrait (issue #1376, John's 2026-09-06 decision): nothing scrolls.
+       Stacking three full-width blocks — the scope, then this rail's own
+       240px dial, 180px pad and two buttons — stood 1035px tall on an 812px
+       phone with only the `overflow-y: auto` below to reach BOOST, which is
+       exactly what the old `order: -2`/`order: -1` stack did. Instead the
+       full-width square scope sits on top and the two rails share ONE ROW
+       beneath it, each shrinking to its half of the width — the joystick's
+       well is fluid down to that width (see ph-helm-joystick.js's `.well`),
+       and the lateral pad the same way. `.helm-scope-row` (gui/console.css)
+       is the shared rule this document opts into rather than spelling out a
+       grid track list of its own — the plain `.scope-row` stack every other
+       console keeps still applies where this class is absent.
+       `--scope-rail-start/-end/-min` are the landscape rail's own properties;
+       they are simply inert in portrait, same as before. `overflow-y: auto`
+       stays as the safety net #1375 established — proved by screenshot
+       (issue #1376 commit) never to trigger at 375x812 or 390x844, it is
+       what a console whose stack outgrows some future viewport falls back on
+       instead of clipping. */
+    @media (orientation: portrait) {
+      .panel-inner { padding: 10px 12px; gap: 8px; }
+      .console-body { overflow-y: auto; }
+      .console-body .ctrl-col { padding: 8px; }
+    }
     /* 8px rather than the 12px of the base rule: ph-helm-joystick's disc is a
        fixed 240px and the column has to fit it inside a phone's landscape
        height, where every pixel of chrome counts. */
@@ -72,7 +87,7 @@
            popup the footer's `ph-station-damage` used to. The locked target
            the footer named heads the movement column the AUTO badge belongs
            to. -->
-      <div class="console-body scope-row">
+      <div class="console-body scope-row helm-scope-row">
         <div class="ctrl-col movement-col">
           <div class="readout">
             <span id="footer-target" data-i18n="console.common.no_target">NO TARGET</span>

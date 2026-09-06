@@ -33,6 +33,14 @@ export class PhBoostBtn extends PhElement {
     .recharge-wrap { width: 100%; height: 0.4rem; background: var(--bg-deep); border: 1px solid var(--line-faint); overflow: hidden; margin-bottom: 0.3rem; }
     .recharge-fill { height: 100%; background: linear-gradient(90deg, var(--loaded-dim), var(--loaded)); transition: width 0.3s ease; }
     .recharge-fill.draining { background: linear-gradient(90deg, var(--reloading-dim), var(--reloading)); }
+    /* Key-binding hints are meaningless on a phone (issue #1376): a touch
+       screen has no SHIFT to hold. Same phone query the Station Bar already
+       decides its own label mode on (gui/hero-bar.js's HERO_BAR_CODE_QUERY) —
+       repeated here as a literal because a shadow-root <style> cannot import
+       a JS string, not because this is a second convention. */
+    @media (orientation: portrait) and (max-width: 599px), (orientation: landscape) and (max-height: 500px) {
+      .binding { display: none; }
+    }
   </style>
   <div class="header">
     <span>${t('component.boost.title')}</span>

@@ -10,24 +10,44 @@
     body { font-size: var(--text-lg); margin: 0; background: var(--surface-void); overflow: hidden; }
     .frame { height: 100%; }
     .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
-    /* The one rail this scope sits beside (issue #1375): 300px holds
-       ph-helm-joystick's fixed 240px disc plus this hull's lateral pad with the
-       column's own padding around them. The square left of it is
-       gui/console.css's one `.scope-cell` rule, so this document states its
-       rail and says nothing else about the scope's size — no aspect-ratio of
-       its own, and no landscape variant of one. */
-    .console-body { --scope-rail-end: 300px; }
-    .console-body .ctrl-col { display: flex; flex-direction: column; gap: 12px; min-height: 0; background: rgba(var(--rgb-panel), 0.6); border: 1px solid var(--edge); padding: 12px; }
-    ph-helm-joystick { flex: 1; min-height: 0; }
-    .btn-row { display: flex; gap: 8px; }
-    .btn-row > * { flex: 1; }
-    /* `overflow-y: auto` for the same reason destroyer/helm carries it (issue
-       #1375): stacked under a full-width square, the control rail stands at
-       its content's height — a 240px dial, a thrust pad, two buttons — and the
-       three of them are taller than a phone's portrait page. Without a
-       scroller here `body { overflow: hidden }` would cut IMPULSE and BOOST
-       off at the bottom edge. */
-    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .console-body { overflow-y: auto; } .console-body .ctrl-col { padding: 8px; } }
+    /* The two rails this scope sits between (issue #1376: every Helm document
+       lays out lateral + impulse/boost left, the scope centre, the joystick
+       right). Same values as destroyer/helm's — this hull mounts the same
+       lateral pad on the left rail — and the same reasoning: 200px is what
+       ph-lateral-thrust-joystick's 180px pad wants, 240px is
+       ph-helm-joystick's dial at full size, and 160px is where both stop
+       shrinking (below it the dial's inset rings and 56px nub stop reading as
+       a dial). Both widgets size themselves to their rail, so a shrunk rail is
+       a smaller control, never a control drawn over the scope. The square
+       between the rails is gui/console.css's one `.scope-cell` rule — no
+       aspect-ratio of its own, and no landscape variant of one. */
+    .console-body { --scope-rail-start: 200px; --scope-rail-end: 240px; --scope-rail-min: 160px; }
+    .console-body .ctrl-col { display: flex; flex-direction: column; justify-content: space-evenly; gap: 12px; min-height: 0; background: rgba(var(--rgb-panel), 0.6); border: 1px solid var(--edge); padding: 12px; }
+    /* Wraps because this rail shrinks (issue #1376, same as destroyer's):
+       IMPULSE and BOOST side by side want ~216px of type; the rail's floor is
+       160px, so on a small landscape screen they go one above the other
+       instead of running out past the rail and over the scope. */
+    .btn-row { display: flex; flex-wrap: wrap; gap: 8px; }
+    .btn-row > * { flex: 1 1 6rem; }
+    /* Portrait (issue #1376, John's 2026-09-06 decision): nothing scrolls.
+       Same fix as destroyer/helm's, for the same measured overflow: stacking
+       the scope, the joystick's 240px column and the lateral pad plus
+       IMPULSE/BOOST stood taller than an 812px page with only
+       `overflow-y: auto` below to reach BOOST. The full-width square scope
+       sits on top and the two rails share ONE ROW beneath it instead, each
+       shrinking to its half of the width — both widgets are fluid down to it
+       (ph-helm-joystick.js's `.well`, ph-lateral-thrust-joystick.js's
+       `.track`). `.helm-scope-row` (gui/console.css) is the shared rule this
+       document opts into rather than spelling out a grid track list of its
+       own. `--scope-rail-start/-end/-min` are the landscape rail's own
+       properties; inert here. `overflow-y: auto` stays as the safety net
+       #1375 established — proved by screenshot (issue #1376 commit) never to
+       trigger at 375x812 or 390x844. */
+    @media (orientation: portrait) {
+      .panel-inner { padding: 10px 12px; gap: 8px; }
+      .console-body { overflow-y: auto; }
+      .console-body .ctrl-col { padding: 8px; }
+    }
   </style>
 </head>
 <body>
@@ -37,24 +57,26 @@
       <!-- No title row and no footer (issue #1374): the shell's Station Bar
            names this seat and its selected tab opens the per-system damage
            popup the footer's `ph-station-damage` used to. The contact count
-           the footer carried heads the control column the AUTO badge belongs
+           the footer carried heads the movement column the AUTO badge belongs
            to. -->
-      <div class="console-body scope-row">
-        <div class="radar-col scope-cell">
-          <ph-helm-radar id="helm-radar"></ph-helm-radar>
-        </div>
-        <div class="ctrl-col">
+      <div class="console-body scope-row helm-scope-row">
+        <div class="ctrl-col movement-col">
           <div class="readout">
             <span id="footer-target" data-i18n="console.common.no_target">NO TARGET</span>
             <span class="spacer"></span>
             <span class="auto-badge" id="helm-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
           </div>
-          <ph-helm-joystick id="helm-joystick"></ph-helm-joystick>
           <ph-lateral-thrust-joystick id="lateral-thrust-joystick"></ph-lateral-thrust-joystick>
           <div class="btn-row">
             <ph-impulse-btn id="impulse-btn"></ph-impulse-btn>
             <ph-boost-btn id="boost-btn"></ph-boost-btn>
           </div>
+        </div>
+        <div class="radar-col scope-cell">
+          <ph-helm-radar id="helm-radar"></ph-helm-radar>
+        </div>
+        <div class="ctrl-col joystick-col">
+          <ph-helm-joystick id="helm-joystick"></ph-helm-joystick>
         </div>
       </div>
     </div>

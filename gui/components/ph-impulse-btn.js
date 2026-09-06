@@ -25,6 +25,14 @@ export class PhImpulseBtn extends PhElement {
     .btn.charging { background: linear-gradient(90deg, var(--reloading) calc(var(--charge) * 100%), var(--bg-card) calc(var(--charge) * 100%)); border-color: var(--reloading); color: var(--reloading); }
     .btn.cooldown { background: var(--bg-card); border-color: var(--ink-dim); color: var(--ink-dim); }
     .btn:disabled { opacity: 0.4; cursor: default; }
+    /* Key-binding hints are meaningless on a phone (issue #1376): a touch
+       screen has no CTRL to hold. Same phone query the Station Bar already
+       decides its own label mode on (gui/hero-bar.js's HERO_BAR_CODE_QUERY) —
+       repeated here as a literal because a shadow-root <style> cannot import
+       a JS string, not because this is a second convention. */
+    @media (orientation: portrait) and (max-width: 599px), (orientation: landscape) and (max-height: 500px) {
+      .binding { display: none; }
+    }
   </style>
   <div class="header">
     <span>${t('component.impulse.title')}</span>

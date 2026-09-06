@@ -1801,13 +1801,10 @@ fn reconcile_seated_consoles(
 /// Acting on a single change-frame would flip a live human's station to Backfill
 /// for a transient that never really disconnected. So a loss must persist this
 /// many consecutive observations first — the display-side echo of
-/// [`VIEW_CRASH_COPY_FAILURES`], deliberately shorter because a genuine unplug
-/// should still reach Backfill promptly, and a returning monitor before the
-/// window is up costs nothing but a cleared counter.
-///
-/// (The echoed threshold is the pane host's own `VIEW_CRASH_COPY_FAILURES`, a
-/// `ultralight`-gated const, so it is named in prose rather than intra-doc
-/// linked from this always-compiled module.)
+/// [`VIEW_CRASH_COPY_FAILURES`](crate::native_host::panes::mirror::VIEW_CRASH_COPY_FAILURES),
+/// deliberately shorter because a genuine unplug should still reach Backfill
+/// promptly, and a returning monitor before the window is up costs nothing but a
+/// cleared counter.
 const DISPLAY_LOSS_DEBOUNCE_FRAMES: u32 = 10;
 
 /// Watch the live monitor set and react to a configured display lost — or

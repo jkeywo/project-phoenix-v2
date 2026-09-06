@@ -182,17 +182,39 @@ impl fmt::Display for PaneExperiments {
 }
 
 /// One frame of `drive_panes`, in milliseconds and counts.
+///
+/// # What the five phases cover since issue #1404's slice 3
+///
+/// The phases are now timed *inside* `PaneLoop::iterate`, which is the work that
+/// touches the views — so two things `drive_panes` does around the call left the
+/// timed phases, and `pump_ms` and `publish_ms` read very slightly lower than
+/// they did before the slice. Better attribution, not faster code:
+///
+/// - **`pump_ms`** is the pushing and draining, and the pre-update gamepad push.
+///   It no longer includes the adapter's per-frame preamble — `set_bus`,
+///   `set_lobby`, and the `serde_json` escape that turns the newest HUD state
+///   into the script the slot holds — because those are Bevy-side and happen
+///   before the iteration starts.
+/// - **`publish_ms`** is the copy loop less the copies: staging a pooled buffer,
+///   the epoch check, and queueing the `PaneUpload`. It no longer includes
+///   draining the recycle channel to refill the pools, which `drive_panes` does
+///   before handing the loop a sink.
+///
+/// Both leftovers are still main-thread pane cost; they now show up in the
+/// frame's own total rather than inside a pane phase.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct PaneFrameSample {
     /// `Renderer::update` — loads, timers, page JavaScript.
     pub update_ms: f64,
-    /// The push/drain loop over every pane.
+    /// The push/drain loop over every pane, plus the gamepad push that precedes
+    /// `update_ms`'s phase. See the type note on what left it.
     pub pump_ms: f64,
     /// `Renderer::render` — rasterising every repainted view.
     pub render_ms: f64,
     /// Every `copy_frame` call summed.
     pub copy_ms: f64,
-    /// The copy loop less the copies: asset lookup and change marking.
+    /// The copy loop less the copies: staging, the epoch check, and queueing the
+    /// upload. See the type note on what left it.
     pub publish_ms: f64,
     /// Panes driven this frame.
     pub panes: usize,

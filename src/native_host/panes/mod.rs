@@ -84,6 +84,7 @@ pub mod document;
 pub mod frame_stats;
 pub mod gamepad;
 pub mod identity;
+pub mod mirror;
 pub mod os_prefs;
 pub mod pane_thread;
 pub mod placement;

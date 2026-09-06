@@ -18,16 +18,21 @@
 //!
 //! # The seams this adapter satisfies (issue #1404)
 //!
-//! Two of them, both declared in the SDK-free [`super::pane_thread`]:
+//! Three of them, all declared in the SDK-free [`super::pane_thread`]:
 //! [`UltralightPaneSurface`] is a [`PaneView`] (resize, one `PaneInput`, one
-//! frame copy) and [`UltralightHost`] is a [`PaneRuntime`] (update, render, mint
-//! a view for a [`PaneKind`]). Everything below — the frame loop, the input
-//! systems, the resize — calls *through* those rather than reaching into the
-//! `UltralightPane`, so the policy that decides what to call and in what order
-//! can be lifted out of this file, checked by an ordinary `cargo test`, and
-//! eventually run on a thread of its own. What that leaves here is the
-//! translation and nothing else: a `PaneInput` back into the exact view call it
-//! stands for, a `PaneKind` into a `PaneSpec`, a `DirtyRect` into a `FrameRect`.
+//! frame copy), [`UltralightHost`] is a [`PaneRuntime`] (update, render, mint a
+//! view for a [`PaneKind`]), and [`ImageUploadSink`] is a [`PaneFrameSink`]
+//! (lend a pooled staging buffer, take back a filled one).
+//!
+//! Slice 3 moved the policy *between* them out: what is driven, in what order,
+//! what forces a whole copy and what a failed one means is [`PaneLoop`] now, and
+//! it is checked by the ordinary `cargo test` every CI job runs rather than by a
+//! human watching four consoles. [`drive_panes`] hands it a sink and an event
+//! list and does the Bevy half either side — building the seats, routing this
+//! machine's input, publishing the uploads, and turning the events into operator
+//! log lines and faults. What is left of the *adapter* is translation and
+//! nothing else: a `PaneInput` back into the exact view call it stands for, a
+//! `PaneKind` into a `PaneSpec`, a `DirtyRect` into a `FrameRect`.
 //!
 //! One thing moved *into* the surface with them: whether the page is
 //! transparent, and so which copy it makes. The copy loop used to ask the pane
@@ -53,7 +58,7 @@
 //! [`drive_panes`] is an `Update` system on the Bevy main thread, and every
 //! `evaluate_script` it makes is synchronous. `FixedUpdate` runs `SimSet` on that
 //! same thread (AGENTS.md rule 7), so page JavaScript time is *simulation* time
-//! for every participant on the ship. [`pump_pane`] bounds the pushes one pane
+//! for every participant on the ship. [`pump_pane`](super::surface::pump_pane) bounds the pushes one pane
 //! may take per frame for that reason — see `super::surface`'s module note.
 //!
 //! # Layout: single-window tiling, or composited onto Station windows
@@ -81,7 +86,6 @@
 //! `docs/delivery-checklist.md` for the packaging half.
 
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::time::Instant;
 
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::{ClearColorConfig, RenderTarget};
@@ -104,13 +108,15 @@ use vellum_ultralight::staging;
 
 use super::document::pane_drain_script;
 use super::frame_stats::{PaneFrameSample, PaneFrameStats};
+use super::mirror::VIEW_CRASH_COPY_FAILURES;
 use super::pane_thread::{
-    FrameRect, PaneInput, PaneKeyCode, PaneKind, PaneRuntime, PaneSpecOwned, PaneView,
+    FrameRect, NoFrameSink, PaneCommand, PaneEvent, PaneFrameSink, PaneInput, PaneKeyCode,
+    PaneKind, PaneLoop, PaneRuntime, PaneSpecOwned, PaneThreadSample, PaneView,
 };
 use super::placement::{home_for_pane, PaneHome, PaneTile};
 use super::recovery::{service_faults, PaneFault};
 use super::registry::PaneId;
-use super::surface::{pump_pane, PaneSurface, PaneSurfaceError};
+use super::surface::{PaneSurface, PaneSurfaceError};
 use super::upload::{frame_is_current, PaneFrameBuffer, PanePendingUploads, PaneUpload};
 use super::PaneBusResource;
 use crate::console_bridge::HudStateChanged;
@@ -120,7 +126,7 @@ use crate::native_host::bridge_display::{BridgeLayoutResource, BridgeStationSurf
 use crate::native_host::bridge_layout::BridgeLayout;
 use crate::native_host::bridge_profile::PaneRect;
 use crate::native_host::host_lobby::{
-    host_lobby_drain_script, pump_host_lobby, HostLobbyBridgeResource, HostLobbyRevealResource,
+    host_lobby_drain_script, HostLobbyBridgeResource, HostLobbyRevealResource,
     HOST_LOBBY_SURFACE_ID,
 };
 use crate::native_host::input_routing::{
@@ -526,17 +532,6 @@ impl PaneRuntime for UltralightHost {
     }
 }
 
-/// How many consecutive frames a pane's frame copy may fail before the view is
-/// treated as crashed (issue #1125).
-///
-/// A `copy_frame` error is ordinarily transient — a repaint mid-flight, a buffer
-/// not ready — so a single one is not a crash. A view that has genuinely died
-/// (a lost surface, a renderer that stopped answering) fails *every* frame, so a
-/// short run of consecutive failures is the honest crash signal. Sized to about
-/// half a second at 60 fps: long enough not to fire on a blip, short enough that
-/// a dead console flips its station to Backfill promptly.
-const VIEW_CRASH_COPY_FAILURES: u32 = 30;
-
 /// The texture a pane's pixels are copied into, by whether the page is
 /// transparent (issue #1402).
 ///
@@ -610,11 +605,19 @@ fn pane_buffer_len(size: (u32, u32)) -> usize {
     size.0 as usize * size.1 as usize * 4
 }
 
-/// One pane on screen: its view, its texture, where it sits, and which window it
-/// is composited on.
+/// One pane on screen: its texture, where it sits, and which window it is
+/// composited on.
+///
+/// **Not its view** (issue #1404, slice 3). The `UltralightPaneSurface`, its
+/// load state, whether it owes a whole frame and how many copies in a row have
+/// failed all live in [`PaneHost::pane_loop`] now — the half of a pane that will
+/// be on the renderer's own thread. What is left here is the half that is Bevy's
+/// and stays on the main thread: the asset, the node, the window, the rectangle,
+/// and the staging pool the frames are copied into. Its eventual shape is
+/// [`super::mirror::MirrorPane`]; the swap is slice 5's, once the two halves are
+/// genuinely apart.
 struct PaneWindow {
     id: PaneId,
-    surface: UltralightPaneSurface,
     image: Handle<Image>,
     /// The UI node showing [`image`](Self::image), so a closed pane's canvas can
     /// be despawned rather than left on screen showing a page nothing talks to.
@@ -631,9 +634,6 @@ struct PaneWindow {
     /// This window's top-left on the virtual desktop, physical pixels; `(0, 0)`
     /// for the primary window.
     window_origin: (i32, i32),
-    /// Consecutive frames whose copy failed. Reset on any success; a run past
-    /// [`VIEW_CRASH_COPY_FAILURES`] faults the pane as a crashed view (#1125).
-    copy_failures: u32,
     /// This pane's free list of full-size staging buffers (issue #1404). A copy
     /// takes one, publishes it inside a
     /// [`PaneFrameBuffer`](super::upload::PaneFrameBuffer), and gets the
@@ -643,12 +643,13 @@ struct PaneWindow {
     /// This texture's generation. Bumped whenever [`image`](Self::image) is
     /// re-minted (a resize), so a returning buffer of the old length or a frame
     /// produced against the old size is recognisable.
+    ///
+    /// Kept on **both** sides of the seam: the loop stamps each frame with the
+    /// generation it copied against, and the publish below checks it against
+    /// this one before the frame reaches the render world. Trivially equal today
+    /// — a resize bumps both in the same statement — which is the point of
+    /// having the check already in place.
     epoch: u64,
-    /// Whether the next copy must be forced whole. True at construction — the
-    /// texture holds only its fill, so a dirty-rectangle copy would leave the
-    /// rest of it blank — and after every resize, and kept across an iteration
-    /// the pane had to skip for want of a buffer.
-    needs_full: bool,
 }
 
 impl PaneWindow {
@@ -682,9 +683,15 @@ impl PaneWindow {
 /// affinity — so it is a non-send resource and only main-thread systems touch
 /// it.
 pub struct PaneHost {
-    /// The renderer, behind the [`PaneRuntime`] seam (issue #1404): the frame
-    /// loop asks it to update, render and mint views, and asks it nothing else.
-    runtime: UltralightHost,
+    /// The renderer and every live view, behind the per-iteration policy that
+    /// drives them (issue #1404, slice 3).
+    ///
+    /// [`PaneLoop`] is where "update, pump, render, copy" now lives: SDK-free,
+    /// Bevy-free and checked by the ordinary `cargo test`. This module's job
+    /// either side of it is what genuinely needs Bevy — building the seats,
+    /// routing this machine's input, and turning a published frame into a
+    /// texture upload.
+    pane_loop: PaneLoop<UltralightHost>,
     windows: Vec<PaneWindow>,
     /// Each **tiled** pane's slot on the primary window, so a recreated pane
     /// rebuilds where its predecessor sat (issue #1125).
@@ -753,10 +760,6 @@ impl PaneHost {
         self.focus.focused()
     }
 
-    fn index_of(&self, pane: PaneId) -> Option<usize> {
-        self.windows.iter().position(|w| w.id == pane)
-    }
-
     /// Give a pane's view keyboard focus and take it from whatever held it,
     /// keeping Ultralight's single-focused-view invariant in step with the model.
     fn focus_view(&mut self, previous: Option<PaneId>, next: Option<PaneId>) {
@@ -767,11 +770,11 @@ impl PaneHost {
         // thread these are two messages in one FIFO, and a focus that arrived
         // before the unfocus it replaces would leave Ultralight's
         // single-focused-view invariant pointing at nothing.
-        if let Some(prev) = previous.and_then(|p| self.index_of(p)) {
-            self.windows[prev].surface.input(&PaneInput::Unfocus);
+        if let Some(view) = previous.and_then(|p| self.pane_loop.view_mut(p)) {
+            view.input(&PaneInput::Unfocus);
         }
-        if let Some(next) = next.and_then(|p| self.index_of(p)) {
-            self.windows[next].surface.input(&PaneInput::Focus);
+        if let Some(view) = next.and_then(|p| self.pane_loop.view_mut(p)) {
+            view.input(&PaneInput::Focus);
         }
     }
 
@@ -1104,6 +1107,13 @@ fn init_pane_host(world: &mut World) {
     let bus = world.get_resource::<PaneBusResource>().cloned();
 
     let mut windows = Vec::new();
+    // The views, in seat order, to be handed to the [`PaneLoop`] once every seat
+    // is built (issue #1404, slice 3). Collected rather than pushed straight in,
+    // because the runtime itself is only moved into the loop after the last seat
+    // — this path still mints views from the raw `UltralightRuntime` so that it
+    // can tell "the view could not be created" from "the view could not load its
+    // console", which the [`PaneRuntime`] seam answers with one error.
+    let mut views: Vec<(PaneId, PaneKind, UltralightPaneSurface)> = Vec::new();
     let mut station_cameras: Vec<(Entity, Entity)> = Vec::new();
     let mut tiles: Vec<PaneTile> = Vec::new();
     for seat in seats {
@@ -1287,9 +1297,19 @@ fn init_pane_host(world: &mut World) {
         if seat.hud {
             world.entity_mut(canvas).insert(ZIndex(20));
         }
+        views.push((
+            id,
+            if seat.lobby {
+                PaneKind::Lobby
+            } else if seat.hud {
+                PaneKind::Hud
+            } else {
+                PaneKind::Console
+            },
+            surface,
+        ));
         windows.push(PaneWindow {
             id,
-            surface,
             image: handle,
             canvas,
             window: seat.window,
@@ -1297,10 +1317,8 @@ fn init_pane_host(world: &mut World) {
             size: seat.size,
             scale: seat.scale,
             window_origin: seat.window_origin,
-            copy_failures: 0,
             staging: pane_staging_pool(seat.size, seat.hud),
             epoch: 0,
-            needs_full: true,
         });
         if seat.lobby {
             crate::pinfo!(
@@ -1345,14 +1363,26 @@ fn init_pane_host(world: &mut World) {
     // framed by a reticle promising a keyboard target that accepts nothing. A
     // host with no `--pane` seeds no focus at all, which is the honest state.
     let focus = FocusRing::focused_on_first_pane(router.focus_order());
+    // Every seat is built, so the runtime can be handed to the loop that will
+    // drive them (issue #1404, slice 3), in seat order — the order the loop
+    // pumps and copies them in, and the order the router placed them in.
+    let mut pane_loop = PaneLoop::new(UltralightHost::new(runtime));
+    for (id, kind, view) in views {
+        let size = windows
+            .iter()
+            .find(|w| w.id == id)
+            .map(|w| w.size)
+            .unwrap_or((1, 1));
+        pane_loop.adopt(id, kind, view, size);
+    }
     if let Some(first) = focus.focused() {
-        if let Some(window) = windows.iter_mut().find(|w| w.id == first) {
-            window.surface.input(&PaneInput::Focus);
+        if let Some(view) = pane_loop.view_mut(first) {
+            view.input(&PaneInput::Focus);
         }
     }
     let (recycle_tx, recycle_rx) = channel();
     world.insert_non_send_resource(PaneHost {
-        runtime: UltralightHost::new(runtime),
+        pane_loop,
         windows,
         tiles,
         primary_window: primary_entity,
@@ -1570,8 +1600,15 @@ fn read_pads(
 /// runtime does the per-pad selection and drives THIS pane's one station.
 ///
 /// Only console panes get it — the host-lobby and HUD surfaces are not client
-/// consoles and install no receiver. Pushed before `drive_panes` renders, so the
-/// snapshot the page's `requestAnimationFrame` poll reads this tick is current.
+/// consoles and install no receiver.
+///
+/// This system only fills a slot; the push itself is
+/// [`PaneLoop::iterate`](super::pane_thread::PaneLoop::iterate)'s, in a phase
+/// that runs **before** the iteration's `Renderer::update`. That is where the
+/// latency guarantee lives: the page's `requestAnimationFrame` poll of
+/// `navigator.getGamepads()` is serviced inside `update`, so a snapshot set this
+/// frame is read by the page this frame. Chained ahead of `drive_panes` so the
+/// slot is current before the iteration that reads it.
 fn push_gamepads_to_panes(
     host: Option<NonSendMut<PaneHost>>,
     pads: Query<(Entity, &Gamepad)>,
@@ -1583,18 +1620,30 @@ fn push_gamepads_to_panes(
     let readings = read_pads(&pads, &mut slots);
     // The steady no-pad state pushes nothing; the frame the last pad leaves
     // pushes one empty snapshot so the page sees it disconnect, then falls quiet.
-    if readings.is_empty() && !slots.had_any {
-        return;
-    }
-    slots.had_any = !readings.is_empty();
-    let json = super::gamepad::gamepad_snapshot_json(&readings);
-    let script = format!("window.__phoenixSetGamepads({json})");
-    for pane in host.windows.iter_mut() {
-        if pane.is_host_lobby() || pane.is_hud_overlay() {
-            continue;
-        }
-        let _ = pane.surface.push(&script);
-    }
+    //
+    // Said as a **slot** since issue #1404, slice 3: the loop pushes whatever
+    // the slot holds into every ready console once per iteration, before that
+    // iteration's `update`, and this system sets it every frame — to the
+    // snapshot on a frame that would have pushed, and to `None` on a frame that
+    // would not. So the clearing snapshot is still pushed exactly once, on the
+    // frame the last pad leaves, and the quiet frames after it push nothing,
+    // which is what `had_any` has always said. The push is fire-and-forget and
+    // does not force a whole copy, as it never did. The only difference is where
+    // the throw goes on a console whose page has not installed the shim yet: the
+    // loop declines to push into a document that has not finished loading, where
+    // this used to push and discard the error. Neither reaches the page.
+    let script = if readings.is_empty() && !slots.had_any {
+        None
+    } else {
+        slots.had_any = !readings.is_empty();
+        let json = super::gamepad::gamepad_snapshot_json(&readings);
+        Some(format!("window.__phoenixSetGamepads({json})"))
+    };
+    host.pane_loop.apply(
+        PaneCommand::SetGamepadScript(script),
+        &mut NoFrameSink,
+        &mut Vec::new(),
+    );
 }
 
 /// Follow each OS window's size: resize every surface's Ultralight view and its
@@ -1670,6 +1719,10 @@ fn resize_pane_surfaces(
         }
     }
     let mut changed = false;
+    // Split the borrow: the pane windows and the loop that owns their views are
+    // two fields of the host, and a resize touches both.
+    let host = &mut *host;
+    let pane_loop = &mut host.pane_loop;
     for (i, pane) in host.windows.iter_mut().enumerate() {
         let Some((origin, size)) = targets[i] else {
             continue;
@@ -1677,10 +1730,6 @@ fn resize_pane_surfaces(
         if origin == pane.origin && size == pane.size {
             continue;
         }
-        // Move the view, mint the texture it copies into afresh, and resize the
-        // node that draws it — all three must agree, or `copy_frame` writes a
-        // buffer of the wrong length into the image the next frame.
-        pane.surface.resize(size.0, size.1);
         // A NEW asset, not `Image::resize` (issue #1404): the pane images are
         // `RenderAssetUsages::RENDER_WORLD`, so their `data` was moved out at
         // the first extract and resizing a `data: None` image would leave the
@@ -1702,7 +1751,21 @@ fn resize_pane_surfaces(
         ));
         pane.image = handle.clone();
         pane.epoch += 1;
-        pane.needs_full = true;
+        // Move the view, and start the generation the new texture belongs to —
+        // through the command seam, so the view and its texture agree about
+        // which frames are about which surface. All three (view, asset, node)
+        // must agree, or a copy writes a buffer of the wrong length into the
+        // image the next frame.
+        pane_loop.apply(
+            PaneCommand::Resize {
+                id: pane.id,
+                width: size.0,
+                height: size.1,
+                epoch: pane.epoch,
+            },
+            &mut NoFrameSink,
+            &mut Vec::new(),
+        );
         // The old length is worthless now; a returning buffer of that length is
         // dropped by the copy loop's drain.
         pane.staging = pane_staging_pool(size, pane.is_hud_overlay());
@@ -1801,8 +1864,7 @@ fn route_pointer_input(
     // a move in the same frame.
     if mouse.just_pressed(MouseButton::Left) {
         if let Some((_, _, _, Some(hit))) = cursor {
-            if let Some(index) = host.index_of(hit.pane) {
-                let view = &mut host.windows[index].surface;
+            if let Some(view) = host.pane_loop.view_mut(hit.pane) {
                 // Move then down, in that order and into the same pane's stream:
                 // Ultralight decides what is under the pointer from the move.
                 view.input(&PaneInput::MouseMove {
@@ -1829,17 +1891,15 @@ fn route_pointer_input(
             // the edge resolves correctly.
             if host.router.placement(captured).map(|p| p.window) == Some(key) {
                 if let Some((lx, ly)) = host.router.project_into_pane(captured, x, y) {
-                    if let Some(index) = host.index_of(captured) {
-                        host.windows[index]
-                            .surface
-                            .input(&PaneInput::MouseMove { x: lx, y: ly });
+                    if let Some(view) = host.pane_loop.view_mut(captured) {
+                        view.input(&PaneInput::MouseMove { x: lx, y: ly });
                     }
                 }
             }
         }
     } else if let Some((_, _, _, Some(hit))) = cursor {
-        if let Some(index) = host.index_of(hit.pane) {
-            host.windows[index].surface.input(&PaneInput::MouseMove {
+        if let Some(view) = host.pane_loop.view_mut(hit.pane) {
+            view.input(&PaneInput::MouseMove {
                 x: hit.local_x,
                 y: hit.local_y,
             });
@@ -1856,10 +1916,8 @@ fn route_pointer_input(
                 .filter(|(key, ..)| host.router.placement(captured).map(|p| p.window) == Some(*key))
                 .and_then(|(_, x, y, _)| host.router.project_into_pane(captured, x, y))
                 .unwrap_or((0, 0));
-            if let Some(index) = host.index_of(captured) {
-                host.windows[index]
-                    .surface
-                    .input(&PaneInput::MouseUp { x: lx, y: ly });
+            if let Some(view) = host.pane_loop.view_mut(captured) {
+                view.input(&PaneInput::MouseUp { x: lx, y: ly });
             }
         }
     }
@@ -1867,8 +1925,8 @@ fn route_pointer_input(
     // Scroll goes to the pane under the cursor.
     if scroll.delta != Vec2::ZERO {
         if let Some((_, _, _, Some(hit))) = cursor {
-            if let Some(index) = host.index_of(hit.pane) {
-                host.windows[index].surface.input(&PaneInput::Scroll {
+            if let Some(view) = host.pane_loop.view_mut(hit.pane) {
+                view.input(&PaneInput::Scroll {
                     dx: scroll.delta.x as i32,
                     dy: scroll.delta.y as i32,
                 });
@@ -1942,8 +2000,7 @@ fn route_touch_input(
                         if host.focus.focus(hit.pane) {
                             host.focus_view(previous, Some(hit.pane));
                         }
-                        if let Some(index) = host.index_of(hit.pane) {
-                            let view = &mut host.windows[index].surface;
+                        if let Some(view) = host.pane_loop.view_mut(hit.pane) {
                             // The focus above, then move, then down — one pane's
                             // stream, in the order the page must see them.
                             view.input(&PaneInput::MouseMove {
@@ -1961,10 +2018,8 @@ fn route_touch_input(
             TouchPhase::Moved => {
                 if let Some(pane) = host.contacts.pane_for(touch.id) {
                     if let Some((lx, ly)) = host.router.project_into_pane(pane, phys.0, phys.1) {
-                        if let Some(index) = host.index_of(pane) {
-                            host.windows[index]
-                                .surface
-                                .input(&PaneInput::MouseMove { x: lx, y: ly });
+                        if let Some(view) = host.pane_loop.view_mut(pane) {
+                            view.input(&PaneInput::MouseMove { x: lx, y: ly });
                         }
                     }
                 }
@@ -1972,10 +2027,8 @@ fn route_touch_input(
             TouchPhase::Ended | TouchPhase::Canceled => {
                 if let Some(pane) = host.contacts.end(touch.id) {
                     if let Some((lx, ly)) = host.router.project_into_pane(pane, phys.0, phys.1) {
-                        if let Some(index) = host.index_of(pane) {
-                            host.windows[index]
-                                .surface
-                                .input(&PaneInput::MouseUp { x: lx, y: ly });
+                        if let Some(view) = host.pane_loop.view_mut(pane) {
+                            view.input(&PaneInput::MouseUp { x: lx, y: ly });
                         }
                     }
                 }
@@ -2036,15 +2089,17 @@ fn forward_keyboard_text(
         return;
     };
     let ctrl = keycodes.pressed(KeyCode::ControlLeft) || keycodes.pressed(KeyCode::ControlRight);
-    let focused = host.focus.focused().and_then(|p| host.index_of(p));
+    let focused = host.focus.focused();
     for key in keys.read() {
         if !key.state.is_pressed() {
             continue;
         }
-        let Some(index) = focused else {
+        let Some(pane) = focused else {
             continue;
         };
-        let view = &mut host.windows[index].surface;
+        let Some(view) = host.pane_loop.view_mut(pane) else {
+            continue;
+        };
         // `key_char` is what actually puts a character into a field; the
         // editing keys below are raw key-downs. Both shapes are the protocol's,
         // and the adapter turns them back into the same view calls this made
@@ -2074,11 +2129,167 @@ fn forward_keyboard_text(
     }
 }
 
+/// What one frame's copies did, for `--frame-stats`.
+#[derive(Clone, Copy, Debug, Default)]
+struct SinkTally {
+    copied: usize,
+    forced: usize,
+    pixels: u64,
+    /// Panes whose pool was empty, so their copy was skipped entirely.
+    starved: usize,
+    /// Frames copied against a generation the pane no longer has. Zero while
+    /// the copy and the publish are the same statement on the same thread; a
+    /// real count once a pane thread can copy while the main thread resizes.
+    stale: usize,
+}
+
+/// The [`PaneFrameSink`] that turns a copied frame into a texture upload (issue
+/// #1404, slice 3).
+///
+/// This is the Bevy half of the seam, and the whole of what the frame loop used
+/// to do inline: lend the pane its own pooled staging buffer, and hand the
+/// filled one to [`PanePendingUploads`] with the epoch checked and the
+/// bookkeeping kept. Everything *around* it — when to copy, whether to force,
+/// what a failure means — is [`PaneLoop`]'s, and is tested with no GPU in sight.
+///
+/// A buffer lent and not published goes back to its pane's pool. That is the
+/// still-page case (`copy_frame` reported nothing repainted) and the failed-copy
+/// case, and it happens on the next [`stage`](PaneFrameSink::stage) or when this
+/// sink is dropped, so no path can quietly lose a buffer out of a pool.
+struct ImageUploadSink<'a> {
+    windows: &'a mut Vec<PaneWindow>,
+    pending: &'a mut PanePendingUploads,
+    /// The return path a published buffer's [`PaneFrameBuffer`] posts to when
+    /// the render world is finished with it.
+    recycle: Sender<(PaneId, Vec<u8>)>,
+    /// The buffer currently on loan, and whose pool it came from.
+    staged: Option<(PaneId, Vec<u8>)>,
+    tally: SinkTally,
+}
+
+impl<'a> ImageUploadSink<'a> {
+    fn new(
+        windows: &'a mut Vec<PaneWindow>,
+        pending: &'a mut PanePendingUploads,
+        recycle: Sender<(PaneId, Vec<u8>)>,
+    ) -> Self {
+        Self {
+            windows,
+            pending,
+            recycle,
+            staged: None,
+            tally: SinkTally::default(),
+        }
+    }
+
+    fn tally(&self) -> SinkTally {
+        self.tally
+    }
+
+    /// Put an unpublished loan back where it came from.
+    fn return_staged(&mut self) {
+        let Some((id, bytes)) = self.staged.take() else {
+            return;
+        };
+        if let Some(pane) = self.windows.iter_mut().find(|w| w.id == id) {
+            pane.staging.push(bytes);
+        }
+    }
+}
+
+impl PaneFrameSink for ImageUploadSink<'_> {
+    fn stage(&mut self, id: PaneId, _len: usize) -> Option<&mut [u8]> {
+        self.return_staged();
+        // The pool is minted at the pane's own size and re-minted by every
+        // resize, so `len` is what these buffers already are; it is on the trait
+        // for a producer whose pool is not the one that sized the surface.
+        let taken = self
+            .windows
+            .iter_mut()
+            .find(|w| w.id == id)
+            .and_then(|pane| pane.staging.pop());
+        let Some(bytes) = taken else {
+            // No buffer free: the loop skips this pane's copy entirely rather
+            // than allocating a whole surface on the frame path. Ultralight
+            // keeps unioning its dirty bounds until the next successful copy,
+            // so nothing is *silently* lost — but the frame is, and `lost` says
+            // so.
+            self.tally.starved += 1;
+            return None;
+        };
+        self.staged = Some((id, bytes));
+        self.staged.as_mut().map(|(_, bytes)| &mut bytes[..])
+    }
+
+    fn publish(&mut self, id: PaneId, epoch: u64, rect: FrameRect, full: bool) {
+        let Some((staged_id, bytes)) = self.staged.take() else {
+            return;
+        };
+        // As strict as `RecordingSink`, and for the same reason: the loop is the
+        // only caller and always publishes the pane it just staged, so a
+        // mismatch would mean one pane's pixels were about to be uploaded into
+        // another pane's texture. Debug-only — a shipped host would rather show
+        // the wrong rectangle than abort.
+        debug_assert_eq!(
+            staged_id, id,
+            "published a frame into another pane's buffer"
+        );
+        let Some((image, current, size)) = self
+            .windows
+            .iter()
+            .find(|w| w.id == id)
+            .map(|pane| (pane.image.id(), pane.epoch, pane.size))
+        else {
+            return;
+        };
+        if !frame_is_current(epoch, current) {
+            // The pane was re-minted while this frame was being copied, so it
+            // describes a surface that no longer exists. Let the buffer go — it
+            // is the old length, and the resize refilled the pool at the new one.
+            self.tally.stale += 1;
+            return;
+        }
+        self.tally.copied += 1;
+        if full {
+            self.tally.forced += 1;
+        }
+        self.tally.pixels += rect.pixel_count();
+        self.pending.uploads.push(PaneUpload {
+            image,
+            epoch,
+            // The render half speaks vellum's own `DirtyRect`, the protocol
+            // speaks `FrameRect`; this is the seam between them (issue #1404).
+            rect: rect.into(),
+            surface: size,
+            full,
+            bytes: PaneFrameBuffer::new(id, bytes, Some(self.recycle.clone())),
+            attempts: 0,
+        });
+    }
+
+    fn drop_pane(&mut self, _id: PaneId) {
+        // The pool lives on the pane's own [`PaneWindow`], which the close sweep
+        // drops with the rest of it, so there is nothing left to forget here.
+        // A loan outstanding when a pane closes is returned to whatever pool is
+        // still there, and dropped with it if there is not.
+        self.return_staged();
+    }
+}
+
+impl Drop for ImageUploadSink<'_> {
+    fn drop(&mut self) {
+        self.return_staged();
+    }
+}
+
 /// One frame for every pane: service the library, move messages both ways,
 /// rasterise, and copy what repainted into each pane's texture.
 ///
 /// Runs on the Bevy main thread, which is the simulation's — see the module
-/// note, and [`pump_pane`]'s per-frame push budget.
+/// note, and `pump_pane`'s per-frame push budget. What it does *itself* since
+/// issue #1404's slice 3 is the Bevy half: retire and open panes, set the
+/// iteration's slots, hand [`PaneLoop::iterate`] a sink over the staging pools,
+/// and turn the events it produced into operator log lines, faults and stats.
 fn drive_panes(
     host: Option<NonSendMut<PaneHost>>,
     bus: Option<Res<PaneBusResource>>,
@@ -2137,101 +2348,37 @@ fn drive_panes(
         );
     }
     // Presentation time, never simulation time: an unmeasured host reads no
-    // clock here at all, and a measured one stamps nothing the simulation can
+    // clock at all, and a measured one stamps nothing the simulation can
     // observe — see the module note in `super::frame_stats`.
     let clock = stats.is_some();
-    let stamp = |on: bool| on.then(Instant::now);
-    let elapsed_ms =
-        |from: Option<Instant>| from.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
+    // Split the borrow: the loop that owns the views and the pane windows that
+    // own their textures are two fields of the host, and one iteration touches
+    // both — the loop drives, the sink publishes.
+    let host = &mut *host;
+    let mut events: Vec<PaneEvent> = Vec::new();
+    host.pane_loop.set_measure(clock);
+    // The two message routes, re-read every frame rather than captured once: a
+    // host with no `--pane` has no bus at all (the lobby surface is not a
+    // participant), and either resource can be inserted after the host stood up.
+    host.pane_loop.set_bus(bus.as_ref().map(|b| b.0.clone()));
+    host.pane_loop
+        .set_lobby(lobby.as_ref().map(|l| l.0.clone()));
+    // The HUD overlay (issue #422, native port) is driven by the host's
+    // `HudStateChanged`, cached in `ViewscreenHudLatest` so a state that arrived
+    // before the page loaded still reaches it. Held as a latest-wins SLOT: the
+    // loop pushes whatever it holds into the overlay each iteration the document
+    // is ready, which is exactly what this loop did inline before. The escaping
+    // stays here, because `serde_json` belongs to the codec and the adapter, not
+    // to the SDK-free policy.
+    host.pane_loop.apply(
+        PaneCommand::SetHudScript(hud_latest.json.as_ref().map(|json| {
+            let arg = serde_json::to_string(json).unwrap_or_else(|_| "\"{}\"".into());
+            format!("window.__updateHud({arg})")
+        })),
+        &mut NoFrameSink,
+        &mut events,
+    );
 
-    let phase = stamp(clock);
-    host.runtime.update();
-    let update_ms = elapsed_ms(phase);
-
-    let phase = stamp(clock);
-    let mut pushed_this_frame = vec![false; host.windows.len()];
-    for (index, pane) in host.windows.iter_mut().enumerate() {
-        // A load that has finished is what makes pushes legal. Asking the view
-        // each frame (rather than trusting a callback) keeps this to one place.
-        let was_loaded = pane.surface.is_ready();
-        if pane.surface.refresh_loaded() && !was_loaded {
-            crate::pinfo!(
-                log,
-                LogCat::Lobby,
-                "pane host: {} finished loading",
-                if pane.is_hud_overlay() {
-                    "the viewscreen HUD".to_string()
-                } else if pane.is_host_lobby() {
-                    "the host lobby".to_string()
-                } else {
-                    format!("{} console", pane.id)
-                }
-            );
-        }
-        // The HUD overlay (issue #422, native port) is driven by the host's
-        // `HudStateChanged`, cached in `ViewscreenHudLatest` so a state that
-        // arrived before the page loaded still reaches it. Push the newest each
-        // frame it is drawn — one idempotent `__updateHud` on an already-
-        // repainting transparent surface, evaluated here so the DOM change is
-        // picked up by the render below.
-        if pane.is_hud_overlay() {
-            if let (Some(json), true) = (&hud_latest.json, pane.surface.is_ready()) {
-                let arg = serde_json::to_string(json).unwrap_or_else(|_| "\"{}\"".into());
-                if pane
-                    .surface
-                    .push(&format!("window.__updateHud({arg})"))
-                    .is_ok()
-                {
-                    pushed_this_frame[index] = true;
-                }
-            }
-            continue;
-        }
-        // The lobby surface rides its OWN bridge, over the same `PaneSurface`.
-        // Nothing it says is a `ClientMessage` and nothing it hears is a
-        // projection, so nothing it says may reach the pane bus — which is the
-        // whole reason the two are separate.
-        if pane.is_host_lobby() {
-            if let Some(lobby) = &lobby {
-                let report = pump_host_lobby(&lobby.0, &mut pane.surface);
-                pushed_this_frame[index] = report.pushed > 0;
-                if let Some(failure) = &report.push_failure {
-                    // Ordinary in the window between "the document loaded" and
-                    // "its module island ran" — the state is kept and retried,
-                    // so this is a debug line rather than a warning.
-                    crate::pdebug!(
-                        log,
-                        LogCat::Lobby,
-                        "pane host: the host lobby deferred a push: {failure}"
-                    );
-                }
-            }
-            continue;
-        }
-        let Some(bus) = &bus else { continue };
-        let report = pump_pane(&bus.0, pane.id, &mut pane.surface);
-        pushed_this_frame[index] = report.pushed > 0;
-        for refusal in &report.refusals {
-            crate::pwarn!(log, LogCat::Admit, "pane host: {}: {refusal}", pane.id);
-        }
-    }
-
-    let pump_ms = elapsed_ms(phase);
-
-    let phase = stamp(clock);
-    host.runtime.render();
-    let render_ms = elapsed_ms(phase);
-
-    let phase = stamp(clock);
-    let mut copy_ms = 0.0;
-    let mut copied = 0usize;
-    let mut forced = 0usize;
-    let mut pixels = 0u64;
-    let mut starved = 0usize;
-    // Frames copied against a generation the pane no longer has. Zero in this
-    // slice by construction (see `copy_epoch` below); a real count once a pane
-    // thread can copy while the main thread resizes.
-    let mut stale = 0usize;
     // Buffers the render world (or a discarded frame) finished with since the
     // last pass go back to their own pane's pool first, so this frame's copies
     // have something to take. A buffer whose length no longer matches its pane —
@@ -2246,89 +2393,55 @@ fn drive_panes(
             pane.staging.push(buffer);
         }
     }
+
     let recycle_tx = host.recycle_tx.clone();
-    for (index, pane) in host.windows.iter_mut().enumerate() {
-        // A push we just made is trusted on its own regardless of what the
-        // surface reports: a plain attribute write is real DOM state that
-        // changed and Ultralight's dirty-bounds tracking does not always flag
-        // it. `needs_full` carries a force the pane could not honour — a fresh
-        // texture, a resize, or an iteration skipped for want of a buffer.
-        let force = pushed_this_frame[index] || pane.needs_full;
-        let Some(mut data) = pane.staging.pop() else {
-            // No buffer free: skip this pane's copy entirely rather than
-            // allocating a full surface on the frame path. Ultralight keeps
-            // unioning its dirty bounds until the next successful copy, so
-            // nothing is *silently* lost — but the frame is, and `lost` says so.
-            starved += 1;
-            pane.needs_full |= force;
-            continue;
-        };
-        // The generation this frame is about to be copied against. Checked
-        // again at publish time below: trivially equal today, because the copy
-        // and the publish are the same statement on the same thread, but it is
-        // the seam the pane thread (slice 5) needs and it is cheaper to have
-        // the check already in place than to remember to add it.
-        let copy_epoch = pane.epoch;
-        let copy_started = stamp(clock);
-        // Which copy is made — straight alpha for the transparent HUD, verbatim
-        // BGRA for every opaque console — is the SURFACE's own answer now (issue
-        // #1404): it was set from the same predicate the texture was minted
-        // from, so the copy and the format cannot come apart, and the loop no
-        // longer has to know which pane is the overlay to copy it correctly.
-        let outcome = pane.surface.copy_frame(&mut data, force);
-        copy_ms += elapsed_ms(copy_started);
-        match outcome {
-            Ok(rect) => {
-                pane.copy_failures = 0;
-                if let Some(rect) = rect {
-                    if !frame_is_current(copy_epoch, pane.epoch) {
-                        // The pane was re-minted while this frame was being
-                        // copied, so it describes a surface that no longer
-                        // exists. Let the buffer go — it is the old length, and
-                        // the resize refilled the pool at the new one — and
-                        // leave `needs_full` alone, since the resize set it.
-                        stale += 1;
-                        continue;
-                    }
-                    copied += 1;
-                    if force {
-                        forced += 1;
-                    }
-                    pixels += rect.pixel_count();
-                    // The force has been honoured: the whole surface is in this
-                    // buffer, so the texture is whole once it lands.
-                    pane.needs_full = false;
-                    pending.uploads.push(PaneUpload {
-                        image: pane.image.id(),
-                        epoch: pane.epoch,
-                        // The render half speaks vellum's own `DirtyRect`, the
-                        // protocol speaks `FrameRect`; this is the seam between
-                        // them (issue #1404).
-                        rect: rect.into(),
-                        surface: pane.size,
-                        full: force,
-                        bytes: PaneFrameBuffer::new(pane.id, data, Some(recycle_tx.clone())),
-                        attempts: 0,
-                    });
+    let tally = {
+        let mut sink = ImageUploadSink::new(&mut host.windows, &mut pending, recycle_tx);
+        host.pane_loop.iterate(&mut sink, &mut events);
+        sink.tally()
+    };
+
+    // What the iteration had to say. The events arrive in the order they were
+    // produced — the load edges and the pump's refusals, then the copy's
+    // failures, then the cost — which is the order these lines were written in
+    // when the loop was inline.
+    let mut sample = PaneThreadSample::default();
+    for event in events {
+        match event {
+            PaneEvent::Loaded(id) => crate::pinfo!(
+                log,
+                LogCat::Lobby,
+                "pane host: {} finished loading",
+                if id == VIEWSCREEN_HUD_SURFACE_ID {
+                    "the viewscreen HUD".to_string()
+                } else if id == HOST_LOBBY_SURFACE_ID {
+                    "the host lobby".to_string()
                 } else {
-                    // Nothing repainted: the buffer never left, so it goes
-                    // straight back rather than round the recycle channel.
-                    pane.staging.push(data);
+                    format!("{id} console")
                 }
+            ),
+            // Ordinary in the window between "the document loaded" and "its
+            // module island ran" — the state is kept and retried, so this is a
+            // debug line rather than a warning.
+            PaneEvent::PushDeferred { reason, .. } => crate::pdebug!(
+                log,
+                LogCat::Lobby,
+                "pane host: the host lobby deferred a push: {reason}"
+            ),
+            PaneEvent::Refused { id, refusal } => {
+                crate::pwarn!(log, LogCat::Admit, "pane host: {id}: {refusal}")
             }
-            Err(e) => {
-                // The buffer never left, and the force was not honoured — a
-                // push's repaint may not be in Ultralight's own dirty bounds,
-                // so it is carried to the next attempt.
-                pane.staging.push(data);
-                pane.needs_full |= force;
-                pane.copy_failures += 1;
+            PaneEvent::CopyFailed {
+                id,
+                consecutive,
+                reason,
+            } => {
                 crate::pwarn!(
                     log,
                     LogCat::Lobby,
-                    "pane host: {} frame copy failed ({}/{}): {e}",
-                    pane.id,
-                    pane.copy_failures,
+                    "pane host: {} frame copy failed ({}/{}): {reason}",
+                    id,
+                    consecutive,
                     VIEW_CRASH_COPY_FAILURES
                 );
                 // A view that fails EVERY frame has crashed — a lost surface, a
@@ -2344,30 +2457,37 @@ fn drive_panes(
                 // lobby view is a warning per frame and a blank surface, which
                 // is honest and recoverable by restarting the host. The HUD
                 // overlay (issue #422, native port) is the same: no station, no
-                // bus entry, so it cannot ride the Backfill path either.
-                if pane.copy_failures >= VIEW_CRASH_COPY_FAILURES
-                    && !pane.is_host_lobby()
-                    && !pane.is_hud_overlay()
+                // bus entry, so it cannot ride the Backfill path either. The
+                // predicate is [`PaneKind::permanent`], said here in the two ids
+                // this adapter reserves for those surfaces.
+                if consecutive >= VIEW_CRASH_COPY_FAILURES
+                    && id != HOST_LOBBY_SURFACE_ID
+                    && id != VIEWSCREEN_HUD_SURFACE_ID
                 {
                     if let Some(bus) = &bus {
-                        bus.0.fault(pane.id, PaneFault::ViewCrashed);
+                        bus.0.fault(id, PaneFault::ViewCrashed);
                     }
                 }
             }
+            PaneEvent::Stats(iteration) => sample = iteration,
+            // Nothing else reaches this loop while the iteration is synchronous:
+            // `Created` is read where the `Create` was applied, and `Started`,
+            // `Frame` and `ThreadFailed` only exist once there is a thread.
+            _ => {}
         }
     }
-    let publish_ms = (elapsed_ms(phase) - copy_ms).max(0.0);
+
     if let Some(stats) = stats.as_mut() {
         stats.record_pane(PaneFrameSample {
-            update_ms,
-            pump_ms,
-            render_ms,
-            copy_ms,
-            publish_ms,
+            update_ms: sample.update_ms,
+            pump_ms: sample.pump_ms,
+            render_ms: sample.render_ms,
+            copy_ms: sample.copy_ms,
+            publish_ms: sample.publish_ms,
             panes: host.windows.len(),
-            copied,
-            forced,
-            pixels,
+            copied: tally.copied,
+            forced: tally.forced,
+            pixels: tally.pixels,
             // The render world's counts arrive a frame late, left behind by the
             // extract that collected the previous batch — see
             // `super::upload::extract_pane_uploads`.
@@ -2375,7 +2495,7 @@ fn drive_panes(
             uploads_full: pending.tally.uploaded_full as usize,
             upload_bytes: pending.tally.bytes,
             deferred: pending.tally.deferred as usize,
-            lost: starved + stale + pending.tally.dropped as usize,
+            lost: tally.starved + tally.stale + pending.tally.dropped as usize,
         });
     }
 
@@ -2542,7 +2662,14 @@ fn open_pending_views(
             }
         };
         let on_station = placement.station_camera.is_some();
-        match make_pane_view(&mut host.runtime, images, commands, new_id, &url, placement) {
+        match make_pane_view(
+            &mut host.pane_loop,
+            images,
+            commands,
+            new_id,
+            &url,
+            placement,
+        ) {
             Ok(window) => {
                 host.windows.push(window);
                 recreated_any = true;
@@ -2666,13 +2793,13 @@ fn station_camera(host: &mut PaneHost, commands: &mut Commands, window: Entity) 
 /// host, which is right for both a recovery and a console the operator can
 /// simply close and re-open.
 fn make_pane_view(
-    runtime: &mut UltralightHost,
+    pane_loop: &mut PaneLoop<UltralightHost>,
     images: &mut Assets<Image>,
     commands: &mut Commands,
     id: PaneId,
     url: &str,
     placement: PaneSeat,
-) -> Result<PaneWindow, PaneSurfaceError> {
+) -> Result<PaneWindow, String> {
     let PaneSeat {
         window,
         station_camera,
@@ -2681,21 +2808,44 @@ fn make_pane_view(
         scale,
         window_origin,
     } = placement;
-    // Through the runtime seam (issue #1404): the spec, the per-pane session,
+    // Through the command seam (issue #1404): the spec, the per-pane session,
     // the drain script and the load are one step there, and it is the step the
-    // pane thread will take on the far side of a `Create` command. Every pane
+    // pane thread will take on the far side of a `Create` message. Every pane
     // built after init is a console — the two permanent surfaces are built once,
     // at init — so the kind is not a parameter.
-    let surface = runtime.create(
-        id,
-        PaneKind::Console,
-        &PaneSpecOwned {
-            width: size.0,
-            height: size.1,
-            device_scale: scale,
+    //
+    // Applied and read back in the same statement: the answer is a `Created`
+    // event because that is the shape it has to have once the create happens on
+    // another thread, and the reason it carries is already the `PaneSurfaceError`
+    // this used to return, spelled out.
+    let mut created = Vec::new();
+    pane_loop.apply(
+        PaneCommand::Create {
+            id,
+            kind: PaneKind::Console,
+            spec: PaneSpecOwned {
+                width: size.0,
+                height: size.1,
+                device_scale: scale,
+            },
+            url: url.to_string(),
+            // A brand-new texture, so generation zero and nothing in flight
+            // against an older one.
+            epoch: 0,
+            visible: true,
         },
-        url,
-    )?;
+        &mut NoFrameSink,
+        &mut created,
+    );
+    for event in created {
+        if let PaneEvent::Created {
+            result: Err(reason),
+            ..
+        } = event
+        {
+            return Err(reason);
+        }
+    }
     let image = Image::new_fill(
         Extent3d {
             width: size.0,
@@ -2731,7 +2881,6 @@ fn make_pane_view(
     let canvas = canvas.id();
     Ok(PaneWindow {
         id,
-        surface,
         image: handle,
         canvas,
         window,
@@ -2739,11 +2888,9 @@ fn make_pane_view(
         size,
         scale,
         window_origin,
-        copy_failures: 0,
         // `transparent: false` above: an opaque console's fill.
         staging: pane_staging_pool(size, false),
         epoch: 0,
-        needs_full: true,
     })
 }
 
@@ -2799,6 +2946,19 @@ fn retire_closed_panes(
         false
     });
 
+    // And the VIEW goes with the window (issue #1404, slice 3). A view left
+    // behind is not inert: the input systems would still route to it, and
+    // `pump_pane` would still drain a live page's records into a registry that
+    // refuses them, once per frame, for the rest of the run.
+    //
+    // `NoFrameSink` is the sink because the pane's staging pool is on the
+    // `PaneWindow` the `retain` above has just dropped: there is nothing left
+    // for the real sink's `drop_pane` to forget. That stops being true when the
+    // loop owns the pools.
+    for pane in &closed {
+        host.pane_loop
+            .apply(PaneCommand::Close(*pane), &mut NoFrameSink, &mut Vec::new());
+    }
     // A finger pinned to a pane that has gone must not stay captured by a view
     // that no longer exists.
     for pane in &closed {

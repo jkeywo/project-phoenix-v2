@@ -74,6 +74,17 @@ export class PhDossierPanel extends PhElement {
     :host * { box-sizing: border-box; }
     .heading { font-size: var(--text-xs); letter-spacing: 0.2em; color: var(--ink-dim); padding: 0 0.2rem 0.3rem; flex-shrink: 0; }
     .empty { font-size: var(--text-xs); color: var(--ink-dim); text-align: center; padding: 0.5rem 0; letter-spacing: 0.2em; }
+    /* List and sheet render as sibling panes side by side by default (issue
+       #1382): a subject stays visible while its own sheet is open, so picking
+       a different one is a single tap rather than back-then-forward. Portrait
+       has no width to spare for both, so the media query below turns this
+       into the phone's list-then-sheet flow instead. */
+    #body { display: flex; flex-direction: row; gap: 0.6rem; flex: 1; min-height: 0; }
+    .list-pane { display: flex; flex-direction: column; min-height: 0; flex: 1; min-width: 0; }
+    .sheet-pane { display: flex; flex-direction: column; min-height: 0; flex: 1; min-width: 0;
+                  border-left: 1px solid var(--line-soft); padding-left: 0.6rem; }
+    .sheet-empty { font-size: var(--text-xs); color: var(--ink-dim); text-align: center; padding: 0.5rem 0;
+                   letter-spacing: 0.2em; margin: auto; }
     .list { display: flex; flex-direction: column; gap: 0.35rem; overflow-y: auto; min-height: 0; }
     .subject { display: flex; flex-direction: column; gap: 0.1rem; text-align: left; width: 100%;
                font-family: inherit; color: inherit; background: transparent; cursor: pointer;
@@ -93,6 +104,16 @@ export class PhDossierPanel extends PhElement {
     button.back { align-self: flex-start; font-family: inherit; font-size: var(--text-xs); letter-spacing: 0.15em;
                   padding: 0.2rem 0.5rem; margin-bottom: 0.2rem; background: transparent; color: var(--ink);
                   border: 1px solid var(--line-soft); border-radius: 2px; cursor: pointer; min-height: var(--control-hit-min); }
+    /* Phone: no room for both panes, so only one shows at a time — the list
+       until a subject is open, then its sheet with the back control above.
+       The data-sheet-open attribute is set on #body by render(), never read
+       outside this media query, so desktop always keeps both panes on
+       screen regardless of it. */
+    @media (orientation: portrait) {
+      #body:not([data-sheet-open]) .sheet-pane { display: none; }
+      #body[data-sheet-open] .list-pane { display: none; }
+      .sheet-pane { border-left: none; padding-left: 0; }
+    }
   </style>
   <div class="heading" id="heading"></div>
   <div id="body"></div>
@@ -131,22 +152,43 @@ export class PhDossierPanel extends PhElement {
   render() {
     const body = this.shadowRoot.getElementById('body');
     body.innerHTML = '';
+
+    const listPane = document.createElement('div');
+    listPane.className = 'list-pane';
+    this.#renderList(listPane, this.#dossiers);
+    body.appendChild(listPane);
+
+    const sheetPane = document.createElement('div');
+    sheetPane.className = 'sheet-pane';
     const open = this.open;
     if (open) {
-      this.#renderSheet(body, open);
+      body.dataset.sheetOpen = '';
+      this.#renderSheet(sheetPane, open);
     } else {
+      delete body.dataset.sheetOpen;
       this.#openUuid = null;
-      this.#renderList(body, this.#dossiers);
+      // Nothing to prompt for when there is nothing to pick from — the list
+      // pane's own [NO FILES] already says that.
+      if (this.#dossiers.length > 0) this.#renderSheetPrompt(sheetPane);
     }
+    body.appendChild(sheetPane);
   }
 
-  /** @param {HTMLElement} body @param {Array} dossiers */
-  #renderList(body, dossiers) {
+  /** @param {HTMLElement} pane */
+  #renderSheetPrompt(pane) {
+    const prompt = document.createElement('div');
+    prompt.className = 'sheet-empty';
+    prompt.textContent = t('component.dossier.select_prompt');
+    pane.appendChild(prompt);
+  }
+
+  /** @param {HTMLElement} pane @param {Array} dossiers */
+  #renderList(pane, dossiers) {
     if (dossiers.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'empty';
       empty.textContent = t('component.dossier.empty');
-      body.appendChild(empty);
+      pane.appendChild(empty);
       return;
     }
     const list = document.createElement('div');
@@ -165,7 +207,7 @@ export class PhDossierPanel extends PhElement {
       row.addEventListener('click', () => this.select(d.uuid));
       list.appendChild(row);
     });
-    body.appendChild(list);
+    pane.appendChild(list);
   }
 
   /**
@@ -178,15 +220,15 @@ export class PhDossierPanel extends PhElement {
     return facts === 0 ? t('component.dossier.nothing_on_file') : String(facts);
   }
 
-  /** @param {HTMLElement} body @param {object} dossier */
-  #renderSheet(body, dossier) {
+  /** @param {HTMLElement} pane @param {object} dossier */
+  #renderSheet(pane, dossier) {
     const back = document.createElement('button');
     back.type = 'button';
     back.className = 'back';
     back.id = 'dossier-back';
     back.textContent = t('component.dossier.back');
     back.addEventListener('click', () => this.select(null));
-    body.appendChild(back);
+    pane.appendChild(back);
 
     const sheet = document.createElement('div');
     sheet.className = 'sheet';
@@ -247,7 +289,7 @@ export class PhDossierPanel extends PhElement {
       sheet.appendChild(block);
     }
 
-    body.appendChild(sheet);
+    pane.appendChild(sheet);
   }
 }
 

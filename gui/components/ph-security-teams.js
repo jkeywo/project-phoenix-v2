@@ -31,9 +31,17 @@ export class PhSecurityTeams extends PhElement {
   template() {
     return `
   <style>
-    :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
+    :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); min-height: 0; }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; font-size: var(--text-sm); letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
+    /* Teams and available work render as two blocks side by side by default
+       (issue #1382) — the inverse of engineering's stacked-pair (default
+       column, portrait forces row): here default is row, and portrait forces
+       column because a phone has no width to spare for both. */
+    .blocks { display: flex; flex-direction: row; gap: 0.6rem; flex: 1; min-height: 0; }
+    .block { display: flex; flex-direction: column; min-height: 0; flex: 1; min-width: 0; }
+    .block + .block { border-left: 1px solid var(--line-faint); padding-left: 0.6rem; }
+    .header { display: flex; justify-content: space-between; align-items: center; font-size: var(--text-sm); letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; flex-shrink: 0; }
+    #teams, #jobs { flex: 1; min-height: 0; overflow-y: auto; }
     .card { border: 1px solid var(--line-faint); background: var(--bg-card); padding: 0.5rem; display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.4rem; }
     .card-top { display: flex; justify-content: space-between; align-items: center; gap: 0.4rem; }
     .team-label { font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.15em; }
@@ -68,11 +76,21 @@ export class PhSecurityTeams extends PhElement {
     .refusal { font-size: var(--text-xs); color: var(--fire); letter-spacing: 0.1em; }
     .refusal[hidden] { display: none; }
     .empty { font-size: var(--text-xs); color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
+    @media (orientation: portrait) {
+      .blocks { flex-direction: column; }
+      .block + .block { border-left: none; padding-left: 0; border-top: 1px solid var(--line-faint); padding-top: 0.5rem; }
+    }
   </style>
-  <div class="header"><span>${t('component.security_teams.title')}</span></div>
-  <div id="teams"></div>
-  <div class="header"><span>${t('component.security_teams.jobs_title')}</span></div>
-  <div id="jobs"></div>
+  <div class="blocks" id="blocks">
+    <div class="block teams-block">
+      <div class="header"><span>${t('component.security_teams.title')}</span></div>
+      <div id="teams"></div>
+    </div>
+    <div class="block jobs-block">
+      <div class="header"><span>${t('component.security_teams.jobs_title')}</span></div>
+      <div id="jobs"></div>
+    </div>
+  </div>
   <div class="refusal" id="refusal" hidden></div>
 `;
   }

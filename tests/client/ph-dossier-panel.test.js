@@ -121,6 +121,46 @@ describe('PhDossierPanel', () => {
     expect(subjects(el)).toHaveLength(1);
   });
 
+  // AC1 (#1382): the list and the open sheet are siblings, not alternatives — a
+  // subject stays visible and pickable while its own sheet is open, so desktop
+  // never falls back to the phone's list-XOR-sheet behavior. The media query
+  // that hides one pane on a phone reads this same marker, so asserting the
+  // marker here is asserting the mechanism AC1 depends on.
+  it('keeps the list pane in the DOM, and marks the body, once a sheet opens', () => {
+    const el = setup();
+    el.state = { dossiers: [DEPOT, CLAIMANT] };
+    const body = el.shadowRoot.getElementById('body');
+    expect(body.dataset.sheetOpen).toBeUndefined();
+
+    el.select('skyway_depot-1');
+    expect(subjects(el)).toHaveLength(2);
+    expect(el.shadowRoot.querySelector('.subject[data-uuid="skyway_depot-1"]')).not.toBeNull();
+    expect(body.dataset.sheetOpen).toBe('');
+
+    el.select(null);
+    expect(el.shadowRoot.getElementById('body').dataset.sheetOpen).toBeUndefined();
+  });
+
+  // The sheet pane is never blank while dossiers exist and none is open — it
+  // says so — but there is nothing to prompt for when the list itself is empty,
+  // since the list pane's own [NO FILES] already covers that case.
+  it('prompts the sheet pane to pick a subject only when there is one to pick', () => {
+    const el = setup();
+    el.state = { dossiers: [DEPOT, CLAIMANT] };
+    expect(el.shadowRoot.querySelector('.sheet-pane .sheet-empty').textContent)
+      .toBe(t('component.dossier.select_prompt'));
+
+    el.select('skyway_depot-1');
+    expect(el.shadowRoot.querySelector('.sheet-pane .sheet-empty')).toBeNull();
+
+    el.select(null);
+    expect(el.shadowRoot.querySelector('.sheet-pane .sheet-empty').textContent)
+      .toBe(t('component.dossier.select_prompt'));
+
+    el.state = { dossiers: [] };
+    expect(el.shadowRoot.querySelector('.sheet-pane .sheet-empty')).toBeNull();
+  });
+
   // The open sheet is resolved by uuid on every render, so a live world reaches
   // it: the facts move under the operator rather than freezing at the tap.
   it('re-renders the open sheet from the newest payload', () => {

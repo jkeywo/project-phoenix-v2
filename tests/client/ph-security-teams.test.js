@@ -77,6 +77,29 @@ describe('PhSecurityTeams', () => {
     expect(empties[1].textContent).toBe(t('component.security_teams.no_jobs'));
   });
 
+  // AC2 (#1382): teams and jobs render as two ordered blocks inside a shared
+  // `.blocks` wrapper — the DOM shape both the default side-by-side row
+  // layout and the `@media (orientation: portrait)` column-flip rule depend
+  // on. Pinning it here means a future edit that merges the two blocks back
+  // into one, drops the `.blocks` wrapper, or deletes the media query fails
+  // a unit test instead of only being caught by eyeballing a screenshot.
+  it('renders teams and jobs as two ordered blocks inside the shared wrapper', () => {
+    const el = setup();
+    el.state = BLACKBOARD;
+    const blocks = el.shadowRoot.getElementById('blocks');
+    expect(blocks).not.toBeNull();
+    expect(blocks.children).toHaveLength(2);
+
+    const [teamsBlock, jobsBlock] = blocks.children;
+    expect(teamsBlock.classList.contains('block')).toBe(true);
+    expect(teamsBlock.classList.contains('teams-block')).toBe(true);
+    expect(teamsBlock.querySelector('#teams')).not.toBeNull();
+
+    expect(jobsBlock.classList.contains('block')).toBe(true);
+    expect(jobsBlock.classList.contains('jobs-block')).toBe(true);
+    expect(jobsBlock.querySelector('#jobs')).not.toBeNull();
+  });
+
   // AC2: the team list with state, assignment and progress.
   it('lists every team with its state badge, assignment and progress bar', () => {
     const el = setup();

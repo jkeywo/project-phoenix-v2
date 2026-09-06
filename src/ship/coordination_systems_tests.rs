@@ -3019,6 +3019,205 @@ fn the_destroyer_authors_engineering_second_in_its_seek_order() {
     );
 }
 
+// ── The cruiser's Command station and Tactical stances (issue #1387) ──────
+
+/// What the cruiser AUTHORS, read off the shipped hull. The Command mechanism
+/// is entirely hull-agnostic code, so the only thing that can be wrong on a
+/// second hull is the data — which is exactly what this reads.
+#[test]
+fn the_cruiser_authors_an_auxiliary_command_station_directing_tactical() {
+    let config = hull_ship_config("alliance_cruiser");
+
+    let command = config
+        .station(&crate::core::messages::StationId("command".into()))
+        .expect("the cruiser declares a Command Station");
+    assert!(
+        command.auxiliary,
+        "Command is never offered as its own lobby seat"
+    );
+    assert!(command.human_seeking, "Command seeks a human host");
+    assert_eq!(
+        command.host_order,
+        vec![crate::core::messages::StationId("captain".into())],
+        "the Captain hosts Command through authored hull data, not a \
+         hard-coded Captain rule"
+    );
+    assert_eq!(command.visiting_rating.as_deref(), Some("Std"));
+    assert_eq!(
+        command.command_target,
+        Some(crate::core::messages::StationId("tactical".into()))
+    );
+    assert_eq!(
+        command.console.as_deref(),
+        Some("gui/command-console.html"),
+        "Command is not a hull's own seat: every hull mounts the one shared \
+         document rather than a gui/<hull>/ copy of it"
+    );
+    assert!(
+        command.stances.is_empty(),
+        "Command directs a catalogue, it does not author one"
+    );
+
+    let command_system = config
+        .system(&SystemId("command".into()))
+        .expect("the cruiser declares the Command capability system");
+    assert_eq!(command_system.kind, "command");
+    assert_eq!(
+        command_system.station,
+        Some(crate::core::messages::StationId("command".into())),
+        "the capability system is owned by the Command Station, so its seek \
+         host is authorised for stance orders like any other visiting seat"
+    );
+
+    let tactical = config
+        .station(&crate::core::messages::StationId("tactical".into()))
+        .expect("the cruiser declares a Tactical Station");
+    let ids: Vec<&str> = tactical.stances.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec![
+            "tactical-weapons-free",
+            "tactical-hold",
+            "tactical-normal",
+            "tactical-high",
+        ],
+        "the authored catalogue IS the whole selectable vocabulary"
+    );
+    let by_id = |id: &str| {
+        tactical
+            .stances
+            .iter()
+            .find(|s| s.id == id)
+            .unwrap_or_else(|| panic!("{id} must be authored"))
+    };
+    let weapons_free = by_id("tactical-weapons-free");
+    assert_eq!(weapons_free.kind, crate::ship::config::StanceKind::Standard);
+    assert!(weapons_free.high_alert);
+    assert!(
+        weapons_free.persist_behind_human,
+        "weapons free is a durable order: it survives a handoff at Command"
+    );
+    assert!(
+        weapons_free.ai_engaged,
+        "an uncrewed Command seat picks weapons free at Red Alert"
+    );
+    let hold = by_id("tactical-hold");
+    assert_eq!(hold.kind, crate::ship::config::StanceKind::Standard);
+    assert!(!hold.high_alert);
+    assert_eq!(
+        by_id("tactical-normal").kind,
+        crate::ship::config::StanceKind::NormalAlertNeutral
+    );
+    assert!(!by_id("tactical-normal").high_alert);
+    assert_eq!(
+        by_id("tactical-high").kind,
+        crate::ship::config::StanceKind::HighAlertNeutral
+    );
+    assert!(by_id("tactical-high").high_alert);
+}
+
+/// Both neutral fallbacks are MANDATORY, proved by removing each one from the
+/// real shipped cruiser and re-running the load-time validator: the hull is
+/// refused, so a catalogue that could not answer "what posture now?" for one
+/// of the two alert levels can never boot.
+#[test]
+fn removing_either_cruiser_neutral_stance_refuses_the_hull_at_load() {
+    let registry = crate::ship::system_registry::SystemKindRegistry::with_core_systems()
+        .expect("the core registry builds");
+    let kinds: Vec<&str> = registry.kinds().collect();
+    let config = hull_ship_config("alliance_cruiser");
+    crate::ship::config::validate(&config, &kinds)
+        .expect("the shipped cruiser is valid as authored");
+
+    for (removed, kind) in [
+        (
+            "tactical-normal",
+            crate::ship::config::StanceKind::NormalAlertNeutral,
+        ),
+        (
+            "tactical-high",
+            crate::ship::config::StanceKind::HighAlertNeutral,
+        ),
+    ] {
+        let mut broken = config.clone();
+        let tactical = broken
+            .stations
+            .iter_mut()
+            .find(|s| s.id.0 == "tactical")
+            .expect("the cruiser declares a Tactical Station");
+        tactical.stances.retain(|stance| stance.id != removed);
+        match crate::ship::config::validate(&broken, &kinds) {
+            Err(crate::ship::config::ShipConfigError::StanceCatalogueNeutralCount {
+                station,
+                kind: refused_kind,
+                found,
+            }) => {
+                assert_eq!(station.0, "tactical");
+                assert_eq!(refused_kind, kind);
+                assert_eq!(found, 0, "the fallback really is gone");
+            }
+            other => panic!("removing {removed} must refuse the hull, got {other:?}"),
+        }
+    }
+}
+
+/// The CMD tab's server half on the cruiser: with the Captain seat crewed and
+/// nobody at Tactical, the auxiliary Command Station resolves onto the Captain
+/// at its authored visiting rating, and that Captain's token — which holds no
+/// station the `command` system belongs to — is the one admission accepts for
+/// a stance order.
+#[test]
+fn the_cruisers_command_station_hosts_on_a_crewed_captain_and_admits_their_stance() {
+    let mut app = seeking_app("alliance_cruiser", &["captain", "helm"]);
+    tick(&mut app);
+
+    let command_station = crate::core::messages::StationId("command".into());
+    let assignment = station_assignment(&mut app, &command_station);
+    assert_eq!(
+        assignment.host,
+        Some(crate::core::messages::StationId("captain".into())),
+        "Command rides the Captain's console as a hero-bar tab"
+    );
+    assert_eq!(assignment.rating, "Std");
+
+    let command_system = SystemId("command".into());
+    assert_eq!(
+        source_of(&mut app, &command_system),
+        ControlSource::Human,
+        "the hosted Command seat accepts its host's orders"
+    );
+
+    let payload = crate::core::messages::SystemControlPayload::SetStationStance {
+        station: crate::core::messages::StationId("tactical".into()),
+        stance: "tactical-weapons-free".into(),
+    };
+    let authorized = |app: &mut App, token: &str| {
+        let ship = find_ship_entity(app);
+        let world = app.world();
+        crate::command_admission::is_command_authorized(
+            token,
+            &command_system,
+            &payload,
+            world
+                .entity(ship)
+                .get::<ShipSystemControlSources>()
+                .unwrap(),
+            world.resource::<Sessions>(),
+            &world.entity(ship).get::<ShipConfigComponent>().unwrap().0,
+            world.entity(ship).get::<HumanSeekingHosts>(),
+        )
+    };
+    assert!(
+        authorized(&mut app, "officer-captain"),
+        "the resolved Command host is admitted for the stance order"
+    );
+    assert!(
+        !authorized(&mut app, "officer-helm"),
+        "another crewed seat is not: Command's authored host_order names only \
+         the Captain"
+    );
+}
+
 /// The authored order, live: Tactical empty and three other seats crewed.
 /// The DERIVED walk would hand both systems to the Captain (first authored
 /// station); the authored one hands them to Engineering. Navigation still

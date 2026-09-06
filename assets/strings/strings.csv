@@ -295,6 +295,11 @@ entity.alliance_cruiser.station.tactical.description,assets/entities/alliance_cr
 entity.alliance_cruiser.station.science.description,assets/entities/alliance_cruiser.toml → [station] description,[Monitor sensors and manage shields.]
 entity.alliance_cruiser.station.engineering.description,assets/entities/alliance_cruiser.toml → [station] description,[Manage power and repairs.]
 entity.alliance_cruiser.station.comms.description,assets/entities/alliance_cruiser.toml → [station] description,"[Hail stations, plot course and navigate.]"
+entity.alliance_cruiser.station.command.description,assets/entities/alliance_cruiser.toml → [station] description,[Direct the ship's AI-run stations.]
+entity.alliance_cruiser.station.tactical.stance.weapons_free,assets/entities/alliance_cruiser.toml → [station.stance] label,[Weapons Free]
+entity.alliance_cruiser.station.tactical.stance.hold,assets/entities/alliance_cruiser.toml → [station.stance] label,[Hold Fire]
+entity.alliance_cruiser.station.tactical.stance.normal,assets/entities/alliance_cruiser.toml → [station.stance] label,[Follow Alert (Standing By)]
+entity.alliance_cruiser.station.tactical.stance.high,assets/entities/alliance_cruiser.toml → [station.stance] label,[Follow Alert (Battle Stations)]
 entity.alliance_cruiser.station.captain.tutorial.welcome.title,assets/entities/alliance_cruiser.toml → [station.tutorial] title — first-visit captain tip heading,CAPTAIN'S CHAIR
 entity.alliance_cruiser.station.captain.tutorial.rating.title,assets/entities/alliance_cruiser.toml → [station.tutorial] title — current captain rating selector guidance,STATION RATING
 entity.alliance_cruiser.station.captain.tutorial.rating.text,assets/entities/alliance_cruiser.toml → [station.tutorial] text — current captain rating selector guidance,"[Before launch, the lobby's Station Rating selector offers Std and Simplified. Simplified hands Red Alert to the ship's AI; Std leaves that call with you.]"

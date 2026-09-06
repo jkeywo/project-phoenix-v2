@@ -1168,6 +1168,7 @@ mod tests {
         let mut hulls = 0usize;
         let mut systems = 0usize;
         let mut command_instances = 0usize;
+        let mut command_targets = 0usize;
         let mut dock_instances = 0usize;
 
         for path in entries {
@@ -1178,6 +1179,11 @@ mod tests {
                 continue;
             };
             hulls += 1;
+            command_targets += ship
+                .stations
+                .iter()
+                .filter(|station| station.command_target.is_some())
+                .count();
             let projected = registry.project_console_families(&ship.systems);
             for system in &ship.systems {
                 systems += 1;
@@ -1201,9 +1207,21 @@ mod tests {
             systems >= 50,
             "expected every shipped hull's System topology"
         );
+        // Command is authored per hull, not once for the fleet: the Destroyer
+        // (issue #1107) and the Cruiser (issue #1387) each own one. Counted
+        // against the hulls that actually DIRECT a Station rather than pinned
+        // to a literal, so a third hull adopting Command extends the invariant
+        // instead of failing it — while a `command` System with nothing to
+        // direct, or a directing Station with no System to admit its orders,
+        // still fails.
+        assert!(
+            command_instances >= 2,
+            "the shipped Command topology disappeared, got {command_instances}"
+        );
         assert_eq!(
-            command_instances, 1,
-            "the shipped Command topology disappeared"
+            command_instances, command_targets,
+            "every hull that authors a `command_target` owns exactly one \
+             `command` System, and no hull owns one without directing anything"
         );
         assert!(
             dock_instances >= 4,

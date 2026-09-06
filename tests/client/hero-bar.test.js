@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { JSDOM } from 'jsdom';
+import { parse as parseToml } from 'smol-toml';
 import { describe, expect, it, vi } from 'vitest';
 import {
   HERO_BAR_CODE_QUERY, heroBarHealthState, heroBarImportanceState, heroBarKeyTarget,
@@ -937,5 +938,81 @@ describe('client.html gives the bar the shape the labels assume', () => {
     // Derived from the touch floor that sets the strip's height, so raising
     // the floor moves the corner with it rather than leaving it half-buried.
     expect(offset[1]).toMatch(/top:\s*calc\(var\(--control-hit-min\)/);
+  });
+});
+
+describe("the cruiser's Command tab (issue #1387)", () => {
+  /**
+   * Read the hull rather than hand-write it. The Command mechanism is
+   * hull-agnostic JS — the only thing a second hull can get wrong is its TOML,
+   * so a fixture copied from the destroyer would pass while the cruiser
+   * authored nothing at all.
+   */
+  function cruiserStations() {
+    const toml = parseToml(
+      fs.readFileSync(
+        path.join(path.dirname(fileURLToPath(import.meta.url)), '../../assets/entities/alliance_cruiser.toml'),
+        'utf8',
+      ),
+    );
+    return (toml.station || []).map(st => ({
+      id: st.id,
+      name: st.name,
+      short_code: st.short_code,
+      console: st.console,
+      human_seeking: st.human_seeking === true,
+      visiting_rating: st.visiting_rating,
+      auxiliary: st.auxiliary === true,
+    }));
+  }
+
+  it('authors Command as an auxiliary human-seeking station on the shared console', () => {
+    // A guard on the fixture: everything below is about a station that has to
+    // exist in the hull for the assertions to mean anything.
+    const command = cruiserStations().find(st => st.id === 'command');
+    expect(command).toBeTruthy();
+    expect(command).toMatchObject({
+      short_code: 'CMD',
+      console: 'gui/command-console.html',
+      human_seeking: true,
+      auxiliary: true,
+      visiting_rating: 'Std',
+    });
+  });
+
+  it('puts a CMD tab on the Captain once the host resolves Command there', () => {
+    const model = heroBarModel({
+      directStation: 'captain',
+      stations: cruiserStations(),
+      stationHosts: {
+        // What the server's visiting-station resolver answers for a crewed
+        // Captain: Command rides that seat, Comms and Navigation do not.
+        command: { station: 'command', host: 'captain', rating: 'Std' },
+        comms: { station: 'comms', host: null, rating: 'Backfill' },
+        navigation: { station: 'navigation', host: null, rating: 'Backfill' },
+      },
+      stationRatings: { captain: 'Std' },
+      activeStation: 'captain',
+    });
+    expect(model.tabs.map(tab => tab.id)).toEqual(['captain', 'command']);
+    expect(model.tabs[1]).toMatchObject({ kind: 'station', code: 'CMD', rating: 'Std' });
+    expect(model.ownership.command).toBe('visiting');
+    // Selecting the tab is what opens the shared Command document; the tab's
+    // id is the key the shell mounts that iframe under.
+    expect(cruiserStations().find(st => st.id === 'command').console)
+      .toBe('gui/command-console.html');
+  });
+
+  it('leaves Command off a seat it does not host, and names it as AI there', () => {
+    const model = heroBarModel({
+      directStation: 'helm',
+      stations: cruiserStations(),
+      stationHosts: { command: { station: 'command', host: null, rating: 'Backfill' } },
+      stationRatings: { helm: 'Std' },
+      activeStation: 'helm',
+    });
+    expect(model.tabs.map(tab => tab.id)).toEqual(['helm']);
+    expect(model.ownership.command).toBe('ai');
+    expect(model.aiStations.map(st => st.id)).toContain('command');
   });
 });

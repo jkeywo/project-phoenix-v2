@@ -1179,6 +1179,52 @@ automated_systems = []
 name = "Simplified"
 automated_systems = ["phaser-fore", "phaser-aft"]
 
+# Command stance catalogue (issues #1107, #1387).
+# The cruiser directs Tactical for the same reason the destroyer does: weapons
+# posture is the hull's one AI branch that reads Red Alert directly (the
+# `min_alert_to_fire` fire gate), so a stance is a posture fact that gate
+# already understood rather than a newly invented behaviour.
+# When nobody claims Tactical, the auxiliary Command station (below, normally
+# hosted by Captain) lists it and applies one of these authored stances. A
+# stance supplies the weapons AI hosts their alert POSTURE the same way Red
+# Alert does — it never buffs a stat or fires a gun itself. The two neutral
+# fallbacks are the migrated Red Alert path: `high_alert_neutral` behaves as
+# "at red alert", `normal_alert_neutral` as "stood down", and changing the
+# ship's alert switches between them without overwriting a standard order.
+# [ai] The four stance ids and the `persist_behind_human` / `ai_engaged`
+# choices mirror the destroyer's catalogue deliberately, so a Captain who
+# learned Command on one hull reads the same vocabulary on the other.
+[[station.stance]]
+id = "tactical-weapons-free"
+label = "entity.alliance_cruiser.station.tactical.stance.weapons_free"
+kind = "standard"
+high_alert = true
+# A durable order: it survives a human handoff at Command rather than resetting.
+persist_behind_human = true
+# The posture an uncrewed Command seat adopts at Red Alert (issue #1109). When
+# nobody hosts Command AND Tactical is on the AI, the ship's own AI directs
+# Tactical to weapons-free while at Red Alert, standing back down to the
+# alert-neutral otherwise — the same authored stance a human would pick,
+# applied through the same admitted-order path.
+ai_engaged = true
+
+[[station.stance]]
+id = "tactical-hold"
+label = "entity.alliance_cruiser.station.tactical.stance.hold"
+kind = "standard"
+high_alert = false
+
+[[station.stance]]
+id = "tactical-normal"
+label = "entity.alliance_cruiser.station.tactical.stance.normal"
+kind = "normal_alert_neutral"
+
+[[station.stance]]
+id = "tactical-high"
+label = "entity.alliance_cruiser.station.tactical.stance.high"
+kind = "high_alert_neutral"
+high_alert = true
+
 # #1059 RECHECK: this documents the current Std/Simplified lobby selector,
 # not the future star-rung picker.
 [[station.tutorial]]
@@ -1352,10 +1398,48 @@ auxiliary = true
 name = "Std"
 automated_systems = []
 
+# Command station (issues #1107, #1387). An AUXILIARY, human-seeking station:
+# it is mounted and resolved like any other station but is never offered as its
+# own lobby seat (`auxiliary = true`), and it seeks a human host through
+# authored hull data — `host_order = ["captain"]` — rather than any hard-coded
+# Captain rule. When the Captain seat is directly held its holder hosts Command
+# as a hero-bar tab; when it is not, Command falls to the ship AI, which keeps
+# the directed station in its alert-neutral stance. Command directs the
+# `tactical` station (`command_target`), listing that station's authored stance
+# catalogue above only while Tactical is AI-controlled. The console is the
+# shared `gui/command-console.html`: Command is not a hull's own seat, so there
+# is no `gui/cruiser/` document for it.
+[[station]]
+id = "command"
+name = "Command"
+description = "entity.alliance_cruiser.station.command.description"
+rank = "Cpt."
+short_code = "CMD"
+console = "gui/command-console.html"
+manual_overview = "You direct the ship's AI-run stations without operating their systems yourself. When Tactical is on the AI, Command lists it here and lets you set its stance — weapons free, hold fire, or leave it to follow the alert level. The stance tells Tactical's AI what posture to hold; it never fires the guns for you."
+auxiliary = true
+human_seeking = true
+host_order = ["captain"]
+visiting_rating = "Std"
+command_target = "tactical"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
 [[system]]
 id = "captain"
 kind = "captain"
 station = "captain"
+
+# The Command capability system (issues #1107, #1387): the admitted target for
+# `SetStationStance`. Owned by the auxiliary Command station, so the seek host
+# (Captain, normally) is authorised for stance orders exactly as any other
+# human-seeking station's systems are.
+[[system]]
+id = "command"
+kind = "command"
+station = "command"
 
 [[system]]
 id = "red-alert"

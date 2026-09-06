@@ -193,3 +193,138 @@ test('captain console: AI-run Red Alert renders read-only with AUTO badge', asyn
   await expect(page.locator('ph-red-alert').locator('#auto-badge')).toBeVisible();
   await expect(page.locator('ph-red-alert').locator('#auto-badge')).toHaveText(ts('console.common.auto'));
 });
+
+// ── CINEMATIC full-width camera row (issue #1377) ───────────────────────────
+// Hull-agnostic: ph-camera-select is the same shared component everywhere, so
+// this exercises it through the battleship page like every other test above.
+test('captain console: the host-appended CINEMATIC view spans the camera grid full width, other extra views still show', { tag: '@core' }, async ({ page }) => {
+  await page.goto(CONSOLE_URL);
+
+  await page.evaluate((s) => window.__updateConsole('captain', JSON.stringify(s)), {
+    red_alert: false,
+    view_direction: 'Fore',
+    // Fore/Port/Starboard/Aft fill the cross; Cinematic is the host-appended
+    // view this issue gives its own row; Drone is an unrelated extra view
+    // that must keep flowing into a free cross corner, unaffected.
+    camera_views: ['Fore', 'Port', 'Starboard', 'Aft', 'Cinematic', 'Drone'],
+    objectives: [],
+    blips: [],
+  });
+
+  const camSelect = page.locator('ph-camera-select');
+  const cinematicBtn = camSelect.locator('[data-view="Cinematic"]');
+  const foreBtn = camSelect.locator('[data-view="Fore"]');
+  const droneBtn = camSelect.locator('[data-view="Drone"]');
+  await expect(cinematicBtn).toBeVisible();
+  await expect(droneBtn).toBeVisible();
+
+  const [cinematicBox, foreBox] = await Promise.all([
+    cinematicBtn.boundingBox(),
+    foreBtn.boundingBox(),
+  ]);
+  // Full-width row below the cross: at least as wide as two of the cross's
+  // own columns, and drawn below them rather than sharing their row.
+  expect(cinematicBox.width).toBeGreaterThan(foreBox.width * 2);
+  expect(cinematicBox.y).toBeGreaterThan(foreBox.y + foreBox.height);
+});
+
+// ── Phone TARGET | MISSION segment (issue #1377) ────────────────────────────
+// Destroyer only: this hull's Captain seat absorbs Sensors, so it is the one
+// Captain console with both a target card (scan readout + sensor panel) and
+// a mission group (objectives + the deadline clock) to segment on a phone.
+// Mirrors `gui/battleship/navigation.html`'s TRAFFIC | MISSION coverage in
+// tests/smoke/navigation-console.spec.js (issue #1379).
+const DESTROYER_CAPTAIN_URL = '/gui/destroyer/captain.html';
+
+function destroyerCaptainState() {
+  return {
+    system_ids: ['captain', 'sensors'],
+    system_families: { captain: 'captain', sensors: 'sensors' },
+    systems: {
+      captain: {
+        objectives: [{ id: 'obj-1', text: 'Hold the line', done: false }],
+        boosted_objective_id: null,
+        camera_views: ['Fore', 'Port', 'Starboard', 'Aft'],
+        current_view: 'Fore',
+        operations: {},
+        deadlines: [{ id: 'd1', text: 'Rendezvous', seconds_remaining: 120 }],
+        red_alert: false,
+      },
+      sensors: {
+        scan: { capable: true },
+        target_uuid: 'contact-1',
+        target_name: 'Contact One',
+        blips: [],
+        regions: [],
+      },
+    },
+    own_hull: null,
+  };
+}
+
+async function pushDestroyerCaptainState(page) {
+  await page.waitForFunction(() => typeof window.__updateConsole === 'function');
+  await page.evaluate((s) => window.__updateConsole('captain', JSON.stringify(s)), destroyerCaptainState());
+}
+
+test('destroyer captain console: the phone segment switches TARGET and MISSION and keeps one tab stop', { tag: '@core' }, async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(DESTROYER_CAPTAIN_URL);
+  await pushDestroyerCaptainState(page);
+
+  const targetTab = page.locator('#captain-seg-target');
+  const missionTab = page.locator('#captain-seg-mission');
+  const targetPanel = page.locator('#captain-panel-target');
+  const missionPanel = page.locator('#captain-panel-mission');
+
+  // Default: TARGET selected and visible, MISSION hidden and out of the tab order.
+  await expect(targetTab).toHaveAttribute('aria-selected', 'true');
+  await expect(missionTab).toHaveAttribute('aria-selected', 'false');
+  await expect(targetPanel).toBeVisible();
+  await expect(missionPanel).toBeHidden();
+  expect(await missionTab.getAttribute('tabindex')).toBe('-1');
+
+  await missionTab.click();
+
+  await expect(missionTab).toHaveAttribute('aria-selected', 'true');
+  await expect(targetTab).toHaveAttribute('aria-selected', 'false');
+  await expect(missionPanel).toBeVisible();
+  await expect(targetPanel).toBeHidden();
+  expect(await targetTab.getAttribute('tabindex')).toBe('-1');
+  expect(await missionTab.getAttribute('tabindex')).toBe('0');
+
+  // Arrow-key roving moves the single tab stop AND re-selects (the same
+  // automatic activation the Station Bar's own tabs use).
+  await missionTab.focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect(targetTab).toBeFocused();
+  await expect(targetTab).toHaveAttribute('aria-selected', 'true');
+  await expect(targetPanel).toBeVisible();
+  await expect(missionPanel).toBeHidden();
+});
+
+test('destroyer captain console: TARGET and MISSION both stay on screen at desktop width', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(DESTROYER_CAPTAIN_URL);
+  await pushDestroyerCaptainState(page);
+
+  await expect(page.locator('#captain-seg')).toBeHidden();
+  await expect(page.locator('#captain-panel-target')).toBeVisible();
+  await expect(page.locator('#captain-panel-mission')).toBeVisible();
+});
+
+test('destroyer captain console: at 390px neither the console body nor the page needs to scroll', { tag: '@core' }, async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(DESTROYER_CAPTAIN_URL);
+  await pushDestroyerCaptainState(page);
+
+  const overflow = await page.evaluate(() => {
+    const body = document.querySelector('.console-body');
+    return {
+      bodyScrolls: body.scrollHeight > body.clientHeight + 1,
+      pageScrolls: document.documentElement.scrollHeight > window.innerHeight + 1,
+    };
+  });
+  expect(overflow.bodyScrolls).toBe(false);
+  expect(overflow.pageScrolls).toBe(false);
+});

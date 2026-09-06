@@ -754,6 +754,9 @@ console.captain.shields_power,"captain console — ""Shields & Power"" panel hea
 console.captain.repair,"captain console — ""Repair"" panel heading",Repair
 console.captain.navigation,"captain console — ""Navigation"" panel heading",Navigation
 console.captain.comms,"captain console — ""Comms"" panel heading",Comms
+console.captain.seg.target,"Destroyer captain console phone segment — TARGET tab label, showing the sensor target card and scan readout (issue #1377)","[TARGET]"
+console.captain.seg.mission,"Destroyer captain console phone segment — MISSION tab label, showing objectives and the mission clock (issue #1377)","[MISSION]"
+console.captain.seg.label,"Destroyer captain console phone segment — tablist aria-label naming what TARGET | MISSION switches between (issue #1377)","[Captain view]"
 console.command.doc_title,Browser-tab title of the command console page,[Project Phoenix — Command Console]
 console.command.screen_label,Phone-frame screen label of the command console,[Command]
 console.command.directing,"command console — label before the directed station's name",[Directing]

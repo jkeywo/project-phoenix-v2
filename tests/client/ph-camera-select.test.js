@@ -79,6 +79,41 @@ describe('PhCameraSelect', () => {
     expect(buttons[3].classList.contains('active')).toBe(false);
   });
 
+  it('classifies the host-appended cinematic view to its own full-width row', () => {
+    const { el } = setup();
+    el.state = {
+      viewscreen_system_id: 'viewscreen',
+      current_view: 'Fore',
+      views: ['Fore', 'Aft', 'Port', 'Starboard', 'Cinematic'],
+      auto: false,
+    };
+    const cross = ['Fore', 'Aft', 'Port', 'Starboard'].map(
+      (v) => el.shadowRoot.querySelector(`[data-view="${v}"]`),
+    );
+    const cinematicBtn = el.shadowRoot.querySelector('[data-view="Cinematic"]');
+    expect(cinematicBtn.style.gridArea).toBe('4 / 1 / 5 / 4');
+    // Untouched: the cross still lands where it always has.
+    expect(cross[0].style.gridArea).toBe('1 / 2');
+    expect(cross[1].style.gridArea).toBe('3 / 2');
+    expect(cross[2].style.gridArea).toBe('2 / 1');
+    expect(cross[3].style.gridArea).toBe('2 / 3');
+  });
+
+  it('any other extra camera view still flows into a free cross corner, unaffected by cinematic', () => {
+    const { el } = setup();
+    el.state = {
+      viewscreen_system_id: 'viewscreen',
+      current_view: 'Fore',
+      // Cinematic classifies before the free-cell fallback runs, so it must
+      // not consume a slot from `freeCells` — the extra "Drone" view here
+      // still lands on the fallback's first cell.
+      views: ['Fore', 'Aft', 'Port', 'Starboard', 'Cinematic', 'Drone'],
+      auto: false,
+    };
+    const droneBtn = el.shadowRoot.querySelector('[data-view="Drone"]');
+    expect(droneBtn.style.gridArea).toBe('1 / 1');
+  });
+
   it('AUTO badge shown and buttons disabled when auto=true', () => {
     const { el } = setup();
     el.state = {

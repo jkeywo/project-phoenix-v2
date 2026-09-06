@@ -19,7 +19,45 @@ export class PhRedAlert extends PhElement {
     :host * { box-sizing: border-box; }
     .header { display: flex; justify-content: space-between; align-items: center; font-size: var(--text-sm); letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
     .auto-badge { font-size: var(--text-xs); color: var(--reloading); border: 1px solid var(--reloading); padding: 0.1rem 0.4rem; letter-spacing: 0.2em; }
-    .alert-btn { width: 100%; font-family: 'Chakra Petch', sans-serif; font-size: var(--text-md); font-weight: 700; padding: 0.7rem 0; letter-spacing: 0.2em; text-transform: uppercase; cursor: pointer; border: 2px solid; transition: all 0.15s ease; min-height: var(--control-hit-min); }
+    /* The round alert control (issue #1377). A captain finds Red Alert by
+       shape as much as by reading it — the one circle on a bridge of
+       rectangles — so it stops being a full-width bar like every other
+       control here. .alert-row centres it in the host's width rather than
+       stretching it, and the diameter is min(host width, 7.5rem) via
+       width:100%/max-width plus aspect-ratio, floored at the
+       --control-hit-min custom property so a squeezed rail never drops it
+       below the touch minimum. STAND DOWN / RED ALERT wrap onto two lines
+       inside it — white-space:normal, a smaller face size than the old bar
+       carried — because a single line of either string does not fit the
+       circle's narrower waist; the strings themselves are untouched. */
+    .alert-row { display: flex; justify-content: center; padding: 0.15rem 0; }
+    .alert-btn {
+      width: 100%;
+      max-width: 7.5rem;
+      min-width: var(--control-hit-min);
+      /* Redundant with aspect-ratio (a circle's height already tracks its
+         floored width) but declared explicitly: the control-floors touch-
+         floor test reads the CSS text statically, on both axes, and does not
+         evaluate aspect-ratio to infer one axis from the other. */
+      min-height: var(--control-hit-min);
+      aspect-ratio: 1 / 1;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 0.6rem;
+      font-family: 'Chakra Petch', sans-serif;
+      font-size: var(--text-xs);
+      font-weight: 700;
+      line-height: 1.2;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      white-space: normal;
+      cursor: pointer;
+      border: 3px solid;
+      transition: all 0.15s ease;
+    }
     .alert-btn.standby { background: var(--bg-card); border-color: var(--line-faint); color: var(--ink-dim); }
     .alert-btn.standby:hover:not(:disabled) { background: var(--cyan-deep); color: var(--ink-dim); }
     .alert-btn.active { background: var(--fire-deep); border-color: var(--fire); color: var(--fire); text-shadow: 0 0 8px rgba(var(--rgb-fire), 0.5); }
@@ -40,7 +78,9 @@ export class PhRedAlert extends PhElement {
     <span>${t('component.red_alert.title')}</span>
     <span class="auto-badge" id="auto-badge" style="display:none">${t('console.common.auto')}</span>
   </div>
-  <button class="alert-btn standby" id="alert-btn">${t('component.red_alert.standby')}</button>
+  <div class="alert-row">
+    <button class="alert-btn standby" id="alert-btn">${t('component.red_alert.standby')}</button>
+  </div>
   <span class="feedback-status" id="feedback-status" role="status" aria-live="polite" aria-atomic="true"></span>
   <button class="hold-btn free" id="hold-btn">${t('component.weapons_hold.free')}</button>
 `;

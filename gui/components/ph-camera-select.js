@@ -94,6 +94,13 @@ export class PhCameraSelect extends PhElement {
       else if (/(^|[^a-z])(aft|rear|reverse|back|stern)([^a-z]|$)/.test(n)) area = '3 / 2';
       else if (/(^|[^a-z])(port|left)([^a-z]|$)/.test(n)) area = '2 / 1';
       else if (/(^|[^a-z])(starboard|stbd|right)([^a-z]|$)/.test(n)) area = '2 / 3';
+      // The host-appended cinematic view (issue #1377) gets its own
+      // full-width row under the FWD/PORT/STBD/AFT cross, rather than
+      // competing with other extra views for a corner cell. `#container` has
+      // no `grid-template-rows` of its own (only `grid-auto-rows: 1fr`), so
+      // row 4 is created implicitly the first time something addresses it —
+      // no CSS change needed to make room for it.
+      else if (/(^|[^a-z])cinematic([^a-z]|$)/.test(n)) area = '4 / 1 / 5 / 4';
       else { area = freeCells[flowCell % freeCells.length]; flowCell++; }
       btn.style.gridArea = area;
     });

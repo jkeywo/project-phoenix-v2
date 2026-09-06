@@ -22,9 +22,28 @@ export class PhPhasersControls extends PhElement {
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
     .header { display: flex; justify-content: space-between; align-items: center; font-size: var(--text-sm); letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
-    .bank-row { display: flex; align-items: center; gap: 0.4rem; font-size: var(--text-xs); padding: 0.3rem 0; }
+    /* flex-wrap (issue #1378): the codebase convention for a row that does
+       not fit its column at phone width (see gui/components/ph-navigation-map.js,
+       issue #1379) rather than a width-based breakpoint, which no other
+       console in the repo uses. The row's natural wrap point cannot be left
+       to the browser, though: with the label+bar+badge+status+button all as
+       flat siblings, the browser breaks wherever the running width happens
+       to overflow, which — with any non-empty blocking-reason label, i.e.
+       every non-Ready bank including the default no-lock state — lands
+       after '.status' rather than before it, producing three lines instead
+       of two. '.bank-line-top' (label + bar) and '.bank-line-bottom' (badge
+       + status + button) each force a full flex line via 'flex: 1 1 100%',
+       so the row always wraps to exactly two lines regardless of label
+       length. '.cooldown-wrap' keeps a real minimum width so it stays a
+       visible bar rather than collapsing to nothing before the row wraps;
+       'row-gap' gives the second line the same breathing room as the row's
+       own horizontal gap. '.btn' (the FIRE button) keeps its 44px floor from
+       the shared control family on either line. */
+    .bank-row { display: flex; flex-wrap: wrap; row-gap: 0.3rem; gap: 0.4rem; font-size: var(--text-xs); padding: 0.3rem 0; }
+    .bank-line-top, .bank-line-bottom { display: flex; align-items: center; gap: 0.4rem; flex: 1 1 100%; min-width: 0; }
+    .bank-line-bottom { justify-content: space-between; }
     .bank-row .lbl { min-width: 2.5rem; color: var(--ink-dim); }
-    .cooldown-wrap { flex: 1; height: 0.5rem; background: var(--bg-deep); border: 1px solid var(--line-faint); overflow: hidden; }
+    .cooldown-wrap { flex: 1 1 4rem; min-width: 4rem; height: 0.5rem; background: var(--bg-deep); border: 1px solid var(--line-faint); overflow: hidden; }
     .cooldown-fill { height: 100%; background: linear-gradient(90deg, var(--loaded-dim), var(--loaded)); transition: width 0.3s ease; }
     .cooldown-fill.cooling { background: linear-gradient(90deg, var(--fire-dim), var(--fire)); }
     .auto-badge { font-size: var(--text-xs); color: var(--reloading); border: 1px solid var(--reloading); padding: 0.05rem 0.3rem; letter-spacing: 0.2em; margin-left: 0.3rem; }
@@ -110,22 +129,29 @@ export class PhPhasersControls extends PhElement {
         row = document.createElement('div');
         row.className = 'bank-row';
         row.dataset.id = bank.id;
+
+        const lineTop = document.createElement('div');
+        lineTop.className = 'bank-line-top';
         const lbl = document.createElement('span');
         lbl.className = 'lbl';
-        row.appendChild(lbl);
+        lineTop.appendChild(lbl);
         const wrap = document.createElement('div');
         wrap.className = 'cooldown-wrap';
         const fill = document.createElement('div');
         fill.className = 'cooldown-fill';
         wrap.appendChild(fill);
-        row.appendChild(wrap);
+        lineTop.appendChild(wrap);
+        row.appendChild(lineTop);
+
+        const lineBottom = document.createElement('div');
+        lineBottom.className = 'bank-line-bottom';
         const badge = document.createElement('span');
         badge.className = 'auto-badge';
         badge.textContent = t('console.common.auto');
-        row.appendChild(badge);
+        lineBottom.appendChild(badge);
         const status = document.createElement('span');
         status.className = 'status';
-        row.appendChild(status);
+        lineBottom.appendChild(status);
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'btn';
@@ -136,7 +162,9 @@ export class PhPhasersControls extends PhElement {
               { bank: bank.id }, 'fire_phaser');
           }
         });
-        row.appendChild(btn);
+        lineBottom.appendChild(btn);
+        row.appendChild(lineBottom);
+
         if (idx < container.children.length) {
           container.insertBefore(row, container.children[idx]);
         } else {

@@ -35,6 +35,9 @@ export const renderStation = makeTacticalRender({
     blasters: 'blasters-controls',
     torpedo: 'torpedo-controls',
     autoBadge: 'tactical-auto-badge',
+    // Target lock card (issue #1378): name/stance/class/bearing/range/hull/
+    // shield facings/shield frequency, beside the torpedo column.
+    targetCard: 'target-lock-card',
   },
   // The destroyer authored a blaster column — it stays in view even while empty.
   torpedoMaxDefault: 0,

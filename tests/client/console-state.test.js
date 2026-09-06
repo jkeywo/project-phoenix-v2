@@ -12,6 +12,7 @@ import {
   repairCoreAndTargets,
   torpSlotStates,
   foldTorpedoBadges,
+  targetFactsFor,
   buildWeaponsConsoleState as rawBuildWeaponsConsoleState,
   buildCaptainConsoleState as rawBuildCaptainConsoleState,
   buildHelmConsoleState as rawBuildHelmConsoleState,
@@ -782,6 +783,119 @@ describe('buildWeaponsConsoleState', () => {
     const s = parse(buildWeaponsConsoleState({ blasterBanks: [bank] }));
     // charge_progress not present → passes through as undefined; treat as falsy
     expect(s.blasters[0].charge_progress == null || s.blasters[0].charge_progress === 0).toBe(true);
+  });
+});
+
+// ── Shared target-facts helper + the Weapons target lock card (#1378) ──────
+
+describe('targetFactsFor', () => {
+  it('returns all-null facts (shields as []) for no uuid', () => {
+    const facts = targetFactsFor({ asteroids: [] }, null, 300);
+    expect(facts).toEqual({
+      target_name: null, target_kind: null, target_stance: null, target_faction: null,
+      target_bearing: null, target_range: null, target_class: null, target_hull_pct: null,
+      target_heading: null, target_speed: null, target_threat: null,
+      target_shield_freq: null, target_shields: [], target_shield_fraction: null,
+    });
+  });
+
+  it('returns the same all-null shape when the uuid does not resolve', () => {
+    const facts = targetFactsFor({ asteroids: [{ uuid: 'other' }] }, 'missing', 300);
+    expect(facts.target_name).toBeNull();
+    expect(facts.target_shields).toEqual([]);
+  });
+
+  it('resolves the full fact set for a matching entity', () => {
+    const state = {
+      shipX: 0, shipZ: 0,
+      asteroids: [{
+        uuid: 'raider-1', x: 0, z: -100,
+        tags: ['ship'], name: 'Raider', stance: 'hostile', faction: 'pirate',
+        shipClass: 'Corvette', hull_pct: 60, yaw: 45 * Math.PI / 180, speed: 12,
+        shield_freq: 0.4, shields: [{ label: 'fore', hp: 50, max_hp: 100, online: true }],
+        shield_fraction: 0.5,
+      }],
+    };
+    const facts = targetFactsFor(state, 'raider-1', 300);
+    expect(facts.target_name).toBe('Raider');
+    expect(facts.target_kind).toBe('ship');
+    expect(facts.target_stance).toBe('hostile');
+    expect(facts.target_faction).toBe('pirate');
+    expect(facts.target_class).toBe('Corvette');
+    expect(facts.target_hull_pct).toBe(60);
+    expect(facts.target_heading).toBe(45);
+    expect(facts.target_speed).toBe(12);
+    expect(facts.target_threat).toBe('high');
+    expect(facts.target_shield_freq).toBeCloseTo(0.4);
+    expect(facts.target_shields).toEqual([{ label: 'fore', hp: 50, max_hp: 100, online: true }]);
+    expect(facts.target_shield_fraction).toBeCloseTo(0.5);
+    // atan2(dx=0, -dz=100) = 0° (directly ahead)
+    expect(facts.target_bearing).toBeCloseTo(0);
+    expect(facts.target_range).toBeCloseTo(100);
+  });
+
+  it('falls back to the uuid for an unnamed match, and to "low" threat for a non-hostile stance', () => {
+    const state = {
+      shipX: 0, shipZ: 0,
+      asteroids: [{ uuid: 'e1', x: 5, z: 0, tags: ['ship'], stance: 'neutral' }],
+    };
+    const facts = targetFactsFor(state, 'e1', 300);
+    expect(facts.target_name).toBe('e1');
+    expect(facts.target_threat).toBe('low');
+  });
+});
+
+describe('buildWeaponsConsoleState target lock card fields (issue #1378)', () => {
+  const LOCKED_STATE = {
+    shipX: 0, shipZ: 0,
+    weaponsTarget: 'raider-1',
+    asteroids: [{
+      uuid: 'raider-1', x: 0, z: -50, radar_icon: 'ship',
+      tags: ['ship'], name: 'Raider', stance: 'hostile', shipClass: 'Corvette',
+      hull_pct: 40, shield_freq: 0.6, shields: [{ label: 'fore', hp: 10, max_hp: 100, online: true }],
+    }],
+  };
+
+  it('gains stance, class, bearing, range, hull and shield rows off the Tactical lock', () => {
+    const s = parse(buildWeaponsConsoleState(LOCKED_STATE));
+    expect(s.target_stance).toBe('hostile');
+    expect(s.target_class).toBe('Corvette');
+    expect(s.target_hull_pct).toBe(40);
+    expect(s.target_shield_freq).toBeCloseTo(0.6);
+    expect(s.target_shields).toEqual([{ label: 'fore', hp: 10, max_hp: 100, online: true }]);
+    expect(s.target_bearing).toBeCloseTo(0);
+    expect(s.target_range).toBeCloseTo(50);
+    // The existing target_uuid/target_name resolution is untouched.
+    expect(s.target_uuid).toBe('raider-1');
+    expect(s.target_name).toBe('Raider');
+  });
+
+  it('carries the same all-null shape as Sensors when there is no lock', () => {
+    const s = parse(buildWeaponsConsoleState(EMPTY));
+    expect(s.target_stance).toBeNull();
+    expect(s.target_class).toBeNull();
+    expect(s.target_hull_pct).toBeNull();
+    expect(s.target_shield_freq).toBeNull();
+    expect(s.target_shields).toEqual([]);
+    expect(s.target_bearing).toBeNull();
+    expect(s.target_range).toBeNull();
+  });
+
+  it('never reads the Sensors selection for the target lock card (privacy boundary)', () => {
+    // Sensors has independently selected a DIFFERENT entity than the
+    // Tactical lock; the card must reflect only the Tactical lock.
+    const state = {
+      ...LOCKED_STATE,
+      sensorsTarget: 'decoy-1',
+      asteroids: [
+        ...LOCKED_STATE.asteroids,
+        { uuid: 'decoy-1', x: 0, z: -9999, radar_icon: 'ship', tags: ['ship'], name: 'Decoy', shipClass: 'Freighter', stance: 'neutral' },
+      ],
+    };
+    const s = parse(buildWeaponsConsoleState(state));
+    expect(s.target_class).toBe('Corvette');
+    expect(s.target_name).toBe('Raider');
+    expect(s.target_class).not.toBe('Freighter');
   });
 });
 

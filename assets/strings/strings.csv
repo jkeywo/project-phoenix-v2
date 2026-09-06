@@ -645,6 +645,7 @@ component.shield_panel.grid_nominal,Shield grid status: operating normally,GRID 
 component.shield_panel.grid_offline,Shield grid status: grid down,GRID OFFLINE
 component.shield_panel.integrity,Shield panel label for overall integrity bar,INTEGRITY
 component.shield_panel.focus,Shield focus readout. {name} is the focused facing,FOCUS: {name}
+component.target_lock_card.title,Tactical target lock card panel heading (issue #1378),[TARGET LOCK]
 component.torpedoes.title,Torpedo controls panel heading,TORPEDOES
 component.torpedoes.empty,Torpedo controls when the ship has no torpedo tubes,[NO TORPEDO TUBES]
 component.torpedoes.pattern_step,Torpedo patterned-attack step indicator (step number of total),STEP {step}/{total}

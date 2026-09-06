@@ -14,23 +14,31 @@
     .command-advice .advice-heading { font-family: "Chakra Petch", sans-serif; font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; }
     .command-advice .advice-stance { color: var(--ink); font-weight: 700; letter-spacing: 0.08em; }
     .command-advice .advice-hint { color: var(--ink-faint); margin-left: auto; font-style: italic; }
-    .console-body { flex: 1; min-height: 0; }
-    .console-body .col { display: flex; flex-direction: column; background: rgba(var(--rgb-panel), 0.6); border: 1px solid var(--edge); padding: 12px; min-height: 0; overflow-y: auto; height: 100%; }
-    .console-body .col h2 { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
-    ph-phasers-controls, ph-blasters-controls, ph-torpedo-controls { flex-shrink: 0; }
+    /* Phasers + blasters left, the scope, torpedoes + the target lock card
+       right (issue #1378). `.scope-row`/`.scope-cell` are gui/console.css's
+       one shared rule for "a scope with up to two control rails beside it"
+       (issue #1375) — the same shape gui/destroyer/helm.html already uses.
+       The two rail widths are the only thing this document supplies: wide
+       enough for a bank row's label + status + FIRE button on a desktop
+       landscape window, narrow enough that a phone's landscape window already
+       needs the weapon rows' own wrap (see the three `ph-*-controls`
+       components' `flex-wrap`). Portrait stacks scope-then-rails at full
+       width, same as every other `.scope-row` console — the scope becomes as
+       big a square as the phone's width allows. */
+    .console-body { --scope-rail-start: 230px; --scope-rail-end: 230px; --scope-rail-min: 190px; }
+    .console-body .ctrl-col { display: flex; flex-direction: column; gap: 10px; min-height: 0; background: rgba(var(--rgb-panel), 0.6); border: 1px solid var(--edge); padding: 12px; overflow-y: auto; }
+    ph-phasers-controls, ph-blasters-controls, ph-torpedo-controls, ph-target-lock-card { flex-shrink: 0; }
     /* The scope is square by gui/console.css's one `.scope-cell` rule
        (issue #1375): side = min(free width, free height), so it fills the
-       width in this stacked column and the column's height in landscape. The
-       per-orientation aspect-ratio pair this document used to carry said the
-       same thing in two places and had to be re-derived every time the chrome
-       above it changed. */
+       rail's-worth of remaining width in landscape and the full width in
+       portrait. */
     .overlay-back { position: absolute; top: 6px; left: 6px; z-index: 6; background: rgba(var(--rgb-panel), 0.85); border: 1px solid var(--edge); color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.2em; padding: 6px 14px; cursor: pointer; text-transform: uppercase; transition: all 0.15s ease; min-height: var(--control-hit-min); }
     .overlay-back:hover { background: rgba(var(--rgb-panel-up), 0.9); border-color: var(--ink-dim); }
     .overlay-panel { position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 5; background: rgba(var(--rgb-deep), 0.97); border: 1px solid var(--edge); display: none; flex-direction: column; padding: 16px; }
     .overlay-panel.open { display: flex; }
     .overlay-panel h2 { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
     .overlay-panel ph-dossier-panel { flex: 1; min-height: 0; }
-    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .console-body .col { padding: 8px; } .overlay-panel { padding: 8px; } }
+    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .console-body .ctrl-col { padding: 8px; } .overlay-panel { padding: 8px; } }
   </style>
 </head>
 <body>
@@ -50,20 +58,27 @@
         <span class="advice-stance" id="command-advice-stance">—</span>
         <span class="advice-hint" data-i18n="console.command.advice_hint">Advisory — you retain control</span>
       </div>
-      <div class="console-body">
-        <div class="col">
-          <h2 data-i18n="console.tactical.weapons">Weapons</h2>
+      <!-- Phasers + blasters left, the scope, torpedoes + the target lock
+           card right (issue #1378). The target lock card is fed by
+           `renderTargetCard` in gui/stations/tactical-console.js, off the SAME
+           Tactical lock the radar and weapon panels already read — never the
+           Sensors selection. -->
+      <div class="console-body scope-row">
+        <div class="ctrl-col weapons-col">
           <div class="readout">
             <span id="footer-target" data-i18n="console.common.no_target">NO TARGET</span>
             <span class="spacer"></span>
             <span class="auto-badge" id="tactical-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
           </div>
-          <div class="scope-cell">
-            <ph-tactical-radar id="tactical-radar"></ph-tactical-radar>
-          </div>
           <ph-phasers-controls id="phasers-controls"></ph-phasers-controls>
           <ph-blasters-controls id="blasters-controls"></ph-blasters-controls>
+        </div>
+        <div class="radar-col scope-cell">
+          <ph-tactical-radar id="tactical-radar"></ph-tactical-radar>
+        </div>
+        <div class="ctrl-col torpedo-col">
           <ph-torpedo-controls id="torpedo-controls"></ph-torpedo-controls>
+          <ph-target-lock-card id="target-lock-card"></ph-target-lock-card>
         </div>
       </div>
     </div>
@@ -96,6 +111,7 @@
     import '../components/ph-phasers-controls.js';
     import '../components/ph-blasters-controls.js';
     import '../components/ph-torpedo-controls.js';
+    import '../components/ph-target-lock-card.js';
     import '../components/ph-dossier-panel.js';
     import '../components/ph-security-teams.js';
     import { initConsole } from '../console-core.js';

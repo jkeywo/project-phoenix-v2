@@ -44,7 +44,11 @@ export class PhTorpedoControls extends PhElement {
     .tube-row.blocked .status { color: var(--fire); }
     .tube-row.unavailable .status { color: var(--ink-faint); }
     .tube-row.ready .status { color: var(--loaded); }
-    .tube-controls { display: flex; align-items: center; gap: 0.4rem; margin-left: auto; }
+    /* flex-wrap (issue #1378): same convention as ph-phasers-controls.js —
+       see the comment there. The stepper pair + slot strip wrap onto their
+       own line under the label/status when the row is too narrow for both,
+       rather than the slot strip or the FIRE button running off the column. */
+    .tube-controls { display: flex; flex-wrap: wrap; row-gap: 0.3rem; align-items: center; gap: 0.4rem; margin-left: auto; }
     .torp-slots { display: flex; gap: 0.2rem; align-items: center; }
     .torp-slot {
       position: relative; width: 0.85rem; height: 1.4rem; border-radius: 2px; overflow: hidden; flex-shrink: 0;

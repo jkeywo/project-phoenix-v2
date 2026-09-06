@@ -637,6 +637,73 @@ export function torpSlotStates(tube) {
 }
 
 /**
+ * Shared target-facts lookup (issue #1378): the identity/tactical facts about
+ * a locked target, derived from its entity snapshot. Originally inline in
+ * `buildSensorsConsoleState` (issue #927 grew it field by field); the
+ * Tactical target lock card (issue #1378) needed the exact same facts off the
+ * WEAPONS builder's own lock, so this is now the one place either builder
+ * reads them from — never a second derivation that could drift from the
+ * first.
+ *
+ * Sensors-only facts stay OUT of this helper on purpose: `target_alert`,
+ * `target_weapons` and `target_projection` are read from the ship's OWN
+ * `SensorRadar` blackboard — a privacy-scoped reading only the Sensors
+ * builder is allowed to see (issues #749, #1397, #1339) — never from the
+ * plain entity snapshot this helper reads. Folding them in here would let a
+ * caller reach them without going through that boundary.
+ *
+ * @param {{ asteroids?: Array, shipX?: number, shipZ?: number }} state
+ * @param {string|null|undefined} uuid  the locked target's uuid, or falsy for no lock
+ * @param {number} [range] scan/weapons radar range — accepted for every
+ *   caller to pass the same shape a future range-gated fact would need;
+ *   unused by today's facts, which are not range-limited.
+ * @returns {object} the `target_*` fields below, defaulted to `null`
+ *   (`target_shields` to `[]`) when there is no lock or `uuid` does not
+ *   resolve against `state.asteroids`.
+ */
+export function targetFactsFor(state, uuid, range) {
+  const entities = state.asteroids;
+  const tgt = (uuid && entities) ? entities.find(a => a.uuid === uuid) : null;
+  if (!tgt) {
+    return {
+      target_name: null, target_kind: null, target_stance: null, target_faction: null,
+      target_bearing: null, target_range: null, target_class: null, target_hull_pct: null,
+      target_heading: null, target_speed: null, target_threat: null,
+      target_shield_freq: null, target_shields: [], target_shield_fraction: null,
+    };
+  }
+
+  const dx = entityX(tgt) - (state.shipX || 0);
+  const dz = entityZ(tgt) - (state.shipZ || 0);
+  const tags = (tgt.tags || tgt.entity_tags || []).map(tag => String(tag).toLowerCase());
+  const stance = tgt.stance || 'neutral';
+
+  return {
+    target_name:  tgt.name || uuid,
+    target_kind:  tags.includes('ship') ? 'ship' : tags.includes('station') ? 'station' : 'asteroid',
+    target_stance: stance,
+    target_faction: tgt.faction || null,
+    target_bearing: (Math.atan2(dx, -dz) * 180 / Math.PI + 360) % 360,
+    target_range: Math.sqrt(dx * dx + dz * dz),
+    target_class: tgt.shipClass || null,
+    target_hull_pct: tgt.hull_pct !== undefined ? tgt.hull_pct : null,
+    target_heading: tgt.yaw != null
+      ? (((tgt.yaw * 180 / Math.PI) % 360) + 360) % 360
+      : null,
+    target_speed: tgt.speed !== undefined ? tgt.speed : null,
+    target_threat: tgt.threat || (stance === 'hostile' ? 'high' : 'low'),
+    target_shield_freq: tgt.shield_freq != null ? tgt.shield_freq : null,
+    target_shields: tgt.shields || [],
+    // Single-facing NPC shield fraction (#473). `null` for shieldless
+    // entities (no [shields] block on the TOML); `0..=1` for shielded NPCs;
+    // `0` for broken shields.
+    target_shield_fraction: tgt.shield_fraction !== undefined && tgt.shield_fraction !== null
+      ? tgt.shield_fraction
+      : null,
+  };
+}
+
+/**
  * Payload contract for the Tactical/Weapons console iframe (issue #827).
  * Rendered by gui/battleship/tactical.html and gui/cruiser/tactical.html.
  *
@@ -649,7 +716,14 @@ export function torpSlotStates(tube) {
  *             phaser_arcs: Array<{range_frac: number|null}>,
  *             torpedo_arcs: Array, blasters: Array,
  *             own_hull: StationHullAggregate, tactical_auto: boolean,
- *             station_rating: string }} WeaponsConsolePayload
+ *             station_rating: string,
+ *             target_stance: string|null, target_class: string|null,
+ *             target_bearing: number|null, target_range: number|null,
+ *             target_hull_pct: number|null, target_shields: Array,
+ *             target_shield_freq: number|null }} WeaponsConsolePayload
+ *   The `target_*` facts beyond `target_uuid`/`target_name` (issue #1378) are
+ *   fed by {@link targetFactsFor} off THIS builder's own Tactical lock — never
+ *   the Sensors selection — for the destroyer's target lock card.
  */
 
 /**
@@ -731,6 +805,14 @@ export function buildWeaponsConsoleState(state, systemIds = []) {
   // Derive target_name from the locked server blip when no explicit name is stored.
   const resolvedTargetName = targetName || (targetUuid && blips.find(b => b.uuid === targetUuid)?.name) || null;
 
+  // Target lock card facts (issue #1378): stance, class, bearing, range, hull,
+  // shield facings and shield frequency for the destroyer's target lock card —
+  // read off THIS builder's own Tactical lock (`targetUuid` above) through the
+  // helper shared with Sensors. Deliberately not `state.sensorsTarget` or the
+  // `SensorRadar` blackboard: a Weapons operator must never learn what
+  // Sensors has independently selected.
+  const targetFacts = targetFactsFor(state, targetUuid, range);
+
   // Add shared target markers (science target + navigation waypoint)
   const entities = state.asteroids || [];
   const sensBb = blackboardOfKind(state, 'Sensors')?.data;
@@ -747,6 +829,7 @@ export function buildWeaponsConsoleState(state, systemIds = []) {
   if (waypoint) blips.push(waypoint);
 
   return JSON.stringify({
+    ...targetFacts,
     target_uuid:   targetUuid,
     target_name:   resolvedTargetName,
     banks,
@@ -1723,6 +1806,13 @@ export function buildShieldsConsoleState(state, systemIds = []) {
  * Payload contract for the Sensors console iframe (issue #827). Rendered by
  * gui/battleship/sensors.html.
  *
+ * Every `target_*` field from `target_name` through `target_shield_fraction`
+ * (issue #1378) is fed by {@link targetFactsFor}, shared with the Weapons
+ * builder's target lock card. `target_alert`, `target_weapons` and
+ * `target_projection` stay OUTSIDE that helper — they are read from this
+ * ship's own `SensorRadar` blackboard, a privacy-scoped reading Weapons never
+ * sees.
+ *
  * @typedef {{ scan_range: number, ship_x: number, ship_z: number,
  *             ship_heading: number, ship_speed: number, complexity: string,
  *             impulse_charge_progress: number, on_screen: boolean,
@@ -1794,43 +1884,21 @@ export function buildSensorsConsoleState(state, systemIds = []) {
     }
   );
 
-  let targetBearing = null, targetRange = null;
-  let targetName = null, targetKind = null, targetStance = null, targetFaction = null;
-  let targetClass = null, targetHullPct = null, targetHeading = null, targetSpeed = null;
-  let targetThreat = null, targetShieldFreq = null, targetShields = [];
-  let targetShieldFraction = null;
-  let targetDx = null, targetDz = null;
+  // Target identity/tactical facts (issue #1378): shared with the Weapons
+  // builder's own target lock card through the one helper, so the two never
+  // derive these fields two different ways. `range` is passed for symmetry
+  // with that caller and unused here, same as there.
+  const facts = targetFactsFor(state, state.sensorsTarget, range);
 
+  // Target-relative offset for the trajectory projection below — sensors-only
+  // (targetFactsFor deliberately does not expose it), so this is the one
+  // small piece of the original entity lookup that still happens here.
+  let targetDx = null, targetDz = null;
   if (state.sensorsTarget && entities) {
     const tgt = entities.find(a => a.uuid === state.sensorsTarget);
     if (tgt) {
-      const dx   = entityX(tgt) - (state.shipX || 0);
-      const dz   = entityZ(tgt) - (state.shipZ || 0);
-      targetDx = dx;
-      targetDz = dz;
-      targetBearing   = (Math.atan2(dx, -dz) * 180 / Math.PI + 360) % 360;
-      targetRange     = Math.sqrt(dx * dx + dz * dz);
-      targetName      = tgt.name      || state.sensorsTarget;
-      const tags      = (tgt.tags || tgt.entity_tags || []).map(t => String(t).toLowerCase());
-      targetKind      = tags.includes('ship')    ? 'ship'
-                      : tags.includes('station') ? 'station' : 'asteroid';
-      targetStance    = tgt.stance    || 'neutral';
-      targetFaction   = tgt.faction   || null;
-      targetClass     = tgt.shipClass || null;
-      targetHullPct   = tgt.hull_pct  !== undefined ? tgt.hull_pct  : null;
-      targetHeading   = tgt.yaw != null
-        ? (((tgt.yaw * 180 / Math.PI) % 360) + 360) % 360
-        : null;
-      targetSpeed     = tgt.speed     !== undefined ? tgt.speed     : null;
-      targetThreat    = tgt.threat    || (targetStance === 'hostile' ? 'high' : 'low');
-      targetShieldFreq = tgt.shield_freq != null ? tgt.shield_freq : null;
-      targetShields    = tgt.shields     || [];
-      // Single-facing NPC shield fraction (#473). `null` for shieldless
-      // entities (no [shields] block on the TOML); `0..=1` for shielded
-      // NPCs; `0` for broken shields.
-      targetShieldFraction = tgt.shield_fraction !== undefined && tgt.shield_fraction !== null
-        ? tgt.shield_fraction
-        : null;
+      targetDx = entityX(tgt) - (state.shipX || 0);
+      targetDz = entityZ(tgt) - (state.shipZ || 0);
     }
   }
 
@@ -1899,20 +1967,20 @@ export function buildSensorsConsoleState(state, systemIds = []) {
     ),
     blips,
     target_uuid:        state.sensorsTarget || null,
-    target_name:        targetName,
-    target_kind:        targetKind,
-    target_stance:      targetStance,
-    target_faction:     targetFaction,
-    target_bearing:     targetBearing,
-    target_range:       targetRange,
-    target_class:       targetClass,
-    target_hull_pct:    targetHullPct,
-    target_heading:     targetHeading,
-    target_speed:       targetSpeed,
-    target_threat:      targetThreat,
-    target_shield_freq: targetShieldFreq,
-    target_shields:     targetShields,
-    target_shield_fraction: targetShieldFraction,
+    target_name:        facts.target_name,
+    target_kind:        facts.target_kind,
+    target_stance:      facts.target_stance,
+    target_faction:     facts.target_faction,
+    target_bearing:     facts.target_bearing,
+    target_range:       facts.target_range,
+    target_class:       facts.target_class,
+    target_hull_pct:    facts.target_hull_pct,
+    target_heading:     facts.target_heading,
+    target_speed:       facts.target_speed,
+    target_threat:      facts.target_threat,
+    target_shield_freq: facts.target_shield_freq,
+    target_shields:     facts.target_shields,
+    target_shield_fraction: facts.target_shield_fraction,
     target_alert:       targetAlert,
     target_weapons:     targetWeapons,
     // Selected-target trajectory projection (issue #1339). `null` when

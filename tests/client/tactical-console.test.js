@@ -54,6 +54,7 @@ const FIXTURES = {
     '<ph-torpedo-controls id="torpedo-controls"></ph-torpedo-controls>' +
     '<span id="footer-target"></span>' +
     '<span id="tactical-auto-badge" hidden></span>' +
+    '<ph-target-lock-card id="target-lock-card"></ph-target-lock-card>' +
     '<ph-dossier-panel id="dossier-panel"></ph-dossier-panel>' +
     '<div id="command-advice" hidden><span id="command-advice-stance"></span></div>',
   courier:
@@ -233,6 +234,45 @@ describe('destroyer tactical renderStation', () => {
   it('prefixes the footer target and falls back to the uuid when unnamed', () => {
     destroyerRender(payload, document);
     expect(el('footer-target').textContent).toBe('◉ d1');
+  });
+
+  // ── Target lock card (issue #1378) ──────────────────────────────────────
+  it('feeds the target lock card the Tactical lock facts, beside the footer', () => {
+    const withFacts = {
+      ...w,
+      target_name: 'Raider', target_stance: 'hostile', target_class: 'Corvette',
+      target_bearing: 12, target_range: 88, target_hull_pct: 55,
+      target_shields: [{ label: 'fore', hp: 50, max_hp: 100 }], target_shield_freq: 0.3,
+    };
+    destroyerRender({ ...payload, systems: { 'tactical-radar': withFacts } }, document);
+    expect(el('target-lock-card').state).toEqual({
+      target_uuid: 'd1',
+      target_name: 'Raider',
+      target_stance: 'hostile',
+      target_class: 'Corvette',
+      target_bearing: 12,
+      target_range: 88,
+      target_hull_pct: 55,
+      target_shields: [{ label: 'fore', hp: 50, max_hp: 100 }],
+      target_shield_freq: 0.3,
+    });
+    // The footer stays alongside it, unchanged.
+    expect(el('footer-target').textContent).toBe('◉ Raider');
+  });
+
+  it('clears the target lock card to its no-target defaults when nothing is locked', () => {
+    destroyerRender({ ...payload, systems: { 'tactical-radar': { blips: [] } } }, document);
+    expect(el('target-lock-card').state).toEqual({
+      target_uuid: null,
+      target_name: null,
+      target_stance: null,
+      target_class: null,
+      target_bearing: null,
+      target_range: null,
+      target_hull_pct: null,
+      target_shields: [],
+      target_shield_freq: null,
+    });
   });
 });
 

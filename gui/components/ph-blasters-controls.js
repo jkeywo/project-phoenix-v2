@@ -23,9 +23,19 @@ export class PhBlastersControls extends PhElement {
     :host * { box-sizing: border-box; }
     .header { display: flex; justify-content: space-between; align-items: center; font-size: var(--text-sm); letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
     .bank-row { display: flex; flex-direction: column; gap: 0.2rem; padding: 0.3rem 0; }
-    .bank-top { display: flex; align-items: center; gap: 0.4rem; font-size: var(--text-xs); }
+    /* flex-wrap (issue #1378): same convention as ph-phasers-controls.js —
+       see the comment there for why the browser's own wrap point (three
+       lines whenever the blocking-reason label is non-empty, which is every
+       non-Ready bank) is wrong and '.bank-line-top' (label + bar) /
+       '.bank-line-bottom' (badge + status + button), each forced to a full
+       flex line, fix it. '.bar-wrap' keeps a real minimum width so the
+       charge/cooldown bar stays visible rather than collapsing before the
+       row wraps. */
+    .bank-top { display: flex; flex-wrap: wrap; row-gap: 0.3rem; gap: 0.4rem; font-size: var(--text-xs); }
+    .bank-line-top, .bank-line-bottom { display: flex; align-items: center; gap: 0.4rem; flex: 1 1 100%; min-width: 0; }
+    .bank-line-bottom { justify-content: space-between; }
     .bank-top .lbl { min-width: 2.5rem; color: var(--ink-dim); }
-    .bar-wrap { flex: 1; height: 0.5rem; background: var(--bg-deep); border: 1px solid var(--line-faint); overflow: hidden; }
+    .bar-wrap { flex: 1 1 4rem; min-width: 4rem; height: 0.5rem; background: var(--bg-deep); border: 1px solid var(--line-faint); overflow: hidden; }
     .bar-fill { height: 100%; transition: width 0.15s ease; }
     .bar-fill.charge { background: linear-gradient(90deg, var(--reloading-dim), var(--reloading)); }
     .bar-fill.cooldown { background: linear-gradient(90deg, var(--fire-dim), var(--fire)); }
@@ -98,22 +108,29 @@ export class PhBlastersControls extends PhElement {
 
         const top = document.createElement('div');
         top.className = 'bank-top';
+
+        const lineTop = document.createElement('div');
+        lineTop.className = 'bank-line-top';
         const lbl = document.createElement('span');
         lbl.className = 'lbl';
-        top.appendChild(lbl);
+        lineTop.appendChild(lbl);
         const wrap = document.createElement('div');
         wrap.className = 'bar-wrap';
         const fill = document.createElement('div');
         fill.className = 'bar-fill';
         wrap.appendChild(fill);
-        top.appendChild(wrap);
+        lineTop.appendChild(wrap);
+        top.appendChild(lineTop);
+
+        const lineBottom = document.createElement('div');
+        lineBottom.className = 'bank-line-bottom';
         const badge = document.createElement('span');
         badge.className = 'auto-badge';
         badge.textContent = t('console.common.auto');
-        top.appendChild(badge);
+        lineBottom.appendChild(badge);
         const status = document.createElement('span');
         status.className = 'status';
-        top.appendChild(status);
+        lineBottom.appendChild(status);
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'btn';
@@ -146,7 +163,8 @@ export class PhBlastersControls extends PhElement {
               { bank: bank.id }, 'charge_blaster_start');
           }
         });
-        top.appendChild(btn);
+        lineBottom.appendChild(btn);
+        top.appendChild(lineBottom);
         row.appendChild(top);
 
         const barRow = document.createElement('div');

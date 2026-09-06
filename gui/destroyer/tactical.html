@@ -24,8 +24,17 @@
        needs the weapon rows' own wrap (see the three `ph-*-controls`
        components' `flex-wrap`). Portrait stacks scope-then-rails at full
        width, same as every other `.scope-row` console — the scope becomes as
-       big a square as the phone's width allows. */
-    .console-body { --scope-rail-start: 230px; --scope-rail-end: 230px; --scope-rail-min: 190px; }
+       big a square as the phone's width allows.
+
+       `--scope-rail-min` is 176px, not the 190px both rails' basis would
+       suggest: at 650x450 (tests/smoke/scope-responsive.spec.js's stress
+       size) both rails already sit at the floor, and 190px left the scope
+       134px square — under that spec's 150px-of-the-short-edge floor. Both
+       rails already wrap their bank rows well above this width (the same
+       fallback the comment above describes), so 176px costs nothing a phone
+       landscape window wasn't already doing; it only buys the scope back the
+       16px it was short. */
+    .console-body { --scope-rail-start: 230px; --scope-rail-end: 230px; --scope-rail-min: 176px; }
     .console-body .ctrl-col { display: flex; flex-direction: column; gap: 10px; min-height: 0; background: rgba(var(--rgb-panel), 0.6); border: 1px solid var(--edge); padding: 12px; overflow-y: auto; }
     ph-phasers-controls, ph-blasters-controls, ph-torpedo-controls, ph-target-lock-card { flex-shrink: 0; }
     /* The scope is square by gui/console.css's one `.scope-cell` rule

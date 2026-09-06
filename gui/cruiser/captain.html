@@ -12,8 +12,26 @@
     .console-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     .console-body .col { display: flex; flex-direction: column; background: rgba(var(--rgb-panel), 0.6); border: 1px solid var(--edge); padding: 12px; min-height: 0; overflow-y: auto; }
     .console-body .col h2 { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
-    ph-camera-select, ph-red-alert, ph-objective-list { flex: 1; min-height: 0; }
-    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .console-body { grid-template-columns: 1fr; gap: 8px; } .console-body .col { padding: 8px; } }
+    /* Camera cross + Red Alert (issue #1392). Landscape/desktop is the
+       default: the Command column is one of two narrow side-by-side columns,
+       so the cross needs the column's full width and Red Alert stacks UNDER
+       it. Portrait stacks Command/Mission full-width top-to-bottom, so the
+       Command column is wide enough to put the cross and the circle side by
+       side instead — the direction flips in the portrait media block below.
+       `align-items: stretch` (the flex default) does the rest: it makes both
+       controls full-width when stacked, and full-height-of-row when side by
+       side, with no extra sizing CSS needed. */
+    .controls-row { display: flex; flex-direction: column; gap: 12px; }
+    .controls-row ph-camera-select { flex: 1; min-height: 0; }
+    .controls-row ph-red-alert { flex-shrink: 0; }
+    ph-objective-list { flex: 1; min-height: 0; }
+    ph-deadline-list { flex-shrink: 0; padding-top: 4px; border-top: 1px solid var(--line-soft); }
+    @media (orientation: portrait) {
+      .panel-inner { padding: 10px 12px; gap: 8px; }
+      .console-body { grid-template-columns: 1fr; gap: 8px; }
+      .console-body .col { padding: 8px; }
+      .controls-row { flex-direction: row; }
+    }
     @media (orientation: landscape) { .console-body .col:first-child { border-right: none; } }
   </style>
 </head>
@@ -31,9 +49,15 @@
           <div class="readout">
             <span id="footer-target" data-i18n="console.common.no_target">NO TARGET</span>
           </div>
-          <ph-camera-select id="camera-select"></ph-camera-select>
-          <ph-red-alert id="red-alert"></ph-red-alert>
+          <div class="controls-row">
+            <ph-camera-select id="camera-select"></ph-camera-select>
+            <ph-red-alert id="red-alert"></ph-red-alert>
+          </div>
+        </div>
+        <div class="col">
+          <h2 data-i18n="console.captain.mission">Mission</h2>
           <ph-objective-list id="objective-list"></ph-objective-list>
+          <ph-deadline-list id="deadline-list"></ph-deadline-list>
         </div>
       </div>
     </div>
@@ -42,6 +66,7 @@
     import '../components/ph-camera-select.js';
     import '../components/ph-red-alert.js';
     import '../components/ph-objective-list.js';
+    import '../components/ph-deadline-list.js';
     import { initConsole } from '../console-core.js';
     // The render lives in gui/cruiser/captain.console.js (issue #1235): the
     // shared Captain renderer + this hull's variant. s is a flat

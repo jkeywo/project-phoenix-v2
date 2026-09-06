@@ -743,6 +743,7 @@ console.tactical.screen_label,Phone-frame screen label of the tactical console,T
 console.captain.doc_title,Browser-tab title of the captain console page,[Project Phoenix — Captain Console]
 console.captain.screen_label,Phone-frame screen label of the captain console,Captain Console
 console.captain.command,"captain console — ""Command"" panel heading",Command
+console.captain.mission,"captain console — ""Mission"" panel heading",Mission
 console.cruiser_comms.doc_title,Browser-tab title of the comms console page,[Project Phoenix — Comms Console]
 console.comms.navigation,"comms console — ""Navigation"" panel heading",Navigation
 console.comms.comms,"comms console — ""Comms"" panel heading",Comms

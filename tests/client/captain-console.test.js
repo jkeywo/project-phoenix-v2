@@ -45,6 +45,7 @@ const FIXTURES = {
     '<ph-camera-select id="camera-select"></ph-camera-select>' +
     '<ph-red-alert id="red-alert"></ph-red-alert>' +
     '<ph-objective-list id="objective-list"></ph-objective-list>' +
+    '<ph-deadline-list id="deadline-list"></ph-deadline-list>' +
     '<span id="footer-target"></span>',
   destroyer:
     '<ph-camera-select id="camera-select"></ph-camera-select>' +
@@ -126,6 +127,7 @@ describe('cruiser captain renderStation', () => {
     camera_views: ['camera_fore'], view_direction: 'camera_fore', viewscreen_auto: false,
     red_alert: false, weapons_hold: false, red_alert_auto: false,
     objectives: [], boosted_objective_id: null,
+    deadlines: [{ id: 'd1' }],
     own_hull: { pct: 1 },
     blips: [],
   };
@@ -133,6 +135,11 @@ describe('cruiser captain renderStation', () => {
   it('drives the shared core from the flat payload', () => {
     cruiserRender(base, document);
     expect(el('camera-select').state).toEqual({ views: ['camera_fore'], current_view: 'camera_fore', auto: false });
+  });
+
+  it('drives the Mission column deadline clock from the flat payload', () => {
+    cruiserRender(base, document);
+    expect(el('deadline-list').state).toEqual({ deadlines: [{ id: 'd1' }] });
   });
 
   it('tints the footer by contact count', () => {

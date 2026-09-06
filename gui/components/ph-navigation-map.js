@@ -79,7 +79,39 @@ export class PhNavigationMap extends PhElement {
       '.st-friendly { color: var(--loaded); }',
       '.st-neutral { color: var(--ink-dim); }',
       '.st-unknown { color: var(--ink-dim); }',
-      '.wp-bar { position: absolute; top: 10px; left: 12px; right: 12px; display: flex; justify-content: flex-end; gap: 8px; z-index: 2; pointer-events: none; }',
+      // flex-wrap (issue #1379): at a 390px phone-portrait width the three
+      // waypoint buttons do not fit one row — wrapping (rather than a
+      // width-based breakpoint, which no other console in the repo uses)
+      // keeps Set / Set as / Clear reachable at any width the bar is given.
+      // `left` stays a fixed 12px now (issue #1379 review finding 1): the bar
+      // is flush-right (`justify-content: flex-end`), so when only ONE button
+      // shows (the common case — a waypoint already set, so only Clear
+      // Waypoint remains), that lone item overflows past a narrowed `left`
+      // bound rather than respecting it — CSS never reflows a single flex
+      // item onto a line of its own just because it doesn't fit; wrapping
+      // only ever redistributes among MULTIPLE items sharing a line. A
+      // reserved `left` therefore only ever changed *when a 2nd/3rd button
+      // wraps*, never a lone button's own position, so it could not stop a
+      // wide ON SCREEN + AUTO corner from running straight into a solo
+      // Clear/Set Waypoint button.
+      //
+      // `.wp-bar-spacer` fixes this at the actual mechanism: an invisible
+      // flex item, always first in source order, whose own size is the
+      // corner's real footprint. Consuming that width (plus the corner's own
+      // height, so line 2 clears it vertically) forces genuine multi-item
+      // wrap accounting even when there is only one real button — the
+      // spacer + lone button don't fit on line 1, so the button wraps to
+      // line 2, safely below the corner, however wide the corner gets.
+      // `display` defaults to `none` (excluded from flex flow entirely, same
+      // as a hidden `.wp-btn`) so a host with no corner (the Captain/Comms
+      // overlay clones) never pays for a spacer it has no use for; a host
+      // with a corner sets all three custom properties together (see the IIFE
+      // in gui/battleship/navigation.html / gui/cruiser/comms.html) — custom
+      // properties cross the shadow boundary, so this always measures the
+      // REAL rendered corner, never a hardcoded guess a longer/shorter
+      // translation of "On Screen" (or "AUTO") would immediately invalidate.
+      '.wp-bar { position: absolute; top: 10px; left: 12px; right: 12px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; row-gap: 6px; z-index: 2; pointer-events: none; }',
+      '.wp-bar-spacer { flex: 0 0 var(--nav-chart-corner-clear, 0px); height: var(--nav-chart-corner-clear-h, 0px); display: var(--nav-chart-corner-clear-display, none); visibility: hidden; }',
       '.wp-btn { pointer-events: auto; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); letter-spacing: 0.14em; text-transform: uppercase; color: var(--cyan); background: rgba(var(--rgb-panel), 0.88); border: 1px solid rgba(var(--rgb-edge-control), 0.5); padding: 6px 12px; cursor: pointer; display: none; white-space: nowrap; min-height: var(--control-hit-min); }',
       '.wp-btn.show { display: block; }',
       '.wp-btn.active { color: var(--gold); border-color: var(--gold); }',
@@ -91,6 +123,7 @@ export class PhNavigationMap extends PhElement {
       '<div style="position:relative;width:100%;height:100%">',
       '  <canvas></canvas>',
       '  <div class="wp-bar">',
+      '    <div class="wp-bar-spacer" aria-hidden="true"></div>',
       '    <button type="button" class="wp-btn" id="btn-set-waypoint">' + t('console.navigation.set_waypoint') + '</button>',
       '    <button type="button" class="wp-btn" id="btn-set-selected">' + t('console.navigation.set_as_waypoint') + '</button>',
       '    <button type="button" class="wp-btn" id="btn-clear-waypoint">' + t('console.navigation.clear_waypoint') + '</button>',

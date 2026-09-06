@@ -778,6 +778,8 @@ console.common.locked,Tactical footer when a target is locked but unnamed,LOCKED
 console.navigation.not_set,Navigation console — waypoint readout when none is set,NOT SET
 console.navigation.custom,Navigation console — selected-entity readout for a custom point,CUSTOM
 console.navigation.none,Navigation console — selected-entity readout when nothing is selected,NONE
+console.navigation.seg.mission,"Navigation console phone segment — MISSION tab label, showing the objective list (issue #1379)","[MISSION]"
+console.navigation.seg.label,"Navigation console phone segment — tablist aria-label naming what TRAFFIC | MISSION switches between (issue #1379)","[Navigation view]"
 console.common.nav_toggle,Button that toggles the navigation chart overlay,Nav
 console.common.comms_toggle,Button that toggles the comms overlay,Comms
 console.common.objectives_toggle,Button that toggles the objectives overlay,Objectives

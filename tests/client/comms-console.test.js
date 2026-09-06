@@ -37,11 +37,18 @@ const FIXTURES = {
     '<span id="footer-target"></span>' +
     '<span id="comms-auto-badge" hidden></span>',
   cruiser:
+    '<div id="nav-view" hidden></div>' +
+    '<div id="comms-view" hidden></div>' +
     '<ph-comms-contact-list id="comms-contact-list"></ph-comms-contact-list>' +
     '<ph-comms-hail-list id="comms-hail-list"></ph-comms-hail-list>' +
     '<ph-comms-current-message id="comms-current-message"></ph-comms-current-message>' +
     '<ph-navigation-map id="navigation-map"></ph-navigation-map>' +
-    '<ph-navigation-map id="nav-overlay-map"></ph-navigation-map>' +
+    '<ph-civilian-traffic id="civilian-traffic"></ph-civilian-traffic>' +
+    '<ph-objective-list id="objective-list"></ph-objective-list>' +
+    '<span id="nav-contact-count"></span>' +
+    '<span id="waypoint-name"></span>' +
+    '<button id="btn-on-screen"></button>' +
+    '<span id="navigation-auto-badge" hidden></span>' +
     '<span id="footer-target"></span>' +
     '<span id="footer-right"></span>' +
     '<span id="comms-auto-badge" hidden></span>',
@@ -143,11 +150,51 @@ describe('cruiser comms renderStation', () => {
     expect(el('comms-current-message').state).toEqual({ thread: { id: 'm1', is_read: false }, messages: comms.messages, rejection: 'console.common.no_target' });
   });
 
-  it('drives the navigation map and its overlay clone from the absorbed navigation system', () => {
+  it('drives the navigation map from the absorbed navigation system, through the shared Navigation renderer', () => {
     cruiserRender(payload, document);
-    const expected = { blips: [{ uuid: 'n1' }], regions: [{ id: 'r1' }], range: 4000, ship_pos: { x: 1, z: 2 }, ship_heading: 90, waypoint: { name: 'Gate' }, auto: true };
-    expect(el('navigation-map').state).toEqual(expected);
-    expect(el('nav-overlay-map').state).toEqual(expected);
+    expect(el('navigation-map').state).toEqual({
+      blips: [{ uuid: 'n1' }], regions: [{ id: 'r1' }], range: 4000,
+      ship_pos: { x: 1, z: 2 }, ship_heading: 90, waypoint: { name: 'Gate' }, auto: true,
+    });
+    expect(el('waypoint-name').textContent).toBe('Gate');
+    expect(el('civilian-traffic').state).toEqual({ civilians: [], auto: true });
+  });
+
+  it('shows the Navigation full-panel view and hides Comms when the navigation family resolves non-empty (issue #1379)', () => {
+    cruiserRender(payload, document);
+    expect(el('nav-view').hidden).toBe(false);
+    expect(el('comms-view').hidden).toBe(true);
+  });
+
+  it('shows the Comms full-panel view and hides Navigation when this load carries no navigation family', () => {
+    const commsOnly = { systems: { comms }, own_hull: { pct: 0.5 } };
+    cruiserRender(commsOnly, document);
+    expect(el('comms-view').hidden).toBe(false);
+    expect(el('nav-view').hidden).toBe(true);
+  });
+
+  // Issue #1379 review finding 1: the auxiliary "navigation" Station owns
+  // exactly one System, so `buildConsoleStateInner` takes the single-family
+  // FLAT branch and this document's load carries `system_ids`/
+  // `system_families` with NO `.systems` key at all — never the keyed
+  // `{ systems: {...} }` shape every other case in this suite constructs.
+  // `familyView` alone resolves `{}` for that shape; the renderer must fall
+  // back to the payload itself once `system_families` says it IS navigation.
+  it('shows the Navigation full-panel view with real map/waypoint data from a genuinely flat single-family payload', () => {
+    const flatNav = {
+      ...nav,
+      own_hull: { pct: 0.5 },
+      system_ids: ['navigation'],
+      system_families: { navigation: 'navigation' },
+    };
+    cruiserRender(flatNav, document);
+    expect(el('nav-view').hidden).toBe(false);
+    expect(el('comms-view').hidden).toBe(true);
+    expect(el('navigation-map').state).toEqual({
+      blips: [{ uuid: 'n1' }], regions: [{ id: 'r1' }], range: 4000,
+      ship_pos: { x: 1, z: 2 }, ship_heading: 90, waypoint: { name: 'Gate' }, auto: true,
+    });
+    expect(el('waypoint-name').textContent).toBe('Gate');
   });
 
   it('shows the waypoint name in the footer, not a hail', () => {

@@ -10,16 +10,49 @@
     .frame { height: 100%; }
     .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
     .console-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 320px; gap: 16px; }
-    .map-col { min-height: 0; display: flex; flex-direction: column; background: rgba(var(--rgb-panel), 0.6); border: 1px solid var(--edge); padding: 12px; gap: 10px; }
-    .map-wrap { flex: 1; min-height: 0; }
+    .map-col { min-height: 0; display: flex; flex-direction: column; background: rgba(var(--rgb-panel), 0.6); border: 1px solid var(--edge); padding: 12px; }
+    /* The chart fills every pixel this column has (issue #1379). Unlike the
+       Phase 2 combat scopes (ph-radar and kin), which are deliberately capped
+       square, the nav chart is pure north-up strategic space with no aspect
+       ratio to keep — a wider pane should show more of it, not padding. ON
+       SCREEN and its AUTO badge move off their own row and into the chart's
+       own corner (light DOM, absolutely positioned — NOT inside
+       ph-navigation-map's shadow root, which would strand
+       console-core.js's `#btn-on-screen` adapter gate), so they cost the
+       chart no vertical space at all. */
+    .map-wrap { position: relative; flex: 1; min-height: 0; }
     #map-canvas { width: 100%; height: 100%; display: block; min-height: 280px; }
+    /* ph-navigation-map has no aspect-ratio of its own (unlike the square
+       combat scopes) and its shadow-DOM canvas falls back to the canvas
+       element's native 300x150 intrinsic ratio when nothing gives the HOST
+       an explicit height — `height:auto` on a block element otherwise
+       resolves from that shadow content, not from `.map-wrap`'s flexed
+       size. This is what actually fills the column (issue #1379). */
+    ph-navigation-map { display: block; width: 100%; height: 100%; }
+    .chart-corner { position: absolute; top: 10px; left: 12px; z-index: 2; display: flex; align-items: center; gap: 8px; }
+    .chart-corner .btn { margin: 0; min-height: var(--control-hit-min); }
     .side-col { min-height: 0; display: flex; flex-direction: column; gap: 12px; }
     .side-panel { min-height: 0; display: flex; flex-direction: column; gap: 10px; background: rgba(var(--rgb-panel), 0.6); border: 1px solid var(--edge); padding: 12px; }
+    .side-panel.grow { flex: 1; }
     .metric { display: flex; justify-content: space-between; gap: 12px; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }
     .metric strong { color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: var(--text-lg); }
-    .btn-row { display: flex; gap: 8px; }
-    .btn-row button { flex: 1; margin: 0; min-height: var(--control-hit-min); }
-    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .console-body { grid-template-columns: 1fr; gap: 8px; overflow-y: auto; } }
+    /* Phone TRAFFIC | MISSION segment (issue #1379): desktop/landscape keep
+       showing the traffic list and the mission list stacked at once, same as
+       before — the segment control is invisible there, and this rule makes
+       the JS-toggled `hidden` on the non-selected panel a no-op so both stay
+       on screen. Portrait cannot fit metrics + both lists without scrolling
+       the whole console, so the segment actually hides one there. */
+    #nav-seg { display: none; }
+    .side-panel.nav-seg-panel[hidden] { display: flex; }
+    @media (orientation: portrait) {
+      .panel-inner { padding: 10px 12px; gap: 8px; }
+      .console-body { display: flex; flex-direction: column; gap: 8px; }
+      .map-col { flex: 1 1 auto; min-height: 120px; }
+      .side-col { flex: 0 0 auto; max-height: 42vh; }
+      #nav-seg { display: flex; }
+      .side-panel.nav-seg-panel { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+      .side-panel.nav-seg-panel[hidden] { display: none; }
+    }
   </style>
 </head>
 <body>
@@ -33,12 +66,12 @@
            beside the chart control the automation drives. -->
       <div class="console-body">
         <div class="map-col">
-          <div class="btn-row">
-            <button class="btn" id="btn-on-screen" type="button"><span class="btn-bg"></span><span class="label" data-i18n="console.navigation.on_screen">On Screen</span></button>
-            <span class="auto-badge" id="navigation-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
-          </div>
           <div class="map-wrap" id="map-canvas">
             <ph-navigation-map id="navigation-map"></ph-navigation-map>
+            <div class="chart-corner">
+              <button class="btn" id="btn-on-screen" type="button"><span class="btn-bg"></span><span class="label" data-i18n="console.navigation.on_screen">On Screen</span></button>
+              <span class="auto-badge" id="navigation-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
+            </div>
           </div>
         </div>
         <div class="side-col">
@@ -47,10 +80,17 @@
             <div class="metric"><span data-i18n="console.navigation.waypoint">Waypoint</span><strong id="waypoint-name" data-i18n="console.navigation.not_set">NOT SET</strong></div>
             <div class="metric"><span data-i18n="console.navigation.contacts">Contacts</span><strong id="nav-contact-count">0</strong></div>
           </div>
-          <div class="side-panel">
+          <!-- Phone-only segment (issue #1379): hidden by #nav-seg's own
+               landscape/desktop `display:none` above, so the roving tabindex
+               it wires never competes with Tab order on those layouts. -->
+          <div class="seg" id="nav-seg" role="tablist" data-i18n-attr="aria-label:console.navigation.seg.label">
+            <button type="button" class="seg-btn" id="nav-seg-traffic" role="tab" aria-selected="true" aria-controls="nav-panel-traffic" data-i18n="component.civilians.heading">TRAFFIC</button>
+            <button type="button" class="seg-btn" id="nav-seg-mission" role="tab" aria-selected="false" aria-controls="nav-panel-mission" tabindex="-1" data-i18n="console.navigation.seg.mission">MISSION</button>
+          </div>
+          <div class="side-panel nav-seg-panel" id="nav-panel-traffic">
             <ph-civilian-traffic id="civilian-traffic"></ph-civilian-traffic>
           </div>
-          <div class="side-panel" style="flex:1">
+          <div class="side-panel nav-seg-panel grow" id="nav-panel-mission" hidden>
             <ph-objective-list id="objective-list"></ph-objective-list>
           </div>
         </div>
@@ -63,6 +103,7 @@
     import '../components/ph-objective-list.js';
     import { initConsole } from '../console-core.js';
     import { t } from '../strings.js';
+    import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
     import { activateNavigationAction } from '../stations/navigation-action-control.js';
     import { NAVIGATION_CHART_ACTION_ID } from '../stations/navigation-actions.js';
     // The render lives in gui/battleship/navigation.console.js (issue
@@ -72,6 +113,47 @@
     import { renderStation } from './navigation.console.js';
 
     var consoleApi = initConsole({ name: 'navigation', render: renderStation });
+
+    // Reserve the chart-corner's own footprint out of the shadow-DOM waypoint
+    // bar's row (issue #1379): both are absolutely positioned over the same
+    // top band (ON SCREEN light-DOM, top-left; Set/Set as/Clear shadow-DOM,
+    // top-right), and once the bar wraps to two buttons on its first row
+    // there is not 366px of phone-width to spare for both un-reserved. Three
+    // custom properties cross the shadow boundary (ph-navigation-map already
+    // reads the theme's own custom properties the same way) to feed its
+    // `.wp-bar-spacer` — see the comment above that rule for why the spacer
+    // (not a `left` bound alone) is what actually keeps a *lone* Set/Clear
+    // Waypoint button off the corner. This measures the REAL rendered corner
+    // — never a hardcoded guess a longer/shorter translation of "On Screen"
+    // would immediately invalidate.
+    //
+    // The corner's own size is not just a load-time constant: `setAutoState`
+    // (gui/console-ui.js) flips the AUTO badge's `hidden` attribute on every
+    // render as `navigation_auto` changes, and Navigation runs
+    // `human_seeking: true` on every hull (so an unmanned seat handing to AI
+    // is the mainline case, not an edge case) — so the reserved clearance
+    // must track the corner's rendered box on every render, not only on
+    // window resize / font load. A ResizeObserver on `.chart-corner` itself
+    // is the same pattern already used for canvas sizing in
+    // ph-navigation-map.js / ph-radar.js / ph-tactical-radar.js (issue #1379
+    // review finding 1).
+    (function() {
+      var corner = document.querySelector('.chart-corner');
+      var wrap = document.querySelector('.map-wrap');
+      function updateClear() {
+        if (!corner || !wrap) return;
+        var box = corner.getBoundingClientRect();
+        wrap.style.setProperty('--nav-chart-corner-clear', (Math.ceil(box.width) + 12 + 12) + 'px');
+        wrap.style.setProperty('--nav-chart-corner-clear-h', Math.ceil(box.height) + 'px');
+        wrap.style.setProperty('--nav-chart-corner-clear-display', 'block');
+      }
+      updateClear();
+      window.addEventListener('resize', updateClear);
+      if (document.fonts && document.fonts.ready) document.fonts.ready.then(updateClear);
+      if (corner && typeof ResizeObserver === 'function') {
+        new ResizeObserver(updateClear).observe(corner);
+      }
+    })();
 
     var navMap = document.getElementById('navigation-map');
     // The map selects a chart contact on tap (navselect event); it does not set
@@ -91,6 +173,41 @@
         function() { consoleApi.sendAction('set_navigation_chart', {}); },
       );
     });
+
+    // Phone TRAFFIC | MISSION segment (issue #1379): presentation-only local
+    // selection, like the Comms thread pick below it never was — no host
+    // command, just which `.side-panel` is on screen. Activates on both
+    // click and arrow-driven focus (the same automatic-activation the
+    // Station Bar's own tabs use — gui/hero-bar.js), so a keyboard operator
+    // never has to press Enter on top of the arrow move.
+    var navSeg = document.getElementById('nav-seg');
+    var navSegButtons = [
+      document.getElementById('nav-seg-traffic'),
+      document.getElementById('nav-seg-mission'),
+    ];
+    var navSegPanels = {
+      traffic: document.getElementById('nav-panel-traffic'),
+      mission: document.getElementById('nav-panel-mission'),
+    };
+    function selectNavSeg(key) {
+      navSegButtons.forEach(function(btn, i) {
+        btn.setAttribute('aria-selected', (i === 0) === (key === 'traffic') ? 'true' : 'false');
+      });
+      navSegPanels.traffic.hidden = key !== 'traffic';
+      navSegPanels.mission.hidden = key !== 'mission';
+      syncRovingTabindex(navSegButtons, key === 'traffic' ? 0 : 1);
+    }
+    navSeg.addEventListener('click', function(e) {
+      var btn = e.target.closest('.seg-btn');
+      if (!btn) return;
+      selectNavSeg(btn === navSegButtons[1] ? 'mission' : 'traffic');
+    });
+    navSeg.addEventListener('focusin', function(e) {
+      var btn = e.target.closest('.seg-btn');
+      if (!btn) return;
+      selectNavSeg(btn === navSegButtons[1] ? 'mission' : 'traffic');
+    });
+    installRovingTabindex(navSeg, { getItems: function() { return navSegButtons; }, orientation: 'horizontal' });
   </script>
 </body>
 </html>

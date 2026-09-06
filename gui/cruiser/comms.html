@@ -9,20 +9,64 @@
     body { font-size: var(--text-lg); margin: 0; background: var(--surface-void); overflow: hidden; }
     .frame { height: 100%; }
     .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
-    .console-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    .console-body .col { display: flex; flex-direction: column; background: rgba(var(--rgb-panel), 0.6); border: 1px solid var(--edge); padding: 12px; min-height: 0; overflow-y: auto; }
-    .console-body .col h2 { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
-    ph-comms-contact-list, ph-comms-hail-list, ph-comms-current-message, ph-navigation-map { flex: 1; min-height: 0; }
-    .overlay-toggle { background: rgba(var(--rgb-panel), 0.85); border: 1px solid var(--edge); color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.2em; padding: 8px 16px; cursor: pointer; text-transform: uppercase; transition: all 0.15s ease; white-space: nowrap; min-height: var(--control-hit-min); }
-    .overlay-toggle:hover { background: rgba(var(--rgb-panel-up), 0.9); border-color: var(--ink-dim); }
-    .overlay-toggle.active { background: rgba(var(--rgb-cyan-dim), 0.9); border-color: var(--cyan); color: var(--cyan); }
-    .overlay-back { position: absolute; top: 6px; left: 6px; z-index: 6; background: rgba(var(--rgb-panel), 0.85); border: 1px solid var(--edge); color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.2em; padding: 6px 14px; cursor: pointer; text-transform: uppercase; transition: all 0.15s ease; min-height: var(--control-hit-min); }
-    .overlay-back:hover { background: rgba(var(--rgb-panel-up), 0.9); border-color: var(--ink-dim); }
-    .overlay-panel { position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 5; background: rgba(var(--rgb-deep), 0.97); border: 1px solid var(--edge); display: none; flex-direction: column; padding: 16px; }
-    .overlay-panel.open { display: flex; }
-    .overlay-panel h2 { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
-    .overlay-panel ph-navigation-map { flex: 1; min-height: 0; }
-    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .console-body { grid-template-columns: 1fr; gap: 8px; } .console-body .col { padding: 8px; } .overlay-toggle { font-size: var(--text-xs); padding: 6px 12px; } .overlay-panel { padding: 8px; } }
+    /* Two real Stations share this one document (alliance_cruiser.toml's
+       "comms" and auxiliary "navigation" rows both point here) — only one is
+       ever mounted in a given tab, so only one `.view` is ever unhidden; see
+       the switch in comms.console.js's `tail`. */
+    .console-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    .view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    /* `.view`'s own `display:flex` (an author rule) otherwise beats the
+       browser's default `[hidden]{display:none}` (a user-agent rule) on
+       cascade origin alone, specificity tie or not — this restates it at
+       higher specificity so `.hidden = true` actually hides a view. */
+    .view[hidden] { display: none; }
+
+    /* ── Navigation view (issue #1379) ───────────────────────────────────
+       The same "chart fills the space" layout as gui/battleship/navigation.html,
+       reusing its element ids so gui/stations/navigation-console.js's shared
+       makeNavigationRender drives both documents identically — see
+       comms.console.js. */
+    .nav-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 320px; gap: 16px; }
+    .map-col { min-height: 0; display: flex; flex-direction: column; background: rgba(var(--rgb-panel), 0.6); border: 1px solid var(--edge); padding: 12px; }
+    .map-wrap { position: relative; flex: 1; min-height: 0; }
+    #map-canvas { width: 100%; height: 100%; display: block; min-height: 280px; }
+    /* ph-navigation-map has no aspect-ratio of its own and otherwise falls
+       back to the canvas element's native 300x150 intrinsic ratio instead of
+       filling `.map-wrap`'s flexed height — see the matching comment in
+       gui/battleship/navigation.html. */
+    ph-navigation-map { display: block; width: 100%; height: 100%; }
+    .chart-corner { position: absolute; top: 10px; left: 12px; z-index: 2; display: flex; align-items: center; gap: 8px; }
+    .chart-corner .btn { margin: 0; min-height: var(--control-hit-min); }
+    .side-col { min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+    .side-panel { min-height: 0; display: flex; flex-direction: column; gap: 10px; background: rgba(var(--rgb-panel), 0.6); border: 1px solid var(--edge); padding: 12px; }
+    .side-panel.grow { flex: 1; }
+    .metric { display: flex; justify-content: space-between; gap: 12px; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }
+    .metric strong { color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: var(--text-lg); }
+    /* Desktop/landscape: the segment control is invisible and both side
+       panels stay on screen stacked, same as before — this makes the
+       JS-toggled `hidden` on the non-selected one a no-op. Portrait actually
+       hides one (see the media query below). */
+    #nav-seg { display: none; }
+    .side-panel.nav-seg-panel[hidden] { display: flex; }
+
+    /* ── Comms view (unchanged pending #1380) ────────────────────────────── */
+    .col { display: flex; flex-direction: column; background: rgba(var(--rgb-panel), 0.6); border: 1px solid var(--edge); padding: 12px; min-height: 0; overflow-y: auto; flex: 1; }
+    .col h2 { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
+    ph-comms-contact-list, ph-comms-hail-list, ph-comms-current-message { flex: 1; min-height: 0; }
+
+    @media (orientation: portrait) {
+      .panel-inner { padding: 10px 12px; gap: 8px; }
+      .col { padding: 8px; }
+      /* Same no-scroll rule as the direct Navigation console (issue #1379):
+         metrics + one of TRAFFIC | MISSION share the side block, the other
+         stays in the DOM `hidden`. */
+      .nav-body { display: flex; flex-direction: column; gap: 8px; }
+      .map-col { flex: 1 1 auto; min-height: 120px; }
+      .side-col { flex: 0 0 auto; max-height: 42vh; }
+      #nav-seg { display: flex; }
+      .side-panel.nav-seg-panel { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+      .side-panel.nav-seg-panel[hidden] { display: none; }
+    }
   </style>
 </head>
 <body>
@@ -31,37 +75,65 @@
     <div class="panel-inner">
       <!-- No title row and no footer (issue #1374): the shell's Station Bar
            names this seat and its selected tab opens the per-system damage
-           popup the footer's `ph-station-damage` used to. The full-frame
-           chart button moves to the head of the Navigation column it opens;
-           the waypoint and the message count move to the head of the Comms
-           column they belong to. -->
+           popup the footer's `ph-station-damage` used to. -->
       <div class="console-body">
-        <div class="col">
-          <div class="col-head">
-            <h2 data-i18n="console.comms.navigation">Navigation</h2>
-            <button class="overlay-toggle" id="nav-toggle" data-active="false" data-i18n="console.common.nav_toggle">Nav</button>
+        <!-- Navigation view: on screen only while this document is mounted
+             as the cruiser's auxiliary "navigation" Station. Which view is
+             visible is decided in comms.console.js from which family the
+             received payload actually carries (issue #1379) — never a
+             client-local toggle, because a single-family payload never
+             carries both at once (see buildConsoleStateInner). Starts
+             hidden — "comms" is this document's primary identity (the
+             non-auxiliary Station row) — the first real push settles it
+             either way before the operator sees the placeholder. -->
+        <div class="view" id="nav-view" hidden>
+          <div class="nav-body">
+            <div class="map-col">
+              <div class="map-wrap" id="map-canvas">
+                <ph-navigation-map id="navigation-map"></ph-navigation-map>
+                <div class="chart-corner">
+                  <button class="btn" id="btn-on-screen" type="button"><span class="btn-bg"></span><span class="label" data-i18n="console.navigation.on_screen">On Screen</span></button>
+                  <span class="auto-badge" id="navigation-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
+                </div>
+              </div>
+            </div>
+            <div class="side-col">
+              <div class="side-panel">
+                <div class="metric"><span data-i18n="console.navigation.selected">Selected</span><strong id="ent-name" data-i18n="console.navigation.none">NONE</strong></div>
+                <div class="metric"><span data-i18n="console.navigation.waypoint">Waypoint</span><strong id="waypoint-name" data-i18n="console.navigation.not_set">NOT SET</strong></div>
+                <div class="metric"><span data-i18n="console.navigation.contacts">Contacts</span><strong id="nav-contact-count">0</strong></div>
+              </div>
+              <div class="seg" id="nav-seg" role="tablist" data-i18n-attr="aria-label:console.navigation.seg.label">
+                <button type="button" class="seg-btn" id="nav-seg-traffic" role="tab" aria-selected="true" aria-controls="nav-panel-traffic" data-i18n="component.civilians.heading">TRAFFIC</button>
+                <button type="button" class="seg-btn" id="nav-seg-mission" role="tab" aria-selected="false" aria-controls="nav-panel-mission" tabindex="-1" data-i18n="console.navigation.seg.mission">MISSION</button>
+              </div>
+              <div class="side-panel nav-seg-panel" id="nav-panel-traffic">
+                <ph-civilian-traffic id="civilian-traffic"></ph-civilian-traffic>
+              </div>
+              <div class="side-panel nav-seg-panel grow" id="nav-panel-mission" hidden>
+                <ph-objective-list id="objective-list"></ph-objective-list>
+              </div>
+            </div>
           </div>
-          <ph-navigation-map id="navigation-map"></ph-navigation-map>
         </div>
-        <div class="col">
-          <h2 data-i18n="console.comms.comms">Comms</h2>
-          <div class="readout">
-            <span id="footer-target" data-i18n="console.common.no_waypoint">NO WAYPOINT</span>
-            <span class="sep">·</span>
-            <span id="footer-right">—</span>
-            <span class="spacer"></span>
-            <span class="auto-badge" id="comms-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
+        <!-- Comms view: on screen only while this document is mounted as the
+             cruiser's own "comms" Station (unchanged pending #1380). -->
+        <div class="view" id="comms-view">
+          <div class="col">
+            <h2 data-i18n="console.comms.comms">Comms</h2>
+            <div class="readout">
+              <span id="footer-target" data-i18n="console.common.no_waypoint">NO WAYPOINT</span>
+              <span class="sep">·</span>
+              <span id="footer-right">—</span>
+              <span class="spacer"></span>
+              <span class="auto-badge" id="comms-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
+            </div>
+            <ph-comms-contact-list id="comms-contact-list"></ph-comms-contact-list>
+            <ph-comms-hail-list id="comms-hail-list"></ph-comms-hail-list>
+            <ph-comms-current-message id="comms-current-message"></ph-comms-current-message>
           </div>
-          <ph-comms-contact-list id="comms-contact-list"></ph-comms-contact-list>
-          <ph-comms-hail-list id="comms-hail-list"></ph-comms-hail-list>
-          <ph-comms-current-message id="comms-current-message"></ph-comms-current-message>
         </div>
       </div>
-    </div>
-    <div class="overlay-panel" id="nav-overlay">
-      <button class="overlay-back" id="nav-back" data-i18n="console.common.back">&#8592; Back</button>
-      <h2 data-i18n="console.comms.navigation">Navigation</h2>
-      <ph-navigation-map id="nav-overlay-map"></ph-navigation-map>
     </div>
   </div>
   <script type="module">
@@ -69,45 +141,114 @@
     import '../components/ph-comms-hail-list.js';
     import '../components/ph-comms-current-message.js';
     import '../components/ph-navigation-map.js';
+    import '../components/ph-civilian-traffic.js';
+    import '../components/ph-objective-list.js';
     import { initConsole } from '../console-core.js';
+    import { t } from '../strings.js';
+    import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
+    import { activateNavigationAction } from '../stations/navigation-action-control.js';
+    import { NAVIGATION_CHART_ACTION_ID } from '../stations/navigation-actions.js';
     // The render lives in gui/cruiser/comms.console.js (issue #1235): the
     // shared Comms renderer + this hull's variant (Navigation absorbed into
-    // the same Station, per issue #825). s is a SystemStationConsolePayload.
-    // The vitest suite imports the same renderStation.
+    // the same document, per issue #825, split back into its own full-panel
+    // view by issue #1379). s is a SystemStationConsolePayload. The vitest
+    // suite imports the same renderStation.
     import { renderStation } from './comms.console.js';
 
-    function closeAllOverlays() {
-      ['nav-overlay'].forEach(function(oid) {
-        var el = document.getElementById(oid);
-        if (el) el.classList.remove('open');
-      });
-      document.querySelectorAll('.overlay-toggle').forEach(function(b) {
-        b.dataset.active = 'false';
-        b.classList.remove('active');
-      });
-    }
-
-    function toggleOverlay(id, btnId) {
-      var overlay = document.getElementById(id);
-      var btn = document.getElementById(btnId);
-      var isOpen = btn.dataset.active === 'true';
-      closeAllOverlays();
-      if (!isOpen) {
-        overlay.classList.add('open');
-        btn.dataset.active = 'true';
-        btn.classList.add('active');
-      }
-    }
-
-    initConsole({
+    var consoleApi = initConsole({
       name: 'comms',
       render: renderStation,
       actionFamilies: ['comms', 'navigation'],
-      navigationActions: { supportsChart: false, supportsCivilianOrders: false },
     });
 
-    document.getElementById('nav-toggle').addEventListener('click', function() { toggleOverlay('nav-overlay', 'nav-toggle'); });
-    document.getElementById('nav-back').addEventListener('click', closeAllOverlays);
+    // Reserve the chart-corner's own footprint out of the shadow-DOM waypoint
+    // bar's row — see the matching comment in gui/battleship/navigation.html.
+    // Measuring is a no-op while `#nav-view` starts `hidden` (a hidden
+    // element has no layout box), so a MutationObserver re-measures the
+    // moment the Navigation view actually comes on screen, not only on
+    // window resize. The corner's own size also changes at runtime whenever
+    // `setAutoState` (gui/console-ui.js) flips the AUTO badge's `hidden`
+    // attribute — Navigation runs `human_seeking: true` on every hull, so an
+    // unmanned seat handing to AI is routine, not an edge case — so a
+    // ResizeObserver on `.chart-corner` itself re-measures on that change
+    // too (issue #1379 review finding 1), the same pattern already used for
+    // canvas sizing in ph-navigation-map.js / ph-radar.js / ph-tactical-radar.js.
+    // All three custom properties feed `.wp-bar-spacer` in the shadow DOM —
+    // see the comment above that rule in ph-navigation-map.js for why a
+    // `left` bound alone never kept a *lone* Set/Clear Waypoint button off
+    // the corner.
+    (function() {
+      var corner = document.querySelector('.chart-corner');
+      var wrap = document.querySelector('.map-wrap');
+      function updateClear() {
+        if (!corner || !wrap) return;
+        var box = corner.getBoundingClientRect();
+        wrap.style.setProperty('--nav-chart-corner-clear', (Math.ceil(box.width) + 12 + 12) + 'px');
+        wrap.style.setProperty('--nav-chart-corner-clear-h', Math.ceil(box.height) + 'px');
+        wrap.style.setProperty('--nav-chart-corner-clear-display', 'block');
+      }
+      updateClear();
+      window.addEventListener('resize', updateClear);
+      if (document.fonts && document.fonts.ready) document.fonts.ready.then(updateClear);
+      var navViewEl = document.getElementById('nav-view');
+      if (navViewEl && typeof MutationObserver === 'function') {
+        new MutationObserver(updateClear).observe(navViewEl, { attributes: true, attributeFilter: ['hidden'] });
+      }
+      if (corner && typeof ResizeObserver === 'function') {
+        new ResizeObserver(updateClear).observe(corner);
+      }
+    })();
+
+    var navMap = document.getElementById('navigation-map');
+    // The map selects a chart contact on tap (navselect event); it does not set
+    // the waypoint itself — that is the map's own Set Waypoint / Set as
+    // Waypoint / Clear Waypoint bar, which round-trips through the same action
+    // map (set_navigation_waypoint / clear_navigation_waypoint).
+    navMap.addEventListener('navselect', function(e) {
+      var b = e.detail || null;
+      document.getElementById('ent-name').textContent = b && b.name ? b.name : t('console.navigation.none');
+    });
+
+    document.getElementById('btn-on-screen').addEventListener('click', function() {
+      activateNavigationAction(
+        document.getElementById('btn-on-screen'),
+        NAVIGATION_CHART_ACTION_ID,
+        {},
+        function() { consoleApi.sendAction('set_navigation_chart', {}); },
+      );
+    });
+
+    // Phone TRAFFIC | MISSION segment (issue #1379) — see the matching block
+    // in gui/battleship/navigation.html; identical behaviour, duplicated
+    // rather than shared, like the rest of this document's own wiring.
+    var navSeg = document.getElementById('nav-seg');
+    var navSegButtons = [
+      document.getElementById('nav-seg-traffic'),
+      document.getElementById('nav-seg-mission'),
+    ];
+    var navSegPanels = {
+      traffic: document.getElementById('nav-panel-traffic'),
+      mission: document.getElementById('nav-panel-mission'),
+    };
+    function selectNavSeg(key) {
+      navSegButtons.forEach(function(btn, i) {
+        btn.setAttribute('aria-selected', (i === 0) === (key === 'traffic') ? 'true' : 'false');
+      });
+      navSegPanels.traffic.hidden = key !== 'traffic';
+      navSegPanels.mission.hidden = key !== 'mission';
+      syncRovingTabindex(navSegButtons, key === 'traffic' ? 0 : 1);
+    }
+    navSeg.addEventListener('click', function(e) {
+      var btn = e.target.closest('.seg-btn');
+      if (!btn) return;
+      selectNavSeg(btn === navSegButtons[1] ? 'mission' : 'traffic');
+    });
+    navSeg.addEventListener('focusin', function(e) {
+      var btn = e.target.closest('.seg-btn');
+      if (!btn) return;
+      selectNavSeg(btn === navSegButtons[1] ? 'mission' : 'traffic');
+    });
+    installRovingTabindex(navSeg, { getItems: function() { return navSegButtons; }, orientation: 'horizontal' });
   </script>
 </body>
 </html>

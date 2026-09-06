@@ -99,6 +99,21 @@ display_name = "entity.asteroid.name"
 transform = { position = [120.0, 0.0, -80.0] }
 spawn_on = "game_start"
 
+# Issue #1319 — scenario-authored, presentation-only role presets. Disjoint
+# panels/quick_actions so a browser test can prove each preset's own filter
+# in isolation, distinct from the built-in reserved "all" id.
+[[gm_role_preset]]
+id = "gm-m1-tactical"
+label = "world.smoke_gm_role_preset.tactical.label"
+panels = ["gm-map-panel", "gm-activity"]
+quick_actions = ["gm-session-pause"]
+
+[[gm_role_preset]]
+id = "gm-m1-narrative"
+label = "world.smoke_gm_role_preset.narrative.label"
+panels = ["gm-inspector"]
+quick_actions = ["gm-session-resume"]
+
 [script]
 setup = """
 on_timer(0, "gm_m1_started");
@@ -1002,6 +1017,26 @@ test('M1 exits through a retained deterministic GM peer trace', async ({ context
     expect(gmTwoIdentity.rolePreset).toBeNull();
     expect(typeof gmTwoIdentity.reconnectCredential).toBe('string');
     expect(gmTwoIdentity.reconnectCredential.length).toBeGreaterThan(10);
+
+    // Live-switch this operator's own presentation-only role preset (issue
+    // #1319) through the real authored <select> before it disconnects. The
+    // choice must persist alongside this same reconnectable identity and
+    // come back verbatim after rejoin -- never silently reset to the
+    // built-in All the way an unconditional restore-on-join would.
+    const gmTwoRolePresetId = 'gm-m1-tactical';
+    await gmTwo.selectOption('#gm-role-preset-select', gmTwoRolePresetId);
+    await gmTwo.waitForFunction(
+      ({ key, presetId }) => JSON.parse(localStorage.getItem(key) || 'null')?.rolePreset === presetId,
+      { key: GM_IDENTITY_KEY, presetId: gmTwoRolePresetId },
+      { timeout: 10_000 },
+    );
+    const gmTwoIdentityAfterPreset = await gmTwo.evaluate(
+      (key) => JSON.parse(localStorage.getItem(key)),
+      GM_IDENTITY_KEY,
+    );
+    expect(gmTwoIdentityAfterPreset.rolePreset).toBe(gmTwoRolePresetId);
+    expect(gmTwoIdentityAfterPreset.operatorId).toBe(gmTwoIdentity.operatorId);
+    expect(gmTwoIdentityAfterPreset.reconnectCredential).toBe(gmTwoIdentity.reconnectCredential);
     report.roster.afterFirstJoin = await publicRoster(gmOne);
     expect(report.roster.afterFirstJoin.gms).toHaveLength(2);
     report.phases.firstJoin = {
@@ -1063,7 +1098,15 @@ test('M1 exits through a retained deterministic GM peer trace', async ({ context
       { key: GM_IDENTITY_KEY, expectedCredential: privateReconnectCredential },
     );
     expect(returnedIdentity.operatorId).toBe(gmTwoIdentity.operatorId);
-    expect(returnedIdentity.rolePreset).toBe(gmTwoIdentity.rolePreset);
+    expect(returnedIdentity.rolePreset).toBe(gmTwoRolePresetId);
+    // Prove the restored gm-m1-tactical preset actually filtered THIS
+    // reconnected browser, not just that its id round-tripped through
+    // localStorage: gm-session-resume and gm-inspector sit outside the
+    // preset's quick_actions/panels and must stay hidden, while
+    // gm-map-panel is inside it and must stay visible.
+    await expect(gmTwoReturning.locator('#gm-session-resume')).toBeHidden();
+    await expect(gmTwoReturning.locator('#gm-inspector')).toBeHidden();
+    await expect(gmTwoReturning.locator('#gm-map-panel')).toBeVisible();
     expect(returnedIdentity.credentialPresent).toBe(true);
     expect(returnedIdentity.credentialMatches).toBe(true);
     expect(await gmTwoReturning.evaluate(() => window.wasm_is_paused())).toBe(true);
@@ -1089,6 +1132,12 @@ test('M1 exits through a retained deterministic GM peer trace', async ({ context
       committed: true,
       pausedAfterCommit: true,
     };
+    // Switch this reconnected browser back to the built-in default before
+    // driving gm-session-resume: gm-m1-tactical's own quick_actions list
+    // (asserted above) never includes it, so leaving the restored preset
+    // in place would hide the control this test needs to click next.
+    await gmTwoReturning.selectOption('#gm-role-preset-select', 'all');
+    await expect(gmTwoReturning.locator('#gm-session-resume')).toBeVisible();
     await clickGmControl(gmTwoReturning, 'gm-session-resume');
     await Promise.all([ship, gmOne, gmTwoReturning].map((page) => page.waitForFunction(
       () => window.wasm_is_paused() === false,

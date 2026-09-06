@@ -168,6 +168,17 @@ pub fn encode_station_activity(p: &crate::debug::payload::StationActivityPayload
     serde_json::to_string(p).unwrap_or_default()
 }
 
+/// Encode the scenario-authored GM role preset list (issue #1319) as JSON for
+/// `wasm_get_gm_role_presets`. Presentation-only data — see
+/// `pasm/spec/design/gm-console-t2.yaml`'s `gm-t2-performing-surface` — so
+/// this never touches a `GmAction`, the crew-public GM roster, a snapshot, or
+/// the sim digest. `serde_json::to_string` never fails on this shape (plain
+/// strings and vectors), so this returns `String` rather than `Result`,
+/// matching [`encode_station_activity`] above.
+pub fn encode_gm_role_presets(presets: &[crate::world::config::GmRolePresetEntry]) -> String {
+    serde_json::to_string(presets).unwrap_or_default()
+}
+
 /// Encode an AI-state debug payload to JSON (issues #1149 and #1152, PRD #1144).
 ///
 /// The single seam where `crate::debug::payload::AiStatePayload` becomes the JSON

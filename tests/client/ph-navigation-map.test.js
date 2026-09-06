@@ -212,7 +212,7 @@ describe('PhNavigationMap', () => {
     const h = setup();
     expect(h.el.shadowRoot).toBeDefined();
     expect(h.el.shadowRoot.querySelector('canvas')).toBeDefined();
-    const overlay = h.el.shadowRoot.getElementById('overlay');
+    const overlay = h.el.shadowRoot.getElementById('contact-overlay');
     expect(overlay).toBeDefined();
     expect(overlay.tagName).toBe('DIV');
   });
@@ -376,7 +376,7 @@ describe('PhNavigationMap', () => {
 
     click(h.canvas, 150, 150);
     expect(sendAction).not.toHaveBeenCalled();
-    expect(h.el.shadowRoot.getElementById('overlay').classList.contains('show')).toBe(false);
+    expect(h.el.shadowRoot.getElementById('contact-overlay').classList.contains('show')).toBe(false);
   });
 
   it('Set Waypoint pick mode places a free waypoint at the tapped world position', () => {
@@ -547,7 +547,7 @@ describe('PhNavigationMap', () => {
   it('tap on blip shows overlay with entity info', () => {
     const sendAction = vi.fn();
     const h = setup({ sendAction });
-    const overlay = h.el.shadowRoot.getElementById('overlay');
+    const overlay = h.el.shadowRoot.getElementById('contact-overlay');
 
     h.el.state = {
       blips: [
@@ -598,7 +598,7 @@ describe('PhNavigationMap', () => {
   it('tap far from blips hides overlay', () => {
     const sendAction = vi.fn();
     const h = setup({ sendAction });
-    const overlay = h.el.shadowRoot.getElementById('overlay');
+    const overlay = h.el.shadowRoot.getElementById('contact-overlay');
 
     h.el.state = {
       blips: [
@@ -702,7 +702,7 @@ describe('PhNavigationMap', () => {
     h.el.state = { blips: [], range: 5000, ship_pos: { x: 0, z: 0 }, ship_heading: 0 };
     h.tickRaf();
     expect(selected).toBeNull();
-    expect(h.el.shadowRoot.getElementById('overlay').classList.contains('show')).toBe(false);
+    expect(h.el.shadowRoot.getElementById('contact-overlay').classList.contains('show')).toBe(false);
   });
 
   describe('label font scaling', () => {

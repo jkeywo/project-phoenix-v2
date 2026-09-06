@@ -842,6 +842,51 @@ pub struct PlayerSpawnEntry {
     pub rotation: Option<[f32; 3]>,
 }
 
+/// The reserved role-preset id every browser Game Master falls back to and
+/// that a world may never author (issue #1319). See [`GmRolePresetEntry`].
+pub const GM_ROLE_PRESET_ALL_ID: &str = "all";
+
+/// One scenario-authored `[[gm_role_preset]]` block (issue #1319, PASM
+/// `gm-t2-performing-surface`).
+///
+/// Presentation-only, personal to the browser Game Master who selects it:
+/// never crosses into `GmOperator`, the crew-public GM roster, a `GmAction`,
+/// a snapshot, or the sim digest — see `pasm/spec/design/gm-console-t2.yaml`.
+/// `panels`/`quick_actions`/`contacts` are open string-id vocabularies rather
+/// than a closed enum, so a preset may already name a panel this build does
+/// not draw yet — the M6-compatible panel-descriptor shape the acceptance
+/// criteria ask for (`gui/gm-role-presets.js` is the consumer). An empty list
+/// on any one facet means "unrestricted" for it; a preset that omits a key
+/// restricts nothing on that facet.
+///
+/// ```toml
+/// [[gm_role_preset]]
+/// id = "tactical"
+/// label = "world.falling_skyway.gm_role_preset.tactical.label"
+/// panels = ["gm-map-panel", "gm-activity"]
+/// quick_actions = ["gm-session-pause"]
+/// ```
+///
+/// `id` is stable and unique within a world — [`parse_world`] refuses a
+/// duplicate or the reserved [`GM_ROLE_PRESET_ALL_ID`] (the always-present
+/// built-in default) by name, the same argument as
+/// `[[deadline]]`/`[[route]]`/`[[workforce]]`. `label` is a `strings.csv` id,
+/// not English — AGENTS.md rule 11's display-text exception — carried
+/// through unchanged; `contacts` names world-entity `name`s the same way a
+/// script or dialogue front-end addresses one.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GmRolePresetEntry {
+    pub id: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub panels: Vec<String>,
+    #[serde(default)]
+    pub quick_actions: Vec<String>,
+    #[serde(default)]
+    pub contacts: Vec<String>,
+}
+
 /// Raw single-pass deserialization of a world TOML.
 #[derive(Debug, Default, Deserialize)]
 pub struct RawWorld {
@@ -876,6 +921,10 @@ pub struct RawWorld {
     /// matches the `[[workforce]]` array key, so no rename is needed.
     #[serde(default)]
     pub workforce: Vec<crate::world::workforce::Workforce>,
+    /// Scenario-authored GM role presets (issue #1319). The field name already
+    /// matches the `[[gm_role_preset]]` array key, so no rename is needed.
+    #[serde(default)]
+    pub gm_role_preset: Vec<GmRolePresetEntry>,
     /// Paths to additional world TOML files to load additively at startup.
     #[serde(default)]
     pub extra_worlds: Vec<String>,
@@ -1703,6 +1752,18 @@ pub struct WorldConfig {
     /// where work there carries on. See
     /// [`WorkforceRegister::on_strike`](crate::world::workforce::WorkforceRegister::on_strike).
     pub workforces: Vec<crate::world::workforce::Workforce>,
+    /// Scenario-authored GM role presets, in authored order (issue #1319,
+    /// PASM `gm-t2-performing-surface`).
+    ///
+    /// Authored data only — presentation, not authority. A browser Game
+    /// Master's OWN chosen id, and its `all`/missing/invalid fallback, live
+    /// entirely in `gui/gm-role-presets.js` (via `wasm_get_gm_role_presets`);
+    /// nothing here is read by GM action admission, folded into a snapshot,
+    /// or folded into the sim digest — `WorldConfig` is authored content, not
+    /// runtime state, exactly as `workforces` above is (see
+    /// `tests/authoritative_state_enumeration.rs`). Ids are unique within a
+    /// world and `"all"` is reserved; [`parse_world`] refuses either by name.
+    pub gm_role_presets: Vec<GmRolePresetEntry>,
     /// Every INLINE `[script.*]` Rhai body this world authors, in key order.
     ///
     /// Retained for exactly one reader: [`entity_template_paths`]'s scripted
@@ -2050,6 +2111,44 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         }
     }
 
+    // Scenario-authored GM role presets (issue #1319, PASM
+    // gm-t2-performing-surface): presentation-only browser filters a Game
+    // Master may select and live-switch, never authority. A reconnecting GM's
+    // stored identity names its choice by this id alone, so a duplicate is two
+    // presets competing for every restore — same argument as
+    // deadlines/routes/workforce above. `"all"` is reserved for the built-in
+    // default every browser falls back to (`gui/gm-role-presets.js`'s
+    // `GM_ALL_ROLE_PRESET`) and may not be authored.
+    for (i, preset) in raw.gm_role_preset.iter().enumerate() {
+        if preset.id.trim().is_empty() {
+            return Err(format!(
+                "[[gm_role_preset]] #{i} has an empty id; every role preset needs \
+                 a stable id for a reconnecting Game Master's identity to name it"
+            ));
+        }
+        if preset.id == GM_ROLE_PRESET_ALL_ID {
+            return Err(format!(
+                "[[gm_role_preset]] #{i} declares reserved id 'all'; that id is \
+                 the built-in default every Game Master falls back to and may \
+                 not be authored"
+            ));
+        }
+        if let Some(j) = raw
+            .gm_role_preset
+            .iter()
+            .enumerate()
+            .take(i)
+            .position(|(_, other)| other.id == preset.id)
+        {
+            return Err(format!(
+                "duplicate gm_role_preset id '{}': [[gm_role_preset]] #{j} and \
+                 [[gm_role_preset]] #{i} both declare it; role preset ids must \
+                 be unique within a world",
+                preset.id
+            ));
+        }
+    }
+
     // Validate extra_worlds: every entry must be a non-empty string.
     for (i, path) in raw.extra_worlds.iter().enumerate() {
         if path.trim().is_empty() {
@@ -2107,6 +2206,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         deadlines: raw.deadline,
         routes: raw.route,
         workforces: raw.workforce,
+        gm_role_presets: raw.gm_role_preset,
         script_sources: inline_script_sources(raw.script.as_ref()),
     })
 }

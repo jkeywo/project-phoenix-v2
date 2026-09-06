@@ -3879,3 +3879,102 @@ fn a_world_with_no_deadline_table_has_none() {
     let cfg = parse_world("[global]\nseed = 1\n").expect("must parse");
     assert!(cfg.deadlines.is_empty());
 }
+
+// ── Scenario-authored GM role presets (issue #1319) ──────────────────────
+
+#[test]
+fn parse_world_reads_the_gm_role_preset_table_in_authored_order() {
+    let toml = r#"
+[[gm_role_preset]]
+id = "tactical"
+label = "world.fs.gm_role_preset.tactical.label"
+panels = ["gm-map-panel", "gm-activity"]
+quick_actions = ["gm-session-pause"]
+contacts = ["enemy_frigate"]
+
+[[gm_role_preset]]
+id = "narrative"
+"#;
+    let cfg = parse_world(toml).expect("must parse");
+    assert_eq!(cfg.gm_role_presets.len(), 2);
+    assert_eq!(cfg.gm_role_presets[0].id, "tactical");
+    assert_eq!(
+        cfg.gm_role_presets[0].label,
+        "world.fs.gm_role_preset.tactical.label"
+    );
+    assert_eq!(
+        cfg.gm_role_presets[0].panels,
+        vec!["gm-map-panel".to_string(), "gm-activity".to_string()]
+    );
+    assert_eq!(
+        cfg.gm_role_presets[0].quick_actions,
+        vec!["gm-session-pause".to_string()]
+    );
+    assert_eq!(
+        cfg.gm_role_presets[0].contacts,
+        vec!["enemy_frigate".to_string()]
+    );
+    // A preset that names only an id restricts nothing: every facet defaults
+    // to empty, which the browser reads as "unrestricted" for that facet.
+    assert_eq!(cfg.gm_role_presets[1].id, "narrative");
+    assert!(cfg.gm_role_presets[1].label.is_empty());
+    assert!(cfg.gm_role_presets[1].panels.is_empty());
+    assert!(cfg.gm_role_presets[1].quick_actions.is_empty());
+    assert!(cfg.gm_role_presets[1].contacts.is_empty());
+}
+
+#[test]
+fn parse_world_refuses_a_duplicate_gm_role_preset_id_naming_both_entries() {
+    // The id is the only handle a reconnecting GM's stored identity has on a
+    // preset (`gui/gm-role-presets.js`'s `resolveGmRolePreset`), so a
+    // duplicate is two presets competing for every restore.
+    let toml = r#"
+[[gm_role_preset]]
+id = "tactical"
+
+[[gm_role_preset]]
+id = "narrative"
+
+[[gm_role_preset]]
+id = "tactical"
+"#;
+    let err = parse_world(toml).expect_err("a duplicate gm_role_preset id must be refused");
+    assert!(err.contains("tactical"), "names the id: {err}");
+    assert!(
+        err.contains("#0") && err.contains("#2"),
+        "names BOTH entries: {err}"
+    );
+}
+
+#[test]
+fn parse_world_refuses_an_empty_gm_role_preset_id() {
+    let toml = r#"
+[[gm_role_preset]]
+id = "   "
+"#;
+    let err = parse_world(toml).expect_err("an unaddressable role preset must be refused");
+    assert!(err.contains("empty id"), "{err}");
+}
+
+#[test]
+fn parse_world_refuses_the_reserved_all_gm_role_preset_id() {
+    // "all" is the built-in default every browser Game Master falls back to
+    // (`gui/gm-role-presets.js`'s `GM_ALL_ROLE_PRESET`) — a world authoring it
+    // would silently shadow that fallback rather than add a real choice.
+    let toml = r#"
+[[gm_role_preset]]
+id = "all"
+"#;
+    let err = parse_world(toml).expect_err("the reserved 'all' id must be refused");
+    assert!(err.contains("reserved"), "{err}");
+    assert!(err.contains("all"), "{err}");
+}
+
+#[test]
+fn a_world_with_no_gm_role_preset_table_has_none() {
+    // The compatibility half: every shipped world today authors no
+    // `[[gm_role_preset]]`, so its Game Master console offers exactly the
+    // built-in All preset, unchanged by this vocabulary.
+    let cfg = parse_world("[global]\nseed = 1\n").expect("must parse");
+    assert!(cfg.gm_role_presets.is_empty());
+}

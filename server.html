@@ -333,6 +333,12 @@
       min-width: 0; padding: 1rem; border: 1px solid var(--edge-control);
       background: var(--surface-panel-down); display: flex; flex-direction: column; gap: .75rem;
     }
+    /* A role preset (issue #1319) may hide one of these three via the
+       `hidden` attribute (gui/gm-role-presets.js). Their own `display: flex`
+       above outranks the UA `[hidden]{display:none}` default, so — same
+       pattern as `#gm-station-controls[hidden]` below — it needs its own
+       override here or toggling `hidden` would be a visual no-op. */
+    #gm-map-panel[hidden], #gm-inspector[hidden], #gm-activity[hidden] { display: none; }
     #gm-activity { grid-column: 1 / -1; }
     #gm-activity-filters { display: flex; flex-wrap: wrap; gap: .75rem 1rem; }
     .gm-activity-filter { display: grid; gap: .3rem; color: var(--ink-muted); }
@@ -1811,6 +1817,16 @@
         <header>
           <h1 id="gm-console-title" data-i18n="server.gm.console.title"></h1>
           <p data-i18n="server.gm.console.local_truth"></p>
+          <!-- Presentation-only role preset (issue #1319): filters which
+               panels/quick actions THIS browser shows. Never authority --
+               see gui/gm-role-presets.js. Defaults to the built-in All, which
+               is the only option when the scenario authors none. -->
+          <label id="gm-role-preset-label" class="gm-activity-filter" for="gm-role-preset-select">
+            <span data-i18n="server.gm.role_preset.heading"></span>
+            <select id="gm-role-preset-select">
+              <option value="all" data-i18n="server.gm.role_preset.option.all"></option>
+            </select>
+          </label>
         </header>
         <section id="gm-session-controls" role="region" aria-labelledby="gm-session-heading">
           <h2 id="gm-session-heading" data-i18n="server.gm.session.heading"></h2>
@@ -2369,6 +2385,7 @@
     import { createGmLocalProjection } from './gui/gm-local-projection.js';
     import { createGmSessionControls } from './gui/gm-session-controls.js';
     import { createGmStationPuppet } from './gui/gm-station-puppet.js';
+    import { createGmRolePresets } from './gui/gm-role-presets.js';
     import {
       ActionFeedbackLifecycle,
       emitActionFeedbackTransition,
@@ -2424,6 +2441,23 @@
     });
     window.__hostGmStationRefresh = gmStationPuppet.refresh;
     window.__hostGmStationState = gmStationPuppet.state;
+    // Presentation-only role presets (issue #1319). `onSelect` fires only on
+    // the operator's OWN explicit live switch; the classic script below turns
+    // that into a `rememberGmIdentity` write when a reconnectable GM identity
+    // exists (fleet member/reconnect path only -- an owner GM has none, same
+    // as `reconnectCredential`).
+    const gmRolePresets = createGmRolePresets({
+      doc: document,
+      t,
+      onSelect: (presetId) => {
+        if (typeof window.__hostGmRolePresetChanged === 'function') {
+          window.__hostGmRolePresetChanged(presetId);
+        }
+      },
+    });
+    window.__hostGmRolePresetsSetAvailable = gmRolePresets.setAvailablePresets;
+    window.__hostGmRolePresetsRestore = gmRolePresets.restore;
+    window.__hostGmRolePresetsState = gmRolePresets.state;
     window.__hostSemanticActions = hostSemanticActions;
     window.__hostActionFeedback = hostActionFeedback;
     const hostChannelDispatch = createHostChannel({
@@ -3307,6 +3341,13 @@
     let fleetIdentityStorage = null;
     try { fleetIdentityStorage = window.localStorage; } catch (_) {}
     /**
+     * The stored-identity key this GM's live role-preset switches persist
+     * under (issue #1319) — set alongside the reconnect flow's own
+     * `identityCode`, `null` outside of it (an owner GM mints no
+     * reconnectable identity, same as `reconnectCredential`).
+     */
+    let gmRolePresetIdentityCode = null;
+    /**
      * The hull `wasm_select_ship` was last called with, as a fleet ship — see
      * `lockPlayerHull`. Held here rather than read back out of Rust because the
      * fleet needs it on paths where Bevy is not running yet.
@@ -4039,15 +4080,49 @@
       if (!fleetIdentityStorage || !code) return null;
       try {
         const value = JSON.parse(fleetIdentityStorage.getItem(FLEET_GM_IDENTITY_KEY) || 'null');
+        // `rolePreset` (issue #1319) is the operator's own last explicit role
+        // preset choice, or `null` for a GM that never opened the selector
+        // (or a stored blob written before this issue). It is presentation
+        // only -- see gui/gm-role-presets.js -- and is returned VERBATIM
+        // here rather than forced to null: forcing it was #1294's deliberate
+        // placeholder, and #1319 is what lifts it.
         return value && value.code === String(code)
           && typeof value.reconnectCredential === 'string'
           && value.reconnectCredential
-          ? { ...value, rolePreset: null }
+          ? { ...value, rolePreset: typeof value.rolePreset === 'string' ? value.rolePreset : null }
           : null;
       } catch (_) {
         return null;
       }
     }
+
+    /** This browser's own current role-preset choice (issue #1319), or
+     * `null` before the module island above has constructed the controller —
+     * the boot ordering `finishInit()` documents elsewhere never assumes
+     * either side runs first. */
+    function currentGmRolePresetId() {
+      if (typeof window.__hostGmRolePresetsState !== 'function') return null;
+      try { return window.__hostGmRolePresetsState().desiredId; } catch (_) { return null; }
+    }
+
+    /**
+     * The operator's own live role-preset switch (issue #1319), wired as the
+     * `gm-role-presets.js` controller's `onSelect`. Persists only when this
+     * browser holds a reconnectable GM identity for the fleet it is
+     * currently in (the join/reconnect path only — an owner GM has none,
+     * same as `reconnectCredential`); otherwise the switch is still applied
+     * to this session's own panels, it simply has nothing to survive a
+     * reload with.
+     */
+    window.__hostGmRolePresetChanged = function(presetId) {
+      if (!fleetHandle || fleetHandle.role !== 'gm' || !gmRolePresetIdentityCode) return;
+      rememberGmIdentity(gmRolePresetIdentityCode, {
+        role: 'gm',
+        operatorId: fleetHandle.operatorId,
+        reconnectCredential: fleetHandle.reconnectCredential,
+        rolePreset: presetId,
+      });
+    };
 
     function rememberGmIdentity(code, identity) {
       if (!fleetIdentityStorage || !code || !identity || identity.role !== 'gm'
@@ -4058,7 +4133,7 @@
           code: String(code),
           operatorId: identity.operatorId || null,
           reconnectCredential: identity.reconnectCredential,
-          rolePreset: null,
+          rolePreset: typeof identity.rolePreset === 'string' ? identity.rolePreset : null,
         }));
       } catch (_) {}
     }
@@ -4655,6 +4730,19 @@
         ? storedGmIdentity(identityCode)
         : null;
       if (priorIdentity) fleetRole = 'gm';
+      // Seed the role-preset selector from storage BEFORE the identity even
+      // reconnects (issue #1319), and key live switches to this code so a
+      // later selection change persists under the same stored identity. Only
+      // when there is an actual stored choice to restore -- otherwise (no
+      // stored identity at all: a mistyped/unparsed code, joining a different
+      // fleet, or a crew-role join on the host page) this would silently
+      // reset the operator's own already-live selection back to All, and a
+      // join that then gets refused below never undoes that reset.
+      gmRolePresetIdentityCode = identityCode;
+      if (priorIdentity && typeof priorIdentity.rolePreset === 'string'
+          && typeof window.__hostGmRolePresetsRestore === 'function') {
+        window.__hostGmRolePresetsRestore(priorIdentity.rolePreset);
+      }
       handle = window.fleetSession.createFleetMember({
         base: rendezvousBase,
         data,
@@ -4668,7 +4756,12 @@
         ship: fleetShip(),
         onIdentity: (identity) => {
           fleetRole = normaliseFleetRole(identity && identity.role);
-          rememberGmIdentity(identityCode, identity);
+          // `identity.rolePreset` is fleet-session.js's own unaware `null`
+          // placeholder (issue #1294) — merge in this browser's OWN current
+          // selection (already seeded from storage above) rather than let
+          // this automatic re-emission stomp a just-restored value back to
+          // null (issue #1319).
+          rememberGmIdentity(identityCode, { ...identity, rolePreset: currentGmRolePresetId() });
           publishFleetLobbyState();
           paintGmStartControls();
         },
@@ -4721,7 +4814,7 @@
         role: handle.role,
         operatorId: handle.operatorId,
         reconnectCredential: handle.reconnectCredential,
-        rolePreset: null,
+        rolePreset: currentGmRolePresetId(),
       });
       fleetSuffix = handle.code ? handle.code.suffix : null;
       paintFleetPanel();
@@ -6934,12 +7027,22 @@ function finishInit() {
   // ── Available ships from world config (issue #623) ──────────────────────
   window.wasm_get_available_ships = wasmBindings.wasm_get_available_ships;
   window.wasm_select_ship = wasmBindings.wasm_select_ship;
+  // Scenario-authored GM role presets (issue #1319) — presentation only, see
+  // gui/gm-role-presets.js.
+  window.wasm_get_gm_role_presets = wasmBindings.wasm_get_gm_role_presets;
 
   // The explicit GM profile owns no selected/local ship. It still follows the
   // ordinary world preload and startServer path, including the runtime sidecar
   // fetch callback installed there.
   if (window.__phoenixGmPage) {
     window.wasm_prepare_game_master();
+    if (typeof window.__hostGmRolePresetsSetAvailable === 'function') {
+      window.__hostGmRolePresetsSetAvailable(
+        typeof window.wasm_get_gm_role_presets === 'function'
+          ? window.wasm_get_gm_role_presets()
+          : '[]',
+      );
+    }
     startServer();
     return;
   }

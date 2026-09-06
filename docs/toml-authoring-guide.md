@@ -69,6 +69,7 @@ non-asteroid entries spawn via `server_app::setup_world` (PRD #337).
 | `[[deadline]]` | array of tables | `[]` | Named mission deadlines the crew can be shown and script can slip or cancel (see §1.6). |
 | `[[route]]` | array of tables | `[]` | Named civilian traffic lanes: anchor chains a `[civilian]` craft flies (see §1.8). |
 | `[[workforce]]` | array of tables | `[]` | The sides of a labour dispute: who staffs a structure, whether they are out, and what they make of the crew (see §1.12). |
+| `[[gm_role_preset]]` | array of tables | `[]` | Presentation-only Game Master filters over panels, quick actions, and contacts — never authority (see §1.14). |
 | `[ambient_light]` | table | none | World ambient light override; omitted sub-fields fall back to renderer constants. |
 | `[dust]` | table | none | Ambient dust / velocity-mote effect (see §1.3). |
 | `[render]` | table | none | How the camera resolves light (HDR, tonemapping, bloom) and how long a visual takes to arrive or leave (see §1.4). |
@@ -944,6 +945,53 @@ And file what she says under **what it is about**, never under who said it: the
 subject is the structure, so the records comparison and the testimony end up on
 one fact sheet under two provenances. See `assets/worlds/probe_corroborate.toml`,
 which stands five sites side by side and moves only the gates.
+
+### 1.14 GM role presets: presentation-only Game Master filters
+
+A `[[gm_role_preset]]` is personal browser presentation for the GM console,
+never authority: it narrows which panels, quick actions, and contacts ONE
+Game Master's own browser shows. Every GM keeps identical action
+availability, permissions, locks, ordering, and authority no matter what
+preset they or any other GM has chosen — two Game Masters may pick the same
+preset, different presets, or none at all with no effect on each other.
+
+```toml
+[[gm_role_preset]]
+id = "tactical"                                        # unique in the world
+label = "world.example.gm_role_preset.tactical.label"  # a strings.csv id, never English
+panels = ["gm-map-panel", "gm-activity"]
+quick_actions = ["gm-session-pause"]
+contacts = ["enemy_frigate"]                            # an [[entity]] name
+
+[[gm_role_preset]]
+id = "narrative"                                        # names only an id: restricts nothing
+```
+
+* A duplicate `id`, an empty `id`, or the reserved id `"all"` — the built-in
+  default every Game Master falls back to, and may never be authored — is a
+  load-time error.
+* `panels`, `quick_actions`, and `contacts` are each an optional list of ids;
+  an omitted or empty list means *unrestricted* for that facet. Panel and
+  quick-action ids are the GM console's own DOM ids (`gm-map-panel`,
+  `gm-inspector`, `gm-activity`, `gm-session-pause`, `gm-session-resume`, and
+  whatever a later milestone's panel adds); contact ids are `[[entity]] name`s.
+  `gui/gm-role-presets.js`'s `GM_ROLE_PRESET_PANEL_IDS` and
+  `GM_ROLE_PRESET_QUICK_ACTION_IDS` are the authoritative list of ids a
+  preset can actually filter today — naming an id outside those lists is
+  accepted and stored but has no visible effect yet.
+* The GM Station-control panel (`gm-station-controls`) is never filtered by
+  a role preset even if named in `panels`: its `hidden` attribute is owned
+  by puppet availability (`gui/gm-station-puppet.js`), not by the preset
+  controller, so an author writing `panels = ["gm-map-panel"]` will still
+  see the Station-puppet panel whenever a puppet is available.
+* A Game Master who never opens the selector, or whose stored choice names an
+  id this world does not (or no longer) author, sees the built-in **All**
+  preset instead — every panel, quick action, and contact. The choice is
+  never lost by falling back this way: it is honoured again if the id comes
+  back (a mod pack re-enables it, a reload restores the world that named it).
+* The choice persists only alongside that Game Master's own reconnectable
+  identity, and is never sent to the simulation, the crew-public GM roster,
+  or a snapshot.
 
 ### Example — a world, end to end
 

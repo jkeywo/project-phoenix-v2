@@ -190,6 +190,29 @@ entities:
       coordinates: [gm-milestone-performing]
       runs_in: [host-browser-runtime]
 
+  - component: gm-t2-role-presets
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Presentation-Only GM Role Presets
+      summary: "A Game Master selects and may live-switch one scenario-authored role preset — a stable id, String Table label, and open panel/quick-action/contact id lists — that filters which panels, quick actions, and contacts THEIR OWN browser shows. It defaults to the built-in All (never authored, always available), permits duplicate selection across independent GMs, and persists only with that GM's own reconnectable identity, restoring it — or falling back safely to All for a missing, invalid, or removed id — on rejoin. It never reaches GmOperator, the crew-public GM roster, a GmAction, a snapshot, or the sim digest, so no GM's choice ever changes action availability, permissions, locks, ordering, or authority."
+      rationale:
+        - "[ai] Issue #1319's delivered slice of gm-t2-performing-surface, scoped and recorded here rather than in that entity's own (still empty) implementation block, which #1317/#1318/#1320 continue to share."
+        - "[ai] panels/quick_actions/contacts are open string-id vocabularies, not a closed enum, so #1317's Comms Studio and #1318's knowledge comparison extend the same schema without a migration — the M6-compatible panel-descriptor shape the acceptance criteria ask for. No shipped panel reads `contacts` yet; the map/inspector/activity feed stay omniscient."
+        - "[ai] WorldConfig is authored content, not runtime state (see tests/authoritative_state_enumeration.rs's `[[workforce]]` precedent), so a Vec field on its already-registered Resource adds nothing to census, snapshot, or digest. The reserved id `all` keeps a scenario from ever shadowing the built-in default; parse_world refuses it and a duplicate id by name."
+        - "[ai] Round-1 review (#1319): the pure loader/filter and source-string vitest suites had no whole-path browser evidence, and an unconditional restore-on-join call reset a live selection to All on any join with no stored identity (a mistyped code, a different fleet, a crew-role join) even when the join was then refused. Fixed by gating the restore on an actual stored `rolePreset` string, and added tests/smoke/gm-m1-exit.spec.js coverage (an authored preset selected through the real `<select>` before disconnect, round-tripped through reconnect) plus a `tests/smoke/gm-page.spec.js` `@core` spec that boots a preset-authoring fixture world and proves both authored options render with real String Table copy, that live-switching one hides exactly its own unauthored panels/quick actions while an authored one stays visible, and that the untouched quick action still applies its GmAction -- presentation only, never authority."
+    architecture:
+      kind: gm-presentation
+      authority: non-authoritative
+      coordinates: [gm-t2-performing-surface, gm-milestone-performing]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/world/config.rs, src/core/codec.rs, src/server/bridge.rs, gui/gm-role-presets.js, server.html, assets/strings/strings.csv, docs/toml-authoring-guide.md]
+      symbols: [GmRolePresetEntry, GM_ROLE_PRESET_ALL_ID, encode_gm_role_presets, wasm_get_gm_role_presets, parseGmRolePresets, resolveGmRolePreset, isGmPanelVisible, isGmQuickActionVisible, isGmContactVisible, createGmRolePresets, GM_ALL_ROLE_PRESET]
+      tests: [cargo test --features headless --lib gm_role_preset, cargo test --features headless --lib gm_roster_decoder_rejects_duplicates_bounds_and_private_fields, npx vitest run tests/client/gm-role-presets.test.js tests/client/gm-join-page.test.js, tests/smoke/gm-m1-exit.spec.js, tests/smoke/gm-page.spec.js]
+
   - decision: gm-t2-device-and-milestone-boundaries
     core:
       status: accepted

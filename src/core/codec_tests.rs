@@ -5941,7 +5941,20 @@ fn gm_roster_decoder_rejects_duplicates_bounds_and_private_fields() {
     .unwrap();
     assert!(decode_gm_roster(&too_many).is_none());
 
-    for private_field in ["peer", "credential", "owner", "leader", "station"] {
+    // `role_preset`/`rolePreset` (issue #1319) is personal browser
+    // presentation, never a crew-public roster field — see
+    // `gui/gm-role-presets.js` and `pasm/spec/design/gm-console-t2.yaml`'s
+    // `gm-t2-performing-surface`. `GmOperator`'s `deny_unknown_fields` must
+    // refuse either spelling exactly like the other private fields below.
+    for private_field in [
+        "peer",
+        "credential",
+        "owner",
+        "leader",
+        "station",
+        "role_preset",
+        "rolePreset",
+    ] {
         let raw = format!(
             r#"[{{"id":"gm-1","name":"Morgan","connected":true,"ready":false,"{private_field}":"secret"}}]"#
         );
@@ -5982,6 +5995,50 @@ fn gm_roster_decoder_requires_the_exact_ready_field() {
         decode_gm_roster(r#"[{"id":"gm-1","name":"Morgan","connected":true,"ready":false}]"#)
             .unwrap();
     assert!(!roster.operators()[0].ready);
+}
+
+// ── Scenario-authored GM role presets (issue #1319) ──────────────────────
+
+#[test]
+fn gm_role_preset_encoder_round_trips_authored_order_and_facets() {
+    use crate::world::config::GmRolePresetEntry;
+
+    let presets = vec![
+        GmRolePresetEntry {
+            id: "tactical".to_string(),
+            label: "world.fs.gm_role_preset.tactical.label".to_string(),
+            panels: vec!["gm-map-panel".to_string(), "gm-activity".to_string()],
+            quick_actions: vec!["gm-session-pause".to_string()],
+            contacts: vec!["enemy_frigate".to_string()],
+        },
+        GmRolePresetEntry {
+            id: "narrative".to_string(),
+            ..Default::default()
+        },
+    ];
+    let encoded = encode_gm_role_presets(&presets);
+    let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(value[0]["id"], "tactical");
+    assert_eq!(value[0]["label"], "world.fs.gm_role_preset.tactical.label");
+    assert_eq!(
+        value[0]["panels"],
+        serde_json::json!(["gm-map-panel", "gm-activity"])
+    );
+    assert_eq!(
+        value[0]["quick_actions"],
+        serde_json::json!(["gm-session-pause"])
+    );
+    assert_eq!(value[0]["contacts"], serde_json::json!(["enemy_frigate"]));
+    assert_eq!(value[1]["id"], "narrative");
+    assert_eq!(value[1]["panels"], serde_json::json!([]));
+
+    let decoded: Vec<GmRolePresetEntry> = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(decoded, presets);
+}
+
+#[test]
+fn gm_role_preset_encoder_returns_an_empty_array_for_a_world_with_none() {
+    assert_eq!(encode_gm_role_presets(&[]), "[]");
 }
 
 #[test]

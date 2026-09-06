@@ -17,6 +17,35 @@ const GM_ROCK_PATH = 'assets/entities/smoke_gm_ordinary_asteroid.toml';
 const GM_REGION_PATH = 'assets/entities/smoke_gm_inert_region.toml';
 const GM_LAYER_PATH = 'assets/worlds/smoke_gm_region_layer.toml';
 
+// Scenario-authored, presentation-only GM role presets (issue #1319). Two
+// distinct ids with disjoint panels/quick_actions, alongside the built-in
+// reserved "all", so a browser test can prove both authored options render
+// with real String Table copy and that live-switching one narrows exactly
+// its own authored panels/quick actions -- never any GM's authority.
+const GM_ROLE_PRESET_WORLD = `
+[global]
+seed = 1319
+title = "GM role preset smoke fixture"
+description = "Scenario-authored presentation-only role presets for issue 1319."
+sim_tick_hz = 30
+
+[[entity]]
+template_path = "assets/entities/alliance_courier.toml"
+name = "entity.alliance_courier.display_name"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+[[gm_role_preset]]
+id = "tactical"
+label = "world.smoke_gm_role_preset.tactical.label"
+panels = ["gm-map-panel", "gm-activity"]
+quick_actions = ["gm-session-pause"]
+
+[[gm_role_preset]]
+id = "narrative"
+label = "world.smoke_gm_role_preset.narrative.label"
+`;
+
 // A real region-damage producer drives the activity stream. The NPC survives
 // long enough to select from the first row, then leaves the map while its
 // retained feed identity remains readable. Nothing in this fixture injects a
@@ -1231,3 +1260,71 @@ test('a GM reaches and operates a spatial Helm Station at 1280x720, then release
   await engineering.close();
   await science.close();
 });
+
+test(
+  'scenario-authored role presets render with String Table copy and filter presentation only',
+  { tag: '@core' },
+  async ({ context }) => {
+    await context.route('**/assets/worlds/default.toml', (route) =>
+      route.fulfill({ contentType: 'text/plain', body: GM_ROLE_PRESET_WORLD }),
+    );
+
+    const page = await context.newPage();
+    const errors = captureServerPageErrors(page);
+    await page.goto('/?gm=1&scenario=assets/worlds/default.toml');
+    await waitForWasmReady(page);
+    await page.evaluate(() => window.__hostFleetOpen());
+    await page.waitForFunction(() => {
+      const state = window.__hostGmStartState?.();
+      return state?.admitted === true
+        && state.presentationReady === true
+        && state.localValidation === true;
+    });
+    await page.evaluate(() => document.getElementById('gm-ready-btn').click());
+    await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
+
+    // Both authored presets render beside the built-in All, with real String
+    // Table copy -- not a raw id, and not an unresolved ⟨missing.id⟩
+    // placeholder -- proving the TOML -> parse_world -> wasm_get_gm_role_presets
+    // -> the real <select> path end to end (acceptance criterion 1).
+    const options = await page.locator('#gm-role-preset-select option').evaluateAll(
+      (nodes) => nodes.map((node) => ({ value: node.value, text: node.textContent })),
+    );
+    expect(options).toEqual([
+      { value: 'all', text: '[All]' },
+      { value: 'tactical', text: '[Tactical]' },
+      { value: 'narrative', text: '[Narrative]' },
+    ]);
+
+    // The default is All: nothing authored is hidden yet.
+    await expect(page.locator('#gm-map-panel')).toBeVisible();
+    await expect(page.locator('#gm-inspector')).toBeVisible();
+    await expect(page.locator('#gm-session-resume')).toBeVisible();
+
+    // Live-switch to Tactical through the real <select>. gm-inspector and the
+    // gm-session-resume quick action are hidden -- neither is in Tactical's
+    // authored lists -- while gm-map-panel, which IS authored, stays visible.
+    await page.selectOption('#gm-role-preset-select', 'tactical');
+    await expect(page.locator('#gm-inspector')).toBeHidden();
+    await expect(page.locator('#gm-session-resume')).toBeHidden();
+    await expect(page.locator('#gm-map-panel')).toBeVisible();
+
+    // Presentation only: gm-session-pause stays visible and enabled under
+    // Tactical (it IS in the authored quick_actions), and clicking it still
+    // applies the real GmAction and pauses the authoritative simulation --
+    // the preset narrows what renders, never what this GM may do.
+    const pause = page.locator('#gm-session-pause');
+    await expect(pause).toBeVisible();
+    await expect(pause).toBeEnabled();
+    await pause.scrollIntoViewIfNeeded();
+    await pause.click();
+    await page.waitForFunction(
+      () => window.__hostGmSessionState?.().paused === true,
+      undefined,
+      { timeout: 15_000 },
+    );
+    expect(await page.evaluate(() => window.wasm_is_paused())).toBe(true);
+
+    expect(errors).toEqual([]);
+  },
+);

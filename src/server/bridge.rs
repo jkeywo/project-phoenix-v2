@@ -3839,6 +3839,29 @@ pub fn wasm_get_available_ships() -> Array {
     arr
 }
 
+/// Return the scenario-authored GM role preset list for the currently loaded
+/// world (issue #1319), as a JSON array of
+/// `{ id, label, panels, quick_actions, contacts }` objects.
+///
+/// Presentation only: the browser GM page (`gui/gm-role-presets.js`) filters
+/// its own panels/quick actions against whichever preset a Game Master picks
+/// and live-switches. Nothing here reaches `GmOperator`, the crew-public GM
+/// roster, a `GmAction`, a snapshot, or the sim digest — see
+/// `pasm/spec/design/gm-console-t2.yaml`'s `gm-t2-performing-surface`.
+///
+/// Returns `"[]"` when the world declares none, or before a world has
+/// loaded — the GM page falls back to the single built-in "All" preset,
+/// which is never authored and always available.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_get_gm_role_presets() -> String {
+    let world_config = crate::entities::config_cache::get_world_config();
+    match world_config {
+        Some(ref wc) => crate::core::codec::encode_gm_role_presets(&wc.gm_role_presets),
+        None => "[]".to_string(),
+    }
+}
+
 /// Enrich one `AvailableShipEntry` into a JS `{ template_path, label, class,
 /// hull_id, power_rating, name }` object, reading the extra metadata from the
 /// cached entity config when it is available.

@@ -64,7 +64,7 @@ export class PhNavigationMap extends PhElement {
       ':host { display: block; position: relative; touch-action: none; }',
       'canvas { display: block; width: 100%; height: 100%; touch-action: none; }',
       'canvas.picking { cursor: crosshair; }',
-      '#overlay {',
+      '#contact-overlay {',
       '  position: absolute; bottom: 0; left: 0; right: 0;',
       '  padding: 10px 14px 14px;',
       '  background: linear-gradient(0deg, rgba(var(--rgb-deep), 0.95) 0%, rgba(var(--rgb-deep), 0.7) 70%, transparent 100%);',
@@ -72,9 +72,9 @@ export class PhNavigationMap extends PhElement {
       '  font-family: "JetBrains Mono", monospace;',
       '  pointer-events: none; display: none;',
       '}',
-      '#overlay.show { display: block; }',
-      '#overlay .ov-name { font-size: var(--text-lg); color: var(--ink); font-weight: 600; letter-spacing: 0.05em; }',
-      '#overlay .ov-detail { font-size: var(--text-xs); color: var(--ink-dim); margin-top: 3px; letter-spacing: 0.15em; display: flex; gap: 10px; }',
+      '#contact-overlay.show { display: block; }',
+      '#contact-overlay .ov-name { font-size: var(--text-lg); color: var(--ink); font-weight: 600; letter-spacing: 0.05em; }',
+      '#contact-overlay .ov-detail { font-size: var(--text-xs); color: var(--ink-dim); margin-top: 3px; letter-spacing: 0.15em; display: flex; gap: 10px; }',
       '.st-hostile { color: var(--fire-hot); }',
       '.st-friendly { color: var(--loaded); }',
       '.st-neutral { color: var(--ink-dim); }',
@@ -129,7 +129,13 @@ export class PhNavigationMap extends PhElement {
       '    <button type="button" class="wp-btn" id="btn-clear-waypoint">' + t('console.navigation.clear_waypoint') + '</button>',
       '  </div>',
       '  <div class="toast" id="toast" role="status"></div>',
-      '  <div id="overlay">',
+      // Named "contact-overlay", not the generic "overlay", because Playwright's
+      // locators pierce open shadow roots (unlike getElementById/querySelector in
+      // real page code): a bare "#overlay" here collided with server.html's own
+      // page-level #overlay (the join/loading QR panel) and made every
+      // `page.locator('#overlay')` a strict-mode violation once this component
+      // sat anywhere in the GM console's DOM (issue #1319 gate finding).
+      '  <div id="contact-overlay">',
       '    <div class="ov-name" id="ov-name"></div>',
       '    <div class="ov-detail">',
       '      <span id="ov-kind"></span>',
@@ -146,7 +152,7 @@ export class PhNavigationMap extends PhElement {
     this.needsRender = true;
     this.rafId = null;
     this.resizeObserver = null;
-    this.overlay = this.shadowRoot.getElementById('overlay');
+    this.overlay = this.shadowRoot.getElementById('contact-overlay');
     this.toast = this.shadowRoot.getElementById('toast');
     this.btnSetWaypoint = this.shadowRoot.getElementById('btn-set-waypoint');
     this.btnSetSelected = this.shadowRoot.getElementById('btn-set-selected');

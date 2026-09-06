@@ -244,6 +244,32 @@ mod tests {
         });
     }
 
+    fn broadcast_snapshot(bus: &PaneBus, msg: ServerMessage) {
+        bus.transport().dispatch(TransportDispatch {
+            target: &Target::All,
+            msg: &msg,
+            delivery: DeliveryClass::Snapshot,
+        });
+    }
+
+    #[test]
+    fn a_burst_of_snapshots_of_one_kind_reaches_the_page_as_one_push() {
+        // The phone's lossy channel drops stale snapshots; the pane bus
+        // coalesces them at push time (see `registry`), so a frame that
+        // unpacked into many ticks costs the page one evaluation per kind
+        // rather than a budget's worth of stale ones (issue #1403).
+        let (bus, id) = bus_with_pane();
+        for _ in 0..(MAX_PUSHES_PER_FRAME * 2) {
+            broadcast_snapshot(&bus, ServerMessage::GameStarted);
+        }
+        broadcast_snapshot(&bus, ServerMessage::ShipDestroyed);
+        let mut surface = RecordingSurface::ready();
+        let report = pump_pane(&bus, id, &mut surface);
+        assert_eq!(report.pushed, 2, "one push per kind");
+        assert_eq!(report.deferred, 0);
+        assert!(!report.budget_exhausted);
+    }
+
     #[test]
     fn a_document_that_has_not_loaded_is_not_pushed_to_and_keeps_its_backlog() {
         let (bus, id) = bus_with_pane();

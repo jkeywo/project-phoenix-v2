@@ -44,7 +44,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::core::codec::{self, JsonCodec, MessageCodec};
-use crate::core::messages::ClientMessage;
+use crate::core::messages::{ClientMessage, ServerMessageDiscriminants};
 use crate::delivery::serve::HostedDocuments;
 use crate::native_host::transport::{NativeTransport, TransportDispatch, TransportEvent};
 
@@ -592,6 +592,7 @@ impl NativeTransport for PaneTransport {
             let verdict = pane.push_outbound(PaneDispatch {
                 json,
                 delivery: dispatch.delivery,
+                kind: ServerMessageDiscriminants::from(dispatch.msg),
             });
             if verdict == OutboundVerdict::Overflowed {
                 faulted.push(pane.id());

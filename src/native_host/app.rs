@@ -853,6 +853,12 @@ pub fn build_native_host_app(
         app.add_plugins(crate::native_host::panes::ultralight::PaneDisplayPlugin);
     }
 
+    // The pane-frame upload path (issue #1404). UNCONDITIONAL, and deliberately
+    // outside the `ultralight` block above: it is the render-world half of the
+    // pane pipeline, it compiles and is tested with the feature off, and on a
+    // renderer-less Contract host it is what drains a queue nothing can upload.
+    app.add_plugins(crate::native_host::panes::upload::PaneUploadPlugin);
+
     // Bridge-display profile (issue #1123). Installed unconditionally, and the
     // config is inserted only when a validated profile was given — an
     // AUTHORED one, which is what makes the adapter place the windows it names:

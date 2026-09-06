@@ -197,7 +197,14 @@ pub struct ImageCopier {
 }
 
 impl ImageCopier {
-    fn new(src_image: Handle<Image>, size: Extent3d, render_device: &RenderDevice) -> ImageCopier {
+    /// Public so a test can read back an image it made itself rather than one
+    /// [`create_render_target`] made — `tests/native_pane_upload_gpu.rs` proves
+    /// the #1404 pane upload against an ordinary `Image::new_fill` texture.
+    pub fn new(
+        src_image: Handle<Image>,
+        size: Extent3d,
+        render_device: &RenderDevice,
+    ) -> ImageCopier {
         // The row stride MUST match what `ImageCopyDriver` writes:
         // `align_copy_bytes_per_row(width * 4)`. Aligning `width` and then
         // multiplying by 4 (as an earlier version did) only coincides with that

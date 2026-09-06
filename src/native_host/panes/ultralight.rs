@@ -62,6 +62,7 @@
 //! cargo. [`stage_sdk`] does it, and `phoenix-host` calls it at startup; see
 //! `docs/delivery-checklist.md` for the packaging half.
 
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Instant;
 
 use bevy::asset::RenderAssetUsages;
@@ -89,6 +90,7 @@ use super::placement::{home_for_pane, PaneHome, PaneTile};
 use super::recovery::{service_faults, PaneFault};
 use super::registry::PaneId;
 use super::surface::{pump_pane, PaneSurface, PaneSurfaceError};
+use super::upload::{frame_is_current, PaneFrameBuffer, PanePendingUploads, PaneUpload};
 use super::PaneBusResource;
 use crate::console_bridge::HudStateChanged;
 use crate::core::messages::GamePhase;
@@ -375,6 +377,61 @@ const fn pane_texture_format(transparent: bool) -> TextureFormat {
     }
 }
 
+/// The colour a pane's texture is minted in, by the same predicate
+/// [`pane_texture_format`] uses.
+///
+/// The transparent HUD overlay starts fully clear, so the frames before its
+/// first copy show the 3-D scene rather than a black rectangle over it; every
+/// opaque surface starts black. It matters more since issue #1404: the texture
+/// is written in place and only where the page repainted, so this fill is what
+/// shows anywhere a frame has not yet reached — including the whole surface for
+/// the frame or two after a resize mints a new one.
+const fn pane_fill(transparent: bool) -> [u8; 4] {
+    if transparent {
+        [0, 0, 0, 0]
+    } else {
+        [0, 0, 0, 255]
+    }
+}
+
+/// How many staging buffers one pane keeps.
+///
+/// Engine constants, not gameplay tuning. **Three is the floor under pipelined
+/// rendering**, not two: the main thread runs a frame ahead of the render
+/// thread, so a buffer taken at frame N is written by the render world during
+/// frame N+1 and only lands back in the pool at the top of frame N+2. Two
+/// buffers are therefore *exactly* saturated in steady state, and any single
+/// hiccup — one deferral, one frame the render thread ran long on — leaves the
+/// next copy with an empty pool and costs a `starved` frame. Three leaves one
+/// spare for that, and the cap is four so a burst that returns two at once is
+/// kept rather than thrown away. An empty pool skips that pane's copy for one
+/// iteration (counted as `lost`), which Ultralight absorbs by unioning its
+/// dirty bounds until the next successful copy.
+const PANE_STAGING_BUFFERS: usize = 3;
+const PANE_STAGING_CAP: usize = 4;
+
+/// A fresh pool of [`PANE_STAGING_BUFFERS`] full-size buffers for a
+/// `width`×`height` surface, every pixel seeded with [`pane_fill`].
+///
+/// Seeded, not zeroed, on purpose: a buffer only ever receives its own dirty
+/// rectangles, so everything outside them is whatever the buffer held before —
+/// and for a fresh buffer that must be the fill the texture itself starts as,
+/// never transparent black in an opaque console. That is what lets
+/// `upload::defer` widen a superseding frame to the whole surface and still
+/// upload only pixels the texture already shows or this pane painted.
+fn pane_staging_pool(size: (u32, u32), transparent: bool) -> Vec<Vec<u8>> {
+    let len = pane_buffer_len(size);
+    let fill = pane_fill(transparent);
+    (0..PANE_STAGING_BUFFERS)
+        .map(|_| fill.iter().copied().cycle().take(len).collect())
+        .collect()
+}
+
+/// The byte length of one full-size staging buffer for `size`.
+fn pane_buffer_len(size: (u32, u32)) -> usize {
+    size.0 as usize * size.1 as usize * 4
+}
+
 /// One pane on screen: its view, its texture, where it sits, and which window it
 /// is composited on.
 struct PaneWindow {
@@ -399,6 +456,21 @@ struct PaneWindow {
     /// Consecutive frames whose copy failed. Reset on any success; a run past
     /// [`VIEW_CRASH_COPY_FAILURES`] faults the pane as a crashed view (#1125).
     copy_failures: u32,
+    /// This pane's free list of full-size staging buffers (issue #1404). A copy
+    /// takes one, publishes it inside a
+    /// [`PaneFrameBuffer`](super::upload::PaneFrameBuffer), and gets the
+    /// allocation back when the render world drops the frame. Capped at
+    /// [`PANE_STAGING_CAP`].
+    staging: Vec<Vec<u8>>,
+    /// This texture's generation. Bumped whenever [`image`](Self::image) is
+    /// re-minted (a resize), so a returning buffer of the old length or a frame
+    /// produced against the old size is recognisable.
+    epoch: u64,
+    /// Whether the next copy must be forced whole. True at construction — the
+    /// texture holds only its fill, so a dirty-rectangle copy would leave the
+    /// rest of it blank — and after every resize, and kept across an iteration
+    /// the pane had to skip for want of a buffer.
+    needs_full: bool,
 }
 
 impl PaneWindow {
@@ -476,6 +548,14 @@ pub struct PaneHost {
     /// `rebuild_layout` re-derives the focus order, and doing that sixty times a
     /// second would fight a Ctrl+Tab the operator just made.
     lobby_present: bool,
+    /// The staging-buffer return path (issue #1404). A published frame's
+    /// [`PaneFrameBuffer`](super::upload::PaneFrameBuffer) holds a clone of the
+    /// sender and posts its allocation back here when it is dropped — after the
+    /// render world's `write_texture`, or when a stale frame is discarded. The
+    /// copy loop drains the receiver at its top, so a buffer is available again
+    /// the frame after it was used.
+    recycle_tx: Sender<(PaneId, Vec<u8>)>,
+    recycle_rx: Receiver<(PaneId, Vec<u8>)>,
 }
 
 impl PaneHost {
@@ -579,6 +659,11 @@ pub struct PaneDisplayPlugin;
 impl Plugin for PaneDisplayPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ViewscreenHudLatest>();
+        // Idempotent, and belt-and-braces: `PaneUploadPlugin` (registered
+        // unconditionally in `native_host::app`) already puts this in, but
+        // `drive_panes` takes it as a plain `ResMut` and the ignored SDK tests
+        // build their own apps around this plugin alone.
+        app.init_resource::<PanePendingUploads>();
         app.add_systems(PreUpdate, init_pane_host).add_systems(
             Update,
             (
@@ -942,12 +1027,7 @@ fn init_pane_host(world: &mut World) {
         }
         // The transparent HUD overlay starts fully clear so the one frame before
         // its first copy shows the 3-D scene, not a black fill; opaque surfaces
-        // start black.
-        let fill: [u8; 4] = if seat.hud {
-            [0, 0, 0, 0]
-        } else {
-            [0, 0, 0, 255]
-        };
+        // start black — see `pane_fill`.
         let image = Image::new_fill(
             Extent3d {
                 width: seat.size.0,
@@ -955,9 +1035,16 @@ fn init_pane_host(world: &mut World) {
                 depth_or_array_layers: 1,
             },
             TextureDimension::D2,
-            &fill,
+            &pane_fill(seat.hud),
             pane_texture_format(seat.hud),
-            RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+            // RENDER_WORLD only (issue #1404): the data is moved out at the
+            // first extract and this asset is never written from the main world
+            // again. Every frame after it is a `write_texture` into the texture
+            // this created — see `super::upload`. A stray `get_mut` on a pane
+            // image would now be an `AlreadyExtracted` error rather than a
+            // silent per-frame texture re-creation, which is the right way
+            // round.
+            RenderAssetUsages::RENDER_WORLD,
         );
         let handle = world.resource_mut::<Assets<Image>>().add(image);
         let canvas = world
@@ -1017,6 +1104,9 @@ fn init_pane_host(world: &mut World) {
             scale: seat.scale,
             window_origin: seat.window_origin,
             copy_failures: 0,
+            staging: pane_staging_pool(seat.size, seat.hud),
+            epoch: 0,
+            needs_full: true,
         });
         if seat.lobby {
             crate::pinfo!(
@@ -1066,6 +1156,7 @@ fn init_pane_host(world: &mut World) {
             window.surface.view.focus();
         }
     }
+    let (recycle_tx, recycle_rx) = channel();
     world.insert_non_send_resource(PaneHost {
         runtime,
         windows,
@@ -1079,6 +1170,8 @@ fn init_pane_host(world: &mut World) {
         router,
         station_cameras,
         lobby_present,
+        recycle_tx,
+        recycle_rx,
     });
 }
 
@@ -1331,6 +1424,10 @@ fn resize_pane_surfaces(
     windows: Query<&Window>,
     mut images: ResMut<Assets<Image>>,
     mut nodes: Query<&mut Node>,
+    // The canvas's image handle is swapped here too (issue #1404): a resize
+    // mints a NEW asset rather than resizing the old one, so the node has to be
+    // pointed at it.
+    mut canvases: Query<&mut ImageNode>,
 ) {
     let Some(mut host) = host else {
         return;
@@ -1386,16 +1483,37 @@ fn resize_pane_surfaces(
         if origin == pane.origin && size == pane.size {
             continue;
         }
-        // Move the view, reallocate the texture it copies into, and resize the
+        // Move the view, mint the texture it copies into afresh, and resize the
         // node that draws it — all three must agree, or `copy_frame` writes a
         // buffer of the wrong length into the image the next frame.
         pane.surface.view_mut().resize(size.0, size.1);
-        if let Some(image) = images.get_mut(&pane.image) {
-            image.resize(Extent3d {
+        // A NEW asset, not `Image::resize` (issue #1404): the pane images are
+        // `RenderAssetUsages::RENDER_WORLD`, so their `data` was moved out at
+        // the first extract and resizing a `data: None` image would leave the
+        // GPU texture at its old size — a silent disagreement that every later
+        // upload would be refused for. Minting one instead gives the render
+        // world a fresh texture at the new size, and the epoch bump is what
+        // makes any frame still in flight against the old one recognisable.
+        let transparent = pane.is_hud_overlay();
+        let handle = images.add(Image::new_fill(
+            Extent3d {
                 width: size.0,
                 height: size.1,
                 depth_or_array_layers: 1,
-            });
+            },
+            TextureDimension::D2,
+            &pane_fill(transparent),
+            pane_texture_format(transparent),
+            RenderAssetUsages::RENDER_WORLD,
+        ));
+        pane.image = handle.clone();
+        pane.epoch += 1;
+        pane.needs_full = true;
+        // The old length is worthless now; a returning buffer of that length is
+        // dropped by the copy loop's drain.
+        pane.staging = pane_staging_pool(size, pane.is_hud_overlay());
+        if let Ok(mut canvas) = canvases.get_mut(pane.canvas) {
+            canvas.image = handle;
         }
         if let Ok(mut node) = nodes.get_mut(pane.canvas) {
             node.left = Val::Px(origin.0 as f32 / pane.scale as f32);
@@ -1813,6 +1931,9 @@ fn drive_panes(
     // overlay every frame it draws, including the first frame after it loads.
     hud_latest: Res<ViewscreenHudLatest>,
     mut images: ResMut<Assets<Image>>,
+    // Where a copied frame is published (issue #1404). The render world empties
+    // this at extract and leaves the previous batch's counts behind.
+    mut pending: ResMut<PanePendingUploads>,
     mut commands: Commands,
     log: Option<Res<LogFilterConfig>>,
     // `--frame-stats` (see `super::frame_stats`): present only on a host asked
@@ -1939,40 +2060,100 @@ fn drive_panes(
     let mut copied = 0usize;
     let mut forced = 0usize;
     let mut pixels = 0u64;
+    let mut starved = 0usize;
+    // Frames copied against a generation the pane no longer has. Zero in this
+    // slice by construction (see `copy_epoch` below); a real count once a pane
+    // thread can copy while the main thread resizes.
+    let mut stale = 0usize;
+    // Buffers the render world (or a discarded frame) finished with since the
+    // last pass go back to their own pane's pool first, so this frame's copies
+    // have something to take. A buffer whose length no longer matches its pane —
+    // the pane resized, or closed and its successor is a different size — is
+    // simply dropped: the pool was refilled at the new length by whoever made
+    // the change.
+    for (pane_id, buffer) in host.recycle_rx.try_iter().collect::<Vec<_>>() {
+        let Some(pane) = host.windows.iter_mut().find(|w| w.id == pane_id) else {
+            continue;
+        };
+        if buffer.len() == pane_buffer_len(pane.size) && pane.staging.len() < PANE_STAGING_CAP {
+            pane.staging.push(buffer);
+        }
+    }
+    let recycle_tx = host.recycle_tx.clone();
     for (index, pane) in host.windows.iter_mut().enumerate() {
-        let Some(image) = images.get_mut(&pane.image) else {
-            continue;
-        };
-        let Some(data) = image.data.as_mut() else {
-            continue;
-        };
         // A push we just made is trusted on its own regardless of what the
         // surface reports: a plain attribute write is real DOM state that
         // changed and Ultralight's dirty-bounds tracking does not always flag
-        // it.
-        let force = pushed_this_frame[index];
+        // it. `needs_full` carries a force the pane could not honour — a fresh
+        // texture, a resize, or an iteration skipped for want of a buffer.
+        let force = pushed_this_frame[index] || pane.needs_full;
+        let Some(mut data) = pane.staging.pop() else {
+            // No buffer free: skip this pane's copy entirely rather than
+            // allocating a full surface on the frame path. Ultralight keeps
+            // unioning its dirty bounds until the next successful copy, so
+            // nothing is *silently* lost — but the frame is, and `lost` says so.
+            starved += 1;
+            pane.needs_full |= force;
+            continue;
+        };
+        // The generation this frame is about to be copied against. Checked
+        // again at publish time below: trivially equal today, because the copy
+        // and the publish are the same statement on the same thread, but it is
+        // the seam the pane thread (slice 5) needs and it is cheaper to have
+        // the check already in place than to remember to add it.
+        let copy_epoch = pane.epoch;
         let copy_started = stamp(clock);
         // The HUD overlay is the one transparent surface and takes the
         // straight-alpha copy; every console is opaque and is moved verbatim
         // into its BGRA texture — see `pane_texture_format`.
         let outcome = if pane.is_hud_overlay() {
-            pane.surface.view.copy_frame(data, force)
+            pane.surface.view.copy_frame(&mut data, force)
         } else {
-            pane.surface.view.copy_frame_bgra(data, force)
+            pane.surface.view.copy_frame_bgra(&mut data, force)
         };
         copy_ms += elapsed_ms(copy_started);
         match outcome {
             Ok(rect) => {
                 pane.copy_failures = 0;
                 if let Some(rect) = rect {
+                    if !frame_is_current(copy_epoch, pane.epoch) {
+                        // The pane was re-minted while this frame was being
+                        // copied, so it describes a surface that no longer
+                        // exists. Let the buffer go — it is the old length, and
+                        // the resize refilled the pool at the new one — and
+                        // leave `needs_full` alone, since the resize set it.
+                        stale += 1;
+                        continue;
+                    }
                     copied += 1;
                     if force {
                         forced += 1;
                     }
                     pixels += rect.pixel_count();
+                    // The force has been honoured: the whole surface is in this
+                    // buffer, so the texture is whole once it lands.
+                    pane.needs_full = false;
+                    pending.uploads.push(PaneUpload {
+                        image: pane.image.id(),
+                        epoch: pane.epoch,
+                        rect,
+                        surface: pane.size,
+                        full: force,
+                        bytes: PaneFrameBuffer::new(pane.id, data, Some(recycle_tx.clone())),
+                        attempts: 0,
+                    });
+                } else {
+                    // Nothing repainted: the buffer never left, so it goes
+                    // straight back rather than round the recycle channel.
+                    pane.staging.push(data);
                 }
             }
             Err(e) => {
+                // The buffer never left, and the force was not honoured — a
+                // push's repaint may not be in Ultralight's own dirty bounds,
+                // so it is carried to the next attempt.
+                pane.staging.push(data);
+                pane.needs_full |= force;
                 pane.copy_failures += 1;
                 crate::pwarn!(
                     log,
@@ -2019,6 +2200,14 @@ fn drive_panes(
             copied,
             forced,
             pixels,
+            // The render world's counts arrive a frame late, left behind by the
+            // extract that collected the previous batch — see
+            // `super::upload::extract_pane_uploads`.
+            uploads: pending.tally.uploaded as usize,
+            uploads_full: pending.tally.uploaded_full as usize,
+            upload_bytes: pending.tally.bytes,
+            deferred: pending.tally.deferred as usize,
+            lost: starved + stale + pending.tally.dropped as usize,
         });
     }
 
@@ -2343,10 +2532,12 @@ fn make_pane_view(
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
-        &[0, 0, 0, 255],
         // `transparent: false` above: an opaque console, copied verbatim.
+        &pane_fill(false),
         pane_texture_format(false),
-        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+        // RENDER_WORLD only — see the note at `init_pane_host`'s twin of this
+        // call, and `super::upload`.
+        RenderAssetUsages::RENDER_WORLD,
     );
     let handle = images.add(image);
     let mut canvas = commands.spawn((
@@ -2378,6 +2569,10 @@ fn make_pane_view(
         scale,
         window_origin,
         copy_failures: 0,
+        // `transparent: false` above: an opaque console's fill.
+        staging: pane_staging_pool(size, false),
+        epoch: 0,
+        needs_full: true,
     })
 }
 

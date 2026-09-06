@@ -595,10 +595,23 @@ the ship.
 `--frame-stats --log info` logs one line a second from
 `src/native_host/panes/frame_stats.rs`: the Bevy frame period, the five
 `drive_panes` phases (update / pump / render / copy / publish), panes copied
-and forced whole, megapixels copied, `Image` assets Bevy was told changed
-(each one is a full GPU texture re-creation on the render thread),
-`FixedUpdate` ticks per frame and their cost, and the residual the render
-thread accounts for. The `PHOENIX_FRAME_EXPERIMENTS` variable (`novsync`,
+and forced whole, megapixels copied, the pane frames uploaded to the GPU and
+what they cost (`uploads`, `MB/frame`, `deferred`, `lost`), `Image` assets Bevy
+was told changed, `FixedUpdate` ticks per frame and their cost, and the residual
+the render thread accounts for.
+
+Two of those numbers changed meaning with issue #1404. `image assets changed`
+used to be the pane count, and each such event **was** a full GPU texture
+re-creation and bind-group eviction on the render thread — that was the whole
+reason to measure it. It no longer counts any pane: a pane image is minted
+`RenderAssetUsages::RENDER_WORLD` and is never written from the main world
+again, and a copied frame reaches the GPU as a `write_texture` of its dirty
+rectangle into the texture bevy_ui is already sampling
+(`src/native_host/panes/upload.rs`). The pane's share of that line is what
+`uploads` is now, and `lost` — a copy skipped for want of a staging buffer, or
+a frame the render world had to drop — is the number that should read 0.0.
+
+The `PHOENIX_FRAME_EXPERIMENTS` variable (`novsync`,
 `raf33`) switches one suspected cost off per run so the lines can be
 compared; the toggles are scaffolding for the multi-screen
 frame-rate investigation and go once the fixes land. Every clock read is

@@ -23,8 +23,14 @@
 //!   (the rest of the copy loop, chiefly marking the `Image` asset changed);
 //! * how many panes copied, how many were forced whole, and the pixels copied
 //!   per frame;
+//! * how many frames reached the GPU as a `write_texture` of their dirty
+//!   rectangle, the bytes those writes moved, how many were deferred for a
+//!   texture not yet created, and how many were **lost** — a copy skipped for
+//!   want of a staging buffer, or a frame the render world dropped (issue
+//!   #1404, `super::upload`);
 //! * how many `Image` assets Bevy was told changed per frame — each one is a
-//!   full GPU texture re-creation on the render thread;
+//!   full GPU texture re-creation on the render thread. Since #1404 **none of
+//!   them is a pane**: a pane texture is written in place;
 //! * how many `FixedUpdate` ticks a frame unpacked into and what they cost;
 //! * the **residual**: frame period minus everything above. With pipelined
 //!   rendering the main thread blocks until the render thread has finished
@@ -196,6 +202,32 @@ pub struct PaneFrameSample {
     pub forced: usize,
     /// Pixels written across every pane.
     pub pixels: u64,
+    /// Frames the render world wrote into a pane texture (issue #1404) —
+    /// counted a frame late, because the tally comes back at the next extract.
+    pub uploads: usize,
+    /// How many of `uploads` carried the whole surface — the upload twin of
+    /// `forced`. A `forced` with no `uploads_full` behind it is a whole-surface
+    /// repaint that never landed.
+    pub uploads_full: usize,
+    /// Bytes those writes moved.
+    pub upload_bytes: u64,
+    /// Frames the render world put aside because their texture did not exist
+    /// yet.
+    ///
+    /// This should be **rare**, not routine: an `Image` added in `PreUpdate` or
+    /// `Update` is extracted and prepared in the same frame, so a pane's texture
+    /// normally exists by the time its first frame arrives. A non-zero
+    /// `deferred` is a symptom worth chasing, not the ordinary cost of opening
+    /// or resizing a pane.
+    pub deferred: usize,
+    /// Frames that never reached a texture: a copy skipped because the pane's
+    /// buffer pool was empty, a frame dropped at publish because a resize had
+    /// moved the pane's epoch under it (zero by construction while the copy
+    /// runs on the main thread; real once it crosses the pane thread), plus
+    /// anything the render world dropped. **The number that should be zero** —
+    /// a non-zero `lost` is a pane whose dirty pixels went nowhere, which shows
+    /// as a stale patch on a console.
+    pub lost: usize,
 }
 
 impl PaneFrameSample {
@@ -311,6 +343,11 @@ impl FrameStatsWindow {
             copied: per_frame(self.panes.iter().map(|s| s.copied as f64).sum()),
             forced: per_frame(self.panes.iter().map(|s| s.forced as f64).sum()),
             megapixels: per_frame(self.panes.iter().map(|s| s.pixels as f64).sum()) / 1.0e6,
+            uploads: per_frame(self.panes.iter().map(|s| s.uploads as f64).sum()),
+            uploads_full: per_frame(self.panes.iter().map(|s| s.uploads_full as f64).sum()),
+            upload_mb: per_frame(self.panes.iter().map(|s| s.upload_bytes as f64).sum()) / 1.0e6,
+            deferred: per_frame(self.panes.iter().map(|s| s.deferred as f64).sum()),
+            lost: per_frame(self.panes.iter().map(|s| s.lost as f64).sum()),
             modified: per_frame(self.modified.iter().map(|m| f64::from(*m)).sum()),
             ticks,
             fixed_ms,
@@ -338,6 +375,16 @@ pub struct PaneFrameReport {
     pub copied: f64,
     pub forced: f64,
     pub megapixels: f64,
+    /// Pane frames written into their textures, per frame (issue #1404).
+    pub uploads: f64,
+    /// How many of those carried the whole surface — `forced`'s upload twin.
+    pub uploads_full: f64,
+    /// Megabytes those writes moved, per frame.
+    pub upload_mb: f64,
+    /// Frames the render world held back for a texture not yet created.
+    pub deferred: f64,
+    /// Frames whose pixels went nowhere — the number that should be zero.
+    pub lost: f64,
     /// `Image` assets reported changed, per frame.
     pub modified: f64,
     pub ticks: f64,
@@ -356,6 +403,7 @@ impl fmt::Display for PaneFrameReport {
             "frame stats: {:.2} s, {} frames | frame {:.1} ms mean, {:.1} p95, {:.1} max ({:.1} fps) \
              | panes {:.1}: update {}, pump {}, render {}, copy {}, publish {} ms (mean/p95; \
              {:.1} ms/frame) | copied {:.1}/frame, forced {:.1}, {:.2} Mpx/frame \
+             | uploads {:.1}/frame ({:.1} full), {:.2} MB/frame, deferred {:.1}, lost {:.1} \
              | image assets changed {:.1}/frame | fixed {:.1} ticks/frame, {:.1} ms/frame{} \
              | residual {:.1} ms/frame",
             self.elapsed_s,
@@ -374,6 +422,11 @@ impl fmt::Display for PaneFrameReport {
             self.copied,
             self.forced,
             self.megapixels,
+            self.uploads,
+            self.uploads_full,
+            self.upload_mb,
+            self.deferred,
+            self.lost,
             self.modified,
             self.ticks,
             self.fixed_ms,
@@ -429,8 +482,16 @@ pub fn mark_fixed_loop_end(stats: Option<ResMut<PaneFrameStats>>, tick: Option<R
 }
 
 /// Count the `Image` assets Bevy was told changed. Each such event is a full
-/// GPU texture re-creation on the render thread, so this is the number any fix
-/// that keeps a pane texture in place (#1404) is judged by.
+/// GPU texture re-creation on the render thread, and this is the number the fix
+/// that keeps a pane texture in place (#1404) was judged by.
+///
+/// **The pane share of it is gone.** Since #1404's first slice a pane frame is
+/// a `write_texture` into a `RenderAssetUsages::RENDER_WORLD` image that is
+/// never written from the main world again (`super::upload`), so no pane raises
+/// a `Modified` event at all. The ~11 per frame that remain on the four-screen
+/// rig are somebody else's — the ordinary asset traffic of a running mission —
+/// and a pane texture appearing here again would be a regression of exactly
+/// this fix.
 pub fn count_image_modified(
     mut events: MessageReader<AssetEvent<Image>>,
     stats: Option<ResMut<PaneFrameStats>>,
@@ -565,6 +626,11 @@ mod tests {
                 copied: 4,
                 forced: 2,
                 pixels: 1_000_000,
+                uploads: 3,
+                uploads_full: 1,
+                upload_bytes: 2_000_000,
+                deferred: 1,
+                lost: 2,
             });
             window.push_fixed(FixedLoopSample { ms: 12.0, ticks: 6 });
             window.push_modified(4);
@@ -585,6 +651,11 @@ mod tests {
         assert_eq!(report.copied, 4.0);
         assert_eq!(report.forced, 2.0);
         assert_eq!(report.megapixels, 1.0);
+        assert_eq!(report.uploads, 3.0);
+        assert_eq!(report.uploads_full, 1.0);
+        assert_eq!(report.upload_mb, 2.0);
+        assert_eq!(report.deferred, 1.0);
+        assert_eq!(report.lost, 2.0);
         assert_eq!(report.modified, 4.0);
         assert_eq!(report.ticks, 6.0);
         assert_eq!(report.fixed_ms, 12.0);
@@ -608,6 +679,11 @@ mod tests {
             "copied 4.0/frame",
             "forced 2.0",
             "1.00 Mpx/frame",
+            "uploads 3.0/frame",
+            "(1.0 full)",
+            "2.00 MB/frame",
+            "deferred 1.0",
+            "lost 2.0",
             "image assets changed 4.0/frame",
             "fixed 6.0 ticks/frame",
             "(2.00 ms/tick)",

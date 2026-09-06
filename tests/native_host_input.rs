@@ -30,6 +30,15 @@
 //! acceptance kit's job (`docs/acceptance/1124-input.md`). The routing *logic*
 //! for both is covered by the pure tests in
 //! `src/native_host/input_routing_tests.rs`, which run in ordinary CI.
+//!
+//! It also cannot prove anything about the **upload path** (issue #1404): the
+//! app below is built around `PaneDisplayPlugin` alone, so nothing ever drains
+//! `PanePendingUploads`. Each pane copies exactly its pool's worth of frames and
+//! is `starved` from then on. That is harmless for the routing and focus
+//! assertions made here — they do not look at pixels — but it does mean the
+//! copy-and-upload path is exercised for only the first few frames, and is
+//! covered properly by `tests/native_pane_upload_gpu.rs` and the unit tests in
+//! `src/native_host/panes/upload.rs`.
 
 #![cfg(all(feature = "ultralight", not(target_arch = "wasm32")))]
 

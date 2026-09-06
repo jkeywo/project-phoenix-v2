@@ -55,6 +55,7 @@
 //! | audience projection | **phoenix** ([`routing`]) | ditto |
 //! | which of the host's inputs reach a page | **phoenix** ([`ultralight`]) | void-and-thunder deliberately withholds the keyboard; a console has form fields |
 //! | the document, and what is injected into it | **phoenix** ([`document`]) | void-and-thunder `include_str!`s its own page; a pane loads the shipped client |
+//! | a copied frame → the GPU, in place | **phoenix** ([`upload`]) | vellum hands over bytes and a dirty rectangle; how a *Bevy* texture takes them without being re-created is engine-specific (issue #1404) |
 //!
 //! # What is testable without an SDK, and why that matters
 //!
@@ -89,6 +90,7 @@ pub mod registry;
 pub mod routing;
 pub mod surface;
 pub mod transport;
+pub mod upload;
 
 #[cfg(feature = "ultralight")]
 pub mod ultralight;

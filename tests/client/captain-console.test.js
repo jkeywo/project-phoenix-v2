@@ -78,7 +78,7 @@ describe('battleship captain renderStation', () => {
 
   const base = {
     camera_views: ['camera_fore', 'cinematic'], view_direction: 'camera_fore', viewscreen_auto: true,
-    red_alert: true, weapons_hold: false, red_alert_auto: false,
+    red_alert: true, red_alert_auto: false,
     objectives: [{ id: 'o1', text: 'Hold the line', status: 'active' }], boosted_objective_id: 'o1',
     own_hull: { pct: 0.8 },
     blips: [{ uuid: 'e1' }],
@@ -88,7 +88,7 @@ describe('battleship captain renderStation', () => {
   it('drives camera, red-alert and objectives from the flat payload', () => {
     battleshipRender(base, document);
     expect(el('camera-select').state).toEqual({ views: ['camera_fore', 'cinematic'], current_view: 'camera_fore', auto: true });
-    expect(el('red-alert').state).toEqual({ active: true, hold: false, auto: false });
+    expect(el('red-alert').state).toEqual({ active: true, auto: false });
     expect(el('objective-list').state).toEqual({ objectives: base.objectives, boosted_objective_id: 'o1' });
   });
 
@@ -125,7 +125,7 @@ describe('cruiser captain renderStation', () => {
 
   const base = {
     camera_views: ['camera_fore'], view_direction: 'camera_fore', viewscreen_auto: false,
-    red_alert: false, weapons_hold: false, red_alert_auto: false,
+    red_alert: false, red_alert_auto: false,
     objectives: [], boosted_objective_id: null,
     deadlines: [{ id: 'd1' }],
     own_hull: { pct: 1 },
@@ -160,7 +160,7 @@ describe('cruiser captain renderStation', () => {
 describe('destroyer captain renderStation', () => {
   beforeEach(() => mount(FIXTURES.destroyer));
 
-  const cap = { camera_views: ['camera_fore'], view_direction: 'camera_fore', viewscreen_auto: true, red_alert: false, weapons_hold: false, red_alert_auto: true, objectives: [{ id: 'o1' }], boosted_objective_id: null, deadlines: [{ id: 'd1' }] };
+  const cap = { camera_views: ['camera_fore'], view_direction: 'camera_fore', viewscreen_auto: true, red_alert: false, red_alert_auto: true, objectives: [{ id: 'o1' }], boosted_objective_id: null, deadlines: [{ id: 'd1' }] };
   const sensors = { blips: [{ uuid: 's1' }], scan: { text: 'hull breach' }, target_uuid: 's1', target_name: 'Raider', sensors_auto: true };
   const payload = {
     systems: { captain: cap, 'red-alert': cap, viewscreen: cap, sensors, 'sensor-radar': sensors },
@@ -170,7 +170,7 @@ describe('destroyer captain renderStation', () => {
   it('reads the captain view via projected Console Family', () => {
     destroyerRender(payload, document);
     expect(el('camera-select').state).toEqual({ views: ['camera_fore'], current_view: 'camera_fore', auto: true });
-    expect(el('red-alert').state).toEqual({ active: false, hold: false, auto: true });
+    expect(el('red-alert').state).toEqual({ active: false, auto: true });
     expect(el('objective-list').state).toEqual({ objectives: [{ id: 'o1' }], boosted_objective_id: null });
   });
 
@@ -206,7 +206,7 @@ describe('destroyer captain renderStation', () => {
 describe('courier captain renderStation', () => {
   beforeEach(() => mount(FIXTURES.courier));
 
-  const command = { camera_views: ['camera_fore', 'camera_aft', 'cinematic'], view_direction: 'cinematic', viewscreen_auto: false, red_alert: true, weapons_hold: true, red_alert_auto: false, objectives: [{ id: 'o1' }], boosted_objective_id: 'o1' };
+  const command = { camera_views: ['camera_fore', 'camera_aft', 'cinematic'], view_direction: 'cinematic', viewscreen_auto: false, red_alert: true, red_alert_auto: false, objectives: [{ id: 'o1' }], boosted_objective_id: 'o1' };
   const shields = { facings: [{ id: 'fore' }], focused_facing: 'fore', shields_auto: true, threat_bearing: 45.4 };
   const power = { consoles: [{ id: 'reactor' }], power_auto: true, battery_charge: 40, battery_max: 100, battery_online: true, charging: true };
   const repair = { overall_hull: { pct: 0.7, destroyed_pct: 0.1 }, teams: [{ id: 't1' }], repair_auto: false, dispatch_targets: [{ id: 'x' }], damaged_systems: [{ id: 'y' }] };

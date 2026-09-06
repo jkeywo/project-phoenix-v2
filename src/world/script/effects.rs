@@ -741,24 +741,54 @@ pub(crate) fn register_effects(engine: &mut HostRegistry) {
             });
         });
     }
-    // The tactical restraint lever, from the scenario's side (issue #1041).
-    // Two verbs rather than one setter, for the reason the strike hooks above
-    // are two and `repair_infrastructure`/`damage_infrastructure` are two: the
-    // direction lives in the name, so a scenario cannot arm a ship it meant to
-    // silence by getting a boolean the wrong way round.
+    // The tactical restraint lever, from the scenario's side (issues #1041,
+    // #1398). Two verbs rather than one setter, for the reason the strike hooks
+    // above are two and `repair_infrastructure`/`damage_infrastructure` are two:
+    // the direction lives in the name, so a scenario cannot arm a ship it meant
+    // to silence by getting a boolean the wrong way round.
     //
-    // ONE command each, unlike the strike hooks: the mirror flag
-    // (`weapons_hold.<name>`) is written off the authoritative component by
-    // `mirror_weapons_hold_flags`, because a weapons hold has a second author —
-    // the ship's own captain — and a flag pushed here would have covered the
-    // scenario's orders and silently missed the crew's.
-    for (name, held) in [("hold_fire", true), ("release_fire", false)] {
+    // THE VERBS ARE POWER ORDERS since issue #1398. They kept their names — a
+    // scenario says "hold fire", not "command the weapons group to zero" — and
+    // lost the per-ship boolean they used to write. What they push now is a
+    // reactor order on the ship's `weapons` group, applied by
+    // `ship::power::drain_scripted_power_orders` through the same
+    // `PowerSystem::set_group_allocation` an Engineering officer's console
+    // command reaches. Two consequences a scenario author should know:
+    //
+    //   * A hull can REFUSE. `set_group_allocation` clamps to the group's own
+    //     authored `[power_groups.weapons] min_level`, so `hold_fire` silences a
+    //     hull that authors `min_level = 0` and leaves one that authors `1`
+    //     shooting. Which hulls may be taken cold is a designer's decision in
+    //     the entity TOML, not this vocabulary's.
+    //   * `release_fire` restores the group's authored `default_level` rather
+    //     than a number written here, so a hull that boots its weapons at 3 gets
+    //     3 back.
+    //
+    // ONE command each, and still no flag pushed beside it: the mirror
+    // (`weapons_cold.own_ship` / `weapons_cold.<name>`) is written off the
+    // ship's own reactor by `ship::power::mirror_weapons_cold_flags`, because
+    // the reactor has a second author — the crew's Engineering officer — and a
+    // flag pushed here would have covered the scenario's orders and silently
+    // missed theirs.
+    for (name, level) in [
+        (
+            "hold_fire",
+            crate::modifiers::power_system::ScriptedPowerLevel::Exact(0),
+        ),
+        (
+            "release_fire",
+            crate::modifiers::power_system::ScriptedPowerLevel::AuthoredDefault,
+        ),
+    ] {
         engine.register_fn(
             name,
             move |sink: &mut EffectSink, entity: ImmutableString| {
-                sink.push(ActionCmd::SetWeaponsHold {
+                sink.push(ActionCmd::SetGroupPower {
                     entity: entity.to_string(),
-                    held,
+                    group: crate::core::messages::PowerGroupId(
+                        crate::modifiers::power_system::WEAPONS_POWER_GROUP.to_string(),
+                    ),
+                    level,
                 });
             },
         );

@@ -187,7 +187,10 @@ describe('safe and atomic import', () => {
 
   it('rejects overlapping conflicts and malformed slot counts atomically', () => {
     for (const mutate of [
-      (profile) => { profile.bindings['captain.red-alert'][0] = { code: 'KeyH' }; },
+      // KeyV is `captain.view`'s default slot-0 binding, so this collides inside
+      // the Captain context. (It was KeyH until issue #1398 retired
+      // `captain.weapons-hold` and freed that key.)
+      (profile) => { profile.bindings['captain.red-alert'][0] = { code: 'KeyV' }; },
       (profile) => { profile.bindings['captain.red-alert'] = [{ code: 'KeyY' }]; },
     ]) {
       const registry = createClientSemanticActionRegistry();
@@ -204,21 +207,26 @@ describe('safe and atomic import', () => {
   it('preserves imported remaps over defaults for actions added later', () => {
     const registry = createClientSemanticActionRegistry();
     const profile = createDefaultOperatorProfile(registry);
-    profile.bindings['captain.red-alert'][0] = { code: 'KeyH' };
-    delete profile.bindings['captain.weapons-hold'];
+    // The imported profile takes the key the "later" action defaults to, so
+    // restoring that default would collide — which is what makes the defaults
+    // get cleared rather than merged. `captain.view` is a real registered
+    // action, which is what makes this branch reachable at all;
+    // `captain.weapons-hold` played the part until issue #1398 retired it.
+    profile.bindings['captain.red-alert'][0] = { code: 'KeyV' };
+    delete profile.bindings['captain.view'];
 
     const result = prepareOperatorProfileImport(JSON.stringify(profile), { registry });
     expect(result.status).toBe('imported');
     expect(result.profile.bindings['captain.red-alert'][0]).toMatchObject({
-      type: 'keyboard', code: 'KeyH',
+      type: 'keyboard', code: 'KeyV',
     });
-    expect(result.profile.bindings['captain.weapons-hold']).toEqual([null, null]);
+    expect(result.profile.bindings['captain.view']).toEqual([null, null]);
     expect(result.diagnostics).toContainEqual({
       code: 'new-action-defaults-cleared', count: 1,
     });
     expect(applyOperatorProfile(result.profile, registry).status).toBe('applied');
-    expect(registry.action('captain.red-alert').bindings[0].code).toBe('KeyH');
-    expect(registry.action('captain.weapons-hold').bindings).toEqual([null, null]);
+    expect(registry.action('captain.red-alert').bindings[0].code).toBe('KeyV');
+    expect(registry.action('captain.view').bindings).toEqual([null, null]);
   });
 
   it('ignores unknown and prototype-named action entries without pollution', () => {

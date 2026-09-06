@@ -1195,7 +1195,7 @@ description = "entity.alliance_destroyer.station.engineering.description"
 rank = "Ltn."
 short_code = "ENG"
 console = "gui/destroyer/engineering.html"
-manual_overview = "You keep the destroyer running and, on this hull, you also mind the shields. Allocate reactor power between helm, weapons, and shields, focus a shield arc against the bearing you are taking fire from, and dispatch repair teams by priority. You also work the ship's coupling gear: a tractor beam to take a crippled craft under tow, a transfer umbilical to pass supplies across a dock the Helm has made, and a field dispatch to send a repair team across to an ally or structure. The generated Shields section below reads this ship's real arc strength and regen. Simplified rating lets the AI run the repair teams."
+manual_overview = "You keep the destroyer running and, on this hull, you also mind the shields. Allocate reactor power between helm, weapons, and shields, focus a shield arc against the bearing you are taking fire from, and dispatch repair teams by priority. Weapons is the one group you may switch off entirely: take it to LVL 0 and the guns go COLD, which is how this ship shows restraint without standing down from Red Alert — and anyone with sensors on you can see it. You also work the ship's coupling gear: a tractor beam to take a crippled craft under tow, a transfer umbilical to pass supplies across a dock the Helm has made, and a field dispatch to send a repair team across to an ally or structure. The generated Shields section below reads this ship's real arc strength and regen. Simplified rating lets the AI run the repair teams."
 
 [[station.rating]]
 name = "Std"

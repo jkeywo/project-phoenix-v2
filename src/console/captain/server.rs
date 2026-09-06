@@ -1,13 +1,11 @@
 use bevy::prelude::*;
 
-use crate::authoritative::{DeclareState, StateClass};
 use crate::command_admission::ai_emit::emit_ai_command;
 use crate::core::messages::{
     ActionFeedbackOutcome, AdmittedCommand, AdmittedCommands, CameraView, CaptainBlackboard,
     DeliveryClass, ObjectiveSnapshot, ServerMessage, SystemBlackboard, SystemControlPayload,
     SystemId, ViewMode,
 };
-use crate::effect_queue::EffectQueue;
 use crate::objectives::WorldConditions;
 use crate::ship::combat_activity::RecentCombatActivity;
 use crate::ship::control_source::ControlSource;
@@ -46,16 +44,6 @@ impl Plugin for CaptainPlugin {
             crate::ship::system_registry::VIEWSCREEN_KIND,
         ));
         app.init_resource::<crate::server_app::CaptainPriorityBoost>();
-        // The scripted weapons-hold queue `apply_scripted_weapons_holds` drains
-        // (issue #1223), registered and declared at this owning site. A transient
-        // inter-system queue — drained in full every tick, empty at every
-        // fold/snapshot boundary — so `ClearedAtFold`. Payload is `(ship uuid,
-        // held)`, resolved from the authored entity name by the applier.
-        app.init_resource::<EffectQueue<(String, bool)>>()
-            .declare_state::<EffectQueue<(String, bool)>>(
-                StateClass::ClearedAtFold,
-                "digest-exclusion-classes",
-            );
         // The ONE shared AI decision cadence (issues #889, #895).
         crate::ai::cadence::register_ai_cadence(app);
         app.add_systems(
@@ -84,15 +72,6 @@ impl Plugin for CaptainPlugin {
                 handle_set_red_alert
                     .in_set(crate::sim_sets::SimSet::Input)
                     .in_set(crate::sim_sets::RedAlertApplied),
-                handle_set_weapons_hold.in_set(crate::sim_sets::SimSet::Input),
-                // The scenario's half of the same lever, and its mirror. Both
-                // in `Modifiers`, chained: a scripted order lands and is
-                // mirrored in the same tick, so an `on_flag_set` handler
-                // chaining off it fires on the next pipeline pass exactly as a
-                // captain's press does.
-                (apply_scripted_weapons_holds, mirror_weapons_hold_flags)
-                    .chain()
-                    .in_set(crate::sim_sets::SimSet::Modifiers),
                 handle_set_view.in_set(crate::sim_sets::SimSet::Input),
                 handle_set_objective_priority.in_set(crate::sim_sets::SimSet::Input),
                 crate::ship::combat_activity::update_combat_activity
@@ -184,196 +163,6 @@ pub(crate) fn handle_set_red_alert(
                 finish_action_feedback(cmd, &mut outbound, ActionFeedbackOutcome::Applied);
             }
         }
-    }
-}
-
-/// Applies `SetWeaponsHold { held }` commands from every ship's own
-/// `AdmittedCommands` to that ship's own `ShipWeaponsHold` (issue #1041) — the
-/// tactical restraint lever.
-///
-/// A deliberate twin of [`handle_set_red_alert`] above, down to the assign-not-
-/// invert semantics and the per-entity dispatch. It runs on the SAME
-/// `red-alert` admitted target, which is what makes the lever available on
-/// every hull that already has the alert: an NPC's Red Alert system is
-/// provisioned AI-only at spawn, so a scenario ordering a Harrow to hold fire
-/// needs no new capability on the hull and no new registration here.
-///
-/// Nothing in this handler decides whether the ship then fires. It writes one
-/// boolean; the suppression happens where every other firing decision happens,
-/// in the bank's own authored predicate reading the fact the hosts seed from
-/// [`crate::console::weapons::WeaponsAlertPosture`].
-fn handle_set_weapons_hold(
-    mut ship_query: Query<
-        (&AdmittedCommands, &mut crate::ship::state::ShipWeaponsHold),
-        With<crate::server_app::Ship>,
-    >,
-    mut outbound: Option<
-        ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
-    >,
-) {
-    for (admitted, mut hold) in ship_query.iter_mut() {
-        for cmd in admitted.for_target(crate::ship::system_registry::RED_ALERT_SYSTEM_ID) {
-            if let SystemControlPayload::SetWeaponsHold { held } = cmd.payload {
-                hold.0 = held;
-                finish_action_feedback(cmd, &mut outbound, ActionFeedbackOutcome::Applied);
-            }
-        }
-    }
-}
-
-/// Drain the scenario's queued `hold_fire` / `release_fire` orders onto their
-/// ships (issue #1041).
-///
-/// The scripted twin of [`handle_set_weapons_hold`] above, and it writes the
-/// SAME state: a scenario ordering a hull to hold fire and a captain pressing
-/// the button leave the ship in one place, so the fire hosts have one thing to
-/// read and the mirror below has one thing to publish.
-///
-/// It writes the component directly rather than manufacturing an admitted
-/// command, which is the shape every other scripted world effect already has
-/// (`destroy_entity`, `damage_infrastructure`, `set_workforce_disposition`).
-/// Admission is the boundary between an OPERATOR and the ship — human or AI,
-/// the same table either way — and the world is not an operator. What it is not
-/// is a bypass: nothing here decides whether the ship fires, only what its
-/// posture is, and the posture is then read through the same authored predicate
-/// a captain's order is.
-pub fn apply_scripted_weapons_holds(
-    // The scripted weapons-hold queue, extracted off `WorldContentRuntime` (issue
-    // #1223) and owned by `CaptainPlugin`; this is its drain. `Option` so a
-    // reduced test app that runs this system without the registering plugin is a
-    // no-op rather than a panic — the same defensiveness the former
-    // `Option<ResMut<WorldContentRuntime>>` had.
-    weapons_holds_queue: Option<ResMut<EffectQueue<(String, bool)>>>,
-    mut ships: Query<
-        (
-            &crate::entities::spawner::EntityUuid,
-            &mut crate::ship::state::ShipWeaponsHold,
-        ),
-        With<crate::server_app::Ship>,
-    >,
-) {
-    let Some(mut weapons_holds_queue) = weapons_holds_queue else {
-        return;
-    };
-    // A `Deref` read, so a world that queues nothing never marks the queue
-    // changed — the `tick_operations` precedent.
-    if weapons_holds_queue.0.is_empty() {
-        return;
-    }
-    let queued = std::mem::take(&mut weapons_holds_queue.0);
-    for (uuid, held) in queued {
-        let mut found = false;
-        for (ship_uuid, mut hold) in ships.iter_mut() {
-            if ship_uuid.0 == uuid {
-                hold.0 = held;
-                found = true;
-            }
-        }
-        if !found {
-            bevy::log::warn!(
-                "scripted weapons hold for '{uuid}': no ship with that uuid is in \
-                 the world — ignoring"
-            );
-        }
-    }
-}
-
-/// Mirror every ship's authoritative weapons hold into the world flag store
-/// (issue #1041), so scenario script can read the posture and react to it.
-///
-/// Imitates issue #1035's `workforce.<id>.on_strike` deliberately: the
-/// component stays authoritative, the flag is a MIRROR of it, and script reads
-/// the mirror. Two keys are written — `weapons_hold.own_ship` for the hull the
-/// crew fly, and `weapons_hold.<name>` for any ship carrying an authored
-/// reference name. The role key exists because a world's player hull is not
-/// required to declare a name (`falling_skyway.toml` gives its `player-ship` an
-/// `id` and no `name`), and "has the crew held fire?" is exactly the question a
-/// scenario wants to ask.
-///
-/// The transition is decided from the store's own `(before, after)` and the
-/// event pushed onto `pending_world_events`, exactly as
-/// `infrastructure::server::mirror_flags` does — so an
-/// `on_flag_set("weapons_hold.own_ship", …)` handler chains off the crew's
-/// order on the next pipeline pass, through machinery that was already there.
-///
-/// `Changed<ShipWeaponsHold>` rather than every ship every tick: insertion
-/// counts as a change, so each ship's flag is written once at spawn and then
-/// only when its posture actually moves. Rows are sorted by flag name before
-/// anything is written, so the order of the emitted events is a function of the
-/// content and never of archetype iteration order.
-pub fn mirror_weapons_hold_flags(
-    runtime: Option<ResMut<crate::world::server::WorldContentRuntime>>,
-    ships: Query<
-        (
-            &crate::ship::state::ShipWeaponsHold,
-            Option<&crate::entities::spawner::EntityName>,
-            bevy::ecs::query::Has<crate::server_app::LocalShip>,
-        ),
-        (
-            With<crate::server_app::Ship>,
-            Changed<crate::ship::state::ShipWeaponsHold>,
-        ),
-    >,
-) {
-    let Some(mut runtime) = runtime else {
-        return;
-    };
-    if ships.is_empty() {
-        return;
-    }
-    let mut writes: Vec<(String, bool)> = Vec::new();
-    for (hold, name, is_local) in ships.iter() {
-        if is_local {
-            writes.push((
-                crate::ship::state::OWN_SHIP_WEAPONS_HOLD_FLAG.to_string(),
-                hold.0,
-            ));
-        }
-        if let Some(name) = name {
-            writes.push((crate::ship::state::weapons_hold_flag(&name.0), hold.0));
-        }
-    }
-    writes.sort();
-    // The store is READ first and written only on a real transition, and that
-    // is not an optimisation — it is what keeps a world nobody pulls the lever
-    // in byte-identical.
-    //
-    // `Changed<ShipWeaponsHold>` fires on INSERTION as well as on assignment,
-    // so every ship in the world reaches this loop on the tick it spawns. The
-    // first draft wrote each of those through `DerefMut`, which marked
-    // `WorldContentRuntime` changed on every spawn — and change detection on
-    // that resource is read elsewhere, so a world that spawns anything
-    // mid-run saw its behaviour move. `probe_radiation.toml`, which spawns three
-    // radiation bands and a stricken hauler while a tow is running, is where
-    // that showed up: its committed digest moved with the lever untouched.
-    //
-    // Reading first costs a hash lookup and means the overwhelmingly common
-    // case — a released hold whose flag is already absent — takes no mutable
-    // borrow at all.
-    let pending: Vec<(String, bool)> = writes
-        .into_iter()
-        .filter(|(flag, held)| runtime.flags.flag(flag) != *held)
-        .collect();
-    if pending.is_empty() {
-        return;
-    }
-    for (flag, held) in pending {
-        if held {
-            runtime.flags.set_flag(&flag);
-        } else {
-            runtime.flags.clear_flag(&flag);
-        }
-        runtime.pending_world_events.push(if held {
-            crate::world::content::WorldEvent::FlagSet {
-                name: flag,
-                origin_layer: None,
-            }
-        } else {
-            crate::world::content::WorldEvent::FlagCleared {
-                name: flag,
-                origin_layer: None,
-            }
-        });
     }
 }
 
@@ -864,9 +653,6 @@ fn publish_captain_blackboard(
         (
             &ShipSystemControlSources,
             Option<&crate::ship::state::ShipRedAlert>,
-            // The restraint lever (issue #1041), replicated onto the same
-            // console that raises the alert.
-            Option<&crate::ship::state::ShipWeaponsHold>,
             Option<&crate::ship::state::ShipViewMode>,
             Option<&crate::entities::spawner::EntitySystemHull>,
             Option<&crate::entities::spawner::EntityUuid>,
@@ -880,7 +666,6 @@ fn publish_captain_blackboard(
     for (
         control_sources,
         red_alert_comp,
-        weapons_hold_comp,
         view_mode_comp,
         hull_opt,
         uuid_opt,
@@ -890,7 +675,6 @@ fn publish_captain_blackboard(
     ) in ship_query.iter_mut()
     {
         let red_alert = red_alert_comp.map(|ra| ra.0).unwrap_or(false);
-        let weapons_hold = weapons_hold_comp.map(|h| h.0).unwrap_or(false);
 
         let (hull_fraction, hull_integrity_pct) = hull_opt
             .map(|h| {
@@ -1028,7 +812,6 @@ fn publish_captain_blackboard(
             red_alert,
             red_alert_system_id: crate::ship::system_registry::red_alert_system_id(),
             red_alert_auto,
-            weapons_hold,
             viewscreen_system_id,
             viewscreen_auto,
             view_direction,

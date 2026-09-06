@@ -794,7 +794,6 @@ mod tests {
             entity.physics = Some([1.0, 2.0, 3.0, 0.5, 40.0, 0.1, 0.0, 0.0]);
             entity.hull = Some(vec![("captain".to_string(), 3.0, 500.0)]);
             entity.red_alert = Some(true);
-            entity.weapons_hold = Some(true);
             entity.control = Some(crate::snapshot::ControlState {
                 thrust: 1.0,
                 steering: -1.0,

@@ -8,6 +8,7 @@ entities:
       rationale:
         - A state-setting control is idempotent, unlike a toggle command that can be applied twice or arrive after the displayed state changes.
         - The control remains read-only while the red-alert system is AI-controlled.
+        - "[ai] Issue #1398: RED ALERT IS THE CAPTAIN'S ONLY FIRING-POSTURE LEVER. The Weapons Hold button that sat beside it from issue #1041 is gone, with its semantic action, its KeyH binding, its set_weapons_hold command and its blackboard replica. Restraint is expressed by POWER now, so the control that expresses it is Engineering's — see weapons-cold-fire-gate and scripted-weapons-restraint-orders — and a captain reading this panel reads one posture rather than two that had to be composed in their head."
     architecture:
       kind: client-interface
       authority: non-authoritative
@@ -41,42 +42,6 @@ entities:
       paths: [src/ship/state.rs, src/console/captain/server.rs]
       symbols: [ShipRedAlert]
 
-  - state: authoritative-weapons-hold-state
-    core:
-      status: implemented
-      confidence: confirmed
-      title: Authoritative Weapons Hold State
-      summary: Per-ship host-owned boolean restraint lever, layered under the binary alert rather than replacing it, and set with the same explicit-target-state semantics.
-      rationale:
-        - "Issue #1041 ships the THIN restraint lever rather than graduated rules of engagement. There are no authority tiers and no per-target rules of engagement; that design stays parked under issue #834's out-of-scope list, and a review that finds either here has found scope creep."
-        - "The state is independent of the alert rather than a third alert value. A crew that had to stand down to hold fire would be choosing between shields and restraint, and the whole point of proportionate force is that it is not that choice."
-        - "[ai] It suppresses fire by composing into the VALUE of the fact the shipped gate already reads, not by adding a fact or a conjunct. Every armed hull authors one predicate — fact(red_alert) >= param(min_alert_to_fire) — differing only in the threshold, so a second fact would mean editing every one of those predicates, which is the new-vocabulary change the acceptance criteria forbid, and a hull whose author forgot it would ignore the captain's order in silence."
-        - "[ai] The seeded value is a LADDER, not a boolean with a sentinel. min_alert_to_fire is a floor on how hot the ship must be before a bank opens up, and a weapons hold is a rung below stood-down. Sitting under every authorable floor is what makes the lever work on the always-armed Harrow gun line, which authors a threshold of 0: a hold seeded as a plain 0.0 would have left those hulls firing through the order, because 0 >= 0."
-        - "Released, the seeded value is exactly the 1.0/0.0 the fire hosts inlined before this issue, so Red Alert's behaviour is unchanged when the hold is not engaged. The committed world digests are the standing proof, and the weapons-hold digest namespace folds nothing while no ship holds so that they can be."
-        - "AI/human symmetry is structural rather than asserted: the NPC fire hosts respect the hold because they seed the same fact and resolve the same authored predicate, with no branch anywhere on who is flying."
-        - "It rides the red-alert admitted-command target rather than declaring a system of its own, so every NPC whose Red Alert capability is already provisioned AI-only can be ordered to hold with no second capability to declare and no second consumer to register."
-        - "[ai] Issue #1396 moved the lever to POWER — see weapons-cold-fire-gate — and this state is now the SECOND occupant of the same rung rather than its owner. It survives the change untouched so that the scripted hold_fire() / release_fire() verbs keep suppressing fire in the window before issue #1398 re-implements them as power orders; dropping it in #1396 would have silently un-gated the two probe worlds and Falling Skyway's Havelock beat, because their scripts would go on setting a flag nothing read. #1398 removes it."
-    architecture:
-      classification: authoritative
-      owner: host-weapons-hold-control-router
-      writers:
-        - host-weapons-hold-control-router
-      replicas:
-        - weapons-hold-status-replica
-    implementation:
-      status: declared
-      paths: [src/ship/state.rs, src/console/captain/server.rs, src/console/weapons/mod.rs, src/sim_digest.rs]
-      symbols:
-        - ShipWeaponsHold
-        - WeaponsAlertPosture
-        - WEAPONS_COLD_ALERT_FACT
-        - OWN_SHIP_WEAPONS_HOLD_FLAG
-      tests: [cargo test, "cargo test --lib a_cold_weapons_group_closes_every_shipped_fire_gate"]
-    evidence:
-      - kind: test
-        reference: "src/entities/authored_ai_pins.rs::a_cold_weapons_group_closes_every_shipped_fire_gate"
-        summary: "The suppression claim resolved through the REAL shipped predicates on the REAL shipped hulls — the fleet baseline's threshold of 1 and the Harrow gun line's always-armed 0 — with every readiness reading favourable and the alert raised. The powered rows in the same test are the byte-identical half, and the hold is asserted on the same rung until #1398 retires it."
-
   - component: weapons-cold-fire-gate
     core:
       status: implemented
@@ -87,7 +52,11 @@ entities:
       rationale:
         - "[ai] The reading is PER SYSTEM, not per ship, because [[system]].power_group is authored per system. A hull is free to put its tubes on a different group than its beams; the gate then closes on the half that is switched off and leaves the other half shooting. Every shipped hull puts all of it on weapons today, so a ship-wide shortcut would have passed every test and quietly contradicted the authoring granularity the TOML already has."
         - "[ai] The gate is applied at BOTH origins. The authored-predicate half stops the AI asking; the applier half refuses a human's admitted order. A gate that lived only in the AI decider would constrain NPC crews and leave a player free to fire a gun the crew had switched off — the same defect issue #943 reported for torpedo conservation, fixed there the same way, downstream of admission where there is no source identity left to branch on."
-        - "[ai] It composes into the VALUE of the existing red_alert fact rather than adding a fact or a conjunct, for the reason the weapons-hold state gives above: every armed hull authors one predicate differing only in its threshold, so a second fact would mean re-authoring the whole fleet. Red Alert therefore cannot override cold — the cold rung is read before the alert, so raising the alert on a ship whose guns are off changes nothing."
+        - "[ai] It composes into the VALUE of the existing red_alert fact rather than adding a fact or a conjunct: every armed hull authors one predicate — fact(red_alert) >= param(min_alert_to_fire) — differing only in its threshold, so a second fact would mean re-authoring the whole fleet, and a hull whose author forgot it would ignore the order in silence. Red Alert therefore cannot override cold — the cold rung is read before the alert, so raising the alert on a ship whose guns are off changes nothing."
+        - "[ai] The seeded value is a LADDER, not a boolean with a sentinel. min_alert_to_fire is a floor on how hot the ship must be before a bank opens up, and a switched-off group is a rung BELOW stood-down. Sitting under every authorable floor is what makes the lever work on the always-armed Harrow gun line, which authors a threshold of 0: a cold reading seeded as a plain 0.0 would leave those hulls firing with no power in their guns, because 0 >= 0."
+        - "[ai] Issue #1398 left this the ONLY occupant of the rung. The captain's ShipWeaponsHold shared it from #1041 and is now deleted, along with the SetWeaponsHold command, the console control, the weapons-hold digest namespace and the EntityState.weapons_hold snapshot field (SNAPSHOT_FORMAT 19 to 20). Two levers that had to be read together were one lever too many, and the surviving one is the one an opponent's Sensors can see — sensor-radar-blackboard-state's selected_target_weapons_cold, issue #1397."
+        - "Graduated rules of engagement stay parked. There are no authority tiers and no per-target rules of engagement here; that design is out of scope under issue #834, and a review that finds either has found scope creep."
+        - "AI/human symmetry is structural rather than asserted: the NPC fire hosts respect a cold group because they seed the same fact and resolve the same authored predicate, with no branch anywhere on who is flying."
         - "[ai] PowerCold is kept apart from Offline in the refusal vocabulary: Offline is a system the crew have LOST, cold is one they switched off and can switch back on with one order. The wire carries only Applied/Refused, so the distinction costs no message vocabulary."
         - "[ai] Absence fails OPEN, in both inputs: a ship with no reactor component, or a system its hull put on no power group, is not a ship with dead guns but one the question cannot be asked of. This is the same choice PowerSystem::is_group_cold makes for an untracked group, and it is what keeps the bare-App weapons fixtures — which spawn neither a ShipConfig nor a reactor — behaving exactly as they did."
     architecture:
@@ -112,73 +81,55 @@ entities:
       - kind: test
         reference: "src/console/weapons/server_tests.rs::a_cold_weapons_group_holds_fire_and_power_gives_it_back"
         summary: "A backfilled bank with every readiness reading favourable and the alert RAISED holds while its authored group is at level 0, and opens fire on the next AI tick after the group is powered back — one run, one thing changed."
+      - kind: test
+        reference: "tests/headless_runner.rs::powering_the_weapons_down_silences_an_always_armed_hull_and_restoring_it_gives_the_fire_back"
+        summary: "The same claim end to end on the hard hull: probe_restraint's Harrow patrol boat, always armed at min_alert_to_fire = 0, stops firing when the scenario's hold_fire order takes its weapons group cold and resumes when release_fire restores the hull's authored default_level."
 
-  - component: host-weapons-hold-control-router
+  - component: scripted-weapons-restraint-orders
     core:
       status: implemented
       confidence: confirmed
-      title: Host Weapons Hold Control Router
-      summary: Authoritative handler that validates an admitted SetWeaponsHold command and assigns its held value to the addressed ship.
+      origin: ai
+      title: Scripted Weapons Restraint Orders
+      summary: "The scenario's half of the restraint lever (issue #1398). The Rhai verbs hold_fire(name) and release_fire(name) kept their names and lost their own state: each pushes an ActionCmd::SetGroupPower naming the ship, the weapons group and a ScriptedPowerLevel (Exact(0) to hold, AuthoredDefault to release). The dispatch applier resolves the authored entity NAME against WorldContentRuntime::name_to_uuid and queues a PendingGroupPower; ship::power::drain_scripted_power_orders drains it through the same PowerSystem::set_group_allocation an Engineering console order reaches. mirror_weapons_cold_flags then publishes the reactor reading as the world flags weapons_cold.own_ship (role key) and weapons_cold.<name>, chained in the same tick so an on_flag_set handler fires on the next pipeline pass."
       rationale:
-        - The router assigns rather than inverts, so a retried, duplicated or stale-console order cannot turn a ship's guns back on.
-        - It applies to the owning ship entity, so a scenario ordering one hull to hold fire leaves every other hull alone.
-        - "[ai] It decides nothing about firing. It writes one boolean; the suppression happens where every other firing decision happens, in the bank's own authored predicate."
+        - "[ai] The verbs keep their names because a scenario says hold fire, not command the weapons group to zero. Renaming them would have edited probe_picket.toml, probe_restraint.toml and Falling Skyway's three Havelock enforcer calls to say the same thing in engine vocabulary."
+        - "[ai] A hull can REFUSE. The order goes through the very setter a console order does, so the group's authored [power_groups.weapons] min_level clamps it: a hull authoring 0 can be silenced and one authoring 1 cannot. Which hulls may express restraint is a designer's decision in the entity TOML rather than this vocabulary's — which is why ship_harrow_patrol.toml, the hull all three worlds order, grew a [power_groups.*] block of its own here (transcribing the canonical seeding, with min_level = 0 on weapons and power_group = \"weapons\" on its two phaser banks). It is the first NPC hull in the fleet that may be taken cold; ship_harrow_tug.toml already declares a block of its own, for its tractor bus, and what is new here is min_level = 0 on weapons."
+        - "[ai] release_fire restores the group's authored default_level rather than a number the world file or the applier guessed. That resolution can only happen at the applier, which is the first place holding both the ship and its ShipConfigComponent; the Rhai closure that pushed the order has no world access at all. ScriptedPowerLevel names the two intents so the general Exact(level) form stays available to a later set_power verb."
+        - "[ai] The order writes the reactor DIRECTLY rather than manufacturing an admitted command, which is the shape every other scripted world effect has. Admission is the boundary between an OPERATOR and the ship, and the world is not an operator. It is not a bypass: nothing here decides whether the ship fires, and the clamp above is the crew's own."
+        - "[ai] The mirror is written off the REACTOR rather than beside the order, because the reactor has a second author — the crew's Engineering officer — and a flag pushed at the order site would have covered the scenario's orders and silently missed theirs. It replaces the retired weapons_hold.* mirror key for key; falling_skyway.toml and probe_restraint.toml re-key their on_flag_set handlers and nothing else about those beats changes."
+        - "[ai] The mirror walks every ship every tick rather than filtering on Changed. ShipPowerSystem is taken by &mut each tick by tick_power_system to integrate the battery, so change detection fires for every ship anyway. The store is READ before it is written, which is the property that actually matters: a DerefMut on WorldContentRuntime marks the resource changed and change detection on it is read elsewhere, which is how issue #1041's first draft moved probe_radiation.toml's committed digest with the lever untouched."
     architecture:
       kind: subsystem
       authority: authoritative
-      owns:
-        - authoritative-weapons-hold-state
-      consumes:
-        - set-weapons-hold-command
+      reads:
+        - ship-power-state
       writes:
-        - authoritative-weapons-hold-state
+        - ship-power-state
       runs_in:
         - host-browser-runtime
     implementation:
       status: declared
-      paths: [src/console/captain/server.rs, src/core/messages.rs]
-      symbols: [SetWeaponsHold]
-      tests: [cargo test]
-
-  - message: set-weapons-hold-command
-    core:
-      status: implemented
-      confidence: confirmed
-      title: Set Weapons Hold Command
-      summary: Client-to-host request carrying the desired weapons-hold state as held true or false, addressed to the red-alert system.
-      rationale:
-        - The payload expresses the requested end state, so retries and duplicate delivery cannot invert the order.
-        - It targets the red-alert system so one console control source governs the ship's whole firing posture, and so a hull needs no second capability to be orderable.
-    architecture:
-      authority: request
-      producer:
-        - red-alert-console-interface
-      consumer:
-        - host-command-admission
-        - host-weapons-hold-control-router
-      validator:
-        - host-command-admission
-      trust_boundary: client-to-host
-      payload: set-weapons-hold-held
-    implementation:
-      status: declared
-      paths: [src/core/messages.rs, gui/action-map.js]
-      tests: [cargo test, npx vitest run]
-
-  - state: weapons-hold-status-replica
-    core:
-      status: implemented
-      confidence: confirmed
-      title: Weapons Hold Status Replica
-      summary: Non-authoritative captain presentation of the local ship's weapons hold, published on the captain blackboard beside the alert.
-    architecture:
-      classification: replicated
-      derived_from:
-        - authoritative-weapons-hold-state
-      owner: red-alert-console-interface
-    implementation:
-      status: declared
-      paths: [src/console/captain/server.rs, gui/console-state.js, gui/components/ph-red-alert.js]
+      paths: [src/world/script/effects.rs, src/world/dispatch.rs, src/world/server.rs, src/ship/power.rs, src/modifiers/power_system.rs, assets/entities/ship_harrow_patrol.toml, assets/worlds/probe_restraint.toml, assets/worlds/probe_picket.toml, assets/worlds/falling_skyway.toml]
+      symbols:
+        - ActionCmd
+        - ScriptedPowerLevel
+        - PendingGroupPower
+        - drain_scripted_power_orders
+        - mirror_weapons_cold_flags
+        - OWN_SHIP_WEAPONS_COLD_FLAG
+        - weapons_cold_flag
+      tests: [cargo test, "cargo test --features headless --test headless_runner restraint"]
+    evidence:
+      - kind: test
+        reference: "src/ship/power_tests.rs::a_scripted_hold_takes_the_weapons_cold_and_release_restores_the_authored_default"
+        summary: "A hull booting its weapons group at 3 rather than the fleet's usual 2 goes to 0 on hold_fire's order and back to 3 on release_fire's — so an applier restoring a hardcoded 2 would fail here and pass everywhere else."
+      - kind: test
+        reference: "src/ship/power_tests.rs::a_scripted_hold_is_clamped_by_the_hulls_own_authored_floor"
+        summary: "A hull authoring min_level = 1 stays at 1 under the same order, and the mirror flag says so — the script gets no privilege the crew do not have."
+      - kind: test
+        reference: "tests/headless_runner.rs::the_crews_own_restraint_is_visible_to_the_scenario_and_something_answers_it"
+        summary: "probe_restraint's operator reacts to weapons_cold.own_ship through on_flag_set, once on the transition rather than once per tick, and the named enforcer mirrors under weapons_cold.<name> beside it."
 
   - state: red-alert-status-replica
     core:

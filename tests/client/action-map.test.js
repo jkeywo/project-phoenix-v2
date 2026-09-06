@@ -58,7 +58,6 @@ describe('ACTION_MAP', () => {
       'set_target',
       'set_torpedo_volley_target',
       'set_view',
-      'set_weapons_hold',
       'show_on_screen',
       'start_impulse_charge',
       'start_transfer',
@@ -374,49 +373,6 @@ describe('set_station_stance (issue #1107)', () => {
     const send = mkSend();
     ACTION_MAP.set_station_stance({ action: 'set_station_stance', station: 'tactical' }, send);
     ACTION_MAP.set_station_stance({ action: 'set_station_stance', stance: 'tactical-hold' }, send);
-    expect(send).not.toHaveBeenCalled();
-  });
-});
-
-// Issue #1041: the tactical restraint lever. Same `red-alert` target as the
-// alert above — one control source governs the ship's whole firing posture —
-// and the same explicit-desired-state shape, so a stale or retried press
-// cannot invert the order.
-describe('set_weapons_hold', () => {
-  it('sends correlated ControlSystem with the explicit desired held=true state', () => {
-    const send = mkSend();
-    ACTION_MAP.set_weapons_hold({ action: 'set_weapons_hold', held: true, correlation: 'hold-1' }, send);
-    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
-      correlation: 'hold-1',
-      target: 'red-alert',
-      payload: { type: 'SetWeaponsHold', data: { held: true } },
-    });
-    expect(send).toHaveBeenCalledTimes(1);
-  });
-
-  it('sends the explicit desired held=false state', () => {
-    const send = mkSend();
-    ACTION_MAP.set_weapons_hold({ action: 'set_weapons_hold', held: false, correlation: 'hold-2' }, send);
-    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
-      correlation: 'hold-2',
-      target: 'red-alert',
-      payload: { type: 'SetWeaponsHold', data: { held: false } },
-    });
-  });
-
-  it('coerces a missing held flag to false (never inverts)', () => {
-    const send = mkSend();
-    ACTION_MAP.set_weapons_hold({ action: 'set_weapons_hold', correlation: 'hold-3' }, send);
-    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
-      correlation: 'hold-3',
-      target: 'red-alert',
-      payload: { type: 'SetWeaponsHold', data: { held: false } },
-    });
-  });
-
-  it('does not create an untracked Weapons Hold command without a correlation', () => {
-    const send = mkSend();
-    ACTION_MAP.set_weapons_hold({ action: 'set_weapons_hold', held: true }, send);
     expect(send).not.toHaveBeenCalled();
   });
 });

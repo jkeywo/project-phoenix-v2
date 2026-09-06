@@ -359,9 +359,6 @@ pub(crate) fn tick_blaster_auto_fire(
             // fact for the bank's authored fire predicate. `Option<&_>` for
             // bare-`App` fixtures; absent reads `false`.
             Option<&crate::ship::state::ShipRedAlert>,
-            // Issue #1041: the captain's weapons hold, folded with the alert
-            // above into the one `red_alert` fact the authored gate reads.
-            Option<&crate::ship::state::ShipWeaponsHold>,
             // Issue #1396: this ship's reactor, so each bank's OWN authored
             // power group can be read for COLD (level 0) and folded into that
             // same fact. `Option<&_>`: a fixture with no reactor is not a ship
@@ -403,7 +400,6 @@ pub(crate) fn tick_blaster_auto_fire(
         bank_policies_opt,
         mut admitted,
         red_alert_opt,
-        weapons_hold_opt,
         power_opt,
         stances_opt,
     ) in ship_q.iter_mut()
@@ -515,7 +511,6 @@ pub(crate) fn tick_blaster_auto_fire(
                         sid,
                     )
                 }),
-                weapons_hold_opt,
                 stance_override,
             );
             let facts = seed_blaster_bank_facts(true, false, 0.0, in_range, in_arc, posture);

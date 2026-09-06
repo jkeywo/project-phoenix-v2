@@ -33,7 +33,7 @@ function projection({ operators = [], activity = [], results = [] } = {}) {
       control_sources: { 'red-alert': operators.length ? 'Human' : 'Ai' },
       blackboards: [['red-alert', {
         kind: 'Captain',
-        data: { red_alert: false, weapons_hold: false },
+        data: { red_alert: false },
       }]],
     }],
     activity,
@@ -73,7 +73,7 @@ describe('GM authentic Station projection', () => {
     expect(parseGmStationProjection({ ships: [], activity: null, results: [] })).toBeUndefined();
 
     const input = buildGmStationConsoleInput(value, value.ships[0]);
-    expect(input.blackboards['red-alert']).toEqual({ red_alert: false, weapons_hold: false });
+    expect(input.blackboards['red-alert']).toEqual({ red_alert: false });
     expect(input.blackboardKinds['red-alert']).toBe('Captain');
     expect(input.stationPuppets.captain.latest_activity.operator_id).toBe('gm-1');
   });

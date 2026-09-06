@@ -14,7 +14,7 @@ Backfill may derive private policy memory from facts available to the station it
 
 | Domain | Shared facts | Human surface | Backfill consumer |
 |---|---|---|---|
-| Captain | objectives, selected priority, combat activity, red alert, weapons hold, current view | Captain blackboard and controls | `operate_captain_ai` |
+| Captain | objectives, selected priority, combat activity, red alert, current view | Captain blackboard and controls | `operate_captain_ai` |
 | Helm | own motion, authored limits, combat lock, waypoint/clearance, scored objectives, visible contacts, weapon/shield geometry | Helm blackboard/radar and controls | hosts under `src/ship/helm_ai/` |
 | Tactical | combat lock, visible/acquirable contacts, weapon readiness/arcs/range, scored operate/destroy directives | Tactical radar and weapons controls | `ai_target_selection` plus weapon-family hosts |
 | Shields | own arc health/focus, damage history, threat bearing | Shields blackboard and arc controls | `ai_shield_focus` |

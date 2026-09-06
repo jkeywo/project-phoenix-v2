@@ -83,10 +83,12 @@ test('captain console: camera-select and red alert call __sendAction with correc
   await camBtns.nth(2).click();
   await camBtns.nth(0).click();
   await page.locator('ph-red-alert').locator('#alert-btn').click();
-  await page.locator('ph-red-alert').locator('#hold-btn').click();
+  // Issue #1398: `ph-red-alert` carries ONE button. The Weapons Hold beside it
+  // is retired — restraint is a power order from Engineering.
+  await expect(page.locator('ph-red-alert').locator('#hold-btn')).toHaveCount(0);
 
   const sent = (await page.evaluate(() => window.__sent)).map(JSON.parse);
-  expect(sent).toHaveLength(5);
+  expect(sent).toHaveLength(4);
   for (const envelope of sent) {
     expect(Number.isFinite(envelope.__input_ms)).toBe(true);
     delete envelope.__input_ms;
@@ -97,7 +99,7 @@ test('captain console: camera-select and red alert call __sendAction with correc
   // first one migrated and the only one this assertion used to strip.
   const SEMANTIC_IDS = [
     'captain.view', 'captain.view', 'captain.view',
-    'captain.red-alert', 'captain.weapons-hold',
+    'captain.red-alert',
   ];
   sent.forEach((envelope, i) => {
     expect(envelope.correlation).toMatch(/^[\x21-\x7e]{1,64}$/);
@@ -110,7 +112,6 @@ test('captain console: camera-select and red alert call __sendAction with correc
     { action: 'set_view', console: 'captain', direction: 'Starboard' },
     { action: 'set_view', console: 'captain', direction: 'Fore' },
     { action: 'set_red_alert', console: 'captain', active: true },
-    { action: 'set_weapons_hold', console: 'captain', held: true },
   ]);
 });
 

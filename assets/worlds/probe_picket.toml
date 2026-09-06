@@ -48,7 +48,7 @@
 #          `probe_picket` and commits both teams: containment first (it is
 #          `threat_containment`), boarding second (`optional`).
 #   ~t=11  the containment lands: `probe_picket_contained` rises, the handler
-#          chains, and the picket is held to its own weapons hold.
+#          chains, and the picket's own `weapons` group is commanded to 0.
 #   ~t=13  the boarding lands: `probe_picket_boarded` rises.
 #   t=10   `probe_leaver` withdraws — an authored `escaped` recorded FIRST, then
 #          the removal, in one call. That order is the engine's own contract for
@@ -185,8 +185,10 @@ on_timer(18, "on_enmity_declared");
 on_timer(28, "on_enmity_withdrawn");
 
 // CONTAINED. The mounts are locked out from outside, which this world makes real
-// the same way the mission does: through #1041's weapons-hold lever, applied to
-// an NPC through the same state a captain's console writes.
+// the same way the mission does: through the restraint lever (#1041, re-pointed
+// at POWER by #1398), applied to an NPC through the same reactor an Engineering
+// console commands. The verb name did not change and neither did this call; what
+// it writes is now the picket's `weapons` group at level 0.
 fn on_picket_contained(ctx) {
     ctx.effects.hold_fire("world.probe_picket.entity.picket.name");
     ctx.flags.picket_contained = 1;

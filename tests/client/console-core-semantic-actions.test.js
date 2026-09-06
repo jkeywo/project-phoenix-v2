@@ -186,24 +186,34 @@ describe('console-core semantic action runtime', () => {
     delete window.sendAction;
   });
 
-  it('routes the second real Captain action through the same semantic runtime', () => {
+  it('routes the Captain viewscreen action through the same semantic runtime', () => {
     const sent = [];
     window.__sendAction = (json) => sent.push(JSON.parse(json));
     const runtime = initConsole({ name: 'captain', render: () => {} });
     expect(window.__supportsSemanticAction('captain.red-alert', 'captain')).toBe(true);
     expect(window.__supportsSemanticAction('power.increase-allocation', 'captain')).toBe(false);
+    // Issue #1398: `captain.weapons-hold` is retired, so KeyH claims nothing in
+    // this context and the second real action exercised here is the viewscreen.
+    expect(window.__supportsSemanticAction('captain.weapons-hold', 'captain')).toBe(false);
     window.__updateConsole('captain', JSON.stringify({
       red_alert: false,
-      weapons_hold: false,
       red_alert_auto: false,
+      viewscreen_auto: false,
+      view_direction: 'camera_fore',
+      camera_views: ['camera_fore', 'camera_aft'],
     }));
 
     document.dispatchEvent(new KeyboardEvent('keydown', {
       code: 'KeyH', bubbles: true, cancelable: true,
     }));
+    expect(sent).toHaveLength(0);
+
+    document.dispatchEvent(new KeyboardEvent('keydown', {
+      code: 'KeyV', bubbles: true, cancelable: true,
+    }));
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({
-      action: 'set_weapons_hold', console: 'captain', held: true,
+      action: 'set_view', console: 'captain',
     });
     expect(runtime.semanticActions.action('power.increase-allocation')).toBeNull();
     expect(runtime.semanticActions.action('repair.dispatch-team')).toBeNull();
@@ -224,11 +234,10 @@ describe('console-core semantic action runtime', () => {
     const runtime = initConsole({ name: 'captain', render: () => {} });
     window.__updateConsole('captain', JSON.stringify({
       red_alert: false,
-      weapons_hold: false,
       red_alert_auto: false,
     }));
 
-    expect(window.activateSemanticAction('captain.weapons-hold', {
+    expect(window.activateSemanticAction('captain.red-alert', {
       context: 'captain', source: 'control',
     })).toMatchObject({ claimed: true, handled: true });
     const status = document.querySelector('.semantic-action-feedback');
@@ -425,7 +434,7 @@ describe('console-core semantic action runtime', () => {
     });
     window.__updateConsole('captain', JSON.stringify(withConsoleFamilyProjection({
       systems: {
-        captain: { red_alert: false, red_alert_auto: false, weapons_hold: false },
+        captain: { red_alert: false, red_alert_auto: false },
         comms: {
           contacts: [{ uuid: 'ally-1', in_range: true }],
           messages: [],

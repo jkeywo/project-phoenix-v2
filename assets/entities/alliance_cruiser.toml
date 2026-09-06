@@ -1328,7 +1328,7 @@ description = "entity.alliance_cruiser.station.engineering.description"
 rank = "Ltn."
 short_code = "ENG"
 console = "gui/cruiser/engineering.html"
-manual_overview = "You keep the ship alive. Allocate reactor power between helm, weapons, and shields as the situation demands, and dispatch repair teams to damaged systems by priority. Watch the battery reserve during heavy weapons fire. Simplified rating lets the AI run the repair teams so you concentrate on power allocation."
+manual_overview = "You keep the ship alive. Allocate reactor power between helm, weapons, and shields as the situation demands, and dispatch repair teams to damaged systems by priority. Weapons is the one group you may switch off entirely: take it to LVL 0 and the guns go COLD, which is how this ship shows restraint without standing down from Red Alert — and anyone with sensors on you can see it. Watch the battery reserve during heavy weapons fire. Simplified rating lets the AI run the repair teams so you concentrate on power allocation."
 
 [[station.rating]]
 name = "Std"

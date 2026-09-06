@@ -223,7 +223,7 @@ use crate::ship::helm_ai::{
     HelmBoostAiPolicyState, HelmEnginesAiPolicyState, HelmSteeringAiPolicyState,
 };
 use crate::ship::impulse::ImpulsePhase;
-use crate::ship::state::{ShipPhysics, ShipRedAlert, ShipWeaponsHold};
+use crate::ship::state::{ShipPhysics, ShipRedAlert};
 use crate::sim_rng::{SimRng, SimRngState};
 use crate::sim_tick::SimTick;
 use crate::weapons::torpedo::{Torpedo, TubeBurstState, TubeLoadState};
@@ -339,17 +339,17 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// simply declared no sides, so both are refused by `Versions::check`, which
 /// names the dimension.
 ///
-/// `9` — issue #1041 added [`EntityState::weapons_hold`], and it is the
-/// simplest of these arguments: the field is on every ship row, so the payload
-/// shape moved, and what it records is an ORDER. A format-8 save of a ship
-/// whose captain had called a weapons hold is byte-indistinguishable from one
-/// whose captain had not; restoring the first into a #1041 build resumes a crew
-/// who had chosen restraint with their guns live, on the very tick the scenario
-/// is weighing what they chose. The alert beside it has been persisted from the
-/// beginning for exactly this reason, and half a firing posture is not a
-/// posture. Nothing in the payload distinguishes that save from one taken with
-/// the lever never pulled, so both are refused by `Versions::check`, which names
-/// the dimension.
+/// `9` — issue #1041 added `EntityState::weapons_hold` (removed again at 20,
+/// see below), and it is the simplest of these arguments: the field is on every
+/// ship row, so the payload shape moved, and what it records is an ORDER. A
+/// format-8 save of a ship whose captain had called a weapons hold is
+/// byte-indistinguishable from one whose captain had not; restoring the first
+/// into a #1041 build resumes a crew who had chosen restraint with their guns
+/// live, on the very tick the scenario is weighing what they chose. The alert
+/// beside it has been persisted from the beginning for exactly this reason, and
+/// half a firing posture is not a posture. Nothing in the payload distinguishes
+/// that save from one taken with the lever never pulled, so both are refused by
+/// `Versions::check`, which names the dimension.
 ///
 /// `10` — issue #863 added [`EntityState::spawn`] and
 /// [`ScenarioState::name_to_uuid`], and this is the argument #1035 made turned
@@ -535,7 +535,34 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// same gate, on the same rule every other bump on this ladder keeps: the
 /// version is a statement about the rules the save was written under, not about
 /// which of its rows happen to be empty.
-pub const SNAPSHOT_FORMAT: u32 = 19;
+///
+/// `20` — issue #1398 REMOVED `EntityState::weapons_hold`, and it is the first
+/// rung on this ladder that subtracts rather than adds. The captain's
+/// `ShipWeaponsHold` is gone: restraint is a POWER order now, a `weapons` group
+/// commanded to level 0, and that already rides `EntityState::power` (format 14,
+/// reinstated at the group's own authored floor since #1395). So a format-20
+/// capture carries the posture it always did — in the one field that now
+/// expresses it.
+///
+/// # The decode stays tolerant, and the record is still refused
+///
+/// Nothing here denies unknown fields, so a format-19 record still PARSES: its
+/// `weapons_hold` entries are ignored by the derived visitor and the reader gets
+/// a `LoadRefusal::Moved(Format)` that names the dimension, rather than a RON
+/// error about an unexpected field. That is what "tolerant decode" buys, and it
+/// is the whole of what it buys.
+///
+/// It does not make the record loadable, and the reason is #1041's own argument
+/// read forwards. A format-19 save records the hold in a field this build cannot
+/// honour, and the only faithful translation — taking that ship's `weapons`
+/// group cold — is one the hull may refuse: `min_level` is authored per hull and
+/// `alliance_battleship`, `alliance_courier` and `alliance_tender` all say `1`.
+/// Accepting the record would therefore resume a crew who had chosen restraint
+/// with live guns on exactly the hulls that cannot express restraint any other
+/// way. Nothing in the payload distinguishes that save from one taken with the
+/// lever never pulled, so both are refused by `Versions::check`, which names the
+/// dimension — the same answer every rung above gives.
+pub const SNAPSHOT_FORMAT: u32 = 20;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -643,12 +670,6 @@ pub struct EntityState {
     pub hull: Option<Vec<(String, f32, f32)>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub red_alert: Option<bool>,
-    /// The captain's weapons hold (issue #1041) — the restraint lever layered
-    /// under the alert above. Stored beside it because the two are one firing
-    /// posture: a save that remembered the alert and forgot the hold would
-    /// resume a ship that had been ordered to hold fire with its guns live.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub weapons_hold: Option<bool>,
     /// The ship's Command stance selections (issues #1107–#1109) as
     /// `(station id, stance id)`, sorted by station id.
     ///
@@ -4397,7 +4418,6 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
         Option<&ShipPhysics>,
         Option<&EntitySystemHull>,
         Option<&ShipRedAlert>,
-        Option<&ShipWeaponsHold>,
         Option<&crate::console::command::server::ShipStationStances>,
         Option<&crate::ship_plugin::ShipSystemControlSources>,
     )>() else {
@@ -4406,7 +4426,7 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
     let mut rows: Vec<EntityState> = query
         .iter(world)
         .map(
-            |(uuid, physics, hull, alert, hold, stances, control_sources)| EntityState {
+            |(uuid, physics, hull, alert, stances, control_sources)| EntityState {
                 ai_fidelity: ai_fidelity
                     .iter()
                     .find(|(id, _)| id == &uuid.0)
@@ -4575,7 +4595,6 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
                 }),
                 hull: hull.map(|h| hull_rows(&h.0)),
                 red_alert: alert.map(|a| a.0),
-                weapons_hold: hold.map(|h| h.0),
                 // Sorted by station id, the same walk `fold_station_stances_namespace`
                 // takes, so the capture is byte-identical whatever order the map's
                 // entries were inserted in. An empty map yields an empty vec, which
@@ -6199,14 +6218,6 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
         if let Some(active) = row.red_alert {
             if let Some(mut alert) = entity_mut.get_mut::<ShipRedAlert>() {
                 alert.0 = active;
-            }
-        }
-        // Issue #1041. Restored beside the alert, because the two are one
-        // firing posture and a resumed ship that had been ordered to hold fire
-        // must come back holding it.
-        if let Some(held) = row.weapons_hold {
-            if let Some(mut hold) = entity_mut.get_mut::<ShipWeaponsHold>() {
-                hold.0 = held;
             }
         }
         // Issues #1107–#1109. The per-ship Command stance map IS folded into the

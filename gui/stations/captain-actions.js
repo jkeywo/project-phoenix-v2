@@ -12,7 +12,6 @@ import { createSemanticActionRegistry } from '../semantic-action-registry.js';
 
 export const CAPTAIN_ACTION_CONTEXT = 'captain';
 export const CAPTAIN_RED_ALERT_ACTION_ID = 'captain.red-alert';
-export const CAPTAIN_WEAPONS_HOLD_ACTION_ID = 'captain.weapons-hold';
 export const CAPTAIN_VIEW_ACTION_ID = 'captain.view';
 export const CAPTAIN_OBJECTIVE_PRIORITY_ACTION_ID = 'captain.objective-priority';
 
@@ -37,25 +36,6 @@ export const CAPTAIN_RED_ALERT_ACTION = Object.freeze({
       input: 'button',
       control: 'face-bottom',
     }),
-  ]),
-});
-
-export const CAPTAIN_WEAPONS_HOLD_ACTION = Object.freeze({
-  id: CAPTAIN_WEAPONS_HOLD_ACTION_ID,
-  contexts: Object.freeze([CAPTAIN_ACTION_CONTEXT]),
-  labelId: 'semantic_action.captain.weapons_hold.label',
-  accessibilityLabelId: 'semantic_action.captain.weapons_hold.accessibility',
-  authoritativeFeedback: true,
-  bindings: Object.freeze([
-    Object.freeze({
-      type: 'keyboard',
-      code: 'KeyH',
-      ctrlKey: false,
-      shiftKey: false,
-      altKey: false,
-      metaKey: false,
-    }),
-    null,
   ]),
 });
 
@@ -97,9 +77,12 @@ export const CAPTAIN_OBJECTIVE_PRIORITY_ACTION = Object.freeze({
   ]),
 });
 
+// Red Alert is the Captain's only firing-posture lever since issue #1398. The
+// Weapons Hold action that sat beside it from #1041 (id `captain.weapons-hold`,
+// bound to KeyH) is retired along with the `set_weapons_hold` command: restraint
+// is a POWER order now, made from Engineering.
 export const CAPTAIN_ACTIONS = Object.freeze([
   CAPTAIN_RED_ALERT_ACTION,
-  CAPTAIN_WEAPONS_HOLD_ACTION,
   CAPTAIN_VIEW_ACTION,
   CAPTAIN_OBJECTIVE_PRIORITY_ACTION,
 ]);
@@ -157,19 +140,6 @@ export function registerCaptainActions(registry, options = {}) {
     );
     if (!payload) return false;
     sendAction('set_red_alert', payload);
-    return true;
-  });
-  registry.register(CAPTAIN_WEAPONS_HOLD_ACTION, ({ actionId, correlation, inputMs } = {}) => {
-    const view = captainActionView(getState());
-    if (!view || view.red_alert_auto || !sendAction) return false;
-    const payload = correlatedPayload(
-      actionId,
-      correlation,
-      inputMs,
-      { held: !Boolean(view.weapons_hold) },
-    );
-    if (!payload) return false;
-    sendAction('set_weapons_hold', payload);
     return true;
   });
   registry.register(CAPTAIN_VIEW_ACTION, ({

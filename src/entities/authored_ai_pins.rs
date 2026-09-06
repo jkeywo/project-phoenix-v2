@@ -544,9 +544,13 @@ const BESPOKE_DOCTRINES: &[(&str, &str)] = &[
     // The reactor arithmetic is NOT what distinguishes them, and it is worth
     // saying so because an earlier revision of this note claimed it was. An
     // Alliance hull authors the same canonical trio at `helm 2 + weapons 2 +
-    // shields 2` = 6; these five author no `[power_groups.*]` at all, so
-    // `PowerSystem::from_authored_groups` seeds that same trio at level 2 —
-    // also 6. Elevating helm puts BOTH at 7, and `PowerSystem::tick` indexes
+    // shields 2` = 6; four of these five author no `[power_groups.*]` at all, so
+    // `PowerSystem::from_authored_groups` falls back to `seeded_with_defaults`
+    // and seeds that same trio at level 2 — also 6. `ship_harrow_patrol` authors
+    // the same trio explicitly since #1398 (at the same levels, with
+    // `min_level = 0` on weapons so a scenario can take its guns cold), so the
+    // seeded total is 6 either way. Elevating helm puts BOTH at 7, and
+    // `PowerSystem::tick` indexes
     // `config.rates[total - 3]`, which is -2 on the fleet baseline's
     // `[5, 4, 3, 2, -2, -5]` and -2 on the patrol's `[6, 5, 4, 2, -2, -6]`
     // alike. The same three groups cost the same drain either way.
@@ -3053,9 +3057,10 @@ fn weapons_fire_guard_truth_table() {
 /// for a cold group would have left the Harrow gun line firing with no power in
 /// its guns, because `0 >= 0`.
 ///
-/// The captain's hold (issue #1041) is asserted on the same rung in passing: it
-/// retires in #1398, and until it does the two levers must stay
-/// indistinguishable to the authored predicate.
+/// Power is the ONLY lever on this rung since issue #1398. The captain's
+/// `ShipWeaponsHold` shared it from #1041 until then; retiring it left the fire
+/// gate with one thing to read, and the Rhai `hold_fire()` / `release_fire()`
+/// verbs pointing at the reactor instead of at a boolean of their own.
 #[test]
 fn a_cold_weapons_group_closes_every_shipped_fire_gate() {
     use crate::console::weapons::{WeaponsAlertPosture, WEAPONS_COLD_ALERT_FACT};
@@ -3063,7 +3068,6 @@ fn a_cold_weapons_group_closes_every_shipped_fire_gate() {
     let cold = WeaponsAlertPosture {
         red_alert: true,
         weapons_cold: true,
-        weapons_hold: false,
         stance_high_alert: None,
     };
     assert_eq!(
@@ -3073,26 +3077,25 @@ fn a_cold_weapons_group_closes_every_shipped_fire_gate() {
          ship can be AT stations with its guns switched off, and RAISING the \
          alert must not give the fire back"
     );
-    // The captain's hold, retiring in #1398, occupies the same rung — so the
-    // scripted `hold_fire()` verb keeps working until its power re-implementation
-    // lands, and the value it seeds is the one this constant now names.
+    // A Command stance cannot give the fire back either: cold is read before the
+    // override, so a directed Station whose stance says HIGH ALERT still reads
+    // the bottom rung while its guns have no power.
     assert_eq!(
         WeaponsAlertPosture {
-            red_alert: true,
-            weapons_cold: false,
-            weapons_hold: true,
-            stance_high_alert: None,
+            red_alert: false,
+            weapons_cold: true,
+            stance_high_alert: Some(true),
         }
         .alert_fact_value(),
         WEAPONS_COLD_ALERT_FACT,
     );
     // The live half of the byte-identical claim, at the source: with power on
-    // and no hold the seeded value is exactly the 1.0/0.0 every host inlined
-    // before these issues, so a run in which nothing goes cold cannot have moved.
+    // the seeded value is exactly the 1.0/0.0 every host inlined before these
+    // issues, so a run in which nothing goes cold cannot have moved.
     assert_eq!(WeaponsAlertPosture::alert(true).alert_fact_value(), 1.0);
     assert_eq!(WeaponsAlertPosture::alert(false).alert_fact_value(), 0.0);
 
-    let held_snapshot = |extra: &[(&str, f64)]| {
+    let cold_snapshot = |extra: &[(&str, f64)]| {
         let mut pairs = vec![("red_alert", cold.alert_fact_value())];
         pairs.extend_from_slice(extra);
         facts(&pairs)
@@ -3116,7 +3119,7 @@ fn a_cold_weapons_group_closes_every_shipped_fire_gate() {
             resolve(
                 &p,
                 channel,
-                &held_snapshot(&[
+                &cold_snapshot(&[
                     ("target_valid", 1.0),
                     ("in_range", 1.0),
                     ("in_arc", 1.0),
@@ -3155,7 +3158,7 @@ fn a_cold_weapons_group_closes_every_shipped_fire_gate() {
     );
     assert_eq!(param(&hp, "min_alert_to_fire"), 0.0);
     assert_eq!(
-        resolve(&hp, "phaser_fire", &held_snapshot(&[])),
+        resolve(&hp, "phaser_fire", &cold_snapshot(&[])),
         None,
         "the always-armed threshold of 0 is exactly what a cold group has to \
          beat, and it does — `-1 >= 0` is false. Seeded as a plain 0.0 it would \

@@ -57,16 +57,6 @@ fn test_app() -> App {
                 .expect("the shipped Captain policy decodes"),
         ),
     ));
-    // The restraint lever (issue #1041). Its own `insert` because the
-    // bundle above is at Bevy's 15-element tuple ceiling — the same reason
-    // the production spawner splits it out.
-    {
-        let mut q = app.world_mut().query_filtered::<Entity, With<LocalShip>>();
-        let ship = q.single(app.world()).expect("the fixture ship");
-        app.world_mut()
-            .entity_mut(ship)
-            .insert(crate::ship::state::ShipWeaponsHold::default());
-    }
     // One fixed step per update (issue #895): the plugin's systems run on
     // the logical tick, and each harness tick advances it once.
     crate::ship::test_support::drive_one_fixed_step_per_update(
@@ -99,13 +89,6 @@ fn set_red_alert(app: &mut App, red: bool) {
     if let Ok(mut ra) = q.single_mut(app.world_mut()) {
         ra.0 = red;
     }
-}
-
-fn get_weapons_hold(app: &mut App) -> bool {
-    let mut q = app
-        .world_mut()
-        .query_filtered::<&crate::ship::state::ShipWeaponsHold, With<LocalShip>>();
-    q.single(app.world()).map(|h| h.0).unwrap_or(false)
 }
 
 fn captain_bb(app: &mut App) -> CaptainBlackboard {
@@ -338,30 +321,6 @@ fn correlated_red_alert_idempotent_success_is_still_applied() {
 }
 
 #[test]
-fn correlated_weapons_hold_is_applied_by_the_authoritative_consumer() {
-    let mut app = test_app();
-    start_game(&mut app);
-    push(
-        &mut app,
-        "captain",
-        correlated_command(
-            "hold-accepted",
-            crate::ship::system_registry::red_alert_system_id(),
-            SystemControlPayload::SetWeaponsHold { held: true },
-        ),
-    );
-    let messages = tick(&mut app);
-
-    assert!(get_weapons_hold(&mut app));
-    assert!(has_feedback(
-        &messages,
-        "captain",
-        "hold-accepted",
-        ActionFeedbackOutcome::Applied,
-    ));
-}
-
-#[test]
 fn correlated_view_is_applied_only_after_the_view_consumer_runs() {
     let mut app = test_app();
     start_game(&mut app);
@@ -490,112 +449,6 @@ fn correlated_red_alert_from_non_captain_is_refused_by_admission() {
             ..
         }
     )));
-}
-
-/// Issue #1041 AC1: the hold is a state the captain sets, LAYERED on the
-/// binary alert rather than replacing it — so the two move independently
-/// and Red Alert's own behaviour is untouched.
-///
-/// Both directions in one app, because "the captain can hold fire" is only
-/// half a lever: a hold that could not be released would be a ship that had
-/// disarmed itself.
-#[test]
-fn captain_holds_and_releases_fire_without_touching_the_alert() {
-    let mut app = test_app();
-    start_game(&mut app);
-    // Stations first. The alert is the state the hold layers under, and
-    // asserting it stays up throughout is the "does not replace" half.
-    push(
-        &mut app,
-        "captain",
-        ClientMessage::ControlSystem {
-            target: crate::ship::system_registry::red_alert_system_id(),
-            payload: SystemControlPayload::SetRedAlert { active: true },
-        },
-    );
-    tick(&mut app);
-    assert!(get_red_alert(&mut app));
-    assert!(
-        !get_weapons_hold(&mut app),
-        "a ship at stations is weapons-free until someone says otherwise"
-    );
-
-    push(
-        &mut app,
-        "captain",
-        ClientMessage::ControlSystem {
-            target: crate::ship::system_registry::red_alert_system_id(),
-            payload: SystemControlPayload::SetWeaponsHold { held: true },
-        },
-    );
-    tick(&mut app);
-    assert!(get_weapons_hold(&mut app), "the captain's order lands");
-    assert!(
-        get_red_alert(&mut app),
-        "and the ship is STILL at red alert — the hold layers under the \
-         alert, it does not stand it down"
-    );
-
-    // Releasing it puts the ship back exactly where it started.
-    push(
-        &mut app,
-        "captain",
-        ClientMessage::ControlSystem {
-            target: crate::ship::system_registry::red_alert_system_id(),
-            payload: SystemControlPayload::SetWeaponsHold { held: false },
-        },
-    );
-    tick(&mut app);
-    assert!(!get_weapons_hold(&mut app));
-    assert!(get_red_alert(&mut app));
-}
-
-/// The command carries the desired END state, so a retried or duplicated
-/// press is idempotent — the handler assigns, it does not invert. Same
-/// contract as `SetRedAlert`, and for the same reason: a console showing a
-/// stale posture must not be able to flip the ship's guns back on.
-#[test]
-fn a_repeated_weapons_hold_order_is_idempotent() {
-    let mut app = test_app();
-    start_game(&mut app);
-    for _ in 0..3 {
-        push(
-            &mut app,
-            "captain",
-            ClientMessage::ControlSystem {
-                target: crate::ship::system_registry::red_alert_system_id(),
-                payload: SystemControlPayload::SetWeaponsHold { held: true },
-            },
-        );
-        tick(&mut app);
-        assert!(get_weapons_hold(&mut app));
-    }
-}
-
-/// The hold is replicated onto the same console that raises the alert, so
-/// the captain reads one posture rather than inferring it.
-#[test]
-fn the_captain_blackboard_publishes_the_weapons_hold() {
-    let mut app = test_app();
-    start_game(&mut app);
-    tick(&mut app);
-    assert!(!captain_bb(&mut app).weapons_hold);
-    push(
-        &mut app,
-        "captain",
-        ClientMessage::ControlSystem {
-            target: crate::ship::system_registry::red_alert_system_id(),
-            payload: SystemControlPayload::SetWeaponsHold { held: true },
-        },
-    );
-    // Two ticks: one for the order to be admitted and applied, one for the
-    // publisher to export the settled reading. The assertion is on the
-    // PUBLISHED value rather than on the component deliberately — what is
-    // pinned here is the captain's readout of the posture, which is what
-    // makes the lever usable at all.
-    tick(&mut app);
-    tick(&mut app);
-    assert!(captain_bb(&mut app).weapons_hold);
 }
 
 #[test]

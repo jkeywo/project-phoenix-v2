@@ -230,7 +230,6 @@ describe('Navigation semantic actions', () => {
       'captain.objective-priority',
       'captain.red-alert',
       'captain.view',
-      'captain.weapons-hold',
       'navigation.contact-selection',
       'navigation.map-pan-down',
       'navigation.map-pan-left',

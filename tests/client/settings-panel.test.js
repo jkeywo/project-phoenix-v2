@@ -40,7 +40,7 @@ import { createSemanticActionRegistry } from '../../gui/semantic-action-registry
 import { createClientSemanticActionRegistry } from '../../gui/client-semantic-actions.js';
 import {
   CAPTAIN_RED_ALERT_ACTION_ID,
-  CAPTAIN_WEAPONS_HOLD_ACTION_ID,
+  CAPTAIN_VIEW_ACTION_ID,
   createCaptainActionRegistry,
 } from '../../gui/stations/captain-actions.js';
 
@@ -1500,7 +1500,9 @@ describe('semantic controls tab', () => {
       && el.getAttribute('data-control') === 'semantic-binding-captain.red-alert-1');
     replacement.focus();
     replacement.dispatch('keydown', {
-      code: 'KeyH', key: 'h', repeat: false,
+      // `captain.view`'s default slot-0 key, so this collides. It was the
+      // Weapons Hold's KeyH until issue #1398 retired that action.
+      code: 'KeyV', key: 'v', repeat: false,
       preventDefault() {}, stopPropagation() {},
     });
     const cancel = descendants(bodyOf(doc)).find((el) => el.getAttribute
@@ -1548,7 +1550,7 @@ describe('semantic controls tab', () => {
     const captureFor = (actionId, slot) => descendants(bodyOf(doc)).find((el) =>
       el.getAttribute && el.getAttribute('data-control')
         === `semantic-binding-${actionId}-${slot}`);
-    captureFor(CAPTAIN_WEAPONS_HOLD_ACTION_ID, 0).dispatch('keydown', {
+    captureFor(CAPTAIN_VIEW_ACTION_ID, 0).dispatch('keydown', {
       code: 'KeyR', repeat: false,
       preventDefault() {}, stopPropagation() {},
     });
@@ -1562,20 +1564,20 @@ describe('semantic controls tab', () => {
     expect(doc.activeElement).toBe(cancel);
     expect(allText(bodyOf(doc))).toContain(t('semantic_action.captain.red_alert.label'));
     expect(registry.action(CAPTAIN_RED_ALERT_ACTION_ID).bindings[0].code).toBe('KeyR');
-    expect(registry.action(CAPTAIN_WEAPONS_HOLD_ACTION_ID).bindings[0].code).toBe('KeyH');
+    expect(registry.action(CAPTAIN_VIEW_ACTION_ID).bindings[0].code).toBe('KeyV');
 
     cancel.click();
     expect(registry.action(CAPTAIN_RED_ALERT_ACTION_ID).bindings[0].code).toBe('KeyR');
-    expect(registry.action(CAPTAIN_WEAPONS_HOLD_ACTION_ID).bindings[0].code).toBe('KeyH');
+    expect(registry.action(CAPTAIN_VIEW_ACTION_ID).bindings[0].code).toBe('KeyV');
 
-    captureFor(CAPTAIN_WEAPONS_HOLD_ACTION_ID, 0).dispatch('keydown', {
+    captureFor(CAPTAIN_VIEW_ACTION_ID, 0).dispatch('keydown', {
       code: 'KeyR', repeat: false,
       preventDefault() {}, stopPropagation() {},
     });
     descendants(bodyOf(doc)).find((el) => el.getAttribute
       && el.getAttribute('data-control') === 'semantic-binding-conflict-replace').click();
     expect(registry.action(CAPTAIN_RED_ALERT_ACTION_ID).bindings[0]).toBeNull();
-    expect(registry.action(CAPTAIN_WEAPONS_HOLD_ACTION_ID).bindings[0].code).toBe('KeyR');
+    expect(registry.action(CAPTAIN_VIEW_ACTION_ID).bindings[0].code).toBe('KeyR');
     expect(sent).toEqual([]);
   });
 
@@ -1595,7 +1597,7 @@ describe('semantic controls tab', () => {
     ));
     registry.register(definition(
       'captain.source', ['captain'], 'KeyB',
-      'semantic_action.captain.weapons_hold.label',
+      'semantic_action.captain.view.label',
     ));
     registry.register(definition(
       'bridge.source', ['bridge'], 'KeyC',
@@ -1621,7 +1623,7 @@ describe('semantic controls tab', () => {
     expect(items).toHaveLength(2);
     expect(items.map((item) => item.textContent)).toEqual([
       t('settings.controls.conflict_item', {
-        action: t('semantic_action.captain.weapons_hold.label'), slot: '1',
+        action: t('semantic_action.captain.view.label'), slot: '1',
       }),
       t('settings.controls.conflict_item', {
         action: t('semantic_action.captain.red_alert.label'), slot: '2',
@@ -1711,12 +1713,12 @@ describe('semantic controls tab', () => {
   it('keeps a standalone modifier through auto-repeat and applies it only on matching keyup', () => {
     const { doc, registry } = openControls();
     const capture = descendants(bodyOf(doc)).find((el) => el.getAttribute
-      && el.getAttribute('data-control') === 'semantic-binding-captain.weapons-hold-0');
+      && el.getAttribute('data-control') === 'semantic-binding-captain.view-0');
     capture.dispatch('keydown', {
       code: 'ControlLeft', key: 'Control', ctrlKey: true, repeat: false,
       preventDefault() {}, stopPropagation() {},
     });
-    expect(registry.action(CAPTAIN_WEAPONS_HOLD_ACTION_ID).bindings[0].code).toBe('KeyH');
+    expect(registry.action(CAPTAIN_VIEW_ACTION_ID).bindings[0].code).toBe('KeyV');
 
     let repeatPrevented = false;
     let repeatStopped = false;
@@ -1727,13 +1729,13 @@ describe('semantic controls tab', () => {
     });
     expect(repeatPrevented).toBe(false);
     expect(repeatStopped).toBe(false);
-    expect(registry.action(CAPTAIN_WEAPONS_HOLD_ACTION_ID).bindings[0].code).toBe('KeyH');
+    expect(registry.action(CAPTAIN_VIEW_ACTION_ID).bindings[0].code).toBe('KeyV');
 
     capture.dispatch('keyup', {
       code: 'ControlLeft', key: 'Control', ctrlKey: false,
       preventDefault() {}, stopPropagation() {},
     });
-    expect(registry.action(CAPTAIN_WEAPONS_HOLD_ACTION_ID).bindings[0]).toMatchObject({
+    expect(registry.action(CAPTAIN_VIEW_ACTION_ID).bindings[0]).toMatchObject({
       code: 'ControlLeft', ctrlKey: false,
     });
   });
@@ -1795,7 +1797,7 @@ describe('semantic controls tab', () => {
   it('modal Escape cancels conflict from Reset All and restores the originating capture', () => {
     const { doc, registry } = openControls();
     const capture = descendants(bodyOf(doc)).find((el) => el.getAttribute
-      && el.getAttribute('data-control') === 'semantic-binding-captain.weapons-hold-0');
+      && el.getAttribute('data-control') === 'semantic-binding-captain.view-0');
     capture.dispatch('keydown', {
       code: 'KeyR', repeat: false,
       preventDefault() {}, stopPropagation() {},
@@ -1817,9 +1819,9 @@ describe('semantic controls tab', () => {
     expect(findOverlay(doc).hidden).toBe(false);
     expect(descendants(bodyOf(doc)).some((el) =>
       el.className === 'settings-binding-conflict')).toBe(false);
-    expect(registry.action(CAPTAIN_WEAPONS_HOLD_ACTION_ID).bindings[0].code).toBe('KeyH');
+    expect(registry.action(CAPTAIN_VIEW_ACTION_ID).bindings[0].code).toBe('KeyV');
     const restored = descendants(bodyOf(doc)).find((el) => el.getAttribute
-      && el.getAttribute('data-control') === 'semantic-binding-captain.weapons-hold-0');
+      && el.getAttribute('data-control') === 'semantic-binding-captain.view-0');
     expect(doc.activeElement).toBe(restored);
     expect(restored.value).toBe(t('settings.controls.press_key'));
   });
@@ -1828,7 +1830,7 @@ describe('semantic controls tab', () => {
     const { doc, registry, inst } = openControls();
     const before = registry.bindingProfile();
     const capture = descendants(bodyOf(doc)).find((el) => el.getAttribute
-      && el.getAttribute('data-control') === 'semantic-binding-captain.weapons-hold-0');
+      && el.getAttribute('data-control') === 'semantic-binding-captain.view-0');
     capture.dispatch('keydown', {
       code: 'KeyR', repeat: false,
       preventDefault() {}, stopPropagation() {},
@@ -1859,8 +1861,8 @@ describe('semantic controls tab', () => {
     const { doc, registry } = openControls();
     registry.setBinding(CAPTAIN_RED_ALERT_ACTION_ID, 0, { code: 'KeyY' });
     registry.setBinding(CAPTAIN_RED_ALERT_ACTION_ID, 1, { code: 'KeyU' });
-    registry.setBinding(CAPTAIN_WEAPONS_HOLD_ACTION_ID, 0, { code: 'KeyJ' });
-    registry.setBinding(CAPTAIN_WEAPONS_HOLD_ACTION_ID, 1, { code: 'KeyK' });
+    registry.setBinding(CAPTAIN_VIEW_ACTION_ID, 0, { code: 'KeyJ' });
+    registry.setBinding(CAPTAIN_VIEW_ACTION_ID, 1, { code: 'KeyK' });
 
     descendants(bodyOf(doc)).find((el) => el.getAttribute
       && el.getAttribute('data-control')
@@ -1869,7 +1871,7 @@ describe('semantic controls tab', () => {
       expect.objectContaining({ type: 'keyboard', code: 'KeyR' }),
       { type: 'gamepad', input: 'button', control: 'face-bottom' },
     ]);
-    expect(registry.action(CAPTAIN_WEAPONS_HOLD_ACTION_ID).bindings.map((binding) =>
+    expect(registry.action(CAPTAIN_VIEW_ACTION_ID).bindings.map((binding) =>
       binding && binding.code)).toEqual(['KeyJ', 'KeyK']);
 
     descendants(bodyOf(doc)).find((el) => el.getAttribute
@@ -1878,8 +1880,8 @@ describe('semantic controls tab', () => {
       expect.objectContaining({ type: 'keyboard', code: 'KeyR' }),
       { type: 'gamepad', input: 'button', control: 'face-bottom' },
     ]);
-    expect(registry.action(CAPTAIN_WEAPONS_HOLD_ACTION_ID).bindings.map((binding) =>
-      binding && binding.code)).toEqual(['KeyH', null]);
+    expect(registry.action(CAPTAIN_VIEW_ACTION_ID).bindings.map((binding) =>
+      binding && binding.code)).toEqual(['KeyV', null]);
   });
 
   it('wires the parent-owned profile to the explicit iframe update seam', () => {

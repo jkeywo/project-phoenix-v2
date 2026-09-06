@@ -47,8 +47,7 @@ pub struct EffectQueue<T: Send + Sync + 'static>(pub Vec<T>);
 
 // Hand-written rather than `#[derive(Default)]` so the impl does NOT demand
 // `T: Default`: an empty queue is `Vec::new()` whatever `T` is, and the payloads
-// (`ConditionAdjustment`, a `(String, bool)` weapons hold, …) are not all
-// `Default`.
+// (`ConditionAdjustment`, `PendingGroupPower`, …) are not all `Default`.
 impl<T: Send + Sync + 'static> Default for EffectQueue<T> {
     fn default() -> Self {
         Self(Vec::new())

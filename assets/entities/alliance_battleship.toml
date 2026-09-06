@@ -843,8 +843,15 @@ label = "entity.alliance_battleship.power_groups.weapons.label"
 # issue #1395. No group on the battleship may be taken COLD; only the
 # destroyer's and the cruiser's weapons author `min_level = 0`. A capital ship
 # is the one hull whose guns nobody may switch off with a single Engineering
-# order: it is here to keep shooting, and the restraint those two smaller hulls
-# express by going cold, this one expresses by holding fire.
+# order: it is here to keep shooting.
+#
+# STANDING NOTE (issue #1398): that sentence used to end "…and the restraint
+# those two smaller hulls express by going cold, this one expresses by holding
+# fire." The captain's Weapons Hold is retired, so a battleship now has NO way
+# to express restraint short of standing down from Red Alert. That may be the
+# right answer for a capital ship; it is at least a live question, and the only
+# change that would settle it the other way is authoring `min_level = 0` here —
+# a decision for whoever owns this hull's doctrine, not one #1398 took.
 #
 # NOMINAL (×1.0) is 2, which is where this group boots; dropping it to 1 is a
 # legal order that spends the freed point elsewhere, so rung 1 has to be drawn.

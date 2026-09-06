@@ -1013,7 +1013,7 @@ const PHASER_FACTS: &[FactDescriptor] = &[
     ship(
         RED_ALERT,
         "phaser bank",
-        "the ship's firing posture (red alert / weapons hold)",
+        "the ship's firing posture (red alert / weapons cold)",
         "false — reads as not weapons-free",
         "console::weapons::beam::seed_phaser_bank_facts",
     ),
@@ -1058,7 +1058,7 @@ const BLASTER_FACTS: &[FactDescriptor] = &[
     ship(
         RED_ALERT,
         "blaster bank",
-        "the ship's firing posture (red alert / weapons hold)",
+        "the ship's firing posture (red alert / weapons cold)",
         "false — reads as not weapons-free",
         "console::weapons::blaster::seed_blaster_bank_facts",
     ),
@@ -1145,7 +1145,7 @@ const TORPEDO_TUBE_FACTS: &[FactDescriptor] = &[
     ship(
         RED_ALERT,
         "torpedo tube",
-        "the ship's firing posture (red alert / weapons hold)",
+        "the ship's firing posture (red alert / weapons cold)",
         "false — reads as not weapons-free",
         "console::weapons::torpedo::seed_torpedo_tube_launch_facts",
     ),
@@ -1162,7 +1162,7 @@ const WEAPONS_DOCTRINE_FACTS: &[FactDescriptor] = &[
     ship(
         RED_ALERT,
         "weapons doctrine",
-        "the ship's firing posture (red alert / weapons hold)",
+        "the ship's firing posture (red alert / weapons cold)",
         "false — reads as not weapons-free",
         "console::weapons::seed_weapons_doctrine_facts",
     ),

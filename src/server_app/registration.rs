@@ -470,9 +470,9 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     // Two authoritative shapes, split exactly as `src/sim_digest.rs` folds them:
     //
     // * `Folded` — state `world_digest` walks every tick (`fold_run_scope`, the
-    //   entity/infrastructure/civilian/weapons-hold/station-stances/tractor/dock/
-    //   external-repair/umbilical/asteroid namespaces). A divergence in one of
-    //   these is caught on the tick it happens.
+    //   entity/infrastructure/civilian/station-stances/tractor/dock/
+    //   external-repair/umbilical/asteroid/collisions/security namespaces).
+    //   A divergence in one of these is caught on the tick it happens.
     // * `DeferredFold` — authoritative state the record classifies as in-the-fold
     //   but that `world_digest` does NOT walk today (the honest "deferred, and the
     //   digest may grow to cover it" list in `sim_digest`'s module docs: weapons
@@ -538,7 +538,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 StateClass::Folded,
                 "authoritative-red-alert-state",
             )
-            // Per-namespace folds (issues #1025/#1028/#1041/#1107/#1143/#907).
+            // Per-namespace folds (issues #1025/#1028/#1107/#1143/#907).
             .declare_state::<crate::infrastructure::InfrastructureCondition>(
                 StateClass::Folded,
                 "infrastructure-condition-state",
@@ -546,10 +546,6 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             .declare_state::<crate::civilian::server::CivilianTraffic>(
                 StateClass::Folded,
                 "civilian-traffic-state",
-            )
-            .declare_state::<crate::ship::state::ShipWeaponsHold>(
-                StateClass::Folded,
-                "authoritative-weapons-hold-state",
             )
             .declare_state::<crate::console::command::server::ShipStationStances>(
                 StateClass::Folded,

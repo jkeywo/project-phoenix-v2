@@ -27,7 +27,7 @@ entities:
       classification: authoritative
       owner: ship-power-controller
       writers: [ship-power-controller]
-      replicas: [ship-system-blackboards-state]
+      replicas: [ship-system-blackboards-state, sensor-radar-blackboard-state]
     implementation:
       status: declared
       paths: [src/ship/power.rs, src/core/messages.rs]

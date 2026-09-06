@@ -5,8 +5,7 @@ const HULLS = ['battleship', 'cruiser', 'destroyer', 'courier'];
 const COMPONENTS = [
   ['gui/components/ph-red-alert.js', [
     'CAPTAIN_RED_ALERT_ACTION_ID',
-    'CAPTAIN_WEAPONS_HOLD_ACTION_ID',
-  ], ["sendAction('set_red_alert'", "sendAction('set_weapons_hold'"]],
+  ], ["sendAction('set_red_alert'"]],
   ['gui/components/ph-camera-select.js', [
     'CAPTAIN_VIEW_ACTION_ID',
   ], ["sendAction('set_view'"]],

@@ -164,15 +164,17 @@ pub struct WorldContentRuntime {
     // The four transient per-tick effect queues that used to sit here —
     // `pending_condition_adjustments`, `pending_capacity_adjustments`,
     // `pending_civilian_orders` and `pending_weapons_holds` — were extracted to
-    // their own per-owner `crate::effect_queue::EffectQueue<T>` resources (issue
-    // #1223), registered and drained by the plugin that owns each edge
-    // (Infrastructure / Civilian / captain). They lived here partly so the
-    // authoritative-state census "saw no new registration"; #1220–#1222 gave the
-    // census a real declaration registry, so each queue is now declared
-    // `ClearedAtFold` at its owning `build()` instead. `pending_world_events` and
-    // `pending_delayed_actions` stay: unlike those four they are NOT empty at a
-    // tick boundary (they are snapshotted / carried across ticks), so they are
-    // deferred state rather than a transient inter-system queue.
+    // their own per-owner `crate::effect_queue::EffectQueue<T>` resources
+    // (issue #1223), registered and drained by the plugin that owns each edge
+    // (Infrastructure / Civilian / Power — the last was the captain's until
+    // #1398 turned the scripted weapons hold into a reactor order). They lived
+    // here partly so the authoritative-state census "saw no new registration";
+    // #1220–#1222 gave the census a real declaration registry, so each queue is
+    // now declared `ClearedAtFold` at its owning `build()` instead.
+    // `pending_world_events` and `pending_delayed_actions` stay: unlike those
+    // four they are NOT empty at a tick boundary (they are snapshotted /
+    // carried across ticks), so they are deferred state rather than a transient
+    // inter-system queue.
 }
 
 /// Bevy resource wrapping the server-side objective manager.
@@ -3063,9 +3065,9 @@ pub(crate) struct EffectQueuesOut<'a> {
     pub capacity_adjustments: &'a mut Vec<crate::infrastructure::CapacityAdjustment>,
     /// Drained by `crate::civilian::tick_civilian_traffic`.
     pub civilian_orders: &'a mut Vec<crate::civilian::PendingCivilianOrder>,
-    /// Drained by `crate::console::captain::server::apply_scripted_weapons_holds`,
-    /// as `(ship uuid, held)`.
-    pub weapons_holds: &'a mut Vec<(String, bool)>,
+    /// Drained by `crate::ship::power::drain_scripted_power_orders` (issue
+    /// #1398) — the scripted reactor orders `hold_fire` / `release_fire` push.
+    pub power_orders: &'a mut Vec<crate::modifiers::power_system::PendingGroupPower>,
     /// Drained by `crate::narrative::emit_authored_and_marked_entity_narrative`
     /// (issue #1338): the authored beats and marked-entity outcomes a script
     /// declared this tick, plus the scripted-removal signal every
@@ -3100,7 +3102,8 @@ pub(crate) struct EffectQueues<'w, 's> {
     condition: Option<ResMut<'w, EffectQueue<crate::infrastructure::ConditionAdjustment>>>,
     capacity: Option<ResMut<'w, EffectQueue<crate::infrastructure::CapacityAdjustment>>>,
     civilian_orders: Option<ResMut<'w, EffectQueue<crate::civilian::PendingCivilianOrder>>>,
-    weapons_holds: Option<ResMut<'w, EffectQueue<(String, bool)>>>,
+    power_orders:
+        Option<ResMut<'w, EffectQueue<crate::modifiers::power_system::PendingGroupPower>>>,
     narrative: Option<ResMut<'w, EffectQueue<crate::core::narrative::NarrativeRequest>>>,
     computer_message:
         Option<ResMut<'w, EffectQueue<crate::core::computer_message::ComputerMessageRequest>>>,
@@ -3108,7 +3111,7 @@ pub(crate) struct EffectQueues<'w, 's> {
     condition_fallback: Local<'s, Vec<crate::infrastructure::ConditionAdjustment>>,
     capacity_fallback: Local<'s, Vec<crate::infrastructure::CapacityAdjustment>>,
     civilian_orders_fallback: Local<'s, Vec<crate::civilian::PendingCivilianOrder>>,
-    weapons_holds_fallback: Local<'s, Vec<(String, bool)>>,
+    power_orders_fallback: Local<'s, Vec<crate::modifiers::power_system::PendingGroupPower>>,
     narrative_fallback: Local<'s, Vec<crate::core::narrative::NarrativeRequest>>,
     computer_message_fallback:
         Local<'s, Vec<crate::core::computer_message::ComputerMessageRequest>>,
@@ -3132,9 +3135,9 @@ impl EffectQueues<'_, '_> {
                 Some(q) => &mut q.0,
                 None => &mut self.civilian_orders_fallback,
             },
-            weapons_holds: match &mut self.weapons_holds {
+            power_orders: match &mut self.power_orders {
                 Some(q) => &mut q.0,
-                None => &mut self.weapons_holds_fallback,
+                None => &mut self.power_orders_fallback,
             },
             narrative: match &mut self.narrative {
                 Some(q) => &mut q.0,
@@ -3200,8 +3203,8 @@ pub(crate) fn apply_dispatch_result(
         &mut bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>,
     >,
     // The transient effect queues a name-resolved command lands on (issue
-    // #1223): condition/capacity adjustments, civilian orders and weapons holds
-    // used to be `pending_*` fields on `runtime`; each is now its owning plugin's
+    // #1223): condition/capacity adjustments, civilian orders and scripted power
+    // orders used to be `pending_*` fields on `runtime`; each is now its owning plugin's
     // `EffectQueue<T>` resource, lent here as plain `&mut Vec<T>`. The narrative
     // queue (issue #1338) joined them last.
     effects: &mut EffectQueuesOut,
@@ -3546,21 +3549,28 @@ pub(crate) fn apply_dispatch_result(
                 }
             }
 
-            // Issue #1041. The name is resolved here — the applier is where
-            // `name_to_uuid` lives — and the order is queued for
-            // `apply_scripted_weapons_holds`, which is the one system holding
-            // an entity query. The mirror flag is NOT written here: it is
-            // mirrored off the authoritative component, so a scenario's order
-            // and a captain's press produce the same transition event.
-            ActionCmd::SetWeaponsHold { entity, held } => {
+            // Issues #1041/#1398. The name is resolved here — the applier is
+            // where `name_to_uuid` lives — and the order is queued for
+            // `ship::power::drain_scripted_power_orders`, which is the one
+            // system holding both an entity query and the reactor. The mirror
+            // flag is NOT written here: `weapons_cold.*` is mirrored off the
+            // reactor, so a scenario's order and an Engineering officer's order
+            // produce the same transition event.
+            ActionCmd::SetGroupPower {
+                entity,
+                group,
+                level,
+            } => {
                 let Some(uuid) = runtime.name_to_uuid.get(&entity).cloned() else {
                     bevy::log::warn!(
-                        "{log_ctx}: SetWeaponsHold: no entity named '{entity}' in this \
+                        "{log_ctx}: SetGroupPower: no entity named '{entity}' in this \
                          world — ignoring"
                     );
                     continue;
                 };
-                effects.weapons_holds.push((uuid, held));
+                effects
+                    .power_orders
+                    .push(crate::modifiers::power_system::PendingGroupPower { uuid, group, level });
             }
 
             // Issue #1028, and the same shape for the same reason: the applier

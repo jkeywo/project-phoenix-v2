@@ -253,8 +253,6 @@ station = "captain"
         app.world_mut()
             .register_component::<crate::entities::spawner::EntitySystemHull>();
         app.world_mut()
-            .register_component::<crate::ship::state::ShipWeaponsHold>();
-        app.world_mut()
             .register_component::<crate::console::command::server::ShipStationStances>();
         app.world_mut().insert_resource(SimTick(42));
         app.world_mut().insert_resource(SimulationPaused(false));

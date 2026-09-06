@@ -17,12 +17,13 @@ Each actual state edge also emits the existing unconditional
 that fact as a tick-stamped Red Alert row scoped by the affected actual `Ship`;
 it does not infer edges from snapshots or add a second event bus.
 
-A human Captain's Red Alert and Weapons Hold activations also have a transient,
+A human Captain's Red Alert activation also has a transient,
 correlated presentation lifecycle: `Pressed` → `Pending` → `Applied`/`Refused`, with a
 client-local `TimedOut` result when no targeted host response arrives. Admission
 retains the opaque correlation only until the due command reaches the Captain
 consumer; the consumer returns `Applied` even for an idempotent same-state
 success. This metadata is absent from Red Alert gameplay state, payloads,
 command logs, mesh traffic, snapshots and replay. Consequently Pending never
-paints either control as active: only the published `ShipRedAlert` and
-`ShipWeaponsHold` states can do that.
+paints the control as active: only the published `ShipRedAlert` state can do
+that. (The Weapons Hold that shared this lifecycle from issue #1041 was retired
+in #1398; restraint is a Power order, and its readout is the reactor's own.)

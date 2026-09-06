@@ -566,25 +566,11 @@ fn insert_ship_config_and_core_bundle(
         crate::console::weapons::ActiveBeam::default(),
         crate::console::weapons::PhaserCooldown::default(),
         crate::ship::sensors::SensorRadarSelection::default(),
-        // The restraint lever (issue #1041) rides in the SAME bundle as the
-        // alert it layers under, nested rather than added as a second
-        // `insert`. Every ship carries it, player and NPC alike, so the
-        // captain's order and a scenario's order land on the same state and
-        // the fire hosts need no "is this an NPC?" branch; it defaults to
-        // released, so a hull nobody orders behaves exactly as it did
-        // before this issue.
-        //
-        // The nesting is load-bearing, not tidiness. A second `insert` is a
-        // second queued command and a second archetype move per ship, which
-        // shifts what the command queue does afterwards — and a world that
-        // never pulls this lever must be byte-identical, which is the
-        // acceptance criterion this whole slice is built to. Bundles nest,
-        // so pairing it with `ShipRedAlert` keeps the tuple inside Bevy's
-        // 15-element ceiling without paying for a second command.
-        (
-            crate::ship::state::ShipRedAlert::default(),
-            crate::ship::state::ShipWeaponsHold::default(),
-        ),
+        // The alert. Its former bundle-mate `ShipWeaponsHold` (issue #1041)
+        // was retired in #1398: restraint is a POWER order now, so the state
+        // the fire gate reads is the ship's own reactor and there is no second
+        // per-ship boolean to spawn.
+        crate::ship::state::ShipRedAlert::default(),
         crate::ship::state::ShipViewMode::default(),
         crate::ship::state::ShipPhaserFrequency::default(),
         crate::console::navigation::NavigationWaypoint::default(),

@@ -90,10 +90,9 @@ pub fn seed_torpedo_tube_load_facts(
 /// gap in one go needs the stronger one. Note `target_facing_shields` beside it
 /// is an HP reading, not a boolean: `<= 0` means the striking arc is not
 /// blocking (down, or absent entirely).
-/// `posture` is the firing reading, added by issue #872 and widened by issues
-/// #1041 and #1396 — this ship's own [`crate::ship::state::ShipRedAlert`], the
-/// captain's [`crate::ship::state::ShipWeaponsHold`], and whether THIS tube's
-/// authored power group is cold, folded into the one `red_alert` fact by
+/// `posture` is the firing reading, added by issue #872 and widened by issue
+/// #1396 — this ship's own [`crate::ship::state::ShipRedAlert`] and whether THIS
+/// tube's authored power group is cold, folded into the one `red_alert` fact by
 /// [`crate::console::weapons::WeaponsAlertPosture`]. Seeded on the LAUNCH
 /// snapshot only: loading a tube and granting a round from the magazine are not
 /// offensive fire and stay ungated — a restrained ship may fill its tubes, it

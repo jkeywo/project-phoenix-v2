@@ -315,22 +315,30 @@ pub enum ActionCmd {
         id: String,
         mutation: crate::world::workforce::WorkforceMutation,
     },
-    /// Order the named ship to hold or release its fire (issue #1041).
+    /// Command one of the named ship's POWER groups to a level (issue #1398).
+    ///
+    /// The state behind `hold_fire(name)` / `release_fire(name)` since #1398.
+    /// The verbs kept their names and lost their own state: restraint is a
+    /// reactor order now, so a scenario silences a hull through the same
+    /// `PowerSystem` an Engineering officer commands and the fire gate has one
+    /// thing to read instead of two.
     ///
     /// `entity` is the world's authored entity NAME, resolved by the applier
     /// against `WorldContentRuntime::name_to_uuid` for the reason every other
     /// name-carrying command here is, and queued rather than applied on the
     /// spot because the applier holds that map and no entity query at all.
     ///
-    /// The mirror flag is **not** written here, and this is where the shape
-    /// parts company with [`Self::SetWorkforceState`]: a weapons hold has a
-    /// second author — the ship's own captain, human or AI, through the
-    /// admitted `SetWeaponsHold` command — so the flag is mirrored off the
-    /// authoritative component every tick by the one system that owns the
-    /// mirror, and a scenario's order gets the same `FlagSet`/`FlagCleared`
-    /// transition a captain's press does. A flag written here would have been
+    /// The mirror flag is **not** written here. `weapons_cold.*` is mirrored off
+    /// the ship's own reactor every tick by
+    /// `crate::ship::power::mirror_weapons_cold_flags`, so a scenario's order
+    /// and an Engineering officer's order produce the same
+    /// `FlagSet`/`FlagCleared` transition. A flag written here would have been
     /// written for the scenario's orders and silently absent for the crew's.
-    SetWeaponsHold { entity: String, held: bool },
+    SetGroupPower {
+        entity: String,
+        group: crate::core::messages::PowerGroupId,
+        level: crate::modifiers::power_system::ScriptedPowerLevel,
+    },
     /// Order the named civilian to hold, divert or dock (issue #1028).
     ///
     /// `entity` is the world's authored entity NAME, not a UUID, and the applier

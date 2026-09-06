@@ -51,7 +51,6 @@ async function installCaptainFeedbackProbe(frameBody) {
       const alertRoot = document.querySelector('ph-red-alert')?.shadowRoot;
       const cameraRoot = document.querySelector('ph-camera-select')?.shadowRoot;
       const alertButton = alertRoot?.getElementById('alert-btn');
-      const holdButton = alertRoot?.getElementById('hold-btn');
       const activeView = cameraRoot?.querySelector('.cam-btn.active');
       window.__captainFeedbackTransitions.push({
         actionId: value.actionId,
@@ -59,8 +58,6 @@ async function installCaptainFeedbackProbe(frameBody) {
         state: value.state,
         alertActive: alertButton?.classList.contains('active') ?? false,
         alertBusy: alertButton?.getAttribute('aria-busy') ?? null,
-        holdHeld: holdButton?.classList.contains('held') ?? false,
-        holdBusy: holdButton?.getAttribute('aria-busy') ?? null,
         activeView: activeView?.dataset.view ?? null,
       });
     });
@@ -108,8 +105,10 @@ test('remapped Captain Red Alert binding reaches the authoritative command path'
   const frameBody = captainFrame.locator('body');
   const alertComponent = captainFrame.locator('ph-red-alert');
   const alertButton = alertComponent.locator('#alert-btn');
-  const holdButton = alertComponent.locator('#hold-btn');
   const alertFeedback = alertComponent.locator('#feedback-status');
+  // Issue #1398: `ph-red-alert` carries ONE button. Restraint moved to Power,
+  // so the Captain's second discoverable action here is the viewscreen.
+  await expect(alertComponent.locator('#hold-btn')).toHaveCount(0);
   const activeViewButton = captainFrame.locator('ph-camera-select .cam-btn.active');
   await expect(alertButton).toBeEnabled();
   await expect(alertButton).toHaveText(ts('component.red_alert.standby'));
@@ -119,11 +118,11 @@ test('remapped Captain Red Alert binding reaches the authoritative command path'
   const binding = captain.locator(
     '[data-control="semantic-binding-captain.red-alert-0"]',
   );
-  const holdBinding = captain.locator(
-    '[data-control="semantic-binding-captain.weapons-hold-0"]',
+  const viewBinding = captain.locator(
+    '[data-control="semantic-binding-captain.view-0"]',
   );
   await expect(binding).toHaveValue('R');
-  await expect(holdBinding).toHaveValue('H');
+  await expect(viewBinding).toHaveValue('V');
 
   // Browser-delivered proof: even with Shift optional in the reserved policy,
   // Ctrl+R cannot become a Station binding and the authored R survives.
@@ -140,8 +139,8 @@ test('remapped Captain Red Alert binding reaches the authoritative command path'
 
   // Both actions share Captain context. Replace clears the previous slot;
   // resetting Red Alert then clears that colliding remap before restoring R.
-  await holdBinding.click();
-  await holdBinding.press('KeyR');
+  await viewBinding.click();
+  await viewBinding.press('KeyR');
   await expect(captain.locator('[data-control="semantic-binding-conflict-cancel"]'))
     .toBeFocused();
   // Conflict Escape is modal-wide: move backward out of the prompt to Reset
@@ -167,27 +166,27 @@ test('remapped Captain Red Alert binding reaches the authoritative command path'
   await captain.keyboard.press('Escape');
   await expect(captain.locator('#settings-overlay')).toBeVisible();
   await expect(captain.locator('.settings-binding-conflict')).toHaveCount(0);
-  await expect(holdBinding).toBeFocused();
-  await expect(holdBinding).toHaveValue(ts('settings.controls.press_key'));
-  await holdBinding.blur();
-  await expect(holdBinding).toHaveValue('H');
+  await expect(viewBinding).toBeFocused();
+  await expect(viewBinding).toHaveValue(ts('settings.controls.press_key'));
+  await viewBinding.blur();
+  await expect(viewBinding).toHaveValue('V');
 
-  await holdBinding.click();
-  await holdBinding.press('KeyR');
+  await viewBinding.click();
+  await viewBinding.press('KeyR');
   await expect(captain.locator('[data-control="semantic-binding-conflict-cancel"]'))
     .toBeFocused();
   await captain.click('[data-control="semantic-binding-conflict-replace"]');
   await expect(binding).toHaveValue(ts('input.binding.unassigned'));
-  await expect(holdBinding).toBeFocused();
-  await expect(holdBinding).toHaveValue(ts('settings.controls.press_key'));
-  await holdBinding.blur();
-  await expect(holdBinding).toHaveValue('R');
+  await expect(viewBinding).toBeFocused();
+  await expect(viewBinding).toHaveValue(ts('settings.controls.press_key'));
+  await viewBinding.blur();
+  await expect(viewBinding).toHaveValue('R');
   await captain.click('[data-control="semantic-binding-reset-captain.red-alert"]');
   await expect(binding).toHaveValue('R');
-  await expect(holdBinding).toHaveValue(ts('input.binding.unassigned'));
+  await expect(viewBinding).toHaveValue(ts('input.binding.unassigned'));
   await captain.click('[data-control="semantic-binding-reset-all"]');
   await expect(binding).toHaveValue('R');
-  await expect(holdBinding).toHaveValue('H');
+  await expect(viewBinding).toHaveValue('V');
 
   // Modified navigation keys are chords, not modal navigation. Both remain
   // inside capture, are refused by the registry, and leave the field ready
@@ -278,16 +277,9 @@ test('remapped Captain Red Alert binding reaches the authoritative command path'
   await expect(alertButton).toHaveClass(/active/);
   await expect(alertFeedback).toHaveText(ts('action_feedback.applied'));
 
-  // The same shipped registry/transport/authority lifecycle covers Weapons
-  // Hold and the parameterised View action. Pending is observed before the
-  // ordinary Captain blackboard changes either control's rendered state.
-  await captain.keyboard.press('KeyH');
-  const holdEvents = await expectAppliedLifecycle(frameBody, 'captain.weapons-hold');
-  const holdPending = holdEvents.find((event) => event.state === 'Pending');
-  expect(holdPending).toMatchObject({ holdHeld: false, holdBusy: 'true' });
-  await expect(holdButton).toHaveText(ts('component.weapons_hold.held'));
-  await expect(holdButton).toHaveClass(/held/);
-
+  // The same shipped registry/transport/authority lifecycle covers the
+  // parameterised View action. Pending is observed before the ordinary Captain
+  // blackboard changes the control's rendered state.
   const viewBefore = await activeViewButton.count() === 1
     ? await activeViewButton.getAttribute('data-view')
     : null;
@@ -306,7 +298,7 @@ test('remapped Captain Red Alert binding reaches the authoritative command path'
   // A real peer with no Captain tenure sends the same well-formed correlated
   // state-setting command. Admission targets Refused back to that token, and
   // advancing the authoritative clock proves the rejected request never
-  // changes Red Alert (or either already-applied sibling Captain state).
+  // changes Red Alert (or the already-applied sibling Captain state).
   const nonCaptain = await createTestClient(context, hostId, {
     name: 'Unassigned Crew',
   });
@@ -328,8 +320,6 @@ test('remapped Captain Red Alert binding reaches the authoritative command path'
   ).toBeGreaterThan(refusedAtTick + 2);
   await expect(alertButton).toHaveText(ts('component.red_alert.active'));
   await expect(alertButton).toHaveClass(/active/);
-  await expect(holdButton).toHaveText(ts('component.weapons_hold.held'));
-  await expect(holdButton).toHaveClass(/held/);
   await expect(activeViewButton).toHaveAttribute('data-view', viewAfter);
 
   await nonCaptain.close();

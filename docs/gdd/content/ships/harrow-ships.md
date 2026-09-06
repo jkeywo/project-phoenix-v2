@@ -34,7 +34,7 @@ Unlike current Alliance player ships, these hulls generally use a single hull-in
 
 The Patrol is a persistent screening and enforcement hull. It is not especially fast or agile, but its twin phaser banks and 300-point hull let it remain in contact and apply steady pressure. In Falling Skyway, a Harrow Patrol template is repurposed mechanically as the Havelock enforcer/picket; this does not by itself make Havelock part of House Harrow. Its scenario role can escalate from coercive presence to combat, and its weapons may be disabled without requiring its destruction.
 
-This establishes an important content principle: a hostile-capable hull can be an actor in an operational crisis rather than a disposable combat wave. Scenario state, comms, faction relations, weapons-hold decisions, and disablement can all matter.
+This establishes an important content principle: a hostile-capable hull can be an actor in an operational crisis rather than a disposable combat wave. Scenario state, comms, faction relations, restraint decisions (a hull's weapons power group taken cold), and disablement can all matter.
 
 ## Harrow Destroyer
 
@@ -90,7 +90,7 @@ Mixed forces should be authored as objectives and groups, not given scenario-onl
 - Mixed groups create target, manoeuvre, defence, and timing decisions across multiple stations.
 - Harrow ships respond correctly to faction changes, disablement, objectives, and scenario-local doctrine.
 - Combat Test can spawn and resolve every current role without scenario-specific weapon or AI code.
-- Falling Skyway’s enforcer can be negotiated with, disabled, held at weapons hold, attacked, or destroyed through supported shared state.
+- Falling Skyway’s enforcer can be negotiated with, disabled, ordered to take its weapons cold, attacked, or destroyed through supported shared state.
 
 ## Canonical sources
 

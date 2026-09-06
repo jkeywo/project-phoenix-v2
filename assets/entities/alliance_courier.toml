@@ -481,7 +481,10 @@ label = "entity.alliance_courier.power_groups.weapons.label"
 # issue #1395. No group on the courier may be taken COLD; only the destroyer's
 # and the cruiser's weapons author `min_level = 0`. Going cold is a statement a
 # warship makes about restraint, and this hull carries too little armament for
-# switching it off to read as anything but a malfunction.
+# switching it off to read as anything but a malfunction. Since issue #1398
+# retired the captain's Weapons Hold that also means the courier has no
+# restraint lever at all — see the standing note on the battleship, which the
+# same question applies to.
 #
 # NOMINAL (×1.0) is 2, which is where this group boots; dropping it to 1 is a
 # legal order that spends the freed point elsewhere, so rung 1 has to be drawn.

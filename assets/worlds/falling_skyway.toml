@@ -364,11 +364,14 @@
 # THE ENGINE HALF OF THIS SLICE MOVES NOTHING AT ALL, and that is the acceptance
 # criterion rather than a nicety: `fold_weapons_hold_namespace` folds nothing
 # while no ship is holding, and a released hold seeds the fire hosts exactly the
-# 1.0/0.0 they always seeded. Two things had to be fixed for that to be true
-# rather than merely intended — the mirror now reads the flag store before it
-# writes, so a spawning ship no longer marks `WorldContentRuntime` changed, and
-# the new component rides the ship spawn bundle nested rather than as a second
-# `insert`, so no extra command or archetype move reorders what spawns after it.
+# 1.0/0.0 they always seeded. (Issue #1398 retired that namespace outright when
+# it retired the hold; deleting a fold that contributed nothing unless a ship was
+# holding is the same non-move read from the other end.)
+# Two things had to be fixed for that to be true rather than merely intended —
+# the mirror now reads the flag store before it writes, so a spawning ship no
+# longer marks `WorldContentRuntime` changed, and the new component rides the
+# ship spawn bundle nested rather than as a second `insert`, so no extra command
+# or archetype move reorders what spawns after it.
 # `probe_storm.toml` is what caught both: its committed 11434311098359716284 came
 # back only when the second one was fixed too.
 #
@@ -396,7 +399,7 @@
 #
 #   the destroyer's new `stabilise` capability   a hull that CAN run an operation
 #       and never has folds nothing (`fold_operations_namespace`), the same
-#       reading #1041's own `fold_weapons_hold_namespace` note relies on; and an
+#       reading #1041's own weapons-hold namespace note relied on; and an
 #       Act-3 run is four hundred seconds past a 900-frame window in any case;
 #   `skyhook_failure_due`                        a `[[deadline]]` lives on
 #       `WorldContentRuntime`, which nothing folds;
@@ -651,7 +654,7 @@
 # `Versions::check` refusing a save whose scripts have since moved — and it is
 # NOT what this header blesses. The blessed number is `state_digest`, which
 # `ReplayLedger::seal` computes from `world_digest` alone: run scope, entities,
-# infrastructure, operations, civilians, weapons holds, asteroids, collisions.
+# infrastructure, operations, civilians, asteroids, collisions.
 # No script hash is in that fold, and no content-ledger entry reaches it. So a
 # save recorded before this slice is correctly refused afterwards, and the run
 # digest is correctly unmoved — the two answers differ because they are answers
@@ -1596,8 +1599,8 @@ overrides = { comms = { hailable = true } }
 # there doing nothing until somebody starts something: the fleet's own faction
 # files call the Harrow "a non-engaging neighbour the player must choose to
 # provoke", which is the premise a restraint lever needs. And its gun line
-# authors `min_alert_to_fire = 0`, so it is the hull a weapons hold has to beat
-# the hard way.
+# authors `min_alert_to_fire = 0`, so it is the hull restraint has to beat the
+# hard way.
 #
 # The `[infrastructure]` on a warship is a composition, not a new combat state.
 # A condition track already falls with hull damage and already owns named
@@ -4281,7 +4284,11 @@ on_flag_set("havelock_enforcer_boarded", "on_picket_boarded");
 // Havelock's operations staff watching the corridor notice that the destroyer
 // has not gone weapons-free. Read off the MIRROR flag, exactly as a condition
 // reads `workforce.<id>.on_strike` — the scenario never touches ship state.
-on_flag_set("weapons_hold.own_ship", "on_crew_holds_fire");
+//
+// Re-keyed from `weapons_hold.own_ship` in issue #1398: restraint is a POWER
+// order now, so what the operations staff are actually watching is the crew's
+// weapons group at level 0. Same key shape, same handler, same beat.
+on_flag_set("weapons_cold.own_ship", "on_crew_holds_fire");
 
 // ── The standoff's shared reads ─────────────────────────────────────────────
 
@@ -4677,10 +4684,11 @@ fn on_picket_boarded(ctx) {
     });
 }
 
-// DISABLED. The mount is gone, the boat is not: the picket is held to its own
-// weapons hold — #1041's own lever, applied to an NPC through the same state a
-// captain's console writes — and everyone aboard it lives. Repairable, in
-// principle, which is the difference the flags are recording.
+// DISABLED. The mount is gone, the boat is not: the picket's weapons group is
+// taken COLD — the restraint lever #1398 re-pointed at POWER, applied to an NPC
+// through the same reactor an Engineering console commands — and everyone aboard
+// it lives. Repairable, in principle, which is the difference the flags are
+// recording.
 //
 // AC3 LANDS HERE. Nothing about this handler requires the hull to fail: the
 // authored threshold clears its flag at 35 % of the condition track, and

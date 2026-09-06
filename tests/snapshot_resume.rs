@@ -39,7 +39,7 @@ use project_phoenix::snapshot::{
     SIMULATION_RULES, SNAPSHOT_FORMAT,
 };
 use project_phoenix::world::script::load::script_ledger_key;
-use vellum_save::{FileStore, Moved, Verdict, Versions};
+use vellum_save::{FileStore, Moved, Store, Verdict, Versions};
 
 /// The duel arena: a fixed roster spawned at t=0 and no asteroid field at all.
 ///
@@ -6700,16 +6700,15 @@ fn a_world_with_no_debris_writes_no_debris_state() {
     );
 }
 
-// ── Issue #1041: an order to hold fire survives the save ─────────────────────
+// ── The restraint world, shared by the fixtures below ──────────────────────
 
 const RESTRAINT: &str = "assets/worlds/probe_restraint.toml";
 
-/// Frames to run before the restraint capture.
+/// Frames to run before a restraint capture.
 ///
-/// `probe_restraint.toml` orders its picket to hold at t=4 s and releases it at
-/// t=8 s, so a capture has to land inside that window — 360 frames is t=6 s,
-/// squarely between the two. The precondition below asserts the hold rather than
-/// trusting the number.
+/// `probe_restraint.toml` orders its picket's weapons cold at t=4 s and powers
+/// them back up at t=8 s, so a capture aimed at that window has to land inside
+/// it — 360 frames is t=6 s, squarely between the two.
 const RESTRAINT_CAPTURE_AT: u64 = 360;
 
 fn restraint_args() -> HeadlessArgs {
@@ -6721,75 +6720,6 @@ fn restraint_args() -> HeadlessArgs {
         deterministic: true,
         ..Default::default()
     }
-}
-
-/// The saved weapons-hold state of every ship in a payload, keyed by uuid.
-fn held_ships(payload: &PhoenixSnapshot) -> Vec<(String, bool)> {
-    let mut rows: Vec<(String, bool)> = payload
-        .entities
-        .iter()
-        .filter_map(|e| e.weapons_hold.map(|held| (e.uuid.clone(), held)))
-        .collect();
-    rows.sort();
-    rows
-}
-
-/// **Issue #1041.** A ship its captain ordered to hold fire comes back holding
-/// it.
-///
-/// The sharp case, and it is sharp for the reason the strike test above is: the
-/// fresh app does not start from the save. It boots the same world file, which
-/// spawns every hull weapons-free, and only then has the capture laid over it —
-/// so the resumed world genuinely holds the wrong answer at the moment `restore`
-/// is called. Half a firing posture is not a posture: a save that remembered the
-/// alert and forgot the hold would hand the crew back a ship with live guns on
-/// the tick a scenario is weighing what they chose.
-#[test]
-fn an_order_to_hold_fire_survives_a_resume() {
-    let mut live = boot(&restraint_args());
-    step(&mut live, RESTRAINT_CAPTURE_AT);
-
-    let payload = capture(live.world());
-    let captured_digest = world_digest(live.world());
-
-    let held = held_ships(&payload);
-    assert!(
-        held.iter().any(|(_, h)| *h),
-        "precondition: the capture is taken INSIDE the hold window — a capture with \
-         nothing held would round-trip identically even if restore dropped the field"
-    );
-    assert!(
-        held.iter().any(|(_, h)| !*h),
-        "precondition: and something is weapons-free at the same instant, so what \
-         round-trips below is a per-ship answer rather than a constant"
-    );
-
-    let mut resumed = boot_to_restore_point(&restraint_args(), &payload);
-    assert!(
-        held_ships(&capture(resumed.world()))
-            .iter()
-            .all(|(_, h)| !*h),
-        "precondition: the freshly booted world has every hull weapons-free — it is a \
-         fresh read of the same file, not a resumed one, so nothing below can be \
-         satisfied by a bootstrap coincidence"
-    );
-
-    let report = restore(resumed.world_mut(), &payload);
-    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
-
-    assert_eq!(
-        held_ships(&capture(resumed.world())),
-        held,
-        "every ship's posture comes back exactly as it was ordered — the held hull \
-         held, the free ones free"
-    );
-    assert_eq!(
-        world_digest(resumed.world()),
-        captured_digest,
-        "the resumed world stands exactly where the capture did, weapons-hold \
-         namespace included — a resume that dropped the order would fold a different \
-         number here, because a held ship IS in that namespace"
-    );
 }
 
 // ── Issue #1395: an order to power the weapons down survives the save ────────
@@ -6903,14 +6833,19 @@ fn an_order_to_power_down_survives_a_resume() {
     );
 }
 
-/// A save written before the weapons hold was recorded is refused on **format**.
+/// A save written while the weapons hold still existed is refused on **format**.
 ///
-/// The field carries `#[serde(default)]`, so an older payload still parses —
-/// which is exactly why the constant had to move. Nothing in a format-8 payload
-/// distinguishes a run whose captain had called a hold from one whose captain
-/// had not, and the two are different worlds.
+/// Issue #1398 removed `EntityState.weapons_hold`, and nothing in this payload
+/// denies unknown fields, so a format-19 record still PARSES — which is exactly
+/// why the constant had to move. The refusal is what makes the tolerance safe:
+/// a format-19 save records restraint in a field this build cannot honour, and
+/// the only faithful translation (that ship's `weapons` group taken cold) is one
+/// `alliance_battleship`, `alliance_courier` and `alliance_tender` all refuse,
+/// because they author `min_level = 1`. Nothing in the payload distinguishes such
+/// a save from one taken with the lever never pulled, so both are refused, and
+/// the refusal names the dimension that moved rather than dying in the parser.
 #[test]
-fn a_save_written_before_the_weapons_hold_is_refused_on_format() {
+fn a_save_written_while_the_weapons_hold_existed_is_refused_on_format() {
     let mut live = boot(&restraint_args());
     step(&mut live, RESTRAINT_CAPTURE_AT);
 
@@ -6920,14 +6855,49 @@ fn a_save_written_before_the_weapons_hold_is_refused_on_format() {
 
     let previous = Versions::new(SNAPSHOT_FORMAT - 1, SIMULATION_RULES, current.content);
     let run = run_for(payload, digest, SEED, RESTRAINT, previous);
+
+    // A REAL format-19 record carries `weapons_hold` on every ship row, and a
+    // run stamped 19 by this build does not. Putting the field back in front of
+    // the alert it used to sit beside is what makes the artifact the one the
+    // refusal is about — and it is what makes the TOLERANT-DECODE half of the
+    // claim testable: if the parser tripped over the field this build no longer
+    // knows, the refusal below would be `Unparsable`, which names nothing.
+    let text = run.to_ron().expect("the run serialises");
+    let aged = age_to_format_19(&text);
+    assert_ne!(aged, text, "precondition: a ship row was found to age");
     let store = FileStore::new(scratch("weapons-hold-format"));
-    save_to(&store, "autosave", &run).expect("the save is written");
+    store
+        .write("autosave", &aged)
+        .expect("the aged save is written");
 
     let refusal = load_from(&store, "autosave", &current).expect_err("this build refuses it");
     assert!(
         matches!(refusal, LoadRefusal::Moved(Moved::Format { .. })),
-        "the refusal names the dimension that moved: {refusal}"
+        "the refusal names the dimension that moved rather than dying in the \
+         parser — the decode stayed tolerant of the retired field: {refusal}"
     );
+}
+
+/// Re-insert the retired `EntityState.weapons_hold` field on every ship row of a
+/// serialised run, turning a current payload into a format-19-shaped one.
+///
+/// Anchored on `red_alert:`, the field it was stored beside, and skipped where
+/// that text is a quoted map key rather than a struct field — a RON identifier
+/// is never quoted, so the check is exact rather than heuristic.
+fn age_to_format_19(text: &str) -> String {
+    const MARKER: &str = "red_alert:";
+    let mut out = String::with_capacity(text.len() + 64);
+    let mut last = 0;
+    for (index, _) in text.match_indices(MARKER) {
+        if index > 0 && text.as_bytes()[index - 1] == b'"' {
+            continue;
+        }
+        out.push_str(&text[last..index]);
+        out.push_str("weapons_hold:Some(true),");
+        last = index;
+    }
+    out.push_str(&text[last..]);
+    out
 }
 
 // ── Issue #1386: the team abroad on a field repair survives the save ─────────

@@ -102,7 +102,7 @@ export function makeCaptainRender(variant) {
     // ── Red alert ────────────────────────────────────────────────────────
     if (ids.redAlert) {
       const el = doc.getElementById(ids.redAlert);
-      if (el) el.state = { active: !!view.red_alert, hold: !!view.weapons_hold, auto: !!view.red_alert_auto };
+      if (el) el.state = { active: !!view.red_alert, auto: !!view.red_alert_auto };
     }
 
     // ── Objectives ───────────────────────────────────────────────────────

@@ -1085,8 +1085,6 @@ pub(crate) fn ai_phaser_auto_fire(
             // stance rides here too (issue #1107):
             //   - the ship's own red-alert state (issue #872), seeded as a typed
             //     fact for the bank's authored fire predicate;
-            //   - the captain's weapons hold (issue #1041), folded into the same
-            //     `red_alert` fact the bank's gate reads;
             //   - the ship's reactor (issue #1396), so each bank's OWN authored
             //     power group can be read for COLD (level 0) and folded into
             //     that same fact — the bundle is why this reading costs the
@@ -1097,7 +1095,6 @@ pub(crate) fn ai_phaser_auto_fire(
             //     fixture that spawns none behaves exactly as before.
             (
                 Option<&crate::ship::state::ShipRedAlert>,
-                Option<&crate::ship::state::ShipWeaponsHold>,
                 Option<&crate::ship::power::ShipPowerSystem>,
                 Option<&crate::console::command::server::ShipStationStances>,
             ),
@@ -1130,15 +1127,15 @@ pub(crate) fn ai_phaser_auto_fire(
         combat_config_opt,
         bank_policies_opt,
         phaser_freq_opt,
-        (red_alert_opt, weapons_hold_opt, power_opt, stances_opt),
+        (red_alert_opt, power_opt, stances_opt),
     ) in ship_q.iter_mut()
     {
         // Read once per ship, folded into every bank's posture below.
         // NOT tested here: whether red alert gates fire is the authored
-        // predicate's business (issue #872), and so is whether a weapons hold
-        // does (issue #1041) or a cold power group does (issue #1396) — all
-        // three ride the same fact and the same authored predicate, which is
-        // exactly why no Rust branch appears here.
+        // predicate's business (issue #872), and so is whether a cold power
+        // group does (issues #1396/#1398) — both ride the same fact and the
+        // same authored predicate, which is exactly why no Rust branch appears
+        // here.
         //
         // The Command stance override (issue #1107) is computed the same way and
         // rides the same fact: when an AI-controlled weapons Station is directed
@@ -1154,8 +1151,8 @@ pub(crate) fn ai_phaser_auto_fire(
                 red_alert_opt.is_some_and(|r| r.0),
             )
         });
-        // One bank's posture (issue #1396). The alert, the hold and the stance
-        // are the ship's; COLD is a reading of the power group THIS bank's
+        // One bank's posture (issue #1396). The alert and the stance are the
+        // ship's; COLD is a reading of the power group THIS bank's
         // `[[system]]` entry authors, so the closure is resolved per bank rather
         // than once per ship. A bank whose system id cannot be minted is never
         // cold — the same fail-open the control-source gates take.
@@ -1169,7 +1166,6 @@ pub(crate) fn ai_phaser_auto_fire(
                         &sid,
                     )
                 }),
-                weapons_hold_opt,
                 stance_override,
             )
         };

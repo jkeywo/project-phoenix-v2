@@ -8,8 +8,6 @@ import {
   CAPTAIN_RED_ALERT_ACTION_ID,
   CAPTAIN_VIEW_ACTION,
   CAPTAIN_VIEW_ACTION_ID,
-  CAPTAIN_WEAPONS_HOLD_ACTION,
-  CAPTAIN_WEAPONS_HOLD_ACTION_ID,
   createCaptainActionRegistry,
 } from '../../gui/stations/captain-actions.js';
 import { ActionFeedbackLifecycle } from '../../gui/action-feedback.js';
@@ -36,7 +34,6 @@ describe('real Captain Red Alert semantic adapter', () => {
   it('registers every shipped Captain command family with stable two-slot metadata', () => {
     expect(CAPTAIN_ACTIONS).toEqual([
       CAPTAIN_RED_ALERT_ACTION,
-      CAPTAIN_WEAPONS_HOLD_ACTION,
       CAPTAIN_VIEW_ACTION,
       CAPTAIN_OBJECTIVE_PRIORITY_ACTION,
     ]);
@@ -61,16 +58,19 @@ describe('real Captain Red Alert semantic adapter', () => {
     });
   });
 
-  it('declares Weapons Hold as a second real Captain action with two slots', () => {
-    expect(CAPTAIN_WEAPONS_HOLD_ACTION).toMatchObject({
-      id: 'captain.weapons-hold',
-      contexts: ['captain'],
-      labelId: expect.any(String),
-      accessibilityLabelId: expect.any(String),
+  // Issue #1398: the Captain's Weapons Hold action is retired. Restraint is a
+  // POWER order from Engineering, so the console offers no action for it and
+  // KeyH is free for a Captain rebinding.
+  it('registers no weapons-hold action and leaves KeyH unclaimed in the Captain context', () => {
+    expect(CAPTAIN_ACTIONS.map((action) => action.id)).not.toContain('captain.weapons-hold');
+    const sendAction = vi.fn();
+    const registry = captainRegistry({
+      getState: () => ({ red_alert: false, red_alert_auto: false }),
+      sendAction,
     });
-    expect(CAPTAIN_WEAPONS_HOLD_ACTION.bindings).toHaveLength(2);
-    expect(CAPTAIN_WEAPONS_HOLD_ACTION.bindings[0]).toMatchObject({ code: 'KeyH' });
-    expect(CAPTAIN_WEAPONS_HOLD_ACTION.bindings[1]).toBeNull();
+    expect(registry.dispatchKeyboardEvent(key('KeyH'), CAPTAIN_ACTION_CONTEXT))
+      .toMatchObject({ claimed: false });
+    expect(sendAction).not.toHaveBeenCalled();
   });
 
   it('emits the existing explicit set_red_alert envelope from the default binding', () => {
@@ -142,28 +142,6 @@ describe('real Captain Red Alert semantic adapter', () => {
     expect(result.actionId).toBe(CAPTAIN_RED_ALERT_ACTION_ID);
     expect(sendAction).toHaveBeenCalledWith('set_red_alert', expect.objectContaining({
       active: true, correlation: expect.any(String),
-    }));
-  });
-
-  it('routes default and remapped Weapons Hold through the existing explicit envelope', () => {
-    const sendAction = vi.fn();
-    const registry = captainRegistry({
-      getState: () => ({ weapons_hold: false, red_alert_auto: false }),
-      sendAction,
-    });
-    expect(registry.dispatchKeyboardEvent(key('KeyH'), CAPTAIN_ACTION_CONTEXT))
-      .toMatchObject({ claimed: true, actionId: CAPTAIN_WEAPONS_HOLD_ACTION_ID, handled: true });
-    expect(sendAction).toHaveBeenLastCalledWith('set_weapons_hold', expect.objectContaining({
-      held: true,
-      correlation: expect.any(String),
-      semantic_action: CAPTAIN_WEAPONS_HOLD_ACTION_ID,
-    }));
-
-    registry.setBinding(CAPTAIN_WEAPONS_HOLD_ACTION_ID, 0, { code: 'KeyJ' });
-    registry.dispatchKeyboardEvent(key('KeyJ'), CAPTAIN_ACTION_CONTEXT);
-    expect(sendAction).toHaveBeenCalledTimes(2);
-    expect(sendAction).toHaveBeenLastCalledWith('set_weapons_hold', expect.objectContaining({
-      held: true, correlation: expect.any(String),
     }));
   });
 

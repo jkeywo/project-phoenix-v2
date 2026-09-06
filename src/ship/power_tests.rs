@@ -1291,3 +1291,271 @@ fn brownout_advisory_tags_the_live_power_control_source() {
         }
     }
 }
+
+// ── Scripted restraint: the power orders behind `hold_fire` / `release_fire`
+//    and the `weapons_cold.*` mirror (issue #1398) ─────────────────────────────
+
+/// A bare app carrying just the two restraint systems, in the order the plugin
+/// chains them: drain the scenario's queued orders, then mirror the result.
+///
+/// Deliberately not [`test_app`] above: what is under test is a per-ENTITY
+/// reactor and the world flag store, and the fixture up there spawns a ship with
+/// neither a `ShipPowerSystem` component nor a uuid to address one by.
+fn restraint_app() -> App {
+    let mut app = App::new();
+    app.init_resource::<crate::effect_queue::EffectQueue<PendingGroupPower>>()
+        .init_resource::<crate::world::server::WorldContentRuntime>()
+        .add_systems(
+            Update,
+            (drain_scripted_power_orders, mirror_weapons_cold_flags).chain(),
+        );
+    app
+}
+
+/// A hull authoring `weapons` at `default_level` with the given commandable
+/// floor, so a test can field both the ship that may go cold and the one that
+/// may not without hand-building a `ShipConfig`.
+fn coldable_hull(default_level: u8, min_level: u8) -> crate::ship_plugin::ShipConfigComponent {
+    crate::ship_plugin::ShipConfigComponent(
+        crate::ship::config::parse_and_validate(
+            &format!(
+                r#"
+[power_groups.weapons]
+label = "entity.test.power_groups.weapons.label"
+default_level = {default_level}
+min_level = {min_level}
+max_level = 4
+
+[[station]]
+id = "tactical"
+name = "Tactical"
+description = "Dummy"
+rank = "Ltn."
+
+[[system]]
+id = "phaser-fore"
+kind = "phaser_bank"
+station = "tactical"
+power_group = "weapons"
+"#
+            ),
+            &["phaser_bank"],
+        )
+        .expect("the fixture hull parses"),
+    )
+}
+
+/// Spawn a ship with a reactor seeded from its own authored groups, the way the
+/// production spawner does.
+fn spawn_reactor_ship(
+    app: &mut App,
+    uuid: &str,
+    name: Option<&str>,
+    local: bool,
+    config: crate::ship_plugin::ShipConfigComponent,
+) -> Entity {
+    let seed = authored_power_group_seed(&config.0.power_groups);
+    let power = ShipPowerSystem(PowerSystem::from_authored_groups(
+        &PowerConfig::default(),
+        &seed,
+    ));
+    let mut e = app.world_mut().spawn((
+        crate::server_app::Ship,
+        crate::entities::spawner::EntityUuid(uuid.to_string()),
+        power,
+        config,
+    ));
+    if let Some(name) = name {
+        e.insert(crate::entities::spawner::EntityName(name.to_string()));
+    }
+    if local {
+        e.insert(crate::server_app::LocalShip);
+    }
+    e.id()
+}
+
+fn queue_order(app: &mut App, uuid: &str, level: ScriptedPowerLevel) {
+    app.world_mut()
+        .resource_mut::<crate::effect_queue::EffectQueue<PendingGroupPower>>()
+        .0
+        .push(PendingGroupPower {
+            uuid: uuid.to_string(),
+            group: PowerGroupId(WEAPONS_POWER_GROUP.to_string()),
+            level,
+        });
+}
+
+fn weapons_level(app: &mut App, entity: Entity) -> u8 {
+    app.world()
+        .get::<ShipPowerSystem>(entity)
+        .expect("the ship carries a reactor")
+        .0
+        .level_for(&PowerGroupId(WEAPONS_POWER_GROUP.to_string()))
+}
+
+fn flag(app: &App, name: &str) -> bool {
+    app.world()
+        .resource::<crate::world::server::WorldContentRuntime>()
+        .flags
+        .flag(name)
+}
+
+/// **Issue #1398.** `hold_fire` takes the named ship's weapons group cold and
+/// `release_fire` puts it back at the hull's AUTHORED default — not at a number
+/// the script or this system chose.
+///
+/// The hull boots at 3 rather than the fleet's usual 2 precisely so the release
+/// half cannot pass by coincidence: an applier that restored a hardcoded 2 would
+/// satisfy every shipped hull and quietly demote this one.
+#[test]
+fn a_scripted_hold_takes_the_weapons_cold_and_release_restores_the_authored_default() {
+    let mut app = restraint_app();
+    let ship = spawn_reactor_ship(
+        &mut app,
+        "u-1",
+        Some("Enforcer"),
+        false,
+        coldable_hull(3, 0),
+    );
+    assert_eq!(weapons_level(&mut app, ship), 3, "the hull boots at 3");
+
+    queue_order(&mut app, "u-1", ScriptedPowerLevel::Exact(0));
+    app.update();
+    assert_eq!(
+        weapons_level(&mut app, ship),
+        0,
+        "hold_fire reaches level 0"
+    );
+
+    queue_order(&mut app, "u-1", ScriptedPowerLevel::AuthoredDefault);
+    app.update();
+    assert_eq!(
+        weapons_level(&mut app, ship),
+        3,
+        "release_fire restores the hull's own default_level, not a Rust constant"
+    );
+}
+
+/// **Issue #1398.** A hull whose `[power_groups.weapons]` authors `min_level = 1`
+/// REFUSES a scripted hold, exactly as it refuses an Engineering officer's.
+///
+/// The order goes through `PowerSystem::set_group_allocation`, so which hulls can
+/// express restraint is a designer's decision in the entity TOML rather than the
+/// script vocabulary's. `alliance_battleship`, `alliance_courier` and
+/// `alliance_tender` all say `1` today.
+#[test]
+fn a_scripted_hold_is_clamped_by_the_hulls_own_authored_floor() {
+    let mut app = restraint_app();
+    let ship = spawn_reactor_ship(
+        &mut app,
+        "u-2",
+        Some("Battleship"),
+        false,
+        coldable_hull(2, 1),
+    );
+
+    queue_order(&mut app, "u-2", ScriptedPowerLevel::Exact(0));
+    app.update();
+
+    assert_eq!(
+        weapons_level(&mut app, ship),
+        1,
+        "the reactor clamps to the group's authored floor; the script gets no \
+         privilege the crew do not have"
+    );
+    assert!(
+        !flag(&app, &weapons_cold_flag("Battleship")),
+        "and the mirror says so — a scenario reading the flag learns the order did \
+         not take"
+    );
+}
+
+/// **Issue #1398.** The mirror writes both keys: the ROLE key for the hull the
+/// crew fly and the NAME key for any ship carrying an authored reference name,
+/// and each transition emits exactly one world event so an `on_flag_set` handler
+/// chains once rather than every tick.
+#[test]
+fn the_mirror_writes_the_role_and_name_keys_and_emits_one_event_per_transition() {
+    let mut app = restraint_app();
+    spawn_reactor_ship(&mut app, "u-local", None, true, coldable_hull(2, 0));
+    spawn_reactor_ship(
+        &mut app,
+        "u-named",
+        Some("Enforcer"),
+        false,
+        coldable_hull(2, 0),
+    );
+
+    app.update();
+    assert!(!flag(&app, OWN_SHIP_WEAPONS_COLD_FLAG));
+    assert!(!flag(&app, &weapons_cold_flag("Enforcer")));
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .pending_world_events
+        .clear();
+
+    queue_order(&mut app, "u-local", ScriptedPowerLevel::Exact(0));
+    queue_order(&mut app, "u-named", ScriptedPowerLevel::Exact(0));
+    app.update();
+
+    assert!(
+        flag(&app, OWN_SHIP_WEAPONS_COLD_FLAG),
+        "the hull the crew fly mirrors under a ROLE key — a world's player ship is \
+         not required to declare a reference name"
+    );
+    assert!(flag(&app, &weapons_cold_flag("Enforcer")));
+
+    let set_events: Vec<String> = app
+        .world()
+        .resource::<crate::world::server::WorldContentRuntime>()
+        .pending_world_events
+        .iter()
+        .filter_map(|event| match event {
+            crate::world::content::WorldEvent::FlagSet { name, .. } => Some(name.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        set_events,
+        vec![
+            weapons_cold_flag("Enforcer"),
+            OWN_SHIP_WEAPONS_COLD_FLAG.to_string()
+        ],
+        "one event per transition, in sorted flag order rather than in archetype \
+         iteration order"
+    );
+
+    // Idle ticks after the transition emit nothing: the store is READ before it
+    // is written, which is what keeps a world nobody orders byte-identical.
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .pending_world_events
+        .clear();
+    app.update();
+    app.update();
+    assert!(app
+        .world()
+        .resource::<crate::world::server::WorldContentRuntime>()
+        .pending_world_events
+        .is_empty());
+}
+
+/// **Issue #1398.** An order naming a uuid no ship in the world carries is a
+/// warned no-op, not a panic and not a write onto some other hull.
+#[test]
+fn a_scripted_order_for_an_absent_ship_moves_nothing() {
+    let mut app = restraint_app();
+    let ship = spawn_reactor_ship(
+        &mut app,
+        "u-3",
+        Some("Enforcer"),
+        false,
+        coldable_hull(2, 0),
+    );
+
+    queue_order(&mut app, "u-not-here", ScriptedPowerLevel::Exact(0));
+    app.update();
+
+    assert_eq!(weapons_level(&mut app, ship), 2);
+    assert!(!flag(&app, &weapons_cold_flag("Enforcer")));
+}

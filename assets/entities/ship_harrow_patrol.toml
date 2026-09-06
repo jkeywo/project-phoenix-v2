@@ -381,6 +381,7 @@ station = "tactical"
 id = "phaser-port"
 kind = "phaser_bank"
 station = "tactical"
+power_group = "weapons"
 
 # Ship-wide phaser settings (issue #801): firing mode + emitter frequency.
 # One declared system (NOT per-bank) so SetPhaserMode/SetPhaserFrequency
@@ -394,9 +395,12 @@ station = "tactical"
 id = "phaser-starboard"
 kind = "phaser_bank"
 station = "tactical"
+power_group = "weapons"
 
 # Fine Power systems (issue #513): reactor + battery for per-instance damage.
-# NPCs have no `[power_groups.*]` block so `power_group` is omitted.
+# The reactor and the battery are not ON a power group — they ARE the reactor —
+# so `power_group` is omitted here. The gun line above declares one; see the
+# `[power_groups.*]` block below for why this hull grew one at all.
 [[system]]
 id = "power-reactor"
 kind = "power_reactor"
@@ -426,6 +430,54 @@ channel = "red_alert"
 when = "true"
 verb = "set_red_alert"
 value = false
+
+# ── Power groups (issue #1398) ───────────────────────────────────────────────
+#
+# THE FIRST NPC HULL THAT MAY BE TAKEN COLD, and it declares a
+# `[power_groups.*]` block for one reason: restraint. (`ship_harrow_tug.toml`
+# already declares one, for its tractor bus; what is new here is
+# `min_level = 0` on weapons.) Issue #1398 retired the captain's hidden weapons
+# hold, so `ctx.effects.hold_fire(name)` is now a POWER order on this ship's
+# `weapons` group — and a group can only be commanded cold if its own hull says
+# so. Three worlds order this hull to hold: `probe_restraint.toml`,
+# `probe_picket.toml` and Falling Skyway's Havelock enforcer. Without
+# `min_level = 0` here every one of them would issue an order the reactor
+# clamps back to 1, and the enforcer would go on shooting.
+#
+# Authoring a `[power_groups.*]` block replaces the canonical default seeding
+# wholesale (`ship::power::authored_power_group_seed`), so all three groups are
+# written out — at exactly the levels the default seeding gave them, which is why
+# this block changes nothing about how the hull flies. `default_level = 2` is the
+# level each group booted at before; `max_level = 4` is the API ceiling; and the
+# only value that is not a transcription of the old behaviour is the weapons
+# floor.
+#
+# The gun line's `[[system]]` entries name `weapons` above. Nothing else on this
+# hull does: `helm` and `shields` are declared because the reactor's budget and
+# the `[power.ai_policy]` channels below are written in terms of them, not
+# because a system reads them for a gate.
+[power_groups.helm]
+label = "entity.ship_harrow_patrol.power_groups.helm.label"
+default_level = 2
+min_level = 1
+max_level = 4
+
+[power_groups.weapons]
+label = "entity.ship_harrow_patrol.power_groups.weapons.label"
+# `min_level = 0`: this group may be taken COLD. The same statement the
+# destroyer and the cruiser make (issue #1395), on the hull a scenario actually
+# silences. Weapons is the one group here that can be switched off outright:
+# cutting a patrol boat's drive or its shields to nothing is a way to lose it,
+# while its guns at 0 cost it its guns and nothing else.
+default_level = 2
+min_level = 0
+max_level = 4
+
+[power_groups.shields]
+label = "entity.ship_harrow_patrol.power_groups.shields.label"
+default_level = 2
+min_level = 1
+max_level = 4
 
 # Reactor + battery. Transcribed from `PowerConfig::default()`, which is what
 # this hull ran on before it declared the section: authoring

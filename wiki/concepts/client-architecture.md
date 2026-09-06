@@ -58,8 +58,9 @@ slots and presentation metadata sit above transport and carry no Station or
 session authority. Each console iframe owns an isolated registry instance;
 `client.html` owns the current in-memory binding choices and copies them into
 iframes through `__updateSemanticActionBindings` on load and remap. The Captain
-family has four stable adapters: `captain.red-alert`, `captain.weapons-hold`,
-`captain.view`, and `captain.objective-priority`. Sensors and Science add five:
+family has three stable adapters: `captain.red-alert`, `captain.view`, and
+`captain.objective-priority`. (`captain.weapons-hold` was retired with the
+lever in issue #1398 — restraint is a Power order now.) Sensors and Science add five:
 `sensors.target-selection`, `sensors.scan`, `sensors.viewscreen`,
 `sensors.cancel-impulse`, and `science.shield-focus`. Every visible control in
 those families and its default/remapped binding invokes the same adapter.
@@ -86,8 +87,8 @@ remain authoritative projections; Pending never mutates them optimistically.
 settles latency and forwards the terminal result only for that exact
 correlation; ordinary blackboard pushes cannot acknowledge it. Every iframe has
 one generic accessible final-status presenter, while specialised controls may
-also expose busy state. Pending never changes Red Alert, Weapons Hold, camera,
-or objective state: only the normal authoritative blackboard does.
+also expose busy state. Pending never changes Red Alert, camera, or objective
+state: only the normal authoritative blackboard does.
 
 Navigation uses the same registry and correlation lifecycle for chart display,
 free placement, selected-contact anchoring, clear, contact selection and

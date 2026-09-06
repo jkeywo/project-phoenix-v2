@@ -859,7 +859,7 @@ export function buildWeaponsConsoleState(state, systemIds = []) {
  * Rendered by gui/battleship/captain.html and gui/cruiser/captain.html.
  *
  * @typedef {{ red_alert: boolean, red_alert_system_id: string,
- *             red_alert_auto: boolean, weapons_hold: boolean,
+ *             red_alert_auto: boolean,
  *             viewscreen_system_id: string,
  *             viewscreen_auto: boolean, view_direction: string,
  *             camera_views: Array, view_mode: string, objectives: Array,
@@ -880,10 +880,6 @@ export function buildCaptainConsoleState(state, systemIds = []) {
       red_alert:             bb.red_alert             ?? false,
       red_alert_system_id:   bb.red_alert_system_id   ?? null,
       red_alert_auto:        bb.red_alert_auto         ?? false,
-      // The tactical restraint lever (issue #1041): guns cold while the ship
-      // stays at stations. Same console and same control source as the alert,
-      // so it rides the captain blackboard beside it.
-      weapons_hold:          bb.weapons_hold           ?? false,
       viewscreen_system_id:  bb.viewscreen_system_id  ?? null,
       viewscreen_auto:       bb.viewscreen_auto        ?? false,
       view_direction:        bb.view_direction         ?? '',
@@ -907,9 +903,6 @@ export function buildCaptainConsoleState(state, systemIds = []) {
     red_alert:             state.redAlert    || false,
     red_alert_system_id:   null,
     red_alert_auto:        false,
-    // No blackboard, no hold: the legacy fallback has no wire source for it,
-    // and "released" is the state a console with nothing to read should show.
-    weapons_hold:          false,
     viewscreen_system_id:  null,
     viewscreen_auto:       false,
     view_direction:        viewDirection,

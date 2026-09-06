@@ -103,11 +103,7 @@ pub(crate) fn supports_correlated_action_feedback_for_kind(
 
     authored_terminal_owner
         || (target.0 == crate::ship::system_registry::RED_ALERT_SYSTEM_ID
-            && matches!(
-                payload,
-                SystemControlPayload::SetRedAlert { .. }
-                    | SystemControlPayload::SetWeaponsHold { .. }
-            ))
+            && matches!(payload, SystemControlPayload::SetRedAlert { .. }))
         || (target.0 == crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID
             && matches!(payload, SystemControlPayload::SetView { .. }))
         || (target.0 == crate::ship::system_registry::CAPTAIN_SYSTEM_ID
@@ -862,7 +858,6 @@ station = "repair"
         use crate::core::messages::{CameraView, ViewMode};
 
         let red_alert = SystemControlPayload::SetRedAlert { active: true };
-        let hold = SystemControlPayload::SetWeaponsHold { held: true };
         let view = SystemControlPayload::SetView {
             mode: ViewMode::Camera(CameraView::new("camera_fore")),
         };
@@ -908,10 +903,6 @@ station = "repair"
         assert!(supports_correlated_action_feedback(
             &crate::ship::system_registry::red_alert_system_id(),
             &red_alert,
-        ));
-        assert!(supports_correlated_action_feedback(
-            &crate::ship::system_registry::red_alert_system_id(),
-            &hold,
         ));
         assert!(supports_correlated_action_feedback(
             &crate::ship::system_registry::viewscreen_system_id(),

@@ -1023,10 +1023,6 @@ pub(crate) fn ai_torpedo_auto_fire(
             // fact for the tube's authored LAUNCH predicate. `Option<&_>` for
             // fixtures that spawn a ship without it; absent reads `false`.
             Option<&crate::ship::state::ShipRedAlert>,
-            // Issue #1041: the captain's weapons hold, folded with the alert
-            // above into the one `red_alert` fact the tube's authored LAUNCH
-            // predicate already reads.
-            Option<&crate::ship::state::ShipWeaponsHold>,
             // Issue #1396: this ship's reactor, so each TUBE's own authored
             // power group can be read for COLD (level 0) and folded into that
             // same fact. `Option<&_>`: a fixture with no reactor is not a ship
@@ -1070,15 +1066,14 @@ pub(crate) fn ai_torpedo_auto_fire(
         tube_policies,
         mut admitted,
         red_alert_opt,
-        weapons_hold_opt,
         power_opt,
         stances_opt,
     ) in ships.iter_mut()
     {
         // Read once per ship; folded into every tube's posture below. No Rust
         // rule consults it — the gate is the tube's authored predicate (#872),
-        // and the restraint levers beside it ride that same predicate (#1041,
-        // #1396). The Command stance override (#1107) rides the same fact;
+        // and the restraint lever beside it rides that same predicate (#1396).
+        // The Command stance override (#1107) rides the same fact;
         // absent a direction it is `None` and the seeded value is unchanged.
         let stance_override = crate::console::command::server::weapons_station_stance_high_alert(
             stances_opt,
@@ -1101,7 +1096,6 @@ pub(crate) fn ai_torpedo_auto_fire(
                         &sid,
                     )
                 }),
-                weapons_hold_opt,
                 stance_override,
             )
         };

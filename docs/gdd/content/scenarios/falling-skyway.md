@@ -129,7 +129,7 @@ Promises of passage or evidence filing are recorded commitments. The records pro
 
 ### Force and restraint
 
-The Havelock enforcer can be hailed, threatened, attacked, disabled, or destroyed as supported by current state. The scenario observes weapons hold, attacks, disablement, and destruction. Force is neither forbidden nor consequence-free; a clean technical or negotiated outcome may require restraint, while some states may make coercion useful.
+The Havelock enforcer can be hailed, threatened, attacked, disabled, or destroyed as supported by current state. The scenario observes restraint (the enforcer's weapons power group taken cold), attacks, disablement, and destruction. Force is neither forbidden nor consequence-free; a clean technical or negotiated outcome may require restraint, while some states may make coercion useful.
 
 ## Scenario TOML/Rhai shape
 

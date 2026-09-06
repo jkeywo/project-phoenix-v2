@@ -6,8 +6,9 @@ use crate::core::messages::{
     PowerReactorBlackboard, ServerMessage, SystemBlackboard, SystemId,
 };
 use crate::modifiers::power_system::{
-    power_level_for_group, AuthoredPowerGroup, PowerConfig, PowerSystem, HELM_POWER_GROUP,
-    POWER_GROUP_ORDER, SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
+    power_level_for_group, AuthoredPowerGroup, PendingGroupPower, PowerConfig, PowerSystem,
+    ScriptedPowerLevel, HELM_POWER_GROUP, POWER_GROUP_ORDER, SHIELDS_POWER_GROUP,
+    WEAPONS_POWER_GROUP,
 };
 use crate::ship_plugin::CoordinationEnqueue;
 
@@ -265,6 +266,7 @@ pub struct ShipPowerPlugin;
 
 impl Plugin for ShipPowerPlugin {
     fn build(&self, app: &mut App) {
+        use crate::authoritative::DeclareState;
         use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
         // Admitted-command consumer (issue #833): `handle_power_messages` reads
         // the `power-reactor` system's admitted commands.
@@ -274,6 +276,17 @@ impl Plugin for ShipPowerPlugin {
         ));
         app.init_resource::<crate::core::messages::InterSystemQueue>()
             .add_message::<CoordinationEnqueue>();
+        // The scripted power-order queue `drain_scripted_power_orders` drains
+        // (issues #1223, #1398), registered and declared at this owning site —
+        // it was the captain plugin's `EffectQueue<(String, bool)>` while
+        // restraint was a hold. A transient inter-system queue — drained in
+        // full every tick, empty at every fold/snapshot boundary — so
+        // `ClearedAtFold`.
+        app.init_resource::<crate::effect_queue::EffectQueue<PendingGroupPower>>()
+            .declare_state::<crate::effect_queue::EffectQueue<PendingGroupPower>>(
+                crate::authoritative::StateClass::ClearedAtFold,
+                "digest-exclusion-classes",
+            );
         app.insert_resource(ShipPowerSystem(PowerSystem::default()))
             .init_resource::<PowerConfigResource>()
             .init_resource::<PowerMultiplierResource>()
@@ -304,6 +317,15 @@ impl Plugin for ShipPowerPlugin {
                         .before(tick_power_system),
                     tick_power_system.in_set(crate::sim_sets::SimSet::Physics),
                     tick_power_brownout_advisory.in_set(crate::sim_sets::SimSet::Modifiers),
+                    // The scenario's half of the restraint lever, and its
+                    // mirror (issue #1398). Both in `Modifiers`, chained: a
+                    // scripted order lands and is mirrored in the same tick, so
+                    // an `on_flag_set` handler chaining off it fires on the next
+                    // pipeline pass exactly as an Engineering officer's order
+                    // does.
+                    (drain_scripted_power_orders, mirror_weapons_cold_flags)
+                        .chain()
+                        .in_set(crate::sim_sets::SimSet::Modifiers),
                     publish_power_blackboard.in_set(crate::sim_sets::SimSet::Publish),
                 ),
             )
@@ -622,6 +644,198 @@ pub fn tick_power_brownout_advisory(
                 });
             }
         }
+    }
+}
+
+// ── Scripted restraint (issue #1398) ─────────────────────────────────────────
+
+/// The world flag mirroring the hull the crew fly: `weapons_cold.own_ship`.
+///
+/// Keyed by ROLE rather than by an authored reference name, because the
+/// player's hull is not required to declare one — `falling_skyway.toml` gives
+/// its `player-ship` an `id` and no `name`, so there is no name to key on and a
+/// scenario still has to be able to ask the question.
+///
+/// Replaces `weapons_hold.own_ship` (issue #1041) key for key: what moved is the
+/// state behind it, from a hidden captain's boolean to the ship's own reactor.
+pub const OWN_SHIP_WEAPONS_COLD_FLAG: &str = "weapons_cold.own_ship";
+
+/// The world flag mirroring a named ship's cold weapons group:
+/// `weapons_cold.<name>`.
+///
+/// The naming imitates issue #1035's `workforce.<id>.on_strike` deliberately:
+/// authoritative state lives in the ship's own [`ShipPowerSystem`], the flag is
+/// a MIRROR of it, and scenario script reads the mirror. `name` is the entity's
+/// authored reference name — the same string `on_destroyed(...)` and `hail(...)`
+/// take.
+pub fn weapons_cold_flag(name: &str) -> String {
+    format!("weapons_cold.{name}")
+}
+
+/// Drain the scenario's queued power orders onto their ships (issue #1398).
+///
+/// The scripted half of the reactor, and it writes the SAME state an
+/// Engineering officer's console command does: `hold_fire(name)` in a world
+/// script and `SetPowerGroupAllocation { group: "weapons", level: 0 }` from a
+/// Power console both land in
+/// [`PowerSystem::set_group_allocation`](crate::modifiers::power_system::PowerSystem::set_group_allocation),
+/// so the fire gate has one thing to read and [`mirror_weapons_cold_flags`]
+/// below has one thing to publish.
+///
+/// It writes the reactor directly rather than manufacturing an admitted
+/// command, which is the shape every other scripted world effect already has
+/// (`destroy_entity`, `damage_infrastructure`, `set_workforce_disposition`).
+/// Admission is the boundary between an OPERATOR and the ship — human or AI, the
+/// same table either way — and the world is not an operator. What it is not is a
+/// bypass: the order goes through the very setter a console order does, so the
+/// group's authored `min_level` clamps it exactly the same way. A hull whose
+/// `[power_groups.weapons]` says `min_level = 1` cannot be silenced by a script
+/// any more than by its own crew, and that refusal is a designer's decision in
+/// the entity TOML rather than this system's.
+///
+/// [`ScriptedPowerLevel::AuthoredDefault`] is resolved HERE and nowhere else,
+/// because here is the first place that holds both the ship and its
+/// [`crate::ship_plugin::ShipConfigComponent`]: the Rhai closure that pushed the
+/// order has no world access at all, and a script that wrote `2` would be
+/// authoring one hull's number into every scenario that used the verb.
+pub fn drain_scripted_power_orders(
+    // The scripted power-order queue, owned and declared by [`ShipPowerPlugin`].
+    // `Option` so a reduced test app that runs this system without the
+    // registering plugin is a no-op rather than a panic.
+    power_orders: Option<ResMut<crate::effect_queue::EffectQueue<PendingGroupPower>>>,
+    mut ships: Query<
+        (
+            &crate::entities::spawner::EntityUuid,
+            &mut ShipPowerSystem,
+            Option<&crate::ship_plugin::ShipConfigComponent>,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+) {
+    let Some(mut power_orders) = power_orders else {
+        return;
+    };
+    // A `Deref` read, so a world that queues nothing never marks the queue
+    // changed — the `tick_operations` precedent.
+    if power_orders.0.is_empty() {
+        return;
+    }
+    let queued = std::mem::take(&mut power_orders.0);
+    for order in queued {
+        let mut found = false;
+        for (ship_uuid, mut power, ship_config) in ships.iter_mut() {
+            if ship_uuid.0 != order.uuid {
+                continue;
+            }
+            found = true;
+            let level = match order.level {
+                ScriptedPowerLevel::Exact(level) => level,
+                ScriptedPowerLevel::AuthoredDefault => ship_config
+                    .and_then(|config| config.0.power_groups.get(&order.group))
+                    .map(|group| group.default_level)
+                    .unwrap_or_else(crate::ship::config::default_power_level),
+            };
+            if let Err(err) = power.0.set_group_allocation(&order.group, level) {
+                // A machine token, not prose: `src/ship/power.rs` is on
+                // `check-strings.mjs`'s wire-visible allowlist, where every
+                // prose literal in the production region is an error — spaces
+                // and capitals included, so the uuid rides a colon.
+                warn!("power.scripted_order_ignored:{}:{err:?}", order.uuid);
+            }
+        }
+        if !found {
+            warn!("power.scripted_order_unknown_ship:{}", order.uuid);
+        }
+    }
+}
+
+/// Mirror every ship's `weapons` power group into the world flag store (issue
+/// #1398), so scenario script can read the posture and react to it.
+///
+/// Replaces `console::captain::server::mirror_weapons_hold_flags` (issue #1041)
+/// key for key: `weapons_cold.own_ship` for the hull the crew fly, and
+/// `weapons_cold.<name>` for any ship carrying an authored reference name. The
+/// role key exists because a world's player hull is not required to declare a
+/// name (`falling_skyway.toml` gives its `player-ship` an `id` and no `name`),
+/// and "have the crew gone cold?" is exactly the question a scenario wants to
+/// ask.
+///
+/// The transition is decided from the store's own `(before, after)` and the
+/// event pushed onto `pending_world_events`, exactly as
+/// `infrastructure::server::mirror_flags` does — so an
+/// `on_flag_set("weapons_cold.own_ship", …)` handler chains off an order on the
+/// next pipeline pass, through machinery that was already there.
+///
+/// # Why every ship every tick, and why that is still cheap
+///
+/// The retired hold mirror could filter on `Changed<ShipWeaponsHold>` because
+/// that component only moved when somebody pulled the lever. [`ShipPowerSystem`]
+/// is not like that: `tick_power_system` takes it by `&mut` to integrate the
+/// battery, so change detection fires for every ship on every tick and the
+/// filter would buy nothing but a false sense of one. So the walk is
+/// unconditional — and the store is READ before it is written, which is the part
+/// that actually matters. Reading first is not an optimisation: it is what keeps
+/// a world nobody pulls the lever in byte-identical, because a `DerefMut` on
+/// `WorldContentRuntime` marks the resource changed and change detection on it
+/// is read elsewhere (`probe_radiation.toml` is where that showed up under
+/// #1041, with the lever untouched and its committed digest moved).
+///
+/// Rows are sorted by flag name before anything is written, so the order of the
+/// emitted events is a function of the content and never of archetype iteration
+/// order.
+pub fn mirror_weapons_cold_flags(
+    runtime: Option<ResMut<crate::world::server::WorldContentRuntime>>,
+    ships: Query<
+        (
+            &ShipPowerSystem,
+            Option<&crate::entities::spawner::EntityName>,
+            bevy::ecs::query::Has<crate::server_app::LocalShip>,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+) {
+    let Some(mut runtime) = runtime else {
+        return;
+    };
+    if ships.is_empty() {
+        return;
+    }
+    let weapons = PowerGroupId(WEAPONS_POWER_GROUP.to_string());
+    let mut writes: Vec<(String, bool)> = Vec::new();
+    for (power, name, is_local) in ships.iter() {
+        let cold = power.0.is_group_cold(&weapons);
+        if is_local {
+            writes.push((OWN_SHIP_WEAPONS_COLD_FLAG.to_string(), cold));
+        }
+        if let Some(name) = name {
+            writes.push((weapons_cold_flag(&name.0), cold));
+        }
+    }
+    writes.sort();
+    let pending: Vec<(String, bool)> = writes
+        .into_iter()
+        .filter(|(flag, cold)| runtime.flags.flag(flag) != *cold)
+        .collect();
+    if pending.is_empty() {
+        return;
+    }
+    for (flag, cold) in pending {
+        if cold {
+            runtime.flags.set_flag(&flag);
+        } else {
+            runtime.flags.clear_flag(&flag);
+        }
+        runtime.pending_world_events.push(if cold {
+            crate::world::content::WorldEvent::FlagSet {
+                name: flag,
+                origin_layer: None,
+            }
+        } else {
+            crate::world::content::WorldEvent::FlagCleared {
+                name: flag,
+                origin_layer: None,
+            }
+        });
     }
 }
 

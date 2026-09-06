@@ -291,7 +291,6 @@ describe('Helm semantic actions', () => {
     const ids = registry.list().map((action) => action.id);
     expect(ids).toEqual([
       'captain.red-alert',
-      'captain.weapons-hold',
       'captain.view',
       'captain.objective-priority',
       ...HELM_ACTIONS.map((action) => action.id),
@@ -340,7 +339,6 @@ describe('Helm semantic actions', () => {
     ]);
     expect(clientSettingsSemanticActions(registry).map((action) => action.id)).toEqual([
       'captain.red-alert',
-      'captain.weapons-hold',
       'captain.view',
       'captain.objective-priority',
       ...HELM_ACTIONS.map((action) => action.id),

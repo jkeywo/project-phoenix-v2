@@ -15422,10 +15422,11 @@ fn npc_weapons_fire_without_a_captain_raising_the_alert() {
 /// on it.
 ///
 /// It also declares a SECOND system, `tactical-radar`, with the `power_group`
-/// line deliberately omitted — the shape every shipped NPC hull authors
-/// (`ship_harrow_cruiser.toml` puts none of its systems on a group). That is the
-/// arm `power_group_for` takes at runtime for the whole NPC fleet, so the
-/// fixture has to be able to express it rather than leaving it to the
+/// line deliberately omitted — the shape most shipped NPC hulls author
+/// (`ship_harrow_cruiser.toml` puts none of its systems on a group; since #1398
+/// `ship_harrow_patrol.toml` is the exception, its gun line naming `weapons`).
+/// That is the arm `power_group_for` takes at runtime for a groupless system, so
+/// the fixture has to be able to express it rather than leaving it to the
 /// undeclared-system short-circuit.
 ///
 /// Authored as TOML rather than hand-built so the test cannot express a hull the
@@ -15489,7 +15490,7 @@ fn is_firing(app: &App, ship: Entity) -> bool {
 /// group is at level 0 does not fire; RED ALERT does not give the fire back;
 /// power does, on the very next AI tick.
 ///
-/// The subject is a Harrow gun line deliberately, as the weapons-hold pin's is:
+/// The subject is a Harrow gun line deliberately, as the restraint pin's is:
 /// it authors `min_alert_to_fire = 0`, so it is the hull a restraint lever has
 /// to beat the hard way, and the red-alert claim is not vacuous on it — it would
 /// be shooting with the alert DOWN. Nothing about the world moves between the
@@ -15651,9 +15652,11 @@ fn a_systems_cold_reading_comes_from_its_own_authored_power_group() {
     // DECLARED on the hull but on NO power group — `[[system]] tactical-radar`
     // authors no `power_group`, so `power_group_for` reaches the system and
     // finds `None`. Never cold: it is not on the reactor's books, so switching a
-    // group off cannot reach it. This is the arm every shipped NPC hull takes
-    // (none of the Harrow's systems name a group); if it ever read as cold, the
-    // whole NPC fleet would stop shooting.
+    // group off cannot reach it. This is the arm most shipped NPC hulls take
+    // (none of `ship_harrow_cruiser.toml`'s systems name a group); if it ever
+    // read as cold, those hulls would stop shooting. `ship_harrow_patrol` is the
+    // deliberate exception since #1398 — its gun line names `weapons` precisely
+    // so a scenario CAN read it as cold, on the arm above.
     //
     // Pinned on the fixture first, so a later edit to the hull TOML cannot let
     // this case quietly collapse into the undeclared-system one below.

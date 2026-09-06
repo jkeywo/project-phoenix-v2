@@ -139,7 +139,7 @@ entities:
     architecture:
       classification: derived
       owner: sensors-target-controller
-      derived_from: [sensors-target-state, authoritative-ship-motion-state]
+      derived_from: [sensors-target-state, authoritative-ship-motion-state, ship-power-state]
     implementation:
       status: declared
       paths: [src/ship/sensors.rs, src/core/messages.rs, src/entities/config.rs, src/lobby/server.rs, gui/console-state.js, gui/sim-state.js, gui/components/ph-sensor-radar.js, gui/components/ph-radar.js, gui/components/ph-sensor-panel.js]

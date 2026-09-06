@@ -119,6 +119,8 @@ export function registerCommsActions(registry, options = {}) {
   const sendAction = typeof options.sendAction === 'function' ? options.sendAction : null;
   const selectMessage = typeof options.selectMessage === 'function'
     ? options.selectMessage : null;
+  const selectThread = typeof options.selectThread === 'function'
+    ? options.selectThread : null;
   const getCurrentMessage = typeof options.getCurrentMessage === 'function'
     ? options.getCurrentMessage : null;
 
@@ -146,16 +148,29 @@ export function registerCommsActions(registry, options = {}) {
     return true;
   });
 
+  // One selection identity for both grains (issue #1380). The inbox lists
+  // THREADS, so a HAILS row supplies `thread_id`; the parameter-free
+  // keyboard/gamepad binding and any control naming an exact message still
+  // supply `message_id`. Both are the same operation to the operator — "show
+  // me that" — so they share one action, one key and one feedback lifecycle,
+  // and the renderer keeps its two picks consistent underneath.
   registry.register(COMMS_SELECT_MESSAGE_ACTION, ({ detail, settleFeedback } = {}) => {
     const view = commsActionView(getState());
-    if (!view || !selectMessage) return false;
+    if (!view) return false;
+    const thread = detail && typeof detail.thread_id === 'string'
+      ? detail.thread_id : null;
     const selected = detail && typeof detail.message_id === 'string'
       ? detail.message_id : null;
     // The renderer owns this local state. A parameter-free keyboard/gamepad
     // activation asks it to choose/cycle; a row supplies its exact id. Never
-    // claim Applied for a missing/stale message or emit the unconsumed legacy
-    // SelectCommsMessage host command.
-    if (selectMessage(selected) !== true) return false;
+    // claim Applied for a missing/stale thread or message, or emit the
+    // unconsumed legacy SelectCommsMessage host command.
+    if (thread !== null) {
+      if (!selectThread || selectThread(thread) !== true) return false;
+    } else {
+      if (!selectMessage) return false;
+      if (selectMessage(selected) !== true) return false;
+    }
     if (typeof settleFeedback === 'function') {
       settleFeedback(ACTION_FEEDBACK_STATE.APPLIED);
     }

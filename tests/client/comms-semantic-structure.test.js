@@ -30,6 +30,25 @@ describe('Comms semantic-action structural coverage', () => {
       expect(html).toMatch(/initConsole\s*\(\s*\{[\s\S]*?name:\s*'comms'/);
       expect(source(`gui/${hull}/comms.console.js`)).toContain('makeCommsRender');
     });
+
+    // Issue #1380: HAILS | CONTACTS over one list area, and the open thread in
+    // a local overlay panel with a Back button and NO tab code — the shell's
+    // Station Bar only advertises `.overlay-panel[data-tab-code]`, so this
+    // panel stays out of the bar by construction rather than by a filter.
+    it(`${hull} puts hails and contacts behind one tab pair, with the thread as a local panel`, () => {
+      const html = source(`gui/${hull}/comms.html`);
+      expect(html).toContain('id="comms-seg"');
+      expect(html).toContain('data-i18n="console.comms.seg.hails"');
+      expect(html).toContain('data-i18n="console.comms.seg.contacts"');
+      expect(html).toContain('id="comms-hails-unread"');
+      expect(html).toContain('initConsoleOverlays');
+      const panel = html.match(/<div[^>]*id="comms-thread-panel"[^>]*>/);
+      expect(panel).not.toBeNull();
+      expect(panel[0]).toContain('overlay-panel');
+      expect(panel[0]).not.toContain('data-tab-code');
+      expect(html).toContain('data-overlay-back');
+      expect(html).toContain('data-i18n="console.common.back"');
+    });
   }
 
   for (const [path, semanticId, forbiddenDirectCall] of COMPONENTS) {
@@ -50,6 +69,12 @@ describe('Comms semantic-action structural coverage', () => {
       "sendAction('show_on_screen'",
     ]) expect(text).toContain(action);
     expect(text).toContain('selectMessage(selected)');
+    // Issue #1380: the inbox lists threads, so the one selection identity
+    // routes a `thread_id` detail to the renderer's thread seam and a
+    // `message_id` detail to the message seam — still no host command either
+    // way, and still the same local Applied lifecycle.
+    expect(text).toContain('selectThread(thread)');
+    expect(text).toContain('detail.thread_id');
     expect(text).not.toContain("sendAction('select_comms_message'");
     expect(text).toContain('response_index');
     expect(text).toContain('confirmed === true');

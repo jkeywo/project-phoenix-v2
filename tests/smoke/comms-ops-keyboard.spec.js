@@ -65,7 +65,7 @@ test('Comms console: a hail is selected and answered from the keyboard, with no 
 
   // Flat `comms`-family payload — fields at the top level, as
   // buildCommsConsoleState emits them (not nested under a `comms` key).
-  await page.evaluate(() => window.__updateConsole('comms', JSON.stringify({
+  const commsPayload = JSON.stringify({
     contacts: [],
     messages: [
       {
@@ -77,23 +77,46 @@ test('Comms console: a hail is selected and answered from the keyboard, with no 
         responses: [],
       },
     ],
-  })));
+  });
+  await page.evaluate((json) => window.__updateConsole('comms', json), commsPayload);
 
   // ── Tab reaches the hail list — it is one Tab stop (AC #1) ──────────────────
   expect(await tabTo(page, '#comms-hail-list')).toBe(true);
 
-  // The unread second hail is the automatic thread, while focus starts on the
-  // first row. Enter therefore proves the shared local selection actually
-  // repaints both panels; no unconsumed host command leaves the console.
+  // The unread hail is the automatic thread, and since issue #1380 the inbox
+  // is SORTED — unread first — so it is also the first row and the one focus
+  // starts on. Arrow down to the read hail and Enter on it: that proves the
+  // shared local selection actually repaints both panels, from the keyboard,
+  // with no unconsumed host command leaving the console.
   await expect(page.locator('ph-comms-current-message #sender-label')).toHaveText('OUTER RELAY');
-  await page.keyboard.press('Enter');
   await expect(page.locator('ph-comms-hail-list .row').first())
+    .toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('ph-comms-hail-list .row').nth(1))
     .toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('ph-comms-current-message #sender-label')).toHaveText('RELAY STATION');
   expect(await page.evaluate(
     () => window.__sent.some((a) => a.action === 'select_comms_message')
   )).toBe(false);
   expect(await page.evaluate(() => window.__sent)).toEqual([]);
+
+  // ── A repaint must not evict the operator from the list ─────────────────────
+  // The shell pushes console state ~10x a second. If a render re-inserted rows
+  // whose order had not changed, that remove+insert would blur the focused row
+  // between keystrokes and no one could arrow or Enter at all. Push the SAME
+  // payload again; the same row must still hold focus. (Only a real browser
+  // runs the focus-fixup rule this depends on, which is why the check lives
+  // here and not in the jsdom suite.)
+  const focusedRowId = () => page.evaluate(() => {
+    const host = document.getElementById('comms-hail-list');
+    const el = host && host.shadowRoot ? host.shadowRoot.activeElement : null;
+    return el ? (el.dataset.id || null) : null;
+  });
+  const heldRow = await focusedRowId();
+  expect(heldRow).toBeTruthy();
+  await page.evaluate((json) => window.__updateConsole('comms', json), commsPayload);
+  expect(await focusedRowId()).toBe(heldRow);
 
   // ── Tab on to the open thread and answer it from the keyboard ───────────────
   expect(await tabTo(page, '#comms-current-message')).toBe(true);

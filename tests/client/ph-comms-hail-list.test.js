@@ -151,7 +151,7 @@ describe('PhCommsHailList', () => {
     expect(preview.textContent).not.toContain('world.');
   });
 
-  it('clicking a message row activates the shared selection identity', () => {
+  it('clicking a thread row activates the shared selection identity', () => {
     const activateSemanticAction = vi.fn();
     const { el } = setup({ activateSemanticAction });
     el.state = {
@@ -163,17 +163,119 @@ describe('PhCommsHailList', () => {
     expect(row.getAttribute('aria-selected')).toBe('false');
     row.click();
     expect(activateSemanticAction).toHaveBeenCalledTimes(1);
+    // The row stands for a THREAD (issue #1380). A pre-threading message has
+    // no thread_id of its own, so `effectiveThreadId` makes it its own thread
+    // and the two ids coincide — the DETAIL KEY is what tells the renderer
+    // which grain it is being asked for.
     expect(activateSemanticAction).toHaveBeenCalledWith('comms.select-message', {
-      source: 'control', detail: { message_id: 'msg-42' },
+      source: 'control', detail: { thread_id: 'msg-42' },
     });
     expect(row.getAttribute('aria-selected')).toBe('false');
     el.state = {
       messages: [
         { id: 'msg-42', sender_name: 'Test', subject: 'Hello', is_read: false },
       ],
-      selected_message_id: 'msg-42',
+      selected_thread_id: 'msg-42',
     };
     expect(row.getAttribute('aria-selected')).toBe('true');
+  });
+
+  // ── Issue #1380: the inbox lists threads, not messages ──────────────────
+
+  it('folds a five-message conversation into ONE row previewing its latest line', () => {
+    const { el } = setup();
+    el.state = {
+      messages: ['a', 'b', 'c', 'd', 'e'].map((suffix, i) => ({
+        id: `m-${suffix}`, thread_id: 'relay', sender_name: 'Relay Seven',
+        body: `Line ${i + 1}`, is_read: true,
+      })),
+    };
+    const rows = el.shadowRoot.querySelectorAll('.row');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].dataset.id).toBe('relay');
+    expect(rows[0].querySelector('.sender').textContent).toBe('Relay Seven');
+    expect(rows[0].querySelector('.preview').textContent).toBe('Line 5');
+    const count = rows[0].querySelector('.count');
+    expect(count.hidden).toBe(false);
+    expect(count.textContent).toBe('5');
+  });
+
+  it('hides the count on a one-message thread', () => {
+    const { el } = setup();
+    el.state = { messages: [{ id: 'm1', thread_id: 't1', sender_name: 'Solo', body: 'Once' }] };
+    expect(el.shadowRoot.querySelector('.count').hidden).toBe(true);
+  });
+
+  it('renders the projected thread order the console handed it', () => {
+    const { el } = setup();
+    el.state = {
+      threads: [
+        { thread_id: 'urgent', sender_name: 'Command', subject: 'Now', message_count: 1, any_unread: true, latest_priority: 'critical' },
+        { thread_id: 'quiet', sender_name: 'Relay', subject: 'Later', message_count: 3, any_unread: false, latest_priority: 'routine' },
+      ],
+      selected_thread_id: 'quiet',
+    };
+    const rows = [...el.shadowRoot.querySelectorAll('.row')];
+    expect(rows.map((row) => row.dataset.id)).toEqual(['urgent', 'quiet']);
+    expect(rows[0].classList.contains('critical')).toBe(true);
+    expect(rows[1].getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('re-orders cached rows when a thread is read and the inbox re-sorts', () => {
+    const { el } = setup();
+    const read = { id: 'm1', thread_id: 't1', sender_name: 'First', body: 'One', is_read: true };
+    const unread = { id: 'm2', thread_id: 't2', sender_name: 'Second', body: 'Two', is_read: false };
+    el.state = { messages: [read, unread] };
+    expect([...el.shadowRoot.querySelectorAll('.row')].map((r) => r.dataset.id))
+      .toEqual(['t2', 't1']);
+    el.state = { messages: [read, { ...unread, is_read: true }] };
+    expect([...el.shadowRoot.querySelectorAll('.row')].map((r) => r.dataset.id))
+      .toEqual(['t1', 't2']);
+  });
+
+  // The shell pushes console state ~10x a second. A render that re-inserts
+  // rows it did not need to move is a DOM remove+insert, which drops focus —
+  // and an operator who cannot hold focus on a row for a tenth of a second can
+  // never arrow to another or press Enter (issue #1178's contract).
+  it('keeps focus on a row when an identical state is pushed again', () => {
+    const { el } = setup();
+    const state = {
+      messages: [
+        { id: 'm1', thread_id: 't1', sender_name: 'First', body: 'One', is_read: false },
+        { id: 'm2', thread_id: 't2', sender_name: 'Second', body: 'Two', is_read: false },
+      ],
+    };
+    el.state = state;
+    const row = el.shadowRoot.querySelectorAll('.row')[1];
+    row.focus();
+    expect(el.shadowRoot.activeElement).toBe(row);
+
+    // The property underneath the focus one, and the one jsdom can actually
+    // see: an unchanged projection moves NO node. (jsdom does not run the
+    // focus-fixup rule when a node is re-inserted, so the activeElement
+    // assertion below only bites in a real browser — the Chromium smoke in
+    // tests/smoke/comms-ops-keyboard.spec.js pushes twice for that.)
+    const list = el.shadowRoot.getElementById('list');
+    const observer = new MutationObserver(() => {});
+    observer.observe(list, { childList: true });
+    el.state = state;
+    const churn = observer.takeRecords();
+    observer.disconnect();
+    expect(churn).toEqual([]);
+    expect(el.shadowRoot.activeElement).toBe(row);
+  });
+
+  it('hands focus back to the same row when a real re-sort moves it', () => {
+    const { el } = setup();
+    const read = { id: 'm1', thread_id: 't1', sender_name: 'First', body: 'One', is_read: true };
+    const unread = { id: 'm2', thread_id: 't2', sender_name: 'Second', body: 'Two', is_read: false };
+    el.state = { messages: [read, unread] };
+    const row = el.shadowRoot.querySelector('.row[data-id="t1"]');
+    row.focus();
+    el.state = { messages: [read, { ...unread, is_read: true }] };
+    expect([...el.shadowRoot.querySelectorAll('.row')].map((r) => r.dataset.id))
+      .toEqual(['t1', 't2']);
+    expect(el.shadowRoot.activeElement).toBe(row);
   });
 
   it('does not throw when the semantic activation seam is not set and row is clicked', () => {

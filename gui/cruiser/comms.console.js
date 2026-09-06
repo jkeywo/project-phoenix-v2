@@ -18,8 +18,12 @@
  * The Navigation view reuses `makeNavigationRender` — the SAME renderer
  * `gui/battleship/navigation.console.js` drives, configured for this
  * document's ids — so both documents' charts, metrics and civilian-traffic
- * panel stay in lockstep by construction. The Comms view is the pre-#1379
- * `makeCommsRender` tail, unchanged pending #1380.
+ * panel stay in lockstep by construction. The Comms view is the shared
+ * `makeCommsRender` core (issue #1380) — HAILS | CONTACTS over one list area,
+ * one row per thread, and the open thread as a column at width or a local
+ * `.overlay-panel` in phone portrait. This hull's `tail` therefore carries
+ * only what that core does not: the Navigation view, the Comms message count,
+ * and the switch deciding which of the two views is on screen.
  */
 import { makeCommsRender } from '../stations/comms-console.js';
 import { makeNavigationRender } from '../stations/navigation-console.js';
@@ -61,6 +65,9 @@ export const renderStation = makeCommsRender({
     contactList: 'comms-contact-list',
     hailList: 'comms-hail-list',
     currentMessage: 'comms-current-message',
+    hailsUnread: 'comms-hails-unread',
+    activeHail: 'footer-target',
+    threadPanel: 'comms-thread-panel',
     autoBadge: 'comms-auto-badge',
   },
   // Station badge: the retired composite's comms_auto meant "station is
@@ -74,9 +81,13 @@ export const renderStation = makeCommsRender({
     const nav = resolveFamilyView(s, 'navigation');
     renderNavigationView(nav, doc);
 
-    const wp = nav.waypoint;
-    const footerEl = doc.getElementById('footer-target');
-    if (footerEl) footerEl.textContent = wp ? (wp.name || t('console.common.waypoint')) : t('console.common.no_waypoint');
+    // `#footer-target` is the Comms view's own readout and the shared core
+    // fills it with the open thread's channel (issue #1380). It used to carry
+    // the WAYPOINT, from the era when this one seat was Comms and Navigation
+    // at once; since #1379 split them into two full-panel views that readout
+    // lived inside the Comms view and could only ever say NO WAYPOINT, because
+    // a Comms load resolves no navigation family at all. The Navigation view
+    // keeps its own `#waypoint-name` metric — each tab says what it shows.
 
     const msgCount = (view.messages || []).length;
     const footerRightEl = doc.getElementById('footer-right');

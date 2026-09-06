@@ -5,6 +5,8 @@ import {
   isLatestLiveCriticalMessage,
   hailMessage, respondToMessage, clearCommsMessage,
   commsPreview, COMMS_PREVIEW_CHARS,
+  sortedThreadsFrom, threadMessagesFrom, activeThreadMessageFrom,
+  unreadThreadCount,
 } from '../../gui/comms-state.js';
 import { CHANGE_DOMAINS } from '../../gui/reducer-result.js';
 
@@ -317,6 +319,8 @@ describe('sortedThreads', () => {
       sender_name: 'New',
       // The preview is derived from the LATEST message's resolved body.
       subject: 'Latest',
+      // Two messages, one row (issue #1380).
+      message_count: 2,
       any_unread: false,
       any_urgent: false,
       latest_priority: 'routine',
@@ -372,6 +376,73 @@ describe('sortedThreads', () => {
     expect(threads[0].thread_id).toBe('unread');
     expect(threads.find(t => t.thread_id === 'critical').latest_priority)
       .toBe(COMMS_PRIORITY.ROUTINE);
+  });
+});
+
+// ── The pure functions the live console calls (issue #1380) ─────────────────
+// The Comms renderer never holds a ClientCommsState — it is handed a console
+// payload — so grouping, history and the active message have to be callable
+// off a bare message list. These assert that directly, and that the store's
+// own methods are the same rules and not a second copy of them.
+describe('sortedThreadsFrom / threadMessagesFrom / activeThreadMessageFrom', () => {
+  const messages = [
+    msgInThread('m1', 't1', { sender_name: 'Ops', body: 'One', is_read: true, responses: [] }),
+    msgInThread('m2', 't2', { sender_name: 'Relay', body: 'Two', is_read: false, responses: [] }),
+    msgInThread('m3', 't1', { sender_name: 'Ops', body: 'Three', is_read: true }),
+  ];
+
+  it('groups a conversation into one summary carrying its length and newest line', () => {
+    const threads = sortedThreadsFrom(messages, []);
+    expect(threads.map(t => t.thread_id)).toEqual(['t2', 't1']); // unread first
+    const t1 = threads.find(t => t.thread_id === 't1');
+    expect(t1.message_count).toBe(2);
+    expect(t1.subject).toBe('Three');
+    expect(t1.sender_name).toBe('Ops');
+  });
+
+  it('a five-message conversation is exactly one row, previewing its latest', () => {
+    const five = ['a', 'b', 'c', 'd', 'e'].map((suffix, i) => msgInThread(
+      `m-${suffix}`, 'long', { body: `Line ${i + 1}`, is_read: i < 4, responses: [] },
+    ));
+    const threads = sortedThreadsFrom(five, []);
+    expect(threads).toHaveLength(1);
+    expect(threads[0]).toMatchObject({
+      thread_id: 'long', message_count: 5, subject: 'Line 5', any_unread: true,
+    });
+  });
+
+  it('counts the threads with unread traffic, not the unread messages', () => {
+    const noisy = [
+      msgInThread('a1', 'ta', { is_read: false }),
+      msgInThread('a2', 'ta', { is_read: false }),
+      msgInThread('b1', 'tb', { is_read: true }),
+    ];
+    expect(unreadThreadCount(sortedThreadsFrom(noisy, []))).toBe(1);
+    expect(unreadThreadCount(sortedThreadsFrom([], []))).toBe(0);
+    expect(unreadThreadCount(undefined)).toBe(0);
+  });
+
+  it('returns one thread history in inbox order and its active message', () => {
+    expect(threadMessagesFrom(messages, 't1').map(m => m.id)).toEqual(['m1', 'm3']);
+    expect(threadMessagesFrom(messages, 'nope')).toEqual([]);
+    // m1 has no responses; m3 does and is unanswered.
+    expect(activeThreadMessageFrom(messages, 't1').id).toBe('m3');
+    expect(activeThreadMessageFrom(messages, 't2')).toBeNull();
+  });
+
+  it('tolerates a missing message list rather than throwing on an empty payload', () => {
+    expect(sortedThreadsFrom(undefined, undefined)).toEqual([]);
+    expect(threadMessagesFrom(null, 't1')).toEqual([]);
+    expect(activeThreadMessageFrom(null, 't1')).toBeNull();
+  });
+
+  it('the store methods delegate to them rather than re-deriving', () => {
+    const s = new ClientCommsState();
+    const roster = [contact('s-uuid', 'Ops Channel')];
+    s.apply(commsStateMsg(messages, roster));
+    expect(s.sortedThreads()).toEqual(sortedThreadsFrom(messages, roster));
+    expect(s.threadMessages('t1')).toEqual(threadMessagesFrom(messages, 't1'));
+    expect(s.activeMessageForThread('t1')).toEqual(activeThreadMessageFrom(messages, 't1'));
   });
 });
 

@@ -110,12 +110,14 @@ describe('ph-comms-hail-list (comms) keyboard contract', () => {
     const rows = options(el);
     rows[1].click();
     expect(window.activateSemanticAction).toHaveBeenCalledTimes(1);
+    // A row stands for a THREAD since issue #1380; these fixtures are
+    // pre-threading messages, so each is its own thread and the ids coincide.
     expect(window.activateSemanticAction).toHaveBeenCalledWith('comms.select-message', {
-      source: 'control', detail: { message_id: 'm2' },
+      source: 'control', detail: { thread_id: 'm2' },
     });
     expect(rows[1].getAttribute('aria-selected')).toBe('false');
     expect(rows[0].getAttribute('aria-selected')).toBe('false');
-    el.state = { ...state, selected_message_id: 'm2' };
+    el.state = { ...state, selected_thread_id: 'm2' };
     expect(rows[1].getAttribute('aria-selected')).toBe('true');
   });
 

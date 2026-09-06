@@ -294,6 +294,11 @@ export function initConsole({
       selectMessage: typeof render.selectMessage === 'function'
         ? function(messageId) { return render.selectMessage(_latestState, messageId); }
         : null,
+      // The same operation at the grain the inbox actually lists (issue
+      // #1380): a HAILS row names a thread, not one of its messages.
+      selectThread: typeof render.selectThread === 'function'
+        ? function(threadId) { return render.selectThread(_latestState, threadId); }
+        : null,
       getCurrentMessage: typeof render.currentMessage === 'function'
         ? function() { return render.currentMessage(_latestState); }
         : null,

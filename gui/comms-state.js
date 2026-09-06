@@ -107,6 +107,111 @@ export function commsPreview(msg) {
   return head + '…';
 }
 
+// ── Pure thread grouping (issue #1380) ──────────────────────────────────────
+// Grouping, history and previews are functions of the message list, not of the
+// store: the live Comms renderer holds no `ClientCommsState` at all — it is
+// handed a console payload ten times a second — so the rules below have to be
+// callable without one. `ClientCommsState`'s own methods are thin delegates to
+// them, which is what keeps the store and the console showing one inbox rather
+// than two spellings of it.
+
+/** All messages belonging to `threadId`, in inbox (chronological) order. */
+export function threadMessagesFrom(messages, threadId) {
+  return (Array.isArray(messages) ? messages : [])
+    .filter(m => effectiveThreadId(m) === threadId);
+}
+
+/**
+ * The active message of `threadId`: the LAST message in it that still has
+ * pending responses (non-empty responses, no selected_response, not orphaned,
+ * sender in range). Null when the thread has none — a conversation answered
+ * right through is still readable, it just cannot be replied to.
+ */
+export function activeThreadMessageFrom(messages, threadId) {
+  const msgs = threadMessagesFrom(messages, threadId);
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i];
+    if ((m.responses || []).length > 0
+        && (m.selected_response === null || m.selected_response === undefined)
+        && !m.is_orphaned
+        && m.sender_in_range !== false) {
+      return m;
+    }
+  }
+  return null;
+}
+
+/**
+ * Thread summaries sorted for display: live Critical first, urgent+unread,
+ * plain unread, then read. Relative order within each group is preserved
+ * (stable sort, inbox order). Each thread appears once and its metadata
+ * reflects the LATEST message in the thread — which is what makes a
+ * five-message conversation one inbox row previewing its newest line.
+ *
+ * `contacts` names the CHANNEL rather than the last speaker, so a multi-speaker
+ * thread (an outpost whose science officer answers for it) stays filed under
+ * the outpost; a synthetic broadcast with no contact falls back to the speaker.
+ */
+export function sortedThreadsFrom(messages, contacts) {
+  const raw = Array.isArray(messages) ? messages : [];
+  const roster = Array.isArray(contacts) ? contacts : [];
+
+  // Unique thread ids in first-seen order (preserves inbox order).
+  const seen = [];
+  for (const m of raw) {
+    const tid = effectiveThreadId(m);
+    if (!seen.includes(tid)) seen.push(tid);
+  }
+
+  const summaries = seen.map(tid => {
+    const threadMsgs = threadMessagesFrom(raw, tid);
+    const latest = threadMsgs[threadMsgs.length - 1];
+    // Only a real sender identity can match a contact. Without the guard an
+    // `undefined` sender_uuid matches an `undefined` contact uuid — a fixture
+    // or a synthetic broadcast would then be filed under the first nameless
+    // contact in the roster and lose its sender's name entirely.
+    const contact = latest.sender_uuid
+      ? roster.find(c => c.uuid === latest.sender_uuid)
+      : undefined;
+    const anyUnread = threadMsgs.some(m => !m.is_read);
+    const latestPriority = latestLiveThreadPriority(threadMsgs);
+    // Preserve legacy Urgent's unread lifecycle. A historical Critical is
+    // not allowed to leak through this compatibility field after a newer
+    // message supersedes it.
+    const anyUrgent = latestPriority === COMMS_PRIORITY.CRITICAL
+      || threadMsgs.some(m => commsPriority(m) === COMMS_PRIORITY.URGENT && !m.is_read);
+    return {
+      thread_id: tid,
+      sender_name: (contact && contact.name) || latest.sender_name,
+      subject: commsPreview(latest),
+      message_count: threadMsgs.length,
+      any_unread: anyUnread,
+      any_urgent: anyUrgent,
+      latest_priority: latestPriority,
+      latest_out_of_range: latest.sender_in_range === false,
+      latest_orphaned: !!latest.is_orphaned,
+    };
+  });
+
+  const priority = s => (
+    s.latest_priority === COMMS_PRIORITY.CRITICAL ? 0
+      : s.any_urgent ? 1
+        : s.any_unread ? 2 : 3
+  );
+  // Array.prototype.sort is stable, matching Rust's sort_by.
+  summaries.sort((a, b) => priority(a) - priority(b));
+  return summaries;
+}
+
+/**
+ * How many of `threads` carry unread traffic — the number the HAILS tab shows.
+ * Takes summaries rather than raw messages so the caller that already has the
+ * projection does not group the inbox twice per render.
+ */
+export function unreadThreadCount(threads) {
+  return (Array.isArray(threads) ? threads : []).filter(s => s && s.any_unread).length;
+}
+
 /**
  * The client's view of the Comms console state.
  * Mirrors `ClientCommsState` in src/client_comms.rs.
@@ -163,7 +268,7 @@ export class ClientCommsState {
 
   /** All messages belonging to `threadId`, in inbox (chronological) order. */
   threadMessages(threadId) {
-    return this.messages.filter(m => effectiveThreadId(m) === threadId);
+    return threadMessagesFrom(this.messages, threadId);
   }
 
   /**
@@ -172,17 +277,7 @@ export class ClientCommsState {
    * not orphaned, sender in range). Null when none.
    */
   activeMessageForThread(threadId) {
-    const msgs = this.threadMessages(threadId);
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      const m = msgs[i];
-      if ((m.responses || []).length > 0
-          && (m.selected_response === null || m.selected_response === undefined)
-          && !m.is_orphaned
-          && m.sender_in_range !== false) {
-        return m;
-      }
-    }
-    return null;
+    return activeThreadMessageFrom(this.messages, threadId);
   }
 
   /**
@@ -230,44 +325,7 @@ export class ClientCommsState {
    * the LATEST message in the thread. Mirrors `sorted_threads`.
    */
   sortedThreads() {
-    // Unique thread ids in first-seen order (preserves inbox order).
-    const seen = [];
-    for (const m of this.messages) {
-      const tid = effectiveThreadId(m);
-      if (!seen.includes(tid)) seen.push(tid);
-    }
-
-    const summaries = seen.map(tid => {
-      const threadMsgs = this.threadMessages(tid);
-      const latest = threadMsgs[threadMsgs.length - 1];
-      const contact = this.contacts.find(c => c.uuid === latest.sender_uuid);
-      const anyUnread = threadMsgs.some(m => !m.is_read);
-      const latestPriority = latestLiveThreadPriority(threadMsgs);
-      // Preserve legacy Urgent's unread lifecycle. A historical Critical is
-      // not allowed to leak through this compatibility field after a newer
-      // message supersedes it.
-      const anyUrgent = latestPriority === COMMS_PRIORITY.CRITICAL
-        || threadMsgs.some(m => commsPriority(m) === COMMS_PRIORITY.URGENT && !m.is_read);
-      return {
-        thread_id: tid,
-        sender_name: contact ? contact.name : latest.sender_name,
-        subject: commsPreview(latest),
-        any_unread: anyUnread,
-        any_urgent: anyUrgent,
-        latest_priority: latestPriority,
-        latest_out_of_range: latest.sender_in_range === false,
-        latest_orphaned: !!latest.is_orphaned,
-      };
-    });
-
-    const priority = s => (
-      s.latest_priority === COMMS_PRIORITY.CRITICAL ? 0
-        : s.any_urgent ? 1
-          : s.any_unread ? 2 : 3
-    );
-    // Array.prototype.sort is stable, matching Rust's sort_by.
-    summaries.sort((a, b) => priority(a) - priority(b));
-    return summaries;
+    return sortedThreadsFrom(this.messages, this.contacts);
   }
 }
 

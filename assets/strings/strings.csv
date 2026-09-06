@@ -590,6 +590,7 @@ component.comms_contacts.empty,Comms contact list when nothing is in hailing ran
 component.comms_contacts.hail,Button that hails a comms contact,HAIL
 component.comms_hails.empty,Comms message list when no transmissions have arrived,NO MESSAGES
 component.comms_hails.label,Accessible name (aria-label) for the comms hail list — the keyboard/pointer message selector (issue #1178),Received hails
+component.comms_hails.thread_count,"Comms inbox row tooltip counting the messages folded into one thread. {n} is the count (issue #1380)","[{n} messages in this thread]"
 component.comms.priority.critical,Visible text paired with a diamond and danger colour on a live critical Comms hail,CRITICAL
 component.comms_message.no_active_hail,Comms message panel when no hail is open,[NO ACTIVE HAIL]
 component.comms_message.confirm_important,"Comms response button prompt asking the operator to confirm an important, irreversible response before it is sent",CONFIRM?
@@ -747,6 +748,10 @@ console.comms.navigation,"comms console — ""Navigation"" panel heading",Naviga
 console.comms.comms,"comms console — ""Comms"" panel heading",Comms
 console.comms.messages.one,"comms console footer — message count, exactly one. {n} is the count",[{n} MESSAGE]
 console.comms.messages.other,"comms console footer — message count, zero or several. {n} is the count",[{n} MESSAGES]
+console.comms.seg.hails,"Comms console segment — HAILS tab label, showing the thread inbox (issue #1380)","[HAILS]"
+console.comms.seg.contacts,"Comms console segment — CONTACTS tab label, showing the hailable contacts (issue #1380)","[CONTACTS]"
+console.comms.seg.label,"Comms console segment — tablist aria-label naming what HAILS | CONTACTS switches between (issue #1380)","[Comms list]"
+console.comms.seg.hails_unread,"Comms HAILS tab count tooltip — how many threads still carry an unread message. {n} is the count (issue #1380)","[{n} unread threads]"
 console.engineering.doc_title,Browser-tab title of the engineering console page,[Project Phoenix — Engineering Console]
 console.engineering.screen_label,Phone-frame screen label of the engineering console,Engineering Console
 console.engineering.power,"engineering console — ""Power"" panel heading",Power

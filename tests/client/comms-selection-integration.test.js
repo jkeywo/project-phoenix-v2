@@ -64,7 +64,11 @@ describe('Comms local selection semantic action', () => {
   });
 
   it('converges pointer, keyboard and gamepad on one rendered state owner', () => {
-    expect(rows().every((row) => row.getAttribute('aria-selected') === 'false')).toBe(true);
+    // The row the console opened on is marked from the first render (issue
+    // #1380): the inbox lists threads, and the highlight says which one the
+    // thread panel is showing — picked or automatic.
+    expect(rows()[0].getAttribute('aria-selected')).toBe('true');
+    expect(rows()[1].getAttribute('aria-selected')).toBe('false');
     expect(currentSender()).toBe('Alpha');
 
     rows()[1].click();

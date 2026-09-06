@@ -20,6 +20,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { t } from '../../gui/strings.js';
 import { renderStation as battleshipRender } from '../../gui/battleship/comms.console.js';
 import { renderStation as rawCruiserRender } from '../../gui/cruiser/comms.console.js';
+import { sortedThreadsFrom } from '../../gui/comms-state.js';
 import { withConsoleFamilyProjection } from './console-family-fixture.js';
 
 const cruiserRender = (payload, doc) => rawCruiserRender(withConsoleFamilyProjection(payload), doc);
@@ -33,7 +34,10 @@ const FIXTURES = {
   battleship:
     '<ph-comms-contact-list id="comms-contact-list"></ph-comms-contact-list>' +
     '<ph-comms-hail-list id="comms-hail-list"></ph-comms-hail-list>' +
+    '<div class="overlay-panel" id="comms-thread-panel">' +
     '<ph-comms-current-message id="comms-current-message"></ph-comms-current-message>' +
+    '</div>' +
+    '<span id="comms-hails-unread" hidden></span>' +
     '<span id="footer-target"></span>' +
     '<span id="comms-auto-badge" hidden></span>',
   cruiser:
@@ -41,7 +45,10 @@ const FIXTURES = {
     '<div id="comms-view" hidden></div>' +
     '<ph-comms-contact-list id="comms-contact-list"></ph-comms-contact-list>' +
     '<ph-comms-hail-list id="comms-hail-list"></ph-comms-hail-list>' +
+    '<div class="overlay-panel" id="comms-thread-panel">' +
     '<ph-comms-current-message id="comms-current-message"></ph-comms-current-message>' +
+    '</div>' +
+    '<span id="comms-hails-unread" hidden></span>' +
     '<ph-navigation-map id="navigation-map"></ph-navigation-map>' +
     '<ph-civilian-traffic id="civilian-traffic"></ph-civilian-traffic>' +
     '<ph-objective-list id="objective-list"></ph-objective-list>' +
@@ -72,14 +79,137 @@ describe('battleship comms renderStation', () => {
   it('drives the contact list, hail list and current message from the flat payload', () => {
     battleshipRender(base, document);
     expect(el('comms-contact-list').state).toEqual({ contacts: [{ id: 'c1' }] });
-    expect(el('comms-hail-list').state).toEqual({ ...base, selected_message_id: null });
-    expect(el('comms-current-message').state).toEqual({ thread: { id: 'm2', is_read: false, sender_name: 'Ops' }, messages: base.messages, rejection: null });
+    expect(el('comms-hail-list').state).toEqual({
+      ...base,
+      threads: sortedThreadsFrom(base.messages, base.contacts),
+      selected_thread_id: 'm2',
+    });
+    // The thread panel gets the CONVERSATION, not the whole inbox: these two
+    // messages are two one-message threads, so the open one carries just its own.
+    expect(el('comms-current-message').state).toEqual({
+      thread: { id: 'm2', is_read: false, sender_name: 'Ops' },
+      messages: [base.messages[1]],
+      sender_name: 'Ops',
+      rejection: null,
+    });
   });
 
-  it('owns local message selection and repaints the list, thread and footer together', () => {
+  // Issue #1380 AC1: a five-message conversation is one row showing the latest.
+  it('folds a five-message conversation into one row and opens its whole history', () => {
+    const conversation = ['a', 'b', 'c', 'd', 'e'].map((suffix, i) => ({
+      id: `m-${suffix}`, thread_id: 'relay', sender_name: 'Relay Seven',
+      body: `Line ${i + 1}`, is_read: i < 4,
+    }));
+    battleshipRender({ ...base, messages: conversation }, document);
+    const threads = el('comms-hail-list').state.threads;
+    expect(threads).toHaveLength(1);
+    expect(threads[0]).toMatchObject({
+      thread_id: 'relay', message_count: 5, subject: 'Line 5', any_unread: true,
+    });
+    expect(el('comms-current-message').state.messages.map((m) => m.id))
+      .toEqual(['m-a', 'm-b', 'm-c', 'm-d', 'm-e']);
+    expect(el('footer-target').textContent).toBe('Relay Seven');
+  });
+
+  it('counts the threads still carrying unread traffic on the HAILS tab', () => {
+    battleshipRender(base, document);
+    expect(el('comms-hails-unread').hidden).toBe(false);
+    expect(el('comms-hails-unread').textContent).toBe('1');
+    battleshipRender({
+      ...base,
+      messages: base.messages.map((m) => ({ ...m, is_read: true })),
+    }, document);
+    expect(el('comms-hails-unread').hidden).toBe(true);
+    expect(el('comms-hails-unread').textContent).toBe('');
+  });
+
+  it('owns local thread selection and repaints list, thread and readout together', () => {
+    battleshipRender(base, document);
+    expect(battleshipRender.selectThread(base, 'm1', document)).toBe(true);
+    expect(el('comms-hail-list').state.selected_thread_id).toBe('m1');
+    expect(el('comms-current-message').state.thread.id).toBe('m1');
+    expect(el('footer-target').textContent).toBe('Old');
+    // No `data-tab-code`, so the shell's Station Bar never advertises it.
+    expect(document.getElementById('comms-thread-panel').hasAttribute('data-tab-code'))
+      .toBe(false);
+    expect(battleshipRender.selectThread(base, 'missing', document)).toBe(false);
+    expect(el('comms-current-message').state.thread.id).toBe('m1');
+  });
+
+  // `.overlay-panel.open` is the SHELL-FACING fact, not a local style hook:
+  // console-core reads it back out of the DOM and posts it to the Station Bar
+  // as this console's open overlay, and the bar then gives the seat's own tab
+  // its "come back to the console" meaning instead of opening the per-system
+  // damage popup (issue #1374). The panel only earns that while it is really
+  // covering the console — which the stylesheet decides (absolute in portrait,
+  // an ordinary column otherwise) and which the renderer reads back as "taken
+  // out of flow". jsdom computes `static` for the plain fixture node, i.e. the
+  // landscape/desktop column.
+  it('marks the thread panel open only where the stylesheet makes it an overlay', () => {
+    const panel = document.getElementById('comms-thread-panel');
+    battleshipRender(base, document);
+    expect(panel.classList.contains('open')).toBe(false);
+
+    // A column member: selected and rendered, but NOT reported as an overlay.
+    expect(battleshipRender.selectThread(base, 'm1', document)).toBe(true);
+    expect(el('comms-current-message').state.thread.id).toBe('m1');
+    expect(panel.classList.contains('open')).toBe(false);
+    expect(battleshipRender.selectMessage(base, 'm2', document)).toBe(true);
+    expect(panel.classList.contains('open')).toBe(false);
+
+    // Phone portrait: the same node, positioned over the list, IS an overlay.
+    panel.style.position = 'absolute';
+    expect(battleshipRender.selectThread(base, 'm1', document)).toBe(true);
+    expect(panel.classList.contains('open')).toBe(true);
+
+    // Back to a column — a rotation — and the next selection clears the stale
+    // mark, so the bar is never left holding an overlay that covers nothing.
+    panel.style.position = '';
+    expect(battleshipRender.selectMessage(base, 'm2', document)).toBe(true);
+    expect(panel.classList.contains('open')).toBe(false);
+  });
+
+  // A thread-grain pick must stay thread-grain. A scripted follow-up arrives as
+  // a NEW message on the SAME thread_id (`CommsMessage::injected`), and it does
+  // not raise a new inbox row — it folds into the row already highlighted. So
+  // if tapping the row pinned the message that was active at tap time, the
+  // operator would be left with the answered message's disabled responses and
+  // no cue that the reply they are owed had become unreachable.
+  it('follows a same-thread follow-up after the tapped message is answered', () => {
+    const opening = {
+      id: 'm1', thread_id: 'relay', sender_name: 'Relay Seven', body: 'Do you copy?',
+      is_read: true, selected_response: null,
+      responses: [{ text: 'Acknowledge', available: true }],
+    };
+    const before = { ...base, messages: [opening] };
+    battleshipRender(before, document);
+    expect(battleshipRender.selectThread(before, 'relay', document)).toBe(true);
+    expect(el('comms-current-message').state.thread.id).toBe('m1');
+
+    // The operator answers m1; the script injects m2 into the same thread.
+    const followUp = {
+      id: 'm2', thread_id: 'relay', sender_name: 'Relay Seven', body: 'Then hold station.',
+      is_read: false, selected_response: null,
+      responses: [{ text: 'Holding', available: true }],
+    };
+    const after = {
+      ...base,
+      messages: [{ ...opening, selected_response: 0 }, followUp],
+    };
+    battleshipRender(after, document);
+    expect(el('comms-hail-list').state.selected_thread_id).toBe('relay');
+    expect(el('comms-current-message').state.thread.id).toBe('m2');
+    expect(battleshipRender.currentMessage(after).id).toBe('m2');
+
+    // An explicit MESSAGE-grain pick still wins and still pins.
+    expect(battleshipRender.selectMessage(after, 'm1', document)).toBe(true);
+    expect(battleshipRender.currentMessage(after).id).toBe('m1');
+  });
+
+  it('owns local message selection and moves the open thread with it', () => {
     battleshipRender(base, document);
     expect(battleshipRender.selectMessage(base, 'm1', document)).toBe(true);
-    expect(el('comms-hail-list').state.selected_message_id).toBe('m1');
+    expect(el('comms-hail-list').state.selected_thread_id).toBe('m1');
     expect(el('comms-current-message').state.thread.id).toBe('m1');
     expect(el('footer-target').textContent).toBe('Old');
     expect(battleshipRender.currentMessage(base).id).toBe('m1');
@@ -101,7 +231,7 @@ describe('battleship comms renderStation', () => {
     ];
     battleshipRender({ ...base, messages }, document);
     expect(el('comms-current-message').state).toEqual({
-      thread: messages[1], messages, rejection: null,
+      thread: messages[1], messages: [messages[1]], sender_name: undefined, rejection: null,
     });
   });
 
@@ -146,8 +276,17 @@ describe('cruiser comms renderStation', () => {
   it('reads the comms view via projected Console Family for the shared core', () => {
     cruiserRender(payload, document);
     expect(el('comms-contact-list').state).toEqual({ contacts: [{ id: 'c1' }] });
-    expect(el('comms-hail-list').state).toEqual({ ...comms, selected_message_id: null });
-    expect(el('comms-current-message').state).toEqual({ thread: { id: 'm1', is_read: false }, messages: comms.messages, rejection: 'console.common.no_target' });
+    expect(el('comms-hail-list').state).toEqual({
+      ...comms,
+      threads: sortedThreadsFrom(comms.messages, comms.contacts),
+      selected_thread_id: 'm1',
+    });
+    expect(el('comms-current-message').state).toEqual({
+      thread: { id: 'm1', is_read: false },
+      messages: comms.messages,
+      sender_name: undefined,
+      rejection: 'console.common.no_target',
+    });
   });
 
   it('drives the navigation map from the absorbed navigation system, through the shared Navigation renderer', () => {
@@ -197,15 +336,30 @@ describe('cruiser comms renderStation', () => {
     expect(el('waypoint-name').textContent).toBe('Gate');
   });
 
-  it('shows the waypoint name in the footer, not a hail', () => {
+  // Issue #1380: the Comms view's readout names the open thread's channel.
+  // It used to carry the WAYPOINT, from the era when one seat was Comms AND
+  // Navigation; since #1379 split them into two full-panel views that readout
+  // sat inside the Comms view and could only ever say NO WAYPOINT, because a
+  // Comms load resolves no navigation family at all. The waypoint metric lives
+  // in the Navigation view, which is the tab that shows it.
+  it('names the open thread in the Comms readout, not a waypoint', () => {
+    const named = {
+      ...payload,
+      systems: {
+        ...payload.systems,
+        comms: { ...comms, messages: [{ id: 'm1', is_read: false, sender_name: 'Relay Seven' }] },
+      },
+    };
+    cruiserRender(named, document);
+    expect(el('footer-target').textContent).toBe('Relay Seven');
+    // The fixture's own unnamed hail falls back to the shared label.
     cruiserRender(payload, document);
-    expect(el('footer-target').textContent).toBe('Gate');
-    const unnamed = { ...payload, systems: { ...payload.systems, navigation: { ...nav, waypoint: { name: null } } } };
-    cruiserRender(unnamed, document);
-    expect(el('footer-target').textContent).toBe(t('console.common.waypoint'));
-    const none = { ...payload, systems: { ...payload.systems, navigation: { ...nav, waypoint: null } } };
-    cruiserRender(none, document);
-    expect(el('footer-target').textContent).toBe(t('console.common.no_waypoint'));
+    expect(el('footer-target').textContent).toBe(t('console.common.active_hail'));
+    const empty = { ...payload, systems: { ...payload.systems, comms: { ...comms, messages: [] } } };
+    cruiserRender(empty, document);
+    expect(el('footer-target').textContent).toBe(t('console.common.no_active_hail'));
+    // The Navigation view keeps the waypoint metric it owns.
+    expect(el('waypoint-name').textContent).toBe('Gate');
   });
 
   it('shows a pluralized message count in footer-right', () => {

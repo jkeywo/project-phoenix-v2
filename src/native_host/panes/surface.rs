@@ -67,6 +67,10 @@ pub enum PaneSurfaceError {
     /// A script could not be evaluated, or threw. The ordinary cause is a page
     /// whose own scripts have not finished running.
     Script(String),
+    /// A frame copy failed (issue #1404): a surface that could not be locked, a
+    /// buffer of the wrong length, a view that has stopped answering. Ordinarily
+    /// transient — a run of them in a row is the crashed-view signal.
+    Frame(String),
 }
 
 impl std::fmt::Display for PaneSurfaceError {
@@ -74,6 +78,10 @@ impl std::fmt::Display for PaneSurfaceError {
         match self {
             PaneSurfaceError::Load(detail) => write!(f, "load failed: {detail}"),
             PaneSurfaceError::Script(detail) => write!(f, "script failed: {detail}"),
+            // Bare, unlike its siblings: every caller of a frame copy already
+            // says "frame copy failed" and how many in a row, so a prefix here
+            // would only repeat them.
+            PaneSurfaceError::Frame(detail) => write!(f, "{detail}"),
         }
     }
 }

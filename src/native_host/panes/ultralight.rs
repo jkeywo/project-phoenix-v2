@@ -16,6 +16,24 @@
 //! `CursorMoved`/`ButtonInput`/`KeyboardInput`/`TouchInput` per window, asks that
 //! model where the event goes, and injects it into the target view.
 //!
+//! # The seams this adapter satisfies (issue #1404)
+//!
+//! Two of them, both declared in the SDK-free [`super::pane_thread`]:
+//! [`UltralightPaneSurface`] is a [`PaneView`] (resize, one `PaneInput`, one
+//! frame copy) and [`UltralightHost`] is a [`PaneRuntime`] (update, render, mint
+//! a view for a [`PaneKind`]). Everything below — the frame loop, the input
+//! systems, the resize — calls *through* those rather than reaching into the
+//! `UltralightPane`, so the policy that decides what to call and in what order
+//! can be lifted out of this file, checked by an ordinary `cargo test`, and
+//! eventually run on a thread of its own. What that leaves here is the
+//! translation and nothing else: a `PaneInput` back into the exact view call it
+//! stands for, a `PaneKind` into a `PaneSpec`, a `DirtyRect` into a `FrameRect`.
+//!
+//! One thing moved *into* the surface with them: whether the page is
+//! transparent, and so which copy it makes. The copy loop used to ask the pane
+//! window "are you the HUD?"; a surface now carries the answer it was minted
+//! with, beside the texture format minted from the same predicate.
+//!
 //! # Why the feature gate exists
 //!
 //! `ul-next-sys`'s build script **downloads a proprietary SDK archive at build
@@ -86,6 +104,9 @@ use vellum_ultralight::staging;
 
 use super::document::pane_drain_script;
 use super::frame_stats::{PaneFrameSample, PaneFrameStats};
+use super::pane_thread::{
+    FrameRect, PaneInput, PaneKeyCode, PaneKind, PaneRuntime, PaneSpecOwned, PaneView,
+};
 use super::placement::{home_for_pane, PaneHome, PaneTile};
 use super::recovery::{service_faults, PaneFault};
 use super::registry::PaneId;
@@ -251,6 +272,16 @@ pub struct UltralightPaneSurface {
     /// Set once the document has reported a completed load. Sticky: `is_loading`
     /// goes false between navigations too, and a pane navigates once.
     loaded: bool,
+    /// Whether this page composites over what is behind it (issue #1404).
+    ///
+    /// Set at construction from the surface's [`PaneKind`], the same predicate
+    /// the texture format and the fill are minted from, and read by exactly one
+    /// thing: which copy [`PaneView::copy_frame`] makes. Before this the copy
+    /// loop asked the *pane window* whether it was the HUD, so the one fact that
+    /// has to agree with the texture — straight alpha or verbatim BGRA — was
+    /// decided a level above the thing that knows it. A surface now carries its
+    /// own answer, which is what lets a copy happen anywhere the surface is.
+    transparent: bool,
     /// The script that collects what this document has queued.
     ///
     /// Held per surface because the two documents this type drives install
@@ -276,9 +307,21 @@ impl UltralightPaneSurface {
     /// (`tests/native_host_pane_ultralight.rs`) needs a runtime, a view and this
     /// wrapper, and nothing else this module builds.
     pub fn new(view: UltralightPane) -> Self {
+        Self::with_transparency(view, false)
+    }
+
+    /// Wrap a freshly created pane view whose page is **transparent** — the
+    /// viewscreen HUD overlay (issue #422, native port), and nothing else today.
+    ///
+    /// A separate constructor rather than a parameter on [`new`](Self::new)
+    /// because `new` is what the ignored SDK integration tests call, and every
+    /// caller that is not the HUD wants the opaque answer. See
+    /// [`transparent`](Self::transparent) for what the flag decides.
+    pub fn with_transparency(view: UltralightPane, transparent: bool) -> Self {
         Self {
             view,
             loaded: false,
+            transparent,
             drain_script: pane_drain_script(),
         }
     }
@@ -293,6 +336,9 @@ impl UltralightPaneSurface {
         Self {
             view,
             loaded: false,
+            // Opaque chrome, like a console: `PaneKind::Lobby.transparent()` is
+            // false, and this is the same answer said in the adapter.
+            transparent: false,
             drain_script: host_lobby_drain_script(),
         }
     }
@@ -345,6 +391,138 @@ impl PaneSurface for UltralightPaneSurface {
             // not exist. Next frame.
             Err(_) => Vec::new(),
         }
+    }
+}
+
+/// The frame half of the seam (issue #1404, slice 2).
+///
+/// Every call here is one the frame loop used to make by reaching into
+/// `surface.view`. Going through the trait instead is what lets the loop be
+/// written — and tested, against
+/// [`pane_thread::doubles`](super::pane_thread) — without an SDK, and what will
+/// let it run on a thread of its own. The calls, and their order, are exactly
+/// the calls and the order they were.
+impl PaneView for UltralightPaneSurface {
+    fn refresh_loaded(&mut self) -> bool {
+        UltralightPaneSurface::refresh_loaded(self)
+    }
+
+    fn resize(&mut self, width: u32, height: u32) {
+        self.view.resize(width, height);
+    }
+
+    fn input(&mut self, input: &PaneInput) {
+        match input {
+            PaneInput::MouseMove { x, y } => self.view.mouse_move(*x, *y),
+            PaneInput::MouseDown { x, y } => self.view.mouse_down(*x, *y, UlMouseButton::Left),
+            PaneInput::MouseUp { x, y } => self.view.mouse_up(*x, *y, UlMouseButton::Left),
+            PaneInput::Scroll { dx, dy } => self.view.scroll(*dx, *dy),
+            // Every editing key is a raw key-down with native code 0 and no
+            // modifiers, exactly as `forward_keyboard_text` has always sent them
+            // — the modifiers gap noted there is unchanged by this seam.
+            PaneInput::Key(code) => self.view.key(
+                KeyEventType::RawKeyDown,
+                match code {
+                    PaneKeyCode::Back => VirtualKeyCode::Back,
+                    PaneKeyCode::Return => VirtualKeyCode::Return,
+                    PaneKeyCode::Left => VirtualKeyCode::Left,
+                    PaneKeyCode::Right => VirtualKeyCode::Right,
+                    PaneKeyCode::Up => VirtualKeyCode::Up,
+                    PaneKeyCode::Down => VirtualKeyCode::Down,
+                    PaneKeyCode::Home => VirtualKeyCode::Home,
+                    PaneKeyCode::End => VirtualKeyCode::End,
+                    PaneKeyCode::Delete => VirtualKeyCode::Delete,
+                    PaneKeyCode::Tab => VirtualKeyCode::Tab,
+                },
+                0,
+                Modifiers::default(),
+            ),
+            PaneInput::KeyChar(text) => self.view.key_char(text),
+            PaneInput::Focus => self.view.focus(),
+            PaneInput::Unfocus => self.view.unfocus(),
+        }
+    }
+
+    fn copy_frame(
+        &mut self,
+        dst: &mut [u8],
+        force: bool,
+    ) -> Result<Option<FrameRect>, PaneSurfaceError> {
+        // The transparent HUD takes the straight-alpha copy; every opaque
+        // surface is moved verbatim into its BGRA texture — see
+        // [`pane_texture_format`], which is minted from the same predicate.
+        let copied = if self.transparent {
+            self.view.copy_frame(dst, force)
+        } else {
+            self.view.copy_frame_bgra(dst, force)
+        };
+        copied
+            .map(|rect| rect.map(FrameRect::from))
+            .map_err(|e| PaneSurfaceError::Frame(e.to_string()))
+    }
+}
+
+/// The one Ultralight renderer, behind the trait the pane loop mints views
+/// through (issue #1404, slice 2).
+///
+/// A newtype rather than an `impl PaneRuntime for UltralightRuntime`, because
+/// the mapping from a [`PaneKind`] to a `PaneSpec` — the transparency, the
+/// per-pane ephemeral storage session, which drain script the surface gets — is
+/// this host's policy and not vellum's. `!Send`, like the runtime it holds: what
+/// crosses onto the pane thread in slice 5 is the closure that builds one.
+pub struct UltralightHost {
+    runtime: UltralightRuntime,
+}
+
+impl UltralightHost {
+    /// Take ownership of a started runtime.
+    pub fn new(runtime: UltralightRuntime) -> Self {
+        Self { runtime }
+    }
+}
+
+impl PaneRuntime for UltralightHost {
+    type View = UltralightPaneSurface;
+
+    fn update(&mut self) {
+        self.runtime.update();
+    }
+
+    fn render(&mut self) {
+        self.runtime.render();
+    }
+
+    fn create(
+        &mut self,
+        id: PaneId,
+        kind: PaneKind,
+        spec: &PaneSpecOwned,
+        url: &str,
+    ) -> Result<Self::View, PaneSurfaceError> {
+        let spec = PaneSpec {
+            width: spec.width,
+            height: spec.height,
+            device_scale: spec.device_scale,
+            transparent: kind.transparent(),
+            // One storage session per pane, named after the pane and never
+            // written to disk — see the twin of this spec in `init_pane_host`
+            // for what a shared session would cost.
+            session: Some(PaneSession::ephemeral(id.to_string())),
+        };
+        let view = self
+            .runtime
+            .create_pane(&spec)
+            .map_err(|e| PaneSurfaceError::Load(e.to_string()))?;
+        // The lobby drains its OWN queue — the one place the two surfaces differ
+        // below the URL.
+        let mut surface = match kind {
+            PaneKind::Lobby => UltralightPaneSurface::for_host_lobby(view),
+            PaneKind::Console | PaneKind::Hud => {
+                UltralightPaneSurface::with_transparency(view, kind.transparent())
+            }
+        };
+        surface.load(url)?;
+        Ok(surface)
     }
 }
 
@@ -504,7 +682,9 @@ impl PaneWindow {
 /// affinity — so it is a non-send resource and only main-thread systems touch
 /// it.
 pub struct PaneHost {
-    runtime: UltralightRuntime,
+    /// The renderer, behind the [`PaneRuntime`] seam (issue #1404): the frame
+    /// loop asks it to update, render and mint views, and asks it nothing else.
+    runtime: UltralightHost,
     windows: Vec<PaneWindow>,
     /// Each **tiled** pane's slot on the primary window, so a recreated pane
     /// rebuilds where its predecessor sat (issue #1125).
@@ -579,15 +759,19 @@ impl PaneHost {
 
     /// Give a pane's view keyboard focus and take it from whatever held it,
     /// keeping Ultralight's single-focused-view invariant in step with the model.
-    fn focus_view(&self, previous: Option<PaneId>, next: Option<PaneId>) {
+    fn focus_view(&mut self, previous: Option<PaneId>, next: Option<PaneId>) {
         if previous == next {
             return;
         }
+        // Unfocus BEFORE focus, and both through the input seam: on the pane
+        // thread these are two messages in one FIFO, and a focus that arrived
+        // before the unfocus it replaces would leave Ultralight's
+        // single-focused-view invariant pointing at nothing.
         if let Some(prev) = previous.and_then(|p| self.index_of(p)) {
-            self.windows[prev].surface.view.unfocus();
+            self.windows[prev].surface.input(&PaneInput::Unfocus);
         }
         if let Some(next) = next.and_then(|p| self.index_of(p)) {
-            self.windows[next].surface.view.focus();
+            self.windows[next].surface.input(&PaneInput::Focus);
         }
     }
 
@@ -979,6 +1163,13 @@ fn init_pane_host(world: &mut World) {
             None
         };
 
+        // Built inline rather than through `UltralightHost::create` (issue
+        // #1404), deliberately: this path distinguishes "the view could not be
+        // created" from "the view could not load its console" in its log and in
+        // what it does next, and the seam returns one error for both. Seat
+        // building is where the two permanent surfaces are minted and where a
+        // failure is fatal to the whole host, so it keeps its own arms until
+        // slice 5 replaces it with a `Create` command and a `Created` event.
         let spec = PaneSpec {
             width: seat.size.0,
             height: seat.size.1,
@@ -1014,7 +1205,10 @@ fn init_pane_host(world: &mut World) {
         let mut surface = if seat.lobby {
             UltralightPaneSurface::for_host_lobby(view)
         } else {
-            UltralightPaneSurface::new(view)
+            // The HUD overlay is the one transparent surface, and the surface
+            // itself now carries that: which copy it makes follows the flag
+            // rather than a question asked of the pane window (issue #1404).
+            UltralightPaneSurface::with_transparency(view, seat.hud)
         };
         if let Err(e) = surface.load(url) {
             crate::perror!(
@@ -1152,13 +1346,13 @@ fn init_pane_host(world: &mut World) {
     // host with no `--pane` seeds no focus at all, which is the honest state.
     let focus = FocusRing::focused_on_first_pane(router.focus_order());
     if let Some(first) = focus.focused() {
-        if let Some(window) = windows.iter().find(|w| w.id == first) {
-            window.surface.view.focus();
+        if let Some(window) = windows.iter_mut().find(|w| w.id == first) {
+            window.surface.input(&PaneInput::Focus);
         }
     }
     let (recycle_tx, recycle_rx) = channel();
     world.insert_non_send_resource(PaneHost {
-        runtime,
+        runtime: UltralightHost::new(runtime),
         windows,
         tiles,
         primary_window: primary_entity,
@@ -1486,7 +1680,7 @@ fn resize_pane_surfaces(
         // Move the view, mint the texture it copies into afresh, and resize the
         // node that draws it — all three must agree, or `copy_frame` writes a
         // buffer of the wrong length into the image the next frame.
-        pane.surface.view_mut().resize(size.0, size.1);
+        pane.surface.resize(size.0, size.1);
         // A NEW asset, not `Image::resize` (issue #1404): the pane images are
         // `RenderAssetUsages::RENDER_WORLD`, so their `data` was moved out at
         // the first extract and resizing a `data: None` image would leave the
@@ -1608,9 +1802,17 @@ fn route_pointer_input(
     if mouse.just_pressed(MouseButton::Left) {
         if let Some((_, _, _, Some(hit))) = cursor {
             if let Some(index) = host.index_of(hit.pane) {
-                let view = &mut host.windows[index].surface.view;
-                view.mouse_move(hit.local_x, hit.local_y);
-                view.mouse_down(hit.local_x, hit.local_y, UlMouseButton::Left);
+                let view = &mut host.windows[index].surface;
+                // Move then down, in that order and into the same pane's stream:
+                // Ultralight decides what is under the pointer from the move.
+                view.input(&PaneInput::MouseMove {
+                    x: hit.local_x,
+                    y: hit.local_y,
+                });
+                view.input(&PaneInput::MouseDown {
+                    x: hit.local_x,
+                    y: hit.local_y,
+                });
             }
             host.mouse_capture.press(hit.pane);
         }
@@ -1628,17 +1830,19 @@ fn route_pointer_input(
             if host.router.placement(captured).map(|p| p.window) == Some(key) {
                 if let Some((lx, ly)) = host.router.project_into_pane(captured, x, y) {
                     if let Some(index) = host.index_of(captured) {
-                        host.windows[index].surface.view.mouse_move(lx, ly);
+                        host.windows[index]
+                            .surface
+                            .input(&PaneInput::MouseMove { x: lx, y: ly });
                     }
                 }
             }
         }
     } else if let Some((_, _, _, Some(hit))) = cursor {
         if let Some(index) = host.index_of(hit.pane) {
-            host.windows[index]
-                .surface
-                .view
-                .mouse_move(hit.local_x, hit.local_y);
+            host.windows[index].surface.input(&PaneInput::MouseMove {
+                x: hit.local_x,
+                y: hit.local_y,
+            });
         }
     }
 
@@ -1655,8 +1859,7 @@ fn route_pointer_input(
             if let Some(index) = host.index_of(captured) {
                 host.windows[index]
                     .surface
-                    .view
-                    .mouse_up(lx, ly, UlMouseButton::Left);
+                    .input(&PaneInput::MouseUp { x: lx, y: ly });
             }
         }
     }
@@ -1665,10 +1868,10 @@ fn route_pointer_input(
     if scroll.delta != Vec2::ZERO {
         if let Some((_, _, _, Some(hit))) = cursor {
             if let Some(index) = host.index_of(hit.pane) {
-                host.windows[index]
-                    .surface
-                    .view
-                    .scroll(scroll.delta.x as i32, scroll.delta.y as i32);
+                host.windows[index].surface.input(&PaneInput::Scroll {
+                    dx: scroll.delta.x as i32,
+                    dy: scroll.delta.y as i32,
+                });
             }
         }
     }
@@ -1740,9 +1943,17 @@ fn route_touch_input(
                             host.focus_view(previous, Some(hit.pane));
                         }
                         if let Some(index) = host.index_of(hit.pane) {
-                            let view = &mut host.windows[index].surface.view;
-                            view.mouse_move(hit.local_x, hit.local_y);
-                            view.mouse_down(hit.local_x, hit.local_y, UlMouseButton::Left);
+                            let view = &mut host.windows[index].surface;
+                            // The focus above, then move, then down — one pane's
+                            // stream, in the order the page must see them.
+                            view.input(&PaneInput::MouseMove {
+                                x: hit.local_x,
+                                y: hit.local_y,
+                            });
+                            view.input(&PaneInput::MouseDown {
+                                x: hit.local_x,
+                                y: hit.local_y,
+                            });
                         }
                     }
                 }
@@ -1751,7 +1962,9 @@ fn route_touch_input(
                 if let Some(pane) = host.contacts.pane_for(touch.id) {
                     if let Some((lx, ly)) = host.router.project_into_pane(pane, phys.0, phys.1) {
                         if let Some(index) = host.index_of(pane) {
-                            host.windows[index].surface.view.mouse_move(lx, ly);
+                            host.windows[index]
+                                .surface
+                                .input(&PaneInput::MouseMove { x: lx, y: ly });
                         }
                     }
                 }
@@ -1762,8 +1975,7 @@ fn route_touch_input(
                         if let Some(index) = host.index_of(pane) {
                             host.windows[index]
                                 .surface
-                                .view
-                                .mouse_up(lx, ly, UlMouseButton::Left);
+                                .input(&PaneInput::MouseUp { x: lx, y: ly });
                         }
                     }
                 }
@@ -1816,10 +2028,11 @@ fn forward_keyboard_text(
     keycodes: Res<ButtonInput<KeyCode>>,
     mut keys: MessageReader<KeyboardInput>,
 ) {
-    // Read-only in `host`: it forwards text into views (all `&self` calls) and
-    // never changes the layout or focus, so it does not need `NonSendMut`'s
-    // mutable deref.
-    let Some(host) = host else {
+    // `NonSendMut` rather than a shared borrow (issue #1404): a key now travels
+    // as a `PaneInput` through the view seam, and delivering one takes `&mut`.
+    // Nothing about the layout or the focus is changed here — the focused pane
+    // is read once, before the batch.
+    let Some(mut host) = host else {
         return;
     };
     let ctrl = keycodes.pressed(KeyCode::ControlLeft) || keycodes.pressed(KeyCode::ControlRight);
@@ -1831,77 +2044,31 @@ fn forward_keyboard_text(
         let Some(index) = focused else {
             continue;
         };
-        let view = &host.windows[index].surface.view;
+        let view = &mut host.windows[index].surface;
+        // `key_char` is what actually puts a character into a field; the
+        // editing keys below are raw key-downs. Both shapes are the protocol's,
+        // and the adapter turns them back into the same view calls this made
+        // directly before (issue #1404).
         match &key.logical_key {
-            Key::Character(text) => view.key_char(text),
-            Key::Space => view.key_char(" "),
-            Key::Backspace => view.key(
-                KeyEventType::RawKeyDown,
-                VirtualKeyCode::Back,
-                0,
-                Modifiers::default(),
-            ),
-            Key::Enter => view.key(
-                KeyEventType::RawKeyDown,
-                VirtualKeyCode::Return,
-                0,
-                Modifiers::default(),
-            ),
+            Key::Character(text) => view.input(&PaneInput::KeyChar(text.to_string())),
+            Key::Space => view.input(&PaneInput::KeyChar(" ".to_string())),
+            Key::Backspace => view.input(&PaneInput::Key(PaneKeyCode::Back)),
+            Key::Enter => view.input(&PaneInput::Key(PaneKeyCode::Return)),
             // Caret movement and forward-delete: without these the caret cannot
             // move within a field and forward-delete is unavailable, so a comms
             // reply or a waypoint name can only be typed and back-spaced. Each
             // maps cleanly to an Ultralight virtual key and is forwarded as a raw
             // key-down like the arms above (issue #1124).
-            Key::ArrowLeft => view.key(
-                KeyEventType::RawKeyDown,
-                VirtualKeyCode::Left,
-                0,
-                Modifiers::default(),
-            ),
-            Key::ArrowRight => view.key(
-                KeyEventType::RawKeyDown,
-                VirtualKeyCode::Right,
-                0,
-                Modifiers::default(),
-            ),
-            Key::ArrowUp => view.key(
-                KeyEventType::RawKeyDown,
-                VirtualKeyCode::Up,
-                0,
-                Modifiers::default(),
-            ),
-            Key::ArrowDown => view.key(
-                KeyEventType::RawKeyDown,
-                VirtualKeyCode::Down,
-                0,
-                Modifiers::default(),
-            ),
-            Key::Home => view.key(
-                KeyEventType::RawKeyDown,
-                VirtualKeyCode::Home,
-                0,
-                Modifiers::default(),
-            ),
-            Key::End => view.key(
-                KeyEventType::RawKeyDown,
-                VirtualKeyCode::End,
-                0,
-                Modifiers::default(),
-            ),
-            Key::Delete => view.key(
-                KeyEventType::RawKeyDown,
-                VirtualKeyCode::Delete,
-                0,
-                Modifiers::default(),
-            ),
+            Key::ArrowLeft => view.input(&PaneInput::Key(PaneKeyCode::Left)),
+            Key::ArrowRight => view.input(&PaneInput::Key(PaneKeyCode::Right)),
+            Key::ArrowUp => view.input(&PaneInput::Key(PaneKeyCode::Up)),
+            Key::ArrowDown => view.input(&PaneInput::Key(PaneKeyCode::Down)),
+            Key::Home => view.input(&PaneInput::Key(PaneKeyCode::Home)),
+            Key::End => view.input(&PaneInput::Key(PaneKeyCode::End)),
+            Key::Delete => view.input(&PaneInput::Key(PaneKeyCode::Delete)),
             // Ctrl+Tab is inter-pane focus; a bare Tab is the page's own field
             // traversal.
-            Key::Tab if !ctrl => view.key(
-                KeyEventType::RawKeyDown,
-                VirtualKeyCode::Tab,
-                0,
-                Modifiers::default(),
-            ),
+            Key::Tab if !ctrl => view.input(&PaneInput::Key(PaneKeyCode::Tab)),
             _ => {}
         }
     }
@@ -2103,14 +2270,12 @@ fn drive_panes(
         // the check already in place than to remember to add it.
         let copy_epoch = pane.epoch;
         let copy_started = stamp(clock);
-        // The HUD overlay is the one transparent surface and takes the
-        // straight-alpha copy; every console is opaque and is moved verbatim
-        // into its BGRA texture — see `pane_texture_format`.
-        let outcome = if pane.is_hud_overlay() {
-            pane.surface.view.copy_frame(&mut data, force)
-        } else {
-            pane.surface.view.copy_frame_bgra(&mut data, force)
-        };
+        // Which copy is made — straight alpha for the transparent HUD, verbatim
+        // BGRA for every opaque console — is the SURFACE's own answer now (issue
+        // #1404): it was set from the same predicate the texture was minted
+        // from, so the copy and the format cannot come apart, and the loop no
+        // longer has to know which pane is the overlay to copy it correctly.
+        let outcome = pane.surface.copy_frame(&mut data, force);
         copy_ms += elapsed_ms(copy_started);
         match outcome {
             Ok(rect) => {
@@ -2136,7 +2301,10 @@ fn drive_panes(
                     pending.uploads.push(PaneUpload {
                         image: pane.image.id(),
                         epoch: pane.epoch,
-                        rect,
+                        // The render half speaks vellum's own `DirtyRect`, the
+                        // protocol speaks `FrameRect`; this is the seam between
+                        // them (issue #1404).
+                        rect: rect.into(),
                         surface: pane.size,
                         full: force,
                         bytes: PaneFrameBuffer::new(pane.id, data, Some(recycle_tx.clone())),
@@ -2374,7 +2542,7 @@ fn open_pending_views(
             }
         };
         let on_station = placement.station_camera.is_some();
-        match make_pane_view(&host.runtime, images, commands, new_id, &url, placement) {
+        match make_pane_view(&mut host.runtime, images, commands, new_id, &url, placement) {
             Ok(window) => {
                 host.windows.push(window);
                 recreated_any = true;
@@ -2498,7 +2666,7 @@ fn station_camera(host: &mut PaneHost, commands: &mut Commands, window: Entity) 
 /// host, which is right for both a recovery and a console the operator can
 /// simply close and re-open.
 fn make_pane_view(
-    runtime: &UltralightRuntime,
+    runtime: &mut UltralightHost,
     images: &mut Assets<Image>,
     commands: &mut Commands,
     id: PaneId,
@@ -2513,18 +2681,21 @@ fn make_pane_view(
         scale,
         window_origin,
     } = placement;
-    let spec = PaneSpec {
-        width: size.0,
-        height: size.1,
-        device_scale: scale,
-        transparent: false,
-        session: Some(PaneSession::ephemeral(id.to_string())),
-    };
-    let view = runtime
-        .create_pane(&spec)
-        .map_err(|e| PaneSurfaceError::Load(e.to_string()))?;
-    let mut surface = UltralightPaneSurface::new(view);
-    surface.load(url)?;
+    // Through the runtime seam (issue #1404): the spec, the per-pane session,
+    // the drain script and the load are one step there, and it is the step the
+    // pane thread will take on the far side of a `Create` command. Every pane
+    // built after init is a console — the two permanent surfaces are built once,
+    // at init — so the kind is not a parameter.
+    let surface = runtime.create(
+        id,
+        PaneKind::Console,
+        &PaneSpecOwned {
+            width: size.0,
+            height: size.1,
+            device_scale: scale,
+        },
+        url,
+    )?;
     let image = Image::new_fill(
         Extent3d {
             width: size.0,

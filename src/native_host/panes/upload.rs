@@ -78,16 +78,19 @@
 //! buffer. The plugin's `Last` system drains it instead: no renderer means no
 //! upload, and the honest thing to do with the frame is to let it go.
 
-use std::ops::{Deref, DerefMut};
-use std::sync::mpsc::Sender;
-
 use bevy::asset::AssetId;
 use bevy::image::Image;
 use bevy::prelude::*;
 
 use vellum_ultralight::surface::DirtyRect;
 
-use super::registry::PaneId;
+/// The staging buffer a frame travels in.
+///
+/// Defined in [`super::pane_thread`] — the Bevy-free half of the seam, since
+/// both the producer and this consumer carry one — and re-exported here, where
+/// it was first introduced (issue #1404, slice 1) and where every existing
+/// reader names it.
+pub use super::pane_thread::PaneFrameBuffer;
 
 /// How many render frames a deferred upload may wait for its `GpuImage` before
 /// it is dropped.
@@ -174,60 +177,6 @@ pub fn upload_layout(
         offset,
         bytes_per_row,
     })
-}
-
-/// One pane's staging buffer, on loan from that pane's pool.
-///
-/// Dropping it returns the allocation to the producer — see the module note's
-/// "recycle-on-drop pool". A buffer built without a sender (a test fixture, or
-/// a producer that does not pool) simply frees on drop.
-#[derive(Debug)]
-pub struct PaneFrameBuffer {
-    pane: PaneId,
-    bytes: Vec<u8>,
-    recycle: Option<Sender<(PaneId, Vec<u8>)>>,
-}
-
-impl PaneFrameBuffer {
-    /// Take `bytes` for `pane`, to be returned through `recycle` on drop.
-    pub fn new(pane: PaneId, bytes: Vec<u8>, recycle: Option<Sender<(PaneId, Vec<u8>)>>) -> Self {
-        Self {
-            pane,
-            bytes,
-            recycle,
-        }
-    }
-
-    /// Which pane's pool this buffer belongs to.
-    pub fn pane(&self) -> PaneId {
-        self.pane
-    }
-}
-
-impl Deref for PaneFrameBuffer {
-    type Target = [u8];
-
-    fn deref(&self) -> &[u8] {
-        &self.bytes
-    }
-}
-
-impl DerefMut for PaneFrameBuffer {
-    fn deref_mut(&mut self) -> &mut [u8] {
-        &mut self.bytes
-    }
-}
-
-impl Drop for PaneFrameBuffer {
-    fn drop(&mut self) {
-        if let Some(recycle) = self.recycle.take() {
-            let bytes = std::mem::take(&mut self.bytes);
-            // A closed receiver means the producer is gone (the pane host was
-            // torn down, or the process is exiting); the allocation simply
-            // frees here instead.
-            let _ = recycle.send((self.pane, bytes));
-        }
-    }
 }
 
 /// One pane frame on its way to the GPU.
@@ -521,6 +470,8 @@ pub fn discard_pane_uploads(mut pending: ResMut<PanePendingUploads>) {
 mod tests {
     use super::*;
     use std::sync::mpsc::channel;
+
+    use crate::native_host::panes::registry::PaneId;
 
     const PANE: PaneId = PaneId(7);
 

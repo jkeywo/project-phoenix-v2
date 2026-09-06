@@ -56,6 +56,7 @@
 //! | which of the host's inputs reach a page | **phoenix** ([`ultralight`]) | void-and-thunder deliberately withholds the keyboard; a console has form fields |
 //! | the document, and what is injected into it | **phoenix** ([`document`]) | void-and-thunder `include_str!`s its own page; a pane loads the shipped client |
 //! | a copied frame → the GPU, in place | **phoenix** ([`upload`]) | vellum hands over bytes and a dirty rectangle; how a *Bevy* texture takes them without being re-created is engine-specific (issue #1404) |
+//! | the protocol a renderer off the main thread speaks | **phoenix** ([`pane_thread`]) | vellum's runtime is `!Send` by construction and says so; *what* a host asks a pinned renderer for — a lifecycle, a per-pane input FIFO, latest-wins script slots — is this host's own (issue #1404) |
 //!
 //! # What is testable without an SDK, and why that matters
 //!
@@ -84,6 +85,7 @@ pub mod frame_stats;
 pub mod gamepad;
 pub mod identity;
 pub mod os_prefs;
+pub mod pane_thread;
 pub mod placement;
 pub mod recovery;
 pub mod registry;

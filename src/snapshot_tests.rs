@@ -203,6 +203,91 @@ fn an_armed_gm_event_fire_round_trips_with_its_authored_trigger_table() {
         .is_empty());
 }
 
+/// An armed GM PLACEMENT survives the boundary between its `PreUpdate` apply
+/// and the `FixedUpdate` spawn that performs it (issue #1305), in the order
+/// that decides which placement draws which `WorldIdMint` id.
+///
+/// Losing it is worse than losing an armed Fire: each press is its own
+/// correlation rather than an idempotent latch, so a GM trying again after a
+/// resume would risk TWO hulls rather than recovering the one they were told
+/// they placed.
+#[test]
+fn armed_gm_placements_round_trip_in_their_canonical_order() {
+    fn palette() -> crate::world::server::WorldContentRuntime {
+        crate::world::server::WorldContentRuntime {
+            gm_palette: vec![crate::world::config::GmPaletteEntry {
+                id: "raider".into(),
+                label: "world.gm.palette.raider.label".into(),
+                template_path: "assets/entities/ship_harrow_destroyer.toml".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+    fn armed(name: &str, x_mm: i64) -> crate::gm_spawn::PendingGmSpawn {
+        crate::gm_spawn::PendingGmSpawn {
+            palette: "raider".into(),
+            variant: None,
+            name: name.into(),
+            position_mm: [x_mm, 0, -40_000],
+            heading_mdeg: 90_000,
+        }
+    }
+
+    let mut live = App::new();
+    live.add_plugins(MinimalPlugins);
+    live.world_mut().insert_resource(SimTick(33));
+    let mut runtime = palette();
+    runtime.pending_gm_spawns = vec![armed("raider_2", 200_000), armed("raider_1", 100_000)];
+    live.world_mut().insert_resource(runtime);
+
+    let payload = capture(live.world());
+    let scenario = payload.scenario.as_ref().expect("a world was loaded");
+    assert_eq!(
+        scenario
+            .pending_gm_spawns
+            .iter()
+            .map(|pending| pending.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["raider_2", "raider_1"],
+        "captured in the runtime's own order, never sorted: the order is the identity"
+    );
+
+    let mut resumed = App::new();
+    resumed.add_plugins(MinimalPlugins);
+    resumed.world_mut().insert_resource(SimTick(999));
+    // A freshly-loaded world rebuilds the same palette with nothing armed,
+    // which is what makes the restored reading unambiguous evidence.
+    resumed.world_mut().insert_resource(palette());
+    assert!(resumed
+        .world()
+        .resource::<crate::world::server::WorldContentRuntime>()
+        .pending_gm_spawns
+        .is_empty());
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+    assert_eq!(
+        resumed
+            .world()
+            .resource::<crate::world::server::WorldContentRuntime>()
+            .pending_gm_spawns,
+        vec![armed("raider_2", 200_000), armed("raider_1", 100_000)],
+    );
+
+    // A world with nothing armed writes the field out of the payload entirely,
+    // which is what keeps every pre-#1305 scenario's capture byte-identical.
+    let mut idle = App::new();
+    idle.add_plugins(MinimalPlugins);
+    idle.world_mut().insert_resource(SimTick(33));
+    idle.world_mut().insert_resource(palette());
+    assert!(capture(idle.world())
+        .scenario
+        .expect("a world was loaded")
+        .pending_gm_spawns
+        .is_empty());
+}
+
 #[test]
 fn station_puppet_membership_round_trips_at_the_authoritative_boundary() {
     let target = crate::gm_puppet::StationPuppetTarget::new(

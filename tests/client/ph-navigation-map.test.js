@@ -47,8 +47,11 @@ function makeFakeCtx() {
     arc: (...a) => { calls.arc.push(a); rec('arc', a); },
     fill: () => { calls.fill.push(true); rec('fill', []); },
     stroke: () => { calls.stroke.push(true); rec('stroke', []); },
-    moveTo: (...a) => calls.moveTo.push(a),
-    lineTo: (...a) => calls.lineTo.push(a),
+    // Segment ends go in the chronological log too, with the stroke colour
+    // that was live when they were laid down, so a test can ask which way a
+    // particular line was drawn and not merely that some line exists.
+    moveTo: (...a) => { calls.moveTo.push(a); rec('moveTo', a); },
+    lineTo: (...a) => { calls.lineTo.push(a); rec('lineTo', a); },
     fillText: (...a) => calls.fillText.push({ text: a[0], x: a[1], y: a[2], font: ctx.font }),
     save: vi.fn(),
     restore: vi.fn(),
@@ -1488,6 +1491,259 @@ describe('PhNavigationMap', () => {
       expect(h.fakeCtx._calls.moveTo.length).toBeGreaterThan(0);
       expect(h.fakeCtx._calls.lineTo.length).toBeGreaterThan(h.fakeCtx._calls.moveTo.length);
       expect(h.el.getAttribute('aria-label')).toBe(t('component.entity_map.label'));
+    });
+  });
+  // ── GM placement gesture (issue #1305) ─────────────────────────────────
+  //
+  // The chart is where "click/press picks the position, drag picks the
+  // heading" lives, so this block is where the acceptance criterion "mouse and
+  // touch resolve the same world position/heading independent of screen
+  // pixels" is actually proved: the same world placement is driven three ways
+  // — mouse, touch and keyboard — and the emitted detail compared.
+  describe('GM placement mode', () => {
+    // A 600x600 buffer over a 300x300 CSS box, range 1000, so one buffer pixel
+    // is 1000/300 metres and (300, 300) is the world origin.
+    const PLACEMENT_STATE = {
+      interaction: 'inspect',
+      show_ship_marker: false,
+      range: 1000,
+      regions: [],
+      blips: [],
+    };
+
+    function armed(opts) {
+      const h = setup(opts);
+      h.el.state = PLACEMENT_STATE;
+      h.tickRaf();
+      const placements = [];
+      h.el.addEventListener('navplace', (e) => placements.push(e.detail));
+      expect(h.el.navigationBeginPlacement()).toBe(true);
+      expect(h.el.navigationPlacementArmed()).toBe(true);
+      expect(h.el.hasAttribute('data-placement-armed')).toBe(true);
+      return { ...h, placements };
+    }
+
+    it('a mouse press picks the world position and the drag picks the heading', () => {
+      const h = armed();
+      // CSS (200, 150) → buffer (400, 300): +100 buffer px east of centre, and
+      // the chart's scale is 300 buffer px per 1000 m, so 333.33 m east.
+      // Dragging north (screen up) is world +z, which is bearing 180.
+      h.canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 200, clientY: 150, bubbles: true }));
+      h.canvas.dispatchEvent(new MouseEvent('mousemove', { clientX: 200, clientY: 100, bubbles: true }));
+      h.canvas.dispatchEvent(new MouseEvent('mouseup', { clientX: 200, clientY: 100, bubbles: true }));
+
+      expect(h.placements).toHaveLength(1);
+      const [placed] = h.placements;
+      expect(placed.x).toBeCloseTo(333.333, 2);
+      expect(placed.z).toBeCloseTo(0, 6);
+      expect(placed.heading).toBeCloseTo(180, 6);
+      // The gesture disarms itself: one press is one placement.
+      expect(h.el.navigationPlacementArmed()).toBe(false);
+      expect(h.el.hasAttribute('data-placement-armed')).toBe(false);
+    });
+
+    it('draws the ring at the world position it will commit, not offset by the ship', () => {
+      // The marker is only honest if it uses the CHART's projection. This
+      // chart is world-absolute: the grid, the ship glyph and every blip
+      // project with `(0, 0, 0)`, and the gesture inverts with `(0, 0, 0)`.
+      // `ship_pos`/`ship_heading` exist only to place and rotate the ship
+      // glyph — and the crew nav charts do supply them (gui/cruiser/
+      // comms.console.js, gui/courier/captain.console.js) — so projecting the
+      // ring through them would translate and rotate it away from the world
+      // position `navplace` actually carries.
+      const h = armed();
+      h.el.state = { ...PLACEMENT_STATE, ship_pos: { x: 5000, z: -3000 }, ship_heading: 90 };
+      h.canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 200, clientY: 150, bubbles: true }));
+      h.tickRaf();
+
+      const ring = arcFor(fakeCtx, 'stroke', (o) => o.strokeStyle === 'var(--tactical)');
+      expect(ring).toBeTruthy();
+      // The press landed on buffer (400, 300); the ring belongs there too.
+      expect(ring.args[0]).toBeCloseTo(400, 6);
+      expect(ring.args[1]).toBeCloseTo(300, 6);
+    });
+
+    /**
+     * The armed marker from the most recent render: the ring's arc and the
+     * arm's far end. `var(--tactical)` is this chart's placement colour and
+     * nothing else strokes with it, so the filter is exact.
+     */
+    function armedMarker(ctx) {
+      const tactical = (o) => o.strokeStyle === 'var(--tactical)';
+      return {
+        ring: ctx._ops.filter((o) => o.op === 'arc' && tactical(o)).pop(),
+        tip: ctx._ops.filter((o) => o.op === 'lineTo' && tactical(o)).pop(),
+      };
+    }
+
+    /** Press at the chart centre, drag to one CSS point, and render armed. */
+    function dragTo(clientX, clientY) {
+      const h = armed();
+      h.canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 150, clientY: 150, bubbles: true }));
+      h.canvas.dispatchEvent(new MouseEvent('mousemove', { clientX, clientY, bubbles: true }));
+      // Only the armed render matters; drop what the earlier ones logged.
+      h.fakeCtx._ops.length = 0;
+      h.tickRaf();
+      return { ...h, ...armedMarker(h.fakeCtx) };
+    }
+
+    // The arm is the operator's only sight of the heading before committing —
+    // and on the bracket-key path it is the ONLY feedback about the
+    // `heading_mdeg` that will be sent — so it has to be drawn through the
+    // ring's own projection rather than a second spelling of the trig. Because
+    // the gesture inverts with that same projection, the arm always points the
+    // way the drag went; the pair below pins both screen axes, since a sign
+    // error on one of them mirrors the arm while leaving the other correct.
+    it('the heading arm follows a northward drag up the screen, not down it', () => {
+      // Drag north: world +z, bearing 180 (the gesture test above pins that).
+      const h = dragTo(150, 100);
+      expect(h.ring).toBeTruthy();
+      expect(h.tip).toBeTruthy();
+      expect(h.tip.args[1]).toBeLessThan(h.ring.args[1]);
+      expect(h.tip.args[0]).toBeCloseTo(h.ring.args[0], 6);
+    });
+
+    it('the heading arm follows an eastward drag across the screen', () => {
+      // Drag east: world +x, bearing 90.
+      const h = dragTo(200, 150);
+      expect(h.ring).toBeTruthy();
+      expect(h.tip).toBeTruthy();
+      expect(h.tip.args[0]).toBeGreaterThan(h.ring.args[0]);
+      expect(h.tip.args[1]).toBeCloseTo(h.ring.args[1], 6);
+    });
+
+    it('a touch drag resolves the identical world placement a mouse drag does', () => {
+      const mouse = armed();
+      mouse.canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 200, clientY: 150, bubbles: true }));
+      mouse.canvas.dispatchEvent(new MouseEvent('mousemove', { clientX: 250, clientY: 150, bubbles: true }));
+      mouse.canvas.dispatchEvent(new MouseEvent('mouseup', { clientX: 250, clientY: 150, bubbles: true }));
+
+      const finger = armed();
+      touch(finger.canvas, 'touchstart', [{ clientX: 200, clientY: 150 }]);
+      touch(finger.canvas, 'touchmove', [{ clientX: 250, clientY: 150 }]);
+      touch(finger.canvas, 'touchend', [], [{ clientX: 250, clientY: 150 }]);
+
+      expect(finger.placements).toEqual(mouse.placements);
+      expect(finger.placements[0].heading).toBeCloseTo(90, 6);
+    });
+
+    it('a plain click places without a heading rather than snapping to jitter', () => {
+      const h = armed();
+      click(h.canvas, 200, 150);
+      expect(h.placements).toHaveLength(1);
+      expect(h.placements[0].heading).toBe(0);
+    });
+
+    it('the keyboard places the same world point with no pointer at all', () => {
+      const pointer = armed();
+      // Two cursor steps right of centre. One step is 24 CSS px (48 buffer px
+      // at this 2x buffer), so the pointer twin presses at CSS x = 150 + 48.
+      pointer.canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 198, clientY: 150, bubbles: true }));
+      pointer.canvas.dispatchEvent(new MouseEvent('mouseup', { clientX: 198, clientY: 150, bubbles: true }));
+
+      const keys = armed();
+      const press = (key) => keys.el.dispatchEvent(
+        new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }),
+      );
+      press('ArrowRight');
+      press('ArrowRight');
+      press('Enter');
+
+      expect(keys.placements).toHaveLength(1);
+      expect(keys.placements[0].x).toBeCloseTo(pointer.placements[0].x, 6);
+      expect(keys.placements[0].z).toBeCloseTo(pointer.placements[0].z, 6);
+    });
+
+    it('the bracket keys turn the heading a drag would have set', () => {
+      const h = armed();
+      const press = (key) => h.el.dispatchEvent(
+        new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }),
+      );
+      press(']');
+      press(']');
+      press('[');
+      press('Enter');
+      expect(h.placements).toHaveLength(1);
+      expect(h.placements[0].heading).toBeCloseTo(15, 6);
+    });
+
+    it('Escape cancels an armed placement without committing one', () => {
+      const h = armed();
+      const cancels = [];
+      h.el.addEventListener('navplacecancel', () => cancels.push(true));
+      h.el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      expect(h.el.navigationPlacementArmed()).toBe(false);
+      expect(cancels).toHaveLength(1);
+      expect(h.placements).toHaveLength(0);
+    });
+
+    // Arming a chart the operator cannot reach is the same as not arming it.
+    // The GM console is one long scrolling page whose placement panel sits
+    // ABOVE the workspace holding this chart, so on a laptop viewport the
+    // whole chart was below the fold when PLACE armed it: a press-and-drag
+    // landed on whatever else was on screen and produced nothing at all, and
+    // the keyboard path needed the operator to Tab to a chart they could not
+    // see. Both halves of the reveal are load-bearing, so both are pinned.
+    it('arming scrolls the chart into view and takes the focus', () => {
+      const h = setup();
+      h.el.state = PLACEMENT_STATE;
+      h.tickRaf();
+      // jsdom implements no layout, so the component's guarded call needs a
+      // stand-in here; the browser supplies the real one.
+      h.el.scrollIntoView = vi.fn();
+
+      expect(h.el.navigationBeginPlacement()).toBe(true);
+
+      expect(h.el.scrollIntoView).toHaveBeenCalledTimes(1);
+      expect(document.activeElement).toBe(h.el);
+      // And the chart says what it is now waiting for, rather than looking
+      // exactly as it did a moment ago.
+      const toast = h.el.shadowRoot.getElementById('toast');
+      expect(toast.textContent).toBe(t('component.navigation_map.place_prompt'));
+      expect(toast.classList.contains('show')).toBe(true);
+    });
+
+    it('arms even where the host document implements no scrolling', () => {
+      const h = setup();
+      h.el.state = PLACEMENT_STATE;
+      h.tickRaf();
+      expect(typeof h.el.scrollIntoView).not.toBe('function');
+      expect(() => h.el.navigationBeginPlacement()).not.toThrow();
+      expect(h.el.navigationPlacementArmed()).toBe(true);
+    });
+
+    it('a gesture that resolves no world point cancels instead of vanishing', () => {
+      // A chart with no backing store resolves no world point. Disarming in
+      // silence would leave the panel that armed it still armed — offering a
+      // Place control wired to nothing — and the operator with a press that
+      // did nothing and no word about why.
+      const h = armed();
+      const cancels = [];
+      h.el.addEventListener('navplacecancel', () => cancels.push(true));
+      h.canvas.width = 0;
+
+      click(h.canvas, 200, 150);
+
+      expect(h.placements).toHaveLength(0);
+      expect(cancels).toHaveLength(1);
+      expect(h.el.navigationPlacementArmed()).toBe(false);
+      expect(h.el.hasAttribute('data-placement-armed')).toBe(false);
+    });
+
+    it('an armed press places instead of panning the chart', () => {
+      const h = armed();
+      const before = h.el.state;
+      h.canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 100, clientY: 100, bubbles: true }));
+      h.canvas.dispatchEvent(new MouseEvent('mousemove', { clientX: 260, clientY: 260, bubbles: true }));
+      h.canvas.dispatchEvent(new MouseEvent('mouseup', { clientX: 260, clientY: 260, bubbles: true }));
+      expect(h.placements).toHaveLength(1);
+      // A pan would have moved the chart under a subsequent placement; the
+      // second armed press from the same screen point proves it did not.
+      h.el.state = before;
+      h.el.navigationBeginPlacement();
+      click(h.canvas, 200, 150);
+      expect(h.placements[1].x).toBeCloseTo(333.333, 2);
+      expect(h.placements[1].z).toBeCloseTo(0, 6);
     });
   });
 });

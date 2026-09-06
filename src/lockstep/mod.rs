@@ -909,6 +909,15 @@ pub fn register_lockstep(app: &mut App) {
                 StateClass::Presentation,
                 "gm-action-state",
             )
+            // The GM placement panel's last published page-local projection
+            // (issue #1305). `Presentation` for its Session and Mission twins'
+            // exact reason: it is a de-duplication cache for a Host Channel
+            // push, derived entirely from the authored palette and the GM
+            // action log, both of which are already classified.
+            .declare_state::<crate::gm_spawn::LastGmSpawnProjection>(
+                StateClass::Presentation,
+                "gm-action-state",
+            )
             // The digest exchange's own records. `Derived` — they are folds OF
             // the authoritative state and a count of the barrier's decisions, so
             // folding them would fold their inputs a second time, and a peer's
@@ -940,8 +949,10 @@ pub fn register_lockstep(app: &mut App) {
         .init_resource::<crate::gm_action::LocalGmActionRefusals>()
         .init_resource::<crate::gm_action::LastGmSessionProjection>()
         .init_resource::<crate::gm_event::LastGmMissionProjection>()
+        .init_resource::<crate::gm_spawn::LastGmSpawnProjection>()
         .add_message::<crate::console_bridge::GmSessionChanged>()
         .add_message::<crate::console_bridge::GmMissionChanged>()
+        .add_message::<crate::console_bridge::GmSpawnChanged>()
         .add_systems(
             PreUpdate,
             // `drive_recovery` (issue #1118) sits between applying the inbox and
@@ -997,6 +1008,7 @@ pub fn register_lockstep(app: &mut App) {
             (
                 crate::gm_action::publish_session_projection,
                 crate::gm_event::publish_mission_projection,
+                crate::gm_spawn::publish_spawn_projection,
             ),
         )
         // The host-loss Backfill flip (issue #1119). In `SimSet::Input`, at the

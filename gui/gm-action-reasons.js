@@ -22,6 +22,8 @@ export const GM_ACTION_REFUSAL_REASON_LABELS = Object.freeze({
   'unknown-gm-event': 'server.gm.session.reason.unknown_gm_event',
   'unknown-entity': 'server.gm.session.reason.unknown_entity',
   'target-not-damageable': 'server.gm.session.reason.target_not_damageable',
+  'unknown-gm-palette-entry': 'server.gm.session.reason.unknown_gm_palette_entry',
+  'world-unavailable': 'server.gm.session.reason.world_unavailable',
 });
 
 /** The immediate browser-to-WASM ingress refusal, which has no wire reason. */

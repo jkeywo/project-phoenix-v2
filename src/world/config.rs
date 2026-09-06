@@ -887,6 +887,105 @@ pub struct GmRolePresetEntry {
     pub contacts: Vec<String>,
 }
 
+/// One authored variant of a `[[gm_palette]]` entry — the "allowed overrides"
+/// half of the palette contract (issue #1305, PASM `gm-t2-directed-world-actions`).
+///
+/// A GM never composes an override document. A palette entry may declare a
+/// CLOSED list of variants, each a stable id, a String Table label and an
+/// authored `overrides` table applied exactly as a scripted `spawn_entity`'s
+/// `overrides` is; the typed action carries at most the variant's ID. That is
+/// what makes "only palette-declared templates and allowed overrides pass
+/// apply-tick validation" structural rather than a convention: there is no
+/// wire shape in which an arbitrary field, faction or asset path could arrive.
+///
+/// ```toml
+/// [[gm_palette]]
+/// id = "raider"
+/// label = "world.combat_test.gm_palette.raider.label"
+/// template_path = "assets/entities/ship_harrow_destroyer.toml"
+///
+/// [[gm_palette.variant]]
+/// id = "blood_eagle"
+/// label = "world.combat_test.gm_palette.raider.blood_eagle.label"
+/// overrides = { name = "world.combat_test.harrow.blood_eagle" }
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct GmPaletteVariant {
+    pub id: String,
+    #[serde(default)]
+    pub label: String,
+    /// The authored override document merged onto the template at spawn — the
+    /// same `toml::Value` shape a scripted `spawn_entity`'s `overrides` carries,
+    /// so both go through `merge_entity_config_toml` and neither invents a
+    /// second merge policy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overrides: Option<toml::Value>,
+}
+
+/// One scenario-authored `[[gm_palette]]` block: a template a Game Master may
+/// place on the map (issue #1305, PASM `gm-t2-directed-world-actions`).
+///
+/// The palette is the WHOLE spawn vocabulary a GM has. A `GmAction` names a
+/// palette `id`, never a `template_path`, so an arbitrary loaded asset path
+/// cannot be spawned however the browser is driven — the same argument that
+/// keeps `FireGmEvent` naming an authored event rather than a script path.
+///
+/// Unlike [`GmRolePresetEntry`] this is NOT presentation-only: the apply-tick
+/// reducer resolves the id against the live list, so the table is copied into
+/// [`WorldContentRuntime`](crate::world::server::WorldContentRuntime) at load
+/// beside the trigger table and read from there on every peer. It is authored
+/// content, so it is answered for by the CONTENT digest and never captured or
+/// folded itself; what a run moves is the pending-spawn queue.
+///
+/// ```toml
+/// [[gm_palette]]
+/// id = "raider"
+/// label = "world.combat_test.gm_palette.raider.label"
+/// template_path = "assets/entities/ship_harrow_destroyer.toml"
+/// name_prefix = "gm_raider"
+/// groups = ["hostiles"]
+/// ```
+///
+/// `id` is stable and unique within a world; `label` is a `strings.csv` id, not
+/// English (AGENTS.md rule 11's display-text exception). `name_prefix` seeds the
+/// deterministic scenario name every spawned instance gets (`<prefix>_<canonical
+/// sequence>`), defaulting to `id`, so a spawned hull is addressable by objective
+/// targets and later scripts exactly as an authored one is. `groups` joins the
+/// same `on_all_destroyed` group memberships a scripted spawn registers.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct GmPaletteEntry {
+    pub id: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub template_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_prefix: Option<String>,
+    #[serde(default)]
+    pub groups: Vec<String>,
+    /// The authored variants a GM may choose between, in authored order. A
+    /// `Vec` and a linear scan rather than a map: this list is read inside the
+    /// deterministic apply-tick reducer, where map iteration order must never
+    /// reach a result.
+    #[serde(default, rename = "variant")]
+    pub variants: Vec<GmPaletteVariant>,
+}
+
+impl GmPaletteEntry {
+    /// The scenario-name stem every instance spawned from this entry uses.
+    pub fn name_stem(&self) -> &str {
+        match self.name_prefix.as_deref() {
+            Some(prefix) if !prefix.is_empty() => prefix,
+            _ => self.id.as_str(),
+        }
+    }
+
+    /// Resolve one authored variant id against this entry's closed list.
+    pub fn variant(&self, id: &str) -> Option<&GmPaletteVariant> {
+        self.variants.iter().find(|variant| variant.id == id)
+    }
+}
+
 /// Raw single-pass deserialization of a world TOML.
 #[derive(Debug, Default, Deserialize)]
 pub struct RawWorld {
@@ -925,6 +1024,10 @@ pub struct RawWorld {
     /// matches the `[[gm_role_preset]]` array key, so no rename is needed.
     #[serde(default)]
     pub gm_role_preset: Vec<GmRolePresetEntry>,
+    /// Scenario-authored GM spawn palette (issue #1305). The field name already
+    /// matches the `[[gm_palette]]` array key, so no rename is needed.
+    #[serde(default)]
+    pub gm_palette: Vec<GmPaletteEntry>,
     /// Paths to additional world TOML files to load additively at startup.
     #[serde(default)]
     pub extra_worlds: Vec<String>,
@@ -1863,6 +1966,18 @@ pub struct WorldConfig {
     /// `tests/authoritative_state_enumeration.rs`). Ids are unique within a
     /// world and `"all"` is reserved; [`parse_world`] refuses either by name.
     pub gm_role_presets: Vec<GmRolePresetEntry>,
+    /// Scenario-authored GM spawn palette, in authored order (issue #1305,
+    /// PASM `gm-t2-directed-world-actions`).
+    ///
+    /// The complete set of templates a Game Master may place. Copied into
+    /// [`WorldContentRuntime`](crate::world::server::WorldContentRuntime) at
+    /// load, where the deterministic apply-tick reducer resolves a
+    /// `GmAction::SpawnPaletteEntity`'s palette id against it on every peer.
+    /// Ids are unique within a world and every `template_path` is preloaded
+    /// and recorded in the frozen content set exactly as a scripted
+    /// `spawn_entity`'s literal path is; [`parse_world`] refuses a duplicate,
+    /// an empty id/label/template, and a duplicate variant id by name.
+    pub gm_palette: Vec<GmPaletteEntry>,
     /// Every INLINE `[script.*]` Rhai body this world authors, in key order.
     ///
     /// Retained for exactly one reader: [`entity_template_paths`]'s scripted
@@ -2248,6 +2363,80 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         }
     }
 
+    // The scenario-authored GM spawn palette (issue #1305, PASM
+    // gm-t2-directed-world-actions). Unlike the presets above this table is
+    // AUTHORITATIVE: a typed `SpawnPaletteEntity` names one of these ids and
+    // the apply-tick reducer resolves it on every peer, so a duplicate id is
+    // two different hulls competing for one canonical grant. An empty
+    // `template_path` would be a palette row that can only ever refuse, and an
+    // empty label a row with nothing to put in front of an operator.
+    for (i, entry) in raw.gm_palette.iter().enumerate() {
+        if entry.id.trim().is_empty() {
+            return Err(format!(
+                "[[gm_palette]] #{i} has an empty id; every palette entry needs \
+                 a stable id for a typed GM spawn action to name it"
+            ));
+        }
+        if entry.label.trim().is_empty() {
+            return Err(format!(
+                "[[gm_palette]] '{}' has an empty label; a palette entry needs \
+                 a String Table id for the Game Master's own list",
+                entry.id
+            ));
+        }
+        if entry.template_path.trim().is_empty() {
+            return Err(format!(
+                "[[gm_palette]] '{}' has an empty template_path; the palette is \
+                 the only place a Game Master's spawn may name a template",
+                entry.id
+            ));
+        }
+        if let Some(j) = raw
+            .gm_palette
+            .iter()
+            .enumerate()
+            .take(i)
+            .position(|(_, other)| other.id == entry.id)
+        {
+            return Err(format!(
+                "duplicate gm_palette id '{}': [[gm_palette]] #{j} and \
+                 [[gm_palette]] #{i} both declare it; palette ids must be \
+                 unique within a world",
+                entry.id
+            ));
+        }
+        for (v, variant) in entry.variants.iter().enumerate() {
+            if variant.id.trim().is_empty() {
+                return Err(format!(
+                    "[[gm_palette.variant]] #{v} of '{}' has an empty id; a \
+                     variant is chosen by id in the typed action",
+                    entry.id
+                ));
+            }
+            if variant.label.trim().is_empty() {
+                return Err(format!(
+                    "[[gm_palette.variant]] '{}' of '{}' has an empty label; a \
+                     variant needs a String Table id for the operator's list",
+                    variant.id, entry.id
+                ));
+            }
+            if let Some(w) = entry
+                .variants
+                .iter()
+                .enumerate()
+                .take(v)
+                .position(|(_, other)| other.id == variant.id)
+            {
+                return Err(format!(
+                    "duplicate gm_palette variant id '{}' in '{}': variants #{w} \
+                     and #{v} both declare it; variant ids must be unique \
+                     within their palette entry",
+                    variant.id, entry.id
+                ));
+            }
+        }
+    }
+
     // Validate extra_worlds: every entry must be a non-empty string.
     for (i, path) in raw.extra_worlds.iter().enumerate() {
         if path.trim().is_empty() {
@@ -2306,6 +2495,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         routes: raw.route,
         workforces: raw.workforce,
         gm_role_presets: raw.gm_role_preset,
+        gm_palette: raw.gm_palette,
         script_sources: inline_script_sources(raw.script.as_ref()),
     })
 }
@@ -2428,6 +2618,16 @@ pub fn entity_template_paths(world: &WorldConfig, curated_ships: &[String]) -> V
     for spawn in script_spawned_templates(world) {
         if seen.insert(spawn.template_path.clone()) {
             out.push(spawn.template_path);
+        }
+    }
+
+    // 6. `[[gm_palette]].template_path` entries (issue #1305). A Game Master's
+    //    spawn happens mid-mission, long after preload has finished, and the
+    //    palette is a literal authored path exactly like surface 1 — so it is
+    //    queued here rather than discovered at the moment the GM presses Place.
+    for entry in &world.gm_palette {
+        if seen.insert(entry.template_path.clone()) {
+            out.push(entry.template_path.clone());
         }
     }
 

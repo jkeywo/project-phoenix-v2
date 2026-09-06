@@ -120,6 +120,29 @@ pub enum GmAction {
         effect: crate::gm_effect::GmDirectEffectKind,
         amount_milli_hp: u32,
     },
+    /// Place one scenario-authored palette entry on the map (issue #1305).
+    ///
+    /// `palette` is a `[[gm_palette]]` id, never a `template_path`: the whole
+    /// point of the palette is that this action has no field an arbitrary
+    /// loaded asset path could arrive in. `variant` names one of that entry's
+    /// authored variants — the allowed overrides — or `None` for the bare
+    /// template. `position_mm` is resolved WORLD coordinates in millimetres and
+    /// `heading_mdeg` a resolved heading in millidegrees, in the simulation's
+    /// own bearing convention; the map gesture converts pixels to world space
+    /// once, in the browser, so mouse, touch and the keyboard placement path
+    /// all submit the same command. Fixed point rather than float so the action
+    /// has an exact identity in the journal and the digest — see
+    /// [`crate::gm_spawn::placement_metres`].
+    ///
+    /// Applying it ARMS the placement; the ordinary trigger pipeline then
+    /// performs the ordinary `spawn_entity` dispatch, which is what makes a GM
+    /// spawn and a scripted spawn the same spawn. See [`crate::gm_spawn`].
+    SpawnPaletteEntity {
+        palette: String,
+        variant: Option<String>,
+        position_mm: [i64; 3],
+        heading_mdeg: i32,
+    },
 }
 
 /// Presentation/result family for a typed GM action. The complete action stays
@@ -138,17 +161,25 @@ pub enum GmActionKind {
     /// and healing on a named Entity today, Station/System scopes (#1311) and
     /// the disable/restore latch (#1312) next.
     DirectEffect,
+    /// The directed world-mutation family (issue #1305): palette spawn today,
+    /// safe despawn (#1306) next, both naming a stable target identity.
+    WorldSpawn,
 }
 
 impl GmActionKind {
-    /// Whether this family's actions name one stable target identity.
+    /// Whether this family's durable facts carry a stable target identity
+    /// ([`GmAction::target_id`]).
     ///
-    /// [`GmAction::target_id`] is the producer; this is the same fact stated
-    /// about the FAMILY, which is all a refusal has left once the action itself
-    /// is gone. A refusal that disagrees with it is malformed — see
-    /// [`validate_fleet_frame`].
+    /// Written as one function rather than restated at each site because
+    /// `validate_fleet_frame` refuses a replicated refusal whose target does
+    /// not match its family, and the two statements drifting apart would
+    /// either drop a legitimate refusal or admit a targetless one that the
+    /// activity feed can only render as an action on the empty id.
     pub fn carries_target(self) -> bool {
-        matches!(self, Self::EventControl | Self::DirectEffect)
+        match self {
+            Self::EventControl | Self::DirectEffect | Self::WorldSpawn => true,
+            Self::SessionPause | Self::StationPuppet | Self::StationCommand => false,
+        }
     }
 }
 
@@ -187,7 +218,8 @@ impl GmAction {
         match self {
             Self::SetSessionPaused { .. }
             | Self::FireGmEvent { .. }
-            | Self::ApplyDirectEffect { .. } => None,
+            | Self::ApplyDirectEffect { .. }
+            | Self::SpawnPaletteEntity { .. } => None,
             Self::SetStationPuppet { ship, .. } | Self::IssueStationCommand { ship, .. } => {
                 Some(ship)
             }
@@ -206,6 +238,10 @@ impl GmAction {
         match self {
             Self::FireGmEvent { event } => Some(event.as_str()),
             Self::ApplyDirectEffect { target, .. } => Some(target.as_str()),
+            // The palette id, not the derived instance name: the durable fact
+            // has to say WHAT the operator placed, and the instance name is
+            // minted by the reducer a boundary later.
+            Self::SpawnPaletteEntity { palette, .. } => Some(palette.as_str()),
             Self::SetSessionPaused { .. }
             | Self::SetStationPuppet { .. }
             | Self::IssueStationCommand { .. } => None,
@@ -238,6 +274,22 @@ impl GmAction {
                 amount_milli_hp,
                 ..
             } if bounded(target) && *amount_milli_hp > 0 => Ok(()),
+            // The palette id's SHAPE is checked here rather than only against
+            // the live table, for the event id's reason: a malformed one is a
+            // malformed action, not an unknown palette entry. The placement is
+            // checked here too — a non-finite coordinate is never a valid
+            // request on any world.
+            Self::SpawnPaletteEntity {
+                palette,
+                variant,
+                position_mm,
+                heading_mdeg,
+            } if bounded(palette)
+                && variant.as_deref().is_none_or(bounded)
+                && crate::gm_spawn::placement_is_valid(*position_mm, *heading_mdeg) =>
+            {
+                Ok(())
+            }
             Self::SetStationPuppet { ship, station, .. }
                 if bounded(&ship.0) && bounded(&station.0) =>
             {
@@ -267,6 +319,7 @@ impl GmAction {
             Self::IssueStationCommand { .. } => GmActionKind::StationCommand,
             Self::FireGmEvent { .. } => GmActionKind::EventControl,
             Self::ApplyDirectEffect { .. } => GmActionKind::DirectEffect,
+            Self::SpawnPaletteEntity { .. } => GmActionKind::WorldSpawn,
         }
     }
 
@@ -276,7 +329,8 @@ impl GmAction {
             Self::SetStationPuppet { .. }
             | Self::IssueStationCommand { .. }
             | Self::FireGmEvent { .. }
-            | Self::ApplyDirectEffect { .. } => None,
+            | Self::ApplyDirectEffect { .. }
+            | Self::SpawnPaletteEntity { .. } => None,
         }
     }
 
@@ -284,12 +338,14 @@ impl GmAction {
         match self {
             Self::SetSessionPaused { active } | Self::SetStationPuppet { active, .. } => *active,
             // A Fire is always a request to make something happen. There is no
-            // "un-fire", so the flag is a constant rather than a policy — and a
+            // "un-fire", so the flag is a constant rather than a policy — a
             // direct effect carries its own sign in `GmDirectEffectKind`, not
-            // in this boolean.
+            // in this boolean, and a placement is the same shape: #1306's
+            // despawn is a different action, not this one with the flag off.
             Self::IssueStationCommand { .. }
             | Self::FireGmEvent { .. }
-            | Self::ApplyDirectEffect { .. } => true,
+            | Self::ApplyDirectEffect { .. }
+            | Self::SpawnPaletteEntity { .. } => true,
         }
     }
 }
@@ -536,6 +592,16 @@ pub enum GmActionRefusalReason {
     /// looking at a live thing on the map, and "nothing answers to that
     /// identity" would be a lie about their own selection.
     TargetNotDamageable,
+    /// No `[[gm_palette]]` entry carries this id at the apply tick, or the
+    /// named variant is not one that entry authored (issue #1305). Both are
+    /// the same answer to a GM: nothing placeable answers to that name.
+    ///
+    /// Appended for [`Self::UnknownGmEvent`]'s reason — the journal is folded
+    /// through postcard, which encodes an enum by VARIANT INDEX.
+    UnknownGmPaletteEntry,
+    /// The world has no content runtime to place anything into: no palette,
+    /// no trigger pipeline, nothing that could ever perform the spawn.
+    WorldUnavailable,
 }
 
 /// One terminal fact in the GM command log and local activity projection.
@@ -1171,8 +1237,12 @@ impl GmActionJournal {
                         GmAction::FireGmEvent { event } => {
                             fired_events.insert(event.clone());
                         }
+                        // A placement has no latch to fold forward: each
+                        // grant is its own spawn, and the world it produced is
+                        // recorded by the entities themselves.
                         GmAction::IssueStationCommand { .. }
-                        | GmAction::ApplyDirectEffect { .. } => {}
+                        | GmAction::ApplyDirectEffect { .. }
+                        | GmAction::SpawnPaletteEntity { .. } => {}
                     }
                 }
                 entries.push(result.clone());
@@ -1208,13 +1278,15 @@ impl GmActionJournal {
                         GmActionOutcome::NoOp
                     }
                 }
-                GmAction::IssueStationCommand { .. } => GmActionOutcome::Applied,
                 // A directed effect's real answer is a function of the live
                 // hull, which this reducer does not have. Production always
                 // records the actual apply-boundary result above, so this arm
                 // is only ever reached by the pure-fixture path — and the
-                // honest answer there is "the grant was admitted".
-                GmAction::ApplyDirectEffect { .. } => GmActionOutcome::Applied,
+                // honest answer there is "the grant was admitted". A
+                // placement has the same shape: each grant is its own spawn.
+                GmAction::IssueStationCommand { .. }
+                | GmAction::ApplyDirectEffect { .. }
+                | GmAction::SpawnPaletteEntity { .. } => GmActionOutcome::Applied,
             };
             entries.push(LoggedGmAction {
                 operator_id: grant.operator_id.clone(),
@@ -1272,13 +1344,15 @@ impl GmActionJournal {
                         GmActionOutcome::NoOp
                     }
                 }
-                GmAction::IssueStationCommand { .. } => GmActionOutcome::Applied,
                 // A directed effect's real answer is a function of the live
                 // hull, which this reducer does not have. Production always
                 // records the actual apply-boundary result above, so this arm
                 // is only ever reached by the pure-fixture path — and the
-                // honest answer there is "the grant was admitted".
-                GmAction::ApplyDirectEffect { .. } => GmActionOutcome::Applied,
+                // honest answer there is "the grant was admitted". A
+                // placement has the same shape: each grant is its own spawn.
+                GmAction::IssueStationCommand { .. }
+                | GmAction::ApplyDirectEffect { .. }
+                | GmAction::SpawnPaletteEntity { .. } => GmActionOutcome::Applied,
             };
             entries.push(LoggedGmAction {
                 operator_id: grant.operator_id.clone(),
@@ -1712,6 +1786,84 @@ pub fn apply_due_actions(
                                 (GmActionOutcome::Applied, None)
                             }
                         }
+                    }
+                }
+            }
+            // A placement is REVALIDATED here and then ARMED, for the Fire
+            // arm's reason: the spawn itself needs the template loader, the
+            // uuid mint, the anchor tables and the layer map that live behind
+            // `tick_trigger_pipeline`'s FixedUpdate parameter set, which this
+            // PreUpdate system deliberately does not hold — and a second route
+            // into spawning is the one shape that would make a GM spawn differ
+            // from a scripted one. Everything that decides the RESULT (the
+            // palette entry, the variant, the placement) is answered here, at
+            // the agreed apply tick, so every peer commits the same outcome.
+            GmAction::SpawnPaletteEntity {
+                palette,
+                variant,
+                position_mm,
+                heading_mdeg,
+            } => {
+                // No world at all: nothing is placeable, and nothing would ever
+                // drain the arm. Refused rather than silently dropped, so the
+                // operator gets an answer under their own correlation.
+                let Some(content) = content.as_deref_mut() else {
+                    journal
+                        .record_applied_result(LoggedGmAction {
+                            operator_id: grant.operator_id.clone(),
+                            correlation: grant.correlation.clone(),
+                            action_kind: grant.action.kind(),
+                            requested_active,
+                            outcome: GmActionOutcome::Refused,
+                            tick: grant.apply_tick,
+                            reason: Some(GmActionRefusalReason::WorldUnavailable),
+                            order: Some(grant.order),
+                            target: grant.action.target_id().map(str::to_string),
+                            effect: None,
+                        })
+                        .expect("live GM result matches its canonical grant");
+                    continue;
+                };
+                // The PLACEMENT's bounds are not rechecked here, and
+                // deliberately: `GmActionGrant::validate` runs on every insert,
+                // so the canonical journal cannot hold a grant whose action
+                // does not validate on any peer. What IS revalidated here is
+                // everything that can legitimately have CHANGED between the
+                // request and the boundary -- the authored palette entry and
+                // its variant, which a layer load or unload moves.
+                match crate::gm_spawn::palette_entry(&content.gm_palette, palette) {
+                    // An unauthored palette id, or a variant that entry never
+                    // declared: the palette IS the vocabulary, so both are the
+                    // same refusal rather than a partially honoured spawn.
+                    None => (
+                        GmActionOutcome::Refused,
+                        Some(GmActionRefusalReason::UnknownGmPaletteEntry),
+                    ),
+                    Some(entry)
+                        if variant
+                            .as_deref()
+                            .is_some_and(|id| entry.variant(id).is_none()) =>
+                    {
+                        (
+                            GmActionOutcome::Refused,
+                            Some(GmActionRefusalReason::UnknownGmPaletteEntry),
+                        )
+                    }
+                    Some(entry) => {
+                        let name = crate::gm_spawn::PendingGmSpawn::derive_name(
+                            entry,
+                            grant.order.sequence,
+                        );
+                        content
+                            .pending_gm_spawns
+                            .push(crate::gm_spawn::PendingGmSpawn {
+                                palette: palette.clone(),
+                                variant: variant.clone(),
+                                name,
+                                position_mm: *position_mm,
+                                heading_mdeg: *heading_mdeg,
+                            });
+                        (GmActionOutcome::Applied, None)
                     }
                 }
             }
@@ -2605,6 +2757,268 @@ station = "helm"
                 Some(GmActionRefusalReason::UnknownGmEvent)
             )]
         );
+    }
+
+    // ── GM palette placement (issue #1305) ──────────────────────────────
+
+    fn palette(id: &str, variants: &[&str]) -> crate::world::config::GmPaletteEntry {
+        crate::world::config::GmPaletteEntry {
+            id: id.to_string(),
+            label: format!("world.gm.palette.{id}.label"),
+            template_path: format!("assets/entities/{id}.toml"),
+            name_prefix: None,
+            groups: vec!["gm_placed".to_string()],
+            variants: variants
+                .iter()
+                .map(|variant| crate::world::config::GmPaletteVariant {
+                    id: (*variant).to_string(),
+                    label: format!("world.gm.palette.{id}.{variant}.label"),
+                    overrides: None,
+                })
+                .collect(),
+        }
+    }
+
+    fn place_grant(
+        sequence: u64,
+        apply_tick: u64,
+        correlation: &str,
+        entry: &str,
+        variant: Option<&str>,
+        position_mm: [i64; 3],
+        heading_mdeg: i32,
+    ) -> GmActionGrant {
+        GmActionGrant {
+            from: HostSlot(1),
+            sequenced_by: HostSlot(1),
+            operator_id: "gm-1".into(),
+            correlation: GmActionId::new(correlation).unwrap(),
+            recovery_generation: 0,
+            apply_tick,
+            order: GmActionOrder::new(HostSlot(1), sequence),
+            action: GmAction::SpawnPaletteEntity {
+                palette: entry.into(),
+                variant: variant.map(str::to_string),
+                position_mm,
+                heading_mdeg,
+            },
+        }
+    }
+
+    fn place_app(
+        tick: u64,
+        entries: Vec<crate::world::config::GmPaletteEntry>,
+        grants: impl IntoIterator<Item = GmActionGrant>,
+    ) -> App {
+        let mut journal = GmActionJournal::default();
+        for grant in grants {
+            journal.insert(grant).unwrap();
+        }
+        let runtime = crate::world::server::WorldContentRuntime {
+            gm_palette: entries,
+            ..Default::default()
+        };
+        let mut app = App::new();
+        app.insert_resource(crate::sim_tick::SimTick(tick))
+            .insert_resource(SimulationPaused(false))
+            .insert_resource(journal)
+            .init_resource::<GmActionLog>()
+            .insert_resource(runtime)
+            .add_systems(Update, apply_due_actions);
+        app
+    }
+
+    fn placements(app: &App) -> Vec<crate::gm_spawn::PendingGmSpawn> {
+        app.world()
+            .resource::<crate::world::server::WorldContentRuntime>()
+            .pending_gm_spawns
+            .clone()
+    }
+
+    /// The happy path, and the one thing a placement must NOT share with a
+    /// Fire: two presses of the same palette entry are two hulls, not one arm.
+    /// Their names come from the canonical sequence, so every peer -- including
+    /// one that restored mid-run -- agrees which is which.
+    #[test]
+    fn a_gm_placement_arms_the_ordinary_spawn_and_two_presses_are_two_hulls() {
+        let mut app = place_app(
+            5,
+            vec![palette("raider", &[])],
+            [
+                place_grant(
+                    1,
+                    5,
+                    "place-a",
+                    "raider",
+                    None,
+                    [120_000, 0, -40_000],
+                    90_000,
+                ),
+                place_grant(2, 5, "place-b", "raider", None, [0, 0, 0], 0),
+            ],
+        );
+        app.update();
+
+        assert_eq!(
+            outcomes(&app),
+            vec![
+                (GmActionOutcome::Applied, None),
+                (GmActionOutcome::Applied, None)
+            ]
+        );
+        let armed = placements(&app);
+        assert_eq!(armed.len(), 2, "each press places its own hull");
+        assert_eq!(armed[0].name, "raider_1");
+        assert_eq!(armed[1].name, "raider_2");
+        assert_eq!(armed[0].position_mm, [120_000, 0, -40_000]);
+        assert_eq!(armed[0].heading_mdeg, 90_000);
+    }
+
+    /// The palette IS the vocabulary: an id nothing authors, and a variant the
+    /// named entry never declared, are the same refusal -- decided against the
+    /// LIVE table at the apply tick, not at request time.
+    #[test]
+    fn a_placement_outside_the_authored_palette_is_refused_at_the_apply_boundary() {
+        let mut app = place_app(
+            7,
+            vec![palette("raider", &["blood_eagle"])],
+            [
+                place_grant(1, 7, "place-a", "tender", None, [0, 0, 0], 0),
+                place_grant(2, 7, "place-b", "raider", Some("iron_spear"), [0, 0, 0], 0),
+                place_grant(
+                    3,
+                    7,
+                    "place-c",
+                    "assets/entities/ship_harrow_cruiser.toml",
+                    None,
+                    [0, 0, 0],
+                    0,
+                ),
+                place_grant(4, 7, "place-d", "raider", Some("blood_eagle"), [0, 0, 0], 0),
+            ],
+        );
+        app.update();
+
+        assert_eq!(
+            outcomes(&app),
+            vec![
+                (
+                    GmActionOutcome::Refused,
+                    Some(GmActionRefusalReason::UnknownGmPaletteEntry)
+                ),
+                (
+                    GmActionOutcome::Refused,
+                    Some(GmActionRefusalReason::UnknownGmPaletteEntry)
+                ),
+                (
+                    GmActionOutcome::Refused,
+                    Some(GmActionRefusalReason::UnknownGmPaletteEntry)
+                ),
+                (GmActionOutcome::Applied, None),
+            ],
+            "an asset path is not a palette id, and neither is an unauthored variant"
+        );
+        assert_eq!(placements(&app).len(), 1);
+    }
+
+    /// A placement outside the coordinate bound is refused on BOTH authorities
+    /// that can see it -- the browser's own proposal, and the canonical journal
+    /// -- so no such grant ever reaches the apply boundary on any peer.
+    #[test]
+    fn an_out_of_range_placement_is_refused_before_it_can_become_a_grant() {
+        let far = crate::gm_spawn::MAX_GM_SPAWN_COORD_MM + 1;
+        let action = GmAction::SpawnPaletteEntity {
+            palette: "raider".into(),
+            variant: None,
+            position_mm: [far, 0, 0],
+            heading_mdeg: 0,
+        };
+        assert_eq!(
+            GmActionProposal {
+                from: HostSlot(1),
+                operator_id: "gm-1".into(),
+                correlation: GmActionId::new("place-a").unwrap(),
+                action: action.clone(),
+            }
+            .validate(),
+            Err(GmActionRefusalReason::InvalidAction)
+        );
+
+        let mut journal = GmActionJournal::default();
+        assert!(
+            journal
+                .insert(place_grant(1, 3, "place-a", "raider", None, [far, 0, 0], 0))
+                .is_err(),
+            "the canonical journal never holds a grant whose action does not validate"
+        );
+
+        // And the heading bound, on the same two authorities.
+        assert!(!crate::gm_spawn::placement_is_valid(
+            [0, 0, 0],
+            crate::gm_spawn::MAX_GM_SPAWN_HEADING_MDEG + 1
+        ));
+    }
+
+    /// No world at all: refused under the operator's own correlation rather
+    /// than armed against a queue nothing will ever drain.
+    #[test]
+    fn a_placement_without_a_loaded_world_is_refused_rather_than_lost() {
+        let mut journal = GmActionJournal::default();
+        journal
+            .insert(place_grant(1, 3, "place-a", "raider", None, [0, 0, 0], 0))
+            .unwrap();
+        let mut app = App::new();
+        app.insert_resource(crate::sim_tick::SimTick(3))
+            .insert_resource(SimulationPaused(false))
+            .insert_resource(journal)
+            .init_resource::<GmActionLog>()
+            .add_systems(Update, apply_due_actions);
+        app.update();
+
+        assert_eq!(
+            outcomes(&app),
+            vec![(
+                GmActionOutcome::Refused,
+                Some(GmActionRefusalReason::WorldUnavailable)
+            )]
+        );
+    }
+
+    /// Every durable fact a placement produces names WHAT was placed, on both
+    /// lanes that can produce one -- so the activity feed and the panel can say
+    /// so without re-reading the journal, and `validate_fleet_frame` accepts
+    /// the replicated refusal.
+    #[test]
+    fn a_placement_result_carries_its_stable_palette_identity() {
+        let mut app = place_app(
+            2,
+            vec![palette("raider", &[])],
+            [place_grant(1, 2, "place-a", "raider", None, [0, 0, 0], 0)],
+        );
+        app.update();
+        let applied = app.world().resource::<GmActionJournal>().applied_results()[0].clone();
+        assert_eq!(applied.action_kind, GmActionKind::WorldSpawn);
+        assert_eq!(applied.target.as_deref(), Some("raider"));
+
+        let request = GmActionRequest {
+            operator_id: "gm-1".into(),
+            correlation: GmActionId::new("place-b").unwrap(),
+            action: GmAction::SpawnPaletteEntity {
+                palette: "raider".into(),
+                variant: None,
+                position_mm: [0, 0, 0],
+                heading_mdeg: 0,
+            },
+        };
+        let ingress =
+            LoggedGmAction::refused_request(&request, 4, GmActionRefusalReason::WrongPhase);
+        assert_eq!(ingress.target.as_deref(), Some("raider"));
+
+        // The frame rule is per-family, not "event control or nothing": a
+        // world-spawn refusal MUST name its palette entry and a pause refusal
+        // must not name anything.
+        assert!(GmActionKind::WorldSpawn.carries_target());
+        assert!(!GmActionKind::SessionPause.carries_target());
     }
 
     #[test]

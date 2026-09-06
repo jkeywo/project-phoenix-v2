@@ -922,24 +922,27 @@ fn fold_scenario_triggers(world: &World, mut acc: u64) -> u64 {
     let Some(runtime) = world.get_resource::<WorldContentRuntime>() else {
         return acc;
     };
-    if runtime.triggers.is_empty() {
-        return acc;
-    }
 
-    acc = fold_str(acc, "scenario-triggers");
-    acc = fold_u64(acc, runtime.triggers.len() as u64);
-    for state in runtime.triggers.iter() {
-        acc = fold_optional_str(acc, state.trigger.id.as_deref());
-        acc = fold_u64(acc, trigger_condition_code(&state.trigger.condition));
-        acc = fold_u64(acc, u64::from(state.fired));
-        acc = fold_optional_str(acc, state.origin_layer.as_deref());
-        acc = fold_u64(acc, u64::from(state.last_fired_elapsed.is_some()));
-        acc = fold_u64(acc, state.seen_destroyed.len() as u64);
-        if !state.seen_destroyed.is_empty() {
-            let mut seen: Vec<&str> = state.seen_destroyed.iter().map(String::as_str).collect();
-            seen.sort_unstable();
-            for name in seen {
-                acc = fold_str(acc, name);
+    // Guarded per BLOCK rather than by one early return (issue #1305): the GM
+    // blocks below belong to a world that may author no trigger at all, and a
+    // world with an empty table and nothing armed still folds nothing, so every
+    // existing world's digest is exactly where it was.
+    if !runtime.triggers.is_empty() {
+        acc = fold_str(acc, "scenario-triggers");
+        acc = fold_u64(acc, runtime.triggers.len() as u64);
+        for state in runtime.triggers.iter() {
+            acc = fold_optional_str(acc, state.trigger.id.as_deref());
+            acc = fold_u64(acc, trigger_condition_code(&state.trigger.condition));
+            acc = fold_u64(acc, u64::from(state.fired));
+            acc = fold_optional_str(acc, state.origin_layer.as_deref());
+            acc = fold_u64(acc, u64::from(state.last_fired_elapsed.is_some()));
+            acc = fold_u64(acc, state.seen_destroyed.len() as u64);
+            if !state.seen_destroyed.is_empty() {
+                let mut seen: Vec<&str> = state.seen_destroyed.iter().map(String::as_str).collect();
+                seen.sort_unstable();
+                for name in seen {
+                    acc = fold_str(acc, name);
+                }
             }
         }
     }
@@ -956,6 +959,27 @@ fn fold_scenario_triggers(world: &World, mut acc: u64) -> u64 {
         // A `BTreeSet`, so this walk is already the sorted one every peer makes.
         for id in &runtime.pending_gm_event_fires {
             acc = fold_str(acc, id);
+        }
+    }
+    // The GM's armed placements (issue #1305), on the same terms: the AUTHORED
+    // palette is content the content digest answers for, and what a RUN moves is
+    // which placements are owed and in what order. Behind the same emptiness
+    // check, so no world that authors no palette moved.
+    //
+    // The queue's own order is folded rather than a sorted copy of it: two
+    // placements swapped would draw each other's `WorldIdMint` id, which is a
+    // real divergence this fold exists to catch.
+    if !runtime.pending_gm_spawns.is_empty() {
+        acc = fold_str(acc, "scenario-gm-spawns");
+        acc = fold_u64(acc, runtime.pending_gm_spawns.len() as u64);
+        for pending in &runtime.pending_gm_spawns {
+            acc = fold_str(acc, &pending.palette);
+            acc = fold_optional_str(acc, pending.variant.as_deref());
+            acc = fold_str(acc, &pending.name);
+            for axis in pending.position_mm {
+                acc = fold_u64(acc, axis as u64);
+            }
+            acc = fold_u64(acc, pending.heading_mdeg as i64 as u64);
         }
     }
     acc

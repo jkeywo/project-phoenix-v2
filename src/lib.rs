@@ -116,6 +116,7 @@ pub mod gm_puppet;
 /// Crew-public Game Master identities (issue #1289), kept separate from crew
 /// sessions and the player-ship fleet roster by construction.
 pub mod gm_roster;
+pub mod gm_spawn;
 /// Infrastructure condition + capacity on authored world furniture (issue
 /// #1025): the pure degradation/repair track and its Bevy adapter.
 pub mod infrastructure;

@@ -1132,6 +1132,45 @@ pub fn decode_gm_action_request(raw: &str) -> Option<crate::gm_action::GmActionR
                 amount_milli_hp: u32::try_from(amount).ok().filter(|amount| *amount > 0)?,
             }
         }
+        // Exactly `{operator_id, correlation, action, palette, variant,
+        // position_mm, heading_mdeg}` (issue #1305). `variant` is always
+        // present — `null` for the bare template — so the field-count guard
+        // stays exact rather than accepting two shapes. There is deliberately
+        // no template/asset field to smuggle anything through: the palette id
+        // IS the vocabulary.
+        "spawn_palette_entity"
+            if object.len() == 7
+                && object.contains_key("palette")
+                && object.contains_key("variant")
+                && object.contains_key("position_mm")
+                && object.contains_key("heading_mdeg") =>
+        {
+            let position = object.get("position_mm")?.as_array()?;
+            if position.len() != 3 {
+                return None;
+            }
+            let mut position_mm = [0i64; 3];
+            for (slot, value) in position_mm.iter_mut().zip(position) {
+                *slot = value.as_i64()?;
+            }
+            let variant = match object.get("variant")? {
+                serde_json::Value::Null => None,
+                value => Some(bounded_gm_target_id(value.as_str()?)?),
+            };
+            let heading_mdeg = i32::try_from(object.get("heading_mdeg")?.as_i64()?).ok()?;
+            // The placement bound is the action's own answer, applied HERE too
+            // so an out-of-range request never becomes a grant, exactly as
+            // `bounded_gm_event_id` refuses an unqualified event id at ingress.
+            if !crate::gm_spawn::placement_is_valid(position_mm, heading_mdeg) {
+                return None;
+            }
+            crate::gm_action::GmAction::SpawnPaletteEntity {
+                palette: bounded_gm_target_id(object.get("palette")?.as_str()?)?,
+                variant,
+                position_mm,
+                heading_mdeg,
+            }
+        }
         "issue_station_command"
             if object.len() == 7
                 && object.contains_key("ship")
@@ -1197,6 +1236,16 @@ pub fn encode_gm_session_projection(
     projection: &crate::gm_action::GmSessionProjection,
 ) -> Result<String, serde_json::Error> {
     serde_json::to_string(projection)
+}
+
+/// Encode the absolute GM spawn-panel projection (issue #1305) for the
+/// `gm_spawn` Host Channel. The payload carries palette ids and String Table
+/// labels only — never a `template_path`, which the browser must never be in a
+/// position to name.
+pub fn encode_gm_spawn_projection(
+    payload: &crate::gm_spawn::GmSpawnProjection,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(payload)
 }
 
 /// Encode the absolute GM mission-panel projection (issue #1301).

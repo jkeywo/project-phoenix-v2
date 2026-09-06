@@ -255,6 +255,36 @@ transform = { position = [0.0, 0.0, 0.0] }
 spawn_on = "game_start"
 `;
 
+// Issue #1305: one `[[gm_palette]]` row with one authored variant, plus one
+// ordinary entity so the GM-only session has a world to place into. The
+// authoritative half is covered by the Rust pipeline tests; what this fixture
+// is here for is the browser half — the row's String Table label, the map
+// gesture, the keyboard path, and the attributed Applied results.
+const GM_PALETTE_WORLD = `
+[global]
+seed = 1305
+title = "GM palette smoke fixture"
+description = "Map-gesture palette placement coverage for issue 1305."
+
+[[entity]]
+template_path = "assets/entities/alliance_courier.toml"
+name = "entity.alliance_courier.display_name"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+[[gm_palette]]
+id = "tender"
+label = "world.smoke_gm_palette.tender.label"
+template_path = "assets/entities/alliance_tender.toml"
+name_prefix = "gm_tender"
+
+[[gm_palette.variant]]
+id = "escort"
+label = "world.smoke_gm_palette.tender.escort.label"
+overrides = { radar_appearance = { size = 7.0 } }
+`;
+
+
 async function selectAndWait(client, station) {
   await client.send('SelectStation', { station });
   await client.page.waitForFunction(
@@ -763,6 +793,98 @@ test('a GM damages and repairs one Entity through the typed action path', { tag:
 
   expect(errors).toEqual([]);
 });
+
+/// Issue #1305 exit evidence in a real browser: an authored `[[gm_palette]]`
+/// reaches the GM placement panel with its String Table label, a real map
+/// press-and-drag places one hull at resolved world coordinates, and the
+/// keyboard path — no pointer at all — places a second. Both come back as
+/// attributed Applied results, and the omniscient map grows by exactly the two
+/// hulls that were placed.
+test('a GM places palette entries by map drag and by keyboard alone', { tag: '@core' }, async ({ context }) => {
+  test.setTimeout(120_000);
+  await context.route('**/assets/worlds/default.toml', (route) =>
+    route.fulfill({ contentType: 'text/plain', body: GM_PALETTE_WORLD }),
+  );
+
+  const page = await context.newPage();
+  const errors = captureServerPageErrors(page);
+  await page.goto('/?gm=1&scenario=assets/worlds/default.toml');
+  await waitForWasmReady(page);
+  await page.evaluate(() => window.__hostFleetOpen());
+  await page.waitForFunction(() => {
+    const state = window.__hostGmStartState?.();
+    return state?.admitted === true
+      && state.presentationReady === true
+      && state.localValidation === true;
+  }, undefined, { timeout: 30_000 });
+  await page.evaluate(() => document.getElementById('gm-ready-btn').click());
+  await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
+
+  // The authored palette reaches the panel from the authoritative projection —
+  // nothing in this spec injects a Host Channel payload.
+  const row = page.locator('#gm-spawn-palette .gm-spawn-entry[data-palette-id="tender"]');
+  await expect(row).toBeVisible({ timeout: 30_000 });
+  await expect(row.locator('.gm-spawn-entry-label'))
+    .toHaveText(ts('world.smoke_gm_palette.tender.label'));
+  await expect(page.locator('#gm-spawn-empty')).toBeHidden();
+  // Only what the scenario authored is offered: one entry, one variant beside
+  // the bare template. There is no control anywhere that names an asset path.
+  expect(await page.evaluate(() => window.__hostGmSpawnState())).toMatchObject({ palette: 1 });
+  await expect(row.locator('.gm-spawn-entry-variant option'))
+    .toHaveText([ts('server.gm.spawn.variant_none'), ts('world.smoke_gm_palette.tender.escort.label')]);
+
+  const before = await page.evaluate(
+    () => document.getElementById('gm-entity-map').state.blips.length,
+  );
+
+  // 1. The map gesture: press picks the position, drag picks the heading.
+  await row.locator('button[data-role="place"]').click();
+  await expect(page.locator('#gm-entity-map')).toHaveAttribute('data-placement-armed', '');
+  // Arming brings the chart to the operator. This console is one long
+  // scrolling page whose placement panel sits above the workspace, so on this
+  // viewport the chart is entirely below the fold when PLACE is pressed —
+  // and a gesture aimed at a chart that is not on screen lands on whatever
+  // is, and reports nothing at all. The chart also takes the focus, which is
+  // what makes the keyboard path below reachable without a pointer.
+  const chart = await page.locator('#gm-entity-map canvas').boundingBox();
+  const viewport = page.viewportSize();
+  expect(chart.y).toBeGreaterThanOrEqual(0);
+  expect(chart.y + chart.height).toBeLessThanOrEqual(viewport.height);
+  await expect(page.locator('#gm-entity-map')).toBeFocused();
+  await page.mouse.move(chart.x + chart.width * 0.65, chart.y + chart.height * 0.4);
+  await page.mouse.down();
+  await page.mouse.move(chart.x + chart.width * 0.65, chart.y + chart.height * 0.2, { steps: 4 });
+  await page.mouse.up();
+
+  const applied = page.locator('#gm-spawn-log .gm-spawn-log-entry[data-outcome="applied"]');
+  await expect(applied).toHaveCount(1, { timeout: 30_000 });
+  await expect(applied.first()).toHaveAttribute('data-palette', 'tender');
+  await expect(applied.first()).toContainText(ts('world.smoke_gm_palette.tender.label'));
+
+  // 2. The accessible non-drag path: the chart's own keyboard cursor. Nothing
+  // here focuses the chart — arming did, so pressing PLACE is the whole
+  // pointer involvement, and a keyboard operator reaches the same placement.
+  await row.locator('button[data-role="place"]').click();
+  await expect(page.locator('#gm-entity-map')).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press(']');
+  await page.keyboard.press('Enter');
+  await expect(applied).toHaveCount(2, { timeout: 30_000 });
+
+  // Both placements are real hulls in the omniscient world, not just rows.
+  await page.waitForFunction(
+    (expected) => document.getElementById('gm-entity-map').state.blips.length >= expected,
+    before + 2,
+    { timeout: 30_000 },
+  );
+  expect(await page.evaluate(() => window.__hostGmSpawnState()))
+    .toMatchObject({ arming: null, pending: 0 });
+
+  expect(errors).toEqual([]);
+});
+
+
 
 test('authored field and layer fixture supports aggregate and Region inspection end to end', async ({ context }) => {
   test.setTimeout(90_000);

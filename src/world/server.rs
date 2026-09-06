@@ -176,6 +176,26 @@ pub struct WorldContentRuntime {
     /// it. So, like `pending_world_events` and `pending_delayed_actions`, it
     /// lives here and is snapshotted.
     pub pending_gm_event_fires: std::collections::BTreeSet<String>,
+    /// The scenario-authored GM spawn palette, copied from `WorldConfig` at
+    /// load (issue #1305).
+    ///
+    /// AUTHORED CONTENT, not run state: it lives here for `trigger_states`'
+    /// reason — the deterministic apply-tick reducer and the trigger pipeline
+    /// both need it, and neither holds `WorldConfig` — and, like a trigger's
+    /// authored condition, it is answered for by `snapshot::content_digest`
+    /// rather than captured or folded. A resumed world rebuilds it by replaying
+    /// the same load.
+    pub gm_palette: Vec<crate::world::config::GmPaletteEntry>,
+    /// GM placements that have crossed their canonical apply boundary and are
+    /// waiting for the trigger pipeline to spawn them (issue #1305).
+    ///
+    /// A `Vec` in canonical grant order rather than a set: two identical
+    /// placements of the same palette entry are two entities, not one, and the
+    /// ORDER decides which draws which uuid from the `WorldIdMint`. Genuinely
+    /// cross-tick for `pending_gm_event_fires`' reason — armed in `PreUpdate`,
+    /// drained in `FixedUpdate`, which a paused session never reaches — so it is
+    /// snapshotted and folded.
+    pub pending_gm_spawns: Vec<crate::gm_spawn::PendingGmSpawn>,
 }
 
 /// Bevy resource wrapping the server-side objective manager.
@@ -1618,6 +1638,9 @@ pub(crate) fn init_world_runtime(
             .or_insert_with(|| uuid.clone());
     }
 
+    // Replace the authored GM palette on each world load (#1305).
+    runtime.gm_palette = world_config.gm_palette.clone();
+
     // Reset the complete paired table; scripts are the production source.
     runtime.triggers.clear();
 
@@ -2203,6 +2226,7 @@ pub(crate) fn tick_trigger_pipeline(
     if buffer.0.is_empty()
         && runtime.pending_delayed_actions.is_empty()
         && runtime.pending_gm_event_fires.is_empty()
+        && runtime.pending_gm_spawns.is_empty()
     {
         return;
     }
@@ -2288,6 +2312,91 @@ pub(crate) fn tick_trigger_pipeline(
     // than move — one Vec clone per non-empty tick, the same cost the
     // pre-#716 local `world_events.clone()` paid.
     let mut current_events = buffer.0.clone();
+
+    // The GM's armed placements (issue #1305), performed BEFORE the chaining
+    // loop rather than inside it.
+    //
+    // Before, because a placement is not a trigger firing: it emits no
+    // `WorldEvent` of its own, and running it inside a pass would make the
+    // uuid a spawn draws depend on how many chaining passes that tick happened
+    // to take. Draining it here — in canonical grant order, through the SAME
+    // `dispatch_action` + `apply_dispatch_result` path a scripted
+    // `spawn_entity` uses — gives every peer the same mint order at the same
+    // tick, and gives the spawned entity the same name→uuid and group
+    // registrations a scripted one gets, so a later objective target or
+    // `on_all_destroyed` sees no difference between them.
+    //
+    // Drained unconditionally: an entry whose palette entry has gone (its layer
+    // unloaded between the apply tick and here) is DROPPED rather than retained,
+    // because unlike an armed Fire — which waits for a `when` predicate that may
+    // yet read true — nothing about a placement can become possible later.
+    if !runtime.pending_gm_spawns.is_empty() {
+        let armed = std::mem::take(&mut runtime.pending_gm_spawns);
+        let mut spawn_events: Vec<WorldEvent> = Vec::new();
+        for pending in armed {
+            // The action is built (and the palette borrow released) before the
+            // apply below takes `&mut runtime`.
+            let action = match crate::gm_spawn::palette_entry(&runtime.gm_palette, &pending.palette)
+            {
+                Some(entry) => crate::gm_spawn::spawn_action(&pending, entry),
+                None => {
+                    bevy::log::warn!(
+                        "tick_trigger_pipeline: armed GM placement names palette \
+                         entry '{}', which this world no longer authors - dropping",
+                        pending.palette
+                    );
+                    continue;
+                }
+            };
+            let name_to_uuid = runtime.name_to_uuid.clone();
+            let layers = project_layer_views(world_layers.layer_map.as_deref());
+            let result = {
+                let ctx = DispatchContext {
+                    // A GM placement belongs to the run, not to a layer: it
+                    // carries resolved world coordinates, so it needs no anchor
+                    // table, and a base-world origin is what keeps the entity
+                    // alive across a layer unload.
+                    origin_layer: None,
+                    entity_name: None,
+                    name_to_uuid: &name_to_uuid,
+                    base_flags: &runtime.flags,
+                    layers: &layers,
+                    base_anchors: world_layers
+                        .base_world_config
+                        .as_ref()
+                        .map(|wc| &wc.anchors)
+                        .unwrap_or(&empty_anchors),
+                    factions: faction_dispatch.registry.as_deref().map(|r| &r.0),
+                    uuid_source: &uuid_source,
+                    template_loader: &template_loader,
+                };
+                dispatch_action(&action, &ctx)
+            };
+            apply_dispatch_result(
+                result,
+                "tick_trigger_pipeline (gm placement)",
+                &mut spawn_events,
+                &uuid_to_entity,
+                &mut *runtime,
+                &mut objectives,
+                &mut commands,
+                &mut ship_modifiers,
+                world_layers.pending_layers.as_deref_mut(),
+                world_layers.layer_map.as_deref_mut(),
+                next_state.as_deref_mut(),
+                game_over_reason.as_deref_mut(),
+                &mut faction_dispatch,
+                &mut ai_query,
+                balance_events.as_deref_mut(),
+                &mut effect_queues.out(),
+            );
+        }
+        // A spawn emits no `WorldEvent` today, but the shared applier owns that
+        // decision; anything it does emit joins the NEXT tick's buffer rather
+        // than this tick's chain, matching `tick_delayed_actions`.
+        runtime.pending_world_events.append(&mut spawn_events);
+    }
+
     let mut pass = 0;
     loop {
         pass += 1;
@@ -3651,6 +3760,32 @@ pub(crate) fn apply_dispatch_result(
                         rotation: tc.quat(),
                         scale: tc.scale_vec(),
                     });
+                }
+
+                // A hull's pose is `ShipPhysics`, not its `Transform`: the
+                // spawner seeds `yaw: 0.0` and `integrate_ship_physics`
+                // overwrites the Transform from it every tick, so an authored
+                // rotation on a SHIP used to survive exactly until the first
+                // fixed step. That is what a GM's dragged heading (issue #1305)
+                // would have lost, and a scripted spawn's authored rotation
+                // with it. Seeded here, once, through an entity command that
+                // runs after the spawner's own inserts and only where the
+                // component exists — a rotation-free spawn (every one every
+                // shipped world makes) queues nothing and is byte-identical.
+                //
+                // `-rotation[1]` because the Transform Euler the physics writes
+                // is `from_euler(YXZ, -yaw, 0, roll)`; the two spellings of one
+                // pose must not disagree the moment the hull exists.
+                if let Some([_, transform_yaw, _]) = rotation {
+                    commands.entity(spawned).queue(
+                        move |mut entity: bevy::ecs::world::EntityWorldMut| {
+                            if let Some(mut physics) =
+                                entity.get_mut::<crate::ship::state::ShipPhysics>()
+                            {
+                                physics.yaw = -transform_yaw;
+                            }
+                        },
+                    );
                 }
 
                 // Attach to the authoring layer's spawned_entities so

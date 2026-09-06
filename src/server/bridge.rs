@@ -55,8 +55,8 @@ use {
     crate::boot::{BootPlan, BootProfile, WorldIngest},
     crate::console_bridge::{
         AiChatterEvent, AudioConfigChanged, AudioCueEvent, GmActivityFeedChanged,
-        GmEntityProjectionChanged, GmMissionChanged, GmSessionChanged, GmStationProjectionChanged,
-        HudStateChanged, LobbyStateChanged,
+        GmEntityProjectionChanged, GmMissionChanged, GmSessionChanged, GmSpawnChanged,
+        GmStationProjectionChanged, HudStateChanged, LobbyStateChanged,
     },
     crate::core::codec::{self, JsonCodec, MessageCodec},
     crate::core::messages::{self, DeliveryClass},
@@ -1004,10 +1004,13 @@ pub mod host_channels {
     /// The GM-operable authored-event registry and its attributed results
     /// (issue #1301) — what the mission panel lists and fires.
     pub const GM_MISSION: &str = "gm_mission";
+    /// The scenario-authored GM spawn palette and its attributed placement
+    /// results (issue #1305) — what the placement panel lists and places.
+    pub const GM_SPAWN: &str = "gm_spawn";
 
     /// Every registered host channel name. The JS dispatcher table in
     /// `server.html` must have a handler per entry.
-    pub const ALL: [&str; 12] = [
+    pub const ALL: [&str; 13] = [
         HUD,
         LOBBY,
         CHATTER,
@@ -1020,6 +1023,7 @@ pub mod host_channels {
         GM_STATION,
         GM_SESSION,
         GM_MISSION,
+        GM_SPAWN,
     ];
 }
 
@@ -1454,6 +1458,7 @@ pub fn wasm_init() {
             flush_host_channels
                 .after(crate::gm_action::publish_session_projection)
                 .after(crate::gm_event::publish_mission_projection)
+                .after(crate::gm_spawn::publish_spawn_projection)
                 .after(crate::gm_activity::publish_frame_activity),
             publish_sim_tick,
             publish_god_mode,
@@ -4854,10 +4859,11 @@ fn flush_host_channels(
     mut gm_station: MessageReader<GmStationProjectionChanged>,
     mut gm_session: MessageReader<GmSessionChanged>,
     mut gm_mission: MessageReader<GmMissionChanged>,
+    mut gm_spawn: MessageReader<GmSpawnChanged>,
 ) {
     // Declarative channel table: name → drained JSON payloads. Adding a
     // message channel = one row here (see `host_channels`).
-    let message_batches: [(&str, Vec<String>); 10] = [
+    let message_batches: [(&str, Vec<String>); 11] = [
         (
             host_channels::HUD,
             hud.read().map(|m| m.json.clone()).collect(),
@@ -4914,6 +4920,13 @@ fn flush_host_channels(
             gm_mission
                 .read()
                 .filter_map(|event| codec::encode_gm_mission_projection(&event.payload).ok())
+                .collect(),
+        ),
+        (
+            host_channels::GM_SPAWN,
+            gm_spawn
+                .read()
+                .filter_map(|event| codec::encode_gm_spawn_projection(&event.payload).ok())
                 .collect(),
         ),
     ];
@@ -5817,6 +5830,7 @@ spawn_on = "game_start"
                 host_channels::GM_STATION,
                 host_channels::GM_SESSION,
                 host_channels::GM_MISSION,
+                host_channels::GM_SPAWN,
             ]
         );
     }

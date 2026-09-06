@@ -573,7 +573,17 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// same correlation a duplicate rather than a retry. Durable results also
 /// gained the resolved effect itself, without which a restored feed cannot say
 /// how much a logged hit landed or discarded.
-pub const SNAPSHOT_FORMAT: u32 = 20;
+///
+/// Format 21 carries the armed GM PLACEMENTS (issue #1305) — the same
+/// cross-schedule gap one rung further along, and the one whose loss is least
+/// recoverable. A format-20 capture taken after a placement crossed its
+/// PreUpdate apply boundary but before `tick_trigger_pipeline` spawned the hull
+/// records an Applied placement with nothing that will ever perform it; and
+/// because each press is its own correlation rather than an idempotent latch, a
+/// GM trying again would risk TWO hulls rather than recovering the one. The
+/// queue's ORDER travels with it because it decides which placement draws which
+/// `WorldIdMint` id.
+pub const SNAPSHOT_FORMAT: u32 = 21;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -2057,6 +2067,23 @@ pub struct ScenarioState {
     /// a queue, so sorting IS its identity rather than a payload convention.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_gm_event_fires: Vec<String>,
+    /// `WorldContentRuntime::pending_gm_spawns` (issue #1305): the GM
+    /// placements that have crossed their canonical apply boundary and whose
+    /// hulls have not been spawned yet.
+    ///
+    /// It travels for [`Self::pending_gm_event_fires`]' reason exactly: the
+    /// authoritative fact that the placement was Applied lives in the GM action
+    /// journal this payload already carries, and the journal's idempotency
+    /// means a second press under a new correlation is a SECOND hull rather
+    /// than a retry — so a resume without this field silently loses the one the
+    /// operator was told they placed, with no way to get it back that does not
+    /// also risk two.
+    ///
+    /// A `Vec` written in the runtime's own order, which is canonical grant
+    /// order: unlike the sorted fire set, the sequence here decides which
+    /// placement draws which uuid from the `WorldIdMint`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_gm_spawns: Vec<crate::gm_spawn::PendingGmSpawn>,
 }
 
 /// One scenario trigger's runtime state — the three fields a run *changes*.
@@ -2829,6 +2856,10 @@ fn capture_scenario(world: &World) -> Option<ScenarioState> {
         // payload — for every world that authors no GM-operable event, which is
         // every shipped world today.
         pending_gm_event_fires,
+        // The GM's armed placements (issue #1305). Empty — and so absent from
+        // the payload — for every world that authors no `[[gm_palette]]`, which
+        // is every shipped world today.
+        pending_gm_spawns: runtime.pending_gm_spawns.clone(),
     })
 }
 
@@ -5554,6 +5585,12 @@ fn restore_scenario(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
         // walk's rule: the freshly-loaded world has none, and the capture's set
         // is the complete authoritative statement of what is still owed a run.
         runtime.pending_gm_event_fires = stored.pending_gm_event_fires.iter().cloned().collect();
+
+        // The GM's armed placements (issue #1305), on the same rule and for the
+        // same reason: the freshly-loaded world has none, and the capture's
+        // queue is the complete statement of what is still owed — in the order
+        // that decides which draws which uuid.
+        runtime.pending_gm_spawns = stored.pending_gm_spawns.clone();
 
         runtime.entity_groups = stored
             .entity_groups

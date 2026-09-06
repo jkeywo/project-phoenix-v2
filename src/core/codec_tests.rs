@@ -6046,6 +6046,115 @@ fn gm_role_preset_encoder_returns_an_empty_array_for_a_world_with_none() {
     assert_eq!(encode_gm_role_presets(&[]), "[]");
 }
 
+// ── GM palette placement ingress (issue #1305) ───────────────────────────
+
+#[test]
+fn gm_placement_ingress_accepts_exactly_the_palette_shape() {
+    let request = decode_gm_action_request(
+        r#"{"operator_id":"gm-1","correlation":"place-1","action":"spawn_palette_entity",
+            "palette":"raider","variant":"blood_eagle",
+            "position_mm":[120500,0,-40250],"heading_mdeg":90000}"#,
+    )
+    .expect("a complete placement decodes");
+    assert_eq!(
+        request.action,
+        crate::gm_action::GmAction::SpawnPaletteEntity {
+            palette: "raider".to_string(),
+            variant: Some("blood_eagle".to_string()),
+            position_mm: [120_500, 0, -40_250],
+            heading_mdeg: 90_000,
+        }
+    );
+
+    // `variant: null` is the bare template, and keeps the field count exact.
+    let bare = decode_gm_action_request(
+        r#"{"operator_id":"gm-1","correlation":"place-2","action":"spawn_palette_entity",
+            "palette":"raider","variant":null,"position_mm":[0,0,0],"heading_mdeg":0}"#,
+    )
+    .expect("a variant-free placement decodes");
+    assert!(matches!(
+        bare.action,
+        crate::gm_action::GmAction::SpawnPaletteEntity { variant: None, .. }
+    ));
+}
+
+#[test]
+fn gm_placement_ingress_refuses_asset_paths_pixels_and_malformed_placements() {
+    // There is no template/asset field at all, and a smuggled one blows the
+    // exact field-count guard rather than being ignored.
+    assert!(decode_gm_action_request(
+        r#"{"operator_id":"gm-1","correlation":"p","action":"spawn_palette_entity",
+            "palette":"raider","variant":null,"position_mm":[0,0,0],"heading_mdeg":0,
+            "template_path":"assets/entities/alliance_battleship.toml"}"#
+    )
+    .is_none());
+    // A missing variant is a different shape, not a defaulted one.
+    assert!(decode_gm_action_request(
+        r#"{"operator_id":"gm-1","correlation":"p","action":"spawn_palette_entity",
+            "palette":"raider","position_mm":[0,0,0],"heading_mdeg":0}"#
+    )
+    .is_none());
+    // Screen pixels would arrive as a two-element pair; world space is three.
+    assert!(decode_gm_action_request(
+        r#"{"operator_id":"gm-1","correlation":"p","action":"spawn_palette_entity",
+            "palette":"raider","variant":null,"position_mm":[100,200],"heading_mdeg":0}"#
+    )
+    .is_none());
+    // Floats are not a placement: the wire carries fixed point.
+    assert!(decode_gm_action_request(
+        r#"{"operator_id":"gm-1","correlation":"p","action":"spawn_palette_entity",
+            "palette":"raider","variant":null,"position_mm":[1.5,0,0],"heading_mdeg":0}"#
+    )
+    .is_none());
+    // Out of range on either axis is refused before it can become a grant.
+    assert!(decode_gm_action_request(
+        r#"{"operator_id":"gm-1","correlation":"p","action":"spawn_palette_entity",
+            "palette":"raider","variant":null,"position_mm":[5000000001,0,0],"heading_mdeg":0}"#
+    )
+    .is_none());
+    assert!(decode_gm_action_request(
+        r#"{"operator_id":"gm-1","correlation":"p","action":"spawn_palette_entity",
+            "palette":"raider","variant":null,"position_mm":[0,0,0],"heading_mdeg":360001}"#
+    )
+    .is_none());
+    // An empty palette id names nothing.
+    assert!(decode_gm_action_request(
+        r#"{"operator_id":"gm-1","correlation":"p","action":"spawn_palette_entity",
+            "palette":"","variant":null,"position_mm":[0,0,0],"heading_mdeg":0}"#
+    )
+    .is_none());
+}
+
+#[test]
+fn gm_spawn_projection_encodes_palette_ids_and_labels_only() {
+    use crate::gm_spawn::{GmPaletteOption, GmPaletteVariantOption, GmSpawnProjection};
+
+    let payload = GmSpawnProjection {
+        palette: vec![GmPaletteOption {
+            id: "raider".to_string(),
+            label: "world.fs.gm_palette.raider.label".to_string(),
+            variants: vec![GmPaletteVariantOption {
+                id: "blood_eagle".to_string(),
+                label: "world.fs.gm_palette.raider.blood_eagle.label".to_string(),
+            }],
+        }],
+        results: Vec::new(),
+    };
+    let encoded = encode_gm_spawn_projection(&payload).expect("projection encodes");
+    let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(value["palette"][0]["id"], "raider");
+    assert_eq!(
+        value["palette"][0]["label"],
+        "world.fs.gm_palette.raider.label"
+    );
+    assert_eq!(value["palette"][0]["variants"][0]["id"], "blood_eagle");
+    assert_eq!(value["results"], serde_json::json!([]));
+    assert!(
+        !encoded.contains("assets/"),
+        "the browser is never handed a spawnable asset path: {encoded}"
+    );
+}
+
 #[test]
 fn start_grant_codec_enforces_exact_id_mode_and_attribution() {
     let automatic =

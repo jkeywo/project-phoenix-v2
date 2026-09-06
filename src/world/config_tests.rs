@@ -3978,3 +3978,121 @@ fn a_world_with_no_gm_role_preset_table_has_none() {
     let cfg = parse_world("[global]\nseed = 1\n").expect("must parse");
     assert!(cfg.gm_role_presets.is_empty());
 }
+
+#[test]
+fn parse_world_reads_the_gm_palette_table_in_authored_order() {
+    let toml = r#"
+[[gm_palette]]
+id = "raider"
+label = "world.fs.gm_palette.raider.label"
+template_path = "assets/entities/ship_harrow_destroyer.toml"
+name_prefix = "gm_raider"
+groups = ["hostiles"]
+
+[[gm_palette.variant]]
+id = "blood_eagle"
+label = "world.fs.gm_palette.raider.blood_eagle.label"
+overrides = { name = "world.fs.harrow.blood_eagle" }
+
+[[gm_palette]]
+id = "tender"
+label = "world.fs.gm_palette.tender.label"
+template_path = "assets/entities/alliance_tender.toml"
+"#;
+    let cfg = parse_world(toml).expect("gm_palette parses");
+    assert_eq!(cfg.gm_palette.len(), 2);
+    assert_eq!(cfg.gm_palette[0].id, "raider");
+    assert_eq!(cfg.gm_palette[0].name_stem(), "gm_raider");
+    assert_eq!(cfg.gm_palette[0].groups, vec!["hostiles".to_string()]);
+    assert_eq!(cfg.gm_palette[0].variants.len(), 1);
+    assert_eq!(cfg.gm_palette[0].variants[0].id, "blood_eagle");
+    assert!(cfg.gm_palette[0].variants[0].overrides.is_some());
+    assert_eq!(cfg.gm_palette[1].id, "tender");
+    // A palette entry with no `name_prefix` names its instances after its id.
+    assert_eq!(cfg.gm_palette[1].name_stem(), "tender");
+    assert!(cfg.gm_palette[1].variants.is_empty());
+
+    // Every palette template is queued for preload, so a Game Master's
+    // mid-mission placement never waits on a fetch that preload skipped.
+    let preloaded = entity_template_paths(&cfg, &[]);
+    assert!(preloaded.contains(&"assets/entities/ship_harrow_destroyer.toml".to_string()));
+    assert!(preloaded.contains(&"assets/entities/alliance_tender.toml".to_string()));
+}
+
+#[test]
+fn parse_world_refuses_a_duplicate_gm_palette_id_naming_both_entries() {
+    // A typed `SpawnPaletteEntity` names one id, and the apply-tick reducer
+    // resolves the FIRST match: a duplicate is two hulls competing for one
+    // canonical grant, which is a world-authoring bug, not a runtime choice.
+    let toml = r#"
+[[gm_palette]]
+id = "raider"
+label = "world.fs.gm_palette.raider.label"
+template_path = "assets/entities/a.toml"
+
+[[gm_palette]]
+id = "raider"
+label = "world.fs.gm_palette.raider.label"
+template_path = "assets/entities/b.toml"
+"#;
+    let err = parse_world(toml).expect_err("a duplicate gm_palette id must be refused");
+    assert!(err.contains("duplicate gm_palette id 'raider'"), "{err}");
+    assert!(err.contains("#0") && err.contains("#1"), "{err}");
+    // A wrapped `format!` literal without its `\` continuation bakes the source
+    // indentation into the middle of the sentence the author actually reads.
+    assert!(!err.contains("  "), "message is doubly spaced: {err}");
+}
+
+#[test]
+fn parse_world_refuses_a_palette_entry_missing_its_id_label_or_template() {
+    for (toml, expected) in [
+        (
+            "[[gm_palette]]\nid = \"\"\nlabel = \"l\"\ntemplate_path = \"a.toml\"\n",
+            "empty id",
+        ),
+        (
+            "[[gm_palette]]\nid = \"raider\"\nlabel = \"\"\ntemplate_path = \"a.toml\"\n",
+            "empty label",
+        ),
+        (
+            "[[gm_palette]]\nid = \"raider\"\nlabel = \"l\"\ntemplate_path = \"\"\n",
+            "empty template_path",
+        ),
+    ] {
+        let err = parse_world(toml).expect_err("an incomplete palette entry must be refused");
+        assert!(err.contains(expected), "expected {expected}, got {err}");
+        assert!(!err.contains("  "), "message is doubly spaced: {err}");
+    }
+}
+
+#[test]
+fn parse_world_refuses_a_duplicate_gm_palette_variant_id() {
+    let toml = r#"
+[[gm_palette]]
+id = "raider"
+label = "world.fs.gm_palette.raider.label"
+template_path = "assets/entities/a.toml"
+
+[[gm_palette.variant]]
+id = "blood_eagle"
+label = "world.fs.gm_palette.raider.blood_eagle.label"
+
+[[gm_palette.variant]]
+id = "blood_eagle"
+label = "world.fs.gm_palette.raider.blood_eagle.label"
+"#;
+    let err = parse_world(toml).expect_err("a duplicate variant id must be refused");
+    assert!(
+        err.contains("duplicate gm_palette variant id 'blood_eagle'"),
+        "{err}"
+    );
+    assert!(!err.contains("  "), "message is doubly spaced: {err}");
+}
+
+#[test]
+fn a_world_with_no_gm_palette_table_offers_nothing_placeable() {
+    // Every shipped world today. The Game Master's placement panel is empty
+    // rather than offering an implicit vocabulary of loaded asset paths.
+    let cfg = parse_world("[global]\nseed = 1\n").expect("world parses");
+    assert!(cfg.gm_palette.is_empty());
+}

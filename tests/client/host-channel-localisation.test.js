@@ -33,6 +33,7 @@ function mountDispatcher({ strings = { t, has, localiseTree } } = {}) {
     shake: record('shake'),
     gm_entity: record('gm_entity'),
     gm_activity: record('gm_activity'),
+    gm_spawn: record('gm_spawn'),
     gm_session: record('gm_session'),
   };
   const dispatch = createHostChannel({ handlers, strings });
@@ -178,6 +179,48 @@ describe('host channel localisation boundary', () => {
     expect(payloadFor(raw.seen, 'gm_entity')).toEqual(dto);
     expect(localiseSpy).not.toHaveBeenCalled();
     expect(t(dto.entities[0].name)).not.toBe(dto.entities[0].name);
+  });
+
+  it('delivers the gm_spawn palette DTO raw, ids and labels untouched', () => {
+    // The spawn projection (issue #1305) is the sharpest case for the raw-DTO
+    // rule: every authored `[[gm_palette]]` row REQUIRES a String Table label
+    // id, and the sibling `id` is exactly what the typed SpawnPaletteEntity
+    // action carries on the wire. Localising here would resolve the label a
+    // first time (so the panel's own t() would then miss and render
+    // `⟨[Support Tender]⟩`) and would rewrite any id that happened to equal a
+    // table key.
+    const localiseSpy = vi.fn(localiseTree);
+    const raw = mountDispatcher({ strings: { t, has, localiseTree: localiseSpy } });
+    const dto = {
+      palette: [{
+        id: 'world.smoke_gm_palette.tender.label',
+        label: 'world.smoke_gm_palette.tender.label',
+        variants: [{
+          id: 'world.smoke_gm_palette.tender.escort.label',
+          label: 'world.smoke_gm_palette.tender.escort.label',
+        }],
+      }],
+      results: [{
+        operator_id: 'gm-1',
+        correlation: 'spawn-1',
+        action_kind: 'WorldSpawn',
+        requested_active: true,
+        outcome: 'Applied',
+        tick: 12,
+        target: 'world.smoke_gm_palette.tender.label',
+      }],
+    };
+
+    expect(has(dto.palette[0].label)).toBe(true);
+    expect(has(dto.palette[0].variants[0].label)).toBe(true);
+    const wire = JSON.stringify(dto);
+    raw.dispatch('gm_spawn', wire);
+
+    expect(raw.seen.find(([name]) => name === 'gm_spawn')[1]).toBe(wire);
+    expect(payloadFor(raw.seen, 'gm_spawn')).toEqual(dto);
+    expect(localiseSpy).not.toHaveBeenCalled();
+    // The panel — not the dispatcher — is what turns the id into English.
+    expect(t(dto.palette[0].label)).not.toBe(dto.palette[0].label);
   });
 
   it('delivers gm_activity raw without mutating identities, weapons, or systems', () => {

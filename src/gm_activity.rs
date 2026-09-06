@@ -142,6 +142,13 @@ pub enum GmActivityAction {
         discarded_milli_hp: u32,
         destroyed: bool,
     },
+    /// One authored palette entry was placed on the map (issue #1305).
+    /// `palette` is the `[[gm_palette]]` id — never a template path, which the
+    /// browser is never handed. The crew see only the hull that arrived; the GM
+    /// feed names the operator who placed it.
+    SpawnPaletteEntity {
+        palette: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -382,6 +389,7 @@ fn action_key(action: &GmActivityAction) -> (u8, bool, &str) {
         // slot the pause row already uses, so damage and healing on one target
         // never collapse onto each other.
         GmActivityAction::ApplyDirectEffect { entity, heal, .. } => (3, *heal, entity.as_str()),
+        GmActivityAction::SpawnPaletteEntity { palette } => (4, false, palette.as_str()),
     }
 }
 
@@ -1089,6 +1097,8 @@ fn refusal_reason(reason: crate::gm_action::GmActionRefusalReason) -> &'static s
         Reason::UnknownGmEvent => "unknown-gm-event",
         Reason::UnknownEntity => "unknown-entity",
         Reason::TargetNotDamageable => "target-not-damageable",
+        Reason::UnknownGmPaletteEntry => "unknown-gm-palette-entry",
+        Reason::WorldUnavailable => "world-unavailable",
     }
 }
 
@@ -1210,6 +1220,16 @@ fn terminal_action_entries(
                                 // hole from making the whole absolute page
                                 // unparseable for every GM's feed.
                                 event: fact.target.clone()?,
+                            }
+                        }
+                        // Same rule as the event family: every producer of a
+                        // world-spawn fact attaches the palette id and
+                        // `validate_fleet_frame` refuses a replicated refusal
+                        // without one, so `None` drops this row rather than
+                        // publishing a placement of the empty id.
+                        crate::gm_action::GmActionKind::WorldSpawn => {
+                            GmActivityAction::SpawnPaletteEntity {
+                                palette: fact.target.clone()?,
                             }
                         }
                         _ => GmActivityAction::SetSessionPaused {

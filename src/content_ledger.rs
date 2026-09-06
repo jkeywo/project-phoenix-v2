@@ -351,11 +351,21 @@ pub fn eager_record_world_entities_with_scripts(
     // The `[[entity]]` roster AND every literal template the exact compiled
     // script set names (issue #1047). The fallback above preserves direct parsed-
     // config callers; production native boot supplies `CompiledScripts`.
+    // The `[[gm_palette]]` templates (issue #1305) join the same walk for the
+    // same reason the scripted literals do: a Game Master's spawn resolves an
+    // authored literal path mid-mission, so it belongs in the frozen content
+    // set and an edit to it must refuse a stale save. Nothing here is computed,
+    // so `note_uncovered_spawn` has nothing to say about a palette spawn.
+    let palette_paths = world_config
+        .gm_palette
+        .iter()
+        .map(|entry| entry.template_path.clone());
     let mut queue: Vec<String> = world_config
         .entities
         .iter()
         .map(|e| e.template_path.clone())
         .chain(scripted_paths)
+        .chain(palette_paths)
         .collect();
     let mut visited: HashSet<String> = HashSet::new();
 

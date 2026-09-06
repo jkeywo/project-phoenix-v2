@@ -1374,6 +1374,74 @@ fn an_armed_gm_fire_moves_the_digest_and_an_empty_set_leaves_it_alone() {
     );
 }
 
+/// An armed GM PLACEMENT is folded; the authored palette it names is not
+/// (issue #1305).
+///
+/// Same argument as the armed Fire above: the palette is authored content that
+/// `snapshot::content_digest` answers for, and what a RUN moves is which
+/// placements are owed. The queue's ORDER folds too, because it decides which
+/// placement draws which `WorldIdMint` id — two peers holding the same two
+/// placements the other way round are about to give each hull the other's
+/// identity.
+#[test]
+fn an_armed_gm_placement_moves_the_digest_and_its_order_is_part_of_it() {
+    let armed = |name: &str, x_mm: i64| crate::gm_spawn::PendingGmSpawn {
+        palette: "raider".into(),
+        variant: None,
+        name: name.into(),
+        position_mm: [x_mm, 0, 0],
+        heading_mdeg: 0,
+    };
+    let palette = || {
+        vec![crate::world::config::GmPaletteEntry {
+            id: "raider".into(),
+            label: "world.gm.palette.raider.label".into(),
+            template_path: "assets/entities/ship_harrow_destroyer.toml".into(),
+            ..Default::default()
+        }]
+    };
+
+    // A world that authors a palette but has nothing armed — and, crucially,
+    // authors no trigger at all — folds exactly what it folded before this
+    // issue, which is nothing.
+    let mut idle_world = scenario_world();
+    idle_world.resource_mut::<WorldContentRuntime>().gm_palette = palette();
+    let idle = world_digest(&idle_world);
+    assert_eq!(idle, world_digest(&scenario_world()));
+
+    let mut world = scenario_world();
+    world.resource_mut::<WorldContentRuntime>().gm_palette = palette();
+    world
+        .resource_mut::<WorldContentRuntime>()
+        .pending_gm_spawns = vec![armed("raider_1", 100_000)];
+    let one = world_digest(&world);
+    assert_ne!(
+        idle, one,
+        "an armed placement is authoritative pending work"
+    );
+
+    // WHERE it is placed is part of it.
+    let mut moved = scenario_world();
+    moved.resource_mut::<WorldContentRuntime>().gm_palette = palette();
+    moved
+        .resource_mut::<WorldContentRuntime>()
+        .pending_gm_spawns = vec![armed("raider_1", 100_001)];
+    assert_ne!(one, world_digest(&moved));
+
+    // And so is the ORDER two placements sit in.
+    let mut forward = scenario_world();
+    forward.resource_mut::<WorldContentRuntime>().gm_palette = palette();
+    forward
+        .resource_mut::<WorldContentRuntime>()
+        .pending_gm_spawns = vec![armed("raider_1", 100_000), armed("raider_2", 200_000)];
+    let mut backward = scenario_world();
+    backward.resource_mut::<WorldContentRuntime>().gm_palette = palette();
+    backward
+        .resource_mut::<WorldContentRuntime>()
+        .pending_gm_spawns = vec![armed("raider_2", 200_000), armed("raider_1", 100_000)];
+    assert_ne!(world_digest(&forward), world_digest(&backward));
+}
+
 /// The cooldown stamp folds as present-or-absent and never by value: a restore
 /// reconstructs the mission-clock anchor by `f32` subtraction, so its readings
 /// are not bit-exact across a resume. See `fold_scenario_triggers`.

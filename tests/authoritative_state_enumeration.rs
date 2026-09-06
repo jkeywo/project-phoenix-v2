@@ -595,6 +595,21 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // side is declared `Folded`; `CommsInboxRes` was, briefly, and the
     // correction is the point of naming it here.
     //
+    // Issue #1305's GM SPAWN PALETTE adds two more FIELDS to
+    // `WorldContentRuntime` and no registration:
+    //
+    //   * `gm_palette` — the scenario's authored `[[gm_palette]]` table, copied
+    //     from `WorldConfig` at load. Authored CONTENT, not run state: it is
+    //     answered for by `snapshot::content_digest` exactly as a trigger's
+    //     authored condition is, so it is neither captured nor folded, and a
+    //     resumed world rebuilds it by replaying the same load.
+    //   * `pending_gm_spawns` — placements that crossed their PreUpdate apply
+    //     boundary and are waiting for `tick_trigger_pipeline` to spawn them.
+    //     Authoritative and genuinely cross-tick (a paused session reaches no
+    //     fixed step), so it IS captured in `ScenarioState` and folded by
+    //     `fold_scenario_triggers`, in its own order — which decides which
+    //     placement draws which `WorldIdMint` id — beside the armed GM Fires.
+    //
     // What keeps both types below on THIS list, by that rule: `WorldContentRuntime`
     // still carries `pending_delayed_actions` (authoritative, and deliberately
     // out of both the payload and the fold — see `fold_scenario_records`),

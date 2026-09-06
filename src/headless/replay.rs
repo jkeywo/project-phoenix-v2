@@ -1371,6 +1371,91 @@ mod tests {
         );
     }
 
+    /// A placement replays through the SAME canonical lane (issue #1305): the
+    /// artifact carries the grant, `apply_due_actions` revalidates it against
+    /// the replayed world's own palette, and the replayed peer arms exactly
+    /// what the recorded one armed — same name, same coordinates, same order.
+    #[test]
+    fn a_gm_placement_replays_through_the_canonical_journal() {
+        let mut source = GmActionJournal::default();
+        source
+            .insert(crate::gm_action::GmActionGrant {
+                from: HostSlot(1),
+                sequenced_by: HostSlot(1),
+                operator_id: "gm-one".into(),
+                correlation: crate::gm_action::GmActionId::new("replay-place-1").unwrap(),
+                recovery_generation: 0,
+                apply_tick: 0,
+                order: crate::gm_action::GmActionOrder::new(HostSlot(1), 1),
+                action: crate::gm_action::GmAction::SpawnPaletteEntity {
+                    palette: "raider".into(),
+                    variant: None,
+                    position_mm: [120_000, 0, -40_000],
+                    heading_mdeg: 90_000,
+                },
+            })
+            .unwrap();
+        // The recording APPLIED the placement, which is the prefix a replay
+        // adopts.
+        source.restore_applied_frontier(1).unwrap();
+        validate_gm_action_journal(&source).expect("a placement journal is canonical");
+
+        let runtime = crate::world::server::WorldContentRuntime {
+            gm_palette: vec![crate::world::config::GmPaletteEntry {
+                id: "raider".into(),
+                label: "world.gm.palette.raider.label".into(),
+                template_path: "assets/entities/ship_harrow_destroyer.toml".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let mut app = App::new();
+        app.insert_resource(SimTick(0));
+        app.insert_resource(GmActionJournal::default());
+        app.insert_resource(crate::gm_action::GmActionLog::default());
+        app.insert_resource(crate::gm_action::SimulationPaused(false));
+        app.insert_resource(runtime);
+        app.add_systems(PreUpdate, crate::gm_action::apply_due_actions);
+        seed_replay_initial_state(&mut app, &source);
+
+        let mut sim = PhoenixSim {
+            app,
+            max_frames: 1,
+            frames: 0,
+            expected_commands: 0,
+            applied: 0,
+            submitted: 0,
+            tail: true,
+            gm_actions: source,
+            final_tick: Some(0),
+            ledger: DigestLedger::new(0),
+        };
+        sim.step();
+
+        let entry = &sim
+            .app
+            .world()
+            .resource::<crate::gm_action::GmActionLog>()
+            .entries()[0];
+        assert_eq!(entry.outcome, crate::gm_action::GmActionOutcome::Applied);
+        assert_eq!(entry.target.as_deref(), Some("raider"));
+        assert_eq!(
+            sim.app
+                .world()
+                .resource::<crate::world::server::WorldContentRuntime>()
+                .pending_gm_spawns,
+            vec![crate::gm_spawn::PendingGmSpawn {
+                palette: "raider".into(),
+                variant: None,
+                name: "raider_1".into(),
+                position_mm: [120_000, 0, -40_000],
+                heading_mdeg: 90_000,
+            }],
+            "the replayed peer arms exactly what the recorded one armed"
+        );
+    }
+
     #[test]
     fn an_applied_gm_frontier_cannot_cross_the_recorded_final_tick() {
         let mut captured = artifact();

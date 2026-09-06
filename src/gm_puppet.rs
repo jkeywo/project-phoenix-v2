@@ -248,7 +248,8 @@ pub fn validate_station_action(
         // say about it and defers to its own reducer.
         GmAction::SetSessionPaused { .. }
         | GmAction::FireGmEvent { .. }
-        | GmAction::ApplyDirectEffect { .. } => return Ok(()),
+        | GmAction::ApplyDirectEffect { .. }
+        | GmAction::SpawnPaletteEntity { .. } => return Ok(()),
         GmAction::SetStationPuppet { station, .. }
         | GmAction::IssueStationCommand { station, .. } => station,
     };
@@ -295,7 +296,8 @@ pub fn validate_station_action(
         }
         GmAction::SetSessionPaused { .. }
         | GmAction::FireGmEvent { .. }
-        | GmAction::ApplyDirectEffect { .. } => unreachable!(),
+        | GmAction::ApplyDirectEffect { .. }
+        | GmAction::SpawnPaletteEntity { .. } => unreachable!(),
     }
 }
 

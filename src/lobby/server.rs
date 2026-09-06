@@ -1,3 +1,4 @@
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use std::collections::VecDeque;
 
@@ -1131,6 +1132,24 @@ pub fn handle_set_name_system(
     }
 }
 
+/// The GM resources `handle_return_to_lobby_system` clears on a run boundary,
+/// bundled to stay within Bevy's supported function-system parameter arity:
+/// the placement projection (issue #1305) landed beside the direct-effect
+/// queue (issue #1310) on the same reset list and together they tipped the
+/// plain parameter list over the limit.
+#[derive(SystemParam)]
+pub struct GmLobbyReset<'w> {
+    journal: Option<ResMut<'w, crate::gm_action::GmActionJournal>>,
+    log: Option<ResMut<'w, crate::gm_action::GmActionLog>>,
+    results: Option<ResMut<'w, crate::gm_action::LocalGmActionRefusals>>,
+    projection: Option<ResMut<'w, crate::gm_action::LastGmSessionProjection>>,
+    mission_projection: Option<ResMut<'w, crate::gm_event::LastGmMissionProjection>>,
+    spawn_projection: Option<ResMut<'w, crate::gm_spawn::LastGmSpawnProjection>>,
+    content: Option<ResMut<'w, crate::world::server::WorldContentRuntime>>,
+    direct_effects: Option<ResMut<'w, crate::gm_effect::PendingGmDirectEffects>>,
+    paused: Option<ResMut<'w, crate::gm_action::SimulationPaused>>,
+}
+
 /// Per-variant system for `ClientMessage::ReturnToLobby` (issue #734). Gated on
 /// GameOver for a connected participant — the game-over screen's "return to
 /// lobby" button — and additionally on `InProgress` for the host page's own
@@ -1143,14 +1162,7 @@ pub fn handle_return_to_lobby_system(
     mut sessions: ResMut<Sessions>,
     state: Res<State<GamePhase>>,
     mut results: LobbyResultApplier,
-    mut gm_journal: Option<ResMut<crate::gm_action::GmActionJournal>>,
-    mut gm_log: Option<ResMut<crate::gm_action::GmActionLog>>,
-    mut gm_results: Option<ResMut<crate::gm_action::LocalGmActionRefusals>>,
-    mut gm_projection: Option<ResMut<crate::gm_action::LastGmSessionProjection>>,
-    mut gm_mission_projection: Option<ResMut<crate::gm_event::LastGmMissionProjection>>,
-    mut content: Option<ResMut<crate::world::server::WorldContentRuntime>>,
-    mut gm_direct_effects: Option<ResMut<crate::gm_effect::PendingGmDirectEffects>>,
-    mut paused: Option<ResMut<crate::gm_action::SimulationPaused>>,
+    mut gm: GmLobbyReset,
     mut virtual_time: Option<ResMut<Time<bevy::time::Virtual>>>,
 ) {
     let phase = state.get().clone();
@@ -1170,16 +1182,16 @@ pub fn handle_return_to_lobby_system(
         // due Pause must not reassert itself in `apply_due_actions`, and a GM
         // request queued later in this frame is either cleared here or refused
         // as WrongPhase on the next frame. The technical fleet remains intact.
-        if let Some(journal) = gm_journal.as_deref_mut() {
+        if let Some(journal) = gm.journal.as_deref_mut() {
             *journal = Default::default();
         }
-        if let Some(log) = gm_log.as_deref_mut() {
+        if let Some(log) = gm.log.as_deref_mut() {
             *log = Default::default();
         }
-        if let Some(results) = gm_results.as_deref_mut() {
+        if let Some(results) = gm.results.as_deref_mut() {
             *results = Default::default();
         }
-        if let Some(projection) = gm_projection.as_deref_mut() {
+        if let Some(projection) = gm.projection.as_deref_mut() {
             *projection = Default::default();
         }
         // The mission twin's cache has to go with it. `publish_mission_projection`
@@ -1189,7 +1201,14 @@ pub fn handle_return_to_lobby_system(
         // byte-identical to round one's, so a stale cache would leave the GM
         // page's reset-to-empty mission panel with nothing to repopulate it for
         // the whole of the next mission.
-        if let Some(projection) = gm_mission_projection.as_deref_mut() {
+        if let Some(projection) = gm.mission_projection.as_deref_mut() {
+            *projection = Default::default();
+        }
+        // And the placement twin's, for the same reason: the authored palette
+        // is Startup-built, so round two's projection is byte-identical to
+        // round one's and a stale cache would leave the reset panel empty for
+        // the whole of the next mission (issue #1305).
+        if let Some(projection) = gm.spawn_projection.as_deref_mut() {
             *projection = Default::default();
         }
         // The arm itself, not just the cache of it: an armed Fire is a GM
@@ -1202,17 +1221,22 @@ pub fn handle_return_to_lobby_system(
         // behind it — while the panel showed it armed against an empty feed.
         // `as_deref_mut` only in here, so a frame with no return-to-lobby does
         // not mark `WorldContentRuntime` changed.
-        if let Some(content) = content.as_deref_mut() {
+        if let Some(content) = gm.content.as_deref_mut() {
             content.pending_gm_event_fires.clear();
+            // An armed placement is the same kind of fact and goes with it
+            // (issue #1305): the grant that authorised it was cleared above, so
+            // performing it in the next run would put a hull on the map with
+            // nobody attributed and no result feed to explain it.
+            content.pending_gm_spawns.clear();
         }
         // A resolved directed effect is the same kind of pending effect and
         // goes at the same boundary (issue #1310): the grant that authorised it
         // was cleared with the journal above, so an arm that outlived the run
         // would land attributed damage in the NEXT one with nobody behind it.
-        if let Some(effects) = gm_direct_effects.as_deref_mut() {
+        if let Some(effects) = gm.direct_effects.as_deref_mut() {
             *effects = Default::default();
         }
-        if let Some(paused) = paused.as_deref_mut() {
+        if let Some(paused) = gm.paused.as_deref_mut() {
             paused.0 = false;
         }
         // Return-to-lobby is frame-driven specifically so a paused fixed clock

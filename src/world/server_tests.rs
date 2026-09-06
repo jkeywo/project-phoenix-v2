@@ -1972,6 +1972,183 @@ fn a_gm_fire_of_an_automatic_event_is_recorded_under_its_authored_id() {
     );
 }
 
+// ── GM palette placement through the ordinary spawn path (issue #1305) ────
+
+/// One `[[gm_palette]]` row over a real shipped hull, so the spawn exercises
+/// the ordinary template loader rather than a fixture that could not spawn.
+fn gm_palette_fixture() -> Vec<crate::world::config::GmPaletteEntry> {
+    vec![crate::world::config::GmPaletteEntry {
+        id: "raider".into(),
+        label: "world.gm.palette.raider.label".into(),
+        template_path: "assets/entities/ship_harrow_destroyer.toml".into(),
+        name_prefix: Some("gm_raider".into()),
+        groups: vec!["hostiles".into()],
+        variants: Vec::new(),
+    }]
+}
+
+/// The Fire harness with a palette instead of an event table.
+fn gm_palette_app() -> App {
+    let mut app = ai_trigger_test_app();
+    app.add_message::<crate::core::balance::BalanceEvent>()
+        .insert_resource(crate::sim_tick::SimTick(1))
+        .insert_resource(crate::gm_action::SimulationPaused(false))
+        .init_resource::<crate::gm_action::GmActionJournal>()
+        .init_resource::<crate::gm_action::GmActionLog>()
+        .add_systems(
+            Update,
+            crate::gm_action::apply_due_actions.before(collect_world_events),
+        );
+    app.world_mut()
+        .resource_mut::<WorldContentRuntime>()
+        .gm_palette = gm_palette_fixture();
+    app
+}
+
+/// Grant one placement at the app's current tick and step once.
+fn place_gm_entity(
+    app: &mut App,
+    correlation: &str,
+    palette: &str,
+    position_mm: [i64; 3],
+    heading_mdeg: i32,
+) {
+    let tick = app.world().resource::<crate::sim_tick::SimTick>().0;
+    let sequence = app
+        .world()
+        .resource::<crate::gm_action::GmActionJournal>()
+        .next_sequence();
+    let grant = crate::gm_action::GmActionGrant {
+        from: crate::command_admission::log::HostSlot(1),
+        sequenced_by: crate::command_admission::log::HostSlot(1),
+        operator_id: "gm-1".into(),
+        correlation: crate::gm_action::GmActionId::new(correlation).unwrap(),
+        recovery_generation: 0,
+        apply_tick: tick,
+        order: crate::gm_action::GmActionOrder::new(
+            crate::command_admission::log::HostSlot(1),
+            sequence,
+        ),
+        action: crate::gm_action::GmAction::SpawnPaletteEntity {
+            palette: palette.into(),
+            variant: None,
+            position_mm,
+            heading_mdeg,
+        },
+    };
+    app.world_mut()
+        .resource_mut::<crate::gm_action::GmActionJournal>()
+        .insert(grant)
+        .expect("canonical grant");
+    app.update();
+}
+
+/// Issue #1305, the whole vertical slice in one step: a typed GM placement
+/// crosses its canonical apply boundary, the ORDINARY trigger pipeline performs
+/// the ORDINARY `spawn_entity` dispatch, and the hull exists at the resolved
+/// world position with its name and group registered exactly as a scripted
+/// spawn's would be.
+#[test]
+fn a_gm_placement_spawns_through_the_ordinary_scenario_path() {
+    let mut app = gm_palette_app();
+    place_gm_entity(&mut app, "place-1", "raider", [120_000, 0, -40_000], 90_000);
+
+    assert_eq!(
+        gm_outcomes(&app),
+        vec![crate::gm_action::GmActionOutcome::Applied]
+    );
+    {
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert!(
+            runtime.pending_gm_spawns.is_empty(),
+            "the arm is consumed by the spawn it caused"
+        );
+        let uuid = runtime
+            .name_to_uuid
+            .get("gm_raider_1")
+            .expect("a GM placement registers its scenario name like any other spawn");
+        assert!(!uuid.is_empty());
+        assert!(
+            runtime
+                .entity_groups
+                .get("hostiles")
+                .is_some_and(|members| members.contains("gm_raider_1")),
+            "the palette entry's authored groups ride along, so on_all_destroyed sees it"
+        );
+    }
+
+    let mut query = app
+        .world_mut()
+        .query::<(&Transform, &crate::entities::spawner::EntityUuid)>();
+    let placed = query
+        .iter(app.world())
+        .find(|(_, uuid)| {
+            app.world()
+                .resource::<WorldContentRuntime>()
+                .name_to_uuid
+                .get("gm_raider_1")
+                == Some(&uuid.0)
+        })
+        .map(|(transform, _)| *transform)
+        .expect("the placed hull exists in the world");
+    assert!((placed.translation.x - 120.0).abs() < 1e-3);
+    assert!((placed.translation.z + 40.0).abs() < 1e-3);
+}
+
+/// The dragged heading survives the spawn. A hull's pose is `ShipPhysics`, not
+/// its `Transform`, and the spawner seeds `yaw: 0.0` — so without the seed the
+/// GM's heading would live exactly until the first fixed step.
+#[test]
+fn a_placed_hull_faces_the_heading_the_gesture_resolved() {
+    let mut app = gm_palette_app();
+    place_gm_entity(&mut app, "place-1", "raider", [0, 0, 0], 90_000);
+
+    let uuid = app
+        .world()
+        .resource::<WorldContentRuntime>()
+        .name_to_uuid
+        .get("gm_raider_1")
+        .cloned()
+        .expect("the placement registered its name");
+    let mut query = app.world_mut().query::<(
+        &crate::ship::state::ShipPhysics,
+        &crate::entities::spawner::EntityUuid,
+    )>();
+    let physics = query
+        .iter(app.world())
+        .find(|(_, id)| id.0 == uuid)
+        .map(|(physics, _)| physics.yaw)
+        .expect("a placed ship carries the pose the sim actually reads");
+    assert!(
+        (physics - std::f32::consts::FRAC_PI_2).abs() < 1e-4,
+        "90 degrees in the sim's own bearing convention, got {physics}"
+    );
+}
+
+/// An armed placement whose palette entry has gone — its layer unloaded between
+/// the apply tick and the drain — is dropped rather than retained. Unlike a
+/// held Fire, nothing about a placement can become possible later.
+#[test]
+fn an_armed_placement_whose_palette_entry_vanished_is_dropped() {
+    let mut app = gm_palette_app();
+    {
+        let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+        runtime
+            .pending_gm_spawns
+            .push(crate::gm_spawn::PendingGmSpawn {
+                palette: "retired".into(),
+                variant: None,
+                name: "retired_1".into(),
+                position_mm: [0, 0, 0],
+                heading_mdeg: 0,
+            });
+    }
+    app.update();
+
+    let runtime = app.world().resource::<WorldContentRuntime>();
+    assert!(runtime.pending_gm_spawns.is_empty());
+    assert!(!runtime.name_to_uuid.contains_key("retired_1"));
+}
 #[test]
 fn raw_root_sibling_spawn_composition_error_blocks_script_runtime() {
     const WORLD_PATH: &str = "tests/fixtures/root_sibling_composition_rejected.toml";

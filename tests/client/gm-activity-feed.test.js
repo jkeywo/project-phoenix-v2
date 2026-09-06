@@ -146,6 +146,22 @@ function applyDirectEffect(data = {}, action = {}) {
   }, { ships: [], links: [] });
 }
 
+/** One palette placement (issue #1305), the fifth action family. */
+function spawnPaletteEntity(data = {}, action = {}) {
+  return entry('gm_action', {
+    type: 'gm_action',
+    data: {
+      operator: { id: 'gm-alpha', name: 'Morgan' },
+      correlation: 'place-1',
+      action: { type: 'spawn_palette_entity', palette: 'raider', ...action },
+      outcome: 'applied',
+      reason: null,
+      order: { sequence: 7, origin: 1 },
+      ...data,
+    },
+  }, { ships: [], links: [] });
+}
+
 function allCategories() {
   return [
     damage(),
@@ -286,6 +302,19 @@ describe('GM activity feed pure adapter', () => {
       expect(parseGmActivityFeed(payload([applyDirectEffect({}, broken)]))).toBeUndefined();
     }
   });
+
+  it('accepts a palette placement and rejects a nameless one', () => {
+    const parsed = parseGmActivityFeed(payload([spawnPaletteEntity()]));
+    expect(parsed.entries).toHaveLength(1);
+    expect(parsed.entries[0].detail.data.action)
+      .toEqual({ type: 'spawn_palette_entity', palette: 'raider' });
+    // Same payload-wide strictness the Fire family gets, and the same reason:
+    // the browser carries the exact action vocabulary Rust publishes.
+    expect(parseGmActivityFeed(payload([spawnPaletteEntity({}, { palette: '' })])))
+      .toBeUndefined();
+    // And no template path can ride in: the placement row names an id only.
+    expect(parsed.entries[0].detail.data.action).not.toHaveProperty('template_path');
+  });
 });
 
 describe('GM activity feed presentation and selection links', () => {
@@ -357,6 +386,30 @@ describe('GM activity feed presentation and selection links', () => {
     }
     expect(realStrings.get('server.gm.activity.action.apply_direct_damage')).toContain('{entity}');
     expect(realStrings.get('server.gm.activity.action.apply_direct_heal')).toContain('{amount}');
+  });
+
+  it('names the placed palette entry and its refusal reason from the String Table', () => {
+    const refused = spawnPaletteEntity({
+      correlation: 'place-2',
+      outcome: 'refused',
+      reason: 'unknown-gm-palette-entry',
+    });
+    expect(harness.feed.update(payload([spawnPaletteEntity(), refused], 16))).toBe(true);
+    const rows = [...document.querySelectorAll('[data-category="gm_action"]')];
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent)
+      .toContain('server.gm.activity.action.spawn_palette_entity:raider');
+    expect(rows[0].textContent).toContain('server.gm.activity.action_outcome.applied');
+    expect(rows[1].textContent)
+      .toContain('server.gm.activity.action_reason.unknown-gm-palette-entry');
+    // A placement must never borrow the pause family's sentence.
+    for (const row of rows) {
+      expect(row.textContent).not.toContain('server.gm.activity.action.resume');
+    }
+    expect(realStrings.get('server.gm.activity.action.spawn_palette_entity'))
+      .toContain('{palette}');
+    expect(realStrings.has('server.gm.activity.action_reason.unknown-gm-palette-entry'))
+      .toBe(true);
   });
 
   it('drives category plus ship filters and clear resets both', () => {

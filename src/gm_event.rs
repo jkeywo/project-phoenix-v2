@@ -19,7 +19,13 @@
 //!   ORDINARY condition-bearing trigger, which keeps its automatic condition and
 //!   also becomes GM-operable (issue #1302).
 //!
-//! #1303 and #1304 turn on Pause and Skip. Nothing that DECIDES anything about
+//! * `.pauseable()` adds the persistent Pause lever to a control set either
+//!   surface declared (issue #1303). Which events are paused RIGHT NOW is
+//!   per-run authoritative state on
+//!   [`WorldContentRuntime::paused_gm_events`](crate::world::server::WorldContentRuntime::paused_gm_events),
+//!   not part of the control set: the set says which levers exist.
+//!
+//! #1304 turns on Skip. Nothing that DECIDES anything about
 //! a Fire reads `Trigger::condition` — not this module, not the `FireGmEvent`
 //! admission, not the apply-tick revalidation, and not the eligibility gates of
 //! the trigger pipeline's manual pass
@@ -107,8 +113,13 @@ pub struct GmMissionEvent {
     pub label: String,
     /// Whether the Fire lever is declared.
     pub fire: bool,
-    /// Whether the Pause lever is declared (issue #1303).
+    /// Whether the Pause lever is DECLARED (issue #1303) — authored config,
+    /// fixed for the life of the trigger.
     pub pause: bool,
+    /// Whether the event is paused RIGHT NOW (issue #1303) — per-run state a
+    /// GM toggles. Always false for an event that declares no Pause lever,
+    /// because nothing can put it in the set.
+    pub paused: bool,
     /// Whether the Skip lever is declared (issue #1304).
     pub skip: bool,
     /// Whether the event is repeatable. A one-shot event is spent after one
@@ -139,6 +150,7 @@ pub struct GmMissionProjection {
 pub fn controllable_events(
     states: &[TriggerState],
     pending_fires: &std::collections::BTreeSet<String>,
+    paused_events: &std::collections::BTreeSet<String>,
 ) -> Vec<GmMissionEvent> {
     states
         .iter()
@@ -146,6 +158,7 @@ pub fn controllable_events(
             let controls = state.trigger.gm_controls.as_ref()?;
             let id = qualified_event_id(state.origin_layer.as_deref(), &controls.id);
             let armed = pending_fires.contains(&id);
+            let paused = paused_events.contains(&id);
             Some(GmMissionEvent {
                 id,
                 label: controls.label.clone(),
@@ -155,6 +168,7 @@ pub fn controllable_events(
                 repeatable: state.trigger.repeat,
                 spent: state.fired && !state.trigger.repeat,
                 armed,
+                paused,
             })
         })
         .collect()
@@ -182,6 +196,26 @@ pub fn fireable_index(states: &[TriggerState], qualified: &str) -> Option<usize>
         .then_some(index)
 }
 
+/// Whether the named event exists AND declares the Pause lever (issue #1303).
+///
+/// [`fireable_index`]'s twin, and revalidated at the same moment and for the
+/// same reason: an event whose layer unloaded between the request and the apply
+/// tick is not pausable, and every peer must say so at exactly the same tick.
+/// Note what it does NOT consult — the once/repeat latch. A spent one-shot can
+/// still be paused and unpaused, because Pause is a statement about whether the
+/// condition is evaluated at all and a spent trigger is simply one whose
+/// evaluation would decline anyway; making it a refusal would give the GM a
+/// toggle that silently stops answering.
+pub fn pausable_index(states: &[TriggerState], qualified: &str) -> Option<usize> {
+    let index = find_event(states, qualified)?;
+    states[index]
+        .trigger
+        .gm_controls
+        .as_ref()
+        .is_some_and(GmEventControls::declares_pause)
+        .then_some(index)
+}
+
 /// Page-local last-published mission projection. Presentation only: the
 /// authoritative facts are the trigger table and the GM action journal.
 #[derive(Resource, Clone, Debug, Default)]
@@ -191,11 +225,12 @@ pub struct LastGmMissionProjection(Option<GmMissionProjection>);
 pub fn projection(
     states: &[TriggerState],
     pending_fires: &std::collections::BTreeSet<String>,
+    paused_events: &std::collections::BTreeSet<String>,
     log: &crate::gm_action::GmActionLog,
     refusals: &crate::gm_action::LocalGmActionRefusals,
 ) -> GmMissionProjection {
     GmMissionProjection {
-        events: controllable_events(states, pending_fires),
+        events: controllable_events(states, pending_fires, paused_events),
         results: crate::gm_action::projected_results(
             crate::gm_action::GmActionKind::EventControl,
             log,
@@ -218,15 +253,16 @@ pub fn publish_mission_projection(
     mut writer: MessageWriter<crate::console_bridge::GmMissionChanged>,
 ) {
     let empty_states: Vec<TriggerState> = Vec::new();
-    let empty_fires = std::collections::BTreeSet::new();
-    let (states, fires) = match runtime.as_deref() {
+    let empty_ids = std::collections::BTreeSet::new();
+    let (states, fires, paused) = match runtime.as_deref() {
         Some(runtime) => (
             runtime.trigger_states.as_slice(),
             &runtime.pending_gm_event_fires,
+            &runtime.paused_gm_events,
         ),
-        None => (empty_states.as_slice(), &empty_fires),
+        None => (empty_states.as_slice(), &empty_ids, &empty_ids),
     };
-    let next = projection(states, fires, &log, &refusals);
+    let next = projection(states, fires, paused, &log, &refusals);
     if last.0.as_ref() == Some(&next) {
         return;
     }
@@ -262,7 +298,7 @@ mod tests {
             state("breach", None, false, false),
             state("breach", Some("assets/worlds/layer.toml"), false, false),
         ];
-        let events = controllable_events(&states, &Default::default());
+        let events = controllable_events(&states, &Default::default(), &Default::default());
         assert_eq!(
             events.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
             vec!["base-world::breach", "assets/worlds/layer.toml::breach"],
@@ -280,7 +316,7 @@ mod tests {
         let mut plain = state("breach", None, false, false);
         plain.trigger.gm_controls = None;
         let states = vec![plain];
-        assert!(controllable_events(&states, &Default::default()).is_empty());
+        assert!(controllable_events(&states, &Default::default(), &Default::default()).is_empty());
         assert_eq!(find_event(&states, "base-world::breach"), None);
         assert_eq!(fireable_index(&states, "base-world::breach"), None);
     }
@@ -290,7 +326,10 @@ mod tests {
         let mut listed = state("breach", None, false, false);
         listed.trigger.gm_controls.as_mut().expect("controls").fire = false;
         let states = vec![listed];
-        assert_eq!(controllable_events(&states, &Default::default()).len(), 1);
+        assert_eq!(
+            controllable_events(&states, &Default::default(), &Default::default()).len(),
+            1
+        );
         assert_eq!(find_event(&states, "base-world::breach"), Some(0));
         assert_eq!(fireable_index(&states, "base-world::breach"), None);
     }
@@ -301,7 +340,7 @@ mod tests {
             state("once", None, false, true),
             state("again", None, true, true),
         ];
-        let events = controllable_events(&states, &Default::default());
+        let events = controllable_events(&states, &Default::default(), &Default::default());
         assert!(events[0].spent && !events[0].repeatable);
         assert!(!events[1].spent && events[1].repeatable);
     }
@@ -324,7 +363,7 @@ mod tests {
         };
         let states = vec![automatic("evac", true), automatic("silent", false)];
 
-        let events = controllable_events(&states, &Default::default());
+        let events = controllable_events(&states, &Default::default(), &Default::default());
         assert_eq!(
             events.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
             vec!["base-world::evac", "base-world::silent"],
@@ -344,14 +383,76 @@ mod tests {
         // every trigger every shipped world already authors.
         let mut plain = automatic("evac", true);
         plain.trigger.gm_controls = None;
-        assert!(controllable_events(&[plain], &Default::default()).is_empty());
+        assert!(controllable_events(&[plain], &Default::default(), &Default::default()).is_empty());
+    }
+
+    /// Issue #1303: the Pause LEVER and the paused STATE are two facts, and
+    /// the projection reports both. A control set that does not declare Pause
+    /// is not pausable however the run has gone, which is the absent-control
+    /// refusal expressed at its source.
+    #[test]
+    fn only_a_declared_pause_lever_is_pausable_and_paused_is_a_separate_fact() {
+        let mut declared = state("breach", None, false, false);
+        declared
+            .trigger
+            .gm_controls
+            .as_mut()
+            .expect("controls")
+            .pause = true;
+        // Fire and Pause are independent levers, so an event may declare Pause
+        // alone: `pausable_index` must not reach for `declares_fire`.
+        let mut pause_only = state("quiet", None, false, false);
+        {
+            let controls = pause_only.trigger.gm_controls.as_mut().expect("controls");
+            controls.fire = false;
+            controls.pause = true;
+        }
+        let states = vec![declared, pause_only, state("sweep", None, true, false)];
+
+        assert_eq!(pausable_index(&states, "base-world::breach"), Some(0));
+        assert_eq!(pausable_index(&states, "base-world::quiet"), Some(1));
+        assert_eq!(
+            pausable_index(&states, "base-world::sweep"),
+            None,
+            "an event that declares no Pause lever exposes no toggle"
+        );
+        assert_eq!(pausable_index(&states, "base-world::missing"), None);
+        assert_eq!(
+            fireable_index(&states, "base-world::quiet"),
+            None,
+            "and declaring Pause does not quietly add Fire"
+        );
+
+        let paused = std::collections::BTreeSet::from(["base-world::breach".to_string()]);
+        let events = controllable_events(&states, &Default::default(), &paused);
+        assert_eq!(
+            events
+                .iter()
+                .map(|e| (e.pause, e.paused))
+                .collect::<Vec<_>>(),
+            vec![(true, true), (true, false), (false, false)],
+            "the lever is authored; the engaged state belongs to the run"
+        );
+    }
+
+    /// A spent one-shot is still pausable (issue #1303). Pause decides whether
+    /// the condition is EVALUATED, and a GM offered a toggle that silently
+    /// stopped answering once the event had fired would have no way to tell
+    /// that apart from a broken control.
+    #[test]
+    fn a_spent_one_shot_event_is_still_pausable() {
+        let mut spent = state("breach", None, false, true);
+        spent.trigger.gm_controls.as_mut().expect("controls").pause = true;
+        let states = vec![spent];
+        assert!(controllable_events(&states, &Default::default(), &Default::default())[0].spent);
+        assert_eq!(pausable_index(&states, "base-world::breach"), Some(0));
     }
 
     #[test]
     fn an_armed_fire_is_projected_until_the_pipeline_runs_it() {
         let states = vec![state("breach", None, false, false)];
         let pending = std::collections::BTreeSet::from(["base-world::breach".to_string()]);
-        assert!(controllable_events(&states, &pending)[0].armed);
-        assert!(!controllable_events(&states, &Default::default())[0].armed);
+        assert!(controllable_events(&states, &pending, &Default::default())[0].armed);
+        assert!(!controllable_events(&states, &Default::default(), &Default::default())[0].armed);
     }
 }

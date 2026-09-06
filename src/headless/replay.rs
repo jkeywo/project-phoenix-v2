@@ -1456,6 +1456,131 @@ mod tests {
         );
     }
 
+    /// Issue #1303: a Pause replays through the same canonical journal, with no
+    /// bespoke replay path of its own.
+    ///
+    /// `ReplayGmSeed` seeds the whole journal and `apply_due_actions` is the one
+    /// production reducer both the live host and the replay run, so the only
+    /// thing worth pinning is that the reducer reaches the same authoritative
+    /// state the recording did — and that a Resume recorded after it lands too,
+    /// because the two together are what a mid-run pause looks like on the wire.
+    #[test]
+    fn a_paused_gm_event_replays_through_the_canonical_journal() {
+        let event = "base-world::breach_alarm";
+        let mut source = GmActionJournal::default();
+        for (sequence, correlation, active) in
+            [(1, "replay-pause-1", true), (2, "replay-pause-2", true)]
+        {
+            source
+                .insert(crate::gm_action::GmActionGrant {
+                    from: HostSlot(1),
+                    sequenced_by: HostSlot(1),
+                    operator_id: "gm-one".into(),
+                    correlation: crate::gm_action::GmActionId::new(correlation).unwrap(),
+                    recovery_generation: 0,
+                    apply_tick: 0,
+                    order: crate::gm_action::GmActionOrder::new(HostSlot(1), sequence),
+                    action: crate::gm_action::GmAction::SetEventPaused {
+                        event: event.into(),
+                        active,
+                    },
+                })
+                .unwrap();
+        }
+        source.restore_applied_frontier(2).unwrap();
+        validate_gm_action_journal(&source).expect("a Pause journal is canonical");
+
+        let mut trigger = crate::world::config::scripted_trigger(
+            crate::world::config::TriggerCondition::OnDestroyed {
+                entity_name: "courier".to_string(),
+            },
+        );
+        trigger.id = Some("breach_alarm".into());
+        let mut controls = crate::world::config::GmEventControls::fire_only(
+            "breach_alarm".into(),
+            "world.gm.event.breach_alarm".into(),
+        );
+        controls.pause = true;
+        trigger.gm_controls = Some(controls);
+        let runtime = crate::world::server::WorldContentRuntime {
+            trigger_states: vec![crate::world::content::TriggerState {
+                trigger,
+                fired: false,
+                origin_layer: None,
+                seen_destroyed: Default::default(),
+                last_fired_elapsed: None,
+            }],
+            ..Default::default()
+        };
+
+        let mut app = App::new();
+        app.insert_resource(SimTick(0));
+        app.insert_resource(GmActionJournal::default());
+        app.insert_resource(crate::gm_action::GmActionLog::default());
+        app.insert_resource(crate::gm_action::SimulationPaused(false));
+        app.insert_resource(runtime);
+        app.add_systems(PreUpdate, crate::gm_action::apply_due_actions);
+        seed_replay_initial_state(&mut app, &source);
+
+        let mut sim = PhoenixSim {
+            app,
+            max_frames: 1,
+            frames: 0,
+            expected_commands: 0,
+            applied: 0,
+            submitted: 0,
+            tail: true,
+            gm_actions: source,
+            final_tick: Some(0),
+            ledger: DigestLedger::new(0),
+        };
+        sim.step();
+
+        let entries = sim
+            .app
+            .world()
+            .resource::<crate::gm_action::GmActionLog>()
+            .entries()
+            .to_vec();
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| (entry.outcome, entry.verb, entry.target.as_deref()))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    crate::gm_action::GmActionOutcome::Applied,
+                    Some(crate::gm_action::GmEventVerb::Pause),
+                    Some(event)
+                ),
+                (
+                    crate::gm_action::GmActionOutcome::NoOp,
+                    Some(crate::gm_action::GmEventVerb::Pause),
+                    Some(event)
+                ),
+            ],
+            "the replayed peer commits the same absolute answer the recorded one did"
+        );
+        assert_eq!(
+            sim.app
+                .world()
+                .resource::<crate::world::server::WorldContentRuntime>()
+                .paused_gm_events
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>(),
+            vec![event.to_string()],
+            "and reaches the same paused set"
+        );
+        assert!(
+            !sim.app
+                .world()
+                .resource::<crate::gm_action::SimulationPaused>()
+                .0,
+            "a paused EVENT never touches the session clock"
+        );
+    }
+
     #[test]
     fn an_applied_gm_frontier_cannot_cross_the_recorded_final_tick() {
         let mut captured = artifact();

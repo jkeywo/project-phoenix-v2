@@ -1166,7 +1166,13 @@ pub struct GmEventControls {
     /// The explicit Fire lever. `gm_event` implies it; `gm_controls` declares
     /// it.
     pub fire: bool,
-    /// The persistent manual Pause lever (issue #1303). Always false here.
+    /// The persistent manual Pause lever (issue #1303), declared by the
+    /// `.pauseable()` sibling modifier. It says the lever EXISTS, never whether
+    /// it is currently engaged: which events a GM has actually paused is
+    /// per-run authoritative state on
+    /// [`WorldContentRuntime::paused_gm_events`](crate::world::server::WorldContentRuntime::paused_gm_events),
+    /// snapshotted and folded, while this is authored config the content digest
+    /// already answers for.
     pub pause: bool,
     /// The arm-the-next-occurrence Skip lever (issue #1304). Always false here.
     pub skip: bool,
@@ -1205,15 +1211,24 @@ impl GmEventControls {
         self.fire
     }
 
+    /// Whether this control set declares the Pause lever (issue #1303).
+    ///
+    /// A separate question from "is it paused right now": the answer here is
+    /// authored and fixed for the life of the trigger, while the engaged state
+    /// belongs to the run.
+    pub fn declares_pause(&self) -> bool {
+        self.pause
+    }
+
     /// The control set both authoring surfaces build today: Fire, nothing else.
     ///
     /// Deliberately NOT named for the manual shorthand (it was `manual_fire`
     /// while #1301 was its only caller): issue #1302 builds the identical set
     /// for an ordinary condition-bearing trigger, and a constructor named for
     /// one of its two callers would read as a claim about the condition that
-    /// is simply not true. #1303/#1304 add their levers as sibling authoring
-    /// modifiers rather than widening either declaration's parameter list, so
-    /// this stays the one starting point.
+    /// is simply not true. #1303's `.pauseable()` and #1304's Skip add their
+    /// levers as sibling authoring modifiers rather than widening either
+    /// declaration's parameter list, so this stays the one starting point.
     pub fn fire_only(id: String, label: String) -> Self {
         Self {
             id,

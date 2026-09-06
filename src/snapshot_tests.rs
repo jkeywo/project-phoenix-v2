@@ -288,6 +288,108 @@ fn armed_gm_placements_round_trip_in_their_canonical_order() {
         .is_empty());
 }
 
+/// Issue #1303: which events a GM has PAUSED crosses a save, and a world that
+/// has paused nothing writes the field out of the payload entirely.
+///
+/// It has to travel for the armed-Fire test's reason with the sign reversed. A
+/// paused event's condition is not evaluated at all, so a resume that forgot
+/// this field silently starts evaluating conditions the GM stopped — while the
+/// journal in the same payload still says the Pause was Applied, which makes a
+/// second Pause a No-op and leaves the GM no lever that can change either fact.
+#[test]
+fn paused_gm_events_round_trip_with_their_authored_trigger_table() {
+    fn pausable(
+        id: &str,
+        condition: crate::world::config::TriggerCondition,
+    ) -> crate::world::content::TriggerState {
+        let mut trigger = crate::world::config::scripted_trigger(condition);
+        trigger.id = Some(id.to_string());
+        let mut controls = crate::world::config::GmEventControls::fire_only(
+            id.to_string(),
+            format!("world.gm.event.{id}"),
+        );
+        controls.pause = true;
+        trigger.gm_controls = Some(controls);
+        crate::world::content::TriggerState {
+            trigger,
+            fired: false,
+            origin_layer: None,
+            seen_destroyed: Default::default(),
+            last_fired_elapsed: None,
+        }
+    }
+    fn table() -> crate::world::server::WorldContentRuntime {
+        crate::world::server::WorldContentRuntime {
+            trigger_states: vec![
+                pausable("breach", crate::world::config::TriggerCondition::Manual),
+                pausable(
+                    "sweep",
+                    crate::world::config::TriggerCondition::OnDestroyed {
+                        entity_name: "courier".to_string(),
+                    },
+                ),
+            ],
+            ..Default::default()
+        }
+    }
+
+    let mut live = App::new();
+    live.add_plugins(MinimalPlugins);
+    live.world_mut().insert_resource(SimTick(21));
+    let mut runtime = table();
+    runtime.paused_gm_events.insert("base-world::sweep".into());
+    runtime.paused_gm_events.insert("base-world::breach".into());
+    live.world_mut().insert_resource(runtime);
+
+    let payload = capture(live.world());
+    let scenario = payload.scenario.as_ref().expect("a world was loaded");
+    assert_eq!(
+        scenario.paused_gm_events,
+        vec![
+            "base-world::breach".to_string(),
+            "base-world::sweep".to_string()
+        ],
+    );
+
+    let mut resumed = App::new();
+    resumed.add_plugins(MinimalPlugins);
+    resumed.world_mut().insert_resource(SimTick(999));
+    // A freshly-loaded world pauses nothing, which is what makes the restored
+    // reading unambiguous evidence rather than a value that was already there.
+    resumed.world_mut().insert_resource(table());
+    assert!(resumed
+        .world()
+        .resource::<crate::world::server::WorldContentRuntime>()
+        .paused_gm_events
+        .is_empty());
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+    assert_eq!(
+        resumed
+            .world()
+            .resource::<crate::world::server::WorldContentRuntime>()
+            .paused_gm_events
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>(),
+        vec![
+            "base-world::breach".to_string(),
+            "base-world::sweep".to_string()
+        ],
+    );
+
+    let mut idle = App::new();
+    idle.add_plugins(MinimalPlugins);
+    idle.world_mut().insert_resource(SimTick(21));
+    idle.world_mut().insert_resource(table());
+    assert!(capture(idle.world())
+        .scenario
+        .expect("a world was loaded")
+        .paused_gm_events
+        .is_empty());
+}
+
 #[test]
 fn station_puppet_membership_round_trips_at_the_authoritative_boundary() {
     let target = crate::gm_puppet::StationPuppetTarget::new(

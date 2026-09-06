@@ -571,6 +571,17 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // and the campaign handoff counters (#1043) — is folded rather than merely
     // snapshotted.
     //
+    // Issues #1301 and #1303 add two more FIELDS to `WorldContentRuntime` and no
+    // new registration, on the same rule: `pending_gm_event_fires` (which GM
+    // Fires have crossed their apply boundary and are waiting for the trigger
+    // pipeline) and `paused_gm_events` (which GM-operable events a Game Master
+    // has paused, so their automatic conditions are not evaluated at all). Both
+    // are authoritative cross-tick state, both are captured in `ScenarioState`,
+    // and both are walked by `sim_digest::fold_scenario_triggers` — each behind
+    // its own emptiness check, which is what left every existing world's digest
+    // where it was. The type itself stays unclassified for the reason the
+    // closing paragraph below gives, not for want of covering these.
+    //
     // ── THE CLASSIFICATION RULE ──────────────────────────────────────────────
     //
     // Defined ONCE, at `authoritative::StateClass`'s own doc comment — not

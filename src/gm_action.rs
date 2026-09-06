@@ -143,6 +143,44 @@ pub enum GmAction {
         position_mm: [i64; 3],
         heading_mdeg: i32,
     },
+    /// Pause or resume one authored, GM-operable event (issue #1303).
+    ///
+    /// `event` is the same layer-qualified stable id [`Self::FireGmEvent`]
+    /// names, and `active` is the ABSOLUTE requested state rather than a
+    /// toggle, exactly as [`Self::SetSessionPaused`] is: two GMs pressing at
+    /// once must not depend on arrival order to decide whether the event ends
+    /// up paused. Applying it adds or removes the id from
+    /// `WorldContentRuntime::paused_gm_events`; the trigger pipeline then
+    /// declines to EVALUATE that trigger's condition at all, so no missed edge
+    /// is captured while it is paused.
+    ///
+    /// APPENDED, like every variant added to this enum after the first: the
+    /// durable journal is folded into the deterministic digest through postcard,
+    /// which encodes an enum by variant INDEX (see
+    /// [`GmActionRefusalReason::UnknownGmEvent`]).
+    SetEventPaused {
+        event: String,
+        active: bool,
+    },
+}
+
+/// WHICH lever of the authored-event control family one durable result records
+/// (issue #1303).
+///
+/// Deliberately not a second [`GmActionKind`]. The kind is a ROUTING family —
+/// it decides which surface a result is projected onto, and Fire, Pause and
+/// Skip all belong to the mission panel — while this says which verb happened,
+/// which is what the panel's and the activity feed's sentences are about.
+/// Collapsing the two questions into one enum forces a choice between a feed
+/// that cannot say "paused" and a panel that has to subscribe to a growing list
+/// of kinds; `requested_active` cannot stand in either, because it is a constant
+/// `true` for a Fire and a real absolute state for a Pause, so an `active: true`
+/// Pause and a Fire are indistinguishable through it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GmEventVerb {
+    Fire,
+    Pause,
 }
 
 /// Presentation/result family for a typed GM action. The complete action stays
@@ -219,7 +257,8 @@ impl GmAction {
             Self::SetSessionPaused { .. }
             | Self::FireGmEvent { .. }
             | Self::ApplyDirectEffect { .. }
-            | Self::SpawnPaletteEntity { .. } => None,
+            | Self::SpawnPaletteEntity { .. }
+            | Self::SetEventPaused { .. } => None,
             Self::SetStationPuppet { ship, .. } | Self::IssueStationCommand { ship, .. } => {
                 Some(ship)
             }
@@ -236,7 +275,9 @@ impl GmAction {
     /// no single stable target", not "unknown".
     pub fn target_id(&self) -> Option<&str> {
         match self {
-            Self::FireGmEvent { event } => Some(event.as_str()),
+            Self::FireGmEvent { event } | Self::SetEventPaused { event, .. } => {
+                Some(event.as_str())
+            }
             Self::ApplyDirectEffect { target, .. } => Some(target.as_str()),
             // The palette id, not the derived instance name: the durable fact
             // has to say WHAT the operator placed, and the instance name is
@@ -257,7 +298,7 @@ impl GmAction {
             // The qualified id shape is checked here rather than only against
             // the live table so a malformed one is refused as an invalid
             // ACTION, not mistaken for an unknown event.
-            Self::FireGmEvent { event }
+            Self::FireGmEvent { event } | Self::SetEventPaused { event, .. }
                 if bounded(event)
                     && event.contains("::")
                     && !event.ends_with("::")
@@ -317,9 +358,23 @@ impl GmAction {
             Self::SetSessionPaused { .. } => GmActionKind::SessionPause,
             Self::SetStationPuppet { .. } => GmActionKind::StationPuppet,
             Self::IssueStationCommand { .. } => GmActionKind::StationCommand,
-            Self::FireGmEvent { .. } => GmActionKind::EventControl,
+            Self::FireGmEvent { .. } | Self::SetEventPaused { .. } => GmActionKind::EventControl,
             Self::ApplyDirectEffect { .. } => GmActionKind::DirectEffect,
             Self::SpawnPaletteEntity { .. } => GmActionKind::WorldSpawn,
+        }
+    }
+
+    /// Which lever of the event-control family this action pulls, or `None` for
+    /// every family that has none (issue #1303).
+    pub fn verb(&self) -> Option<GmEventVerb> {
+        match self {
+            Self::FireGmEvent { .. } => Some(GmEventVerb::Fire),
+            Self::SetEventPaused { .. } => Some(GmEventVerb::Pause),
+            Self::SetSessionPaused { .. }
+            | Self::SetStationPuppet { .. }
+            | Self::IssueStationCommand { .. }
+            | Self::ApplyDirectEffect { .. }
+            | Self::SpawnPaletteEntity { .. } => None,
         }
     }
 
@@ -330,13 +385,18 @@ impl GmAction {
             | Self::IssueStationCommand { .. }
             | Self::FireGmEvent { .. }
             | Self::ApplyDirectEffect { .. }
-            | Self::SpawnPaletteEntity { .. } => None,
+            | Self::SpawnPaletteEntity { .. }
+            // Not session pause: a paused EVENT stops one authored condition
+            // being evaluated and leaves the simulation running.
+            | Self::SetEventPaused { .. } => None,
         }
     }
 
     pub fn requested_active(&self) -> bool {
         match self {
-            Self::SetSessionPaused { active } | Self::SetStationPuppet { active, .. } => *active,
+            Self::SetSessionPaused { active }
+            | Self::SetStationPuppet { active, .. }
+            | Self::SetEventPaused { active, .. } => *active,
             // A Fire is always a request to make something happen. There is no
             // "un-fire", so the flag is a constant rather than a policy — a
             // direct effect carries its own sign in `GmDirectEffectKind`, not
@@ -449,6 +509,17 @@ pub struct GmActionRefusal {
     /// pause-only refusal byte-identical to its pre-#1301 shape.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
+    /// Which lever of the event-control family the refused action pulled
+    /// ([`GmAction::verb`]) — `None` for every family that has none (issue
+    /// #1303).
+    ///
+    /// [`Self::target`]'s reason, one step further: a refusal that names the
+    /// event but not the verb is published on every GM's feed as a refused
+    /// FIRE, because Fire is the only event-control verb a pre-#1303 fact could
+    /// have recorded. `requested_active` cannot disambiguate — it is a constant
+    /// `true` for a Fire and the requested absolute state for a Pause.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verb: Option<GmEventVerb>,
 }
 
 impl GmActionRefusal {
@@ -462,6 +533,7 @@ impl GmActionRefusal {
             self.reason,
         )
         .with_target(self.target.clone())
+        .with_verb(self.verb)
     }
 }
 
@@ -531,6 +603,13 @@ pub fn validate_fleet_frame(
             // pause refusal with one would invent a second identity for a family
             // that has none. Both are malformed frames, not facts to project.
             if refusal.action_kind.carries_target() != refusal.target.is_some() {
+                return Err(GmActionRefusalReason::InvalidAction);
+            }
+            // And the verb travels with it (issue #1303), on the same rule:
+            // an event-control refusal that names no lever is republished as a
+            // refused Fire on every other GM's feed, and a verb on a family
+            // that has none is a claim about a lever that does not exist.
+            if (refusal.action_kind == GmActionKind::EventControl) != refusal.verb.is_some() {
                 return Err(GmActionRefusalReason::InvalidAction);
             }
         }
@@ -641,6 +720,20 @@ pub struct LoggedGmAction {
     /// its pre-#1310 shape, so no existing world's digest moves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effect: Option<crate::gm_effect::GmDirectEffectResult>,
+    /// Which lever of the event-control family produced this fact
+    /// ([`GmAction::verb`]) — `None` for every family that has none (issue
+    /// #1303).
+    ///
+    /// It rides the durable result for [`Self::target`]'s reason, sharpened by
+    /// the lane that has no grant at all: a local ingress refusal is built from
+    /// the REQUEST, so a consumer that wanted the verb would have nowhere to
+    /// look one up. Both surfaces that read this need it — the activity feed
+    /// would otherwise render every Pause and Resume as "fired {event}", and
+    /// the mission panel's own result sentences name the verb too.
+    /// `skip_serializing_if` keeps a pause-only or Station-only journal
+    /// byte-identical to its pre-#1303 shape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verb: Option<GmEventVerb>,
 }
 
 impl LoggedGmAction {
@@ -663,6 +756,7 @@ impl LoggedGmAction {
             order: None,
             target: None,
             effect: None,
+            verb: None,
         }
     }
 
@@ -675,6 +769,12 @@ impl LoggedGmAction {
     /// Attach a resolved directed-effect result to a fact built above.
     pub fn with_effect(mut self, effect: Option<crate::gm_effect::GmDirectEffectResult>) -> Self {
         self.effect = effect;
+        self
+    }
+
+    /// Attach the event-control lever this fact records (issue #1303).
+    pub fn with_verb(mut self, verb: Option<GmEventVerb>) -> Self {
+        self.verb = verb;
         self
     }
 
@@ -699,6 +799,7 @@ impl LoggedGmAction {
             reason,
         )
         .with_target(request.action.target_id().map(str::to_string))
+        .with_verb(request.action.verb())
     }
 }
 
@@ -1214,6 +1315,10 @@ impl GmActionJournal {
         // second Fire reduces to the same No-op on every peer even when the
         // live trigger table is not available to this reducer.
         let mut fired_events = std::collections::BTreeSet::new();
+        // Which events this canonical prefix has left paused, so a redundant
+        // set-state reduces to the same No-op on every peer even when the live
+        // trigger table is not available to this reducer (issue #1303).
+        let mut paused_events = std::collections::BTreeSet::new();
         let mut entries = Vec::new();
         for (index, grant) in self.grants.iter().take(end).enumerate() {
             let requested_active = grant.action.requested_active();
@@ -1237,6 +1342,13 @@ impl GmActionJournal {
                         GmAction::FireGmEvent { event } => {
                             fired_events.insert(event.clone());
                         }
+                        GmAction::SetEventPaused { event, active } => {
+                            if *active {
+                                paused_events.insert(event.clone());
+                            } else {
+                                paused_events.remove(event);
+                            }
+                        }
                         // A placement has no latch to fold forward: each
                         // grant is its own spawn, and the world it produced is
                         // recorded by the entities themselves.
@@ -1256,6 +1368,19 @@ impl GmActionJournal {
                     fired_events.insert(event.clone());
                     GmActionOutcome::Applied
                 }
+                GmAction::SetEventPaused { event, active }
+                    if paused_events.contains(event) == *active =>
+                {
+                    GmActionOutcome::NoOp
+                }
+                GmAction::SetEventPaused { event, active } => {
+                    if *active {
+                        paused_events.insert(event.clone());
+                    } else {
+                        paused_events.remove(event);
+                    }
+                    GmActionOutcome::Applied
+                }
                 GmAction::SetSessionPaused { active } if paused == *active => GmActionOutcome::NoOp,
                 GmAction::SetSessionPaused { active } => {
                     paused = *active;
@@ -1299,6 +1424,7 @@ impl GmActionJournal {
                 order: Some(grant.order),
                 target: grant.action.target_id().map(str::to_string),
                 effect: None,
+                verb: grant.action.verb(),
             });
         }
         GmActionLog { entries, paused }
@@ -1311,6 +1437,10 @@ impl GmActionJournal {
         let mut paused = self.initial_paused;
         let mut puppets = std::collections::BTreeSet::new();
         let mut fired_events = std::collections::BTreeSet::new();
+        // Which events this canonical prefix has left paused, so a redundant
+        // set-state reduces to the same No-op on every peer even when the live
+        // trigger table is not available to this reducer (issue #1303).
+        let mut paused_events = std::collections::BTreeSet::new();
         let mut entries = Vec::new();
         for grant in self.grants.iter().take(end) {
             let requested_active = grant.action.requested_active();
@@ -1320,6 +1450,19 @@ impl GmActionJournal {
                 }
                 GmAction::FireGmEvent { event } => {
                     fired_events.insert(event.clone());
+                    GmActionOutcome::Applied
+                }
+                GmAction::SetEventPaused { event, active }
+                    if paused_events.contains(event) == *active =>
+                {
+                    GmActionOutcome::NoOp
+                }
+                GmAction::SetEventPaused { event, active } => {
+                    if *active {
+                        paused_events.insert(event.clone());
+                    } else {
+                        paused_events.remove(event);
+                    }
                     GmActionOutcome::Applied
                 }
                 GmAction::SetSessionPaused { active } if paused == *active => GmActionOutcome::NoOp,
@@ -1365,6 +1508,7 @@ impl GmActionJournal {
                 order: Some(grant.order),
                 target: grant.action.target_id().map(str::to_string),
                 effect: None,
+                verb: grant.action.verb(),
             });
         }
         GmActionLog { entries, paused }
@@ -1820,6 +1964,7 @@ pub fn apply_due_actions(
                             order: Some(grant.order),
                             target: grant.action.target_id().map(str::to_string),
                             effect: None,
+                            verb: grant.action.verb(),
                         })
                         .expect("live GM result matches its canonical grant");
                     continue;
@@ -1867,6 +2012,46 @@ pub fn apply_due_actions(
                     }
                 }
             }
+            // Pause is a persistent manual toggle on ONE authored event, and
+            // its target is revalidated here for `FireGmEvent`'s reason: the
+            // layer carrying the event can unload between the request and the
+            // agreed apply tick, and every peer must answer the same way at
+            // that tick. It reads `pausable_index`, not `fireable_index` — an
+            // event may declare Pause without Fire, or Fire without Pause, and
+            // "the toggle only exists where it is declared" is exactly the
+            // absent-control refusal.
+            GmAction::SetEventPaused { event, active } => {
+                match content.as_deref_mut() {
+                    // No world at all: nothing is operable, the same answer a
+                    // GM gets for an id that names no live event.
+                    None => (
+                        GmActionOutcome::Refused,
+                        Some(GmActionRefusalReason::UnknownGmEvent),
+                    ),
+                    Some(content) => {
+                        match crate::gm_event::pausable_index(&content.trigger_states, event) {
+                            None => (
+                                GmActionOutcome::Refused,
+                                Some(GmActionRefusalReason::UnknownGmEvent),
+                            ),
+                            // Absolute, not a toggle: a second GM asking for the
+                            // state it is already in is a deterministic No-op
+                            // rather than an un-pause nobody requested.
+                            Some(_) if content.paused_gm_events.contains(event) == *active => {
+                                (GmActionOutcome::NoOp, None)
+                            }
+                            Some(_) => {
+                                if *active {
+                                    content.paused_gm_events.insert(event.clone());
+                                } else {
+                                    content.paused_gm_events.remove(event);
+                                }
+                                (GmActionOutcome::Applied, None)
+                            }
+                        }
+                    }
+                }
+            }
             GmAction::SetSessionPaused { active } if paused.0 == *active => {
                 (GmActionOutcome::NoOp, None)
             }
@@ -1902,6 +2087,7 @@ pub fn apply_due_actions(
                         order: Some(grant.order),
                         target: grant.action.target_id().map(str::to_string),
                         effect: None,
+                        verb: grant.action.verb(),
                     };
                     journal
                         .record_applied_result(result)
@@ -1973,6 +2159,7 @@ pub fn apply_due_actions(
                             order: Some(grant.order),
                             target: grant.action.target_id().map(str::to_string),
                             effect: None,
+                            verb: grant.action.verb(),
                         };
                         journal
                             .record_applied_result(result)
@@ -2063,6 +2250,7 @@ pub fn apply_due_actions(
                 order: Some(grant.order),
                 target: grant.action.target_id().map(str::to_string),
                 effect: resolved_effect,
+                verb: grant.action.verb(),
             })
             .expect("live GM result matches its canonical grant");
     }
@@ -2148,6 +2336,7 @@ pub(crate) fn refusal_for(
         tick,
         reason,
         target: proposal.action.target_id().map(str::to_string),
+        verb: proposal.action.verb(),
     }
 }
 
@@ -2457,6 +2646,45 @@ station = "helm"
 
     // -- Firing an authored GM event (issue #1301) ---------------------------
 
+    /// The same fixture with the Pause lever declared (issue #1303).
+    fn pausable_event_state(id: &str, pause: bool) -> crate::world::content::TriggerState {
+        let mut state = manual_event_state(id, None, false, true);
+        state.trigger.gm_controls.as_mut().expect("controls").pause = pause;
+        state
+    }
+
+    fn pause_grant(
+        sequence: u64,
+        apply_tick: u64,
+        operator: &str,
+        correlation: &str,
+        event: &str,
+        active: bool,
+    ) -> GmActionGrant {
+        GmActionGrant {
+            from: HostSlot(1),
+            sequenced_by: HostSlot(1),
+            operator_id: operator.into(),
+            correlation: GmActionId::new(correlation).unwrap(),
+            recovery_generation: 0,
+            apply_tick,
+            order: GmActionOrder::new(HostSlot(1), sequence),
+            action: GmAction::SetEventPaused {
+                event: event.into(),
+                active,
+            },
+        }
+    }
+
+    fn paused(app: &App) -> Vec<String> {
+        app.world()
+            .resource::<crate::world::server::WorldContentRuntime>()
+            .paused_gm_events
+            .iter()
+            .cloned()
+            .collect()
+    }
+
     fn manual_event_state(
         id: &str,
         layer: Option<&str>,
@@ -2736,6 +2964,284 @@ station = "helm"
 
     /// A world-less peer (the pure fixtures and the replay harness) refuses
     /// rather than panicking or silently succeeding.
+    /// Issue #1303, the whole set-state contract in one run: the first Pause
+    /// applies, a REDUNDANT request for the state it is already in is a
+    /// deterministic No-op whichever GM makes it, and the matching Resume
+    /// applies. Absolute state, never a toggle — so two GMs pressing at the
+    /// same apply boundary commit the same answer on every peer regardless of
+    /// which arrived first.
+    #[test]
+    fn pausing_one_event_is_absolute_idempotent_and_attributed() {
+        let mut app = fire_app(
+            5,
+            vec![pausable_event_state("breach", true)],
+            [
+                pause_grant(1, 5, "gm-1", "pause-1", "base-world::breach", true),
+                pause_grant(2, 5, "gm-2", "pause-2", "base-world::breach", true),
+                pause_grant(3, 5, "gm-1", "resume-1", "base-world::breach", false),
+                pause_grant(4, 5, "gm-2", "resume-2", "base-world::breach", false),
+            ],
+        );
+        app.update();
+
+        assert_eq!(
+            outcomes(&app),
+            vec![
+                (GmActionOutcome::Applied, None),
+                (GmActionOutcome::NoOp, None),
+                (GmActionOutcome::Applied, None),
+                (GmActionOutcome::NoOp, None),
+            ],
+        );
+        assert!(paused(&app).is_empty(), "the run ends resumed");
+
+        // Every durable fact names the operator, the event and the LEVER, so a
+        // feed can tell a Resume from a Fire of the same event.
+        let results = app
+            .world()
+            .resource::<GmActionJournal>()
+            .applied_results()
+            .to_vec();
+        assert_eq!(
+            results
+                .iter()
+                .map(|r| (
+                    r.operator_id.as_str(),
+                    r.action_kind,
+                    r.verb,
+                    r.requested_active,
+                    r.target.as_deref()
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    "gm-1",
+                    GmActionKind::EventControl,
+                    Some(GmEventVerb::Pause),
+                    true,
+                    Some("base-world::breach")
+                ),
+                (
+                    "gm-2",
+                    GmActionKind::EventControl,
+                    Some(GmEventVerb::Pause),
+                    true,
+                    Some("base-world::breach")
+                ),
+                (
+                    "gm-1",
+                    GmActionKind::EventControl,
+                    Some(GmEventVerb::Pause),
+                    false,
+                    Some("base-world::breach")
+                ),
+                (
+                    "gm-2",
+                    GmActionKind::EventControl,
+                    Some(GmEventVerb::Pause),
+                    false,
+                    Some("base-world::breach")
+                ),
+            ],
+        );
+    }
+
+    /// The paused set survives between apply boundaries, and the Pause and Fire
+    /// levers are independent: a paused event still accepts a Fire, which is
+    /// the whole point of having both (the GM stopped the world's own trigger
+    /// and now chooses the moment themselves).
+    #[test]
+    fn a_paused_event_still_accepts_a_fire() {
+        let mut app = fire_app(
+            5,
+            vec![pausable_event_state("breach", true)],
+            [
+                pause_grant(1, 5, "gm-1", "pause-1", "base-world::breach", true),
+                fire_grant(2, 5, "fire-1", "base-world::breach"),
+            ],
+        );
+        app.update();
+
+        assert_eq!(
+            outcomes(&app),
+            vec![
+                (GmActionOutcome::Applied, None),
+                (GmActionOutcome::Applied, None),
+            ],
+        );
+        assert_eq!(paused(&app), vec!["base-world::breach".to_string()]);
+        assert_eq!(armed(&app), vec!["base-world::breach".to_string()]);
+    }
+
+    /// The absent-control refusal, at the apply boundary rather than at request
+    /// time: an event that declares no Pause lever, an id that names no live
+    /// event at all, and a run with no world are the same answer to a GM —
+    /// nothing here is pausable under that name at this tick.
+    #[test]
+    fn pausing_an_event_that_declares_no_pause_control_is_refused() {
+        let mut app = fire_app(
+            5,
+            vec![pausable_event_state("breach", false)],
+            [
+                pause_grant(1, 5, "gm-1", "pause-1", "base-world::breach", true),
+                pause_grant(2, 5, "gm-1", "pause-2", "base-world::missing", true),
+            ],
+        );
+        app.update();
+
+        assert_eq!(
+            outcomes(&app),
+            vec![
+                (
+                    GmActionOutcome::Refused,
+                    Some(GmActionRefusalReason::UnknownGmEvent)
+                ),
+                (
+                    GmActionOutcome::Refused,
+                    Some(GmActionRefusalReason::UnknownGmEvent)
+                ),
+            ],
+        );
+        assert!(paused(&app).is_empty());
+
+        // A refusal still names the event AND the lever, on both lanes that can
+        // produce one before a grant exists.
+        let refused = LoggedGmAction::refused_request(
+            &GmActionRequest {
+                operator_id: "gm-1".into(),
+                correlation: GmActionId::new("pause-local").unwrap(),
+                action: GmAction::SetEventPaused {
+                    event: "base-world::breach".into(),
+                    active: false,
+                },
+            },
+            9,
+            GmActionRefusalReason::WrongPhase,
+        );
+        assert_eq!(refused.target.as_deref(), Some("base-world::breach"));
+        assert_eq!(refused.verb, Some(GmEventVerb::Pause));
+        assert!(!refused.requested_active, "and which state it asked for");
+
+        let owner = refusal_for(
+            HostSlot(1),
+            &GmActionProposal {
+                from: HostSlot(2),
+                operator_id: "gm-2".into(),
+                correlation: GmActionId::new("pause-owner").unwrap(),
+                action: GmAction::SetEventPaused {
+                    event: "base-world::breach".into(),
+                    active: true,
+                },
+            },
+            9,
+            GmActionRefusalReason::UnknownGmEvent,
+        );
+        assert_eq!(owner.target.as_deref(), Some("base-world::breach"));
+        assert_eq!(owner.verb, Some(GmEventVerb::Pause));
+        let roster = crate::lockstep::FleetRoster::with_participants_and_gms(
+            Vec::new(),
+            vec![HostSlot(1), HostSlot(2)],
+            vec![
+                crate::lockstep::FleetGm {
+                    host: HostSlot(1),
+                    operator_id: "gm-1".into(),
+                },
+                crate::lockstep::FleetGm {
+                    host: HostSlot(2),
+                    operator_id: "gm-2".into(),
+                },
+            ],
+            HostSlot(1),
+            HostSlot(1),
+        )
+        .unwrap();
+        assert_eq!(
+            validate_fleet_frame(&GmActionFrame::Refused(owner.clone()), &roster),
+            Ok(())
+        );
+        // Stripped of its lever, the same frame could only be republished as a
+        // refused FIRE on every other GM's feed, so it is malformed.
+        let mut verbless = owner;
+        verbless.verb = None;
+        assert_eq!(
+            validate_fleet_frame(&GmActionFrame::Refused(verbless), &roster),
+            Err(GmActionRefusalReason::InvalidAction)
+        );
+    }
+
+    /// A Pause with no world at all is refused rather than lost, exactly as a
+    /// Fire is: the reducer runs in the pure journal fixtures and the replay
+    /// harness without a `WorldContentRuntime`.
+    #[test]
+    fn a_pause_without_a_loaded_world_is_refused_rather_than_lost() {
+        let mut journal = GmActionJournal::default();
+        journal
+            .insert(pause_grant(
+                1,
+                3,
+                "gm-1",
+                "pause-1",
+                "base-world::breach",
+                true,
+            ))
+            .unwrap();
+        let mut app = App::new();
+        app.insert_resource(crate::sim_tick::SimTick(3))
+            .insert_resource(SimulationPaused(false))
+            .insert_resource(journal)
+            .init_resource::<GmActionLog>()
+            .add_systems(Update, apply_due_actions);
+        app.update();
+
+        assert_eq!(
+            outcomes(&app),
+            vec![(
+                GmActionOutcome::Refused,
+                Some(GmActionRefusalReason::UnknownGmEvent)
+            )],
+        );
+    }
+
+    /// The pure reducer that reconstructs a log without live world state agrees
+    /// with the live one about which set-state requests changed anything —
+    /// which is what makes a restored frontier and a replayed one project the
+    /// same terminal facts.
+    #[test]
+    fn the_derived_reducer_folds_pause_state_the_same_way_the_live_one_does() {
+        let mut journal = GmActionJournal::default();
+        for grant in [
+            pause_grant(1, 4, "gm-1", "pause-1", "base-world::breach", true),
+            pause_grant(2, 4, "gm-2", "pause-2", "base-world::breach", true),
+            pause_grant(3, 4, "gm-1", "pause-3", "base-world::sweep", true),
+            pause_grant(4, 4, "gm-1", "resume-1", "base-world::breach", false),
+            pause_grant(5, 4, "gm-1", "resume-2", "base-world::breach", false),
+        ] {
+            journal.insert(grant).unwrap();
+        }
+        journal.restore_applied_frontier(5).unwrap();
+        let log = journal.applied_log();
+        assert_eq!(
+            log.entries()
+                .iter()
+                .map(|entry| entry.outcome)
+                .collect::<Vec<_>>(),
+            vec![
+                GmActionOutcome::Applied,
+                GmActionOutcome::NoOp,
+                GmActionOutcome::Applied,
+                GmActionOutcome::Applied,
+                GmActionOutcome::NoOp,
+            ],
+        );
+        assert!(
+            log.entries()
+                .iter()
+                .all(|entry| entry.verb == Some(GmEventVerb::Pause)),
+            "every derived fact still names the lever it replayed"
+        );
+        assert!(!log.paused(), "an event pause is not a session pause");
+    }
+
     #[test]
     fn a_fire_without_a_loaded_world_is_refused_rather_than_lost() {
         let mut journal = GmActionJournal::default();
@@ -3562,6 +4068,7 @@ station = "helm"
             tick: 7,
             reason: GmActionRefusalReason::JournalFull,
             target: None,
+            verb: None,
         };
         assert_eq!(
             validate_fleet_frame(&GmActionFrame::Refused(refused.clone()), &roster),
@@ -3576,14 +4083,36 @@ station = "helm"
             Err(GmActionRefusalReason::InvalidAction)
         );
         targetless_fire.target = Some("base-world::breach_alarm".into());
+        // And the LEVER travels with the family too (issue #1303): without it
+        // this frame could only be republished as a refused Fire.
         assert_eq!(
-            validate_fleet_frame(&GmActionFrame::Refused(targetless_fire), &roster),
+            validate_fleet_frame(&GmActionFrame::Refused(targetless_fire.clone()), &roster),
+            Err(GmActionRefusalReason::InvalidAction)
+        );
+        targetless_fire.verb = Some(GmEventVerb::Fire);
+        assert_eq!(
+            validate_fleet_frame(&GmActionFrame::Refused(targetless_fire.clone()), &roster),
+            Ok(())
+        );
+        let mut refused_pause = targetless_fire.clone();
+        refused_pause.verb = Some(GmEventVerb::Pause);
+        refused_pause.requested_active = false;
+        assert_eq!(
+            validate_fleet_frame(&GmActionFrame::Refused(refused_pause), &roster),
             Ok(())
         );
         let mut targeted_pause = refused.clone();
         targeted_pause.target = Some("base-world::breach_alarm".into());
         assert_eq!(
             validate_fleet_frame(&GmActionFrame::Refused(targeted_pause), &roster),
+            Err(GmActionRefusalReason::InvalidAction)
+        );
+        // A session-pause refusal carrying an event-control lever invents a
+        // control its family does not have.
+        let mut levered_session_pause = refused.clone();
+        levered_session_pause.verb = Some(GmEventVerb::Fire);
+        assert_eq!(
+            validate_fleet_frame(&GmActionFrame::Refused(levered_session_pause), &roster),
             Err(GmActionRefusalReason::InvalidAction)
         );
 
@@ -3681,6 +4210,7 @@ station = "helm"
             order: Some(GmActionOrder::new(HostSlot(1), 1)),
             target: None,
             effect: None,
+            verb: None,
         };
         let pause = LoggedGmAction {
             operator_id: "gm-1".into(),
@@ -3693,6 +4223,7 @@ station = "helm"
             order: Some(GmActionOrder::new(HostSlot(1), 0)),
             target: None,
             effect: None,
+            verb: None,
         };
         let station_refused = LoggedGmAction::refused(
             "gm-1".into(),
@@ -3713,6 +4244,7 @@ station = "helm"
             order: Some(GmActionOrder::new(HostSlot(1), 2)),
             target: None,
             effect: None,
+            verb: None,
         };
         let log = GmActionLog {
             entries: vec![pause, station_applied.clone(), station_pending],
@@ -3744,6 +4276,7 @@ station = "helm"
                 order: Some(pause.order),
                 target: None,
                 effect: None,
+                verb: None,
             }),
             Err("pending GM result is not a Station command"),
         );
@@ -4346,6 +4879,7 @@ station = "helm"
             tick: 3,
             reason: GmActionRefusalReason::UnknownEntity,
             target: None,
+            verb: None,
         };
         assert_eq!(
             validate_fleet_frame(&GmActionFrame::Refused(refusal.clone()), &roster),

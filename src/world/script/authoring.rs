@@ -243,6 +243,10 @@ mod tests {
         // may reach for is the author's judgement, and the mission panel can
         // only list what a scenario declares.
         ("trigger", "gm_controls", &["id", "label"]),
+        // The Pause lever on a declared control set (issue #1303). Sibling to
+        // `gm_controls`, and exposed for its reason: whether a Game Master may
+        // suspend an automatic moment is the author's judgement.
+        ("trigger", "pauseable", &[]),
         ("trigger", "when", &["predicate"]),
         ("trigger", "repeat", &[]),
         ("trigger", "repeatable", &[]),

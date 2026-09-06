@@ -339,6 +339,13 @@
     .gm-mission-event-label { flex: 1 1 12rem; }
     .gm-mission-event-state { color: var(--ink-muted); }
     .gm-mission-event[data-spent="true"] .gm-mission-event-state { color: var(--fire-bright); }
+    /* A standing GM Pause (issue #1303) reads at a glance, because it changes
+       what every other line on the row means: a "Ready" event whose condition
+       is not being evaluated would be a lie by omission. Distinct from the
+       spent colour above -- spent is what the mission did, paused is what the
+       operator did and can undo. */
+    .gm-mission-event[data-paused="true"] .gm-mission-event-state { color: var(--ink-primary); }
+    .gm-mission-event[data-paused="true"] { border-left: 2px solid var(--edge-bright); padding-left: .5rem; }
     .gm-mission-event button {
       min-width: 6rem; padding: .5rem .9rem; color: var(--ink-primary);
       background: var(--surface-panel-up); border: 1px solid var(--edge-bright);
@@ -1958,11 +1965,12 @@
           <ol id="gm-session-log" role="log" aria-labelledby="gm-session-log-heading"
             aria-live="polite" aria-relevant="additions text"></ol>
         </section>
-        <!-- The mission panel (issue #1301): every GM-operable authored event
-             the loaded scenario declares, with the levers it declared. Rows and
-             their Fire controls are built by gui/gm-mission-panel.js from the
-             absolute `gm_mission` Host Channel projection, so an empty scenario
-             renders the empty sentence and nothing else. -->
+        <!-- The mission panel (issues #1301 and #1303): every GM-operable
+             authored event the loaded scenario declares, with the levers it
+             declared. Rows and their Fire / Pause controls are built by
+             gui/gm-mission-panel.js from the absolute `gm_mission` Host Channel
+             projection, so an empty scenario renders the empty sentence and
+             nothing else, and an event that declares no Pause has no toggle. -->
         <section id="gm-mission-panel" role="region" aria-labelledby="gm-mission-heading">
           <h2 id="gm-mission-heading" data-i18n="server.gm.mission.heading"></h2>
           <ul id="gm-mission-events" role="list"></ul>
@@ -2708,6 +2716,9 @@
       submitFireEvent: (request) =>
         typeof window.__hostFireGmEvent === 'function'
           && window.__hostFireGmEvent(request),
+      submitSetEventPaused: (request) =>
+        typeof window.__hostSetGmEventPaused === 'function'
+          && window.__hostSetGmEventPaused(request),
       getOperator: () => typeof window.__hostLocalGm === 'function'
         ? window.__hostLocalGm() : null,
       getOperatorName: (id) => typeof window.__hostGmName === 'function'
@@ -4000,6 +4011,35 @@
           variant: request.variant === undefined ? null : request.variant,
           position_mm: request.position_mm,
           heading_mdeg: request.heading_mdeg,
+        })) !== false;
+      } catch (_) {
+        return false;
+      }
+    };
+
+    /**
+     * Submit one attributed absolute Pause state for an authored GM event
+     * (#1303).
+     *
+     * `event` is the layer-qualified id the mission panel read out of the
+     * authoritative projection, exactly as the Fire seam above; `active` is the
+     * absolute state requested, so two GMs pressing at once cannot depend on
+     * arrival order for where the toggle ends up.
+     */
+    window.__hostSetGmEventPaused = function(request) {
+      const gm = localGm();
+      if (!gm || !request || typeof request !== 'object'
+          || typeof request.event !== 'string' || !request.event
+          || typeof request.correlation !== 'string' || !request.correlation
+          || typeof request.active !== 'boolean'
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      try {
+        return window.wasm_submit_gm_action(JSON.stringify({
+          operator_id: gm.id,
+          correlation: request.correlation,
+          action: 'set_event_paused',
+          event: request.event,
+          active: request.active,
         })) !== false;
       } catch (_) {
         return false;

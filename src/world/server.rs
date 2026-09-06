@@ -196,6 +196,23 @@ pub struct WorldContentRuntime {
     /// drained in `FixedUpdate`, which a paused session never reaches — so it is
     /// snapshotted and folded.
     pub pending_gm_spawns: Vec<crate::gm_spawn::PendingGmSpawn>,
+    /// Layer-qualified ids of GM-operable events a Game Master has PAUSED
+    /// (issue #1303).
+    ///
+    /// A `BTreeSet` for [`Self::pending_gm_event_fires`]' reasons, and captured
+    /// and folded beside it. What it means is narrower than it looks: while an
+    /// id is in here, `tick_trigger_pipeline` does not EVALUATE that trigger's
+    /// automatic condition at all — it never reaches
+    /// `trigger_fires_for_events`, so no `seen_destroyed` name is accumulated,
+    /// no `fired` latch is set and no cooldown is stamped. That is what "no
+    /// missed edge is captured" has to mean mechanically: an `OnAllDestroyed`
+    /// that merely skipped its firing would still have banked the destructions
+    /// and would fire the instant it resumed.
+    ///
+    /// It gates ONLY the automatic pass. An armed Fire is honoured while
+    /// paused, because Fire is the lever a GM reaches for precisely when the
+    /// automatic opportunity has gone.
+    pub paused_gm_events: std::collections::BTreeSet<String>,
 }
 
 /// Bevy resource wrapping the server-side objective manager.

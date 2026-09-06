@@ -443,6 +443,7 @@ fn logged(
         )),
         target: None,
         effect: None,
+        verb: None,
     }
 }
 
@@ -527,6 +528,7 @@ fn a_fired_gm_event_is_attributed_by_the_event_it_fired() {
     );
     fact.action_kind = crate::gm_action::GmActionKind::EventControl;
     fact.target = Some("base-world::breach_alarm".into());
+    fact.verb = Some(crate::gm_action::GmEventVerb::Fire);
     results.push(fact);
 
     let entries = terminal_action_entries(&mut state, None, Some(&results), None, None);
@@ -618,6 +620,72 @@ fn a_refused_direct_effect_still_names_the_target_it_was_aimed_at() {
         }
     );
     assert_eq!(detail.reason.as_deref(), Some("unknown-entity"));
+}
+
+/// Issue #1303: Pause and Resume reach the feed as themselves.
+///
+/// They share `GmActionKind::EventControl` with Fire, because the kind is the
+/// ROUTING family that decides which surface a result is projected onto. What
+/// tells them apart is the durable fact's VERB — and folding on the kind alone,
+/// as this did before Pause existed, would publish every Pause and Resume as
+/// "fired {event}" with no field able to say otherwise (`requested_active` is a
+/// constant `true` for a Fire).
+#[test]
+fn a_paused_gm_event_is_attributed_as_a_pause_and_not_as_a_fire() {
+    let mut state = GmActivityState::default();
+    assert!(terminal_action_entries(&mut state, None, None, None, None).is_empty());
+    let mut results = crate::gm_action::LocalGmActionRefusals::default();
+    for (correlation, active) in [("pause-1", true), ("resume-1", false)] {
+        let mut fact = logged(
+            "gm-alpha",
+            correlation,
+            crate::gm_action::GmActionOutcome::Applied,
+            None,
+        );
+        fact.action_kind = crate::gm_action::GmActionKind::EventControl;
+        fact.target = Some("base-world::breach_alarm".into());
+        fact.verb = Some(crate::gm_action::GmEventVerb::Pause);
+        fact.requested_active = active;
+        results.push(fact);
+    }
+
+    let entries = terminal_action_entries(&mut state, None, Some(&results), None, None);
+    let actions: Vec<GmActivityAction> = entries
+        .iter()
+        .map(|entry| {
+            let GmActivityDetail::GmAction(detail) = &entry.detail else {
+                panic!("expected GM action detail")
+            };
+            detail.action.clone()
+        })
+        .collect();
+    assert_eq!(
+        actions,
+        vec![
+            GmActivityAction::SetEventPaused {
+                event: "base-world::breach_alarm".into(),
+                active: true,
+            },
+            GmActivityAction::SetEventPaused {
+                event: "base-world::breach_alarm".into(),
+                active: false,
+            },
+        ],
+    );
+
+    // An event-control fact with no lever names a control nobody pulled, so it
+    // is dropped rather than rendered as the one verb that used to exist.
+    let mut leverless = crate::gm_action::LocalGmActionRefusals::default();
+    let mut fact = logged(
+        "gm-alpha",
+        "leverless-1",
+        crate::gm_action::GmActionOutcome::Applied,
+        None,
+    );
+    fact.action_kind = crate::gm_action::GmActionKind::EventControl;
+    fact.target = Some("base-world::breach_alarm".into());
+    leverless.push(fact);
+    assert!(terminal_action_entries(&mut state, None, Some(&leverless), None, None).is_empty());
 }
 
 #[test]

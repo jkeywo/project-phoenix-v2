@@ -675,6 +675,10 @@ pub fn encode_mesh_frame(frame: &crate::lockstep::MeshFrame) -> Result<String, s
                     // an absent key the same way, so a refusal minted by a peer
                     // that predates the event-control family still decodes.
                     "target": refusal.target,
+                    // And WHICH lever it refused (issue #1303), on the same
+                    // terms: `null` for every family without one, and an
+                    // absent key reads the same way.
+                    "verb": refusal.verb,
                 }),
             ),
         },
@@ -891,6 +895,15 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
                             .get("target")
                             .and_then(serde_json::Value::as_str)
                             .and_then(bounded_gm_target_id),
+                        // The lever (issue #1303). Absent, `null` or an
+                        // unrecognised spelling all read as "this family names
+                        // no lever" — `validate_fleet_frame` then refuses the
+                        // frame if its family required one, rather than this
+                        // ingress guessing Fire.
+                        verb: body
+                            .get("verb")
+                            .cloned()
+                            .and_then(|value| serde_json::from_value(value).ok()),
                     })
                 }
                 _ => return None,
@@ -1169,6 +1182,20 @@ pub fn decode_gm_action_request(raw: &str) -> Option<crate::gm_action::GmActionR
                 variant,
                 position_mm,
                 heading_mdeg,
+            }
+        }
+        // Exactly `{operator_id, correlation, action, event, active}`. The
+        // absolute `active` is the same shape `set_session_paused` carries and
+        // for the same reason: two GMs pressing at once must not depend on
+        // arrival order for the state the event ends up in.
+        "set_event_paused"
+            if object.len() == 5
+                && object.contains_key("event")
+                && object.contains_key("active") =>
+        {
+            crate::gm_action::GmAction::SetEventPaused {
+                event: bounded_gm_event_id(object.get("event")?.as_str()?)?,
+                active: object.get("active")?.as_bool()?,
             }
         }
         "issue_station_command"
@@ -1575,6 +1602,7 @@ mod mesh_frame_tests {
                 tick: 419,
                 reason: crate::gm_action::GmActionRefusalReason::WrongPhase,
                 target: None,
+                verb: None,
             },
         ));
         // A refused Fire crosses the same lane still naming the event it tried
@@ -1590,6 +1618,7 @@ mod mesh_frame_tests {
                 tick: 419,
                 reason: crate::gm_action::GmActionRefusalReason::UnknownGmEvent,
                 target: Some("base-world::breach_alarm".into()),
+                verb: Some(crate::gm_action::GmEventVerb::Fire),
             },
         ));
         for frame in [proposal, refusal, refused_fire] {
@@ -1762,6 +1791,105 @@ mod mesh_frame_tests {
                 "must fail closed: {refused}"
             );
         }
+    }
+
+    /// Issue #1303: pausing an authored event crosses the same narrow typed
+    /// ingress, carrying the ABSOLUTE state rather than a toggle.
+    #[test]
+    fn pausing_an_authored_gm_event_uses_the_same_exact_typed_ingress() {
+        for (raw, active) in [
+            (
+                r#"{"operator_id":"gm-1","correlation":"pause-3","action":"set_event_paused","event":"base-world::breach_alarm","active":true}"#,
+                true,
+            ),
+            (
+                r#"{"operator_id":"gm-1","correlation":"resume-3","action":"set_event_paused","event":"base-world::breach_alarm","active":false}"#,
+                false,
+            ),
+        ] {
+            let request = super::decode_gm_action_request(raw).expect("valid pause request");
+            assert_eq!(
+                request.action,
+                crate::gm_action::GmAction::SetEventPaused {
+                    event: "base-world::breach_alarm".into(),
+                    active,
+                }
+            );
+            assert_eq!(
+                request.action.kind(),
+                crate::gm_action::GmActionKind::EventControl,
+                "Pause routes to the mission surface beside Fire"
+            );
+            assert_eq!(
+                request.action.verb(),
+                Some(crate::gm_action::GmEventVerb::Pause),
+                "and the durable result must be able to say WHICH lever it was"
+            );
+            assert_eq!(request.action.target_id(), Some("base-world::breach_alarm"));
+            assert_eq!(
+                request.action.requested_pause(),
+                None,
+                "a paused EVENT is not a paused session"
+            );
+            assert_eq!(request.action.requested_active(), active);
+        }
+
+        for refused in [
+            // An unqualified id cannot name one event across layers.
+            r#"{"operator_id":"gm-1","correlation":"pause-3","action":"set_event_paused","event":"breach_alarm","active":true}"#,
+            r#"{"operator_id":"gm-1","correlation":"pause-3","action":"set_event_paused","event":"","active":true}"#,
+            r#"{"operator_id":"gm-1","correlation":"pause-3","action":"set_event_paused","event":"base-world::","active":true}"#,
+            // Absolute state only: a toggle would depend on arrival order.
+            r#"{"operator_id":"gm-1","correlation":"pause-3","action":"set_event_paused","event":"base-world::a"}"#,
+            r#"{"operator_id":"gm-1","correlation":"pause-3","action":"set_event_paused","event":"base-world::a","active":"yes"}"#,
+            // A second target is a wider mutation surface, not a Pause.
+            r#"{"operator_id":"gm-1","correlation":"pause-3","action":"set_event_paused","event":"base-world::a","active":true,"ship":"player-1"}"#,
+            r#"{"operator_id":"gm-1","correlation":"pause-3","action":"set_event_paused"}"#,
+        ] {
+            assert!(
+                super::decode_gm_action_request(refused).is_none(),
+                "must fail closed: {refused}"
+            );
+        }
+    }
+
+    /// A refused Pause replicates as a refused PAUSE (issue #1303): the lever
+    /// crosses the owner-decision lane beside the event id, because a frame
+    /// carrying only the id could be republished on every other GM's feed as a
+    /// refused Fire of that same event.
+    #[test]
+    fn a_replicated_event_control_refusal_carries_its_lever() {
+        let refusal = MeshFrame::GmAction(crate::gm_action::GmActionFrame::Refused(
+            crate::gm_action::GmActionRefusal {
+                sequenced_by: HostSlot(1),
+                requester: HostSlot(2),
+                operator_id: "gm-1".into(),
+                correlation: crate::gm_action::GmActionId::new("pause-1").unwrap(),
+                action_kind: crate::gm_action::GmActionKind::EventControl,
+                requested_active: false,
+                tick: 419,
+                reason: crate::gm_action::GmActionRefusalReason::UnknownGmEvent,
+                target: Some("base-world::breach_alarm".into()),
+                verb: Some(crate::gm_action::GmEventVerb::Pause),
+            },
+        ));
+        let text = super::encode_mesh_frame(&refusal).expect("encodes");
+        assert!(text.contains(r#""verb":"pause""#), "{text}");
+        assert_eq!(super::decode_mesh_frame(&text), Some(refusal));
+
+        // The same frame from a peer that predates the lever: the key is simply
+        // absent, and it still decodes rather than being dropped on the floor.
+        // `validate_fleet_frame` is what then refuses it, rather than this
+        // ingress guessing Fire.
+        let legacy = text.replace(r#","verb":"pause""#, "");
+        assert!(!legacy.contains("verb"), "{legacy}");
+        let Some(MeshFrame::GmAction(crate::gm_action::GmActionFrame::Refused(decoded))) =
+            super::decode_mesh_frame(&legacy)
+        else {
+            panic!("a legacy refusal still decodes")
+        };
+        assert_eq!(decoded.verb, None);
+        assert_eq!(decoded.target.as_deref(), Some("base-world::breach_alarm"));
     }
 
     /// No session token can reach this wire, because the type it projects from

@@ -149,6 +149,18 @@ pub enum GmActivityAction {
     SpawnPaletteEntity {
         palette: String,
     },
+    /// One authored GM-operable event was paused or resumed (issue #1303).
+    /// `active` is the absolute state the GM asked for, so the feed says
+    /// "paused" or "resumed" rather than "toggled".
+    ///
+    /// A separate variant from [`Self::FireGmEvent`] even though both belong to
+    /// [`crate::gm_action::GmActionKind::EventControl`]: the kind routes a
+    /// result to the mission surface, while this vocabulary is the sentence a
+    /// GM reads, and "fired the breach alarm" is simply not what happened.
+    SetEventPaused {
+        event: String,
+        active: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -390,6 +402,7 @@ fn action_key(action: &GmActivityAction) -> (u8, bool, &str) {
         // never collapse onto each other.
         GmActivityAction::ApplyDirectEffect { entity, heal, .. } => (3, *heal, entity.as_str()),
         GmActivityAction::SpawnPaletteEntity { palette } => (4, false, palette.as_str()),
+        GmActivityAction::SetEventPaused { event, active } => (5, *active, event.as_str()),
     }
 }
 
@@ -1187,15 +1200,18 @@ fn terminal_action_entries(
                 detail: GmActivityDetail::GmAction(GmActivityGmAction {
                     operator: gm_operator(&fact.operator_id, roster),
                     correlation: fact.correlation.as_str().to_owned(),
-                    // The event-control family names WHAT it fired; every older
-                    // family keeps the exact row shape it already published.
-                    action: match fact.action_kind {
+                    // The event-control family names WHAT it did to WHICH
+                    // event, so it reads the durable fact's VERB and not just
+                    // its kind (issue #1303): the kind is the routing family
+                    // Fire and Pause share, and folding on it alone would
+                    // publish every Pause and Resume as "fired {event}".
+                    action: match (fact.action_kind, fact.verb) {
                         // The directed world-effect family names WHAT it hit
                         // and WHAT the hull did with it. A fact whose result
                         // carries no resolved effect (a refusal settled before
                         // any hull was read) still renders, with zeroes, rather
                         // than dropping the operator's row.
-                        crate::gm_action::GmActionKind::DirectEffect => {
+                        (crate::gm_action::GmActionKind::DirectEffect, _) => {
                             let effect = fact.effect;
                             GmActivityAction::ApplyDirectEffect {
                                 entity: fact.target.clone()?,
@@ -1209,25 +1225,37 @@ fn terminal_action_entries(
                                 destroyed: effect.is_some_and(|effect| effect.destroyed),
                             }
                         }
-                        crate::gm_action::GmActionKind::EventControl => {
-                            GmActivityAction::FireGmEvent {
-                                // Every producer of an event-control fact
-                                // attaches the qualified id and
-                                // `validate_fleet_frame` refuses a replicated
-                                // refusal without one, so `None` is
-                                // unreachable. Dropping that row rather than
-                                // publishing an empty id keeps one hypothetical
-                                // hole from making the whole absolute page
-                                // unparseable for every GM's feed.
-                                event: fact.target.clone()?,
-                            }
-                        }
+                        (
+                            crate::gm_action::GmActionKind::EventControl,
+                            Some(crate::gm_action::GmEventVerb::Fire),
+                        ) => GmActivityAction::FireGmEvent {
+                            // Every producer of an event-control fact attaches
+                            // the qualified id and `validate_fleet_frame`
+                            // refuses a replicated refusal without one, so
+                            // `None` is unreachable. Dropping that row rather
+                            // than publishing an empty id keeps one
+                            // hypothetical hole from making the whole absolute
+                            // page unparseable for every GM's feed.
+                            event: fact.target.clone()?,
+                        },
+                        (
+                            crate::gm_action::GmActionKind::EventControl,
+                            Some(crate::gm_action::GmEventVerb::Pause),
+                        ) => GmActivityAction::SetEventPaused {
+                            event: fact.target.clone()?,
+                            active: fact.requested_active,
+                        },
+                        // An event-control fact with no verb is the same
+                        // hypothetical hole as one with no target, and is
+                        // dropped rather than rendered under a lever nobody
+                        // pulled.
+                        (crate::gm_action::GmActionKind::EventControl, None) => return None,
                         // Same rule as the event family: every producer of a
                         // world-spawn fact attaches the palette id and
                         // `validate_fleet_frame` refuses a replicated refusal
                         // without one, so `None` drops this row rather than
                         // publishing a placement of the empty id.
-                        crate::gm_action::GmActionKind::WorldSpawn => {
+                        (crate::gm_action::GmActionKind::WorldSpawn, _) => {
                             GmActivityAction::SpawnPaletteEntity {
                                 palette: fact.target.clone()?,
                             }

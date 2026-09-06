@@ -249,7 +249,8 @@ pub fn validate_station_action(
         GmAction::SetSessionPaused { .. }
         | GmAction::FireGmEvent { .. }
         | GmAction::ApplyDirectEffect { .. }
-        | GmAction::SpawnPaletteEntity { .. } => return Ok(()),
+        | GmAction::SpawnPaletteEntity { .. }
+        | GmAction::SetEventPaused { .. } => return Ok(()),
         GmAction::SetStationPuppet { station, .. }
         | GmAction::IssueStationCommand { station, .. } => station,
     };
@@ -297,7 +298,8 @@ pub fn validate_station_action(
         GmAction::SetSessionPaused { .. }
         | GmAction::FireGmEvent { .. }
         | GmAction::ApplyDirectEffect { .. }
-        | GmAction::SpawnPaletteEntity { .. } => unreachable!(),
+        | GmAction::SpawnPaletteEntity { .. }
+        | GmAction::SetEventPaused { .. } => unreachable!(),
     }
 }
 
@@ -998,6 +1000,7 @@ station = "tactical"
                     order: Some(order),
                     target: None,
                     effect: None,
+                    verb: None,
                 })
                 .unwrap();
             let provisional_log = journal.applied_log();

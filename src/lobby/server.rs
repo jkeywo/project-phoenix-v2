@@ -1228,6 +1228,14 @@ pub fn handle_return_to_lobby_system(
             // performing it in the next run would put a hull on the map with
             // nobody attributed and no result feed to explain it.
             content.pending_gm_spawns.clear();
+            // And the Pause toggles with it (issue #1303), for the same reason
+            // one line up: a paused event is a GM command's standing effect,
+            // and the grant that authorised it was cleared with the journal.
+            // A toggle that survived would stop the NEXT run evaluating an
+            // authored condition with nobody attributed and no row on any feed
+            // to say why, and the mission panel would open showing it paused
+            // against an empty result feed.
+            content.paused_gm_events.clear();
         }
         // A resolved directed effect is the same kind of pending effect and
         // goes at the same boundary (issue #1310): the grant that authorised it

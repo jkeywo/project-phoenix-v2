@@ -546,6 +546,66 @@ pub(crate) fn register_trigger_builders(
         },
     );
 
+    // 15. The Pause lever on an authored GM-operable event (issue #1303).
+    //
+    // `on_destroyed("courier", "evac").gm_controls("evac", "world.gm.event.evac").pauseable()`
+    // — a SIBLING modifier on the same handle, exactly as
+    // `gm-t2-event-control-contract` said Pause would arrive, rather than a
+    // third parameter of `gm_controls`. A world that already declares a control
+    // set is untouched by this issue landing, and an author who wants the lever
+    // says so in one word.
+    //
+    // It requires a control set to already exist, and that guard is the
+    // load-time half of "only an event declaring Pause exposes the toggle": a
+    // `.pauseable()` on a trigger with no `gm_event`/`gm_controls` declaration
+    // has no id to address, no label to render and no mission-panel row to hang
+    // a toggle on, so it can only be an authoring mistake. The guard is the
+    // exact inverse of `gm_controls`'s duplicate check above.
+    //
+    // Declaring it TWICE is deliberately fine, unlike a second `gm_controls`.
+    // The difference is what the second declaration could change: a second
+    // control set silently re-identifies the event under an id the author did
+    // not choose, while a second `.pauseable()` sets the same bool to the same
+    // value. `repeatable()` is idempotent for the same reason and this matches
+    // it.
+    let s = state.clone();
+    host_fn!(
+        engine,
+        "pauseable",
+        receiver = "trigger",
+        category = "trigger",
+        params = [],
+        summary = "Add the persistent GM Pause lever to the control set this \
+                  registration already declares: \
+                  `on_destroyed(e, \"h\").gm_controls(\"id\", \"l\").pauseable()`. \
+                  While a GM has the event paused its automatic condition is \
+                  not evaluated and captures no missed edge; Fire, if \
+                  declared, still works. Chains with the other modifiers in \
+                  any order.",
+        move |handle: &mut TriggerHandle| -> Result<TriggerHandle, Box<EvalAltResult>> {
+            let mut st = s.lock().expect("builder state lock");
+            let index = handle.index;
+            match st.script_triggers.get_mut(index) {
+                Some(t) => match t.trigger.gm_controls.as_mut() {
+                    Some(controls) => {
+                        controls.pause = true;
+                        Ok(*handle)
+                    }
+                    None => Err(raise(
+                        "pauseable(): this registration declares no GM \
+                         controls; call gm_event(id, label, handler) or \
+                         .gm_controls(id, label) first"
+                            .to_string(),
+                    )),
+                },
+                // Unreachable through the front-end, exactly as in `when` below.
+                None => Err(raise(format!(
+                    "pauseable(): trigger handle {index} names no registered trigger"
+                ))),
+            }
+        },
+    );
+
     // The trigger-LEVEL predicate gate, chained onto whichever registration just
     // ran: `on_all_destroyed("hostiles", "h").when("counter(waves) >= 8")`.
     //
@@ -1288,6 +1348,78 @@ mod tests {
             },
             "the automatic condition is untouched by the declaration"
         );
+    }
+
+    /// Issue #1303: `.pauseable()` adds the Pause lever to a control set either
+    /// surface declared, composes with every other modifier in any order, and
+    /// changes nothing else about the trigger.
+    #[test]
+    fn pauseable_adds_the_pause_lever_to_either_authoring_surface() {
+        for source in [
+            r#"on_destroyed("courier", "h")
+                   .gm_controls("evac", "world.gm.event.evac").pauseable();
+               fn h(ctx) { }"#,
+            r#"gm_event("evac", "world.gm.event.evac", "h").pauseable();
+               fn h(ctx) { }"#,
+        ] {
+            let controls = script_triggers(source)[0]
+                .trigger
+                .gm_controls
+                .clone()
+                .expect("a control set");
+            assert!(controls.pause, "`{source}` declares the Pause lever");
+            assert!(controls.fire, "and leaves the Fire lever alone");
+            assert!(!controls.skip, "Skip (#1304) is still not declared");
+            assert_eq!(controls.id, "evac");
+        }
+
+        // Order-independent, like every other trigger-level modifier, and a
+        // second `.pauseable()` is idempotent rather than a load-time error:
+        // unlike a second control set it cannot re-identify the event.
+        let one = script_triggers(
+            r#"on_flag_set("alarm", "h")
+                   .gm_controls("evac", "world.gm.event.evac").pauseable().repeat()
+                   .when("flag(ready)");
+               fn h(ctx) { }"#,
+        );
+        let other = script_triggers(
+            r#"on_flag_set("alarm", "h")
+                   .when("flag(ready)").repeat()
+                   .gm_controls("evac", "world.gm.event.evac").pauseable().pauseable();
+               fn h(ctx) { }"#,
+        );
+        assert_eq!(one[0].trigger, other[0].trigger);
+        assert!(one[0].trigger.repeat && one[0].trigger.when.is_some());
+        assert_eq!(
+            one[0].trigger.condition,
+            TriggerCondition::OnFlagSet {
+                name: "alarm".into()
+            },
+            "the automatic condition is untouched by the declaration"
+        );
+    }
+
+    /// `.pauseable()` on a trigger that declares no control set is a load-time
+    /// error: there is no id to address it by, no label to render and no
+    /// mission-panel row to hang a toggle on, so it can only be a mistake.
+    #[test]
+    fn pauseable_without_a_control_set_is_a_blocking_finding() {
+        let compiled = compile_scripts(&[ScriptSource {
+            path: "w.toml#script.setup".to_string(),
+            source: r#"on_world_loaded("h").pauseable(); fn h(ctx) { }"#.to_string(),
+        }]);
+        assert!(
+            compiled
+                .findings
+                .iter()
+                .any(|finding| finding.severity == crate::world::validate::Severity::Error),
+            "a pauseable() with no gm_controls must be refused at load: {:?}",
+            compiled.findings
+        );
+        assert!(compiled
+            .script_triggers
+            .iter()
+            .all(|st| st.trigger.gm_controls.is_none()));
     }
 
     /// One trigger, one control set. Declaring twice is a load-time error

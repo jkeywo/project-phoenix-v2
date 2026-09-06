@@ -1442,6 +1442,76 @@ fn an_armed_gm_placement_moves_the_digest_and_its_order_is_part_of_it() {
     assert_ne!(world_digest(&forward), world_digest(&backward));
 }
 
+/// A GM-operable event's PAUSED state is folded; the Pause lever it declares is
+/// not (issue #1303).
+///
+/// The armed-Fire test's reason, sharpened: which events are paused decides
+/// what the trigger pipeline evaluates on every LATER tick, so two peers that
+/// disagree about it are about to run different missions from here on. It is
+/// folded behind the same emptiness check, which is why no existing world's
+/// digest moved when this landed.
+#[test]
+fn a_paused_gm_event_moves_the_digest_and_an_empty_set_leaves_it_alone() {
+    let pausable = |id: &str| {
+        let mut state = trigger_state("raider");
+        state.trigger.id = Some(id.into());
+        let mut controls = crate::world::config::GmEventControls::fire_only(
+            id.into(),
+            format!("world.gm.event.{id}"),
+        );
+        controls.pause = true;
+        state.trigger.gm_controls = Some(controls);
+        state
+    };
+    let table = |world: &mut World| {
+        world.resource_mut::<WorldContentRuntime>().trigger_states =
+            vec![pausable("breach"), pausable("sweep")];
+    };
+
+    let mut world = scenario_world();
+    table(&mut world);
+    let idle = world_digest(&world);
+
+    // A world that authors pausable events but has paused none digests exactly
+    // as it would have before this issue.
+    let mut plain = scenario_world();
+    table(&mut plain);
+    plain
+        .resource_mut::<WorldContentRuntime>()
+        .paused_gm_events
+        .clear();
+    assert_eq!(world_digest(&plain), idle);
+
+    world
+        .resource_mut::<WorldContentRuntime>()
+        .paused_gm_events
+        .insert("base-world::breach".into());
+    let held = world_digest(&world);
+    assert_ne!(idle, held, "a paused event changes what is evaluated");
+
+    // WHICH event is paused is part of it, and so is the armed set beside it:
+    // the two are separate facts about the same event and fold separately.
+    let mut other = scenario_world();
+    table(&mut other);
+    other
+        .resource_mut::<WorldContentRuntime>()
+        .paused_gm_events
+        .insert("base-world::sweep".into());
+    assert_ne!(held, world_digest(&other));
+
+    let mut armed = scenario_world();
+    table(&mut armed);
+    armed
+        .resource_mut::<WorldContentRuntime>()
+        .pending_gm_event_fires
+        .insert("base-world::breach".into());
+    assert_ne!(
+        held,
+        world_digest(&armed),
+        "an armed Fire and a standing Pause on the same event are not one fact"
+    );
+}
+
 /// The cooldown stamp folds as present-or-absent and never by value: a restore
 /// reconstructs the mission-clock anchor by `f32` subtraction, so its readings
 /// are not bit-exact across a resume. See `fold_scenario_triggers`.

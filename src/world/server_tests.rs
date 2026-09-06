@@ -65,6 +65,26 @@ fn silent(ctx) { ctx.flags.increment("silents", 1); }
 '''
 "#;
 
+/// The issue #1303 half: ORDINARY condition-bearing triggers that declare the
+/// Pause lever, plus one that declares only Fire.
+///
+/// `on_all_destroyed` is here on purpose and is the sharpest case in the file:
+/// it is the ONE condition that banks state as it watches (`seen_destroyed`),
+/// so it is the one that can prove "no missed edge is captured" rather than
+/// merely "no handler ran". With no authored entity groups the matcher falls
+/// back to treating the group name as its sole member, so destroying `wing`
+/// completes it.
+const SCRIPT_GM_PAUSABLE_EVENTS: &str = r#"[script]
+setup = '''
+on_destroyed("courier", "evac").gm_controls("evac", "world.gm.event.evac").pauseable();
+on_all_destroyed("wing", "wipe").gm_controls("wipe", "world.gm.event.wipe").pauseable();
+on_destroyed("raider", "lockdown").gm_controls("lockdown", "world.gm.event.lockdown");
+fn evac(ctx) { ctx.flags.increment("evacs", 1); }
+fn wipe(ctx) { ctx.flags.increment("wipes", 1); }
+fn lockdown(ctx) { ctx.flags.increment("lockdowns", 1); }
+'''
+"#;
+
 /// `a_gm_fire_held_by_a_false_predicate_lands_when_the_predicate_holds`.
 const SCRIPT_GM_EVENT_GATED: &str = r#"[script]
 setup = '''
@@ -1616,6 +1636,37 @@ fn fire_gm_event(app: &mut App, correlation: &str, event: &str) {
     app.update();
 }
 
+/// Grant one absolute Pause/Resume of `event` at the app's current tick and
+/// step once (issue #1303).
+fn set_gm_event_paused(app: &mut App, correlation: &str, event: &str, active: bool) {
+    let tick = app.world().resource::<crate::sim_tick::SimTick>().0;
+    let sequence = app
+        .world()
+        .resource::<crate::gm_action::GmActionJournal>()
+        .next_sequence();
+    let grant = crate::gm_action::GmActionGrant {
+        from: crate::command_admission::log::HostSlot(1),
+        sequenced_by: crate::command_admission::log::HostSlot(1),
+        operator_id: "gm-1".into(),
+        correlation: crate::gm_action::GmActionId::new(correlation).unwrap(),
+        recovery_generation: 0,
+        apply_tick: tick,
+        order: crate::gm_action::GmActionOrder::new(
+            crate::command_admission::log::HostSlot(1),
+            sequence,
+        ),
+        action: crate::gm_action::GmAction::SetEventPaused {
+            event: event.into(),
+            active,
+        },
+    };
+    app.world_mut()
+        .resource_mut::<crate::gm_action::GmActionJournal>()
+        .insert(grant)
+        .expect("canonical grant");
+    app.update();
+}
+
 fn gm_outcomes(app: &App) -> Vec<crate::gm_action::GmActionOutcome> {
     app.world()
         .resource::<crate::gm_action::GmActionJournal>()
@@ -1861,6 +1912,176 @@ fn an_automatic_event_that_already_fired_refuses_to_fire_again_for_a_gm() {
     );
 }
 
+/// Issue #1303, the criterion the whole issue turns on: while an event is
+/// paused its automatic condition is NOT EVALUATED, and the edge it missed is
+/// not banked anywhere that could fire it on unpause.
+///
+/// `on_all_destroyed` is the condition that can tell the difference. Merely
+/// skipping the FIRING would still let `trigger_fires_for_events` accumulate
+/// the destruction into `seen_destroyed`, and the trigger would fire on the
+/// first tick after the Resume — the exact "captured missed edge" the contract
+/// forbids. Skipping the EVALUATION leaves the set empty, so the resumed
+/// trigger is waiting for a destruction that has already happened and will not
+/// happen again; a GM who wanted the moment anyway must use Fire.
+#[test]
+fn a_paused_event_evaluates_nothing_and_banks_no_missed_edge() {
+    let mut app = gm_event_app(SCRIPT_GM_PAUSABLE_EVENTS);
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .trigger_states
+            .len(),
+        3
+    );
+
+    set_gm_event_paused(&mut app, "pause-1", "base-world::wipe", true);
+    assert_eq!(
+        gm_outcomes(&app),
+        vec![crate::gm_action::GmActionOutcome::Applied]
+    );
+    assert!(app
+        .world()
+        .resource::<WorldContentRuntime>()
+        .paused_gm_events
+        .contains("base-world::wipe"));
+
+    // The occurrence happens while paused. Nothing runs, and — the part a
+    // firing-only gate would get wrong — nothing is remembered either.
+    destroy_named(&mut app, "wing");
+    {
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert_eq!(
+            runtime.flags.counter("wipes"),
+            0,
+            "a paused event runs nothing"
+        );
+        assert!(!runtime.trigger_states[1].fired);
+        assert!(
+            runtime.trigger_states[1].seen_destroyed.is_empty(),
+            "a paused condition is not evaluated, so it banks no missed edge"
+        );
+    }
+
+    set_gm_event_paused(&mut app, "resume-1", "base-world::wipe", false);
+    assert!(app
+        .world()
+        .resource::<WorldContentRuntime>()
+        .paused_gm_events
+        .is_empty());
+
+    // Unpausing resumes ORDINARY evaluation. Ordinary world events go by and
+    // the missed occurrence never surfaces.
+    destroy_named(&mut app, "raider");
+    {
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert_eq!(
+            runtime.flags.counter("lockdowns"),
+            1,
+            "the event beside it was never paused and works normally"
+        );
+        assert_eq!(
+            runtime.flags.counter("wipes"),
+            0,
+            "an edge missed during Pause does not fire on unpause"
+        );
+    }
+
+    // And the resumed trigger is genuinely live, not broken: the NEXT
+    // occurrence fires it.
+    destroy_named(&mut app, "wing");
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("wipes"),
+        1,
+        "ordinary evaluation resumes rather than the trigger being spent"
+    );
+}
+
+/// Pause gates the AUTOMATIC pass and nothing else: a Fire of a paused event
+/// still arms and still runs the ordinary handler through the ordinary
+/// lifecycle. This is why both levers exist — a GM stops the world choosing the
+/// moment so they can choose it themselves.
+#[test]
+fn fire_still_works_while_the_event_is_paused() {
+    let mut app = gm_event_app(SCRIPT_GM_PAUSABLE_EVENTS);
+
+    set_gm_event_paused(&mut app, "pause-1", "base-world::evac", true);
+    fire_gm_event(&mut app, "fire-1", "base-world::evac");
+
+    {
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert_eq!(
+            runtime.flags.counter("evacs"),
+            1,
+            "a paused event still honours an explicit Fire"
+        );
+        assert!(
+            runtime.trigger_states[0].fired,
+            "through the ordinary latch"
+        );
+        assert!(runtime.pending_gm_event_fires.is_empty());
+        assert!(
+            runtime.paused_gm_events.contains("base-world::evac"),
+            "and the Pause is still standing afterwards"
+        );
+    }
+    assert_eq!(
+        gm_outcomes(&app),
+        vec![
+            crate::gm_action::GmActionOutcome::Applied,
+            crate::gm_action::GmActionOutcome::Applied,
+        ]
+    );
+}
+
+/// The absent-control refusal at the live seam, and the absolute projection a
+/// reconnecting GM reads: only an event DECLARING Pause is pausable, and the
+/// projection says which of them is paused right now.
+#[test]
+fn only_a_declared_pause_control_is_toggleable_and_the_projection_says_so() {
+    let mut app = gm_event_app(SCRIPT_GM_PAUSABLE_EVENTS);
+
+    set_gm_event_paused(&mut app, "pause-1", "base-world::lockdown", true);
+    assert_eq!(
+        gm_outcomes(&app),
+        vec![crate::gm_action::GmActionOutcome::Refused]
+    );
+    assert_eq!(
+        app.world()
+            .resource::<crate::gm_action::GmActionJournal>()
+            .applied_results()[0]
+            .reason,
+        Some(crate::gm_action::GmActionRefusalReason::UnknownGmEvent),
+    );
+    assert!(app
+        .world()
+        .resource::<WorldContentRuntime>()
+        .paused_gm_events
+        .is_empty());
+
+    set_gm_event_paused(&mut app, "pause-2", "base-world::evac", true);
+    let runtime = app.world().resource::<WorldContentRuntime>();
+    let events = crate::gm_event::controllable_events(
+        &runtime.trigger_states,
+        &runtime.pending_gm_event_fires,
+        &runtime.paused_gm_events,
+    );
+    assert_eq!(
+        events
+            .iter()
+            .map(|event| (event.id.as_str(), event.pause, event.paused))
+            .collect::<Vec<_>>(),
+        vec![
+            ("base-world::evac", true, true),
+            ("base-world::wipe", true, false),
+            ("base-world::lockdown", false, false),
+        ],
+        "the projection is absolute, so a reconnecting GM reads the same toggles",
+    );
+}
+
 /// An ordinary trigger that declares NO `gm_controls` is invisible to the
 /// mission panel and unaddressable by a `FireGmEvent` — the criterion that
 /// keeps every trigger every shipped world already authors out of the GM's
@@ -1874,6 +2095,7 @@ fn an_automatic_event_without_controls_is_invisible_and_unfireable() {
         crate::gm_event::controllable_events(
             &runtime.trigger_states,
             &runtime.pending_gm_event_fires,
+            &runtime.paused_gm_events,
         )
         .into_iter()
         .map(|event| event.id)
@@ -6158,6 +6380,64 @@ fn removing_a_layers_triggers_keeps_every_survivors_own_handler() {
     assert_eq!(runtime.triggers.len(), 3);
     assert_eq!(registered_handler_count(&runtime), 3);
     assert_eq!(runtime.triggers.generation(), generation_after);
+}
+
+/// Issue #1303: unloading a layer takes its Pause toggles with it.
+///
+/// This is the one seam where a layer-qualified id stops naming anything, and
+/// authoritative state must not accumulate an entry nothing can ever address.
+/// Pruned here rather than in the trigger pipeline the way an armed Fire is,
+/// because the pipeline is already awake on any tick an arm exists while a
+/// paused event costs it nothing — and waking it solely to notice a dead id
+/// would be worse than doing it at the moment the id dies. Exact ids, never a
+/// `layer_path::` prefix match: the qualified id is a join, and only the states
+/// that actually left may take their toggle with them.
+#[test]
+fn unloading_a_layer_releases_the_gm_pauses_on_its_own_events() {
+    fn staged(source: &str, handler: &str, id: &str) -> ScriptTrigger {
+        let mut trigger = crate::world::config::scripted_trigger(TriggerCondition::OnWorldLoaded);
+        trigger.id = Some(id.to_string());
+        let mut controls = crate::world::config::GmEventControls::fire_only(
+            id.to_string(),
+            format!("world.gm.event.{id}"),
+        );
+        controls.pause = true;
+        trigger.gm_controls = Some(controls);
+        ScriptTrigger {
+            trigger,
+            handler: handler.to_string(),
+            source_path: source.to_string(),
+        }
+    }
+
+    let mut runtime = WorldContentRuntime::default();
+    let mut sr = WorldScriptRuntime::empty();
+    sr.triggers = vec![staged("base.toml#script.setup", "base_a", "alarm")];
+    merge_script_triggers(&mut runtime, &mut sr, None);
+    // Deliberately the SAME authored id in the layer: the two are one qualified
+    // id apart, which is what a prefix match would get wrong.
+    sr.triggers = vec![staged("l1.toml#script.setup", "l1_a", "alarm")];
+    merge_script_triggers(&mut runtime, &mut sr, Some("l1.toml"));
+
+    runtime.paused_gm_events.insert("base-world::alarm".into());
+    runtime.paused_gm_events.insert("l1.toml::alarm".into());
+
+    assert_eq!(
+        remove_layer_script_triggers(&mut runtime, &mut sr.handlers, "l1.toml"),
+        1
+    );
+    assert_eq!(
+        runtime.paused_gm_events.iter().cloned().collect::<Vec<_>>(),
+        vec!["base-world::alarm".to_string()],
+        "the layer's own toggle goes; the base world's identically-named one stays"
+    );
+
+    // And an unload that contributed nothing takes nothing.
+    assert_eq!(
+        remove_layer_script_triggers(&mut runtime, &mut sr.handlers, "never_loaded.toml"),
+        0
+    );
+    assert_eq!(runtime.paused_gm_events.len(), 1);
 }
 
 /// The scoping rule a scripted flag write resolves through (issue #1045), over

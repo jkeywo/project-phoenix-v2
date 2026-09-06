@@ -162,6 +162,27 @@ function spawnPaletteEntity(data = {}, action = {}) {
   }, { ships: [], links: [] });
 }
 
+/** One Pause/Resume of an authored GM event (issue #1303), the same family. */
+function pauseGmEvent(data = {}, action = {}) {
+  return entry('gm_action', {
+    type: 'gm_action',
+    data: {
+      operator: { id: 'gm-alpha', name: 'Morgan' },
+      correlation: 'pause-event-1',
+      action: {
+        type: 'set_event_paused',
+        event: 'base-world::breach_alarm',
+        active: true,
+        ...action,
+      },
+      outcome: 'applied',
+      reason: null,
+      order: { sequence: 8, origin: 1 },
+      ...data,
+    },
+  }, { ships: [], links: [] });
+}
+
 function allCategories() {
   return [
     damage(),
@@ -315,6 +336,21 @@ describe('GM activity feed pure adapter', () => {
     // And no template path can ride in: the placement row names an id only.
     expect(parsed.entries[0].detail.data.action).not.toHaveProperty('template_path');
   });
+
+  it('accepts a paused GM event and tells it apart from a fired one', () => {
+    const parsed = parseGmActivityFeed(payload([pauseGmEvent(), pauseGmEvent({}, {
+      active: false,
+    })]));
+    expect(parsed.entries.map((row) => row.detail.data.action)).toEqual([
+      { type: 'set_event_paused', event: 'base-world::breach_alarm', active: true },
+      { type: 'set_event_paused', event: 'base-world::breach_alarm', active: false },
+    ]);
+    // The absolute state is required: a Pause row without it could only be
+    // rendered by guessing which position of the toggle was asked for.
+    expect(parseGmActivityFeed(payload([pauseGmEvent({}, { active: 'yes' })])))
+      .toBeUndefined();
+    expect(parseGmActivityFeed(payload([pauseGmEvent({}, { event: '' })]))).toBeUndefined();
+  });
 });
 
 describe('GM activity feed presentation and selection links', () => {
@@ -410,6 +446,27 @@ describe('GM activity feed presentation and selection links', () => {
       .toContain('{palette}');
     expect(realStrings.has('server.gm.activity.action_reason.unknown-gm-palette-entry'))
       .toBe(true);
+  });
+
+  it('says paused and resumed rather than fired for the same event', () => {
+    expect(harness.feed.update(payload([
+      pauseGmEvent(),
+      pauseGmEvent({ correlation: 'resume-event-1' }, { active: false }),
+    ], 16))).toBe(true);
+    const rows = [...document.querySelectorAll('[data-category="gm_action"]')];
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent)
+      .toContain('server.gm.activity.action.pause_gm_event:base-world::breach_alarm');
+    expect(rows[1].textContent)
+      .toContain('server.gm.activity.action.resume_gm_event:base-world::breach_alarm');
+    // The bug this whole branch exists to prevent: Pause shares one
+    // `GmActionKind` with Fire, so a feed folding on the kind alone renders
+    // both of these as a fire of the same event.
+    for (const row of rows) {
+      expect(row.textContent).not.toContain('server.gm.activity.action.fire_gm_event');
+    }
+    expect(realStrings.get('server.gm.activity.action.pause_gm_event')).toContain('{event}');
+    expect(realStrings.get('server.gm.activity.action.resume_gm_event')).toContain('{event}');
   });
 
   it('drives category plus ship filters and clear resets both', () => {

@@ -284,6 +284,33 @@ label = "world.smoke_gm_palette.tender.escort.label"
 overrides = { radar_appearance = { size = 7.0 } }
 `;
 
+// Issue #1303: two ORDINARY condition-bearing triggers, only ONE of which
+// declares `.pauseable()`. The pair is the point — a Pause toggle appearing on
+// the declared row and nowhere else is what "only an event declaring Pause
+// exposes the toggle" looks like in a real browser, and the second row is the
+// control that would catch a panel rendering the toggle for everything.
+const GM_PAUSABLE_EVENT_WORLD = `
+[global]
+seed = 1303
+title = "GM pausable event smoke fixture"
+description = "pauseable() on an automatic trigger, coverage for issue 1303."
+
+[[entity]]
+template_path = "assets/entities/alliance_courier.toml"
+name = "entity.alliance_courier.display_name"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+[script]
+setup = """
+on_destroyed("entity.alliance_courier.display_name", "on_courier_lost")
+    .gm_controls("courier_lost", "world.smoke_gm.event.courier_lost").pauseable();
+on_hull_below("entity.alliance_courier.display_name", flt("0.5"), "on_witness")
+    .gm_controls("witness", "world.smoke_gm.event.witness");
+fn on_courier_lost(ctx) { ctx.flags.increment("courier_losses", 1); }
+fn on_witness(ctx) { ctx.flags.increment("witnesses", 1); }
+"""
+`;
 
 async function selectAndWait(client, station) {
   await client.send('SelectStation', { station });
@@ -697,6 +724,7 @@ test('an automatic event declaring gm_controls is listed and fireable, and an un
   expect(errors).toEqual([]);
 });
 
+
 // Direct Entity damage and healing (issue #1310). A NEW feature needs a NEW
 // @core test (AGENTS.md Testing Strategy). Nothing here injects a Host Channel
 // payload: the target, its absolute hull, the overflow preview and every
@@ -884,7 +912,82 @@ test('a GM places palette entries by map drag and by keyboard alone', { tag: '@c
   expect(errors).toEqual([]);
 });
 
+/// Issue #1303 exit evidence in a real browser: the Pause toggle appears only
+/// on the event that declares it, a press crosses the typed GM action path and
+/// comes back Applied under the PAUSE verb rather than as a fire, the row flips
+/// to Resume, Fire keeps working while the event is paused, and Resume puts it
+/// back.
+test('a pausable authored event toggles end to end and an undeclared one has no toggle', { tag: '@core' }, async ({ context }) => {
+  test.setTimeout(90_000);
+  await context.route('**/assets/worlds/default.toml', (route) =>
+    route.fulfill({ contentType: 'text/plain', body: GM_PAUSABLE_EVENT_WORLD }),
+  );
 
+  const page = await context.newPage();
+  const errors = captureServerPageErrors(page);
+  await page.goto('/?gm=1&scenario=assets/worlds/default.toml');
+  await waitForWasmReady(page);
+  await page.evaluate(() => window.__hostFleetOpen());
+  await page.waitForFunction(() => {
+    const state = window.__hostGmStartState?.();
+    return state?.admitted === true
+      && state.presentationReady === true
+      && state.localValidation === true;
+  }, undefined, { timeout: 30_000 });
+  await page.evaluate(() => document.getElementById('gm-ready-btn').click());
+  await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
+
+  const row = page.locator('#gm-mission-events .gm-mission-event[data-event-id="base-world::courier_lost"]');
+  const witness = page.locator('#gm-mission-events .gm-mission-event[data-event-id="base-world::witness"]');
+  await expect(row).toBeVisible({ timeout: 30_000 });
+  await expect(witness).toBeVisible();
+
+  // The absent-control refusal as an operator meets it: the event beside this
+  // one is equally GM-operable and equally automatic, and simply has no toggle.
+  const toggle = row.locator('button[data-role="pause"]');
+  await expect(toggle).toBeEnabled();
+  await expect(toggle).toHaveText(ts('server.gm.mission.pause'));
+  await expect(witness.locator('button[data-role="pause"]')).toHaveCount(0);
+  expect(await page.evaluate(() => window.__hostGmMissionState())).toMatchObject({
+    events: 2,
+    pausable: 1,
+    paused: 0,
+  });
+
+  await toggle.click();
+  const applied = page.locator('#gm-mission-log .gm-mission-log-entry[data-outcome="applied"]');
+  await expect(applied).toHaveCount(1, { timeout: 30_000 });
+  await expect(applied).toContainText('base-world::courier_lost');
+  // The verb, not just the event: a result folded on the action KIND alone
+  // would say "fired" here, because Pause and Fire share one kind.
+  await expect(applied).toHaveAttribute('data-verb', 'pause');
+  await expect(applied).toContainText(ts('server.gm.mission.verb_pause'));
+  await expect(row).toHaveAttribute('data-paused', 'true', { timeout: 30_000 });
+  await expect(row.locator('.gm-mission-event-state'))
+    .toHaveText(ts('server.gm.mission.state_paused'));
+  await expect(toggle).toHaveText(ts('server.gm.mission.resume'));
+  expect(await page.evaluate(() => window.__hostGmMissionState())).toMatchObject({
+    paused: 1,
+    pending: 0,
+  });
+
+  // Fire is independent of Pause, which is why both levers exist: a GM stops
+  // the world choosing the moment so they can choose it themselves.
+  const fire = row.locator('button[data-role="fire"]');
+  await expect(fire).toBeEnabled();
+  await fire.click();
+  await expect(applied).toHaveCount(2, { timeout: 30_000 });
+  await expect(row).toHaveAttribute('data-spent', 'true', { timeout: 30_000 });
+  await expect(row).toHaveAttribute('data-paused', 'true');
+
+  // And the toggle goes back, on the same absolute terms.
+  await toggle.click();
+  await expect(applied).toHaveCount(3, { timeout: 30_000 });
+  await expect(row).toHaveAttribute('data-paused', 'false', { timeout: 30_000 });
+  await expect(toggle).toHaveText(ts('server.gm.mission.pause'));
+
+  expect(errors).toEqual([]);
+});
 
 test('authored field and layer fixture supports aggregate and Region inspection end to end', async ({ context }) => {
   test.setTimeout(90_000);

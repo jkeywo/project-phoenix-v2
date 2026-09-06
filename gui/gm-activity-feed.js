@@ -97,6 +97,14 @@ function normaliseAction(value) {
       && typeof value.palette === 'string' && value.palette.length > 0) {
     return { type: value.type, palette: value.palette };
   }
+  // One authored GM event was paused or resumed (issue #1303). A sibling
+  // variant rather than a flag on the one above, because "fired" and "paused"
+  // are different things that happened to the same event, and `active` says
+  // which of the toggle's two positions was asked for.
+  if (value.type === 'set_event_paused' && typeof value.event === 'string'
+      && value.event.length > 0 && typeof value.active === 'boolean') {
+    return { type: value.type, event: value.event, active: value.active };
+  }
   return undefined;
 }
 
@@ -395,6 +403,13 @@ export function createGmActivityFeed({
           action = t('server.gm.activity.action.spawn_palette_entity', {
             palette: detail.action.palette,
           });
+        } else if (detail.action.type === 'set_event_paused') {
+          action = t(
+            detail.action.active
+              ? 'server.gm.activity.action.pause_gm_event'
+              : 'server.gm.activity.action.resume_gm_event',
+            { event: detail.action.event },
+          );
         } else {
           action = t(`server.gm.activity.action.${detail.action.active ? 'pause' : 'resume'}`);
         }

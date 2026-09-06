@@ -982,6 +982,19 @@ fn fold_scenario_triggers(world: &World, mut acc: u64) -> u64 {
             acc = fold_u64(acc, pending.heading_mdeg as i64 as u64);
         }
     }
+    // The GM's paused events (issue #1303), on the same terms and behind the
+    // same emptiness check. Which events are paused is a fact a RUN moves and
+    // that changes what the pipeline evaluates on every later tick, so two
+    // peers that disagree about it diverge; whether an event CAN be paused is
+    // authored config `snapshot::content_digest` already answers for.
+    if !runtime.paused_gm_events.is_empty() {
+        acc = fold_str(acc, "scenario-gm-event-paused");
+        acc = fold_u64(acc, runtime.paused_gm_events.len() as u64);
+        // A `BTreeSet`, so this walk is already the sorted one every peer makes.
+        for id in &runtime.paused_gm_events {
+            acc = fold_str(acc, id);
+        }
+    }
     acc
 }
 

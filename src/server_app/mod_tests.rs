@@ -2432,10 +2432,15 @@ fn a_lobby_round_trip_disarms_a_predicate_held_gm_fire() {
     // The exact case the arm exists for: the Fire applied, the gate withheld
     // the firing, and the entry waits for the predicate to hold.
     trigger.when = Some(crate::world::flags::parse_predicate("flag(armed)").unwrap());
-    trigger.gm_controls = Some(GmEventControls::fire_only(
-        "scuttle".to_string(),
-        "world.gm.event.scuttle".to_string(),
-    ));
+    let mut controls =
+        GmEventControls::fire_only("scuttle".to_string(), "world.gm.event.scuttle".to_string());
+    // Issue #1303 rides the same boundary: a standing Pause is a GM command's
+    // effect too, and one that survived would stop the NEXT run evaluating an
+    // authored condition with nobody attributed and no row on any feed saying
+    // why, while the panel opened showing it paused against an empty result
+    // feed.
+    controls.pause = true;
+    trigger.gm_controls = Some(controls);
     let mut runtime = crate::world::server::WorldContentRuntime::default();
     runtime
         .trigger_states
@@ -2447,6 +2452,7 @@ fn a_lobby_round_trip_disarms_a_predicate_held_gm_fire() {
             last_fired_elapsed: None,
         });
     runtime.pending_gm_event_fires.insert(EVENT.to_string());
+    runtime.paused_gm_events.insert(EVENT.to_string());
     app.insert_resource(runtime)
         .init_resource::<crate::gm_action::GmActionLog>()
         .init_resource::<crate::gm_action::LocalGmActionRefusals>()
@@ -2464,8 +2470,8 @@ fn a_lobby_round_trip_disarms_a_predicate_held_gm_fire() {
             .payload
             .events
             .iter()
-            .all(|event| event.armed),
-        "the run under way holds the arm"
+            .all(|event| event.armed && event.paused),
+        "the run under way holds the arm and the Pause"
     );
 
     push(
@@ -2475,7 +2481,7 @@ fn a_lobby_round_trip_disarms_a_predicate_held_gm_fire() {
     );
     // Drained every frame: `Messages` keeps only two frames of history, and the
     // republish lands on whichever frame the reset does.
-    let mut republished: Vec<Vec<(String, bool)>> = Vec::new();
+    let mut republished: Vec<Vec<(String, bool, bool)>> = Vec::new();
     for _ in 0..3 {
         app.update();
         republished.extend(
@@ -2489,7 +2495,7 @@ fn a_lobby_round_trip_disarms_a_predicate_held_gm_fire() {
                         .payload
                         .events
                         .iter()
-                        .map(|event| (event.id.clone(), event.armed))
+                        .map(|event| (event.id.clone(), event.armed, event.paused))
                         .collect()
                 }),
         );
@@ -2503,10 +2509,17 @@ fn a_lobby_round_trip_disarms_a_predicate_held_gm_fire() {
             .is_empty(),
         "the arm is part of the per-run GM lane the reset clears"
     );
+    assert!(
+        app.world()
+            .resource::<crate::world::server::WorldContentRuntime>()
+            .paused_gm_events
+            .is_empty(),
+        "and so is the Pause standing over it (issue #1303)"
+    );
     assert_eq!(
         republished,
-        vec![vec![(EVENT.to_string(), false)]],
-        "the panel is republished reporting the event as disarmed"
+        vec![vec![(EVENT.to_string(), false, false)]],
+        "the panel is republished reporting the event as disarmed and resumed"
     );
 }
 

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createGmMissionPanel,
   eventIsFireable,
+  eventIsPausable,
   parseGmMissionPayload,
 } from '../../gui/gm-mission-panel.js';
 import { t } from '../../gui/strings.js';
@@ -12,6 +13,7 @@ function mount({
   correlations = ['gm-fire-1', 'gm-fire-2', 'gm-fire-3'],
   operator = { id: 'gm-a', name: 'Alex' },
   submitFireEvent = vi.fn(() => true),
+  submitSetEventPaused = vi.fn(() => true),
   capacity,
   timeoutMs,
   schedule = vi.fn(),
@@ -23,6 +25,7 @@ function mount({
     win: window,
     t,
     submitFireEvent,
+    submitSetEventPaused,
     getOperator: () => operator,
     getOperatorName: (id) => ({ 'gm-a': 'Alex', 'gm-b': 'Blair' }[id] || id),
     correlation: () => queue.shift(),
@@ -32,7 +35,7 @@ function mount({
     ...(capacity == null ? {} : { capacity }),
     ...(timeoutMs == null ? {} : { timeoutMs }),
   });
-  return { panel, submitFireEvent, schedule, cancelSchedule };
+  return { panel, submitFireEvent, submitSetEventPaused, schedule, cancelSchedule };
 }
 
 function event(overrides = {}) {
@@ -45,6 +48,7 @@ function event(overrides = {}) {
     repeatable: false,
     spent: false,
     armed: false,
+    paused: false,
     ...overrides,
   };
 }
@@ -56,12 +60,15 @@ function result(overrides = {}) {
     outcome: 'applied',
     tick: 42,
     target: 'base-world::breach_alarm',
+    verb: 'fire',
+    requested_active: true,
     ...overrides,
   };
 }
 
 const rows = () => [...document.querySelectorAll('#gm-mission-events .gm-mission-event')];
 const fireButton = (id) => document.querySelector(`button[data-role="fire"][data-event-id="${id}"]`);
+const pauseButton = (id) => document.querySelector(`button[data-role="pause"][data-event-id="${id}"]`);
 const logRows = () => [...document.querySelectorAll('#gm-mission-log .gm-mission-log-entry')];
 
 describe('GM mission panel', () => {
@@ -307,11 +314,167 @@ describe('GM mission panel', () => {
     expect(panel.state()).toEqual({
       events: 0,
       fireable: 0,
+      pausable: 0,
+      paused: 0,
       pending: 0,
       authoritative: 0,
     });
     expect(rows()).toHaveLength(0);
     expect(logRows()).toHaveLength(0);
+  });
+
+  // ── Pause / Resume (issue #1303) ────────────────────────────────────────
+
+  it('offers the toggle only on an event that declares Pause', () => {
+    const { panel } = mount();
+    panel.update({
+      events: [
+        event({ pause: true }),
+        event({ id: 'base-world::sweep', pause: false }),
+      ],
+      results: [],
+    });
+
+    expect(pauseButton('base-world::breach_alarm')).not.toBeNull();
+    expect(pauseButton('base-world::sweep')).toBeNull();
+    expect(eventIsPausable(event({ pause: true }))).toBe(true);
+    expect(eventIsPausable(event({ pause: false }))).toBe(false);
+    expect(panel.state()).toMatchObject({ events: 2, pausable: 1, paused: 0 });
+
+    // And the control is driven only by the declaration, however hard it is
+    // pushed: this is the absent-control refusal on the operator's side of the
+    // wire, so no request is minted at all.
+    const { panel: other, submitSetEventPaused } = mount();
+    other.update({ events: [event({ pause: false })], results: [] });
+    expect(other.setPaused('base-world::breach_alarm', true)).toBe(false);
+    expect(other.setPaused('base-world::not-authored', true)).toBe(false);
+    expect(submitSetEventPaused).not.toHaveBeenCalled();
+  });
+
+  it('asks for the absolute state, and reads Resume back from the projection', () => {
+    const { panel, submitSetEventPaused } = mount();
+    panel.update({ events: [event({ pause: true })], results: [] });
+
+    const control = pauseButton('base-world::breach_alarm');
+    expect(control.textContent).toBe(t('server.gm.mission.pause'));
+    expect(control.getAttribute('aria-label')).toBe(
+      t('server.gm.mission.pause_accessibility', { label: t('server.gm.mission.heading') }),
+    );
+    control.click();
+
+    expect(submitSetEventPaused).toHaveBeenCalledWith({
+      event: 'base-world::breach_alarm',
+      active: true,
+      correlation: 'gm-fire-1',
+    });
+
+    // The authoritative projection is what moves the toggle. A reconnecting GM
+    // reads exactly this, which is why the button's position is never local
+    // state: the row simply renders what the simulation says.
+    panel.update({
+      events: [event({ pause: true, paused: true })],
+      results: [result({ verb: 'pause', requested_active: true })],
+    });
+    const resumed = pauseButton('base-world::breach_alarm');
+    expect(resumed.textContent).toBe(t('server.gm.mission.resume'));
+    expect(resumed.getAttribute('aria-label')).toBe(
+      t('server.gm.mission.resume_accessibility', { label: t('server.gm.mission.heading') }),
+    );
+    expect(rows()[0].dataset.paused).toBe('true');
+    expect(rows()[0].querySelector('.gm-mission-event-state').textContent)
+      .toBe(t('server.gm.mission.state_paused'));
+    expect(panel.state()).toMatchObject({ paused: 1, pending: 0 });
+
+    resumed.click();
+    expect(submitSetEventPaused).toHaveBeenLastCalledWith({
+      event: 'base-world::breach_alarm',
+      active: false,
+      correlation: 'gm-fire-2',
+    });
+  });
+
+  it('keeps Fire available on a paused event, and holds the two levers apart', () => {
+    const { panel, submitFireEvent, submitSetEventPaused } = mount();
+    panel.update({ events: [event({ pause: true, paused: true })], results: [] });
+
+    // A pending Pause must not disable Fire, and vice versa: they are two
+    // independent authoritative requests about one event.
+    pauseButton('base-world::breach_alarm').click();
+    expect(fireButton('base-world::breach_alarm').disabled).toBe(false);
+    fireButton('base-world::breach_alarm').click();
+
+    expect(submitSetEventPaused).toHaveBeenCalledTimes(1);
+    expect(submitFireEvent).toHaveBeenCalledTimes(1);
+    expect(panel.state().pending).toBe(2);
+    expect(pauseButton('base-world::breach_alarm').disabled).toBe(true);
+    expect(fireButton('base-world::breach_alarm').disabled).toBe(true);
+  });
+
+  it('says which lever each result was, rather than reporting a Resume as a fire', () => {
+    const { panel } = mount();
+    panel.update({
+      events: [event({ pause: true })],
+      results: [
+        result({ correlation: 'r-1', verb: 'fire' }),
+        result({ correlation: 'r-2', verb: 'pause', requested_active: true }),
+        result({ correlation: 'r-3', verb: 'pause', requested_active: false, outcome: 'no-op' }),
+      ],
+    });
+
+    const texts = logRows().map((row) => row.textContent);
+    expect(texts[0]).toContain(t('server.gm.mission.verb_fire'));
+    expect(texts[1]).toContain(t('server.gm.mission.verb_pause'));
+    expect(texts[2]).toContain(t('server.gm.mission.verb_resume'));
+    expect(logRows().map((row) => row.dataset.verb)).toEqual(['fire', 'pause', 'pause']);
+    expect(texts[1]).not.toContain(t('server.gm.mission.verb_fire'));
+  });
+
+  it('rejects a result payload that does not say which lever it was', () => {
+    const withoutVerb = { ...result() };
+    delete withoutVerb.verb;
+    expect(parseGmMissionPayload({ events: [], results: [withoutVerb] })).toBeUndefined();
+    expect(parseGmMissionPayload({
+      events: [], results: [result({ verb: 'skip' })],
+    })).toBeUndefined();
+    const withoutPaused = { ...event() };
+    delete withoutPaused.paused;
+    expect(parseGmMissionPayload({ events: [withoutPaused], results: [] })).toBeUndefined();
+  });
+
+  it('shows a reconnecting GM the paused state without any local history', () => {
+    // A GM that joins mid-mission mounts a brand-new panel and is handed the
+    // absolute projection. Nothing here accumulated the Pause, so what the row
+    // shows is exactly what the simulation says — the same reading a live GM
+    // has, which is what makes reconnect and restore the same code path.
+    const { panel } = mount();
+    const projection = {
+      events: [
+        event({ pause: true, paused: true }),
+        event({ id: 'base-world::sweep', pause: true, paused: false }),
+      ],
+      results: [result({ verb: 'pause', requested_active: true })],
+    };
+    expect(panel.update(projection)).toBe(true);
+
+    expect(pauseButton('base-world::breach_alarm').textContent)
+      .toBe(t('server.gm.mission.resume'));
+    expect(pauseButton('base-world::sweep').textContent).toBe(t('server.gm.mission.pause'));
+    expect(rows().map((row) => row.dataset.paused)).toEqual(['true', 'false']);
+    expect(panel.state()).toMatchObject({ events: 2, pausable: 2, paused: 1, pending: 0 });
+    expect(logRows()[0].textContent).toContain(t('server.gm.mission.verb_pause'));
+  });
+
+  it('announces a Pause press under the lever it pressed', () => {
+    const { panel } = mount();
+    panel.update({ events: [event({ pause: true })], results: [] });
+    pauseButton('base-world::breach_alarm').click();
+
+    const feedback = document.getElementById('gm-mission-feedback');
+    expect(feedback.dataset.verb).toBe('pause');
+    expect(feedback.textContent).toContain(t('server.gm.mission.pause_accessibility', {
+      label: t('server.gm.mission.heading'),
+    }));
+    expect(feedback.textContent).not.toContain(t('server.gm.mission.fire'));
   });
 
   it('never settles a same-correlation result attributed to another operator', () => {

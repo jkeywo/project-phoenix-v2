@@ -583,7 +583,17 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// GM trying again would risk TWO hulls rather than recovering the one. The
 /// queue's ORDER travels with it because it decides which placement draws which
 /// `WorldIdMint` id.
-pub const SNAPSHOT_FORMAT: u32 = 21;
+///
+/// Format 22 carries which GM-operable events are PAUSED, and the lever each
+/// durable GM result pulled (issue #1303). A format-21 record has no field that
+/// can say either. Resuming it un-pauses every paused event — the restored
+/// world resumes evaluating conditions a GM deliberately stopped, while the
+/// journal it carries still says that Pause was Applied, so a second Pause is a
+/// No-op and no lever remains that could change either fact. And every logged
+/// event-control result in it is a Fire by construction, so defaulting the
+/// lever would republish a restored run's Pauses and Resumes as fires of the
+/// same events.
+pub const SNAPSHOT_FORMAT: u32 = 22;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -2084,6 +2094,22 @@ pub struct ScenarioState {
     /// placement draws which uuid from the `WorldIdMint`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_gm_spawns: Vec<crate::gm_spawn::PendingGmSpawn>,
+    /// `WorldContentRuntime::paused_gm_events` (issue #1303): the
+    /// layer-qualified ids of GM-operable events a Game Master has paused.
+    ///
+    /// It has to travel for [`Self::pending_gm_event_fires`]' reason with the
+    /// sign reversed. A paused event's trigger is not evaluated at all, so a
+    /// resume WITHOUT this field silently un-pauses every paused event: the
+    /// restored world starts evaluating conditions the GM deliberately stopped,
+    /// while the journal this payload already carries still says the Pause was
+    /// Applied and a second Pause of it would therefore reduce to a No-op. The
+    /// GM would be told the event is paused, watch it fire, and have no lever
+    /// left that could change either fact.
+    ///
+    /// Written in the `BTreeSet`'s own sorted order, for
+    /// [`Self::pending_gm_event_fires`]' reason.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paused_gm_events: Vec<String>,
 }
 
 /// One scenario trigger's runtime state — the three fields a run *changes*.
@@ -2791,6 +2817,7 @@ fn capture_scenario(world: &World) -> Option<ScenarioState> {
 
     let pending_gm_event_fires: Vec<String> =
         runtime.pending_gm_event_fires.iter().cloned().collect();
+    let paused_gm_events: Vec<String> = runtime.paused_gm_events.iter().cloned().collect();
 
     let mut entity_groups: Vec<(String, Vec<String>)> = runtime
         .entity_groups
@@ -2860,6 +2887,10 @@ fn capture_scenario(world: &World) -> Option<ScenarioState> {
         // the payload — for every world that authors no `[[gm_palette]]`, which
         // is every shipped world today.
         pending_gm_spawns: runtime.pending_gm_spawns.clone(),
+        // The GM's paused events (issue #1303). Empty — and so absent from the
+        // payload — for every world that authors no pausable event, which is
+        // every shipped world today.
+        paused_gm_events,
     })
 }
 
@@ -5591,6 +5622,11 @@ fn restore_scenario(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
         // queue is the complete statement of what is still owed — in the order
         // that decides which draws which uuid.
         runtime.pending_gm_spawns = stored.pending_gm_spawns.clone();
+        // The GM's paused events (issue #1303). Wholesale replacement on the
+        // same rule and for the sharper reason on `ScenarioState`: a
+        // freshly-loaded world pauses nothing, so anything short of replacement
+        // resumes conditions the GM stopped.
+        runtime.paused_gm_events = stored.paused_gm_events.iter().cloned().collect();
 
         runtime.entity_groups = stored
             .entity_groups

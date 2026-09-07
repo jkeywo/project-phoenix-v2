@@ -116,12 +116,12 @@ describe('the readouts the footer carried moved into the console body', () => {
     });
   }
 
-  it('every console that shows a target readout still answers to #footer-target', () => {
+  it('every target-bearing console retains a readout or target card', () => {
     // The renderers null-guard `ids.footer`, so a dropped one is silent — which
-    // is fine where the console genuinely has nowhere to put it (Navigation's
-    // said the same words as its own Waypoint metric) and a bug where it does.
+    // is fine where a dedicated target card owns those facts (Cruiser Tactical)
+    // and a bug where removing the readout loses the console's only target.
     const withTarget = allConsoleDocuments()
-      .filter((file) => docFor(file).getElementById('footer-target'))
+      .filter((file) => docFor(file).querySelector('#footer-target, ph-target-lock-card'))
       .map(rel);
     expect(withTarget).toEqual([
       'gui/battleship/captain.html',

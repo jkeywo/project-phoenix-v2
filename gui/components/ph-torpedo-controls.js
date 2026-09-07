@@ -71,6 +71,21 @@ export class PhTorpedoControls extends PhElement {
     .pattern-row { display: flex; gap: 0.5rem; padding-left: 4.5rem; font-size: var(--text-xs); letter-spacing: 0.15em; color: var(--reloading); }
     .pattern-row.idle { display: none; }
     .empty { font-size: var(--text-xs); color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
+
+    /* Compact hull-authored rail: the same three touch controls fit on a
+       single row in phone landscape as well as portrait. */
+      :host([compact-rail]) .tube-row {
+        display: grid; grid-template-columns: repeat(3, minmax(44px, 1fr));
+        gap: 0.3rem;
+      }
+      :host([compact-rail]) .tube-controls { display: contents; }
+      :host([compact-rail]) .lbl { grid-column: 1 / 3; min-width: 0; }
+      :host([compact-rail]) .status { grid-column: 1 / -1; min-width: 0; text-align: left; }
+      :host([compact-rail]) .status:empty { display: none; }
+      :host([compact-rail]) .torp-slots { grid-column: 3; grid-row: 1; justify-content: end; }
+      :host([compact-rail]) button { min-width: var(--control-hit-min); min-height: var(--control-hit-min); padding-inline: 0; margin: 0; justify-content: center; }
+      :host([compact-rail]) .btn .led { left: 50%; top: 6px; transform: translateX(-50%); width: 4px; height: 4px; }
+      :host([compact-rail]) .pattern-row { grid-column: 1 / -1; }
   </style>
   <div class="header">
     <span>${t('component.torpedoes.title')}</span>

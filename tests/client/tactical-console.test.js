@@ -52,7 +52,9 @@ const FIXTURES = {
     '<ph-torpedo-controls id="torpedo-controls"></ph-torpedo-controls>' +
     '<span id="footer-target"></span>' +
     '<span id="tactical-auto-badge" hidden></span>' +
-    '<ph-security-teams id="security-teams"></ph-security-teams>',
+    '<ph-security-teams id="security-teams"></ph-security-teams>' +
+    '<ph-target-lock-card id="target-lock-card"></ph-target-lock-card>' +
+    '<ph-dossier-panel id="dossier-panel"></ph-dossier-panel>',
   destroyer:
     '<ph-tactical-radar id="tactical-radar"></ph-tactical-radar>' +
     '<ph-phasers-controls id="phasers-controls"></ph-phasers-controls>' +
@@ -182,7 +184,8 @@ describe('battleship tactical renderStation', () => {
   });
 });
 
-// ── Cruiser: the `var t` shadowing regression + the Security tail (#1389) ────
+// ── Cruiser: the `var t` shadowing regression + the Security/target-card/
+//    Intel tails (#1389, #1393) ──────────────────────────────────────────────
 describe('cruiser tactical renderStation', () => {
   beforeEach(() => mount(FIXTURES.cruiser));
 
@@ -246,6 +249,144 @@ describe('cruiser tactical renderStation', () => {
     expect(el('tactical-radar').state.target_uuid).toBe('e5');
     expect(el('phasers-controls').state.banks).toEqual([{ id: 'fore' }]);
     expect(el('torpedo-controls').state.tubes).toEqual([{ id: 't1' }]);
+  });
+
+  // ── Target lock card (issue #1393) ──────────────────────────────────────
+  it('feeds the target lock card the Tactical lock facts, beside the footer', () => {
+    const withFacts = {
+      blips: [{ uuid: 'e6' }], target_uuid: 'e6',
+      target_name: 'Raider', target_stance: 'hostile', target_class: 'Corvette',
+      target_bearing: 12, target_range: 88, target_hull_pct: 55,
+      target_shields: [{ label: 'fore', hp: 50, max_hp: 100 }], target_shield_freq: 0.3,
+    };
+    cruiserRender(keyed(withFacts), document);
+    expect(el('target-lock-card').state).toEqual({
+      target_uuid: 'e6',
+      target_name: 'Raider',
+      target_stance: 'hostile',
+      target_class: 'Corvette',
+      target_bearing: 12,
+      target_range: 88,
+      target_hull_pct: 55,
+      target_shields: [{ label: 'fore', hp: 50, max_hp: 100 }],
+      target_shield_freq: 0.3,
+    });
+  });
+
+  it('clears the target lock card to its no-target defaults when nothing is locked', () => {
+    cruiserRender(keyed({ blips: [] }), document);
+    expect(el('target-lock-card').state).toEqual({
+      target_uuid: null,
+      target_name: null,
+      target_stance: null,
+      target_class: null,
+      target_bearing: null,
+      target_range: null,
+      target_hull_pct: null,
+      target_shields: [],
+      target_shield_freq: null,
+    });
+  });
+});
+
+// ── Cruiser: the Intel tab's unread badge (issue #1393) ──────────────────────
+//
+// Mirrors the destroyer's own suite below (issue #1373): the count the shell's
+// Station Bar draws is computed here, in the console's own render, because
+// only the console knows whether the seat is LOOKING at the panel. This hull
+// has no Command-intent strip, so its overlay fixture carries only the two
+// tabbed panels this seat declares (Security, Intel).
+
+describe('cruiser tactical intel badge', () => {
+  const OVERLAYS =
+    '<div class="overlay-panel" id="security-overlay"></div>' +
+    '<div class="overlay-panel" id="intel-overlay"></div>';
+
+  let reported;
+  // A FRESH document per test, not the shared jsdom one — see the destroyer
+  // suite's own comment on why: the "already read" baseline lives in a
+  // WeakMap keyed on the document (gui/cruiser/tactical.console.js).
+  let doc;
+
+  const freshDoc = () => {
+    const made = document.implementation.createHTMLDocument();
+    made.body.innerHTML = FIXTURES.cruiser + OVERLAYS;
+    return made;
+  };
+
+  const subject = (uuid, facts) => ({
+    uuid,
+    facts: Array.from({ length: facts }, (_, i) => ({ text: 'f' + i })),
+    evidence: [],
+  });
+  const payloadWith = (dossiers) => ({
+    systems: { 'tactical-radar': { blips: [], banks: [], tubes: [] } },
+    dossiers,
+  });
+  const openIntel = (target = doc) =>
+    target.getElementById('intel-overlay').classList.add('open');
+  const closeIntel = (target = doc) =>
+    target.getElementById('intel-overlay').classList.remove('open');
+  const latestBadge = () => reported.filter(([id]) => id === 'intel-overlay').at(-1)?.[1];
+
+  beforeEach(() => {
+    doc = freshDoc();
+    reported = [];
+    window.__setConsoleTabBadge = (id, count) => { reported.push([id, count]); };
+  });
+
+  afterEach(() => { delete window.__setConsoleTabBadge; });
+
+  it('reports every subject with something on file to a seat that has not looked', () => {
+    cruiserRender(payloadWith([subject('a', 1), subject('b', 2)]), doc);
+    expect(latestBadge()).toBe(2);
+  });
+
+  it('grows when a dossier gains a fact while the panel is closed', () => {
+    cruiserRender(payloadWith([subject('a', 1)]), doc);
+    openIntel();
+    cruiserRender(payloadWith([subject('a', 1)]), doc);
+    expect(latestBadge()).toBe(0);
+
+    closeIntel();
+    cruiserRender(payloadWith([subject('a', 2)]), doc);
+    expect(latestBadge()).toBe(1);
+  });
+
+  it('clears the moment the panel is open — reading is what marks it read', () => {
+    cruiserRender(payloadWith([subject('a', 3), subject('b', 1)]), doc);
+    expect(latestBadge()).toBe(2);
+    openIntel();
+    cruiserRender(payloadWith([subject('a', 3), subject('b', 1)]), doc);
+    expect(latestBadge()).toBe(0);
+  });
+
+  it('stays cleared over repeated renders with the panel open', () => {
+    openIntel();
+    cruiserRender(payloadWith([subject('a', 3)]), doc);
+    cruiserRender(payloadWith([subject('a', 3)]), doc);
+    expect(reported.map(([, count]) => count)).toEqual([0, 0]);
+  });
+
+  it('reports nothing unread for a hull with no dossiers at all', () => {
+    cruiserRender(payloadWith(undefined), doc);
+    expect(latestBadge()).toBe(0);
+  });
+
+  it('renders fine on a console whose shell installed no badge hook', () => {
+    delete window.__setConsoleTabBadge;
+    expect(() => cruiserRender(payloadWith([subject('a', 1)]), doc)).not.toThrow();
+  });
+
+  it('starts a second document from an empty baseline, whatever the first read', () => {
+    const first = freshDoc();
+    openIntel(first);
+    cruiserRender(payloadWith([subject('a', 2), subject('b', 1)]), first);
+    expect(latestBadge()).toBe(0);
+
+    const second = freshDoc();
+    cruiserRender(payloadWith([subject('a', 2), subject('b', 1)]), second);
+    expect(latestBadge()).toBe(2);
   });
 });
 

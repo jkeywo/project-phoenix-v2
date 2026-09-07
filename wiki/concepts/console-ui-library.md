@@ -6,6 +6,8 @@ sources:
   - gui/components/
   - gui/console-ui.js
   - gui/mount-plan.js
+  - gui/console.css
+  - gui/cruiser/tactical.html
 updated: 2026-08-27
 ---
 
@@ -29,3 +31,8 @@ Add a new component when a control has its own behaviour or is shared across lay
 
 - Copying a complex control's DOM and behaviour into every console layout.
 - A config-file renderer that attempts to generate every station interface.
+
+Cruiser Tactical opts into `tactical-scope-row` for its portrait layout: a
+full-width scope, paired bounded weapon rails, and a full-width target strip.
+The torpedo and target components opt into compact rendering through `compact-rail` (all orientations) and
+`portrait-strip` (portrait only). The target card sits below the phasers in landscape and desktop.

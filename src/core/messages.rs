@@ -6038,6 +6038,11 @@ pub struct LobbyStatePayload {
     /// backwards-compatible convenience projection.
     #[serde(default)]
     pub readiness: crate::lobby::start_policy::ReadinessTally,
+    /// Identity-free connected Station/rating pairs for the frozen fleet boot.
+    /// Separate from readiness: a rating change must propagate even when the
+    /// connected and ready counts stay the same.
+    #[serde(default)]
+    pub station_ratings: Vec<(StationId, String)>,
     /// Whether this host has finished its local render/presentation preload.
     /// Fleet coordination combines this with the other hosts' values before
     /// issuing a start grant; it is presentation state, not crew readiness.

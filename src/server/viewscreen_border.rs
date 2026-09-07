@@ -358,6 +358,7 @@ pub(crate) fn push_lobby_state(
         all_stations_filled: roster.all_filled,
         all_ready,
         readiness,
+        station_ratings: sessions.0.lobby_station_ratings(&stations),
         presentation_ready,
         stations: roster.stations,
         spectators,

@@ -107,6 +107,10 @@ impl Host {
     /// the first `update()`, because `headless_auto_start` enters `InProgress`
     /// on the first fixed step and the ships are spawned by that transition.
     fn new(slot: HostSlot) -> Self {
+        Self::with_roster(slot, roster(slot))
+    }
+
+    fn with_roster(slot: HostSlot, frozen: FleetRoster) -> Self {
         let args = args();
         let mut app = build_headless_app(&args).expect("app should build");
         // This host's own crew, and ONLY this host's own crew. The other ship's
@@ -130,7 +134,7 @@ impl Host {
              a fleet with no delay has no window in which to receive a peer's \
              input for the tick it is about to simulate"
         );
-        join_fleet(app.world_mut(), roster(slot), delay);
+        assert!(join_fleet(app.world_mut(), frozen, delay));
         // A short digest cadence, so the exchange is exercised several times
         // inside a probe-length run rather than once. The shipped cadence is a
         // diagnostic interval and moves nothing in the simulation.
@@ -289,10 +293,99 @@ fn mission_orders() -> Vec<(u64, HostSlot, &'static str, SystemControlPayload)> 
 
 // ── The preconditions ────────────────────────────────────────────────────────
 
+/// The browser's frozen choices, not local Sessions or a later command,
+/// determine both hulls' initial automation on every peer.
+#[test]
+fn frozen_lobby_ratings_seed_both_hosts_without_a_corrective_crew_command() {
+    use project_phoenix::ship::components::{ActiveStationRatings, ShipSystemControlSources};
+    use project_phoenix::ship::control_source::ControlSource;
+
+    let mut hosts: Vec<_> = [SLOT_ONE, SLOT_TWO]
+        .into_iter()
+        .map(|local| {
+            let encoded = serde_json::json!({
+                "local": local.0, "owner": SLOT_ONE.0, "participants": [1, 2],
+                "ships": [
+                    {"host": 1, "ship_path": SHIP, "crew": [["helm", "Simplified"]]},
+                    {"host": 2, "ship_path": SHIP, "crew": [["helm", "Std"]]},
+                ]
+            })
+            .to_string();
+            let (frozen, _) = project_phoenix::core::codec::decode_fleet_roster(&encoded).unwrap();
+            Host::with_roster(local, frozen)
+        })
+        .collect();
+    for _ in 0..30 {
+        step(&mut hosts);
+    }
+    let states: Vec<std::collections::BTreeMap<_, _>> = hosts
+        .iter_mut()
+        .map(|host| {
+            let mut query = host.app.world_mut().query::<(
+                &FleetSlotOf,
+                &ActiveStationRatings,
+                &ShipSystemControlSources,
+            )>();
+            query
+                .iter(host.app.world())
+                .map(|(slot, ratings, sources)| {
+                    (
+                        slot.0,
+                        (
+                            ratings.0[&StationId("helm".into())].clone(),
+                            sources.0.clone(),
+                        ),
+                    )
+                })
+                .collect()
+        })
+        .collect();
+    assert_eq!(
+        states[0], states[1],
+        "local Sessions cannot replace frozen peer ratings"
+    );
+    assert_eq!(states[0][&SLOT_ONE].0, "Simplified");
+    assert_eq!(states[0][&SLOT_TWO].0, "Std");
+    let steering = project_phoenix::ship::system_registry::helm_steering_system_id();
+    assert_eq!(
+        states[0][&SLOT_TWO].1.source_for(&steering),
+        ControlSource::Human,
+        "the seated Std Helm must not silently boot on Backfill"
+    );
+    assert_eq!(hosts[0].digest(), hosts[1].digest());
+}
+
+#[test]
+fn a_frozen_rating_outside_its_hull_is_refused_before_activation() {
+    let mut app = build_headless_app(&args()).unwrap();
+    let before = world_digest(app.world());
+    let tick = app.world().resource::<SimTick>().0;
+    let frozen_before = app.world().get_resource::<FleetRoster>().cloned();
+    let delay = project_phoenix::lockstep::authored_delay(app.world());
+    for (station, rating) in [("helm", "not-an-authored-rating"), ("missing-seat", "Std")] {
+        let mut ships = roster(SLOT_ONE).ships().to_vec();
+        ships[1].crew = vec![(StationId(station.into()), rating.into())];
+        assert!(!join_fleet(
+            app.world_mut(),
+            FleetRoster::new(ships, SLOT_ONE),
+            delay
+        ));
+        assert_eq!(app.world().resource::<SimTick>().0, tick);
+        assert_eq!(
+            app.world().get_resource::<FleetRoster>(),
+            frozen_before.as_ref()
+        );
+        assert!(!app.world().contains_resource::<FleetLockstep>());
+        assert_eq!(world_digest(app.world()), before);
+    }
+    assert!(
+        join_fleet(app.world_mut(), roster(SLOT_ONE), delay),
+        "refusal leaves the same host able to adopt its valid frozen roster"
+    );
+}
+
 /// Before anything else: the fleet really is two hosts flying two ships, each
-/// projecting its own, each carrying only its own crew.
-///
-/// AC1 and AC5's setup. Every later assertion is vacuous without it.
+/// projecting its own, each carrying only its own crew (AC1 and AC5).
 #[test]
 fn each_host_flies_its_own_ship_and_knows_only_its_own_crew() {
     let mut hosts = vec![Host::new(SLOT_ONE), Host::new(SLOT_TWO)];

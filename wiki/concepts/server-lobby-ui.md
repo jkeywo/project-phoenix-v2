@@ -3,7 +3,7 @@ title: Server HTML Lobby UI
 type: concept
 tags: [lobby, server, html, ui, bridge, responsive, accessibility, reduced-motion, native, gm]
 sources: [server.html, client.html, gui/host-lobby-view.js, gui/host-lobby-render.js, gui/host-lobby.css, gui/host-qr.js, gui/host-qr.css, gui/join-url.js, gui/lobby-view.js, gui/client-lobby-render.js, gui/lobby-state.js, gui/fleet-session.js, src/server/viewscreen_border.rs, src/console_bridge.rs, src/server/bridge.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/join.rs, src/lockstep/mod.rs, src/core/messages.rs, src/gm_roster.rs, src/lobby/start_policy.rs]
-updated: 2026-09-04
+updated: 2026-09-07
 ---
 
 # Server HTML Lobby UI
@@ -41,6 +41,7 @@ This is a **one-way state-push channel** that runs in parallel to the regular [M
 | `crew_count` | `u32` | Currently filled claimable Stations. |
 | `max_players` | `u32` | Number of claimable seats on the active ship. |
 | `readiness` | `ReadinessTally` | Connected non-Spectator crew and its ready subset; Station choice is irrelevant. |
+| `station_ratings` | `Vec<(StationId, String)>` | Connected non-Spectator holders' selected lobby Ratings, sorted by Station id; no participant identity or session token. |
 | `presentation_ready` | `bool` | The renderer's required assets have reached a terminal preload state; rendererless/headless peers report ready. |
 | `stations` | `Vec<StationPayload>` | One entry per claimable, non-auxiliary station. |
 | `spectators` | `Vec<String>` | Names holding the explicit Spectator role. |
@@ -48,6 +49,12 @@ This is a **one-way state-push channel** that runs in parallel to the regular [M
 | `all_stations_filled` | `bool` | Flips ready badge to `READY TO LAUNCH`. |
 
 `StationPayload`: `name`, `short_code`, `rank`, `holder_name?`, `is_mine`, `preset_names`.
+
+`SessionManager::lobby_station_ratings` selects each held Station's pending
+lobby Rating, then its first authored Rating, then `Std`. `server.html`
+publishes these pairs alongside readiness through `gui/fleet-session.js`,
+including when only a Rating changes. Mission start freezes them as
+`FleetShip.crew`, so every host boots the same per-hull control sources.
 
 The grid is sized directly from the claimable roster. It creates no padding or reserved placeholder cards.
 

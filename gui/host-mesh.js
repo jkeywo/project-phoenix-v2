@@ -122,9 +122,13 @@
  * GM request/decision controls and the Rust-owned paused transfer frame. `10`
  * adds its owner-sequenced restore clock. `11` carries the transaction kind so
  * a known departed GM reconnect can reuse that transfer without being mistaken
- * for a new public operator.
+ * for a new public operator. `12` carries frozen Station/rating pairs: an
+ * older host would silently boot a human-held Station on Backfill.
  */
-export const HOST_MESH_PROTOCOL = 11;
+export const HOST_MESH_PROTOCOL = 12;
+
+import { canonicalStationRatings } from './fleet-crew.js';
+export { canonicalStationRatings } from './fleet-crew.js';
 
 /** Frame types this revision speaks. */
 export const HOST_FRAME_HELLO = 'hello';
@@ -976,11 +980,13 @@ export function updateSlot(fleet, id, patch = {}) {
  * `slot.ready` remains the loadout/content-ready bit introduced with the fleet
  * lobby; this separate pair is the crew readiness #1290 aggregates.
  */
-export function setCrewReadiness(fleet, id, tally = {}) {
+export function setCrewReadiness(fleet, id, tally = {}, stationRatings = []) {
   const slot = slotById(fleet, id);
   if (!slot || !slot.connected) return { ok: false, reason: 'unknown' };
   if (fleet.frozen) return { ok: false, reason: REASON_RECOVERY_ONLY };
-  const next = { ...slot, crew: crewReadiness(tally, fleet.maxSlots) };
+  const ratings = canonicalStationRatings(stationRatings);
+  if (ratings === null) return { ok: false, reason: 'invalid-crew' };
+  const next = { ...slot, crew: crewReadiness(tally, fleet.maxSlots), station_ratings: ratings };
   return {
     ok: true,
     fleet: { ...fleet, slots: fleet.slots.map((candidate) => candidate.id === id ? next : candidate) },
@@ -1276,6 +1282,7 @@ export function rosterOf(fleet) {
       connected: s.connected,
       ready: s.ready,
       crew: crewReadiness(s.crew, fleet.maxSlots),
+      station_ratings: canonicalStationRatings(s.station_ratings),
       name: s.name,
       ship: s.ship,
     })),
@@ -1317,10 +1324,12 @@ export function simulationRosterOf(roster, mine) {
       ship_path: slot.ship && typeof slot.ship.template_path === 'string'
         ? slot.ship.template_path
         : null,
-      crew: [],
+      crew: canonicalStationRatings(slot.station_ratings),
     }))
     .filter((ship) => Number.isSafeInteger(ship.host) && participantSet.has(ship.host))
     .sort((left, right) => left.host - right.host);
+
+  if (ships.some(ship => ship.crew === null)) return null;
 
   const gms = (Array.isArray(roster.gm_bindings) ? roster.gm_bindings : [])
     .map((gm) => ({
@@ -1577,6 +1586,7 @@ if (typeof window !== 'undefined') {
     freezeFleet,
     updateSlot,
     setCrewReadiness,
+    canonicalStationRatings,
     setGmReady,
     setStartValidation,
     startPolicyOf,

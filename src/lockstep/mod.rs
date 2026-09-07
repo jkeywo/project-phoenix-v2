@@ -65,6 +65,7 @@ use crate::command_admission::log::{
 };
 use crate::logging::LogCat;
 
+pub mod crew;
 pub mod frame;
 pub mod host_loss;
 pub mod recovery;
@@ -1080,6 +1081,9 @@ pub fn join_fleet(world: &mut World, roster: FleetRoster, delay: u64) -> bool {
             && world
                 .get_resource::<FleetRoster>()
                 .is_some_and(|current| current == &roster);
+    }
+    if !crew::roster_crew_matches_hulls(world, &roster) {
+        return false;
     }
     crate::gm_action::reset(world);
     if !alone {

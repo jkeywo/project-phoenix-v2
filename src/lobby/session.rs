@@ -219,6 +219,36 @@ impl SessionManager {
         self.pending_ratings.get(station)
     }
 
+    /// The same connected-seat choices ordinary ship boot consumes. This
+    /// projection can cross the host mesh without player names or tokens.
+    pub fn lobby_station_ratings(
+        &self,
+        stations: &crate::lobby::stations_config::ShipStations,
+    ) -> Vec<(StationId, String)> {
+        let mut crew: Vec<_> = stations
+            .stations
+            .iter()
+            .filter(|station| {
+                !station.auxiliary
+                    && self.players.iter().any(|player| {
+                        player.connected
+                            && !player.spectator
+                            && player.station.as_ref() == Some(&station.id)
+                    })
+            })
+            .map(|station| {
+                let rating = self
+                    .pending_rating_for(&station.id)
+                    .cloned()
+                    .or_else(|| station.ratings.first().cloned())
+                    .unwrap_or_else(|| "Std".into());
+                (station.id.clone(), rating)
+            })
+            .collect();
+        crew.sort_by(|a, b| a.0 .0.cmp(&b.0 .0));
+        crew
+    }
+
     /// Clear a single station's pending rating (e.g. on release/reassignment).
     pub fn clear_pending_rating(&mut self, station: &StationId) {
         self.pending_ratings.remove(station);
@@ -470,6 +500,41 @@ mod tests {
         assert_eq!(p.name, "Alice");
         assert!(p.connected);
         assert!(p.station.is_none());
+    }
+
+    #[test]
+    fn fleet_lobby_ratings_follow_connected_seats_and_pending_choices() {
+        let mut sm = sm();
+        let mut stations = test_stations();
+        stations.stations[0].ratings = vec!["Assisted".into()];
+        stations.stations[3].auxiliary = true;
+        for (token, station) in [
+            ("captain-token", "captain"),
+            ("helm-token", "helm"),
+            ("departed-token", "tactical"),
+            ("aux-token", "repair"),
+            ("spectator-token", "sensors"),
+        ] {
+            sm.register(token.into(), format!("Private {token}"))
+                .unwrap();
+            sm.set_station(token, Some(StationId(station.into())));
+        }
+        sm.set_pending_rating(&StationId("helm".into()), "Manual".into());
+        sm.set_last_rating("captain-token", Some("Old reconnect rating".into()));
+        sm.disconnect("departed-token");
+        sm.set_spectator("spectator-token", true);
+        assert_eq!(
+            sm.lobby_station_ratings(&stations),
+            vec![
+                (StationId("captain".into()), "Assisted".into()),
+                (StationId("helm".into()), "Manual".into()),
+            ]
+        );
+        sm.set_station("helm-token", None);
+        assert_eq!(
+            sm.lobby_station_ratings(&stations),
+            vec![(StationId("captain".into()), "Assisted".into()),]
+        );
     }
 
     #[test]

@@ -397,6 +397,40 @@ describe('rotating the fleet code (issue #1115)', () => {
 });
 
 describe('admitting a second ship host', () => {
+  it('retains pre-Welcome crew choices until the member can publish its start state', async () => {
+    const { factories, lead } = await fleetOf();
+    const received = [];
+    const member = createFleetMember({
+      base: 'https://rendezvous.test', data: DATA, code: lead.code.suffix,
+      stamp: STAMP, factories, onRoster: roster => received.push(roster),
+    });
+    const chosen = [['helm', 'Simplified']];
+    expect(member.slot).toBeNull();
+    expect(member.setCrewReadiness({ connected: 1, ready: 1 }, chosen)).toBe(true);
+    chosen[0][1] = 'Mutated after submission';
+    await settle();
+    expect(received.at(-1).slots.find(slot => slot.id === member.slot).station_ratings)
+      .toEqual([['helm', 'Simplified']]);
+    member.close();
+  });
+
+  it('freezes the latest rating-only change identically on both hosts', async () => {
+    const { factories, world, lead } = await fleetOf();
+    const two = await memberOn(world, factories, lead.code.suffix);
+    lead.fleet.setCrewReadiness({ connected: 1, ready: 1 }, [['captain', 'Std']]);
+    two.member.setCrewReadiness({ connected: 1, ready: 1 }, [['helm', 'Assisted']]);
+    await settle();
+    two.member.setCrewReadiness({ connected: 1, ready: 1 }, [['helm', 'Manual']]);
+    await settle();
+    lead.fleet.freeze();
+    await settle();
+    expect(lastRoster(lead)).toEqual(lastRoster(two));
+    expect(lead.simulationRosters.at(-1).ships.map(ship => ship.crew))
+      .toEqual([[['captain', 'Std']], [['helm', 'Manual']]]);
+    expect(two.simulationRosters.at(-1).ships).toEqual(lead.simulationRosters.at(-1).ships);
+    expect(two.member.setCrewReadiness({ connected: 1, ready: 1 }, [['helm', 'Assisted']])).toBe(false);
+  });
+
   it('gives it its own slot, and both hosts see the same fleet', async () => {
     const { factories, world, lead } = await fleetOf();
     const two = await memberOn(world, factories, lead.code.suffix.toLowerCase());

@@ -1080,13 +1080,18 @@ pub fn decode_fleet_roster(raw: &str) -> Option<(crate::lockstep::FleetRoster, O
             .and_then(|p| p.as_str())
             .map(str::to_string);
         let mut crew = Vec::new();
-        for seat in entry
-            .get("crew")
-            .and_then(|c| c.as_array())
-            .map(Vec::as_slice)
-            .unwrap_or_default()
-        {
+        let seats = match entry.get("crew") {
+            None => &[][..],
+            Some(value) => value.as_array()?.as_slice(),
+        };
+        if seats.len() > crate::lockstep::crew::MAX_FLEET_CREW_SEATS {
+            return None;
+        }
+        for seat in seats {
             let pair = seat.as_array()?;
+            if pair.len() != 2 {
+                return None;
+            }
             crew.push((
                 StationId(pair.first()?.as_str()?.to_string()),
                 pair.get(1)?.as_str()?.to_string(),
@@ -1095,7 +1100,7 @@ pub fn decode_fleet_roster(raw: &str) -> Option<(crate::lockstep::FleetRoster, O
         ships.push(FleetShip {
             host,
             ship_path,
-            crew,
+            crew: crate::lockstep::crew::canonical_station_ratings(crew)?,
         });
     }
     if let Some(entries) = value.get("participants") {

@@ -73,7 +73,9 @@ use crate::lockstep::transfer::SnapshotChunk;
 /// silently DROPPED a slot-claim frame would keep the recovered ship on Backfill
 /// while the revision-4 hosts handed it back to the replacement — a split with no
 /// symptom but a divergence.
-pub const HOST_MESH_PROTOCOL: u32 = 11;
+// Revision 12 also carries the frozen Station ratings through the lobby mesh;
+// revision 11's JavaScript would discard them before Rust could seed a ship.
+pub const HOST_MESH_PROTOCOL: u32 = 12;
 
 /// One command a host admitted from its own crew, as it crosses to the fleet.
 ///
@@ -420,7 +422,7 @@ mod tests {
     #[test]
     fn the_protocol_revision_is_pinned() {
         assert_eq!(
-            HOST_MESH_PROTOCOL, 11,
+            HOST_MESH_PROTOCOL, 12,
             "bumping this is a fleet-wide incompatible change: gui/host-mesh.js \
              refuses a frame whose `m` it does not know, so both halves and the \
              Vitest pin move together or a mixed fleet fails to agree a tick"

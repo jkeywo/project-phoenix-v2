@@ -3817,6 +3817,7 @@
     let fleetStartPolicy = null;
     /** Latest local lobby tally; Rust has already excluded spectators. */
     let fleetLobbyReadiness = { connected: 0, ready: 0 };
+    let fleetLobbyStationRatings = [];
     let fleetLobbyPhase = 'Lobby';
     /** Rust-owned render/preload terminal fact from the latest lobby payload. */
     let fleetPresentationReady = false;
@@ -4392,6 +4393,7 @@
         // complete. Only Rust's explicit terminal fact can open this latch.
         fleetPresentationReady = s.presentation_ready === true;
         const tally = s.readiness;
+        fleetLobbyStationRatings = window.hostMesh.canonicalStationRatings(s.station_ratings);
         if (tally && Number.isInteger(tally.connected) && Number.isInteger(tally.ready)) {
           fleetLobbyReadiness = {
             connected: Math.max(0, tally.connected),
@@ -4408,10 +4410,10 @@
         }
       }
       if (!fleetHandle) return;
-      const valid = fleetStartValidation();
+      const valid = fleetStartValidation() && fleetLobbyStationRatings !== null;
       const role = normaliseFleetRole(fleetHandle.role || fleetRole);
       const stateKey = `${role}|${fleetLobbyReadiness.connected}|${fleetLobbyReadiness.ready}`
-        + `|${fleetPresentationReady}|${valid}`;
+        + `|${JSON.stringify(fleetLobbyStationRatings)}|${fleetPresentationReady}|${valid}`;
       if (stateKey !== fleetLastPublishedStartState) {
         // Both fleet setters synchronously publish a new roster, whose
         // `onRoster` callback re-enters this function. Latch the projection
@@ -4426,7 +4428,7 @@
           // default zero-player tally and could auto-start before its real
           // connected/unready crew count arrived.
           if (role === 'ship') {
-            fleetHandle.setCrewReadiness(fleetLobbyReadiness);
+            fleetHandle.setCrewReadiness(fleetLobbyReadiness, fleetLobbyStationRatings);
           }
           fleetHandle.setStartValidation(valid);
         } catch (e) {

@@ -4168,6 +4168,7 @@ fn host_lobby_payload_carries_exact_presentation_readiness_boolean() {
         all_stations_filled: false,
         all_ready: false,
         readiness: crate::lobby::start_policy::ReadinessTally::default(),
+        station_ratings: Vec::new(),
         presentation_ready: true,
         stations: Vec::new(),
         spectators: Vec::new(),

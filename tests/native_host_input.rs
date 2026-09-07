@@ -143,7 +143,7 @@ fn the_pane_input_adapter_builds_a_router_over_real_window_geometry() {
 /// Wait for the pane host to build, then check the router it built against the
 /// real primary window.
 fn check(
-    host: Option<NonSend<PaneHost>>,
+    host: Option<Res<PaneHost>>,
     primary: Query<(Entity, &Window), With<PrimaryWindow>>,
     mut frames: ResMut<Frames>,
     outcome: Res<Outcome>,
@@ -168,6 +168,10 @@ fn check(
         return;
     };
 
+    assert!(
+        host.thread_is_running(),
+        "the pane runtime must run on its own thread"
+    );
     let router = host.router();
     if router.len() != 2 {
         finish(

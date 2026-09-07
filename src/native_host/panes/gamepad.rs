@@ -86,6 +86,21 @@ pub fn gamepad_snapshot_json(pads: &[PadReading]) -> String {
     serde_json::to_string(&slots).unwrap_or_else(|_| "[]".to_string())
 }
 
+/// The latest script to hold on the pane thread. Before the first pad there is
+/// nothing to publish. Afterwards an empty snapshot must remain held until a
+/// new state arrives: clearing the slot on a faster main frame could coalesce
+/// away the disconnect before any page had observed it.
+pub fn held_gamepad_script(pads: &[PadReading], ever_connected: &mut bool) -> Option<String> {
+    if pads.is_empty() && !*ever_connected {
+        return None;
+    }
+    *ever_connected = true;
+    Some(format!(
+        "window.__phoenixSetGamepads({})",
+        gamepad_snapshot_json(pads)
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,6 +110,19 @@ mod tests {
             slot,
             buttons: [(false, 0.0); STANDARD_BUTTONS],
             axes: [0.0; STANDARD_AXES],
+        }
+    }
+
+    #[test]
+    fn unplug_remains_a_held_empty_snapshot_across_quiet_main_frames() {
+        let mut connected = false;
+        assert_eq!(held_gamepad_script(&[], &mut connected), None);
+        assert!(held_gamepad_script(&[pad(0)], &mut connected).is_some());
+        for _ in 0..4 {
+            assert_eq!(
+                held_gamepad_script(&[], &mut connected).as_deref(),
+                Some("window.__phoenixSetGamepads([])")
+            );
         }
     }
 

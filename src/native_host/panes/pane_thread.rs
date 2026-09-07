@@ -1,34 +1,16 @@
-//! The protocol a pane host and its renderer speak, and the seams they speak it
-//! through (issue #1404, slice 2).
+//! The SDK-independent pane protocol, iteration policy and dedicated thread.
 //!
-//! # What this is for
+//! [`spawn_pane_thread`] moves only a Send factory onto "phoenix-panes". Its
+//! !Send runtime and views are created, driven and dropped there, views first.
+//! Commands arrive over std::sync::mpsc; the loop handles them during the wait
+//! to its 16 ms deadline as well as before the next iteration. Frames carry
+//! their texture epoch and recycle their allocation by drop into a bounded
+//! per-pane pool. Replacing a pool on resize also replaces its return channel.
 //!
-//! Panes are rasterised by one Ultralight renderer, and that renderer has
-//! **thread affinity**: its `Renderer` and every `View` must be created, used
-//! and dropped on one thread. Today that thread is Bevy's main thread, which is
-//! also the simulation's — so ~21 ms of pane work per frame is ~21 ms the ship
-//! is not simulating. #1404 moves the renderer onto a thread of its own, and a
-//! thread boundary is a place where nothing can be *reached into*: the frame
-//! loop can no longer call a `View` method, only send a message and read one
-//! back.
-//!
-//! This module is that message set — [`PaneCommand`] one way, [`PaneEvent`] the
-//! other — plus the three traits the loop is written against ([`PaneView`],
-//! [`PaneRuntime`], [`PaneFrameSink`]). It is deliberately **Bevy-free and
-//! feature-OFF**: the policy that will run on the pane thread (slice 3's
-//! `PaneLoop`) is checked by the ordinary `cargo test` every CI job runs,
-//! against the doubles below, rather than only by a human on a Windows machine
-//! with an SDK and a GPU. That is the same split the rest of
-//! [`super`] is built on.
-//!
-//! There is still no thread. Since slice 4 the commands are **queued** by the
-//! Bevy systems that raise them — a `VecDeque` on `PaneHost` — and drained
-//! through [`PaneLoop::apply`] at the top of `drive_panes`, before the
-//! iteration that would show the result. Those systems are chained ahead of it,
-//! so a command raised in a frame is applied in that frame, in the order it was
-//! raised: the queue changes where the call is made, not when it lands. Slice 5
-//! moves the queue onto a channel and the loop onto its own thread, and only
-//! then does a command cost a period of latency.
+//! Started is the first event, including factory errors and unwind panics.
+//! An unwind after startup reports ThreadFailed; release panic=abort cannot
+//! recover. The handle sends Shutdown on stop or drop, joins within two seconds
+//! when finished, and otherwise detaches without moving SDK objects.
 //!
 //! # Latest-wins slots, not queued pushes
 //!
@@ -47,7 +29,7 @@
 //! latency. See [`PaneLoop::iterate`].
 //!
 //! That is both what the main thread does today (`cache_hud_state` keeps the
-//! newest HUD JSON and `drive_panes` pushes it each frame it draws) and the only
+//! newest HUD JSON and `drive_pane_host` pushes it each frame it draws) and the only
 //! shape that is bounded by construction. Queued pushes would let a 60 Hz
 //! producer outrun a 45 Hz renderer and grow an unbounded backlog of states
 //! nobody will ever see — the newest is the only one that matters, and a slot
@@ -83,9 +65,15 @@
 //! Between panes there is no order to keep — two panes are two independent
 //! documents — which is why the queue is per pane rather than global.
 
+use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
-use std::sync::mpsc::Sender;
-use std::time::Instant;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    mpsc::{self, Receiver, Sender, TryRecvError},
+    Arc, Mutex,
+};
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
 use super::registry::PaneId;
 use super::surface::{pump_pane, PaneSurface, PaneSurfaceError};
@@ -358,19 +346,9 @@ pub enum PaneEvent {
     ThreadFailed { reason: String },
 }
 
-/// What one iteration of the pane loop cost, and did.
-///
-/// The pane-side twin of [`super::frame_stats::PaneFrameSample`], which after
-/// slice 5 measures only what the *main* thread still spends on panes. Recorded
-/// here so an iteration that costs 22 ms is legible as an iteration, not
-/// smeared across however many main frames it spanned. Wiring it into the report
-/// is slice 5's.
-///
-/// Its `copied`/`forced`/`pixels` are the **loop's own** counts — what
-/// `copy_frame` reported — and can legitimately differ from the sink's tally,
-/// which counts only what it actually published and so excludes a frame found
-/// stale at publish time (an epoch the pane has moved past). `drive_panes`
-/// records the sink's tally for those three, and this sample's phase timings.
+/// One renderer iteration's phases and work, excluding the deadline wait.
+/// Main-world draining and uploads are measured separately by
+/// [`super::frame_stats::PaneFrameSample`]. Every emitted sample is accumulated.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct PaneThreadSample {
     /// `Renderer::update` — the library's own timers, network and script work.
@@ -394,8 +372,10 @@ pub struct PaneThreadSample {
     /// Pixels copied.
     pub pixels: u64,
     /// The whole iteration, wall clock — always at least the five phases, and
-    /// more than them when the loop waited.
+    /// more than them for unclassified iteration work; excludes the period wait.
     pub iteration_ms: f64,
+    /// Copies deferred for want of a free staging buffer.
+    pub starved: usize,
 }
 
 /// One pane's staging buffer, on loan from that pane's pool.
@@ -552,15 +532,8 @@ pub trait PaneFrameSink {
     fn drop_pane(&mut self, id: PaneId);
 }
 
-/// A sink with nothing behind it.
-///
-/// For the commands that cannot produce a frame — [`PaneCommand::Create`],
-/// [`PaneCommand::Input`] and the two script slots — applied from a place where
-/// the pool is not reachable. It is safe for [`PaneCommand::Close`] too **on the
-/// main-thread wiring of slice 3**, where a pane's staging pool is owned by the
-/// Bevy side and dropped with the pane's own record: the real sink's
-/// [`drop_pane`](PaneFrameSink::drop_pane) has nothing left to do there. Once
-/// the loop owns the pool (slice 5) a `Close` must reach the real sink.
+/// A sink for pure tests of commands that cannot publish a frame. Production
+/// lifecycle commands always use the thread's real pool, including Close.
 pub struct NoFrameSink;
 
 impl PaneFrameSink for NoFrameSink {
@@ -571,6 +544,330 @@ impl PaneFrameSink for NoFrameSink {
     fn publish(&mut self, _id: PaneId, _epoch: u64, _rect: FrameRect, _full: bool) {}
 
     fn drop_pane(&mut self, _id: PaneId) {}
+}
+
+/// Measured pipelined-rendering pool: three buffers, at most four returned.
+pub const PANE_STAGING_BUFFERS: usize = 3;
+pub const PANE_STAGING_CAP: usize = 4;
+
+/// Owned configuration; the runtime is constructed on its owning thread.
+pub struct PaneThreadConfig {
+    pub bus: Option<PaneBus>,
+    pub lobby: Option<HostLobbyBridge>,
+    pub period: Duration,
+    pub buffers_per_pane: usize,
+    pub measure: bool,
+    /// Optional adapter diagnostic, called on the stopping thread if bounded
+    /// shutdown must detach the renderer. Also applies when the handle drops.
+    pub on_shutdown_timeout: Option<fn()>,
+}
+impl Default for PaneThreadConfig {
+    fn default() -> Self {
+        Self {
+            bus: None,
+            lobby: None,
+            period: Duration::from_millis(16),
+            buffers_per_pane: PANE_STAGING_BUFFERS,
+            measure: false,
+            on_shutdown_timeout: None,
+        }
+    }
+}
+struct FramePool {
+    len: usize,
+    free: Vec<Vec<u8>>,
+    recycle: Sender<(PaneId, Vec<u8>)>,
+    returned: Receiver<(PaneId, Vec<u8>)>,
+}
+
+/// Thread-owned pools. Resize replaces the return channel too, so equal-length
+/// buffers from an old generation cannot return to the new pool.
+pub struct PooledFrames {
+    pools: HashMap<PaneId, FramePool>,
+    staged: Option<(PaneId, Vec<u8>)>,
+    frames: Vec<PaneEvent>,
+    buffers_per_pane: usize,
+    starved: usize,
+}
+impl PooledFrames {
+    pub fn new(buffers_per_pane: usize) -> Self {
+        Self {
+            pools: HashMap::new(),
+            staged: None,
+            frames: Vec::new(),
+            buffers_per_pane: buffers_per_pane.clamp(1, PANE_STAGING_CAP),
+            starved: 0,
+        }
+    }
+    fn configure(&mut self, id: PaneId, kind: PaneKind, len: usize) {
+        self.return_staged();
+        let (recycle, returned) = mpsc::channel();
+        let fill = if kind.transparent() {
+            [0, 0, 0, 0]
+        } else {
+            [0, 0, 0, 255]
+        };
+        let free = (0..self.buffers_per_pane)
+            .map(|_| fill.iter().copied().cycle().take(len).collect())
+            .collect();
+        self.pools.insert(
+            id,
+            FramePool {
+                len,
+                free,
+                recycle,
+                returned,
+            },
+        );
+    }
+    fn return_staged(&mut self) {
+        if let Some((id, bytes)) = self.staged.take() {
+            if let Some(pool) = self.pools.get_mut(&id) {
+                if bytes.len() == pool.len && pool.free.len() < PANE_STAGING_CAP {
+                    pool.free.push(bytes);
+                }
+            }
+        }
+    }
+}
+impl PaneFrameSink for PooledFrames {
+    fn stage(&mut self, id: PaneId, len: usize) -> Option<&mut [u8]> {
+        self.return_staged();
+        let pool = self.pools.get_mut(&id)?;
+        for (_, bytes) in pool.returned.try_iter() {
+            if bytes.len() == pool.len && pool.free.len() < PANE_STAGING_CAP {
+                pool.free.push(bytes);
+            }
+        }
+        if len != pool.len {
+            return None;
+        }
+        let Some(bytes) = pool.free.pop() else {
+            self.starved += 1;
+            return None;
+        };
+        self.staged = Some((id, bytes));
+        self.staged.as_mut().map(|(_, bytes)| bytes.as_mut_slice())
+    }
+    fn publish(&mut self, id: PaneId, epoch: u64, rect: FrameRect, full: bool) {
+        let Some((staged_id, bytes)) = self.staged.take() else {
+            return;
+        };
+        debug_assert_eq!(id, staged_id);
+        let Some(pool) = self.pools.get(&id) else {
+            return;
+        };
+        self.frames.push(PaneEvent::Frame(PaneFrame {
+            id,
+            epoch,
+            rect,
+            full,
+            bytes: PaneFrameBuffer::new(id, bytes, Some(pool.recycle.clone())),
+        }));
+    }
+    fn drop_pane(&mut self, id: PaneId) {
+        self.return_staged();
+        self.pools.remove(&id);
+    }
+}
+
+/// No renderer or view crosses this thread-safe handle.
+pub struct PaneThreadHandle {
+    pub commands: Sender<PaneCommand>,
+    pub events: Mutex<Receiver<PaneEvent>>,
+    finished: Arc<AtomicBool>,
+    join: Option<JoinHandle<()>>,
+    on_shutdown_timeout: Option<fn()>,
+}
+impl PaneThreadHandle {
+    pub fn is_running(&self) -> bool {
+        !self.finished.load(Ordering::Acquire)
+    }
+    pub fn send(&self, command: PaneCommand) -> Result<(), mpsc::SendError<PaneCommand>> {
+        self.commands.send(command)
+    }
+    pub fn try_recv(&self) -> Result<PaneEvent, TryRecvError> {
+        self.events
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .try_recv()
+    }
+    /// Idempotent bounded shutdown. A stalled renderer stays on its own thread.
+    pub fn stop(&mut self) {
+        if self.join.is_none() {
+            return;
+        }
+        let _ = self.commands.send(PaneCommand::Shutdown);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !self.finished.load(Ordering::Acquire) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        if let Some(join) = self.join.take() {
+            if self.finished.load(Ordering::Acquire) {
+                let _ = join.join();
+            } else {
+                // Detaching never drops the renderer or its views on this thread.
+                drop(join);
+                if let Some(report) = self.on_shutdown_timeout {
+                    report();
+                }
+            }
+        }
+    }
+}
+impl Drop for PaneThreadHandle {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+fn panic_reason(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(reason) = payload.downcast_ref::<&str>() {
+        (*reason).to_owned()
+    } else if let Some(reason) = payload.downcast_ref::<String>() {
+        reason.clone()
+    } else {
+        "pane thread panicked".to_owned()
+    }
+}
+fn apply_thread_command<R: PaneRuntime>(
+    driver: &mut PaneLoop<R>,
+    sink: &mut PooledFrames,
+    command: PaneCommand,
+    events: &Sender<PaneEvent>,
+) -> bool {
+    let configure = match &command {
+        PaneCommand::Create { id, kind, spec, .. } => {
+            Some((*id, *kind, spec.width as usize * spec.height as usize * 4))
+        }
+        PaneCommand::Resize {
+            id, width, height, ..
+        } => driver
+            .panes
+            .iter()
+            .find(|p| p.id == *id)
+            .map(|p| (*id, p.kind, *width as usize * *height as usize * 4)),
+        _ => None,
+    };
+    let mut out = Vec::new();
+    let stop = driver.apply(command, sink, &mut out) == LoopControl::Stop;
+    if let Some((id, kind, len)) = configure {
+        if driver.contains(id) {
+            sink.configure(id, kind, len);
+        }
+    }
+    for event in out {
+        if events.send(event).is_err() {
+            return false;
+        }
+    }
+    !stop
+}
+
+/// Only the factory is Send: a !Send runtime and its views are created, used
+/// and destroyed here. Started is always first, even on a factory panic.
+/// Unwind recovery applies only in dev builds: release uses panic=abort.
+pub fn spawn_pane_thread<R, F>(
+    config: PaneThreadConfig,
+    start: F,
+) -> std::io::Result<PaneThreadHandle>
+where
+    R: PaneRuntime + 'static,
+    F: FnOnce() -> Result<R, String> + Send + 'static,
+{
+    let (commands, receive) = mpsc::channel();
+    let (events, event_rx) = mpsc::channel();
+    let finished = Arc::new(AtomicBool::new(false));
+    let done = finished.clone();
+    let join = thread::Builder::new()
+        .name("phoenix-panes".into())
+        .spawn(move || {
+            struct Finish(Arc<AtomicBool>);
+            impl Drop for Finish {
+                fn drop(&mut self) {
+                    self.0.store(true, Ordering::Release);
+                }
+            }
+            let _finish = Finish(done);
+            let mut started = false;
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let runtime = match start() {
+                    Ok(runtime) => runtime,
+                    Err(reason) => {
+                        let _ = events.send(PaneEvent::Started(Err(reason)));
+                        return;
+                    }
+                };
+                if events.send(PaneEvent::Started(Ok(()))).is_err() {
+                    return;
+                }
+                started = true;
+                let mut driver = PaneLoop::new(runtime);
+                driver.set_bus(config.bus);
+                driver.set_lobby(config.lobby);
+                driver.set_measure(config.measure);
+                let mut sink = PooledFrames::new(config.buffers_per_pane);
+                let period = config.period.max(Duration::from_millis(1));
+                loop {
+                    let deadline = Instant::now() + period;
+                    loop {
+                        match receive.try_recv() {
+                            Ok(command) => {
+                                if !apply_thread_command(&mut driver, &mut sink, command, &events) {
+                                    return;
+                                }
+                            }
+                            Err(TryRecvError::Empty) => break,
+                            Err(TryRecvError::Disconnected) => return,
+                        }
+                        if Instant::now() >= deadline {
+                            break;
+                        }
+                    }
+                    let mut out = Vec::new();
+                    driver.iterate(&mut sink, &mut out);
+                    sink.return_staged();
+                    for event in out.iter_mut() {
+                        if let PaneEvent::Stats(sample) = event {
+                            sample.starved = std::mem::take(&mut sink.starved);
+                        }
+                    }
+                    let sample = out.pop();
+                    out.append(&mut sink.frames);
+                    out.extend(sample);
+                    for event in out {
+                        if events.send(event).is_err() {
+                            return;
+                        }
+                    }
+                    while let Some(wait) = deadline.checked_duration_since(Instant::now()) {
+                        match receive.recv_timeout(wait) {
+                            Ok(command) => {
+                                if !apply_thread_command(&mut driver, &mut sink, command, &events) {
+                                    return;
+                                }
+                            }
+                            Err(mpsc::RecvTimeoutError::Timeout) => break,
+                            Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                        }
+                    }
+                }
+            }));
+            if let Err(payload) = result {
+                let reason = panic_reason(payload);
+                let _ = events.send(if started {
+                    PaneEvent::ThreadFailed { reason }
+                } else {
+                    PaneEvent::Started(Err(reason))
+                });
+            }
+        })?;
+    Ok(PaneThreadHandle {
+        commands,
+        events: Mutex::new(event_rx),
+        finished,
+        join: Some(join),
+        on_shutdown_timeout: config.on_shutdown_timeout,
+    })
 }
 
 /// Whether the loop keeps going.
@@ -617,7 +914,7 @@ struct LoopPane<V> {
 
 /// The per-iteration policy: what is driven, in what order, and what comes back.
 ///
-/// This is the whole of what used to be the body of `drive_panes`, lifted out of
+/// This is the whole of what used to be the body of `drive_pane_host`, lifted out of
 /// the Ultralight adapter so that an ordinary `cargo test` can check it. Nothing
 /// here knows about Bevy, a GPU or an SDK: the renderer is a [`PaneRuntime`],
 /// each document is a [`PaneView`], and the pixels go wherever a
@@ -636,8 +933,9 @@ struct LoopPane<V> {
 /// A push before the render is the point of steps 2 and 3 being in that order: a
 /// state pushed after the rasterise would show a frame late, every time.
 pub struct PaneLoop<R: PaneRuntime> {
-    runtime: R,
+    // Fields drop in declaration order: views must go before their renderer.
     panes: Vec<LoopPane<R::View>>,
+    runtime: R,
     /// The pane bus, while there is one. A host with no `--pane` — the lobby
     /// surface alone — has none at all, and its consoles are simply not pumped.
     bus: Option<PaneBus>,
@@ -684,28 +982,6 @@ impl<R: PaneRuntime> PaneLoop<R> {
     /// Whether to time the phases of each iteration.
     pub fn set_measure(&mut self, measure: bool) {
         self.measure = measure;
-    }
-
-    /// Take an already-built view under the loop's management.
-    ///
-    /// The seat-building path (`init_pane_host`) still constructs the two
-    /// permanent surfaces itself, because it distinguishes "the view could not
-    /// be created" from "the view could not load its console" in what it logs
-    /// and what it does next, and [`PaneRuntime::create`] returns one error for
-    /// both. Slice 5 replaces that with a `Create` command and a `Created`
-    /// event; until then this is how those views arrive.
-    pub fn adopt(&mut self, id: PaneId, kind: PaneKind, view: R::View, size: (u32, u32)) {
-        self.panes.push(LoopPane {
-            id,
-            kind,
-            view,
-            size,
-            epoch: 0,
-            visible: true,
-            needs_full: true,
-            pushed_this_iteration: false,
-            copy_failures: 0,
-        });
     }
 
     /// How many views the loop is driving.
@@ -1019,7 +1295,434 @@ impl<R: PaneRuntime> PaneLoop<R> {
             forced,
             pixels,
             iteration_ms: elapsed_ms(iteration),
+            starved: 0,
         }));
+    }
+}
+
+#[cfg(test)]
+mod thread_tests {
+    use super::doubles::{RecordingRuntime, RecordingView};
+    use super::*;
+
+    const PANE: PaneId = PaneId(7);
+    const TIMEOUT: Duration = Duration::from_secs(3);
+
+    struct TrackedRuntime {
+        inner: RecordingRuntime, // Rc makes this !Send, deliberately.
+        owner: thread::ThreadId,
+        trace: Sender<(thread::ThreadId, String)>,
+    }
+    struct TrackedView {
+        inner: RecordingView,
+        owner: thread::ThreadId,
+        trace: Sender<(thread::ThreadId, String)>,
+    }
+    fn record(owner: thread::ThreadId, trace: &Sender<(thread::ThreadId, String)>, event: String) {
+        assert_eq!(owner, thread::current().id(), "SDK call crossed threads");
+        let _ = trace.send((thread::current().id(), event));
+    }
+    impl Drop for TrackedRuntime {
+        fn drop(&mut self) {
+            record(self.owner, &self.trace, "drop-runtime".into());
+        }
+    }
+    impl Drop for TrackedView {
+        fn drop(&mut self) {
+            record(self.owner, &self.trace, "drop-view".into());
+        }
+    }
+    impl PaneRuntime for TrackedRuntime {
+        type View = TrackedView;
+        fn update(&mut self) {
+            record(self.owner, &self.trace, "update".into());
+            self.inner.update();
+        }
+        fn render(&mut self) {
+            record(self.owner, &self.trace, "render".into());
+            self.inner.render();
+        }
+        fn create(
+            &mut self,
+            id: PaneId,
+            kind: PaneKind,
+            spec: &PaneSpecOwned,
+            url: &str,
+        ) -> Result<Self::View, PaneSurfaceError> {
+            record(self.owner, &self.trace, "create".into());
+            let mut inner = self.inner.create(id, kind, spec, url)?;
+            inner.paint = Some(FrameRect::full(spec.width, spec.height));
+            Ok(TrackedView {
+                inner,
+                owner: self.owner,
+                trace: self.trace.clone(),
+            })
+        }
+    }
+    impl PaneSurface for TrackedView {
+        fn load(&mut self, url: &str) -> Result<(), PaneSurfaceError> {
+            self.inner.load(url)
+        }
+        fn is_ready(&self) -> bool {
+            self.inner.is_ready()
+        }
+        fn push(&mut self, script: &str) -> Result<(), PaneSurfaceError> {
+            record(self.owner, &self.trace, format!("push:{script}"));
+            self.inner.push(script)
+        }
+        fn drain(&mut self) -> Vec<String> {
+            self.inner.drain()
+        }
+    }
+    impl PaneView for TrackedView {
+        fn refresh_loaded(&mut self) -> bool {
+            self.inner.refresh_loaded()
+        }
+        fn resize(&mut self, width: u32, height: u32) {
+            record(self.owner, &self.trace, "resize".into());
+            self.inner.resize(width, height);
+            self.inner.paint = Some(FrameRect::full(width, height));
+        }
+        fn input(&mut self, input: &PaneInput) {
+            record(self.owner, &self.trace, format!("input:{input:?}"));
+            assert!(
+                !matches!(input, PaneInput::KeyChar(text) if text == "panic"),
+                "view panic"
+            );
+            self.inner.input(input);
+        }
+        fn copy_frame(
+            &mut self,
+            dst: &mut [u8],
+            force: bool,
+        ) -> Result<Option<FrameRect>, PaneSurfaceError> {
+            record(self.owner, &self.trace, "copy".into());
+            self.inner.copy_frame(dst, force)
+        }
+    }
+    fn spawn(period: Duration) -> (PaneThreadHandle, Receiver<(thread::ThreadId, String)>) {
+        let (trace, observed) = mpsc::channel();
+        let handle = spawn_pane_thread(
+            PaneThreadConfig {
+                period,
+                measure: true,
+                ..Default::default()
+            },
+            move || {
+                let owner = thread::current().id();
+                assert_eq!(thread::current().name(), Some("phoenix-panes"));
+                record(owner, &trace, "start".into());
+                Ok(TrackedRuntime {
+                    inner: RecordingRuntime::default(),
+                    owner,
+                    trace,
+                })
+            },
+        )
+        .unwrap();
+        (handle, observed)
+    }
+    fn event(handle: &PaneThreadHandle) -> PaneEvent {
+        handle
+            .events
+            .lock()
+            .unwrap()
+            .recv_timeout(TIMEOUT)
+            .expect("pane thread event")
+    }
+    fn until(handle: &PaneThreadHandle, predicate: impl Fn(&PaneEvent) -> bool) -> PaneEvent {
+        let deadline = Instant::now() + TIMEOUT;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let event = handle
+                .events
+                .lock()
+                .unwrap()
+                .recv_timeout(remaining)
+                .expect("expected pane event");
+            if predicate(&event) {
+                return event;
+            }
+        }
+    }
+    fn create() -> PaneCommand {
+        PaneCommand::Create {
+            id: PANE,
+            kind: PaneKind::Console,
+            spec: PaneSpecOwned {
+                width: 2,
+                height: 2,
+                device_scale: 1.0,
+            },
+            url: "http://localhost/console".into(),
+            epoch: 0,
+            visible: true,
+        }
+    }
+
+    #[test]
+    fn real_thread_keeps_a_non_send_runtime_and_views_on_one_thread_and_drops_views_first() {
+        fn send_sync<T: Send + Sync>() {}
+        send_sync::<PaneThreadHandle>();
+        let main = thread::current().id();
+        let (mut handle, trace) = spawn(Duration::from_millis(5));
+        assert!(matches!(event(&handle), PaneEvent::Started(Ok(()))));
+        assert!(handle.is_running());
+        handle.send(create()).unwrap();
+        until(&handle, |event| matches!(event, PaneEvent::Frame(_)));
+        handle
+            .send(PaneCommand::Input {
+                id: PANE,
+                input: PaneInput::Focus,
+            })
+            .unwrap();
+        handle
+            .send(PaneCommand::Input {
+                id: PANE,
+                input: PaneInput::KeyChar("a".into()),
+            })
+            .unwrap();
+        handle.stop();
+        handle.stop();
+        assert!(!handle.is_running());
+        let observed: Vec<_> = trace.try_iter().collect();
+        assert!(observed.iter().all(|(owner, _)| *owner != main));
+        let names: Vec<_> = observed.iter().map(|(_, event)| event.as_str()).collect();
+        let focus = names
+            .iter()
+            .position(|name| *name == "input:Focus")
+            .unwrap();
+        let key = names
+            .iter()
+            .position(|name| *name == "input:KeyChar(\"a\")")
+            .unwrap();
+        assert!(focus < key);
+        assert_eq!(&names[names.len() - 2..], &["drop-view", "drop-runtime"]);
+    }
+
+    #[test]
+    fn a_command_arriving_during_the_wait_is_applied_before_the_next_iteration() {
+        let (mut handle, _) = spawn(Duration::from_secs(1));
+        assert!(matches!(event(&handle), PaneEvent::Started(Ok(()))));
+        until(&handle, |event| matches!(event, PaneEvent::Stats(_)));
+        handle.send(create()).unwrap();
+        let created = handle
+            .events
+            .lock()
+            .unwrap()
+            .recv_timeout(Duration::from_millis(500))
+            .unwrap();
+        assert!(matches!(created, PaneEvent::Created { result: Ok(()), .. }));
+        handle.stop();
+    }
+
+    #[test]
+    fn startup_failure_and_startup_panic_both_begin_with_a_failed_handshake() {
+        for panic in [false, true] {
+            let mut handle = spawn_pane_thread(PaneThreadConfig::default(), move || {
+                assert!(!panic, "factory panic");
+                Err::<RecordingRuntime, _>("SDK unavailable".into())
+            })
+            .unwrap();
+            assert!(matches!(event(&handle), PaneEvent::Started(Err(_))));
+            handle.stop();
+            assert!(!handle.is_running());
+            assert!(matches!(handle.try_recv(), Err(TryRecvError::Disconnected)));
+        }
+    }
+
+    #[test]
+    fn an_unwinding_view_failure_reports_terminal_death_and_finishes() {
+        let (mut handle, trace) = spawn(Duration::from_millis(5));
+        assert!(matches!(event(&handle), PaneEvent::Started(Ok(()))));
+        handle.send(create()).unwrap();
+        until(&handle, |event| matches!(event, PaneEvent::Created { .. }));
+        handle
+            .send(PaneCommand::Input {
+                id: PANE,
+                input: PaneInput::KeyChar("panic".into()),
+            })
+            .unwrap();
+        until(
+            &handle,
+            |event| matches!(event, PaneEvent::ThreadFailed { reason } if reason == "view panic"),
+        );
+        handle.stop();
+        let names: Vec<_> = trace.try_iter().map(|(_, name)| name).collect();
+        assert_eq!(&names[names.len() - 2..], &["drop-view", "drop-runtime"]);
+    }
+
+    #[test]
+    fn a_failed_create_is_reported_without_stopping_other_seats() {
+        let mut handle = spawn_pane_thread(PaneThreadConfig::default(), || {
+            Ok(RecordingRuntime {
+                fail_create: HashMap::from([(PANE, "refused".into())]),
+                ..Default::default()
+            })
+        })
+        .unwrap();
+        assert!(matches!(event(&handle), PaneEvent::Started(Ok(()))));
+        handle.send(create()).unwrap();
+        until(
+            &handle,
+            |event| matches!(event, PaneEvent::Created { id, result: Err(_) } if *id == PANE),
+        );
+        let mut other = create();
+        if let PaneCommand::Create { id, .. } = &mut other {
+            *id = PaneId(8);
+        }
+        handle.send(other).unwrap();
+        until(
+            &handle,
+            |event| matches!(event, PaneEvent::Created { id, result: Ok(()) } if *id == PaneId(8)),
+        );
+        assert!(handle.is_running());
+        handle.stop();
+    }
+
+    #[test]
+    fn dropping_the_handle_stops_the_owning_thread() {
+        let (handle, trace) = spawn(Duration::from_millis(5));
+        assert!(matches!(event(&handle), PaneEvent::Started(Ok(()))));
+        drop(handle);
+        assert!(trace.try_iter().any(|(_, name)| name == "drop-runtime"));
+    }
+
+    #[test]
+    fn a_stalled_thread_reports_timeout_once_and_drops_its_runtime_on_the_owner() {
+        static REPORTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let (blocked, waiting) = mpsc::channel();
+        let (release, resume) = mpsc::channel();
+        let (trace, observed) = mpsc::channel();
+        let main = thread::current().id();
+        let mut handle = spawn_pane_thread(
+            PaneThreadConfig {
+                on_shutdown_timeout: Some(|| {
+                    REPORTS.fetch_add(1, Ordering::Relaxed);
+                }),
+                ..Default::default()
+            },
+            move || {
+                let runtime = TrackedRuntime {
+                    inner: RecordingRuntime::default(),
+                    owner: thread::current().id(),
+                    trace,
+                };
+                blocked.send(()).unwrap();
+                resume.recv_timeout(Duration::from_secs(10)).unwrap();
+                Ok(runtime)
+            },
+        )
+        .unwrap();
+        waiting.recv_timeout(TIMEOUT).unwrap();
+
+        let start = Instant::now();
+        handle.stop();
+        assert!(start.elapsed() < TIMEOUT, "shutdown must stay bounded");
+        assert!(
+            handle.is_running(),
+            "the stalled runtime remains on its owner"
+        );
+        assert_eq!(REPORTS.load(Ordering::Relaxed), 1);
+        handle.stop();
+        drop(handle);
+        assert_eq!(REPORTS.load(Ordering::Relaxed), 1);
+
+        release.send(()).unwrap();
+        let (owner, event) = observed.recv_timeout(TIMEOUT).unwrap();
+        assert_ne!(owner, main);
+        assert_eq!(event, "drop-runtime");
+    }
+
+    #[test]
+    fn resize_changes_the_frame_generation_and_close_stops_publication() {
+        let (mut handle, _) = spawn(Duration::from_millis(5));
+        assert!(matches!(event(&handle), PaneEvent::Started(Ok(()))));
+        handle.send(create()).unwrap();
+        until(&handle, |event| matches!(event, PaneEvent::Frame(_)));
+        handle
+            .send(PaneCommand::Resize {
+                id: PANE,
+                width: 3,
+                height: 2,
+                epoch: 1,
+            })
+            .unwrap();
+        let PaneEvent::Frame(frame) = until(
+            &handle,
+            |event| matches!(event, PaneEvent::Frame(frame) if frame.epoch == 1),
+        ) else {
+            unreachable!()
+        };
+        assert_eq!(frame.bytes.len(), 24);
+        assert_eq!(frame.rect, FrameRect::full(3, 2));
+        assert!(frame.full);
+        drop(frame);
+        handle.send(PaneCommand::Close(PANE)).unwrap();
+        until(
+            &handle,
+            |event| matches!(event, PaneEvent::Stats(sample) if sample.panes == 0),
+        );
+        assert!(matches!(event(&handle), PaneEvent::Stats(sample) if sample.panes == 0));
+        handle.stop();
+    }
+
+    #[test]
+    fn retained_empty_gamepad_slot_reaches_js_even_when_main_frames_outrun_iterations() {
+        let (mut handle, trace) = spawn(Duration::from_millis(5));
+        assert!(matches!(event(&handle), PaneEvent::Started(Ok(()))));
+        handle.send(create()).unwrap();
+        until(&handle, |event| matches!(event, PaneEvent::Frame(_)));
+        handle
+            .send(PaneCommand::SetGamepadScript(Some("populated".into())))
+            .unwrap();
+        handle
+            .send(PaneCommand::SetGamepadScript(Some("empty".into())))
+            .unwrap();
+        // Quiet main frames send no None, so the final state cannot be coalesced away.
+        for _ in 0..3 {
+            until(&handle, |event| matches!(event, PaneEvent::Stats(_)));
+        }
+        handle.stop();
+        let names: Vec<_> = trace.try_iter().map(|(_, name)| name).collect();
+        let first = names.iter().position(|name| name == "push:empty").unwrap();
+        assert_eq!(names[first + 1], "update");
+        assert!(names.iter().filter(|name| *name == "push:empty").count() >= 2);
+    }
+
+    #[test]
+    fn pooled_frames_are_bounded_recycled_and_isolated_across_resize_and_close() {
+        let mut sink = PooledFrames::new(PANE_STAGING_BUFFERS);
+        sink.configure(PANE, PaneKind::Console, 16);
+        for _ in 0..3 {
+            assert_eq!(sink.stage(PANE, 16).unwrap()[3], 255);
+            sink.publish(PANE, 0, FrameRect::full(2, 2), true);
+        }
+        assert!(sink.stage(PANE, 16).is_none());
+        let held = sink.frames.pop().unwrap();
+        drop(held);
+        assert!(
+            sink.stage(PANE, 16).is_some(),
+            "drop recycled one allocation"
+        );
+        sink.publish(PANE, 0, FrameRect::full(2, 2), true);
+        let old_frames = std::mem::take(&mut sink.frames);
+        sink.configure(PANE, PaneKind::Hud, 16); // Equal length, different generation.
+        drop(old_frames);
+        for _ in 0..3 {
+            assert_eq!(sink.stage(PANE, 16).unwrap()[3], 0);
+            sink.publish(PANE, 1, FrameRect::full(2, 2), true);
+        }
+        assert!(
+            sink.stage(PANE, 16).is_none(),
+            "old buffers never inflated this pool"
+        );
+        sink.drop_pane(PANE);
+        sink.frames.clear();
+        assert!(
+            sink.stage(PANE, 16).is_none(),
+            "late returns never resurrect a closed pane"
+        );
     }
 }
 
@@ -1616,7 +2319,7 @@ mod loop_tests {
     //! What one iteration of [`PaneLoop`] does, and in what order (issue #1404,
     //! slice 3).
     //!
-    //! Every claim here used to be a claim about `drive_panes`, provable only by
+    //! Every claim here used to be a claim about `drive_pane_host`, provable only by
     //! a human on a Windows machine with an SDK and a GPU watching four
     //! consoles. They are the claims that decide whether a console draws at all:
     //! that a push reaches a page before the rasterise that would show it, that
@@ -2157,7 +2860,7 @@ mod loop_tests {
             .any(|e| matches!(e, PaneEvent::Refused { id, .. } if *id == console)));
     }
 
-    /// Drain a queue of commands the way `drive_panes` does: FIFO, through
+    /// Drain a queue of commands the way `drive_pane_host` does: FIFO, through
     /// [`PaneLoop::apply`], before the iteration.
     fn drain(
         driver: &mut PaneLoop<RecordingRuntime>,
@@ -2177,7 +2880,7 @@ mod loop_tests {
     fn a_drained_queue_delivers_its_inputs_in_order_and_before_the_iteration() {
         // Slice 4's whole claim: a queue between the system and the view changes
         // WHERE the call is made, not when it lands nor in what order. The
-        // systems that fill it are chained ahead of `drive_panes`, so every
+        // systems that fill it are chained ahead of `drive_pane_host`, so every
         // command raised in a frame is applied in that frame, before the
         // `update` and the render that show it.
         let (runtime, trace) = RecordingRuntime::traced();
@@ -2233,7 +2936,7 @@ mod loop_tests {
 
     #[test]
     fn a_queued_gamepad_snapshot_is_in_the_slot_before_the_update_that_reads_it() {
-        // The pad slot is filled by a system chained ahead of `drive_panes` and
+        // The pad slot is filled by a system chained ahead of `drive_pane_host` and
         // drained with everything else, so it is in place for the pre-update
         // push — the phase whose whole reason is that a console polls the pads
         // inside `Renderer::update`.

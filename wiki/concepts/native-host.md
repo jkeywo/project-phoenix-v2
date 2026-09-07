@@ -2,8 +2,8 @@
 title: Native Host
 type: concept
 tags: [native, viewscreen, lobby, scenario-selection, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile, saved-layouts, media-devices, camera, microphone, saves]
-sources: [src/native_host/mod.rs, src/native_host/direct_join.rs, src/native_host/join_codes.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/lobby/handler.rs, src/content_ledger.rs, tests/fixtures/scenario-arbiter-parity.json, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/layout_store.rs, src/native_host/layout_store_systems.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/frame_stats.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs, src/delivery/args.rs, src/save_slots_store.rs]
-updated: 2026-09-02
+sources: [src/native_host/mod.rs, src/native_host/direct_join.rs, src/native_host/join_codes.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/lobby/handler.rs, src/content_ledger.rs, tests/fixtures/scenario-arbiter-parity.json, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/layout_store.rs, src/native_host/layout_store_systems.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/frame_stats.rs, src/native_host/panes/pane_thread.rs, src/native_host/panes/mirror.rs, src/native_host/panes/upload.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs, src/delivery/args.rs, src/save_slots_store.rs]
+updated: 2026-09-07
 ---
 
 # Native Host
@@ -582,25 +582,53 @@ rejected alternatives (a native reimplementation of the shell, an
 `include_str!`'d document with no base URL, and the unmodified page with no way
 in) are argued in `document.rs`'s module docs.
 
-Host→page is `window.__phoenixPaneApply('<json>')`; page→host is a queue drained
-once a frame with `window.__phoenixPaneOutDrain()`. Both directions carry the
-same JSON a phone would send or receive, decoded by `core::codec` — the codec
-seam is not bypassed either. A frame pushes at most
-`surface::MAX_PUSHES_PER_FRAME` messages per pane and requeues the rest: this
-loop runs in `Update` on the Bevy main thread, which is the thread `FixedUpdate`
-runs `SimSet` on, so page JavaScript time is *simulation* time for everyone on
-the ship.
+Host→page is `window.__phoenixPaneApply('<json>')`; page→host is a queue
+drained once per pane iteration with `window.__phoenixPaneOutDrain()`. Both
+directions carry the same JSON a phone would send or receive, decoded by
+`core::codec`. Each iteration pushes at most `surface::MAX_PUSHES_PER_FRAME`
+messages per pane and requeues the rest.
 
-**Measuring that frame (`--frame-stats`).** A windowed host run with
-`--frame-stats --log info` logs one line a second from
-`src/native_host/panes/frame_stats.rs`: the Bevy frame period, the five
-`drive_panes` phases (update / pump / render / copy / publish), panes copied
-and forced whole, megapixels copied, the pane frames uploaded to the GPU and
-what they cost (`uploads`, `MB/frame`, `deferred`, `lost`), `Image` assets Bevy
-was told changed, `FixedUpdate` ticks per frame and their cost, and the residual
-the render thread accounts for.
+### The pane thread (issue #1404)
 
-Two of those numbers changed meaning with issue #1404. `image assets changed`
+`pane_thread::spawn_pane_thread` owns the Ultralight runtime and every view on
+the named `phoenix-panes` thread. The factory crosses the channel boundary;
+the runtime and views remain on their owning thread, including teardown.
+Startup waits for `Started` before creating Bevy seats. The thread drains
+commands, drives one iteration, and applies arriving commands during its wait
+to the 16 ms deadline. Slow iterations run at the renderer's available cadence.
+
+`PaneHost` is an ordinary Send resource holding a
+`PaneMirror<PaneCanvasData>`, routing state and the thread handle.
+`drive_pane_host` accepts only frames at the mirror's current epoch and
+queues persistent texture uploads. The measured pool remains three buffers
+per pane, capped at four returns; resize replaces both the pool and its return
+channel, so old frames cannot refill a new generation. Mouse capture is
+released when its pane closes.
+
+Input and lifecycle operations are asynchronous. A failed seat creation uses
+the console's existing bounded recovery; camera cleanup checks whether another
+seat shares it. Lobby actions round-trip one pane period plus a Bevy frame.
+A resize can show its new texture before the first whole frame arrives.
+Hidden lobby and HUD surfaces keep receiving state but stop copying frames.
+The gamepad slot keeps an empty snapshot after unplug until the next pad
+state replaces it, so coalescing cannot hide a disconnect from page JavaScript.
+
+A renderer failure closes every console, including one still awaiting creation,
+drops permanent canvases, and leaves the simulation running without thread
+respawn. Unwind reporting is available in dev builds; release uses
+`panic = "abort"`. `AppExit` and handle drop request shutdown and wait at most
+two seconds; an unresponsive renderer is left on its own detached thread.
+
+**Measuring frames and iterations (`--frame-stats`).** A windowed host run
+with `--frame-stats --log info` logs one line a second from
+`src/native_host/panes/frame_stats.rs`: Bevy frame timing, the pane thread's
+five phases and copied pixels per iteration, iterations/s and ms/iteration,
+main-world event drain and upload queueing per frame, stale frames, GPU upload
+counts and bytes, changed Image assets, fixed ticks and their cost.
+Every thread sample is accumulated. The residual subtracts main-world pane
+cost and the fixed loop; concurrent pane-thread work is reported separately.
+
+The upload counters changed meaning with issue #1404. `image assets changed`
 used to be the pane count, and each such event **was** a full GPU texture
 re-creation and bind-group eviction on the render thread — that was the whole
 reason to measure it. It no longer counts any pane: a pane image is minted
@@ -706,7 +734,7 @@ Three further defences, because one is a single point of failure:
 
 ### A closed pane is torn down, not left on screen
 
-`drive_panes` closes a pane whose page stopped draining, and the *view* goes at
+`drive_pane_host` closes a pane whose page stopped draining, and the *view* goes at
 the top of the next frame (`retire_closed_panes`): the `PaneWindow` is dropped,
 its canvas node despawned, its document withdrawn, and the closure logged once.
 Reaching that state at all takes **both** caps — the host's outbound queue only
@@ -1174,7 +1202,7 @@ pane-shaped branch: the whole of it is `PaneBus::close`/`recreate` and the
 runtime display watcher, and the sim sees only the ordinary `PlayerDisconnected`
 and reconnect `Identify`.
 
-- **A view crash.** `drive_panes` counts a pane's consecutive frame-copy
+- **A view crash.** The pane thread reports consecutive frame-copy
   failures; a run past `VIEW_CRASH_COPY_FAILURES` (a lost surface, a renderer
   that stopped answering — where a one-off is a transient) faults the pane
   `PaneFault::ViewCrashed`. The pre-existing inbox-overflow trigger becomes
@@ -1303,12 +1331,10 @@ next keystroke lands somewhere, and the surface carries no typeable control, so 
 chrome that accepts nothing. It stays in the focus order, so Ctrl+Tab still
 reaches it deliberately, and a reveal does not re-seed it either.
 
-Two costs worth stating out loud. `viewscreen_border::push_lobby_state` writes a
-`LobbyStateChanged` every `Update` whether or not anything moved, and every push
-here is a synchronous `evaluate_script` on the Bevy main thread — the thread
-`FixedUpdate` runs `SimSet` on. So the bridge drops a payload identical to the
-last one accepted, and pushes the reveal flag only when it changes: a lobby
-nobody is touching costs the simulation nothing.
+The bridge drops a lobby payload identical to the last one accepted and sends
+the reveal flag only on changes. Its synchronous `evaluate_script` calls run
+on the pane thread; the simulation sees the bridge's queued records on a
+subsequent frame.
 
 ### The join QR (issue #1329)
 

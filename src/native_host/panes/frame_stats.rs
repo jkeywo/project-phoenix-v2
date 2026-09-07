@@ -1,47 +1,22 @@
-//! Where a native host's frame goes (`--frame-stats`), and the experiment
-//! toggles the numbers are read against.
+//! Native-host frame and pane-thread accounting (`--frame-stats`).
 //!
-//! The native host draws every Station console through an embedded, CPU-
-//! rasterised Ultralight view, pumped on the Bevy main thread once a frame
-//! (`ultralight::drive_panes`). With three extra screens open that frame was
-//! measured at ~5.7 fps (2026-09-06, four-screen rig), and this line is what
-//! said where it went: ~50 ms of scalar pixel copy, ~50 ms of Ultralight
-//! rasterisation and 25–50 ms of synchronous JS pushes of backed-up snapshots,
-//! all on the main thread, against a render-thread residual of only 15–20 ms.
-//! The copy and the push backlog are fixed (issues #1402, #1403); the line
-//! stays, because the rasterisation floor (#1405) and the dedicated pane
-//! thread (#1404) are judged by it too.
+//! Once a second the report separates Bevy's frame period, main-world pane
+//! event draining/upload queueing, fixed-loop cost, and the renderer's own
+//! update/pump/render/copy/publish phases. Pane phases are per iteration, with
+//! iterations/s and ms/iteration; uploads, stale frames and loss are per Bevy
+//! frame. Every received Stats event is accumulated, even when several pane
+//! iterations complete between two Bevy frames.
 //!
-//! # What is measured
-//!
-//! Once a second, one log line (`LogCat::Lobby`, info — run with `--log info`):
-//!
-//! * the Bevy frame period from `Time<Real>` (mean, p95, max, fps);
-//! * the five phases of `drive_panes` — `update` (`Renderer::update`), `pump`
-//!   (host→page pushes and the page→host drain), `render`
-//!   (`Renderer::render`), `copy` (surface → texture bytes) and `publish`
-//!   (the rest of the copy loop, chiefly marking the `Image` asset changed);
-//! * how many panes copied, how many were forced whole, and the pixels copied
-//!   per frame;
-//! * how many frames reached the GPU as a `write_texture` of their dirty
-//!   rectangle, the bytes those writes moved, how many were deferred for a
-//!   texture not yet created, and how many were **lost** — a copy skipped for
-//!   want of a staging buffer, or a frame the render world dropped (issue
-//!   #1404, `super::upload`);
-//! * how many `Image` assets Bevy was told changed per frame — each one is a
-//!   full GPU texture re-creation on the render thread. Since #1404 **none of
-//!   them is a pane**: a pane texture is written in place;
-//! * how many `FixedUpdate` ticks a frame unpacked into and what they cost;
-//! * the **residual**: frame period minus everything above. With pipelined
-//!   rendering the main thread blocks until the render thread has finished
-//!   the previous frame, so a large residual against small pane phases is the
-//!   render thread — swapchain waits included — and nothing on this side.
+//! The residual subtracts only main-world pane work and the fixed loop. Work
+//! performed concurrently on the pane thread is never subtracted from Bevy's
+//! frame budget. Pane textures are persistent: Image Modified events count
+//! other assets, while the upload tally counts dirty-rectangle texture writes.
 //!
 //! # Why a clock is fine here
 //!
 //! `Instant::now()` must not be read by a simulation system (`src/perf`'s
 //! rule: a measured run and an unmeasured run produce the same simulation).
-//! Everything stamped here is presentation: `drive_panes` runs in `Update` on
+//! Everything stamped here is presentation: `drive_pane_host` runs in `Update` on
 //! the pane host, and the fixed-loop bracket sits *around* the fixed schedules
 //! in `RunFixedMainLoop`, outside every `SimSet`. Nothing measured feeds
 //! authoritative state, and `tests/native_headless_digest.rs` is the standing
@@ -181,49 +156,16 @@ impl fmt::Display for PaneExperiments {
     }
 }
 
-/// One frame of `drive_panes`, in milliseconds and counts.
-///
-/// # What the five phases cover since issue #1404's slice 3
-///
-/// The phases are now timed *inside* `PaneLoop::iterate`, which is the work that
-/// touches the views — so two things `drive_panes` does around the call left the
-/// timed phases, and `pump_ms` and `publish_ms` read very slightly lower than
-/// they did before the slice. Better attribution, not faster code:
-///
-/// - **`pump_ms`** is the pushing and draining, and the pre-update gamepad push.
-///   It no longer includes the adapter's per-frame preamble — `set_bus`,
-///   `set_lobby`, and the `serde_json` escape that turns the newest HUD state
-///   into the script the slot holds — because those are Bevy-side and happen
-///   before the iteration starts.
-/// - **`publish_ms`** is the copy loop less the copies: staging a pooled buffer,
-///   the epoch check, and queueing the `PaneUpload`. It no longer includes
-///   draining the recycle channel to refill the pools, which `drive_panes` does
-///   before handing the loop a sink.
-///
-/// Both leftovers are still main-thread pane cost; they now show up in the
-/// frame's own total rather than inside a pane phase.
+/// One main-world pane pass, measured independently of the renderer thread.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct PaneFrameSample {
-    /// `Renderer::update` — loads, timers, page JavaScript.
-    pub update_ms: f64,
-    /// The push/drain loop over every pane, plus the gamepad push that precedes
-    /// `update_ms`'s phase. See the type note on what left it.
-    pub pump_ms: f64,
-    /// `Renderer::render` — rasterising every repainted view.
-    pub render_ms: f64,
-    /// Every `copy_frame` call summed.
-    pub copy_ms: f64,
-    /// The copy loop less the copies: staging, the epoch check, and queueing the
-    /// upload. See the type note on what left it.
-    pub publish_ms: f64,
-    /// Panes driven this frame.
-    pub panes: usize,
-    /// Panes whose copy wrote something.
-    pub copied: usize,
-    /// Panes copied whole because a push forced it.
-    pub forced: usize,
-    /// Pixels written across every pane.
-    pub pixels: u64,
+    /// Main-world event draining and seat maintenance, excluding upload queueing.
+    pub drain_ms: f64,
+    /// Main-world cost of queueing accepted frames for the render world.
+    pub upload_ms: f64,
+    pub frames: usize,
+    /// Frames discarded because a pane closed or its epoch changed.
+    pub stale: usize,
     /// Frames the render world wrote into a pane texture (issue #1404) —
     /// counted a frame late, because the tally comes back at the next extract.
     pub uploads: usize,
@@ -242,20 +184,15 @@ pub struct PaneFrameSample {
     /// `deferred` is a symptom worth chasing, not the ordinary cost of opening
     /// or resizing a pane.
     pub deferred: usize,
-    /// Frames that never reached a texture: a copy skipped because the pane's
-    /// buffer pool was empty, a frame dropped at publish because a resize had
-    /// moved the pane's epoch under it (zero by construction while the copy
-    /// runs on the main thread; real once it crosses the pane thread), plus
-    /// anything the render world dropped. **The number that should be zero** —
-    /// a non-zero `lost` is a pane whose dirty pixels went nowhere, which shows
-    /// as a stale patch on a console.
+    /// Frames the render world dropped. The report also adds producer pool
+    /// starvation; epoch discards have their own stale counter.
     pub lost: usize,
 }
 
 impl PaneFrameSample {
-    /// The five phases summed.
+    /// Main-world drain and upload queueing cost.
     pub fn total_ms(&self) -> f64 {
-        self.update_ms + self.pump_ms + self.render_ms + self.copy_ms + self.publish_ms
+        self.drain_ms + self.upload_ms
     }
 }
 
@@ -294,6 +231,7 @@ fn phase(samples: &[f64]) -> PhaseStat {
 pub struct FrameStatsWindow {
     frames_ms: Vec<f64>,
     panes: Vec<PaneFrameSample>,
+    thread: Vec<PaneThreadSample>,
     fixed: Vec<FixedLoopSample>,
     modified: Vec<u32>,
 }
@@ -304,9 +242,13 @@ impl FrameStatsWindow {
         self.frames_ms.push(frame_ms);
     }
 
-    /// One `drive_panes` pass.
+    /// One `drive_pane_host` pass.
     pub fn push_pane(&mut self, sample: PaneFrameSample) {
         self.panes.push(sample);
+    }
+
+    pub fn push_thread(&mut self, sample: PaneThreadSample) {
+        self.thread.push(sample);
     }
 
     /// One frame's fixed-loop bracket.
@@ -328,6 +270,7 @@ impl FrameStatsWindow {
     pub fn clear(&mut self) {
         self.frames_ms.clear();
         self.panes.clear();
+        self.thread.clear();
         self.fixed.clear();
         self.modified.clear();
     }
@@ -339,9 +282,10 @@ impl FrameStatsWindow {
         }
         let frames = self.frames_ms.len() as f64;
         let per_frame = |total: f64| total / frames;
-        let pane_phase = |pick: fn(&PaneFrameSample) -> f64| {
-            phase(&self.panes.iter().map(pick).collect::<Vec<_>>())
+        let pane_phase = |pick: fn(&PaneThreadSample) -> f64| {
+            phase(&self.thread.iter().map(pick).collect::<Vec<_>>())
         };
+        let per_iteration = |total: f64| total / self.thread.len().max(1) as f64;
         let frame = phase(&self.frames_ms);
         let pane_total_ms = per_frame(self.panes.iter().map(PaneFrameSample::total_ms).sum());
         let fixed_ms = per_frame(self.fixed.iter().map(|f| f.ms).sum());
@@ -355,21 +299,30 @@ impl FrameStatsWindow {
             } else {
                 0.0
             },
-            panes: per_frame(self.panes.iter().map(|s| s.panes as f64).sum()),
+            panes: per_iteration(self.thread.iter().map(|s| s.panes as f64).sum()),
             update: pane_phase(|s| s.update_ms),
             pump: pane_phase(|s| s.pump_ms),
             render: pane_phase(|s| s.render_ms),
             copy: pane_phase(|s| s.copy_ms),
             publish: pane_phase(|s| s.publish_ms),
             pane_total_ms,
-            copied: per_frame(self.panes.iter().map(|s| s.copied as f64).sum()),
-            forced: per_frame(self.panes.iter().map(|s| s.forced as f64).sum()),
-            megapixels: per_frame(self.panes.iter().map(|s| s.pixels as f64).sum()) / 1.0e6,
+            iterations_per_s: self.thread.len() as f64 / elapsed.as_secs_f64().max(f64::EPSILON),
+            iteration: pane_phase(|s| s.iteration_ms),
+            drain: phase(&self.panes.iter().map(|s| s.drain_ms).collect::<Vec<_>>()),
+            upload: phase(&self.panes.iter().map(|s| s.upload_ms).collect::<Vec<_>>()),
+            received: per_frame(self.panes.iter().map(|s| s.frames as f64).sum()),
+            stale: per_frame(self.panes.iter().map(|s| s.stale as f64).sum()),
+            copied: per_iteration(self.thread.iter().map(|s| s.copied as f64).sum()),
+            forced: per_iteration(self.thread.iter().map(|s| s.forced as f64).sum()),
+            megapixels: per_iteration(self.thread.iter().map(|s| s.pixels as f64).sum()) / 1.0e6,
             uploads: per_frame(self.panes.iter().map(|s| s.uploads as f64).sum()),
             uploads_full: per_frame(self.panes.iter().map(|s| s.uploads_full as f64).sum()),
             upload_mb: per_frame(self.panes.iter().map(|s| s.upload_bytes as f64).sum()) / 1.0e6,
             deferred: per_frame(self.panes.iter().map(|s| s.deferred as f64).sum()),
-            lost: per_frame(self.panes.iter().map(|s| s.lost as f64).sum()),
+            lost: per_frame(
+                self.panes.iter().map(|s| s.lost as f64).sum::<f64>()
+                    + self.thread.iter().map(|s| s.starved as f64).sum::<f64>(),
+            ),
             modified: per_frame(self.modified.iter().map(|m| f64::from(*m)).sum()),
             ticks,
             fixed_ms,
@@ -379,7 +332,8 @@ impl FrameStatsWindow {
     }
 }
 
-/// One report window reduced. Every rate is per rendered frame.
+/// One report window. Renderer phases and copy counts are per iteration;
+/// main-world work, uploads and losses are per rendered frame.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PaneFrameReport {
     pub elapsed_s: f64,
@@ -392,8 +346,14 @@ pub struct PaneFrameReport {
     pub render: PhaseStat,
     pub copy: PhaseStat,
     pub publish: PhaseStat,
-    /// The five pane phases summed, per frame.
+    /// Main-world pane work, per Bevy frame.
     pub pane_total_ms: f64,
+    pub iterations_per_s: f64,
+    pub iteration: PhaseStat,
+    pub drain: PhaseStat,
+    pub upload: PhaseStat,
+    pub received: f64,
+    pub stale: f64,
     pub copied: f64,
     pub forced: f64,
     pub megapixels: f64,
@@ -424,9 +384,10 @@ impl fmt::Display for PaneFrameReport {
             f,
             "frame stats: {:.2} s, {} frames | frame {:.1} ms mean, {:.1} p95, {:.1} max ({:.1} fps) \
              | panes {:.1}: update {}, pump {}, render {}, copy {}, publish {} ms (mean/p95; \
-             {:.1} ms/frame) | copied {:.1}/frame, forced {:.1}, {:.2} Mpx/frame \
+             {:.1} ms/iteration) | copied {:.1}/iteration, forced {:.1}, {:.2} Mpx/iteration \
              | uploads {:.1}/frame ({:.1} full), {:.2} MB/frame, deferred {:.1}, lost {:.1} \
              | image assets changed {:.1}/frame | fixed {:.1} ticks/frame, {:.1} ms/frame{} \
+             | pane thread {:.1} iterations/s | main panes drain {}, upload {} ms, {:.1} ms/frame, frames {:.1}/frame, stale {:.1} \
              | residual {:.1} ms/frame",
             self.elapsed_s,
             self.frames,
@@ -440,7 +401,7 @@ impl fmt::Display for PaneFrameReport {
             ph(&self.render),
             ph(&self.copy),
             ph(&self.publish),
-            self.pane_total_ms,
+            self.iteration.mean,
             self.copied,
             self.forced,
             self.megapixels,
@@ -456,6 +417,12 @@ impl fmt::Display for PaneFrameReport {
                 Some(per) => format!(" ({per:.2} ms/tick)"),
                 None => String::new(),
             },
+            self.iterations_per_s,
+            ph(&self.drain),
+            ph(&self.upload),
+            self.pane_total_ms,
+            self.received,
+            self.stale,
             self.residual_ms,
         )
     }
@@ -475,8 +442,13 @@ pub struct PaneFrameStats {
     fixed_start: Option<(Instant, u64)>,
 }
 
+pub use super::pane_thread::PaneThreadSample;
+
 impl PaneFrameStats {
-    /// Record this frame's `drive_panes` pass.
+    pub fn record_thread(&mut self, sample: PaneThreadSample) {
+        self.window.push_thread(sample);
+    }
+    /// Record this frame's `drive_pane_host` pass.
     pub fn record_pane(&mut self, sample: PaneFrameSample) {
         self.window.push_pane(sample);
     }
@@ -557,7 +529,7 @@ pub fn log_frame_stats(
 }
 
 /// Installs the accumulator and the three systems around it. Added only for a
-/// windowed host run with `--frame-stats`; `drive_panes` finds the resource and
+/// windowed host run with `--frame-stats`; `drive_pane_host` finds the resource and
 /// starts stamping its phases.
 pub struct PaneFrameStatsPlugin;
 
@@ -638,7 +610,7 @@ mod tests {
         let mut window = FrameStatsWindow::default();
         for _ in 0..2 {
             window.push_frame(100.0);
-            window.push_pane(PaneFrameSample {
+            window.push_thread(PaneThreadSample {
                 update_ms: 1.0,
                 pump_ms: 2.0,
                 render_ms: 3.0,
@@ -648,6 +620,14 @@ mod tests {
                 copied: 4,
                 forced: 2,
                 pixels: 1_000_000,
+                iteration_ms: 16.0,
+                starved: 0,
+            });
+            window.push_pane(PaneFrameSample {
+                drain_ms: 1.0,
+                upload_ms: 0.5,
+                frames: 4,
+                stale: 0,
                 uploads: 3,
                 uploads_full: 1,
                 upload_bytes: 2_000_000,
@@ -669,7 +649,7 @@ mod tests {
         assert_eq!(report.panes, 4.0);
         assert_eq!(report.update.mean, 1.0);
         assert_eq!(report.publish.p95, 5.0);
-        assert_eq!(report.pane_total_ms, 15.0);
+        assert_eq!(report.pane_total_ms, 1.5);
         assert_eq!(report.copied, 4.0);
         assert_eq!(report.forced, 2.0);
         assert_eq!(report.megapixels, 1.0);
@@ -682,7 +662,7 @@ mod tests {
         assert_eq!(report.ticks, 6.0);
         assert_eq!(report.fixed_ms, 12.0);
         assert_eq!(report.ms_per_tick, Some(2.0));
-        assert_eq!(report.residual_ms, 100.0 - 15.0 - 12.0);
+        assert_eq!(report.residual_ms, 100.0 - 1.5 - 12.0);
     }
 
     #[test]
@@ -691,16 +671,17 @@ mod tests {
             .report(Duration::from_secs(1))
             .unwrap()
             .to_string();
+        assert!(!line.contains('\n'), "one report is one log line");
         for needle in [
             "2 frames",
             "frame 100.0 ms mean",
             "(10.0 fps)",
             "panes 4.0",
             "update 1.0/1.0",
-            "15.0 ms/frame",
-            "copied 4.0/frame",
+            "16.0 ms/iteration",
+            "copied 4.0/iteration",
             "forced 2.0",
-            "1.00 Mpx/frame",
+            "1.00 Mpx/iteration",
             "uploads 3.0/frame",
             "(1.0 full)",
             "2.00 MB/frame",
@@ -709,10 +690,30 @@ mod tests {
             "image assets changed 4.0/frame",
             "fixed 6.0 ticks/frame",
             "(2.00 ms/tick)",
-            "residual 73.0 ms/frame",
+            "residual 86.5 ms/frame",
         ] {
             assert!(line.contains(needle), "{line:?} should contain {needle:?}");
         }
+    }
+
+    #[test]
+    fn multiple_thread_samples_do_not_change_the_main_frame_residual() {
+        let mut window = fabricated();
+        window.push_thread(PaneThreadSample {
+            iteration_ms: 90.0,
+            copied: 4,
+            forced: 2,
+            pixels: 1_000_000,
+            starved: 2,
+            ..Default::default()
+        });
+        let report = window.report(Duration::from_secs(1)).unwrap();
+        assert_eq!(report.iterations_per_s, 3.0);
+        assert_eq!(report.iteration.mean, (16.0 + 16.0 + 90.0) / 3.0);
+        assert_eq!(report.copied, 4.0);
+        assert_eq!(report.lost, 3.0);
+        assert_eq!(report.residual_ms, 86.5);
+        assert!(report.to_string().contains("3.0 iterations/s"));
     }
 
     #[test]

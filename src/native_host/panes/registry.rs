@@ -24,9 +24,9 @@
 //! So the cap is per delivery class, which is the same distinction the browser
 //! transport already makes with its two DataChannels: **`Snapshot` messages are
 //! droppable** (the next one supersedes them entirely) and **`Reliable` ones are
-//! not**. Over the cap, the oldest *snapshot* goes; if there are none, the pane
-//! is over its reliable budget and that is a fault worth reporting rather than
-//! hiding, so [`Pane::push_outbound`] says so.
+//! not**. Over the cap, the oldest *snapshot* goes; if there are none, an
+//! incoming snapshot is discarded. An incoming reliable message instead exceeds
+//! the reliable budget, a fault [`Pane::push_outbound`] reports.
 //!
 //! # A snapshot supersedes its own kind before the cap is ever reached
 //!
@@ -121,8 +121,11 @@ pub enum OutboundVerdict {
     /// Queued, and an older snapshot was dropped to make room. Ordinary under
     /// load: the next snapshot supersedes the one that went.
     QueuedDroppingSnapshot,
-    /// Refused. The pane is over its budget and every message in the queue is
-    /// reliable, so nothing may be dropped without breaking the page's state.
+    /// Discarded an incoming snapshot because the full queue is all reliable.
+    /// The snapshot is droppable; this does not exceed the reliable budget.
+    DroppedSnapshot,
+    /// Refused a reliable message. The pane is over its budget and every queued
+    /// message is reliable, so nothing may be dropped without breaking state.
     /// The caller should close the pane rather than pretend this was fine.
     Overflowed,
 }
@@ -213,6 +216,9 @@ impl Pane {
                 self.outbound.push_back(dispatch);
                 OutboundVerdict::QueuedDroppingSnapshot
             }
+            None if dispatch.delivery == DeliveryClass::Snapshot => {
+                OutboundVerdict::DroppedSnapshot
+            }
             None => OutboundVerdict::Overflowed,
         }
     }
@@ -237,13 +243,19 @@ impl Pane {
     /// after it — is what makes the next frame retry from exactly where this one
     /// stopped, with `Welcome` still first.
     ///
-    /// Deliberately not capped: this is a batch that was already inside the cap
-    /// a moment ago, and refusing it here would drop precisely the messages the
-    /// cap policy protects.
-    pub fn requeue_front(&mut self, batch: Vec<PaneDispatch>) {
-        for dispatch in batch.into_iter().rev() {
-            self.outbound.push_front(dispatch);
+    /// The simulation can enqueue more messages while the pane thread pushes
+    /// its drained batch. Replay both batches through the ordinary cap and
+    /// coalescing policy, oldest first, so a newer queued snapshot supersedes
+    /// a returned one and reliable messages retain their original order.
+    /// Returns true if any message exceeded the reliable budget; the caller
+    /// must report the same fault as an overflow from `push_outbound`.
+    pub fn requeue_front(&mut self, batch: Vec<PaneDispatch>) -> bool {
+        let newer = std::mem::take(&mut self.outbound);
+        let mut overflowed = false;
+        for dispatch in batch.into_iter().chain(newer) {
+            overflowed |= self.push_outbound(dispatch) == OutboundVerdict::Overflowed;
         }
+        overflowed
     }
 
     /// How many messages are waiting for this page. Diagnostic.
@@ -580,6 +592,64 @@ mod tests {
     }
 
     #[test]
+    fn requeue_reconciles_newer_snapshots_and_reliable_order_within_the_cap() {
+        let mut registry = PaneRegistry::new(2);
+        let id = registry.open(identity(1));
+        let pane = registry.get_mut(id).unwrap();
+        pane.mark_live();
+        pane.push_outbound(snapshot("old"));
+        pane.push_outbound(reliable("welcome"));
+        let batch = pane.drain_outbound();
+
+        // These arrive while evaluate_script is working on the drained batch.
+        pane.push_outbound(snapshot("new"));
+        assert!(!pane.requeue_front(batch));
+        assert_eq!(pane.queued_outbound(), 2);
+        assert_eq!(
+            pane.drain_outbound(),
+            vec![reliable("welcome"), snapshot("new")]
+        );
+    }
+
+    #[test]
+    fn requeue_sheds_old_snapshots_to_keep_concurrent_reliable_messages() {
+        let mut registry = PaneRegistry::new(2);
+        let id = registry.open(identity(1));
+        let pane = registry.get_mut(id).unwrap();
+        pane.mark_live();
+        pane.push_outbound(reliable("welcome"));
+        pane.push_outbound(snapshot("old"));
+        let batch = pane.drain_outbound();
+
+        pane.push_outbound(reliable("assigned"));
+        assert!(!pane.requeue_front(batch));
+        assert_eq!(pane.queued_outbound(), 2);
+        assert_eq!(
+            pane.drain_outbound(),
+            vec![reliable("welcome"), reliable("assigned")]
+        );
+    }
+
+    #[test]
+    fn requeue_reports_reliable_overflow_and_keeps_the_oldest_messages_in_order() {
+        let mut registry = PaneRegistry::new(2);
+        let id = registry.open(identity(1));
+        let pane = registry.get_mut(id).unwrap();
+        pane.mark_live();
+        pane.push_outbound(reliable("welcome"));
+        pane.push_outbound(reliable("assigned"));
+        let batch = pane.drain_outbound();
+
+        pane.push_outbound(reliable("started"));
+        assert!(pane.requeue_front(batch));
+        assert_eq!(pane.queued_outbound(), 2);
+        assert_eq!(
+            pane.drain_outbound(),
+            vec![reliable("welcome"), reliable("assigned")]
+        );
+    }
+
+    #[test]
     fn a_pane_that_is_all_reliable_and_full_reports_rather_than_dropping_state() {
         // Nothing here may be dropped without breaking the page, so the honest
         // answer is a refusal the caller can act on — not a silently lost
@@ -589,6 +659,10 @@ mod tests {
         let pane = registry.get_mut(id).unwrap();
         pane.push_outbound(reliable("a"));
         pane.push_outbound(reliable("b"));
+        assert_eq!(
+            pane.push_outbound(snapshot("s")),
+            OutboundVerdict::DroppedSnapshot
+        );
         assert_eq!(
             pane.push_outbound(reliable("c")),
             OutboundVerdict::Overflowed

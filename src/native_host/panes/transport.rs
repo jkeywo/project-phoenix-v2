@@ -316,8 +316,12 @@ impl PaneBus {
     /// See [`super::registry::Pane::requeue_front`].
     pub fn requeue_front(&self, id: PaneId, batch: Vec<PaneDispatch>) {
         let mut state = self.lock();
-        if let Some(pane) = state.registry.get_mut(id) {
-            pane.requeue_front(batch);
+        let overflowed = state
+            .registry
+            .get_mut(id)
+            .is_some_and(|pane| pane.requeue_front(batch));
+        if overflowed && !state.faulted.iter().any(|(existing, _)| *existing == id) {
+            state.faulted.push((id, PaneFault::ReliableOverflow));
         }
     }
 

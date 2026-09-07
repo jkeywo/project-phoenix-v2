@@ -200,7 +200,7 @@
   // page that accepts every push and does nothing with it never lets that queue
   // grow. Throwing here turns the next push into a `PaneSurfaceError::Script`,
   // which pump_pane requeues; the host queue then fills, overflows its reliable
-  // budget, and drive_panes closes the pane — the same disconnect a dropped
+  // budget, and drive_pane_host closes the pane — the same disconnect a dropped
   // phone produces, so the station falls back to AI control.
   var INBOX_CAP = 256;
 

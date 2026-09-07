@@ -27,14 +27,12 @@
 //! be in that first batch is `Welcome`, and a pane that missed its `Welcome`
 //! sits in the lobby forever with a completely clean log.
 //!
-//! # Every push costs the simulation, so a frame may only make so many
+//! # Each pane iteration has a bounded push budget
 //!
-//! This is the cost worth stating out loud rather than discovering. A push is a
-//! **synchronous** `evaluate_script` into a real browser engine, and the loop
-//! that calls it (`super::ultralight::drive_panes`) runs in `Update` on the Bevy
-//! main thread — the same thread `FixedUpdate` runs `SimSet` on (AGENTS.md rule
-//! 7). Page JavaScript execution time is therefore *simulation* time, for every
-//! participant on the ship, including the network clients issue #1112 will add.
+//! A push is a synchronous `evaluate_script` into a browser engine. Since
+//! issue #1404 it runs on the dedicated pane thread, so it no longer occupies
+//! the simulation's thread. The budget still bounds each pane's share of an
+//! iteration and prevents one loading console from delaying every other view.
 //!
 //! An unbounded frame is easy to reach without anything being wrong: the first
 //! frame after a document loads drains the whole load-time backlog at once, and
@@ -52,9 +50,8 @@ use super::transport::{PaneBus, PaneInputRefusal};
 
 /// How many messages one pane may be handed in one frame.
 ///
-/// Not a gameplay value and not a designer's knob: it is a bound on how much of
-/// a frame the main thread may spend inside a browser engine, and the module
-/// note above says why that is the simulation's business. Sized to keep a
+/// Not a gameplay value and not a designer's knob: it bounds one console's
+/// share of a pane-thread iteration inside the browser engine. Sized to keep a
 /// steady-state pane (a snapshot and a handful of transitions per tick) well
 /// clear of it, so the budget only ever bites on a backlog.
 pub const MAX_PUSHES_PER_FRAME: usize = 32;
@@ -260,6 +257,118 @@ mod tests {
         });
     }
 
+    /// Deterministically model the simulation publishing while the pane thread
+    /// is inside evaluate_script, without relying on scheduler timing.
+    struct EnqueueThenFail {
+        bus: PaneBus,
+        messages: Vec<(ServerMessage, DeliveryClass)>,
+    }
+
+    impl PaneSurface for EnqueueThenFail {
+        fn load(&mut self, _url: &str) -> Result<(), PaneSurfaceError> {
+            Ok(())
+        }
+
+        fn is_ready(&self) -> bool {
+            true
+        }
+
+        fn push(&mut self, _json: &str) -> Result<(), PaneSurfaceError> {
+            for (msg, delivery) in self.messages.drain(..) {
+                self.bus.transport().dispatch(TransportDispatch {
+                    target: &Target::All,
+                    msg: &msg,
+                    delivery,
+                });
+            }
+            Err(PaneSurfaceError::Script("page inbox full".into()))
+        }
+
+        fn drain(&mut self) -> Vec<String> {
+            Vec::new()
+        }
+    }
+
+    #[test]
+    fn a_failed_push_reconciles_a_newer_snapshot_enqueued_during_evaluation() {
+        let bus = PaneBus::with_capacity(2);
+        let id =
+            bus.open(PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000001", "Ada").unwrap());
+        let snapshot = |reason: &str| ServerMessage::GameOver {
+            reason: reason.into(),
+            outcome: None,
+            report: Vec::new(),
+        };
+        broadcast_snapshot(&bus, snapshot("old"));
+        broadcast(&bus, ServerMessage::GameStarted);
+        let mut surface = EnqueueThenFail {
+            bus: bus.clone(),
+            messages: vec![(snapshot("new"), DeliveryClass::Snapshot)],
+        };
+
+        let report = pump_pane(&bus, id, &mut surface);
+        assert!(report.push_failure.is_some());
+        assert_eq!(report.deferred, 2);
+        assert!(bus.take_faulted().is_empty());
+        let queued = bus.take_outbound(id);
+        assert_eq!(queued.len(), 2, "the requeued batch still respects the cap");
+        assert!(queued[0].json.contains("GameStarted"));
+        assert!(queued[1].json.contains("new"));
+        assert!(!queued[1].json.contains("old"));
+    }
+
+    #[test]
+    fn a_failed_push_discards_a_concurrent_snapshot_when_reliable_messages_fill_the_cap() {
+        let bus = PaneBus::with_capacity(2);
+        let id =
+            bus.open(PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000001", "Ada").unwrap());
+        broadcast(&bus, ServerMessage::GameStarted);
+        broadcast(&bus, ServerMessage::ShipDestroyed);
+        let mut surface = EnqueueThenFail {
+            bus: bus.clone(),
+            messages: vec![(ServerMessage::ReturnedToLobby, DeliveryClass::Snapshot)],
+        };
+
+        let report = pump_pane(&bus, id, &mut surface);
+        assert!(report.push_failure.is_some());
+        assert_eq!(report.deferred, 2);
+        assert!(bus.is_open(id));
+        assert!(bus.take_faulted().is_empty());
+        let queued = bus.take_outbound(id);
+        assert_eq!(queued.len(), 2, "only the two reliable messages survive");
+        assert!(queued[0].json.contains("GameStarted"));
+        assert!(queued[1].json.contains("ShipDestroyed"));
+    }
+
+    #[test]
+    fn a_failed_push_reports_overflow_from_reliable_messages_enqueued_during_evaluation() {
+        let bus = PaneBus::with_capacity(2);
+        let id =
+            bus.open(PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000001", "Ada").unwrap());
+        broadcast(&bus, ServerMessage::GameStarted);
+        broadcast(&bus, ServerMessage::ShipDestroyed);
+        let mut surface = EnqueueThenFail {
+            bus: bus.clone(),
+            messages: vec![
+                (ServerMessage::ReturnedToLobby, DeliveryClass::Reliable),
+                (ServerMessage::GameStarted, DeliveryClass::Reliable),
+            ],
+        };
+
+        let report = pump_pane(&bus, id, &mut surface);
+        assert!(report.push_failure.is_some());
+        assert_eq!(report.deferred, 2);
+        assert_eq!(
+            bus.take_faulted(),
+            vec![(id, super::super::recovery::PaneFault::ReliableOverflow)],
+            "one fault for the pane, even when multiple messages overflow"
+        );
+        let queued = bus.take_outbound(id);
+        assert_eq!(queued.len(), 2);
+        assert!(queued[0].json.contains("GameStarted"));
+        assert!(queued[1].json.contains("ShipDestroyed"));
+    }
+
     #[test]
     fn a_burst_of_snapshots_of_one_kind_reaches_the_page_as_one_push() {
         // The phone's lossy channel drops stale snapshots; the pane bus
@@ -333,11 +442,9 @@ mod tests {
 
     #[test]
     fn a_frame_pushes_at_most_its_budget_and_leaves_the_rest_queued_in_order() {
-        // Every push is a synchronous evaluate_script on the Bevy main thread,
-        // which is the thread the fixed simulation tick runs on — so an
-        // unbounded frame is simulation stall for every participant on the
-        // ship. The first frame after a document loads is exactly where an
-        // unbounded one would happen: it drains the whole load-time backlog.
+        // Every push is a synchronous evaluate_script on the pane thread, so
+        // one unbounded console would delay the other views. The first frame
+        // after a document loads drains the whole load-time backlog.
         let (bus, id) = bus_with_pane();
         let total = MAX_PUSHES_PER_FRAME + 5;
         for _ in 0..total {

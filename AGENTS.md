@@ -200,13 +200,15 @@ cargo build --release --features host --bin phoenix-host
 #                   is_command_authorized entirely and carries mission-abort
 #                   authority — three separate gates enforce that.
 #   --log / --log-entity  same grammar as phoenix-headless
-#   --frame-stats   log, once a second at info (so with --log info), where each
-#                   frame went: Bevy frame time, the embedded panes' update /
-#                   pump / render / copy phases, pixels copied, the pane frames
-#                   written to the GPU (uploads / MB / deferred / lost — "lost"
-#                   should read 0.0), Image assets re-uploaded, fixed-tick
-#                   catch-up, and the residual left to the render thread
-#                   (src/native_host/panes/frame_stats.rs).
+#   --frame-stats   log once a second at info (with --log info): Bevy frame
+#                   timing; pane-thread update / pump / render / copy / publish
+#                   phases per iteration, iterations/s and ms/iteration; main
+#                   event-drain / upload queueing per frame; copied pixels,
+#                   texture uploads / MB / deferred / lost and stale frames;
+#                   Image assets changed; fixed ticks and the residual after
+#                   subtracting main-thread pane work (not concurrent pane work).
+#                   The pane thread and its three-buffer pool are described in
+#                   src/native_host/panes/{pane_thread,frame_stats}.rs.
 #                   PHOENIX_FRAME_EXPERIMENTS=novsync,raf33 switches one
 #                   suspected cost off per run for an A/B; the
 #                   toggles are scaffolding for the multi-screen frame-rate

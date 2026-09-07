@@ -147,7 +147,7 @@ pub struct FaultOutcome {
 ///
 /// This is the seam-level whole of issue #1125's fault handling, drivable from a
 /// test with no SDK, no GPU and no window — which is where its acceptance
-/// criteria live. [`super::ultralight::drive_panes`] calls it once per frame
+/// criteria live. [`super::ultralight::drive_pane_host`] calls it once per frame
 /// after it has *detected* faults (a page over its reliable budget, a view that
 /// stopped answering); a CI test calls it after injecting one through
 /// [`PaneBus::fault`].
@@ -189,6 +189,18 @@ pub fn service_faults(bus: &PaneBus) -> Vec<FaultOutcome> {
     outcomes
 }
 
+/// A dead renderer cannot recreate any view. Close every live bus entry,
+/// including consoles whose creation was still pending, and consume queued
+/// faults so the ordinary per-seat recovery cannot reopen them.
+pub fn close_after_thread_failure(bus: &PaneBus) {
+    for id in bus.open_pane_ids() {
+        bus.fault(id, PaneFault::ViewCrashed);
+        bus.close(id);
+    }
+    let _ = bus.take_faulted();
+    let _ = bus.take_pending_views();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -203,6 +215,27 @@ mod tests {
             format!("crew-{n}"),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn renderer_death_closes_live_and_pending_consoles_without_recreation() {
+        let bus = PaneBus::default();
+        bus.arm_recreation("http://localhost".into(), "<html></html>".into());
+        let live = bus.open(identity(1));
+        bus.mark_live(live);
+        let (pending, _) = bus.open_console("pending");
+        bus.fault(live, PaneFault::ViewCrashed);
+        close_after_thread_failure(&bus);
+        assert!(!bus.is_open(live));
+        assert!(!bus.is_open(pending));
+        assert_eq!(bus.open_count(), 0);
+        assert!(service_faults(&bus).is_empty());
+        assert!(bus.take_pending_views().is_empty());
+        // The adapter may observe further screen requests after terminal failure.
+        let (late, _) = bus.open_console("late");
+        close_after_thread_failure(&bus);
+        assert!(!bus.is_open(late));
+        assert!(service_faults(&bus).is_empty());
     }
 
     #[test]

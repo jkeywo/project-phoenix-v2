@@ -31,14 +31,8 @@
 //! `ultralight` adapter instantiates it with its own payload; the tests below
 //! instantiate it with `()`.
 //!
-//! # Not yet wired
-//!
-//! This slice moves [`VIEW_CRASH_COPY_FAILURES`] here and proves the rules; the
-//! adapter still keeps its panes in a `Vec<PaneWindow>` and reads the failure
-//! count straight off the loop's
-//! [`CopyFailed`](super::pane_thread::PaneEvent::CopyFailed) event. Swapping
-//! that vector for a `PaneMirror<PaneCanvasData>` is slice 5's, where the frames
-//! genuinely cross a thread and the questions above stop being rhetorical.
+//! The adapter instantiates this with its canvas payload; the views and their
+//! pools are owned by the pane thread.
 
 use super::pane_thread::PaneKind;
 use super::recovery::PaneFault;
@@ -76,6 +70,18 @@ pub struct MirrorPane<T> {
     pub payload: T,
 }
 
+impl<T> std::ops::Deref for MirrorPane<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        &self.payload
+    }
+}
+impl<T> std::ops::DerefMut for MirrorPane<T> {
+    fn deref_mut(&mut self) -> &mut T {
+        &mut self.payload
+    }
+}
+
 /// Every pane the main thread knows about.
 ///
 /// A `Vec` rather than a map, and deliberately: pane order is the order they
@@ -85,6 +91,13 @@ pub struct MirrorPane<T> {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PaneMirror<T> {
     panes: Vec<MirrorPane<T>>,
+}
+
+impl<T> std::ops::Index<usize> for PaneMirror<T> {
+    type Output = MirrorPane<T>;
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.panes[index]
+    }
 }
 
 /// What a renderer that stopped means for the panes it was drawing.
@@ -104,6 +117,16 @@ impl<T> PaneMirror<T> {
     /// An empty mirror.
     pub fn new() -> Self {
         Self { panes: Vec::new() }
+    }
+
+    pub fn iter(&self) -> std::slice::Iter<'_, MirrorPane<T>> {
+        self.panes.iter()
+    }
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, MirrorPane<T>> {
+        self.panes.iter_mut()
+    }
+    pub fn retain(&mut self, keep: impl FnMut(&MirrorPane<T>) -> bool) {
+        self.panes.retain(keep);
     }
 
     /// Record a pane that has just been opened, at generation zero.

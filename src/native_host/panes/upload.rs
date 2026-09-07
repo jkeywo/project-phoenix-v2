@@ -313,12 +313,9 @@ pub fn defer(deferred: &mut Vec<PaneUpload>, mut upload: PaneUpload, tally: &mut
 /// Whether a frame produced at `epoch` is still the pane's `current`
 /// generation.
 ///
-/// The **producer's** guard, checked at publish time in `drive_panes`. In this
-/// slice it is trivially true — the copy and the publish are the same statement
-/// on the same thread — and the real resize guard is the new `AssetId` a resize
-/// mints (see the module note). It becomes load-bearing in slice 5, where a
-/// pane thread hands back a frame that may have been copied against a surface
-/// the main thread has since resized away.
+/// A frame from a previous generation cannot describe a newly minted texture.
+/// The live main-world acceptance gate is `PaneMirror::accepts_frame`, which
+/// also refuses frames for closed panes before they enter the upload queue.
 pub fn frame_is_current(epoch: u64, current: u64) -> bool {
     epoch == current
 }

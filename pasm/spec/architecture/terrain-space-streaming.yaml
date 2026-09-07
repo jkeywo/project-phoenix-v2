@@ -40,7 +40,7 @@ entities:
       title: Asteroid Field Lifecycle
       summary: Owns deterministic field density and a fleet-centred grid window, spawning active cells and retiring cells outside the window.
       rationale:
-        - "Gameplay and cosmetic spawns read only their selected template through the shared native/WASM single-entry config accessor. The lookup remains fresh per spawn, including after a missing template is delivered or an existing cache entry is replaced; cell evaluation, identity, spawn order and authored values are unchanged. The snapshot-restore rock builder uses the same lookup."
+        - "[ai] Gameplay and cosmetic spawns read only their selected template through the shared native/WASM single-entry config accessor. The lookup remains fresh per spawn, including after a missing template is delivered or an existing cache entry is replaced; cell evaluation, identity, spawn order and authored values are unchanged. The snapshot-restore rock builder uses the same lookup."
     architecture:
       kind: streaming-lifecycle
       authority: authoritative

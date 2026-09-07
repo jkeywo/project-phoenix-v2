@@ -450,6 +450,7 @@ fn logged(
         objective_verb: None,
         objective_recipients: None,
         comms_recipients: None,
+        npc_doctrine: None,
     }
 }
 

@@ -1,0 +1,12 @@
+[[gm_npc_doctrine_palette]]
+id = "layer-north"
+label = "Layer north route"
+targets = ["Directive courier"]
+[[gm_npc_doctrine_palette.doctrine]]
+id = "layer-route"
+text = "Layer north route"
+directive_kind = "Reach"
+directive_anchor = "north"
+base_priority = 100.0
+target_speed = 0.4
+use_impulse = false

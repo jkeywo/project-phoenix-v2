@@ -23,6 +23,8 @@ export const GM_ACTION_REFUSAL_REASON_LABELS = Object.freeze({
   'protected-entity': 'server.gm.session.reason.protected_entity',
   'unknown-entity': 'server.gm.session.reason.unknown_entity',
   'unknown-objective': 'server.gm.session.reason.unknown_objective',
+  'unknown-npc-doctrine': 'server.gm.session.reason.unknown_npc_doctrine',
+  'npc-doctrine-incompatible': 'server.gm.session.reason.npc_doctrine_incompatible',
   'objective-not-active': 'server.gm.session.reason.objective_not_active',
   'objective-scope-mismatch': 'server.gm.session.reason.objective_scope_mismatch',
   'target-not-damageable': 'server.gm.session.reason.target_not_damageable',

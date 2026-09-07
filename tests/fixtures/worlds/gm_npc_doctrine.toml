@@ -1,0 +1,66 @@
+[global]
+seed = 1308
+title = "GM NPC doctrine fixture"
+description = "Authored choices operated by ordinary NPC AI."
+ai_helm_tick_hz = 30.0
+
+[anchors]
+north = [0.0, 0.0, -1500.0]
+east = [1500.0, 0.0, 0.0]
+
+[player_spawn]
+position = [0.0, 0.0, 500.0]
+
+[[available_ships]]
+template_path = "assets/entities/alliance_cruiser.toml"
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+spawn_on = "game_start"
+transform = { position = [0.0, 0.0, 500.0] }
+
+[[entity]]
+template_path = "assets/entities/alliance_courier.toml"
+name = "Directive courier"
+transform = { position = [0.0, 0.0, 0.0] }
+overrides = { name = "Directive courier", display_name = "Directive courier", tags = ["ship", "gm_removable"], behaviour = { doctrine = [] } }
+
+[[entity]]
+template_path = "assets/entities/station_axiom.toml"
+name = "Incompatible station"
+transform = { position = [-1000.0, 0.0, 0.0] }
+
+[[gm_npc_doctrine_palette]]
+id = "north"
+label = "Fly north"
+targets = ["Directive courier", "Incompatible station"]
+[[gm_npc_doctrine_palette.doctrine]]
+id = "authored-route"
+text = "Fly north"
+directive_kind = "Reach"
+directive_anchor = "north"
+base_priority = 100.0
+target_speed = 0.4
+use_impulse = false
+
+[[gm_npc_doctrine_palette]]
+id = "east"
+label = "Fly east"
+targets = ["Directive courier"]
+[[gm_npc_doctrine_palette.doctrine]]
+id = "authored-route"
+text = "Fly east"
+directive_kind = "Reach"
+directive_anchor = "east"
+base_priority = 100.0
+target_speed = 0.4
+use_impulse = false
+
+[script]
+setup = '''
+on_flag_set("scripted-doctrine", "apply_north");
+fn apply_north(ctx) {
+    ctx.effects.set_npc_doctrine("Directive courier", "north");
+}
+'''

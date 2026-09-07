@@ -497,6 +497,21 @@ pub fn first_divergent_scope(mine: &World, theirs: &[(&'static str, u64)]) -> Op
 /// ending, captain boosts, world.
 fn fold_run_scope(world: &World, mut acc: u64) -> u64 {
     acc = fold_u64(acc, world.get_resource::<SimTick>().map_or(0, |t| t.0));
+    if let Some(mut query) = world.try_query::<(&EntityUuid, &crate::gm_npc::NpcDoctrineState)>() {
+        let mut applied: Vec<_> = query
+            .iter(world)
+            .filter_map(|(uuid, state)| state.0.as_ref().map(|state| (&uuid.0, state)))
+            .collect();
+        applied.sort_by(|a, b| a.0.cmp(b.0));
+        if !applied.is_empty() {
+            acc = fold_str(acc, "npc-doctrine");
+            acc = fold_u64(acc, applied.len() as u64);
+            for (uuid, state) in applied {
+                acc = fold_str(acc, uuid);
+                acc = fold_serde(acc, &crate::gm_npc::applied_digest_fields(state));
+            }
+        }
+    }
     // Objective-free probes keep their previous digest. Retained terminal
     // records and exact authored AI/scoring fields are authoritative; dirty
     // flags and drained presentation transitions are not.

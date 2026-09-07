@@ -37,6 +37,7 @@ Current implementation orientation only. For intended design use
 - [Helm Control Runtime](./concepts/helm-control-intent.md)
 - [AI Helm Decomposition](./concepts/ai-helm-decomposition.md)
 - [AI Ship Unification](./concepts/ai-ship-unification.md)
+- [NPC Doctrine Controls](./concepts/npc-doctrine-controls.md)
 - [Stations](./concepts/stations.md)
 - [System Addressing](./concepts/coarse-system-migration.md)
 - [Captain Plugin](./concepts/captain-plugin.md)

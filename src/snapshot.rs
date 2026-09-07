@@ -618,7 +618,8 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// `30` — #1312 retains independent GM-disabled System latches.
 /// `31` — #1317 retains per-ship Comms routing, scripted dialogue, literal text,
 /// and the captured audience of durable GM outcomes and refusals.
-pub const SNAPSHOT_FORMAT: u32 = 31;
+/// `32` — #1308 retains scenario-applied NPC doctrine through restoration.
+pub const SNAPSHOT_FORMAT: u32 = 32;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -753,6 +754,10 @@ pub struct EntityState {
     /// Independent availability latches, never reconstructed from hull HP.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gm_disabled_systems: Vec<String>,
+    /// Runtime doctrine selections survive palette withdrawal. Absent means
+    /// clear any bootstrap selection and restore its original standing doctrine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub npc_doctrine: Option<crate::gm_npc::AppliedNpcDoctrine>,
     /// The entity's AI LOD lifecycle — see [`AiFidelityState`].
     ///
     /// This is explicit rather than inferred from [`Self::control`]: fidelity
@@ -4272,6 +4277,20 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
     let civilians = capture_civilians(world);
     let debris = capture_debris(world);
     let spawn_origins = capture_spawn_origins(world);
+    let npc_doctrines: std::collections::BTreeMap<_, _> = world
+        .try_query::<(&EntityUuid, &crate::gm_npc::NpcDoctrineState)>()
+        .map(|mut query| {
+            query
+                .iter(world)
+                .filter_map(|(uuid, state)| {
+                    state
+                        .0
+                        .as_ref()
+                        .map(|state| (uuid.0.clone(), state.clone()))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     let Some(mut query) = world.try_query::<(
         &EntityUuid,
         Option<&ShipPhysics>,
@@ -4286,6 +4305,7 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
         .iter(world)
         .map(
             |(uuid, physics, hull, alert, stances, control_sources)| EntityState {
+                npc_doctrine: npc_doctrines.get(&uuid.0).cloned(),
                 ai_fidelity: ai_fidelity
                     .iter()
                     .find(|(id, _)| id == &uuid.0)
@@ -6068,6 +6088,25 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
                     .cloned()
                     .map(crate::core::messages::SystemId),
             );
+        }
+        let restored_doctrine = row
+            .npc_doctrine
+            .as_ref()
+            .map(|state| state.doctrine.clone())
+            .or_else(|| {
+                entity_mut
+                    .get::<crate::gm_npc::NpcDoctrineState>()
+                    .and_then(|state| state.0.as_ref().map(|state| state.baseline.clone()))
+            });
+        if let Some(doctrine) = restored_doctrine {
+            if let Some(mut behaviour) =
+                entity_mut.get_mut::<crate::entities::spawner::BehaviourSection>()
+            {
+                behaviour.0.doctrine = doctrine;
+            }
+        }
+        if entity_mut.contains::<crate::gm_npc::NpcDoctrineState>() || row.npc_doctrine.is_some() {
+            entity_mut.insert(crate::gm_npc::NpcDoctrineState(row.npc_doctrine.clone()));
         }
         if let Some(p) = row.physics {
             if let Some(mut physics) = entity_mut.get_mut::<ShipPhysics>() {

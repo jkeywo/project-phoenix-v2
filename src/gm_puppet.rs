@@ -253,6 +253,7 @@ pub fn validate_station_action(
         | GmAction::ApplyDirectEffect { .. }
         | GmAction::SpawnPaletteEntity { .. }
         | GmAction::DespawnEntity { .. }
+        | GmAction::SetNpcDoctrine { .. }
         | GmAction::ObjectiveAction { .. }
         | GmAction::SetContactOverride { .. }
         | GmAction::SetSystemDisabled { .. }
@@ -303,6 +304,7 @@ pub fn validate_station_action(
         | GmAction::ApplyDirectEffect { .. }
         | GmAction::SpawnPaletteEntity { .. }
         | GmAction::DespawnEntity { .. }
+        | GmAction::SetNpcDoctrine { .. }
         | GmAction::ObjectiveAction { .. }
         | GmAction::SetContactOverride { .. }
         | GmAction::SetSystemDisabled { .. }
@@ -1261,6 +1263,7 @@ station = "tactical"
                     objective_recipients: None,
                     comms_recipients: None,
                     observer: None,
+                    npc_doctrine: None,
                 })
                 .unwrap();
             let provisional_log = journal.applied_log();

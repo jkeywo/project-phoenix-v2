@@ -3,7 +3,7 @@ title: AI Ship Unification
 type: concept
 tags: [ai, npc, ship, ecs, components, control-source, backfill]
 sources: [src/entities/spawner.rs, src/ship/control_source.rs, src/ship/components.rs, src/ship_plugin.rs, src/ship/helm_ai/, src/console/helm/server.rs, src/console/weapons/server.rs, src/console/weapons/beam.rs, src/tractor/server.rs, src/console/navigation/server.rs, src/ai/server.rs, src/ai/host.rs]
-updated: 2026-09-01
+updated: 2026-09-07
 ---
 
 # AI Ship Unification
@@ -30,6 +30,11 @@ An NPC template with behaviour is seeded for AI operation. The LocalShip changes
 each system's control source from live station tenure/rating: an occupied
 eligible station is human-operated; a vacant or disconnected station uses its
 Backfill rating. The downstream system sees only the resulting control policy.
+
+Scenario-authored [NPC Doctrine Controls](./npc-doctrine-controls.md) replace the
+NPC's standing `BehaviourSection.doctrine` through `gm_npc::NpcDoctrineControl`.
+The existing scorer and AI producers consume that intent; runtime selections
+are captured/restored with the entity and folded without using `LocalShip`.
 
 ## One command path
 

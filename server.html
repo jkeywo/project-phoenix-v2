@@ -403,7 +403,7 @@
     #gm-comms-log { max-height: 18rem; overflow: auto; }
     #gm-comms-log pre { white-space: pre-wrap; overflow-wrap: anywhere; }
     #gm-comms-feedback[data-state="Refused"] { color: var(--fire-bright); }
-    #gm-spawn-panel, #gm-despawn-panel, #gm-contact-panel, #gm-system-panel {
+    #gm-spawn-panel, #gm-despawn-panel, #gm-contact-panel, #gm-system-panel, #gm-npc-panel {
       max-width: 44rem; padding: 1.5rem; border: 1px solid var(--edge-control);
       display: grid; gap: .9rem;
     }
@@ -417,13 +417,14 @@
     #gm-spawn-exact-form input { width: 6rem; }
     #gm-spawn-exact-form { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; }
     #gm-spawn-exact-form label { display: grid; gap: .25rem; color: var(--ink-muted); }
-    .gm-spawn-entry button, #gm-spawn-exact {
+    .gm-spawn-entry button, #gm-spawn-exact, #gm-npc-apply, #gm-npc-choice {
       min-width: 6rem; padding: .5rem .9rem; color: var(--ink-primary);
       background: var(--surface-panel-up); border: 1px solid var(--edge-bright);
       font: inherit; cursor: pointer;
     }
     .gm-spawn-entry button[data-arming="true"] { border-color: var(--gold); color: var(--gold); }
-    .gm-spawn-entry button:disabled, #gm-spawn-exact:disabled { opacity: .45; cursor: default; }
+    .gm-spawn-entry button:disabled, #gm-spawn-exact:disabled, #gm-npc-apply:disabled { opacity: .45; cursor: default; }
+    #gm-npc-results { max-height: 12rem; overflow-y: auto; }
     #gm-spawn-hint { color: var(--ink-muted); margin: 0; }
     #gm-spawn-feedback[data-state="Refused"] { color: var(--fire-bright); }
     #gm-spawn-log { margin: 0; padding-left: 1.5rem; max-height: 12rem; overflow-y: auto; }
@@ -2049,6 +2050,18 @@
           <p id="gm-contact-feedback" role="status" aria-live="polite"></p>
           <ol id="gm-contact-results"></ol>
         </section>
+        <section id="gm-npc-panel" role="region" aria-labelledby="gm-npc-heading">
+          <h2 id="gm-npc-heading" data-i18n="server.gm.npc.heading"></h2>
+          <p id="gm-npc-target" role="status"></p>
+          <dl><dt data-i18n="server.gm.npc.current"></dt><dd id="gm-npc-current"></dd>
+            <dt data-i18n="server.gm.npc.intent"></dt><dd id="gm-npc-intent"></dd></dl>
+          <label for="gm-npc-choice" data-i18n="server.gm.npc.choice"></label>
+          <select id="gm-npc-choice"></select>
+          <p id="gm-npc-empty" data-i18n="server.gm.npc.empty"></p>
+          <button id="gm-npc-apply" type="button" disabled data-i18n="server.gm.npc.apply"></button>
+          <p id="gm-npc-feedback" role="status" aria-live="polite"></p>
+          <ol id="gm-npc-results" aria-live="polite"></ol>
+        </section>
         <section id="gm-despawn-panel" role="region" aria-labelledby="gm-despawn-heading">
           <h2 id="gm-despawn-heading" data-i18n="server.gm.despawn.heading"></h2>
           <p id="gm-despawn-target" role="status"></p>
@@ -2757,6 +2770,7 @@
     import { createGmSystemPanel } from './gui/gm-system-panel.js';
     import { createGmContactPanel } from './gui/gm-contact-panel.js';
     import { createGmDespawnPanel } from './gui/gm-despawn-panel.js';
+    import { createGmNpcPanel } from './gui/gm-npc-panel.js';
     import { createGmStationPuppet } from './gui/gm-station-puppet.js';
     import { createGmRolePresets } from './gui/gm-role-presets.js';
     import { createGmKnowledgeCompare } from './gui/gm-knowledge-compare.js';
@@ -2773,6 +2787,7 @@
     let gmContact = null;
     let gmSystem = null;
     let gmDespawn = null;
+    let gmNpc = null;
     const gmProjection = createGmLocalProjection({
       doc: document,
       t,
@@ -2781,6 +2796,7 @@
         if (gmDespawn) gmDespawn.select(entity);
         if (gmContact) gmContact.select(entity);
         if (gmSystem) gmSystem.select(entity);
+        if (gmNpc) gmNpc.select(entity);
       },
     });
     const gmActivity = createGmActivityFeed({
@@ -2966,9 +2982,14 @@
       submit: (request) => window.__hostDespawnEntity(request),
     });
     window.__hostGmDespawnState = gmDespawn.state;
-    window.__hostGmEffectRefresh = function() { gmDirectEffect.refreshAdmission(); gmDespawn.refreshAdmission(); gmContact.refreshAdmission(); gmSystem.refreshAdmission(); };
+    gmNpc = createGmNpcPanel({ doc: document, t, getOperator: () => window.__hostLocalGm?.() || null,
+      submit: request => window.__hostSetNpcDoctrine(request),
+      confirmAction: gmConfirmations.request,
+    });
+    window.__hostGmNpcState = gmNpc.state;
+    window.__hostGmEffectRefresh = function() { gmDirectEffect.refreshAdmission(); gmDespawn.refreshAdmission(); gmContact.refreshAdmission(); gmSystem.refreshAdmission(); gmNpc.refreshAdmission(); };
 
-    window.__hostGmEffectReset = function() { gmConfirmations.cancel(); gmDirectEffect.reset(); gmDespawn.reset(); gmContact.reset(); gmSystem.reset(); };
+    window.__hostGmEffectReset = function() { gmConfirmations.cancel(); gmDirectEffect.reset(); gmDespawn.reset(); gmContact.reset(); gmSystem.reset(); gmNpc.reset(); };
     window.__hostGmEffectState = gmDirectEffect.state;
     window.__hostSemanticActions = hostSemanticActions;
     window.__hostActionFeedback = hostActionFeedback;
@@ -2985,6 +3006,7 @@
           gmDespawn.update(p);
           gmContact.update(p);
           gmSystem.update(p);
+          gmNpc.update(p);
           if (gmProjection.update(p)) {
             gmActivity.reconcileAvailability();
             gmKnowledgeCompare.updateTruth(gmProjection.state().entities);
@@ -4234,6 +4256,13 @@
           || typeof window.wasm_submit_gm_action !== 'function') return false;
       return window.wasm_submit_gm_action(JSON.stringify({ operator_id: operator.id, correlation: request.correlation,
         action: 'set_contact_override', ship: request.ship, target: request.target, mode: request.mode }));
+    };
+    window.__hostSetNpcDoctrine = function(request) {
+      const operator = window.__hostLocalGm();
+      if (!operator || !request || request.operator_id !== operator.id
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      return window.wasm_submit_gm_action(JSON.stringify({ action: 'set_npc_doctrine', operator_id: operator.id,
+        correlation: request.correlation, target: request.target, doctrine: request.doctrine })) !== false;
     };
     window.__hostDespawnEntity = function(request) {
       const operator = localGm();

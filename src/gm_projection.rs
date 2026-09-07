@@ -170,6 +170,10 @@ pub struct GmEntityProjectionPayload {
     pub system_controls: BTreeMap<String, Vec<GmSystemControlStatus>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub system_results: Vec<LoggedGmAction>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub npc_doctrines: BTreeMap<String, crate::gm_npc::NpcDoctrineStatus>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub npc_doctrine_results: Vec<crate::gm_action::LoggedGmAction>,
     pub entities: Vec<GmEntityProjection>,
     /// Bounded attributed results of the directed world-effect family (issue
     /// #1310), carried on the entity surface rather than a channel of its own.
@@ -492,6 +496,7 @@ fn publish_local_projection(
         ),
         With<Ship>,
     >,
+    npc_control: crate::gm_npc::NpcDoctrineControl,
     ships: GmShipProjectionQuery,
     world_entities: GmWorldProjectionQuery,
     all_names: Query<(&EntityUuid, Option<&EntityName>, Option<&EntityId>)>,
@@ -701,6 +706,15 @@ fn publish_local_projection(
             .map(|runtime| runtime.contact_overrides.clone())
             .unwrap_or_default(),
         contact_results,
+        npc_doctrines: world_content
+            .as_deref()
+            .map(|runtime| npc_control.projection(runtime))
+            .unwrap_or_default(),
+        npc_doctrine_results: crate::gm_action::projected_results(
+            crate::gm_action::GmActionKind::NpcDoctrine,
+            &action_log,
+            &local_refusals,
+        ),
         despawn_results: crate::gm_action::projected_results(
             crate::gm_action::GmActionKind::WorldDespawn,
             &action_log,

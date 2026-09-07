@@ -449,6 +449,29 @@ pub(crate) fn register_effects(engine: &mut HostRegistry) {
     );
     host_fn!(
         engine,
+        "set_npc_doctrine",
+        receiver = "effects",
+        category = "effect",
+        params = ["entity", "id"],
+        summary = "Apply an authored NPC doctrine palette id to a compatible live NPC.",
+        |sink: &mut EffectSink,
+         entity: ImmutableString,
+         id: ImmutableString|
+         -> Result<(), Box<EvalAltResult>> {
+            if !crate::gm_npc::bounded_id(&entity) || !crate::gm_npc::bounded_id(&id) {
+                return Err(raise(
+                    "set_npc_doctrine requires bounded entity and palette identities".into(),
+                ));
+            }
+            sink.push_action(TriggerAction::SetNpcDoctrine {
+                entity: entity.to_string(),
+                id: id.to_string(),
+            });
+            Ok(())
+        },
+    );
+    host_fn!(
+        engine,
         "reset_trigger",
         receiver = "effects",
         category = "effect",

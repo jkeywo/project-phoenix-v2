@@ -313,6 +313,7 @@ fn refusal_and_reconstructed_frontier_keep_both_identities_and_mode() {
         objective_verb: None,
         objective_recipients: None,
         comms_recipients: None,
+        npc_doctrine: None,
         verb: None,
         lever: None,
         effect_scope: None,

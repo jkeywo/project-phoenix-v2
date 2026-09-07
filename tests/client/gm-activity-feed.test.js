@@ -731,6 +731,15 @@ describe('GM activity feed presentation and selection links', () => {
 });
 
 describe('GM activity transport separation', () => {
+  it('retains attributed NPC doctrine rows under the semantic ship filter', () => {
+    setTable(realStrings);
+    const npc = entry('gm_action', { type: 'gm_action', data: { operator: { id: 'gm-alpha', name: 'Morgan' }, correlation: 'npc-1',
+      action: { type: 'set_npc_doctrine', target: SHIP, doctrine: 'north' }, outcome: 'applied', reason: null, order: { sequence: 9, origin: 1 } } });
+    const parsed = parseGmActivityFeed(payload([npc]));
+    expect(parsed.entries[0].detail.data.action).toEqual({ type: 'set_npc_doctrine', target: SHIP, doctrine: 'north' });
+    expect(filterGmActivityEntries(parsed.entries, { category: 'gm_action', ship: SHIP })).toHaveLength(1);
+    expect(filterGmActivityEntries(parsed.entries, { category: 'gm_action', ship: OTHER_SHIP })).toHaveLength(0);
+  });
   it('uses only the page-local Host Channel and has a real server-page handler', () => {
     for (const file of [
       'src/core/messages.rs',

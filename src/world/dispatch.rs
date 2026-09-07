@@ -176,6 +176,10 @@ pub enum FlagMutation {
 /// `Uuid`s. Nothing here names a Bevy `Entity`.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ActionCmd {
+    SetNpcDoctrine {
+        uuid: String,
+        id: String,
+    },
     /// Add an objective with `targets` already resolved (explicit targets, or
     /// the trigger entity as fallback).
     AddObjective {
@@ -209,7 +213,9 @@ pub enum ActionCmd {
     /// effect queue and `narrative::emit_authored_and_marked_entity_narrative`
     /// turns it into a `NarrativeKind::BeatFired` event. This is the "authors
     /// explicitly mark beats" half of PRD #1337 — the sim never infers one.
-    NarrativeBeat { id: String },
+    NarrativeBeat {
+        id: String,
+    },
     /// Record an authored outcome for a marked narrative entity (issue #1338).
     ///
     /// `entity` is the world's authored entity NAME, not a UUID, resolved by
@@ -257,11 +263,17 @@ pub enum ActionCmd {
         station: Option<crate::core::messages::StationId>,
     },
     /// Mark an objective complete. A no-op for unknown / non-Active ids.
-    CompleteObjective { id: String },
+    CompleteObjective {
+        id: String,
+    },
     /// Re-arm the trigger(s) with the given authored id (issue #751).
-    ResetTrigger { id: String },
+    ResetTrigger {
+        id: String,
+    },
     /// Mark an objective failed. A no-op for unknown / non-Active ids.
-    FailObjective { id: String },
+    FailObjective {
+        id: String,
+    },
     /// Move the named entity's infrastructure condition by `delta` points —
     /// negative degrades, positive repairs (issue #1025).
     ///
@@ -270,7 +282,10 @@ pub enum ActionCmd {
     /// delta rather than applying it on the spot, so every condition move lands
     /// in the one system that owns operational-flag edges. A timed field-repair
     /// operation applies one small slice of this per tick.
-    AdjustInfrastructureCondition { entity: String, delta: f32 },
+    AdjustInfrastructureCondition {
+        entity: String,
+        delta: f32,
+    },
     /// Move one of the named entity's published `[[infrastructure.capacity]]`
     /// levels by `delta` units — negative spends, positive returns
     /// (issue #1042).
@@ -432,7 +447,9 @@ pub enum ActionCmd {
     /// rather than reaching this queue as a row nothing can style.
     SetReportRow(crate::core::report::ReportRow),
     /// Queue a game-phase transition.
-    SetNextState { phase: GamePhase },
+    SetNextState {
+        phase: GamePhase,
+    },
     /// Additively load a sub-world. `loader_path` is the layer that issued the
     /// action, recorded so `parent:` from the new layer resolves up to it.
     LoadWorld {
@@ -440,7 +457,9 @@ pub enum ActionCmd {
         loader_path: Option<String>,
     },
     /// Unload a previously loaded sub-world.
-    UnloadWorld { path: String },
+    UnloadWorld {
+        path: String,
+    },
     /// Apply `mutation` to `name` in `target_layer`'s store (`None` = base
     /// world). `name` is already stripped of `parent:` prefixes and
     /// `target_layer` is the walk's resolved destination.
@@ -486,7 +505,9 @@ pub enum ActionCmd {
         overrides: Option<toml::Value>,
     },
     /// Destroy the entity with `uuid` and run the destruction cascade.
-    DestroyEntity { uuid: String },
+    DestroyEntity {
+        uuid: String,
+    },
     /// Add `enemy_uuid` to `faction_uuid`'s enemies.
     ///
     /// Deliberately does *not* re-validate AI targets: adding a hostility
@@ -570,6 +591,21 @@ pub fn dispatch_action(action: &TriggerAction, context: &DispatchContext) -> Dis
     let mut out = DispatchResult::default();
 
     match action {
+        TriggerAction::SetNpcDoctrine { entity, id } => {
+            if let Some(uuid) = context
+                .name_to_uuid
+                .get(entity)
+                .or_else(|| context.name_to_uuid.values().find(|uuid| *uuid == entity))
+            {
+                out.commands.push(ActionCmd::SetNpcDoctrine {
+                    uuid: uuid.clone(),
+                    id: id.clone(),
+                });
+            } else {
+                out.warnings
+                    .push(format!("NPC doctrine target '{entity}' is not live"));
+            }
+        }
         // Mission-state actions — objectives, faction hostility, and the
         // game-over transition — are handled by `dispatch_state_action`
         // (issue #711). This table remains the single entry point over every

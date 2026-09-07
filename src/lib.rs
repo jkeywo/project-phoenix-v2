@@ -114,6 +114,7 @@ pub mod gm_despawn;
 pub mod gm_effect;
 pub mod gm_event;
 pub mod gm_join;
+pub mod gm_npc;
 pub mod gm_objective;
 pub mod gm_projection;
 pub mod gm_puppet;

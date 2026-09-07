@@ -270,6 +270,7 @@ mod tests {
         // ended in, is the author's judgement and nobody else's.
         ("effects", "report_row", &["spec"]),
         ("effects", "reset_trigger", &["id"]),
+        ("effects", "set_npc_doctrine", &["entity", "id"]),
         ("effects", "load_world", &["path"]),
         ("effects", "unload_world", &["path"]),
         ("effects", "game_over", &["reason"]),

@@ -1018,6 +1018,8 @@ fn encode_gm_entity_projection_pins_the_local_host_channel_shape() {
     let payload = crate::gm_projection::GmEntityProjectionPayload {
         system_controls: Default::default(),
         system_results: Default::default(),
+        npc_doctrines: Default::default(),
+        npc_doctrine_results: Vec::new(),
         despawn_results: Vec::new(),
         contact_results: Vec::new(),
         contact_overrides: Default::default(),

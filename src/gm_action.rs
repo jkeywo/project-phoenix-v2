@@ -205,6 +205,11 @@ pub enum GmAction {
     TransmitComms {
         transmission: crate::gm_comms::GmCommsTransmission,
     },
+    /// Select scenario-authored intent; callers cannot supply a policy or controls.
+    SetNpcDoctrine {
+        target: String,
+        doctrine: String,
+    },
 }
 
 /// WHICH lever of the authored-event control family one durable result records
@@ -253,6 +258,7 @@ pub enum GmActionKind {
     ContactConceal,
     ContactNormal,
     Comms,
+    NpcDoctrine,
 }
 
 impl GmActionKind {
@@ -276,7 +282,8 @@ impl GmActionKind {
             | Self::SystemRestore
             | Self::ContactConceal
             | Self::ContactNormal
-            | Self::Comms => true,
+            | Self::Comms
+            | Self::NpcDoctrine => true,
             Self::SessionPause | Self::StationPuppet | Self::StationCommand => false,
         }
     }
@@ -326,6 +333,7 @@ impl GmAction {
             | Self::ApplyDirectEffect { .. }
             | Self::SpawnPaletteEntity { .. }
             | Self::DespawnEntity { .. }
+            | Self::SetNpcDoctrine { .. }
             | Self::ObjectiveAction { .. }
             | Self::SetSystemDisabled { .. }
             | Self::TransmitComms { .. }
@@ -353,7 +361,8 @@ impl GmAction {
             Self::ApplyDirectEffect { target, .. }
             | Self::SetSystemDisabled { target, .. }
             | Self::DespawnEntity { target }
-            | Self::SetContactOverride { target, .. } => Some(target.as_str()),
+            | Self::SetContactOverride { target, .. }
+            | Self::SetNpcDoctrine { target, .. } => Some(target.as_str()),
             // The palette id, not the derived instance name: the durable fact
             // has to say WHAT the operator placed, and the instance name is
             // minted by the reducer a boundary later.
@@ -375,6 +384,9 @@ impl GmAction {
             Self::SetSystemDisabled { target, system, .. }
                 if bounded(target) && bounded(&system.0) =>
             {
+                Ok(())
+            }
+            Self::SetNpcDoctrine { target, doctrine } if bounded(target) && bounded(doctrine) => {
                 Ok(())
             }
             Self::DespawnEntity { target } if bounded(target) => Ok(()),
@@ -494,6 +506,7 @@ impl GmAction {
                 crate::gm_contact::ContactMode::Normal => GmActionKind::ContactNormal,
             },
             Self::TransmitComms { .. } => GmActionKind::Comms,
+            Self::SetNpcDoctrine { .. } => GmActionKind::NpcDoctrine,
         }
     }
 
@@ -511,6 +524,7 @@ impl GmAction {
             | Self::SetContactOverride { .. }
             | Self::SetSystemDisabled { .. }
             | Self::DespawnEntity { .. }
+            | Self::SetNpcDoctrine { .. }
             | Self::ObjectiveAction { .. }
             | Self::TransmitComms { .. }
             | Self::ArmGmEventSkip { .. } => None,
@@ -521,6 +535,12 @@ impl GmAction {
     pub fn objective_verb(&self) -> Option<crate::gm_objective::ObjectiveVerb> {
         match self {
             Self::ObjectiveAction { verb, .. } => Some(*verb),
+            _ => None,
+        }
+    }
+    pub fn npc_doctrine(&self) -> Option<String> {
+        match self {
+            Self::SetNpcDoctrine { doctrine, .. } => Some(doctrine.clone()),
             _ => None,
         }
     }
@@ -567,6 +587,7 @@ impl GmAction {
             | Self::SetContactOverride { .. }
             | Self::SetSystemDisabled { .. }
             | Self::DespawnEntity { .. }
+            | Self::SetNpcDoctrine { .. }
             | Self::ObjectiveAction { .. }
             | Self::TransmitComms { .. }
             | Self::ArmGmEventSkip { .. }
@@ -596,6 +617,7 @@ impl GmAction {
             | Self::SetSystemDisabled { .. }
             | Self::DespawnEntity { .. }
             | Self::ObjectiveAction { .. }
+            | Self::SetNpcDoctrine { .. }
             | Self::TransmitComms { .. } => None,
         }
     }
@@ -617,6 +639,7 @@ impl GmAction {
             | Self::SpawnPaletteEntity { .. }
             | Self::SetContactOverride { .. }
             | Self::DespawnEntity { .. }
+            | Self::SetNpcDoctrine { .. }
             | Self::ObjectiveAction { .. }
             | Self::TransmitComms { .. }
             | Self::ArmGmEventSkip { .. } => true,
@@ -757,6 +780,8 @@ pub struct GmActionRefusal {
     pub comms_recipients: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observer: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub npc_doctrine: Option<String>,
 }
 
 impl GmActionRefusal {
@@ -776,6 +801,7 @@ impl GmActionRefusal {
         .with_effect(None, self.effect_scope.clone())
         .with_objective(self.objective_verb, self.objective_recipients.clone())
         .with_comms_recipients(self.comms_recipients.clone())
+        .with_npc_doctrine(self.npc_doctrine.clone())
     }
 }
 
@@ -925,6 +951,14 @@ pub fn validate_fleet_frame(
             if !valid_comms_result_scope(refusal.action_kind, refusal.comms_recipients.as_deref()) {
                 return Err(GmActionRefusalReason::InvalidAction);
             }
+            if (refusal.action_kind == GmActionKind::NpcDoctrine) != refusal.npc_doctrine.is_some()
+                || refusal
+                    .npc_doctrine
+                    .as_deref()
+                    .is_some_and(|id| !crate::gm_npc::bounded_id(id))
+            {
+                return Err(GmActionRefusalReason::InvalidAction);
+            }
             if is_objective != refusal.objective_verb.is_some()
                 || is_objective != refusal.objective_recipients.is_some()
             {
@@ -1040,6 +1074,8 @@ pub enum GmActionRefusalReason {
     UnavailableCommsIdentity,
     UnavailableCommsRecipient,
     UnavailableCommsHail,
+    UnknownNpcDoctrine,
+    NpcDoctrineIncompatible,
 }
 
 /// One terminal fact in the GM command log and local activity projection.
@@ -1132,6 +1168,8 @@ pub struct LoggedGmAction {
     pub comms_recipients: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observer: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub npc_doctrine: Option<String>,
 }
 
 impl LoggedGmAction {
@@ -1161,6 +1199,7 @@ impl LoggedGmAction {
             objective_recipients: None,
             comms_recipients: None,
             observer: None,
+            npc_doctrine: None,
         }
     }
 
@@ -1184,6 +1223,10 @@ impl LoggedGmAction {
     }
     pub fn with_target(mut self, target: Option<String>) -> Self {
         self.target = target;
+        self
+    }
+    pub fn with_npc_doctrine(mut self, doctrine: Option<String>) -> Self {
+        self.npc_doctrine = doctrine;
         self
     }
 
@@ -1241,6 +1284,7 @@ impl LoggedGmAction {
             request.action.objective_recipients(),
         )
         .with_comms_recipients(request.action.comms_recipients())
+        .with_npc_doctrine(request.action.npc_doctrine())
     }
 }
 
@@ -1629,6 +1673,7 @@ impl GmActionJournal {
             || result.objective_verb != grant.action.objective_verb()
             || result.objective_recipients != grant.action.objective_recipients()
             || result.comms_recipients != grant.action.comms_recipients()
+            || result.npc_doctrine != grant.action.npc_doctrine()
             || result.target.as_deref() != grant.action.target_id()
             || result.observer != grant.action.observer_id()
             || (matches!(grant.action, GmAction::SetSystemDisabled { .. })
@@ -1813,6 +1858,7 @@ impl GmActionJournal {
                         | GmAction::SetSystemDisabled { .. }
                         | GmAction::DespawnEntity { .. }
                         | GmAction::ObjectiveAction { .. }
+                        | GmAction::SetNpcDoctrine { .. }
                         | GmAction::TransmitComms { .. } => {}
                     }
                 }
@@ -1882,6 +1928,7 @@ impl GmActionJournal {
                 | GmAction::SetSystemDisabled { .. }
                 | GmAction::DespawnEntity { .. }
                 | GmAction::ObjectiveAction { .. }
+                | GmAction::SetNpcDoctrine { .. }
                 | GmAction::TransmitComms { .. } => GmActionOutcome::Applied,
             };
             entries.push(LoggedGmAction {
@@ -1902,6 +1949,7 @@ impl GmActionJournal {
                 objective_recipients: grant.action.objective_recipients(),
                 comms_recipients: grant.action.comms_recipients(),
                 observer: grant.action.observer_id(),
+                npc_doctrine: grant.action.npc_doctrine(),
             });
         }
         GmActionLog { entries, paused }
@@ -1988,6 +2036,7 @@ impl GmActionJournal {
                 | GmAction::SetSystemDisabled { .. }
                 | GmAction::DespawnEntity { .. }
                 | GmAction::ObjectiveAction { .. }
+                | GmAction::SetNpcDoctrine { .. }
                 | GmAction::TransmitComms { .. } => GmActionOutcome::Applied,
             };
             entries.push(LoggedGmAction {
@@ -2008,6 +2057,7 @@ impl GmActionJournal {
                 objective_recipients: grant.action.objective_recipients(),
                 comms_recipients: grant.action.comms_recipients(),
                 observer: grant.action.observer_id(),
+                npc_doctrine: grant.action.npc_doctrine(),
             });
         }
         GmActionLog { entries, paused }
@@ -2285,6 +2335,7 @@ pub fn apply_due_actions(
         >,
         crate::gm_puppet::capability::StationCapabilities,
         crate::gm_comms::GmCommsParams,
+        crate::gm_npc::NpcDoctrineControl,
     )>,
     mut virtual_time: Option<ResMut<Time<Virtual>>>,
     mut fixed_time: Option<ResMut<Time<Fixed>>>,
@@ -2319,6 +2370,13 @@ pub fn apply_due_actions(
             losses.as_deref(),
         );
         let (outcome, reason) = match &grant.action {
+            GmAction::SetNpcDoctrine { target, doctrine } => match content.as_deref() {
+                Some(runtime) => ship_access.p3().apply(runtime, target, doctrine),
+                None => (
+                    GmActionOutcome::Refused,
+                    Some(GmActionRefusalReason::UnknownNpcDoctrine),
+                ),
+            },
             GmAction::ObjectiveAction {
                 objective,
                 verb,
@@ -2653,6 +2711,7 @@ pub fn apply_due_actions(
                             objective_recipients: None,
                             comms_recipients: None,
                             observer: None,
+                            npc_doctrine: None,
                         })
                         .expect("live GM result matches its canonical grant");
                     continue;
@@ -2834,6 +2893,7 @@ pub fn apply_due_actions(
                         objective_recipients: None,
                         comms_recipients: None,
                         observer: None,
+                        npc_doctrine: None,
                     };
                     journal
                         .record_applied_result(result)
@@ -2918,6 +2978,7 @@ pub fn apply_due_actions(
                             objective_recipients: None,
                             comms_recipients: None,
                             observer: None,
+                            npc_doctrine: None,
                         };
                         journal
                             .record_applied_result(result)
@@ -3012,6 +3073,7 @@ pub fn apply_due_actions(
                 objective_recipients: grant.action.objective_recipients(),
                 comms_recipients: grant.action.comms_recipients(),
                 observer: grant.action.observer_id(),
+                npc_doctrine: grant.action.npc_doctrine(),
             })
             .expect("live GM result matches its canonical grant");
     }
@@ -3108,6 +3170,7 @@ pub(crate) fn refusal_for(
         objective_recipients: proposal.action.objective_recipients(),
         comms_recipients: proposal.action.comms_recipients(),
         observer: proposal.action.observer_id(),
+        npc_doctrine: proposal.action.npc_doctrine(),
     }
 }
 
@@ -5194,6 +5257,7 @@ station = "helm"
             objective_recipients: None,
             comms_recipients: None,
             observer: None,
+            npc_doctrine: None,
             action_kind: GmActionKind::SessionPause,
             requested_active: true,
             tick: 7,
@@ -5349,6 +5413,7 @@ station = "helm"
             objective_recipients: None,
             comms_recipients: None,
             observer: None,
+            npc_doctrine: None,
         };
         let pause = LoggedGmAction {
             operator_id: "gm-1".into(),
@@ -5368,6 +5433,7 @@ station = "helm"
             objective_recipients: None,
             comms_recipients: None,
             observer: None,
+            npc_doctrine: None,
         };
         let station_refused = LoggedGmAction::refused(
             "gm-1".into(),
@@ -5395,6 +5461,7 @@ station = "helm"
             objective_recipients: None,
             comms_recipients: None,
             observer: None,
+            npc_doctrine: None,
         };
         let log = GmActionLog {
             entries: vec![pause, station_applied.clone(), station_pending],
@@ -5433,6 +5500,7 @@ station = "helm"
                 objective_recipients: None,
                 comms_recipients: None,
                 observer: None,
+                npc_doctrine: None,
             }),
             Err("pending GM result is not a Station command"),
         );
@@ -6823,6 +6891,7 @@ kind = "{id}"
             objective_recipients: None,
             comms_recipients: None,
             observer: None,
+            npc_doctrine: None,
             action_kind: GmActionKind::DirectEffect,
             requested_active: true,
             tick: 3,

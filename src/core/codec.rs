@@ -691,6 +691,9 @@ pub fn encode_mesh_frame(frame: &crate::lockstep::MeshFrame) -> Result<String, s
                 if let Some(recipients) = &refusal.comms_recipients {
                     body["comms_recipients"] = serde_json::to_value(recipients)?;
                 }
+                if let Some(doctrine) = &refusal.npc_doctrine {
+                    body["npc_doctrine"] = serde_json::to_value(doctrine)?;
+                }
                 (refusal.tick, body)
             }
         },
@@ -938,6 +941,12 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
                         action_kind,
                         requested_active: body.get("requested_active")?.as_bool()?,
                         effect_scope,
+                        npc_doctrine: body
+                            .get("npc_doctrine")
+                            .filter(|v| !v.is_null())
+                            .map(|v| serde_json::from_value(v.clone()))
+                            .transpose()
+                            .ok()?,
                         objective_verb: body
                             .get("objective_verb")
                             .filter(|v| !v.is_null())
@@ -1305,6 +1314,10 @@ pub fn decode_gm_action_request(raw: &str) -> Option<crate::gm_action::GmActionR
             }
             crate::gm_action::GmAction::TransmitComms { transmission }
         }
+        "set_npc_doctrine" if object.len() == 5 => crate::gm_action::GmAction::SetNpcDoctrine {
+            target: bounded_gm_target_id(object.get("target")?.as_str()?)?,
+            doctrine: bounded_gm_target_id(object.get("doctrine")?.as_str()?)?,
+        },
         "despawn_entity" if object.len() == 4 => crate::gm_action::GmAction::DespawnEntity {
             target: bounded_gm_target_id(object.get("target")?.as_str()?)?,
         },
@@ -1766,6 +1779,7 @@ mod mesh_frame_tests {
                 objective_recipients: None,
                 comms_recipients: None,
                 observer: None,
+                npc_doctrine: None,
             },
         ));
         // A refused Fire crosses the same lane still naming the event it tried
@@ -1788,6 +1802,7 @@ mod mesh_frame_tests {
                 objective_recipients: None,
                 comms_recipients: None,
                 observer: None,
+                npc_doctrine: None,
             },
         ));
         // And a refused SKIP crosses it naming both the event and the lever
@@ -1811,6 +1826,7 @@ mod mesh_frame_tests {
                 objective_recipients: None,
                 comms_recipients: None,
                 observer: None,
+                npc_doctrine: None,
             },
         ));
         for frame in [proposal, refusal, refused_fire, refused_skip] {
@@ -2113,6 +2129,7 @@ mod mesh_frame_tests {
                 objective_recipients: None,
                 comms_recipients: None,
                 observer: None,
+                npc_doctrine: None,
             },
         ));
         let text = super::encode_mesh_frame(&refusal).expect("encodes");

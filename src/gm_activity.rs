@@ -159,6 +159,10 @@ pub enum GmActivityAction {
         verb: crate::gm_objective::ObjectiveVerb,
         recipients: Vec<String>,
     },
+    SetNpcDoctrine {
+        target: String,
+        doctrine: String,
+    },
     DespawnEntity {
         target: String,
     },
@@ -450,6 +454,7 @@ fn action_key(action: &GmActivityAction) -> (u8, bool, &str) {
         GmActivityAction::SetSystemDisabled {
             target, disabled, ..
         } => (12, *disabled, target.as_str()),
+        GmActivityAction::SetNpcDoctrine { target, .. } => (14, false, target.as_str()),
         GmActivityAction::SpawnPaletteEntity { palette } => (4, false, palette.as_str()),
         GmActivityAction::SetEventPaused { event, active } => (5, *active, event.as_str()),
         // Its own rank rather than the Fire's, so two rows about one event at
@@ -1164,6 +1169,8 @@ fn refusal_reason(reason: crate::gm_action::GmActionRefusalReason) -> &'static s
         Reason::UnknownEntity => "unknown-entity",
         Reason::ProtectedEntity => "protected-entity",
         Reason::UnknownObjective => "unknown-objective",
+        Reason::UnknownNpcDoctrine => "unknown-npc-doctrine",
+        Reason::NpcDoctrineIncompatible => "npc-doctrine-incompatible",
         Reason::ObjectiveNotActive => "objective-not-active",
         Reason::ObjectiveScopeMismatch => "objective-scope-mismatch",
         Reason::TargetNotDamageable => "target-not-damageable",
@@ -1289,6 +1296,8 @@ fn terminal_action_entries(
                     .map(|observer| reference(observer, &state.identities))
                     .into_iter()
                     .collect()
+            } else if fact.action_kind == crate::gm_action::GmActionKind::NpcDoctrine {
+                vec![reference(fact.target.as_deref()?, &state.identities)]
             } else {
                 Vec::new()
             };
@@ -1402,6 +1411,12 @@ fn terminal_action_entries(
                         (crate::gm_action::GmActionKind::Comms, _) => {
                             GmActivityAction::TransmitComms {
                                 sender: fact.target.clone()?,
+                            }
+                        }
+                        (crate::gm_action::GmActionKind::NpcDoctrine, _) => {
+                            GmActivityAction::SetNpcDoctrine {
+                                target: fact.target.clone()?,
+                                doctrine: fact.npc_doctrine.clone()?,
                             }
                         }
                         (crate::gm_action::GmActionKind::WorldDespawn, _) => {

@@ -486,7 +486,10 @@ fn insert_behaviour_markers(
     cmds: &mut EntityCommands,
 ) {
     if let Some(behaviour) = &config.behaviour {
-        cmds.insert(BehaviourSection(behaviour.clone()));
+        cmds.insert((
+            BehaviourSection(behaviour.clone()),
+            crate::gm_npc::NpcDoctrineState::default(),
+        ));
     }
     if static_point_defence {
         cmds.insert(StaticPointDefence);

@@ -117,6 +117,8 @@ function normaliseAction(value) {
   if (value.type === 'despawn_entity' && typeof value.target === 'string' && value.target) {
     return { type: value.type, target: value.target };
   }
+  if (value.type === 'set_npc_doctrine' && typeof value.target === 'string' && value.target
+      && typeof value.doctrine === 'string' && value.doctrine) return { type: value.type, target: value.target, doctrine: value.doctrine };
   if (value.type === 'objective_action' && typeof value.objective === 'string' && value.objective
       && ['activate', 'complete', 'fail'].includes(value.verb) && Array.isArray(value.recipients)
       && value.recipients.every((id) => typeof id === 'string' && id)
@@ -451,6 +453,8 @@ export function createGmActivityFeed({
             ships: detail.action.recipients.length ? detail.action.recipients.join(', ')
               : t('server.gm.objective.all_ships'),
           });
+        } else if (detail.action.type === 'set_npc_doctrine') {
+          action = t('server.gm.activity.action.set_npc_doctrine', { target: detail.action.target, doctrine: detail.action.doctrine });
         } else if (detail.action.type === 'spawn_palette_entity') {
           action = t('server.gm.activity.action.spawn_palette_entity', {
             palette: detail.action.palette,

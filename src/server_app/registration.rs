@@ -746,6 +746,10 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 StateClass::DeferredFold,
                 "runtime-spawn-origin-state",
             )
+            .declare_state::<crate::gm_npc::NpcDoctrineState>(
+                StateClass::Folded,
+                "gm-npc-doctrine-state",
+            )
             .declare_state::<GodMode>(
                 StateClass::DeferredFold,
                 "host-debug-simulation-override-state",

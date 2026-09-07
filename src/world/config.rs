@@ -1032,6 +1032,8 @@ pub struct RawWorld {
     pub gm_objective_palette: Vec<crate::gm_objective::RawObjectivePaletteEntry>,
     #[serde(default)]
     pub gm_comms_route: Vec<crate::gm_comms::GmCommsRoute>,
+    #[serde(default)]
+    pub gm_npc_doctrine_palette: Vec<crate::gm_npc::RawNpcDoctrinePaletteEntry>,
     /// Paths to additional world TOML files to load additively at startup.
     #[serde(default)]
     pub extra_worlds: Vec<String>,
@@ -1281,6 +1283,10 @@ impl GmEventControls {
 /// An action to execute when a trigger fires.
 #[derive(Clone, Debug, PartialEq)]
 pub enum TriggerAction {
+    SetNpcDoctrine {
+        entity: String,
+        id: String,
+    },
     AddObjective {
         id: String,
         text: String,
@@ -1650,6 +1656,19 @@ fn parse_flag_kind(s: &str) -> Result<crate::core::messages::FlagKind, String> {
 pub(crate) fn parse_action_entry(raw_action: &RawActionEntry) -> Result<TriggerAction, String> {
     let action =
         match raw_action.kind.as_str() {
+            "set_npc_doctrine" => {
+                let entity = raw_action
+                    .entity
+                    .clone()
+                    .filter(|id| crate::gm_npc::bounded_id(id))
+                    .ok_or("set_npc_doctrine requires a bounded entity identity")?;
+                let id = raw_action
+                    .id
+                    .clone()
+                    .filter(|id| crate::gm_npc::bounded_id(id))
+                    .ok_or("set_npc_doctrine requires an authored palette id")?;
+                TriggerAction::SetNpcDoctrine { entity, id }
+            }
             "add_objective" => {
                 let directive = parse_directive(raw_action)?;
                 let utility = parse_utility_config(raw_action);
@@ -2034,6 +2053,7 @@ pub struct WorldConfig {
     pub gm_objective_palette: Vec<crate::gm_objective::ObjectivePaletteEntry>,
     /// Root-world approved fictional senders, routing and scripted hail roots.
     pub gm_comms_routes: Vec<crate::gm_comms::GmCommsRoute>,
+    pub gm_npc_doctrine_palette: Vec<crate::gm_npc::NpcDoctrinePaletteEntry>,
     /// Every INLINE `[script.*]` Rhai body this world authors, in key order.
     ///
     /// Retained for exactly one reader: [`entity_template_paths`]'s scripted
@@ -2555,6 +2575,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         gm_palette: raw.gm_palette,
         gm_objective_palette: crate::gm_objective::parse_palette(&raw.gm_objective_palette)?,
         gm_comms_routes: raw.gm_comms_route,
+        gm_npc_doctrine_palette: crate::gm_npc::parse_palette(&raw.gm_npc_doctrine_palette)?,
         script_sources: inline_script_sources(raw.script.as_ref()),
     })
 }

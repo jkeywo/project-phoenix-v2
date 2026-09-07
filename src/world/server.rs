@@ -187,6 +187,7 @@ pub struct WorldContentRuntime {
     /// the same load.
     pub gm_palette: Vec<crate::world::config::GmPaletteEntry>,
     pub gm_objective_palette: Vec<crate::gm_objective::ObjectivePaletteEntry>,
+    pub gm_npc_doctrine_palette: Vec<crate::gm_npc::NpcDoctrinePaletteEntry>,
     /// GM placements that have crossed their canonical apply boundary and are
     /// waiting for the trigger pipeline to spawn them (issue #1305).
     ///
@@ -1680,6 +1681,7 @@ pub(crate) fn init_world_runtime(
     // Replace the authored GM palette on each world load (#1305).
     runtime.gm_palette = world_config.gm_palette.clone();
     runtime.gm_objective_palette = world_config.gm_objective_palette.clone();
+    runtime.gm_npc_doctrine_palette = world_config.gm_npc_doctrine_palette.clone();
 
     // Reset the complete paired table; scripts are the production source.
     runtime.triggers.clear();
@@ -3344,6 +3346,13 @@ pub(crate) fn apply_dispatch_result(
 
     for cmd in action_cmds {
         match cmd {
+            ActionCmd::SetNpcDoctrine { uuid, id } => {
+                commands.queue(move |world: &mut World| {
+                    use bevy::ecs::system::RunSystemOnce;
+                    let _ = world
+                        .run_system_once_with(crate::gm_npc::apply_scenario_command, (uuid, id));
+                });
+            }
             cmd @ (ActionCmd::AddObjective { .. }
             | ActionCmd::CompleteObjective { .. }
             | ActionCmd::FailObjective { .. }) => {
@@ -4643,6 +4652,15 @@ fn apply_loaded_layer(
         scripts,
     } = layer;
 
+    if scenario_config.gm_npc_doctrine_palette.iter().any(|entry| {
+        runtime
+            .gm_npc_doctrine_palette
+            .iter()
+            .any(|live| live.id == entry.id)
+    }) {
+        bevy::log::error!("layer {path} has a duplicate GM NPC doctrine palette id");
+        return;
+    }
     if scenario_config.gm_objective_palette.iter().any(|entry| {
         runtime
             .gm_objective_palette
@@ -4753,6 +4771,10 @@ fn apply_loaded_layer(
     for mut entry in scenario_config.gm_objective_palette.clone() {
         entry.origin_layer = Some(path.to_string());
         runtime.gm_objective_palette.push(entry);
+    }
+    for mut entry in scenario_config.gm_npc_doctrine_palette.clone() {
+        entry.origin_layer = Some(path.to_string());
+        runtime.gm_npc_doctrine_palette.push(entry);
     }
 
     // Expose WorldLoaded only after every part of activation is live: ASTs,
@@ -5261,6 +5283,9 @@ fn apply_world_layer_changes(
 
                 runtime
                     .gm_objective_palette
+                    .retain(|entry| entry.origin_layer.as_deref() != Some(path.as_str()));
+                runtime
+                    .gm_npc_doctrine_palette
                     .retain(|entry| entry.origin_layer.as_deref() != Some(path.as_str()));
                 // Remove objectives this layer's triggers added (issue #751)
                 // and prune the runtime state that referenced them (issue #752):

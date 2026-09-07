@@ -1087,6 +1087,20 @@ entities with `[mesh]` (and, for stars, `[[light]]`).
 | `[hull]` | table | none | Hull integrity. See below. |
 | `[behaviour]` | table | none | AI controller. See **§6.2**. |
 
+#### Opting an entity into GM removal
+
+Add `"gm_removable"` to an entity template's `tags`, or to the complete tag
+list in an instance/palette variant override, to permit the GM map's confirmed
+removal action. NPC ships and structures may opt in. Hazard regions must also
+have runtime spawn provenance: use the ordinary script spawn or GM palette.
+An authored standing hazard remains protected.
+
+Fleet/player ships, stars, planets, moons, asteroid fields, trigger volumes,
+objective markers and inert region geometry cannot opt in. Permission is
+rechecked against the live entity at the agreed action tick. Removal runs the
+ordinary destruction triggers and clears live references; historical Comms
+messages and destruction predicate identities remain available.
+
 ### 2.1.1 `[collider]`
 
 | Field | Type | Default | Notes |

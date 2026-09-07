@@ -154,6 +154,9 @@ pub enum GmActivityAction {
     /// `palette` is the `[[gm_palette]]` id — never a template path, which the
     /// browser is never handed. The crew see only the hull that arrived; the GM
     /// feed names the operator who placed it.
+    DespawnEntity {
+        target: String,
+    },
     SpawnPaletteEntity {
         palette: String,
     },
@@ -419,6 +422,7 @@ fn action_key(action: &GmActivityAction) -> (u8, bool, &str) {
         // slot the pause row already uses, so damage and healing on one target
         // never collapse onto each other.
         GmActivityAction::ApplyDirectEffect { entity, heal, .. } => (3, *heal, entity.as_str()),
+        GmActivityAction::DespawnEntity { target } => (7, false, target.as_str()),
         GmActivityAction::SpawnPaletteEntity { palette } => (4, false, palette.as_str()),
         GmActivityAction::SetEventPaused { event, active } => (5, *active, event.as_str()),
         // Its own rank rather than the Fire's, so two rows about one event at
@@ -1131,6 +1135,7 @@ fn refusal_reason(reason: crate::gm_action::GmActionRefusalReason) -> &'static s
         Reason::UnreadableRequest => "unreadable-request",
         Reason::UnknownGmEvent => "unknown-gm-event",
         Reason::UnknownEntity => "unknown-entity",
+        Reason::ProtectedEntity => "protected-entity",
         Reason::TargetNotDamageable => "target-not-damageable",
         Reason::UnknownGmPaletteEntry => "unknown-gm-palette-entry",
         Reason::WorldUnavailable => "world-unavailable",
@@ -1289,6 +1294,11 @@ fn terminal_action_entries(
                         // `validate_fleet_frame` refuses a replicated refusal
                         // without one, so `None` drops this row rather than
                         // publishing a placement of the empty id.
+                        (crate::gm_action::GmActionKind::WorldDespawn, _) => {
+                            GmActivityAction::DespawnEntity {
+                                target: fact.target.clone()?,
+                            }
+                        }
                         (crate::gm_action::GmActionKind::WorldSpawn, _) => {
                             GmActivityAction::SpawnPaletteEntity {
                                 palette: fact.target.clone()?,

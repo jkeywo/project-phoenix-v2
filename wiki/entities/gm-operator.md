@@ -393,6 +393,10 @@ ordering. These generation facts are snapshotted, folded and replayed. A grant
 exactly on the still-unapplied loss boundary keeps the normal action-before-
 loss schedule order; equal surviving GMs remain members when cleanup follows.
 
+## Safe entity removal
+
+`src/gm_despawn.rs` owns the shared apply-boundary policy and normal scripted-removal cleanup. Authored `gm_removable` tags opt eligible NPCs, structures and runtime hazards in; fleet hulls and foundational world geometry remain protected. `DespawnEntity` queues a stable UUID on `WorldContentRuntime` for the ordinary DestroyEntity trigger cascade. Snapshot format 27 preserves the pending queue, and `gm_entity` carries permission previews and attributed removal results to `gui/gm-despawn-panel.js`. Confirmation is tied to the selected UUID and invalidated by selection or permission changes. Live references clear while historical destruction predicates and Comms messages remain readable.
+
 ## Related
 
 - [Session](./session.md)

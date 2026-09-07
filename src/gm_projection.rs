@@ -148,6 +148,9 @@ pub struct GmEntityReference {
 /// Stable identity plus the small M1 map/inspector surface for one world object.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct GmEntityProjection {
+    /// Apply-boundary policy preview; authoritative admission revalidates it.
+    #[serde(default)]
+    pub removable: bool,
     pub entity_id: String,
     pub name: String,
     pub kind: GmEntityKind,
@@ -173,6 +176,8 @@ pub struct GmEntityProjectionPayload {
     /// payload, so a new result republishes it the same way a moved ship does.
     #[serde(default)]
     pub results: Vec<crate::gm_action::LoggedGmAction>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub despawn_results: Vec<crate::gm_action::LoggedGmAction>,
 }
 
 /// One authored Station interface on a fleet/player ship. `console` is copied
@@ -473,6 +478,7 @@ fn publish_local_projection(
     local_refusals: Res<LocalGmActionRefusals>,
     mut previous: Local<Option<GmEntityProjectionPayload>>,
     mut changed: MessageWriter<GmEntityProjectionChanged>,
+    removal_targets: crate::gm_despawn::RemovalQuery,
 ) {
     // Resolve names in a separate deterministic lookup so target links never
     // leak a Bevy `Entity` and remain useful after a projection refresh.
@@ -528,6 +534,8 @@ fn publish_local_projection(
                                 .unwrap_or_else(|| target_id.clone()),
                         });
                 GmEntityProjection {
+                    removable: crate::gm_despawn::validate_target(&removal_targets, &uuid.0)
+                        .is_ok(),
                     entity_id: uuid.0.clone(),
                     name: display_name(uuid, name, None, &authored_names),
                     kind: if point_defence.is_some() {
@@ -590,6 +598,7 @@ fn publish_local_projection(
                 )
             };
             Some(GmEntityProjection {
+                removable: crate::gm_despawn::validate_target(&removal_targets, &uuid.0).is_ok(),
                 entity_id: uuid.0.clone(),
                 name: display_name(uuid, name, id, &authored_names),
                 kind,
@@ -611,6 +620,11 @@ fn publish_local_projection(
     projected.dedup_by(|left, right| left.entity_id == right.entity_id);
 
     let next = GmEntityProjectionPayload {
+        despawn_results: crate::gm_action::projected_results(
+            crate::gm_action::GmActionKind::WorldDespawn,
+            &action_log,
+            &local_refusals,
+        ),
         entities: projected,
         results: crate::gm_action::projected_results(
             crate::gm_action::GmActionKind::DirectEffect,

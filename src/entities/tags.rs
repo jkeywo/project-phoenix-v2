@@ -40,6 +40,8 @@ pub enum EntityTag {
     /// helm radars). Used to mark anchor-based objective targets (e.g. a patrol
     /// route waypoint) that have no associated mesh or collider.
     ObjectiveMarker,
+    /// Explicit authored permission for safe GM removal, subject to hard class gates.
+    GmRemovable,
 }
 
 impl EntityTag {
@@ -63,6 +65,7 @@ impl EntityTag {
             "missile" | "torpedo" => Some(EntityTag::Missile),
             "trigger_volume" => Some(EntityTag::TriggerVolume),
             "objective_marker" => Some(EntityTag::ObjectiveMarker),
+            "gm_removable" => Some(EntityTag::GmRemovable),
             _ => None,
         }
     }
@@ -83,6 +86,7 @@ impl EntityTag {
             EntityTag::Missile => "missile",
             EntityTag::TriggerVolume => "trigger_volume",
             EntityTag::ObjectiveMarker => "objective_marker",
+            EntityTag::GmRemovable => "gm_removable",
         }
     }
 }
@@ -124,6 +128,7 @@ mod tests {
             ("missile", EntityTag::Missile),
             ("trigger_volume", EntityTag::TriggerVolume),
             ("objective_marker", EntityTag::ObjectiveMarker),
+            ("gm_removable", EntityTag::GmRemovable),
         ];
         for (s, expected) in cases {
             assert_eq!(EntityTag::from_str(s), Some(expected), "from_str({s:?})");

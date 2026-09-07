@@ -165,6 +165,7 @@ function normaliseEntity(value) {
     entity_id: value.entity_id,
     name: value.name,
     kind: value.kind,
+    removable: value.removable === true,
     position: [...value.position],
     faction,
     status: {

@@ -228,7 +228,7 @@ describe('GM omniscient local projection', () => {
     });
     // The per-System breakdown is absent from this payload and normalises to an
     // empty list, so the omission is the entity's own answer rather than a hole.
-    expect(parsed).toEqual([entity({ status: { ...entity().status, systems: [] } })]);
+    expect(parsed).toEqual([entity({ removable: false, status: { ...entity().status, systems: [] } })]);
     expect(parsed[0]).not.toHaveProperty('raw_components');
     expect(parsed[0]).not.toHaveProperty('effect_tuning');
     expect(parsed[0]).not.toHaveProperty('layer_path');

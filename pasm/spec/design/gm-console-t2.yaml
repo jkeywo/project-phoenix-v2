@@ -292,3 +292,25 @@ entities:
       kind: scope-boundary
       authority: non-authoritative
       coordinates: [gm-milestone-performing, gm-milestone-integrated-workshop, gm-milestone-information-control, gm-milestone-presentation]
+
+  - component: gm-t2-safe-entity-removal
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Safe Authored GM Entity Removal
+      summary: "DespawnEntity carries one stable UUID through the attributed canonical GM journal. Admission revalidates the live target and arms a snapshotted ordered removal; the ordinary fixed trigger pipeline performs DestroyEntity, including its destruction cascade, narrative and shared live-reference cleanup. The map inspector previews permission and requires a target-specific confirmation; only authoritative results settle its pending request."
+      rationale:
+        - "[ai] Permission is opt-in through the canonical authored gm_removable tag. Fleet hulls, player-tagged entities, stars, planets, moons, asteroid fields, trigger volumes, objective markers and inert geometry are hard protected. Other allowed classes are NPC ships, structures and hazards with runtime spawn provenance. A tag cannot override a hard protection. This defines the previously unspecified removability policy without introducing mutable permission state."
+        - "[ai] WorldDespawn is the entity-inspector result family; WorldSpawn remains the palette panel family. Both use the same action protocol, journal, attribution, owner ordering and replay. A duplicate accepted removal already queued is a No-op; an absent UUID is Refused. Accepted queues cross paused PreUpdate/FixedUpdate boundaries through snapshot format 27 and the digest."
+        - "[ai] Historical name/group destruction predicates, scan facts, Comms messages and rescue casualty counts survive removal. Live selections, beams, support partners, Comms dialogues and response waits are retired on every host without LocalShip gating; Comms history becomes orphaned. The shared normal DestroyEntity applier owns cleanup so scripted and GM removals agree."
+    architecture:
+      kind: gm-world-action
+      authority: authoritative
+      coordinates: [gm-t2-directed-world-actions]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/gm_despawn.rs, src/gm_action.rs, src/world/server.rs, src/snapshot.rs, src/sim_digest.rs, src/gm_projection.rs, src/core/codec.rs, src/console/comms/inbox.rs, gui/gm-despawn-panel.js, server.html]
+      symbols: [DespawnEntity, RemovalQuery, validate_target, remove_entity, pending_gm_despawns, createGmDespawnPanel]
+      tests: [cargo test --features headless gm_despawn, npx vitest run tests/client/gm-despawn-panel.test.js, tests/smoke/gm-page.spec.js]

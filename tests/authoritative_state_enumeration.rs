@@ -614,6 +614,7 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     //     answered for by `snapshot::content_digest` exactly as a trigger's
     //     authored condition is, so it is neither captured nor folded, and a
     //     resumed world rebuilds it by replaying the same load.
+    //   * `pending_gm_despawns` — accepted UUID removals awaiting the ordinary fixed pipeline.
     //   * `pending_gm_spawns` — placements that crossed their PreUpdate apply
     //     boundary and are waiting for `tick_trigger_pipeline` to spawn them.
     //     Authoritative and genuinely cross-tick (a paused session reaches no

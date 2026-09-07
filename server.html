@@ -388,7 +388,7 @@
     .gm-effect-log-entry[data-outcome="timed-out"] { color: var(--fire-bright); }
     /* The placement panel (issue #1305), sharing the mission panel's control
        ladder for its reason: one filled-control rung across the GM page. */
-    #gm-spawn-panel {
+    #gm-spawn-panel, #gm-despawn-panel {
       max-width: 44rem; padding: 1.5rem; border: 1px solid var(--edge-control);
       display: grid; gap: .9rem;
     }
@@ -536,7 +536,7 @@
     }
     @media (max-height: 800px) {
       #gm-console { gap: .9rem; }
-      #gm-session-controls, #gm-mission-panel, #gm-spawn-panel, #gm-entity-card, #gm-effect-panel { padding: 1rem; }
+      #gm-session-controls, #gm-mission-panel, #gm-spawn-panel, #gm-entity-card, #gm-effect-panel, #gm-despawn-panel { padding: 1rem; }
       #gm-station-controls { padding: 1rem; }
       #gm-station-frame { height: clamp(20rem, 55vh, 32rem); }
       #gm-knowledge-panel { padding: 1rem; }
@@ -1994,6 +1994,18 @@
              inputs. Rows come from the absolute `gm_spawn` Host Channel
              projection, so a scenario with no palette renders the empty
              sentence and offers nothing placeable. -->
+        <section id="gm-despawn-panel" role="region" aria-labelledby="gm-despawn-heading">
+          <h2 id="gm-despawn-heading" data-i18n="server.gm.despawn.heading"></h2>
+          <p id="gm-despawn-target" role="status"></p>
+          <button id="gm-despawn-preview" type="button" disabled data-i18n="server.gm.despawn.preview"></button>
+          <div id="gm-despawn-confirmation" hidden role="group" aria-labelledby="gm-despawn-consequence">
+            <p id="gm-despawn-consequence"></p>
+            <button id="gm-despawn-confirm" type="button" data-i18n="server.gm.despawn.confirm"></button>
+            <button id="gm-despawn-cancel" type="button" data-i18n="server.gm.despawn.cancel"></button>
+          </div>
+          <p id="gm-despawn-feedback" role="status" aria-live="polite"></p>
+          <ol id="gm-despawn-results" aria-live="polite"></ol>
+        </section>
         <section id="gm-spawn-panel" role="region" aria-labelledby="gm-spawn-heading">
           <h2 id="gm-spawn-heading" data-i18n="server.gm.spawn.heading"></h2>
           <ul id="gm-spawn-palette" role="list"></ul>
@@ -2670,6 +2682,7 @@
     import { createGmSessionControls } from './gui/gm-session-controls.js';
     import { createGmMissionPanel } from './gui/gm-mission-panel.js';
     import { createGmSpawnPanel } from './gui/gm-spawn-panel.js';
+    import { createGmDespawnPanel } from './gui/gm-despawn-panel.js';
     import { createGmStationPuppet } from './gui/gm-station-puppet.js';
     import { createGmRolePresets } from './gui/gm-role-presets.js';
     import { createGmKnowledgeCompare } from './gui/gm-knowledge-compare.js';
@@ -2683,11 +2696,13 @@
     // projection needs the panel's `select`; the closure resolves at call time,
     // after both exist.
     let gmDirectEffect = null;
+    let gmDespawn = null;
     const gmProjection = createGmLocalProjection({
       doc: document,
       t,
       onSelectionChanged: (entity) => {
         if (gmDirectEffect) gmDirectEffect.select(entity);
+        if (gmDespawn) gmDespawn.select(entity);
       },
     });
     const gmActivity = createGmActivityFeed({
@@ -2818,8 +2833,14 @@
       getOperatorName: (id) => typeof window.__hostGmName === 'function'
         ? window.__hostGmName(id) : id,
     });
-    window.__hostGmEffectRefresh = gmDirectEffect.refreshAdmission;
-    window.__hostGmEffectReset = gmDirectEffect.reset;
+    gmDespawn = createGmDespawnPanel({ doc: document, t,
+      getOperator: () => typeof window.__hostLocalGm === 'function' ? window.__hostLocalGm() : null,
+      submit: (request) => window.__hostDespawnEntity(request),
+    });
+    window.__hostGmDespawnState = gmDespawn.state;
+    window.__hostGmEffectRefresh = function() { gmDirectEffect.refreshAdmission(); gmDespawn.refreshAdmission(); };
+
+    window.__hostGmEffectReset = function() { gmDirectEffect.reset(); gmDespawn.reset(); };
     window.__hostGmEffectState = gmDirectEffect.state;
     window.__hostSemanticActions = hostSemanticActions;
     window.__hostActionFeedback = hostActionFeedback;
@@ -2833,6 +2854,7 @@
         audio_level:  function(p) { window.__audioLevel(p); },
         shake:        function(p) { window.__applyShake(p[0], p[1]); },
         gm_entity:    function(p) {
+          gmDespawn.update(p);
           if (gmProjection.update(p)) {
             gmActivity.reconcileAvailability();
             gmKnowledgeCompare.updateTruth(gmProjection.state().entities);
@@ -4048,6 +4070,13 @@
      * This seam composes neither, so a GM can neither name a template the
      * simulation did not publish nor submit screen pixels.
      */
+    window.__hostDespawnEntity = function(request) {
+      const operator = localGm();
+      if (!operator || !request || typeof request.target !== 'string'
+          || request.operator_id !== operator.id || typeof window.wasm_submit_gm_action !== 'function') return false;
+      return window.wasm_submit_gm_action(JSON.stringify({ operator_id: operator.id,
+        correlation: request.correlation, action: 'despawn_entity', target: request.target }));
+    };
     window.__hostSpawnPaletteEntity = function(request) {
       const gm = localGm();
       if (!gm || !request || typeof request !== 'object'

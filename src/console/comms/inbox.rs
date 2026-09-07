@@ -27,6 +27,21 @@ pub struct CommsInbox {
 }
 
 impl CommsInbox {
+    /// Preserve history when a sender leaves, but retire its live response and
+    /// critical-thread authority. Returns the affected message identities.
+    pub fn orphan_sender(&mut self, sender: &str) -> Vec<String> {
+        let mut ids = Vec::new();
+        for record in &mut self.records {
+            if record.message.sender_uuid == sender {
+                ids.push(record.message.id.clone());
+                if !record.message.is_orphaned {
+                    record.message.is_orphaned = true;
+                    self.dirty = true;
+                }
+            }
+        }
+        ids
+    }
     /// Create an empty `CommsInbox`.
     pub fn new() -> Self {
         Self::default()

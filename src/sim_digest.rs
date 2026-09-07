@@ -969,6 +969,13 @@ fn fold_scenario_triggers(world: &World, mut acc: u64) -> u64 {
     // The queue's own order is folded rather than a sorted copy of it: two
     // placements swapped would draw each other's `WorldIdMint` id, which is a
     // real divergence this fold exists to catch.
+    if !runtime.pending_gm_despawns.is_empty() {
+        acc = fold_str(acc, "pending_gm_despawns");
+        acc = fold_u64(acc, runtime.pending_gm_despawns.len() as u64);
+        for target in &runtime.pending_gm_despawns {
+            acc = fold_str(acc, target);
+        }
+    }
     if !runtime.pending_gm_spawns.is_empty() {
         acc = fold_str(acc, "scenario-gm-spawns");
         acc = fold_u64(acc, runtime.pending_gm_spawns.len() as u64);

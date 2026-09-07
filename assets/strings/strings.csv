@@ -2602,3 +2602,20 @@ server.gm.mission.skip_result_no_op,No-op GM event skip arm. {name} is the opera
 server.gm.mission.skip_result_refused,Refused GM event skip arm. {name} is the operator; {event} the qualified event id; {tick} the authoritative tick; {correlation} the request identity; {reason} the refusal reason (issue #1304),[{name} armed a skip of {event} at tick {tick}. Refused: {reason} ({correlation}).]
 server.gm.activity.action.arm_gm_event_skip,GM operational arming of a skip of one authored event's next occurrence. {event} is its layer-qualified stable id (issue #1304),[Skip next {event}]
 world.smoke_gm.event.raider_lost,Smoke-fixture GM event label proving an authored trigger declaring gm_controls().skip() renders its String Table label in the mission panel (issue #1304),[Let the raider go quietly]
+
+server.gm.despawn.heading,GM safe removal panel,"Remove entity"
+server.gm.despawn.preview,GM safe removal panel,"Preview removal"
+server.gm.despawn.confirm,GM safe removal panel,"Remove this entity"
+server.gm.despawn.cancel,GM safe removal panel,"Cancel"
+server.gm.despawn.select,GM safe removal panel,"Select a removable entity on the map."
+server.gm.despawn.target,GM safe removal panel,"Selected: {name}"
+server.gm.despawn.protected,GM safe removal panel,"{name} is protected from removal."
+server.gm.despawn.consequence,GM safe removal panel,"Remove {name} from the world? Its live targets and connections will be cleared. Authored destruction triggers will run. This cannot be undone."
+server.gm.despawn.pending,GM safe removal panel,"Removal pending."
+server.gm.despawn.applied,GM safe removal panel,"Removal applied."
+server.gm.despawn.refused,GM safe removal panel,"Removal refused."
+server.gm.despawn.timed_out,GM safe removal panel,"No result received. Check the activity feed before retrying."
+server.gm.despawn.no_op,GM safe removal panel,"Already scheduled."
+server.gm.despawn.result,GM safe removal panel,"{operator} · tick {tick} · {target}: {outcome} {reason}"
+server.gm.session.reason.protected_entity,GM refusal protected entity,This entity is protected from removal.
+server.gm.activity.action.despawn_entity,GM activity removal action,Remove {target}

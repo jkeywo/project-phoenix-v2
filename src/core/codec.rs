@@ -1212,6 +1212,9 @@ pub fn decode_gm_action_request(raw: &str) -> Option<crate::gm_action::GmActionR
         // stays exact rather than accepting two shapes. There is deliberately
         // no template/asset field to smuggle anything through: the palette id
         // IS the vocabulary.
+        "despawn_entity" if object.len() == 4 => crate::gm_action::GmAction::DespawnEntity {
+            target: bounded_gm_target_id(object.get("target")?.as_str()?)?,
+        },
         "spawn_palette_entity"
             if object.len() == 7
                 && object.contains_key("palette")

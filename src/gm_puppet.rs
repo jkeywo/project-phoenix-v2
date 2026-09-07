@@ -250,6 +250,7 @@ pub fn validate_station_action(
         | GmAction::FireGmEvent { .. }
         | GmAction::ApplyDirectEffect { .. }
         | GmAction::SpawnPaletteEntity { .. }
+        | GmAction::DespawnEntity { .. }
         | GmAction::SetEventPaused { .. }
         | GmAction::ArmGmEventSkip { .. } => return Ok(()),
         GmAction::SetStationPuppet { station, .. }
@@ -300,6 +301,7 @@ pub fn validate_station_action(
         | GmAction::FireGmEvent { .. }
         | GmAction::ApplyDirectEffect { .. }
         | GmAction::SpawnPaletteEntity { .. }
+        | GmAction::DespawnEntity { .. }
         | GmAction::SetEventPaused { .. }
         | GmAction::ArmGmEventSkip { .. } => unreachable!(),
     }

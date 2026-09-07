@@ -1188,3 +1188,61 @@ station = "tactical"
         "both continuations retain identical hulls and digest",
     );
 }
+
+/// The accepted removal survives the PreUpdate / FixedUpdate save boundary.
+#[test]
+fn armed_gm_despawns_round_trip_in_order_and_affect_the_digest() {
+    fn app(queue: Vec<String>) -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(SimTick(33));
+        app.insert_resource(crate::world::server::WorldContentRuntime {
+            pending_gm_despawns: queue,
+            ..Default::default()
+        });
+        app
+    }
+    let queue = vec!["target-z".to_string(), "target-a".to_string()];
+    let mut live = app(queue.clone());
+    let boundary = capture(live.world());
+    assert_eq!(
+        boundary.scenario.as_ref().unwrap().pending_gm_despawns,
+        queue
+    );
+    let report = restore(live.world_mut(), &boundary);
+    assert!(report.is_complete(), "{:?}", report.gaps);
+    let mut recovered = app(Vec::new());
+    let report = restore(recovered.world_mut(), &boundary);
+    assert!(report.is_complete(), "{:?}", report.gaps);
+    assert_eq!(
+        recovered
+            .world()
+            .resource::<crate::world::server::WorldContentRuntime>()
+            .pending_gm_despawns,
+        queue
+    );
+    assert_eq!(
+        crate::sim_digest::world_digest(live.world()),
+        crate::sim_digest::world_digest(recovered.world())
+    );
+    recovered
+        .world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .pending_gm_despawns
+        .reverse();
+    assert_ne!(
+        crate::sim_digest::world_digest(live.world()),
+        crate::sim_digest::world_digest(recovered.world()),
+        "the accepted order is authoritative"
+    );
+    recovered
+        .world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .pending_gm_despawns
+        .clear();
+    assert_ne!(
+        crate::sim_digest::world_digest(live.world()),
+        crate::sim_digest::world_digest(recovered.world()),
+        "forgetting an accepted removal must diverge"
+    );
+}

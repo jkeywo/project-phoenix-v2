@@ -13,6 +13,113 @@ import {
 } from './fixtures';
 import { ts } from './strings';
 
+const GM_REMOVAL_WORLD = `
+[global]
+seed = 1306
+title = "GM removal smoke fixture"
+description = "Safe entity removal through the real map."
+[[entity]]
+template_path = "assets/entities/alliance_courier.toml"
+name = "Removable courier"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+# The map reads the GameStart hull's config name; author its displayed identity
+# as well as the scenario reference name so these two couriers are distinct.
+overrides = { name = "Removable courier", display_name = "Removable courier", tags = ["ship", "gm_removable"] }
+[[entity]]
+template_path = "assets/entities/alliance_courier.toml"
+name = "Protected courier"
+transform = { position = [200.0, 0.0, 0.0] }
+spawn_on = "game_start"
+overrides = { name = "Protected courier", display_name = "Protected courier" }
+[[entity]]
+template_path = "assets/entities/station_axiom.toml"
+name = "Removable structure"
+transform = { position = [-200.0, 0.0, 0.0] }
+overrides = { tags = ["station", "gm_removable"] }
+[[entity]]
+template_path = "assets/entities/region_radiation_zone.toml"
+name = "Foundational hazard"
+transform = { position = [2000.0, 0.0, 0.0] }
+overrides = { tags = ["region", "gm_removable"], shape = { radius = 10.0 } }
+[[gm_palette]]
+id = "hazard"
+label = "server.gm.entity.kind.hazard"
+template_path = "assets/entities/region_radiation_zone.toml"
+name_prefix = "removable_hazard"
+[[gm_palette.variant]]
+id = "removable"
+label = "server.gm.despawn.heading"
+overrides = { tags = ["region", "gm_removable"], shape = { radius = 10.0 } }
+`;
+
+test('a GM confirms safe removal from the map and protected targets remain', { tag: '@core' }, async ({ context }) => {
+  test.setTimeout(120_000);
+  await context.route('**/assets/worlds/default.toml', route => route.fulfill({ contentType: 'text/plain', body: GM_REMOVAL_WORLD }));
+  const page = await context.newPage();
+  const errors = captureServerPageErrors(page);
+  await page.goto('/?gm=1&scenario=assets/worlds/default.toml');
+  await waitForWasmReady(page);
+  await page.evaluate(() => window.__hostFleetOpen());
+  await page.waitForFunction(() => {
+    const state = window.__hostGmStartState?.();
+    return state?.admitted && state.presentationReady && state.localValidation;
+  });
+  await page.evaluate(() => document.getElementById('gm-ready-btn').click());
+  await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
+  const map = page.locator('#gm-entity-map');
+  const select = async (name) => {
+    await map.scrollIntoViewIfNeeded(); await map.focus();
+    for (let index = 0; index < 20; index++) {
+      await map.press('ArrowRight');
+      if (await page.evaluate(expected => window.__hostGmDespawnState().selected?.name === expected, name)) return;
+    }
+    const state = await page.evaluate(() => ({
+      tick: window.wasm_sim_tick(),
+      blips: document.getElementById('gm-entity-map').state.blips,
+      regions: document.getElementById('gm-entity-map').state.regions,
+      selected: window.__hostGmDespawnState().selected,
+    }));
+    throw new Error(`Map keyboard selection did not reach ${name}: ${JSON.stringify(state)}`);
+  };
+  for (const name of ['Protected courier', 'Foundational hazard']) {
+    await select(name);
+    await expect(page.locator('#gm-despawn-preview')).toBeDisabled();
+    await expect(page.locator('#gm-despawn-confirmation')).toBeHidden();
+  }
+  await select('Removable courier');
+  await page.locator('#gm-despawn-preview').click();
+  await expect(page.locator('#gm-despawn-consequence')).toContainText('Removable courier');
+  await page.locator('#gm-despawn-cancel').click();
+  await expect(page.locator('#gm-despawn-confirmation')).toBeHidden();
+  expect(await page.evaluate(() => window.__hostGmDespawnState().results.length)).toBe(0);
+  let count = 0;
+  for (const name of ['Removable courier', 'Removable structure']) {
+    await select(name);
+    const id = await page.evaluate(() => window.__hostGmDespawnState().selected.entity_id);
+    await page.locator('#gm-despawn-preview').click();
+    await page.locator('#gm-despawn-confirm').click();
+    await expect(page.locator('#gm-despawn-results li[data-outcome="applied"]')).toHaveCount(++count);
+    await page.waitForFunction(uuid => !document.getElementById('gm-entity-map').state.blips.some(b => b.uuid === uuid), id);
+    await expect(page.locator('#gm-entity-card')).toBeHidden();
+  }
+  // A runtime hazard receives normal spawn provenance through the real palette.
+  const row = page.locator('#gm-spawn-palette [data-palette-id="hazard"].gm-spawn-entry');
+  await row.locator('select').selectOption('removable');
+  await row.locator('button[data-role="place"]').click();
+  await page.keyboard.press('ArrowRight'); await page.keyboard.press('Enter');
+  await expect(page.locator('#gm-spawn-log [data-outcome="applied"]')).toHaveCount(1);
+  await page.waitForFunction(() => document.getElementById('gm-entity-map').state.regions.some(r => r.name.startsWith('removable_hazard')));
+  const hazardName = await page.evaluate(() => document.getElementById('gm-entity-map').state.regions.find(r => r.name.startsWith('removable_hazard')).name);
+  await select(hazardName);
+  await expect(page.locator('#gm-despawn-preview')).toBeEnabled();
+  await page.locator('#gm-despawn-preview').click(); await page.locator('#gm-despawn-confirm').click();
+  await expect(page.locator('#gm-despawn-results li[data-outcome="applied"]')).toHaveCount(3);
+  await select('Protected courier');
+  await expect(page.locator('#gm-despawn-preview')).toBeDisabled();
+  expect(errors).toEqual([]);
+});
+
 const GM_FIELD_PATH = 'assets/entities/smoke_gm_asteroid_field.toml';
 const GM_ROCK_PATH = 'assets/entities/smoke_gm_ordinary_asteroid.toml';
 const GM_REGION_PATH = 'assets/entities/smoke_gm_inert_region.toml';

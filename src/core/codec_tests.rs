@@ -1014,8 +1014,10 @@ fn encode_chatter_wire_shape_matches_js_handler() {
 #[test]
 fn encode_gm_entity_projection_pins_the_local_host_channel_shape() {
     let payload = crate::gm_projection::GmEntityProjectionPayload {
+        despawn_results: Vec::new(),
         entities: vec![
             crate::gm_projection::GmEntityProjection {
+                removable: false,
                 entity_id: "00000000-0000-0000-0000-000000000001".into(),
                 name: "Axiom".into(),
                 kind: crate::gm_projection::GmEntityKind::PlayerShip,
@@ -1067,6 +1069,7 @@ fn encode_gm_entity_projection_pins_the_local_host_channel_shape() {
                 },
             },
             crate::gm_projection::GmEntityProjection {
+                removable: false,
                 entity_id: "00000000-0000-0000-0000-000000000003".into(),
                 name: "entity.asteroid_belt.display_name".into(),
                 kind: crate::gm_projection::GmEntityKind::AsteroidField,
@@ -1097,8 +1100,34 @@ fn encode_gm_entity_projection_pins_the_local_host_channel_shape() {
     };
     assert_eq!(
         encode_gm_entity_projection(&payload).unwrap(),
-        r#"{"entities":[{"entity_id":"00000000-0000-0000-0000-000000000001","name":"Axiom","kind":"player_ship","position":[12.0,0.0,-8.0],"faction":{"entity_id":"aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa","name":"faction.alliance.display_name"},"status":{"hull_percent":73,"condition_percent":null,"destroyed":false,"hull_current_milli_hp":146000,"hull_max_milli_hp":200000,"systems":[{"system_id":"impulse-drive","station_id":"helm","station_name":"station.helm.display_name","name":"system.impulse_drive.display_name","current_milli_hp":96000,"max_milli_hp":120000},{"system_id":"core","station_id":null,"name":"system.core.display_name","current_milli_hp":50000,"max_milli_hp":80000}]},"current_target":{"entity_id":"00000000-0000-0000-0000-000000000002","name":"Raider"},"geometry":null,"radar":{"icon":"playerShip","colour":[0.2,0.8,1.0],"size":4.0,"region_colour":null}},{"entity_id":"00000000-0000-0000-0000-000000000003","name":"entity.asteroid_belt.display_name","kind":"asteroid_field","position":[100.0,0.0,200.0],"faction":null,"status":{"hull_percent":null,"condition_percent":null,"destroyed":false,"hull_current_milli_hp":null,"hull_max_milli_hp":null},"current_target":null,"geometry":{"type":"torus","inner_radius":25.0,"outer_radius":125.0},"radar":{"icon":null,"colour":null,"size":null,"region_colour":[0.4,0.35,0.3]}}],"results":[]}"#
+        r#"{"entities":[{"removable":false,"entity_id":"00000000-0000-0000-0000-000000000001","name":"Axiom","kind":"player_ship","position":[12.0,0.0,-8.0],"faction":{"entity_id":"aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa","name":"faction.alliance.display_name"},"status":{"hull_percent":73,"condition_percent":null,"destroyed":false,"hull_current_milli_hp":146000,"hull_max_milli_hp":200000,"systems":[{"system_id":"impulse-drive","station_id":"helm","station_name":"station.helm.display_name","name":"system.impulse_drive.display_name","current_milli_hp":96000,"max_milli_hp":120000},{"system_id":"core","station_id":null,"name":"system.core.display_name","current_milli_hp":50000,"max_milli_hp":80000}]},"current_target":{"entity_id":"00000000-0000-0000-0000-000000000002","name":"Raider"},"geometry":null,"radar":{"icon":"playerShip","colour":[0.2,0.8,1.0],"size":4.0,"region_colour":null}},{"removable":false,"entity_id":"00000000-0000-0000-0000-000000000003","name":"entity.asteroid_belt.display_name","kind":"asteroid_field","position":[100.0,0.0,200.0],"faction":null,"status":{"hull_percent":null,"condition_percent":null,"destroyed":false,"hull_current_milli_hp":null,"hull_max_milli_hp":null},"current_target":null,"geometry":{"type":"torus","inner_radius":25.0,"outer_radius":125.0},"radar":{"icon":null,"colour":null,"size":null,"region_colour":[0.4,0.35,0.3]}}],"results":[]}"#
     );
+}
+
+#[test]
+fn gm_despawn_ingress_accepts_only_one_bounded_stable_target() {
+    let raw = r#"{"operator_id":"gm-1","correlation":"remove-1","action":"despawn_entity","target":"npc"}"#;
+    let request = decode_gm_action_request(raw).expect("typed removal");
+    assert_eq!(
+        request.action,
+        crate::gm_action::GmAction::DespawnEntity {
+            target: "npc".into()
+        }
+    );
+    for target in [
+        serde_json::json!(""),
+        serde_json::json!("x".repeat(129)),
+        serde_json::json!("bad\nidentity"),
+        serde_json::Value::Null,
+        serde_json::json!(42),
+    ] {
+        let mut value: serde_json::Value = serde_json::from_str(raw).unwrap();
+        value["target"] = target;
+        assert!(decode_gm_action_request(&value.to_string()).is_none());
+    }
+    let mut extra: serde_json::Value = serde_json::from_str(raw).unwrap();
+    extra["force"] = serde_json::json!(true);
+    assert!(decode_gm_action_request(&extra.to_string()).is_none());
 }
 
 #[test]

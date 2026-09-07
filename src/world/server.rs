@@ -196,6 +196,8 @@ pub struct WorldContentRuntime {
     /// drained in `FixedUpdate`, which a paused session never reaches — so it is
     /// snapshotted and folded.
     pub pending_gm_spawns: Vec<crate::gm_spawn::PendingGmSpawn>,
+    /// Canonically ordered UUID removals accepted before the fixed pipeline.
+    pub pending_gm_despawns: Vec<String>,
     /// Layer-qualified ids of GM-operable events a Game Master has PAUSED
     /// (issue #1303).
     ///
@@ -2260,6 +2262,7 @@ pub(crate) fn tick_trigger_pipeline(
         && runtime.pending_delayed_actions.is_empty()
         && runtime.pending_gm_event_fires.is_empty()
         && runtime.pending_gm_spawns.is_empty()
+        && runtime.pending_gm_despawns.is_empty()
     {
         return;
     }
@@ -2345,6 +2348,37 @@ pub(crate) fn tick_trigger_pipeline(
     // than move — one Vec clone per non-empty tick, the same cost the
     // pre-#716 local `world_events.clone()` paid.
     let mut current_events = buffer.0.clone();
+
+    // Safe removals use the same command and Destroyed cascade as authored removal.
+    // Keep name/group history: on_destroyed/on_all_destroyed resolve against it.
+    for uuid in std::mem::take(&mut runtime.pending_gm_despawns) {
+        if !uuid_to_entity.contains_key(&uuid) {
+            continue;
+        }
+        let result = crate::world::dispatch::DispatchResult {
+            commands: vec![ActionCmd::DestroyEntity { uuid: uuid.clone() }],
+            new_events: vec![WorldEvent::Destroyed { uuid }],
+            ..Default::default()
+        };
+        apply_dispatch_result(
+            result,
+            "tick_trigger_pipeline (gm removal)",
+            &mut current_events,
+            &uuid_to_entity,
+            &mut *runtime,
+            &mut objectives,
+            &mut commands,
+            &mut ship_modifiers,
+            world_layers.pending_layers.as_deref_mut(),
+            world_layers.layer_map.as_deref_mut(),
+            next_state.as_deref_mut(),
+            game_over_reason.as_deref_mut(),
+            &mut faction_dispatch,
+            &mut ai_query,
+            balance_events.as_deref_mut(),
+            &mut effect_queues.out(),
+        );
+    }
 
     // The GM's armed placements (issue #1305), performed BEFORE the chaining
     // loop rather than inside it.
@@ -3882,7 +3916,9 @@ pub(crate) fn apply_dispatch_result(
                     }
                 });
                 if let Some(ent) = target_entity {
-                    commands.entity(ent).try_despawn();
+                    commands.queue(move |world: &mut World| {
+                        crate::gm_despawn::remove_entity(world, ent);
+                    });
                 }
             }
 

@@ -182,6 +182,10 @@ pub enum GmAction {
     ArmGmEventSkip {
         event: String,
     },
+    /// Remove a live, explicitly removable entity through ordinary world cleanup.
+    DespawnEntity {
+        target: String,
+    },
 }
 
 /// WHICH lever of the authored-event control family one durable result records
@@ -219,9 +223,10 @@ pub enum GmActionKind {
     /// and healing on a named Entity today, Station/System scopes (#1311) and
     /// the disable/restore latch (#1312) next.
     DirectEffect,
-    /// The directed world-mutation family (issue #1305): palette spawn today,
-    /// safe despawn (#1306) next, both naming a stable target identity.
+    /// Palette placement results belong to the spawn panel (issue #1305).
     WorldSpawn,
+    /// Entity-inspector removal results, distinct from palette placement results.
+    WorldDespawn,
 }
 
 impl GmActionKind {
@@ -235,7 +240,7 @@ impl GmActionKind {
     /// activity feed can only render as an action on the empty id.
     pub fn carries_target(self) -> bool {
         match self {
-            Self::EventControl | Self::DirectEffect | Self::WorldSpawn => true,
+            Self::EventControl | Self::DirectEffect | Self::WorldSpawn | Self::WorldDespawn => true,
             Self::SessionPause | Self::StationPuppet | Self::StationCommand => false,
         }
     }
@@ -278,6 +283,7 @@ impl GmAction {
             | Self::FireGmEvent { .. }
             | Self::ApplyDirectEffect { .. }
             | Self::SpawnPaletteEntity { .. }
+            | Self::DespawnEntity { .. }
             | Self::SetEventPaused { .. }
             | Self::ArmGmEventSkip { .. } => None,
             Self::SetStationPuppet { ship, .. } | Self::IssueStationCommand { ship, .. } => {
@@ -299,7 +305,9 @@ impl GmAction {
             Self::FireGmEvent { event }
             | Self::SetEventPaused { event, .. }
             | Self::ArmGmEventSkip { event } => Some(event.as_str()),
-            Self::ApplyDirectEffect { target, .. } => Some(target.as_str()),
+            Self::ApplyDirectEffect { target, .. } | Self::DespawnEntity { target } => {
+                Some(target.as_str())
+            }
             // The palette id, not the derived instance name: the durable fact
             // has to say WHAT the operator placed, and the instance name is
             // minted by the reducer a boundary later.
@@ -316,6 +324,7 @@ impl GmAction {
         };
         match self {
             Self::SetSessionPaused { .. } => Ok(()),
+            Self::DespawnEntity { target } if bounded(target) => Ok(()),
             // The qualified id shape is checked here rather than only against
             // the live table so a malformed one is refused as an invalid
             // ACTION, not mistaken for an unknown event.
@@ -400,6 +409,7 @@ impl GmAction {
             | Self::ArmGmEventSkip { .. } => GmActionKind::EventControl,
             Self::ApplyDirectEffect { .. } => GmActionKind::DirectEffect,
             Self::SpawnPaletteEntity { .. } => GmActionKind::WorldSpawn,
+            Self::DespawnEntity { .. } => GmActionKind::WorldDespawn,
         }
     }
 
@@ -414,6 +424,7 @@ impl GmAction {
             | Self::IssueStationCommand { .. }
             | Self::ApplyDirectEffect { .. }
             | Self::SpawnPaletteEntity { .. }
+            | Self::DespawnEntity { .. }
             | Self::ArmGmEventSkip { .. } => None,
         }
     }
@@ -438,6 +449,7 @@ impl GmAction {
             | Self::FireGmEvent { .. }
             | Self::ApplyDirectEffect { .. }
             | Self::SpawnPaletteEntity { .. }
+            | Self::DespawnEntity { .. }
             | Self::ArmGmEventSkip { .. }
             // Not session pause: a paused EVENT stops one authored condition
             // being evaluated and leaves the simulation running.
@@ -460,7 +472,8 @@ impl GmAction {
             | Self::SetStationPuppet { .. }
             | Self::IssueStationCommand { .. }
             | Self::ApplyDirectEffect { .. }
-            | Self::SpawnPaletteEntity { .. } => None,
+            | Self::SpawnPaletteEntity { .. }
+            | Self::DespawnEntity { .. } => None,
         }
     }
 
@@ -478,6 +491,7 @@ impl GmAction {
             | Self::FireGmEvent { .. }
             | Self::ApplyDirectEffect { .. }
             | Self::SpawnPaletteEntity { .. }
+            | Self::DespawnEntity { .. }
             | Self::ArmGmEventSkip { .. } => true,
         }
     }
@@ -796,6 +810,8 @@ pub enum GmActionRefusalReason {
     /// Appended for [`Self::UnknownGmEvent`]'s reason — the journal is folded
     /// through postcard, which encodes an enum by VARIANT INDEX.
     UnknownSystem,
+    /// Live entity is outside the authored safe-removal policy.
+    ProtectedEntity,
 }
 
 /// One terminal fact in the GM command log and local activity projection.
@@ -1519,7 +1535,8 @@ impl GmActionJournal {
                         // recorded by the entities themselves.
                         GmAction::IssueStationCommand { .. }
                         | GmAction::ApplyDirectEffect { .. }
-                        | GmAction::SpawnPaletteEntity { .. } => {}
+                        | GmAction::SpawnPaletteEntity { .. }
+                        | GmAction::DespawnEntity { .. } => {}
                     }
                 }
                 entries.push(result.clone());
@@ -1583,7 +1600,8 @@ impl GmActionJournal {
                 // placement has the same shape: each grant is its own spawn.
                 GmAction::IssueStationCommand { .. }
                 | GmAction::ApplyDirectEffect { .. }
-                | GmAction::SpawnPaletteEntity { .. } => GmActionOutcome::Applied,
+                | GmAction::SpawnPaletteEntity { .. }
+                | GmAction::DespawnEntity { .. } => GmActionOutcome::Applied,
             };
             entries.push(LoggedGmAction {
                 operator_id: grant.operator_id.clone(),
@@ -1680,7 +1698,8 @@ impl GmActionJournal {
                 // placement has the same shape: each grant is its own spawn.
                 GmAction::IssueStationCommand { .. }
                 | GmAction::ApplyDirectEffect { .. }
-                | GmAction::SpawnPaletteEntity { .. } => GmActionOutcome::Applied,
+                | GmAction::SpawnPaletteEntity { .. }
+                | GmAction::DespawnEntity { .. } => GmActionOutcome::Applied,
             };
             entries.push(LoggedGmAction {
                 operator_id: grant.operator_id.clone(),
@@ -1971,6 +1990,7 @@ pub fn apply_due_actions(
     mut virtual_time: Option<ResMut<Time<Virtual>>>,
     mut fixed_time: Option<ResMut<Time<Fixed>>>,
     mut join_hold: Option<ResMut<crate::gm_join::GmJoinPauseHold>>,
+    removal_targets: crate::gm_despawn::RemovalQuery,
 ) {
     // Outside a fleet, an empty typed lane must not overwrite the ordinary
     // local host pause surface. Replay and restored saves deliberately carry a
@@ -2185,6 +2205,23 @@ pub fn apply_due_actions(
             // from a scripted one. Everything that decides the RESULT (the
             // palette entry, the variant, the placement) is answered here, at
             // the agreed apply tick, so every peer commits the same outcome.
+            GmAction::DespawnEntity { target } => match content.as_deref_mut() {
+                None => (
+                    GmActionOutcome::Refused,
+                    Some(GmActionRefusalReason::WorldUnavailable),
+                ),
+                Some(runtime) if runtime.pending_gm_despawns.contains(target) => {
+                    (GmActionOutcome::NoOp, None)
+                }
+                Some(runtime) => match crate::gm_despawn::validate_target(&removal_targets, target)
+                {
+                    Err(reason) => (GmActionOutcome::Refused, Some(reason)),
+                    Ok(()) => {
+                        runtime.pending_gm_despawns.push(target.clone());
+                        (GmActionOutcome::Applied, None)
+                    }
+                },
+            },
             GmAction::SpawnPaletteEntity {
                 palette,
                 variant,

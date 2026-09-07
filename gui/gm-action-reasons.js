@@ -20,6 +20,7 @@ export const GM_ACTION_REFUSAL_REASON_LABELS = Object.freeze({
   'unreadable-request': 'server.gm.session.reason.unreadable_request',
   'wrong-phase': 'server.gm.session.reason.wrong_phase',
   'unknown-gm-event': 'server.gm.session.reason.unknown_gm_event',
+  'protected-entity': 'server.gm.session.reason.protected_entity',
   'unknown-entity': 'server.gm.session.reason.unknown_entity',
   'target-not-damageable': 'server.gm.session.reason.target_not_damageable',
   // The two narrowed-scope refusals (issue #1311). They join this table rather

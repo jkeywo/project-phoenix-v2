@@ -111,6 +111,9 @@ function normaliseAction(value) {
   // One authored palette entry was placed (issue #1305). `palette` is the
   // authored entry id — never a template path, which the browser is never
   // handed — and the feed renders it verbatim beside the operator who placed it.
+  if (value.type === 'despawn_entity' && typeof value.target === 'string' && value.target) {
+    return { type: value.type, target: value.target };
+  }
   if (value.type === 'spawn_palette_entity'
       && typeof value.palette === 'string' && value.palette.length > 0) {
     return { type: value.type, palette: value.palette };
@@ -425,6 +428,8 @@ export function createGmActivityFeed({
               amount: hullPoints(detail.action.discarded_milli_hp),
             });
           }
+        } else if (detail.action.type === 'despawn_entity') {
+          action = t('server.gm.activity.action.despawn_entity', { target: detail.action.target });
         } else if (detail.action.type === 'spawn_palette_entity') {
           action = t('server.gm.activity.action.spawn_palette_entity', {
             palette: detail.action.palette,

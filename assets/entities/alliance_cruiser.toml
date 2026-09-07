@@ -413,8 +413,8 @@ repair_rate_hp_per_sec = 0.5
 # way rather than a run down a corridor, so it is slower than this hull's own
 # `[repair] travel_duration_secs = 5`, and the asymmetry (out slower than back)
 # is the encumbrance of going equipped. `range = 400` is the reach the destroyer
-# shares with its `[repair.external_dispatch]`; when this hull gains that table
-# (issue #1391) the two must match for the same reason — a repair team and a
+# shares with its `[repair.external_dispatch]`; this hull shares that reach
+# too (issue #1391), for the same reason — a repair team and a
 # security team cross the same gap by the same means, and two different reaches
 # on one hull would be a difference the crew could see and nobody could explain.
 [security]
@@ -422,6 +422,28 @@ team_count = 2
 deploy_duration_secs = 8.0
 withdraw_duration_secs = 6.0
 range = 400.0
+# External repair-team dispatch (issue #1161), mounted on this hull by #1391 —
+# the last of the four external-work capabilities #1388/#1390 gave this hull the
+# dock, the beam and the flow for. It is the engineering-owned `repair` system's
+# `DispatchRepairTeam { team_idx, target: External }` verb: the named team crosses to the
+# ship's designated target and pays that target's OWN condition track while it
+# works there, unavailable to this hull's internal damage-control sweep for the
+# duration. Nothing below the TOML is hull-specific — `ExternalRepairDispatchSpawn`
+# attaches the component off this table alone — so authoring it here is the whole
+# capability.
+#
+# Both numbers are the destroyer's verbatim, for `[dock]`/`[tractor]`/
+# `[umbilical]`'s reason: a shared reach and a shared rate are what let one
+# authored casualty be helped by either hull without per-hull tuning, and a
+# bigger hull does not make a repair party walk further or work faster. The
+# fuller rationale for the two figures themselves — they came across unchanged
+# from the retired `field_repair` capability (#1164 S11a) and have never been
+# re-tuned — lives on `alliance_destroyer.toml`'s copy of this table rather than
+# being restated here; this hull never carried that capability.
+# [ai] Unratified, mirrored from the destroyer rather than re-derived here.
+[repair.external_dispatch]
+range = 400.0
+repair_rate = 0.5
 
 [weapons_console]
 power_multipliers = [ -0.5, 0, 0.25, 0.5 ]

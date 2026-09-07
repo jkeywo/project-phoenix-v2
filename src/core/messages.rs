@@ -5498,6 +5498,13 @@ pub struct RepairBlackboard {
     /// `None` when no team is dispatched.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_dispatch_target_name: Option<String>,
+    /// Current Tactical lock name for an idle team's field destination (#1391).
+    /// Separate from the active claim: absent when no named target is selected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_dispatch_candidate_name: Option<String>,
+    /// Current acquisition refusal for that candidate, recomputed each tick.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_dispatch_candidate_refusal: Option<String>,
     /// The `strings.csv` id of the last dispatch refusal (issue #1161) — no free
     /// team, no designated target, out of range, the named team busy, or another
     /// team already abroad — the console resolves through `t()`. `None` when idle

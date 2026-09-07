@@ -504,6 +504,8 @@ impl HullVisibility {
             external_dispatch_range: bb.external_dispatch_range,
             external_dispatch_target: bb.external_dispatch_target.clone(),
             external_dispatch_target_name: bb.external_dispatch_target_name.clone(),
+            external_dispatch_candidate_name: bb.external_dispatch_candidate_name.clone(),
+            external_dispatch_candidate_refusal: bb.external_dispatch_candidate_refusal.clone(),
             external_dispatch_refusal: bb.external_dispatch_refusal.clone(),
             // Which of this viewer's OWN teams went abroad, and how the target
             // it is working is doing (issue #1386). Passed through on the same
@@ -554,6 +556,8 @@ fn withheld_repair_blackboard(bb: &RepairBlackboard) -> RepairBlackboard {
         external_dispatch_range: None,
         external_dispatch_target: None,
         external_dispatch_target_name: None,
+        external_dispatch_candidate_name: None,
+        external_dispatch_candidate_refusal: None,
         external_dispatch_refusal: None,
         external_dispatch_team_idx: None,
         external_dispatch_target_condition: None,
@@ -1223,7 +1227,10 @@ mod tests {
         // field is added and left unprojected, it shows up here as a field this
         // assertion does not account for and the test needs revisiting.
         let v = vis(vec![]);
-        let bb = bb_with_queue(queue(&[("helm", 40.0)]));
+        let mut bb = bb_with_queue(queue(&[("helm", 40.0)]));
+        bb.external_dispatch_candidate_name = Some("candidate.name".into());
+        bb.external_dispatch_candidate_refusal =
+            Some("repair.dispatch.refused.out_of_range".into());
         let eng = StationId("engineering".into());
         let p = v.project_repair_blackboard(Some(&eng), &bb);
         // Projected:
@@ -1247,6 +1254,14 @@ mod tests {
             p.external_dispatch_target_name,
             bb.external_dispatch_target_name
         );
+        assert_eq!(
+            p.external_dispatch_candidate_name,
+            bb.external_dispatch_candidate_name
+        );
+        assert_eq!(
+            p.external_dispatch_candidate_refusal,
+            bb.external_dispatch_candidate_refusal
+        );
         assert_eq!(p.external_dispatch_refusal, bb.external_dispatch_refusal);
         assert_eq!(p.external_dispatch_team_idx, bb.external_dispatch_team_idx);
         assert_eq!(
@@ -1265,12 +1280,17 @@ mod tests {
         bb.external_dispatch_target = Some("ally-1".into());
         bb.external_dispatch_team_idx = Some(1);
         bb.external_dispatch_target_condition = Some(0.5);
+        bb.external_dispatch_candidate_name = Some("next.name".into());
+        bb.external_dispatch_candidate_refusal =
+            Some("repair.dispatch.refused.out_of_range".into());
 
         let withheld = super::withheld_repair_blackboard(&bb);
         assert_eq!(withheld.external_dispatch_range, None);
         assert_eq!(withheld.external_dispatch_target, None);
         assert_eq!(withheld.external_dispatch_team_idx, None);
         assert_eq!(withheld.external_dispatch_target_condition, None);
+        assert_eq!(withheld.external_dispatch_candidate_name, None);
+        assert_eq!(withheld.external_dispatch_candidate_refusal, None);
         assert_eq!(
             withheld.travel_duration_secs, bb.travel_duration_secs,
             "the ship constant is kept, so a console shown this again renders no nonsense bar"

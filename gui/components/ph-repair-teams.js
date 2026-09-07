@@ -369,14 +369,12 @@ export class PhRepairTeams extends PhElement {
    */
   #renderDispatchRow(drow, teamId, targets, external, auto) {
     const fieldWorking = !!(external && external.target != null);
-    // The host only names the field target once a team is actually working it
-    // (`external_dispatch_target_name` is `None` while nobody is abroad), so an
-    // idle card names the destination generically rather than inventing one.
-    const fieldLabel = external
-      ? (external.target_name
-        ? t(external.target_name)
-        : t('component.repair_teams.field_target'))
-      : null;
+    // The host resolves Tactical's current lock and reach. An absent lock
+    // offers no field destination; the active claim remains a separate readout.
+    const fieldLabel = external?.candidate_name ? t(external.candidate_name) : null;
+    const fieldRefusal = fieldWorking
+      ? 'repair.dispatch.refused.already_abroad'
+      : external?.candidate_refusal;
 
     const sig = [
       targets.map(x => x.id).join('|'),
@@ -431,15 +429,15 @@ export class PhRepairTeams extends PhElement {
     }
 
     drow.querySelectorAll('.btn').forEach(b => {
-      b.disabled = auto || (b.dataset.field === '1' && fieldWorking);
+      b.disabled = auto || (b.dataset.field === '1' && !!fieldRefusal);
     });
     const fieldBtn = drow.querySelector('.field-btn');
     if (fieldBtn) {
       // The host's own refusal id, not a second wording of it: the crew read
       // the same sentence whether they got here by tapping or by reading.
-      fieldBtn.title = fieldWorking
-        ? t('repair.dispatch.refused.already_abroad')
-        : (external && external.refusal ? t(external.refusal) : '');
+      fieldBtn.title = fieldRefusal ? t(fieldRefusal) : '';
+      fieldBtn.setAttribute('aria-label', fieldRefusal
+        ? `${fieldLabel}: ${t(fieldRefusal)}` : fieldLabel);
     }
     return targets.length > 0 || fieldLabel != null;
   }

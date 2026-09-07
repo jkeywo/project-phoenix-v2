@@ -2825,6 +2825,8 @@ fn repair_blackboard_external_dispatch_fields_round_trip_and_are_additive() {
         // #1386) — the two fields the ABROAD card is drawn from.
         external_dispatch_team_idx: Some(2),
         external_dispatch_target_condition: Some(0.42),
+        external_dispatch_candidate_name: Some("world.probe.entity.next.name".into()),
+        external_dispatch_candidate_refusal: Some("repair.dispatch.refused.out_of_range".into()),
         ..Default::default()
     });
     let json = serde_json::to_string(&dispatching).unwrap();
@@ -2851,6 +2853,8 @@ fn repair_blackboard_external_dispatch_fields_round_trip_and_are_additive() {
     };
     assert_eq!(bb.external_dispatch_team_idx, None);
     assert_eq!(bb.external_dispatch_target_condition, None);
+    assert_eq!(bb.external_dispatch_candidate_name, None);
+    assert_eq!(bb.external_dispatch_candidate_refusal, None);
 }
 
 /// The start/stop transfer commands (issue #1160).

@@ -1577,11 +1577,15 @@ describe('buildRepairConsoleState', () => {
       external_dispatch_target_name: 'world.probe.entity.ally.name',
       external_dispatch_team_idx: 2,
       external_dispatch_target_condition: 0.42,
+      external_dispatch_candidate_name: 'world.probe.entity.next.name',
+      external_dispatch_candidate_refusal: 'repair.dispatch.refused.out_of_range',
     })));
     expect(s.external_dispatch).toEqual({
       range: 800,
       target: 'uuid-1',
       target_name: 'world.probe.entity.ally.name',
+      candidate_name: 'world.probe.entity.next.name',
+      candidate_refusal: 'repair.dispatch.refused.out_of_range',
       refusal: null,
       team_idx: 2,
       target_condition: 0.42,
@@ -1594,6 +1598,8 @@ describe('buildRepairConsoleState', () => {
     const s = parse(buildRepairConsoleState(projectedState([
       { system_id: 'core', display_name: 'Core', current: 4, max_hp: 10 },
     ], { external_dispatch_range: 800 })));
+    expect(s.external_dispatch.candidate_name).toBeNull();
+    expect(s.external_dispatch.candidate_refusal).toBeNull();
     expect(s.external_dispatch.team_idx).toBeNull();
     expect(s.external_dispatch.target_condition).toBeNull();
   });

@@ -238,26 +238,50 @@ describe('PhRepairTeams', () => {
     el.state = {
       teams: [{ id: 0, label: 'T1', status: 'idle' }],
       targets: [{ id: 'helm', label: 'Helm', damage_pct: 0.4 }],
-      external_dispatch: { range: 800, target: null, target_name: null },
+      external_dispatch: { candidate_name: 'world.probe_external_repair.entity.ally.name', range: 800, target: null, target_name: null },
     };
     select(el, 0);
     const btns = card(el, 0).querySelectorAll('.btn');
     expect(btns.length).toBe(2);
     expect(btns[1].classList.contains('field-btn')).toBe(true);
     expect(btns[1].querySelector('.label').textContent)
-      .toBe(t('component.repair_teams.field_target'));
+      .toBe(t('world.probe_external_repair.entity.ally.name'));
   });
 
-  it('names the field target from the host once a team is working it', () => {
+  it('names the current field destination from the host', () => {
     const { el } = setup();
     el.state = {
       teams: [{ id: 0, label: 'T1', status: 'idle' }],
       targets: [],
-      external_dispatch: { range: 800, target: 'uuid-1', target_name: 'console.repair.dispatch' },
+      external_dispatch: { candidate_name: 'world.probe_external_repair.entity.ally.name', range: 800, target: 'uuid-1', target_name: 'console.repair.dispatch' },
     };
     select(el, 0);
     expect(card(el, 0).querySelector('.field-btn .label').textContent)
-      .toBe(t('console.repair.dispatch'));
+      .toBe(t('world.probe_external_repair.entity.ally.name'));
+  });
+
+  it('hides the destination without a lock and disables an out-of-range lock', () => {
+    const { el } = setup();
+    const state = {
+      teams: [{ id: 1, label: 'Team 2', status: 'idle' }],
+      targets: [],
+      external_dispatch: { range: 400, target: null, candidate_name: null },
+    };
+    el.state = state;
+    select(el, 1);
+    expect(card(el, 1).querySelector('.field-btn')).toBeNull();
+    el.state = { ...state, external_dispatch: {
+      ...state.external_dispatch,
+      candidate_name: 'world.probe_external_repair.entity.ally.name',
+      candidate_refusal: 'repair.dispatch.refused.out_of_range',
+    } };
+    const field = card(el, 1).querySelector('.field-btn');
+    expect(field.disabled).toBe(true);
+    expect(field.title).toBe(t('repair.dispatch.refused.out_of_range'));
+    el.state = { ...state, external_dispatch: {
+      ...state.external_dispatch, candidate_name: 'world.probe_external_repair.entity.ally.name',
+    } };
+    expect(card(el, 1).querySelector('.field-btn').disabled).toBe(false);
   });
 
   // Issue #1386: the field row is one destination among the stations and sends
@@ -272,7 +296,7 @@ describe('PhRepairTeams', () => {
         { id: 1, label: 'T2', status: 'idle' },
       ],
       targets: [{ id: 'helm', label: 'Helm', damage_pct: 0.4 }],
-      external_dispatch: { range: 800, target: null, target_name: null, team_idx: null },
+      external_dispatch: { candidate_name: 'world.probe_external_repair.entity.ally.name', range: 800, target: null, target_name: null, team_idx: null },
     };
     select(el, 1);
     card(el, 1).querySelector('.field-btn').click();
@@ -296,6 +320,7 @@ describe('PhRepairTeams', () => {
       ],
       targets: [{ id: 'helm', label: 'Helm', damage_pct: 0.4 }],
       external_dispatch: {
+        candidate_name: 'world.probe_external_repair.entity.ally.name',
         range: 800, target: 'uuid-1', target_name: 'console.repair.dispatch', team_idx: 1,
       },
     };
@@ -318,6 +343,7 @@ describe('PhRepairTeams', () => {
     ],
     targets: [{ id: 'helm', label: 'Helm', damage_pct: 0.4 }],
     external_dispatch: {
+        candidate_name: 'world.probe_external_repair.entity.ally.name',
       range: 800,
       target: 'uuid-1',
       target_name: 'console.repair.dispatch',
@@ -398,7 +424,7 @@ describe('PhRepairTeams', () => {
     el.state = {
       teams: [{ id: 0, label: 'T1', status: 'idle' }],
       targets: [],
-      external_dispatch: { range: 800, target: null, target_name: null },
+      external_dispatch: { candidate_name: 'world.probe_external_repair.entity.ally.name', range: 800, target: null, target_name: null },
       auto: true,
     };
     select(el, 0);

@@ -675,6 +675,60 @@ fn every_dock_authoring_hull_declares_dock_markers_in_its_rig() {
     );
 }
 
+/// Issue #1391: `[repair.external_dispatch]` is the one external-work table the
+/// loader does NOT pair-check. `[dock]`, `[tractor]` and `[umbilical]` each
+/// refuse a hull that authored the terms without the `[[system]]` block giving
+/// them a seat and a power group; the dispatch table deliberately does not,
+/// because it rides the `repair` blackboard rather than a System of its own —
+/// `ExternalRepairConfig::validate` asks only that the reach and the rate are
+/// positive.
+///
+/// Which makes the remaining failure silent by construction: a hull authoring
+/// the table with no `kind = "repair"` System parses, is given an
+/// `ExternalRepairDispatch` component by `ExternalRepairDispatchSpawn`, and
+/// publishes a dispatch projection onto a blackboard no Station holds — a
+/// capability nobody can reach. A walk rather than a list, so the NEXT hull to
+/// gain field repair (the cruiser, #1391, was the third) cannot land on the
+/// wrong side of it either.
+#[test]
+fn every_external_repair_hull_validates_its_terms_and_seats_a_repair_system() {
+    let mut dispatchers: Vec<String> = Vec::new();
+    for path in shipped_templates() {
+        let key = path.to_string_lossy().replace('\\', "/");
+        let cfg = crate::entities::include_resolve::load_entity_config(&key)
+            .unwrap_or_else(|e| panic!("{key} must parse: {e}"));
+        let Some(external) = cfg
+            .repair
+            .as_ref()
+            .and_then(|rc| rc.external_dispatch.as_ref())
+        else {
+            continue;
+        };
+        external.validate().unwrap_or_else(|e| {
+            panic!("{key} authors an unusable [repair.external_dispatch]: {e}")
+        });
+        assert!(
+            cfg.ship_config.as_ref().is_some_and(|sc| sc
+                .systems
+                .iter()
+                .any(|s| s.kind == crate::ship::system_registry::REPAIR_KIND)),
+            "{key} authors [repair.external_dispatch] but hangs no `kind = \"repair\"` System \
+             off a Station, so no seat can ever press Dispatch"
+        );
+        dispatchers.push(key);
+    }
+    for expected in [
+        "assets/entities/alliance_cruiser.toml",
+        "assets/entities/alliance_destroyer.toml",
+    ] {
+        assert!(
+            dispatchers.iter().any(|k| k == expected),
+            "{expected} must author [repair.external_dispatch] \
+             (destroyer since #1161, cruiser since #1391); found {dispatchers:?}"
+        );
+    }
+}
+
 #[test]
 fn empty_toml_string_produces_all_none() {
     let config = EntityConfig::from_toml("").expect("parse must succeed");

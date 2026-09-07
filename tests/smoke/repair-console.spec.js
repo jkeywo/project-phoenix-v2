@@ -2,6 +2,13 @@ import { test, expect } from './fixtures';
 
 const CONSOLE_URL = '/gui/battleship/repair.html';
 
+// The cruiser has no dedicated Repair console: its `repair` System hangs off
+// the Engineering seat, so the Field Repair row this file's cruiser case
+// exercises lives on that console instead (issue #1391). Everything else on
+// this page is the same shared `ph-repair-teams` / `ph-hull-integrity` the
+// battleship's console mounts.
+const CRUISER_ENGINEERING_URL = '/gui/cruiser/engineering.html';
+
 function repairState(overrides = {}) {
   return Object.assign(
     {
@@ -130,6 +137,7 @@ test('repair console: an idle card sends a NAMED dispatch to the field target', 
     (s) => window.__updateConsole('repair', JSON.stringify(s)),
     repairState({
       external_dispatch: {
+      candidate_name: 'world.probe_external_repair.entity.ally.name',
         range: 800, target: null, target_name: null, refusal: null, team_idx: null,
       },
     }),
@@ -163,6 +171,7 @@ test('repair console: the abroad card shows the target it works and recalls it',
     (s) => window.__updateConsole('repair', JSON.stringify(s)),
     repairState({
       external_dispatch: {
+      candidate_name: 'world.probe_external_repair.entity.ally.name',
         range: 800,
         target: 'uuid-ally',
         target_name: 'console.repair.dispatch',
@@ -314,4 +323,60 @@ test('repair console: RECALL on a team out on a job sends recall_repair_team', {
   expect(JSON.parse(sent[0])).toMatchObject({
     action: 'recall_repair_team', console: 'repair', team_idx: 0,
   });
+});
+
+// Cruiser field work uses the selected repair card and the named-team verb.
+function cruiserEngineeringState(externalDispatch) {
+  return {
+    system_ids: ['power-reactor', 'repair'],
+    system_families: { 'power-reactor': 'power', repair: 'repair' },
+    systems: {
+      'power-reactor': { consoles: [], power_auto: false },
+      repair: {
+        teams: [0, 1].map(id => ({ id, label: `Team ${id + 1}`, status: 'idle', progress_pct: 0 })),
+        dispatch_targets: [], damaged_systems: [], core_systems: [],
+        overall_hull: { current: 90, max: 100, pct: 0.9 },
+        repair_auto: false, external_dispatch: externalDispatch,
+      },
+    },
+  };
+}
+
+const fieldTargetName = 'world.probe_external_repair.entity.ally.name';
+test('repair console: cruiser Team 2 dispatches to the named field target and recalls', { tag: '@core' }, async ({ page }) => {
+  await page.goto(CRUISER_ENGINEERING_URL);
+  await page.evaluate(() => {
+    window.__sent = [];
+    window.__sendAction = json => window.__sent.push(JSON.parse(json));
+  });
+  const publish = async external => page.evaluate(
+    s => window.__updateConsole('engineering', JSON.stringify(s)),
+    cruiserEngineeringState(external),
+  );
+  await publish({ range: 400, target: null, candidate_name: null });
+  const team = page.locator('ph-repair-teams .card[data-team-id="1"]');
+  await team.locator('.card-top').click();
+  await expect(team.locator('.field-btn')).toHaveCount(0);
+  await publish({ range: 400, target: null, candidate_name: fieldTargetName,
+    candidate_refusal: 'repair.dispatch.refused.out_of_range' });
+  const field = team.locator('.field-btn');
+  await expect(field).toBeDisabled();
+  const expected = await page.evaluate(async id => (await import('/gui/strings.js')).t(id), fieldTargetName);
+  await expect(field).toContainText(expected);
+  await publish({ range: 400, target: null, candidate_name: fieldTargetName });
+  await expect(field).toBeEnabled();
+  await field.focus();
+  await page.keyboard.press('Enter');
+  await publish({ range: 400, target: 'ally-uuid', target_name: fieldTargetName,
+    team_idx: 1, target_condition: 0.42, candidate_name: fieldTargetName });
+  await expect(team).toContainText(expected);
+  await expect(team.locator('.progress-fill')).toHaveAttribute('style', /42%/);
+  await team.locator('.recall-btn').click();
+  const sent = await page.evaluate(() => window.__sent);
+  expect(sent).toEqual([
+    expect.objectContaining({ action: 'dispatch_repair_team', console: 'engineering',
+      control_system_id: 'repair', team_idx: 1, target: 'external' }),
+    expect.objectContaining({ action: 'recall_repair_team', console: 'engineering',
+      control_system_id: 'repair', team_idx: 1 }),
+  ]);
 });

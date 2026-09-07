@@ -36,6 +36,7 @@ const payload = {
         { system_id: 'port-blaster', label: 'Port Blaster', owner: 'tactical', tier: 'Disabled', damage_pct: 0.82, prioritisable: true },
         { system_id: 'aft-sensors', label: 'Aft Sensor Cluster', owner: 'tactical', tier: 'Damaged', damage_pct: 0.26, prioritisable: true },
       ],
+      external_dispatch: { range: 400, target: null, candidate_name: null },
     },
     tractor: { system_id: 'tractor', engaged: true, coupled_target_name: 'ALDRIC', range: 500 },
     umbilical: { system_id: 'umbilical', running: true, rate: 20, operator_level: 80, partner_level: 20 },
@@ -43,13 +44,57 @@ const payload = {
   own_hull: { pct: 0.84 },
 };
 
+const fieldTargetName = 'world.probe_external_repair.entity.ally.name';
+
 for (const [label, width, height] of viewports) {
-  test(`Cruiser Engineering ${label} populated controls remain reachable`, async ({ page }) => {
+  test(`Cruiser Engineering ${label} populated field-repair controls remain reachable`, async ({ page }) => {
     await page.setViewportSize({ width, height });
     await page.goto('/gui/cruiser/engineering.html');
     await page.waitForFunction(() => typeof window.__updateConsole === 'function' && document.querySelector('ph-repair-teams')?.shadowRoot);
     await page.evaluate(state => window.__updateConsole('engineering', JSON.stringify(state)), payload);
     await page.evaluate(() => document.fonts.ready);
+
+    const team = page.locator('ph-repair-teams .card[data-team-id="1"]');
+    await team.locator('.card-top').click();
+    await expect(team.locator('.field-btn')).toHaveCount(0);
+
+    const publishField = external_dispatch => page.evaluate(({ state, external_dispatch }) => {
+      const next = structuredClone(state);
+      next.systems.repair.external_dispatch = external_dispatch;
+      window.__updateConsole('engineering', JSON.stringify(next));
+    }, { state: payload, external_dispatch });
+
+    await publishField({ range: 400, target: null, candidate_name: fieldTargetName });
+    const field = team.locator('.field-btn');
+    const expectedTarget = await page.evaluate(async id => (await import('/gui/strings.js')).t(id), fieldTargetName);
+    const expectedRefusal = await page.evaluate(async id => (await import('/gui/strings.js')).t(id), 'repair.dispatch.refused.out_of_range');
+    await expect(field).toBeEnabled();
+    await expect(field).toContainText(expectedTarget);
+    await field.scrollIntoViewIfNeeded();
+    let fieldMetrics = await field.evaluate(el => ({
+      height: el.getBoundingClientRect().height,
+      scrollWidth: el.scrollWidth, clientWidth: el.clientWidth,
+    }));
+    expect(fieldMetrics.height).toBeGreaterThanOrEqual(44);
+    expect(fieldMetrics.scrollWidth).toBeLessThanOrEqual(fieldMetrics.clientWidth + 1);
+
+    await publishField({ range: 400, target: null, candidate_name: fieldTargetName,
+      candidate_refusal: 'repair.dispatch.refused.out_of_range' });
+    await expect(field).toBeDisabled();
+    await expect(field).toHaveAttribute('title', expectedRefusal);
+
+    await publishField({ range: 400, target: 'ally-uuid', target_name: fieldTargetName,
+      team_idx: 1, target_condition: 0.42, candidate_name: fieldTargetName });
+    await expect(team).toContainText(expectedTarget);
+    await expect(team.locator('.progress-fill')).toHaveAttribute('style', /42%/);
+    const recall = team.locator('.recall-btn');
+    await recall.scrollIntoViewIfNeeded();
+    const recallMetrics = await recall.evaluate(el => ({
+      height: el.getBoundingClientRect().height,
+      scrollWidth: el.scrollWidth, clientWidth: el.clientWidth,
+    }));
+    expect(recallMetrics.height).toBeGreaterThanOrEqual(44);
+    expect(recallMetrics.scrollWidth).toBeLessThanOrEqual(recallMetrics.clientWidth + 1);
 
     const measurement = await page.evaluate(() => {
       const box = el => { const r = el.getBoundingClientRect(); return { x:r.x, y:r.y, right:r.right, bottom:r.bottom, width:r.width, height:r.height }; };
@@ -87,5 +132,6 @@ for (const [label, width, height] of viewports) {
       expect(reached.top).toBeGreaterThanOrEqual(reached.repairTop - 1);
       expect(reached.bottom).toBeLessThanOrEqual(reached.repairBottom + 1);
     }
+    await page.screenshot({ path: `target/console-redesign-resume/1391/responsive-${label}.png` });
   });
 }

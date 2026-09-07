@@ -427,6 +427,8 @@ fn publish_repair_blackboard(
             // leaves every external-dispatch field `None` and is byte-identical
             // on the wire to one built before this existed.
             Option<&super::external_server::ExternalRepairDispatch>,
+            Option<&crate::console::weapons::beam::TacticalRadarSelection>,
+            Option<&Transform>,
             &mut crate::server_app::ShipSystemBlackboards,
         ),
         With<crate::server_app::Ship>,
@@ -437,6 +439,7 @@ fn publish_repair_blackboard(
     named: Query<(
         &crate::entities::spawner::EntityUuid,
         &crate::entities::spawner::EntityName,
+        Option<&Transform>,
     )>,
     // The abroad card's bar (issue #1386). The target's OWN infrastructure
     // condition track, republished every tick because that is the work the team
@@ -447,8 +450,16 @@ fn publish_repair_blackboard(
         &crate::infrastructure::InfrastructureCondition,
     )>,
 ) {
-    for (teams_opt, hull_opt, config_opt, repair_queue_ref, external_opt, mut blackboards) in
-        ship_q.iter_mut()
+    for (
+        teams_opt,
+        hull_opt,
+        config_opt,
+        repair_queue_ref,
+        external_opt,
+        selection,
+        position,
+        mut blackboards,
+    ) in ship_q.iter_mut()
     {
         let default_teams;
         let teams: &ShipRepairTeams = match teams_opt {
@@ -525,8 +536,8 @@ fn publish_repair_blackboard(
                 let target_name = target.as_ref().and_then(|uuid| {
                     named
                         .iter()
-                        .find(|(id, _)| &id.0 == uuid)
-                        .map(|(_, name)| name.0.clone())
+                        .find(|(id, _, _)| &id.0 == uuid)
+                        .map(|(_, name, _)| name.0.clone())
                 });
                 // `None` when the target carries no condition track at all — a
                 // dispatch to such a target holds the team but banks nothing
@@ -552,6 +563,28 @@ fn publish_repair_blackboard(
             None => (None, None, None, None, None, None),
         };
 
+        // The idle card describes the live Tactical lock, not the target of an
+        // existing claim. Reuse the command owner's acquisition verdict so a
+        // drifting target disables the row before a stale click is admitted.
+        let candidate = external_opt.and_then(|external| {
+            let uuid = selection.and_then(|s| s.0.as_deref())?;
+            let (_, name, target_position) = named.iter().find(|(id, _, _)| id.0 == uuid)?;
+            let separation = position
+                .zip(target_position)
+                .map(|(ship, target)| ship.translation.distance(target.translation));
+            let refusal = super::external::dispatch_status(
+                true,
+                Some(uuid),
+                separation,
+                external.config.range,
+            )
+            .err()
+            .map(|reason| reason.string_id().to_string());
+            Some((name.0.clone(), refusal))
+        });
+        let (external_dispatch_candidate_name, external_dispatch_candidate_refusal) =
+            candidate.map_or((None, None), |(name, refusal)| (Some(name), refusal));
+
         let bb = RepairBlackboard {
             teams: team_slots,
             travel_duration_secs: teams.0.timings().travel_duration,
@@ -570,6 +603,8 @@ fn publish_repair_blackboard(
             external_dispatch_range,
             external_dispatch_target,
             external_dispatch_target_name,
+            external_dispatch_candidate_name,
+            external_dispatch_candidate_refusal,
             external_dispatch_refusal,
             external_dispatch_team_idx,
             external_dispatch_target_condition,

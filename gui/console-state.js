@@ -1627,6 +1627,8 @@ export function buildRepairConsoleState(state, systemIds = []) {
         range:       bb.external_dispatch_range,
         target:      bb.external_dispatch_target ?? null,
         target_name: bb.external_dispatch_target_name ?? null,
+        candidate_name: bb.external_dispatch_candidate_name ?? null,
+        candidate_refusal: bb.external_dispatch_candidate_refusal ?? null,
         refusal:     bb.external_dispatch_refusal ?? null,
         // WHICH team is abroad, and how the target it is working is doing
         // (issue #1386). The team index is authoritative — the console used to

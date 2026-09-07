@@ -3039,3 +3039,83 @@ fn tick_repair_teams_sweeps_the_station_using_the_ship_config() {
     );
     assert!(returned, "and only then head home");
 }
+
+#[test]
+fn repair_candidate_tracks_lock_and_range_without_creating_a_claim() {
+    use crate::console::repair::external::ExternalRepairConfig;
+    use crate::console::repair::external_server::ExternalRepairDispatch;
+    use crate::console::weapons::beam::TacticalRadarSelection;
+    use crate::entities::spawner::{EntityName, EntityUuid};
+    use crate::server_app::{Ship, ShipSystemBlackboards};
+    let mut app = App::new();
+    app.add_systems(Update, super::publish_repair_blackboard);
+    let ship = app
+        .world_mut()
+        .spawn((
+            Ship,
+            Transform::default(),
+            TacticalRadarSelection(None),
+            ExternalRepairDispatch::new(ExternalRepairConfig {
+                range: 800.0,
+                repair_rate: 1.0,
+            }),
+            ShipSystemBlackboards::default(),
+        ))
+        .id();
+    let target = app
+        .world_mut()
+        .spawn((
+            EntityUuid("ally".into()),
+            EntityName("ally.name".into()),
+            Transform::from_xyz(800.0, 0.0, 0.0),
+        ))
+        .id();
+    let read = |app: &App| {
+        let boards = app.world().get::<ShipSystemBlackboards>(ship).unwrap();
+        let SystemBlackboard::Repair(bb) =
+            boards.0.get(&SystemId(REPAIR_SYSTEM_ID.into())).unwrap()
+        else {
+            panic!("repair")
+        };
+        bb.clone()
+    };
+    app.update();
+    assert_eq!(read(&app).external_dispatch_candidate_name, None);
+    app.world_mut()
+        .get_mut::<TacticalRadarSelection>(ship)
+        .unwrap()
+        .0 = Some("ally".into());
+    app.update();
+    let bb = read(&app);
+    assert_eq!(
+        bb.external_dispatch_candidate_name.as_deref(),
+        Some("ally.name")
+    );
+    assert_eq!(bb.external_dispatch_candidate_refusal, None);
+    assert_eq!(bb.external_dispatch_target, None);
+    assert_eq!(bb.external_dispatch_target_name, None);
+    app.world_mut()
+        .get_mut::<Transform>(target)
+        .unwrap()
+        .translation
+        .x = 801.0;
+    app.update();
+    assert_eq!(
+        read(&app).external_dispatch_candidate_refusal.as_deref(),
+        Some("repair.dispatch.refused.out_of_range")
+    );
+    app.world_mut()
+        .get_mut::<Transform>(target)
+        .unwrap()
+        .translation
+        .x = 100.0;
+    app.update();
+    assert_eq!(read(&app).external_dispatch_candidate_refusal, None);
+    app.world_mut()
+        .get_mut::<TacticalRadarSelection>(ship)
+        .unwrap()
+        .0 = None;
+    app.update();
+    assert_eq!(read(&app).external_dispatch_candidate_name, None);
+    assert_eq!(read(&app).external_dispatch_candidate_refusal, None);
+}

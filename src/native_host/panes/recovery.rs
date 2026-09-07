@@ -84,9 +84,9 @@ pub const RECREATION_WINDOW: Duration = Duration::from_secs(10);
 /// station to `Backfill`; that half is identical.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PaneFault {
-    /// The page stopped draining and every message queued for it is a reliable
-    /// state transition, so nothing may be dropped to make room (issue #1122,
-    /// the pre-existing trigger — see [`super::registry`]'s cap note).
+    /// The page stopped draining and no queued message can safely be discarded.
+    /// The historical name also covers unsuperseded snapshot deltas and
+    /// change-only complete projections; see [`super::registry`]'s cap note.
     ReliableOverflow,
     /// The pane's Ultralight view stopped answering — a crash, a lost surface, a
     /// frame copy that will not complete. The display itself is fine, so this is
@@ -104,7 +104,7 @@ impl PaneFault {
     pub fn reason(&self) -> &'static str {
         match self {
             PaneFault::ReliableOverflow => {
-                "stopped draining its console and overflowed its reliable backlog"
+                "stopped draining its console and overflowed its state backlog"
             }
             PaneFault::ViewCrashed => "its console view stopped answering (crash or lost surface)",
         }

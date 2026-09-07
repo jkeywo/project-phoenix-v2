@@ -44,7 +44,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::core::codec::{self, JsonCodec, MessageCodec};
-use crate::core::messages::{ClientMessage, ServerMessageDiscriminants};
+use crate::core::messages::ClientMessage;
 use crate::delivery::serve::HostedDocuments;
 use crate::native_host::connections::{ConnectionLeg, SharedConnections};
 use crate::native_host::transport::{NativeTransport, TransportDispatch, TransportEvent};
@@ -659,7 +659,7 @@ impl NativeTransport for PaneTransport {
         let mut state = self.bus.lock();
         // Encode once, not once per pane: the payload is identical and a
         // console snapshot is not small.
-        let mut encoded: Option<String> = None;
+        let mut encoded: Option<PaneDispatch> = None;
         let mut faulted: Vec<PaneId> = Vec::new();
         let recipients = state.connections.shared.lock().recipients(dispatch.target);
         let BusState {
@@ -671,8 +671,8 @@ impl NativeTransport for PaneTransport {
             if !recipients.contains(&connection_ids[&pane.id()]) {
                 continue;
             }
-            let json = match &encoded {
-                Some(json) => json.clone(),
+            let pending = match &encoded {
+                Some(pending) => pending.clone(),
                 None => {
                     // A `ServerMessage` that will not encode is a bug in this
                     // crate, not in the pane; there is nothing useful to hand
@@ -680,15 +680,12 @@ impl NativeTransport for PaneTransport {
                     let Ok(json) = JsonCodec.encode_server(dispatch.msg) else {
                         return;
                     };
-                    encoded = Some(json.clone());
-                    json
+                    let pending = PaneDispatch::encoded(json, dispatch.delivery, dispatch.msg);
+                    encoded = Some(pending.clone());
+                    pending
                 }
             };
-            let verdict = pane.push_outbound(PaneDispatch {
-                json,
-                delivery: dispatch.delivery,
-                kind: ServerMessageDiscriminants::from(dispatch.msg),
-            });
+            let verdict = pane.push_outbound(pending);
             if verdict == OutboundVerdict::Overflowed {
                 faulted.push(pane.id());
             }
@@ -721,6 +718,9 @@ pub(crate) fn identify_test_pane(bus: &PaneBus, id: PaneId) {
     .unwrap();
     let _ = bus.transport().poll();
 }
+
+#[cfg(test)]
+mod snapshot_tests;
 
 #[cfg(test)]
 mod tests {

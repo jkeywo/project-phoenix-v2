@@ -235,6 +235,7 @@ impl PaneSurface for RecordingSurface {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::codec::{JsonCodec, MessageCodec};
     use crate::core::messages::{DeliveryClass, ServerMessage};
     use crate::lobby::handler::Target;
     use crate::native_host::panes::identity::PaneIdentity;
@@ -302,16 +303,15 @@ mod tests {
         let id =
             bus.open(PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000001", "Ada").unwrap());
         super::super::transport::identify_test_pane(&bus, id);
-        let snapshot = |reason: &str| ServerMessage::GameOver {
-            reason: reason.into(),
-            outcome: None,
-            report: Vec::new(),
+        let snapshot = |frequency| ServerMessage::ShieldStatus {
+            facings: Vec::new(),
+            frequency,
         };
-        broadcast_snapshot(&bus, snapshot("old"));
         broadcast(&bus, ServerMessage::GameStarted);
+        broadcast_snapshot(&bus, snapshot(0.1));
         let mut surface = EnqueueThenFail {
             bus: bus.clone(),
-            messages: vec![(snapshot("new"), DeliveryClass::Snapshot)],
+            messages: vec![(snapshot(0.9), DeliveryClass::Snapshot)],
         };
 
         let report = pump_pane(&bus, id, &mut surface);
@@ -321,12 +321,14 @@ mod tests {
         let queued = bus.take_outbound(id);
         assert_eq!(queued.len(), 2, "the requeued batch still respects the cap");
         assert!(queued[0].json.contains("GameStarted"));
-        assert!(queued[1].json.contains("new"));
-        assert!(!queued[1].json.contains("old"));
+        assert_eq!(
+            JsonCodec.decode_server(&queued[1].json).unwrap(),
+            snapshot(0.9)
+        );
     }
 
     #[test]
-    fn a_failed_push_discards_a_concurrent_snapshot_when_reliable_messages_fill_the_cap() {
+    fn a_failed_push_reports_overflow_when_a_concurrent_projection_cannot_fit() {
         let bus = PaneBus::with_capacity(2);
         let id =
             bus.open(PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000001", "Ada").unwrap());
@@ -335,14 +337,20 @@ mod tests {
         broadcast(&bus, ServerMessage::ShipDestroyed);
         let mut surface = EnqueueThenFail {
             bus: bus.clone(),
-            messages: vec![(ServerMessage::ReturnedToLobby, DeliveryClass::Snapshot)],
+            messages: vec![(
+                ServerMessage::RepairState { teams: Vec::new() },
+                DeliveryClass::Snapshot,
+            )],
         };
 
         let report = pump_pane(&bus, id, &mut surface);
         assert!(report.push_failure.is_some());
         assert_eq!(report.deferred, 2);
         assert!(bus.is_open(id));
-        assert!(bus.take_faulted().is_empty());
+        assert_eq!(
+            bus.take_faulted(),
+            vec![(id, super::super::recovery::PaneFault::ReliableOverflow)]
+        );
         let queued = bus.take_outbound(id);
         assert_eq!(queued.len(), 2, "only the two reliable messages survive");
         assert!(queued[0].json.contains("GameStarted"));
@@ -387,9 +395,15 @@ mod tests {
         // rather than a budget's worth of stale ones (issue #1403).
         let (bus, id) = bus_with_pane();
         for _ in 0..(MAX_PUSHES_PER_FRAME * 2) {
-            broadcast_snapshot(&bus, ServerMessage::GameStarted);
+            broadcast_snapshot(
+                &bus,
+                ServerMessage::ShieldStatus {
+                    facings: Vec::new(),
+                    frequency: 0.5,
+                },
+            );
         }
-        broadcast_snapshot(&bus, ServerMessage::ShipDestroyed);
+        broadcast_snapshot(&bus, ServerMessage::RepairState { teams: Vec::new() });
         let mut surface = RecordingSurface::ready();
         let report = pump_pane(&bus, id, &mut surface);
         assert_eq!(report.pushed, 2, "one push per kind");

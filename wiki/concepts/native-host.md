@@ -521,6 +521,7 @@ serialisation and nothing else.
 | Piece | File |
 |---|---|
 | Registry, lifecycle, the outbound cap | `src/native_host/panes/registry.rs` |
+| Complete-state replacement and keyed delta composition | `src/native_host/panes/registry/snapshot.rs` |
 | Identity and its three refusals | `src/native_host/panes/identity.rs` |
 | Audience projection | `src/session_connections.rs, src/native_host/connections.rs` |
 | The `NativeTransport` over the panes | `src/native_host/panes/transport.rs` |
@@ -560,8 +561,25 @@ A superseded pane keeps its screen reservation and stops exchanging traffic.
 Its queues are cleared, fault/requeue work cannot restart it, and the seated
 console reconciler leaves its assignment to the operator. Ordinary crashes
 still disconnect while the replacement page loads, then re-Identify on the
-same token. The pane worker's epochs and reliable/snapshot queues keep their
-existing ownership and delivery rules.
+same token. The pane worker's epochs retain ownership across queued frames.
+
+The outbound queue combines pending updates only within this pane's current
+incarnation and after recipient projection. `registry/snapshot.rs` replaces
+complete Weapons, Repair, Power, Shield and SystemHull projections; it composes
+BlackboardUpdate batches by System key and sparse SimState fields by entity UUID.
+Each blackboard replaces its whole prior value, including an empty privacy
+projection. Reliable messages and ordered events, including ModifierAdded and
+ModifierRemoved, prevent combining updates across their position in the queue.
+Failed pushes use the same rule when rejoining the pending backlog.
+
+The cap never drops state without a retained replacement: even a complete
+SystemHullUpdate can be published only when it changes. A full queue that cannot
+safely combine updates records the historical `ReliableOverflow` fault, closes
+the pane through the ordinary disconnect path and leaves reopening to the
+operator. `transport/snapshot_tests.rs` drives real blackboard and sparse-entity
+producers through the bus and codec, including the common/repair collision and
+a contact's final movement followed by another entity's update. These are native
+queue guarantees; the network transport's delivery policy is unchanged.
 
 ### What a pane loads, and from where
 
@@ -2289,7 +2307,7 @@ its phones load the same public page the operator is on.
 | `tests/native_host_snapshot.rs` | AC5's snapshot half — a native-host capture restores into a fresh native host at the same digest, and the duel continues byte-identically for 120 frames (Combat Test's continuation bound is the payload gap `tests/snapshot_resume.rs` measured, not a native one) |
 | `tests/native_viewscreen_render.rs` | The viewscreen draws a scene — not one flat colour, and lit — over the **middle 40%** of a real-GPU frame, so a live HUD over a dead 3-D scene cannot pass. `#[ignore]`d: CI is ubuntu-only with no display |
 | `tests/native_host.rs` | The delivery half, unchanged, plus the serving loop's shutdown path (polled to a deadline, so a stuck loop fails rather than wedging the run) |
-| `src/native_host/panes/*` | Identity's three refusals, the projection boundary, the outbound cap's reliable/snapshot split, the document assembly (against the repository's own `client.html`, not only a stub), the identity's absence from the served body, the wildcard-bind normalisation, and the per-frame loop's push budget and deferral of a failed push. **#1333:** `placement::home_for_pane`'s four-step rule — a live Station slot beats a stored tile, a console the law seats is `Nowhere(SeatedButUnplaced)` rather than tiled, a legacy tile still tiles, an authored participant's slot is a Station home like any other, a host with no display adapter still tiles, an unknown name is refused, and a station whose seat was surrendered may take a tile again — plus the retry decision per `Nowhere` reason, since a pending view is already drained when it is made: a seated console is faulted so something retries it, and a pane with no home at all (including the authored participant's console whose slot went away) is left as it is. All feature-**off**, so the ordinary `cargo test` CI runs them |
+| `src/native_host/panes/*` | Identity's three refusals, the projection boundary, the outbound cap's complete-state/delta rules and ordering barriers, the document assembly (against the repository's own `client.html`, not only a stub), the identity's absence from the served body, the wildcard-bind normalisation, and the per-frame loop's push budget and deferral of a failed push. **#1333:** `placement::home_for_pane`'s four-step rule — a live Station slot beats a stored tile, a console the law seats is `Nowhere(SeatedButUnplaced)` rather than tiled, a legacy tile still tiles, an authored participant's slot is a Station home like any other, a host with no display adapter still tiles, an unknown name is refused, and a station whose seat was surrendered may take a tile again — plus the retry decision per `Nowhere` reason, since a pending view is already drained when it is made: a seated console is faulted so something retries it, and a pane with no home at all (including the authored participant's console whose slot went away) is left as it is. All feature-**off**, so the ordinary `cargo test` CI runs them |
 | `src/delivery/serve.rs` | A hosted document is served to a loopback peer and to nothing else, while the bundle and the version-pin endpoints stay LAN-open; `peer_origin` classifies IPv4, IPv6, IPv4-mapped and "the OS would not say". **#1353:** `websocket_upgrade` — a well-formed upgrade on a claimed path hands its key over, an `Upgrade` header on any other path is still just a file request, a plain `GET` of the join endpoint gets the worker's own 426, each malformed shape (no `Connection: upgrade`, version 8, no key, a short key, a POST) is a clean 400, and the header tokens are read the way browsers actually write them (`keep-alive, Upgrade`, mixed case) |
 | `tests/client/pane-scripts.test.js` | The two injected scripts, in jsdom, **driven through the real seam**: the boot script reads the identity out of the fragment, leaves a fragment `joinRouteFromLocation`/`parseJoinCode` accept (the literal is read out of `document.rs`, so the cross-language pin is checked), and caps the page's inbox; then the repository's own `createRendezvousJoiner` is run over the link's factories and asserted to produce the host-minted `Identify` on the page→host queue, to keep `JoinHandshake` off it, and to hand `onData` a `localiseTree`d message |
 | `tests/native_host_panes.rs` | A pane joins/claims/readies through the ordinary contracts; it is admitted for its own Station and refused another's by the real policy; it cannot read another pane's projection; a pane and a transport participant hold different Stations on the same running ship; a closed pane hands the lobby the disconnect a dropped phone would; and a pane's identity is in its URL, its document unenumerable, LAN-refused, and withdrawn on close. **#1125:** on a running ship, a view crash flips the seat to Backfill through the ordinary session path; no surviving pane inherits the failed pane's projection; recreating the pane reconnects on the same token and restores its held station out of Backfill with a Welcome; and a lost Station display disconnects its pane without recreating it |

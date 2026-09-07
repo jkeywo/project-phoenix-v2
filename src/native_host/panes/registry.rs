@@ -21,27 +21,27 @@
 //! `GameStarted` are one-shot state transitions, and a pane that missed its
 //! `Welcome` sits in the lobby forever with a completely healthy-looking log.
 //!
-//! So the cap is per delivery class, which is the same distinction the browser
-//! transport already makes with its two DataChannels: **`Snapshot` messages are
-//! droppable** (the next one supersedes them entirely) and **`Reliable` ones are
-//! not**. Over the cap, the oldest *snapshot* goes; if there are none, an
-//! incoming snapshot is discarded. An incoming reliable message instead exceeds
-//! the reliable budget, a fault [`Pane::push_outbound`] reports.
+//! So the cap respects the delivery class and payload semantics: complete
+//! snapshots can supersede the same kind, and partial
+//! updates compose. None may be discarded without a replacement: even a full
+//! projection can publish only on change. An otherwise-full queue faults the
+//! pane through the existing overflow/close path instead of losing state.
 //!
-//! # A snapshot supersedes its own kind before the cap is ever reached
+//! # Coalesce complete states and compose deltas before the cap is reached
 //!
 //! The cap is the safety net; the everyday rule is stricter. A phone's snapshot
-//! class rides a lossy, unordered channel where a stale snapshot is simply
-//! dropped, so a page only ever applies the newest. A pane's queue used to keep
-//! every one, and every one it kept was a synchronous script evaluation on the
+//! class rides a lossy, unordered channel. That classification alone does not
+//! make a payload complete: BlackboardUpdate carries changed System keys, and
+//! SimState carries sparse fields for changed entities. A pane's queue once kept
+//! every message, and every one it kept was a synchronous script evaluation on the
 //! frame that finally drained it: a slow frame unpacked into ten simulation
 //! ticks, each publishing snapshots to every pane, and the next frame paid for
 //! all of them — which made it slower still (measured at 25–50 ms of a 180 ms
-//! frame with three consoles open, issue #1403). So a `Snapshot` dispatch
-//! replaces the queued snapshot **of the same kind** (the same `ServerMessage`
-//! variant) at push time, and the page receives at most one of each kind per
-//! frame. Reliable messages keep their order among themselves and relative to
-//! the snapshots that survive.
+//! frame with three consoles open, issue #1403). Complete snapshots replace the
+//! same kind; partial snapshots merge by System or entity key. The merge stops
+//! at reliable messages and events, preserving reset, spawn, despawn and
+//! recipient-visibility boundaries. All retained data belongs to this PaneId;
+//! closing or superseding it discards the queue with the incarnation.
 //!
 //! # This queue is only half the bound, and the other half is in the page
 //!
@@ -57,11 +57,17 @@
 //! `Live` pane's traffic back into this queue, where the cap below can see it.
 //! The division is not arbitrary: the page is the only side that knows it has
 //! stopped draining, and the host is the only side that knows which messages may
-//! be dropped to make room.
+//! safely supersede queued state.
 
 use std::collections::VecDeque;
 
-use crate::core::messages::{ClientMessage, DeliveryClass, ServerMessageDiscriminants};
+use crate::core::codec::{JsonCodec, MessageCodec};
+use crate::core::messages::{
+    ClientMessage, DeliveryClass, ServerMessage, ServerMessageDiscriminants,
+};
+
+mod snapshot;
+use snapshot::{merge_delta, PendingSnapshot};
 
 use super::identity::PaneIdentity;
 
@@ -100,7 +106,7 @@ pub enum PaneLifecycle {
 }
 
 /// One outbound message waiting for its page.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PaneDispatch {
     /// The encoded `ServerMessage`, in the same JSON a phone would receive.
     pub json: String,
@@ -110,6 +116,44 @@ pub struct PaneDispatch {
     /// snapshot (see the module note). Set where the message is encoded, never
     /// parsed back out of the JSON.
     pub kind: ServerMessageDiscriminants,
+    pending: PendingSnapshot,
+}
+
+impl PaneDispatch {
+    pub(super) fn encoded(json: String, delivery: DeliveryClass, message: &ServerMessage) -> Self {
+        Self {
+            json,
+            delivery,
+            kind: ServerMessageDiscriminants::from(message),
+            pending: PendingSnapshot::for_message(delivery, message),
+        }
+    }
+
+    fn is_barrier(&self) -> bool {
+        matches!(self.pending, PendingSnapshot::Preserve)
+    }
+
+    fn absorb(&mut self, older: &Self) -> bool {
+        if self.kind != older.kind {
+            return false;
+        }
+        match (&older.pending, &self.pending) {
+            (PendingSnapshot::Replace, PendingSnapshot::Replace) => true,
+            (PendingSnapshot::Delta(old), PendingSnapshot::Delta(new)) => {
+                let Some(merged) = merge_delta(old, new) else {
+                    return false;
+                };
+                let Ok(json) = JsonCodec.encode_server(&merged) else {
+                    // Keep both originals if the merged payload cannot encode.
+                    return false;
+                };
+                self.json = json;
+                self.pending = PendingSnapshot::Delta(std::sync::Arc::new(merged));
+                true
+            }
+            _ => false,
+        }
+    }
 }
 
 /// What happened to a message handed to a full pane.
@@ -117,18 +161,12 @@ pub struct PaneDispatch {
 pub enum OutboundVerdict {
     /// Queued with room to spare.
     Queued,
-    /// Queued, replacing the older snapshot of the same kind that was still
-    /// waiting: the page will see only the newer one. Ordinary whenever the
+    /// Queued, replacing or composing with the older snapshot of the same kind
+    /// that was still waiting. Ordinary whenever the
     /// host outpaces the page — see the module note on coalescing.
     QueuedSuperseding,
-    /// Queued, and an older snapshot was dropped to make room. Ordinary under
-    /// load: the next snapshot supersedes the one that went.
-    QueuedDroppingSnapshot,
-    /// Discarded an incoming snapshot because the full queue is all reliable.
-    /// The snapshot is droppable; this does not exceed the reliable budget.
-    DroppedSnapshot,
-    /// Refused a reliable message. The pane is over its budget and every queued
-    /// message is reliable, so nothing may be dropped without breaking state.
+    /// Refused a message that could not safely supersede queued state. Even a
+    /// complete projection can be the producer's final change-only update.
     /// The caller should close the pane rather than pretend this was fine.
     Overflowed,
 }
@@ -195,41 +233,30 @@ impl Pane {
     }
 
     /// Queue something for the page. See the module note for the cap policy.
-    pub fn push_outbound(&mut self, dispatch: PaneDispatch) -> OutboundVerdict {
-        // A snapshot supersedes the queued snapshot of its own kind outright,
-        // full queue or not: only the newest is worth the page's time, and every
-        // one the page never sees is a synchronous script evaluation the frame
-        // does not pay. Reliable messages are never touched by this.
-        if dispatch.delivery == DeliveryClass::Snapshot {
+    pub fn push_outbound(&mut self, mut dispatch: PaneDispatch) -> OutboundVerdict {
+        // Never move a delta across Welcome, a despawn, a Station change or
+        // another ordered event. Those can change the meaning/visibility of it.
+        if !dispatch.is_barrier() {
             let superseded = self
                 .outbound
                 .iter()
-                .position(|d| d.delivery == DeliveryClass::Snapshot && d.kind == dispatch.kind);
+                .enumerate()
+                .rev()
+                .take_while(|(_, d)| !d.is_barrier())
+                .find_map(|(index, d)| (d.kind == dispatch.kind).then_some(index));
             if let Some(index) = superseded {
-                self.outbound.remove(index);
-                self.outbound.push_back(dispatch);
-                return OutboundVerdict::QueuedSuperseding;
+                if dispatch.absorb(&self.outbound[index]) {
+                    self.outbound.remove(index);
+                    self.outbound.push_back(dispatch);
+                    return OutboundVerdict::QueuedSuperseding;
+                }
             }
         }
         if self.outbound.len() < self.outbound_cap {
             self.outbound.push_back(dispatch);
             return OutboundVerdict::Queued;
         }
-        let oldest_snapshot = self
-            .outbound
-            .iter()
-            .position(|d| d.delivery == DeliveryClass::Snapshot);
-        match oldest_snapshot {
-            Some(index) => {
-                self.outbound.remove(index);
-                self.outbound.push_back(dispatch);
-                OutboundVerdict::QueuedDroppingSnapshot
-            }
-            None if dispatch.delivery == DeliveryClass::Snapshot => {
-                OutboundVerdict::DroppedSnapshot
-            }
-            None => OutboundVerdict::Overflowed,
-        }
+        OutboundVerdict::Overflowed
     }
 
     /// Take everything queued for the page, in order.
@@ -409,6 +436,7 @@ mod tests {
             json: tag.to_string(),
             delivery: DeliveryClass::Snapshot,
             kind,
+            pending: PendingSnapshot::Replace,
         }
     }
 
@@ -417,6 +445,7 @@ mod tests {
             json: tag.to_string(),
             delivery: DeliveryClass::Reliable,
             kind: ServerMessageDiscriminants::Welcome,
+            pending: PendingSnapshot::Preserve,
         }
     }
 
@@ -472,10 +501,7 @@ mod tests {
     }
 
     #[test]
-    fn an_overfull_pane_drops_its_oldest_snapshot_and_keeps_every_reliable_message() {
-        // The distinction the browser transport draws with its two
-        // DataChannels: a snapshot is superseded by the next one, a state
-        // transition is not.
+    fn an_overfull_pane_preserves_every_unsuperseded_message_and_reports_the_fault() {
         let mut registry = PaneRegistry::new(3);
         let id = registry.open(identity(1));
         let pane = registry.get_mut(id).unwrap();
@@ -487,30 +513,30 @@ mod tests {
         // Three DIFFERENT kinds, so the cap is what decides here and not the
         // same-kind coalescing rule (tested on its own below).
         assert_eq!(
-            pane.push_outbound(snapshot_of(ServerMessageDiscriminants::ShipDestroyed, "s1")),
+            pane.push_outbound(snapshot_of(ServerMessageDiscriminants::ShieldStatus, "s1")),
             OutboundVerdict::Queued
         );
         assert_eq!(
             pane.push_outbound(snapshot_of(
-                ServerMessageDiscriminants::ReturnedToLobby,
+                ServerMessageDiscriminants::SystemHullUpdate,
                 "s2"
             )),
             OutboundVerdict::Queued
         );
         assert_eq!(
-            pane.push_outbound(snapshot_of(ServerMessageDiscriminants::GameStarted, "s3")),
-            OutboundVerdict::QueuedDroppingSnapshot
+            pane.push_outbound(snapshot_of(ServerMessageDiscriminants::RepairState, "s3")),
+            OutboundVerdict::Overflowed
         );
         let queued: Vec<String> = pane.drain_outbound().into_iter().map(|d| d.json).collect();
         assert_eq!(
             queued,
-            vec!["welcome".to_string(), "s2".to_string(), "s3".to_string()],
-            "the oldest snapshot went; the reliable message stayed"
+            vec!["welcome".to_string(), "s1".to_string(), "s2".to_string()],
+            "neither change-only projection was discarded without a replacement"
         );
     }
 
     #[test]
-    fn a_newer_snapshot_of_the_same_kind_replaces_the_queued_one() {
+    fn replacement_stops_at_reliable_messages_and_keeps_the_newest_within_each_segment() {
         // The page only ever applies the newest snapshot of a kind, and every
         // stale one it is handed is a synchronous script evaluation the frame
         // pays for. The survivor sits where the newest arrived — at the tail —
@@ -528,24 +554,22 @@ mod tests {
             pane.push_outbound(reliable("assigned")),
             OutboundVerdict::Queued
         );
-        assert_eq!(
-            pane.push_outbound(snapshot("s2")),
-            OutboundVerdict::QueuedSuperseding
-        );
+        assert_eq!(pane.push_outbound(snapshot("s2")), OutboundVerdict::Queued);
         assert_eq!(
             pane.push_outbound(snapshot("s3")),
             OutboundVerdict::QueuedSuperseding
         );
-        assert_eq!(pane.queued_outbound(), 3);
+        assert_eq!(pane.queued_outbound(), 4);
         let queued: Vec<String> = pane.drain_outbound().into_iter().map(|d| d.json).collect();
         assert_eq!(
             queued,
             vec![
                 "welcome".to_string(),
+                "s1".to_string(),
                 "assigned".to_string(),
                 "s3".to_string()
             ],
-            "one snapshot survives, at the tail; every reliable message stays, in order"
+            "one snapshot survives per ordered segment; no snapshot crosses a reliable barrier"
         );
     }
 
@@ -606,8 +630,8 @@ mod tests {
         let id = registry.open(identity(1));
         let pane = registry.get_mut(id).unwrap();
         pane.mark_live();
-        pane.push_outbound(snapshot("old"));
         pane.push_outbound(reliable("welcome"));
+        pane.push_outbound(snapshot("old"));
         let batch = pane.drain_outbound();
 
         // These arrive while evaluate_script is working on the drained batch.
@@ -621,7 +645,24 @@ mod tests {
     }
 
     #[test]
-    fn requeue_sheds_old_snapshots_to_keep_concurrent_reliable_messages() {
+    fn requeue_never_merges_a_snapshot_across_a_reliable_barrier_to_avoid_overflow() {
+        let mut registry = PaneRegistry::new(2);
+        let id = registry.open(identity(1));
+        let pane = registry.get_mut(id).unwrap();
+        pane.mark_live();
+        pane.push_outbound(snapshot("old"));
+        pane.push_outbound(reliable("assigned"));
+        let batch = pane.drain_outbound();
+        pane.push_outbound(snapshot("new"));
+        assert!(pane.requeue_front(batch));
+        assert_eq!(
+            pane.drain_outbound(),
+            vec![snapshot("old"), reliable("assigned")]
+        );
+    }
+
+    #[test]
+    fn requeue_reports_overflow_instead_of_shedding_unsuperseded_snapshots() {
         let mut registry = PaneRegistry::new(2);
         let id = registry.open(identity(1));
         let pane = registry.get_mut(id).unwrap();
@@ -631,11 +672,11 @@ mod tests {
         let batch = pane.drain_outbound();
 
         pane.push_outbound(reliable("assigned"));
-        assert!(!pane.requeue_front(batch));
+        assert!(pane.requeue_front(batch));
         assert_eq!(pane.queued_outbound(), 2);
         assert_eq!(
             pane.drain_outbound(),
-            vec![reliable("welcome"), reliable("assigned")]
+            vec![reliable("welcome"), snapshot("old")]
         );
     }
 
@@ -670,7 +711,7 @@ mod tests {
         pane.push_outbound(reliable("b"));
         assert_eq!(
             pane.push_outbound(snapshot("s")),
-            OutboundVerdict::DroppedSnapshot
+            OutboundVerdict::Overflowed
         );
         assert_eq!(
             pane.push_outbound(reliable("c")),

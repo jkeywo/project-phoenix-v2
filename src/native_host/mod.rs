@@ -68,6 +68,7 @@ pub mod bridge_media;
 /// the ordinary `cargo test` CI runs. The winit adapter that opens real
 /// borderless-fullscreen windows from a resolved profile is [`bridge_display`].
 pub mod bridge_profile;
+pub mod connections;
 /// The host as its own rendezvous (issue #1353): the in-process, single-game
 /// subset of the rendezvous service, so a phone on the LAN joins over the
 /// delivery port with no external service anywhere. Behind the `host` feature

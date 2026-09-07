@@ -158,6 +158,7 @@ pub mod server_app;
 /// `server_app` under `SimPluginOptions::render`; presentation-only, outside
 /// the authoritative digest.
 pub mod server_app_render;
+pub mod session_connections;
 pub mod ship;
 pub mod ship_plugin;
 /// The canonical authoritative-state digest (issue #901). At the crate root

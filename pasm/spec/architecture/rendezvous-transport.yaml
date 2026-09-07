@@ -223,7 +223,7 @@ entities:
         - "[ai] It declares its transports honestly rather than by omission. Without the claim a joiner would spend the entire 8/16/30 s ladder, four times over, discovering that a host with no WebRTC has no WebRTC; with it, the joiner skips the direct rungs on the strength of the `joined` frame."
         - "[ai] The socket is tungstenite, the synchronous client, not one of its async wrappers: this crate has no async runtime and every native I/O surface it owns is a blocking std thread, so a runtime would be a new architectural dependency bought for one socket. Native-only behind the host feature; the browser build cannot reach any of it."
         - "[ai] The socket REDIALS on a backoff, mirroring the browser host's lostService(). A Durable Object eviction, a worker redeploy or a Wi-Fi blip would otherwise leave a process running an authoritative mission with no route in for the rest of it — and a native host has no viewscreen to reload. Losing the link clears the issued code AND the registered flag, so the reconnected socket re-registers on the service's next `ready` and the operator log prints the fresh the code. The old code is genuinely dead; keeping the same letters across a host drop needs persistence in the service and is #1115's, exactly as on the browser side."
-        - "[ai] Identity guards are the browser's, in Rust: a reserved token (__local_console__, the ai: prefix) is refused AT the transport with an in-band JoinRefused rather than dropped downstream — a peer left attached under one still sits in audience() and receives that token's private projection — and a duplicate token severs the prior peer without reporting a disconnect, because on a native host EVERY crew member is relayed, so re-Identify on a fresh peer id is the ordinary reconnect rather than an exotic case."
+        - "[ai] R2a/#1410 replaces each relay's private token ownership with session-connection-registry shared across composed LAN/cloud/pane legs. Compatibility admission remains here; only accepted Identify can bind, reserved/malformed/overlong or changed identities are refused in-band, current-owner recipient selection applies to both classes, and superseded peers are physically closed without a Session departure. Reliable overflow drops retain the physical incarnation so delayed teardown cannot target a replacement."
         - "[ai] It cannot log for itself: plog! takes a Bevy system parameter and this is a resource Bevy calls. So it queues RelayNotice values on a shared handle and the host binary's report_relay_notices drains them onto its operator log, beside the join code it prints."
     architecture:
       kind: transport-adapter
@@ -247,6 +247,7 @@ entities:
         - HandshakeFrame
       tests:
         - src/native_host/relay_transport_tests.rs
+        - tests/native_host_panes/session_connections.rs
         - tests/native_relay_protocol.rs
         - tests/native_relay_live.rs
         - tests/native_direct_join.rs

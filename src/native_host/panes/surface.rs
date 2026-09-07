@@ -132,6 +132,12 @@ pub fn pump_pane(bus: &PaneBus, id: PaneId, surface: &mut dyn PaneSurface) -> Pa
     if !surface.is_ready() {
         return report;
     }
+    if bus.is_superseded(id) {
+        // Keep the inert page's own queue bounded without treating an ordinary
+        // connection handoff as a stream of page faults or admitting its input.
+        surface.drain();
+        return report;
+    }
     bus.mark_live(id);
 
     let batch = bus.take_outbound(id);
@@ -238,6 +244,7 @@ mod tests {
         let bus = PaneBus::default();
         let id =
             bus.open(PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000001", "Ada").unwrap());
+        super::super::transport::identify_test_pane(&bus, id);
         (bus, id)
     }
 
@@ -294,6 +301,7 @@ mod tests {
         let bus = PaneBus::with_capacity(2);
         let id =
             bus.open(PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000001", "Ada").unwrap());
+        super::super::transport::identify_test_pane(&bus, id);
         let snapshot = |reason: &str| ServerMessage::GameOver {
             reason: reason.into(),
             outcome: None,
@@ -322,6 +330,7 @@ mod tests {
         let bus = PaneBus::with_capacity(2);
         let id =
             bus.open(PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000001", "Ada").unwrap());
+        super::super::transport::identify_test_pane(&bus, id);
         broadcast(&bus, ServerMessage::GameStarted);
         broadcast(&bus, ServerMessage::ShipDestroyed);
         let mut surface = EnqueueThenFail {
@@ -345,6 +354,7 @@ mod tests {
         let bus = PaneBus::with_capacity(2);
         let id =
             bus.open(PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000001", "Ada").unwrap());
+        super::super::transport::identify_test_pane(&bus, id);
         broadcast(&bus, ServerMessage::GameStarted);
         broadcast(&bus, ServerMessage::ShipDestroyed);
         let mut surface = EnqueueThenFail {

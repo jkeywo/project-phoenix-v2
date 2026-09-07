@@ -1501,6 +1501,11 @@ fn follow_layout_stations(
             // seated station, so this one is simply opened there.
             continue;
         };
+        if bus.0.is_superseded(pane) {
+            // Resizing its monitor or retiling its neighbour is not an
+            // operator request to reconnect an identity that moved elsewhere.
+            continue;
+        }
         if let Some(note) = cause.note(console, monitor) {
             crate::pinfo!(
                 log,
@@ -1699,6 +1704,12 @@ fn reconcile_seated_consoles(
     let mut surrender: Vec<(crate::core::messages::StationId, MonitorIdentity)> = Vec::new();
     for station in &seated {
         let pane = bus.0.open_pane_for_name(&station.0);
+        if pane.is_some_and(|id| bus.0.is_superseded(id)) {
+            // The Session moved to another connection. This is neither a
+            // crashed view nor authority to change the operator's screen plan.
+            missing.remove(station);
+            continue;
+        }
         // BOTH halves, because either alone is a lie: a pane with no slot is
         // built on the wrong window (or not at all), and a slot with no pane is
         // a lit screen with nothing on it.
@@ -2409,6 +2420,7 @@ mod tests {
         let pane =
             bus.open(PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000001", "Ada").unwrap());
         bus.mark_live(pane);
+        crate::native_host::panes::transport::identify_test_pane(&bus, pane);
         let token = bus.token_of(pane).unwrap();
         app.insert_resource(PaneBusResource(bus.clone()));
         app.add_systems(Update, watch_runtime_displays);
@@ -2555,10 +2567,12 @@ mod tests {
         let ada =
             bus.open(PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000001", "Ada").unwrap());
         bus.mark_live(ada);
+        crate::native_host::panes::transport::identify_test_pane(&bus, ada);
         let ada_token = bus.token_of(ada).unwrap();
         let grace =
             bus.open(PaneIdentity::adopt("3f1a6c2e-0a11-4b3c-9d55-000000000002", "Grace").unwrap());
         bus.mark_live(grace);
+        crate::native_host::panes::transport::identify_test_pane(&bus, grace);
         app.insert_resource(PaneBusResource(bus.clone()));
         app.add_systems(Update, watch_runtime_displays);
 
@@ -3341,6 +3355,7 @@ mod tests {
         app.update();
         let pane = bus.open_pane_for_name("helm").unwrap();
         bus.mark_live(pane);
+        crate::native_host::panes::transport::identify_test_pane(&bus, pane);
         let token = bus.token_of(pane).unwrap();
         let window = app.world().resource::<BridgeStationSurfaces>().0[0].window;
         // Drain the view the open queued, as the pane host does once a frame,
@@ -3598,6 +3613,7 @@ mod tests {
         app.update();
         let helm_pane = bus.open_pane_for_name("helm").unwrap();
         bus.mark_live(helm_pane);
+        crate::native_host::panes::transport::identify_test_pane(&bus, helm_pane);
         let helm_token = bus.token_of(helm_pane).unwrap();
         bus.mark_live(bus.open_pane_for_name("weapons").unwrap());
         assert_eq!(bus.open_count(), 2);
@@ -3715,6 +3731,7 @@ mod tests {
         app.update();
         let pane = bus.open_pane_for_name("helm").unwrap();
         bus.mark_live(pane);
+        crate::native_host::panes::transport::identify_test_pane(&bus, pane);
         let token = bus.token_of(pane).unwrap();
         bus.take_pending_views();
 
@@ -4642,6 +4659,86 @@ mod tests {
     // to be composited onto, leaves a station card claiming a screen that is
     // black, with nothing retrying and nothing saying so. These pin the repair:
     // a bounded rebuild on the same identity, and then an honest Backfill.
+
+    #[test]
+    fn a_superseded_console_is_not_recreated_or_unseated_when_its_slot_is_missing() {
+        use crate::native_host::connections::SharedConnections;
+        use crate::native_host::transport::NativeTransport;
+        let (mut app, bus) = console_host();
+        let shared = SharedConnections::default();
+        bus.transport().share_connections(shared.clone());
+        seat(&mut app, "helm", BENQ);
+        app.update();
+        let pane = bus.open_pane_for_name("helm").unwrap();
+        crate::native_host::panes::transport::identify_test_pane(&bus, pane);
+        bus.mark_live(pane);
+        bus.take_pending_views();
+        let token = bus.token_of(pane).unwrap();
+        {
+            let mut connections = shared.lock();
+            let leg = connections.new_leg();
+            let phone = connections.open(leg);
+            connections.bind(phone, &token).unwrap();
+        }
+        app.world_mut()
+            .resource_mut::<BridgeStationSurfaces>()
+            .0
+            .iter_mut()
+            .for_each(|surface| surface.panes.clear());
+        for _ in 0..CONSOLE_MISSING_GRACE_FRAMES * 5 {
+            app.update();
+        }
+        assert!(bus.is_superseded(pane));
+        assert_eq!(bus.open_pane_for_name("helm"), Some(pane));
+        assert!(bus.take_pending_views().is_empty());
+        let layout = app.world().resource::<BridgeLayoutResource>();
+        assert_eq!(
+            layout.layout.monitor_of(&station("helm")),
+            Some(&MonitorIdentity::new(BENQ))
+        );
+        assert!(layout.notices.is_empty());
+
+        // A neighbour changes the split, but nobody reopened the superseded
+        // console. The geometry rebuild sweep must not mint a fresh participant.
+        seat(&mut app, "weapons", BENQ);
+        app.update();
+        assert_eq!(bus.open_pane_for_name("helm"), Some(pane));
+        let new_views = bus.take_pending_views();
+        assert_eq!(new_views.len(), 1, "only the new neighbour gets a view");
+        assert_eq!(bus.name_of(new_views[0].0).as_deref(), Some("weapons"));
+        unseat(&mut app, "weapons");
+        app.update();
+        assert_eq!(bus.open_pane_for_name("helm"), Some(pane));
+        assert!(bus.take_pending_views().is_empty());
+
+        let benq = benq_entity(&mut app);
+        {
+            let mut entity = app.world_mut().entity_mut(benq);
+            let mut monitor = entity.get_mut::<Monitor>().unwrap();
+            monitor.physical_width = 1280;
+            monitor.physical_height = 1024;
+        }
+        app.update();
+        assert_eq!(bus.open_pane_for_name("helm"), Some(pane));
+        assert!(bus.is_superseded(pane));
+        assert!(bus.take_pending_views().is_empty());
+        assert_eq!(rect_of(&app, "helm").width, 1280);
+        assert!(app
+            .world()
+            .resource::<BridgeLayoutResource>()
+            .notices
+            .is_empty());
+
+        // Only an explicit off/on creates a new console, with a new identity.
+        unseat(&mut app, "helm");
+        app.update();
+        seat(&mut app, "helm", BENQ);
+        app.update();
+        let reopened = bus.open_pane_for_name("helm").unwrap();
+        assert_ne!(reopened, pane);
+        assert_ne!(bus.token_of(reopened).as_deref(), Some(token.as_str()));
+        assert!(!bus.is_superseded(reopened));
+    }
 
     #[test]
     fn a_healthy_console_is_never_touched_by_the_reconciler() {
@@ -5672,6 +5769,7 @@ mod tests {
         app.update();
         let pane = bus.open_pane_for_name("helm").unwrap();
         bus.mark_live(pane);
+        crate::native_host::panes::transport::identify_test_pane(&bus, pane);
         let token = bus.token_of(pane).unwrap();
         bus.take_pending_views();
 

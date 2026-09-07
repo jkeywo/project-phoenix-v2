@@ -199,10 +199,10 @@ const TERMINAL_REASONS = new Set([
   // does route a fleet refusal through the joiner must not learn a second one.
   'fleet-full', 'recovery-only',
   // The host's own StampMismatch::code() values, relayed through JoinRefused,
-  // plus the native host's refusal of a token only its runtime may use — which
+  // plus the native host's refusal of an invalid or reserved token — which
   // this page would present again, identically, on every retry.
   'protocol-mismatch', 'content-id-mismatch', 'content-epoch-mismatch',
-  'bundle-content-missing', 'client-stamp-missing', 'reserved-token',
+  'bundle-content-missing', 'client-stamp-missing', 'reserved-token', 'invalid-token',
 ]);
 
 /** True when a machine reason is worth another attempt. */

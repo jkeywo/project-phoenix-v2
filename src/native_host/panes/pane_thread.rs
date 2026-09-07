@@ -3277,6 +3277,7 @@ mod loop_tests {
         // projection, so a lobby that drained the bus — or a console that
         // drained the lobby's queue — would be the whole separation undone.
         let (bus, console) = bus_with_pane();
+        super::super::transport::identify_test_pane(&bus, console);
         let bridge = HostLobbyBridge::new();
         bridge.push_lobby_state("{}");
         broadcast(&bus, ServerMessage::GameStarted);

@@ -90,6 +90,9 @@ pub enum PaneLifecycle {
     Loading,
     /// Open and taking traffic in both directions.
     Live,
+    /// The Session moved to another connection. Keep its screen reservation
+    /// until the operator changes it, but accept no traffic or auto-recovery.
+    Superseded,
     /// Closed. Its session is the lobby's business now — the same disconnect
     /// path a phone that walked out of range takes, which keeps the station
     /// held and flips it to `Backfill`.
@@ -173,6 +176,12 @@ impl Pane {
         if self.lifecycle == PaneLifecycle::Loading {
             self.lifecycle = PaneLifecycle::Live;
         }
+    }
+
+    pub(crate) fn supersede(&mut self) {
+        self.lifecycle = PaneLifecycle::Superseded;
+        self.inbound.clear();
+        self.outbound.clear();
     }
 
     /// Queue something the page asked for.
@@ -346,12 +355,12 @@ impl PaneRegistry {
         self.panes.iter().find(|p| p.id == id)
     }
 
-    /// One pane by handle, mutably. Closed panes are **not** returned: nothing
-    /// may queue traffic for a pane that has gone.
+    /// One pane that may exchange traffic. Closed and superseded panes are
+    /// excluded; physical presence alone does not permit further queue writes.
     pub fn get_mut(&mut self, id: PaneId) -> Option<&mut Pane> {
-        self.panes
-            .iter_mut()
-            .find(|p| p.id == id && p.lifecycle != PaneLifecycle::Closed)
+        self.panes.iter_mut().find(|p| {
+            p.id == id && matches!(p.lifecycle, PaneLifecycle::Loading | PaneLifecycle::Live)
+        })
     }
 
     /// Every open pane, in the order they were opened.

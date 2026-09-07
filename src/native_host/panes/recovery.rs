@@ -247,6 +247,7 @@ mod tests {
         let original = bus.open(identity(1));
         let token = bus.token_of(original).unwrap();
         bus.mark_live(original);
+        super::super::transport::identify_test_pane(&bus, original);
 
         bus.fault(original, PaneFault::ViewCrashed);
         let outcomes = service_faults(&bus);
@@ -356,7 +357,9 @@ mod tests {
         let bystander = bus.open(identity(2));
         let token = bus.token_of(failed).unwrap();
         bus.mark_live(failed);
+        super::super::transport::identify_test_pane(&bus, failed);
         bus.mark_live(bystander);
+        super::super::transport::identify_test_pane(&bus, bystander);
 
         bus.fault(failed, PaneFault::ViewCrashed);
         let (recreated, _) = service_faults(&bus)[0]
@@ -364,6 +367,7 @@ mod tests {
             .clone()
             .expect("a crash recreates");
         bus.mark_live(recreated);
+        super::super::transport::identify_test_pane(&bus, recreated);
 
         bus.transport().dispatch(TransportDispatch {
             target: &Target::Token(token),
@@ -405,6 +409,7 @@ mod tests {
         let original = bus.open(identity(1));
         let token = bus.token_of(original).unwrap();
         bus.mark_live(original);
+        super::super::transport::identify_test_pane(&bus, original);
         bus.fault(original, PaneFault::ViewCrashed);
         let (recreated, _) = service_faults(&bus)[0]
             .recreated

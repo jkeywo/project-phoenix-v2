@@ -30,7 +30,7 @@
 //!   ▼
 //! flush_native_outbound → PaneTransport::dispatch [transport]
 //!   ▼
-//! routing::pane_receives                          ← the projection boundary
+//! session_connections::ConnectionRegistry        ← current-owner routing
 //!   ▼
 //! Pane's outbound queue → pane_apply_script       [registry, document]
 //!   ▼
@@ -90,7 +90,6 @@ pub mod pane_thread;
 pub mod placement;
 pub mod recovery;
 pub mod registry;
-pub mod routing;
 pub mod surface;
 pub mod surface_stats;
 pub mod transport;
@@ -293,6 +292,5 @@ pub use identity::{IdentityRefusal, PaneIdentity};
 pub use placement::{home_for_pane, NoHome, PaneHome, PaneTile};
 pub use recovery::{service_faults, FaultOutcome, PaneFault};
 pub use registry::{PaneDispatch, PaneId, PaneLifecycle, PaneRegistry};
-pub use routing::pane_receives;
 pub use surface::{pump_pane, PanePumpReport, PaneSurface, PaneSurfaceError, RecordingSurface};
 pub use transport::{PaneBus, PaneInputRefusal, PaneTransport};

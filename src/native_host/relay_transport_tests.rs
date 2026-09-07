@@ -140,7 +140,7 @@ fn peer_joined(peer: &str) -> RendezvousFrame {
 /// Drive a peer all the way to an identified crew member, as the real sequence
 /// does: the service announces it, it presents a stamp, it identifies.
 fn admit(
-    t: &mut RelayTransport,
+    t: &mut impl NativeTransport,
     socket: &FakeSocket,
     peer: &str,
     token: &str,
@@ -896,4 +896,183 @@ fn an_undecodable_frame_is_a_notice_rather_than_a_panic() {
 fn it_names_itself_in_the_operator_log() {
     let (t, _socket) = transport();
     assert_eq!(t.name(), "ws-relay");
+}
+
+#[test]
+fn cross_leg_replacement_routes_once_and_ignores_stale_input_and_close() {
+    use crate::native_host::transport::PairedTransport;
+    let (lan, lan_socket) = transport();
+    let (cloud, cloud_socket) = transport();
+    let mut host = PairedTransport::new(lan, cloud);
+    admit(&mut host, &lan_socket, "same-peer-id", "crew-A");
+    let moved = admit(&mut host, &cloud_socket, "same-peer-id", "crew-A");
+    assert!(
+        matches!(moved.as_slice(), [TransportEvent::Received { token, .. }] if token == "crew-A")
+    );
+    // Physical peer ids can coincide on separate services. Their leg and
+    // incarnation keep the old command/close from naming the new connection.
+    lan_socket.arrive(&relayed(
+        "same-peer-id",
+        &JsonCodec
+            .encode_client(&ClientMessage::ReleaseStation)
+            .unwrap(),
+    ));
+    lan_socket.arrive(&RendezvousFrame {
+        peer: Some("same-peer-id".into()),
+        ..frame("relay-peer-left")
+    });
+    assert!(host.poll().is_empty());
+    assert_eq!(lan_socket.sent_of("relay-close").len(), 1);
+    for delivery in [DeliveryClass::Reliable, DeliveryClass::Snapshot] {
+        for target in [
+            Target::Token("crew-A".into()),
+            Target::All,
+            Target::AllExcept("other".into()),
+        ] {
+            lan_socket.outbound.lock().unwrap().clear();
+            cloud_socket.outbound.lock().unwrap().clear();
+            host.dispatch(TransportDispatch {
+                target: &target,
+                msg: &ServerMessage::GameStarted,
+                delivery,
+            });
+            assert!(lan_socket.sent_of("relay").is_empty());
+            let delivered = cloud_socket.sent_of("relay");
+            assert_eq!(delivered.len(), 1);
+            assert_eq!(
+                delivered[0].class.as_deref(),
+                Some(if delivery == DeliveryClass::Reliable {
+                    CLASS_RELIABLE
+                } else {
+                    CLASS_SNAPSHOT
+                })
+            );
+        }
+    }
+    cloud_socket.outbound.lock().unwrap().clear();
+    host.dispatch(TransportDispatch {
+        target: &Target::AllExcept("crew-A".into()),
+        msg: &ServerMessage::GameStarted,
+        delivery: DeliveryClass::Reliable,
+    });
+    assert!(cloud_socket.sent_of("relay").is_empty());
+    cloud_socket.arrive(&relayed(
+        "same-peer-id",
+        &JsonCodec
+            .encode_client(&ClientMessage::SetReady { ready: true })
+            .unwrap(),
+    ));
+    assert!(
+        matches!(host.poll().as_slice(), [TransportEvent::Received { token, msg: ClientMessage::SetReady { ready: true } }] if token == "crew-A")
+    );
+}
+
+#[test]
+fn identify_is_immutable_and_invalid_tokens_never_enter_routing() {
+    let (mut host, socket) = transport();
+    for (index, token) in [
+        "".to_string(),
+        "a".repeat(65),
+        "white space".into(),
+        "line\nfeed".into(),
+        "__local_console__".into(),
+        "ai:helm".into(),
+    ]
+    .iter()
+    .enumerate()
+    {
+        assert!(admit(&mut host, &socket, &format!("invalid-{index}"), token).is_empty());
+    }
+    assert!(host.audience(&Target::All).is_empty());
+    let token = "é".repeat(64);
+    assert_eq!(admit(&mut host, &socket, "valid", &token).len(), 1);
+    let identify = |token: String| {
+        JsonCodec
+            .encode_client(&ClientMessage::Identify {
+                token,
+                name: "Ada".into(),
+            })
+            .unwrap()
+    };
+    socket.arrive(&relayed("valid", &identify(token.clone())));
+    assert_eq!(
+        host.poll().len(),
+        1,
+        "same-link re-Identify remains idempotent"
+    );
+    socket.arrive(&relayed("valid", &identify("someone-else".into())));
+    assert!(host.poll().is_empty());
+    assert!(host.audience(&Target::All).is_empty());
+    assert_eq!(host.poll(), vec![TransportEvent::Disconnected { token }]);
+    assert!(host.poll().is_empty());
+}
+
+#[test]
+fn superseded_pane_does_not_recover_or_reclaim_its_session() {
+    use crate::native_host::panes::identity::PaneIdentity;
+    use crate::native_host::panes::{service_faults, PaneBus, PaneFault};
+    use crate::native_host::transport::PairedTransport;
+    let bus = PaneBus::with_capacity(2);
+    let pane = bus.open(PaneIdentity::mint("helm"));
+    let token = bus.token_of(pane).unwrap();
+    let (relay, socket) = transport();
+    let (lan, _) = transport();
+    let mut host = PairedTransport::new(PairedTransport::new(bus.transport(), lan), relay);
+    bus.submit(
+        pane,
+        ClientMessage::Identify {
+            token: token.clone(),
+            name: "helm".into(),
+        },
+    )
+    .unwrap();
+    assert_eq!(host.poll().len(), 1);
+    bus.mark_live(pane);
+    host.dispatch(TransportDispatch {
+        target: &Target::All,
+        msg: &ServerMessage::GameStarted,
+        delivery: DeliveryClass::Reliable,
+    });
+    assert_eq!(admit(&mut host, &socket, "phone", &token).len(), 1);
+    assert!(bus.is_superseded(pane));
+    assert!(
+        bus.is_open(pane),
+        "screen reservation remains the operator's"
+    );
+    assert_eq!(bus.open_pane_for_name("helm"), Some(pane));
+    assert!(
+        bus.take_outbound(pane).is_empty(),
+        "old reliable projection drained at handoff"
+    );
+    assert!(bus.submit(pane, ClientMessage::ReleaseStation).is_err());
+    assert!(bus
+        .submit(
+            pane,
+            ClientMessage::Identify {
+                token: token.clone(),
+                name: "helm".into()
+            }
+        )
+        .is_err());
+    for _ in 0..10 {
+        bus.fault(pane, PaneFault::ViewCrashed);
+        assert!(service_faults(&bus).is_empty());
+        host.dispatch(TransportDispatch {
+            target: &Target::Token(token.clone()),
+            msg: &ServerMessage::GameStarted,
+            delivery: DeliveryClass::Reliable,
+        });
+    }
+    assert!(bus.take_pending_views().is_empty());
+    let mut surface = crate::native_host::panes::RecordingSurface::ready();
+    surface.queue_record(r#"{"type":"ReleaseStation"}"#);
+    let report = crate::native_host::panes::pump_pane(&bus, pane, &mut surface);
+    assert_eq!(report, crate::native_host::panes::PanePumpReport::default());
+    assert!(crate::native_host::panes::PaneSurface::drain(&mut surface).is_empty());
+    bus.close(pane);
+    assert!(bus.recreate(pane).is_none());
+    assert!(
+        host.poll().is_empty(),
+        "closing stale glass cannot evict the phone"
+    );
 }

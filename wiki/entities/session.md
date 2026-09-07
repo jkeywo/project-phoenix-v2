@@ -2,8 +2,8 @@
 title: Session
 type: entity
 tags: [session, server, identity, reconnect, readiness]
-sources: [src/lobby/session.rs, src/lobby/start_policy.rs, src/lobby/handler.rs, src/lobby/server.rs, src/gm_roster.rs, src/server/bridge.rs]
-updated: 2026-08-31
+sources: [src/session_connections.rs, src/native_host/connections.rs, src/lobby/session.rs, src/lobby/start_policy.rs, src/lobby/handler.rs, src/lobby/server.rs, src/gm_roster.rs, src/server/bridge.rs]
+updated: 2026-09-07
 ---
 
 # Session
@@ -17,6 +17,15 @@ persistent `localStorage` copy the first tab adopts — not the ephemeral
 rendezvous peer id.
 The host bridge maps a peer to that token after `Identify` and passes only the
 token into simulation message handling.
+
+Native physical connections are owned separately by
+`session_connections::ConnectionRegistry`. Paired native transports share
+that registry across LAN, cloud and panes. A leg/incarnation handle binds once
+on accepted `Identify`; the last accepted connection owns both input and
+recipient routing, so a stale connection cannot issue commands or disconnect
+its replacement. Tokens are validated at ingress without changing the key.
+A pane superseded by a phone stays inert on its assigned screen until the
+operator changes it, without triggering crash recovery.
 
 ## Owned state
 

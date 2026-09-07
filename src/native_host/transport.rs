@@ -1,61 +1,36 @@
-//! The native transport seam (issue #1121).
+//! Native adaptation of the simulation's frame-driven transport seam.
 //!
-//! The simulation's entire network surface is three Bevy messages declared in
-//! [`crate::lobby::server`]: [`InboundMessage`], [`PlayerDisconnected`] and
-//! [`OutboundMessage`]. The browser host adapts them to PeerJS with exactly two
-//! systems — `drain_inbound` in `PreUpdate` and `flush_outbound` in `PostUpdate`
-//! (`server::bridge`) — and everything else about the transport is JavaScript.
+//! The simulation exchanges `InboundMessage`, `PlayerDisconnected` and
+//! `OutboundMessage`. The browser adapts those messages in `server::bridge`;
+//! native adapters implement [NativeTransport] and use the same lobby,
+//! command Admission and audience projection.
 //!
-//! This module is the native statement of the same two systems, against a
-//! [`NativeTransport`] trait a real transport plugs into. It exists **now**,
-//! ahead of that transport, for two reasons:
+//! LAN and cloud both use [RelayTransport](super::relay_transport::RelayTransport)
+//! over different physical sockets. Embedded Station panes use
+//! [PaneTransport](super::panes::PaneTransport), retaining their own minted
+//! identity gate and queues. [PairedTransport] shares the pure
+//! [ConnectionRegistry](crate::session_connections::ConnectionRegistry) across
+//! every composed leg; only the current physical owner can supply a Session's
+//! input, owe its departure or receive its targeted messages.
 //!
-//! * The Phoenix WebRTC transport that replaces PeerJS is issue #1112, in
-//!   flight on another track. PeerJS is browser JavaScript and cannot run in a
-//!   native process at all, so issue #1121's "browser clients join the native
-//!   host" acceptance criterion is **deferred** to it. What #1121 owes it is a
-//!   seam that is already wired, already ordered correctly against the fixed
-//!   tick, and already applying the reserved-token gate — so connecting it is
-//!   an `insert_resource`, not a re-plumb.
+//! # Connection ownership and Session authority
 //!
-//!   Both halves of that arrived, as `insert_resource`s and nothing else:
-//!   [`crate::native_host::relay_transport`] (#1113) carries crew over the
-//!   rendezvous service's game relay, and
-//!   [`crate::native_host::direct_join`] (#1353) makes the host its OWN
-//!   rendezvous so a LAN crew reaches it on its delivery port with no service
-//!   anywhere. The reserved-token obligation this module documents below is
-//!   owed by both, and both discharge it through the same code, because the
-//!   direct leg plugs in one layer lower — as a `RelaySocket` under the same
-//!   `RelayTransport`.
-//! * Issue #1122's in-process Ultralight pane is the same shape: PRD #1093 says
-//!   an in-process participant "may avoid network serialisation but cannot
-//!   bypass command admission or projection boundaries". A pane is therefore a
-//!   [`NativeTransport`] that skips the JSON codec and hands over a decoded
-//!   [`ClientMessage`] — which is what this trait carries, rather than bytes.
-//!
-//! # What the seam does NOT do
-//!
-//! It does not mint tokens, map connections, or decide who is who. Admission is
-//! still `command_admission`'s and `lobby::handler`'s; audience projection is
-//! still `core::broadcast::audience`'s, resolving every variant through
-//! `SessionManager::holder_for_station`. A local participant that is a
-//! registered session holding a station is projected to identically to a phone,
-//! with no code here. The one thing the seam owes on its own account is the
-//! **reserved-token refusal**, because the browser applies it at its own
-//! ingress (`server.html`'s `isPeerTokenAllowed`) as well as inside
-//! `handle_identify`: an in-process path that skipped it would be a hole the
-//! network path is not. See [`drain_native_inbound`].
+//! Build/role admission and physical send/close stay in each adapter. The
+//! registry binds an accepted Identify once and handles replacement before
+//! teardown. It never changes authoritative Session state, Station Admission
+//! or audience projection. This Bevy seam retains reserved-token defence for
+//! queue-only adapters too.
 //!
 //! # Ordering
 //!
-//! Ingress runs in `PreUpdate` and egress in `PostUpdate`, i.e. the seam is
-//! **frame**-driven while the simulation is **tick**-driven — deliberately, and
-//! for the reason `server::bridge` documents: Bevy defers message cleanup until
-//! the fixed schedules have observed a frame's messages, so a frame that runs
-//! zero fixed steps loses nothing.
+//! Ingress runs in PreUpdate and egress in PostUpdate: the seam is frame-driven,
+//! while the simulation is tick-driven. Bevy defers message cleanup until the
+//! fixed schedules have observed a frame's messages, so a frame that runs zero
+//! fixed steps loses nothing.
 
 use bevy::prelude::*;
 
+use super::connections::SharedConnections;
 use crate::core::messages::{ClientMessage, DeliveryClass, ServerMessage};
 use crate::lobby::handler::Target;
 use crate::lobby::{InboundMessage, OutboundMessage, PlayerDisconnected};
@@ -97,6 +72,10 @@ pub struct TransportDispatch<'a> {
 /// polled once per frame from `PreUpdate` and dispatched to once per frame from
 /// `PostUpdate`; neither is called from a fixed step, and neither may block.
 pub trait NativeTransport: Send + Sync + 'static {
+    /// Compose before polling any crew traffic. Physical adapters share one
+    /// connection registry; queue-only test transports need no connection map.
+    fn share_connections(&mut self, _connections: SharedConnections) {}
+
     /// Everything that arrived since the last poll, in arrival order.
     fn poll(&mut self) -> Vec<TransportEvent>;
 
@@ -211,17 +190,10 @@ fn flush_native_outbound(
 
 /// Two [`NativeTransport`]s driven as one (issue #1122).
 ///
-/// A native host with local Station panes *and* remote participants has two
-/// transports and one seam. This is that composition, and it is deliberately
-/// dumb: poll `first` then `second`, dispatch to both, and let each decide for
-/// itself whether the `Target` names anyone it knows. Neither sees the other's
-/// traffic, because neither is asked about it — the pane bus routes by token
-/// through `panes::routing`, and a network transport routes by its own
-/// connection table, exactly as `server.html`'s does.
-///
-/// Issue #1112 is the intended production user: it brings the network half, and
-/// what it needs from #1122 is that installing it alongside the panes is an
-/// `insert_resource`, not a re-plumb. It nests, so a third transport is
+/// LAN, cloud and pane adapters share one connection registry here. Poll order
+/// remains first then second, preserving order within each leg. Dispatch visits
+/// both, but only the current owner's physical connection can receive a Target.
+/// Compose before polling crew traffic. It nests, so a third leg is
 /// `PairedTransport::new(PairedTransport::new(a, b), c)`.
 pub struct PairedTransport<A: NativeTransport, B: NativeTransport> {
     first: A,
@@ -231,7 +203,10 @@ pub struct PairedTransport<A: NativeTransport, B: NativeTransport> {
 impl<A: NativeTransport, B: NativeTransport> PairedTransport<A, B> {
     /// Drive `first` and `second` as one transport. Polled in that order, so a
     /// frame's events are ordered by transport and then by arrival within it.
-    pub fn new(first: A, second: B) -> Self {
+    pub fn new(mut first: A, mut second: B) -> Self {
+        let connections = SharedConnections::default();
+        first.share_connections(connections.clone());
+        second.share_connections(connections);
         Self { first, second }
     }
 }
@@ -246,6 +221,10 @@ impl<A: NativeTransport, B: NativeTransport> PairedTransport<A, B> {
 /// `Box<dyn NativeTransport>` and inserts that — and adding a fourth leg later
 /// is one more fold, not sixteen arms.
 impl NativeTransport for Box<dyn NativeTransport> {
+    fn share_connections(&mut self, connections: SharedConnections) {
+        (**self).share_connections(connections);
+    }
+
     fn poll(&mut self) -> Vec<TransportEvent> {
         (**self).poll()
     }
@@ -260,6 +239,11 @@ impl NativeTransport for Box<dyn NativeTransport> {
 }
 
 impl<A: NativeTransport, B: NativeTransport> NativeTransport for PairedTransport<A, B> {
+    fn share_connections(&mut self, connections: SharedConnections) {
+        self.first.share_connections(connections.clone());
+        self.second.share_connections(connections);
+    }
+
     fn poll(&mut self) -> Vec<TransportEvent> {
         let mut events = self.first.poll();
         events.extend(self.second.poll());

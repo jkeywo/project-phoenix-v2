@@ -61,7 +61,9 @@ use crate::core::rendezvous::{
 };
 use crate::delivery::stamp::DeliveryStamp;
 use crate::lobby::handler::Target;
+use crate::native_host::connections::{ConnectionLeg, SharedConnections};
 use crate::native_host::transport::{NativeTransport, TransportDispatch, TransportEvent};
+use crate::session_connections::{BindRefusal, ConnectionId};
 
 /// A duplex text-frame pipe to the rendezvous service.
 ///
@@ -114,19 +116,22 @@ pub struct RelayHostConfig {
 /// to its own sentence in `gui/join-code.js`'s `REASON_STRING_IDS`.
 pub const RESERVED_TOKEN_CODE: &str = "reserved-token";
 
+/// A malformed or changed connection identity cannot be repaired by retrying
+/// the same saved token. The browser treats this refusal as terminal.
+pub const INVALID_TOKEN_CODE: &str = "invalid-token";
+
 /// One crew member the service is carrying for us.
 struct RelayPeer {
+    connection: ConnectionId,
     /// True once the compatibility handshake admitted this build.
     admitted: bool,
     /// True once refused: nothing it sends afterwards may reach the simulation.
     refused: bool,
-    /// The session token it presented on `Identify`. `None` until then, which
-    /// is why a message before `Identify` has nowhere to go.
-    token: Option<String>,
 }
 
 /// A [`NativeTransport`] whose wire is the rendezvous service's game relay.
 pub struct RelayTransport {
+    connections: ConnectionLeg,
     socket: Box<dyn RelaySocket>,
     config: RelayHostConfig,
     codec: JsonCodec,
@@ -146,7 +151,7 @@ pub struct RelayTransport {
     link_up: bool,
     /// Peers whose link failed inside [`NativeTransport::dispatch`], which
     /// cannot emit events. Drained by the next [`NativeTransport::poll`].
-    pending_drops: Vec<String>,
+    pending_drops: Vec<(String, ConnectionId)>,
     /// Anything the operator should see, drained by the host each frame.
     notices: RelayNotices,
 }
@@ -202,6 +207,7 @@ impl RelayTransport {
     /// Build a transport over `socket` and register as a host at once.
     pub fn new(socket: impl RelaySocket, config: RelayHostConfig) -> Self {
         Self {
+            connections: ConnectionLeg::default(),
             socket: Box::new(socket),
             config,
             codec: JsonCodec,
@@ -340,53 +346,30 @@ impl RelayTransport {
             return;
         };
 
-        // `Identify` is what names a session token, exactly as it is in
-        // server.html. Until one arrives this peer has no identity, so a
-        // message before it has nowhere to be delivered and is dropped.
+        let connection = entry.connection;
         if let ClientMessage::Identify { token, .. } = &msg {
-            // A peer's token is SELF-DECLARED, and two shapes are reserved for
-            // the host runtime (`__local_console__` and the `ai:` prefix). The
-            // seam refuses commands under them, but a peer left attached under
-            // a reserved token still sits in `audience()` and receives that
-            // token's projection and every broadcast — so refuse the CONNECTION
-            // here, the way server.html does, rather than silently dropping the
-            // half of the traffic that happens to travel upwards.
-            if crate::lobby::handler::is_reserved_token(token) {
+            let verdict = self.connections.shared.lock().bind(connection, token);
+            if let Err(refusal) = verdict {
+                let code = if refusal == BindRefusal::ReservedToken {
+                    RESERVED_TOKEN_CODE
+                } else {
+                    INVALID_TOKEN_CODE
+                };
                 self.refuse_peer(
                     peer,
-                    RESERVED_TOKEN_CODE,
-                    format!(
-                    "{peer} claimed the reserved token {token}, which only the host runtime may use"
-                ),
+                    code,
+                    format!("connection identity refused: {refusal:?}"),
                 );
                 return;
             }
-            // Duplicate-token sever, and the reason it has to happen HERE: on a
-            // native host every crew member is relayed, so re-`Identify` on a
-            // fresh rendezvous peer id is the ordinary reconnect, and a phone
-            // that lost radio without a TCP FIN leaves the service holding its
-            // old socket for minutes. Two peers under one token would both pass
-            // `audience()` and double-deliver every `Target::Token` and
-            // `Target::All`. The prior peer is dropped WITHOUT a disconnect —
-            // the player did not leave, they moved — exactly as server.html
-            // replaces `tokenConns` before closing the earlier connection.
-            let stale: Vec<String> = self
-                .peers
-                .iter()
-                .filter(|(id, p)| id.as_str() != peer && p.token.as_deref() == Some(token.as_str()))
-                .map(|(id, _)| id.clone())
-                .collect();
-            for id in stale {
-                self.peers.remove(&id);
-            }
-            if let Some(entry) = self.peers.get_mut(peer) {
-                entry.token = Some(token.clone());
-            }
         }
-        let Some(token) = self.peers.get(peer).and_then(|p| p.token.clone()) else {
-            self.notices.push(RelayNotice::Fault {
-                reason: format!("{peer} sent a command before identifying"),
-            });
+        let Some(token) = self
+            .connections
+            .shared
+            .lock()
+            .sender(connection)
+            .map(str::to_owned)
+        else {
             return;
         };
         out.push(TransportEvent::Received { token, msg });
@@ -395,8 +378,8 @@ impl RelayTransport {
     /// Refuse this peer at the transport: tell it why in the same in-band
     /// `JoinRefused` the compatibility handshake uses, mark it refused so
     /// nothing it sends afterwards reaches the simulation, and stop carrying
-    /// it. It keeps no token, so it is out of `audience()` at once and its
-    /// eventual departure reports no disconnect for a player that never was.
+    /// it. It is out of `audience()` at once. The next poll disconnects an
+    /// already identified owner; a never-identified or stale link owes nothing.
     fn refuse_peer(&mut self, peer: &str, code: &str, detail: String) {
         self.notices.push(RelayNotice::Refused {
             peer: peer.to_string(),
@@ -411,35 +394,20 @@ impl RelayTransport {
         if let Some(entry) = self.peers.get_mut(peer) {
             entry.refused = true;
             entry.admitted = false;
-            entry.token = None;
+            self.pending_drops
+                .push((peer.to_string(), entry.connection));
         }
     }
 
-    /// A peer's link ended. Reports a disconnect only for one that got as far
-    /// as identifying — the lobby has nothing to restore for anybody else.
-    ///
-    /// The identity guard is the same one server.html's `close` handler applies,
-    /// and for the same reason: on a same-token reconnect the NEW peer has
-    /// already claimed the token by the time the stale peer's departure lands,
-    /// and reporting that departure would flip an actively-driven station to
-    /// Backfill. So the question asked here is "is anybody ELSE still holding
-    /// this token" — which is what makes a late departure silent for a player
-    /// who has already come back on a fresh rendezvous peer id.
+    /// Only departure of the host-wide current incarnation disconnects a
+    /// Session. A superseded link's close is silent across transport legs too.
     fn drop_peer(&mut self, peer: &str, out: &mut Vec<TransportEvent>) {
         let Some(entry) = self.peers.remove(peer) else {
             return;
         };
-        let Some(token) = entry.token else {
-            return;
-        };
-        if self
-            .peers
-            .values()
-            .any(|p| p.token.as_deref() == Some(token.as_str()))
-        {
-            return;
+        if let Some(token) = self.connections.shared.lock().close(entry.connection) {
+            out.push(TransportEvent::Disconnected { token });
         }
-        out.push(TransportEvent::Disconnected { token });
     }
 
     fn on_frame(&mut self, frame: RendezvousFrame, out: &mut Vec<TransportEvent>) {
@@ -482,12 +450,18 @@ impl RelayTransport {
                         // assets/join/join-codes.toml does not need a release.
                         self.limits = limits;
                     }
+                    // Duplicate announcements are idempotent. Peer ids belong
+                    // to this socket; a later incarnation gets a fresh handle.
+                    if self.peers.contains_key(&peer) {
+                        return;
+                    }
+                    let connection = self.connections.shared.lock().open(self.connections.id);
                     self.peers.insert(
                         peer,
                         RelayPeer {
+                            connection,
                             admitted: false,
                             refused: false,
-                            token: None,
                         },
                     );
                 }
@@ -580,28 +554,58 @@ impl RelayTransport {
         self.notices.push(RelayNotice::Fault { reason });
     }
 
-    /// Every peer an audience target resolves to, as rendezvous peer ids.
+    /// Retire replaced links without publishing a Session disconnect.
+    /// Other legs observe replacement on their next poll/dispatch; the registry
+    /// has already stopped accepting their traffic at the binding boundary.
+    fn retire_superseded(&mut self) {
+        let stale: Vec<_> = {
+            let registry = self.connections.shared.lock();
+            self.peers
+                .iter()
+                .filter(|(_, peer)| registry.is_superseded(peer.connection))
+                .map(|(id, peer)| (id.clone(), peer.connection))
+                .collect()
+        };
+        for (peer, connection) in stale {
+            self.send_frame(&RendezvousFrame::relay_close(&peer));
+            self.peers.remove(&peer);
+            assert!(self.connections.shared.lock().close(connection).is_none());
+        }
+    }
+
+    /// Resolve audiences through the host-wide owner, then select this leg's links.
     fn audience(&self, target: &Target) -> Vec<String> {
+        let recipients = self.connections.shared.lock().recipients(target);
         self.peers
             .iter()
-            .filter(|(_, p)| p.admitted && p.token.is_some())
-            .filter(|(_, p)| match target {
-                Target::All => true,
-                Target::Token(t) => p.token.as_deref() == Some(t.as_str()),
-                Target::AllExcept(t) => p.token.as_deref() != Some(t.as_str()),
-            })
+            .filter(|(_, p)| p.admitted && recipients.contains(&p.connection))
             .map(|(id, _)| id.clone())
             .collect()
     }
 }
 
 impl NativeTransport for RelayTransport {
+    fn share_connections(&mut self, connections: SharedConnections) {
+        assert!(
+            self.peers.is_empty(),
+            "compose transports before accepting crew"
+        );
+        self.connections = ConnectionLeg::new(connections);
+    }
+
     fn poll(&mut self) -> Vec<TransportEvent> {
+        self.retire_superseded();
         let mut out = Vec::new();
         // Links this transport gave up on while dispatching, where it had no
         // way to say so (see `dispatch`).
-        for peer in std::mem::take(&mut self.pending_drops) {
-            self.drop_peer(&peer, &mut out);
+        for (peer, connection) in std::mem::take(&mut self.pending_drops) {
+            if self
+                .peers
+                .get(&peer)
+                .is_some_and(|entry| entry.connection == connection)
+            {
+                self.drop_peer(&peer, &mut out);
+            }
         }
         if !self.socket.is_open() {
             // The link died. Report every identified crew member gone, once —
@@ -624,10 +628,12 @@ impl NativeTransport for RelayTransport {
                 }),
             }
         }
+        self.retire_superseded();
         out
     }
 
     fn dispatch(&mut self, dispatch: TransportDispatch<'_>) {
+        self.retire_superseded();
         let targets = self.audience(dispatch.target);
         if targets.is_empty() {
             return;
@@ -678,7 +684,12 @@ impl NativeTransport for RelayTransport {
                     for peer in &targets {
                         self.send_frame(&RendezvousFrame::relay_close(peer));
                     }
-                    self.pending_drops.extend(targets);
+                    self.pending_drops
+                        .extend(targets.into_iter().filter_map(|peer| {
+                            self.peers
+                                .get(&peer)
+                                .map(|entry| (peer.clone(), entry.connection))
+                        }));
                 }
             }
             return;

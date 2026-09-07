@@ -25,7 +25,7 @@
 //!   `command_admission::ai_emit`'s in-process AI emissions it genuinely crossed
 //!   a client boundary). Outbound, a pane is named by a `Target` the broadcaster
 //!   resolved through `SessionManager::holder_for_station`, and by nothing else
-//!   — see [`super::routing`].
+//!   — see [`crate::session_connections`].
 //!
 //! # Identity is pinned at the bus, not trusted from the page
 //!
@@ -39,20 +39,21 @@
 //! `handle_identify`'s stay where they are; this is a third gate on a hole the
 //! other two do not cover, which is another participant's ordinary token.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::core::codec::{self, JsonCodec, MessageCodec};
 use crate::core::messages::{ClientMessage, ServerMessageDiscriminants};
 use crate::delivery::serve::HostedDocuments;
+use crate::native_host::connections::{ConnectionLeg, SharedConnections};
 use crate::native_host::transport::{NativeTransport, TransportDispatch, TransportEvent};
+use crate::session_connections::ConnectionId;
 
 use super::document::{mint_document_nonce, pane_document_path, pane_url};
 use super::identity::PaneIdentity;
 use super::recovery::{PaneFault, MAX_RECREATIONS_PER_WINDOW, RECREATION_WINDOW};
 use super::registry::{OutboundVerdict, PaneDispatch, PaneId, PaneLifecycle, PaneRegistry};
-use super::routing::pane_receives;
 
 /// Why something a page said was not passed on.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -87,11 +88,15 @@ impl std::error::Error for PaneInputRefusal {}
 #[derive(Default)]
 struct BusState {
     registry: PaneRegistry,
+    connections: ConnectionLeg,
+    connection_ids: BTreeMap<PaneId, ConnectionId>,
+    superseded: BTreeSet<PaneId>,
+    polled: bool,
     /// Events a closed pane left behind, awaiting the next poll: whatever its
     /// page had already said, then the `PlayerDisconnected` the lobby is owed —
     /// which is what keeps the station held and flips it to `Backfill`, the same
     /// treatment a phone that walked out of range gets.
-    departing: Vec<TransportEvent>,
+    departing: Vec<(ConnectionId, Option<ClientMessage>)>,
     /// Panes that failed since the last poll, each with why (issue #1125). A
     /// Bevy system reports and closes them — and, for a view crash, recreates
     /// them; see [`PaneBus::take_faulted`] and [`super::recovery::service_faults`].
@@ -124,6 +129,29 @@ struct BusState {
     recreations: BTreeMap<String, Vec<Instant>>,
 }
 
+impl BusState {
+    fn open(&mut self, identity: PaneIdentity) -> PaneId {
+        let connection = self.connections.shared.lock().open(self.connections.id);
+        let id = self.registry.open(identity);
+        self.connection_ids.insert(id, connection);
+        id
+    }
+
+    fn retire_superseded(&mut self) {
+        let registry = self.connections.shared.lock();
+        for (&id, &connection) in &self.connection_ids {
+            if registry.is_superseded(connection) && self.superseded.insert(id) {
+                if let Some(pane) = self.registry.get_mut(id) {
+                    pane.supersede();
+                }
+            }
+        }
+        self.faulted.retain(|(id, _)| !self.superseded.contains(id));
+        self.pending_views
+            .retain(|(id, _)| !self.superseded.contains(id));
+    }
+}
+
 /// The shared pane registry: cheap to clone, every clone the same panes.
 #[derive(Clone, Default)]
 pub struct PaneBus {
@@ -146,12 +174,14 @@ impl PaneBus {
         // guard is right rather than cascading: the registry's invariants are
         // per-pane queues, and a half-written queue costs a message rather than
         // corrupting the simulation, which owns none of this state.
-        self.state.lock().unwrap_or_else(|e| e.into_inner())
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.retire_superseded();
+        state
     }
 
     /// Open a pane. Creates no session — see [`PaneRegistry::open`].
     pub fn open(&self, identity: PaneIdentity) -> PaneId {
-        self.lock().registry.open(identity)
+        self.lock().open(identity)
     }
 
     /// Hand the bus the host's in-memory HTTP publications, so it can withdraw
@@ -191,14 +221,12 @@ impl PaneBus {
     /// otherwise accumulate one dead document per closed pane.
     pub fn close(&self, id: PaneId) {
         let mut state = self.lock();
-        if let Some((token, pending)) = state.registry.close(id) {
+        if let Some((_token, pending)) = state.registry.close(id) {
+            let connection = state.connection_ids[&id];
             for msg in pending {
-                state.departing.push(TransportEvent::Received {
-                    token: token.clone(),
-                    msg,
-                });
+                state.departing.push((connection, Some(msg)));
             }
-            state.departing.push(TransportEvent::Disconnected { token });
+            state.departing.push((connection, None));
         }
         Self::withdraw(&mut state, id);
     }
@@ -256,6 +284,12 @@ impl PaneBus {
     /// can close a just-recreated pane in the frame before its view is built.
     pub fn is_open(&self, id: PaneId) -> bool {
         self.lock().registry.open_panes().any(|p| p.id() == id)
+    }
+
+    /// Supersession is a connection handoff, never a crashed screen. The layout
+    /// and physical pane remain until an operator action, without auto-recovery.
+    pub fn is_superseded(&self, id: PaneId) -> bool {
+        self.lock().superseded.contains(&id)
     }
 
     /// How many panes are open.
@@ -412,6 +446,9 @@ impl PaneBus {
     /// [`Closed`](PaneLifecycle::Closed) — see the same-token invariant below.
     pub fn recreate(&self, closed_id: PaneId) -> Option<(PaneId, String)> {
         let mut state = self.lock();
+        if state.superseded.contains(&closed_id) {
+            return None;
+        }
         let closed = state.registry.get(closed_id)?;
         // The same-token invariant, enforced at the seam: recreation clones a
         // CLOSED pane's identity onto a fresh pane. An OPEN pane still owns its
@@ -458,7 +495,7 @@ impl PaneBus {
     /// queue its view. The body [`recreate`](Self::recreate) and
     /// [`open_console`](Self::open_console) share.
     fn open_with_document(state: &mut BusState, identity: PaneIdentity) -> (PaneId, String) {
-        let id = state.registry.open(identity.clone());
+        let id = state.open(identity.clone());
         let url = match state.recovery_template.clone() {
             Some((host_addr, body)) => {
                 let nonce = mint_document_nonce();
@@ -550,23 +587,71 @@ pub struct PaneTransport {
     bus: PaneBus,
 }
 
+fn route_pane_input(
+    registry: &mut crate::session_connections::ConnectionRegistry,
+    connection: ConnectionId,
+    msg: ClientMessage,
+    out: &mut Vec<TransportEvent>,
+) {
+    if let ClientMessage::Identify { token, .. } = &msg {
+        if registry.bind(connection, token).is_err() {
+            return;
+        }
+    }
+    if let Some(token) = registry.sender(connection) {
+        out.push(TransportEvent::Received {
+            token: token.to_string(),
+            msg,
+        });
+    }
+}
+
 impl NativeTransport for PaneTransport {
+    fn share_connections(&mut self, shared: SharedConnections) {
+        let mut state = self.bus.lock();
+        assert!(
+            !state.polled && state.departing.is_empty(),
+            "compose transports before accepting crew"
+        );
+        state.connections = ConnectionLeg::new(shared);
+        let panes: Vec<_> = state.registry.open_panes().map(|pane| pane.id()).collect();
+        state.connection_ids.clear();
+        for pane in panes {
+            let connection = state.connections.shared.lock().open(state.connections.id);
+            state.connection_ids.insert(pane, connection);
+        }
+    }
+
     fn poll(&mut self) -> Vec<TransportEvent> {
         let mut state = self.bus.lock();
+        state.polled = true;
+        let shared = state.connections.shared.clone();
+        let mut registry = shared.lock();
         let mut events: Vec<TransportEvent> = Vec::new();
-        for pane in state.registry.open_panes_mut() {
-            let token = pane.token().to_string();
-            for msg in pane.drain_inbound() {
-                events.push(TransportEvent::Received {
-                    token: token.clone(),
-                    msg,
-                });
+        // Closed incarnations finish first: queued commands precede their
+        // departure, which precedes a replacement page's new Identify. A late
+        // close from an already superseded incarnation remains silent.
+        for (connection, msg) in std::mem::take(&mut state.departing) {
+            if let Some(msg) = msg {
+                route_pane_input(&mut registry, connection, msg, &mut events);
+            } else {
+                if let Some(token) = registry.close(connection) {
+                    events.push(TransportEvent::Disconnected { token });
+                }
+                state.connection_ids.retain(|_, id| *id != connection);
             }
         }
-        // Departures last, each with whatever its page said before it went: a
-        // pane that spoke and then closed in the same frame spoke while it was
-        // still connected, and the lobby's answer depends on that order.
-        events.append(&mut state.departing);
+        let BusState {
+            registry: panes,
+            connection_ids,
+            ..
+        } = &mut *state;
+        for pane in panes.open_panes_mut() {
+            let connection = connection_ids[&pane.id()];
+            for msg in pane.drain_inbound() {
+                route_pane_input(&mut registry, connection, msg, &mut events);
+            }
+        }
         events
     }
 
@@ -576,8 +661,14 @@ impl NativeTransport for PaneTransport {
         // console snapshot is not small.
         let mut encoded: Option<String> = None;
         let mut faulted: Vec<PaneId> = Vec::new();
-        for pane in state.registry.open_panes_mut() {
-            if !pane_receives(dispatch.target, pane.token()) {
+        let recipients = state.connections.shared.lock().recipients(dispatch.target);
+        let BusState {
+            registry: panes,
+            connection_ids,
+            ..
+        } = &mut *state;
+        for pane in panes.open_panes_mut() {
+            if !recipients.contains(&connection_ids[&pane.id()]) {
                 continue;
             }
             let json = match &encoded {
@@ -615,6 +706,20 @@ impl NativeTransport for PaneTransport {
     fn name(&self) -> &'static str {
         "panes"
     }
+}
+
+/// Queue fixtures use the same Identify boundary as a real loaded page.
+#[cfg(test)]
+pub(crate) fn identify_test_pane(bus: &PaneBus, id: PaneId) {
+    bus.submit(
+        id,
+        ClientMessage::Identify {
+            token: bus.token_of(id).unwrap(),
+            name: bus.name_of(id).unwrap(),
+        },
+    )
+    .unwrap();
+    let _ = bus.transport().poll();
 }
 
 #[cfg(test)]
@@ -707,7 +812,9 @@ mod tests {
         // already resolved to this `Target::Token` by the time it arrives.
         let bus = PaneBus::default();
         let helm = bus.open(identity(1));
+        identify_test_pane(&bus, helm);
         let comms = bus.open(identity(2));
+        identify_test_pane(&bus, comms);
         bus.mark_live(helm);
         bus.mark_live(comms);
         let helm_token = bus.token_of(helm).unwrap();
@@ -729,7 +836,9 @@ mod tests {
     fn correlated_action_feedback_matches_the_phone_transport_audience_and_codec() {
         let bus = PaneBus::default();
         let captain = bus.open(identity(1));
+        identify_test_pane(&bus, captain);
         let other = bus.open(identity(2));
+        identify_test_pane(&bus, other);
         bus.mark_live(captain);
         bus.mark_live(other);
         let captain_token = bus.token_of(captain).unwrap();
@@ -759,7 +868,9 @@ mod tests {
     fn a_broadcast_reaches_every_open_pane_and_no_closed_one() {
         let bus = PaneBus::default();
         let a = bus.open(identity(1));
+        identify_test_pane(&bus, a);
         let b = bus.open(identity(2));
+        identify_test_pane(&bus, b);
         bus.mark_live(a);
         bus.mark_live(b);
         bus.close(b);
@@ -776,6 +887,7 @@ mod tests {
     fn closing_a_pane_owes_the_lobby_exactly_one_disconnect() {
         let bus = PaneBus::default();
         let id = bus.open(identity(1));
+        identify_test_pane(&bus, id);
         let token = bus.token_of(id).unwrap();
         bus.close(id);
         bus.close(id);
@@ -827,6 +939,7 @@ mod tests {
         // who has gone.
         let bus = PaneBus::default();
         let id = bus.open(identity(1));
+        identify_test_pane(&bus, id);
         bus.submit(id, ClientMessage::ReleaseStation).unwrap();
         bus.close(id);
         let events = bus.transport().poll();
@@ -891,6 +1004,7 @@ mod tests {
         // agreement with the simulation behind a clean log.
         let bus = PaneBus::with_capacity(1);
         let id = bus.open(identity(1));
+        identify_test_pane(&bus, id);
         bus.mark_live(id);
         let mut transport = bus.transport();
         for _ in 0..3 {
@@ -950,6 +1064,7 @@ mod tests {
         // its holder and flips to Backfill — rather than a native special case.
         let bus = PaneBus::default();
         let (id, _) = bus.open_console("helm");
+        identify_test_pane(&bus, id);
         let token = bus.token_of(id).unwrap();
         bus.mark_live(id);
 

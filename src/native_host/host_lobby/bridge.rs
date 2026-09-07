@@ -18,7 +18,7 @@
 //!
 //! Putting it on the pane bus would have meant giving it a token to be refused
 //! for, an entry in the registry whose `Welcome` nobody wants, and a projection
-//! (`routing::pane_receives`) that would have to answer "which participant is
+//! (`session_connections::ConnectionRegistry`) that would have to answer "which participant is
 //! the viewscreen" — a question with no honest answer. So it gets its own
 //! bridge, and the pane bus keeps meaning exactly one thing.
 //!

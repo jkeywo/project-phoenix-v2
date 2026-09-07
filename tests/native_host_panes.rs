@@ -63,6 +63,9 @@ const WORLD: &str = "assets/worlds/combat_test.toml";
 /// A fixed seed, so nothing here is a draw from the OS.
 const SEED: u64 = 20260894;
 
+#[path = "native_host_panes/session_connections.rs"]
+mod session_connections;
+
 fn preload() -> TemplatePreload {
     preload_content_templates(".").expect("the repository's own content preloads")
 }
@@ -851,9 +854,8 @@ fn no_surviving_pane_inherits_a_failed_panes_projection() {
         let _ = bus.take_outbound(recreated);
     }
 
-    // A projection addressed to Ada's token reaches only Ada's own (recreated)
-    // pane. Grace — the surviving neighbour — never sees it, and the failed
-    // handle receives nothing at all.
+    // Before the recreated page identifies, nobody owns Ada's connection.
+    // Grace never inherits that private projection during the reload gap.
     let mut transport = bus.transport();
     transport.dispatch(TransportDispatch {
         target: &Target::Token(ada_token.clone()),
@@ -869,10 +871,29 @@ fn no_surviving_pane_inherits_a_failed_panes_projection() {
         "a surviving neighbour never inherits the failed pane's private projection"
     );
     if let Some(recreated) = recreated {
+        assert!(bus.take_outbound(recreated).is_empty());
+        bus.submit(
+            recreated,
+            ClientMessage::Identify {
+                token: ada_token.clone(),
+                name: "Ada".into(),
+            },
+        )
+        .unwrap();
+        pump(&mut app, 4);
+        let _ = bus.take_outbound(recreated);
+        let _ = bus.take_outbound(grace);
+        transport.dispatch(TransportDispatch {
+            target: &Target::Token(ada_token),
+            msg: &ServerMessage::GameStarted,
+            delivery: project_phoenix::core::messages::DeliveryClass::Reliable,
+        });
+        assert!(bus.take_outbound(ada).is_empty());
+        assert!(bus.take_outbound(grace).is_empty());
         assert_eq!(
             bus.take_outbound(recreated).len(),
             1,
-            "only the pane carrying the same token — Ada's own recreated pane — receives it"
+            "only Ada's recreated pane receives it, after its actual Identify"
         );
     }
 }

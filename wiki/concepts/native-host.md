@@ -2,7 +2,7 @@
 title: Native Host
 type: concept
 tags: [native, viewscreen, lobby, scenario-selection, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile, saved-layouts, media-devices, camera, microphone, saves]
-sources: [src/world/materialization.rs, tests/native_host_lobby/materialization.rs, src/delivery/payload.rs, tests/native_host_catalogue.rs, tests/client/scenario-catalogue-wire.test.js, src/native_host/mod.rs, src/native_host/direct_join.rs, src/native_host/join_codes.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/lobby/handler.rs, src/content_ledger.rs, tests/fixtures/scenario-arbiter-parity.json, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/layout_store.rs, src/native_host/layout_store_systems.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/frame_stats.rs, src/native_host/panes/surface_stats.rs, src/native_host/panes/pane_thread.rs, src/native_host/panes/mirror.rs, src/native_host/panes/upload.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs, src/delivery/args.rs, src/save_slots_store.rs]
+sources: [src/world/materialization.rs, tests/native_host_lobby/materialization.rs, src/delivery/payload.rs, tests/native_host_catalogue.rs, tests/client/scenario-catalogue-wire.test.js, src/native_host/mod.rs, src/native_host/direct_join.rs, src/native_host/join_codes.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/lobby/handler.rs, src/content_ledger.rs, tests/fixtures/scenario-arbiter-parity.json, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/layout_store.rs, src/native_host/layout_store_systems.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/session_connections.rs, src/native_host/connections.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/frame_stats.rs, src/native_host/panes/surface_stats.rs, src/native_host/panes/pane_thread.rs, src/native_host/panes/mirror.rs, src/native_host/panes/upload.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs, src/delivery/args.rs, src/save_slots_store.rs]
 updated: 2026-09-07
 ---
 
@@ -522,7 +522,7 @@ serialisation and nothing else.
 |---|---|
 | Registry, lifecycle, the outbound cap | `src/native_host/panes/registry.rs` |
 | Identity and its three refusals | `src/native_host/panes/identity.rs` |
-| Audience projection | `src/native_host/panes/routing.rs` |
+| Audience projection | `src/session_connections.rs, src/native_host/connections.rs` |
 | The `NativeTransport` over the panes | `src/native_host/panes/transport.rs` |
 | The per-frame loop and its surface trait | `src/native_host/panes/surface.rs` |
 | The document, the URL, the injected scripts | `src/native_host/panes/document.rs` + `pane_boot.js`, `pane_link.js` |
@@ -549,10 +549,19 @@ way, because they close different holes:
 3. the #1121 seam refuses reserved tokens at ingress, as `server.html` does at
    its PeerJS ingress.
 
-Outbound, `routing::pane_receives` is the projection boundary and is four lines:
-`Audience::Holding*` has already resolved through
-`SessionManager::holder_for_station` into a `Target::Token` before a transport
-sees it, so a pane that holds no Station is named by no audience.
+Outbound, `session_connections::ConnectionRegistry` selects one current
+physical owner per recipient. `Audience::Holding*` has already resolved
+through `SessionManager::holder_for_station` into a `Target::Token`.
+The native transport composition shares this registry across LAN, cloud and
+pane legs. All bind on actual `Identify`, with immutable validated tokens;
+a stale connection's commands and departure cannot affect the replacement.
+
+A superseded pane keeps its screen reservation and stops exchanging traffic.
+Its queues are cleared, fault/requeue work cannot restart it, and the seated
+console reconciler leaves its assignment to the operator. Ordinary crashes
+still disconnect while the replacement page loads, then re-Identify on the
+same token. The pane worker's epochs and reliable/snapshot queues keep their
+existing ownership and delivery rules.
 
 ### What a pane loads, and from where
 

@@ -394,6 +394,17 @@ describe('reason reporting', () => {
     expect(reasonStringId('client-stamp-missing')).not.toBe(reasonStringId('content-id-mismatch'));
   });
 
+  it('maps both native identity refusals to authored recovery messages', () => {
+    const source = readFileSync(path.join(root, 'src/native_host/relay_transport.rs'), 'utf8');
+    const codes = [...source.matchAll(/pub const (?:RESERVED|INVALID)_TOKEN_CODE: &str = "([a-z-]+)"/g)]
+      .map((match) => match[1]);
+    expect(new Set(codes)).toEqual(new Set(['reserved-token', 'invalid-token']));
+    for (const code of codes) {
+      expect(reasonStringId(code)).not.toBe(reasonStringId('unknown'));
+    }
+    expect(reasonStringId('invalid-token')).toBe('client.join.error_invalid_token');
+  });
+
   it('does not call a foreign GUID a fleet code', () => {
     // unknown-project/unknown-namespace mean "this belongs to no Phoenix
     // namespace", which is a different statement from "that is the other typed

@@ -974,6 +974,44 @@ describe('the lossy snapshot channel', () => {
 });
 
 describe('automatic reconnect', () => {
+  it.each(['direct', 'ws-relay'])('stops retrying a refused identity after acceptance over %s', async (mode) => {
+    vi.useFakeTimers();
+    let joiner;
+    let host;
+    try {
+      const world = makeWorld({ queued: true });
+      const fixture = await hostOn(world);
+      host = fixture.host;
+      const errors = [];
+      const statuses = [];
+      joiner = createRendezvousJoiner({
+        base: 'https://rendezvous.test',
+        data: DATA,
+        code: fixture.code.suffix,
+        factories: mode === 'ws-relay' ? unlinkableFactories(world) : fixture.factories,
+        levers: transportLeversFromLocation(`?transport=${mode}`),
+        getIdent: () => ({ token: 'invalid saved identity', name: 'Ada' }),
+        onError: (reason) => errors.push(reason),
+        onStatus: (status) => statuses.push(status),
+      });
+      await settle();
+      expect(joiner.connected).toBe(true);
+      fixture.announced[0].send(JSON.stringify({
+        type: 'JoinRefused', data: { code: 'invalid-token' },
+      }));
+      await settle();
+      expect(errors).toEqual(['invalid-token']);
+      expect(statuses.at(-1)).toBe('error');
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(fixture.announced).toHaveLength(1);
+      expect(joiner.connected).toBe(false);
+    } finally {
+      joiner?.close();
+      host?.close();
+      vi.useRealTimers();
+    }
+  });
+
   it('does not let a stale SDP completion consume the retry candidate queue', async () => {
     const gates = Array.from({ length: 2 }, () => {
       let release;

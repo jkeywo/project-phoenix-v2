@@ -578,6 +578,12 @@ impl Default for AssetPreloadResource {
 }
 
 impl AssetPreloadResource {
+    /// Failed scene loads are terminal for the loading gate, but cannot
+    /// establish a complete rendering workload for an observational capture.
+    pub fn failed_glb_count(&self) -> usize {
+        self.failed_glbs.len()
+    }
+
     /// Progress fraction 0.0–1.0.
     pub fn fraction(&self) -> f32 {
         if self.total_count == 0 {

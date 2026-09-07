@@ -128,6 +128,26 @@ fn main() {
         }
     }
 
+    // After both timing windows close: equal final continuations corroborate
+    // comparisons without charging the collector for hashing or claiming that
+    // a final digest proves every intermediate state (#1409).
+    if let Some(path) = args
+        .perf_capture_path
+        .as_deref()
+        .filter(|path| *path != "-")
+    {
+        let continuation = serde_json::json!({
+            "tick": app.world().resource::<project_phoenix::sim_tick::SimTick>().0,
+            "digest": format!("{:016x}", project_phoenix::sim_digest::world_digest(app.world())),
+        });
+        if let Err(error) = std::fs::write(
+            format!("{path}.continuation.json"),
+            continuation.to_string(),
+        ) {
+            eprintln!("phoenix-headless: could not write capture continuation: {error}");
+            std::process::exit(1);
+        }
+    }
     let json = report.to_json();
     match args.report_path.as_deref() {
         None | Some("-") => println!("{json}"),

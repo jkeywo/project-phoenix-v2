@@ -5,9 +5,10 @@
 //! consumer. What lives here is the part the crate excludes by charter: the
 //! collectors, and where the baseline files live.
 //!
-//! Five collectors, one contract:
+//! Six collectors, one contract:
 //!
 //! - [`tick`] — the headless harness loop, native.
+//! - [`native_frames`] — opt-in native App cadence and fixed-update catch-up.
 //! - [`assets`] — the shipped asset inventory, native, no run required.
 //! - [`mesh`] — the mesh interior read through Bevy's own loader, native.
 //! - [`browser`] — boot, preload and frame timing in the browser host, wasm.
@@ -16,7 +17,7 @@
 //!   bridges samples the PRD #1144 debug pipeline already holds into a
 //!   `Recorder`, so one run cannot report two different numbers for one thing.
 //!
-//! [`baseline`] is the sixth piece and not a collector: recording a baseline
+//! [`baseline`] is another piece and not a collector: recording a baseline
 //! *from* a capture, so the numbers a runner is held to are the numbers that
 //! runner produced.
 //!
@@ -98,6 +99,8 @@ pub mod browser;
 pub mod console;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod mesh;
+#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+pub mod native_frames;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod tick;
 

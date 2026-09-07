@@ -75,5 +75,6 @@ Current implementation orientation only. For intended design use
 - [Native Host](./concepts/native-host.md) — the Windows authoritative host: fourth boot profile, native wgpu viewscreen, transport seam, local Ultralight Station panes, per-ship-class saved bridge layouts, and the guided acceptance kit for the whole bridge lobby on real monitors
 - [Peer-Local Save Catalogues](./concepts/save-catalogues.md) — deterministic fixed-tick capture, private browser/native stores, and fresh-session restore
 - [Testing Strategy](./concepts/testing-strategy.md)
+- [Performance Measurement](./concepts/performance-measurement.md)
 - [Model Viewer](./concepts/model-viewer.md)
 - [LOD Generation](./concepts/lod-generation.md)

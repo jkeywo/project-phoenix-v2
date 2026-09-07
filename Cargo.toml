@@ -147,6 +147,18 @@ lto = "thin"
 codegen-units = 16
 strip = true
 
+# Named-system/stack attribution is a separate artifact from a measure baseline.
+# Examples receive bevy/debug through dev-dependencies for genuine system names.
+[profile.attribution]
+inherits = "measure"
+debug = 2
+strip = false
+
+[[example]]
+name = "profile_systems"
+path = "examples/profile_systems.rs"
+required-features = ["host", "headless", "perf"]
+
 [features]
 default = ["server"]
 # Server feature: builds the host crate (Trunk → server.html) which runs

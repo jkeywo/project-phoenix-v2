@@ -1049,7 +1049,20 @@ fn solo_auto_start(
 /// therefore lives on other threads, and this call is the last thing the
 /// binary's `main` does.
 pub fn run(mut app: App) {
-    app.run();
+    let capture =
+        match crate::perf::native_frames::NativeFrameCapture::install_from_environment(&mut app) {
+            Ok(capture) => capture,
+            Err(error) => {
+                eprintln!("native frame capture refused: {error}");
+                return;
+            }
+        };
+    let exit = app.run();
+    if let Some(capture) = capture {
+        if let Err(error) = capture.finish(&exit) {
+            eprintln!("native frame capture failed: {error}");
+        }
+    }
 }
 
 #[cfg(test)]

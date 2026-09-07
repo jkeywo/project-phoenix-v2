@@ -1,4 +1,25 @@
 entities:
+  - component: snapshot-owner-continuation-policy
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Owner-Held Snapshot Continuation
+      summary: "Saved component projections and their conversions live beside the runtime owner. Snapshot orchestration retains the envelope, canonical entity traversal, identity rebinding, restore prerequisites and cross-System order."
+      rationale:
+        - "[ai] The conditional Helm/Radar continuation slice keeps ControlState, PolicyState and RecoveryHistory explicit and re-exports their former snapshot paths. Ship-owned capture and restore preserve desired versus last-applied inputs, the scalar impulse encoding, optional policy/recovery state and Radar target absence. Snapshot keeps UUID joins, prerequisite checks and restore order; runtime owners never import snapshot DTOs. Restoring an unchanged LastShipAttacker does not raise its change-detection edge again."
+        - "[ai] Issue #1413 starts with PowerSystem. Its explicit PowerState keeps the existing serialized field order, defaults and omission rules, with a snapshot::PowerState compatibility re-export. Capture preserves reactor insertion order; restore replaces allocations, charge and exhaustion lock through the existing reactor rules while retaining authored command floors."
+        - "[ai] Continuation is checked through the next Power ticks and resulting motion, weapon and shield modifiers, including saved default values over a different fresh-App bootstrap. Immediate digest equality alone cannot prove this because Power itself is outside that fold. This ownership change adds neither a generic save registry nor runtime-type serialization and does not widen the digest or change the save format."
+    architecture:
+      kind: design-policy
+      authority: authoritative
+      reads: [world-snapshot-artifact, ship-power-state]
+      runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
+    implementation:
+      status: observed
+      paths: [src/modifiers/power_system.rs, src/ship/continuation.rs, src/snapshot.rs, tests/snapshot_resume.rs]
+      symbols: [PowerState, capture_continuation, restore_continuation, ControlState, PolicyState, RecoveryHistory, capture_from, restore_into]
+      tests: ["cargo test --features headless --test snapshot_resume power_continuation_", "cargo test --lib ship::continuation::tests::", "cargo test --features headless --test snapshot_resume control_continuation_"]
+
   - component: startup-save-restore-driver
     core:
       status: implemented

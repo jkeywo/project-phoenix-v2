@@ -2,8 +2,8 @@
 title: Helm Runtime
 type: concept
 tags: [helm, ai, impulse, boost, steering]
-sources: [src/ship/helm_admission.rs, src/ship/helm.rs, src/ai/core.rs, src/ai/server.rs, src/console/helm/server.rs, gui/action-map.js, gui/console-state.js]
-updated: 2026-07-16
+sources: [src/ship/continuation.rs, src/snapshot.rs, tests/snapshot_resume.rs, src/ship/helm_admission.rs, src/ship/helm.rs, src/ai/core.rs, src/ai/server.rs, src/console/helm/server.rs, gui/action-map.js, gui/console-state.js]
+updated: 2026-09-07
 ---
 
 # Helm Runtime
@@ -15,3 +15,12 @@ Helm AI executes on the host as four per-axis systems (`ai_helm_thrust`, `ai_hel
 The console publishes authoritative position, yaw, speeds, impulse, boost, radar, and engine state through Helm blackboards. The client only renders that state and sends controls.
 
 The ship-scoped capability model, shared 3D planning and hazard surface, vertical movement modes, and player/AI actuator convergence are design decisions recorded in [PASM's Helm slice](../../pasm/spec/design/helm-controls.yaml).
+
+Saved Helm and Radar continuation lives in `src/ship/continuation.rs`.
+`ControlState::capture_from` and `restore_into` own desired axes, last-applied
+inputs, impulse encoding, policy/recovery history and target memory. Snapshot
+keeps its UUID joins and restore order, and re-exports the unchanged DTO paths.
+Absent Helm components stay absent; saved neutral inputs and cleared targets
+replace a different bootstrap. The attacker latch only changes when its value
+changes. Owner tests drive the first physics action, and `tests/snapshot_resume.rs`
+compares fresh-app continuation through subsequent simulation actions.

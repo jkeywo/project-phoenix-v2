@@ -192,6 +192,181 @@ fn duel() -> bevy::prelude::App {
     boot(&args(DUEL, ("cruiser", "destroyer")))
 }
 
+fn power_continuation_frontier(
+    world: &mut bevy::prelude::World,
+) -> std::collections::BTreeMap<String, (project_phoenix::snapshot::PowerState, [f32; 4])> {
+    use project_phoenix::{
+        core::messages::ModifierSlot, entities::spawner::EntityUuid, modifiers::ShipModifiers,
+        ship::power::ShipPowerSystem,
+    };
+    let mut query = world.query::<(&EntityUuid, &ShipPowerSystem, &ShipModifiers)>();
+    query
+        .iter(world)
+        .map(|(uuid, power, modifiers)| {
+            (
+                uuid.0.clone(),
+                (
+                    power.0.capture_continuation(),
+                    [
+                        ModifierSlot::MaxSpeed,
+                        ModifierSlot::MaxYawRate,
+                        ModifierSlot::PhaserDamage,
+                        ModifierSlot::ShieldRegen,
+                    ]
+                    .map(|slot| modifiers.get(&slot)),
+                ),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn power_continuation_resumes_the_next_tick_and_modifiers_over_a_different_bootstrap() {
+    use bevy::ecs::system::RunSystemOnce;
+    use project_phoenix::{
+        modifiers::coordination::translate_power_modifiers,
+        ship::power::{PowerConfigResource, ShipPowerSystem},
+    };
+    for depleted in [false, true] {
+        let mut live = duel();
+        step(&mut live, CAPTURE_AT);
+        {
+            let world = live.world_mut();
+            let mut query = world.query::<(&mut ShipPowerSystem, &PowerConfigResource)>();
+            for (mut power, config) in query.iter_mut(world) {
+                let mut allocations: Vec<_> = power
+                    .0
+                    .iter()
+                    .map(|(id, _)| (id.clone(), if depleted { 1 } else { 2 }))
+                    .collect();
+                allocations.reverse();
+                power.0.restore(
+                    &allocations,
+                    if depleted { 0.0 } else { config.0.capacity },
+                    depleted,
+                );
+            }
+            // Settle the production modifier projection before taking a save,
+            // as the ordinary scheduled translator does after an allocation.
+            world.run_system_once(translate_power_modifiers).unwrap();
+        }
+        let payload = capture(live.world());
+        let expected = power_continuation_frontier(live.world_mut());
+        assert!(expected.len() >= 2, "both duel reactors participate");
+        let mut resumed = boot_to_restore_point(&args(DUEL, ("cruiser", "destroyer")), &payload);
+        {
+            let world = resumed.world_mut();
+            let mut query = world.query::<&mut ShipPowerSystem>();
+            for mut power in query.iter_mut(world) {
+                let allocations: Vec<_> = power.0.iter().map(|(id, _)| (id.clone(), 4)).collect();
+                power.0.restore(&allocations, 13.0, !depleted);
+            }
+            world.run_system_once(translate_power_modifiers).unwrap();
+        }
+        assert_ne!(power_continuation_frontier(resumed.world_mut()), expected);
+        let report = restore(resumed.world_mut(), &payload);
+        assert!(report.is_complete(), "{:?}", report.gaps);
+        assert_eq!(power_continuation_frontier(resumed.world_mut()), expected);
+        for frame in 1..=30 {
+            live.update();
+            resumed.update();
+            assert_eq!(
+                power_continuation_frontier(resumed.world_mut()),
+                power_continuation_frontier(live.world_mut()),
+                "Power and derived modifiers at resumed frame {frame}, depleted={depleted}"
+            );
+        }
+        assert_eq!(world_digest(resumed.world()), world_digest(live.world()));
+    }
+}
+
+fn control_continuation_frontier(
+    world: &bevy::prelude::World,
+) -> std::collections::BTreeMap<String, project_phoenix::snapshot::ControlState> {
+    capture(world)
+        .entities
+        .into_iter()
+        .filter_map(|row| row.control.map(|control| (row.uuid, control)))
+        .collect()
+}
+
+#[test]
+fn control_continuation_replaces_bootstrap_inputs_and_targets_before_the_first_resumed_action() {
+    use project_phoenix::{entities::spawner::EntityUuid, snapshot::ControlState};
+    for clear in [false, true] {
+        let mut live = duel();
+        step(&mut live, CAPTURE_AT);
+        let mut frontier = control_continuation_frontier(live.world());
+        assert!(frontier.len() >= 2, "both duel Ships have live controls");
+        let ship_ids: Vec<_> = frontier.keys().cloned().collect();
+        for (uuid, saved) in &mut frontier {
+            saved.thrust = if clear { 0.0 } else { 0.8 };
+            saved.steering = if clear { 0.0 } else { -0.4 };
+            saved.lateral = if clear { 0.0 } else { 0.3 };
+            saved.vertical = 0.0;
+            saved.boost = false;
+            saved.impulse_phase = 0;
+            saved.last_helm = if clear { [0.0; 3] } else { [0.1, 0.2, -0.3] };
+            if clear {
+                saved.target_lock = None;
+                saved.sensor_lock = None;
+                saved.last_attacker = None;
+            } else {
+                let other = ship_ids.iter().find(|id| *id != uuid).unwrap().clone();
+                saved.target_lock = Some(other.clone());
+                saved.sensor_lock = Some(other);
+            }
+        }
+        let install =
+            |world: &mut bevy::prelude::World,
+             states: &std::collections::BTreeMap<String, ControlState>| {
+                let rows = world
+                    .query::<(bevy::prelude::Entity, &EntityUuid)>()
+                    .iter(world)
+                    .map(|(entity, uuid)| (entity, uuid.0.clone()))
+                    .collect::<Vec<_>>();
+                for (entity, uuid) in rows {
+                    if let Some(saved) = states.get(&uuid) {
+                        saved.restore_into(&mut world.entity_mut(entity));
+                    }
+                }
+            };
+        install(live.world_mut(), &frontier);
+        let payload = capture(live.world());
+        if !clear {
+            assert!(payload
+                .entities
+                .iter()
+                .filter_map(|row| row.control.as_ref())
+                .all(|control| control.target_lock.is_some() && control.sensor_lock.is_some()));
+        }
+        let mut resumed = boot_to_restore_point(&args(DUEL, ("cruiser", "destroyer")), &payload);
+        let mut different = frontier.clone();
+        for state in different.values_mut() {
+            state.thrust = -1.0;
+            state.last_helm = [-1.0; 3];
+            state.target_lock = Some("bootstrap-only".into());
+            state.sensor_lock = Some("bootstrap-only".into());
+        }
+        install(resumed.world_mut(), &different);
+        assert_ne!(control_continuation_frontier(resumed.world()), frontier);
+        let report = restore(resumed.world_mut(), &payload);
+        assert!(report.is_complete(), "{:?}", report.gaps);
+        assert_eq!(control_continuation_frontier(resumed.world()), frontier);
+        for frame in 1..=12 {
+            live.update();
+            resumed.update();
+            assert_eq!(
+                control_continuation_frontier(resumed.world()),
+                control_continuation_frontier(live.world()),
+                "control frontier after resumed frame {frame}, clear={clear}"
+            );
+            assert_eq!(world_digest(resumed.world()), world_digest(live.world()),
+                "the first and subsequent authoritative actions agree, frame={frame}, clear={clear}");
+        }
+    }
+}
+
 fn step(app: &mut bevy::prelude::App, frames: u64) {
     for _ in 0..frames {
         app.update();

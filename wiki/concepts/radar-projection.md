@@ -2,8 +2,8 @@
 title: Radar Projection
 type: concept
 tags: [radar, helm, navigation, viewscreen, gm, map, inspector, pure-iterator, shared]
-sources: [gui/console-state.js, gui/components/ph-scope-chrome.js, gui/battleship/navigation.html, gui/sim-state.js, gui/host-channel.js, gui/gm-local-projection.js, gui/entity-inspector.js, gui/components/ph-radar.js, gui/components/ph-tactical-radar.js, gui/components/ph-navigation-map.js, client.html, server.html, src/gm_projection.rs, src/gui/radar.rs, src/radar.rs, src/radar_config.rs, src/entities/tags.rs, src/console/weapons/blackboard.rs, CONTEXT.md]
-updated: 2026-09-01
+sources: [src/ship/continuation.rs, src/snapshot.rs, gui/console-state.js, gui/components/ph-scope-chrome.js, gui/battleship/navigation.html, gui/sim-state.js, gui/host-channel.js, gui/gm-local-projection.js, gui/entity-inspector.js, gui/components/ph-radar.js, gui/components/ph-tactical-radar.js, gui/components/ph-navigation-map.js, client.html, server.html, src/gm_projection.rs, src/gui/radar.rs, src/radar.rs, src/radar_config.rs, src/entities/tags.rs, src/console/weapons/blackboard.rs, CONTEXT.md]
+updated: 2026-09-07
 ---
 
 # Radar Projection
@@ -21,6 +21,12 @@ implementation:
   readiness check used by the weapons server.
 
 The client remains pure JavaScript and does not call the Rust projection.
+
+Saved target memory is separate from those published projections. The Ship-owned
+`ControlState` conversion in `src/ship/continuation.rs` preserves Combat Lock,
+Science Target and last attacker, including cleared targets; `src/snapshot.rs`
+retains entity matching and the compatibility re-export. Live AI consumers still
+read the published viewscreen facts.
 
 ## GM inspect mode
 

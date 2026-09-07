@@ -14,7 +14,7 @@ entities:
     implementation:
       status: declared
       paths: [src/ship/power.rs, src/ship/config.rs, src/modifiers/power_system.rs]
-      symbols: [handle_power_messages, tick_power_system, authored_power_group_seed, from_authored_groups, AuthoredPowerGroup, floor_for, is_group_cold]
+      symbols: [handle_power_messages, tick_power_system, authored_power_group_seed, from_authored_groups, AuthoredPowerGroup, floor_for, is_group_cold, PowerState, capture_continuation, restore_continuation]
       tests: [cargo test, tests/smoke/power-console.spec.js]
 
   - state: ship-power-state
@@ -30,8 +30,9 @@ entities:
       replicas: [ship-system-blackboards-state, sensor-radar-blackboard-state]
     implementation:
       status: declared
-      paths: [src/ship/power.rs, src/core/messages.rs]
-      symbols: [PowerBlackboard]
+      paths: [src/ship/power.rs, src/core/messages.rs, src/modifiers/power_system.rs, src/snapshot.rs, tests/snapshot_resume.rs]
+      symbols: [PowerBlackboard, PowerState, capture_continuation, restore_continuation]
+      tests: [cargo test --features headless --test snapshot_resume power_continuation_]
 
   - state: power-brownout-coordination-state
     core:

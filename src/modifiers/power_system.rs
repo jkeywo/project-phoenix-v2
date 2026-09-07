@@ -1,5 +1,26 @@
 use crate::core::messages::PowerGroupId;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+/// A ship's saved reactor allocation, battery reserve and exhaustion lock.
+///
+/// These explicit scalars retain the existing `snapshot::PowerState` wire
+/// contract. They are separate from runtime state and from the Power read
+/// surface: snapshot orchestration owns entity identity and ordering, while
+/// the reactor owns its projection and reinstatement.
+///
+/// Power-derived damage, motion and shield modifiers read these values on the
+/// first resumed tick. An immediately equal world digest does not establish
+/// that continuation: the reactor itself is not part of that digest fold.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PowerState {
+    /// `(power group id, level)` in reactor insertion order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allocations: Vec<(String, u8)>,
+    pub battery_charge: f32,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub locked: bool,
+}
 
 pub const HELM_POWER_GROUP: &str = "helm";
 pub const WEAPONS_POWER_GROUP: &str = "weapons";
@@ -489,6 +510,31 @@ impl PowerSystem {
         }
     }
 
+    /// Capture the saved projection in the reactor's own allocation order.
+    /// Default values are still a complete replacement of bootstrap state.
+    pub fn capture_continuation(&self) -> PowerState {
+        PowerState {
+            allocations: self
+                .iter()
+                .map(|(id, level)| (id.0.clone(), level))
+                .collect(),
+            battery_charge: self.battery_charge,
+            locked: self.locked(),
+        }
+    }
+
+    /// Reinstate a saved frontier using the reactor's existing restore rules:
+    /// authored group floors survive, duplicate ids keep their first position,
+    /// and the saved lock does not prevent reinstating its own allocations.
+    pub fn restore_continuation(&mut self, saved: &PowerState) {
+        let allocations: Vec<_> = saved
+            .allocations
+            .iter()
+            .map(|(id, level)| (PowerGroupId(id.clone()), *level))
+            .collect();
+        self.restore(&allocations, saved.battery_charge, saved.locked);
+    }
+
     /// Set the allocation for a specific power group to `level`, clamped to
     /// `[floor_for(group), GROUP_LEVEL_MAX]`. Delta is applied one step at a
     /// time via `increase` / `decrease` so the `total() <= 8` and `locked`
@@ -843,6 +889,56 @@ mod tests {
     #![allow(clippy::field_reassign_with_default)]
 
     use super::*;
+
+    #[test]
+    fn continuation_retains_existing_wire_fields_and_allocation_order() {
+        let wire = r#"(allocations:[("weapons",3),("helm",1),("shields",2)],battery_charge:12.5,locked:true)"#;
+        let saved: PowerState = ron::from_str(wire).unwrap();
+        let mut reactor = PowerSystem::default();
+        reactor.restore_continuation(&saved);
+        assert_eq!(reactor.capture_continuation(), saved);
+        assert_eq!(
+            ron::to_string(&reactor.capture_continuation()).unwrap(),
+            wire
+        );
+        let old_default: PowerState = ron::from_str("(battery_charge:0.0)").unwrap();
+        assert_eq!(old_default, PowerState::default());
+    }
+
+    #[test]
+    fn continuation_replaces_bootstrap_and_preserves_exhaustion_and_recovery_ticks() {
+        let config = PowerConfig::default();
+        for (allocations, charge, locked) in [
+            (
+                vec![(weapons(), 4), (helm(), 3), (shields(), 1)],
+                0.001,
+                false,
+            ),
+            (vec![(shields(), 1), (weapons(), 1), (helm(), 1)], 0.0, true),
+            (
+                vec![(helm(), 2), (weapons(), 2), (shields(), 2)],
+                config.capacity,
+                false,
+            ),
+        ] {
+            let mut live = PowerSystem::new(&config);
+            live.restore(&allocations, charge, locked);
+            let saved = live.capture_continuation();
+            let mut resumed = PowerSystem::new(&config);
+            resumed.restore(
+                &[(helm(), 4), (shields(), 4), (weapons(), 4)],
+                13.0,
+                !locked,
+            );
+            assert_ne!(resumed.capture_continuation(), saved);
+            resumed.restore_continuation(&saved);
+            assert_eq!(resumed.capture_continuation(), saved);
+            for _ in 0..200 {
+                assert_eq!(resumed.tick(0.1, &config), live.tick(0.1, &config));
+                assert_eq!(resumed.capture_continuation(), live.capture_continuation());
+            }
+        }
+    }
 
     fn helm() -> PowerGroupId {
         PowerGroupId(HELM_POWER_GROUP.into())

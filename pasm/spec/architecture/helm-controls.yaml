@@ -182,6 +182,7 @@ entities:
       title: Last Helm Input State
       summary: Authoritative cached helm intent mirror for the LocalShip, used by the host for engine telemetry, boost drain, and the viewscreen HUD.
       rationale:
+        - "[ai] Save continuation preserves LastHelmInput separately from the desired axis components. ship::continuation owns their explicit ControlState projection and reinstatement, while snapshot retains entity matching and the restore point. Saved neutral values replace a non-neutral bootstrap before the first resumed integration."
         - "Single writer since #824: host-helm-control-router (process_helm_inputs) mirrors every helm payload it applies — human-admitted and AI-emitted alike — into the LocalShip's LastHelmInput as it writes the intent components, so the thrust/steering pair can never tear between two writers. NPC LastHelmInput deliberately stays at its spawn default so ai_power_allocation's movement rule observes what it observed before the migration."
         - "[ai] The host stores the latest thrust, steering, and lateral inputs rather than replaying raw control messages every frame."
     architecture:
@@ -195,6 +196,7 @@ entities:
     implementation:
       status: observed
       paths:
+        - src/ship/continuation.rs
         - src/ship/components.rs
         - src/ship_plugin.rs
       symbols:

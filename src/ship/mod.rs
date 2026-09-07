@@ -3,6 +3,7 @@ pub mod combat_activity;
 pub mod command_stance;
 pub mod components;
 pub mod config;
+pub mod continuation;
 pub mod control_source;
 pub mod coordination;
 pub mod coordination_systems;

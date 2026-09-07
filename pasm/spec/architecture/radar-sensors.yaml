@@ -60,6 +60,7 @@ entities:
       title: Sensor Radar Selection State
       summary: Per-ship Science Target UUID owned by the sensor radar, written only through Admission (issue #828) and read only by the sensor-radar publisher (issue #829) — no other module imports the component. The sensor-radar blackboard replicates it as selected_target, and the viewscreen aggregator lifts it to science_target.
       rationale:
+        - "[ai] Saved target memory is the continuation exception to live consumer isolation. ship::continuation captures and reinstates the Science Target alongside Combat Lock and last attacker in the existing ControlState payload; a saved absent target clears the bootstrap target. Snapshot orchestration matches the Ship identity before invoking that operation, and ordinary AI consumers still read the published viewscreen fact."
         - "Issue #829 renamed SensorsTarget to SensorRadarSelection and made it radar-owned: cross-system consumers read the viewscreen Science Target fact, never this live selection (spec §3)."
     architecture:
       classification: authoritative
@@ -68,7 +69,7 @@ entities:
       replicas: [ship-system-blackboards-state]
     implementation:
       status: declared
-      paths: [src/ship/sensors.rs, src/core/messages.rs]
+      paths: [src/ship/sensors.rs, src/ship/continuation.rs, src/core/messages.rs]
       symbols: [SensorRadarSelection]
 
   - component: sensors-threat-warning-producer

@@ -2,7 +2,7 @@
 title: Native Host
 type: concept
 tags: [native, viewscreen, lobby, scenario-selection, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile, saved-layouts, media-devices, camera, microphone, saves]
-sources: [src/world/materialization.rs, tests/native_host_lobby/materialization.rs, src/delivery/payload.rs, tests/native_host_catalogue.rs, tests/client/scenario-catalogue-wire.test.js, src/native_host/mod.rs, src/native_host/direct_join.rs, src/native_host/join_codes.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/lobby/handler.rs, src/content_ledger.rs, tests/fixtures/scenario-arbiter-parity.json, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/layout_store.rs, src/native_host/layout_store_systems.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/keyboard.rs, gui/focus-trap.js, tests/client/focus-trap.test.js, tests/client/native-settings.test.js, tests/fixtures/native-escape-keydown.json, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/session_connections.rs, src/native_host/connections.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/frame_stats.rs, src/native_host/panes/hud.rs, gui/viewscreen-hud.html, tests/client/viewscreen-hud.test.js, src/native_host/panes/surface_stats.rs, src/native_host/panes/pane_thread.rs, src/native_host/panes/mirror.rs, src/native_host/panes/upload.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs, src/delivery/args.rs, src/save_slots_store.rs]
+sources: [src/world/materialization.rs, tests/native_host_lobby/materialization.rs, src/delivery/payload.rs, tests/native_host_catalogue.rs, tests/client/scenario-catalogue-wire.test.js, src/native_host/mod.rs, src/native_host/direct_join.rs, src/native_host/join_codes.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/lobby/handler.rs, src/content_ledger.rs, tests/fixtures/scenario-arbiter-parity.json, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/bridge_display_roster_tests.rs, tests/native_host_lobby/display_roster.rs, src/native_host/layout_store.rs, src/native_host/layout_store_systems.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/keyboard.rs, gui/focus-trap.js, tests/client/focus-trap.test.js, tests/client/native-settings.test.js, tests/fixtures/native-escape-keydown.json, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/session_connections.rs, src/native_host/connections.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/frame_stats.rs, src/native_host/panes/hud.rs, gui/viewscreen-hud.html, tests/client/viewscreen-hud.test.js, src/native_host/panes/surface_stats.rs, src/native_host/panes/pane_thread.rs, src/native_host/panes/mirror.rs, src/native_host/panes/upload.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs, src/delivery/args.rs, src/save_slots_store.rs]
 updated: 2026-09-08
 ---
 
@@ -1033,6 +1033,25 @@ was the operator's choice) or falls back to primary-else-first with a
 `LayoutAdoption::ViewscreenMonitorGone` note when it did not.
 
 ### The winit adapter, and missing displays
+
+`bridge_display::sync_station_roster` reconciles the selected hull into the
+live layout before the window and console followers run. This also runs on an
+authored `--profile` host or a host without a saved-layout store. A worldless
+`--lobby` initially has no Station roster; selection supplies `PendingShipConfig`,
+and after GameStart consumes it the selected host's `ShipStations` remains the
+source. The unselected lobby's fallback roster is never adopted.
+
+Profile Station seats deferred until that first selection are attempted once,
+in authored order, against the current layout law. Only monitors present at
+boot retain that intent; a settled unplug retires it, so selection cannot
+silently reopen a console on a replugged display. Participant reservations,
+their pane indices, the authored split, and the operator's current viewscreen
+and existing seats survive. An invalid Station or a now-ineligible monitor is
+reported through the ordinary layout notice and is not retried on a later
+return. Returning to the retained world does not reapply the boot profile.
+The adapter regressions are in `src/native_host/bridge_display_roster_tests.rs`;
+`tests/native_host_lobby/display_roster.rs` exercises actual world selection
+and ordinary ReturnToLobby with and without a profile, without a layout store.
 
 Once winit reports the monitors, `BridgeDisplayPlugin` resolves the profile
 against them and covers each configured monitor:

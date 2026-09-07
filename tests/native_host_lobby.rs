@@ -51,6 +51,9 @@ mod materialization;
 #[path = "native_host_lobby/round_return.rs"]
 mod round_return;
 
+#[path = "native_host_lobby/display_roster.rs"]
+mod display_roster;
+
 /// Populate the process-global template cache from the repository's own tree.
 /// Idempotent (a map keyed by template path), and cargo runs this file as its
 /// own process, so nothing outside it sees the result.

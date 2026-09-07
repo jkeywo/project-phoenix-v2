@@ -389,6 +389,7 @@ entities:
       title: Bridge Display Profile
       summary: A reusable, hand-editable TOML profile that assigns every configured monitor a role — the shared viewscreen, or a crew Station hosting one or two console panes — so a native host covers each monitor with one borderless-fullscreen surface and reloads the same layout after a reboot. The pure model (stable monitor identity, the one/two-pane density rule, pane geometry, the round-trip and the missing-display resolution) is Bevy-free and CI-tested; the winit adapter that reads real monitors and opens the windows is provable only on a machine with displays.
       rationale:
+        - "[ai] The display adapter owns selected-hull roster synchronization independently of saved-layout persistence: an authored profile disables that store, and an unresolvable home directory must not disable Station rows. After boot, sync_station_roster reconciles the actual PendingShipConfig, or the selected host's ShipStations after GameStart consumes it, against the live monitor snapshot before display followers run. It preserves operator seats, viewscreen, reservations, order and splits. Station assignments deferred because --lobby had no hull are attempted once in authored order through the ordinary layout law, without re-adopting the full profile. Only monitors present at boot retain deferred intent, and a settled unplug retires it so selection never silently repairs an absent or replugged display; refusals are notices and later selection or retained-world return never retries those boot instructions. This entrypoint belongs to BridgeDisplayPlugin and does not depend on a particular world-materialization schedule."
         - "[ai] The stable identity is name@WxH — the OS-reported name and native resolution — because winit (and Bevy's Monitor component) exposes no serial or EDID, nothing a display carries in hardware. Position and scale factor are deliberately EXCLUDED, because both change under the ordinary rearrange the identity must survive; two identical monitors, indistinguishable to winit, are the one case that falls back to a position suffix and does not survive a physical swap. On Windows the name is often the GDI device name (like DISPLAY5), so the identity is only as stable as that slot across a re-plug — the honest limit of what the platform gives, documented on identify()."
         - "[ai] The layout/profile model is PURE and lives apart from the winit adapter, because that is where every acceptance criterion with logic in it lives: a monitor keeps its identity across an OS-settings rearrange, a Station refuses a third pane, a profile reloads to the same roles, a vanished monitor is named rather than silently re-homed. All of it runs under the ordinary cargo test; only opening a real borderless-fullscreen window needs a display, and that is the #[ignore]d integration test, exactly as #1121's GPU proof is."
         - "[ai] The density rule (MAX_PANES_PER_STATION = 2) is a documented legibility bound, not a designer's tunable: a console is authored to be read one, or side-by-side two, to a screen, and three at bridge distance is unreadable. A profile that names three panes is refused at validation with an authored explanation naming the monitor, before any window opens."
@@ -448,6 +449,7 @@ entities:
           BridgeDisplaySet,
           BridgeDisplayConfig,
           BridgeDisplayApplied,
+          sync_station_roster,
           BridgeLayoutResource,
           BridgeStationSurfaces,
           StationPane,
@@ -456,7 +458,7 @@ entities:
           reconcile_seated_consoles,
           run_setup,
         ]
-      tests: [cargo test, tests/native_bridge_displays.rs]
+      tests: [cargo test, tests/native_bridge_displays.rs, src/native_host/bridge_display_roster_tests.rs, tests/native_host_lobby/display_roster.rs]
 
   - component: bridge-layout-law
     core:

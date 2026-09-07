@@ -99,7 +99,7 @@ use bevy::window::{
 use crate::logging::{LogCat, LogFilterConfig};
 use crate::native_host::panes::frame_stats::PaneExperiments;
 
-use super::bridge_layout::BridgeLayout;
+use super::bridge_layout::{BridgeLayout, LayoutAction, LayoutAdoption};
 use super::bridge_profile::{
     identify, identify_stable, present_assigned_identities, resolve, runtime_display_losses,
     runtime_display_returns, DiscoveredMonitor, DisplayRole, MonitorGeometry, MonitorIdentity,
@@ -325,6 +325,16 @@ pub struct BridgeDisplayApplied {
     pub viewscreen: Option<MonitorIdentity>,
 }
 
+/// Authored Station seats whose hull was not known at display boot. The
+/// reservations, pane indices, splits and viewscreen have already been adopted;
+/// only these seats wait for selection, and each is attempted exactly once.
+#[derive(Resource, Default)]
+struct DeferredProfileStations(Vec<(crate::core::messages::StationId, MonitorIdentity)>);
+
+#[cfg(test)]
+#[path = "bridge_display_roster_tests.rs"]
+mod roster_tests;
+
 /// Installs the bridge-display adapter.
 ///
 /// [`apply_bridge_profile`] is no longer gated on a [`BridgeDisplayConfig`]
@@ -383,6 +393,7 @@ impl Plugin for BridgeDisplayPlugin {
                     .run_if(not(resource_exists::<BridgeDisplayApplied>))
                     // And nothing to do at all until winit reports a display.
                     .run_if(any_with_component::<Monitor>),
+                sync_station_roster.run_if(resource_exists::<BridgeLayoutResource>),
                 // Both of these need the boot seed to exist: the follower diffs
                 // against what boot recorded, and the watcher's first
                 // observation is the baseline it diffs against.
@@ -541,7 +552,106 @@ fn station_roster(world: &World) -> Vec<crate::core::messages::StationId> {
     world
         .get_resource::<crate::ship::components::PendingShipConfig>()
         .map(|c| c.0.stations.iter().map(|s| s.id.clone()).collect())
+        // GameStart consumes PendingShipConfig. A display first reported after
+        // that edge still needs the selected hull's roster, never the empty
+        // lobby's fallback. SelectedShipResource distinguishes the two.
+        .or_else(|| {
+            world
+                .get_resource::<crate::lobby::SelectedShipResource>()
+                .and_then(|_| world.get_resource::<crate::lobby::stations_config::ShipStations>())
+                .map(|c| c.stations.iter().map(|s| s.id.clone()).collect())
+        })
         .unwrap_or_default()
+}
+
+/// Keep the display law on the selected hull independently of saved layouts.
+/// In particular an authored profile deliberately has no layout store. Reusing
+/// the live monitor snapshot retains the watcher's debounce and stable identity.
+fn sync_station_roster(
+    mut layout: ResMut<BridgeLayoutResource>,
+    hull: Option<Res<crate::ship::components::PendingShipConfig>>,
+    selected: Option<Res<crate::lobby::SelectedShipResource>>,
+    stations: Option<Res<crate::lobby::stations_config::ShipStations>>,
+    mut deferred: Option<ResMut<DeferredProfileStations>>,
+) {
+    if let Some(deferred) = deferred.as_mut() {
+        let missing: Vec<_> = deferred
+            .0
+            .iter()
+            .filter(|(_, monitor)| !layout.layout.monitors().contains(monitor))
+            .cloned()
+            .collect();
+        if !missing.is_empty() {
+            deferred
+                .0
+                .retain(|(_, monitor)| layout.layout.monitors().contains(monitor));
+            // A settled unplug abandons the boot instruction. Replugging is
+            // an explicit operator repair, and its new layout no longer carries
+            // the original participant reservations or split.
+            layout
+                .notices
+                .extend(missing.into_iter().map(|(station, monitor)| {
+                    LayoutNotice::Adopted(LayoutAdoption::SeatRefused {
+                        station,
+                        refusal: super::bridge_layout::LayoutRefusal::UnknownMonitor {
+                            monitor: monitor.clone(),
+                        },
+                        monitor,
+                    })
+                }));
+        }
+    }
+    let owes_seats = deferred.as_ref().is_some_and(|d| !d.0.is_empty());
+    if !layout.is_added()
+        && !hull.as_ref().is_some_and(|h| h.is_changed())
+        && !selected.as_ref().is_some_and(|s| s.is_changed())
+        && !stations.as_ref().is_some_and(|s| s.is_changed())
+        && !owes_seats
+    {
+        return;
+    }
+    let roster: Vec<_> = if let Some(hull) = hull {
+        hull.0.stations.iter().map(|s| s.id.clone()).collect()
+    } else if let (Some(_), Some(stations)) = (selected, stations) {
+        stations.stations.iter().map(|s| s.id.clone()).collect()
+    } else {
+        return;
+    };
+    if layout.layout.roster() == roster && !owes_seats {
+        return;
+    }
+
+    let (mut next, mut notes) = layout.layout.reconcile(&layout.monitors, roster);
+    if let Some(deferred) = deferred.as_mut() {
+        let mut seen = Vec::new();
+        for (station, monitor) in std::mem::take(&mut deferred.0) {
+            if seen.contains(&station) {
+                notes.push(LayoutAdoption::StationNamedTwice { station, monitor });
+                continue;
+            }
+            seen.push(station.clone());
+            // An existing seat is a live choice. Never move it back to a boot
+            // instruction; unassigned seats are attempted in authored order.
+            if next.monitor_of(&station).is_some() {
+                continue;
+            }
+            match next.apply(&LayoutAction::AssignStation {
+                station: station.clone(),
+                monitor: monitor.clone(),
+            }) {
+                Ok(placed) => next = placed,
+                Err(refusal) => notes.push(LayoutAdoption::SeatRefused {
+                    station,
+                    monitor,
+                    refusal,
+                }),
+            }
+        }
+    }
+    layout.layout = next;
+    layout
+        .notices
+        .extend(notes.into_iter().map(LayoutNotice::Adopted));
 }
 
 /// Read the present monitors, seed the live layout, and open one
@@ -598,6 +708,35 @@ pub fn apply_bridge_profile(world: &mut World) {
     let base = BridgeLayout::from_discovered(&discovered, station_roster(world))
         .expect("a non-empty discovery always yields a bridge");
     let authored = world.get_resource::<BridgeDisplayConfig>().cloned();
+    if let Some(config) = authored.as_ref().filter(|c| c.authored) {
+        if !world.contains_resource::<crate::ship::components::PendingShipConfig>()
+            && !world.contains_resource::<crate::lobby::SelectedShipResource>()
+        {
+            world.insert_resource(DeferredProfileStations(
+                config
+                    .profile
+                    .displays
+                    .iter()
+                    // Only the hull is deferred. An absent monitor was not
+                    // adopted at boot and is never silently adopted on replug.
+                    .filter(|display| base.monitors().contains(&display.identity))
+                    .flat_map(|display| match &display.role {
+                        DisplayRole::Station { panes, .. } => panes
+                            .iter()
+                            .filter_map(|p| p.station.as_ref())
+                            .map(|s| {
+                                (
+                                    crate::core::messages::StationId(s.clone()),
+                                    display.identity.clone(),
+                                )
+                            })
+                            .collect::<Vec<_>>(),
+                        _ => Vec::new(),
+                    })
+                    .collect(),
+            ));
+        }
+    }
     let (layout, adoption) = match &authored {
         Some(config) => base.adopt_profile(&config.profile),
         None => (base, Vec::new()),
@@ -606,6 +745,19 @@ pub fn apply_bridge_profile(world: &mut World) {
     // `--pane` profile produces one per participant slot, and opening the
     // monitor row with a wall of them would bury the answers to actual presses.
     for note in &adoption {
+        if world.contains_resource::<DeferredProfileStations>()
+            && matches!(
+                note,
+                LayoutAdoption::SeatRefused {
+                    refusal: super::bridge_layout::LayoutRefusal::UnknownStation { .. },
+                    ..
+                }
+            )
+        {
+            // This is not an invalid hull reference yet. Selection will try
+            // the deferred seat once and publish any actual refusal then.
+            continue;
+        }
         crate::pwarn!(log, LogCat::Lobby, "bridge display: {note}");
     }
 

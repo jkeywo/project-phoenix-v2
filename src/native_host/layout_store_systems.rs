@@ -32,11 +32,10 @@
 //!  1. **Reconcile onto the hull's roster.** The live layout was seeded by
 //!     `bridge_display::apply_bridge_profile` from whatever roster existed then
 //!     — the hull's on a `--world` boot, and *nothing at all* on a `--lobby`
-//!     one, which has no `PendingShipConfig` until the pick. Without this a
-//!     world-less host would carry an empty roster for the rest of the run, and
-//!     the lobby's per-station screen rows (a `map` over
-//!     [`BridgeLayout::eligibility`](crate::native_host::bridge_layout::BridgeLayout::eligibility))
-//!     would be empty with it.
+//!     one, which has no `PendingShipConfig` until the pick. The display
+//!     adapter now synchronizes the roster before this set on every host,
+//!     including authored profiles and hosts without a store. This defensive
+//!     reconcile also keeps saved-file adoption on the hull named below.
 //!  2. **Adopt the saved file** onto that reconciled bridge, through
 //!     [`BridgeLayout::adopt_profile`](crate::native_host::bridge_layout::BridgeLayout::adopt_profile)
 //!     — the same door a hand-authored `--profile` comes through, so a saved
@@ -300,9 +299,8 @@ fn adopt_remembered_layout(
         return;
     }
 
-    // 1. The roster. A `--world` host was seeded with this exact list and the
-    //    reconcile is a no-op; a `--lobby` host was seeded with none, and this
-    //    is where its station rows come from.
+    // 1. Reconcile against this saved file's hull. BridgeDisplaySet already
+    //    synchronized the live roster; this also protects standalone adoption.
     let roster: Vec<crate::core::messages::StationId> =
         hull.0.stations.iter().map(|s| s.id.clone()).collect();
     let monitors = layout.monitors.clone();

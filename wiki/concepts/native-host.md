@@ -752,6 +752,16 @@ way — `Renderer::update()` runs them whether or not anything painted, which is
 why the page's own 500 ms name-field debounce fired in exactly the runs whose
 rAF never did.
 
+The override is per window. Station iframes therefore import
+`gui/native-pane-raf.js` through `gui/components/ph-element.js` before any
+component is defined or upgraded. A same-origin iframe whose parent declares
+the native-pane capability uses that parent's matching request/cancel pair,
+with timestamps from the child's own performance clock. This also covers
+Tactical, which does not load the classic background-tab keepalive. Browser
+documents retain their existing scheduler. `tests/client/native-pane-radar.test.js`
+checks a quiet radar receiving a changed contact with unchanged ship pose,
+including first upgrade and disconnect cancellation.
+
 ### The seam, not a convenience
 
 `currentLink()` reads a closure only

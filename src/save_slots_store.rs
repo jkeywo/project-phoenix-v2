@@ -18,10 +18,11 @@ use crate::save_slots::{
     SaveSlotEntry,
 };
 use crate::save_slots_lifecycle::{
-    begin_startup_restore, cancel_startup_restore, complete_startup_restore, request_manual_save,
-    PendingStoredRun, PendingStoredRuns, RefusedManualSaves, SaveCaptureConsumer,
+    request_manual_save, PendingStoredRun, PendingStoredRuns, RefusedManualSaves,
+    SaveCaptureConsumer,
 };
 use crate::snapshot::{LoadRefusal, StoredRun};
+use crate::startup_restore::{self, RestoreFailure, RestoreOutcome};
 
 /// Stable sentinel whose open handle carries the native host's exclusive claim.
 ///
@@ -179,14 +180,6 @@ impl std::fmt::Display for NativeResumeRefusal {
 #[derive(Resource, Default)]
 struct NativeStartupManualSlots(VecDeque<String>);
 
-#[derive(Resource, Default)]
-struct NativePendingRestore {
-    run: Option<StoredRun>,
-    waited_frames: u32,
-}
-
-const NATIVE_RESTORE_DEADLINE_FRAMES: u32 = 1_800;
-
 /// One peer's store, manual-name reservations, and local write outcomes.
 #[derive(Resource)]
 pub struct SaveSlotService {
@@ -338,7 +331,6 @@ pub fn install_local_save_store(app: &mut App, store: impl LocalSaveStore) {
     app.insert_resource(SaveCaptureConsumer)
         .insert_resource(SaveSlotService::new(store))
         .init_resource::<NativeStartupManualSlots>()
-        .init_resource::<NativePendingRestore>()
         .add_systems(
             OnEnter(crate::core::messages::GamePhase::InProgress),
             admit_native_startup_manual_saves,
@@ -390,10 +382,7 @@ pub fn stage_new_native_session_from_slot(
     if tick != 0 {
         return Err(NativeResumeRefusal::LiveSession { tick });
     }
-    if world
-        .get_resource::<NativePendingRestore>()
-        .is_some_and(|pending| pending.run.is_some())
-    {
+    if startup_restore::is_pending(world) {
         return Err(NativeResumeRefusal::AlreadyStaged);
     }
     let run = world
@@ -437,10 +426,7 @@ pub fn stage_new_native_session_from_slot(
         .snapshot
         .as_ref()
         .map_or(run.ledger.final_tick, |snapshot| snapshot.tick);
-    let mut pending = world.get_resource_or_insert_with(NativePendingRestore::default);
-    pending.run = Some(run);
-    pending.waited_frames = 0;
-    begin_startup_restore(world);
+    startup_restore::stage(world, run);
     Ok(capture_tick)
 }
 
@@ -491,107 +477,34 @@ fn admit_native_startup_manual_saves(world: &mut World) {
     }
 }
 
-fn finish_native_restore(world: &mut World, outcome: NativeRestoreOutcome) {
-    match &outcome {
-        NativeRestoreOutcome::Applied { tick } => complete_startup_restore(world, *tick),
-        NativeRestoreOutcome::Failed { .. } => cancel_startup_restore(world),
-    }
-    if let Some(mut pending) = world.get_resource_mut::<NativePendingRestore>() {
-        pending.run = None;
-        pending.waited_frames = 0;
-    }
+/// Report the shared startup driver's terminal result through the native Store.
+fn apply_native_startup_restore(world: &mut World) {
+    let Some(outcome) = startup_restore::advance(world) else {
+        return;
+    };
+    let outcome = match outcome {
+        RestoreOutcome::Applied { tick } => NativeRestoreOutcome::Applied { tick },
+        RestoreOutcome::Failed(failure) => NativeRestoreOutcome::Failed {
+            detail: match failure {
+                RestoreFailure::NoSnapshot => "the save carries no captured state".to_string(),
+                RestoreFailure::LayerFailed { path } => {
+                    format!("required world layer {path:?} could not be reconstructed")
+                }
+                RestoreFailure::NotReady { tick, .. } => {
+                    format!("the new session never built the saved roster for tick {tick}")
+                }
+                RestoreFailure::DigestMismatch { expected, actual } => format!(
+                    "restored digest {actual:016x} did not match saved digest {expected:016x}"
+                ),
+                RestoreFailure::Incomplete { tick, gaps } => {
+                    format!("restore at tick {tick} retained {gaps} unresolved gap(s)")
+                }
+            },
+        },
+    };
     if let Some(mut service) = world.get_resource_mut::<SaveSlotService>() {
         service.push_restore_outcome(outcome);
     }
-}
-
-/// Apply a startup-staged run only after the newly built scenario is ready.
-/// Dynamic layer/roster reconstruction follows the same snapshot helpers as the
-/// browser fresh-app path; no operator command can insert a run after tick zero.
-fn apply_native_startup_restore(world: &mut World) {
-    let run = world
-        .get_resource::<NativePendingRestore>()
-        .and_then(|pending| pending.run.clone());
-    let Some(run) = run else {
-        return;
-    };
-    if !world
-        .get_resource::<State<crate::core::messages::GamePhase>>()
-        .is_some_and(|phase| phase.get() == &crate::core::messages::GamePhase::InProgress)
-    {
-        return;
-    }
-    let Some(snapshot) = run.snapshot.as_ref() else {
-        finish_native_restore(
-            world,
-            NativeRestoreOutcome::Failed {
-                detail: "the save carries no captured state".to_string(),
-            },
-        );
-        return;
-    };
-
-    match crate::snapshot::reconcile_world_layers(world, &snapshot.state) {
-        crate::snapshot::LayerReconcileStatus::Ready => {}
-        crate::snapshot::LayerReconcileStatus::Waiting => return,
-        crate::snapshot::LayerReconcileStatus::Failed(path) => {
-            finish_native_restore(
-                world,
-                NativeRestoreOutcome::Failed {
-                    detail: format!("required world layer {path:?} could not be reconstructed"),
-                },
-            );
-            return;
-        }
-    }
-
-    let ready = crate::snapshot::ready_to_restore(world, &snapshot.state);
-    if !ready {
-        let waited = {
-            let mut pending = world.resource_mut::<NativePendingRestore>();
-            pending.waited_frames = pending.waited_frames.saturating_add(1);
-            pending.waited_frames
-        };
-        if waited < NATIVE_RESTORE_DEADLINE_FRAMES {
-            return;
-        }
-        if !crate::snapshot::ready_to_rebuild(world, &snapshot.state) {
-            finish_native_restore(
-                world,
-                NativeRestoreOutcome::Failed {
-                    detail: format!(
-                        "the new session never built the saved roster for tick {}",
-                        snapshot.tick
-                    ),
-                },
-            );
-            return;
-        }
-    }
-
-    let report = crate::snapshot::restore(world, &snapshot.state);
-    let restored_digest = crate::sim_digest::world_digest(world);
-    let outcome = if restored_digest != snapshot.digest {
-        NativeRestoreOutcome::Failed {
-            detail: format!(
-                "restored digest {restored_digest:016x} did not match saved digest {:016x}",
-                snapshot.digest
-            ),
-        }
-    } else if !report.is_complete() {
-        NativeRestoreOutcome::Failed {
-            detail: format!(
-                "restore at tick {} retained {} unresolved gap(s)",
-                snapshot.tick,
-                report.gaps.len()
-            ),
-        }
-    } else {
-        NativeRestoreOutcome::Applied {
-            tick: snapshot.tick,
-        }
-    };
-    finish_native_restore(world, outcome);
 }
 
 fn drain_pending_stored_runs(world: &mut World) {
@@ -940,7 +853,7 @@ mod tests {
             .manual_names
             .contains_key(&slot_id));
 
-        begin_startup_restore(app.world_mut());
+        crate::save_slots_lifecycle::begin_startup_restore(app.world_mut());
         app.update();
 
         {
@@ -1083,7 +996,7 @@ mod tests {
             ),
             Ok(27)
         );
-        assert!(app.world().resource::<NativePendingRestore>().run.is_some());
+        assert!(startup_restore::is_pending(app.world()));
 
         let live_store = FakeStore::default();
         crate::snapshot::save_to(&live_store, save_slots::AUTOSAVE_SLOT, &run(27, versions()))

@@ -1,4 +1,25 @@
 entities:
+  - component: startup-save-restore-driver
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Shared Startup Save Restore Driver
+      summary: "One cross-target Bevy adapter advances a compatible staged save from fresh-App bootstrap through layer reconciliation, entity readiness or rebuild, snapshot application, verification and exactly one terminal outcome. Target adapters retain Store access, boot-identity admission and operator/JS reporting."
+      rationale:
+        - "[ai] Issue #1406 removes separate native/browser pending resources, wait counters and cleanup policies. GameStartEntityUuids records the completed authored roster walk; current GamePhase is not a readiness prerequisite. Lobby frames before that marker consume no patience, while both layer and entity waits spend the same 1,800-frame budget. Rebuilding at expiry still requires completed layer topology."
+        - "[ai] Success requires a complete RestoreReport and a matching authoritative digest before save cadence is rebased. Failure cancels capture suspension at the World’s current continuation; snapshot application and layer reconciliation are not transactional rollback. Pending state, the frame budget and terminal reporting remain local side effects outside digest/mesh state."
+    architecture:
+      kind: runtime-adapter
+      authority: non-authoritative
+      coordinates: [t2-peer-local-save-slot-lifecycle, authoritative-state-digest]
+      reads: [world-snapshot-artifact]
+      runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
+    implementation:
+      status: observed
+      paths: [src/startup_restore.rs, src/save_slots_lifecycle.rs, src/save_slots_store.rs, src/server/bridge.rs, src/lockstep/mod.rs]
+      symbols: [StagedRestore, RestoreOutcome, RestoreFailure]
+      tests: [tests/save_slots_persistence.rs, tests/smoke/save-slots.spec.js]
+
   - component: authoritative-state-digest-boundary
     core:
       status: proposed

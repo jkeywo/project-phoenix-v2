@@ -186,6 +186,7 @@ pub mod simmath_vectors;
 /// stored inside `vellum-save`'s envelope. Compiles on both targets — a browser
 /// host is the thing that saves.
 pub mod snapshot;
+pub mod startup_restore;
 /// Host-derived per-Station importance projection (issue #1101): a pure,
 /// Bevy-free attention stream (one-off unread events vs continuing critical
 /// conditions), held strictly apart from health.

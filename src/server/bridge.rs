@@ -142,56 +142,12 @@ pub fn drain_client_debug_flags(
 // moved here is the DURABLE, sim-visible state in between; what stayed at the
 // edge is only that transient transport.
 //
-// The restore types here are defined UNGATED (native + wasm) even though most
-// are inserted only under `wasm_init`, because they are exercised by the native
-// unit tests at the bottom of this file. Bevy's `Resource` derive is spelled
-// with its full path so this stays clear of the wasm-gated `use bevy::prelude::*`
-// glob further down.
-//
 // Two former members of this block moved to sim-side homes in issue #1194, so
 // this presentation module no longer DEFINES sim-visible state that
 // always-compiled code reads: `Instagib` now lives beside its sibling `GodMode`
 // in `crate::server_app`, and `BridgeWorldSource` beside its `RawWorldSource`
 // consumer in `crate::world::server`. The wasm edge below only mirrors, drains,
 // and inserts them through those new paths.
-
-/// A save that passed the version gate and is waiting for the world to finish
-/// bootstrapping before `drain_snapshot_restore` writes it over the top (issue
-/// #1181, formerly the `PENDING_RESTORE` thread-local).
-///
-/// Staged at the wasm edge BEFORE `wasm_init` (a resume is a page reload, so
-/// `wasm_prepare_resume` runs before there is a `World`); `wasm_init` then hands
-/// the staged run off into this Resource, and the drain reads and clears it as
-/// an ordinary resource. `wasm_resume_pending()` reads the `RESUME_PENDING_MIRROR`
-/// edge cache this Resource's presence is mirrored into each frame.
-#[derive(bevy::prelude::Resource, Default)]
-pub struct PendingRestore(pub Option<crate::snapshot::StoredRun>);
-
-/// Frames `drain_snapshot_restore` has waited for `ready_to_restore` (issue
-/// #1181, formerly the `RESTORE_WAITED` thread-local). Reset to zero by
-/// `wasm_init`'s fresh insert when a save is staged; compared against
-/// `RESTORE_DEADLINE_FRAMES` only after the fresh app has entered
-/// `InProgress`. A saved `GameStart` entity cannot exist while the new app is
-/// still waiting in its lobby, so lobby frames are not bootstrap wait time.
-#[derive(bevy::prelude::Resource, Default, Clone, Copy, Debug)]
-pub struct RestoreWaited(pub u32);
-
-/// What `drain_snapshot_restore` should do with a staged save this frame — the
-/// decision extracted from the drain so it is unit-testable on native without a
-/// `World`, a JS host, or a `StoredRun` (issue #1181).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RestoreStep {
-    /// The staged run carries no captured state; clear it and report so.
-    NoSnapshot,
-    /// The world is far enough along (or the deadline passed and the payload can
-    /// rebuild what is still missing); run the restore now.
-    Apply,
-    /// Not ready and still inside the patience budget; leave it staged.
-    KeepWaiting,
-    /// The deadline passed and the payload cannot rebuild the gap; clear it and
-    /// report the abandoned resume.
-    Abandon,
-}
 
 #[cfg(target_arch = "wasm32")]
 struct PendingFleetJoin {
@@ -233,76 +189,6 @@ enum PendingFleetAdoption {
 struct PendingFleetLobbyInput {
     generation: u64,
     input: FleetLobbyInput,
-}
-
-/// Decide the next restore action from the observable inputs (issue #1181).
-///
-/// `waited` is the post-increment frame count (the drain bumps `RestoreWaited`
-/// before asking), so the deadline comparison matches the pre-refactor
-/// `waited < RESTORE_DEADLINE_FRAMES` check exactly. `ready_to_rebuild` is only
-/// consulted once the deadline is reached, so a caller may pass `false` for it
-/// while still waiting — see `drain_snapshot_restore`, which computes it lazily.
-pub fn next_restore_step(
-    has_snapshot: bool,
-    ready_to_restore: bool,
-    waited: u32,
-    deadline: u32,
-    ready_to_rebuild: bool,
-) -> RestoreStep {
-    if !has_snapshot {
-        return RestoreStep::NoSnapshot;
-    }
-    if ready_to_restore {
-        return RestoreStep::Apply;
-    }
-    if waited < deadline {
-        return RestoreStep::KeepWaiting;
-    }
-    // The deadline: everything the bootstrap was going to produce, it has.
-    if ready_to_rebuild {
-        RestoreStep::Apply
-    } else {
-        RestoreStep::Abandon
-    }
-}
-
-/// Whether the fresh browser app has completed the prerequisite that can make
-/// a saved authored roster exist.
-///
-/// Phase alone is too weak: the `OnEnter(InProgress)` spawn commands are
-/// deferred, and a script can move the fresh app beyond `InProgress` later.
-/// `GameStartEntityUuids` is inserted by the spawn system after it has walked
-/// every authored GameStart row (including an empty set), so its presence is
-/// the precise, durable boundary after which restore patience may be spent.
-#[cfg(any(target_arch = "wasm32", test))]
-fn browser_restore_bootstrap_started(world: &bevy::prelude::World) -> bool {
-    world.contains_resource::<crate::server_app::GameStartEntityUuids>()
-}
-
-/// Install the save lifecycle's capture gate before a browser App receives its
-/// first update. A staged restore must not let the fresh bootstrap emit or
-/// persist `RunStarted`/periodic artifacts that would overwrite the selected
-/// local save.
-#[cfg(any(target_arch = "wasm32", test))]
-fn begin_browser_startup_restore(world: &mut bevy::prelude::World, staged: bool) {
-    if staged {
-        crate::save_slots_lifecycle::begin_startup_restore(world);
-    }
-}
-
-/// Resolve browser startup capture suspension. A restored continuation rebases
-/// deterministic cadence at its saved tick; an abandoned restore resumes the
-/// fresh session without leaking any bootstrap artifact captured while staged.
-#[cfg(any(target_arch = "wasm32", test))]
-fn resolve_browser_startup_restore(
-    world: &mut bevy::prelude::World,
-    restored_continuation_tick: Option<u64>,
-) {
-    if let Some(tick) = restored_continuation_tick {
-        crate::save_slots_lifecycle::complete_startup_restore(world, tick);
-    } else {
-        crate::save_slots_lifecycle::cancel_startup_restore(world);
-    }
 }
 
 /// Apply a batch of queued instagib-toggle requests to the flag (issue #1181).
@@ -351,7 +237,7 @@ pub(crate) const fn raw_host_control_allowed(fleet_active: bool) -> bool {
 // but a thread-local. The durable, simulation-visible state these used to also
 // hold moved into typed Resources — `crate::server_app::Instagib` and
 // `crate::world::server::BridgeWorldSource` (relocated sim-side in issue #1194),
-// plus `PendingRestore` / `RestoreWaited` above — drained into / mirrored back
+// plus `crate::startup_restore` — drained into / mirrored back
 // from here by the seam systems each frame. What is left falls into four edge
 // categories, and
 // each MUST stay a thread-local for the stated reason:
@@ -820,15 +706,15 @@ thread_local! {
     /// PRE-INIT stash for a save that passed the version gate, set by
     /// `wasm_prepare_resume` / `wasm_prepare_import` BEFORE `wasm_init` (a resume
     /// is a page reload, so it runs before there is a `World`). `wasm_init` hands
-    /// it off into the [`PendingRestore`] Resource, which `drain_snapshot_restore`
-    /// then reads and clears (issue #1181). Category 4 above.
+    /// it off to [`crate::startup_restore`], which owns the complete lifecycle.
+    /// Category 4 above.
     static PENDING_RESTORE_STAGED: RefCell<Option<crate::snapshot::StoredRun>> =
         const { RefCell::new(None) };
 
     /// OUTBOX mirror of whether a restore is still staged, read back by
     /// `wasm_resume_pending()` (issue #1181). Set `true` when a save is staged
     /// pre-init; refreshed each frame by `drain_snapshot_restore` from the
-    /// [`PendingRestore`] Resource's presence. Category 2 above.
+    /// shared driver's pending state. Category 2 above.
     static RESUME_PENDING_MIRROR: RefCell<bool> = const { RefCell::new(false) };
 
     /// Modifier debug payload as JSON (issue #1150), written by
@@ -1494,14 +1380,10 @@ pub fn wasm_init() {
     .init_resource::<PendingForceStart>()
     // De-globalised bridge state (issue #1181): the durable, sim-visible half of
     // the former thread-locals lives in these Resources. `Instagib` starts off;
-    // `PendingRestore` / `RestoreWaited` take the save staged pre-init by
-    // `wasm_prepare_resume` (empty when there is none). `BridgeWorldSource` is
+    // The shared startup-restore driver takes the pre-init save below.
+    // `BridgeWorldSource` is
     // inserted just below, only when a world was loaded.
     .init_resource::<crate::server_app::Instagib>()
-    .insert_resource(PendingRestore(
-        PENDING_RESTORE_STAGED.with(|p| p.borrow_mut().take()),
-    ))
-    .init_resource::<RestoreWaited>()
     .add_systems(
         PreUpdate,
         (
@@ -1620,8 +1502,9 @@ pub fn wasm_init() {
     // A compatible record was staged before this App existed. Install the
     // lifecycle gate before `run` can execute even one fixed step, preventing
     // the fresh bootstrap's automatic saves from overwriting that record.
-    let restore_staged = app.world().resource::<PendingRestore>().0.is_some();
-    begin_browser_startup_restore(app.world_mut(), restore_staged);
+    if let Some(run) = PENDING_RESTORE_STAGED.with(|p| p.borrow_mut().take()) {
+        crate::startup_restore::stage(app.world_mut(), run);
+    }
 
     crate::perf::browser::boot_end();
     app.run();
@@ -3074,8 +2957,8 @@ pub fn wasm_prepare_resume(slot: String) -> String {
         .unwrap_or_else(|| "assets/entities/alliance_cruiser.toml".to_string());
     match load_resume_after_scenario(&store, &slot, &versions, &selected_ship, &world_config) {
         Ok(run) => {
-            // Stash pre-init; `wasm_init` hands this off into the `PendingRestore`
-            // Resource, `RestoreWaited` starts fresh at 0 there, and the mirror
+            // Stash pre-init; `wasm_init` hands this off to the shared restore
+            // driver with a fresh patience budget, and the mirror
             // makes `wasm_resume_pending()` answer true until the drain clears it
             // (issue #1181).
             PENDING_RESTORE_STAGED.with(|p| *p.borrow_mut() = Some(run));
@@ -3227,7 +3110,7 @@ impl std::fmt::Display for BrowserResumeRefusal {
 /// Whether a save is staged and waiting for the world to finish bootstrapping.
 ///
 /// Reads the `RESUME_PENDING_MIRROR` edge cache (issue #1181): once `wasm_init`
-/// has handed the staged save into the `PendingRestore` Resource, this
+/// has handed the staged save to the shared restore driver, this
 /// `World`-less getter can no longer read the Resource directly, so
 /// `drain_snapshot_restore` mirrors its presence out each frame — true while the
 /// save waits, false the moment it is applied or abandoned.
@@ -3477,211 +3360,41 @@ fn drain_lifecycle_saves(world: &mut World) {
     }
 }
 
-/// How long a staged save waits for the world to bootstrap before what is still
-/// missing is either rebuilt from the payload or the restore is abandoned and
-/// the host is told (issue #863 turned the second of those into the fallback
-/// rather than the only outcome).
-///
-/// Frames rather than ticks, because this is a *wall-clock* patience budget for
-/// something that has not started ticking yet, and a world that never
-/// bootstraps never advances the tick this would otherwise be counted in. At
-/// 60fps this is thirty seconds — an order of magnitude past the second or two
-/// a normal auto-start takes, and short enough that a host does not sit
-/// wondering.
-#[cfg(target_arch = "wasm32")]
-const RESTORE_DEADLINE_FRAMES: u32 = 1_800;
-
-/// Clear the staged save and its read-back mirror once a restore has resolved —
-/// applied, abandoned, or found to carry no state (issue #1181).
-#[cfg(target_arch = "wasm32")]
-fn clear_pending_restore(world: &mut World) {
-    world.resource_mut::<PendingRestore>().0 = None;
-    RESUME_PENDING_MIRROR.with(|m| *m.borrow_mut() = false);
-}
-
-/// Apply a staged save once the scenario's roster exists.
-///
-/// Runs every frame while something is staged and does nothing until
-/// `ready_to_restore` says the world is far enough along — a fresh app has no
-/// ships at tick 0, and restoring into that window writes a ship's state onto
-/// components it has not been given yet.
-///
-/// # The wait is bounded, and the bound is where a dynamic run is put back
-///
-/// `ready_to_restore` can be false forever, and the ordinary way it happens is
-/// the one issue #863 is about: the save names ships a *script* spawned mid-run,
-/// and this session — booting with nobody at the consoles — is not replaying the
-/// run that spawned them. Waiting silently for that is the worst available
-/// outcome; the page plays a perfectly good *fresh* session while the host
-/// believes they resumed.
-///
-/// So the wait has a deadline, and reaching it asks a second question rather than
-/// giving up on the spot: `ready_to_rebuild` — is everything still missing
-/// something the payload can build? If it is, the restore runs and builds it,
-/// which is the whole of #863's browser half. If it is not — a stale `?resume=`,
-/// a different roster picked at boot, ships this world will never have — the
-/// staged save is cleared and the failure is reported through the same status the
-/// save button uses.
-///
-/// The deadline is what keeps those two apart, and it has to be time rather than
-/// a payload field: see `snapshot::ready_to_rebuild` for why a mid-run spawn is
-/// ambiguous until the bootstrap has had its chance.
-///
-/// # De-globalised (issue #1181)
-///
-/// The staged save and the wait counter now live in the [`PendingRestore`] and
-/// [`RestoreWaited`] Resources, handed off from the pre-init edge stash by
-/// `wasm_init`. The wait/deadline/rebuild decision is [`next_restore_step`], a
-/// pure function unit-tested on native; this system only supplies it the
-/// observable inputs and acts on the verdict. `RESUME_PENDING_MIRROR` tracks the
-/// Resource's presence for `wasm_resume_pending()`.
+/// Mirror and report the shared driver's result at the browser edge. All
+/// reconciliation, patience, verification and capture cleanup live in the
+/// cross-target adapter; JS retains only its pending/readback transport.
 #[cfg(target_arch = "wasm32")]
 fn drain_snapshot_restore(world: &mut World) {
-    // Clone the staged run out, releasing the resource borrow so the read-only
-    // `ready_to_*` probes below can borrow the world.
-    let staged = world
-        .get_resource::<PendingRestore>()
-        .and_then(|p| p.0.clone());
-    let Some(run) = staged else {
-        RESUME_PENDING_MIRROR.with(|m| *m.borrow_mut() = false);
+    use crate::startup_restore::{RestoreFailure, RestoreOutcome};
+
+    let outcome = crate::startup_restore::advance(world);
+    RESUME_PENDING_MIRROR.with(|m| {
+        *m.borrow_mut() = crate::startup_restore::is_pending(world);
+    });
+    let Some(outcome) = outcome else {
         return;
     };
-    let Some(snapshot) = run.snapshot.as_ref() else {
-        resolve_browser_startup_restore(world, None);
-        clear_pending_restore(world);
-        set_snapshot_status(
-            false,
-            SNAPSHOT_RESUME,
-            "that save carries no captured state to resume from",
-        );
-        return;
-    };
-
-    // A saved session starts as a NEW local session: the player still joins
-    // this fresh lobby and readies it before the authored GameStart roster is
-    // built. Do not spend the bootstrap deadline while that prerequisite is
-    // intentionally absent. Besides allowing a human to take as long as they
-    // need in the lobby, this matters in automation where an unfocused page's
-    // update loop can consume 1,800 frames before Playwright has joined its
-    // replacement client. Once InProgress begins, the ordinary bounded wait
-    // below still distinguishes slow authored/script spawns from a roster that
-    // this world can never construct.
-    if !browser_restore_bootstrap_started(world) {
-        RESUME_PENDING_MIRROR.with(|m| *m.borrow_mut() = true);
-        return;
-    }
-
-    // A fresh bootstrap only reproduces layers that its opening happens to
-    // load. A captured run may instead have loaded children dynamically or
-    // unloaded startup layers, so restore the exact ordered composition before
-    // probing the entity roster. The reconciler queues one deterministic
-    // load/unload step through the ordinary world-layer pipeline; returning
-    // `Waiting` therefore means this frame must end so that step can apply.
-    // A failed desired layer is terminal: deleting its sentinel and trying the
-    // same content again would turn one loud refusal into a retry loop.
-    match crate::snapshot::reconcile_world_layers(world, &snapshot.state) {
-        crate::snapshot::LayerReconcileStatus::Ready => {}
-        crate::snapshot::LayerReconcileStatus::Waiting => {
-            RESUME_PENDING_MIRROR.with(|m| *m.borrow_mut() = true);
-            return;
-        }
-        crate::snapshot::LayerReconcileStatus::Failed(path) => {
-            resolve_browser_startup_restore(world, None);
-            clear_pending_restore(world);
-            set_snapshot_status(
-                false,
-                SNAPSHOT_RESUME,
-                format!(
-                    "the save requires world layer '{path}', but that layer could not be reconstructed; \
-                     the resume was abandoned and you are playing a fresh session from tick 0"
-                ),
-            );
-            return;
-        }
-    }
-
-    let ready = crate::snapshot::ready_to_restore(world, &snapshot.state);
-    // Bump the patience budget only while genuinely waiting — a restore that is
-    // ready applies on the frame it becomes ready, counting no frame against it.
-    let waited = if ready {
-        world.resource::<RestoreWaited>().0
-    } else {
-        let mut w = world.resource_mut::<RestoreWaited>();
-        w.0 += 1;
-        w.0
-    };
-    // `ready_to_rebuild` walks the roster, and it is only meaningful at the
-    // deadline, so compute it lazily — before then `next_restore_step` ignores it.
-    let rebuildable = if !ready && waited >= RESTORE_DEADLINE_FRAMES {
-        crate::snapshot::ready_to_rebuild(world, &snapshot.state)
-    } else {
-        false
-    };
-
-    match next_restore_step(true, ready, waited, RESTORE_DEADLINE_FRAMES, rebuildable) {
-        RestoreStep::KeepWaiting => {
-            RESUME_PENDING_MIRROR.with(|m| *m.borrow_mut() = true);
-            return;
-        }
-        // The deadline reached with an unrebuildable gap (issue #863): a stale
-        // `?resume=`, a different roster at boot, ships this world will never have.
-        RestoreStep::Abandon => {
-            resolve_browser_startup_restore(world, None);
-            clear_pending_restore(world);
-            set_snapshot_status(
-                false,
-                SNAPSHOT_RESUME,
-                format!(
-                    "this session never built the world that save was taken in, \
-                     so the resume was abandoned and you are playing a fresh \
-                     session from tick 0 (the save wanted {} ship(s) at tick {})",
-                    snapshot.state.entities.len(),
-                    snapshot.tick
-                ),
-            );
-            return;
-        }
-        // `has_snapshot` is `true` here (the no-snapshot case returned above), so
-        // `NoSnapshot` cannot occur; both remaining verdicts fall through to the
-        // restore, which for `Apply`-at-deadline builds the mid-run spawns this
-        // session was never going to reach.
-        RestoreStep::NoSnapshot | RestoreStep::Apply => {}
-    }
-
-    let report = crate::snapshot::restore(world, &snapshot.state);
-    resolve_browser_startup_restore(world, Some(snapshot.tick));
-    clear_pending_restore(world);
-
-    let restored = crate::sim_digest::world_digest(world);
-    if restored != snapshot.digest {
-        // The corruption check, and it is vellum's rather than a hash of the
-        // text: a snapshot's digest is recomputed BY the restored simulation,
-        // so tampered or truncated state cannot restore to the recorded number.
-        set_snapshot_status(
-            false,
-            SNAPSHOT_RESUME,
-            format!(
-                "the save did not restore cleanly (recorded {:016x}, restored {restored:016x})",
-                snapshot.digest
+    let (ok, message) = match outcome {
+        RestoreOutcome::Applied { tick } => (true, format!("resumed at tick {tick}")),
+        RestoreOutcome::Failed(failure) => (false, match failure {
+            RestoreFailure::NoSnapshot => {
+                "that save carries no captured state to resume from".to_string()
+            }
+            RestoreFailure::LayerFailed { path } => format!(
+                "the save requires world layer '{path}', but that layer could not be reconstructed"
             ),
-        );
-    } else if report.is_complete() {
-        set_snapshot_status(
-            true,
-            SNAPSHOT_RESUME,
-            format!("resumed at tick {}", snapshot.tick),
-        );
-    } else {
-        set_snapshot_status(
-            false,
-            SNAPSHOT_RESUME,
-            format!(
-                "resumed at tick {} with {} missing entities",
-                snapshot.tick,
-                report.gaps.len()
+            RestoreFailure::NotReady { tick, entities } => format!(
+                "this session never built the world that save was taken in (the save wanted {entities} ship(s) at tick {tick})"
             ),
-        );
-    }
+            RestoreFailure::DigestMismatch { expected, actual } => format!(
+                "the save did not restore cleanly (recorded {expected:016x}, restored {actual:016x})"
+            ),
+            RestoreFailure::Incomplete { tick, gaps } => {
+                format!("resumed at tick {tick} with {gaps} missing entities")
+            }
+        }),
+    };
+    set_snapshot_status(ok, SNAPSHOT_RESUME, message);
 }
 
 /// Set one host diagnostic surface by its catalogue-owned wire name.
@@ -5221,20 +4934,18 @@ fn flush_host_channels(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_gm_roster_replacement, apply_instagib_toggles, begin_browser_startup_restore,
-        browser_restore_bootstrap_started, defer_unloaded_scenario_content, host_channels,
-        import_artifact_into_catalogue, import_resume_after_scenario, legacy_force_start_allowed,
-        load_resume_after_scenario, next_restore_step, queue_fleet_lobby_input_bounded,
-        rebind_fleet_lobby_projections, resolve_browser_startup_restore,
-        save_slot_start_projection, scoped_browser_save_namespace, BoundedFifo,
-        BrowserResumeRefusal, ImportSlotRefusal, PendingBrowserSaves, PendingRestore, RestoreStep,
-        RestoreWaited, MAX_PENDING_BROWSER_SAVES,
+        apply_gm_roster_replacement, apply_instagib_toggles, defer_unloaded_scenario_content,
+        host_channels, import_artifact_into_catalogue, import_resume_after_scenario,
+        legacy_force_start_allowed, load_resume_after_scenario, queue_fleet_lobby_input_bounded,
+        rebind_fleet_lobby_projections, save_slot_start_projection, scoped_browser_save_namespace,
+        BoundedFifo, BrowserResumeRefusal, ImportSlotRefusal, PendingBrowserSaves,
+        MAX_PENDING_BROWSER_SAVES,
     };
     use crate::console::navigation::server::apply_teleport_to_waypoint;
     use crate::console::navigation::{NavigationWaypoint, WaypointMode};
     use crate::server_app::Instagib;
     use crate::ship::state::ShipPhysics;
-    use bevy::prelude::{App, Messages, World};
+    use bevy::prelude::{App, Messages};
     use std::fmt;
 
     #[derive(Debug)]
@@ -6191,79 +5902,6 @@ spawn_on = "game_start"
         assert_eq!(instagib, Instagib(true), "an empty frame preserves it");
     }
 
-    // ── Pending-restore handoff (issue #1181) ───────────────────────────────
-
-    const DEADLINE: u32 = 1_800;
-
-    /// A staged run with no captured snapshot is reported and cleared, never
-    /// waited on.
-    #[test]
-    fn restore_step_reports_a_run_with_no_snapshot() {
-        assert_eq!(
-            next_restore_step(false, false, 0, DEADLINE, false),
-            RestoreStep::NoSnapshot
-        );
-    }
-
-    /// A world that is ready restores immediately, whatever the wait counter.
-    #[test]
-    fn restore_step_applies_the_moment_the_world_is_ready() {
-        assert_eq!(
-            next_restore_step(true, true, 0, DEADLINE, false),
-            RestoreStep::Apply
-        );
-        assert_eq!(
-            next_restore_step(true, true, DEADLINE + 5, DEADLINE, false),
-            RestoreStep::Apply,
-            "ready wins even past the deadline"
-        );
-    }
-
-    /// Not ready and still inside the patience budget: keep the save staged.
-    #[test]
-    fn restore_step_waits_inside_the_budget() {
-        assert_eq!(
-            next_restore_step(true, false, 1, DEADLINE, false),
-            RestoreStep::KeepWaiting
-        );
-        assert_eq!(
-            next_restore_step(true, false, DEADLINE - 1, DEADLINE, false),
-            RestoreStep::KeepWaiting,
-            "the last frame before the deadline still waits"
-        );
-    }
-
-    /// At the deadline the decision forks on `ready_to_rebuild`: rebuildable gaps
-    /// restore (and build the mid-run spawns), unrebuildable ones abandon.
-    #[test]
-    fn restore_step_forks_at_the_deadline_on_rebuildability() {
-        assert_eq!(
-            next_restore_step(true, false, DEADLINE, DEADLINE, true),
-            RestoreStep::Apply,
-            "deadline + rebuildable -> apply (issue #863's browser half)"
-        );
-        assert_eq!(
-            next_restore_step(true, false, DEADLINE, DEADLINE, false),
-            RestoreStep::Abandon,
-            "deadline + unrebuildable -> abandon"
-        );
-    }
-
-    #[test]
-    fn browser_restore_deadline_starts_only_after_game_start_roster_walk() {
-        let mut world = bevy::prelude::World::new();
-        assert!(
-            !browser_restore_bootstrap_started(&world),
-            "a staged save may wait in the fresh lobby without spending its deadline"
-        );
-
-        world.insert_resource(crate::server_app::GameStartEntityUuids::default());
-        assert!(
-            browser_restore_bootstrap_started(&world),
-            "even an authored empty roster has completed its GameStart prerequisite"
-        );
-    }
-
     #[test]
     fn browser_save_queue_is_bounded_fifo_and_rejected_work_never_drains() {
         let mut pending = PendingBrowserSaves::new();
@@ -6359,62 +5997,5 @@ spawn_on = "game_start"
 
         statuses.push_back("after recovery");
         assert_eq!(statuses.pop_front(), Some("after recovery"));
-    }
-
-    #[test]
-    fn browser_staged_restore_suspends_capture_until_complete_or_cancel() {
-        let mut world = World::new();
-        begin_browser_startup_restore(&mut world, false);
-        assert!(!crate::save_slots_lifecycle::startup_restore_pending(
-            &world
-        ));
-
-        begin_browser_startup_restore(&mut world, true);
-        assert!(crate::save_slots_lifecycle::startup_restore_pending(&world));
-        resolve_browser_startup_restore(&mut world, Some(61));
-        assert!(
-            !crate::save_slots_lifecycle::startup_restore_pending(&world),
-            "successful restore clears suspension after cadence rebase"
-        );
-
-        begin_browser_startup_restore(&mut world, true);
-        resolve_browser_startup_restore(&mut world, None);
-        assert!(
-            !crate::save_slots_lifecycle::startup_restore_pending(&world),
-            "terminal refusal clears suspension for the fresh session"
-        );
-    }
-
-    /// The `PendingRestore` Resource's handoff semantics: default is not pending,
-    /// and clearing (as the drain does on apply/abandon) makes it not pending —
-    /// the state `RESUME_PENDING_MIRROR` mirrors for `wasm_resume_pending()`.
-    #[test]
-    fn pending_restore_resource_tracks_staged_state() {
-        let mut pending = PendingRestore::default();
-        assert!(pending.0.is_none(), "a fresh resource stages nothing");
-
-        // The drain clears by setting the inner Option to None (see
-        // `clear_pending_restore`). Modelled here without a `StoredRun`, which is
-        // the exclusive-system half the pure decision above deliberately factors
-        // out.
-        pending.0 = None;
-        assert!(pending.0.is_none(), "cleared stays not-pending");
-    }
-
-    /// `RestoreWaited` is the patience counter `drain_snapshot_restore` bumps
-    /// once per waiting frame and `wasm_init` resets to zero when a save is
-    /// staged.
-    #[test]
-    fn restore_waited_counts_and_resets() {
-        let mut waited = RestoreWaited::default();
-        assert_eq!(waited.0, 0, "starts at zero");
-
-        for _ in 0..3 {
-            waited.0 += 1;
-        }
-        assert_eq!(waited.0, 3, "bumps once per waiting frame");
-
-        waited = RestoreWaited::default();
-        assert_eq!(waited.0, 0, "a fresh stage resets the budget");
     }
 }

@@ -94,12 +94,18 @@ entities:
       summary: "Issue #865 gives every simulation peer an equal private save-slot catalogue: every peer autosaves at the same deterministic capture ticks, while storage writes and failures remain local side effects. Every peer may create, name, export, and delete local saves. A manual save captures only that peer at its next deterministic tick and commands no other peer. Any peer may later start a new session from a compatible local save. GM-only and combined native instances follow the same rule. Live-session restore is explicitly deferred to T3 M5."
       rationale:
         - "There is no leader or privileged save owner: everyone autosaves and can create saves, while deterministic capture timing keeps independently stored artifacts comparable."
+        - "[ai] Issue #1406 gives native and browser startup one restore driver. The completed GameStart roster, including an empty roster, is the durable prerequisite; subsequent phase changes cannot strand the operation. One 1,800-frame post-bootstrap budget includes unresolved layer work and entity readiness. Report success only after both the restore report and digest verify; every terminal failure releases capture suspension through cancellation, without promising rollback of an already changed World."
     architecture:
       kind: save-user-experience
       authority: non-authoritative
       coordinates: [roadmap-authoritative-snapshots, gm-milestone-operations-safety]
       reads: [world-snapshot-artifact]
       runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
+    implementation:
+      status: observed
+      paths: [src/save_slots.rs, src/save_slots_lifecycle.rs, src/startup_restore.rs, src/save_slots_store.rs, src/server/bridge.rs]
+      symbols: [SaveSchedule, RestoreOutcome, RestoreFailure]
+      tests: [tests/save_slots_persistence.rs, tests/smoke/save-slots.spec.js]
 
   - decision: t2-existing-editor-polish-boundary
     core:

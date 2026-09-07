@@ -1060,16 +1060,11 @@ pub fn join_fleet(world: &mut World, roster: FleetRoster, delay: u64) -> bool {
         // A returned-to-lobby or resume-staged App contains authoritative state
         // from another run. Rebasing only its clock/RNG would not canonicalise
         // that world, so participant adoption is startup-only and fails closed.
-        #[cfg(feature = "server")]
-        let browser_restore_staged = world
-            .get_resource::<crate::server::bridge::PendingRestore>()
-            .is_some_and(|pending| pending.0.is_some());
-        #[cfg(not(feature = "server"))]
-        let browser_restore_staged = false;
+        let restore_staged = crate::startup_restore::is_pending(world);
         let fresh_lobby = !world.contains_resource::<crate::server_app::GameStartEntityUuids>()
             && !world.contains_resource::<crate::server_app::ResumeGameStartEntityUuids>()
             && !crate::save_slots_lifecycle::startup_restore_pending(world)
-            && !browser_restore_staged;
+            && !restore_staged;
         let authored_seed = world
             .get_resource::<crate::world::config::WorldConfig>()
             .and_then(|config| config.global.seed);
@@ -1178,13 +1173,8 @@ pub fn leave_fleet(world: &mut World) -> Result<(), FleetLeaveError> {
     let fresh = !world.contains_resource::<crate::server_app::GameStartEntityUuids>()
         && !world.contains_resource::<crate::server_app::ResumeGameStartEntityUuids>()
         && !crate::save_slots_lifecycle::startup_restore_pending(world);
-    #[cfg(feature = "server")]
-    let browser_restore_staged = world
-        .get_resource::<crate::server::bridge::PendingRestore>()
-        .is_some_and(|pending| pending.0.is_some());
-    #[cfg(not(feature = "server"))]
-    let browser_restore_staged = false;
-    if !lobby || !no_pending_start || !fresh || browser_restore_staged {
+    let restore_staged = crate::startup_restore::is_pending(world);
+    if !lobby || !no_pending_start || !fresh || restore_staged {
         return Err(FleetLeaveError::NotFreshLobby);
     }
 

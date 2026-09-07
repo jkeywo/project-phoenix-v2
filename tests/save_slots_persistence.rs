@@ -32,6 +32,7 @@ use project_phoenix::sim_tick::SimTick;
 use project_phoenix::snapshot::{
     ready_to_restore, reconcile_world_layers, restore, LayerReconcileStatus, LoadRefusal, StoredRun,
 };
+use project_phoenix::startup_restore::RESTORE_DEADLINE_FRAMES;
 use vellum_save::Store;
 
 const WORLD: &str = "assets/worlds/duel.toml";
@@ -809,7 +810,8 @@ fn staged_restore_suppresses_bootstrap_and_rebases_periodic_cadence() {
     // Keep one fresh App in Lobby for several rendered frames. Restore cadence
     // must depend only on the saved continuation, never this bootstrap delay.
     delayed.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO));
-    for _ in 0..7 {
+    let lobby_frames = RESTORE_DEADLINE_FRAMES as usize + 7;
+    for _ in 0..lobby_frames {
         delayed.update();
     }
     assert_eq!(tick(&delayed), 0);
@@ -826,7 +828,7 @@ fn staged_restore_suppresses_bootstrap_and_rebases_periodic_cadence() {
     let (delayed_active_frames, delayed_tick) = await_native_restore(&mut delayed, 1_000);
     assert_eq!(fast_tick, 61);
     assert_eq!(delayed_tick, 61);
-    assert!(7 + delayed_active_frames > fast_frames);
+    assert!(lobby_frames + delayed_active_frames > fast_frames);
     assert_eq!(tick(&fast), 61);
     assert_eq!(tick(&delayed), 61);
     assert_eq!(world_digest(fast.world()), seeded_snapshot.digest);
@@ -898,4 +900,321 @@ fn staged_restore_suppresses_bootstrap_and_rebases_periodic_cadence() {
     delayed.update();
     step_to(&mut fast, tick(&delayed));
     assert_eq!(world_digest(fast.world()), world_digest(delayed.world()));
+}
+
+// These regressions drive the installed native adapter through real App updates.
+// The fixture may hold a bootstrap prerequisite, but never calls the restore
+// driver or its terminal cleanup directly.
+fn startup_restore_record() -> StoredRun {
+    let store = RecordingStore::default();
+    let mut source = build(1, Some(store.clone()));
+    step_to(&mut source, 61);
+    StoredRun::from_ron(
+        &store
+            .read(project_phoenix::save_slots::AUTOSAVE_SLOT)
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap()
+}
+
+fn stage_restore_record(run: &StoredRun) -> (App, RecordingStore) {
+    let store = RecordingStore::default();
+    let text = run.to_ron().unwrap();
+    store.seed(project_phoenix::save_slots::AUTOSAVE_SLOT, &text);
+    let mut app = build(1, Some(store.clone()));
+    stage_new_native_session_from_slot(
+        app.world_mut(),
+        project_phoenix::save_slots::AUTOSAVE_SLOT,
+        &run.versions,
+        WORLD,
+    )
+    .unwrap();
+    (app, store)
+}
+
+#[derive(Resource)]
+struct RestoreFixturePrepared;
+
+fn freeze_restore_bootstrap(world: &mut World) {
+    if !world
+        .get_resource::<State<project_phoenix::core::messages::GamePhase>>()
+        .is_some_and(|phase| phase.get() == &project_phoenix::core::messages::GamePhase::InProgress)
+        || world.contains_resource::<RestoreFixturePrepared>()
+    {
+        return;
+    }
+    world.insert_resource(RestoreFixturePrepared);
+    world.insert_resource(State::new(
+        project_phoenix::core::messages::GamePhase::GameOver,
+    ));
+    world.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO));
+}
+
+fn await_restore_failure(app: &mut App) -> String {
+    for _ in 0..=RESTORE_DEADLINE_FRAMES + 10 {
+        app.update();
+        match app
+            .world_mut()
+            .resource_mut::<SaveSlotService>()
+            .pop_restore_outcome()
+        {
+            Some(NativeRestoreOutcome::Failed { detail }) => return detail,
+            Some(other) => panic!("expected terminal failure, got {other:?}"),
+            None => {}
+        }
+    }
+    panic!("startup restore did not terminate");
+}
+
+fn assert_capture_resumes_once(app: &mut App, store: &RecordingStore) {
+    assert!(!project_phoenix::startup_restore::is_pending(app.world()));
+    assert!(!project_phoenix::save_slots_lifecycle::startup_restore_pending(app.world()));
+    assert!(store.writes().is_empty(), "no bootstrap capture leaked");
+    // Fixture isolation: test capture recovery on the retained World without
+    // running a second OnEnter(InProgress), which would respawn its roster.
+    app.insert_resource(State::new(
+        project_phoenix::core::messages::GamePhase::InProgress,
+    ));
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
+        1.0 / 60.0,
+    )));
+    let manual = request_named_manual_save(app.world_mut(), "After restore").unwrap();
+    let resume_tick = tick(app);
+    for _ in 0..CAPTURE_INTERVAL_TICKS + 4 {
+        app.update();
+        assert!(app
+            .world_mut()
+            .resource_mut::<SaveSlotService>()
+            .pop_restore_outcome()
+            .is_none());
+    }
+    assert!(store.contains(&manual), "manual capture resumed");
+    assert!(
+        store.writes().iter().any(|(slot, text)| {
+            slot == project_phoenix::save_slots::AUTOSAVE_SLOT
+                && StoredRun::from_ron(text).unwrap().snapshot.unwrap().tick > resume_tick
+        }),
+        "periodic capture resumed"
+    );
+}
+
+#[test]
+fn startup_restore_finishes_after_game_over_during_roster_wait() {
+    let run = startup_restore_record();
+    let snapshot = run.snapshot.as_ref().unwrap();
+    let held_uuid = snapshot.state.entities[0].uuid.clone();
+    let ready_state = snapshot.state.clone();
+    let (mut app, store) = stage_restore_record(&run);
+    #[derive(Resource)]
+    struct HeldRestoreEntity(Entity, String);
+    app.add_systems(Update, move |world: &mut World| {
+        if world.contains_resource::<RestoreFixturePrepared>()
+            || !ready_to_restore(world, &ready_state)
+        {
+            return;
+        }
+        let entity = world
+            .query::<(Entity, &EntityUuid)>()
+            .iter(world)
+            .find(|(_, uuid)| uuid.0 == held_uuid)
+            .map(|(entity, _)| entity);
+        if let Some(entity) = entity {
+            world.insert_resource(RestoreFixturePrepared);
+            world
+                .resource_mut::<NextState<project_phoenix::core::messages::GamePhase>>()
+                .set(project_phoenix::core::messages::GamePhase::GameOver);
+            world.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO));
+            world.entity_mut(entity).remove::<EntityUuid>();
+            world.insert_resource(HeldRestoreEntity(entity, held_uuid.clone()));
+        }
+    });
+    for _ in 0..10 {
+        app.update();
+        if app.world().contains_resource::<HeldRestoreEntity>() {
+            break;
+        }
+    }
+    assert!(app.world().contains_resource::<HeldRestoreEntity>());
+    let refused = request_named_manual_save(app.world_mut(), "Still restoring").unwrap();
+    for _ in 0..4 {
+        app.update();
+    }
+    assert_eq!(
+        app.world()
+            .resource::<State<project_phoenix::core::messages::GamePhase>>()
+            .get(),
+        &project_phoenix::core::messages::GamePhase::GameOver,
+        "App updates applied the production transition while restore still waited"
+    );
+    assert!(project_phoenix::save_slots_lifecycle::startup_restore_pending(app.world()));
+    assert!(!store.contains(&refused));
+    let HeldRestoreEntity(entity, uuid) = app
+        .world_mut()
+        .remove_resource::<HeldRestoreEntity>()
+        .unwrap();
+    app.world_mut().entity_mut(entity).insert(EntityUuid(uuid));
+    let (_, restored_tick) = await_native_restore(&mut app, 10);
+    assert_eq!(restored_tick, snapshot.tick);
+    assert_eq!(world_digest(app.world()), snapshot.digest);
+    assert!(
+        !store.contains(&refused),
+        "waiting manual intent is refused at resolution"
+    );
+    assert_capture_resumes_once(&mut app, &store);
+}
+
+#[test]
+fn startup_restore_layer_wait_expires_and_resumes_capture() {
+    use project_phoenix::world::server::{PendingWorldLayerChanges, WorldLayerChange};
+    let run = startup_restore_record();
+    let (mut app, store) = stage_restore_record(&run);
+    app.add_systems(Update, |world: &mut World| {
+        if world.contains_resource::<RestoreFixturePrepared>() {
+            return;
+        }
+        freeze_restore_bootstrap(world);
+        if world.contains_resource::<RestoreFixturePrepared>() {
+            world
+                .resource_mut::<PendingWorldLayerChanges>()
+                .0
+                .push(WorldLayerChange::Load {
+                    path: "assets/worlds/held-restore-layer.toml".into(),
+                    loader_path: None,
+                });
+        }
+    });
+    let detail = await_restore_failure(&mut app);
+    assert!(detail.contains("never built"), "{detail}");
+    // The fixture held the loader, not a real content error. Release it after
+    // proving the wait cannot avoid the driver's deadline.
+    app.world_mut()
+        .resource_mut::<PendingWorldLayerChanges>()
+        .0
+        .clear();
+    assert_capture_resumes_once(&mut app, &store);
+}
+
+#[test]
+fn startup_restore_unrebuildable_roster_expires_after_game_over() {
+    let mut run = startup_restore_record();
+    let snapshot = run.snapshot.as_mut().unwrap();
+    let mut missing = snapshot.state.entities[0].clone();
+    missing.uuid = "unrebuildable-restored-entity".into();
+    missing.spawn = None;
+    snapshot.state.entities.push(missing);
+    let (mut app, store) = stage_restore_record(&run);
+    app.add_systems(Update, freeze_restore_bootstrap);
+    let detail = await_restore_failure(&mut app);
+    assert!(detail.contains("never built"), "{detail}");
+    assert_capture_resumes_once(&mut app, &store);
+}
+
+#[test]
+fn startup_restore_failed_layer_is_terminal_without_retry() {
+    use project_phoenix::world::server::{WorldLayerMap, WorldRuntime};
+    const FAILED_LAYER: &str = "assets/worlds/refused-restore-layer.toml";
+    let mut run = startup_restore_record();
+    run.snapshot
+        .as_mut()
+        .unwrap()
+        .state
+        .layer_flags
+        .push(project_phoenix::snapshot::LayerFlags {
+            path: FAILED_LAYER.into(),
+            loader_path: None,
+            declared_entity_uuids: vec![],
+            flags: Default::default(),
+        });
+    let (mut app, store) = stage_restore_record(&run);
+    app.add_systems(Update, |world: &mut World| {
+        if world.contains_resource::<RestoreFixturePrepared>() {
+            return;
+        }
+        freeze_restore_bootstrap(world);
+        if world.contains_resource::<RestoreFixturePrepared>() {
+            world
+                .resource_mut::<WorldLayerMap>()
+                .0
+                .insert(FAILED_LAYER.into(), WorldRuntime::default());
+        }
+    });
+    let detail = await_restore_failure(&mut app);
+    assert!(detail.contains(FAILED_LAYER), "{detail}");
+    assert!(!app.world().resource::<WorldLayerMap>().0[FAILED_LAYER].is_active);
+    assert_capture_resumes_once(&mut app, &store);
+}
+
+#[test]
+fn startup_restore_digest_failure_cancels_without_rolling_back() {
+    let mut run = startup_restore_record();
+    let captured_tick = run.snapshot.as_ref().unwrap().tick;
+    run.snapshot.as_mut().unwrap().digest ^= 1;
+    let (mut app, store) = stage_restore_record(&run);
+    let detail = await_restore_failure(&mut app);
+    assert!(detail.contains("did not match saved digest"), "{detail}");
+    assert_eq!(
+        tick(&app),
+        captured_tick,
+        "failed verification does not undo the write"
+    );
+    assert_capture_resumes_once(&mut app, &store);
+}
+
+#[test]
+fn startup_restore_incomplete_report_fails_even_with_matching_digest() {
+    let mut run = startup_restore_record();
+    let snapshot = run.snapshot.as_mut().unwrap();
+    let triggers = &mut snapshot.state.scenario.as_mut().unwrap().triggers;
+    assert!(!triggers.is_empty());
+    triggers.push(triggers[0].clone());
+    // Deliberately supply the digest of this incomplete write: a matching
+    // digest alone must never turn the report's unresolved gap into success.
+    let mut reference = boot_to_restore_point(&snapshot.state);
+    let report = restore(reference.world_mut(), &snapshot.state);
+    assert!(!report.is_complete());
+    snapshot.digest = world_digest(reference.world());
+    let (mut app, store) = stage_restore_record(&run);
+    let detail = await_restore_failure(&mut app);
+    assert!(detail.contains("unresolved gap"), "{detail}");
+    assert_capture_resumes_once(&mut app, &store);
+}
+
+#[test]
+fn startup_restore_rebuilds_a_missing_dynamic_entity_at_expiry() {
+    let mut run = startup_restore_record();
+    let snapshot = run.snapshot.as_mut().unwrap();
+    let mut reference = boot_to_restore_point(&snapshot.state);
+    let mut spawned = snapshot
+        .state
+        .entities
+        .iter()
+        .find(|row| row.spawn.is_some())
+        .expect("duel's script-spawned opponent carries a rebuild recipe")
+        .clone();
+    spawned.uuid = "saved-dynamic-reinforcement".into();
+    snapshot.state.entities.push(spawned);
+    let report = restore(reference.world_mut(), &snapshot.state);
+    assert!(report.is_complete(), "{report:?}");
+    assert_eq!(report.entities_spawned, 1);
+    snapshot.digest = world_digest(reference.world());
+    let expected_digest = snapshot.digest;
+    let expected_tick = snapshot.tick;
+
+    let (mut app, store) = stage_restore_record(&run);
+    app.add_systems(Update, freeze_restore_bootstrap);
+    let (frames, restored_tick) =
+        await_native_restore(&mut app, RESTORE_DEADLINE_FRAMES as usize + 10);
+    assert!(
+        frames >= RESTORE_DEADLINE_FRAMES as usize,
+        "rebuilding waits for the bootstrap budget"
+    );
+    assert_eq!(restored_tick, expected_tick);
+    assert_eq!(world_digest(app.world()), expected_digest);
+    assert!(app
+        .world_mut()
+        .query::<&EntityUuid>()
+        .iter(app.world())
+        .any(|uuid| uuid.0 == "saved-dynamic-reinforcement"));
+    assert_capture_resumes_once(&mut app, &store);
 }

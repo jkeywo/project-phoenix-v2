@@ -181,6 +181,8 @@ pub fn complete_startup_restore(world: &mut World, continuation_tick: u64) {
 /// The current continuation becomes the cadence origin if the fresh session is
 /// already live; a pre-run cancellation leaves the ordinary first-run capture
 /// available when the mission eventually starts.
+/// This also resolves failed post-application verification: it does not undo
+/// snapshot or layer changes already applied to the World.
 pub fn cancel_startup_restore(world: &mut World) {
     ensure_lifecycle_resources(world);
     let tick = continuation_tick(world);

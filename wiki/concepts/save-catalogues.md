@@ -2,8 +2,8 @@
 title: Peer-Local Save Catalogues
 type: concept
 tags: [save, snapshot, persistence, autosave, browser, native, catalogue]
-sources: [src/save_slots.rs, src/save_slots_lifecycle.rs, src/save_slots_store.rs, src/snapshot.rs, src/gm_action.rs, src/sim_digest.rs, src/headless/replay.rs, src/server/bridge.rs, src/server_app/world_setup.rs, src/lockstep/mod.rs, src/ship/coordination_systems.rs, src/bin/phoenix_host.rs, src/delivery/args.rs, src/entities/config.rs, src/world/config.rs, gui/save-slots.js, gui/browser-save-identity.js, gui/browser-save-identity-worker.js, server.html, tests/save_slots_persistence.rs]
-updated: 2026-09-01
+sources: [src/save_slots.rs, src/save_slots_lifecycle.rs, src/startup_restore.rs, src/save_slots_store.rs, src/snapshot.rs, src/gm_action.rs, src/sim_digest.rs, src/headless/replay.rs, src/server/bridge.rs, src/server_app/world_setup.rs, src/lockstep/mod.rs, src/ship/coordination_systems.rs, src/bin/phoenix_host.rs, src/delivery/args.rs, src/entities/config.rs, src/world/config.rs, gui/save-slots.js, gui/browser-save-identity.js, gui/browser-save-identity-worker.js, server.html, tests/save_slots_persistence.rs, tests/smoke/save-slots.spec.js]
+updated: 2026-09-07
 ---
 
 # Peer-Local Save Catalogues
@@ -113,6 +113,17 @@ After success, the scheduler marks the restored phase as already observed and
 rebases its periodic cadence from the restored continuation tick, preventing a
 duplicate run-start/final save and placing the next periodic autosave exactly
 one interval later.
+
+`startup_restore` owns the shared Bevy driver, staged record and terminal
+outcome. The native Store adapter and browser bridge only hand off validated
+records and report the result. Waiting starts after `GameStartEntityUuids`
+records the completed authored roster walk, so an operator may remain in the
+fresh lobby indefinitely and a later `GameOver` cannot strand restore.
+Unresolved layers and missing entities consume one 1,800-frame budget; at
+expiry, rebuilding is allowed only with ready layers and rebuildable entities.
+The driver resolves capture suspension after checking both the report and
+digest. A failure resumes capture at the current continuation without rolling
+back changes already applied to the World.
 
 ## Portable transfer
 

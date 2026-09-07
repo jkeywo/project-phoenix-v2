@@ -157,6 +157,61 @@ async function exportSlot(page, slotId) {
   }, slotId);
 }
 
+test('failed startup verification reports once and releases browser save capture', async ({ context }) => {
+  test.setTimeout(180_000);
+  await installMultiHullWorld(context);
+  const { page, captain } = await startedHost(context);
+  const saved = await createNamedSave(page, 'Bad digest');
+  await page.evaluate((slotId) => {
+    const key = `phoenix:${sessionStorage.getItem('phoenix-save-peer-id')}:${slotId}`;
+    const text = localStorage.getItem(key);
+    if (!text) throw new Error('missing captured run');
+    const changed = text.replace(
+      /(snapshot:\s*Some\s*\(\s*\(\s*tick:\s*\d+,\s*digest:\s*)(\d+)/s,
+      (_, prefix, digest) => `${prefix}${BigInt(digest) ^ 1n}`,
+    );
+    if (changed === text) throw new Error('missing snapshot digest');
+    localStorage.setItem(key, changed);
+  }, saved.slot_id);
+  await captain.close();
+  await cataloguePage(page);
+  await page.locator(`[data-slot-id="${saved.slot_id}"]`).click();
+  await page.locator('[data-save-action="start"]').click();
+  await waitForWasmReady(page);
+  await page.waitForFunction(() => window.wasm_resume_pending?.(), null, { timeout: 30_000 });
+  // Observe the real edge FIFO before the host's ordinary status poll consumes
+  // it. This replacement App is still in its lobby, so restore cannot finish.
+  await page.evaluate(() => {
+    window.__restoreOutcomes = [];
+    const read = window.wasm_snapshot_status;
+    window.wasm_snapshot_status = () => {
+      const status = read();
+      if (status) window.__restoreOutcomes.push(status);
+      return status;
+    };
+  });
+  const replacement = await createTestClient(context, await readHostPeerId(page), { name: 'Resume tester' });
+  await replacement.send('SelectStation', { station: 'Captain' });
+  await replacement.page.waitForFunction(
+    (token) => window.__messages?.some((message) =>
+      message.type === 'StationAssigned' && message.data.token === token),
+    replacement.token,
+  );
+  await replacement.send('SetReady', { ready: true });
+  await replacement.waitForMessage('GameStarted', 20_000);
+  await page.bringToFront();
+  await page.waitForFunction(() => !window.wasm_resume_pending(), null, { timeout: 30_000 });
+  await expect.poll(() => page.evaluate(() =>
+    window.__restoreOutcomes.filter((value) => value.split('\t')[1] === 'resume')))
+    .toEqual([expect.stringContaining('error\tresume\tthe save did not restore cleanly')]);
+  const after = await createNamedSave(page, 'After failed restore');
+  expect(Number(after.capture_tick)).toBeGreaterThanOrEqual(Number(saved.capture_tick));
+  const terminal = await page.evaluate(() =>
+    window.__restoreOutcomes.filter((value) => value.split('\t')[1] === 'resume'));
+  expect(terminal).toHaveLength(1);
+  await replacement.close();
+});
+
 test('local save slots complete their browser lifecycle and restore only in a fresh App', { tag: '@core' }, async ({
   context,
 }) => {

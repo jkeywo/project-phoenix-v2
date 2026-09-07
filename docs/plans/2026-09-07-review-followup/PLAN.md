@@ -1,6 +1,6 @@
 # Codebase review follow-up plan
 
-Status: implementation draft requested by John, 7 September 2026. No implementation or issue publication is included in this change.
+Status: implementation authorized by John on 7 September 2026. Current delivery and validation status is in PROGRESS.md; completed profiling results and conditional stop decisions are in RESULTS.md.
 
 - Worktree: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan
 - Branch: codex/review-followup-plan

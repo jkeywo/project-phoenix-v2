@@ -2,7 +2,11 @@
 
 This note makes the essential review evidence available with the plan. Full source references, captures, scripts and binary provenance remain in the [original review pack](C:/Coding/project-phoenix-v2/.phoenix/reviews/2026-09-07/README.md). The large raw artifacts and proprietary SDK binaries are not copied into this branch.
 
-## Source and active work
+## Current implementation evidence
+
+The implementation rebased onto delivered #1404 (main 76d36d24). The new quiet-window headless, renderer and Ultralight captures, pinned build identities, hardware dimensions, selected controls and rejected runs are summarized in [RESULTS.md](C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/docs/plans/2026-09-07-review-followup/RESULTS.md). That is the current performance evidence; the initial review measurements below explain the original plan and are not the adoption baseline. Subsequent animation and native data-delivery corrections have separate functional validation and are not silently substituted into those frozen comparisons.
+
+## Initial review source and active work
 
 - Reviews were anchored to source commit 99932cfdbcba290efadd5c389aa0cc59a75124e8.
 - This planning worktree starts at committed main 40af72382d731c789d3b904bd6e86ae5a73e1f60. The intervening commit repairs CI/demo/smoke dependencies; the reviewed host-policy findings were checked again against the committed source.
@@ -10,7 +14,7 @@ This note makes the essential review evidence available with the plan. Full sour
 - [#1404](https://github.com/jkeywo/project-phoenix-v2/issues/1404) and [#1405](https://github.com/jkeywo/project-phoenix-v2/issues/1405) were open when inspected on 7 September 2026. #1404's last published progress records slices 1–4 on main; local dirty work goes beyond that. Do not equate an open checkbox with absent code or an edited file with accepted delivery.
 - Related existing work: [#1363 native Load Game](https://github.com/jkeywo/project-phoenix-v2/issues/1363), [#1181 bridge Resources](https://github.com/jkeywo/project-phoenix-v2/issues/1181), and [#1362 World/Ship pickers](https://github.com/jkeywo/project-phoenix-v2/issues/1362). A targeted tracker search identified these overlaps; it is not an exhaustive duplicate audit. Check again before publishing new issues.
 
-## What was measured
+## Initial review measurements
 
 The rig was an Intel Core Ultra 9 275HX with 24 logical processors and an NVIDIA RTX 5090 Laptop GPU, Vulkan, driver 610.74. The Viewscreen and Helm/Tactical Station screens were 1920×1080 at scale 1. Both scenarios used the Alliance Destroyer and seed 42.
 

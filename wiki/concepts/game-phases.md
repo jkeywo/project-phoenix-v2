@@ -2,7 +2,7 @@
 title: Game Phases
 type: concept
 tags: [phases, lobby, loading, in-progress, game-over, reconnect]
-sources: [src/delivery/payload.rs, tests/native_host_catalogue.rs, tests/client/scenario-catalogue-wire.test.js, src/core/messages.rs, src/lobby/start_policy.rs, src/lobby/handler.rs, src/lobby/server.rs, src/lockstep/mod.rs, src/server/bridge.rs, src/server_app/registration.rs, src/server_app/broadcast_publish.rs, src/server/viewscreen_border.rs, tests/native_host_lobby.rs]
+sources: [src/delivery/payload.rs, tests/native_host_catalogue.rs, tests/client/scenario-catalogue-wire.test.js, src/core/messages.rs, src/lobby/start_policy.rs, src/lobby/handler.rs, src/lobby/server.rs, src/lockstep/mod.rs, src/server/bridge.rs, src/server_app/registration.rs, src/server_app/broadcast_publish.rs, src/server/viewscreen_border.rs, src/native_host/world_load.rs, tests/native_host_lobby.rs, tests/native_host_lobby/round_return.rs, tests/client/native-retained-lobby.test.js]
 updated: 2026-09-07
 ---
 
@@ -87,6 +87,17 @@ native App regression in `tests/native_host_lobby.rs` covers both transport
 delivery and the final HUD through their production registrations.
 The game-over UI can issue `ReturnToLobby`; the server resets round readiness
 and returns to the lobby through the authoritative lobby handler.
+
+Native hosts retain their selected World on return, whether selected by `--world`
+or from `--lobby`. `NativeWorldLoadPlugin` registers the actual GameOver/InProgress
+to Lobby transitions: after the handler's seat/Ready clears and
+`ReturnedToLobby`, `publish_world_welcome` sends a complete reliable `Welcome`
+and its paired `ShipManual`. The existing client reducer clears its scenario
+wait and rebuilds the roster, so connected phones and panes can claim and Ready
+before another launch without reconnecting. Initial Lobby entry and refused
+return requests do not trigger this refresh. The browser's genuine new-scenario
+selection wait is unchanged. This refresh does not rematerialize entities or
+reset script continuation; a phase re-entry is not a fresh authored timeline.
 
 ## Related
 

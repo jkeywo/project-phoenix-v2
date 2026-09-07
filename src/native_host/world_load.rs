@@ -146,11 +146,26 @@ struct PendingWorldLoad {
     curated_ships: Vec<String>,
 }
 
-/// Installed on every native host and inert on one that already has a world.
+/// Installed on every native host. Selection is inert once a world has loaded;
+/// returning crew still receive that retained world's complete lobby projection.
 pub struct NativeWorldLoadPlugin;
 
 impl Plugin for NativeWorldLoadPlugin {
     fn build(&self, app: &mut App) {
+        // ReturnToLobby already cleared seats/readies and queued its reliable
+        // acknowledgement. Native hosts retain their selected world, so there
+        // is no subsequent scenario pick to release the client's waiting
+        // overlay. Re-Welcome on the accepted phase edge, after those clears,
+        // without resetting the world or changing the browser's selection flow.
+        for exited in [GamePhase::GameOver, GamePhase::InProgress] {
+            app.add_systems(
+                OnTransition {
+                    exited,
+                    entered: GamePhase::Lobby,
+                },
+                publish_world_welcome.run_if(resource_exists::<crate::world::config::WorldConfig>),
+            );
+        }
         // The same authoritative pass as Startup, in this schedule rather
         // than behind a nested schedule that would hide cross-plugin edges.
         crate::world::materialization::register(app, RuntimeWorldLoad);
@@ -596,6 +611,25 @@ fn republish_loaded_world(world: &mut World) {
         roster
     };
 
+    let mut outbox = world.resource_mut::<LobbyOutbox>();
+    for token in roster {
+        outbox.0.push((
+            Target::All,
+            ServerMessage::ReadyChanged {
+                token,
+                ready: false,
+            },
+        ));
+    }
+    publish_world_welcome(world);
+}
+
+/// Publish the selected world's complete client projection after materializing
+/// it or returning to its retained lobby. This is presentation only: the caller
+/// owns any Session reset, and no entities, scripts, clocks or identities reset.
+/// Welcome clears the client's scenario wait and rebuilds the cleared roster;
+/// ShipManual restores its paired hull-specific client state.
+fn publish_world_welcome(world: &mut World) {
     // The ratings the `Welcome` reports, resolved the way
     // `handle_identify_system` resolves them: the live ship's if it has spawned,
     // else whatever the lobby has pending.
@@ -636,15 +670,6 @@ fn republish_loaded_world(world: &mut World) {
     );
 
     let mut outbox = world.resource_mut::<LobbyOutbox>();
-    for token in roster {
-        outbox.0.push((
-            Target::All,
-            ServerMessage::ReadyChanged {
-                token,
-                ready: false,
-            },
-        ));
-    }
     outbox.0.push((Target::All, welcome));
     outbox
         .0

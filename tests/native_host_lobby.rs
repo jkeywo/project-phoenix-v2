@@ -48,6 +48,9 @@ const SEED: u64 = 20260894;
 #[path = "native_host_lobby/materialization.rs"]
 mod materialization;
 
+#[path = "native_host_lobby/round_return.rs"]
+mod round_return;
+
 /// Populate the process-global template cache from the repository's own tree.
 /// Idempotent (a map keyed by template path), and cargo runs this file as its
 /// own process, so nothing outside it sees the result.

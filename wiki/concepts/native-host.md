@@ -204,6 +204,11 @@ ignores every seat they tap.
 A second `Welcome` is safe by construction: `replaceFrom` replaces rather than
 merges, and the `Welcome` arm emits `MOUNT_CONSOLES` unconditionally.
 
+The same `publish_world_welcome` projection completes a native retained-World
+return to Lobby after its authoritative seat/Ready clears. See
+[Game Phases](./game-phases.md#gameover) for the connected-crew return contract
+and its distinction from world rematerialization.
+
 ### A refused world leaves a pickable lobby
 
 A load that fails **after** the ingest (an unreadable or malformed world, an

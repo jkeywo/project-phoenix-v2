@@ -721,10 +721,9 @@ pub fn build_native_host_app(
     }
     app.add_plugins(WorldPlugin);
 
-    // The runtime world load (issue #1326). Installed unconditionally and inert
-    // with a world already ingested — its drain runs only while there is no
-    // `WorldConfig` — so a `--world` host is byte-for-byte unchanged, the same
-    // promise `BridgeDisplayPlugin` keeps below for `--profile`.
+    // The runtime world load (issue #1326). Selection runs only while there is
+    // no WorldConfig. Both native entry paths also re-Welcome existing crew
+    // when returning to the retained world's Lobby, without another ingest.
     app.add_plugins(crate::native_host::world_load::NativeWorldLoadPlugin);
     if cfg.world_path.is_none() {
         app.insert_resource(crate::native_host::world_load::LobbyScenarioCatalog(

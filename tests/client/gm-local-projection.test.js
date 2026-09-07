@@ -144,6 +144,62 @@ describe('GM omniscient local projection', () => {
     })).toBeUndefined();
   });
 
+  it('carries the per-System breakdown a scoped effect is picked from', () => {
+    const systems = [
+      {
+        system_id: 'impulse-drive',
+        station_id: 'helm',
+        station_name: 'station.helm.name',
+        name: 'system_hull.impulse_drive.display_name',
+        current_milli_hp: 10_000,
+        max_milli_hp: 40_000,
+      },
+      {
+        system_id: 'core',
+        station_id: null,
+        station_name: null,
+        name: 'system_hull.core.display_name',
+        current_milli_hp: 32_000,
+        max_milli_hp: 32_000,
+      },
+    ];
+    const parsed = parseGmEntityProjection({
+      entities: [entity({ status: { ...entity().status, systems } })],
+    });
+    expect(parsed[0].status.systems).toEqual(systems);
+    // The owner's display name is optional on the wire — Rust omits it for an
+    // unowned System and for a hull with no ship config — and absent reads as
+    // `null`, which is what makes the picker fall back to the authoring key.
+    expect(parseGmEntityProjection({
+      entities: [entity({
+        status: {
+          ...entity().status,
+          systems: [{ ...systems[0], station_name: undefined }],
+        },
+      })],
+    })[0].status.systems[0].station_name).toBeNull();
+    // An entity with no hull carries no breakdown, and the omission is empty
+    // rather than missing — the shape every pre-#1311 payload already had.
+    expect(parseGmEntityProjection({ entities: [region()] })[0].status.systems).toEqual([]);
+    // A PRESENT but malformed breakdown rejects the whole entity: a Station
+    // scope that quietly covered less of the ship than the picker claimed is
+    // worse than no picker at all.
+    for (const broken of [
+      [{ ...systems[0], system_id: '' }],
+      [{ ...systems[0], station_id: '' }],
+      [{ ...systems[0], station_name: '' }],
+      [{ ...systems[0], station_name: 7 }],
+      [{ ...systems[0], current_milli_hp: -1 }],
+      [{ ...systems[0], max_milli_hp: 1.5 }],
+      [{ ...systems[0], name: 4 }],
+      'helm',
+    ]) {
+      expect(parseGmEntityProjection({
+        entities: [entity({ status: { ...entity().status, systems: broken } })],
+      })).toBeUndefined();
+    }
+  });
+
   it('announces the current selection to surfaces that act on it', () => {
     const onSelectionChanged = vi.fn();
     harness = mount({ onSelectionChanged });
@@ -170,7 +226,9 @@ describe('GM omniscient local projection', () => {
       })],
       ecs_world: { entities: 99 },
     });
-    expect(parsed).toEqual([entity()]);
+    // The per-System breakdown is absent from this payload and normalises to an
+    // empty list, so the omission is the entity's own answer rather than a hole.
+    expect(parsed).toEqual([entity({ status: { ...entity().status, systems: [] } })]);
     expect(parsed[0]).not.toHaveProperty('raw_components');
     expect(parsed[0]).not.toHaveProperty('effect_tuning');
     expect(parsed[0]).not.toHaveProperty('layer_path');

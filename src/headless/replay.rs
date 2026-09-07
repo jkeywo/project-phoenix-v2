@@ -1474,6 +1474,142 @@ mod tests {
         );
     }
 
+    /// A Station-scoped effect replays down the same lane and re-resolves
+    /// against the replayed world's OWN authored ownership (issue #1311).
+    ///
+    /// The artifact carries the scope, not a system list: which Systems `helm`
+    /// owns is a fact about the replayed hull's ship config, and a recorded
+    /// list would let a replay damage a Station the config no longer describes.
+    /// The clamp and the lethality prove the re-resolution actually narrowed —
+    /// 250 points asked of a 30-point Station lands 30, discards 220, and does
+    /// NOT report a kill, because the other Station's 50 points are still there.
+    #[test]
+    fn a_station_scoped_effect_replays_through_the_canonical_journal() {
+        let mut source = GmActionJournal::default();
+        source
+            .insert(crate::gm_action::GmActionGrant {
+                from: HostSlot(1),
+                sequenced_by: HostSlot(1),
+                operator_id: "gm-one".into(),
+                correlation: crate::gm_action::GmActionId::new("replay-hit-helm").unwrap(),
+                recovery_generation: 0,
+                apply_tick: 0,
+                order: crate::gm_action::GmActionOrder::new(HostSlot(1), 1),
+                action: crate::gm_action::GmAction::ApplyDirectEffect {
+                    target: "npc-1".into(),
+                    scope: crate::gm_effect::GmDirectEffectScope::Station(
+                        crate::core::messages::StationId("helm".into()),
+                    ),
+                    effect: crate::gm_effect::GmDirectEffectKind::Damage,
+                    amount_milli_hp: 250_000,
+                },
+            })
+            .unwrap();
+        source.restore_applied_frontier(1).unwrap();
+        validate_gm_action_journal(&source).expect("an effect journal is canonical");
+
+        let mut app = App::new();
+        app.insert_resource(SimTick(0));
+        app.insert_resource(GmActionJournal::default());
+        app.insert_resource(crate::gm_action::GmActionLog::default());
+        app.insert_resource(crate::gm_action::SimulationPaused(false));
+        app.insert_resource(crate::gm_effect::PendingGmDirectEffects::default());
+        app.world_mut().spawn((
+            crate::entities::spawner::EntityUuid("npc-1".into()),
+            crate::entities::spawner::EntitySystemHull(
+                crate::ship::damage::SystemHull::from_config(&[
+                    (SystemId("impulse-drive".into()), 30.0),
+                    (SystemId("phaser-bank".into()), 50.0),
+                ]),
+            ),
+            crate::ship::components::ShipConfigComponent(
+                toml::from_str(
+                    r#"
+[[station]]
+id = "helm"
+name = "station.helm.display_name"
+description = "station.helm.description"
+rank = "Lieutenant"
+
+[[station]]
+id = "tactical"
+name = "station.tactical.display_name"
+description = "station.tactical.description"
+rank = "Lieutenant"
+
+[[system]]
+id = "impulse-drive"
+kind = "impulse-drive"
+station = "helm"
+
+[[system]]
+id = "phaser-bank"
+kind = "phaser-bank"
+station = "tactical"
+"#,
+                )
+                .expect("a well-formed authoring fixture"),
+            ),
+        ));
+        app.add_systems(PreUpdate, crate::gm_action::apply_due_actions);
+        seed_replay_initial_state(&mut app, &source);
+
+        let mut sim = PhoenixSim {
+            app,
+            max_frames: 1,
+            frames: 0,
+            expected_commands: 0,
+            applied: 0,
+            submitted: 0,
+            tail: true,
+            gm_actions: source,
+            final_tick: Some(0),
+            ledger: DigestLedger::new(0),
+        };
+        sim.step();
+
+        let entry = &sim
+            .app
+            .world()
+            .resource::<crate::gm_action::GmActionLog>()
+            .entries()[0];
+        assert_eq!(entry.outcome, crate::gm_action::GmActionOutcome::Applied);
+        assert_eq!(
+            entry.effect,
+            Some(crate::gm_effect::GmDirectEffectResult {
+                kind: crate::gm_effect::GmDirectEffectKind::Damage,
+                applied_milli_hp: 30_000,
+                discarded_milli_hp: 220_000,
+                destroyed: false,
+            }),
+            "the replayed peer re-resolves the clamp against the STATION and the \
+             lethality against the whole hull"
+        );
+        assert_eq!(
+            entry.effect_scope,
+            Some(crate::gm_effect::GmDirectEffectScope::Station(
+                crate::core::messages::StationId("helm".into())
+            )),
+            "the durable fact still names the Station it narrowed to"
+        );
+        assert_eq!(
+            sim.app
+                .world()
+                .resource::<crate::gm_effect::PendingGmDirectEffects>()
+                .entries()
+                .iter()
+                .map(|effect| (effect.scope.clone(), effect.amount_milli_hp))
+                .collect::<Vec<_>>(),
+            vec![(
+                crate::gm_effect::GmDirectEffectScope::Station(crate::core::messages::StationId(
+                    "helm".into()
+                )),
+                30_000
+            )],
+            "the replayed peer arms exactly what the recorded one armed"
+        );
+    }
+
     /// A placement replays through the SAME canonical lane (issue #1305): the
     /// artifact carries the grant, `apply_due_actions` revalidates it against
     /// the replayed world's own palette, and the replayed peer arms exactly

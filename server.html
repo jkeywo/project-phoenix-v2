@@ -368,7 +368,10 @@
        so the block the panel hides that way needs its own rule -- the same
        pattern `#gm-map-panel[hidden]` and friends below follow. */
     #gm-effect-controls[hidden] { display: none; }
-    #gm-effect-amount-label { display: flex; align-items: center; gap: .5rem; }
+    #gm-effect-amount-label,
+    #gm-effect-scope-label { display: flex; align-items: center; gap: .5rem; }
+    #gm-effect-scope { flex: 1 1 auto; min-width: 0; font: inherit; padding: .3rem .4rem; }
+    #gm-effect-warning[data-emptied="true"] { color: var(--fire-bright); }
     #gm-effect-amount { width: 7rem; font: inherit; padding: .3rem .4rem; }
     #gm-effect-actions { display: flex; flex-wrap: wrap; gap: .6rem; }
     #gm-effect-actions button {
@@ -2048,6 +2051,15 @@
                 data-i18n="server.gm.effect.empty"></p>
               <div id="gm-effect-controls" hidden>
                 <p id="gm-effect-target"></p>
+                <!-- Scope narrows the SAME press to one Station's authored
+                     Systems or to one System (issue #1311). Its options are
+                     built from the per-System breakdown the `gm_entity`
+                     projection publishes, so the page never composes a
+                     ship-local authoring key of its own. -->
+                <label id="gm-effect-scope-label" for="gm-effect-scope">
+                  <span data-i18n="server.gm.effect.scope_label"></span>
+                  <select id="gm-effect-scope"></select>
+                </label>
                 <p id="gm-effect-hull"></p>
                 <label id="gm-effect-amount-label" for="gm-effect-amount">
                   <span data-i18n="server.gm.effect.amount_label"></span>
@@ -3991,14 +4003,25 @@
      * map projection; this seam never composes one, so a GM cannot name a
      * target the simulation did not publish. The amount crosses as milli-HP so
      * the journal never has to round a float typed into a box.
+     *
+     * `scope`/`scope_id` narrow the same press to one Station or System (issue
+     * #1311). They are checked here to the same standard the entity is, and
+     * both are ALWAYS sent — `scope_id` null for the whole entity — because the
+     * typed ingress guards an exact field set rather than accepting two shapes.
      */
     window.__hostApplyDirectEffect = function(request) {
       const gm = localGm();
+      const scope = request && request.scope;
+      const scopeId = request && request.scope_id;
+      const scopedShape = (scope === 'entity' && scopeId === null)
+        || ((scope === 'station' || scope === 'system')
+            && typeof scopeId === 'string' && scopeId.length > 0);
       if (!gm || !request || typeof request !== 'object'
           || typeof request.entity !== 'string' || !request.entity
           || (request.effect !== 'damage' && request.effect !== 'heal')
           || !Number.isSafeInteger(request.amount_milli_hp) || request.amount_milli_hp <= 0
           || typeof request.correlation !== 'string' || !request.correlation
+          || !scopedShape
           || typeof window.wasm_submit_gm_action !== 'function') return false;
       try {
         return window.wasm_submit_gm_action(JSON.stringify({
@@ -4008,6 +4031,8 @@
           entity: request.entity,
           effect: request.effect,
           amount_milli_hp: request.amount_milli_hp,
+          scope,
+          scope_id: scopeId,
         })) !== false;
       } catch (_) {
         return false;

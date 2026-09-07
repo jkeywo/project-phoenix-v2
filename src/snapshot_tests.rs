@@ -1024,3 +1024,171 @@ fn an_armed_direct_effect_survives_capture_and_lands_once_on_both_sides() {
         "both continuations retain identical hulls and digest",
     );
 }
+
+/// The SCOPE of an armed effect crosses the capture boundary with it, so a
+/// resumed peer damages the Station the grant named rather than the whole hull
+/// (issue #1311, snapshot format 24).
+///
+/// This is the fact format 24 exists for. The amount alone survived a format-23
+/// record; a restore that defaulted the scope back to `Entity` would land the
+/// same 25 points across every System on the ship, and the live peer and the
+/// resumed one would then disagree about a hull neither could explain.
+#[test]
+fn an_armed_scoped_effect_restores_against_the_same_station_it_named() {
+    use bevy::ecs::system::RunSystemOnce;
+
+    fn bootstrap() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<crate::lobby::server::OutboundMessage>();
+        app.world_mut()
+            .register_component::<crate::ship::state::ShipPhysics>();
+        app.world_mut()
+            .register_component::<crate::entities::spawner::EntitySystemHull>();
+        app.world_mut()
+            .register_component::<crate::ship::state::ShipWeaponsHold>();
+        app.world_mut()
+            .register_component::<crate::console::command::server::ShipStationStances>();
+        app.world_mut()
+            .register_component::<crate::ship_plugin::ShipSystemControlSources>();
+        app.world_mut()
+            .register_component::<crate::ship::state::ShipRedAlert>();
+        app.world_mut().insert_resource(SimTick(42));
+        app.world_mut().insert_resource(SimulationPaused(false));
+        app.world_mut().insert_resource(GmActionJournal::default());
+        app.world_mut()
+            .insert_resource(crate::gm_action::GmActionLog::default());
+        app.world_mut()
+            .insert_resource(crate::gm_effect::PendingGmDirectEffects::default());
+        app.world_mut().insert_resource(crate::sim_rng::SimRng::new(
+            4242,
+            crate::sim_rng::SeedSource::Cli,
+        ));
+        app.world_mut().spawn((
+            crate::entities::spawner::EntityUuid("npc-1".into()),
+            crate::entities::spawner::EntitySystemHull(
+                crate::ship::damage::SystemHull::from_config(&[
+                    (SystemId("impulse-drive".into()), 50.0),
+                    (SystemId("phaser-bank".into()), 50.0),
+                ]),
+            ),
+            crate::ship::components::ShipConfigComponent(
+                toml::from_str(
+                    r#"
+[[station]]
+id = "helm"
+name = "station.helm.display_name"
+description = "station.helm.description"
+rank = "Lieutenant"
+
+[[station]]
+id = "tactical"
+name = "station.tactical.display_name"
+description = "station.tactical.description"
+rank = "Lieutenant"
+
+[[system]]
+id = "impulse-drive"
+kind = "impulse-drive"
+station = "helm"
+
+[[system]]
+id = "phaser-bank"
+kind = "phaser-bank"
+station = "tactical"
+"#,
+                )
+                .expect("a well-formed authoring fixture"),
+            ),
+        ));
+        app
+    }
+
+    let mut live = bootstrap();
+    live.world_mut()
+        .resource_mut::<GmActionJournal>()
+        .insert(crate::gm_action::GmActionGrant {
+            from: HostSlot(1),
+            sequenced_by: HostSlot(1),
+            operator_id: "gm-1".into(),
+            correlation: GmActionId::new("recover-scoped-effect").unwrap(),
+            recovery_generation: 0,
+            apply_tick: 42,
+            order: GmActionOrder::new(HostSlot(1), 1),
+            action: GmAction::ApplyDirectEffect {
+                target: "npc-1".into(),
+                scope: crate::gm_effect::GmDirectEffectScope::Station(
+                    crate::core::messages::StationId("helm".into()),
+                ),
+                effect: crate::gm_effect::GmDirectEffectKind::Damage,
+                amount_milli_hp: 25_000,
+            },
+        })
+        .unwrap();
+    live.world_mut()
+        .run_system_once(crate::gm_action::apply_due_actions)
+        .unwrap();
+
+    let boundary = capture(live.world());
+    assert_eq!(
+        boundary
+            .gm_direct_effects
+            .entries()
+            .iter()
+            .map(|effect| effect.scope.clone())
+            .collect::<Vec<_>>(),
+        vec![crate::gm_effect::GmDirectEffectScope::Station(
+            crate::core::messages::StationId("helm".into())
+        )],
+        "the capture carries WHERE the effect lands, not only how much",
+    );
+    assert_eq!(
+        boundary
+            .gm_actions
+            .applied_results()
+            .iter()
+            .map(|result| result.effect_scope.clone())
+            .collect::<Vec<_>>(),
+        vec![Some(crate::gm_effect::GmDirectEffectScope::Station(
+            crate::core::messages::StationId("helm".into())
+        ))],
+        "and so does the durable fact the resumed feed re-renders",
+    );
+
+    let report = restore(live.world_mut(), &boundary);
+    assert!(report.is_complete(), "source gaps: {:?}", report.gaps);
+    let mut recovered = bootstrap();
+    let report = restore(recovered.world_mut(), &boundary);
+    assert!(report.is_complete(), "recovered gaps: {:?}", report.gaps);
+
+    for app in [&mut live, &mut recovered] {
+        app.world_mut()
+            .run_system_once(crate::gm_effect::apply_gm_direct_effects)
+            .unwrap();
+    }
+    for app in [&mut live, &mut recovered] {
+        let mut query = app
+            .world_mut()
+            .query::<&crate::entities::spawner::EntitySystemHull>();
+        let hull = query.single(app.world()).unwrap();
+        assert!(
+            (hull
+                .0
+                .current_for(&SystemId("impulse-drive".into()))
+                .unwrap()
+                - 25.0)
+                .abs()
+                < 0.01,
+            "the resumed damage phase restricts to the Station the grant named"
+        );
+        assert!(
+            (hull.0.current_for(&SystemId("phaser-bank".into())).unwrap() - 50.0).abs() < 0.01,
+            "a resumed scoped hit still cannot reach another Station's System"
+        );
+    }
+    assert_eq!(
+        crate::sim_digest::world_digest(live.world()),
+        crate::sim_digest::world_digest(recovered.world()),
+        "both continuations retain identical hulls and digest",
+    );
+}

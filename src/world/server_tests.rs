@@ -2417,12 +2417,11 @@ fn a_paused_event_leaves_an_armed_skip_exactly_where_it_was() {
     );
 
     set_gm_event_paused(&mut app, "resume-1", "base-world::evac", false);
-    assert!(
-        app.world()
-            .resource::<WorldContentRuntime>()
-            .paused_gm_events
-            .is_empty()
-    );
+    assert!(app
+        .world()
+        .resource::<WorldContentRuntime>()
+        .paused_gm_events
+        .is_empty());
     assert_eq!(
         armed_skips(&app),
         vec!["base-world::evac".to_string()],

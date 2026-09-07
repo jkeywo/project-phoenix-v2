@@ -106,9 +106,13 @@ pub enum GmAction {
     ///
     /// `target` is the stable `EntityUuid`, never a Bevy `Entity`: a grant can
     /// be sequenced for a future boundary, and an entity index is not an
-    /// identity across one. `scope` is `Entity` for now and is where issue
-    /// #1311's Station/System narrowing lands, so that slice appends a variant
-    /// rather than adding a second action family for the same mechanic.
+    /// identity across one. `scope` narrows the same mechanic to one Station's
+    /// authored Systems or to a single System (issue #1311) — a variant of one
+    /// enum rather than a second action family, because a Station hit and a
+    /// whole-hull hit differ in which Systems the distribution may reach and in
+    /// nothing else. The Station/System ids are ship-local authoring keys
+    /// resolved against the TARGET's own hull, so they are meaningful only
+    /// together with `target`.
     ///
     /// The amount is absolute milli-HP, and it is what the OPERATOR asked for.
     /// What actually lands is resolved against the live hull at the agreed
@@ -329,11 +333,25 @@ impl GmAction {
             // accepted as a guaranteed No-op: an operator who typed nothing has
             // not asked for anything, and the empty press should never reach the
             // journal in the first place.
+            // The SCOPE id's shape is checked here for the palette id's reason:
+            // an unbounded or control-laden Station/System key is a malformed
+            // ACTION, not an unknown Station, and it must never reach the
+            // canonical journal to be told apart at an apply tick.
             Self::ApplyDirectEffect {
                 target,
+                scope,
                 amount_milli_hp,
                 ..
-            } if bounded(target) && *amount_milli_hp > 0 => Ok(()),
+            } if bounded(target)
+                && *amount_milli_hp > 0
+                && match scope {
+                    crate::gm_effect::GmDirectEffectScope::Entity => true,
+                    crate::gm_effect::GmDirectEffectScope::Station(station) => bounded(&station.0),
+                    crate::gm_effect::GmDirectEffectScope::System(system) => bounded(&system.0),
+                } =>
+            {
+                Ok(())
+            }
             // The palette id's SHAPE is checked here rather than only against
             // the live table, for the event id's reason: a malformed one is a
             // malformed action, not an unknown palette entry. The placement is
@@ -377,9 +395,9 @@ impl GmAction {
             Self::SetSessionPaused { .. } => GmActionKind::SessionPause,
             Self::SetStationPuppet { .. } => GmActionKind::StationPuppet,
             Self::IssueStationCommand { .. } => GmActionKind::StationCommand,
-            Self::FireGmEvent { .. } | Self::SetEventPaused { .. } | Self::ArmGmEventSkip { .. } => {
-                GmActionKind::EventControl
-            }
+            Self::FireGmEvent { .. }
+            | Self::SetEventPaused { .. }
+            | Self::ArmGmEventSkip { .. } => GmActionKind::EventControl,
             Self::ApplyDirectEffect { .. } => GmActionKind::DirectEffect,
             Self::SpawnPaletteEntity { .. } => GmActionKind::WorldSpawn,
         }
@@ -397,6 +415,18 @@ impl GmAction {
             | Self::ApplyDirectEffect { .. }
             | Self::SpawnPaletteEntity { .. }
             | Self::ArmGmEventSkip { .. } => None,
+        }
+    }
+
+    /// The requested narrowing, independent of whether resolution can succeed.
+    pub fn effect_scope(&self) -> Option<crate::gm_effect::GmDirectEffectScope> {
+        match self {
+            Self::ApplyDirectEffect { scope, .. }
+                if !matches!(scope, crate::gm_effect::GmDirectEffectScope::Entity) =>
+            {
+                Some(scope.clone())
+            }
+            _ => None,
         }
     }
 
@@ -574,6 +604,9 @@ pub struct GmActionRefusal {
     /// `skip_serializing_if` keeps every pre-#1304 refusal byte-identical.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lever: Option<crate::gm_event::GmEventLever>,
+    /// Requested Station/System scope, retained even when no grant is admitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect_scope: Option<crate::gm_effect::GmDirectEffectScope>,
 }
 
 impl GmActionRefusal {
@@ -589,6 +622,7 @@ impl GmActionRefusal {
         .with_target(self.target.clone())
         .with_verb(self.verb)
         .with_lever(self.lever)
+        .with_effect(None, self.effect_scope.clone())
     }
 }
 
@@ -668,6 +702,9 @@ pub fn validate_fleet_frame(
             // refused Fire on every other GM's feed, because Fire is the only
             // event-control verb a fact with neither field could ever have
             // recorded.
+            if refusal.effect_scope.is_some() && refusal.action_kind != GmActionKind::DirectEffect {
+                return Err(GmActionRefusalReason::InvalidAction);
+            }
             let is_event_control = refusal.action_kind == GmActionKind::EventControl;
             if !is_event_control && (refusal.verb.is_some() || refusal.lever.is_some()) {
                 return Err(GmActionRefusalReason::InvalidAction);
@@ -744,6 +781,21 @@ pub enum GmActionRefusalReason {
     /// The world has no content runtime to place anything into: no palette,
     /// no trigger pipeline, nothing that could ever perform the spawn.
     WorldUnavailable,
+    /// The target's hull tracks no System with the named id at the apply tick
+    /// (issue #1311). Deliberately asked of the HULL rather than of the ship
+    /// config: an authored `[[system]]` with no `[[hull.system_hull]]` entry —
+    /// every Alliance radar is one — exists but can never be damaged or
+    /// repaired, and "nothing damageable answers to that name" is the same
+    /// honest answer for both.
+    ///
+    /// A Station that names no live System reuses
+    /// [`Self::UnknownStation`]; a Station whose Systems this hull tracks none
+    /// of reuses [`Self::TargetNotDamageable`]. Only "no such System" was a
+    /// fact no existing reason could state.
+    ///
+    /// Appended for [`Self::UnknownGmEvent`]'s reason — the journal is folded
+    /// through postcard, which encodes an enum by VARIANT INDEX.
+    UnknownSystem,
 }
 
 /// One terminal fact in the GM command log and local activity projection.
@@ -809,6 +861,21 @@ pub struct LoggedGmAction {
     /// existing world's digest moves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lever: Option<crate::gm_event::GmEventLever>,
+    /// WHICH part of the target a directed world effect was aimed at (issue
+    /// #1311), when it was aimed at less than the whole hull.
+    ///
+    /// `None` is the whole entity, which is what every pre-#1311 fact meant and
+    /// what `GmDirectEffectScope::Entity` still means — so a run that only ever
+    /// aims at whole hulls serialises byte-identically to its #1310 shape and
+    /// no existing digest moves. The narrowed scopes are `Some`, because a feed
+    /// row saying "20 hull to Courier" when the operator emptied one Station is
+    /// a true sentence about a fact the GM cannot act on.
+    ///
+    /// It rides the RESULT for [`Self::target`]'s reason: the activity feed and
+    /// the direct-effect panel read the bounded result surface, which outlives
+    /// the journal window a supplemental local refusal can fall outside of.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect_scope: Option<crate::gm_effect::GmDirectEffectScope>,
 }
 
 impl LoggedGmAction {
@@ -833,6 +900,7 @@ impl LoggedGmAction {
             effect: None,
             verb: None,
             lever: None,
+            effect_scope: None,
         }
     }
 
@@ -848,9 +916,15 @@ impl LoggedGmAction {
         self
     }
 
-    /// Attach a resolved directed-effect result to a fact built above.
-    pub fn with_effect(mut self, effect: Option<crate::gm_effect::GmDirectEffectResult>) -> Self {
+    /// Attach a resolved directed-effect result, and the narrowed scope it was
+    /// aimed at, to a fact built above.
+    pub fn with_effect(
+        mut self,
+        effect: Option<crate::gm_effect::GmDirectEffectResult>,
+        scope: Option<crate::gm_effect::GmDirectEffectScope>,
+    ) -> Self {
         self.effect = effect;
+        self.effect_scope = scope;
         self
     }
 
@@ -883,6 +957,7 @@ impl LoggedGmAction {
         .with_target(request.action.target_id().map(str::to_string))
         .with_verb(request.action.verb())
         .with_lever(request.action.event_lever())
+        .with_effect(None, request.action.effect_scope())
     }
 }
 
@@ -1523,6 +1598,7 @@ impl GmActionJournal {
                 effect: None,
                 verb: grant.action.verb(),
                 lever: grant.action.event_lever(),
+                effect_scope: grant.action.effect_scope(),
             });
         }
         GmActionLog { entries, paused }
@@ -1619,6 +1695,7 @@ impl GmActionJournal {
                 effect: None,
                 verb: grant.action.verb(),
                 lever: grant.action.event_lever(),
+                effect_scope: grant.action.effect_scope(),
             });
         }
         GmActionLog { entries, paused }
@@ -1875,6 +1952,11 @@ pub fn apply_due_actions(
     hulls: Query<(
         &crate::entities::spawner::EntityUuid,
         Option<&crate::entities::spawner::EntitySystemHull>,
+        // The target's own Station->System ownership map (issue #1311).
+        // `Option` because a structure, an asteroid or an authored marker
+        // carries no ship config: a Station scope aimed at one is refused with
+        // `UnknownStation` rather than silently widened to the whole hull.
+        Option<&crate::ship::components::ShipConfigComponent>,
     )>,
     ships: Query<
         (
@@ -1899,16 +1981,14 @@ pub fn apply_due_actions(
     }
     let now = tick.as_deref().map_or(0, |tick| tick.0);
     let due = journal.pending_through(now).to_vec();
-    // `(current, max)` per directed-effect target as this drain has left it.
-    // Keyed by uuid and walked in canonical grant order, so every peer builds
-    // the same projection from the same starting hulls.
-    let mut projected_hulls: std::collections::BTreeMap<String, (f32, f32)> =
-        std::collections::BTreeMap::new();
     for grant in due {
         let requested_active = grant.action.requested_active();
         // Only the directed world-effect family fills this in; every other
         // family's durable fact keeps its exact pre-#1310 shape.
         let mut resolved_effect: Option<crate::gm_effect::GmDirectEffectResult> = None;
+        // The NARROWED scope a directed effect named, `None` for the whole
+        // entity and for every other family — see `LoggedGmAction::effect_scope`.
+        let requested_scope = grant.action.effect_scope();
         let station_grant_after_loss = station_grant_outlives_operator(
             &grant,
             &journal,
@@ -1928,7 +2008,7 @@ pub fn apply_due_actions(
                 effect,
                 amount_milli_hp,
             } => {
-                let found = hulls.iter().find(|(uuid, _)| uuid.0 == *target);
+                let found = hulls.iter().find(|(uuid, ..)| uuid.0 == *target);
                 match (direct_effects.as_deref_mut(), found) {
                     // No arm queue at all: nothing downstream could ever apply
                     // this, so refusing is the only honest terminal answer.
@@ -1947,55 +2027,108 @@ pub fn apply_due_actions(
                     // all, or an authored `[hull]` that declares no systems.
                     // Two spellings of one fact, and both owe the operator the
                     // same answer — which is not "that does not exist".
-                    (Some(_), Some((_, None))) => (
+                    (Some(_), Some((_, None, _))) => (
                         GmActionOutcome::Refused,
                         Some(GmActionRefusalReason::TargetNotDamageable),
                     ),
-                    (Some(_), Some((_, Some(hull)))) if hull.0.is_empty() => (
+                    (Some(_), Some((_, Some(hull), _))) if hull.0.is_empty() => (
                         GmActionOutcome::Refused,
                         Some(GmActionRefusalReason::TargetNotDamageable),
                     ),
-                    (Some(pending), Some((_, Some(hull)))) => {
-                        // Measured against what the grants canonically BEFORE
-                        // this one left, not against the untouched hull: two
-                        // GMs pressing one target on one boundary must get two
-                        // honest answers, and the reducer may not mutate the
-                        // world to find that out. The projection is the
-                        // `fired_events` discipline `log_prefix` already uses.
-                        let (current, max) =
-                            *projected_hulls.entry(target.clone()).or_insert_with(|| {
-                                pending.project_totals(
+                    (Some(pending), Some((_, Some(hull), ship_config))) => {
+                        let config = ship_config.map(|config| &config.0);
+                        // The scope becomes a System allow-list at the AGREED
+                        // APPLY TICK, against the hull and the ship config the
+                        // target carries right now — a Station a layer unloaded,
+                        // or a hull swapped since the press, is refused here
+                        // rather than silently widened back to the whole hull.
+                        match crate::gm_effect::scope_systems(scope, &hull.0, config) {
+                            Err(crate::gm_effect::GmDirectEffectScopeError::UnknownStation) => (
+                                GmActionOutcome::Refused,
+                                Some(GmActionRefusalReason::UnknownStation),
+                            ),
+                            Err(crate::gm_effect::GmDirectEffectScopeError::UnknownSystem) => (
+                                GmActionOutcome::Refused,
+                                Some(GmActionRefusalReason::UnknownSystem),
+                            ),
+                            // The Station is authored and owns Systems, but
+                            // this hull tracks none of them — the scoped
+                            // spelling of an undamageable target, and the same
+                            // answer for the same reason.
+                            Err(crate::gm_effect::GmDirectEffectScopeError::NotDamageable) => (
+                                GmActionOutcome::Refused,
+                                Some(GmActionRefusalReason::TargetNotDamageable),
+                            ),
+                            Ok(systems) => {
+                                // Measured against what the grants canonically
+                                // BEFORE this one left, not against the
+                                // untouched hull: two GMs pressing one target
+                                // on one boundary must get two honest answers,
+                                // and the reducer may not mutate the world to
+                                // find that out. Effects armed EARLIER in this
+                                // very drain are already in `pending`, so the
+                                // queue walk IS the whole projection and no
+                                // second running total is kept beside it.
+                                let (current, max) =
+                                    crate::gm_effect::scope_totals(&hull.0, systems.as_deref());
+                                // The KIND rides along because an arm wider than
+                                // this scope lands an unknown fraction of
+                                // itself here, and may only be projected in the
+                                // direction that shrinks this press's headroom.
+                                let (current, max) = pending.project_totals(
                                     target,
+                                    systems.as_deref(),
+                                    &hull.0,
+                                    config,
+                                    *effect,
+                                    current,
+                                    max,
+                                );
+                                // LETHALITY asks the whole hull, not the scope
+                                // (issue #1311). Emptying a Station is not
+                                // sinking a ship, so the two totals are
+                                // projected separately and only the scoped one
+                                // decides the clamp. For an `Entity` scope both
+                                // projections are the same walk over the same
+                                // queue and the answer is unchanged from #1310.
+                                // Every arm is CONTAINED by the whole hull, so
+                                // the kind never suppresses one here and this
+                                // projection is exact whatever was armed.
+                                let (hull_current, _) = pending.project_totals(
+                                    target,
+                                    None,
+                                    &hull.0,
+                                    config,
+                                    *effect,
                                     hull.0.total_current(),
                                     hull.0.total_max(),
-                                )
-                            });
-                        let resolution = crate::gm_effect::resolve_direct_effect(
-                            *effect,
-                            *amount_milli_hp,
-                            current,
-                            max,
-                        );
-                        resolved_effect = Some(resolution);
-                        if resolution.applied_milli_hp == 0 {
-                            // A full hull asked to heal, or a wreck asked to
-                            // take more damage. Deterministic on every peer,
-                            // and it still reports the discarded remainder.
-                            (GmActionOutcome::NoOp, None)
-                        } else {
-                            projected_hulls.insert(
-                                target.clone(),
-                                crate::gm_effect::totals_after(&resolution, current, max),
-                            );
-                            pending.push(crate::gm_effect::PendingGmDirectEffect {
-                                tick: grant.apply_tick,
-                                order: grant.order,
-                                target: target.clone(),
-                                scope: *scope,
-                                kind: *effect,
-                                amount_milli_hp: resolution.applied_milli_hp,
-                            });
-                            (GmActionOutcome::Applied, None)
+                                );
+                                let resolution = crate::gm_effect::resolve_direct_effect_within(
+                                    *effect,
+                                    *amount_milli_hp,
+                                    current,
+                                    max,
+                                    hull_current,
+                                );
+                                resolved_effect = Some(resolution);
+                                if resolution.applied_milli_hp == 0 {
+                                    // A full scope asked to heal, or an already
+                                    // empty one asked to take more damage.
+                                    // Deterministic on every peer, and it still
+                                    // reports the discarded remainder.
+                                    (GmActionOutcome::NoOp, None)
+                                } else {
+                                    pending.push(crate::gm_effect::PendingGmDirectEffect {
+                                        tick: grant.apply_tick,
+                                        order: grant.order,
+                                        target: target.clone(),
+                                        scope: scope.clone(),
+                                        kind: *effect,
+                                        amount_milli_hp: resolution.applied_milli_hp,
+                                    });
+                                    (GmActionOutcome::Applied, None)
+                                }
+                            }
                         }
                     }
                 }
@@ -2076,6 +2209,7 @@ pub fn apply_due_actions(
                             effect: None,
                             verb: grant.action.verb(),
                             lever: grant.action.event_lever(),
+                            effect_scope: None,
                         })
                         .expect("live GM result matches its canonical grant");
                     continue;
@@ -2252,6 +2386,7 @@ pub fn apply_due_actions(
                         effect: None,
                         verb: grant.action.verb(),
                         lever: grant.action.event_lever(),
+                        effect_scope: None,
                     };
                     journal
                         .record_applied_result(result)
@@ -2325,6 +2460,7 @@ pub fn apply_due_actions(
                             effect: None,
                             verb: grant.action.verb(),
                             lever: grant.action.event_lever(),
+                            effect_scope: None,
                         };
                         journal
                             .record_applied_result(result)
@@ -2417,6 +2553,7 @@ pub fn apply_due_actions(
                 effect: resolved_effect,
                 verb: grant.action.verb(),
                 lever: grant.action.event_lever(),
+                effect_scope: requested_scope,
             })
             .expect("live GM result matches its canonical grant");
     }
@@ -2504,6 +2641,7 @@ pub(crate) fn refusal_for(
         target: proposal.action.target_id().map(str::to_string),
         verb: proposal.action.verb(),
         lever: proposal.action.event_lever(),
+        effect_scope: proposal.action.effect_scope(),
     }
 }
 
@@ -4587,6 +4725,7 @@ station = "helm"
             requester: HostSlot(2),
             operator_id: "gm-2".into(),
             correlation: GmActionId::new("auth-refusal").unwrap(),
+            effect_scope: None,
             action_kind: GmActionKind::SessionPause,
             requested_active: true,
             tick: 7,
@@ -4737,6 +4876,7 @@ station = "helm"
             effect: None,
             verb: None,
             lever: None,
+            effect_scope: None,
         };
         let pause = LoggedGmAction {
             operator_id: "gm-1".into(),
@@ -4751,6 +4891,7 @@ station = "helm"
             effect: None,
             verb: None,
             lever: None,
+            effect_scope: None,
         };
         let station_refused = LoggedGmAction::refused(
             "gm-1".into(),
@@ -4773,6 +4914,7 @@ station = "helm"
             effect: None,
             verb: None,
             lever: None,
+            effect_scope: None,
         };
         let log = GmActionLog {
             entries: vec![pause, station_applied.clone(), station_pending],
@@ -4806,6 +4948,7 @@ station = "helm"
                 lever: None,
                 effect: None,
                 verb: None,
+                effect_scope: None,
             }),
             Err("pending GM result is not a Station command"),
         );
@@ -5077,6 +5220,107 @@ station = "helm"
         app
     }
 
+    /// [`effect_grant`] aimed at less than the whole hull (issue #1311).
+    fn scoped_effect_grant(
+        sequence: u64,
+        apply_tick: u64,
+        correlation: &str,
+        target: &str,
+        scope: crate::gm_effect::GmDirectEffectScope,
+        effect: crate::gm_effect::GmDirectEffectKind,
+        amount_milli_hp: u32,
+    ) -> GmActionGrant {
+        let mut grant = effect_grant(
+            sequence,
+            apply_tick,
+            correlation,
+            target,
+            effect,
+            amount_milli_hp,
+        );
+        if let GmAction::ApplyDirectEffect { scope: slot, .. } = &mut grant.action {
+            *slot = scope;
+        }
+        grant
+    }
+
+    fn effect_station(id: &str) -> crate::gm_effect::GmDirectEffectScope {
+        crate::gm_effect::GmDirectEffectScope::Station(crate::core::messages::StationId(id.into()))
+    }
+
+    fn effect_system(id: &str) -> crate::gm_effect::GmDirectEffectScope {
+        crate::gm_effect::GmDirectEffectScope::System(crate::core::messages::SystemId(id.into()))
+    }
+
+    /// A world with ONE stationed hull, so a narrowed scope has real authored
+    /// ownership to resolve against (issue #1311).
+    ///
+    /// The ship config is parsed from TOML for the reason
+    /// `gm_effect::tests::ship_config` is: the ownership under test has to be
+    /// the same `[[system]] station = "..."` field a shipped hull authors, read
+    /// the same way.
+    ///
+    /// A row with max `0.0` is authored in the config but NOT tracked by the
+    /// hull — the shape every Alliance radar has, a `[[system]]` with no
+    /// `[[hull.system_hull]]` entry. It exists to be owned by a Station and can
+    /// never be damaged or repaired.
+    fn stationed_effect_app(
+        tick: u64,
+        uuid: &str,
+        systems: &[(&str, f32, f32, Option<&str>)],
+        grants: impl IntoIterator<Item = GmActionGrant>,
+    ) -> App {
+        let mut app = effect_app(tick, &[], &[], grants);
+        let mut toml = String::new();
+        let mut stations: Vec<&str> = systems
+            .iter()
+            .filter_map(|(_, _, _, station)| *station)
+            .collect();
+        stations.sort_unstable();
+        stations.dedup();
+        for station in stations {
+            toml.push_str(&format!(
+                r#"
+[[station]]
+id = "{station}"
+name = "station.{station}.display_name"
+description = "station.{station}.description"
+rank = "Lieutenant"
+"#
+            ));
+        }
+        let mut hull = crate::ship::damage::SystemHull::from_config(
+            &systems
+                .iter()
+                .filter(|(_, max, _, _)| *max > 0.0)
+                .map(|(id, max, _, _)| (crate::core::messages::SystemId((*id).into()), *max))
+                .collect::<Vec<_>>(),
+        );
+        for (id, max, current, station) in systems {
+            if *max > 0.0 {
+                hull.set_hp(&crate::core::messages::SystemId((*id).into()), *current);
+            }
+            toml.push_str(&format!(
+                r#"
+[[system]]
+id = "{id}"
+kind = "{id}"
+"#
+            ));
+            if let Some(station) = station {
+                toml.push_str(&format!("station = \"{station}\"\n"));
+            }
+        }
+        app.world_mut().spawn((
+            crate::entities::spawner::EntityUuid(uuid.into()),
+            crate::entities::spawner::EntitySystemHull(hull),
+            crate::ship::components::ShipConfigComponent(
+                toml::from_str(&toml).expect("a well-formed authoring fixture"),
+            ),
+        ));
+        app
+    }
+
     fn armed_effects(app: &App) -> Vec<crate::gm_effect::PendingGmDirectEffect> {
         app.world()
             .resource::<crate::gm_effect::PendingGmDirectEffects>()
@@ -5339,6 +5583,431 @@ station = "helm"
         assert_eq!(second.discarded_milli_hp, 20_000);
     }
 
+    /// A narrowed scope is resolved and CLAMPED against only what it names, so
+    /// the durable result an operator reads describes the Station they aimed at
+    /// rather than the hull it sits in (issue #1311).
+    ///
+    /// 25 points at a Station holding 20 is lethal to that Station and
+    /// discards 5 — the same arithmetic the whole-hull path performs, asked of
+    /// a smaller total. `destroyed` stays false because the entity survives:
+    /// emptying a Station is not sinking a ship.
+    #[test]
+    fn a_station_scope_resolves_and_clamps_against_only_its_own_systems() {
+        let mut app = stationed_effect_app(
+            5,
+            "npc-1",
+            &[
+                ("impulse-drive", 40.0, 15.0, Some("helm")),
+                ("manoeuvre-thrusters", 20.0, 5.0, Some("helm")),
+                ("phaser-bank", 40.0, 40.0, Some("tactical")),
+            ],
+            [scoped_effect_grant(
+                1,
+                5,
+                "hit-helm",
+                "npc-1",
+                effect_station("helm"),
+                crate::gm_effect::GmDirectEffectKind::Damage,
+                25_000,
+            )],
+        );
+        app.update();
+
+        assert_eq!(outcomes(&app), vec![(GmActionOutcome::Applied, None)]);
+        assert_eq!(
+            effect_results(&app)[0].expect("resolved"),
+            crate::gm_effect::GmDirectEffectResult {
+                kind: crate::gm_effect::GmDirectEffectKind::Damage,
+                applied_milli_hp: 20_000,
+                discarded_milli_hp: 5_000,
+                destroyed: false,
+            },
+            "the clamp is the STATION's 20 points, and the entity survives it"
+        );
+        assert_eq!(
+            armed_effects(&app)
+                .iter()
+                .map(|effect| (effect.scope.clone(), effect.amount_milli_hp))
+                .collect::<Vec<_>>(),
+            vec![(effect_station("helm"), 20_000)],
+            "the arm carries the scope so the damage phase restricts the same way"
+        );
+        assert_eq!(
+            app.world()
+                .resource::<GmActionJournal>()
+                .applied_results()
+                .iter()
+                .map(|result| result.effect_scope.clone())
+                .collect::<Vec<_>>(),
+            vec![Some(effect_station("helm"))],
+            "the durable fact says WHICH Station, so the feed cannot claim the hull"
+        );
+    }
+
+    /// Every way a narrowed scope can name nothing, told apart at the apply
+    /// tick and against the LIVE world — because a Station a layer unloaded
+    /// between the press and the boundary is exactly as absent as one that was
+    /// never authored.
+    ///
+    /// The three answers are deliberately different sentences. `UnknownStation`
+    /// and `UnknownSystem` say nothing answers to that name;
+    /// `TargetNotDamageable` says something does, but this hull tracks none of
+    /// it — the scoped spelling of the refusal a beacon already gets.
+    #[test]
+    fn a_scope_that_names_nothing_damageable_is_refused_at_the_apply_boundary() {
+        let mut app = stationed_effect_app(
+            4,
+            "npc-1",
+            &[
+                ("impulse-drive", 40.0, 40.0, Some("helm")),
+                // Authored under `science` but NOT tracked by the hull, the
+                // shape every Alliance radar has.
+                ("nav-radar", 0.0, 0.0, Some("science")),
+            ],
+            [
+                scoped_effect_grant(
+                    1,
+                    4,
+                    "no-station",
+                    "npc-1",
+                    effect_station("engineering"),
+                    crate::gm_effect::GmDirectEffectKind::Damage,
+                    1_000,
+                ),
+                scoped_effect_grant(
+                    2,
+                    4,
+                    "no-system",
+                    "npc-1",
+                    effect_system("torpedo-tube"),
+                    crate::gm_effect::GmDirectEffectKind::Damage,
+                    1_000,
+                ),
+                scoped_effect_grant(
+                    3,
+                    4,
+                    "no-damageable-system",
+                    "npc-1",
+                    effect_station("science"),
+                    crate::gm_effect::GmDirectEffectKind::Heal,
+                    1_000,
+                ),
+                // A Station scope aimed at a hull that authors no stations at
+                // all is refused rather than silently widened to the whole
+                // hull: `effect_app`'s bare `npc-2` carries no ship config.
+                scoped_effect_grant(
+                    4,
+                    4,
+                    "no-config",
+                    "npc-2",
+                    effect_station("helm"),
+                    crate::gm_effect::GmDirectEffectKind::Damage,
+                    1_000,
+                ),
+            ],
+        );
+        // The config-less hull the fourth grant aims at.
+        app.world_mut().spawn((
+            crate::entities::spawner::EntityUuid("npc-2".into()),
+            crate::entities::spawner::EntitySystemHull(
+                crate::ship::damage::SystemHull::from_config(&[(
+                    crate::core::messages::SystemId("captain".into()),
+                    100.0,
+                )]),
+            ),
+        ));
+        app.update();
+
+        assert_eq!(
+            outcomes(&app),
+            vec![
+                (
+                    GmActionOutcome::Refused,
+                    Some(GmActionRefusalReason::UnknownStation)
+                ),
+                (
+                    GmActionOutcome::Refused,
+                    Some(GmActionRefusalReason::UnknownSystem)
+                ),
+                (
+                    GmActionOutcome::Refused,
+                    Some(GmActionRefusalReason::TargetNotDamageable)
+                ),
+                (
+                    GmActionOutcome::Refused,
+                    Some(GmActionRefusalReason::UnknownStation)
+                ),
+            ]
+        );
+        assert_eq!(
+            app.world()
+                .resource::<GmActionLog>()
+                .entries()
+                .iter()
+                .map(|fact| fact.effect_scope.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                Some(effect_station("engineering")),
+                Some(effect_system("torpedo-tube")),
+                Some(effect_station("science")),
+                Some(effect_station("helm"))
+            ],
+            "refusals retain the requested narrowing even when it cannot resolve",
+        );
+        assert!(
+            armed_effects(&app).is_empty(),
+            "a refusal arms no work for the damage phase"
+        );
+    }
+
+    #[test]
+    fn refused_scoped_effects_keep_the_requested_scope_on_every_result_lane() {
+        for scope in [effect_station("helm"), effect_system("impulse-drive")] {
+            let grant = scoped_effect_grant(
+                1,
+                4,
+                "scope-refusal",
+                "gone",
+                scope.clone(),
+                crate::gm_effect::GmDirectEffectKind::Damage,
+                1_000,
+            );
+            let mut reconstructed = GmActionJournal::default();
+            reconstructed.insert(grant.clone()).unwrap();
+            reconstructed.restore_applied_frontier(1).unwrap();
+            assert_eq!(
+                reconstructed.applied_log().entries()[0].effect_scope,
+                Some(scope.clone()),
+                "reconstructing a grant frontier preserves its requested scope"
+            );
+            let request = GmActionRequest {
+                operator_id: grant.operator_id.clone(),
+                correlation: grant.correlation.clone(),
+                action: grant.action.clone(),
+            };
+            let ingress =
+                LoggedGmAction::refused_request(&request, 4, GmActionRefusalReason::WrongPhase);
+            assert_eq!(ingress.effect_scope, Some(scope.clone()));
+            let refusal = refusal_for(
+                HostSlot(1),
+                &GmActionProposal {
+                    from: HostSlot(1),
+                    operator_id: request.operator_id,
+                    correlation: request.correlation,
+                    action: request.action,
+                },
+                4,
+                GmActionRefusalReason::WrongPhase,
+            );
+            assert_eq!(refusal.logged().effect_scope, Some(scope.clone()));
+            let frame = crate::lockstep::MeshFrame::GmAction(GmActionFrame::Refused(refusal));
+            let encoded = crate::core::codec::encode_mesh_frame(&frame).unwrap();
+            assert_eq!(
+                crate::core::codec::decode_mesh_frame(&encoded),
+                Some(frame.clone())
+            );
+            let crate::lockstep::MeshFrame::GmAction(GmActionFrame::Refused(mut malformed)) = frame
+            else {
+                unreachable!()
+            };
+            malformed.action_kind = GmActionKind::SessionPause;
+            let malformed = crate::lockstep::MeshFrame::GmAction(GmActionFrame::Refused(malformed));
+            let encoded = crate::core::codec::encode_mesh_frame(&malformed).unwrap();
+            assert!(
+                crate::core::codec::decode_mesh_frame(&encoded).is_none(),
+                "a non-effect refusal cannot claim a narrowed effect scope"
+            );
+            for target in ["gone", "beacon", "beacon-componentless"] {
+                let mut grant = grant.clone();
+                if let GmAction::ApplyDirectEffect { target: slot, .. } = &mut grant.action {
+                    *slot = target.into();
+                }
+                let mut app = effect_app(4, &[], &["beacon"], [grant]);
+                app.update();
+                let fact = &app.world().resource::<GmActionLog>().entries()[0];
+                assert_eq!(fact.outcome, GmActionOutcome::Refused);
+                assert_eq!(fact.effect_scope, Some(scope.clone()), "{target}");
+            }
+        }
+    }
+
+    /// A System scope resolves against exactly one System's totals, and a
+    /// System already at zero asked to take more damage is the same No-op an
+    /// empty hull is — not a refusal, because the scope named something real.
+    #[test]
+    fn a_system_scope_measures_one_system_and_an_empty_one_is_a_no_op() {
+        let mut app = stationed_effect_app(
+            6,
+            "npc-1",
+            &[
+                ("impulse-drive", 40.0, 0.0, Some("helm")),
+                ("phaser-bank", 40.0, 40.0, Some("tactical")),
+            ],
+            [
+                scoped_effect_grant(
+                    1,
+                    6,
+                    "hit-dead-system",
+                    "npc-1",
+                    effect_system("impulse-drive"),
+                    crate::gm_effect::GmDirectEffectKind::Damage,
+                    5_000,
+                ),
+                scoped_effect_grant(
+                    2,
+                    6,
+                    "heal-full-system",
+                    "npc-1",
+                    effect_system("phaser-bank"),
+                    crate::gm_effect::GmDirectEffectKind::Heal,
+                    5_000,
+                ),
+            ],
+        );
+        app.update();
+
+        assert_eq!(
+            outcomes(&app),
+            vec![(GmActionOutcome::NoOp, None), (GmActionOutcome::NoOp, None)],
+            "an empty System asked for more damage, and a full one asked to heal"
+        );
+        for result in effect_results(&app) {
+            let result = result.expect("a No-op still reports what it discarded");
+            assert_eq!(result.applied_milli_hp, 0);
+            assert_eq!(result.discarded_milli_hp, 5_000);
+        }
+        assert!(armed_effects(&app).is_empty());
+    }
+
+    /// Two GMs pressing OVERLAPPING scopes on one boundary each get an honest
+    /// answer, and a third pressing a disjoint scope is unaffected by either
+    /// (issue #1311).
+    ///
+    /// The second press is measured against what the first left inside the
+    /// scope they share; the fourth measures the whole hull, which overlaps
+    /// everything and so carries both. Nothing here mutates the world — the
+    /// reducer resolves against the arm queue, which is what makes the answers
+    /// identical on every peer.
+    #[test]
+    fn simultaneous_scoped_effects_resolve_against_each_other_but_not_across_scopes() {
+        let mut app = stationed_effect_app(
+            7,
+            "npc-1",
+            &[
+                ("impulse-drive", 40.0, 40.0, Some("helm")),
+                ("manoeuvre-thrusters", 20.0, 20.0, Some("helm")),
+                ("phaser-bank", 40.0, 40.0, Some("tactical")),
+            ],
+            [
+                scoped_effect_grant(
+                    1,
+                    7,
+                    "helm-a",
+                    "npc-1",
+                    effect_station("helm"),
+                    crate::gm_effect::GmDirectEffectKind::Damage,
+                    50_000,
+                ),
+                scoped_effect_grant(
+                    2,
+                    7,
+                    "helm-b",
+                    "npc-1",
+                    effect_station("helm"),
+                    crate::gm_effect::GmDirectEffectKind::Damage,
+                    50_000,
+                ),
+                scoped_effect_grant(
+                    3,
+                    7,
+                    "tactical",
+                    "npc-1",
+                    effect_station("tactical"),
+                    crate::gm_effect::GmDirectEffectKind::Damage,
+                    40_000,
+                ),
+            ],
+        );
+        app.update();
+
+        assert_eq!(
+            armed_effects(&app)
+                .iter()
+                .map(|effect| (effect.order.sequence, effect.amount_milli_hp))
+                .collect::<Vec<_>>(),
+            vec![(1, 50_000), (2, 10_000), (3, 40_000)],
+            "the second helm press only has 10 of that Station's 60 points left, \
+             and the tactical press has its own 40 untouched by either"
+        );
+        let results = effect_results(&app);
+        assert_eq!(results[1].expect("resolved").discarded_milli_hp, 40_000);
+        assert!(
+            !results[0].expect("resolved").destroyed && !results[1].expect("resolved").destroyed,
+            "emptying a Station is not sinking a ship while another Station is alive"
+        );
+        assert!(
+            results[2].expect("resolved").destroyed,
+            "destruction is a whole-hull fact, so the press that empties the LAST \
+             living Systems is the kill even though its clamp was a Station's"
+        );
+
+        // Mixed KINDS across scopes (#1311 round-1 review). A whole-hull heal
+        // lands an unknown share of itself inside any one Station — the damage
+        // phase's keyed generator decides — so a Station DAMAGE press behind it
+        // may not count those points as damageable. Measured against the
+        // un-healed Station total, its clamp is what the hull will honour
+        // whichever Systems the heal chose.
+        let mut mixed = stationed_effect_app(
+            7,
+            "npc-1",
+            &[
+                ("impulse-drive", 40.0, 10.0, Some("helm")),
+                ("phaser-bank", 40.0, 10.0, Some("tactical")),
+            ],
+            [
+                scoped_effect_grant(
+                    1,
+                    7,
+                    "heal-hull",
+                    "npc-1",
+                    crate::gm_effect::GmDirectEffectScope::Entity,
+                    crate::gm_effect::GmDirectEffectKind::Heal,
+                    40_000,
+                ),
+                scoped_effect_grant(
+                    2,
+                    7,
+                    "damage-helm",
+                    "npc-1",
+                    effect_station("helm"),
+                    crate::gm_effect::GmDirectEffectKind::Damage,
+                    50_000,
+                ),
+            ],
+        );
+        mixed.update();
+
+        assert_eq!(
+            armed_effects(&mixed)
+                .iter()
+                .map(|effect| (effect.order.sequence, effect.amount_milli_hp))
+                .collect::<Vec<_>>(),
+            vec![(1, 40_000), (2, 10_000)],
+            "the Station press is bounded by the 10 points that Station holds \
+             UN-healed: the 40-point hull heal may land entirely on tactical"
+        );
+        let mixed_results = effect_results(&mixed);
+        assert_eq!(
+            mixed_results[1].expect("resolved").discarded_milli_hp,
+            40_000,
+            "the rest is honestly reported as discarded rather than promised"
+        );
+        assert!(
+            !mixed_results[1].expect("resolved").destroyed,
+            "10 points off a hull the queue projects at 60 is no kill"
+        );
+    }
+
     /// The typed vocabulary: what a direct effect is, what it names, and what
     /// it refuses without ever reaching the world.
     #[test]
@@ -5375,6 +6044,41 @@ station = "helm"
             nameless.validate(),
             Err(GmActionRefusalReason::InvalidAction)
         );
+
+        // A narrowed scope is the same action, so it validates the same way —
+        // and its id's SHAPE is checked here rather than only against the live
+        // hull, for the palette id's reason: an unbounded or empty Station key
+        // is a malformed action, not an unknown Station, and must never reach
+        // the canonical journal to be told apart at an apply tick (#1311).
+        for scope in [effect_station("helm"), effect_system("impulse-drive")] {
+            assert_eq!(
+                GmAction::ApplyDirectEffect {
+                    target: "npc-1".into(),
+                    scope,
+                    effect: crate::gm_effect::GmDirectEffectKind::Damage,
+                    amount_milli_hp: 1,
+                }
+                .validate(),
+                Ok(())
+            );
+        }
+        for scope in [
+            effect_station(""),
+            effect_system(""),
+            effect_station(&"x".repeat(4096)),
+            effect_system("helm\u{0}"),
+        ] {
+            assert_eq!(
+                GmAction::ApplyDirectEffect {
+                    target: "npc-1".into(),
+                    scope,
+                    effect: crate::gm_effect::GmDirectEffectKind::Damage,
+                    amount_milli_hp: 1,
+                }
+                .validate(),
+                Err(GmActionRefusalReason::InvalidAction)
+            );
+        }
     }
 
     /// A replicated refusal must name the entity it refused, for the same
@@ -5403,6 +6107,7 @@ station = "helm"
             requester: HostSlot(2),
             operator_id: "gm-2".into(),
             correlation: GmActionId::new("effect-refusal").unwrap(),
+            effect_scope: None,
             action_kind: GmActionKind::DirectEffect,
             requested_active: true,
             tick: 3,

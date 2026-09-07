@@ -137,6 +137,14 @@ pub enum GmActivityAction {
     /// the hull actually absorbed against what was asked for.
     ApplyDirectEffect {
         entity: String,
+        /// The narrowed Station/System scope the effect was aimed at (issue
+        /// #1311), absent for a whole-hull effect.
+        ///
+        /// Absent rather than a third "entity" spelling because that is what
+        /// every pre-#1311 row meant, so a whole-hull effect's row is unchanged
+        /// and the browser's existing parse of it still holds.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scope: Option<crate::gm_effect::GmDirectEffectScope>,
         heal: bool,
         applied_milli_hp: u32,
         discarded_milli_hp: u32,
@@ -1126,6 +1134,7 @@ fn refusal_reason(reason: crate::gm_action::GmActionRefusalReason) -> &'static s
         Reason::TargetNotDamageable => "target-not-damageable",
         Reason::UnknownGmPaletteEntry => "unknown-gm-palette-entry",
         Reason::WorldUnavailable => "world-unavailable",
+        Reason::UnknownSystem => "unknown-system",
     }
 }
 
@@ -1229,6 +1238,7 @@ fn terminal_action_entries(
                             let effect = fact.effect;
                             GmActivityAction::ApplyDirectEffect {
                                 entity: fact.target.clone()?,
+                                scope: fact.effect_scope.clone(),
                                 heal: effect.is_some_and(|effect| {
                                     effect.kind == crate::gm_effect::GmDirectEffectKind::Heal
                                 }),
@@ -1266,16 +1276,14 @@ fn terminal_action_entries(
                         // same hypothetical hole as one with no target, and is
                         // dropped rather than rendered under a lever nobody
                         // pulled.
-                        (crate::gm_action::GmActionKind::EventControl, None) => {
-                            match fact.lever {
-                                Some(crate::gm_event::GmEventLever::SkipNext) => {
-                                    GmActivityAction::ArmGmEventSkip {
-                                        event: fact.target.clone()?,
-                                    }
+                        (crate::gm_action::GmActionKind::EventControl, None) => match fact.lever {
+                            Some(crate::gm_event::GmEventLever::SkipNext) => {
+                                GmActivityAction::ArmGmEventSkip {
+                                    event: fact.target.clone()?,
                                 }
-                                None => return None,
                             }
-                        }
+                            None => return None,
+                        },
                         // Same rule as the event family: every producer of a
                         // world-spawn fact attaches the palette id and
                         // `validate_fleet_frame` refuses a replicated refusal

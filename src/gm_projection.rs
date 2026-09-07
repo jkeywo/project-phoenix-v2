@@ -69,6 +69,64 @@ pub struct GmEntityStatus {
     /// than reconstructing hull points from a rounded percent.
     pub hull_current_milli_hp: Option<u32>,
     pub hull_max_milli_hp: Option<u32>,
+    /// One row per damageable System the target's hull tracks, with the Station
+    /// that authored it (issue #1311).
+    ///
+    /// The GM page needs this to offer a Station/System picker at all: the
+    /// scope of a directed effect is a ship-local authoring key, and a browser
+    /// that had to invent one would be composing an identity the simulation
+    /// never published — the same rule the map selection already follows for
+    /// the target itself. Carrying the live per-System totals with it is what
+    /// lets the lethality and overflow preview answer the SCOPED question
+    /// rather than restating the whole hull's.
+    ///
+    /// Empty for every entity with no hull, and for an entity whose Systems are
+    /// authored under no Station (`station_id` is then `None` on each row, so a
+    /// Station picker simply offers fewer options rather than lying about
+    /// ownership).
+    ///
+    /// Omitted from the wire when empty, so the row for a beacon, a region or
+    /// an asteroid field is byte-identical to its pre-#1311 shape and the
+    /// per-frame cost of the breakdown falls only on the entities that have
+    /// one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub systems: Vec<GmSystemHullStatus>,
+}
+
+/// One damageable System on a projected entity, with its authored owner.
+///
+/// Ordered by the HULL's own declaration order, which is the order the weighted
+/// distribution consumes — not a map order, and not a name sort, so the picker
+/// reads in the order the ship was authored in.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct GmSystemHullStatus {
+    pub system_id: SystemId,
+    /// The `[[station]]` that authored this System as its own, or `None` when
+    /// the hull tracks a System its ship config does not assign (the courier's
+    /// ownerless `core` bucket) or carries no ship config at all.
+    pub station_id: Option<StationId>,
+    /// That Station's authored display name: the exact value
+    /// `GmStationInterfaceProjection::name` already publishes for the same
+    /// Stations on the same ship, carried here so the two GM surfaces cannot
+    /// disagree about what a Station is called. It passes through the browser's
+    /// `wireText` seam like every other name on this projection, so an authored
+    /// String Table id resolves and the shipped hulls' literal `[[station]]
+    /// name` reads as authored.
+    ///
+    /// Without it the picker would have to render the raw `station_id` beside a
+    /// localised System name, so one `<select>` would mix an authoring key with
+    /// a translated label and the Station half alone would be untranslatable.
+    ///
+    /// `None` when the System has no owner, or when this entity carries no ship
+    /// config to name one — omitted from the wire then, so a hull projected
+    /// without a `ShipConfigComponent` keeps the row shape it already had.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub station_name: Option<String>,
+    /// The authored display name — a String Table id on every shipped hull,
+    /// localised at render time exactly as the rest of this projection is.
+    pub name: String,
+    pub current_milli_hp: u32,
+    pub max_milli_hp: u32,
 }
 
 /// Authored radar presentation, narrowed to the public map vocabulary.
@@ -225,6 +283,10 @@ type GmShipProjectionQuery<'w, 's> = Query<
         Option<&'static StaticPointDefence>,
         Option<&'static InfrastructureCondition>,
         Option<&'static RadarAppearanceSection>,
+        // The Station->System ownership map behind the scoped direct-effect
+        // picker (issue #1311). `Option` because a `StaticPointDefence`
+        // structure reaches this query too and need not be a stationed hull.
+        Option<&'static ShipConfigComponent>,
     ),
     With<Ship>,
 >;
@@ -257,9 +319,47 @@ fn percent(current: f32, maximum: f32) -> u8 {
     }
 }
 
+/// The per-System breakdown a scoped direct effect is picked from (#1311).
+///
+/// The Station comes from the ship config rather than from the hull, because
+/// ownership is authored in `[[system]]` and the hull only says what can be
+/// damaged. A System the hull tracks but the config never assigned is projected
+/// with no owner rather than dropped — the courier's `core` bucket is exactly
+/// that, and it is a legitimate System-scope target.
+fn system_statuses(
+    hull: &EntitySystemHull,
+    config: Option<&ShipConfigComponent>,
+) -> Vec<GmSystemHullStatus> {
+    hull.0
+        .iter()
+        .map(|(system_id, entry)| {
+            let station_id = config
+                .and_then(|config| config.0.system(system_id))
+                .and_then(|system| system.station.clone());
+            // The owner's display name comes from the same `[[station]]` block
+            // `GmStationInterfaceProjection` reads, so the two GM surfaces
+            // cannot disagree about what a Station is called.
+            let station_name = station_id.as_ref().and_then(|station_id| {
+                config
+                    .and_then(|config| config.0.station(station_id))
+                    .map(|station| station.name.clone())
+            });
+            GmSystemHullStatus {
+                system_id: system_id.clone(),
+                station_id,
+                station_name,
+                name: entry.display_name.clone(),
+                current_milli_hp: crate::gm_effect::hp_to_milli(entry.current),
+                max_milli_hp: crate::gm_effect::hp_to_milli(entry.max),
+            }
+        })
+        .collect()
+}
+
 fn broad_status(
     hull: Option<&EntitySystemHull>,
     infrastructure: Option<&InfrastructureCondition>,
+    config: Option<&ShipConfigComponent>,
 ) -> GmEntityStatus {
     let hull_percent = hull.map(|hull| percent(hull.0.total_current(), hull.0.total_max()));
     let condition_percent = infrastructure
@@ -271,10 +371,11 @@ fn broad_status(
         hull_current_milli_hp: hull
             .map(|hull| crate::gm_effect::hp_to_milli(hull.0.total_current())),
         hull_max_milli_hp: hull.map(|hull| crate::gm_effect::hp_to_milli(hull.0.total_max())),
+        systems: hull.map_or_else(Vec::new, |hull| system_statuses(hull, config)),
     }
 }
 
-fn hull_status(hull: &EntitySystemHull) -> GmEntityStatus {
+fn hull_status(hull: &EntitySystemHull, config: Option<&ShipConfigComponent>) -> GmEntityStatus {
     let total_max = hull.0.total_max();
     let total_current = hull.0.total_current();
     GmEntityStatus {
@@ -283,6 +384,7 @@ fn hull_status(hull: &EntitySystemHull) -> GmEntityStatus {
         destroyed: total_current <= 0.0,
         hull_current_milli_hp: Some(crate::gm_effect::hp_to_milli(total_current)),
         hull_max_milli_hp: Some(crate::gm_effect::hp_to_milli(total_max)),
+        systems: system_statuses(hull, config),
     }
 }
 
@@ -413,6 +515,7 @@ fn publish_local_projection(
                 point_defence,
                 infrastructure,
                 radar,
+                ship_config,
             )| {
                 let current_target =
                     target
@@ -437,9 +540,9 @@ fn publish_local_projection(
                     position: [physics.x, physics.y, physics.z],
                     faction: faction_reference(faction, factions.as_deref()),
                     status: if infrastructure.is_some() {
-                        broad_status(Some(hull), infrastructure)
+                        broad_status(Some(hull), infrastructure, ship_config)
                     } else {
-                        hull_status(hull)
+                        hull_status(hull, ship_config)
                     },
                     current_target,
                     geometry: None,
@@ -492,7 +595,11 @@ fn publish_local_projection(
                 kind,
                 position,
                 faction: faction_reference(faction, factions.as_deref()),
-                status: broad_status(hull, infrastructure),
+                // A non-`Ship` world entity carries no `ShipConfigComponent`
+                // at all, so its Systems project with no Station owner — which
+                // is the honest answer for a beacon, a planet or an authored
+                // asteroid, and leaves System scope available on it.
+                status: broad_status(hull, infrastructure, None),
                 current_target: None,
                 geometry,
                 radar: radar_appearance(radar),

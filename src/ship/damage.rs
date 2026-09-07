@@ -101,8 +101,24 @@ pub fn apply_damage_with_shields(
 /// - `hull_damage_applied`: what was actually absorbed by systems
 /// - `ship_destroyed`: true when all systems have reached 0 HP after this hit
 pub fn apply_hull_damage(hull: &mut SystemHull, amount: f32, rng: &mut Pcg32) -> (f32, bool) {
+    apply_hull_damage_within(hull, None, amount, rng)
+}
+
+/// [`apply_hull_damage`] restricted to the Systems named by `allow` (issue
+/// #1311); `None` is the whole hull and is exactly [`apply_hull_damage`].
+///
+/// `ship_destroyed` still asks the WHOLE hull, not the scope: a Station hit
+/// that empties the last living Systems ends the ship, and a scoped hit that
+/// leaves other Systems alive has not. Destruction is a fact about the entity,
+/// which is why it is measured where it was before this scope existed.
+pub fn apply_hull_damage_within(
+    hull: &mut SystemHull,
+    allow: Option<&[SystemId]>,
+    amount: f32,
+    rng: &mut Pcg32,
+) -> (f32, bool) {
     let before = hull.total_current();
-    hull.apply_damage(amount, rng);
+    hull.apply_damage_within(allow, amount, rng);
     let hull_damage = before - hull.total_current();
     let ship_destroyed = hull.is_destroyed();
     (hull_damage, ship_destroyed)
@@ -293,11 +309,34 @@ impl SystemHull {
     /// more likely to absorb the next hit). Damage spills to further weighted
     /// selections when a system is exhausted. Systems already at 0 HP are
     /// never targeted.
-    pub fn apply_damage(&mut self, mut amount: f32, rng: &mut Pcg32) {
+    pub fn apply_damage(&mut self, amount: f32, rng: &mut Pcg32) {
+        self.apply_damage_within(None, amount, rng);
+    }
+
+    /// [`Self::apply_damage`] restricted to `allow`, the Systems a scoped hit
+    /// is permitted to touch (issue #1311). `None` is the whole hull and is
+    /// EXACTLY [`Self::apply_damage`] — one walk, one weighting, one spill
+    /// loop, so a Station-scoped GM hit and a beam hit choose their systems by
+    /// the same rule rather than by two rules that could drift.
+    ///
+    /// A system outside `allow` is invisible to every step: it contributes no
+    /// weight, cannot be chosen, cannot be the float-precision fallback, and
+    /// cannot absorb spill. That is the whole of "Station scope never affects a
+    /// System outside its authored ownership, and System scope never spills to
+    /// siblings" — the restriction lives in the distribution itself rather than
+    /// in a caller that clamps afterwards.
+    pub fn apply_damage_within(
+        &mut self,
+        allow: Option<&[SystemId]>,
+        mut amount: f32,
+        rng: &mut Pcg32,
+    ) {
+        let in_scope = |id: &SystemId| allow.is_none_or(|allow| allow.contains(id));
         while amount > 0.0 {
             let total: f32 = self
                 .order
                 .iter()
+                .filter(|id| in_scope(id))
                 .filter_map(|id| self.entries.get(id))
                 .filter(|entry| entry.current > 0.0)
                 .map(|entry| entry.current)
@@ -310,7 +349,7 @@ impl SystemHull {
             // negative.
             let mut r = unit_f32(rng) * total;
             let mut chosen_id: Option<SystemId> = None;
-            for id in &self.order {
+            for id in self.order.iter().filter(|id| in_scope(id)) {
                 let entry = self
                     .entries
                     .get(id)
@@ -329,9 +368,10 @@ impl SystemHull {
                 self.order
                     .iter()
                     .rev()
+                    .filter(|id| in_scope(id))
                     .find(|id| self.entries.get(*id).is_some_and(|e| e.current > 0.0))
                     .cloned()
-                    .expect("total > 0.0 implies at least one live entry")
+                    .expect("total > 0.0 implies at least one live entry in scope")
             });
             let entry = self
                 .entries
@@ -386,6 +426,37 @@ impl SystemHull {
         self.entries.values().map(|e| e.current).sum()
     }
 
+    /// Sum of current HP across the Systems named by `allow` (issue #1311),
+    /// walked in declaration order rather than map order so a scoped total is
+    /// the same last bit on every peer — the reason `entries` is a `BTreeMap`
+    /// at all, applied to a subset.
+    pub fn total_current_within(&self, allow: Option<&[SystemId]>) -> f32 {
+        match allow {
+            None => self.total_current(),
+            Some(allow) => self
+                .order
+                .iter()
+                .filter(|id| allow.contains(id))
+                .filter_map(|id| self.entries.get(id))
+                .map(|entry| entry.current)
+                .sum(),
+        }
+    }
+
+    /// Sum of max HP across the Systems named by `allow` (issue #1311).
+    pub fn total_max_within(&self, allow: Option<&[SystemId]>) -> f32 {
+        match allow {
+            None => self.total_max(),
+            Some(allow) => self
+                .order
+                .iter()
+                .filter(|id| allow.contains(id))
+                .filter_map(|id| self.entries.get(id))
+                .map(|entry| entry.max)
+                .sum(),
+        }
+    }
+
     /// Distribute `amount` of healing across systems below their max HP,
     /// weighted by their MISSING HP, spilling to further weighted selections
     /// when one fills up. Returns the amount actually restored.
@@ -404,12 +475,27 @@ impl SystemHull {
     /// Callers that must report what they discarded clamp against
     /// [`Self::total_missing`] first; this function simply stops when there is
     /// nothing left to fill.
-    pub fn restore_distributed(&mut self, mut amount: f32, rng: &mut Pcg32) -> f32 {
+    pub fn restore_distributed(&mut self, amount: f32, rng: &mut Pcg32) -> f32 {
+        self.restore_distributed_within(None, amount, rng)
+    }
+
+    /// [`Self::restore_distributed`] restricted to `allow` (issue #1311), the
+    /// exact mirror of [`Self::apply_damage_within`] and restricted for its
+    /// reason: healing mirrors scope so a Station repair cannot quietly refill
+    /// another Station's systems.
+    pub fn restore_distributed_within(
+        &mut self,
+        allow: Option<&[SystemId]>,
+        mut amount: f32,
+        rng: &mut Pcg32,
+    ) -> f32 {
+        let in_scope = |id: &SystemId| allow.is_none_or(|allow| allow.contains(id));
         let mut restored = 0.0f32;
         while amount > 0.0 {
             let total: f32 = self
                 .order
                 .iter()
+                .filter(|id| in_scope(id))
                 .filter_map(|id| self.entries.get(id))
                 .map(|entry| (entry.max - entry.current).max(0.0))
                 .sum();
@@ -418,7 +504,7 @@ impl SystemHull {
             }
             let mut r = unit_f32(rng) * total;
             let mut chosen_id: Option<SystemId> = None;
-            for id in &self.order {
+            for id in self.order.iter().filter(|id| in_scope(id)) {
                 let entry = self
                     .entries
                     .get(id)
@@ -439,13 +525,14 @@ impl SystemHull {
                 self.order
                     .iter()
                     .rev()
+                    .filter(|id| in_scope(id))
                     .find(|id| {
                         self.entries
                             .get(*id)
                             .is_some_and(|e| (e.max - e.current) > 0.0)
                     })
                     .cloned()
-                    .expect("total > 0.0 implies at least one entry with headroom")
+                    .expect("total > 0.0 implies at least one entry with headroom in scope")
             });
             let entry = self
                 .entries
@@ -1034,6 +1121,78 @@ mod tests {
 
         // An undamaged hull absorbs nothing at all.
         assert!(near(hull.restore_distributed(10.0, &mut rng), 0.0));
+    }
+
+    /// Issue #1311: a restricted walk is invisible to every system outside its
+    /// allow-list — it contributes no weight, cannot be chosen, cannot be the
+    /// float-precision fallback and cannot absorb spill.
+    ///
+    /// The amounts here deliberately OVERRUN the allow-list. A hit that fits
+    /// inside the scope would pass even if the filter applied only to the first
+    /// draw; only an overrun exercises the spill loop, which is the step that
+    /// would otherwise walk into a sibling.
+    #[test]
+    fn a_scoped_walk_never_leaves_its_allow_list_in_either_direction() {
+        let allow = [sid("helm"), sid("tactical")];
+        let mut rng = test_rng();
+
+        let mut hull = four_console_hull();
+        hull.apply_damage_within(Some(&allow), 500.0, &mut rng);
+        assert!(near(hull.current_for(&sid("helm")).unwrap(), 0.0));
+        assert!(near(hull.current_for(&sid("tactical")).unwrap(), 0.0));
+        assert!(
+            near(hull.current_for(&sid("power")).unwrap(), 25.0)
+                && near(hull.current_for(&sid("shields")).unwrap(), 25.0),
+            "an overrun spills only within the allow-list"
+        );
+        assert!(!hull.is_destroyed(), "half the hull is still alive");
+
+        let restored = hull.restore_distributed_within(Some(&allow), 500.0, &mut rng);
+        assert!(near(restored, 50.0), "healing mirrors the same restriction");
+        assert!(near(hull.total_current(), 100.0));
+
+        // Healing outside the allow-list cannot reach the damaged half either.
+        hull.set_hp(&sid("power"), 0.0);
+        assert!(near(
+            hull.restore_distributed_within(Some(&allow), 25.0, &mut rng),
+            0.0
+        ));
+        assert!(near(hull.current_for(&sid("power")).unwrap(), 0.0));
+
+        // A scope of exactly one is the same rule with nowhere to spill.
+        let mut hull = four_console_hull();
+        hull.apply_damage_within(Some(&[sid("shields")]), 500.0, &mut rng);
+        assert!(near(hull.total_current(), 75.0));
+        assert!(near(hull.current_for(&sid("shields")).unwrap(), 0.0));
+
+        // `None` IS the unrestricted walk: same seed, same draw, same result.
+        let mut scoped = four_console_hull();
+        let mut whole = four_console_hull();
+        scoped.apply_damage_within(None, 40.0, &mut Pcg32::seeded(99, 0));
+        whole.apply_damage(40.0, &mut Pcg32::seeded(99, 0));
+        for id in ["helm", "tactical", "power", "shields"] {
+            assert!(near(
+                scoped.current_for(&sid(id)).unwrap(),
+                whole.current_for(&sid(id)).unwrap()
+            ));
+        }
+    }
+
+    /// Scoped totals sum only the allow-list, which is what a scoped clamp,
+    /// overflow figure and lethality preview are all measured against.
+    #[test]
+    fn scoped_totals_sum_only_the_allow_list() {
+        let mut hull = four_console_hull();
+        hull.set_hp(&sid("helm"), 5.0);
+        let allow = [sid("helm"), sid("tactical")];
+        assert!(near(hull.total_current_within(Some(&allow)), 30.0));
+        assert!(near(hull.total_max_within(Some(&allow)), 50.0));
+        assert!(near(hull.total_current_within(None), hull.total_current()));
+        assert!(near(hull.total_max_within(None), hull.total_max()));
+        assert!(
+            near(hull.total_current_within(Some(&[])), 0.0),
+            "an empty allow-list names nothing, so it sums to nothing"
+        );
     }
 
     /// A destroyed system has the largest headroom, so the mirror walk brings

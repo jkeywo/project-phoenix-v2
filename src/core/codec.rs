@@ -683,6 +683,7 @@ pub fn encode_mesh_frame(frame: &crate::lockstep::MeshFrame) -> Result<String, s
                     // `null` for a Fire, a Pause and for every family that
                     // pulls none. Same reading rule as `target` above.
                     "lever": refusal.lever,
+                    "effect_scope": refusal.effect_scope,
                 }),
             ),
         },
@@ -880,15 +881,26 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
                     crate::gm_action::GmActionFrame::Granted(grant)
                 }
                 "refused" => {
+                    let action_kind =
+                        serde_json::from_value(body.get("action_kind")?.clone()).ok()?;
+                    let effect_scope = match body.get("effect_scope") {
+                        None | Some(serde_json::Value::Null) => None,
+                        Some(value) => Some(serde_json::from_value(value.clone()).ok()?),
+                    };
+                    if effect_scope.is_some()
+                        && action_kind != crate::gm_action::GmActionKind::DirectEffect
+                    {
+                        return None;
+                    }
                     crate::gm_action::GmActionFrame::Refused(crate::gm_action::GmActionRefusal {
                         sequenced_by: from,
                         requester: HostSlot(u32::try_from(body.get("requester")?.as_u64()?).ok()?),
                         operator_id: body.get("operator_id")?.as_str()?.to_string(),
                         correlation: serde_json::from_value(body.get("correlation")?.clone())
                             .ok()?,
-                        action_kind: serde_json::from_value(body.get("action_kind")?.clone())
-                            .ok()?,
+                        action_kind,
                         requested_active: body.get("requested_active")?.as_bool()?,
+                        effect_scope,
                         tick,
                         reason: serde_json::from_value(body.get("reason")?.clone()).ok()?,
                         // Absent, `null` or unbounded all read as "this family
@@ -1145,26 +1157,51 @@ pub fn decode_gm_action_request(raw: &str) -> Option<crate::gm_action::GmActionR
                 event: bounded_gm_event_id(object.get("event")?.as_str()?)?,
             }
         }
-        // Exactly `{operator_id, correlation, action, entity, effect, amount}`
-        // (issue #1310). The amount arrives as milli-HP so the browser cannot
-        // hand the journal a float it would then have to round; `scope` is not
-        // on the wire at all while `Entity` is the only one, so a client cannot
-        // name a scope this build does not implement.
+        // Exactly `{operator_id, correlation, action, entity, effect, amount,
+        // scope, scope_id}` (issues #1310, #1311). The amount arrives as
+        // milli-HP so the browser cannot hand the journal a float it would then
+        // have to round.
+        //
+        // `scope` and `scope_id` are ALWAYS present — `scope_id` is `null` for
+        // the whole-entity scope — so the field-count guard stays exact rather
+        // than accepting two shapes, exactly as `spawn_palette_entity`'s
+        // always-present `variant` does. The pair is a discriminant plus one id
+        // rather than the enum's own serde shape because THIS boundary is a
+        // narrow deny-by-default ingress: a flat pair has one spelling a browser
+        // can send, and a nested object would give a client a second place to
+        // put a field nobody validated.
         "apply_direct_effect"
-            if object.len() == 6
+            if object.len() == 8
                 && object.contains_key("entity")
                 && object.contains_key("effect")
-                && object.contains_key("amount_milli_hp") =>
+                && object.contains_key("amount_milli_hp")
+                && object.contains_key("scope")
+                && object.contains_key("scope_id") =>
         {
             let effect = match object.get("effect")?.as_str()? {
                 "damage" => crate::gm_effect::GmDirectEffectKind::Damage,
                 "heal" => crate::gm_effect::GmDirectEffectKind::Heal,
                 _ => return None,
             };
+            let scope_id = object.get("scope_id")?;
+            let scope = match object.get("scope")?.as_str()? {
+                // A whole-entity effect carries no id, and one that arrives
+                // anyway is refused rather than ignored: a request the ingress
+                // silently reinterprets is a request whose result cannot be
+                // predicted from what was sent.
+                "entity" if scope_id.is_null() => crate::gm_effect::GmDirectEffectScope::Entity,
+                "station" => crate::gm_effect::GmDirectEffectScope::Station(
+                    crate::core::messages::StationId(bounded_gm_target_id(scope_id.as_str()?)?),
+                ),
+                "system" => crate::gm_effect::GmDirectEffectScope::System(
+                    crate::core::messages::SystemId(bounded_gm_target_id(scope_id.as_str()?)?),
+                ),
+                _ => return None,
+            };
             let amount = object.get("amount_milli_hp")?.as_u64()?;
             crate::gm_action::GmAction::ApplyDirectEffect {
                 target: bounded_gm_target_id(object.get("entity")?.as_str()?)?,
-                scope: crate::gm_effect::GmDirectEffectScope::Entity,
+                scope,
                 effect,
                 amount_milli_hp: u32::try_from(amount).ok().filter(|amount| *amount > 0)?,
             }
@@ -1628,6 +1665,7 @@ mod mesh_frame_tests {
                 target: None,
                 verb: None,
                 lever: None,
+                effect_scope: None,
             },
         ));
         // A refused Fire crosses the same lane still naming the event it tried
@@ -1645,6 +1683,7 @@ mod mesh_frame_tests {
                 target: Some("base-world::breach_alarm".into()),
                 verb: Some(crate::gm_action::GmEventVerb::Fire),
                 lever: None,
+                effect_scope: None,
             },
         ));
         // And a refused SKIP crosses it naming both the event and the lever
@@ -1663,6 +1702,7 @@ mod mesh_frame_tests {
                 target: Some("base-world::breach_alarm".into()),
                 verb: None,
                 lever: Some(crate::gm_event::GmEventLever::SkipNext),
+                effect_scope: None,
             },
         ));
         for frame in [proposal, refusal, refused_fire, refused_skip] {
@@ -1960,6 +2000,7 @@ mod mesh_frame_tests {
                 target: Some("base-world::breach_alarm".into()),
                 verb: Some(crate::gm_action::GmEventVerb::Pause),
                 lever: None,
+                effect_scope: None,
             },
         ));
         let text = super::encode_mesh_frame(&refusal).expect("encodes");
@@ -1997,7 +2038,7 @@ mod mesh_frame_tests {
     #[test]
     fn a_direct_effect_uses_the_same_exact_typed_ingress() {
         let request = super::decode_gm_action_request(
-            r#"{"operator_id":"gm-1","correlation":"hit-4","action":"apply_direct_effect","entity":"npc-1","effect":"damage","amount_milli_hp":25000}"#,
+            r#"{"operator_id":"gm-1","correlation":"hit-4","action":"apply_direct_effect","entity":"npc-1","effect":"damage","amount_milli_hp":25000,"scope":"entity","scope_id":null}"#,
         )
         .expect("valid direct-effect request");
         assert_eq!(
@@ -2020,7 +2061,7 @@ mod mesh_frame_tests {
         );
 
         let heal = super::decode_gm_action_request(
-            r#"{"operator_id":"gm-1","correlation":"heal-4","action":"apply_direct_effect","entity":"npc-1","effect":"heal","amount_milli_hp":1}"#,
+            r#"{"operator_id":"gm-1","correlation":"heal-4","action":"apply_direct_effect","entity":"npc-1","effect":"heal","amount_milli_hp":1,"scope":"entity","scope_id":null}"#,
         )
         .expect("valid heal request");
         assert!(matches!(
@@ -2031,15 +2072,58 @@ mod mesh_frame_tests {
             }
         ));
 
+        // The narrowed scopes (issue #1311) arrive through the SAME arm, as a
+        // discriminant plus one ship-local authoring key. Nothing else about
+        // the request changes shape, which is the point of scope being a field
+        // of one mechanic rather than a second action.
+        let station = super::decode_gm_action_request(
+            r#"{"operator_id":"gm-1","correlation":"hit-5","action":"apply_direct_effect","entity":"npc-1","effect":"damage","amount_milli_hp":25000,"scope":"station","scope_id":"helm"}"#,
+        )
+        .expect("valid Station-scoped request");
+        assert_eq!(
+            station.action,
+            crate::gm_action::GmAction::ApplyDirectEffect {
+                target: "npc-1".into(),
+                scope: crate::gm_effect::GmDirectEffectScope::Station(
+                    crate::core::messages::StationId("helm".into())
+                ),
+                effect: crate::gm_effect::GmDirectEffectKind::Damage,
+                amount_milli_hp: 25_000,
+            }
+        );
+        let system = super::decode_gm_action_request(
+            r#"{"operator_id":"gm-1","correlation":"heal-5","action":"apply_direct_effect","entity":"npc-1","effect":"heal","amount_milli_hp":4000,"scope":"system","scope_id":"impulse-drive"}"#,
+        )
+        .expect("valid System-scoped request");
+        assert_eq!(
+            system.action,
+            crate::gm_action::GmAction::ApplyDirectEffect {
+                target: "npc-1".into(),
+                scope: crate::gm_effect::GmDirectEffectScope::System(
+                    crate::core::messages::SystemId("impulse-drive".into())
+                ),
+                effect: crate::gm_effect::GmDirectEffectKind::Heal,
+                amount_milli_hp: 4_000,
+            }
+        );
+
         for refused in [
             // A signed amount is not the vocabulary: the sign is the kind.
-            r#"{"operator_id":"gm-1","correlation":"x","action":"apply_direct_effect","entity":"npc-1","effect":"damage","amount_milli_hp":-5}"#,
-            r#"{"operator_id":"gm-1","correlation":"x","action":"apply_direct_effect","entity":"npc-1","effect":"damage","amount_milli_hp":0}"#,
-            r#"{"operator_id":"gm-1","correlation":"x","action":"apply_direct_effect","entity":"npc-1","effect":"damage","amount_milli_hp":2.5}"#,
-            r#"{"operator_id":"gm-1","correlation":"x","action":"apply_direct_effect","entity":"","effect":"damage","amount_milli_hp":5}"#,
-            r#"{"operator_id":"gm-1","correlation":"x","action":"apply_direct_effect","entity":"npc-1","effect":"vaporise","amount_milli_hp":5}"#,
+            r#"{"operator_id":"gm-1","correlation":"x","action":"apply_direct_effect","entity":"npc-1","effect":"damage","amount_milli_hp":-5,"scope":"entity","scope_id":null}"#,
+            r#"{"operator_id":"gm-1","correlation":"x","action":"apply_direct_effect","entity":"npc-1","effect":"damage","amount_milli_hp":0,"scope":"entity","scope_id":null}"#,
+            r#"{"operator_id":"gm-1","correlation":"x","action":"apply_direct_effect","entity":"npc-1","effect":"damage","amount_milli_hp":2.5,"scope":"entity","scope_id":null}"#,
+            r#"{"operator_id":"gm-1","correlation":"x","action":"apply_direct_effect","entity":"","effect":"damage","amount_milli_hp":5,"scope":"entity","scope_id":null}"#,
+            r#"{"operator_id":"gm-1","correlation":"x","action":"apply_direct_effect","entity":"npc-1","effect":"vaporise","amount_milli_hp":5,"scope":"entity","scope_id":null}"#,
             // A scope this build does not implement cannot be named from here.
-            r#"{"operator_id":"gm-1","correlation":"x","action":"apply_direct_effect","entity":"npc-1","effect":"damage","amount_milli_hp":5,"scope":"system"}"#,
+            r#"{"operator_id":"gm-1","correlation":"x","action":"apply_direct_effect","entity":"npc-1","effect":"damage","amount_milli_hp":5,"scope":"deck","scope_id":"a"}"#,
+            // A narrowed scope with no id names nothing, and a whole-entity one
+            // carrying an id is a request the ingress would have to reinterpret.
+            r#"{"operator_id":"gm-1","correlation":"x","action":"apply_direct_effect","entity":"npc-1","effect":"damage","amount_milli_hp":5,"scope":"station","scope_id":null}"#,
+            r#"{"operator_id":"gm-1","correlation":"x","action":"apply_direct_effect","entity":"npc-1","effect":"damage","amount_milli_hp":5,"scope":"system","scope_id":""}"#,
+            r#"{"operator_id":"gm-1","correlation":"x","action":"apply_direct_effect","entity":"npc-1","effect":"damage","amount_milli_hp":5,"scope":"entity","scope_id":"helm"}"#,
+            // The field-count guard stays exact in both directions.
+            r#"{"operator_id":"gm-1","correlation":"x","action":"apply_direct_effect","entity":"npc-1","effect":"damage","amount_milli_hp":5}"#,
+            r#"{"operator_id":"gm-1","correlation":"x","action":"apply_direct_effect","entity":"npc-1","effect":"damage","amount_milli_hp":5,"scope":"entity","scope_id":null,"station":"helm"}"#,
             r#"{"operator_id":"gm-1","correlation":"x","action":"apply_direct_effect","entity":"npc-1","effect":"damage"}"#,
         ] {
             assert!(

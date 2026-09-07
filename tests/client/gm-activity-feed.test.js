@@ -344,9 +344,32 @@ describe('GM activity feed pure adapter', () => {
       { applied_milli_hp: -1 },
       { discarded_milli_hp: 1.5 },
       { destroyed: null },
+      // A malformed narrowing rejects the row rather than widening it to the
+      // whole ship (issue #1311).
+      { scope: { deck: 'a' } },
+      { scope: { station: '' } },
+      { scope: 'station' },
     ]) {
       expect(parseGmActivityFeed(payload([applyDirectEffect({}, broken)]))).toBeUndefined();
     }
+  });
+
+  it('carries the Station or System a narrowed effect was aimed at', () => {
+    for (const [wire, parsed] of [
+      [{ station: 'helm' }, { kind: 'station', id: 'helm' }],
+      [{ system: 'impulse-drive' }, { kind: 'system', id: 'impulse-drive' }],
+    ]) {
+      const feed = parseGmActivityFeed(payload([applyDirectEffect({}, { scope: wire })]));
+      expect(feed.entries[0].detail.data.action.scope).toEqual(parsed);
+    }
+    // The whole-hull spelling carries no scope at all, which is what every
+    // pre-#1311 row meant, so those rows parse byte for byte as they did.
+    const whole = parseGmActivityFeed(payload([applyDirectEffect()]));
+    expect(whole.entries[0].detail.data.action.scope).toBeUndefined();
+    const explicit = parseGmActivityFeed(
+      payload([applyDirectEffect({}, { scope: 'entity' })]),
+    );
+    expect(explicit.entries[0].detail.data.action.scope).toBeUndefined();
   });
 
   it('accepts a palette placement and rejects a nameless one', () => {
@@ -464,6 +487,34 @@ describe('GM activity feed presentation and selection links', () => {
     }
     expect(realStrings.get('server.gm.activity.action.apply_direct_damage')).toContain('{entity}');
     expect(realStrings.get('server.gm.activity.action.apply_direct_heal')).toContain('{amount}');
+  });
+
+  it('names the Station or System a narrowed effect emptied (issue #1311)', () => {
+    const station = applyDirectEffect({ correlation: 'hit-helm' }, {
+      scope: { station: 'helm' },
+      applied_milli_hp: 20000,
+    });
+    const system = applyDirectEffect({ correlation: 'heal-drive' }, {
+      scope: { system: 'impulse-drive' },
+      heal: true,
+      applied_milli_hp: 4000,
+    });
+    expect(harness.feed.update(payload([applyDirectEffect(), station, system], 16))).toBe(true);
+    const rows = [...document.querySelectorAll('[data-category="gm_action"]')];
+    expect(rows).toHaveLength(3);
+    // A whole-hull row still says nothing about a scope, which is what makes
+    // the narrowed rows readable as narrowed.
+    expect(rows[0].textContent)
+      .not.toContain('server.gm.activity.action.direct_effect_station');
+    expect(rows[1].textContent)
+      .toContain('server.gm.activity.action.direct_effect_station:helm');
+    expect(rows[2].textContent)
+      .toContain('server.gm.activity.action.direct_effect_system:impulse-drive');
+    // And both ids this branch composes resolve against the shipped table.
+    expect(realStrings.get('server.gm.activity.action.direct_effect_station'))
+      .toContain('{scope}');
+    expect(realStrings.get('server.gm.activity.action.direct_effect_system'))
+      .toContain('{scope}');
   });
 
   it('names the placed palette entry and its refusal reason from the String Table', () => {

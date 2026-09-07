@@ -3,6 +3,9 @@ import { wireText } from './strings.js';
 // world-effect vocabulary (issue #1310); a second conversion here is exactly
 // how the feed and the panel that submitted the effect would come to disagree.
 import { hullPoints } from './gm-direct-effect-panel.js';
+// ...and the SCOPE vocabulary is spelled once too, for the same reason (issue
+// #1311). This module reads it rather than re-deriving serde's tagging.
+import { parseGmEffectScope } from './gm-effect-scope.js';
 
 /** Strict page-local adapter for the one bounded GM activity feed. */
 
@@ -88,6 +91,13 @@ function normaliseAction(value) {
       && Number.isSafeInteger(value.applied_milli_hp) && value.applied_milli_hp >= 0
       && Number.isSafeInteger(value.discarded_milli_hp) && value.discarded_milli_hp >= 0
       && typeof value.destroyed === 'boolean') {
+    // The narrowed Station/System scope (issue #1311), absent for a whole-hull
+    // effect — which is what every pre-#1311 row meant, so those parse exactly
+    // as they did. A MALFORMED scope rejects the row rather than being dropped:
+    // a feed that quietly widened one Station's hit to the whole ship would
+    // attribute a GM something they did not do.
+    const scope = parseGmEffectScope(value.scope);
+    if (scope === undefined) return undefined;
     return {
       type: value.type,
       entity: value.entity,
@@ -95,6 +105,7 @@ function normaliseAction(value) {
       applied_milli_hp: value.applied_milli_hp,
       discarded_milli_hp: value.discarded_milli_hp,
       destroyed: value.destroyed,
+      ...(scope ? { scope } : {}),
     };
   }
   // One authored palette entry was placed (issue #1305). `palette` is the
@@ -400,6 +411,12 @@ export function createGmActivityFeed({
               amount: hullPoints(detail.action.applied_milli_hp),
             },
           );
+          if (detail.action.scope) {
+            action += t(
+              `server.gm.activity.action.direct_effect_${detail.action.scope.kind}`,
+              { scope: detail.action.scope.id },
+            );
+          }
           if (detail.action.destroyed) {
             action += t('server.gm.activity.action.direct_effect_lethal');
           }

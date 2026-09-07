@@ -38,7 +38,7 @@
 //! | `GmActionJournal` | [`PhoenixSnapshot::gm_actions`] |
 //! | `StationPuppets` | [`PhoenixSnapshot::gm_puppets`] |
 //! | accepted pending GM Station commands | [`PhoenixSnapshot::gm_station_commands`] |
-//! | armed GM direct damage/heal effects | [`PhoenixSnapshot::gm_direct_effects`] |
+//! | armed GM direct damage/heal effects (with their Station/System scope) | [`PhoenixSnapshot::gm_direct_effects`] |
 //! | `SimRng`'s six stream positions | [`PhoenixSnapshot::rng`] (`SimRngState`) |
 //! | `WorldIdMint`'s tick + per-namespace counters | [`PhoenixSnapshot::mint`] |
 //! | `GamePhase` | [`PhoenixSnapshot::phase`] |
@@ -604,7 +604,16 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// once the moment has passed. Durable results also gained the event-control
 /// LEVER, without which a restored feed reports every Skip as a Fire of the
 /// same event: the opposite sentence about the same button.
-pub const SNAPSHOT_FORMAT: u32 = 23;
+///
+/// Format 24 carries the SCOPE of an armed or already-applied GM direct effect
+/// (issue #1311). A format-23 record predates Station and System scopes, so
+/// every effect it holds is a whole-hull one and defaulting the field would be
+/// correct — but the durable result gained `effect_scope` alongside it, and a
+/// format-23 journal that quietly restored as "whole hull" would let a resumed
+/// feed say a GM emptied a ship when they emptied one Station. The format gate
+/// refuses that rather than inventing the difference, which is the same
+/// judgement formats 19 and 20 made about the facts they added.
+pub const SNAPSHOT_FORMAT: u32 = 24;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.

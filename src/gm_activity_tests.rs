@@ -445,6 +445,7 @@ fn logged(
         effect: None,
         verb: None,
         lever: None,
+        effect_scope: None,
     }
 }
 
@@ -629,6 +630,7 @@ fn a_direct_effect_is_attributed_by_its_target_and_its_resolved_amounts() {
         detail.action,
         GmActivityAction::ApplyDirectEffect {
             entity: "npc-1".into(),
+            scope: None,
             heal: false,
             applied_milli_hp: 25_000,
             discarded_milli_hp: 5_000,
@@ -637,6 +639,89 @@ fn a_direct_effect_is_attributed_by_its_target_and_its_resolved_amounts() {
     );
     assert_eq!(detail.outcome, GmActivityActionOutcome::Applied);
     assert_eq!(entries[0].category, GmActivityCategory::GmAction);
+}
+
+/// A narrowed effect is attributed by the Station or System it was aimed at as
+/// well as by the entity (issue #1311).
+///
+/// A row saying "20 hull to Courier" when the operator emptied one Station is a
+/// true sentence about a fact the GM cannot act on, so the scope rides the row.
+/// A whole-hull effect keeps `scope: None` — which is what every pre-#1311 row
+/// meant — so the existing browser parse of it is unchanged.
+#[test]
+fn a_scoped_effect_is_attributed_by_the_station_or_system_it_named() {
+    let mut state = GmActivityState::default();
+    assert!(terminal_action_entries(&mut state, None, None, None, None).is_empty());
+    let mut results = crate::gm_action::LocalGmActionRefusals::default();
+    for (correlation, scope) in [
+        (
+            "hit-helm",
+            crate::gm_effect::GmDirectEffectScope::Station(crate::core::messages::StationId(
+                "helm".into(),
+            )),
+        ),
+        (
+            "hit-drive",
+            crate::gm_effect::GmDirectEffectScope::System(crate::core::messages::SystemId(
+                "impulse-drive".into(),
+            )),
+        ),
+    ] {
+        let mut fact = logged(
+            "gm-alpha",
+            correlation,
+            crate::gm_action::GmActionOutcome::Applied,
+            None,
+        );
+        fact.action_kind = crate::gm_action::GmActionKind::DirectEffect;
+        fact.target = Some("npc-1".into());
+        fact.effect = Some(crate::gm_effect::GmDirectEffectResult {
+            kind: crate::gm_effect::GmDirectEffectKind::Heal,
+            applied_milli_hp: 4_000,
+            discarded_milli_hp: 0,
+            destroyed: false,
+        });
+        fact.effect_scope = Some(scope);
+        results.push(fact);
+    }
+
+    let entries = terminal_action_entries(&mut state, None, Some(&results), None, None);
+    // Compared as a SET: which rows carry which scope is this test's subject,
+    // and the feed's own newest-first ordering is
+    // `terminal_gm_actions_attribute_exact_outcomes_dedup_and_rebase_on_restore`'s.
+    let mut scopes: Vec<String> = entries
+        .iter()
+        .map(|entry| {
+            let GmActivityDetail::GmAction(detail) = &entry.detail else {
+                panic!("expected GM action detail")
+            };
+            match &detail.action {
+                GmActivityAction::ApplyDirectEffect { scope, heal, .. } => {
+                    assert!(heal, "the kind still rides the row beside the scope");
+                    format!("{scope:?}")
+                }
+                other => panic!("expected a direct effect, got {other:?}"),
+            }
+        })
+        .collect();
+    scopes.sort();
+    assert_eq!(
+        scopes,
+        vec![
+            format!(
+                "{:?}",
+                Some(crate::gm_effect::GmDirectEffectScope::Station(
+                    crate::core::messages::StationId("helm".into())
+                ))
+            ),
+            format!(
+                "{:?}",
+                Some(crate::gm_effect::GmDirectEffectScope::System(
+                    crate::core::messages::SystemId("impulse-drive".into())
+                ))
+            ),
+        ]
+    );
 }
 
 /// A refusal settled before any hull was read carries no resolved effect. The
@@ -664,6 +749,7 @@ fn a_refused_direct_effect_still_names_the_target_it_was_aimed_at() {
         detail.action,
         GmActivityAction::ApplyDirectEffect {
             entity: "npc-gone".into(),
+            scope: None,
             heal: false,
             applied_milli_hp: 0,
             discarded_milli_hp: 0,

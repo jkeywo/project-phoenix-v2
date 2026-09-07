@@ -2212,4 +2212,41 @@ fn an_armed_direct_effect_moves_the_digest_and_an_empty_queue_leaves_it_alone() 
         .resource_mut::<crate::gm_effect::PendingGmDirectEffects>()
         .push(effect(1, "npc-2", 25_000));
     assert_ne!(armed, world_digest(&elsewhere));
+
+    // ...and so is WHERE on the hull it will land (issue #1311). Two peers
+    // holding the same amount against the same target under different scopes
+    // are about to damage different Systems, so the scope has to be part of
+    // what the digest compares — otherwise a scope that diverged would surface
+    // only as a hull mismatch some ticks later, with nothing naming the cause.
+    let scoped = |scope: crate::gm_effect::GmDirectEffectScope| {
+        let mut world = fold_world();
+        world.insert_resource(crate::gm_effect::PendingGmDirectEffects::default());
+        let mut entry = effect(1, "npc-1", 25_000);
+        entry.scope = scope;
+        world
+            .resource_mut::<crate::gm_effect::PendingGmDirectEffects>()
+            .push(entry);
+        world_digest(&world)
+    };
+    let helm = scoped(crate::gm_effect::GmDirectEffectScope::Station(
+        crate::core::messages::StationId("helm".into()),
+    ));
+    let tactical = scoped(crate::gm_effect::GmDirectEffectScope::Station(
+        crate::core::messages::StationId("tactical".into()),
+    ));
+    let drive = scoped(crate::gm_effect::GmDirectEffectScope::System(
+        crate::core::messages::SystemId("impulse-drive".into()),
+    ));
+    assert_ne!(armed, helm, "a Station scope is not the whole hull");
+    assert_ne!(helm, tactical, "nor is one Station another");
+    assert_ne!(
+        helm, drive,
+        "nor is a Station-scoped hit a System-scoped one under the same name"
+    );
+    assert_eq!(
+        armed,
+        scoped(crate::gm_effect::GmDirectEffectScope::Entity),
+        "the whole-hull scope is what every pre-#1311 arm meant, so it folds \
+         exactly as it did and no recorded world's digest moved"
+    );
 }

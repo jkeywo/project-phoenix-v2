@@ -1004,6 +1004,7 @@ station = "tactical"
                     target: None,
                     effect: None,
                     verb: None,
+                    effect_scope: None,
                 })
                 .unwrap();
             let provisional_log = journal.applied_log();

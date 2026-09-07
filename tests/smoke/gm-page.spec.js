@@ -283,6 +283,12 @@ transform = { position = [0.0, 0.0, 0.0] }
 spawn_on = "game_start"
 `;
 
+// The Station display names `assets/entities/alliance_courier.toml` authors
+// beside the ids the picker keys on (issue #1311). The GM projection publishes
+// them exactly as the station-interface surface does, so the scope picker reads
+// as the hull was authored instead of showing the raw authoring key.
+const COURIER_STATION_NAMES = { captain: 'Captain', tactical: 'Tactical' };
+
 // Issue #1305: one `[[gm_palette]]` row with one authored variant, plus one
 // ordinary entity so the GM-only session has a world to place into. The
 // authoritative half is covered by the Rust pipeline tests; what this fixture
@@ -918,6 +924,220 @@ test('a GM damages and repairs one Entity through the typed action path', { tag:
     damageable: true,
     pending: 0,
   });
+
+  expect(errors).toEqual([]);
+});
+
+// Station- and System-scoped damage and healing (issue #1311). A NEW feature
+// needs a NEW @core test (AGENTS.md Testing Strategy), and this is the only
+// whole-path evidence that the narrowing survives every layer between the
+// picker and the hull: nothing here injects a Host Channel payload, so the
+// Station list, the scoped hull readings, the refusals and every result row
+// come from the authoritative projection the running simulation publishes.
+//
+// The Alliance courier is the fixture because its authored ownership already
+// has every shape the criteria name: `tactical` owns four damageable Systems
+// (112 hull), `captain` owns two (56), and `core` (32) is authored under no
+// Station at all — so a Station scope, a System scope and an ownerless System
+// are all reachable on one hull.
+test('a GM damages and repairs one Station and one System without touching their siblings', { tag: '@core' }, async ({ context }) => {
+  test.setTimeout(120_000);
+  await context.route('**/assets/worlds/default.toml', (route) =>
+    route.fulfill({ contentType: 'text/plain', body: GM_DIRECT_EFFECT_WORLD }),
+  );
+
+  const page = await context.newPage();
+  const errors = captureServerPageErrors(page);
+  await page.goto('/?gm=1&scenario=assets/worlds/default.toml');
+  await waitForWasmReady(page);
+  await page.evaluate(() => window.__hostFleetOpen());
+  await page.waitForFunction(() => {
+    const state = window.__hostGmStartState?.();
+    return state?.admitted === true
+      && state.presentationReady === true
+      && state.localValidation === true;
+  }, undefined, { timeout: 30_000 });
+  await page.evaluate(() => document.getElementById('gm-ready-btn').click());
+  await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
+  await page.waitForFunction(() => {
+    const map = document.getElementById('gm-entity-map');
+    return !map?.hidden && (map.state?.blips?.length ?? 0) > 0;
+  }, undefined, { timeout: 30_000 });
+
+  const map = page.locator('#gm-entity-map');
+  await map.focus();
+  await map.press('ArrowRight');
+  await expect(page.locator('#gm-effect-panel'))
+    .toHaveAttribute('data-damageable', 'true', { timeout: 30_000 });
+  const targetId = await page.locator('#gm-entity-card').getAttribute('data-entity-id');
+
+  // The picker is built from the projection's own per-System breakdown: every
+  // option here is an authoring key the simulation published, in hull order.
+  const scope = page.locator('#gm-effect-scope');
+  await expect(scope).toBeEnabled();
+  const options = await scope.evaluate((select) => [...select.options].map((o) => o.value));
+  expect(options.slice(0, 3)).toEqual(['entity', 'station:tactical', 'station:captain']);
+  expect(options).toContain('system:core');
+  expect(options).toContain('system:power-reactor');
+
+  const hullLine = page.locator('#gm-effect-hull');
+  const hullPercent = () => page.evaluate((id) => {
+    const surface = document.getElementById('gm-entity-map');
+    return surface.state.blips.find((blip) => blip.uuid === id)?.hull_percent ?? null;
+  }, targetId);
+  expect(await hullPercent()).toBe(100);
+
+  // A Station scope reads that Station's own totals, not the hull's 200.
+  await scope.selectOption('station:captain');
+  await expect(hullLine).toHaveText(ts('server.gm.effect.scope_hull', {
+    scope: ts('server.gm.effect.scope_station', { name: COURIER_STATION_NAMES.captain }),
+    current: '56',
+    max: '56',
+  }));
+
+  // Far more than that Station can absorb: it empties, it reports the overflow,
+  // and it is explicitly NOT lethal, because 144 hull points elsewhere on this
+  // ship are still alive.
+  await page.locator('#gm-effect-amount').fill('9999');
+  const warning = page.locator('#gm-effect-warning');
+  await expect(warning).toHaveAttribute('data-emptied', 'true');
+  await expect(warning).not.toHaveAttribute('data-lethal', 'true');
+  await page.locator('#gm-effect-damage').click();
+
+  const applied = page.locator('#gm-effect-log .gm-effect-log-entry[data-outcome="applied"]');
+  await expect(applied).toHaveCount(1, { timeout: 30_000 });
+  await expect(applied).toHaveAttribute('data-scope', 'station:captain');
+  await expect(applied).toHaveAttribute('data-applied', '56000');
+  await expect(applied).toHaveAttribute('data-destroyed', 'false');
+  expect(Number(await applied.getAttribute('data-discarded'))).toBeGreaterThan(0);
+
+  // The ship took it and survived it. The exact figures are on the result row
+  // above, which the reducer settled at the apply tick; the hull reading here is
+  // deliberately directional, because this ship's own repair teams may restore a
+  // damaged System at any moment and an exact percent is not a stable fact.
+  await page.waitForFunction(
+    (id) => {
+      const surface = document.getElementById('gm-entity-map');
+      const hull = surface.state.blips.find((blip) => blip.uuid === id)?.hull_percent ?? 100;
+      return hull < 100 && hull > 0;
+    },
+    targetId,
+    { timeout: 30_000 },
+  );
+
+  // THE ACCEPTANCE CRITERION, read straight off the authoritative projection:
+  // the sibling Station is untouched, and so is the ownerless System.
+  await scope.selectOption('station:tactical');
+  await expect(hullLine).toHaveText(ts('server.gm.effect.scope_hull', {
+    scope: ts('server.gm.effect.scope_station', { name: COURIER_STATION_NAMES.tactical }),
+    current: '112',
+    max: '112',
+  }));
+  await scope.selectOption('system:core');
+  await expect(hullLine).toHaveText(ts('server.gm.effect.scope_hull', {
+    scope: ts('server.gm.effect.scope_system', { name: ts('system_hull.core.display_name') }),
+    current: '32',
+    max: '32',
+  }));
+
+  // A System scope stops at its own System — no spill to a sibling on the same
+  // Station, and none to the rest of the hull.
+  await page.locator('#gm-effect-amount').fill('9999');
+  await page.locator('#gm-effect-damage').click();
+  const coreHit = page.locator(
+    '#gm-effect-log .gm-effect-log-entry[data-scope="system:core"]',
+  );
+  await expect(coreHit).toHaveCount(1, { timeout: 30_000 });
+  await expect(coreHit).toHaveAttribute('data-applied', '32000');
+  await expect(coreHit).toHaveAttribute('data-destroyed', 'false');
+  await scope.selectOption('system:core');
+  await expect(hullLine).toHaveText(ts('server.gm.effect.scope_hull', {
+    scope: ts('server.gm.effect.scope_system', { name: ts('system_hull.core.display_name') }),
+    current: '0',
+    max: '32',
+  }), { timeout: 30_000 });
+  await scope.selectOption('station:tactical');
+  await expect(hullLine).toHaveText(ts('server.gm.effect.scope_hull', {
+    scope: ts('server.gm.effect.scope_station', { name: COURIER_STATION_NAMES.tactical }),
+    current: '112',
+    max: '112',
+  }));
+
+  // Healing mirrors scope and clamps: the emptied Station refills to exactly
+  // its own maximum and reports everything it threw away.
+  await scope.selectOption('station:captain');
+  await page.locator('#gm-effect-amount').fill('9999');
+  await page.locator('#gm-effect-heal').click();
+  const healed = page.locator(
+    '#gm-effect-log .gm-effect-log-entry[data-effect="heal"][data-scope="station:captain"]',
+  );
+  await expect(healed).toHaveCount(1, { timeout: 30_000 });
+  await expect(healed).toHaveAttribute('data-outcome', 'applied');
+  expect(Number(await healed.getAttribute('data-applied'))).toBeGreaterThan(0);
+  expect(Number(await healed.getAttribute('data-discarded'))).toBeGreaterThan(0);
+  await expect(hullLine).toHaveText(ts('server.gm.effect.scope_hull', {
+    scope: ts('server.gm.effect.scope_station', { name: COURIER_STATION_NAMES.captain }),
+    current: '56',
+    max: '56',
+  }), { timeout: 30_000 });
+
+  // A scope this hull does not author is REFUSED at the apply tick, with the
+  // reason spelled from the shared String Table rather than a wire token. The
+  // picker cannot offer one, so the request is composed at the page seam — the
+  // shape a stale page or a replayed request takes.
+  const refusals = await page.evaluate((entity) => {
+    const send = (scopeKind, scopeId) => window.__hostApplyDirectEffect({
+      entity,
+      effect: 'damage',
+      amount_milli_hp: 1_000,
+      correlation: `scope-refusal-${scopeKind}`,
+      scope: scopeKind,
+      scope_id: scopeId,
+    });
+    return {
+      station: send('station', 'engineering'),
+      system: send('system', 'warp-core'),
+      // A narrowed scope with no id is not a request this seam will compose at
+      // all: it fails closed in the browser rather than reaching the journal.
+      malformed: window.__hostApplyDirectEffect({
+        entity,
+        effect: 'damage',
+        amount_milli_hp: 1_000,
+        correlation: 'scope-refusal-malformed',
+        scope: 'station',
+        scope_id: null,
+      }),
+    };
+  }, targetId);
+  expect(refusals).toEqual({ station: true, system: true, malformed: false });
+
+  const unknownStation = page.locator(
+    '#gm-effect-log .gm-effect-log-entry[data-reason="unknown-station"]',
+  );
+  await expect(unknownStation).toHaveCount(1, { timeout: 30_000 });
+  await expect(unknownStation).toContainText(ts('server.gm.session.reason.unknown_station'));
+  const unknownSystem = page.locator(
+    '#gm-effect-log .gm-effect-log-entry[data-reason="unknown-system"]',
+  );
+  await expect(unknownSystem).toHaveCount(1, { timeout: 30_000 });
+  await expect(unknownSystem).toContainText(ts('server.gm.session.reason.unknown_system'));
+
+  // Neither refusal touched anything: no result row claims to have applied one,
+  // which is what "never affects a System outside its authored ownership" means
+  // for a scope that owns nothing at all.
+  await expect(page.locator(
+    '#gm-effect-log .gm-effect-log-entry[data-scope="station:engineering"][data-outcome="applied"]',
+  )).toHaveCount(0);
+  await expect(page.locator(
+    '#gm-effect-log .gm-effect-log-entry[data-scope="system:warp-core"][data-outcome="applied"]',
+  )).toHaveCount(0);
+
+  // And the GM activity feed names the Station the applied hit was aimed at.
+  await expect(
+    page.locator('#gm-activity-list [data-category="gm_action"]')
+      .filter({ hasText: ts('server.gm.activity.action.direct_effect_station', { scope: 'captain' }) })
+      .first(),
+  ).toBeVisible({ timeout: 30_000 });
 
   expect(errors).toEqual([]);
 });

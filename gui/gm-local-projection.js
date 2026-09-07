@@ -75,6 +75,48 @@ function normaliseGeometry(value) {
   return undefined;
 }
 
+/**
+ * The per-System hull breakdown a scoped direct effect is picked from (#1311).
+ *
+ * Absent is an empty list — the wire omits it for every entity with no hull, so
+ * a beacon, a region or an asteroid field row is byte-identical to its
+ * pre-#1311 shape. A row that is PRESENT but malformed rejects the whole
+ * entity, exactly as a malformed radar block does: an entity whose breakdown
+ * silently lost a System would offer a Station scope that quietly covered less
+ * of the ship than the picker claimed.
+ *
+ * `station_name` is the owning Station's authored display name, held to the
+ * same rule as `station_id`: absent is `null`, a non-empty string is kept, and
+ * anything else rejects the entity. The wire omits it for a System with no
+ * owner and for a hull projected without a ship config, which is exactly when
+ * the picker falls back to the id.
+ */
+function normaliseSystems(value) {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) return undefined;
+  const systems = [];
+  for (const row of value) {
+    if (!row || typeof row !== 'object'
+        || typeof row.system_id !== 'string' || row.system_id.length === 0
+        || typeof row.name !== 'string'
+        || !(row.station_id === null || row.station_id === undefined
+             || (typeof row.station_id === 'string' && row.station_id.length > 0))
+        || !(row.station_name === null || row.station_name === undefined
+             || (typeof row.station_name === 'string' && row.station_name.length > 0))
+        || !Number.isSafeInteger(row.current_milli_hp) || row.current_milli_hp < 0
+        || !Number.isSafeInteger(row.max_milli_hp) || row.max_milli_hp < 0) return undefined;
+    systems.push({
+      system_id: row.system_id,
+      station_id: row.station_id == null ? null : row.station_id,
+      station_name: row.station_name == null ? null : row.station_name,
+      name: row.name,
+      current_milli_hp: row.current_milli_hp,
+      max_milli_hp: row.max_milli_hp,
+    });
+  }
+  return systems;
+}
+
 function normaliseReference(value) {
   if (!value || typeof value !== 'object'
       || typeof value.entity_id !== 'string' || value.entity_id.length === 0
@@ -91,6 +133,8 @@ function normaliseEntity(value) {
   // rather than leaving a damage control unable to preview its own lethality.
   const hullCurrent = status && normaliseMilliHp(status.hull_current_milli_hp);
   const hullMax = status && normaliseMilliHp(status.hull_max_milli_hp);
+  // The per-System breakdown a narrowed scope is picked from (issue #1311).
+  const systems = status && normaliseSystems(status.systems);
   const geometry = normaliseGeometry(value && value.geometry);
   const radar = normaliseRadar(value && value.radar);
   if (!value || typeof value !== 'object'
@@ -104,6 +148,7 @@ function normaliseEntity(value) {
       || conditionPercent === undefined
       || hullCurrent === undefined
       || hullMax === undefined
+      || systems === undefined
       || (hullPercent === null) !== (hullCurrent === null)
       || (hullPercent === null) !== (hullMax === null)
       || geometry === undefined
@@ -128,6 +173,7 @@ function normaliseEntity(value) {
       destroyed: status.destroyed,
       hull_current_milli_hp: hullCurrent,
       hull_max_milli_hp: hullMax,
+      systems,
     },
     current_target: currentTarget,
     geometry,

@@ -498,21 +498,18 @@ mod tests {
         let states = vec![state("breach", None, false, false)];
         let pending = std::collections::BTreeSet::from(["base-world::breach".to_string()]);
         assert!(
-            controllable_events(
+            controllable_events(&states, &pending, &Default::default(), &Default::default(),)[0]
+                .armed
+        );
+        assert!(
+            !controllable_events(
                 &states,
-                &pending,
+                &Default::default(),
                 &Default::default(),
                 &Default::default(),
             )[0]
             .armed
         );
-        assert!(!controllable_events(
-            &states,
-            &Default::default(),
-            &Default::default(),
-            &Default::default(),
-        )[0]
-        .armed);
     }
 
     /// Issue #1303: the Pause LEVER and the paused STATE are two facts, and
@@ -553,7 +550,8 @@ mod tests {
         );
 
         let paused = std::collections::BTreeSet::from(["base-world::breach".to_string()]);
-        let events = controllable_events(&states, &Default::default(), &paused, &Default::default());
+        let events =
+            controllable_events(&states, &Default::default(), &paused, &Default::default());
         assert_eq!(
             events
                 .iter()

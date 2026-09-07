@@ -225,8 +225,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/rating.rs, src/ship_plugin.rs, src/lobby/handler.rs, src/entities/spawner.rs, src/server_app/world_setup.rs]
-      symbols: [apply_rating, seed_boot_ratings, ai_only_systems, BACKFILL_RATING]
+      paths: [src/ship/rating.rs, src/ship_plugin.rs, src/lobby/handler.rs, src/lobby/result_application.rs, src/lobby/result_application_tests.rs, src/entities/spawner.rs, src/server_app/world_setup.rs]
+      symbols: [apply_rating, seed_boot_ratings, ai_only_systems, BACKFILL_RATING, LobbyResultApplier]
       messages: [SetStationRating, RatingChanged]
       tests: [cargo test]
 

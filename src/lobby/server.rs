@@ -5,7 +5,8 @@ use crate::core::messages::{
     ClientMessage, DeliveryClass, GamePhase, GameState, ServerMessage, ShipClientConfig, WorldData,
 };
 use crate::lobby::handler;
-use crate::lobby::handler::CountdownAction;
+#[path = "result_application.rs"]
+mod result_application;
 pub use crate::lobby::handler::Target;
 use crate::lobby::session::SessionManager;
 use crate::lobby::stations_config::{stations_from_ship_config, ShipStations};
@@ -14,11 +15,12 @@ use crate::ship_plugin::{
     load_ship_config_from_disk, ActiveStationRatings, PendingShipConfig, ShipConfigComponent,
     ShipSystemControlSources,
 };
+pub use result_application::LobbyResultApplier;
 
 /// Server-authoritative pre-game countdown. When `remaining_secs > 0.0` the
 /// lobby is counting down and `pending_phase` is the target after the timer
 /// expires. Anyone unreadying, disconnecting, or a new player joining resets
-/// this timer (via `CountdownAction::Cancel`).
+/// this timer (via `handler::CountdownAction::Cancel`).
 #[derive(Resource)]
 pub struct CountdownTimer {
     pub remaining_secs: f32,
@@ -1052,22 +1054,12 @@ pub fn handle_identify_system(
     mut inbound: MessageReader<InboundMessage>,
     mut sessions: ResMut<Sessions>,
     state: Res<State<GamePhase>>,
-    mut next_state: ResMut<NextState<GamePhase>>,
-    mut outbox: ResMut<LobbyOutbox>,
+    mut results: LobbyResultApplier,
     world: Option<Res<WorldResource>>,
     ship_stations: Option<Res<ShipStations>>,
     ship_client_config: Res<ShipClientConfigResource>,
     ship_manual: Res<ShipManualResource>,
     gm_roster: Res<crate::gm_roster::GmRoster>,
-    mut ship_query: Query<
-        (
-            &ShipConfigComponent,
-            &mut ShipSystemControlSources,
-            &mut ActiveStationRatings,
-        ),
-        With<crate::server_app::LocalShip>,
-    >,
-    mut countdown: Option<ResMut<CountdownTimer>>,
 ) {
     let default_stations = ShipStations::default();
     let stations = ship_stations
@@ -1081,133 +1073,52 @@ pub fn handle_identify_system(
         let ClientMessage::Identify { token, name } = &ev.msg else {
             continue;
         };
-        if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
-            let ratings_snapshot = active_ratings.0.clone();
-            let result = handler::handle_identify(
-                token,
-                name,
-                &mut sessions.0,
-                phase.clone(),
-                world_data,
-                stations,
-                &ship_client_config.0,
-                &ratings_snapshot,
-                gm_roster.operators(),
+        let ratings_snapshot = results.identify_ratings(&sessions.0);
+        let result = handler::handle_identify(
+            token,
+            name,
+            &mut sessions.0,
+            phase.clone(),
+            world_data,
+            stations,
+            &ship_client_config.0,
+            &ratings_snapshot,
+            gm_roster.operators(),
+        );
+        // Publish the read-only ship manual (issue #772) to this client
+        // right after its Welcome — same trigger, same recipient. Only when
+        // the identify was accepted (a Welcome is going out).
+        let sent_welcome = result
+            .outbound
+            .iter()
+            .any(|(_, m)| matches!(m, ServerMessage::Welcome { .. }));
+        results.apply(result);
+        if sent_welcome {
+            results.send(
+                Target::Token(token.clone()),
+                ServerMessage::ShipManual {
+                    manual: ship_manual.0.clone(),
+                },
             );
-            // Publish the read-only ship manual (issue #772) to this client
-            // right after its Welcome — same trigger, same recipient. Only when
-            // the identify was accepted (a Welcome is going out).
-            let sent_welcome = result
-                .outbound
-                .iter()
-                .any(|(_, m)| matches!(m, ServerMessage::Welcome { .. }));
-            apply_result(
-                result,
-                &mut outbox,
-                &mut next_state,
-                Some(cfg),
-                Some(&mut cs),
-                &mut active_ratings,
-                countdown.as_deref_mut(),
-            );
-            if sent_welcome {
-                outbox.0.push((
-                    Target::Token(token.clone()),
-                    ServerMessage::ShipManual {
-                        manual: ship_manual.0.clone(),
-                    },
-                ));
-            }
-        } else {
-            // No Ship entity yet (Lobby/Loading) — fall back to whatever
-            // ratings players have picked in the lobby so far, so (re)joining
-            // clients' Welcome reflects current toggle state.
-            let pending_ratings = sessions.0.pending_ratings().clone();
-            let result = handler::handle_identify(
-                token,
-                name,
-                &mut sessions.0,
-                phase.clone(),
-                world_data,
-                stations,
-                &ship_client_config.0,
-                &pending_ratings,
-                gm_roster.operators(),
-            );
-            let mut fallback_ratings = ActiveStationRatings::default();
-            let sent_welcome = result
-                .outbound
-                .iter()
-                .any(|(_, m)| matches!(m, ServerMessage::Welcome { .. }));
-            apply_result(
-                result,
-                &mut outbox,
-                &mut next_state,
-                None,
-                None,
-                &mut fallback_ratings,
-                countdown.as_deref_mut(),
-            );
-            if sent_welcome {
-                outbox.0.push((
-                    Target::Token(token.clone()),
-                    ServerMessage::ShipManual {
-                        manual: ship_manual.0.clone(),
-                    },
-                ));
-            }
         }
     }
 }
 
 /// Per-variant system for `ClientMessage::SetName` (issue #734). Gated on
-/// Lobby/Loading. The result only carries outbound (a `NameChanged` broadcast),
-/// but the dual-path `apply_result` call mirrors the other systems for
-/// consistency.
+/// Lobby/Loading. The result carries outbound (a `NameChanged` broadcast),
+/// applied through the same complete result adapter as the other variants.
 pub fn handle_set_name_system(
     mut inbound: MessageReader<InboundMessage>,
     mut sessions: ResMut<Sessions>,
-    mut next_state: ResMut<NextState<GamePhase>>,
-    mut outbox: ResMut<LobbyOutbox>,
-    mut ship_query: Query<
-        (
-            &ShipConfigComponent,
-            &mut ShipSystemControlSources,
-            &mut ActiveStationRatings,
-        ),
-        With<crate::server_app::LocalShip>,
-    >,
-    mut countdown: Option<ResMut<CountdownTimer>>,
+    mut results: LobbyResultApplier,
 ) {
     let events: Vec<_> = inbound.read().cloned().collect();
     for ev in events {
         let ClientMessage::SetName { name } = &ev.msg else {
             continue;
         };
-        if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
-            let result = handler::handle_set_name(&ev.token, name, &mut sessions.0);
-            apply_result(
-                result,
-                &mut outbox,
-                &mut next_state,
-                Some(cfg),
-                Some(&mut cs),
-                &mut active_ratings,
-                countdown.as_deref_mut(),
-            );
-        } else {
-            let result = handler::handle_set_name(&ev.token, name, &mut sessions.0);
-            let mut fallback_ratings = ActiveStationRatings::default();
-            apply_result(
-                result,
-                &mut outbox,
-                &mut next_state,
-                None,
-                None,
-                &mut fallback_ratings,
-                countdown.as_deref_mut(),
-            );
-        }
+        let result = handler::handle_set_name(&ev.token, name, &mut sessions.0);
+        results.apply(result);
     }
 }
 
@@ -1216,23 +1127,13 @@ pub fn handle_set_name_system(
 /// lobby" button — and additionally on `InProgress` for the host page's own
 /// settings menu, whose "exit to lobby" aborts a running mission (issue #939).
 /// The phase gate itself lives in `handler::handle_return_to_lobby`; this
-/// system only classifies the sender's token. `apply_result` routes the phase
+/// system only classifies the sender's token. `LobbyResultApplier` routes the phase
 /// transition back to `Lobby` plus the cleared-ready / returned broadcasts.
 pub fn handle_return_to_lobby_system(
     mut inbound: MessageReader<InboundMessage>,
     mut sessions: ResMut<Sessions>,
     state: Res<State<GamePhase>>,
-    mut next_state: ResMut<NextState<GamePhase>>,
-    mut outbox: ResMut<LobbyOutbox>,
-    mut ship_query: Query<
-        (
-            &ShipConfigComponent,
-            &mut ShipSystemControlSources,
-            &mut ActiveStationRatings,
-        ),
-        With<crate::server_app::LocalShip>,
-    >,
-    mut countdown: Option<ResMut<CountdownTimer>>,
+    mut results: LobbyResultApplier,
     mut gm_journal: Option<ResMut<crate::gm_action::GmActionJournal>>,
     mut gm_log: Option<ResMut<crate::gm_action::GmActionLog>>,
     mut gm_results: Option<ResMut<crate::gm_action::LocalGmActionRefusals>>,
@@ -1248,32 +1149,9 @@ pub fn handle_return_to_lobby_system(
             continue;
         };
         let authority = handler::return_to_lobby_authority(&ev.token);
-        if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
-            let result = handler::handle_return_to_lobby(&mut sessions.0, phase.clone(), authority);
-            returned |= result.new_phase == Some(GamePhase::Lobby);
-            apply_result(
-                result,
-                &mut outbox,
-                &mut next_state,
-                Some(cfg),
-                Some(&mut cs),
-                &mut active_ratings,
-                countdown.as_deref_mut(),
-            );
-        } else {
-            let result = handler::handle_return_to_lobby(&mut sessions.0, phase.clone(), authority);
-            returned |= result.new_phase == Some(GamePhase::Lobby);
-            let mut fallback_ratings = ActiveStationRatings::default();
-            apply_result(
-                result,
-                &mut outbox,
-                &mut next_state,
-                None,
-                None,
-                &mut fallback_ratings,
-                countdown.as_deref_mut(),
-            );
-        }
+        let result = handler::handle_return_to_lobby(&mut sessions.0, phase.clone(), authority);
+        returned |= result.new_phase == Some(GamePhase::Lobby);
+        results.apply(result);
     }
     if returned {
         // Clear the complete per-run lane synchronously before MeshSet. An old
@@ -1308,25 +1186,14 @@ pub fn handle_return_to_lobby_system(
 /// Per-variant system for `ClientMessage::SelectStation` (issue #733).
 /// Reads its variant off the inbound bus with its own cursor, calls the pure
 /// `handler::handle_select_station`, then applies the result to Bevy
-/// resources via `apply_result` — using the same dual-path
-/// (real ship entity vs. pre-spawn fallback) handling as the other lobby
-/// message systems.
+/// resources via `LobbyResultApplier`, which resolves the loaded-Ship or
+/// pre-spawn context for all per-variant message systems.
 pub fn handle_select_station_system(
     mut inbound: MessageReader<InboundMessage>,
     mut sessions: ResMut<Sessions>,
     state: Res<State<GamePhase>>,
-    mut next_state: ResMut<NextState<GamePhase>>,
-    mut outbox: ResMut<LobbyOutbox>,
+    mut results: LobbyResultApplier,
     ship_stations: Option<Res<ShipStations>>,
-    mut ship_query: Query<
-        (
-            &ShipConfigComponent,
-            &mut ShipSystemControlSources,
-            &mut ActiveStationRatings,
-        ),
-        With<crate::server_app::LocalShip>,
-    >,
-    mut countdown: Option<ResMut<CountdownTimer>>,
 ) {
     let default_stations = ShipStations::default();
     let stations = ship_stations
@@ -1339,42 +1206,14 @@ pub fn handle_select_station_system(
         let ClientMessage::SelectStation { station } = &ev.msg else {
             continue;
         };
-        if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
-            let result = handler::handle_select_station(
-                &ev.token,
-                station,
-                &mut sessions.0,
-                phase.clone(),
-                stations,
-            );
-            apply_result(
-                result,
-                &mut outbox,
-                &mut next_state,
-                Some(cfg),
-                Some(&mut cs),
-                &mut active_ratings,
-                countdown.as_deref_mut(),
-            );
-        } else {
-            let result = handler::handle_select_station(
-                &ev.token,
-                station,
-                &mut sessions.0,
-                phase.clone(),
-                stations,
-            );
-            let mut fallback_ratings = ActiveStationRatings::default();
-            apply_result(
-                result,
-                &mut outbox,
-                &mut next_state,
-                None,
-                None,
-                &mut fallback_ratings,
-                countdown.as_deref_mut(),
-            );
-        }
+        let result = handler::handle_select_station(
+            &ev.token,
+            station,
+            &mut sessions.0,
+            phase.clone(),
+            stations,
+        );
+        results.apply(result);
     }
 }
 
@@ -1383,18 +1222,8 @@ pub fn handle_release_station_system(
     mut inbound: MessageReader<InboundMessage>,
     mut sessions: ResMut<Sessions>,
     state: Res<State<GamePhase>>,
-    mut next_state: ResMut<NextState<GamePhase>>,
-    mut outbox: ResMut<LobbyOutbox>,
+    mut results: LobbyResultApplier,
     ship_stations: Option<Res<ShipStations>>,
-    mut ship_query: Query<
-        (
-            &ShipConfigComponent,
-            &mut ShipSystemControlSources,
-            &mut ActiveStationRatings,
-        ),
-        With<crate::server_app::LocalShip>,
-    >,
-    mut countdown: Option<ResMut<CountdownTimer>>,
 ) {
     let default_stations = ShipStations::default();
     let stations = ship_stations
@@ -1407,40 +1236,9 @@ pub fn handle_release_station_system(
         let ClientMessage::ReleaseStation = &ev.msg else {
             continue;
         };
-        if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
-            let result = handler::handle_release_station(
-                &ev.token,
-                &mut sessions.0,
-                phase.clone(),
-                stations,
-            );
-            apply_result(
-                result,
-                &mut outbox,
-                &mut next_state,
-                Some(cfg),
-                Some(&mut cs),
-                &mut active_ratings,
-                countdown.as_deref_mut(),
-            );
-        } else {
-            let result = handler::handle_release_station(
-                &ev.token,
-                &mut sessions.0,
-                phase.clone(),
-                stations,
-            );
-            let mut fallback_ratings = ActiveStationRatings::default();
-            apply_result(
-                result,
-                &mut outbox,
-                &mut next_state,
-                None,
-                None,
-                &mut fallback_ratings,
-                countdown.as_deref_mut(),
-            );
-        }
+        let result =
+            handler::handle_release_station(&ev.token, &mut sessions.0, phase.clone(), stations);
+        results.apply(result);
     }
 }
 
@@ -1449,22 +1247,12 @@ pub fn handle_set_ready_system(
     mut inbound: MessageReader<InboundMessage>,
     mut sessions: ResMut<Sessions>,
     state: Res<State<GamePhase>>,
-    mut next_state: ResMut<NextState<GamePhase>>,
-    mut outbox: ResMut<LobbyOutbox>,
+    mut results: LobbyResultApplier,
     ship_stations: Option<Res<ShipStations>>,
     #[cfg(feature = "server")] preload: Option<
         Res<crate::server::asset_preload::AssetPreloadResource>,
     >,
     model_rigs: Option<Res<crate::entities::model_markers::ModelRigReadiness>>,
-    mut ship_query: Query<
-        (
-            &ShipConfigComponent,
-            &mut ShipSystemControlSources,
-            &mut ActiveStationRatings,
-        ),
-        With<crate::server_app::LocalShip>,
-    >,
-    mut countdown: Option<ResMut<CountdownTimer>>,
 ) {
     let default_stations = ShipStations::default();
     let stations = ship_stations
@@ -1492,52 +1280,22 @@ pub fn handle_set_ready_system(
         let ClientMessage::SetReady { ready } = &ev.msg else {
             continue;
         };
-        if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
-            let result = handler::handle_set_ready(
-                &ev.token,
-                *ready,
-                &mut sessions.0,
-                phase.clone(),
-                preload_complete,
-                stations,
-            );
-            apply_result(
-                result,
-                &mut outbox,
-                &mut next_state,
-                Some(cfg),
-                Some(&mut cs),
-                &mut active_ratings,
-                countdown.as_deref_mut(),
-            );
-        } else {
-            let result = handler::handle_set_ready(
-                &ev.token,
-                *ready,
-                &mut sessions.0,
-                phase.clone(),
-                preload_complete,
-                stations,
-            );
-            let mut fallback_ratings = ActiveStationRatings::default();
-            apply_result(
-                result,
-                &mut outbox,
-                &mut next_state,
-                None,
-                None,
-                &mut fallback_ratings,
-                countdown.as_deref_mut(),
-            );
-        }
+        let result = handler::handle_set_ready(
+            &ev.token,
+            *ready,
+            &mut sessions.0,
+            phase.clone(),
+            preload_complete,
+            stations,
+        );
+        results.apply(result);
     }
 }
 
 /// Per-variant system for `ClientMessage::SetSpectator` (issue #1105). Reads
 /// its variant off the inbound bus with its own cursor, calls the pure
 /// `handler::handle_set_spectator`, and applies the seat-vacate / unready
-/// / rating-reset / `SpectatorChanged` broadcasts through the same dual-path
-/// `apply_result` the other lobby message systems use. Threads the phase and
+/// / rating-reset / `SpectatorChanged` broadcasts through the same complete result adapter as the other lobby message systems. Threads the phase and
 /// `ShipStations` through like `handle_release_station_system` does: when a
 /// spectator gives up a seat, that seat's rating is reset (Backfill mid-game,
 /// base rating pre-game) exactly as a ReleaseStation would.
@@ -1545,18 +1303,8 @@ pub fn handle_set_spectator_system(
     mut inbound: MessageReader<InboundMessage>,
     mut sessions: ResMut<Sessions>,
     state: Res<State<GamePhase>>,
-    mut next_state: ResMut<NextState<GamePhase>>,
-    mut outbox: ResMut<LobbyOutbox>,
+    mut results: LobbyResultApplier,
     ship_stations: Option<Res<ShipStations>>,
-    mut ship_query: Query<
-        (
-            &ShipConfigComponent,
-            &mut ShipSystemControlSources,
-            &mut ActiveStationRatings,
-        ),
-        With<crate::server_app::LocalShip>,
-    >,
-    mut countdown: Option<ResMut<CountdownTimer>>,
 ) {
     let default_stations = ShipStations::default();
     let stations = ship_stations
@@ -1569,50 +1317,21 @@ pub fn handle_set_spectator_system(
         let ClientMessage::SetSpectator { spectator } = &ev.msg else {
             continue;
         };
-        if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
-            let result = handler::handle_set_spectator(
-                &ev.token,
-                *spectator,
-                &mut sessions.0,
-                phase.clone(),
-                stations,
-            );
-            apply_result(
-                result,
-                &mut outbox,
-                &mut next_state,
-                Some(cfg),
-                Some(&mut cs),
-                &mut active_ratings,
-                countdown.as_deref_mut(),
-            );
-        } else {
-            let result = handler::handle_set_spectator(
-                &ev.token,
-                *spectator,
-                &mut sessions.0,
-                phase.clone(),
-                stations,
-            );
-            let mut fallback_ratings = ActiveStationRatings::default();
-            apply_result(
-                result,
-                &mut outbox,
-                &mut next_state,
-                None,
-                None,
-                &mut fallback_ratings,
-                countdown.as_deref_mut(),
-            );
-        }
+        let result = handler::handle_set_spectator(
+            &ev.token,
+            *spectator,
+            &mut sessions.0,
+            phase.clone(),
+            stations,
+        );
+        results.apply(result);
     }
 }
 
 /// Per-variant system for `ClientMessage::SetAfk` (issue #1104). Reads its
 /// variant off the inbound bus with its own cursor, calls the pure
 /// `handler::handle_set_afk`, and applies the delegate/restore
-/// `RatingChanged` + `AfkChanged` broadcasts through the same dual-path
-/// `apply_result` the other lobby message systems use. Threads
+/// `RatingChanged` + `AfkChanged` broadcasts through the same complete result adapter as the other lobby message systems. Threads
 /// `ActiveStationRatings` through so the pure handler can SNAPSHOT the player's
 /// current directly-held Station rating before Backfill overwrites it (AFK-exit
 /// restores from that snapshot). Runs on the same Lobby/Loading/InProgress gate
@@ -1620,50 +1339,16 @@ pub fn handle_set_spectator_system(
 pub fn handle_set_afk_system(
     mut inbound: MessageReader<InboundMessage>,
     mut sessions: ResMut<Sessions>,
-    mut next_state: ResMut<NextState<GamePhase>>,
-    mut outbox: ResMut<LobbyOutbox>,
-    mut ship_query: Query<
-        (
-            &ShipConfigComponent,
-            &mut ShipSystemControlSources,
-            &mut ActiveStationRatings,
-        ),
-        With<crate::server_app::LocalShip>,
-    >,
-    mut countdown: Option<ResMut<CountdownTimer>>,
+    mut results: LobbyResultApplier,
 ) {
     let events: Vec<_> = inbound.read().cloned().collect();
     for ev in events {
         let ClientMessage::SetAfk { afk } = &ev.msg else {
             continue;
         };
-        if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
-            let result =
-                handler::handle_set_afk(&ev.token, *afk, &mut sessions.0, &active_ratings.0);
-            apply_result(
-                result,
-                &mut outbox,
-                &mut next_state,
-                Some(cfg),
-                Some(&mut cs),
-                &mut active_ratings,
-                countdown.as_deref_mut(),
-            );
-        } else {
-            let fallback_ratings = ActiveStationRatings::default();
-            let result =
-                handler::handle_set_afk(&ev.token, *afk, &mut sessions.0, &fallback_ratings.0);
-            let mut apply_ratings = ActiveStationRatings::default();
-            apply_result(
-                result,
-                &mut outbox,
-                &mut next_state,
-                None,
-                None,
-                &mut apply_ratings,
-                countdown.as_deref_mut(),
-            );
-        }
+        let result =
+            handler::handle_set_afk(&ev.token, *afk, &mut sessions.0, &results.afk_ratings());
+        results.apply(result);
     }
 }
 
@@ -1677,18 +1362,8 @@ pub fn handle_set_station_rating_system(
     mut inbound: MessageReader<InboundMessage>,
     mut sessions: ResMut<Sessions>,
     state: Res<State<GamePhase>>,
-    mut next_state: ResMut<NextState<GamePhase>>,
-    mut outbox: ResMut<LobbyOutbox>,
+    mut results: LobbyResultApplier,
     ship_stations: Option<Res<ShipStations>>,
-    mut ship_query: Query<
-        (
-            &ShipConfigComponent,
-            &mut ShipSystemControlSources,
-            &mut ActiveStationRatings,
-        ),
-        With<crate::server_app::LocalShip>,
-    >,
-    mut countdown: Option<ResMut<CountdownTimer>>,
 ) {
     let default_stations = ShipStations::default();
     let stations = ship_stations
@@ -1701,49 +1376,21 @@ pub fn handle_set_station_rating_system(
         let ClientMessage::SetStationRating { rating_name } = &ev.msg else {
             continue;
         };
-        if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
-            let result = handler::handle_set_station_rating(
-                &ev.token,
-                rating_name,
-                &mut sessions.0,
-                phase.clone(),
-                stations,
-            );
-            apply_result(
-                result,
-                &mut outbox,
-                &mut next_state,
-                Some(cfg),
-                Some(&mut cs),
-                &mut active_ratings,
-                countdown.as_deref_mut(),
-            );
-        } else {
-            let result = handler::handle_set_station_rating(
-                &ev.token,
-                rating_name,
-                &mut sessions.0,
-                phase.clone(),
-                stations,
-            );
-            let mut fallback_ratings = ActiveStationRatings::default();
-            apply_result(
-                result,
-                &mut outbox,
-                &mut next_state,
-                None,
-                None,
-                &mut fallback_ratings,
-                countdown.as_deref_mut(),
-            );
-        }
+        let result = handler::handle_set_station_rating(
+            &ev.token,
+            rating_name,
+            &mut sessions.0,
+            phase.clone(),
+            stations,
+        );
+        results.apply(result);
     }
 }
 
 /// Per-variant system for `ClientMessage::ReportStationEligibility` (issue #1103).
 ///
 /// Stores the sender's ANONYMOUS ineligible-Station set in the SessionManager
-/// side-map (off `Player`, never broadcast). There is no `apply_result` /
+/// side-map (off `Player`, never broadcast). There is no `LobbyResultApplier` /
 /// `LobbyOutbox` path on purpose: the report produces no outbound message — it is
 /// private host state that only the human-seeking resolver
 /// (`resolve_human_seeking_hosts`) and the direct-claim guard
@@ -1770,22 +1417,12 @@ fn handle_disconnect(
     mut events: MessageReader<PlayerDisconnected>,
     mut sessions: ResMut<Sessions>,
     state: Res<State<GamePhase>>,
-    mut next_state: ResMut<NextState<GamePhase>>,
-    mut outbox: ResMut<LobbyOutbox>,
-    mut ship_query: Query<
-        (
-            &ShipConfigComponent,
-            &mut ShipSystemControlSources,
-            &mut ActiveStationRatings,
-        ),
-        With<crate::server_app::LocalShip>,
-    >,
+    mut results: LobbyResultApplier,
     stations: Option<Res<ShipStations>>,
     #[cfg(feature = "server")] preload: Option<
         Res<crate::server::asset_preload::AssetPreloadResource>,
     >,
     model_rigs: Option<Res<crate::entities::model_markers::ModelRigReadiness>>,
-    mut countdown: Option<ResMut<CountdownTimer>>,
 ) {
     let empty_stations = ShipStations::default();
     let ship_stations = stations.as_deref().unwrap_or(&empty_stations);
@@ -1804,101 +1441,14 @@ fn handle_disconnect(
         && model_rigs.is_none_or(|rigs| rigs.is_ready());
 
     for ev in events.read() {
-        // Apply Backfill rating to the disconnecting player's station so the
-        // ship keeps operating without a human at the console.
-        // ship_query may return Err if the Ship entity hasn't spawned yet.
-        if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
-            let ratings_snapshot = active_ratings.0.clone();
-            let result = handler::process_disconnect_with_stations(
-                &ev.token,
-                &mut sessions.0,
-                ship_stations,
-                &cfg.0,
-                &mut cs.0,
-                &ratings_snapshot,
-                state.get().clone(),
-                preload_complete,
-            );
-            apply_result(
-                result,
-                &mut outbox,
-                &mut next_state,
-                Some(cfg),
-                Some(&mut cs),
-                &mut active_ratings,
-                countdown.as_deref_mut(),
-            );
-        } else {
-            let result = handler::process_disconnect(
-                &ev.token,
-                &mut sessions.0,
-                state.get().clone(),
-                preload_complete,
-            );
-            let mut fallback_ratings = ActiveStationRatings::default();
-            apply_result(
-                result,
-                &mut outbox,
-                &mut next_state,
-                None,
-                None,
-                &mut fallback_ratings,
-                countdown.as_deref_mut(),
-            );
-        }
+        results.disconnect(
+            &ev.token,
+            &mut sessions.0,
+            ship_stations,
+            state.get().clone(),
+            preload_complete,
+        );
     }
-}
-
-fn apply_result(
-    result: handler::LobbyHandlerResult,
-    outbox: &mut ResMut<LobbyOutbox>,
-    next_state: &mut ResMut<NextState<GamePhase>>,
-    ship_config: Option<&ShipConfigComponent>,
-    control_sources: Option<&mut ShipSystemControlSources>,
-    active_ratings: &mut ActiveStationRatings,
-    mut countdown: Option<&mut CountdownTimer>,
-) {
-    // Handle countdown actions before the phase transition so the cancel
-    // broadcast goes out on the same frame as the unready message.
-    if let Some(ref action) = result.countdown_action {
-        if let Some(ref mut timer) = countdown {
-            match action {
-                CountdownAction::Start {
-                    secs,
-                    pending_phase,
-                } if timer.local_start_allowed && timer.remaining_secs <= 0.0 => {
-                    timer.remaining_secs = *secs as f32;
-                    timer.pending_phase = Some(pending_phase.clone());
-                    outbox.0.push((
-                        Target::All,
-                        ServerMessage::GameStartCountdown {
-                            remaining_secs: *secs,
-                        },
-                    ));
-                }
-                CountdownAction::Cancel if timer.remaining_secs > 0.0 => {
-                    timer.remaining_secs = 0.0;
-                    timer.pending_phase = None;
-                    outbox.0.push((
-                        Target::All,
-                        ServerMessage::GameStartCountdown { remaining_secs: 0 },
-                    ));
-                }
-                _ => {}
-            }
-        }
-    }
-
-    if let Some(new_phase) = result.new_phase {
-        next_state.set(new_phase);
-    }
-    if let Some((station_id, rating_name)) = result.station_rating_update {
-        if let (Some(cfg), Some(cs)) = (ship_config, control_sources) {
-            rating::apply_rating(&cfg.0, &station_id, &rating_name, &mut cs.0);
-        }
-        active_ratings.0.insert(station_id, rating_name);
-    }
-    outbox.0.extend(result.outbound);
 }
 
 /// Keep the legacy per-ship countdown dormant while the fleet mesh owns the
@@ -2303,6 +1853,10 @@ pub fn lobby_outbox_broadcaster() -> LobbyOutboxPlugin {
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
+#[path = "result_application_tests.rs"]
+mod result_application_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -2315,7 +1869,7 @@ mod tests {
         }
     }
 
-    fn test_app() -> App {
+    pub(super) fn test_app() -> App {
         let mut app = App::new();
         app.add_plugins(LobbyPlugin)
             .add_plugins(lobby_outbox_broadcaster())
@@ -2333,7 +1887,7 @@ mod tests {
         app
     }
 
-    fn push(app: &mut App, token: &str, msg: ClientMessage) {
+    pub(super) fn push(app: &mut App, token: &str, msg: ClientMessage) {
         app.world_mut()
             .resource_mut::<Messages<InboundMessage>>()
             .write(InboundMessage {
@@ -2342,7 +1896,7 @@ mod tests {
             });
     }
 
-    fn tick(app: &mut App) -> Vec<OutboundMessage> {
+    pub(super) fn tick(app: &mut App) -> Vec<OutboundMessage> {
         app.update();
         let msgs = app.world().resource::<Outbox>().0.clone();
         app.world_mut().resource_mut::<Outbox>().0.clear();

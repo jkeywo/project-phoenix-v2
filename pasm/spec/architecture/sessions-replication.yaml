@@ -31,6 +31,7 @@ entities:
         - Reconnect must restore a player's identity and eligible station relationship after WebRTC peer replacement.
         - "[ai] SUPERSEDES the summary above on two facts issue #1112 checked against gui/session-token.js. The token is 32 lowercase hex characters (crypto.getRandomValues over 16 bytes), not a UUIDv4, and it is held primarily in sessionStorage with a persistent localStorage copy the first tab adopts, not in localStorage alone. Per-tab storage is load-bearing: two console tabs on one desktop sharing a token collapsed into one server-side player. The ephemeral identifier it is contrasted with is now a rendezvous peer id and a DataChannel — PeerJS was retired in the same issue."
         - "[ai] Since #1112 the transport re-sends Identify with the same token on every automatic reconnect, so restoring the held station and pushing the current projection is the ordinary Identify path rather than a second mechanism."
+        - "[ai] Issue #1414 deepens the existing Bevy output adapter into LobbyResultApplier. Per-variant systems retain their readers, handler and phase gates, evaluate once, and hand over the complete result. The adapter resolves the loaded LocalShip projection, applies countdown before phase/rating/outbound work, and retains the distinct pre-spawn rating inputs: Identify reads pending choices, AFK has no applied rating yet. Disconnect retains its loaded-Ship versus pre-spawn pure policy, before Identify in the same tick."
     architecture:
       kind: session-manager
       authority: authoritative
@@ -38,9 +39,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/lobby/session.rs, src/lobby/handler.rs]
-      symbols: [SessionManager]
-      tests: [cargo test]
+      paths: [src/lobby/session.rs, src/lobby/handler.rs, src/lobby/server.rs, src/lobby/result_application.rs, src/lobby/result_application_tests.rs]
+      symbols: [SessionManager, LobbyResultApplier, identify_ratings, afk_ratings]
+      tests: [cargo test, "cargo test --features headless --lib lobby::server::result_application_tests"]
 
   - state: session-identity-state
     core:

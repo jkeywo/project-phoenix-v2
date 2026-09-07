@@ -2,8 +2,8 @@
 title: Stations
 type: concept
 tags: [stations, lobby, ratings, authority, backfill, puppeting, human-seeking]
-sources: [src/lobby/stations_config.rs, src/lobby/session.rs, src/ship/config.rs, src/ship/rating_systems.rs, src/command_admission/policy.rs, src/gm_puppet.rs, src/gm_action.rs, gui/gm-station-puppet.js, gui/console-state.js, gui/console-core.js, assets/entities/alliance_destroyer.toml]
-updated: 2026-09-02
+sources: [src/lobby/stations_config.rs, src/lobby/session.rs, src/lobby/result_application.rs, src/ship/config.rs, src/ship/rating_systems.rs, src/command_admission/policy.rs, src/gm_puppet.rs, src/gm_action.rs, gui/gm-station-puppet.js, gui/console-state.js, gui/console-core.js, assets/entities/alliance_destroyer.toml]
+updated: 2026-09-07
 ---
 
 # Stations
@@ -27,6 +27,11 @@ Each hull declares a fixed `[[station]]` roster in its entity TOML. `ShipConfig`
 `Player.station` is authoritative tenure. The holder chooses among the station's authored lobby ratings. `Backfill` is runtime-only: it is never offered as a lobby selection, and represents a vacant/disconnected station whose systems are operated by AI until the holder reconnects or the seat is claimed again.
 
 `ActiveStationRatings` and `ShipSystemControlSources` derive each fine system's current human/AI policy from that roster and live session state. Downstream consumers do not branch on human versus AI; both origins emit the same admitted commands.
+
+Lobby message results reach both loaded-Ship components through
+`LobbyResultApplier::apply` in `src/lobby/result_application.rs`. Before the
+LocalShip exists, pending Lobby choices remain in `SessionManager`; no temporary
+rating component is created and discarded by each message system.
 
 An active GM puppet is a temporary control overlay, not tenure. It can be added
 only while the Station is Backfill, suppresses AI only for that Station, and

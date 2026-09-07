@@ -2,8 +2,8 @@
 title: Asset Preload
 type: concept
 tags: [assets, gltf, sidecar, preload, lobby, loading-phase]
-sources: [src/server/asset_preload.rs, src/server/pfx.rs, src/server_app/registration.rs, src/server_app_render.rs, src/entities/config_cache.rs, src/entities/model_rig.rs, src/lobby/server.rs, src/core/messages.rs, server.html, client.html]
-updated: 2026-08-27
+sources: [src/server/asset_preload.rs, src/server/pfx.rs, src/server_app/registration.rs, src/server_app_render.rs, src/entities/config_cache.rs, src/entities/model_rig.rs, src/entities/model_markers.rs, src/lobby/server.rs, src/core/messages.rs, server.html, client.html]
+updated: 2026-09-07
 ---
 
 # Asset Preload
@@ -21,7 +21,9 @@ Headless/minimal fixtures may omit `AssetPreloadResource`; that absence is an in
 
 ## Sidecar cache
 
-Model rig sidecars are fetched as text by `server.html` and placed in the thread-local cache in `src/entities/config_cache.rs`. Reads are persistent and multi-consumer: preload can observe delivery while every entity using the same model later parses the same body. An empty delivered body is terminal absence, preventing repeated requests.
+Model rig sidecars are fetched as text by `server.html` and placed in the thread-local cache in `src/entities/config_cache.rs`. Reads are persistent and multi-consumer: preload can observe delivery while entities using the same model later resolve the same body. An empty delivered body is terminal absence, preventing repeated requests.
+
+`model_markers::sync_authoritative_model_markers` attaches simulation-owned marker geometry in PreUpdate and FixedLast. Within one invocation it resolves each candidate sidecar path once and copies that geometry to entities in their existing order, retaining their own transforms. The temporary reuse ends on return, so later spawns observe changed content and pending WASM deliveries are retried. It does not defer marker availability or cache across World loads.
 
 LOD discovery is deliberately two-phase because the base entity template names one model while the sidecar names the rest of the ladder.
 

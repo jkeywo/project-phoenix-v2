@@ -610,8 +610,11 @@ pub struct RockConfig {
 /// Resolve one rock config path against the config cache, with the same
 /// fallbacks the streamer has always used.
 pub fn rock_config(config_path: &str) -> RockConfig {
-    let config_cache = crate::entities::config_cache::get_config_cache();
-    let entity_config = config_cache.get(config_path);
+    // A streaming boundary can spawn many rocks. Read only the selected
+    // template, rather than cloning every cached hull/template for each rock.
+    // Keep this lookup per spawn so subsequent cache replacements are visible.
+    let cached = crate::entities::config_cache::get_cached_entity_config(config_path);
+    let entity_config = cached.as_ref();
     let collider_radius = entity_config
         .and_then(|c| c.collider.as_ref())
         .map(|c| c.radius)
@@ -923,8 +926,7 @@ fn spawn_cosmetic_entity(
     spawn: &crate::asteroids::spawner::AsteroidSpawn,
     y: f32,
 ) -> Entity {
-    let config_cache = crate::entities::config_cache::get_config_cache();
-    let entity_config = config_cache.get(&spawn.config_path);
+    let entity_config = crate::entities::config_cache::get_cached_entity_config(&spawn.config_path);
 
     let mut entity_cmd = commands.spawn((
         Transform::from_xyz(spawn.x, y, spawn.z),

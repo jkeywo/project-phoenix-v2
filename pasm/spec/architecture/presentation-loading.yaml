@@ -72,6 +72,8 @@ entities:
       confidence: confirmed
       title: Model Rig and Marker Loader
       summary: Resolves each spawned entity's primary authored model sidecar into renderer-independent authoritative marker and target geometry. Every authoritative profile preloads those primary sidecars and binds their exact bytes into frozen content identity before mission start; an unresolved live entity holds the fixed clock until an immediate simulation-side sync can attach its canonical state. Entity rendering and active GLB, procedural, or billboard LOD tiers consume it but never replace or remove it.
+      rationale:
+        - "One exclusive synchronization invocation resolves each exact sidecar path at most once for its candidate batch, reusing marker geometry while applying each entity's own authored transform immediately in the original candidate order. The temporary lookup is discarded on return, including pending and identity-fallback results. Later invocations therefore retry WASM delivery and observe changed native sidecar content for new entities without a persistent cache or invalidation protocol. PreUpdate/FixedLast registration and fixed-clock readiness remain unchanged."
     architecture:
       kind: model-loader
       authority: authoritative

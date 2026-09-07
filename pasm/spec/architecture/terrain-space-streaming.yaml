@@ -38,18 +38,20 @@ entities:
       status: implemented
       confidence: confirmed
       title: Asteroid Field Lifecycle
-      summary: Owns deterministic field density and a player-centred grid window, spawning active cells and retiring cells outside the window.
+      summary: Owns deterministic field density and a fleet-centred grid window, spawning active cells and retiring cells outside the window.
+      rationale:
+        - "Gameplay and cosmetic spawns read only their selected template through the shared native/WASM single-entry config accessor. The lookup remains fresh per spawn, including after a missing template is delivered or an existing cache entry is replaced; cell evaluation, identity, spawn order and authored values are unchanged. The snapshot-restore rock builder uses the same lookup."
     architecture:
       kind: streaming-lifecycle
       authority: authoritative
       owns: [asteroid-window-state]
-      reads: [world-configuration-state, authoritative-ship-motion-state]
+      reads: [world-configuration-state, authoritative-ship-motion-state, entity-template-state]
       writes: [spawned-entity-state]
       produces: [asteroid-window-state]
-      runs_in: [host-browser-runtime]
+      runs_in: [host-browser-runtime, headless-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [src/asteroids/window.rs, src/asteroids/spawner.rs, src/asteroids/lifecycle.rs]
+      paths: [src/asteroids/window.rs, src/asteroids/spawner.rs, src/asteroids/lifecycle.rs, src/entities/config_cache.rs, tests/asteroid_streaming.rs]
       tests: [cargo test]
 
   - state: asteroid-window-state

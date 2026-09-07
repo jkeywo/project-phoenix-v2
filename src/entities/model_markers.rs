@@ -13,7 +13,7 @@
 //! in flight, immediately inserts resolved geometry, and is registered for
 //! every simulation profile, including rendererless GM peers.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use bevy::prelude::*;
 
@@ -208,10 +208,22 @@ pub(crate) fn sync_authoritative_model_markers(world: &mut World) {
             .collect()
     };
 
+    // Resolve each exact sidecar only once in this synchronous batch. A cell
+    // boundary can add many entities sharing one rig; repeated disk reads and
+    // TOML parses do not give those entities different authored geometry.
+    // This cache never survives the invocation: pending WASM fetches are
+    // retried, and a later native spawn sees any intervening content change.
+    // Entity order, per-entity transforms and immediate attachment stay intact.
+    let mut batch_markers: HashMap<String, Option<ModelMarkers>> = HashMap::new();
     let mut live_blocked = false;
     for (entity, mesh) in candidates {
         let model_path = mesh.model.as_deref().expect("filtered above");
-        let Some(rig) = resolve_sidecar_rig(model_path, mesh.variant.as_deref()) else {
+        let path = crate::entities::model_rig::sidecar_path(model_path, mesh.variant.as_deref());
+        let markers = batch_markers.entry(path).or_insert_with(|| {
+            resolve_sidecar_rig(model_path, mesh.variant.as_deref())
+                .map(|rig| ModelMarkers::from_rig(&rig))
+        });
+        let Some(markers) = markers else {
             live_blocked = true;
             continue;
         };
@@ -219,7 +231,7 @@ pub(crate) fn sync_authoritative_model_markers(world: &mut World) {
             if let Some(mut transform) = entity_mut.get_mut::<Transform>() {
                 apply_mesh_transform(&mesh, &mut transform);
             }
-            entity_mut.insert(ModelMarkers::from_rig(&rig));
+            entity_mut.insert(markers.clone());
         }
     }
 
@@ -429,6 +441,146 @@ mod tests {
             (target - Vec3::new(12.250_398, 2.8, -8.149_602)).length() < 1e-4,
             "primary base rig must be composed into the target point, got {target:?}"
         );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    struct RigFixture {
+        directory: std::path::PathBuf,
+        model: String,
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    impl RigFixture {
+        fn new() -> Self {
+            let directory =
+                std::env::temp_dir().join(format!("phoenix-marker-batch-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir(&directory).unwrap();
+            let model = directory.join("fixture.glb").to_string_lossy().into_owned();
+            Self { directory, model }
+        }
+
+        fn write(&self, variant: Option<&str>, body: &str) {
+            std::fs::write(
+                crate::entities::model_rig::sidecar_path(&self.model, variant),
+                body,
+            )
+            .unwrap();
+        }
+
+        fn mesh(&self, variant: Option<&str>, scale: f32) -> MeshSection {
+            let mut mesh = primary_mesh();
+            mesh.0.model = Some(self.model.clone());
+            mesh.0.variant = variant.map(str::to_owned);
+            mesh.0.scale = scale;
+            mesh
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    impl Drop for RigFixture {
+        fn drop(&mut self) {
+            for entry in std::fs::read_dir(&self.directory).unwrap() {
+                std::fs::remove_file(entry.unwrap().path()).unwrap();
+            }
+            std::fs::remove_dir(&self.directory).unwrap();
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn rig_body(x: f32) -> String {
+        format!(
+            "[base]\noffset = [1.0, 0.0, 0.0]\nscale = [2.0, 2.0, 2.0]\n\
+             [markers.fore_emitter]\nposition = [{x}, 0.0, 0.0]\n\
+             direction = [0.0, 0.0, -1.0]\n\
+             [[target_points]]\nposition = [{x}, 1.0, 0.0]\n"
+        )
+    }
+
+    /// A shared rig is reusable geometry, not a shared entity transform or a
+    /// model-only key: authored variants and parent scales stay independent.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn marker_batch_preserves_variants_and_each_entities_transform() {
+        let fixture = RigFixture::new();
+        fixture.write(None, &rig_body(3.0));
+        fixture.write(Some("alternate"), &rig_body(5.0));
+        let mut app = App::new();
+        app.init_resource::<ModelRigReadiness>()
+            .add_systems(PreUpdate, sync_authoritative_model_markers);
+        let subjects: Vec<_> = [
+            (None, 1.0, 7.0),
+            (None, 3.0, 21.0),
+            (Some("alternate"), 1.0, 11.0),
+        ]
+        .into_iter()
+        .map(|(variant, scale, expected_x)| {
+            let entity = app
+                .world_mut()
+                .spawn((
+                    fixture.mesh(variant, scale),
+                    Transform::from_xyz(10.0, 0.0, 0.0),
+                ))
+                .id();
+            (entity, scale, expected_x + 10.0)
+        })
+        .collect();
+        app.update();
+        for (entity, scale, expected_x) in subjects {
+            let transform = app.world().get::<Transform>(entity).unwrap();
+            let markers = app.world().get::<ModelMarkers>(entity).unwrap();
+            assert_eq!(transform.scale, Vec3::splat(scale));
+            assert_eq!(
+                markers.resolve_world_position(transform, "fore_emitter"),
+                Some(Vec3::new(expected_x, 0.0, 0.0))
+            );
+            assert_eq!(
+                markers.resolve_target_point_world_position(transform, 0),
+                Some(Vec3::new(expected_x, 2.0 * scale, 0.0))
+            );
+        }
+        assert!(!app
+            .world()
+            .resource::<ModelRigReadiness>()
+            .blocks_simulation());
+    }
+
+    /// No lookup result survives the sync invocation, including the identity
+    /// fallback for absence/malformed content. Future spawns resolve the latest
+    /// body while already-attached entities retain their canonical geometry.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn marker_batch_observes_sidecar_delivery_and_replacement_on_later_passes() {
+        let fixture = RigFixture::new();
+        let mut app = App::new();
+        app.init_resource::<ModelRigReadiness>()
+            .add_systems(PreUpdate, sync_authoritative_model_markers);
+        let mut prior = Vec::new();
+        for (body, expected) in [
+            (None, None),
+            (Some("[malformed".to_string()), None),
+            (Some(rig_body(3.0)), Some(7.0)),
+            (Some(rig_body(5.0)), Some(11.0)),
+        ] {
+            if let Some(body) = body {
+                fixture.write(None, &body);
+            }
+            // More than one entity exercises sharing inside each pass.
+            for _ in 0..2 {
+                let entity = app
+                    .world_mut()
+                    .spawn((fixture.mesh(None, 1.0), Transform::default()))
+                    .id();
+                prior.push((entity, expected));
+            }
+            app.update();
+            for &(entity, expected) in &prior {
+                let markers = app.world().get::<ModelMarkers>(entity).unwrap();
+                assert_eq!(
+                    markers.resolve_world_position(&Transform::IDENTITY, "fore_emitter"),
+                    expected.map(|x| Vec3::new(x, 0.0, 0.0))
+                );
+            }
+        }
     }
 
     /// Registering a presentation-side read must not change canonical geometry

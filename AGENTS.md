@@ -35,6 +35,28 @@ deadline the design model does not claim is an error by design.
 
 ---
 
+## Concurrent Issue Work
+
+Use isolated worktrees for concurrent tasks that edit code. Each task owns its
+issue commits; coordinate overlapping files and implement dependencies in order.
+Preserve unrelated work in a dirty checkout instead of staging or resetting it.
+
+Designate one integration task for each combined push. Workers perform targeted
+validation and independent, read-only review, then hand over commits plus the
+commands, configurations, tested revisions and results. Workers do not run the
+full pre-push gate list or push main independently. For a single task, that task
+also owns integration.
+
+The integrator applies ready commits to local main, resolves conflicts, and runs
+the required gates below once on the integrated result before pushing. Repeat or
+broaden checks only when relevant changes, failures or unresolved concerns make
+the existing evidence insufficient. Review, commit creation and task handoff do
+not by themselves invalidate evidence. A failing gate still needs resolution;
+an isolated retry does not establish that the full suite passed.
+
+Coordinate expensive local Cargo commands across tasks and keep them sequential;
+a build-lock wait is not a reason to launch another copy of the same check.
+
 ## Common Commands
 
 ```bash
@@ -664,52 +686,24 @@ git diff perf/baselines
 #   and header prose survive. Write commentary in the HEADER — the RON value
 #   below it is regenerated. See src/perf/baseline.rs.
 
-# CI: ci.yml — eleven jobs on two cadences. `pasm`, `test`, `editor-test`,
-# `viewer-test` and `boundary` run in PARALLEL and gate independently (any one
-# of them red fails the build); `build` needs `test`; `smoke` needs `build`;
-# `deploy` runs on main. `native-build`, `perf` and `balance` are NIGHTLY ONLY
-# (schedule + workflow_dispatch) — none of them was ever on the critical path,
-# so they cost runner minutes rather than wall clock, and they measure things
-# that move on the order of days.
+# CI topology: .github/workflows/ci.yml is authoritative for commands and
+# dependencies; the local gate commands are listed once at the top of this
+# section. Update those commands when the workflow changes.
 #
-#   pasm         uv run pasm validate ; uv run pasm scan — both through
-#                vellum's `pasm-validate` composite action (fleet-standard,
-#                pinned by rev) ; then uv run pasm scan/traceability --json
-#                uploaded as the `pasm-reports` artifact. No pytest step.
-#   test         cargo fmt --check ; cargo clippy --workspace --all-targets
-#                --features <every feature but `ultralight`> -D warnings ;
-#                cargo test
-#   editor-test  npm run debug-surfaces:check ; npx vitest run ;
-#                node scripts/check-strings.mjs --strict ; npm run lods:check ;
-#                npm run lod-captures:check
-#   build        TRUNK_BUILD_RELEASE=true trunk build --release ;
-#                node scripts/build-client.mjs
-#   smoke        npx playwright test $SMOKE_GREP --shard=N/3, against the built
-#                dist/, across a 3-way matrix. TWO TIERS: @core (48 breadth
-#                tests, one per feature area) on PRs and main pushes; the full
-#                248 on the nightly, on workflow_dispatch, and on a PR labelled
-#                `smoke-full`. See the job's header comment for the trade.
-#   deploy       peaceiris/actions-gh-pages@v4 — publishes dist/ to GitHub
-#                Pages; main branch only, gated on the @core smoke pass
+# `pasm`, `test`, `editor-test`, `viewer-test`, `demo-test`, `tooling-build`,
+# `boundary` and `build` start independently. `smoke` needs `build` and runs
+# across three shards: @core on ordinary PRs/pushes, full coverage on nightly,
+# workflow_dispatch and PRs labelled `smoke-full`.
+# `deploy` runs on main and needs test, build, editor-test, smoke, viewer-test,
+# demo-test, tooling-build and boundary. PASM remains an independent CI gate.
 #
-#   — nightly only —
-#   native-build release phoenix-headless + phoenix-perf, as `native-bins`
-#   perf         phoenix-perf assets|mesh|report — GATES on the `assets`
-#                scenario only (report --gate, exit 3); every other scenario
-#                reports into the job summary and the perf-capture artifact
-#   balance      destroyer report (non-gating) plus the ratified cruiser matrix
-#                (`scripts/balance-runs.cruiser.toml`, gating)
-#
-# Perf or balance numbers for a branch in flight: run the workflow by hand
-# (`gh workflow run ci.yml --ref <branch>`), which takes the nightly path.
-#
-# Keep this list in sync with .github/workflows/ci.yml — if you add a gate
-# there, add it above, and vice versa. Trusting a stale list here is how a
-# batch lands "green" and breaks the build.
-#
-# Keep this list in sync with .github/workflows/ci.yml — if you add a gate
-# there, add it above, and vice versa. Trusting a stale list here is how a
-# batch lands "green" and breaks the build.
+# `native-build`, `perf` and `balance` run only on schedule/workflow_dispatch.
+# native-build links release phoenix-headless and phoenix-perf. Perf needs
+# test, smoke and native-build; its reports are warnings-only in regular CI
+# (the separate manual demo deployment owns the perf --gate checks).
+# Balance needs test and native-build; the cruiser matrix gates that job.
+# Run `gh workflow run ci.yml --ref <branch>` for these scheduled suites on a
+# branch. Their behavioural coverage stays on its existing cadence.
 ```
 
 Prerequisites: Rust stable + `rustup target add wasm32-unknown-unknown`, `cargo install trunk`, node/npm.

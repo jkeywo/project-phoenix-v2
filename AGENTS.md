@@ -57,6 +57,13 @@ an isolated retry does not establish that the full suite passed.
 Coordinate expensive local Cargo commands across tasks and keep them sequential;
 a build-lock wait is not a reason to launch another copy of the same check.
 
+When reusing a `CARGO_TARGET_DIR` across worktrees, force this project's library
+to rebuild after switching source trees. Its shared `rlib`/`cdylib` output can
+otherwise be reused when the incoming files have older timestamps. Refresh
+`src/lib.rs`'s modification time without changing its bytes, then verify the
+library build and dependency record match the intended source. A newly compiled
+test executable alone does not establish that its linked library is current.
+
 ## Common Commands
 
 ```bash

@@ -95,7 +95,7 @@ fn paused_state_and_the_future_gm_frontier_round_trip_together() {
 /// A GM Fire that crossed its apply boundary but whose handler has not run yet
 /// survives capture and restore (issue #1301).
 ///
-/// This is the exact cross-schedule gap format 19 exists to close. The journal
+/// This is the exact cross-schedule gap format 21 exists to close. The journal
 /// already says the Fire was Applied, and its idempotency makes a second Fire
 /// of a one-shot event a No-op — so a resume that forgot the arm would leave an
 /// authored event reported as fired, never run, and permanently unreachable.
@@ -393,7 +393,7 @@ fn paused_gm_events_round_trip_with_their_authored_trigger_table() {
 /// A GM Skip that crossed its apply boundary and is still waiting for the
 /// occurrence it stands in front of survives capture and restore (issue #1304).
 ///
-/// Format 23's reason, and the sharper half of format 19's: a Skip arm is
+/// Format 25's reason, and the sharper half of format 21's: a Skip arm is
 /// waiting on the WORLD, so it routinely outlives any number of saves, and a
 /// resume that forgot one runs in full the occurrence the GM decided the crew
 /// would not see -- with the journal still reporting the arm Applied and no
@@ -812,13 +812,13 @@ fn format_17_without_apply_outcomes_or_pending_station_commands_is_refused() {
 }
 
 #[test]
-fn format_19_without_the_armed_direct_effects_is_refused() {
-    let previous = vellum_save::Versions::new(19, SIMULATION_RULES, 0);
+fn format_21_without_the_armed_direct_effects_is_refused() {
+    let previous = vellum_save::Versions::new(21, SIMULATION_RULES, 0);
     let current = vellum_save::Versions::new(SNAPSHOT_FORMAT, SIMULATION_RULES, 0);
     assert!(matches!(
         previous
             .check(&current)
-            .expect_err("format 19 records an Applied hit nothing will ever land"),
+            .expect_err("format 21 records an Applied hit nothing will ever land"),
         vellum_save::Moved::Format { .. },
     ));
 }
@@ -897,7 +897,7 @@ fn restoring_running_state_does_not_release_an_unrelated_virtual_time_hold() {
 /// An armed GM direct effect crosses the capture boundary and lands EXACTLY
 /// once, identically, on the live world and on a fresh restore (issue #1310).
 ///
-/// This is the cross-schedule gap format 20 exists for: the grant is already
+/// This is the cross-schedule gap format 22 exists for: the grant is already
 /// Applied in the journal — with an exact hull amount and a lethal flag on its
 /// durable result — but `SimSet::Damage` has not run yet, so a capture that
 /// dropped the arm would resume a world claiming damage nobody will ever apply.
@@ -913,8 +913,6 @@ fn an_armed_direct_effect_survives_capture_and_lands_once_on_both_sides() {
             .register_component::<crate::ship::state::ShipPhysics>();
         app.world_mut()
             .register_component::<crate::entities::spawner::EntitySystemHull>();
-        app.world_mut()
-            .register_component::<crate::ship::state::ShipWeaponsHold>();
         app.world_mut()
             .register_component::<crate::console::command::server::ShipStationStances>();
         app.world_mut()
@@ -1027,9 +1025,9 @@ fn an_armed_direct_effect_survives_capture_and_lands_once_on_both_sides() {
 
 /// The SCOPE of an armed effect crosses the capture boundary with it, so a
 /// resumed peer damages the Station the grant named rather than the whole hull
-/// (issue #1311, snapshot format 24).
+/// (issue #1311, snapshot format 26).
 ///
-/// This is the fact format 24 exists for. The amount alone survived a format-23
+/// This is the fact format 26 exists for. The amount alone survived a format-25
 /// record; a restore that defaulted the scope back to `Entity` would land the
 /// same 25 points across every System on the ship, and the live peer and the
 /// resumed one would then disagree about a hull neither could explain.
@@ -1045,8 +1043,6 @@ fn an_armed_scoped_effect_restores_against_the_same_station_it_named() {
             .register_component::<crate::ship::state::ShipPhysics>();
         app.world_mut()
             .register_component::<crate::entities::spawner::EntitySystemHull>();
-        app.world_mut()
-            .register_component::<crate::ship::state::ShipWeaponsHold>();
         app.world_mut()
             .register_component::<crate::console::command::server::ShipStationStances>();
         app.world_mut()

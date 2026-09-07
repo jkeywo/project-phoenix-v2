@@ -554,9 +554,9 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// lever never pulled, so both are refused by `Versions::check`, which names the
 /// dimension — the same answer every rung above gives.
 ///
-/// Format 19 carries the armed GM event Fires and each authored trigger's arm
+/// Format 21 carries the armed GM event Fires and each authored trigger's arm
 /// latch (issue #1301). It is the same cross-schedule gap one rung further: a
-/// format-18 capture taken after the Fire crossed its PreUpdate apply boundary
+/// format-20 capture taken after the Fire crossed its PreUpdate apply boundary
 /// but before `tick_trigger_pipeline` ran the handler records an Applied Fire
 /// with nothing that will ever run it, and the journal's idempotency makes a
 /// second Fire of that one-shot a No-op — so the event becomes permanently
@@ -564,8 +564,8 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// action's stable target identity, without which a restored feed cannot say
 /// WHICH event a logged Fire fired.
 ///
-/// Format 20 carries the armed GM direct damage/heal effects (issue #1310).
-/// The same cross-schedule gap again, and the same consequence: a format-19
+/// Format 22 carries the armed GM direct damage/heal effects (issue #1310).
+/// The same cross-schedule gap again, and the same consequence: a format-21
 /// capture taken after the effect crossed its PreUpdate apply boundary but
 /// before `SimSet::Damage` landed it records an Applied hit — with an exact
 /// hull amount and a lethal flag on the durable result — that no restored peer
@@ -574,9 +574,9 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// gained the resolved effect itself, without which a restored feed cannot say
 /// how much a logged hit landed or discarded.
 ///
-/// Format 21 carries the armed GM PLACEMENTS (issue #1305) — the same
+/// Format 23 carries the armed GM PLACEMENTS (issue #1305) — the same
 /// cross-schedule gap one rung further along, and the one whose loss is least
-/// recoverable. A format-20 capture taken after a placement crossed its
+/// recoverable. A format-22 capture taken after a placement crossed its
 /// PreUpdate apply boundary but before `tick_trigger_pipeline` spawned the hull
 /// records an Applied placement with nothing that will ever perform it; and
 /// because each press is its own correlation rather than an idempotent latch, a
@@ -584,8 +584,8 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// queue's ORDER travels with it because it decides which placement draws which
 /// `WorldIdMint` id.
 ///
-/// Format 22 carries which GM-operable events are PAUSED, and the lever each
-/// durable GM result pulled (issue #1303). A format-21 record has no field that
+/// Format 24 carries which GM-operable events are PAUSED, and the lever each
+/// durable GM result pulled (issue #1303). A format-23 record has no field that
 /// can say either. Resuming it un-pauses every paused event — the restored
 /// world resumes evaluating conditions a GM deliberately stopped, while the
 /// journal it carries still says that Pause was Applied, so a second Pause is a
@@ -594,10 +594,9 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// lever would republish a restored run's Pauses and Resumes as fires of the
 /// same events.
 ///
-/// Format 23 carries the armed GM event Skips (issue #1304) — renumbered from
-/// 21 to 23 on rebase, since #1305 and #1303 had already claimed 21 and 22 on
-/// the branch this landed on. Format 19's gap in the other direction: a
-/// format-22 capture taken after the Skip crossed its PreUpdate apply boundary
+/// Format 25 carries the armed GM event Skips (issue #1304).
+/// Format 21's gap in the other direction: a
+/// format-24 capture taken after the Skip crossed its PreUpdate apply boundary
 /// records an Applied arm that no restored peer will honour, so the occurrence
 /// the GM bought silence for happens in full — the loudest possible way to
 /// lose a decision the operator already made, and one no re-press can undo
@@ -605,15 +604,15 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// LEVER, without which a restored feed reports every Skip as a Fire of the
 /// same event: the opposite sentence about the same button.
 ///
-/// Format 24 carries the SCOPE of an armed or already-applied GM direct effect
-/// (issue #1311). A format-23 record predates Station and System scopes, so
+/// Format 26 carries the SCOPE of an armed or already-applied GM direct effect
+/// (issue #1311). A format-25 record predates Station and System scopes, so
 /// every effect it holds is a whole-hull one and defaulting the field would be
 /// correct — but the durable result gained `effect_scope` alongside it, and a
-/// format-23 journal that quietly restored as "whole hull" would let a resumed
+/// format-25 journal that quietly restored as "whole hull" would let a resumed
 /// feed say a GM emptied a ship when they emptied one Station. The format gate
 /// refuses that rather than inventing the difference, which is the same
-/// judgement formats 19 and 20 made about the facts they added.
-pub const SNAPSHOT_FORMAT: u32 = 24;
+/// judgement formats 21 and 22 made about the facts they added.
+pub const SNAPSHOT_FORMAT: u32 = 26;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.

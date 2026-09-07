@@ -11,9 +11,9 @@ Status: implementation authorized by John on 7 September 2026. Current delivery 
 
 First remove the native/browser correctness differences: startup restore must finish or fail visibly, a Session must have one effective connection owner, and both hosts must publish complete scenario metadata. Then reduce measured presentation work and deepen the World and snapshot modules without changing gameplay.
 
-The [evidence note](C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/docs/plans/2026-09-07-review-followup/EVIDENCE.md) records the measurements, their limits and links to the full reviews. This is a local planning draft for the requested worktree. GitHub remains the planning authority once work is scheduled; publish or attach these slices to the relevant issues before implementation is assigned. Intended architecture belongs in PASM alongside each implemented change, and the wiki changes only when code navigation changes.
+The [evidence note](C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/docs/plans/2026-09-07-review-followup/EVIDENCE.md) records the measurements, their limits and links to the full reviews. This is the approved plan for the requested worktree; PROGRESS.md maps its slices to their GitHub issues and integrated commits. GitHub remains the planning authority. Intended architecture belongs in PASM alongside each implemented change, and the wiki changes only when code navigation changes.
 
-The worktree deliberately starts from committed main. It does not contain the other task's uncommitted pane-thread implementation or supporting metadata. Do not copy those files here. Integrate its delivered commit before work that changes its interfaces.
+The worktree started from committed main and was rebased onto main 76d36d24 after the pane-thread implementation landed as #1404 (718d9a90). Its interfaces are therefore integrated from the delivered commit.
 
 ## Delivery map
 
@@ -161,11 +161,11 @@ Sequence after A2 and coordinate with R1. Tests that do not open panes need not 
 
 For each code slice: reproduce the failure or characterize the public behavior, implement through the real module interface, run targeted tests/checks, then review the final diff. Do not commit a failing regression test as a standalone deliverable. Reuse existing native integration, client reducer and browser smoke coverage; add tests for the newly shared behavior rather than mirroring implementation details.
 
-During implementation use cargo check and relevant test targets. Before each eventual push, run the repository's complete required gates once at the prescribed final integration point, including PASM validation/scan/traceability when its records change. A Rust-only pass does not establish browser compatibility; touched JS/wire paths need their real client and WASM/browser checks. Ultralight SDK and physical bridge checks supplement the feature-off tests. No broad gates are run for this planning-only change.
+During implementation use cargo check and relevant test targets. Before each eventual push, run the repository's complete required gates once at the prescribed final integration point, including PASM validation/scan/traceability when its records change. A Rust-only pass does not establish browser compatibility; touched JS/wire paths need their real client and WASM/browser checks. Ultralight SDK and physical bridge checks supplement the feature-off tests. Reuse completed evidence while its relevant inputs remain unchanged.
 
 Update PASM with intended ownership/behavior in the same implementation slice, then update wiki realization links after code changes. Run the wiki schema lint when closing the batch. Do not update performance baselines silently or present a temporarily skipped acceptance leg as completed.
 
-The next implementer should start R1 and G0, prepare R3 in parallel if desired, and coordinate R2/P1 with the #1404 owner. Recheck current GitHub state and source before filing slices: #1404/#1405 were open when inspected, and their checkboxes lag local implementation. Scope changes discovered by regression tests belong explicitly in the slice description, not in unrelated cleanup.
+PROGRESS.md records the current handoff and remaining checks. Recheck current GitHub state and source before filing additional slices; tracker checkboxes can lag delivered implementation. Scope changes discovered by regression tests belong explicitly in the slice description, not in unrelated cleanup.
 
 [save-lifecycle]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/src/save_slots_lifecycle.rs
 [save-store]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/src/save_slots_store.rs

@@ -6,7 +6,7 @@ This note makes the essential review evidence available with the plan. Full sour
 
 The implementation rebased onto delivered #1404 (main 76d36d24). The new quiet-window headless, renderer and Ultralight captures, pinned build identities, hardware dimensions, selected controls and rejected runs are summarized in [RESULTS.md](C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/docs/plans/2026-09-07-review-followup/RESULTS.md). That is the current performance evidence; the initial review measurements below explain the original plan and are not the adoption baseline. Subsequent animation and native data-delivery corrections have separate functional validation and are not silently substituted into those frozen comparisons.
 
-## Initial review source and active work
+## Initial review source and then-active work
 
 - Reviews were anchored to source commit 99932cfdbcba290efadd5c389aa0cc59a75124e8.
 - This planning worktree starts at committed main 40af72382d731c789d3b904bd6e86ae5a73e1f60. The intervening commit repairs CI/demo/smoke dependencies; the reviewed host-policy findings were checked again against the committed source.
@@ -53,4 +53,4 @@ See [performance methodology](C:/Coding/project-phoenix-v2/.phoenix/reviews/2026
 
 Source-traced correctness failures still need executable regressions through production adapters. Architecture findings are maintenance opportunities, not reproduced defects or measured speedups. Preserve the already-shared simulation, Boot Profiles, Admission, phone JS renderers and existing copy/upload/queue improvements.
 
-The [implementation plan](C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/docs/plans/2026-09-07-review-followup/PLAN.md) carries the dependencies, acceptance checks, chosen policies and stopping criteria. This branch changes planning documents only.
+The [implementation plan](C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/docs/plans/2026-09-07-review-followup/PLAN.md) carries the approved dependencies, acceptance checks, chosen policies and stopping criteria. The branch now contains the implementation; current commits and validation are recorded in [PROGRESS.md](C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/docs/plans/2026-09-07-review-followup/PROGRESS.md).

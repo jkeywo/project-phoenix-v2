@@ -702,6 +702,7 @@ fn scripted_on_destroyed_completes_objective_through_the_live_pipeline() {
     // One inline `[script]` trigger: on the raider's death, complete "obj".
     let mut sr = compile_fixture_scripts(SCRIPT_ON_DESTROYED_COMPLETES_OBJECTIVE);
     assert_eq!(sr.triggers.len(), 2, "two scripted triggers authored");
+    sr.triggers[0].trigger.id = Some("raider-destroyed".into());
 
     let mut app = ai_trigger_test_app();
     app.add_message::<crate::core::balance::BalanceEvent>();
@@ -711,16 +712,17 @@ fn scripted_on_destroyed_completes_objective_through_the_live_pipeline() {
         runtime
             .name_to_uuid
             .insert("raider".to_string(), raider_uuid.to_string());
-        // No declarative triggers; merge appends the scripted one and builds
-        // the parallel handler table.
-        runtime.trigger_states = Vec::new();
+        // Merge appends complete scripted entries to the empty registry.
+        runtime.triggers.replace_declarative(Vec::new());
         merge_script_triggers(&mut runtime, &mut sr, None);
-        assert_eq!(runtime.trigger_states.len(), 2);
-        runtime.trigger_states[0].trigger.id = Some("raider-destroyed".into());
+        assert_eq!(runtime.triggers.len(), 2);
     }
-    assert_eq!(sr.handlers.len(), 2);
     assert!(
-        sr.handlers[0].is_some(),
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .triggers
+            .handler(0)
+            .is_some(),
         "the scripted index carries a handler"
     );
     app.world_mut().insert_resource(sr);
@@ -816,7 +818,7 @@ fn scripted_open_comms_queues_on_the_runtime_through_the_live_pipeline() {
         runtime
             .name_to_uuid
             .insert("raider".to_string(), raider_uuid.to_string());
-        runtime.trigger_states = Vec::new();
+        runtime.triggers.replace_declarative(Vec::new());
         merge_script_triggers(&mut runtime, &mut sr, None);
     }
     assert!(
@@ -877,7 +879,7 @@ fn scripted_flag_write_chains_a_declarative_on_flag_set() {
         // Declarative watcher on_flag_set("armed"); the scripted
         // on_destroyed trigger is appended AFTER it by the merge, so the
         // watcher keeps index 0.
-        runtime.trigger_states = vec![TriggerState {
+        runtime.triggers.replace_declarative(vec![TriggerState {
             trigger: crate::world::content::Trigger {
                 condition: TriggerCondition::OnFlagSet {
                     name: "armed".to_string(),
@@ -891,7 +893,7 @@ fn scripted_flag_write_chains_a_declarative_on_flag_set() {
             origin_layer: None,
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
-        }];
+        }]);
         merge_script_triggers(&mut runtime, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
@@ -905,7 +907,7 @@ fn scripted_flag_write_chains_a_declarative_on_flag_set() {
 
     let runtime = app.world().resource::<WorldContentRuntime>();
     assert!(
-        runtime.trigger_states[0].fired,
+        runtime.triggers[0].fired,
         "a scripted flag write must emit FlagSet so the declarative on_flag_set \
          trigger chains in the next pass (the apply_script_commands preview)"
     );
@@ -942,7 +944,7 @@ fn scripted_flag_clear_chains_a_declarative_on_flag_cleared() {
         // Declarative watcher on_flag_cleared("shields_up"); the scripted
         // on_destroyed trigger is appended AFTER it by the merge, so the
         // watcher keeps index 0.
-        runtime.trigger_states = vec![TriggerState {
+        runtime.triggers.replace_declarative(vec![TriggerState {
             trigger: crate::world::content::Trigger {
                 condition: TriggerCondition::OnFlagCleared {
                     name: "shields_up".to_string(),
@@ -956,7 +958,7 @@ fn scripted_flag_clear_chains_a_declarative_on_flag_cleared() {
             origin_layer: None,
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
-        }];
+        }]);
         merge_script_triggers(&mut runtime, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
@@ -970,7 +972,7 @@ fn scripted_flag_clear_chains_a_declarative_on_flag_cleared() {
 
     let runtime = app.world().resource::<WorldContentRuntime>();
     assert!(
-        runtime.trigger_states[0].fired,
+        runtime.triggers[0].fired,
         "a scripted flag clear must emit FlagCleared so the declarative \
          on_flag_cleared trigger chains in the next pass (the \
          apply_script_commands preview)"
@@ -1009,7 +1011,7 @@ fn scripted_flag_increment_chains_a_declarative_on_flag_set() {
         // Declarative watcher on_flag_set("wave"); the scripted on_destroyed
         // trigger is appended AFTER it by the merge, so the watcher keeps
         // index 0.
-        runtime.trigger_states = vec![TriggerState {
+        runtime.triggers.replace_declarative(vec![TriggerState {
             trigger: crate::world::content::Trigger {
                 condition: TriggerCondition::OnFlagSet {
                     name: "wave".to_string(),
@@ -1023,7 +1025,7 @@ fn scripted_flag_increment_chains_a_declarative_on_flag_set() {
             origin_layer: None,
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
-        }];
+        }]);
         merge_script_triggers(&mut runtime, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
@@ -1037,7 +1039,7 @@ fn scripted_flag_increment_chains_a_declarative_on_flag_set() {
 
     let runtime = app.world().resource::<WorldContentRuntime>();
     assert!(
-        runtime.trigger_states[0].fired,
+        runtime.triggers[0].fired,
         "a scripted flag increment from 0 must emit FlagSet so the declarative \
          on_flag_set trigger chains in the next pass (the apply_script_commands \
          preview)"
@@ -1090,7 +1092,7 @@ fn scripted_and_dispatched_spawn_mint_the_same_entity_uuid() {
             runtime
                 .name_to_uuid
                 .insert("raider".to_string(), raider_uuid.to_string());
-            runtime.trigger_states = Vec::new();
+            runtime.triggers.replace_declarative(Vec::new());
             merge_script_triggers(&mut runtime, &mut sr, None);
         }
         app.world_mut().insert_resource(sr);
@@ -1199,7 +1201,7 @@ fn a_scripted_destroy_chains_on_destroyed_in_the_same_tick() {
         // The witness, at index 0: a declarative `on_destroyed` watching the
         // SKYHOOK — an entity nothing shoots at. Only the scripted destruction
         // can make this fire.
-        runtime.trigger_states = vec![TriggerState {
+        runtime.triggers.replace_declarative(vec![TriggerState {
             trigger: crate::world::content::Trigger {
                 condition: TriggerCondition::OnDestroyed {
                     entity_name: "skyhook".into(),
@@ -1213,7 +1215,7 @@ fn a_scripted_destroy_chains_on_destroyed_in_the_same_tick() {
             origin_layer: None,
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
-        }];
+        }]);
         merge_script_triggers(&mut runtime, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
@@ -1284,7 +1286,7 @@ fn a_scripted_destroy_of_the_last_group_member_fires_on_all_destroyed() {
                 .into_iter()
                 .collect(),
         );
-        runtime.trigger_states = vec![TriggerState {
+        runtime.triggers.replace_declarative(vec![TriggerState {
             trigger: crate::world::content::Trigger {
                 condition: TriggerCondition::OnAllDestroyed {
                     group: "band".into(),
@@ -1299,7 +1301,7 @@ fn a_scripted_destroy_of_the_last_group_member_fires_on_all_destroyed() {
             origin_layer: None,
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
-        }];
+        }]);
         merge_script_triggers(&mut runtime, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
@@ -1357,7 +1359,7 @@ fn a_scripted_destroy_of_an_unknown_name_warns_and_keeps_the_rest_of_the_call() 
         runtime
             .name_to_uuid
             .insert("raider".to_string(), raider_uuid.to_string());
-        runtime.trigger_states = vec![TriggerState {
+        runtime.triggers.replace_declarative(vec![TriggerState {
             trigger: crate::world::content::Trigger {
                 condition: TriggerCondition::OnDestroyed {
                     entity_name: "no_such_entity".into(),
@@ -1371,7 +1373,7 @@ fn a_scripted_destroy_of_an_unknown_name_warns_and_keeps_the_rest_of_the_call() 
             origin_layer: None,
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
-        }];
+        }]);
         merge_script_triggers(&mut runtime, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
@@ -1430,7 +1432,7 @@ fn a_name_freed_by_a_scripted_destroy_is_reusable_by_a_later_spawn() {
         runtime
             .name_to_uuid
             .insert("cue".to_string(), "cue-uuid-1033d".to_string());
-        runtime.trigger_states = Vec::new();
+        runtime.triggers.replace_declarative(Vec::new());
         merge_script_triggers(&mut runtime, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
@@ -1462,15 +1464,14 @@ fn a_name_freed_by_a_scripted_destroy_is_reusable_by_a_later_spawn() {
 
 /// Issue #984 (Rhai M6 phase 2a), Startup-wiring proof: `compile_world_scripts`
 /// inserts `WorldScriptRuntime`, and `init_world_runtime` merges the scripted
-/// trigger into `trigger_states` and builds `handlers` parallel to it — the
+/// trigger into `triggers` and builds `handlers` parallel to it — the
 /// same `Startup` chain production runs (minus the spawn), driven here without
 /// a full headless app.
 ///
 /// The fixture carried a `[[trigger]]` block as well, to pin that the scripted
 /// state was APPENDED after the declarative ones. Issue #985 deleted that
 /// parser (a world authoring one now fails to parse at all), so scripts are the
-/// only source and the parallel `handlers` table has no `None` entries left to
-/// check.
+/// production source. Mixed declarative fixtures are covered at the registry interface.
 #[test]
 fn compile_and_init_wire_a_scripted_trigger_into_the_runtime() {
     let world_toml = WORLD_TOML_SCRIPTED_ON_DESTROYED_COMPLETES_OBJECTIVE;
@@ -1491,25 +1492,24 @@ fn compile_and_init_wire_a_scripted_trigger_into_the_runtime() {
     // compile_world_scripts inserted the runtime; init_world_runtime's
     // one-time merge then drained `triggers` (finding 5) — it is not retained
     // for the world's lifetime, the compiled trigger now lives in
-    // `trigger_states` and the parallel `handlers` table.
+    // the World trigger registry.
     let sr = app.world().resource::<WorldScriptRuntime>();
     assert!(
         sr.triggers.is_empty(),
         "merge_script_triggers drains the retained triggers"
     );
-    // handlers stay parallel to trigger_states — one entry, carrying the
+    // handlers stay parallel to triggers — one entry, carrying the
     // compiled handler fn.
-    assert_eq!(sr.handlers.len(), 1, "one scripted trigger");
+    let runtime = app.world().resource::<WorldContentRuntime>();
     assert_eq!(
-        sr.handlers[0].as_ref().map(|h| h.fn_name.as_str()),
+        runtime.triggers.handler(0).map(|h| h.fn_name.as_str()),
         Some("k"),
         "the scripted index carries its handler fn"
     );
 
-    let runtime = app.world().resource::<WorldContentRuntime>();
-    assert_eq!(runtime.trigger_states.len(), 1);
+    assert_eq!(runtime.triggers.len(), 1);
     assert_eq!(
-        runtime.trigger_states[0].trigger.condition,
+        runtime.triggers[0].trigger.condition,
         TriggerCondition::OnDestroyed {
             entity_name: "raider".to_string()
         }
@@ -1605,7 +1605,7 @@ fn scripted_callback_fires_after_the_delay_not_immediately() {
         runtime
             .name_to_uuid
             .insert("raider".to_string(), raider_uuid.to_string());
-        runtime.trigger_states = Vec::new();
+        runtime.triggers.replace_declarative(Vec::new());
         merge_script_triggers(&mut runtime, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
@@ -1682,7 +1682,7 @@ fn scripted_callback_can_reschedule_another_callback() {
         runtime
             .name_to_uuid
             .insert("raider".to_string(), raider_uuid.to_string());
-        runtime.trigger_states = Vec::new();
+        runtime.triggers.replace_declarative(Vec::new());
         merge_script_triggers(&mut runtime, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
@@ -1761,7 +1761,7 @@ fn scripted_callback_rescheduled_at_delay_zero_defers_to_the_next_tick() {
         runtime
             .name_to_uuid
             .insert("raider".to_string(), raider_uuid.to_string());
-        runtime.trigger_states = Vec::new();
+        runtime.triggers.replace_declarative(Vec::new());
         merge_script_triggers(&mut runtime, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
@@ -1823,7 +1823,7 @@ fn scripted_callback_rescheduled_at_delay_zero_defers_to_the_next_tick() {
 /// the `[[trigger]]` action array: a fire used to be observed through an
 /// action's side effect, and a trigger that fires now records nothing else.
 fn trigger_fired(app: &App, index: usize) -> bool {
-    app.world().resource::<WorldContentRuntime>().trigger_states[index].fired
+    app.world().resource::<WorldContentRuntime>().triggers[index].fired
 }
 
 /// A scenario trigger fires when the named ship reaches the named
@@ -1838,7 +1838,7 @@ fn on_waypoint_reached_trigger_fires() {
     runtime
         .name_to_uuid
         .insert("harrow_patrol".to_string(), npc_uuid.to_string());
-    runtime.trigger_states = vec![TriggerState {
+    runtime.triggers.replace_declarative(vec![TriggerState {
         trigger: crate::world::content::Trigger {
             condition: TriggerCondition::OnWaypointReached {
                 entity_name: "harrow_patrol".to_string(),
@@ -1853,7 +1853,7 @@ fn on_waypoint_reached_trigger_fires() {
         origin_layer: None,
         seen_destroyed: HashSet::new(),
         last_fired_elapsed: None,
-    }];
+    }]);
 
     app.world_mut()
         .resource_mut::<Messages<crate::ai::server::AiWaypointReached>>()
@@ -1882,7 +1882,7 @@ fn on_waypoint_reached_trigger_ignores_a_different_waypoint() {
     runtime
         .name_to_uuid
         .insert("harrow_patrol".to_string(), npc_uuid.to_string());
-    runtime.trigger_states = vec![TriggerState {
+    runtime.triggers.replace_declarative(vec![TriggerState {
         trigger: crate::world::content::Trigger {
             condition: TriggerCondition::OnWaypointReached {
                 entity_name: "harrow_patrol".to_string(),
@@ -1897,7 +1897,7 @@ fn on_waypoint_reached_trigger_ignores_a_different_waypoint() {
         origin_layer: None,
         seen_destroyed: HashSet::new(),
         last_fired_elapsed: None,
-    }];
+    }]);
 
     app.world_mut()
         .resource_mut::<Messages<crate::ai::server::AiWaypointReached>>()
@@ -1926,7 +1926,7 @@ fn on_waypoint_reached_without_waypoint_fires_on_any_waypoint() {
     runtime
         .name_to_uuid
         .insert("harrow_patrol".to_string(), npc_uuid.to_string());
-    runtime.trigger_states = vec![TriggerState {
+    runtime.triggers.replace_declarative(vec![TriggerState {
         trigger: crate::world::content::Trigger {
             condition: TriggerCondition::OnWaypointReached {
                 entity_name: "harrow_patrol".to_string(),
@@ -1941,7 +1941,7 @@ fn on_waypoint_reached_without_waypoint_fires_on_any_waypoint() {
         origin_layer: None,
         seen_destroyed: HashSet::new(),
         last_fired_elapsed: None,
-    }];
+    }]);
 
     app.world_mut()
         .resource_mut::<Messages<crate::ai::server::AiWaypointReached>>()
@@ -1971,7 +1971,7 @@ fn on_waypoint_reached_trigger_ignores_a_different_ship() {
     runtime
         .name_to_uuid
         .insert("other_ship".to_string(), "uuid-other".to_string());
-    runtime.trigger_states = vec![TriggerState {
+    runtime.triggers.replace_declarative(vec![TriggerState {
         trigger: crate::world::content::Trigger {
             condition: TriggerCondition::OnWaypointReached {
                 entity_name: "harrow_patrol".to_string(),
@@ -1986,7 +1986,7 @@ fn on_waypoint_reached_trigger_ignores_a_different_ship() {
         origin_layer: None,
         seen_destroyed: HashSet::new(),
         last_fired_elapsed: None,
-    }];
+    }]);
 
     app.world_mut()
         .resource_mut::<Messages<crate::ai::server::AiWaypointReached>>()
@@ -2015,7 +2015,7 @@ fn on_entity_destroyed_trigger_fires() {
     runtime
         .name_to_uuid
         .insert("station_alpha".to_string(), npc_uuid.to_string());
-    runtime.trigger_states = vec![TriggerState {
+    runtime.triggers.replace_declarative(vec![TriggerState {
         trigger: crate::world::content::Trigger {
             condition: TriggerCondition::OnDestroyed {
                 entity_name: "station_alpha".to_string(),
@@ -2029,7 +2029,7 @@ fn on_entity_destroyed_trigger_fires() {
         origin_layer: None,
         seen_destroyed: HashSet::new(),
         last_fired_elapsed: None,
-    }];
+    }]);
 
     // Emit the AiEntityDestroyed message.
     app.world_mut()
@@ -2418,7 +2418,7 @@ fn on_all_destroyed_trigger_fires_after_all_named_entities_die_across_ticks() {
             .into_iter()
             .collect(),
     );
-    runtime.trigger_states = vec![TriggerState {
+    runtime.triggers.replace_declarative(vec![TriggerState {
         trigger: crate::world::content::Trigger {
             condition: TriggerCondition::OnAllDestroyed {
                 group: "waves".into(),
@@ -2433,7 +2433,7 @@ fn on_all_destroyed_trigger_fires_after_all_named_entities_die_across_ticks() {
         origin_layer: None,
         seen_destroyed: HashSet::new(),
         last_fired_elapsed: None,
-    }];
+    }]);
 
     // Tick 1: only wave_a dies. Trigger must NOT fire yet.
     app.world_mut()
@@ -2482,7 +2482,7 @@ fn when_predicate_suppresses_the_fire_but_keeps_the_trigger_live() {
         runtime
             .name_to_uuid
             .insert("target".into(), npc_uuid.into());
-        runtime.trigger_states = vec![TriggerState {
+        runtime.triggers.replace_declarative(vec![TriggerState {
             trigger: crate::world::content::Trigger {
                 condition: TriggerCondition::OnDestroyed {
                     entity_name: "target".into(),
@@ -2496,7 +2496,7 @@ fn when_predicate_suppresses_the_fire_but_keeps_the_trigger_live() {
             origin_layer: None,
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
-        }];
+        }]);
     }
     // First firing: flag unset → no objective.
     app.world_mut()
@@ -2540,7 +2540,7 @@ fn delayed_set_flag_action_fires_on_flag_set_trigger_on_the_next_tick() {
     let mut app = ai_trigger_test_app();
     {
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-        runtime.trigger_states = vec![TriggerState {
+        runtime.triggers.replace_declarative(vec![TriggerState {
             trigger: crate::world::content::Trigger {
                 condition: TriggerCondition::OnFlagSet { name: "a".into() },
                 when: None,
@@ -2552,7 +2552,7 @@ fn delayed_set_flag_action_fires_on_flag_set_trigger_on_the_next_tick() {
             origin_layer: None,
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
-        }];
+        }]);
     }
     dispatch_delayed_actions(
         &mut app,
@@ -2595,7 +2595,7 @@ fn no_op_reset_of_already_set_flag_does_not_emit_transition() {
     {
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
         runtime.flags.set_flag("a"); // pre-set
-        runtime.trigger_states = vec![TriggerState {
+        runtime.triggers.replace_declarative(vec![TriggerState {
             trigger: crate::world::content::Trigger {
                 condition: TriggerCondition::OnFlagSet { name: "a".into() },
                 when: None,
@@ -2607,7 +2607,7 @@ fn no_op_reset_of_already_set_flag_does_not_emit_transition() {
             origin_layer: None,
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
-        }];
+        }]);
     }
     dispatch_delayed_actions(
         &mut app,
@@ -2644,7 +2644,7 @@ fn delayed_clear_flag_action_fires_on_flag_cleared_trigger_on_the_next_tick() {
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
         // Pre-set so the clear is a real true → false transition.
         runtime.flags.set_flag("shields_up");
-        runtime.trigger_states = vec![TriggerState {
+        runtime.triggers.replace_declarative(vec![TriggerState {
             trigger: crate::world::content::Trigger {
                 condition: TriggerCondition::OnFlagCleared {
                     name: "shields_up".into(),
@@ -2658,7 +2658,7 @@ fn delayed_clear_flag_action_fires_on_flag_cleared_trigger_on_the_next_tick() {
             origin_layer: None,
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
-        }];
+        }]);
     }
     dispatch_delayed_actions(
         &mut app,
@@ -2712,7 +2712,7 @@ fn parent_prefix_in_when_predicate_reads_loader_layer_flag() {
             .name_to_uuid
             .insert("source".into(), npc_uuid.into());
         // Sub-world trigger: on_destroyed with when=flag(parent:armed).
-        runtime.trigger_states = vec![TriggerState {
+        runtime.triggers.replace_declarative(vec![TriggerState {
             trigger: crate::world::content::Trigger {
                 condition: TriggerCondition::OnDestroyed {
                     entity_name: "source".into(),
@@ -2726,7 +2726,7 @@ fn parent_prefix_in_when_predicate_reads_loader_layer_flag() {
             origin_layer: Some(layer_path.clone()),
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
-        }];
+        }]);
     }
     app.world_mut()
         .resource_mut::<Messages<AiEntityDestroyed>>()
@@ -2770,7 +2770,7 @@ fn same_named_flag_in_sub_world_does_not_fire_base_world_on_flag_set() {
     {
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
         // Base-world watcher: on_flag_set armed.
-        runtime.trigger_states = vec![TriggerState {
+        runtime.triggers.replace_declarative(vec![TriggerState {
             trigger: crate::world::content::Trigger {
                 condition: TriggerCondition::OnFlagSet {
                     name: "armed".into(),
@@ -2784,7 +2784,7 @@ fn same_named_flag_in_sub_world_does_not_fire_base_world_on_flag_set() {
             origin_layer: None,
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
-        }];
+        }]);
     }
     dispatch_delayed_actions(
         &mut app,
@@ -2808,7 +2808,7 @@ fn same_named_flag_in_sub_world_does_not_fire_base_world_on_flag_set() {
     let runtime = app.world().resource::<WorldContentRuntime>();
     assert!(!runtime.flags.flag("armed"), "base store must remain empty");
     assert!(
-        !runtime.trigger_states[0].fired,
+        !runtime.triggers[0].fired,
         "base trigger must not cross-fire on sub-world flag"
     );
 }
@@ -2861,7 +2861,7 @@ fn on_entity_attacked_trigger_fires() {
         runtime
             .name_to_uuid
             .insert("enemy_ship".to_string(), npc_uuid.to_string());
-        runtime.trigger_states = vec![TriggerState {
+        runtime.triggers.replace_declarative(vec![TriggerState {
             trigger: crate::world::content::Trigger {
                 condition: TriggerCondition::OnAttacked {
                     entity_name: "enemy_ship".to_string(),
@@ -2875,7 +2875,7 @@ fn on_entity_attacked_trigger_fires() {
             origin_layer: None,
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
-        }];
+        }]);
     }
 
     app.world_mut()
@@ -4335,10 +4335,7 @@ fn probe_layer_flag(app: &mut App, name: &str, layer: &str) {
 }
 
 fn trigger_state_count(app: &App) -> usize {
-    app.world()
-        .resource::<WorldContentRuntime>()
-        .trigger_states
-        .len()
+    app.world().resource::<WorldContentRuntime>().triggers.len()
 }
 
 /// The acceptance case (issue #1045): a layer that authors a `[script]` block
@@ -4374,21 +4371,21 @@ fn a_layer_script_compiles_and_its_trigger_fires_after_load() {
     );
     let runtime = app.world().resource::<WorldContentRuntime>();
     assert_eq!(
-        runtime.trigger_states.len(),
+        runtime.triggers.len(),
         3,
         "on_world_loaded + two on_flag_set"
     );
     assert!(
         runtime
-            .trigger_states
+            .triggers
             .iter()
             .all(|s| s.origin_layer.as_deref() == Some(LAYER_A)),
         "each merged state is tagged with the layer that brought it"
     );
     assert_eq!(
-        sr.handlers.len(),
-        runtime.trigger_states.len(),
-        "handlers stays index-aligned with trigger_states"
+        registered_handler_count(&runtime),
+        runtime.triggers.len(),
+        "every scripted entry retains its handler"
     );
 }
 
@@ -4432,10 +4429,7 @@ fn a_composition_rejected_layer_merges_nothing_and_emits_no_world_loaded() {
         "no AST, handler table, deadline handler, or callback queue was installed"
     );
     let runtime = app.world().resource::<WorldContentRuntime>();
-    assert!(
-        runtime.trigger_states.is_empty(),
-        "no scripted handler merged"
-    );
+    assert!(runtime.triggers.is_empty(), "no scripted handler merged");
     assert!(runtime.deadlines.is_empty(), "no layer deadline was armed");
     assert!(
         runtime
@@ -4838,7 +4832,7 @@ fn the_same_scripted_layer_queued_twice_in_one_drain_defers_once() {
     app.update();
     assert_eq!(trigger_state_count(&app), 3, "merged once, not twice");
     assert_eq!(
-        app.world().resource::<WorldScriptRuntime>().handlers.len(),
+        registered_handler_count(app.world().resource::<WorldContentRuntime>()),
         3
     );
     assert_eq!(layer_counter(&app, LAYER_A, "layer_a_loaded"), 1);
@@ -4864,7 +4858,7 @@ fn two_scripted_layers_in_one_batch_both_merge() {
     app.update();
 
     assert_eq!(
-        app.world().resource::<WorldScriptRuntime>().handlers.len(),
+        registered_handler_count(app.world().resource::<WorldContentRuntime>()),
         6,
         "three triggers from each layer"
     );
@@ -5056,7 +5050,11 @@ fn same_tick_unload_precedes_a_layer_deadline_callback_drain() {
         .0
         .iter()
         .all(|call| call.origin_layer.as_deref() != Some(LAYER_DEADLINE)));
-    assert!(sr.handlers.is_empty());
+    assert!(app
+        .world()
+        .resource::<WorldContentRuntime>()
+        .triggers
+        .is_empty());
 }
 
 /// A shared sibling `.rhai` is compiled once but registers once PER OWNER, and
@@ -5078,7 +5076,7 @@ fn a_shared_sibling_unit_is_scoped_per_layer_and_does_not_grow_across_reloads() 
     );
     assert_eq!(app.world().resource::<WorldScriptRuntime>().asts.len(), 1);
     assert_eq!(
-        app.world().resource::<WorldScriptRuntime>().handlers.len(),
+        registered_handler_count(app.world().resource::<WorldContentRuntime>()),
         2
     );
     assert_eq!(
@@ -5102,7 +5100,7 @@ fn a_shared_sibling_unit_is_scoped_per_layer_and_does_not_grow_across_reloads() 
         );
         assert_eq!(app.world().resource::<WorldScriptRuntime>().asts.len(), 0);
         assert_eq!(
-            app.world().resource::<WorldScriptRuntime>().handlers.len(),
+            registered_handler_count(app.world().resource::<WorldContentRuntime>()),
             0
         );
 
@@ -5114,7 +5112,7 @@ fn a_shared_sibling_unit_is_scoped_per_layer_and_does_not_grow_across_reloads() 
             "cycle {cycle}: still exactly one registration per layer"
         );
         assert_eq!(
-            app.world().resource::<WorldScriptRuntime>().handlers.len(),
+            registered_handler_count(app.world().resource::<WorldContentRuntime>()),
             2
         );
     }
@@ -5369,7 +5367,7 @@ fn unloading_one_shared_ast_owner_retires_its_dialogue_before_a_response_can_run
 /// trigger states sit BEFORE another layer's must take their `handlers` entries
 /// with them.
 ///
-/// Filtering `trigger_states` alone leaves `handlers` too long and shifted, so a
+/// Filtering `triggers` alone leaves `handlers` too long and shifted, so a
 /// surviving trigger resolves the UNLOADED layer's handler — `layer_a_rechecked`
 /// would be written instead of `layer_b_rechecked`. Both the structural check
 /// and the behavioural probe below catch that.
@@ -5382,29 +5380,29 @@ fn unloading_a_layer_keeps_handlers_aligned_for_the_layers_that_remain() {
 
     unload_layer(&mut app, LAYER_A);
 
-    // Structural: the two vecs are the same length, and every survivor is B's.
+    // Every paired survivor belongs to B, and its AST remains resident.
     {
         let sr = app.world().resource::<WorldScriptRuntime>();
         let runtime = app.world().resource::<WorldContentRuntime>();
-        assert_eq!(runtime.trigger_states.len(), 3, "only B's triggers remain");
+        assert_eq!(runtime.triggers.len(), 3, "only B's triggers remain");
         assert_eq!(
-            sr.handlers.len(),
-            runtime.trigger_states.len(),
-            "handlers must shrink WITH trigger_states, not stay behind"
+            registered_handler_count(&runtime),
+            runtime.triggers.len(),
+            "handlers must shrink WITH triggers, not stay behind"
         );
         assert!(
             runtime
-                .trigger_states
+                .triggers
                 .iter()
                 .all(|s| s.origin_layer.as_deref() == Some(LAYER_B)),
             "A's states are gone"
         );
         assert!(
-            sr.handlers.iter().all(|h| h
-                .as_ref()
+            (0..runtime.triggers.len()).all(|index| runtime
+                .triggers
+                .handler(index)
                 .is_some_and(|h| h.fn_name.starts_with("layer_b_"))),
-            "and so are A's handlers: {:?}",
-            sr.handlers
+            "and so are A's handlers"
         );
         assert!(
             !sr.asts.contains_key(&format!("{LAYER_A}#script.setup")),
@@ -5417,7 +5415,7 @@ fn unloading_a_layer_keeps_handlers_aligned_for_the_layers_that_remain() {
     }
 
     // Behavioural: fire the surviving layer's own trigger and see WHICH handler
-    // runs. A desynced `handlers` would run A's here.
+    // runs. A shifted pairing would run A's here.
     probe_layer_flag(&mut app, "recheck", LAYER_B);
     assert_eq!(
         layer_counter(&app, LAYER_B, "layer_b_rechecked"),
@@ -5431,7 +5429,7 @@ fn unloading_a_layer_keeps_handlers_aligned_for_the_layers_that_remain() {
     );
 }
 
-/// The PURE half of the same guard, over the two functions that own both vecs:
+/// The registry half of the same guard, through production registration:
 /// a BASE world's triggers, then two layers', then a removal of the MIDDLE one.
 ///
 /// The App test above cannot reach this shape — its base world is script-free —
@@ -5447,12 +5445,13 @@ fn removing_a_layers_triggers_keeps_every_survivors_own_handler() {
             source_path: source.to_string(),
         }
     }
-    fn handler_names(sr: &WorldScriptRuntime) -> Vec<&str> {
-        sr.handlers
-            .iter()
-            .map(|h| {
-                h.as_ref()
-                    .expect("every index is scripted")
+    fn handler_names(runtime: &WorldContentRuntime) -> Vec<&str> {
+        (0..runtime.triggers.len())
+            .map(|index| {
+                runtime
+                    .triggers
+                    .handler(index)
+                    .expect("scripted entry")
                     .fn_name
                     .as_str()
             })
@@ -5472,48 +5471,47 @@ fn removing_a_layers_triggers_keeps_every_survivors_own_handler() {
     sr.triggers = vec![staged("l2.toml#script.setup", "l2_a")];
     merge_script_triggers(&mut runtime, &mut sr, Some("l2.toml"));
 
-    assert_eq!(runtime.trigger_states.len(), 4);
-    assert_eq!(sr.handlers.len(), 4, "one handler per appended state");
-    let generation_before = runtime.trigger_table_generation;
+    assert_eq!(runtime.triggers.len(), 4);
+    assert_eq!(
+        registered_handler_count(&runtime),
+        4,
+        "one handler per appended state"
+    );
+    let generation_before = runtime.triggers.generation();
 
+    assert_eq!(runtime.triggers.remove_layer("l1.toml"), 1);
+    assert_eq!(runtime.triggers.len(), 3);
     assert_eq!(
-        remove_layer_script_triggers(&mut runtime, &mut sr.handlers, "l1.toml"),
-        1
-    );
-    assert_eq!(runtime.trigger_states.len(), 3);
-    assert_eq!(
-        sr.handlers.len(),
+        registered_handler_count(&runtime),
         3,
-        "handlers shrinks with the table, not after it"
+        "removed entries take their handlers with them"
     );
     assert_eq!(
-        handler_names(&sr),
+        handler_names(&runtime),
         vec!["base_a", "base_b", "l2_a"],
         "every survivor kept the handler it arrived with"
     );
     assert_eq!(
         runtime
-            .trigger_states
+            .triggers
             .iter()
             .map(|s| s.origin_layer.as_deref())
             .collect::<Vec<_>>(),
         vec![None, None, Some("l2.toml")]
     );
     assert_ne!(
-        runtime.trigger_table_generation, generation_before,
+        runtime.triggers.generation(),
+        generation_before,
         "a reshape must move the generation so index-keyed observers rebuild"
     );
 
     // Unloading a path that contributed nothing takes nothing — and does not
     // move the generation, so it costs no observer its history.
-    let generation_after = runtime.trigger_table_generation;
-    assert_eq!(
-        remove_layer_script_triggers(&mut runtime, &mut sr.handlers, "never_loaded.toml"),
-        0
-    );
-    assert_eq!(runtime.trigger_states.len(), 3);
-    assert_eq!(sr.handlers.len(), 3);
-    assert_eq!(runtime.trigger_table_generation, generation_after);
+    let generation_after = runtime.triggers.generation();
+    assert_eq!(runtime.triggers.remove_layer("never_loaded.toml"), 0);
+    assert_eq!(runtime.triggers.len(), 3);
+    assert_eq!(registered_handler_count(&runtime), 3);
+    assert_eq!(runtime.triggers.generation(), generation_after);
 }
 
 /// The scoping rule a scripted flag write resolves through (issue #1045), over
@@ -5631,7 +5629,7 @@ fn a_scriptless_layer_still_merges_nothing() {
     assert!(app
         .world()
         .resource::<WorldContentRuntime>()
-        .trigger_states
+        .triggers
         .is_empty());
 }
 
@@ -6119,7 +6117,7 @@ fn two_load_world_same_path_same_tick_is_single_load() {
 
     // Capture trigger/contact/name counts after the first-tick double-load.
     let runtime = app.world().resource::<WorldContentRuntime>();
-    let triggers_after_double = runtime.trigger_states.len();
+    let triggers_after_double = runtime.triggers.len();
     let names_after_double = runtime.name_to_uuid.len();
     let contacts_after_double = app.world().resource::<CommsRuntime>().contacts.len();
     let _ = runtime;
@@ -6149,7 +6147,7 @@ fn two_load_world_same_path_same_tick_is_single_load() {
 
     let runtime = app.world().resource::<WorldContentRuntime>();
     assert_eq!(
-        runtime.trigger_states.len(),
+        runtime.triggers.len(),
         triggers_after_double,
         "duplicate LoadWorld must not add duplicate trigger states"
     );
@@ -6179,7 +6177,7 @@ fn unload_world_unknown_path_is_noop() {
     app.update(); // must not panic
 
     let runtime = app.world().resource::<WorldContentRuntime>();
-    assert!(runtime.trigger_states.is_empty());
+    assert!(runtime.triggers.is_empty());
 }
 
 // ── Entity spawn / despawn via LoadWorld / UnloadWorld (issue #352) ───────
@@ -6408,10 +6406,7 @@ fn tick_trigger_pipeline_is_a_noop_on_an_empty_world() {
         "an event-free tick must not mark WorldEventBuffer changed"
     );
     let runtime = app.world().resource::<WorldContentRuntime>();
-    assert!(
-        runtime.trigger_states.is_empty(),
-        "no trigger state may appear"
-    );
+    assert!(runtime.triggers.is_empty(), "no trigger state may appear");
     assert!(
         runtime.pending_world_events.is_empty(),
         "no world events may be synthesised from nothing"
@@ -6460,7 +6455,7 @@ fn trigger_chain_exceeding_max_passes_stops_at_the_cap() {
     let mut app = ai_trigger_test_app();
     {
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-        runtime.trigger_states = Vec::new();
+        runtime.triggers.replace_declarative(Vec::new());
         merge_script_triggers(&mut runtime, &mut sr, None);
         runtime.pending_world_events.push(WorldEvent::WorldLoaded);
     }
@@ -6485,7 +6480,7 @@ fn trigger_chain_exceeding_max_passes_stops_at_the_cap() {
         max + 1
     );
     assert!(
-        !runtime.trigger_states[max].fired,
+        !runtime.triggers[max].fired,
         "the link past the cap must never fire (its flag never got set)"
     );
 }
@@ -6519,7 +6514,7 @@ fn trigger_from_layer_missing_in_layer_map_reads_base_flags() {
     {
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
         runtime.flags.set_flag("armed"); // set in the BASE store only
-        runtime.trigger_states = vec![TriggerState {
+        runtime.triggers.replace_declarative(vec![TriggerState {
             trigger: crate::world::content::Trigger {
                 condition: TriggerCondition::OnWorldLoaded,
                 when: Some(crate::world::flags::parse_predicate("flag(armed)").unwrap()),
@@ -6533,7 +6528,7 @@ fn trigger_from_layer_missing_in_layer_map_reads_base_flags() {
             origin_layer: Some("assets/worlds/ghost.toml".to_string()),
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
-        }];
+        }]);
         runtime.pending_world_events.push(WorldEvent::WorldLoaded);
     }
 
@@ -6724,7 +6719,7 @@ fn delayed_queue_dispatches_every_action_variant_in_queue_order() {
         ];
         // Chained witness: fires only if the queue emitted FlagSet("ordered")
         // followed by FlagCleared("ordered").
-        runtime.trigger_states = vec![TriggerState {
+        runtime.triggers.replace_declarative(vec![TriggerState {
             trigger: crate::world::content::Trigger {
                 condition: TriggerCondition::OnFlagCleared {
                     name: "ordered".into(),
@@ -6738,7 +6733,7 @@ fn delayed_queue_dispatches_every_action_variant_in_queue_order() {
             origin_layer: None,
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
-        }];
+        }]);
         all_variants
     };
 
@@ -6795,7 +6790,7 @@ fn delayed_queue_dispatches_every_action_variant_in_queue_order() {
         "AddObjective must dispatch before FailObjective"
     );
     assert!(
-        app.world().resource::<WorldContentRuntime>().trigger_states[0].fired,
+        app.world().resource::<WorldContentRuntime>().triggers[0].fired,
         "SetWorldFlag must dispatch before ClearWorldFlag (the chained \
          on_flag_cleared witness must observe the transition)"
     );
@@ -6903,7 +6898,7 @@ fn pending_world_loaded_event_fires_on_world_loaded_trigger() {
     let mut app = ai_trigger_test_app();
     {
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-        runtime.trigger_states = vec![TriggerState {
+        runtime.triggers.replace_declarative(vec![TriggerState {
             trigger: crate::world::content::Trigger {
                 condition: TriggerCondition::OnWorldLoaded,
                 when: None,
@@ -6915,7 +6910,7 @@ fn pending_world_loaded_event_fires_on_world_loaded_trigger() {
             origin_layer: None,
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
-        }];
+        }]);
         runtime.pending_world_events.push(WorldEvent::WorldLoaded);
     }
 
@@ -6923,7 +6918,7 @@ fn pending_world_loaded_event_fires_on_world_loaded_trigger() {
 
     let runtime = app.world().resource::<WorldContentRuntime>();
     assert!(
-        runtime.trigger_states[0].fired,
+        runtime.triggers[0].fired,
         "on_world_loaded trigger must have fired"
     );
     // Queue must be drained.
@@ -6970,7 +6965,7 @@ fn world_event_buffer_holds_only_current_tick_events() {
 /// base world authored fires on the first Update tick.
 ///
 /// The `WorldConfig` used to carry the world's parsed `[[trigger]]` blocks
-/// and this asserted they reached `trigger_states`; issue #985 deleted both
+/// and this asserted they reached `triggers`; issue #985 deleted both
 /// the field and the parser, so the table starts EMPTY for a script-free
 /// world and only `merge_script_triggers` can fill it — which is what the
 /// second assertion now pins.
@@ -6997,7 +6992,7 @@ fn init_world_runtime_queues_world_loaded_event() {
         "init_world_runtime must queue a WorldLoaded event during Startup"
     );
     assert!(
-        runtime.trigger_states.is_empty(),
+        runtime.triggers.is_empty(),
         "a script-free world contributes no trigger states"
     );
 }
@@ -7063,7 +7058,7 @@ fn on_world_loaded_fires_again_after_unload_and_reload() {
     {
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
         runtime.mission_clock_anchor_secs = Some(0.0);
-        runtime.trigger_states = vec![TriggerState {
+        runtime.triggers.replace_declarative(vec![TriggerState {
             trigger: crate::world::content::Trigger {
                 condition: TriggerCondition::OnWorldLoaded,
                 when: None,
@@ -7075,7 +7070,7 @@ fn on_world_loaded_fires_again_after_unload_and_reload() {
             origin_layer: None,
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
-        }];
+        }]);
     }
 
     // -- First load cycle --
@@ -7089,7 +7084,7 @@ fn on_world_loaded_fires_again_after_unload_and_reload() {
     app.update(); // applies load + queues WorldLoaded
     app.update(); // collect_world_events drains pending event; pipeline fires trigger
 
-    let first_fire = app.world().resource::<WorldContentRuntime>().trigger_states[0]
+    let first_fire = app.world().resource::<WorldContentRuntime>().triggers[0]
         .last_fired_elapsed
         .expect("on_world_loaded trigger must fire on first load");
 
@@ -7102,7 +7097,7 @@ fn on_world_loaded_fires_again_after_unload_and_reload() {
     app.update();
 
     assert_eq!(
-        app.world().resource::<WorldContentRuntime>().trigger_states[0].last_fired_elapsed,
+        app.world().resource::<WorldContentRuntime>().triggers[0].last_fired_elapsed,
         Some(first_fire),
         "an unload emits no WorldLoaded, so the handler must not fire again"
     );
@@ -7118,7 +7113,7 @@ fn on_world_loaded_fires_again_after_unload_and_reload() {
     app.update(); // applies load + queues WorldLoaded
     app.update(); // drain + dispatch
 
-    let second_fire = app.world().resource::<WorldContentRuntime>().trigger_states[0]
+    let second_fire = app.world().resource::<WorldContentRuntime>().triggers[0]
         .last_fired_elapsed
         .expect("the trigger has fired at least once");
     assert!(
@@ -7302,7 +7297,7 @@ fn set_ship_pos(app: &mut App, x: f32, z: f32) {
 }
 
 /// Register `name` → `uuid` and append a region trigger for `condition`,
-/// returning its index in `trigger_states` so the caller can read its latch
+/// returning its index in `triggers` so the caller can read its latch
 /// through [`trigger_fired`].
 ///
 /// The trigger carried an `add_objective` the region tests read as their
@@ -7327,7 +7322,7 @@ fn install_region_trigger_gated(
 ) -> usize {
     let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
     runtime.name_to_uuid.insert(name.into(), uuid.into());
-    runtime.trigger_states.push(TriggerState {
+    runtime.triggers.push(TriggerState {
         trigger: crate::world::content::Trigger {
             condition,
             when,
@@ -7340,7 +7335,7 @@ fn install_region_trigger_gated(
         seen_destroyed: HashSet::new(),
         last_fired_elapsed: None,
     });
-    runtime.trigger_states.len() - 1
+    runtime.triggers.len() - 1
 }
 
 #[test]
@@ -7376,7 +7371,7 @@ fn ship_entering_region_fires_on_entered_region_trigger_exactly_once() {
     // Confirm single-shot: trigger is marked fired, queue is drained.
     let runtime = app.world().resource::<WorldContentRuntime>();
     assert!(
-        runtime.trigger_states[0].fired,
+        runtime.triggers[0].fired,
         "trigger state must be marked fired after entry"
     );
     assert!(
@@ -7903,7 +7898,7 @@ fn destroy_entity_action_despawns_and_emits_chained_event() {
             .name_to_uuid
             .insert("doomed".to_string(), target_uuid.into());
         // Witness: on destroyed of "doomed" — proves the chaining.
-        runtime.trigger_states = vec![TriggerState {
+        runtime.triggers.replace_declarative(vec![TriggerState {
             trigger: crate::world::content::Trigger {
                 condition: TriggerCondition::OnDestroyed {
                     entity_name: "doomed".into(),
@@ -7917,7 +7912,7 @@ fn destroy_entity_action_despawns_and_emits_chained_event() {
             origin_layer: None,
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
-        }];
+        }]);
     }
 
     dispatch_delayed_actions(
@@ -8065,7 +8060,7 @@ fn when_predicate_suppresses_a_scripted_spawn() {
         runtime
             .name_to_uuid
             .insert("src".to_string(), "src-uuid".to_string());
-        runtime.trigger_states = Vec::new();
+        runtime.triggers.replace_declarative(Vec::new());
         merge_script_triggers(&mut runtime, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
@@ -8250,7 +8245,7 @@ fn on_timer_trigger_fires() {
     {
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
         runtime.mission_clock_anchor_secs = Some(0.0);
-        runtime.trigger_states = vec![TriggerState {
+        runtime.triggers.replace_declarative(vec![TriggerState {
             trigger: crate::world::content::Trigger {
                 condition: TriggerCondition::OnTimer { after_secs: 0.0 },
                 when: None,
@@ -8262,12 +8257,12 @@ fn on_timer_trigger_fires() {
             origin_layer: None,
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
-        }];
+        }]);
     }
 
     app.update();
 
-    let state = &app.world().resource::<WorldContentRuntime>().trigger_states[0];
+    let state = &app.world().resource::<WorldContentRuntime>().triggers[0];
     assert!(
         state.fired,
         "on_timer after_secs=0 must fire — tick_trigger_pipeline must emit \
@@ -8288,7 +8283,7 @@ fn on_timer_trigger_does_not_fire_before_after_secs_elapses() {
     {
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
         runtime.mission_clock_anchor_secs = Some(0.0);
-        runtime.trigger_states = vec![TriggerState {
+        runtime.triggers.replace_declarative(vec![TriggerState {
             trigger: crate::world::content::Trigger {
                 condition: TriggerCondition::OnTimer { after_secs: 100.0 },
                 when: None,
@@ -8300,13 +8295,13 @@ fn on_timer_trigger_does_not_fire_before_after_secs_elapses() {
             origin_layer: None,
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
-        }];
+        }]);
     }
 
     app.update();
     app.update();
 
-    let state = &app.world().resource::<WorldContentRuntime>().trigger_states[0];
+    let state = &app.world().resource::<WorldContentRuntime>().triggers[0];
     assert!(
         !state.fired,
         "on_timer after_secs=100 must not fire when only a few ms have elapsed"
@@ -8675,4 +8670,154 @@ fn spawn_game_start_entity_composed_predicate() {
     };
     app_c.update();
     assert_eq!(spawned_c.len(), 1, "high power → spawn even without flag");
+}
+
+fn registered_handler_count(runtime: &WorldContentRuntime) -> usize {
+    (0..runtime.triggers.len())
+        .filter(|&index| runtime.triggers.handler(index).is_some())
+        .count()
+}
+
+#[test]
+fn middle_layer_removal_restore_and_append_keep_same_named_handlers_with_their_owners() {
+    const A: &str = "tests/fixtures/trigger_registry_a.toml";
+    const B: &str = "tests/fixtures/trigger_registry_b.toml";
+    const C: &str = "tests/fixtures/trigger_registry_c.toml";
+    let mut live = scripted_layer_test_app();
+    for path in [A, B, C] {
+        load_layer(&mut live, path);
+    }
+    probe_layer_flag(&mut live, "probe", A);
+    assert_eq!(layer_counter(&live, A, "ran_a"), 1);
+    let initial_generation = live
+        .world()
+        .resource::<WorldContentRuntime>()
+        .triggers
+        .generation();
+    unload_layer(&mut live, B);
+    let payload = crate::snapshot::capture(live.world());
+    assert_eq!(payload.scenario.as_ref().unwrap().triggers.len(), 2);
+
+    // Replay the surviving layer order into a fresh app before restoring.
+    let mut resumed = scripted_layer_test_app();
+    for path in [A, C] {
+        load_layer(&mut resumed, path);
+    }
+    let before_restore = resumed
+        .world()
+        .resource::<WorldContentRuntime>()
+        .triggers
+        .generation();
+    let report = crate::snapshot::restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+    assert_ne!(
+        resumed
+            .world()
+            .resource::<WorldContentRuntime>()
+            .triggers
+            .generation(),
+        before_restore
+    );
+    for app in [&mut live, &mut resumed] {
+        probe_layer_flag(app, "probe", A);
+        probe_layer_flag(app, "probe", C);
+        assert_eq!(
+            layer_counter(app, A, "ran_a"),
+            1,
+            "the captured A latch stayed spent"
+        );
+        assert_eq!(
+            layer_counter(app, C, "ran_c"),
+            1,
+            "C runs its own fire function after B leaves"
+        );
+        assert_eq!(layer_counter(app, C, "ran_a"), 0);
+        assert_eq!(layer_counter(app, C, "ran_b"), 0);
+        load_layer(app, B);
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert_eq!(runtime.triggers.len(), 3);
+        assert_ne!(runtime.triggers.generation(), initial_generation);
+        assert_eq!(
+            runtime
+                .triggers
+                .iter()
+                .map(|state| state.origin_layer.as_deref())
+                .collect::<Vec<_>>(),
+            vec![Some(A), Some(C), Some(B)]
+        );
+        assert_eq!(
+            runtime.triggers.handler(1).unwrap().script_path,
+            format!("{C}#script.setup")
+        );
+        assert_eq!(
+            runtime.triggers.handler(2).unwrap().script_path,
+            format!("{B}#script.setup")
+        );
+        probe_layer_flag(app, "probe", B);
+        assert_eq!(layer_counter(app, B, "ran_b"), 1);
+        assert_eq!(layer_counter(app, C, "ran_c"), 1);
+    }
+    assert_eq!(
+        crate::snapshot::capture(live.world())
+            .scenario
+            .as_ref()
+            .unwrap()
+            .triggers,
+        crate::snapshot::capture(resumed.world())
+            .scenario
+            .as_ref()
+            .unwrap()
+            .triggers
+    );
+}
+
+#[test]
+fn snapshot_reports_incompatible_trigger_rows_without_writing_partial_continuation() {
+    let mut app = scripted_layer_test_app();
+    for path in [
+        "tests/fixtures/trigger_registry_a.toml",
+        "tests/fixtures/trigger_registry_b.toml",
+    ] {
+        load_layer(&mut app, path);
+    }
+    let payload = crate::snapshot::capture(app.world());
+    let original = app
+        .world()
+        .resource::<WorldContentRuntime>()
+        .triggers
+        .capture();
+    let generation = app
+        .world()
+        .resource::<WorldContentRuntime>()
+        .triggers
+        .generation();
+    for duplicate_index in [false, true] {
+        let mut damaged = payload.clone();
+        let rows = &mut damaged.scenario.as_mut().unwrap().triggers;
+        rows[0].fired = true;
+        if duplicate_index {
+            rows[1].index = rows[0].index;
+        } else {
+            rows.pop();
+        }
+        let report = crate::snapshot::restore(app.world_mut(), &damaged);
+        assert!(
+            report.gaps.iter().any(|gap| if duplicate_index {
+                matches!(
+                    gap,
+                    crate::snapshot::RestoreGap::ScenarioTriggerIndexInvalid { index: 0 }
+                )
+            } else {
+                matches!(
+                    gap,
+                    crate::snapshot::RestoreGap::ScenarioTriggersMoved { saved: 1, found: 2 }
+                )
+            }),
+            "gaps: {:?}",
+            report.gaps
+        );
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert_eq!(runtime.triggers.capture(), original);
+        assert_eq!(runtime.triggers.generation(), generation);
+    }
 }

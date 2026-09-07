@@ -172,7 +172,8 @@ entities:
       paths:
         - src/world/script/triggers.rs
         - src/world/script/engine.rs
-      symbols: [register_trigger_builders, BuilderState, ScriptTrigger, Registration, TriggerHandle, register_real_lit]
+        - src/world/trigger_registry.rs
+      symbols: [WorldTriggerRegistry, ScriptHandlerRef, register_trigger_builders, BuilderState, ScriptTrigger, Registration, TriggerHandle, register_real_lit]
       tests: [cargo test]
 
   - component: scenario-script-scheduling

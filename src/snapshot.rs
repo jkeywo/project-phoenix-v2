@@ -2014,11 +2014,11 @@ pub struct LayerFlags {
 /// issue's commitment, not a line to slip in here.
 ///
 /// A layer's own trigger state is not stored separately either, for a narrower
-/// reason: a layer's states are *merged into* the base `trigger_states` vec when
+/// reason: a layer's states are *merged into* the base trigger registry when
 /// its `[script]` set compiles at load (issue #1045) and removed from it at
 /// unload, so [`Self::triggers`] already carries every trigger that can fire.
 /// What identifies them is the `origin_layer` tag on each state — matched by
-/// `world::server::remove_layer_script_triggers` — and a resumed world rebuilds
+/// `world::trigger_registry::WorldTriggerRegistry::remove_layer` — and a resumed world rebuilds
 /// them by re-running the same layer loads.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ScenarioState {
@@ -2027,7 +2027,7 @@ pub struct ScenarioState {
     /// was not yet anchored (no world, or a run that had not started).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mission_elapsed_secs: Option<f32>,
-    /// One row per live trigger state, in `WorldContentRuntime::trigger_states`
+    /// One row per live trigger state, in `WorldContentRuntime::triggers`
     /// order — see [`TriggerRuntimeState`]. Every row is written, not just the
     /// fired ones, so the count is itself the alignment check the restore makes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2185,37 +2185,7 @@ pub struct ScenarioState {
 
 /// One scenario trigger's runtime state — the three fields a run *changes*.
 ///
-/// The trigger itself (condition, actions, `when` predicate, `repeat`,
-/// `cooldown_secs`, authored id) is not here, for [`EntityState::hull`]'s rule:
-/// it is authored config the fresh world rebuilds from TOML — or, for a scripted
-/// trigger, from the `[script]` block the content digest is bound to.
-///
-/// # Scripted and declarative triggers are the same row
-///
-/// `merge_script_triggers` appends one `TriggerState` per compiled
-/// `ScriptTrigger` to the SAME `WorldContentRuntime::trigger_states` vec the
-/// declarative triggers live in — a scripted trigger's `.trigger` is
-/// byte-identical to its TOML equivalent, and only the parallel
-/// `WorldScriptRuntime::handlers` entry says where its effects come from. So
-/// there is one fired-state list to capture, not two, and this row covers both
-/// kinds.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct TriggerRuntimeState {
-    /// Position in `trigger_states`. See [`restore`]'s scenario walk for why an
-    /// index is a stable key *here* while it would not be for an ECS entity: the
-    /// table is rebuilt by a deterministic replay of the same load, and a table
-    /// of a different length is refused rather than written into.
-    pub index: u32,
-    /// The single-shot latch. The whole point of the row.
-    pub fired: bool,
-    /// The `OnAllDestroyed` accumulation, sorted — a `HashSet` in the runtime.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub seen_destroyed: Vec<String>,
-    /// Mission-elapsed seconds of the last fire, which is what a `repeat`
-    /// trigger's `cooldown_secs` is measured from.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_fired_elapsed: Option<f32>,
-}
+pub use crate::world::trigger_registry::TriggerRuntimeState;
 
 /// One queued `WorldEvent`, written as a tag plus its fields.
 ///
@@ -2904,21 +2874,7 @@ fn capture_scenario(world: &World) -> Option<ScenarioState> {
         _ => None,
     };
 
-    let triggers = runtime
-        .trigger_states
-        .iter()
-        .enumerate()
-        .map(|(index, state)| {
-            let mut seen_destroyed: Vec<String> = state.seen_destroyed.iter().cloned().collect();
-            seen_destroyed.sort();
-            TriggerRuntimeState {
-                index: index as u32,
-                fired: state.fired,
-                seen_destroyed,
-                last_fired_elapsed: state.last_fired_elapsed,
-            }
-        })
-        .collect();
+    let triggers = runtime.triggers.capture();
 
     let mut entity_groups: Vec<(String, Vec<String>)> = runtime
         .entity_groups
@@ -5214,6 +5170,8 @@ pub enum RestoreGap {
     /// different layer set, and writing fired-state into it by position would
     /// arm and disarm triggers at random.
     ScenarioTriggersMoved { saved: usize, found: usize },
+    /// A stored index is out of range or duplicated; no latches were written.
+    ScenarioTriggerIndexInvalid { index: u32 },
     /// The capture was waiting on scripted `after(n, |ctx| …)` callbacks and the
     /// bootstrapped world has no `WorldScriptRuntime` to queue them on — a save
     /// from a scripted world being restored into one whose scripts did not
@@ -5266,6 +5224,9 @@ impl std::fmt::Display for RestoreGap {
             RestoreGap::RngStreamsMoved => f.write_str(
                 "this save's generator streams do not match this build's; \
                  mapping them by position would misroute a call site's sequence",
+            ),
+            RestoreGap::ScenarioTriggerIndexInvalid { index } => write!(
+                f, "this save repeats or cannot resolve scenario trigger index {index}; no trigger continuation was restored"
             ),
             RestoreGap::ScenarioTriggersMoved { saved, found } => write!(
                 f,
@@ -5770,29 +5731,13 @@ fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut
 /// point, so merging would leave the resumed scenario holding a firing the
 /// capture never made.
 ///
-/// # The handlers realign, and nothing here realigns them
+/// # Registry-owned continuation
 ///
-/// `WorldScriptRuntime::handlers` is the vec parallel to `trigger_states` that
-/// says which script fn supplies a scripted trigger's effects. It is **not** in
-/// the payload and must not be: it holds `(script_path, fn_name)` pairs that
-/// only mean anything against the retained ASTs, and ASTs are not serialisable
-/// at all. It does not need to be, either. `compile_world_scripts` runs at
-/// `Startup` on the bootstrapped world and `init_world_runtime` calls
-/// `merge_script_triggers` immediately after, which builds `handlers` beside the
-/// table it fills: one `Some` per compiled `ScriptTrigger`, appended in compile
-/// order — the same two deterministic walks (`merge_script_triggers` over the
-/// compiled script set, then the load's registration order) that produced the
-/// captured table. So the resumed world's index *i* names the same trigger and
-/// the same handler the capture's did, before this function writes a single byte,
-/// and the only thing left to check is that the two tables are the same length —
-/// which is [`RestoreGap::ScenarioTriggersMoved`].
-///
-/// A world that had a scripted LAYER loaded at capture (issue #1045) rebuilds the
-/// same way and for the same reason: the layer's own `[script]` set compiles at
-/// `LoadWorld` and appends through the same `merge_script_triggers`, so a resumed
-/// world that re-runs the same layer loads reaches the same table in the same
-/// order. Until it has, the length check is what refuses the mismatch — the same
-/// answer [`ScenarioState::triggers`] already gives for per-layer state.
+/// The same content and layer activation order rebuild the paired trigger table.
+/// Handlers and ASTs are not snapshot payload. The registry validates complete
+/// row cardinality and index coverage before replacing any latch, retains each
+/// row's handler, and advances its observer generation after successful restore.
+/// A refusal reports a gap and leaves all trigger continuation untouched.
 ///
 /// # The per-tick budget is reset, not restored
 ///
@@ -5825,19 +5770,15 @@ fn restore_scenario(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
             (None, _) => None,
         };
 
-        if stored.triggers.len() == runtime.trigger_states.len() {
-            for row in &stored.triggers {
-                let Some(state) = runtime.trigger_states.get_mut(row.index as usize) else {
-                    continue;
-                };
-                state.fired = row.fired;
-                state.seen_destroyed = row.seen_destroyed.iter().cloned().collect();
-                state.last_fired_elapsed = row.last_fired_elapsed;
-            }
-        } else {
-            report.gaps.push(RestoreGap::ScenarioTriggersMoved {
-                saved: stored.triggers.len(),
-                found: runtime.trigger_states.len(),
+        if let Err(error) = runtime.triggers.restore(&stored.triggers) {
+            use crate::world::trigger_registry::TriggerRestoreError;
+            report.gaps.push(match error {
+                TriggerRestoreError::Cardinality { saved, found } => {
+                    RestoreGap::ScenarioTriggersMoved { saved, found }
+                }
+                TriggerRestoreError::InvalidIndex { index } => {
+                    RestoreGap::ScenarioTriggerIndexInvalid { index }
+                }
             });
         }
 

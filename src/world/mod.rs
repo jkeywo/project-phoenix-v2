@@ -26,6 +26,7 @@ pub mod server;
 /// overrides and placement a script's spawn consumed, kept on the entity it
 /// produced so a resume can rebuild what no fresh boot re-derives.
 pub mod spawn_origin;
+pub mod trigger_registry;
 pub mod validate;
 /// Who staffs a structure, and whether they are working (issue #1035) — the
 /// authored `[[workforce]]` sides of a labour dispute, their live strike status

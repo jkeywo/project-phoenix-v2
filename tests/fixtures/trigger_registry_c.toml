@@ -1,0 +1,8 @@
+# Same handler name as A/B, different unit and owner (#1412).
+[global]
+seed = 7
+[script]
+setup = """
+on_flag_set("probe", "fire");
+fn fire(ctx) { ctx.flags.increment("ran_c", 1); }
+"""

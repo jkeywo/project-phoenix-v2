@@ -120,11 +120,10 @@ const FIRE_VALUE_UNAVAILABLE: &str = "n/a";
 /// `observed` guard means a trigger that fired BEFORE capture began is not
 /// mis-recorded as firing on the first captured tick.
 ///
-/// The records are parallel to `WorldContentRuntime.trigger_states` by index —
+/// The records are parallel to `WorldContentRuntime.triggers` by index —
 /// the same order [`collect_scenario_state`] emits triggers in — so
-/// [`Self::fire_history`] keys straight off the collection index. Grown in place
-/// when the roster extends (a layer's triggers append) and rebuilt whenever the
-/// table is RESHAPED.
+/// [`Self::fire_history`] keys straight off the collection index. Rebuilt whenever the
+/// registry changes shape or restores its continuation.
 ///
 /// # Why length is not enough (issue #1045)
 ///
@@ -134,15 +133,15 @@ const FIRE_VALUE_UNAVAILABLE: &str = "n/a";
 /// can come back identical while every index past the removal now names a
 /// different trigger — so the ring built for the trigger that used to be at index
 /// 4 would go on collecting index 4's fires, and the AAR would attribute them to
-/// the wrong scenario beat. `WorldContentRuntime::trigger_table_generation` moves
+/// the wrong scenario beat. `WorldTriggerRegistry::generation` moves
 /// on every reshape, so this rebuilds when it does.
 #[derive(Resource, Debug, Default)]
 pub struct TriggerFireRecorder {
-    /// Per-trigger fire record, indexed like `trigger_states`.
+    /// Per-trigger fire record, indexed like `triggers`.
     per_trigger: Vec<TriggerFireRecord>,
     /// The ring depth last applied, so a retuned config re-caps existing rings.
     depth: usize,
-    /// The `trigger_table_generation` these records were built against. A change
+    /// The registry generation these records were built against. A change
     /// means the table was reshaped and every index may now mean something else.
     generation: u64,
 }
@@ -173,16 +172,13 @@ impl TriggerFireRecorder {
     /// new fires this tick. Pure w.r.t. `runtime` (takes `&`), so it is unit
     /// testable without an `App`.
     fn sync_and_record(&mut self, runtime: &WorldContentRuntime, depth: usize) {
-        let n = runtime.trigger_states.len();
+        let n = runtime.triggers.len();
 
-        // Roster reconciliation. A RESHAPE (any merge or layer retraction, which
-        // is what moves the generation) invalidates every index, so rebuild fresh;
-        // otherwise grow in place, so an appended layer's triggers do not cost the
-        // existing rows their history. The length check stays as the belt to that
-        // brace, covering any shrink a future writer makes without the counter.
-        if self.generation != runtime.trigger_table_generation || self.per_trigger.len() > n {
+        // Registry generation invalidates index history after any reshape or
+        // successful continuation restore. A new recorder also starts empty.
+        if self.generation != runtime.triggers.generation() || self.per_trigger.len() > n {
             self.per_trigger.clear();
-            self.generation = runtime.trigger_table_generation;
+            self.generation = runtime.triggers.generation();
         }
         while self.per_trigger.len() < n {
             self.per_trigger.push(TriggerFireRecord::new(depth));
@@ -197,7 +193,7 @@ impl TriggerFireRecorder {
         }
 
         let chain: [&FlagStore; 1] = [&runtime.flags];
-        for (idx, state) in runtime.trigger_states.iter().enumerate() {
+        for (idx, state) in runtime.triggers.iter().enumerate() {
             let rec = &mut self.per_trigger[idx];
             let cur = state.last_fired_elapsed;
 
@@ -327,7 +323,7 @@ fn condition_atom_values(
 ///
 /// Flags are sorted by name; every other collection is emitted in its authored
 /// / insertion order, which the underlying stores already keep deterministic
-/// (`trigger_states`, `pending_delayed_actions`, `DeadlineTable::records`,
+/// (`triggers`, `pending_delayed_actions`, `DeadlineTable::records`,
 /// `CommitmentLedger::records` and `EvidenceLog::entries` are all `Vec`s the
 /// world file / the run's own history orders). The result is byte-identical JSON
 /// for identical state.
@@ -349,7 +345,7 @@ pub fn collect_scenario_state(
 ///
 /// Identical to [`collect_scenario_state`] but for the per-trigger
 /// [`ScenarioTrigger::fire_history`]: the recorder's rings are parallel to
-/// `trigger_states` by index, the same order this collects them in, so the fire
+/// `triggers` by index, the same order this collects them in, so the fire
 /// history keys straight off the enumeration index.
 pub fn collect_scenario_state_with_fires(
     runtime: &WorldContentRuntime,
@@ -386,7 +382,7 @@ pub fn collect_scenario_state_with_fires(
     // (see the fn docs).
     let chain: [&FlagStore; 1] = [&runtime.flags];
     payload.triggers = runtime
-        .trigger_states
+        .triggers
         .iter()
         .enumerate()
         .map(|(idx, state)| {
@@ -702,7 +698,7 @@ mod tests {
     use crate::dossier::evidence::EvidenceProvenance;
     use crate::world::commitments::CommitmentOutcome;
     use crate::world::config::Trigger;
-    use crate::world::content::TriggerState;
+    use crate::world::content::{TriggerState, WorldEvent};
     use crate::world::deadlines::{Deadline, DeadlineHandler};
     use crate::world::delayed::DelayedAction;
     use crate::world::flags::parse_predicate;
@@ -813,7 +809,7 @@ mod tests {
     #[test]
     fn triggers_report_pending_and_eligibility() {
         let mut runtime = WorldContentRuntime::default();
-        runtime.trigger_states.push(trigger_state(
+        runtime.triggers.push(trigger_state(
             Some("beat"),
             TriggerCondition::OnTimer { after_secs: 30.0 },
             Some("flag(ready)"),
@@ -842,14 +838,14 @@ mod tests {
     #[test]
     fn pending_reflects_lifecycle_and_gateless_is_eligible() {
         let mut runtime = WorldContentRuntime::default();
-        runtime.trigger_states.push(trigger_state(
+        runtime.triggers.push(trigger_state(
             None,
             TriggerCondition::OnWorldLoaded,
             None,
             false,
             true, // fired once-only
         ));
-        runtime.trigger_states.push(trigger_state(
+        runtime.triggers.push(trigger_state(
             Some("repeater"),
             TriggerCondition::OnFlagSet {
                 name: "tick".into(),
@@ -1077,16 +1073,33 @@ mod tests {
         repeat: bool,
     ) -> usize {
         runtime
-            .trigger_states
+            .triggers
             .push(trigger_state(id, condition, when, repeat, false));
-        runtime.trigger_states.len() - 1
+        runtime.triggers.len() - 1
     }
 
     /// Simulate the authoritative fire of the trigger at `idx`: the same two
     /// fields `evaluate_single_trigger` sets when a trigger fires.
     fn simulate_fire(runtime: &mut WorldContentRuntime, idx: usize, elapsed: f32) {
-        runtime.trigger_states[idx].fired = true;
-        runtime.trigger_states[idx].last_fired_elapsed = Some(elapsed);
+        let event = match &runtime.triggers[idx].trigger.condition {
+            TriggerCondition::OnTimer { .. } => WorldEvent::TimerElapsed {
+                elapsed_secs: elapsed,
+            },
+            TriggerCondition::OnWorldLoaded => WorldEvent::WorldLoaded,
+            TriggerCondition::OnFlagSet { name } => WorldEvent::FlagSet {
+                name: name.clone(),
+                origin_layer: None,
+            },
+            condition => panic!("unhandled fixture condition {condition:?}"),
+        };
+        runtime.triggers.evaluate(
+            &[event],
+            &runtime.name_to_uuid,
+            &runtime.entity_groups,
+            elapsed,
+            |_| (vec![&runtime.flags], vec![None]),
+        );
+        assert_eq!(runtime.triggers[idx].last_fired_elapsed, Some(elapsed));
     }
 
     const DEPTH: usize = 4;
@@ -1238,8 +1251,7 @@ mod tests {
         // Fire, then reset (what `reset_triggers_by_id` does to the fire fields).
         simulate_fire(&mut runtime, idx, 5.0);
         recorder.sync_and_record(&runtime, DEPTH);
-        runtime.trigger_states[idx].fired = false;
-        runtime.trigger_states[idx].last_fired_elapsed = None;
+        assert_eq!(runtime.triggers.reset_by_id("resettable"), 1);
         recorder.sync_and_record(&runtime, DEPTH);
         assert_eq!(
             recorder.fire_history(idx).len(),
@@ -1309,11 +1321,80 @@ mod tests {
 
         // A reload leaves a single trigger; the recorder must not carry the old
         // ring onto it.
-        runtime.trigger_states.truncate(1);
+        let retained = runtime.triggers[0].clone();
+        runtime.triggers.replace_declarative(vec![retained]);
         recorder.sync_and_record(&runtime, DEPTH);
         assert!(
             recorder.fire_history(0).is_empty(),
             "the rebuilt record starts empty and re-seeds its baseline"
+        );
+    }
+
+    #[test]
+    fn restoring_continuation_discards_observer_history_without_recording_a_fire() {
+        let mut runtime = WorldContentRuntime::default();
+        let idx = push_trigger(
+            &mut runtime,
+            Some("beat"),
+            TriggerCondition::OnWorldLoaded,
+            None,
+            true,
+        );
+        let mut recorder = TriggerFireRecorder::default();
+        recorder.sync_and_record(&runtime, DEPTH);
+        simulate_fire(&mut runtime, idx, 5.0);
+        recorder.sync_and_record(&runtime, DEPTH);
+        assert_eq!(recorder.fire_history(idx).len(), 1);
+
+        let mut continuation = runtime.triggers.capture();
+        continuation[idx].last_fired_elapsed = Some(20.0);
+        runtime.triggers.restore(&continuation).unwrap();
+        recorder.sync_and_record(&runtime, DEPTH);
+        assert!(
+            recorder.fire_history(idx).is_empty(),
+            "restore seeds a baseline, not a fire"
+        );
+        simulate_fire(&mut runtime, idx, 21.0);
+        recorder.sync_and_record(&runtime, DEPTH);
+        assert_eq!(recorder.fire_history(idx).len(), 1);
+        assert_eq!(recorder.fire_history(idx)[0].fired_secs, 21.0);
+    }
+
+    #[test]
+    fn equal_length_layer_replacement_discards_history_of_the_old_indices() {
+        let mut runtime = WorldContentRuntime::default();
+        for owner in ["a", "b", "c"] {
+            let mut state = trigger_state(
+                Some(owner),
+                TriggerCondition::OnWorldLoaded,
+                None,
+                true,
+                false,
+            );
+            state.origin_layer = Some(owner.into());
+            runtime.triggers.push(state);
+        }
+        let mut recorder = TriggerFireRecorder::default();
+        recorder.sync_and_record(&runtime, DEPTH);
+        simulate_fire(&mut runtime, 2, 5.0);
+        recorder.sync_and_record(&runtime, DEPTH);
+        assert_eq!(recorder.fire_history(2).len(), 1);
+        runtime.triggers.remove_layer("b");
+        let mut replacement = trigger_state(
+            Some("b"),
+            TriggerCondition::OnWorldLoaded,
+            None,
+            true,
+            false,
+        );
+        replacement.origin_layer = Some("b".into());
+        runtime.triggers.push(replacement);
+        assert_eq!(runtime.triggers.len(), 3);
+        recorder.sync_and_record(&runtime, DEPTH);
+        assert!(recorder.fire_history(1).is_empty());
+        assert!(
+            recorder.fire_history(2).is_empty(),
+            "B cannot inherit C's former index history"
         );
     }
 }

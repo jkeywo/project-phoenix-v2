@@ -11,7 +11,9 @@ use crate::objectives::ObjectiveManager;
 use crate::server_app::SimOutbox;
 #[cfg(test)]
 use crate::world::content::TriggerAction;
-use crate::world::content::{TriggerState, WorldEvent};
+#[cfg(test)]
+use crate::world::content::TriggerState;
+use crate::world::content::WorldEvent;
 use crate::world::delayed::{partition_delayed_actions, DelayedAction};
 use crate::world::dispatch::{
     dispatch_action, ActionCmd, DispatchContext, DispatchResult, LayerView,
@@ -35,25 +37,8 @@ use crate::world::script::schedule::{CallEffects, PendingCallbacks, SchedClock, 
 /// `crate::comms::server::CommsRuntime` (issue #816).
 #[derive(Resource, Default)]
 pub struct WorldContentRuntime {
-    /// Mutable per-trigger runtime state (fired flag).
-    pub trigger_states: Vec<TriggerState>,
-    /// Bumped every time the SHAPE of [`trigger_states`](Self::trigger_states)
-    /// changes — once per [`merge_script_triggers`] append and once per
-    /// [`remove_layer_script_triggers`] retraction (issue #1045).
-    ///
-    /// It exists because index is the only key the table has, and since a layer
-    /// can now be unloaded from the MIDDLE of it, "same length" stopped implying
-    /// "same triggers": unloading one layer and loading another between two
-    /// samples leaves the count unchanged while every index past the removal now
-    /// names a different trigger. [`crate::debug::scenario::TriggerFireRecorder`]
-    /// reconciled on length alone and would have gone on attributing fires to the
-    /// trigger that used to be at each index; it now rebuilds when this moves.
-    ///
-    /// Not snapshotted and not folded into any digest: it is a cache-invalidation
-    /// token for index-keyed observers, not authoritative state. A resumed world
-    /// rebuilds the same table by replaying the same loads, and the one observer
-    /// that reads it starts empty anyway.
-    pub trigger_table_generation: u64,
+    /// Ordered continuation/handler pairs and their observer generation.
+    pub triggers: crate::world::trigger_registry::WorldTriggerRegistry,
     /// Named-entity → UUID mapping (populated from `WorldConfig.name_to_uuid`).
     pub name_to_uuid: HashMap<String, String>,
     /// Paths of world TOML files already merged into this runtime, used to
@@ -211,7 +196,7 @@ pub struct PendingScenarioLoad(pub Vec<String>);
 /// — the only way a layer could author one — and issue #1045 gave the capability
 /// back through `[script]`. The states themselves are no longer snapshotted here:
 /// each is origin-tagged with this layer's path in the live table, which is what
-/// [`remove_layer_script_triggers`] matches on at unload.
+/// [`crate::world::trigger_registry::WorldTriggerRegistry::remove_layer`] matches on at unload.
 #[derive(Clone, Debug, Default)]
 pub struct WorldRuntime {
     /// `true` only after a layer completed atomic activation. Failed-load
@@ -528,20 +513,6 @@ pub struct RawWorldSource {
 #[derive(Resource)]
 pub struct PreCompiledScripts(pub Option<crate::world::script::load::CompiledScripts>);
 
-/// A reference to the script handler fn that supplies one scripted trigger's
-/// effects at runtime.
-///
-/// Held in [`WorldScriptRuntime::handlers`] parallel to
-/// `WorldContentRuntime.trigger_states`. `(script_path, fn_name)` is everything
-/// `RuntimeHost::call` needs to resolve the fn against the right unit's AST.
-#[derive(Clone, Debug)]
-pub struct ScriptHandlerRef {
-    /// Content-relative (or virtual) path of the unit whose AST defines the fn.
-    pub script_path: String,
-    /// The handler fn to call when the trigger fires.
-    pub fn_name: String,
-}
-
 /// Runtime state for a world that authors Rhai scripts (issue #984, Rhai M6
 /// phase 2a).
 ///
@@ -564,31 +535,8 @@ pub struct WorldScriptRuntime {
     /// Owners retaining each AST unit. `None` denotes the root world; layer
     /// paths are explicit so shared sibling scripts survive either unload.
     pub ast_owners: BTreeMap<String, BTreeSet<Option<String>>>,
-    /// The compiled script triggers, consumed once by [`init_world_runtime`]'s
-    /// merge ([`merge_script_triggers`]) to append trigger states and build
-    /// [`handlers`](Self::handlers).
+    /// Compiled registrations consumed by the trigger registry at activation.
     pub triggers: Vec<ScriptTrigger>,
-    /// Parallel to `WorldContentRuntime.trigger_states`: `None` for every
-    /// non-scripted trigger index, `Some` for each appended scripted one. Filled
-    /// by [`init_world_runtime`]; empty until the merge runs.
-    ///
-    /// # The parallel-vec invariant (issue #1045)
-    ///
-    /// `handlers[i]` describes `trigger_states[i]`, and the two vecs live on
-    /// DIFFERENT resources, so nothing in the type system keeps them aligned.
-    /// [`tick_trigger_pipeline`] reads `handlers[idx]` for the trigger that fired
-    /// at `idx`; a one-entry drift there does not fail loudly, it runs the WRONG
-    /// script.
-    ///
-    /// Both vecs are therefore mutated ONLY through the two functions that take
-    /// them together — [`merge_script_triggers`] (append, padding `handlers` to
-    /// the table length first) and [`remove_layer_script_triggers`] (filter, over
-    /// a `zip` of the two so the pairing is structural) — and both `debug_assert`
-    /// the lengths afterwards. A layer load appends through the first and a layer
-    /// unload retracts through the second, which is what makes an unload from the
-    /// MIDDLE of the table safe: the surviving handlers shift with their states.
-    /// Add a third mutation site and it must take both vecs too.
-    pub handlers: Vec<Option<ScriptHandlerRef>>,
     /// The per-tick operation/call budget, shared across every script call in a
     /// tick and reset when [`budget_tick`](Self::budget_tick) falls behind the
     /// current `SimTick`.
@@ -652,7 +600,6 @@ impl WorldScriptRuntime {
             asts: compiled.asts,
             ast_owners,
             triggers: compiled.script_triggers,
-            handlers: Vec::new(),
             budget: TickBudget::new(),
             budget_tick: 0,
             content_hash: compiled.content_hash,
@@ -681,7 +628,6 @@ impl WorldScriptRuntime {
             asts: BTreeMap::new(),
             ast_owners: BTreeMap::new(),
             triggers: Vec::new(),
-            handlers: Vec::new(),
             budget: TickBudget::new(),
             budget_tick: 0,
             content_hash: 0,
@@ -1673,12 +1619,8 @@ pub(crate) fn init_world_runtime(
             .or_insert_with(|| uuid.clone());
     }
 
-    // The trigger table starts EMPTY. It used to be derived from the parsed
-    // world's `[[trigger]]` blocks and the scripted states were appended after
-    // them; issue #985 deleted that parser, so scripts are the only source and
-    // `WorldScriptRuntime.handlers` is parallel to a table it fills alone. A
-    // script-free world keeps an empty table, exactly as before.
-    runtime.trigger_states.clear();
+    // Reset the complete paired table; scripts are the production source.
+    runtime.triggers.clear();
 
     // Merge script-authored triggers (issue #984, Rhai M6 phase 2a). `None`
     // origin: these are the BASE world's own, so they anchor at the base flag
@@ -1695,147 +1637,15 @@ pub(crate) fn init_world_runtime(
     runtime.pending_world_events.push(WorldEvent::WorldLoaded);
 }
 
-/// Pad `handlers` with `None` up to `states_len`, so the two parallel vecs are
-/// index-aligned before anything appends to or filters them (issue #1045).
-///
-/// It never truncates. A `handlers` vec LONGER than the trigger table is the
-/// desync the [invariant](WorldScriptRuntime::handlers) exists to prevent, so it
-/// is a `debug_assert` failure — every test build trips it — rather than
-/// something quietly cut back to length.
-fn align_handlers(states_len: usize, handlers: &mut Vec<Option<ScriptHandlerRef>>) {
-    debug_assert!(
-        handlers.len() <= states_len,
-        "WorldScriptRuntime::handlers ({}) has outgrown WorldContentRuntime::trigger_states \
-         ({states_len}): the parallel-vec invariant is broken",
-        handlers.len()
-    );
-    if handlers.len() < states_len {
-        // Guarded rather than an unconditional `resize`, which would TRUNCATE a
-        // longer vec — silently doing the damage the assert above exists to catch,
-        // in exactly the release builds where the assert is compiled out.
-        handlers.resize(states_len, None);
-    }
-}
-
-/// Append one [`TriggerState`] per staged [`ScriptTrigger`] to `trigger_states`,
-/// and one parallel `handlers` entry for each (issue #984, Rhai M6 phase 2a).
-///
-/// It appended AFTER a table `init_world_runtime` had already filled from the
-/// world's `[[trigger]]` blocks, and `handlers` carried a `None` for each of
-/// those declarative indices. Issue #985 deleted that front-end, so the base
-/// world's table starts empty and every index is a scripted one.
-///
-/// `origin_layer` is `None` for the base world's own set and `Some(layer path)`
-/// for one a [layer merge](merge_layer_scripts) brings in (issue #1045). It is
-/// both what an appended trigger's flag chain anchors to and what
-/// [`remove_layer_script_triggers`] matches when that layer unloads.
-///
-/// # The `handlers` half is APPENDED, not rebuilt
-///
-/// It used to assign a freshly-built vec, which was exact while a world merged
-/// exactly once at Startup and silently wrong the moment a second merge (a layer)
-/// could follow. It now pads to the current table length and pushes, so calling it
-/// again over a table that already has entries extends both vecs together — see
-/// the [invariant](WorldScriptRuntime::handlers). Behaviour on the Startup path is
-/// unchanged: the table is cleared and `handlers` is empty, so the pad is a no-op.
-///
-/// An appended state feeds `evaluate_single_trigger` like any other — the
-/// evaluator never knew where a trigger came from — and the handler resolved
-/// through the parallel `handlers` entry is what supplies the effects when it
-/// fires.
-///
-/// Takes the whole [`WorldContentRuntime`] rather than just its table so bumping
-/// [`trigger_table_generation`](WorldContentRuntime::trigger_table_generation) is
-/// not something a caller can forget.
+/// Transfer staged registrations into the registry as one ordered layer.
 pub(crate) fn merge_script_triggers(
     runtime: &mut WorldContentRuntime,
     script_runtime: &mut WorldScriptRuntime,
     origin_layer: Option<&str>,
 ) {
-    align_handlers(runtime.trigger_states.len(), &mut script_runtime.handlers);
-    // This merge is the only reader of `triggers`, so `take` it rather than
-    // borrow-and-clone: the staged `ScriptTrigger`s are consumed here and not
-    // retained for the world's lifetime (finding 5), and taking ownership lets
-    // each field move into the appended state/handler instead of cloning.
-    let mut appended = 0usize;
-    for st in std::mem::take(&mut script_runtime.triggers) {
-        runtime.trigger_states.push(TriggerState {
-            trigger: st.trigger,
-            fired: false,
-            origin_layer: origin_layer.map(str::to_string),
-            seen_destroyed: HashSet::new(),
-            last_fired_elapsed: None,
-        });
-        script_runtime.handlers.push(Some(ScriptHandlerRef {
-            script_path: st.source_path,
-            fn_name: st.handler,
-        }));
-        appended += 1;
-    }
-    // Only a real reshape moves the generation — the mirror of the retraction's
-    // early return. A layer that appends nothing (one whose every unit was
-    // already resident, so its registrations are already live) must not cost the
-    // fire recorder a history that is still perfectly valid.
-    if appended > 0 {
-        runtime.trigger_table_generation = runtime.trigger_table_generation.wrapping_add(1);
-    }
-    debug_assert_eq!(
-        runtime.trigger_states.len(),
-        script_runtime.handlers.len(),
-        "merge_script_triggers must leave handlers index-aligned with trigger_states"
-    );
-}
-
-/// Drop every trigger state the layer at `layer_path` contributed, and its
-/// parallel `handlers` entry, in one pass (issue #1045). Returns how many were
-/// removed.
-///
-/// The counterpart to [`merge_script_triggers`], and the reason an unload from
-/// the MIDDLE of the table is safe: the two vecs are filtered over a `zip`, so
-/// every surviving state keeps the handler it arrived with and both shift down
-/// together. Filtering `trigger_states` alone — the shape the applier had before
-/// a layer could contribute triggers at all — would leave every later handler
-/// describing the wrong trigger.
-pub(crate) fn remove_layer_script_triggers(
-    runtime: &mut WorldContentRuntime,
-    handlers: &mut Vec<Option<ScriptHandlerRef>>,
-    layer_path: &str,
-) -> usize {
-    align_handlers(runtime.trigger_states.len(), handlers);
-    // Nothing of this layer's in the table — the whole shipped set, and every
-    // unload of a scriptless layer. Return before taking and rebuilding two vecs
-    // (and before bumping the generation, which would make the fire recorder
-    // discard a history nothing invalidated).
-    if !runtime
-        .trigger_states
-        .iter()
-        .any(|s| s.origin_layer.as_deref() == Some(layer_path))
-    {
-        return 0;
-    }
-    let mut kept_states = Vec::with_capacity(runtime.trigger_states.len());
-    let mut kept_handlers = Vec::with_capacity(handlers.len());
-    let mut removed = 0usize;
-    for (state, handler) in std::mem::take(&mut runtime.trigger_states)
-        .into_iter()
-        .zip(std::mem::take(handlers))
-    {
-        if state.origin_layer.as_deref() == Some(layer_path) {
-            removed += 1;
-            continue;
-        }
-        kept_states.push(state);
-        kept_handlers.push(handler);
-    }
-    runtime.trigger_states = kept_states;
-    *handlers = kept_handlers;
-    runtime.trigger_table_generation = runtime.trigger_table_generation.wrapping_add(1);
-    debug_assert_eq!(
-        runtime.trigger_states.len(),
-        handlers.len(),
-        "remove_layer_script_triggers must leave handlers index-aligned with trigger_states"
-    );
-    removed
+    runtime
+        .triggers
+        .append_scripted(std::mem::take(&mut script_runtime.triggers), origin_layer);
 }
 
 /// Merge one layer's compiled `[script]` set into the live script runtime
@@ -2436,7 +2246,7 @@ pub(crate) fn tick_trigger_pipeline(
 
     // Reborrow the `ResMut` as a plain `&mut` so the evaluation loop below can
     // split disjoint field borrows (`&runtime.flags` for condition chains while
-    // `&mut runtime.trigger_states[idx]` is handed to the evaluator) — a smart
+    // `&mut runtime.triggers` evaluates the ordered table) — a smart
     // pointer cannot split, a plain reference can. Placed after the early
     // return so change detection still only marks the resource on ticks that
     // actually process events (the pre-existing behaviour: every path past
@@ -2490,68 +2300,35 @@ pub(crate) fn tick_trigger_pipeline(
                 }
             })
             .fold(0.0_f32, |max_e, e| e.max(max_e));
-        // Per-trigger evaluation: build chain from origin_layer up. The
-        // chains borrow the LIVE stores (`runtime.flags` and `layer_map`'s
-        // per-layer stores) rather than per-pass clones: evaluation is safe
-        // against them because the pass is two-phase — every condition is
-        // evaluated before any fired action is dispatched, so no store
-        // mutates while these borrows are alive.
-        // Carries the trigger-states index alongside each fired trigger so the
-        // dispatch loop can look up its scripted handler (issue #984, Rhai M6
-        // phase 2a) in `WorldScriptRuntime.handlers[idx]`.
-        let mut fired: Vec<(usize, crate::world::content::FiredTrigger)> = Vec::new();
-        // We have to clone the origin_layer slice up front: the evaluator
-        // below takes `&mut runtime.trigger_states[idx]`, so nothing may
-        // hold a borrow on `runtime.trigger_states` across the loop.
-        let trigger_origins: Vec<Option<String>> = runtime
-            .trigger_states
-            .iter()
-            .map(|s| s.origin_layer.clone())
-            .collect();
-        let entity_groups = runtime.entity_groups.clone();
-        for (idx, origin) in trigger_origins.iter().enumerate() {
-            // Build the flag-store and layer-path chains for this trigger.
-            // The store half is the ONE shared layered walk
-            // (`layered_flag_chain`), also read through by every AI
-            // policy/selector host (issue #891 stage 2) via
-            // `entity_flag_chain`; the path half is this pipeline's own
-            // wrapper (issue #891 review finding 2) since nothing else needs it.
-            let (flag_chain, layer_chain) = layered_flag_chain_with_paths(
-                origin.as_deref(),
-                &runtime.flags,
-                world_layers.layer_map.as_deref(),
-            );
-            let result = crate::world::content::evaluate_single_trigger(
-                &mut runtime.trigger_states[idx],
-                &current_events,
-                &name_to_uuid,
-                &flag_chain,
-                &layer_chain,
-                &entity_groups,
-                current_elapsed,
-            );
-            if let Some(ft) = result {
-                fired.push((idx, ft));
-            }
-        }
+        // All conditions read the live stores before any fired effect lands.
+        let fired = runtime.triggers.evaluate(
+            &current_events,
+            &name_to_uuid,
+            &runtime.entity_groups,
+            current_elapsed,
+            |origin| {
+                layered_flag_chain_with_paths(
+                    origin,
+                    &runtime.flags,
+                    world_layers.layer_map.as_deref(),
+                )
+            },
+        );
 
         if fired.is_empty() {
             break;
         }
 
         let mut next_events: Vec<WorldEvent> = Vec::new();
-        for (idx, ft) in fired {
-            let handler = script
-                .runtime
-                .as_deref()
-                .and_then(|runtime| runtime.handlers.get(idx))
-                .and_then(Clone::clone);
+        for fired in fired {
+            let handler = fired.handler;
+            let ft = fired.context;
             let origin = handler
                 .as_ref()
                 .map(|handler| handler.script_path.clone())
                 .or_else(|| ft.origin_layer.clone())
                 .unwrap_or_else(|| "base-world".to_owned());
-            let trigger_id = runtime.trigger_states[idx].trigger.id.clone().or_else(|| {
+            let trigger_id = fired.trigger_id.or_else(|| {
                 handler
                     .as_ref()
                     .map(|handler| format!("{}::{}", handler.script_path, handler.fn_name))
@@ -2578,19 +2355,6 @@ pub(crate) fn tick_trigger_pipeline(
             // pass exactly as a declarative `set_flag` used to
             // (`apply_script_commands`).
             if let Some(sr) = script.runtime.as_deref_mut() {
-                // The parallel-vec invariant, checked at the READ site (issue
-                // #1045): `handlers[idx]` only means anything while `handlers` has
-                // exactly one entry per trigger state. A short vec silently runs
-                // NOTHING and a shifted one silently runs the WRONG handler, so a
-                // desync introduced by some future layer-unload change must fail
-                // here in every test build rather than surface as a scenario that
-                // quietly misbehaves. See `WorldScriptRuntime::handlers`.
-                debug_assert_eq!(
-                    sr.handlers.len(),
-                    runtime.trigger_states.len(),
-                    "WorldScriptRuntime::handlers has desynced from \
-                     WorldContentRuntime::trigger_states"
-                );
                 if let Some(h) = handler {
                     // The store chain THIS handler reads through (issue #1045):
                     // its own layer first, then outward to the base world — the
@@ -3373,8 +3137,7 @@ pub(crate) fn apply_dispatch_result(
             }
 
             ActionCmd::ResetTrigger { id } => {
-                let n =
-                    crate::world::content::reset_triggers_by_id(&mut runtime.trigger_states, &id);
+                let n = runtime.triggers.reset_by_id(&id);
                 if n == 0 {
                     bevy::log::warn!(
                         "{log_ctx}: ResetTrigger('{id}') matched no trigger with that id"
@@ -4813,7 +4576,7 @@ fn layer_validation_context<'a>(
 /// `UnloadWorld` removes the stored snapshot, despawns the layer's entities, and
 /// retracts exactly the scenario logic it brought: the trigger states origin-tagged
 /// with its path (each with its parallel `handlers` entry — see
-/// [`remove_layer_script_triggers`]), the AST units it added, and any deadline
+/// [`crate::world::trigger_registry::WorldTriggerRegistry::remove_layer`]), the AST units it added, and any deadline
 /// declaration or queued `after(..)` callback keyed to one of those units.
 ///
 /// # The script runtime is created on demand, one tick early (issue #1045)
@@ -4831,7 +4594,7 @@ fn layer_validation_context<'a>(
 /// a whole tick before the `handlers` that describe them — so the pipeline would
 /// evaluate each `on_world_loaded` against an absent runtime, latch it `fired`,
 /// and the layer's opening handler would never run at all. Waiting a tick means
-/// the states and their handlers are always written in the SAME system body.
+/// the paired registrations become visible only with their execution runtime.
 ///
 /// The re-queued item is a [`WorldLayerChange::DeferredApply`] carrying the
 /// EVALUATED layer, not a fresh `Load`. Re-evaluating would reparse the layer and
@@ -5233,15 +4996,12 @@ fn apply_world_layer_changes(
                     commands.entity(*entity).try_despawn();
                 }
 
-                // Retract exactly the scenario logic this layer brought (issue
-                // #1045). `remove_layer_script_triggers` filters `trigger_states`
-                // and the parallel `handlers` over a `zip`, which is what keeps a
-                // removal from the MIDDLE of the table from leaving every later
-                // handler describing the wrong trigger — see the invariant on
-                // `WorldScriptRuntime::handlers`.
-                //
-                // A layer that authored no script has an empty `script_units` and
-                // no origin-tagged state, so every arm below is a no-op.
+                // Retraction pairs rows even in fixtures with no script runtime.
+                let removed = runtime.triggers.remove_layer(&path);
+                if removed > 0 {
+                    bevy::log::debug!(target: "world",
+                        "apply_world_layer_changes: unloaded {path} retracted {removed} trigger(s)");
+                }
                 if let Some(sr) = script_runtime.as_deref_mut() {
                     for call in runtime.deadlines.remove_origin(&path) {
                         sr.pending_callbacks.retract(&call);
@@ -5251,15 +5011,6 @@ fn apply_world_layer_changes(
                         .retain(|call| call.origin_layer.as_deref() != Some(path.as_str()));
                     sr.pending_comms_opens
                         .retain(|open| open.origin_layer.as_deref() != Some(path.as_str()));
-                    let removed =
-                        remove_layer_script_triggers(&mut runtime, &mut sr.handlers, &path);
-                    if removed > 0 {
-                        bevy::log::debug!(
-                            target: "world",
-                            "apply_world_layer_changes: unloaded {path} retracted {removed} \
-                             scripted trigger(s)"
-                        );
-                    }
                     for unit in &layer.script_units {
                         let remove_unit = sr.ast_owners.get_mut(unit).is_some_and(|owners| {
                             owners.remove(&Some(path.clone()));

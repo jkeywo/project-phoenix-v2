@@ -118,6 +118,35 @@ entities:
         reference: "tests/snapshot_resume.rs::a_mid_run_spawn_is_rebuilt_by_the_restore_rather_than_replayed_by_the_bootstrap"
         summary: "`probe_reinforce.toml` spawns two Harrow raiders at t=3 s from the same `alliance_cruiser` template its authored escort flies, made hostile by an `overrides` block alone. The capture is taken after the spawn; a fresh app is stepped only to `ready_to_rebuild` — with the raiders provably absent and `ready_to_restore` provably false — and the restore builds both. Their FACTION and TAGS are read off the rebuilt hulls, neither of which travels anywhere else in the payload, so a rebuild from the bare template would fail the test while satisfying a count; `name_to_uuid`, the `raiders` group and the captured digest are all asserted alongside."
 
+  - component: world-trigger-registry
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Ordered World Trigger Registry
+      summary: "Owns ordered entries pairing trigger continuation with an optional ScriptHandlerRef, plus the generation used by index-keyed observers. WorldContentRuntime carries one registry; WorldScriptRuntime retains ASTs, compiled staging and execution budgets."
+      rationale:
+        - "Issue #1412: layer append and remove operate on paired entries, so a middle removal cannot shift a surviving trigger onto another layer's same-named handler. There is no independently mutable handlers vector or caller-maintained length invariant."
+        - "Evaluation visits the existing order and returns owned firing context with its paired handler before effects apply. The adapter still supplies the owner's live flag/path chain, preserving the two-phase same-tick loop and script-free fixtures."
+        - "Continuation capture preserves TriggerRuntimeState's index/fired/seen_destroyed/last_fired_elapsed wire fields, deterministic row order and sorted destroyed names. Restore validates cardinality and complete unique index coverage before writing any row; malformed rows produce a bounded RestoreGap without partially changing latches. No stable-id or save-format migration is introduced."
+        - "Real append/remove/clear or declarative replacement advances generation; no-op operations do not. Successful continuation restore also advances it so old fire history cannot be attributed to restored latches. Generation and compiled handler references remain absent from authoritative digest traversal and serialized continuation."
+    architecture:
+      kind: domain-model
+      authority: authoritative
+      depends_on: [world-trigger-evaluator]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: observed
+      paths: [src/world/trigger_registry.rs]
+      symbols: [WorldTriggerRegistry, ScriptHandlerRef, TriggerRuntimeState, TriggerRestoreError, FiredWorldTrigger]
+      tests: ["cargo test --lib --features headless trigger_registry", "cargo test --lib --features headless middle_layer_removal_restore_and_append", "cargo test --lib --features headless snapshot_reports_incompatible_trigger_rows"]
+    evidence:
+      - kind: test
+        reference: "src/world/server_tests.rs::middle_layer_removal_restore_and_append_keep_same_named_handlers_with_their_owners"
+        summary: "Loads A/B/C with identically named handler functions, removes B, restores layered latches into a fresh app, fires only C's own script, then reloads B at the end and verifies its owner and continuation."
+      - kind: test
+        reference: "src/world/trigger_registry_tests.rs"
+        summary: "Mixed declarative/scripted order, same-length replacement generation, handler-preserving continuation, atomic mismatch refusal and the unchanged RON row shape."
+
   - component: world-trigger-chaining-loop
     core:
       status: implemented
@@ -140,11 +169,11 @@ entities:
       kind: evaluation-loop
       authority: authoritative
       reads: [world-event-buffer-state, world-flag-state, world-layer-runtime-state, world-name-binding-state]
-      coordinates: [world-trigger-evaluator, world-trigger-action-dispatcher]
+      coordinates: [world-trigger-registry, world-trigger-evaluator, world-trigger-action-dispatcher]
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/world/server.rs, src/world/content.rs, src/world/script/engine.rs, src/world/script/schedule.rs]
+      paths: [src/world/server.rs, src/world/content.rs, src/world/trigger_registry.rs, src/world/script/engine.rs, src/world/script/schedule.rs]
       symbols: [tick_trigger_pipeline, tick_script_callbacks, apply_script_call, ScriptCallContext, ScriptEventTarget, apply_world_layer_changes, ScheduledCall, MAX_CHAIN_PASSES, evaluate_single_trigger, apply_dispatch_result]
       tests: [cargo test]
     evidence:

@@ -966,7 +966,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: World Trigger Evaluator
-      summary: Evaluates trigger conditions, predicate gates, action predicates, and delayed actions against world runtime state.
+      summary: Evaluates trigger conditions, predicate gates, single-shot latches and cooldowns against World runtime state; WorldTriggerRegistry owns the ordered entries evaluated by the pipeline.
     architecture:
       kind: subsystem
       authority: authoritative
@@ -975,7 +975,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/world/server.rs, src/world/config.rs, src/world/flags.rs]
+      paths: [src/world/content.rs, src/world/trigger_registry.rs, src/world/config.rs, src/world/flags.rs]
       symbols: [Trigger, TriggerAction, Predicate, TriggerState, evaluate_single_trigger]
       tests: [cargo test]
 

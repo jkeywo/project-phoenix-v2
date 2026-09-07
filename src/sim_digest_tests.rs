@@ -920,7 +920,6 @@ fn empty_script_runtime() -> WorldScriptRuntime {
         asts: std::collections::BTreeMap::new(),
         ast_owners: std::collections::BTreeMap::new(),
         triggers: Vec::new(),
-        handlers: Vec::new(),
         budget: TickBudget::new(),
         budget_tick: 0,
         content_hash: 0,
@@ -1190,7 +1189,7 @@ fn a_trigger_latch_moves_the_digest_and_so_does_the_tables_shape() {
     let mut world = scenario_world();
     world
         .resource_mut::<WorldContentRuntime>()
-        .trigger_states
+        .triggers
         .push(trigger_state("raider"));
     let armed = world_digest(&world);
     assert_ne!(
@@ -1199,27 +1198,40 @@ fn a_trigger_latch_moves_the_digest_and_so_does_the_tables_shape() {
         "a live trigger table is folded"
     );
 
-    world.resource_mut::<WorldContentRuntime>().trigger_states[0].fired = true;
+    let mut continuation = world.resource::<WorldContentRuntime>().triggers.capture();
+    continuation[0].fired = true;
+    world
+        .resource_mut::<WorldContentRuntime>()
+        .triggers
+        .restore(&continuation)
+        .unwrap();
     let fired = world_digest(&world);
     assert_ne!(
         armed, fired,
         "the single-shot latch is the point of the walk"
     );
 
-    world.resource_mut::<WorldContentRuntime>().trigger_states[0]
-        .seen_destroyed
-        .insert("escort".into());
+    continuation[0].seen_destroyed.push("escort".into());
+    world
+        .resource_mut::<WorldContentRuntime>()
+        .triggers
+        .restore(&continuation)
+        .unwrap();
     let seen = world_digest(&world);
     assert_ne!(fired, seen, "the OnAllDestroyed accumulation is folded");
 
-    world.resource_mut::<WorldContentRuntime>().trigger_states[0].origin_layer =
-        Some("layers/storm.toml".into());
+    let mut owned_state = world.resource::<WorldContentRuntime>().triggers[0].clone();
+    owned_state.origin_layer = Some("layers/storm.toml".into());
+    world
+        .resource_mut::<WorldContentRuntime>()
+        .triggers
+        .replace_declarative(vec![owned_state]);
     let owned = world_digest(&world);
     assert_ne!(seen, owned, "which layer owns the row is folded with it");
 
     world
         .resource_mut::<WorldContentRuntime>()
-        .trigger_states
+        .triggers
         .push(trigger_state("courier"));
     assert_ne!(
         owned,
@@ -1232,7 +1244,7 @@ fn a_trigger_latch_moves_the_digest_and_so_does_the_tables_shape() {
 /// A table that was RESHAPED without changing size still moves the digest.
 ///
 /// Positional keying with the row count as its only shape guard is exactly the
-/// hazard `WorldContentRuntime::trigger_table_generation` exists to name: a
+/// hazard `WorldContentRuntime::triggers.generation()` exists to name: a
 /// layer unloaded from the middle and another loaded in its place leaves the
 /// count and the `origin_layer` tags alone while every row past the removal now
 /// names a different trigger. Each row's authored identity — its `id`, and its
@@ -1246,7 +1258,10 @@ fn a_reshaped_trigger_table_of_the_same_size_moves_the_digest() {
     };
     let table = |rows: Vec<TriggerState>| {
         let mut world = scenario_world();
-        world.resource_mut::<WorldContentRuntime>().trigger_states = rows;
+        world
+            .resource_mut::<WorldContentRuntime>()
+            .triggers
+            .replace_declarative(rows);
         world_digest(&world)
     };
 
@@ -1275,11 +1290,17 @@ fn the_cooldown_stamp_folds_as_set_or_unset_but_not_as_a_number() {
     let mut world = scenario_world();
     world
         .resource_mut::<WorldContentRuntime>()
-        .trigger_states
+        .triggers
         .push(trigger_state("raider"));
     let unset = world_digest(&world);
 
-    world.resource_mut::<WorldContentRuntime>().trigger_states[0].last_fired_elapsed = Some(5.0);
+    let mut continuation = world.resource::<WorldContentRuntime>().triggers.capture();
+    continuation[0].last_fired_elapsed = Some(5.0);
+    world
+        .resource_mut::<WorldContentRuntime>()
+        .triggers
+        .restore(&continuation)
+        .unwrap();
     let stamped = world_digest(&world);
     assert_ne!(
         unset, stamped,
@@ -1287,8 +1308,12 @@ fn the_cooldown_stamp_folds_as_set_or_unset_but_not_as_a_number() {
          moves it"
     );
 
-    world.resource_mut::<WorldContentRuntime>().trigger_states[0].last_fired_elapsed =
-        Some(5.000_000_5);
+    continuation[0].last_fired_elapsed = Some(5.000_000_5);
+    world
+        .resource_mut::<WorldContentRuntime>()
+        .triggers
+        .restore(&continuation)
+        .unwrap();
     assert_eq!(
         stamped,
         world_digest(&world),
@@ -1802,7 +1827,7 @@ fn insertion_order_does_not_reach_the_fold() {
             for name in order {
                 state.seen_destroyed.insert((*name).into());
             }
-            runtime.trigger_states.push(state);
+            runtime.triggers.push(state);
         }
         {
             let mut comms = world.resource_mut::<CommsRuntime>();

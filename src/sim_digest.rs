@@ -129,7 +129,7 @@
 //! [`fold_scenario_records`] for the six `WorldContentRuntime` fields
 //! deliberately left out — `name_to_uuid`, `observed_hull_fractions`,
 //! `mission_clock_anchor_secs`, `pending_delayed_actions`,
-//! `trigger_table_generation` and `loaded_scenario_paths` — plus the authored
+//! `triggers.generation()` and `loaded_scenario_paths` — plus the authored
 //! row fields that go with them, each with its reason.
 //!
 //! **Folded (`AsteroidUuid` namespace, in `FoldKey` order):** every asteroid's
@@ -722,7 +722,7 @@ fn fold_optional_triple(acc: u64, value: Option<[f32; 3]>) -> u64 {
 /// When #1118 does put this on the per-tick path, the cheap encodings are
 /// already available and do not change a folded number: `FlagStore` and
 /// `entity_groups` can fold through a cached sorted key list invalidated by a
-/// generation counter — the pattern `trigger_table_generation` already
+/// generation counter — the pattern `triggers.generation()` already
 /// establishes for the trigger table — and the layer vector can be folded from a
 /// scratch buffer rather than a fresh `Vec` per call.
 ///
@@ -847,7 +847,7 @@ fn fold_flag_store(mut acc: u64, pairs: &[(&str, i64)]) -> u64 {
     acc
 }
 
-/// Every live trigger's **latch**, in `trigger_states` order.
+/// Every live trigger's **latch**, in `triggers` order.
 ///
 /// The single-shot `fired` flag and the `OnAllDestroyed` accumulation — two of
 /// the three fields a run moves, which is what
@@ -866,7 +866,7 @@ fn fold_flag_store(mut acc: u64, pairs: &[(&str, i64)]) -> u64 {
 /// # Each row's authored IDENTITY folds with its latch
 ///
 /// A latch keyed only by position is exactly the hazard
-/// `WorldContentRuntime::trigger_table_generation` was introduced to name: since
+/// `WorldContentRuntime::triggers.generation()` was introduced to name: since
 /// a layer can be unloaded from the MIDDLE of this vec, "same length" stopped
 /// implying "same triggers", and `TriggerFireRecorder` got that wrong by
 /// believing it. Count plus `origin_layer` does not close it either — a reshape
@@ -910,13 +910,13 @@ fn fold_scenario_triggers(world: &World, mut acc: u64) -> u64 {
     let Some(runtime) = world.get_resource::<WorldContentRuntime>() else {
         return acc;
     };
-    if runtime.trigger_states.is_empty() {
+    if runtime.triggers.is_empty() {
         return acc;
     }
 
     acc = fold_str(acc, "scenario-triggers");
-    acc = fold_u64(acc, runtime.trigger_states.len() as u64);
-    for state in &runtime.trigger_states {
+    acc = fold_u64(acc, runtime.triggers.len() as u64);
+    for state in runtime.triggers.iter() {
         acc = fold_optional_str(acc, state.trigger.id.as_deref());
         acc = fold_u64(acc, trigger_condition_code(&state.trigger.condition));
         acc = fold_u64(acc, u64::from(state.fired));
@@ -1118,7 +1118,7 @@ fn fold_world_event(mut acc: u64, event: &WorldEvent) -> u64 {
 ///   any world that used it, so the fold follows the payload. No shipped world
 ///   authors `action_delays`, so the queue is empty everywhere today; closing it
 ///   properly belongs with the issue that widens the payload.
-/// * **`WorldContentRuntime::trigger_table_generation`** — declared at its own
+/// * **`WorldContentRuntime::triggers.generation()`** — declared at its own
 ///   definition as a cache-invalidation token for index-keyed observers rather
 ///   than authoritative state. It counts this host's load HISTORY, not its
 ///   state; [`fold_scenario_triggers`] closes the hazard it names by folding

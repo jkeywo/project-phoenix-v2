@@ -5037,15 +5037,16 @@ fn dynamically_loaded_order_ownership_entities_and_deadlines_resume_exactly() {
     assert!(report.is_complete(), "gaps: {:?}", report.gaps);
     let runtime = resumed.world().resource::<WorldContentRuntime>();
     let scripts = resumed.world().resource::<WorldScriptRuntime>();
-    assert_eq!(runtime.trigger_states.len(), scripts.handlers.len());
+    assert!((0..runtime.triggers.len()).all(|index| runtime.triggers.handler(index).is_some()));
     for path in [LAYER_NESTED_PARENT_PATH, LAYER_NESTED_CHILD_PATH] {
         assert_eq!(
             runtime
-                .trigger_states
+                .triggers
                 .iter()
-                .zip(&scripts.handlers)
-                .filter(|(state, handler)| {
-                    state.origin_layer.as_deref() == Some(path) && handler.is_some()
+                .enumerate()
+                .filter(|(index, state)| {
+                    state.origin_layer.as_deref() == Some(path)
+                        && runtime.triggers.handler(*index).is_some()
                 })
                 .count(),
             1,
@@ -5129,10 +5130,10 @@ fn a_dynamically_unloaded_startup_layer_stays_absent_after_resume() {
     let runtime = resumed.world().resource::<WorldContentRuntime>();
     let scripts = resumed.world().resource::<WorldScriptRuntime>();
     assert!(runtime
-        .trigger_states
+        .triggers
         .iter()
         .all(|state| state.origin_layer.as_deref() != Some(LAYER_DEADLINE_PATH)));
-    assert_eq!(runtime.trigger_states.len(), scripts.handlers.len());
+    assert!((0..runtime.triggers.len()).all(|index| runtime.triggers.handler(index).is_some()));
     assert!(scripts
         .pending_callbacks
         .0

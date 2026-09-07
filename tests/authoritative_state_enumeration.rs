@@ -536,14 +536,14 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // Issue #1045's SCRIPT-IN-LAYERS registers nothing new, and it is the seam's
     // most invasive slice so far. A layer's `[script]` block now compiles at
     // `LoadWorld` and merges into the SAME `WorldScriptRuntime` this list already
-    // covers — its ASTs and its `handlers` vec — and its trigger states into
-    // `WorldContentRuntime::trigger_states` above. Three new FIELDS, no new
+    // covers — its ASTs and staged registrations — and its trigger states into
+    // `WorldContentRuntime::triggers` above. Three new FIELDS, no new
     // registrations:
     //
     //   * `WorldRuntime::script_units` — the AST keys a layer added, so its unload
     //     retracts exactly them. `WorldRuntime` carries no `#[derive(Resource)]`
     //     of its own; it lives inside `WorldLayerMap`, already covered.
-    //   * `WorldContentRuntime::trigger_table_generation` — a cache-invalidation
+    //   * `WorldTriggerRegistry::generation` — a cache-invalidation
     //     token for index-keyed observers of the trigger table, bumped on every
     //     reshape. NOT authoritative state and deliberately not snapshotted: a
     //     resumed world rebuilds the same table by replaying the same layer loads,
@@ -555,14 +555,14 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     //
     // The empty `WorldScriptRuntime` a scripted layer inserts when the base world
     // authored none is that same registered type, instantiated where a script-free
-    // world previously had nothing. See `src/world/layers.rs` and the parallel-vec
-    // invariant documented on `WorldScriptRuntime::handlers`.
+    // world previously had nothing. See `src/world/layers.rs`; #1412 now keeps
+    // trigger state/handler pairing structurally in `WorldTriggerRegistry`.
     //
     // Issue #1086 CASHED IN most of the "belongs in the same digest fold"
     // language above, and the two entries stay here for a narrower reason than
     // they used to. `sim_digest::fold_scenario_scope` now walks, on every digest
     // sample and on every save and restore: `WorldContentRuntime`'s `flags`,
-    // `trigger_states` (authored identity plus latches),
+    // `triggers` (authored identity plus latches),
     // `pending_world_events`, `entity_groups`, `deadlines`, `commitments`,
     // `evidence` and `workforce`; and `WorldScriptRuntime`'s `pending_callbacks`
     // and `pending_comms_opens`. So every FIELD the paragraphs above account for
@@ -599,7 +599,7 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // still carries `pending_delayed_actions` (authoritative, and deliberately
     // out of both the payload and the fold — see `fold_scenario_records`),
     // `name_to_uuid` and `observed_hull_fractions` (re-derived), the
-    // `mission_clock_anchor_secs` reading, `trigger_table_generation` (the
+    // `mission_clock_anchor_secs` reading, `WorldTriggerRegistry::generation` (the
     // cache token four bullets up) and `loaded_scenario_paths` (the layer-load
     // dedup set, which the payload does not carry). `WorldScriptRuntime` is
     // mostly compiled ASTs, the per-tick budget and the content hash, none of

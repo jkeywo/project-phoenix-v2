@@ -155,11 +155,15 @@ impl Injection {
             }
             Self::TriggerLatch => {
                 let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-                let last = runtime
-                    .trigger_states
+                let mut continuation = runtime.triggers.capture();
+                let last = continuation
                     .last_mut()
                     .expect("the probe world authors triggers");
                 last.fired = !last.fired;
+                runtime
+                    .triggers
+                    .restore(&continuation)
+                    .expect("same index set");
             }
             Self::InboxMessage => {
                 let message = project_phoenix::core::messages::CommsMessage::injected(
@@ -247,11 +251,11 @@ fn the_scenario_surfaces_are_actually_populated() {
         "precondition: the run must have set at least one world flag"
     );
     assert!(
-        !runtime.trigger_states.is_empty(),
+        !runtime.triggers.is_empty(),
         "precondition: the run must carry a live trigger table"
     );
     assert!(
-        runtime.trigger_states.iter().any(|state| state.fired),
+        runtime.triggers.iter().any(|state| state.fired),
         "precondition: at least one trigger must have latched, or the latch fold \
          is being asserted over a table of untouched rows"
     );

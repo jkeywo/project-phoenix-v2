@@ -196,6 +196,11 @@ pub enum GmAction {
         target: String,
         mode: crate::gm_contact::ContactMode,
     },
+    SetSystemDisabled {
+        target: String,
+        system: crate::core::messages::SystemId,
+        disabled: bool,
+    },
 }
 
 /// WHICH lever of the authored-event control family one durable result records
@@ -239,6 +244,8 @@ pub enum GmActionKind {
     WorldDespawn,
     ObjectiveControl,
     ContactReveal,
+    SystemDisable,
+    SystemRestore,
     ContactConceal,
     ContactNormal,
 }
@@ -260,6 +267,8 @@ impl GmActionKind {
             | Self::WorldDespawn
             | Self::ObjectiveControl
             | Self::ContactReveal
+            | Self::SystemDisable
+            | Self::SystemRestore
             | Self::ContactConceal
             | Self::ContactNormal => true,
             Self::SessionPause | Self::StationPuppet | Self::StationCommand => false,
@@ -312,6 +321,7 @@ impl GmAction {
             | Self::SpawnPaletteEntity { .. }
             | Self::DespawnEntity { .. }
             | Self::ObjectiveAction { .. }
+            | Self::SetSystemDisabled { .. }
             | Self::SetEventPaused { .. }
             | Self::ArmGmEventSkip { .. } => None,
             Self::SetStationPuppet { ship, .. }
@@ -334,6 +344,7 @@ impl GmAction {
             | Self::SetEventPaused { event, .. }
             | Self::ArmGmEventSkip { event } => Some(event.as_str()),
             Self::ApplyDirectEffect { target, .. }
+            | Self::SetSystemDisabled { target, .. }
             | Self::DespawnEntity { target }
             | Self::SetContactOverride { target, .. } => Some(target.as_str()),
             // The palette id, not the derived instance name: the durable fact
@@ -353,6 +364,11 @@ impl GmAction {
         };
         match self {
             Self::SetSessionPaused { .. } => Ok(()),
+            Self::SetSystemDisabled { target, system, .. }
+                if bounded(target) && bounded(&system.0) =>
+            {
+                Ok(())
+            }
             Self::DespawnEntity { target } if bounded(target) => Ok(()),
             Self::ObjectiveAction {
                 objective,
@@ -446,6 +462,13 @@ impl GmAction {
 
     pub fn kind(&self) -> GmActionKind {
         match self {
+            Self::SetSystemDisabled { disabled, .. } => {
+                if *disabled {
+                    GmActionKind::SystemDisable
+                } else {
+                    GmActionKind::SystemRestore
+                }
+            }
             Self::SetSessionPaused { .. } => GmActionKind::SessionPause,
             Self::SetStationPuppet { .. } => GmActionKind::StationPuppet,
             Self::IssueStationCommand { .. } => GmActionKind::StationCommand,
@@ -476,6 +499,7 @@ impl GmAction {
             | Self::ApplyDirectEffect { .. }
             | Self::SpawnPaletteEntity { .. }
             | Self::SetContactOverride { .. }
+            | Self::SetSystemDisabled { .. }
             | Self::DespawnEntity { .. }
             | Self::ObjectiveAction { .. }
             | Self::ArmGmEventSkip { .. } => None,
@@ -497,6 +521,9 @@ impl GmAction {
     }
     pub fn effect_scope(&self) -> Option<crate::gm_effect::GmDirectEffectScope> {
         match self {
+            Self::SetSystemDisabled { system, .. } => Some(
+                crate::gm_effect::GmDirectEffectScope::System(system.clone()),
+            ),
             Self::ApplyDirectEffect { scope, .. }
                 if !matches!(scope, crate::gm_effect::GmDirectEffectScope::Entity) =>
             {
@@ -515,6 +542,7 @@ impl GmAction {
             | Self::ApplyDirectEffect { .. }
             | Self::SpawnPaletteEntity { .. }
             | Self::SetContactOverride { .. }
+            | Self::SetSystemDisabled { .. }
             | Self::DespawnEntity { .. }
             | Self::ObjectiveAction { .. }
             | Self::ArmGmEventSkip { .. }
@@ -541,6 +569,7 @@ impl GmAction {
             | Self::ApplyDirectEffect { .. }
             | Self::SpawnPaletteEntity { .. }
             | Self::SetContactOverride { .. }
+            | Self::SetSystemDisabled { .. }
             | Self::DespawnEntity { .. }
             | Self::ObjectiveAction { .. } => None,
         }
@@ -548,6 +577,7 @@ impl GmAction {
 
     pub fn requested_active(&self) -> bool {
         match self {
+            Self::SetSystemDisabled { disabled, .. } => *disabled,
             Self::SetSessionPaused { active }
             | Self::SetStationPuppet { active, .. }
             | Self::SetEventPaused { active, .. } => *active,
@@ -812,7 +842,37 @@ pub fn validate_fleet_frame(
             // refused Fire on every other GM's feed, because Fire is the only
             // event-control verb a fact with neither field could ever have
             // recorded.
-            if refusal.effect_scope.is_some() && refusal.action_kind != GmActionKind::DirectEffect {
+            let is_system_latch = matches!(
+                refusal.action_kind,
+                GmActionKind::SystemDisable | GmActionKind::SystemRestore
+            );
+            if is_system_latch
+                && !matches!(
+                    refusal.effect_scope,
+                    Some(crate::gm_effect::GmDirectEffectScope::System(_))
+                )
+            {
+                return Err(GmActionRefusalReason::InvalidAction);
+            }
+            if is_system_latch {
+                let Some(crate::gm_effect::GmDirectEffectScope::System(system)) =
+                    &refusal.effect_scope
+                else {
+                    unreachable!()
+                };
+                if system.0.is_empty()
+                    || system.0.len() > 128
+                    || system.0.chars().any(char::is_control)
+                    || refusal.requested_active
+                        != (refusal.action_kind == GmActionKind::SystemDisable)
+                {
+                    return Err(GmActionRefusalReason::InvalidAction);
+                }
+            }
+            if refusal.effect_scope.is_some()
+                && refusal.action_kind != GmActionKind::DirectEffect
+                && !is_system_latch
+            {
                 return Err(GmActionRefusalReason::InvalidAction);
             }
             let is_objective = refusal.action_kind == GmActionKind::ObjectiveControl;
@@ -1505,6 +1565,8 @@ impl GmActionJournal {
             || result.objective_recipients != grant.action.objective_recipients()
             || result.target.as_deref() != grant.action.target_id()
             || result.observer != grant.action.observer_id()
+            || (matches!(grant.action, GmAction::SetSystemDisabled { .. })
+                && result.effect_scope != grant.action.effect_scope())
         {
             return Err("GM applied result does not match its canonical grant");
         }
@@ -1682,6 +1744,7 @@ impl GmActionJournal {
                         | GmAction::ApplyDirectEffect { .. }
                         | GmAction::SpawnPaletteEntity { .. }
                         | GmAction::SetContactOverride { .. }
+                        | GmAction::SetSystemDisabled { .. }
                         | GmAction::DespawnEntity { .. }
                         | GmAction::ObjectiveAction { .. } => {}
                     }
@@ -1749,6 +1812,7 @@ impl GmActionJournal {
                 | GmAction::ApplyDirectEffect { .. }
                 | GmAction::SpawnPaletteEntity { .. }
                 | GmAction::SetContactOverride { .. }
+                | GmAction::SetSystemDisabled { .. }
                 | GmAction::DespawnEntity { .. }
                 | GmAction::ObjectiveAction { .. } => GmActionOutcome::Applied,
             };
@@ -1852,6 +1916,7 @@ impl GmActionJournal {
                 | GmAction::ApplyDirectEffect { .. }
                 | GmAction::SpawnPaletteEntity { .. }
                 | GmAction::SetContactOverride { .. }
+                | GmAction::SetSystemDisabled { .. }
                 | GmAction::DespawnEntity { .. }
                 | GmAction::ObjectiveAction { .. } => GmActionOutcome::Applied,
             };
@@ -2134,22 +2199,26 @@ pub fn apply_due_actions(
         // `UnknownStation` rather than silently widened to the whole hull.
         Option<&crate::ship::components::ShipConfigComponent>,
     )>,
-    ships: Query<
-        (
-            &crate::entities::spawner::EntityUuid,
-            &crate::ship::components::ShipConfigComponent,
-            &crate::ship::components::ActiveStationRatings,
-            &crate::ship::components::ShipSystemControlSources,
-            Option<&crate::ship_plugin::HumanSeekingHosts>,
-        ),
-        With<crate::server_app::Ship>,
-    >,
+    // Capability checks inspect the complete target entity. Borrow them apart
+    // from the System latch writer, even though each action uses only one arm.
+    mut ship_access: ParamSet<(
+        Query<
+            (
+                &crate::entities::spawner::EntityUuid,
+                &crate::ship::components::ShipConfigComponent,
+                &crate::ship::components::ActiveStationRatings,
+                &mut crate::ship::components::ShipSystemControlSources,
+                Option<&crate::ship_plugin::HumanSeekingHosts>,
+            ),
+            With<crate::server_app::Ship>,
+        >,
+        crate::gm_puppet::capability::StationCapabilities,
+    )>,
     mut virtual_time: Option<ResMut<Time<Virtual>>>,
     mut fixed_time: Option<ResMut<Time<Fixed>>>,
     mut join_hold: Option<ResMut<crate::gm_join::GmJoinPauseHold>>,
-    (removal_targets, station_capabilities, mut objective_control): (
+    (removal_targets, mut objective_control): (
         crate::gm_despawn::RemovalQuery,
-        crate::gm_puppet::capability::StationCapabilities,
         crate::gm_objective::ObjectiveControl,
     ),
 ) {
@@ -2203,6 +2272,37 @@ pub fn apply_due_actions(
                         GmActionOutcome::Refused,
                         Some(GmActionRefusalReason::UnknownObjective),
                     ),
+                }
+            }
+            GmAction::SetSystemDisabled {
+                target,
+                system,
+                disabled,
+            } => {
+                let mut ships = ship_access.p0();
+                match ships.iter_mut().find(|(uuid, ..)| uuid.0 == *target) {
+                    None => (
+                        GmActionOutcome::Refused,
+                        Some(GmActionRefusalReason::UnknownEntity),
+                    ),
+                    Some((_, config, _, mut sources, _)) => {
+                        if config.0.system(system).is_none() {
+                            (
+                                GmActionOutcome::Refused,
+                                Some(GmActionRefusalReason::UnknownSystem),
+                            )
+                        } else {
+                            let changed = sources.0.set_gm_disabled(system.clone(), *disabled);
+                            (
+                                if changed {
+                                    GmActionOutcome::Applied
+                                } else {
+                                    GmActionOutcome::NoOp
+                                },
+                                None,
+                            )
+                        }
+                    }
                 }
             }
             // A directed effect is RESOLVED here, at the agreed apply tick, and
@@ -2663,11 +2763,13 @@ pub fn apply_due_actions(
                     puppets.set_operator(target, grant.operator_id.clone(), false);
                     (GmActionOutcome::Applied, None)
                 } else {
+                    let capability = ship_access.p1().check(&ship.0, station);
+                    let ships = ship_access.p0();
                     let found = ships
                         .iter()
                         .find(|(uuid, ..)| uuid.0 == ship.0)
                         .map(|(_, config, ratings, ..)| (config, ratings));
-                    match station_capabilities.check(&ship.0, station).and_then(|()| {
+                    match capability.and_then(|()| {
                         crate::gm_puppet::validate_station_action(
                             &grant.action,
                             &grant.operator_id,
@@ -2709,6 +2811,8 @@ pub fn apply_due_actions(
                         Some(GmActionRefusalReason::SystemUnavailable),
                     )
                 } else {
+                    let capability = ship_access.p1().check(&ship.0, station);
+                    let ships = ship_access.p0();
                     let Some((_, config, _, sources, hosts)) =
                         ships.iter().find(|(uuid, ..)| uuid.0 == ship.0)
                     else {
@@ -2735,7 +2839,7 @@ pub fn apply_due_actions(
                             .expect("live GM result matches its canonical grant");
                         continue;
                     };
-                    if let Err(reason) = station_capabilities.check(&ship.0, station) {
+                    if let Err(reason) = capability {
                         (GmActionOutcome::Refused, Some(reason))
                     } else {
                         match crate::core::codec::decode_canonical_system_command(payload.as_str())

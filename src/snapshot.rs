@@ -615,7 +615,8 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// `27` — #1306 preserves accepted removals waiting for the fixed pipeline.
 /// `28` — #1307 retains Objective records, recipient scope and terminal status.
 /// Format 29 persists per-observer contact overrides without granting scan knowledge.
-pub const SNAPSHOT_FORMAT: u32 = 29;
+/// `30` — #1312 retains independent GM-disabled System latches.
+pub const SNAPSHOT_FORMAT: u32 = 30;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -747,6 +748,9 @@ pub struct EntityState {
     /// an empty row explicitly clears any state produced by the bootstrap.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub damage_offline_systems: Vec<String>,
+    /// Independent availability latches, never reconstructed from hull HP.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gm_disabled_systems: Vec<String>,
     /// The entity's AI LOD lifecycle — see [`AiFidelityState`].
     ///
     /// This is explicit rather than inferred from [`Self::control`]: fidelity
@@ -4463,6 +4467,15 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
                         ids
                     })
                     .unwrap_or_default(),
+                gm_disabled_systems: control_sources
+                    .map(|sources| {
+                        sources
+                            .0
+                            .gm_disabled_entries()
+                            .map(|id| id.0.clone())
+                            .collect()
+                    })
+                    .unwrap_or_default(),
             },
         )
         .collect();
@@ -5197,6 +5210,12 @@ pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
     restore_run_scope(world, snapshot, &mut report);
     restore_ai_cadence(world);
     rebuild_power_modifiers(world);
+    // Radar capability is derived from restored HP and the GM latch. Input
+    // consumers run before the next Modifiers phase, so rebuild it now.
+    {
+        use bevy::ecs::system::RunSystemOnce;
+        let _ = world.run_system_once(crate::modifiers::coordination::apply_radar_damage_modifiers);
+    }
     restore_ai_world_snapshot(world, snapshot);
     restore_motion_plans(world, snapshot);
 
@@ -6037,6 +6056,12 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
         {
             sources.0.replace_offline_systems(
                 row.damage_offline_systems
+                    .iter()
+                    .cloned()
+                    .map(crate::core::messages::SystemId),
+            );
+            sources.0.replace_gm_disabled_systems(
+                row.gm_disabled_systems
                     .iter()
                     .cloned()
                     .map(crate::core::messages::SystemId),

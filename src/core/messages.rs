@@ -104,6 +104,8 @@ pub enum ModifierSource {
     /// impulse, power groups, regions and system damage on the same
     /// `MaxSpeed` / `MaxYawRate` slots, and lifts the tick the coupling drops.
     TractorLoad,
+    /// An independent GM availability latch: suppresses this capability slot.
+    SystemDisabled(SystemId),
 }
 
 impl Eq for ModifierSource {}
@@ -129,6 +131,10 @@ impl std::hash::Hash for ModifierSource {
             }
             ModifierSource::SystemDamage(sid) => {
                 5u8.hash(state);
+                sid.hash(state);
+            }
+            ModifierSource::SystemDisabled(sid) => {
+                7u8.hash(state);
                 sid.hash(state);
             }
             ModifierSource::TractorLoad => {

@@ -167,6 +167,11 @@ pub enum GmActivityAction {
         target: String,
         mode: crate::gm_contact::ContactMode,
     },
+    SetSystemDisabled {
+        target: String,
+        system: crate::core::messages::SystemId,
+        disabled: bool,
+    },
     SpawnPaletteEntity {
         palette: String,
     },
@@ -438,6 +443,9 @@ fn action_key(action: &GmActivityAction) -> (u8, bool, &str) {
             objective, verb, ..
         } => (8 + *verb as u8, false, objective.as_str()),
         GmActivityAction::SetContactOverride { target, .. } => (11, false, target.as_str()),
+        GmActivityAction::SetSystemDisabled {
+            target, disabled, ..
+        } => (12, *disabled, target.as_str()),
         GmActivityAction::SpawnPaletteEntity { palette } => (4, false, palette.as_str()),
         GmActivityAction::SetEventPaused { event, active } => (5, *active, event.as_str()),
         // Its own rank rather than the Fire's, so two rows about one event at
@@ -1246,6 +1254,16 @@ fn terminal_action_entries(
                     .collect::<Vec<_>>()
             } else if matches!(
                 fact.action_kind,
+                crate::gm_action::GmActionKind::SystemDisable
+                    | crate::gm_action::GmActionKind::SystemRestore
+            ) {
+                fact.target
+                    .as_deref()
+                    .map(|id| reference(id, &state.identities))
+                    .into_iter()
+                    .collect()
+            } else if matches!(
+                fact.action_kind,
                 crate::gm_action::GmActionKind::ContactReveal
                     | crate::gm_action::GmActionKind::ContactConceal
                     | crate::gm_action::GmActionKind::ContactNormal
@@ -1370,6 +1388,22 @@ fn terminal_action_entries(
                         (crate::gm_action::GmActionKind::WorldDespawn, _) => {
                             GmActivityAction::DespawnEntity {
                                 target: fact.target.clone()?,
+                            }
+                        }
+                        (
+                            kind @ (crate::gm_action::GmActionKind::SystemDisable
+                            | crate::gm_action::GmActionKind::SystemRestore),
+                            _,
+                        ) => {
+                            let Some(crate::gm_effect::GmDirectEffectScope::System(system)) =
+                                &fact.effect_scope
+                            else {
+                                return None;
+                            };
+                            GmActivityAction::SetSystemDisabled {
+                                target: fact.target.clone()?,
+                                system: system.clone(),
+                                disabled: kind == crate::gm_action::GmActionKind::SystemDisable,
                             }
                         }
                         (crate::gm_action::GmActionKind::WorldSpawn, _) => {

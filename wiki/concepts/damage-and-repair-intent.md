@@ -2,8 +2,8 @@
 title: Damage and Repair Information
 type: concept
 tags: [damage, repair, engineering, station, information]
-sources: [pasm/spec/architecture/engineering-damage.yaml, src/ship/damage_sync.rs, src/ship/coordination_systems.rs, src/console/repair/server.rs, src/console/repair/visibility.rs, src/modifiers/repair_teams.rs, gui/console-state.js, gui/components/ph-repair-teams.js]
-updated: 2026-08-28
+sources: [src/ship/impulse_boost_systems.rs, src/ship/physics_systems.rs, src/modifiers/coordination.rs, src/modifiers/cache.rs, src/ship/control_source.rs, src/gm_action.rs, src/gm_projection.rs, src/snapshot.rs, src/sim_digest.rs, gui/gm-system-panel.js, pasm/spec/architecture/engineering-damage.yaml, src/ship/damage_sync.rs, src/ship/coordination_systems.rs, src/console/repair/server.rs, src/console/repair/visibility.rs, src/modifiers/repair_teams.rs, gui/console-state.js, gui/components/ph-repair-teams.js]
+updated: 2026-09-07
 ---
 
 # Damage and Repair Information
@@ -47,6 +47,28 @@ the damaged fine systems owned by that station; its standing ordinal priority
 and optional pinned target choose among the eligible rows. Leaving the station
 removes that local detail immediately. `gui/console-state.js` assembles the
 projected state for the shared `ph-repair-teams` control.
+
+## GM System availability
+
+`ControlSourceResolver` carries a separate GM-disabled System set (#1312). Its
+normal availability policy blocks human commands, AI and operation while the
+latch is set. Damage synchronisation and rating changes cannot clear it, and
+Restore removes only the latch: HP, damage tiers and repair eligibility are
+unchanged. `snapshot.rs` restores this state before continuation admission;
+`sim_digest.rs` folds the sorted ship/System identities.
+
+Ongoing impulse and boost transitions enforce availability too: Disable cancels
+the drive, and Restore permits a new command without restarting the cancelled
+operation. Passive radar uses a distinct `SystemDisabled` modifier contribution
+that suppresses its range slot to zero for the authored System instance IDs.
+Damage contributions remain intact, so Restore recovers the current
+damage-limited range rather than healing the radar. Snapshot restore rebuilds
+these derived ranges before the first Input consumer runs.
+
+The map inspector uses `gui/gm-system-panel.js` with the configured System rows
+and structured results in `gm_entity`. Confirmation is injected under the
+`system.disable` and `system.restore` categories; waiting for confirmation has
+not yet submitted a command.
 
 ## Related
 

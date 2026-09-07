@@ -56,12 +56,41 @@ pub fn handle_impulse_messages(
     }
 }
 
+/// Availability for the authored drive instance, with the ordinary legacy ID fallback.
+pub(crate) fn drive_available(
+    sources: Option<&ShipSystemControlSources>,
+    config: Option<&ShipConfigComponent>,
+    kind: &str,
+    fallback: crate::core::messages::SystemId,
+) -> bool {
+    let id =
+        crate::ship::helm_admission::authored_system_id_for_kind(config, kind).unwrap_or(&fallback);
+    sources.is_none_or(|sources| sources.0.policy_for(id).coordinate)
+}
+
 pub(crate) fn tick_impulse(
     time: Res<Time>,
-    mut ships_q: Query<(&mut ShipImpulse, Option<&ImpulseConfigResource>), With<Ship>>,
+    mut ships_q: Query<
+        (
+            &mut ShipImpulse,
+            Option<&ImpulseConfigResource>,
+            Option<&ShipSystemControlSources>,
+            Option<&ShipConfigComponent>,
+        ),
+        With<Ship>,
+    >,
 ) {
     let dt = time.delta_secs();
-    for (mut impulse, entity_cfg) in ships_q.iter_mut() {
+    for (mut impulse, entity_cfg, sources, config) in ships_q.iter_mut() {
+        if !drive_available(
+            sources,
+            config,
+            crate::ship::system_registry::HELM_IMPULSE_KIND,
+            crate::ship::system_registry::helm_impulse_system_id(),
+        ) {
+            impulse.0.cancel_charge();
+            continue;
+        }
         let charge_duration = entity_cfg.cloned().unwrap_or_default().charge_duration;
         impulse.0.tick(dt, charge_duration);
     }

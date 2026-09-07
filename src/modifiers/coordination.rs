@@ -148,6 +148,8 @@ pub fn apply_radar_damage_modifiers(
         (
             &crate::entities::spawner::EntitySystemHull,
             &mut ShipModifiers,
+            Option<&crate::ship::components::ShipSystemControlSources>,
+            Option<&crate::ship::components::ShipConfigComponent>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -157,22 +159,57 @@ pub fn apply_radar_damage_modifiers(
         helm_radar_system_id, sensor_radar_system_id, tactical_radar_system_id,
     };
 
-    for (hull, mut mods) in ships_q.iter_mut() {
-        for (sid, slot) in [
-            (helm_radar_system_id(), ModifierSlot::HelmRadarRange),
-            (tactical_radar_system_id(), ModifierSlot::RadarRange),
-            (sensor_radar_system_id(), ModifierSlot::SensorRadarRange),
+    for (hull, mut mods, sources, config) in ships_q.iter_mut() {
+        for (kind, fallback, slot) in [
+            (
+                crate::ship::system_registry::HELM_RADAR_KIND,
+                helm_radar_system_id(),
+                ModifierSlot::HelmRadarRange,
+            ),
+            (
+                crate::ship::system_registry::TACTICAL_RADAR_KIND,
+                tactical_radar_system_id(),
+                ModifierSlot::RadarRange,
+            ),
+            (
+                crate::ship::system_registry::SENSOR_RADAR_KIND,
+                sensor_radar_system_id(),
+                ModifierSlot::SensorRadarRange,
+            ),
         ] {
-            let bonus = match hull.0.tier_for(&sid) {
-                DamageTier::Operational => 0.0,
-                DamageTier::Damaged | DamageTier::Disabled => -hull.0.debuff_magnitude_for(&sid),
-                DamageTier::Destroyed => RADAR_DESTROYED_BONUS,
-            };
-            mods.add_or_update(Modifier {
-                source: ModifierSource::SystemDamage(sid),
-                slot,
-                bonus,
-            });
+            let mut ids: Vec<_> = config
+                .into_iter()
+                .flat_map(|config| &config.0.systems)
+                .filter(|system| system.kind == kind)
+                .map(|system| system.id.clone())
+                .collect();
+            if ids.is_empty() {
+                ids.push(fallback);
+            }
+            for sid in ids {
+                let disabled_source = ModifierSource::SystemDisabled(sid.clone());
+                if sources.is_some_and(|sources| sources.0.is_gm_disabled(&sid)) {
+                    mods.add_or_update(Modifier {
+                        source: disabled_source,
+                        slot: slot.clone(),
+                        bonus: 0.0,
+                    });
+                } else {
+                    mods.remove(&disabled_source, &slot);
+                }
+                let bonus = match hull.0.tier_for(&sid) {
+                    DamageTier::Operational => 0.0,
+                    DamageTier::Damaged | DamageTier::Disabled => {
+                        -hull.0.debuff_magnitude_for(&sid)
+                    }
+                    DamageTier::Destroyed => RADAR_DESTROYED_BONUS,
+                };
+                mods.add_or_update(Modifier {
+                    source: ModifierSource::SystemDamage(sid),
+                    slot: slot.clone(),
+                    bonus,
+                });
+            }
         }
     }
 }
@@ -1261,6 +1298,58 @@ mod tests {
             app.world_mut()
                 .spawn((Ship, EntitySystemHull(hull), ShipModifiers::new()))
                 .id()
+        }
+
+        #[test]
+        fn gm_system_disable_suppresses_radar_capability_and_restore_keeps_damage_baseline() {
+            use crate::ship::components::ShipSystemControlSources;
+            for hp in [20.0, 10.0, 0.0] {
+                let mut app = App::new();
+                let sid = helm_radar_system_id();
+                let mut hull =
+                    SystemHull::from_config_with_tiers(&[(sid.clone(), 20.0, tier_config())]);
+                hull.set_hp(&sid, hp);
+                let ship = spawn_ship_with_hull(&mut app, hull);
+                app.world_mut()
+                    .entity_mut(ship)
+                    .insert(ShipSystemControlSources::default());
+                app.add_systems(Update, apply_radar_damage_modifiers);
+                app.update();
+                let baseline = app
+                    .world()
+                    .get::<ShipModifiers>(ship)
+                    .unwrap()
+                    .get(&ModifierSlot::HelmRadarRange);
+                app.world_mut()
+                    .get_mut::<ShipSystemControlSources>(ship)
+                    .unwrap()
+                    .0
+                    .set_gm_disabled(sid.clone(), true);
+                app.update();
+                let mods = app.world().get::<ShipModifiers>(ship).unwrap();
+                assert_eq!(mods.get(&ModifierSlot::HelmRadarRange), 0.0);
+                assert_eq!(mods.get(&ModifierSlot::SensorRadarRange), 1.0);
+                assert_eq!(mods.get(&ModifierSlot::RadarRange), 1.0);
+                app.world_mut()
+                    .get_mut::<ShipSystemControlSources>(ship)
+                    .unwrap()
+                    .0
+                    .set_gm_disabled(sid.clone(), false);
+                app.update();
+                assert_eq!(
+                    app.world()
+                        .get::<ShipModifiers>(ship)
+                        .unwrap()
+                        .get(&ModifierSlot::HelmRadarRange),
+                    baseline
+                );
+                assert_eq!(app.world().get::<EntitySystemHull>(ship).unwrap().0, {
+                    let mut expected =
+                        SystemHull::from_config_with_tiers(&[(sid.clone(), 20.0, tier_config())]);
+                    expected.set_hp(&sid, hp);
+                    expected
+                });
+            }
         }
 
         #[test]

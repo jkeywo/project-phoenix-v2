@@ -660,6 +660,24 @@ describe('GM activity feed presentation and selection links', () => {
     expect(document.querySelectorAll('.gm-activity-entry')).toHaveLength(4);
   });
 
+  it('renders and filters System availability facts with their exact target and System', () => {
+    const rows = ['applied', 'no-op', 'refused'].map((outcome, index) => entry('gm_action', {
+      type: 'gm_action', data: {
+        operator: { id: 'gm-alpha', name: 'Morgan' }, correlation: `system-${index}`,
+        action: { type: 'set_system_disabled', target: SHIP, system: 'impulse-drive', disabled: index < 2 },
+        outcome, reason: outcome === 'refused' ? 'unknown-system' : null,
+        order: { sequence: index + 1, origin: 1 },
+      },
+    }, { tick: index + 1, ships: [ship], links: [{ role: 'ship', entity: ship }] }));
+    expect(harness.feed.update(payload(rows))).toBe(true);
+    const filter = document.getElementById('gm-activity-ship-filter');
+    filter.value = SHIP; filter.dispatchEvent(new Event('change'));
+    expect(document.querySelectorAll('.gm-activity-entry')).toHaveLength(3);
+    expect(document.querySelector('.gm-activity-entry').textContent).toContain('impulse-drive');
+    document.querySelector('[data-involvement="ship"]').click();
+    expect(harness.selectEntity).toHaveBeenCalledWith(SHIP);
+  });
+
   it('resets a disappearing selected ship to All while retained links stay readable and disabled', () => {
     harness.feed.update(payload([damage(), gmAction()]));
     const shipFilter = document.getElementById('gm-activity-ship-filter');

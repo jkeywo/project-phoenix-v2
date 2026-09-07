@@ -506,6 +506,26 @@ fn fold_run_scope(world: &World, mut acc: u64) -> u64 {
             acc = fold_serde(acc, &manager.0.records());
         }
     }
+    if let Some(mut query) =
+        world.try_query::<(&EntityUuid, &crate::ship_plugin::ShipSystemControlSources)>()
+    {
+        let mut latches: Vec<_> = query
+            .iter(world)
+            .filter_map(|(uuid, sources)| {
+                let ids: Vec<_> = sources
+                    .0
+                    .gm_disabled_entries()
+                    .map(|id| id.0.as_str())
+                    .collect();
+                (!ids.is_empty()).then_some((uuid.0.as_str(), ids))
+            })
+            .collect();
+        latches.sort_by(|a, b| a.0.cmp(b.0));
+        if !latches.is_empty() {
+            acc = fold_str(acc, "gm-disabled-systems");
+            acc = fold_serde(acc, &latches);
+        }
+    }
 
     // Typed GM control becomes current authoritative state at its application
     // boundary, not when a transport happens to deliver a future owner commit.

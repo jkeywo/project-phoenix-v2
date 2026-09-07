@@ -693,6 +693,65 @@ fn canonical_contact_actions_keep_observer_ship_scope_for_no_op_and_departed_ref
 }
 
 #[test]
+fn system_latch_results_keep_the_semantic_ship_and_exact_system() {
+    use crate::gm_action::*;
+    let mut state = GmActivityState::default();
+    state.identities.insert(
+        SHIP_A.into(),
+        IdentityRecord {
+            name: "Ship A".into(),
+            is_ship: true,
+        },
+    );
+    terminal_action_entries(&mut state, None, None, None, None);
+    let mut refusals = LocalGmActionRefusals::default();
+    for (index, kind) in [GmActionKind::SystemDisable, GmActionKind::SystemRestore]
+        .into_iter()
+        .enumerate()
+    {
+        refusals.push(
+            LoggedGmAction::refused(
+                "gm-one".into(),
+                GmActionId::new(format!("system-refusal-{index}")).unwrap(),
+                kind,
+                kind == GmActionKind::SystemDisable,
+                42,
+                GmActionRefusalReason::UnknownSystem,
+            )
+            .with_target(Some(SHIP_A.into()))
+            .with_effect(
+                None,
+                Some(crate::gm_effect::GmDirectEffectScope::System(
+                    crate::core::messages::SystemId("drive".into()),
+                )),
+            ),
+        );
+    }
+    let rows = terminal_action_entries(&mut state, None, Some(&refusals), None, None);
+    assert_eq!(rows.len(), 2);
+    for row in &rows {
+        assert_eq!(
+            row.ships[0],
+            GmEntityReference {
+                entity_id: SHIP_A.into(),
+                name: "Ship A".into()
+            }
+        );
+        assert_eq!(row.links[0].role, GmActivityLinkRole::Ship);
+        let GmActivityDetail::GmAction(detail) = &row.detail else {
+            panic!("GM action")
+        };
+        assert!(
+            matches!(&detail.action, GmActivityAction::SetSystemDisabled { target, system, .. } if target == SHIP_A && system.0 == "drive")
+        );
+        assert_eq!(detail.outcome, GmActivityActionOutcome::Refused);
+    }
+    let wire = serde_json::to_string(&rows).unwrap();
+    assert!(wire.contains("set_system_disabled"));
+    assert!(!wire.contains("set_session_paused"));
+}
+
+#[test]
 fn terminal_gm_actions_attribute_exact_outcomes_dedup_and_rebase_on_restore() {
     let mut state = GmActivityState::default();
     assert!(terminal_action_entries(&mut state, None, None, None, None).is_empty());

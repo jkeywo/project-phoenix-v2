@@ -789,6 +789,37 @@ test('rendererless GM maps and inspects stable local ship truth', { tag: '@core'
 // at the pure/DOM-controller level in tests/client/gm-knowledge-compare.test.js;
 // what only a real end-to-end run proves is that the actual WASM wiring
 // renders something at all (issue #1318 review, finding 6).
+test('a GM disables and restores a real System without changing its hull', { tag: '@core' }, async ({ context }) => {
+  test.setTimeout(120_000);
+  const ship = await context.newPage(); const shipErrors = captureServerPageErrors(ship);
+  await ship.goto('/?scenario=assets/worlds/default.toml'); await waitForWasmReady(ship);
+  await ship.evaluate(() => window.__hostFleetOpen()); await waitForJoinCode(ship, 'fleet-code', 30_000);
+  const code = await ship.locator('#fleet-code').textContent();
+  const gm = await context.newPage(); const gmErrors = captureServerPageErrors(gm);
+  await gm.goto('/?scenario=assets/worlds/default.toml'); await waitForWasmReady(gm); await joinFleetAsGm(gm, code);
+  await gm.locator('#gm-ready-btn').click();
+  await Promise.all([ship.waitForFunction(() => window.__saveSlotsPhase === 'InProgress'), gm.waitForFunction(() => window.__saveSlotsPhase === 'InProgress')]);
+  await gm.waitForFunction(() => Object.values(window.__hostGmSystemState().controls).some(rows => rows.some(row => row.system_id === 'red-alert')));
+  const target = await gm.evaluate(() => Object.entries(window.__hostGmSystemState().controls).find(([, rows]) => rows.some(row => row.system_id === 'red-alert'))[0]);
+  await gm.evaluate(target => document.querySelector('#gm-entity-map').navigationSelect({ uuid: target }), target);
+  await gm.locator('#gm-system-select').selectOption('red-alert');
+  const hullBefore = await gm.locator('#gm-entity-hull').getAttribute('value');
+  for (const [verb, disabled] of [['disable', true], ['restore', false]]) {
+    await gm.locator(`#gm-system-${verb}`).click();
+    if (disabled) {
+      await expect(gm.locator('#gm-action-confirmation')).toBeVisible();
+      await gm.locator('[data-confirmation-accept]').click();
+    }
+    await gm.waitForFunction(({ target, disabled }) => {
+      const state = window.__hostGmSystemState();
+      return state.pending === null && state.controls[target]?.find(row => row.system_id === 'red-alert')?.gm_disabled === disabled;
+    }, { target, disabled });
+    await expect(gm.locator('#gm-system-feedback')).toHaveAttribute('data-state', 'applied');
+    await expect(gm.locator('#gm-entity-hull')).toHaveAttribute('value', hullBefore);
+  }
+  expect(shipErrors).toEqual([]); expect(gmErrors).toEqual([]);
+});
+
 test('a GM changes Reveal Conceal Normal for one real observing fleet ship', { tag: '@core' }, async ({ context }) => {
   test.setTimeout(120_000);
   const ship = await context.newPage();

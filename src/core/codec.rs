@@ -905,6 +905,11 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
                     }
                     if effect_scope.is_some()
                         && action_kind != crate::gm_action::GmActionKind::DirectEffect
+                        && !matches!(
+                            action_kind,
+                            crate::gm_action::GmActionKind::SystemDisable
+                                | crate::gm_action::GmActionKind::SystemRestore
+                        )
                     {
                         return None;
                     }
@@ -1259,6 +1264,15 @@ pub fn decode_gm_action_request(raw: &str) -> Option<crate::gm_action::GmActionR
                 ),
                 target: object.get("target")?.as_str()?.to_owned(),
                 mode: serde_json::from_value(object.get("mode")?.clone()).ok()?,
+            }
+        }
+        "set_system_disabled" if object.len() == 6 => {
+            crate::gm_action::GmAction::SetSystemDisabled {
+                target: bounded_gm_target_id(object.get("target")?.as_str()?)?,
+                system: crate::core::messages::SystemId(bounded_gm_target_id(
+                    object.get("system")?.as_str()?,
+                )?),
+                disabled: object.get("disabled")?.as_bool()?,
             }
         }
         "despawn_entity" if object.len() == 4 => crate::gm_action::GmAction::DespawnEntity {

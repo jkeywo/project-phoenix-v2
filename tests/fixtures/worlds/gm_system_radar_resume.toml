@@ -1,0 +1,16 @@
+# Restore probe: one player and one explicitly hostile contact. Keep the
+# contact outside combat range until the test positions it for a sensor scan.
+[global]
+seed = 1312
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+spawn_on = "game_start"
+transform = { position = [0.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/alliance_courier.toml"
+name = "Radar restore hostile"
+transform = { position = [10000.0, 0.0, 0.0] }
+overrides = { faction = "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb" }

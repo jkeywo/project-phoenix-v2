@@ -342,12 +342,16 @@ impl ShipModifiers {
     /// the walk is a linear scan of contiguous memory).
     fn rebuild_cache(&mut self) {
         let mut sums = [0.0_f32; ModifierSlot::COUNT];
-        for ((_, slot), bonus) in self.table.iter() {
+        let mut disabled = [false; ModifierSlot::COUNT];
+        for ((source, slot), bonus) in self.table.iter() {
+            disabled[slot.index()] |= matches!(source, ModifierSource::SystemDisabled(_));
             sums[slot.index()] += *bonus;
         }
         for slot in ModifierSlot::all() {
             let sum = sums[slot.index()];
-            self.cache[slot.index()] = if sum >= 0.0 {
+            self.cache[slot.index()] = if disabled[slot.index()] {
+                0.0
+            } else if sum >= 0.0 {
                 1.0 + sum
             } else {
                 1.0 / (1.0 + sum.abs())
@@ -465,6 +469,7 @@ fn format_source(source: &ModifierSource) -> String {
         ModifierSource::PowerGroup(g) => format!("PowerGroup({})", g.0),
         ModifierSource::SystemDamage(sid) => format!("SystemDamage({})", sid.0),
         ModifierSource::TractorLoad => "TractorLoad".to_string(),
+        ModifierSource::SystemDisabled(sid) => format!("SystemDisabled({})", sid.0),
     }
 }
 

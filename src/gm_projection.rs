@@ -166,6 +166,10 @@ pub struct GmEntityProjection {
 /// state when every selectable ship has left the world.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 pub struct GmEntityProjectionPayload {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub system_controls: BTreeMap<String, Vec<GmSystemControlStatus>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub system_results: Vec<LoggedGmAction>,
     pub entities: Vec<GmEntityProjection>,
     /// Bounded attributed results of the directed world-effect family (issue
     /// #1310), carried on the entity surface rather than a channel of its own.
@@ -182,6 +186,14 @@ pub struct GmEntityProjectionPayload {
     pub contact_overrides: crate::gm_contact::ContactOverrides,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub contact_results: Vec<crate::gm_action::LoggedGmAction>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct GmSystemControlStatus {
+    pub system_id: SystemId,
+    pub name: String,
+    pub gm_disabled: bool,
+    pub available: bool,
 }
 
 /// One authored Station interface on a fleet/player ship. `console` is copied
@@ -472,6 +484,14 @@ fn display_name(
 }
 
 fn publish_local_projection(
+    system_sources: Query<
+        (
+            &EntityUuid,
+            &ShipConfigComponent,
+            &crate::ship_plugin::ShipSystemControlSources,
+        ),
+        With<Ship>,
+    >,
     ships: GmShipProjectionQuery,
     world_entities: GmWorldProjectionQuery,
     all_names: Query<(&EntityUuid, Option<&EntityName>, Option<&EntityId>)>,
@@ -640,6 +660,42 @@ fn publish_local_projection(
         ))
     });
     let next = GmEntityProjectionPayload {
+        system_controls: system_sources
+            .iter()
+            .map(|(uuid, config, sources)| {
+                (
+                    uuid.0.clone(),
+                    config
+                        .0
+                        .systems
+                        .iter()
+                        .map(|system| GmSystemControlStatus {
+                            system_id: system.id.clone(),
+                            name: projected
+                                .iter()
+                                .find(|row| row.entity_id == uuid.0)
+                                .and_then(|row| {
+                                    row.status
+                                        .systems
+                                        .iter()
+                                        .find(|row| row.system_id == system.id)
+                                })
+                                .map(|row| row.name.clone())
+                                .unwrap_or_else(|| system.id.0.clone()),
+                            gm_disabled: sources.0.is_gm_disabled(&system.id),
+                            available: sources.0.policy_for(&system.id).coordinate,
+                        })
+                        .collect(),
+                )
+            })
+            .collect(),
+        system_results: [
+            crate::gm_action::GmActionKind::SystemDisable,
+            crate::gm_action::GmActionKind::SystemRestore,
+        ]
+        .into_iter()
+        .flat_map(|kind| crate::gm_action::projected_results(kind, &action_log, &local_refusals))
+        .collect(),
         contact_overrides: world_content
             .as_ref()
             .map(|runtime| runtime.contact_overrides.clone())

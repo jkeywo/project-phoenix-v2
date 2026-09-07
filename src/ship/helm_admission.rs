@@ -43,7 +43,7 @@ fn entity_inside_blocks_impulse(
     false
 }
 
-fn authored_system_id_for_kind<'a>(
+pub(crate) fn authored_system_id_for_kind<'a>(
     config: Option<&'a crate::ship::components::ShipConfigComponent>,
     kind: &str,
 ) -> Option<&'a crate::core::messages::SystemId> {

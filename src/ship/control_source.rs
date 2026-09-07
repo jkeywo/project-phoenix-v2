@@ -51,6 +51,9 @@ pub struct ControlSourceResolver {
     /// additive: damage overrides the station rating until the console is
     /// repaired.
     offline_systems: HashSet<SystemId>,
+    /// Independent GM availability latch. Damage repair and rating changes
+    /// cannot clear it; restoring it never changes hull HP or damage tiers.
+    gm_disabled_systems: std::collections::BTreeSet<SystemId>,
 }
 
 impl ControlSourceResolver {
@@ -79,9 +82,30 @@ impl ControlSourceResolver {
         }
     }
 
-    /// True when `system_id` is currently damage-offline.
+    /// True when damage or an explicit GM latch prevents operation.
     pub fn is_offline(&self, system_id: &SystemId) -> bool {
-        self.offline_systems.contains(system_id)
+        self.offline_systems.contains(system_id) || self.is_gm_disabled(system_id)
+    }
+
+    pub fn is_gm_disabled(&self, system_id: &SystemId) -> bool {
+        self.gm_disabled_systems.contains(system_id)
+    }
+
+    /// Absolute state setting; returns whether the independent latch changed.
+    pub fn set_gm_disabled(&mut self, system_id: SystemId, disabled: bool) -> bool {
+        if disabled {
+            self.gm_disabled_systems.insert(system_id)
+        } else {
+            self.gm_disabled_systems.remove(&system_id)
+        }
+    }
+
+    pub fn gm_disabled_entries(&self) -> impl Iterator<Item = &SystemId> {
+        self.gm_disabled_systems.iter()
+    }
+
+    pub fn replace_gm_disabled_systems(&mut self, ids: impl IntoIterator<Item = SystemId>) {
+        self.gm_disabled_systems = ids.into_iter().collect();
     }
 
     /// Replace the complete damage-offline set.
@@ -104,7 +128,7 @@ impl ControlSourceResolver {
     /// If the system is in `offline_systems` (damage-driven), the offline policy
     /// is returned unconditionally, overriding any `ControlSource` value.
     pub fn policy_for(&self, system_id: &SystemId) -> ControlTickPolicy {
-        if self.offline_systems.contains(system_id) {
+        if self.is_offline(system_id) {
             return control_tick_policy(ControlSource::Offline);
         }
         control_tick_policy(self.source_for(system_id))

@@ -255,6 +255,7 @@ pub fn validate_station_action(
         | GmAction::DespawnEntity { .. }
         | GmAction::ObjectiveAction { .. }
         | GmAction::SetContactOverride { .. }
+        | GmAction::SetSystemDisabled { .. }
         | GmAction::SetEventPaused { .. }
         | GmAction::ArmGmEventSkip { .. } => return Ok(()),
         GmAction::SetStationPuppet { station, .. }
@@ -303,6 +304,7 @@ pub fn validate_station_action(
         | GmAction::DespawnEntity { .. }
         | GmAction::ObjectiveAction { .. }
         | GmAction::SetContactOverride { .. }
+        | GmAction::SetSystemDisabled { .. }
         | GmAction::SetEventPaused { .. }
         | GmAction::ArmGmEventSkip { .. } => unreachable!(),
     }

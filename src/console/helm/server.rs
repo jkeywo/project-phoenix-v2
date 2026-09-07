@@ -1183,6 +1183,74 @@ mod tests {
     /// `HelmRadarRange` modifier `apply_radar_damage_modifiers` maintains —
     /// not the static config fallback.
     #[test]
+    fn gm_system_disabled_radar_publishes_zero_then_its_damage_limited_range() {
+        use crate::entities::spawner::EntitySystemHull;
+        use crate::ship::components::ShipSystemControlSources;
+        use crate::ship::damage::{ConsoleTierConfig, SystemHull};
+        let mut app = base_app();
+        let npc = spawn_npc_ship(&mut app, 800.0);
+        let sid = crate::core::messages::SystemId("custom-radar".into());
+        let config = crate::ship::config::ShipConfig::from_toml(
+            r#"
+[[station]]
+id = "helm"
+name = "Helm"
+description = "Helm"
+rank = "Pilot"
+[[system]]
+id = "custom-radar"
+kind = "helm_radar"
+station = "helm"
+"#,
+            &["helm_radar"],
+        )
+        .unwrap();
+        app.world_mut()
+            .entity_mut(npc)
+            .insert(crate::ship::components::ShipConfigComponent(config));
+        let mut hull = SystemHull::from_config_with_tiers(&[(
+            sid.clone(),
+            20.0,
+            ConsoleTierConfig {
+                debuff_magnitude: 0.2,
+                ..Default::default()
+            },
+        )]);
+        hull.set_hp(&sid, 10.0);
+        app.world_mut()
+            .entity_mut(npc)
+            .insert((EntitySystemHull(hull), ShipSystemControlSources::default()));
+        // Run the ordinary translator then the actual blackboard publisher.
+        use bevy::ecs::system::RunSystemOnce;
+        app.world_mut()
+            .run_system_once(crate::modifiers::coordination::apply_radar_damage_modifiers)
+            .unwrap();
+        app.update();
+        let baseline = helm_bb_of(&mut app, npc).radar_range;
+        assert!(baseline > 0.0 && baseline < 800.0);
+        app.world_mut()
+            .get_mut::<ShipSystemControlSources>(npc)
+            .unwrap()
+            .0
+            .set_gm_disabled(sid.clone(), true);
+        app.world_mut()
+            .run_system_once(crate::modifiers::coordination::apply_radar_damage_modifiers)
+            .unwrap();
+        app.update();
+        assert_eq!(helm_bb_of(&mut app, npc).radar_range, 0.0);
+        app.world_mut()
+            .get_mut::<ShipSystemControlSources>(npc)
+            .unwrap()
+            .0
+            .set_gm_disabled(sid, false);
+        app.world_mut()
+            .run_system_once(crate::modifiers::coordination::apply_radar_damage_modifiers)
+            .unwrap();
+        app.update();
+        assert_eq!(helm_bb_of(&mut app, npc).radar_range, baseline);
+    }
+
+    #[test]
     fn npc_radar_range_is_scaled_by_the_damage_modifier() {
         let mut app = base_app();
         let npc = spawn_npc_ship(&mut app, 800.0);

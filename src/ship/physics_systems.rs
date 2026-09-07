@@ -53,11 +53,13 @@ pub(crate) fn apply_helm_commands(
             Option<Ref<ImpulseCommand>>,
             Option<&mut ShipBoost>,
             Option<Ref<BoostCommand>>,
+            Option<&ShipSystemControlSources>,
+            Option<&crate::ship::components::ShipConfigComponent>,
         ),
         With<crate::ai::server::AiHighFidelity>,
     >,
 ) {
-    for (impulse, impulse_cmd, boost, boost_cmd) in ships.iter_mut() {
+    for (impulse, impulse_cmd, boost, boost_cmd, sources, config) in ships.iter_mut() {
         if let (Some(mut impulse), Some(cmd)) = (impulse, impulse_cmd) {
             // Exclude the insertion tick (issue #695 follow-up): LOD
             // promotion inserts a fresh default `ImpulseCommand`, which
@@ -68,7 +70,14 @@ pub(crate) fn apply_helm_commands(
             // AI decision or player command. The default should persist
             // untouched until something explicitly writes a new value on a
             // later tick.
-            if cmd.is_changed() && !cmd.is_added() {
+            if !crate::ship::impulse_boost_systems::drive_available(
+                sources,
+                config,
+                crate::ship::system_registry::HELM_IMPULSE_KIND,
+                crate::ship::system_registry::helm_impulse_system_id(),
+            ) {
+                impulse.0.cancel_charge();
+            } else if cmd.is_changed() && !cmd.is_added() {
                 match cmd.0 {
                     crate::ship::impulse::ImpulsePhase::Charging => impulse.0.start_charge(),
                     crate::ship::impulse::ImpulsePhase::Idle => impulse.0.cancel_charge(),
@@ -82,7 +91,14 @@ pub(crate) fn apply_helm_commands(
             // `SetBoost`/`ToggleBoost` for every ship, so a non-local
             // `AiHighFidelity` NPC's boost policy engages here in the same
             // tick it was decided.
-            if cmd.is_changed() && !cmd.is_added() {
+            if !crate::ship::impulse_boost_systems::drive_available(
+                sources,
+                config,
+                crate::ship::system_registry::HELM_BOOST_KIND,
+                crate::ship::system_registry::helm_boost_system_id(),
+            ) {
+                boost.0.deactivate();
+            } else if cmd.is_changed() && !cmd.is_added() {
                 if cmd.0 {
                     boost.0.activate();
                 } else {
@@ -427,6 +443,64 @@ mod tests {
     use crate::ship::helm_ai::helm_axes_operate_ai;
     use crate::ship::impulse::{ImpulsePhase, IMPULSE_CHARGE_DURATION};
     use crate::ship::test_support::*;
+
+    #[test]
+    fn gm_system_disable_stops_charging_active_impulse_and_boost_without_restarting_on_restore() {
+        use crate::ship::system_registry::{helm_boost_system_id, helm_impulse_system_id};
+        for phase in [ImpulsePhase::Charging, ImpulsePhase::Active] {
+            let mut app = test_app();
+            tick(&mut app);
+            let ship = find_ship_entity(&mut app);
+            set_ship_impulse(
+                &mut app,
+                crate::ship::impulse::ImpulseState {
+                    phase,
+                    charge_progress: 0.99,
+                },
+            );
+            app.world_mut()
+                .get_mut::<ShipBoost>(ship)
+                .unwrap()
+                .0
+                .activate();
+            {
+                let mut sources = app
+                    .world_mut()
+                    .get_mut::<ShipSystemControlSources>(ship)
+                    .unwrap();
+                sources.0.set_gm_disabled(helm_impulse_system_id(), true);
+                sources.0.set_gm_disabled(helm_boost_system_id(), true);
+            }
+            tick(&mut app);
+            assert_eq!(get_ship_impulse(&mut app).phase, ImpulsePhase::Idle);
+            assert!(!app.world().get::<ShipBoost>(ship).unwrap().0.is_active());
+            assert_eq!(
+                app.world().get::<ShipPhysics>(ship).unwrap().forward_speed,
+                0.0,
+                "disabled impulse cannot drive autopilot physics"
+            );
+            {
+                let mut sources = app
+                    .world_mut()
+                    .get_mut::<ShipSystemControlSources>(ship)
+                    .unwrap();
+                sources.0.set_gm_disabled(helm_impulse_system_id(), false);
+                sources.0.set_gm_disabled(helm_boost_system_id(), false);
+            }
+            tick(&mut app);
+            assert_eq!(
+                get_ship_impulse(&mut app).phase,
+                ImpulsePhase::Idle,
+                "Restore does not restart a cancelled drive"
+            );
+            assert!(!app.world().get::<ShipBoost>(ship).unwrap().0.is_active());
+            app.world_mut().get_mut::<ImpulseCommand>(ship).unwrap().0 = ImpulsePhase::Charging;
+            app.world_mut().get_mut::<BoostCommand>(ship).unwrap().0 = true;
+            tick(&mut app);
+            assert_eq!(get_ship_impulse(&mut app).phase, ImpulsePhase::Charging);
+            assert!(app.world().get::<ShipBoost>(ship).unwrap().0.is_active());
+        }
+    }
 
     // Regression test for issue #695 follow-up: LOD promotion re-inserting
     // a fresh default `ImpulseCommand` must not silently cancel an

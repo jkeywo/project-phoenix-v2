@@ -54,6 +54,7 @@ export const GM_ACTION_CONFIRMATION_METADATA = Object.freeze(Object.fromEntries(
   DespawnEntity: ['world.despawn'],
   ObjectiveAction: ['objective.activate', 'objective.complete', 'objective.fail'],
   SetContactOverride: ['contact.override'],
+  SetSystemDisabled: ['system.disable', 'system.restore'],
 }).map(([action, ids]) => [action, Object.freeze(ids.map(gmConfirmationMetadata))])));
 
 /** Registration must name a real category, including its accepted default. */

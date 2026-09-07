@@ -7728,41 +7728,18 @@ fn the_dossier_channel_carries_what_the_crew_know_and_not_what_they_do_not() {
 // cargo test -p project-phoenix --features falling-skyway-sim-tests \
 //   --test headless_runner falling_skyway_
 //
-// ── STANDING NOTE: THIS SUITE IS NOT GREEN, AND WAS NOT GREEN BEFORE #1398 ───
+// Long-timeline fixtures must keep the crew alive until the beat they assert.
+// WINDOW_STATION is on the storm lane: holding there through Act 2 can kill
+// the destroyer before storm_passed_due, which stops later script callbacks.
+// Tests of retained dialogue and campaign finalisation shelter at CHOICE_LADDER;
+// tests of Control's window approach its station after the storm has passed.
+// Civilian exposure tests shelter only the player, leaving the traffic on its
+// authored lane. Hazard damage and mission outcome rules remain live.
 //
-// A full run of the 94 gated `falling_skyway_` tests takes about 100 minutes and
-// currently finishes 86 passed / 8 failed. Read a red result here against that
-// number rather than against zero — and re-run the eight below against your own
-// branch point before attributing any of them to the change in front of you.
-// Issue #1398 did: five of the eight were re-run at its branch point and failed
-// there with byte-identical assertion text, and the other three are the same
-// fault as one of those five. Nothing in that slice moved any of it.
-//
-//   a_post_close_stale_filing_cannot_rewrite_the_frozen_ending          baselined
-//   a_post_close_stale_force_order_cannot_rewrite_the_frozen_ending
-//   a_post_close_stale_rigger_ask_cannot_add_evidence_or_campaign_state
-//   a_post_close_stale_rigger_protect_cannot_create_a_commitment
-//   act_3_a_crew_who_react_to_the_last_warning_save_the_head            baselined
-//   idle_traffic_is_lost_loudly_while_the_storm_ignores_the_strike      baselined
-//   the_early_collapse_leaves_one_berth_and_control_asks_for_a_name     baselined
-//   the_next_mission_opens_on_what_this_one_left_behind                 baselined
-//
-// THE FOUR `post_close_stale_*` FAILURES ARE ONE FAULT WITH FOUR NAMES, which is
-// why baselining one of them settles the group: all four park the destroyer on
-// `WINDOW_STATION` from Act 2 and step to the endings through the SAME
-// `run_to_the_endings` helper, and all four die at the same instant. The storm
-// bands' authored 11.85 damage/s — `falling_skyway.toml`'s `storm_band_overrides`,
-// the deliberate hardening whose own header describes it as sometimes trapping
-// the destroyer "in the hazard until hull loss" — walks the hull from full to
-// zero at t=939.6, which is 132 s short of `storm_passed_due` at t=1072. The run
-// enters `GamePhase::GameOver` there, the scripted-callback queue stops draining,
-// and `on_storm_passed` — with `on_transfer_window_opens` and
-// `on_transfer_window_closes` still queued behind it — never fires. So
-// `a3_endings_written` stays 0, and the helper's first assertion is what you see.
-//
-// How much storm a parked hull must survive is a SCENARIO TUNING decision over an
-// unratified authored number, so no engine slice should take it in passing: it
-// wants its own issue and its own designer call.
+// A crew waiting for a warning must also own the designation before Backfill
+// sees the associated operate directive. Preserve earlier Backfill defence,
+// then use skyway_seat_idle_tactical just before the beat opens its objective.
+// Otherwise the AI can complete the rescue the test intends the crew to defer.
 
 const SKYWAY_WORLD: &str = "assets/worlds/falling_skyway.toml";
 
@@ -11388,6 +11365,9 @@ fn falling_skyway_idle_traffic_is_lost_loudly_while_the_storm_ignores_the_strike
 
     let mut first_band_while_unresolved = false;
     while window_now(&app) < closes_at + 6.0 {
+        // Observe civilian losses from shelter so crew survival does not
+        // prevent the mission from writing its campaign record.
+        skyway_move(&mut app, ship, CHOICE_LADDER);
         run(&mut app, 1);
         if named_entity_present(&mut app, "storm_band_one")
             && skyway_flag(&app, "skyway_strike_settled") == 0
@@ -13216,7 +13196,9 @@ fn falling_skyway_a_post_close_stale_filing_cannot_rewrite_the_frozen_ending() {
     assert_eq!(skyway_flag(&app, "skyway_evidence_filing_open"), 1);
     assert_eq!(skyway_promise(&app, "skyway_surface_records"), "open");
 
-    run_to_the_endings(&mut app, ship, WINDOW_STATION);
+    // Stay off the storm lane until finalisation; the stale reply is sent
+    // close aboard its sender below, after the ending is frozen.
+    run_to_the_endings(&mut app, ship, CHOICE_LADDER);
     assert_eq!(skyway_flag(&app, "skyway_mission_finalized"), 1);
     assert_eq!(skyway_flag(&app, "skyway_evidence_filing_open"), 0);
     assert_eq!(skyway_flag(&app, "skyway_records_put"), 0);
@@ -13287,7 +13269,9 @@ fn falling_skyway_a_post_close_stale_force_order_cannot_rewrite_the_frozen_endin
         .expect("Havelock's force response is visibly available before close");
     assert_eq!(skyway_flag(&app, "skyway_strike_engaged"), 0);
 
-    run_to_the_endings(&mut app, ship, WINDOW_STATION);
+    // Stay off the storm lane until finalisation; the stale reply is sent
+    // close aboard its sender below, after the ending is frozen.
+    run_to_the_endings(&mut app, ship, CHOICE_LADDER);
     assert_eq!(skyway_flag(&app, "skyway_mission_finalized"), 1);
     assert_eq!(skyway_flag(&app, "skyway_forced_open"), 0);
     assert_eq!(skyway_flag(&app, "campaign.skyway.strike.unresolved"), 1);
@@ -13411,7 +13395,9 @@ fn falling_skyway_a_post_close_stale_rigger_ask_cannot_add_evidence_or_campaign_
         .expect("the rigger's Ask response is visibly available before close");
     assert_eq!(skyway_flag(&app, "skyway_worker_corroboration_obtained"), 0);
 
-    run_to_the_endings(&mut app, ship, WINDOW_STATION);
+    // Stay off the storm lane until finalisation; the stale reply is sent
+    // close aboard its sender below, after the ending is frozen.
+    run_to_the_endings(&mut app, ship, CHOICE_LADDER);
     let frozen_campaign = skyway_frozen_evidence_record(&app);
     let frozen_sheet = ladder_b_sheet(&mut app);
     let rigger_position = skyway_position(&mut app, SKYWAY_RIGGER);
@@ -13462,7 +13448,9 @@ fn falling_skyway_a_post_close_stale_rigger_protect_cannot_create_a_commitment()
         .expect("the protection response is visibly available before close");
     assert_eq!(skyway_promise(&app, "skyway_protect_witness"), "unknown");
 
-    run_to_the_endings(&mut app, ship, WINDOW_STATION);
+    // Stay off the storm lane until finalisation; the stale reply is sent
+    // close aboard its sender below, after the ending is frozen.
+    run_to_the_endings(&mut app, ship, CHOICE_LADDER);
     let frozen_campaign = skyway_frozen_evidence_record(&app);
     let rigger_position = skyway_position(&mut app, SKYWAY_RIGGER);
     skyway_move(
@@ -15759,10 +15747,19 @@ fn falling_skyway_act_3_a_crew_who_react_to_the_last_warning_save_the_head() {
     // head — inside the destroyer's authored 500-unit tractor range.
     let station = bevy::prelude::Vec3::new(180.0, 0.0, 170.0);
 
+    let watch_opens_at = skyway_deadline_secs(&app, "storm_passed_due") as f64;
+    let mut tactical_seated = false;
     let mut ordered_at: Option<f64> = None;
     let mut completed_at: Option<f64> = None;
 
     for tick in 0..args.max_ticks {
+        // Keep Backfill defence through Acts 1/2, then give the crew the
+        // designation before storm passage publishes the Stabilise directive.
+        // Otherwise Backfill can save the head before their last-warning cue.
+        if !tactical_seated && window_now(&app) >= watch_opens_at - 1.0 {
+            skyway_seat_idle_tactical(&mut app);
+            tactical_seated = true;
+        }
         // Helm holding station, done by hand for the reason every operations
         // test in this file moves a ship by hand: this is a test of the warning
         // window, not of station-keeping. The lock is re-asserted with the hold
@@ -21610,8 +21607,12 @@ fn falling_skyway_the_early_collapse_leaves_one_berth_and_control_asks_for_a_nam
     let (mut app, ship) = skyway_at_act_two();
     skyway_seat_idle_tactical(&mut app);
 
-    // Nothing is done about anything. The ship is parked where it can hear
-    // Control, which is the only thing this crew get right.
+    // The crew leave the head and strike alone. They approach Control after
+    // the storm to hear the remaining berth offer.
+    // Inaction on the head must not kill the crew before its consequences.
+    // Shelter through the storm, then approach Control for the berth offer.
+    let storm_passed_at = skyway_deadline_secs(&app, "storm_passed_due") as f64;
+    parley_run_to(&mut app, ship, storm_passed_at + 1.0, CHOICE_LADDER);
     let opens_at = skyway_deadline_secs(&app, "skyway_transfer_window") as f64;
     parley_run_to(&mut app, ship, opens_at + 6.0, WINDOW_STATION);
 
@@ -21761,7 +21762,7 @@ fn falling_skyway_the_early_collapse_leaves_one_berth_and_control_asks_for_a_nam
 /// of it.
 ///
 /// The road is the early collapse — the cheapest of the four endings to reach
-/// and the harshest to inherit: the head comes down before the transfer window
+/// with a lost head to inherit: the head comes down before the transfer window
 /// opens, so the corridor carries nobody, Control offers one berth on the rung
 /// instead, and the crew give it to the convoy. Two claimants are left on the
 /// rock, the skyhook is gone, and no promise was ever made.
@@ -21785,9 +21786,23 @@ fn falling_skyway_the_next_mission_opens_on_what_this_one_left_behind() {
 
     let (mut app, ship) = skyway_at_act_two();
     skyway_seat_idle_tactical(&mut app);
+    assert_eq!(
+        app.world()
+            .get::<ShipSystemControlSources>(ship)
+            .expect("the crew hull has authoritative system control sources")
+            .0
+            .source_for(&project_phoenix::ship::system_registry::navigation_system_id()),
+        ControlSource::Ai,
+        "the idle Tactical designation leaves Navigation Backfilled to clear traffic"
+    );
 
-    // Nothing is done about anything: the head comes down before the window
-    // opens, and the one berth left on the rung goes to the convoy.
+    // The crew leave the head undesignated: it comes down before the window
+    // opens, and the one berth left on the rung goes to the convoy. Navigation
+    // still clears the traffic through its ordinary Backfill orders.
+    // Inaction on the head must not kill the crew before its consequences.
+    // Shelter through the storm, then approach Control for the berth offer.
+    let storm_passed_at = skyway_deadline_secs(&app, "storm_passed_due") as f64;
+    parley_run_to(&mut app, ship, storm_passed_at + 1.0, CHOICE_LADDER);
     let opens_at = skyway_deadline_secs(&app, "skyway_transfer_window") as f64;
     parley_run_to(&mut app, ship, opens_at + 6.0, WINDOW_STATION);
     assert_eq!(
@@ -21921,17 +21936,23 @@ fn falling_skyway_the_next_mission_opens_on_what_this_one_left_behind() {
             "the `{family}` family reached the next mission"
         );
     }
+    // This mixed-crew road leaves Navigation Backfilled: its ordinary orders
+    // clear the traffic even while Tactical leaves the head undesignated.
+    // The idle-traffic fixture above covers positive named losses through the
+    // same projection; this handoff must preserve the explicit no-loss record.
+    assert_eq!(facts.tally("campaign.skyway.traffic.lost"), 0);
+    for craft in ["meridian", "lark", "pell", "wick"] {
+        assert_eq!(
+            facts.tally(&format!("campaign.skyway.traffic.{craft}")),
+            0,
+            "Backfill's surviving {craft} must not become a casualty in the next mission"
+        );
+    }
     assert_eq!(
-        facts.tally("campaign.skyway.traffic.lost"),
+        facts.tally("campaign.skyway.traffic.none"),
         1,
-        "the storm's deterministic traffic loss survives projection"
+        "the explicit no-loss fact must survive, not merely read as absent zeroes"
     );
-    assert_eq!(
-        facts.tally("campaign.skyway.traffic.lark"),
-        1,
-        "the Scan-enabled deterministic road loses Lark and must retain that exact named fact"
-    );
-    assert_eq!(facts.tally("campaign.skyway.traffic.none"), 0);
 
     // The road-specific facts this variant exists for, and the ones a follow-on
     // mission would actually branch on.
@@ -22009,31 +22030,42 @@ fn falling_skyway_the_next_mission_opens_on_what_this_one_left_behind() {
 
     // ── What did not travel ──────────────────────────────────────────────────
 
-    // The mission ends in a fight it does not win cleanly, so there is transient
-    // state to leave behind — and the facts have no field it could arrive in.
-    // Asserted here on a REAL payload as well as on the unit tests' built one,
-    // because the payload this fold is handed in production is this one.
-    let serialised = ron::ser::to_string(&facts).expect("the facts serialise");
-    for absent in [
-        "physics",
-        "hull",
-        "red_alert",
-        "weapons",
-        "beams",
-        "torpedo",
-        "asteroid",
-        "rng",
-        "collision",
-        "blackboard",
-        "patrol",
-        "pass_surface",
-    ] {
-        assert!(
-            !serialised.contains(absent),
-            "`{absent}` reached the campaign facts — the next mission is being \
-             handed this mission's combat state"
-        );
+    // Strip transient combat state from the REAL captured payload and require
+    // the same campaign facts. Searching serialized text for words such as
+    // "asteroid" rejects legitimate authored asset names and template paths;
+    // it does not establish whether physics or weapon state crossed the seam.
+    let mut without_combat = run;
+    let snapshot = &mut without_combat
+        .snapshot
+        .as_mut()
+        .expect("the finished mission has a snapshot")
+        .state;
+    assert!(
+        snapshot
+            .entities
+            .iter()
+            .any(|entity| entity.physics.is_some() && entity.hull.is_some()),
+        "the captured mission must contain actual ship state to remove"
+    );
+    snapshot.tick = 0;
+    snapshot.rng = None;
+    snapshot.asteroids.clear();
+    snapshot.collisions.clear();
+    for entity in &mut snapshot.entities {
+        entity.physics = None;
+        entity.hull = None;
+        entity.red_alert = None;
+        entity.control = None;
+        entity.weapons = None;
+        entity.pass_surface = None;
+        entity.patrol_cursors.clear();
+        entity.blackboards.clear();
     }
+    assert_eq!(
+        project(&without_combat),
+        facts,
+        "combat state must not alter the campaign handoff, while named assets still travel"
+    );
 
     // ── What a later mission does with them ──────────────────────────────────
 

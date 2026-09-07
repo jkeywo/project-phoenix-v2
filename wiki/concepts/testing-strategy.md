@@ -25,6 +25,14 @@ templates and boots the whole authoritative simulation. Tests that populate
 the process-global native config cache belong there rather than in the library
 test binary.
 
+The manual Falling Skyway timeline tests keep scenario damage and terminal
+outcomes live. Fixtures observing late dialogue or campaign records shelter
+the player through storm exposure, then approach the relevant contact. An
+idle-crew fixture takes Tactical designation before its operate objective
+opens, so Backfill cannot complete a deliberately deferred rescue. Civilian
+loss fixtures leave the traffic on its authored lanes while protecting only
+the observing crew. These setup boundaries live in `tests/headless_runner.rs`.
+
 ## Client JavaScript
 
 Vitest under `tests/client/` covers pure state builders, routing, localization,

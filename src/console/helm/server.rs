@@ -171,6 +171,10 @@ fn publish_helm_blackboard(
             Has<crate::server_app::LocalShip>,
             Option<&crate::entities::spawner::FactionComponent>,
             Option<&crate::ship::state::ShipRedAlert>,
+            (
+                Option<&crate::ship::helm::ThrustInput>,
+                Option<&crate::ship::helm::LateralThrustInput>,
+            ),
         ),
         With<crate::server_app::Ship>,
     >,
@@ -195,6 +199,7 @@ fn publish_helm_blackboard(
         is_local,
         faction,
         red_alert,
+        (thrust_input, lateral_input),
     ) in ship_q.iter_mut()
     {
         // Per-entity component path. Each fallback mirrors the pre-#824
@@ -304,7 +309,19 @@ fn publish_helm_blackboard(
         };
 
         // Read last helm input for engine thrust fraction.
-        let last_input = last_input.copied().unwrap_or_default();
+        let mut last_input = last_input.copied().unwrap_or_default();
+        if !is_local {
+            // NPC interfaces read the same per-axis actuator intent that the
+            // ordinary consumer writes. LastHelmInput is the player's HUD
+            // mirror; it is not updated by NPC commands and would show zero
+            // throughout a real GM takeover.
+            if let Some(input) = thrust_input {
+                last_input.thrust = input.0;
+            }
+            if let Some(input) = lateral_input {
+                last_input.lateral = input.0;
+            }
+        }
 
         // Per-engine blackboard (issue #511): one entry per fine engine system.
         let engine_entries = [

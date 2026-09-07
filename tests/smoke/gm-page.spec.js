@@ -2724,3 +2724,145 @@ test('two equal GMs puppet a human-held Station without blocking its player', { 
   expect(errors).toEqual([]);
   for (const errors of gmErrors) expect(errors).toEqual([]);
 });
+
+test('two equal GMs operate a compatible NPC Helm and recover without stale target authority', { tag: '@core' }, async ({ context }) => {
+  test.setTimeout(240_000);
+  const scenario = 'assets/worlds/probe_gm_npc_puppet.toml';
+  const owner = await context.newPage();
+  const errors = [captureServerPageErrors(owner)];
+  await owner.goto(`/?scenario=${scenario}`);
+  await waitForWasmReady(owner);
+  await owner.evaluate(() => window.__hostFleetOpen());
+  await waitForJoinCode(owner, 'fleet-code', 30_000);
+  const code = await owner.locator('#fleet-code').textContent();
+  const gms = [];
+  for (let index = 0; index < 2; index += 1) {
+    const page = await context.newPage();
+    errors.push(captureServerPageErrors(page));
+    await page.goto(`/?scenario=${scenario}`);
+    await waitForWasmReady(page);
+    await joinFleetAsGm(page, code);
+    gms.push(page);
+  }
+  for (const page of gms) await page.locator('#gm-ready-btn').click();
+  await Promise.all([owner, ...gms].map(page => page.waitForFunction(
+    () => window.__saveSlotsPhase === 'InProgress', undefined, { timeout: 30_000 },
+  )));
+  await gms[0].waitForFunction(() => window.__hostGmStationState?.().projection.ships
+    .some(ship => ship.ship_config.helm_radar_range === 173), undefined, { timeout: 30_000 });
+  const npc = await gms[0].evaluate(() => window.__hostGmStationState().projection.ships
+    .find(ship => ship.ship_config.helm_radar_range === 173).ship_id);
+  const selectNpc = async page => {
+    await page.evaluate(id => {
+      const controller = window.__hostGmStationState();
+      const row = controller.projection.ships.find(ship => ship.ship_id === id);
+      if (!row || row.stations.length !== 1 || row.stations[0].station_id !== 'helm') {
+        throw new Error('NPC capability offer must contain only its complete Helm interface');
+      }
+      const select = document.getElementById('gm-station-select');
+      select.value = [...select.options].find(option => option.textContent === `${row.name} — ${row.stations[0].name}`).value;
+      select.dispatchEvent(new Event('change'));
+    }, npc);
+    await expect(page.locator('#gm-station-frame')).toHaveAttribute('src', 'gui/battleship/helm.html');
+    await expect(page.locator('#gm-station-frame')).toHaveAttribute('data-ship', npc);
+  };
+  const members = async (page, count) => page.waitForFunction(({ id, count }) =>
+    window.__hostGmStationState().projection.ships.find(ship => ship.ship_id === id)
+      ?.stations[0].operators.length === count, { id: npc, count }, { timeout: 30_000 });
+  const toggle = async page => { await page.locator('#gm-station-toggle').scrollIntoViewIfNeeded(); await page.locator('#gm-station-toggle').click(); };
+  for (const page of gms) { await selectNpc(page); await toggle(page); }
+  await members(gms[0], 2);
+  const operators = await gms[0].evaluate(id => window.__hostGmStationState().projection.ships
+    .find(ship => ship.ship_id === id).stations[0].operators, npc);
+  expect(operators).toHaveLength(2);
+  // The authentic widget emits its ordinary joystick envelope. Its result
+  // changes the target NPC's own pose, not the owner's LocalShip.
+  const drive = async (page, key) => {
+    const boundary = await page.evaluate(id => ({
+      id,
+      operator: window.__hostLocalGm().id,
+      sequence: Math.max(0, ...window.__hostGmStationState().projection.activity
+        .filter(entry => entry.ship === id).map(entry => entry.order.sequence)),
+    }), npc);
+    await page.bringToFront();
+    await page.locator('#gm-station-frame').scrollIntoViewIfNeeded();
+    const joystick = page.frameLocator('#gm-station-frame').locator('ph-helm-joystick');
+    await expect(joystick).toBeVisible();
+    await expect(page.frameLocator('#gm-station-frame').locator('#helm-auto-badge')).toBeHidden();
+    await joystick.focus();
+    await expect(joystick).toBeFocused();
+    await page.keyboard.down(key);
+    try {
+      await page.waitForFunction(({ id, operator, sequence }) => window.__hostGmStationState().projection.activity
+        .some(entry => entry.ship === id && entry.operator_id === operator
+          && entry.order.sequence > sequence && entry.action === 'SetThrust'), boundary, { timeout: 20_000 });
+    } catch (error) {
+      const diagnostic = await page.evaluate(() => ({
+        activity: window.__hostGmStationState().projection.activity,
+        selected: window.__hostGmStationState().selectedKey,
+        widget: document.getElementById('gm-station-frame').contentDocument.querySelector('ph-helm-joystick')?.state,
+      }));
+      throw new Error(`${error.message}\nNPC Helm diagnostic: ${JSON.stringify(diagnostic)}`);
+    } finally {
+      await page.keyboard.up(key);
+    }
+  };
+  const before = await gms[0].evaluate(id => window.__hostGmStationState().projection.ships
+    .find(ship => ship.ship_id === id).ship_pose, npc);
+  await drive(gms[0], 'ArrowUp');
+  await gms[0].waitForFunction(({ id, before }) => {
+    const pose = window.__hostGmStationState().projection.ships.find(ship => ship.ship_id === id)?.ship_pose;
+    return pose && (pose.x !== before.x || pose.z !== before.z);
+  }, { id: npc, before }, { timeout: 20_000 });
+  await drive(gms[1], 'ArrowDown');
+  await toggle(gms[1]);
+  await members(gms[0], 1);
+  await drive(gms[0], 'ArrowUp');
+  await toggle(gms[0]);
+  await members(gms[0], 0);
+  await gms[0].waitForFunction(id => window.__hostGmStationState().projection.ships
+    .find(ship => ship.ship_id === id)?.control_sources['helm-thrust'] === 'Ai', npc);
+  for (const page of gms) await toggle(page);
+  await members(gms[0], 2);
+  // A real departure applies the same operator-loss cleanup as a crewed fleet.
+  const identity = await gms[1].evaluate(() => JSON.parse(localStorage.getItem('phoenix.fleet.gm-identity.v1')));
+  await gms[1].close();
+  await members(gms[0], 1);
+  const returning = await context.newPage();
+  errors.push(captureServerPageErrors(returning));
+  await returning.goto(`/?scenario=${scenario}&gm=1`);
+  await waitForWasmReady(returning);
+  await openFleetTab(returning);
+  await returning.fill('[data-control="fleet-code"]', code);
+  await returning.click('[data-control="fleet-join"]');
+  await returning.waitForFunction(() => window.__hostGmStartState?.().admitted === true,
+    undefined, { timeout: 45_000 });
+  expect(await returning.evaluate(() => JSON.parse(localStorage.getItem('phoenix.fleet.gm-identity.v1')).operatorId)).toBe(identity.operatorId);
+  await returning.click('#server-settings-btn');
+  await returning.evaluate(() => document.getElementById('gm-session-resume').click());
+  await returning.waitForFunction(() => !window.wasm_is_paused(), undefined, { timeout: 30_000 });
+  await returning.waitForFunction(id => window.__hostGmStationState?.().projection.ships.some(ship => ship.ship_id === id), npc);
+  await selectNpc(returning);
+  await toggle(returning);
+  await members(returning, 2);
+  // The browser adapter acknowledges a typed request entering its queue. The
+  // frame-driven authority boundary subsequently publishes its actual refusal.
+  const refused = (correlation, reason) => returning.waitForFunction(
+    ({ correlation, reason, operator }) => window.__hostGmActivityState().entries.some(entry => {
+      const result = entry.detail?.type === 'gm_action' ? entry.detail.data : null;
+      return result?.correlation === correlation && result.operator.id === operator
+        && result.outcome === 'refused' && result.reason === reason;
+    }), { correlation, reason, operator: identity.operatorId }, { timeout: 30_000 },
+  );
+  expect(await returning.evaluate(id => window.__hostSetStationPuppet({ ship: id, station: 'engineering', active: true, correlation: 'npc-unsupported' }), npc)).toBe(true);
+  await refused('npc-unsupported', 'system-unavailable');
+  await members(returning, 2);
+  const oldFrame = await returning.locator('#gm-station-frame').elementHandle();
+  expect(await returning.evaluate(({ id, operator }) => window.__hostDespawnEntity({ target: id, operator_id: operator, correlation: 'npc-remove' }), { id: npc, operator: identity.operatorId })).toBe(true);
+  await returning.waitForFunction(id => !window.__hostGmStationState().projection.ships.some(ship => ship.ship_id === id), npc);
+  expect(await oldFrame.evaluate(frame => frame.isConnected)).toBe(false);
+  expect(await returning.evaluate(id => window.__hostSetStationPuppet({ ship: id, station: 'helm', active: true, correlation: 'npc-stale' }), npc)).toBe(true);
+  await refused('npc-stale', 'unknown-station');
+  expect(await returning.evaluate(() => window.__hostMeshStatus().disagreement)).toBeNull();
+  for (const captured of errors) expect(captured).toEqual([]);
+});

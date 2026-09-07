@@ -56,6 +56,57 @@ function mount() {
 describe('GM authentic Station projection', () => {
   beforeEach(mount);
 
+  it('binds each Ship/Station to a fresh browsing context even when its URL matches', () => {
+    const submitStationCommand = vi.fn(() => true);
+    const listeners = new Map();
+    const hostWindow = { addEventListener: (type, listener) => listeners.set(type, listener) };
+    const controller = createGmStationPuppet({
+      doc: document, win: hostWindow, getOperator: () => ({ id: 'gm-1' }), submitStationCommand,
+    });
+    const first = projection({ operators: ['gm-1'] });
+    first.ships[0].ship_id = 'npc-a';
+    first.ships[0].name = 'NPC A';
+    controller.update(first);
+    const oldFrame = document.getElementById('gm-station-frame');
+    const oldWindow = oldFrame.contentWindow;
+    const second = projection({ operators: ['gm-1'] });
+    second.ships[0].ship_id = 'npc-b';
+    second.ships[0].name = 'NPC B';
+    controller.update(second);
+    const liveFrame = document.getElementById('gm-station-frame');
+    expect(liveFrame).not.toBe(oldFrame);
+    expect(liveFrame.contentWindow === oldWindow).toBe(false);
+    expect(liveFrame.dataset.ship).toBe('npc-b');
+    const data = { type: 'console_action', payload: JSON.stringify({ action: 'set_red_alert', console: 'captain', active: true, correlation: 'npc-frame-command' }) };
+    listeners.get('message')({ source: oldWindow, data });
+    expect(submitStationCommand).not.toHaveBeenCalled();
+    listeners.get('message')({ source: liveFrame.contentWindow, data });
+    expect(submitStationCommand).toHaveBeenCalledWith(expect.objectContaining({ ship: 'npc-b' }));
+  });
+
+  it('retires disappeared-target feedback and unloads the final removed interface', () => {
+    const controller = createGmStationPuppet({
+      doc: document, win: window, getOperator: () => ({ id: 'gm-1' }),
+      submitStationCommand: () => true,
+    });
+    controller.update(projection({ operators: ['gm-1'] }));
+    controller.issueConsoleAction({ action: 'set_red_alert', console: 'captain', active: true, correlation: 'old-mount' });
+    expect(controller.state().pendingCommands.size).toBe(1);
+    const oldWindow = document.getElementById('gm-station-frame').contentWindow;
+    controller.update({ ships: [], activity: [], results: [] });
+    expect(controller.state().selectedRow).toBeNull();
+    expect(controller.state().pendingCommands.size).toBe(0);
+    expect(document.getElementById('gm-station-frame').getAttribute('src')).toBeNull();
+    expect(document.getElementById('gm-station-frame').contentWindow === oldWindow).toBe(false);
+    controller.update(projection({ operators: ['gm-1'] }));
+    const feedback = vi.fn(() => true);
+    document.getElementById('gm-station-frame').contentWindow.__updateActionFeedback = feedback;
+    expect(controller.settleCommandResults([{
+      action_kind: 'station-command', operator_id: 'gm-1', correlation: 'old-mount', outcome: 'applied',
+    }])).toBe(0);
+    expect(feedback).not.toHaveBeenCalled();
+  });
+
   it('pins the local projection shape and unwraps ordinary tagged blackboards', () => {
     const value = projection({
       operators: ['gm-1'],

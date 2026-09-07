@@ -1,0 +1,32 @@
+# Narrow #1314 consumer/replay fixture. The NPC begins outside the fleet's
+# ordinary fidelity bubble and keeps its authored patrol policy on release.
+[global]
+seed = 1314
+title = "world.patrol.global.title"
+description = "world.patrol.global.description"
+
+[anchors]
+ironveil_patrol_a = [6000.0, 0.0, -6000.0]
+ironveil_patrol_b = [6000.0, 0.0, -7000.0]
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+[[entity]]
+template_path = "assets/entities/ship_harrow_patrol.toml"
+name = "world.entity.raider_alpha.name"
+transform = { anchor = "ironveil_patrol_a" }
+overrides = { tags = ["ship", "npc", "enemy", "gm_removable"], helm_console = { radar = { range = 173.0 } } }
+
+[[gm_palette]]
+id = "npc_helm"
+label = "world.entity.raider_alpha.name"
+template_path = "assets/entities/ship_harrow_patrol.toml"
+
+[[gm_palette.variant]]
+id = "short_range"
+label = "world.entity.raider_alpha.name"
+overrides = { tags = ["ship", "npc", "enemy", "gm_removable"], helm_console = { radar = { range = 119.0 } } }

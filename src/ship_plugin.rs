@@ -332,7 +332,12 @@ impl Plugin for ShipPlugin {
         // Station's AI remains suppressed for the rest of the tick.
         app.add_systems(
             FixedUpdate,
-            crate::gm_puppet::reconcile_station_puppet_control
+            (
+                crate::gm_puppet::prune_removed_station_puppets,
+                crate::gm_puppet::prepare_station_puppet_fidelity,
+                crate::gm_puppet::reconcile_station_puppet_control,
+            )
+                .chain()
                 .after(crate::lobby::LobbySystemSet)
                 .before(crate::command_admission::AdmissionSet),
         )
@@ -358,8 +363,17 @@ impl Plugin for ShipPlugin {
         )
         .add_systems(
             FixedUpdate,
-            crate::gm_puppet::settle_station_puppet_feedback
+            (
+                crate::gm_puppet::settle_station_puppet_feedback,
+                crate::gm_puppet::settle_removed_station_feedback,
+            )
+                .chain()
                 .in_set(crate::sim_sets::SimSet::Broadcast),
+        )
+        .add_systems(
+            FixedUpdate,
+            crate::gm_puppet::prune_removed_station_puppets
+                .in_set(crate::sim_sets::SimSet::Publish),
         );
 
         // Intent narration (issue #879). Registered separately from the tuple

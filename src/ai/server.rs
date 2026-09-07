@@ -1175,6 +1175,7 @@ const LOD_DWELL_SECS: f64 = 2.0;
 /// same bubble.
 fn lod_ai_ships(
     time: Res<Time>,
+    puppets: Option<Res<crate::gm_puppet::StationPuppets>>,
     fleet: Query<
         (&Transform, Option<&LodBubble>),
         (With<crate::lockstep::FleetSlotOf>, With<Ship>),
@@ -1187,6 +1188,7 @@ fn lod_ai_ships(
             Has<LodBubble>,
             Has<AiHighFidelity>,
             Option<&LodTransitionTimer>,
+            Option<&crate::entities::spawner::EntityUuid>,
         ),
         (With<Ship>, Without<crate::lockstep::FleetSlotOf>),
     >,
@@ -1217,7 +1219,7 @@ fn lod_ai_ships(
         ));
     }
 
-    for (entity, transform, has_bubble, is_high, timer) in &npcs {
+    for (entity, transform, has_bubble, is_high, timer, uuid) in &npcs {
         let current_state = if is_high {
             LodState::High
         } else {
@@ -1226,7 +1228,9 @@ fn lod_ai_ships(
 
         // A bubble carrier (the station) anchors its own zone — hold it high
         // unconditionally so a defended object's own guns always run.
-        let new_state = if has_bubble {
+        let held =
+            uuid.is_some_and(|uuid| puppets.as_deref().is_some_and(|p| p.operates_ship(&uuid.0)));
+        let new_state = if has_bubble || held {
             LodState::High
         } else {
             // The most-inside anchor: the bubble with the largest signed

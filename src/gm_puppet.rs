@@ -17,6 +17,8 @@ use crate::ship::components::{
 };
 use crate::ship::control_source::ControlSource;
 
+pub mod capability;
+
 pub const MAX_CANONICAL_SYSTEM_COMMAND_BYTES: usize = 8192;
 pub const MAX_STATION_PUPPET_ACTIVITY: usize = 128;
 const GM_STATION_FEEDBACK_TOKEN_PREFIX: &str = "ai:gm-station-feedback:";
@@ -311,13 +313,47 @@ pub fn validate_station_action_in_world(
     action: &crate::gm_action::GmAction,
     operator_id: &str,
 ) -> Result<(), crate::gm_action::GmActionRefusalReason> {
+    // A ship key also routes contact policy and other directed actions. Only
+    // actual Station actions require an authentic console capability.
+    let (ship, station) = match action {
+        crate::gm_action::GmAction::SetStationPuppet { ship, station, .. }
+        | crate::gm_action::GmAction::IssueStationCommand { ship, station, .. } => (ship, station),
+        _ => return Ok(()),
+    };
     let puppets = world
         .get_resource::<StationPuppets>()
         .cloned()
         .unwrap_or_default();
-    let Some(ship) = action.ship_key() else {
+    // An existing member can always release, including after target removal.
+    // Takeover and commands use the same fail-closed verdict as the offer list.
+    if !matches!(
+        action,
+        crate::gm_action::GmAction::SetStationPuppet { active: false, .. }
+    ) {
+        let mut query = world.query_filtered::<EntityRef, With<crate::server_app::Ship>>();
+        let mut matches = query.iter(world).filter(|entity| {
+            entity
+                .get::<EntityUuid>()
+                .is_some_and(|uuid| uuid.0 == ship.0)
+        });
+        let entity = matches
+            .next()
+            .ok_or(crate::gm_action::GmActionRefusalReason::UnknownStation)?;
+        if matches.next().is_some() {
+            return Err(crate::gm_action::GmActionRefusalReason::UnknownStation);
+        }
+        capability::station_capability(
+            &entity,
+            station,
+            Some(
+                &crate::ship::system_registry::SystemKindRegistry::with_core_systems()
+                    .expect("built-in System descriptors"),
+            ),
+            world.get_resource::<crate::command_admission::router::AdmittedConsumerRegistry>(),
+        )?;
+    } else {
         return Ok(());
-    };
+    }
     let found = {
         let mut query = world.query_filtered::<
             (&EntityUuid, &ShipConfigComponent, &ActiveStationRatings),
@@ -338,6 +374,9 @@ pub fn validate_station_action_in_world(
 }
 
 impl StationPuppets {
+    pub fn operates_ship(&self, ship: &str) -> bool {
+        self.entries.iter().any(|entry| entry.target.ship.0 == ship)
+    }
     pub fn entries(&self) -> &[StationPuppet] {
         &self.entries
     }
@@ -442,6 +481,107 @@ impl StationPuppets {
             )
                 .cmp(&(target.ship.0.as_str(), target.station.0.as_str()))
         })
+    }
+}
+
+/// Membership itself is the fidelity hold. Promote before Admission, not in
+/// Physics after the first consumer already ran. Snapshot continuation with a
+/// queued command therefore reconstructs the same full consumer bundle before
+/// delivery. A second equal GM never resets existing intent or policy state.
+pub fn prepare_station_puppet_fidelity(
+    time: Res<Time>,
+    puppets: Res<StationPuppets>,
+    pending: Res<PendingGmStationCommands>,
+    ships: Query<
+        (Entity, &EntityUuid),
+        (
+            With<crate::server_app::Ship>,
+            Without<crate::lockstep::FleetSlotOf>,
+            Without<crate::ai::server::AiHighFidelity>,
+        ),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, uuid) in &ships {
+        if puppets.operates_ship(&uuid.0)
+            || pending
+                .entries()
+                .iter()
+                .any(|command| command.ship.0 == uuid.0)
+        {
+            commands.entity(entity).insert((
+                crate::ai::server::ai_high_fidelity_components(),
+                crate::ai::server::LodTransitionTimer {
+                    last_state_change_secs: time.elapsed_secs() as f64,
+                },
+            ));
+        }
+    }
+}
+
+/// All destruction paths meet here after Damage, including beam, blaster,
+/// script, layer unload and GM removal. History remains attributed; only live
+/// memberships are pruned. Pending delivery still owns its honest refusal.
+pub fn prune_removed_station_puppets(
+    ships: Query<(&EntityUuid, &ShipConfigComponent), With<crate::server_app::Ship>>,
+    mut puppets: ResMut<StationPuppets>,
+) {
+    puppets.entries.retain(|entry| {
+        let mut matches = ships
+            .iter()
+            .filter(|(uuid, _)| uuid.0 == entry.target.ship.0);
+        matches
+            .next()
+            .is_some_and(|(_, config)| config.0.station(&entry.target.station).is_some())
+            && matches.next().is_none()
+    });
+}
+
+/// A target can be destroyed after delivery but before its consumer runs.
+/// First let actual consumer feedback settle (including an Applied answer
+/// produced before destruction); only then refuse orphaned routes. Otherwise
+/// the journal could retain an unprojected Pending fact forever.
+pub fn settle_removed_station_feedback(
+    ships: Query<(&EntityUuid, &ShipConfigComponent), With<crate::server_app::Ship>>,
+    mut routes: ResMut<PendingGmStationFeedbackRoutes>,
+    mut journal: Option<ResMut<crate::gm_action::GmActionJournal>>,
+    mut log: Option<ResMut<crate::gm_action::GmActionLog>>,
+) {
+    let Some(journal) = journal.as_deref_mut() else {
+        return;
+    };
+    let orphaned = routes
+        .0
+        .iter()
+        .filter_map(|(token, route)| {
+            let grant = journal
+                .grants()
+                .iter()
+                .find(|grant| grant.order == route.order)?;
+            let crate::gm_action::GmAction::IssueStationCommand { ship, station, .. } =
+                &grant.action
+            else {
+                return None;
+            };
+            let mut matches = ships.iter().filter(|(uuid, _)| uuid.0 == ship.0);
+            let live = matches
+                .next()
+                .is_some_and(|(_, config)| config.0.station(station).is_some())
+                && matches.next().is_none();
+            (!live).then_some((token.clone(), route.order))
+        })
+        .collect::<Vec<_>>();
+    for (token, order) in orphaned {
+        journal
+            .refuse_pending_station_command(
+                order,
+                crate::gm_action::GmActionRefusalReason::SystemUnavailable,
+            )
+            .expect("an unfinished consumer route has a canonical pending result");
+        routes.0.remove(&token);
+        if let Some(log) = log.as_deref_mut() {
+            *log = journal.applied_log();
+        }
     }
 }
 
@@ -902,6 +1042,7 @@ station = "tactical"
             .spawn((
                 crate::server_app::Ship,
                 EntityUuid("player-1".into()),
+                crate::lockstep::FleetSlotOf(crate::command_admission::HostSlot(1)),
                 ShipConfigComponent(config.clone()),
                 ShipSystemControlSources(sources),
                 ActiveStationRatings(ratings),

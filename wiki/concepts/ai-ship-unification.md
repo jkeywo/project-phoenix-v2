@@ -72,6 +72,14 @@ the authoritative LOD decision, so a stationless GM computes the same fidelity
 set as both ship hosts. Authored `LodBubble` entities remain anchors even in a
 GM-only world with no fleet.
 
+An active canonical NPC Station takeover also holds that NPC at full fidelity.
+`src/gm_puppet.rs` installs the complete ordinary high-fidelity bundle before
+Admission, including when the first accepted command shares the takeover tick
+or was restored awaiting delivery. Joining an already active takeover never
+resets its intent or policy memory. After the last release, the ordinary
+distance, dwell and hysteresis rules resume; the Station's live authored rating
+again decides which fine-System AI hosts may run.
+
 ## Related
 
 - [AI Helm Decomposition](./ai-helm-decomposition.md)

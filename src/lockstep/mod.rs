@@ -874,6 +874,10 @@ pub fn register_lockstep(app: &mut App) {
                 StateClass::Derived,
                 "gm-action-state",
             )
+            .declare_state::<crate::gm_puppet::capability::NpcStationConfig>(
+                StateClass::Derived,
+                "gm-action-state",
+            )
             .declare_state::<crate::gm_puppet::PendingGmStationCommands>(
                 StateClass::Folded,
                 "gm-action-state",

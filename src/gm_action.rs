@@ -2147,7 +2147,11 @@ pub fn apply_due_actions(
     mut virtual_time: Option<ResMut<Time<Virtual>>>,
     mut fixed_time: Option<ResMut<Time<Fixed>>>,
     mut join_hold: Option<ResMut<crate::gm_join::GmJoinPauseHold>>,
-    mut objective_control: crate::gm_objective::ObjectiveControl,
+    (removal_targets, station_capabilities, mut objective_control): (
+        crate::gm_despawn::RemovalQuery,
+        crate::gm_puppet::capability::StationCapabilities,
+        crate::gm_objective::ObjectiveControl,
+    ),
 ) {
     // Outside a fleet, an empty typed lane must not overwrite the ordinary
     // local host pause surface. Replay and restored saves deliberately carry a
@@ -2663,13 +2667,15 @@ pub fn apply_due_actions(
                         .iter()
                         .find(|(uuid, ..)| uuid.0 == ship.0)
                         .map(|(_, config, ratings, ..)| (config, ratings));
-                    match crate::gm_puppet::validate_station_action(
-                        &grant.action,
-                        &grant.operator_id,
-                        puppets,
-                        found.map(|(config, _)| &config.0),
-                        found.map(|(_, ratings)| ratings),
-                    ) {
+                    match station_capabilities.check(&ship.0, station).and_then(|()| {
+                        crate::gm_puppet::validate_station_action(
+                            &grant.action,
+                            &grant.operator_id,
+                            puppets,
+                            found.map(|(config, _)| &config.0),
+                            found.map(|(_, ratings)| ratings),
+                        )
+                    }) {
                         Ok(()) => {
                             puppets.set_operator(target, grant.operator_id.clone(), true);
                             (GmActionOutcome::Applied, None)
@@ -2729,11 +2735,8 @@ pub fn apply_due_actions(
                             .expect("live GM result matches its canonical grant");
                         continue;
                     };
-                    if config.0.station(station).is_none() {
-                        (
-                            GmActionOutcome::Refused,
-                            Some(GmActionRefusalReason::UnknownStation),
-                        )
+                    if let Err(reason) = station_capabilities.check(&ship.0, station) {
+                        (GmActionOutcome::Refused, Some(reason))
                     } else {
                         match crate::core::codec::decode_canonical_system_command(payload.as_str())
                         {
@@ -3214,6 +3217,7 @@ station = "helm"
         app.world_mut().spawn((
             crate::server_app::Ship,
             crate::entities::spawner::EntityUuid("player-1".into()),
+            crate::lockstep::FleetSlotOf(HostSlot(1)),
             crate::ship::components::ShipConfigComponent(config),
             ratings,
             sources,
@@ -5324,6 +5328,56 @@ station = "helm"
         world.insert_resource(LastGmSessionProjection::default());
         world.insert_resource(crate::lockstep::MeshOutbox::default());
         world
+    }
+
+    #[test]
+    fn typed_contact_ingress_and_replay_do_not_require_station_capabilities() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut live = admitted_world();
+        let request = crate::core::codec::decode_gm_action_request(
+            r#"{"operator_id":"gm-1","correlation":"contact-without-console","action":"set_contact_override","ship":"observer","target":"target","mode":"conceal"}"#,
+        )
+        .unwrap();
+        let GmActionSubmission::Granted(grant) = submit_local(&mut live, request).unwrap() else {
+            panic!("an admitted contact action must reach its own apply validator");
+        };
+        let replayed: GmActionGrant =
+            serde_json::from_str(&serde_json::to_string(&grant).unwrap()).unwrap();
+        let mut replay = admitted_world();
+        replay
+            .resource_mut::<GmActionJournal>()
+            .insert(replayed)
+            .unwrap();
+        for world in [&mut live, &mut replay] {
+            // A valid contact observer need not offer any authentic Station.
+            world.spawn((
+                crate::server_app::Ship,
+                crate::lockstep::FleetSlotOf(HostSlot(2)),
+                crate::entities::spawner::EntityUuid("observer".into()),
+            ));
+            world.spawn(crate::entities::spawner::EntityUuid("target".into()));
+            world.init_resource::<crate::world::server::WorldContentRuntime>();
+            world.resource_mut::<crate::sim_tick::SimTick>().0 = grant.apply_tick;
+            world.run_system_once(apply_due_actions).unwrap();
+            assert_eq!(
+                world.resource::<GmActionLog>().entries()[0].outcome,
+                GmActionOutcome::Applied
+            );
+            assert_eq!(
+                crate::gm_contact::mode(
+                    &world
+                        .resource::<crate::world::server::WorldContentRuntime>()
+                        .contact_overrides,
+                    "observer",
+                    "target"
+                ),
+                crate::gm_contact::ContactMode::Conceal,
+            );
+        }
+        assert_eq!(
+            live.resource::<GmActionLog>().entries(),
+            replay.resource::<GmActionLog>().entries()
+        );
     }
 
     #[test]

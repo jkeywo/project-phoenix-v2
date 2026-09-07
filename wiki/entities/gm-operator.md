@@ -334,7 +334,7 @@ blackboard detail, which remains accessible through Station puppeting.
 
 `SetStationPuppet` and `IssueStationCommand` extend the same attributed,
 idempotent `GmActionJournal`. A takeover may begin only on an authored Station
-on a player ship, including a human-held Station on any live rating. `StationPuppets` stores
+on a compatible ship, including a human-held player Station on any live rating. `StationPuppets` stores
 the canonical `(ship, station, sorted equal-operator set)` membership; it is
 captured in snapshots and folded into the simulation digest alongside the
 applied GM journal. A Station command is decoded and passes the shared
@@ -347,7 +347,7 @@ after restore; it carries only canonical order plus the iframe's opaque
 correlation, never GM authority. Activity remains a presentation projection
 and is cleared on restore.
 
-The rendererless GM reads each fleet player ship's exact `StationConfig.console`
+The rendererless GM reads each compatible ship's exact `StationConfig.console`
 URL plus its topology, tagged blackboards, ratings, control sources,
 membership, activity, pose, waypoint, objectives, hull and absolute live world
 entity lane over the local-only `gm_station` Host Channel. It also receives the
@@ -395,7 +395,7 @@ At an agreed GM host-loss boundary, that operator is removed from every
 takeover and its activity projection. Equal surviving operators retain their
 membership; when the departed GM was last, the Station's ordinary rating is
 reapplied at that same boundary. The frozen GM binding remains available to an
-authenticated recovered peer, which may take a player Station again. Each
+authenticated recovered peer, which may take a compatible Station again. Each
 recovery advances a canonical slot generation recorded in the journal: grants
 retain the generation in which they were sequenced, so pre-loss work remains
 durably Refused even after `rejoin` clears the transient departed flag, while
@@ -404,6 +404,19 @@ exactly on the recovery boundary to preserve established deterministic
 ordering. These generation facts are snapshotted, folded and replayed. A grant
 exactly on the still-unapplied loss boundary keeps the normal action-before-
 loss schedule order; equal surviving GMs remain members when cleanup follows.
+
+## NPC capability and lifecycle
+
+NPC capability is checked by `src/gm_puppet/capability.rs` at offer, ingress and
+canonical application. The initial audited NPC interface is battleship Helm;
+Captain, Power and mixed interfaces with incomplete per-ship producers remain
+excluded. The common NPC spawn stores the normal `ShipClientConfig` projection
+from its resolved instance config, including overrides, and restore rebuilds it.
+Active membership promotes the NPC through the existing full-fidelity bundle
+before Admission and holds it against LOD demotion. Last release restores the
+live rating and ordinary LOD policy. Post-Damage cleanup removes memberships
+whose Ship or Station disappeared. The browser replaces the full iframe context
+when its Ship/Station key changes, so stale messages cannot control a replacement.
 
 ## Safe entity removal
 

@@ -666,6 +666,7 @@ fn publish_local_projection(
 }
 
 fn publish_station_projection(
+    capabilities: crate::gm_puppet::capability::StationCapabilities,
     puppets: Res<StationPuppets>,
     activity: Res<crate::gm_puppet::StationPuppetActivity>,
     action_log: Res<GmActionLog>,
@@ -688,7 +689,8 @@ fn publish_station_projection(
         (
             &EntityUuid,
             Option<&EntityName>,
-            &crate::lockstep::FleetSlotOf,
+            Option<&crate::lockstep::FleetSlotOf>,
+            Option<&crate::gm_puppet::capability::NpcStationConfig>,
             &ShipConfigComponent,
             &ActiveStationRatings,
             &ShipSystemControlSources,
@@ -697,10 +699,7 @@ fn publish_station_projection(
             Option<&crate::console::navigation::server::NavigationWaypoint>,
             Option<&EntitySystemHull>,
         ),
-        (
-            With<crate::server_app::Ship>,
-            With<crate::lockstep::FleetSlotOf>,
-        ),
+        With<crate::server_app::Ship>,
     >,
     mut previous: Local<Option<GmStationProjectionPayload>>,
     mut changed: MessageWriter<GmStationProjectionChanged>,
@@ -758,22 +757,40 @@ fn publish_station_projection(
     let mut projected_ships = ships
         .iter()
         .map(
-            |(uuid, name, slot, config, ratings, sources, blackboards, physics, waypoint, hull)| {
+            |(
+                uuid,
+                name,
+                slot,
+                npc_config,
+                config,
+                ratings,
+                sources,
+                blackboards,
+                physics,
+                waypoint,
+                hull,
+            )| {
                 let config_path = roster
                     .as_ref()
                     .and_then(|roster| {
                         roster
                             .ships()
                             .iter()
-                            .find(|ship| ship.host == slot.0)
+                            .find(|ship| slot.is_some_and(|slot| ship.host == slot.0))
                             .and_then(|ship| ship.ship_path.as_deref())
                     })
                     .or_else(|| selected_ship.as_ref().map(|selected| selected.0.as_str()));
                 let config_cache = crate::entities::config_cache::get_config_cache();
-                let ship_client_config = config_path
-                    .and_then(|path| config_cache.get(path))
-                    .map(crate::lobby::server::project_ship_client_config)
-                    .unwrap_or_default();
+                let ship_client_config = if slot.is_some() {
+                    config_path
+                        .and_then(|path| config_cache.get(path))
+                        .map(crate::lobby::server::project_ship_client_config)
+                        .unwrap_or_default()
+                } else {
+                    npc_config
+                        .map(|config| config.0.clone())
+                        .unwrap_or_default()
+                };
                 let station_ratings = config
                     .0
                     .stations
@@ -790,6 +807,7 @@ fn publish_station_projection(
                     .stations
                     .iter()
                     .filter_map(|station| {
+                        capabilities.check(&uuid.0, &station.id).ok()?;
                         let console = station
                             .console
                             .as_deref()

@@ -27,13 +27,25 @@ function mount(markup) {
 }
 const el = (id) => document.getElementById(id);
 
+// The cruiser mounts the two Operations panels since #1390 (its Engineering
+// seat owns a `kind = "tractor"` and a `kind = "umbilical"` System), but no
+// Field Repair dispatch panel — this hull authors no
+// `[repair.external_dispatch]` — and no Shields column, which lives on Science.
 const CRUISER_FIXTURE =
   '<ph-power-controls id="power-controls"></ph-power-controls>' +
   '<ph-battery-bar id="battery-bar"></ph-battery-bar>' +
   '<ph-hull-integrity id="hull-integrity"></ph-hull-integrity>' +
   '<ph-station-damage id="core-damage"></ph-station-damage>' +
   '<ph-repair-teams id="repair-teams"></ph-repair-teams>' +
-  '<span id="engineering-auto-badge" hidden></span>';
+  '<span id="engineering-auto-badge" hidden></span>' +
+  '<div id="tractor-panel" hidden>' +
+    '<button id="tractor-btn"></button><span id="tractor-status"></span>' +
+    '<div id="tractor-refusal" hidden></div>' +
+  '</div>' +
+  '<div id="umbilical-panel" hidden>' +
+    '<button id="umbilical-btn"></button><span id="umbilical-status"></span>' +
+    '<div id="umbilical-refusal" hidden></div>' +
+  '</div>';
 
 const DESTROYER_FIXTURE =
   '<ph-shield-facings id="shield-facings"></ph-shield-facings>' +
@@ -101,15 +113,74 @@ describe('cruiser engineering renderStation', () => {
     expect(el('engineering-auto-badge').hidden).toBe(true);
   });
 
-  it('carries no shields column and no tractor/umbilical/dispatch panels', () => {
+  it('carries no shields column and no field-repair dispatch panel', () => {
     expect(el('shield-facings')).toBeNull();
-    expect(el('tractor-panel')).toBeNull();
+    expect(el('dispatch-panel')).toBeNull();
   });
 
   it('falls back to a full hull and zero battery when the payload carries nothing', () => {
     cruiserRender({ systems: {} }, document);
     expect(el('hull-integrity').state).toEqual({ total_pct: 1, destroyed_pct: undefined });
     expect(el('battery-bar').state.level_pct).toBe(0);
+  });
+
+  // ── Operations tail (issue #1390) ──────────────────────────────────────
+  // The same two panels the destroyer has carried since #1156/#1160, now on
+  // this hull. They are driven by the shared `renderTractorPanel` /
+  // `renderUmbilicalPanel`, so these cases pin that the cruiser's variant
+  // really calls them — not that the shared bodies work, which the destroyer
+  // block below pins too.
+
+  it('hides both Operations panels while the payload carries no coupling systems', () => {
+    cruiserRender(payload, document);
+    expect(el('tractor-panel').hidden).toBe(true);
+    expect(el('umbilical-panel').hidden).toBe(true);
+  });
+
+  it('shows the tractor panel and toggles engage/release text+class', () => {
+    const idle = { ...payload, systems: { ...payload.systems, tractor: { engaged: false, range: 500 } } };
+    cruiserRender(idle, document);
+    expect(el('tractor-panel').hidden).toBe(false);
+    expect(el('tractor-btn').classList.contains('engaged')).toBe(false);
+    expect(el('tractor-btn').textContent).toBe(t('console.tractor.engage'));
+    expect(el('tractor-status').textContent).toContain('500');
+
+    const holding = { ...payload, systems: { ...payload.systems, tractor: { engaged: true, coupled_target_name: 'console.tractor.idle' } } };
+    cruiserRender(holding, document);
+    expect(el('tractor-btn').classList.contains('engaged')).toBe(true);
+    expect(el('tractor-btn').textContent).toBe(t('console.tractor.release'));
+    expect(el('tractor-status').textContent).toContain(t('console.tractor.holding'));
+  });
+
+  it('shows a tractor refusal when present and clears it when absent', () => {
+    cruiserRender({ ...payload, systems: { ...payload.systems, tractor: { engaged: false, refusal: 'console.tractor.idle' } } }, document);
+    expect(el('tractor-refusal').hidden).toBe(false);
+    cruiserRender({ ...payload, systems: { ...payload.systems, tractor: { engaged: false } } }, document);
+    expect(el('tractor-refusal').hidden).toBe(true);
+  });
+
+  it('shows the umbilical panel, toggles start/stop and reports both ends levels', () => {
+    const idle = { ...payload, systems: { ...payload.systems, umbilical: { running: false, rate: 20, operator_level: 100, partner_level: null } } };
+    cruiserRender(idle, document);
+    expect(el('umbilical-panel').hidden).toBe(false);
+    expect(el('umbilical-btn').classList.contains('engaged')).toBe(false);
+    expect(el('umbilical-btn').textContent).toBe(t('console.umbilical.start'));
+    // A partner with no such ledger reads '—', not 0.
+    expect(el('umbilical-status').textContent).toContain('100 → —');
+
+    const flowing = { ...payload, systems: { ...payload.systems, umbilical: { running: true, rate: 20, operator_level: 80, partner_level: 20 } } };
+    cruiserRender(flowing, document);
+    expect(el('umbilical-btn').classList.contains('engaged')).toBe(true);
+    expect(el('umbilical-btn').textContent).toBe(t('console.umbilical.stop'));
+    expect(el('umbilical-status').textContent).toContain(t('console.umbilical.flowing'));
+    expect(el('umbilical-status').textContent).toContain('80 → 20');
+  });
+
+  it('shows an umbilical refusal when present and clears it when absent', () => {
+    cruiserRender({ ...payload, systems: { ...payload.systems, umbilical: { running: false, refusal: 'console.umbilical.idle' } } }, document);
+    expect(el('umbilical-refusal').hidden).toBe(false);
+    cruiserRender({ ...payload, systems: { ...payload.systems, umbilical: { running: false } } }, document);
+    expect(el('umbilical-refusal').hidden).toBe(true);
   });
 });
 

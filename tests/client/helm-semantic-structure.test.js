@@ -5,14 +5,18 @@ function source(path) {
   return readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8');
 }
 
-// [hull, mounts a lateral-thrust pad, mounts the contextual Dock control].
+// [hull, lateral-thrust pad, contextual Dock control, under-tow-load banner].
 // The Dock column tracks which hulls author a `kind = "dock"` System: the
-// destroyer since #1164 S11a, the cruiser since #1388. The battleship authors
-// none, so its Helm must still carry no dock button at all.
+// destroyer since #1164 S11a, the cruiser since #1388. The tow-load column
+// tracks which hulls author a `kind = "tractor"` System — the beam is
+// Engineering's control on both, but the tow's mass penalty lands on the Helm,
+// so this is the seat that has to say so: the destroyer since #1157, the
+// cruiser since #1390. The battleship authors neither, so its Helm must still
+// carry no dock button and no banner at all.
 const HELM_VARIANTS = [
-  ['battleship', false, false],
-  ['cruiser', true, true],
-  ['destroyer', true, true],
+  ['battleship', false, false, false],
+  ['cruiser', true, true, true],
+  ['destroyer', true, true, true],
 ];
 
 const SEMANTIC_COMPONENTS = [
@@ -34,7 +38,7 @@ const SEMANTIC_COMPONENTS = [
 ];
 
 describe('Helm semantic-action structural coverage', () => {
-  for (const [hull, lateral, dock] of HELM_VARIANTS) {
+  for (const [hull, lateral, dock, towLoad] of HELM_VARIANTS) {
     it(`${hull} mounts its complete shipped Helm variant`, () => {
       const html = source(`gui/${hull}/helm.html`);
       expect(html).toContain(`initConsole({ name: 'helm'`);
@@ -43,6 +47,7 @@ describe('Helm semantic-action structural coverage', () => {
       ]) expect(html).toContain(control);
       expect(html.includes('<ph-lateral-thrust-joystick')).toBe(lateral);
       expect(html.includes('id="dock-btn"')).toBe(dock);
+      expect(html.includes('id="tow-load-panel"')).toBe(towLoad);
     });
   }
 

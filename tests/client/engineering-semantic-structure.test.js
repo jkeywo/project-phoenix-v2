@@ -15,6 +15,12 @@ describe('Engineering-family visible-control semantic structure', () => {
     ['gui/destroyer/engineering.html', [
       'TRACTOR_TOGGLE_ACTION_ID', 'UMBILICAL_TOGGLE_ACTION_ID', 'EXTERNAL_REPAIR_TOGGLE_ACTION_ID',
     ]],
+    // The cruiser mounts the same two Operations controls since #1390, and
+    // reaches them the same way. It authors no `[repair.external_dispatch]`,
+    // so it carries no Field Repair control to route.
+    ['gui/cruiser/engineering.html', [
+      'TRACTOR_TOGGLE_ACTION_ID', 'UMBILICAL_TOGGLE_ACTION_ID',
+    ]],
   ]) {
     it(`${file} routes its visible controls through semantic identities`, () => {
       const text = source(file);

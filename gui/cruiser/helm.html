@@ -38,8 +38,17 @@
     .dock-row { display: flex; align-items: center; gap: 10px; }
     .dock-btn { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); letter-spacing: 0.14em; padding: 6px 14px; background: rgba(var(--rgb-panel), 0.8); color: var(--ink); border: 1px solid var(--edge); cursor: pointer; min-height: var(--control-hit-min); }
     .dock-btn.docked { background: var(--loaded); color: var(--surface-void); border-color: var(--loaded); }
-    .dock-status { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }
+    .dock-status { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }
     .dock-refusal { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--reloading); margin-top: 6px; }
+    /* Under-tow-load indicator (issue #1157, mounted here by #1390 now that this
+       hull mounts a tractor): shown only while this ship's beam holds a target,
+       so the rail is unchanged for the whole of a flight that never tows.
+       The same banner as Destroyer Helm, compacted here because the Cruiser's
+       movement rail can carry Dock and tow status at the same time. */
+    .tow-load-panel { flex-shrink: 0; border-top: 1px solid var(--edge); padding-top: 4px; margin-top: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+    .tow-load-panel[hidden] { display: none; }
+    .tow-load-label { flex: 0 0 auto; white-space: nowrap; font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); letter-spacing: 0.14em; color: var(--reloading); }
+    .tow-load-target { max-width: 100%; overflow-wrap: anywhere; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }
     /* Portrait (issue #1376, John's 2026-09-06 decision): nothing scrolls.
        Same fix as destroyer/helm's, for the same measured overflow: stacking
        the scope, the joystick's 240px column and the lateral pad plus
@@ -59,11 +68,13 @@
     @media (orientation: landscape) and (max-height: 500px) {
       .panel-inner { padding: 8px; gap: 8px; }
       .console-body .ctrl-col { padding: 8px; gap: 8px; }
+      .console-body .movement-col { padding-block: 4px; gap: 4px; }
     }
     @media (orientation: portrait) {
       .panel-inner { padding: 10px 12px; gap: 8px; }
       .console-body { overflow-y: auto; }
       .console-body .ctrl-col { padding: 8px; }
+      .console-body .movement-col { gap: 4px; }
     }
   </style>
 </head>
@@ -90,15 +101,22 @@
           </div>
           <!-- Contextual dock control (issue #1388): this hull's helm owns a
                `dock` system, so it publishes a `dock` blackboard and this panel
-               appears exactly while a berth is in range or a dock is held. No
-               under-tow-load banner here — the cruiser mounts no tractor, so it
-               publishes no `tractor` blackboard and there is nothing to show. -->
+               appears exactly while a berth is in range or a dock is held. -->
           <div class="dock-panel" id="dock-panel" hidden>
             <div class="dock-row">
               <button id="dock-btn" class="dock-btn" data-i18n="console.dock.dock">Dock</button>
               <span id="dock-status" class="dock-status">—</span>
             </div>
             <div id="dock-refusal" class="dock-refusal" hidden></div>
+          </div>
+          <!-- Under-tow-load indicator (issue #1157, mounted here by #1390):
+               shown only while this ship's tractor holds a target, so the helm
+               can see it is under load and why. The tractor is Engineering's
+               control on this hull, but the mass penalty lands on THIS seat, so
+               this is where it has to be said. Hidden the rest of the time. -->
+          <div class="tow-load-panel" id="tow-load-panel" hidden>
+            <span class="tow-load-label" data-i18n="console.helm.under_tow">Under tow load</span>
+            <span id="tow-load-target" class="tow-load-target"></span>
           </div>
         </div>
         <div class="radar-col scope-cell">

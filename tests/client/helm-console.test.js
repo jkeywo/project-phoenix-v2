@@ -33,7 +33,9 @@ const BATTLESHIP_FIXTURE =
   '<span id="footer-target"></span>';
 
 // The cruiser mounts the contextual dock panel since #1388 (its Helm owns a
-// `kind = "dock"` System), but no tow-load panel — this hull carries no tractor.
+// `kind = "dock"` System) and the under-tow-load banner since #1390 (its
+// Engineering seat owns a `kind = "tractor"` System, and the tow's mass penalty
+// lands on this seat).
 const CRUISER_FIXTURE =
   '<ph-helm-radar id="helm-radar"></ph-helm-radar>' +
   '<ph-helm-joystick id="helm-joystick"></ph-helm-joystick>' +
@@ -45,7 +47,8 @@ const CRUISER_FIXTURE =
   '<div id="dock-panel" hidden>' +
     '<button id="dock-btn"></button><span id="dock-status"></span>' +
     '<div id="dock-refusal" hidden></div>' +
-  '</div>';
+  '</div>' +
+  '<div id="tow-load-panel" hidden><span id="tow-load-target"></span></div>';
 
 const DESTROYER_FIXTURE =
   '<ph-helm-radar id="helm-radar"></ph-helm-radar>' +
@@ -148,10 +151,20 @@ describe('cruiser helm renderStation', () => {
     expect(el('dock-refusal').hidden).toBe(true);
   });
 
-  // The tow-load banner reads a `tractor` blackboard; this hull mounts no
-  // tractor, so the panel stays destroyer-only and the cruiser markup has none.
-  it('carries no tow-load panel', () => {
-    expect(el('tow-load-panel')).toBeNull();
+  // Issue #1390: this hull now mounts a tractor, so the banner it publishes
+  // for reaches this seat — the beam is Engineering's control but the mass
+  // penalty is the helm's, and the crossing between the two seats is the whole
+  // point of the panel.
+  it('shows the under-tow-load banner only while the tractor holds a target', () => {
+    cruiserRender(payload, document);
+    expect(el('tow-load-panel').hidden).toBe(true);
+    const towed = { ...payload, tow_load: { active: true, target_name: 'console.tractor.idle' } };
+    cruiserRender(towed, document);
+    expect(el('tow-load-panel').hidden).toBe(false);
+    expect(el('tow-load-target').textContent).toBe('· ' + t('console.tractor.idle'));
+    // Released: the beam publishes an inactive load and the banner goes again.
+    cruiserRender({ ...payload, tow_load: { active: false } }, document);
+    expect(el('tow-load-panel').hidden).toBe(true);
   });
 });
 

@@ -6,7 +6,7 @@ const viewports = [
   ['phone-375x760', 375, 760],
   ['phone-390x792', 390, 792],
   ['landscape-716x375', 716, 375],
-  ['desktop-1280x900', 1280, 900],
+  ['desktop-1308x900', 1308, 900],
 ];
 const modes = {
   available: { system_id: 'cruiser-docking-clamps', available: true, engaged: false, docked: false, available_target_name: 'world.probe_dock.entity.berth.name' },
@@ -23,6 +23,7 @@ const base = {
   engine_port_thrust: 0.35, engine_stbd_thrust: 0.62, hostile_arcs: [],
   helm_auto: false, lateral_auto: false, impulse_charge_progress: 0,
   boost_enabled: true, boost_active: false, boost_battery: 0.82, own_hull: { pct: 0.94 },
+  tow_load: { active: true, target_name: 'ALDRIC' },
 };
 
 for (const [label, width, height] of viewports) {
@@ -35,7 +36,7 @@ for (const [label, width, height] of viewports) {
       await page.evaluate(() => document.fonts.ready);
     const measurement = await page.evaluate(() => {
       const b = (el) => { const r = el.getBoundingClientRect(); return { x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom }; };
-      const ids = ['dock-btn','dock-panel','helm-radar','helm-joystick','lateral-thrust-joystick','impulse-btn','boost-btn'];
+      const ids = ['dock-btn','dock-panel','tow-load-panel','helm-radar','helm-joystick','lateral-thrust-joystick','impulse-btn','boost-btn'];
       const boxes = Object.fromEntries(ids.map(id => [id, b(document.getElementById(id))]));
       const body = document.querySelector('.console-body');
       const scope = document.querySelector('.scope-cell');
@@ -45,10 +46,16 @@ for (const [label, width, height] of viewports) {
       const overlap = (a,c) => Math.min(a.right,c.right)-Math.max(a.x,c.x)>1 && Math.min(a.bottom,c.bottom)-Math.max(a.y,c.y)>1;
       const scopeBox=b(scope);
       const scopeIntruders=controls.filter(el => !scope.contains(el) && overlap(b(el),scopeBox)).map(el=>el.id);
-      return { innerWidth, innerHeight, boxes, body: b(body), bodyScrollHeight: body.scrollHeight, bodyClientHeight: body.clientHeight, bodyOverflowY:getComputedStyle(body).overflowY, children, outerClipping, scopeIntruders, labels:{dock:document.getElementById('dock-btn').textContent,status:document.getElementById('dock-status').textContent} };
+      const dockStatus = document.getElementById('dock-status');
+      const towTarget = document.getElementById('tow-load-target');
+      return { innerWidth, innerHeight, boxes, body: b(body), bodyScrollHeight: body.scrollHeight, bodyClientHeight: body.clientHeight, bodyOverflowY:getComputedStyle(body).overflowY, children, outerClipping, scopeIntruders, labels:{dock:document.getElementById('dock-btn').textContent,status:dockStatus.textContent,tow:towTarget.textContent}, textOverflow:{dock:dockStatus.scrollWidth > dockStatus.clientWidth + 1,tow:towTarget.scrollWidth > towTarget.clientWidth + 1} };
     });
       expect(measurement.outerClipping).toEqual([]);
       expect(measurement.scopeIntruders).toEqual([]);
+      expect(measurement.boxes['tow-load-panel'].height).toBeGreaterThan(0);
+      expect(measurement.labels.status.length).toBeGreaterThan(0);
+      expect(measurement.labels.tow).toContain('ALDRIC');
+      expect(measurement.textOverflow).toEqual({ dock: false, tow: false });
       expect(measurement.bodyScrollHeight).toBeLessThanOrEqual(measurement.bodyClientHeight + 1);
       expect(measurement.boxes['dock-btn'].height).toBeGreaterThanOrEqual(44);
       expect(measurement.boxes['dock-btn'].width).toBeGreaterThanOrEqual(44);

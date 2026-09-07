@@ -77,6 +77,22 @@ rather than the rendered label. Docking is FLOWN — the server closes the neare
 viable dock-marker pair — which is why the dock is Helm's and not Engineering's,
 even though the umbilical that runs across the finished dock is Engineering's.
 
+## Under tow load
+
+A ship that mounts a `kind = "tractor"` System also carries an under-tow-load
+banner on its Helm — the Alliance destroyer, and the Alliance cruiser since it
+gained a tractor; the battleship mounts none and shows nothing. The banner stays
+hidden until this ship's beam actually holds a target, and then names the held
+hull, so the seat can see both that it is under load and why.
+
+The beam itself is ENGINEERING's control on both hulls: an engineer grips a hull,
+a helm officer flies one. What reaches the Helm is the consequence — the tow's
+mass penalty on top speed and turn rate — which is why the banner is here and the
+Engage/Release button is not. Both consoles read the one authoritative `tractor`
+blackboard (`buildHelmTowLoadView` in `gui/console-state.js` on this side) rather
+than each deriving a hold of their own, so they cannot disagree about whether a
+tow is held.
+
 ## Radar and coordination
 
 `ph-helm-radar` renders the local Helm blackboard, including contacts, the

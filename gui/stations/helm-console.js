@@ -10,9 +10,10 @@
  * footer text is built (or whether it is touched at all — the destroyer's
  * stays a static "NO TARGET"), and a bespoke tail: the contextual Dock
  * control on the two hulls whose Helm owns a `dock` System (destroyer
- * #1164 S11a, cruiser #1388) plus the destroyer's own under-tow-load
- * banner. The Dock half of that tail is `renderDockPanel` below — shared,
- * not copied, so the two hulls cannot drift apart.
+ * #1164 S11a, cruiser #1388) plus the under-tow-load banner on the two
+ * hulls that mount a tractor (destroyer #1157, cruiser #1390). Both halves
+ * of that tail are `renderDockPanel` and `renderTowLoadPanel` below —
+ * shared, not copied, so the two hulls cannot drift apart.
  *
  * Helm is a FLAT single-family payload — every hull calls `initConsole`
  * as an authoritative flat Helm-family payload — so `renderStation` reads
@@ -42,8 +43,8 @@
  *   (paired with zeroFallback — the cruiser pattern)
  * @property {function(object, Document, function): void} [tail]
  *   Bespoke per-hull rendering the shared core does not cover (the contextual
- *   Dock control, the destroyer's under-tow-load banner), called with
- *   `(s, doc, t)` after the common panels are set.
+ *   Dock control, the under-tow-load banner), called with `(s, doc, t)` after
+ *   the common panels are set.
  */
 
 import { t } from '../strings.js';
@@ -162,6 +163,38 @@ export function renderDockPanel(s, doc, tr) {
     if (d.refusal) { dockRefusal.hidden = false; dockRefusal.textContent = tr(d.refusal); }
     else { dockRefusal.hidden = true; dockRefusal.textContent = ''; }
   }
+}
+
+/**
+ * The under-tow-load banner (issues #1157, #1390), shared by every hull that
+ * mounts a tractor — the destroyer since #1157 and the cruiser since #1390.
+ * Shared here for `renderDockPanel`'s reason: one banner reading one
+ * authoritative view.
+ *
+ * The tractor is ENGINEERING's control on both hulls, but the tow's mass
+ * penalty lands on the HELM, so this seat is where the load has to be said.
+ * `s.tow_load` is built by `buildHelmTowLoadView` in gui/console-state.js off
+ * the same `tractor` blackboard the Engineering panel reads; a hull with no
+ * tractor publishes none, so the view is null and the banner stays hidden.
+ *
+ * A hull opts in by calling this from its variant `tail`; its markup supplies
+ * `tow-load-panel` / `tow-load-target`.
+ *
+ * @param {object} s      the Helm console payload
+ * @param {Document} doc
+ * @param {function} tr   the string resolver (the shared `t`)
+ */
+export function renderTowLoadPanel(s, doc, tr) {
+  const towPanel = doc.getElementById('tow-load-panel');
+  if (!towPanel) return;
+  const tl = s.tow_load || null;
+  if (!tl || !tl.active) {
+    towPanel.hidden = true;
+    return;
+  }
+  towPanel.hidden = false;
+  const towTarget = doc.getElementById('tow-load-target');
+  if (towTarget) towTarget.textContent = tl.target_name ? '· ' + tr(tl.target_name) : '';
 }
 
 /**

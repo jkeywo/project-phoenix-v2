@@ -26,11 +26,13 @@ import {
   expectFixtureWorld,
 } from './fixtures';
 
-// A self-contained world served in place of default.toml: the shipped Alliance
-// Destroyer as the player ship (it carries the dock and the umbilical) and one
-// passive umbilical berth drawn up close alongside, inside the dock range. Three
-// overrides, all the world's own intent re-applied onto the picked hull
-// (server_app::player_hull_config), never a change to the shipped destroyer:
+// Two self-contained worlds served in place of default.toml, one per hull that
+// carries both a dock and an umbilical: the shipped Alliance Destroyer (since
+// #1159/#1160) and the Alliance Cruiser (since #1388/#1390). Each puts its hull
+// at the origin with one passive umbilical berth drawn up close alongside,
+// inside the dock range. Three overrides, all the world's own intent re-applied
+// onto the picked hull (server_app::player_hull_config), never a change to the
+// shipped entity:
 //   * a reserve_fuel ledger, the source the umbilical delivers from (the destroyer
 //     authors none of its own by design — a ledger would fold into every world);
 //   * a brisk dock approach speed and umbilical rate, so the mate forms and the
@@ -76,6 +78,36 @@ transform = { position = [70.0, 0.0, 0.0] }
 spawn_on = "game_start"
 `;
 
+// The cruiser's own case (issue #1390). Same berth, same overrides, same
+// distances — only the hull differs. This hull authors no `[infrastructure]`
+// ledger either, for the same reason the destroyer does not, so the world
+// supplies the reserve_fuel source the transfer draws from.
+const CRUISER_DOCK_WORLD = `
+[global]
+seed = 1390
+title = "Cruiser Operations Dock Fixture"
+
+[ambient_light]
+color      = [0.6, 0.55, 0.5]
+brightness = 300.0
+
+[[available_ships]]
+template_path = "assets/entities/alliance_cruiser.toml"
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+overrides = { dock = { approach_speed = 120.0 }, umbilical = { rate = 40.0 }, infrastructure = { condition_max = 100.0, decay_per_sec = 0.0, hull_damage_share = 0.0, capacity = [{ id = "reserve_fuel", amount = 100, ceiling = 100 }] } }
+
+[[entity]]
+template_path = "assets/entities/umbilical_berth.toml"
+name = "world.smoke_operations.entity.depot.name"
+transform = { position = [70.0, 0.0, 0.0] }
+spawn_on = "game_start"
+`;
+
 async function waitForStation(client, timeout = 5_000) {
   await client.page.waitForFunction(
     (t) =>
@@ -103,13 +135,13 @@ async function latestBlackboard(client, systemId) {
   }, systemId);
 }
 
-test('Helm dock -> Engineering umbilical -> capacity moves between two hulls', { tag: '@core' }, async ({
-  context,
-}) => {
-  test.setTimeout(90_000);
-
+// The whole chain, once, against one hull's world. Both cases below run it —
+// the destroyer's (#1167) and the cruiser's (#1390) — because the claim is that
+// the SAME two seats, the SAME two wire messages and the SAME blackboard gates
+// carry an authored dock+umbilical pair on any hull that mounts them.
+async function runTransferChain(context, world) {
   await context.route('**/assets/worlds/default.toml', (route) =>
-    route.fulfill({ contentType: 'text/plain', body: DOCK_WORLD }),
+    route.fulfill({ contentType: 'text/plain', body: world }),
   );
 
   const serverPage = await context.newPage();
@@ -136,7 +168,7 @@ test('Helm dock -> Engineering umbilical -> capacity moves between two hulls', {
   await engineer.waitForMessage('GameStarted', 10_000);
 
   const worldSetup = await helm.waitForMessage('WorldSetup', 5_000);
-  expectFixtureWorld(worldSetup, DOCK_WORLD);
+  expectFixtureWorld(worldSetup, world);
 
   await helm.page.bringToFront();
   await engineer.page.bringToFront();
@@ -242,4 +274,26 @@ test('Helm dock -> Engineering umbilical -> capacity moves between two hulls', {
 
   await helm.close();
   await engineer.close();
+}
+
+test('Helm dock -> Engineering umbilical -> capacity moves between two hulls', { tag: '@core' }, async ({
+  context,
+}) => {
+  test.setTimeout(90_000);
+  await runTransferChain(context, DOCK_WORLD);
+});
+
+// Issue #1390: the cruiser authors the same umbilical over the dock it gained in
+// #1388, so it completes the same transfer. Nothing below the TOML is
+// hull-aware, and this case is what says so.
+//
+// NOT `@core`: the breadth pass already runs this chain once, above, and this is
+// the per-hull variant of it — the same call #1388's own cruiser dock case made
+// in helm-dock.spec.js. It runs on the nightly, on workflow_dispatch, and on a
+// PR labelled `smoke-full`.
+test('cruiser: Helm dock -> Engineering umbilical -> capacity moves between two hulls', async ({
+  context,
+}) => {
+  test.setTimeout(90_000);
+  await runTransferChain(context, CRUISER_DOCK_WORLD);
 });

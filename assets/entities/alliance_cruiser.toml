@@ -348,26 +348,45 @@ damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
 
-# ── Dock-system damage entry (issue #1388) ───────────────────────────────────
-# The dock (authored as a system further down) carries a hull entry so a storm
-# can KNOCK IT OUT — a docking clamp is gear on the outside of the hull, and a
-# radiation band's `damage_zone` picks it the same way it picks any other system
-# (issue #1052's ordered `RegionDamage` draw over `EntitySystemHull`). Damaged to
-# `Disabled` the dock refuses (`dock.refused.disabled`) and a held mate parts, so
-# danger reaches the crew's external work exactly as it reaches a gun or an
-# engine.
+# ── Operational-system damage entries (issues #1388, #1390) ──────────────────
+# The dock, the tractor and the umbilical (all authored as systems further down)
+# each carry a hull entry so a storm can KNOCK THEM OUT — coupling gear is gear
+# on the OUTSIDE of the hull, and a radiation band's `damage_zone` picks it the
+# same way it picks any other system (issue #1052's ordered `RegionDamage` draw
+# over `EntitySystemHull`). Damaged to `Disabled` the dock refuses
+# (`dock.refused.disabled`) and a held mate parts, the tractor drops its hold and
+# the umbilical's flow stops — so danger reaches the crew's external work exactly
+# as it reaches a gun or an engine.
 #
-# 30 HP and the 0.5/0.15/0.15 shape MIRROR the destroyer's own dock row
-# (`alliance_destroyer.toml`) and the NPC hulls carrying the identical system
-# (`alliance_tender.toml`) — the player/NPC symmetry PRD #1143 is built on.
+# 30 HP and the 0.5/0.15/0.15 shape MIRROR the destroyer's own dock, tractor and
+# umbilical rows (`alliance_destroyer.toml`) and the NPC hulls carrying the same
+# gear a row at a time — `alliance_tender.toml`'s dock and umbilical,
+# `ship_harrow_tug.toml`'s tractor. That sameness IS the player/NPC symmetry PRD
+# #1143 is built on: a storm costs a crewed hull's tractor exactly what it costs
+# a tug's.
 #
-# THIS IS THIS HULL'S FIRST OPERATIONAL (non-combat) SYSTEM ROW. Every entry
-# above is part of the 500-point combat durability ladder the #915 tuning pass
-# pegged; the dock sits OUTSIDE it, so the hull's combat pool is unchanged in
-# intent even though the raw `is_destroyed` sum now includes these 30 points.
-# `npm run balance:cruiser` is the standing check on that claim.
+# THESE ARE THIS HULL'S OPERATIONAL (non-combat) SYSTEM ROWS. Every entry above
+# is part of the 500-point combat durability ladder the #915 tuning pass pegged;
+# these three sit OUTSIDE it, so the hull's combat pool is unchanged in intent
+# even though the raw `is_destroyed` sum now includes their 90 points. The
+# standing `npm run balance:cruiser` gate checks this against the thresholds in
+# `scripts/balance-runs.cruiser.toml`.
 [[hull.system_hull]]
 system_id = "dock"
+max_hp = 30
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
+debuff_magnitude = 0.15
+
+[[hull.system_hull]]
+system_id = "tractor"
+max_hp = 30
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
+debuff_magnitude = 0.15
+
+[[hull.system_hull]]
+system_id = "umbilical"
 max_hp = 30
 damaged_threshold_pct = 0.5
 disabled_threshold_pct = 0.15
@@ -1671,6 +1690,42 @@ kind = "dock"
 station = "helm"
 power_group = "helm"
 
+# ── Tractor and Umbilical (issue #1390) ──────────────────────────────────────
+# The other half of this hull's external work, and the half the dock exists to
+# serve: a beam that takes a craft under tow, and a transfer line that moves a
+# capacity across a mate the Helm has made.
+#
+# ENGINEERING-owned, not Helm-owned, and that split is deliberate rather than
+# incidental: the dock is FLOWN (the server flies the mate manoeuvre, so the seat
+# that flies the ship presses Dock), while the coupling and the flow are RUN — an
+# engineer grips a hull and watches a ledger drain, which is the destroyer's own
+# arrangement since #1156/#1160 and the one PRD #1143's player/NPC symmetry is
+# built on. The `kind` is what maps each onto the Engineering Console Family
+# (`ship::system_registry`) and what makes `TractorBeam`/`UmbilicalLine` appear at
+# spawn; the terms they run under are the `[tractor]` and `[umbilical]` tables at
+# the foot of this file.
+#
+# On the `helm` power group at each table's `min_power_level = 2`, exactly as the
+# destroyer's pair is, and for the reason spelled out there: a power group draws
+# by its LEVEL, not per system, so hanging these off `helm` adds NO new resting
+# draw and leaves the reactor budget untouched — a fresh `ops` group would rest a
+# fourth group above the sustainable total and drain a combat hull at station. It
+# also keeps one lever over all three coupling systems: a Power officer who robs
+# Helm below level 2 takes the tow and the transfer down with the drive and the
+# clamps together. Neither is listed in any rating's `automated_systems` — an
+# unmanned Engineering runs power and repair, it does not tow on its own.
+[[system]]
+id = "tractor"
+kind = "tractor"
+station = "engineering"
+power_group = "helm"
+
+[[system]]
+id = "umbilical"
+kind = "umbilical"
+station = "engineering"
+power_group = "helm"
+
 [[system]]
 id = "comms"
 kind = "comms"
@@ -2179,4 +2234,57 @@ engage_distance = 400.0
 approach_speed = 60.0
 mate_tolerance = 4.0
 undock_clear_distance = 120.0
+min_power_level = 2
+
+# ── Tractor terms (issue #1390) ──────────────────────────────────────────────
+#
+# The coupling terms the `[[system]] kind = "tractor"` above runs under: how far
+# the beam reaches, where the held load rides relative to the operator, and the
+# lowest powered rung. Like `[dock]`, the table's PRESENCE is the opt-in — a hull
+# that authors no `[tractor]` spawns no `TractorBeam` and its consoles are
+# unchanged.
+#
+# `range = 500` and `coupling_offset = [0, 0, -90]` are the destroyer's values
+# verbatim, and deliberately so rather than scaled to this bigger hull, for the
+# reason `[dock]` above gives: a shared reach is what lets one authored hulk be
+# towable by either hull without per-hull tuning. The offset is not a hull
+# dimension either way — 90 units astern is dozens of hull radii on both hulls
+# (this rig's `[collider] radius = 1.5`), far enough that nothing about the
+# cruiser's extra beam brings the load inside it. The load rides astern in the
+# operator's OWN frame, so turning the ship swings the tow round rather than
+# dragging it sideways (`tractor::coupling::coupled_position`). [ai] Unratified.
+[tractor]
+range = 500.0
+coupling_offset = [ 0.0, 0.0, -90.0 ]
+min_power_level = 2
+
+# The fleet tow-load curve the tug, the tractor probe and the destroyer all
+# author: a laden hulk costs the helm half the penalty at #1154's default entity
+# mass and approaches — but never reaches — a 0.8 ceiling. Shared for the same
+# reason the reach is: the cost of towing a given hulk should be a fact about the
+# hulk, not about which Alliance hull picked it up. [ai] Unratified.
+[tractor.tow_load]
+half_penalty_mass = 10000.0
+max_penalty = 0.8
+
+# ── Umbilical terms (issue #1390) ────────────────────────────────────────────
+#
+# What the transfer moves, how fast, which way, and the lowest powered rung. The
+# capacity id both docked ends must carry is `reserve_fuel`, the shipped resupply
+# ledger (`alliance_tender.toml`, `umbilical_probe`, `alliance_destroyer.toml`);
+# `direction = "deliver"` sends the operator's capacity to the docked partner,
+# which is a crew pumping load INTO a depot's demand rows. `rate = 20` is the
+# shipped flow rate. [ai] Unratified.
+#
+# This hull authors NO `[infrastructure]` ledger of its own — deliberately, and
+# for the destroyer's reason: a condition/capacity track on the crew's own hull
+# would fold into every world it flies. Until a scenario gives the transfer an
+# end to draw from, the flow refuses `NoCapacity`, which is inert in combat_test
+# and patrol where the cruiser never docks. A world that wants the crew to pump
+# says so itself, by overriding `[infrastructure]` onto the picked hull the way
+# `tests/smoke/operations-dock-umbilical.spec.js` does.
+[umbilical]
+capacity = "reserve_fuel"
+rate = 20.0
+direction = "deliver"
 min_power_level = 2

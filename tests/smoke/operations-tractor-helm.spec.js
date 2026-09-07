@@ -31,13 +31,19 @@ import {
   expectFixtureWorld,
 } from './fixtures';
 
-// A self-contained world served in place of default.toml: the shipped Alliance
-// Destroyer as the player ship (the one hull that carries a tractor) and one
-// heavy derelict inside its tractor reach. The destroyer's tactical radar is
-// widened here so a human Tactical can lock the non-hostile derelict at a working
-// tractor distance (the shipped 50-unit horizon is a close-combat range); the
-// override is the world's, re-applied onto the picked hull, never a change to the
-// shipped destroyer (server_app::player_hull_config).
+// Two self-contained worlds served in place of default.toml, one per hull that
+// mounts a tractor. Each puts the hull at the origin with one heavy derelict
+// inside its tractor reach, and widens that hull's tactical radar so a human
+// Tactical can lock the non-hostile derelict at a working tractor distance (the
+// shipped 50-unit horizon is a close-combat range, on both hulls). The override
+// is the world's, re-applied onto the picked hull, never a change to the shipped
+// entity (server_app::player_hull_config).
+//
+// The destroyer has carried the tractor since #1156; the cruiser mounts the same
+// system on the same terms since #1390, so the two cases below are the SAME
+// chain run twice — which is the point. If the cruiser's authored tractor were
+// wrong in any way the shared path cares about (station, power group, table,
+// reach), the second case fails where the first passes.
 const TRACTOR_WORLD = `
 [global]
 seed = 1167
@@ -65,6 +71,36 @@ overrides = { weapons_console = { radar = { range = 700.0 } } }
 
 # The derelict — a heavy neutral hauler 120 units to starboard, well inside the
 # destroyer's 500-unit tractor reach. Its heavy mass makes the tow real work.
+[[entity]]
+template_path = "assets/entities/ship_civilian_hauler.toml"
+name = "world.smoke_operations.entity.derelict.name"
+transform = { position = [120.0, 0.0, 0.0] }
+overrides = { mass = 240000.0 }
+`;
+
+// The cruiser's own case (issue #1390). Same shape, same derelict, same radar
+// widening — only the hull differs. This hull's `[[system]] kind = "tractor"` is
+// Engineering-owned on the `helm` power group exactly as the destroyer's is, so
+// the seats and the wire messages below are identical too.
+const CRUISER_TRACTOR_WORLD = `
+[global]
+seed = 1390
+title = "Cruiser Operations Tractor Fixture"
+
+[ambient_light]
+color      = [0.6, 0.55, 0.5]
+brightness = 300.0
+
+[[available_ships]]
+template_path = "assets/entities/alliance_cruiser.toml"
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+overrides = { weapons_console = { radar = { range = 700.0 } } }
+
 [[entity]]
 template_path = "assets/entities/ship_civilian_hauler.toml"
 name = "world.smoke_operations.entity.derelict.name"
@@ -100,13 +136,13 @@ async function latestBlackboard(client, systemId) {
   }, systemId);
 }
 
-test('Tactical lock -> Engineering tractor -> Helm feels the weight', async ({
-  context,
-}) => {
-  test.setTimeout(60_000);
-
+// The whole chain, once, against one hull's world. Both cases below run it —
+// the destroyer's (#1167) and the cruiser's (#1390) — because the claim is that
+// the SAME three seats, the SAME three wire messages and the SAME blackboard
+// gate carry an authored tractor on any hull that mounts one.
+async function runTractorChain(context, world) {
   await context.route('**/assets/worlds/default.toml', (route) =>
-    route.fulfill({ contentType: 'text/plain', body: TRACTOR_WORLD }),
+    route.fulfill({ contentType: 'text/plain', body: world }),
   );
 
   const serverPage = await context.newPage();
@@ -139,7 +175,7 @@ test('Tactical lock -> Engineering tractor -> Helm feels the weight', async ({
 
   // The derelict's uuid, from the WorldSetup the host sends every client.
   const worldSetup = await tactical.waitForMessage('WorldSetup', 5_000);
-  expectFixtureWorld(worldSetup, TRACTOR_WORLD);
+  expectFixtureWorld(worldSetup, world);
   const entities = worldSetup?.data?.world?.entities ?? [];
   const derelict = entities.find(
     (e) => Array.isArray(e.tags) && e.tags.includes('civilian'),
@@ -218,4 +254,20 @@ test('Tactical lock -> Engineering tractor -> Helm feels the weight', async ({
   await tactical.close();
   await engineer.close();
   await helm.close();
+}
+
+test('Tactical lock -> Engineering tractor -> Helm feels the weight', async ({
+  context,
+}) => {
+  test.setTimeout(60_000);
+  await runTractorChain(context, TRACTOR_WORLD);
+});
+
+// Issue #1390: the cruiser authors the same tractor, so it completes the same
+// chain. Nothing below the TOML is hull-aware, and this case is what says so.
+test('cruiser: Tactical lock -> Engineering tractor -> Helm feels the weight', async ({
+  context,
+}) => {
+  test.setTimeout(60_000);
+  await runTractorChain(context, CRUISER_TRACTOR_WORLD);
 });

@@ -191,11 +191,11 @@ test('two ship hosts assemble a fleet, and each crew star stays on its own host'
     name: 'Crewman',
   });
 
-  const tokensOn = (page) =>
+  const connectionCountOn = (page) =>
     page.evaluate(() => {
       try {
         // eslint-disable-next-line no-eval
-        return [...(0, eval)('tokenConns').keys()];
+        return (0, eval)('hostConnections').targets('all', 'reliable').length;
       } catch { return null; }
     });
 
@@ -203,7 +203,7 @@ test('two ship hosts assemble a fleet, and each crew star stays on its own host'
     (t) => {
       try {
         // eslint-disable-next-line no-eval
-        return (0, eval)('tokenConns').has(t);
+        return (0, eval)('hostConnections').targets(`token:${t}`, 'reliable').length === 1;
       } catch { return false; }
     },
     phone.token,
@@ -213,7 +213,7 @@ test('two ship hosts assemble a fleet, and each crew star stays on its own host'
   // The second host is in the same fleet and knows nothing about that phone:
   // the fleet link is a different socket in a different namespace carrying a
   // different protocol, so there is no filtering for this to depend on.
-  expect(await tokensOn(second)).toEqual([]);
+  expect(await connectionCountOn(second)).toBe(0);
   await phone.close();
 });
 

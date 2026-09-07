@@ -183,7 +183,7 @@ test('the WebSocket relay carries a whole session when WebRTC is off the table',
   expect(await peerConfigsOn(client)).toEqual([]);
 
   // The host admitted this phone as an ORDINARY player — same Identify gate,
-  // same token map — which is what "the fallback does not fork the game
+  // same current connection owner — which is what "the fallback does not fork the game
   // protocol" has to mean to be worth anything.
   const token = await client.evaluate(() => sessionStorage.getItem('session-token'));
   expect(token).toBeTruthy();
@@ -191,7 +191,7 @@ test('the WebSocket relay carries a whole session when WebRTC is off the table',
     (t) => {
       try {
         // eslint-disable-next-line no-eval
-        return (0, eval)('tokenConns').has(t);
+        return (0, eval)('hostConnections').targets(`token:${t}`, 'reliable').length === 1;
       } catch { return false; }
     },
     token,
@@ -209,15 +209,15 @@ test('the WebSocket relay carries a whole session when WebRTC is off the table',
 
 test('a snapshot channel that opened before Identify is promoted when the token lands', async ({ context }) => {
   // The lossy channel can finish negotiating on EITHER side of the Identify
-  // that names this connection's token, and the host's per-token routing map
+  // that names this connection's token, and the host's per-token routing selection
   // has to end up holding it whichever way round it happened. In the ordinary
   // WebRTC join it is always the early one: both channels come off one
   // negotiation and the compatibility handshake has to complete before the
   // phone may send Identify at all. So this is the ordering that runs on every
   // real join, and nothing covered it after the peerjs shim was retired — the
-  // behaviour lives in server.html's attachHostConn/bindSnapshot pair, both
-  // halves guarded on connection identity so a torn-down stale connection
-  // cannot delete the live one's entry.
+  // behaviour lives in gui/host-peer-routing.js's current-owner selection,
+  // where the snapshot channel belongs to its physical incarnation and an
+  // old connection cannot replace the current owner's route.
   const host = await bootHost(context);
   const client = await joinWith(context, await joinCodeOn(host));
   await waitForConnected(client);
@@ -231,7 +231,7 @@ test('a snapshot channel that opened before Identify is promoted when the token 
     .toMatchObject({ readyState: 'open' });
 
   // …and the token, once it arrived, adopted it. Without the promotion the
-  // entry is simply absent and every snapshot for this player silently falls
+  // snapshot route is absent and every snapshot for this player silently falls
   // back to the reliable channel for the rest of the mission — a regression
   // with no error, no log line and no visible symptom short of head-of-line
   // stalls on a bad radio.
@@ -239,7 +239,8 @@ test('a snapshot channel that opened before Identify is promoted when the token 
     (t) => {
       try {
         // eslint-disable-next-line no-eval
-        const chan = (0, eval)('tokenSnapshotConns').get(t);
+        const routes = (0, eval)('hostConnections').targets(`token:${t}`, 'snapshot');
+        const chan = routes.length === 1 ? routes[0] : null;
         return chan ? { label: chan.label, readyState: chan.readyState } : false;
       } catch { return false; }
     },

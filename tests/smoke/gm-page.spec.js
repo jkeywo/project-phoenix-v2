@@ -773,7 +773,7 @@ test('a GM reaches and operates a spatial Helm Station at 1280x720, then release
   await helm.close();
   await ship.waitForFunction(
     // eslint-disable-next-line no-eval
-    token => !(0, eval)('tokenConns').has(token),
+    token => (0, eval)('hostConnections').targets(`token:${token}`, 'reliable').length === 0,
     helmToken,
     { timeout: 15_000 },
   );
@@ -1134,7 +1134,7 @@ test('a GM reaches and operates a spatial Helm Station at 1280x720, then release
   await helmDuringTakeover.close();
   await ship.waitForFunction(
     // eslint-disable-next-line no-eval
-    token => !(0, eval)('tokenConns').has(token),
+    token => (0, eval)('hostConnections').targets(`token:${token}`, 'reliable').length === 0,
     helmToken,
     { timeout: 15_000 },
   );

@@ -36,22 +36,27 @@ test('four phones join one host on one code and hold four different seats', { ta
     }));
   }
 
-  // The host's own per-token bookkeeping: four reliable connections and four
-  // lossy ones, keyed by four distinct session tokens. This is what
-  // routeOutbound routes on, so a collision here would silently deliver one
-  // phone's targeted messages to another.
+  // Ask the same Rust-owner-backed routing API that routeOutbound uses.
+  // Each token selects its own physical connection and a distinct, open
+  // snapshot channel; a reliable fallback cannot satisfy the lossy count.
   const hostState = await serverPage.evaluate((tokens) => {
     // eslint-disable-next-line no-eval
-    const conns = (0, eval)('tokenConns');
-    // eslint-disable-next-line no-eval
-    const snaps = (0, eval)('tokenSnapshotConns');
+    const host = (0, eval)('hostConnections');
+    const reliable = tokens.flatMap((t) => host.targets(`token:${t}`, 'reliable'));
+    const lossy = tokens.flatMap((t) => {
+      const commands = host.targets(`token:${t}`, 'reliable');
+      return host.targets(`token:${t}`, 'snapshot').filter((channel) =>
+        channel !== commands[0] && channel.label === 'snapshot' && channel.readyState === 'open');
+    });
     return {
-      reliable: tokens.filter((t) => conns.has(t)).length,
-      lossy: tokens.filter((t) => snaps.has(t)).length,
-      total: conns.size,
+      reliable: reliable.length,
+      lossy: lossy.length,
+      distinctReliable: new Set(reliable).size,
+      distinctLossy: new Set(lossy).size,
+      total: host.targets('all', 'reliable').length,
     };
   }, clients.map((c) => c.token));
-  expect(hostState).toEqual({ reliable: 4, lossy: 4, total: 4 });
+  expect(hostState).toEqual({ reliable: 4, lossy: 4, distinctReliable: 4, distinctLossy: 4, total: 4 });
 
   // Every phone sees the whole crew — the lobby roster crossed four separate
   // connections, not one broadcast that happened to reach the first.
@@ -107,11 +112,11 @@ test('four phones join one host on one code and hold four different seats', { ta
   await clients[3].close();
   await serverPage.waitForFunction(
     // eslint-disable-next-line no-eval
-    (token) => !(0, eval)('tokenConns').has(token),
+    (token) => (0, eval)('hostConnections').targets(`token:${token}`, 'reliable').length === 0,
     clients[3].token,
     { timeout: 10_000 },
   );
-  expect(await serverPage.evaluate(() => (0, eval)('tokenConns').size)).toBe(3);
+  expect(await serverPage.evaluate(() => (0, eval)('hostConnections').targets('all', 'reliable').length)).toBe(3);
 
   for (const client of clients.slice(0, 3)) await client.close();
 });

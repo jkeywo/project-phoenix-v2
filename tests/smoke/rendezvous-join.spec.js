@@ -81,7 +81,7 @@ test('typing the code reaches Welcome over a direct channel', { tag: '@core' }, 
     (t) => {
       try {
         // eslint-disable-next-line no-eval
-        return (0, eval)('tokenConns').has(t);
+        return (0, eval)('hostConnections').targets(`token:${t}`, 'reliable').length === 1;
       } catch { return false; }
     },
     token,

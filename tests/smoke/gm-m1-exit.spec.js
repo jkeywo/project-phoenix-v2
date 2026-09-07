@@ -1107,7 +1107,7 @@ test('M1 exits through a retained deterministic GM peer trace', async ({ context
     helm = null;
     await ship.waitForFunction(
       // eslint-disable-next-line no-eval
-      (token) => !(0, eval)('tokenConns').has(token),
+      (token) => (0, eval)('hostConnections').targets(`token:${token}`, 'reliable').length === 0,
       helmToken,
       { timeout: 15_000 },
     );

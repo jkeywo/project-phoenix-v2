@@ -310,12 +310,12 @@ test('shared session-token orphans the first Engineering device (ghost console)'
   await waitForLastMessage(ghostWinner, 'PowerState', `data && data.helm === ${boot}`);
 
   // Small settling window to drain any in-flight SimState (the server tick
-  // that might have fired between tokenConns overwrite and this check).
+  // that might have fired between connection-owner replacement and this check).
   await c3.page.waitForTimeout(500);
 
   // Check that c3 did NOT receive the ghostWinner's change back to `boot`.
   // We check for the specific value rather than any PowerState to avoid
-  // flakiness from a PowerState that fired just before tokenConns was
+  // flakiness from a PowerState that fired just before the connection owner was
   // updated (in-flight via BroadcastChannel past preCount).
   const sawGhostChange = await c3.page.evaluate(
     ({ count, level }) => {

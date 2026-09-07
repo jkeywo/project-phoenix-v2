@@ -183,7 +183,7 @@ fn real_native_pack_installation_publishes_updates_locks_and_reconnect_metadata(
         ("valid-v1.zip", vec!["aurora-skirmish"]),
         ("script-valid.zip", vec!["aurora-skirmish", "script-valid"]),
     ] {
-        surface.queue_record(&format!(r#"{{"kind":"install_mod_pack","pack":"{file}"}}"#));
+        surface.queue_record(format!(r#"{{"kind":"install_mod_pack","pack":"{file}"}}"#));
         pump_host_lobby(&lobby.bridge, &mut surface);
         pump(&mut app, 8);
         assert!(app.world().resource::<ModPackShelfResource>().accepted);

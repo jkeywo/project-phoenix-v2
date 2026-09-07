@@ -4383,7 +4383,7 @@ fn a_layer_script_compiles_and_its_trigger_fires_after_load() {
         "each merged state is tagged with the layer that brought it"
     );
     assert_eq!(
-        registered_handler_count(&runtime),
+        registered_handler_count(runtime),
         runtime.triggers.len(),
         "every scripted entry retains its handler"
     );
@@ -5386,7 +5386,7 @@ fn unloading_a_layer_keeps_handlers_aligned_for_the_layers_that_remain() {
         let runtime = app.world().resource::<WorldContentRuntime>();
         assert_eq!(runtime.triggers.len(), 3, "only B's triggers remain");
         assert_eq!(
-            registered_handler_count(&runtime),
+            registered_handler_count(runtime),
             runtime.triggers.len(),
             "handlers must shrink WITH triggers, not stay behind"
         );

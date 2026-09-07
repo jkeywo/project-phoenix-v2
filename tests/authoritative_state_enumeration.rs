@@ -358,7 +358,6 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     "project_phoenix::ship::shields::ShieldsFocusAiPolicy",
     "project_phoenix::ship::shields::ShipShields",
     "project_phoenix::ship::state::ShipViewMode",
-    "project_phoenix::world::server::ObjectiveManagerRes",
     "project_phoenix::world::server::PendingScenarioLoad",
     "project_phoenix::world::server::WorldContentRuntime",
     // The Rhai scripting seam (issue #984, Rhai M6 phase 2a/2b). Both are

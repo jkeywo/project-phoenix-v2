@@ -178,6 +178,12 @@ pub struct GmMissionEvent {
 pub struct GmMissionProjection {
     pub events: Vec<GmMissionEvent>,
     pub results: Vec<crate::gm_action::LoggedGmAction>,
+    #[serde(default)]
+    pub objective_palette: Vec<crate::gm_objective::ObjectiveRow>,
+    #[serde(default)]
+    pub objectives: Vec<crate::gm_objective::ObjectiveRow>,
+    #[serde(default)]
+    pub objective_results: Vec<crate::gm_action::LoggedGmAction>,
 }
 
 /// The complete controllable-event registry for one live world, in
@@ -303,6 +309,9 @@ pub fn projection(
 ) -> GmMissionProjection {
     GmMissionProjection {
         events: controllable_events(states, pending_fires, paused_events, pending_skips),
+        objective_palette: Vec::new(),
+        objectives: Vec::new(),
+        objective_results: Vec::new(),
         results: crate::gm_action::projected_results(
             crate::gm_action::GmActionKind::EventControl,
             log,
@@ -318,6 +327,8 @@ pub fn projection(
 /// paused session still has to report the result of a Fire that was refused at
 /// admission.
 pub fn publish_mission_projection(
+    objectives: Option<Res<crate::world::server::ObjectiveManagerRes>>,
+    ships: Query<&crate::entities::spawner::EntityUuid, With<crate::lockstep::FleetSlotOf>>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     log: Res<crate::gm_action::GmActionLog>,
     refusals: Res<crate::gm_action::LocalGmActionRefusals>,
@@ -335,7 +346,18 @@ pub fn publish_mission_projection(
         ),
         None => (empty_states.as_slice(), &empty_ids, &empty_ids, &empty_ids),
     };
-    let next = projection(states, fires, paused, skips, &log, &refusals);
+    let mut next = projection(states, fires, paused, skips, &log, &refusals);
+    let live: Vec<String> = ships.iter().map(|uuid| uuid.0.clone()).collect();
+    (next.objective_palette, next.objectives) = crate::gm_objective::rows(
+        runtime.as_deref(),
+        objectives.as_deref().map(|o| &o.0),
+        &live,
+    );
+    next.objective_results = crate::gm_action::projected_results(
+        crate::gm_action::GmActionKind::ObjectiveControl,
+        &log,
+        &refusals,
+    );
     if last.0.as_ref() == Some(&next) {
         return;
     }

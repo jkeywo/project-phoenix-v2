@@ -154,6 +154,11 @@ pub enum GmActivityAction {
     /// `palette` is the `[[gm_palette]]` id — never a template path, which the
     /// browser is never handed. The crew see only the hull that arrived; the GM
     /// feed names the operator who placed it.
+    ObjectiveAction {
+        objective: String,
+        verb: crate::gm_objective::ObjectiveVerb,
+        recipients: Vec<String>,
+    },
     DespawnEntity {
         target: String,
     },
@@ -217,7 +222,8 @@ pub enum GmActivityDetail {
 }
 
 /// One common tick-stamped row. `ships` is semantic scope from actual `Ship`
-/// components; an empty vector is global and therefore matches only All ships.
+/// components or canonical Objective recipient UUIDs. An empty vector is global
+/// and therefore matches only All ships; missing display names retain the UUID.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct GmActivityEntry {
     pub tick: u64,
@@ -423,6 +429,9 @@ fn action_key(action: &GmActivityAction) -> (u8, bool, &str) {
         // never collapse onto each other.
         GmActivityAction::ApplyDirectEffect { entity, heal, .. } => (3, *heal, entity.as_str()),
         GmActivityAction::DespawnEntity { target } => (7, false, target.as_str()),
+        GmActivityAction::ObjectiveAction {
+            objective, verb, ..
+        } => (8 + *verb as u8, false, objective.as_str()),
         GmActivityAction::SpawnPaletteEntity { palette } => (4, false, palette.as_str()),
         GmActivityAction::SetEventPaused { event, active } => (5, *active, event.as_str()),
         // Its own rank rather than the Fire's, so two rows about one event at
@@ -1136,6 +1145,9 @@ fn refusal_reason(reason: crate::gm_action::GmActionRefusalReason) -> &'static s
         Reason::UnknownGmEvent => "unknown-gm-event",
         Reason::UnknownEntity => "unknown-entity",
         Reason::ProtectedEntity => "protected-entity",
+        Reason::UnknownObjective => "unknown-objective",
+        Reason::ObjectiveNotActive => "objective-not-active",
+        Reason::ObjectiveScopeMismatch => "objective-scope-mismatch",
         Reason::TargetNotDamageable => "target-not-damageable",
         Reason::UnknownGmPaletteEntry => "unknown-gm-palette-entry",
         Reason::WorldUnavailable => "world-unavailable",
@@ -1220,11 +1232,28 @@ fn terminal_action_entries(
     let mut entries: Vec<GmActivityEntry> = durable
         .into_iter()
         .filter_map(|fact| {
+            let ships = if fact.action_kind == crate::gm_action::GmActionKind::ObjectiveControl {
+                fact.objective_recipients
+                    .as_ref()?
+                    .iter()
+                    .map(|id| reference(id, &state.identities))
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+            let links = ships
+                .iter()
+                .cloned()
+                .map(|entity| GmActivityLink {
+                    role: GmActivityLinkRole::Ship,
+                    entity,
+                })
+                .collect();
             Some(GmActivityEntry {
                 tick: fact.tick,
                 category: GmActivityCategory::GmAction,
-                ships: Vec::new(),
-                links: Vec::new(),
+                ships,
+                links,
                 detail: GmActivityDetail::GmAction(GmActivityGmAction {
                     operator: gm_operator(&fact.operator_id, roster),
                     correlation: fact.correlation.as_str().to_owned(),
@@ -1294,6 +1323,13 @@ fn terminal_action_entries(
                         // `validate_fleet_frame` refuses a replicated refusal
                         // without one, so `None` drops this row rather than
                         // publishing a placement of the empty id.
+                        (crate::gm_action::GmActionKind::ObjectiveControl, _) => {
+                            GmActivityAction::ObjectiveAction {
+                                objective: fact.target.clone()?,
+                                verb: fact.objective_verb?,
+                                recipients: fact.objective_recipients.clone()?,
+                            }
+                        }
                         (crate::gm_action::GmActionKind::WorldDespawn, _) => {
                             GmActivityAction::DespawnEntity {
                                 target: fact.target.clone()?,

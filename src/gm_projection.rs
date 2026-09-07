@@ -729,10 +729,6 @@ fn publish_station_projection(
         .as_ref()
         .map(|world| world.0.entities.clone())
         .unwrap_or_default();
-    let objectives = objectives
-        .as_ref()
-        .map(|objectives| objectives.0.sorted_snapshots())
-        .unwrap_or_default();
 
     let mut projected_ships = ships
         .iter()
@@ -834,6 +830,10 @@ fn publish_station_projection(
                     }
                 });
 
+                let scoped_objectives = objectives
+                    .as_ref()
+                    .map(|manager| manager.0.snapshots_for(&uuid.0))
+                    .unwrap_or_default();
                 GmPuppetShipProjection {
                     ship_id: uuid.0.clone(),
                     name: name.map_or_else(|| uuid.0.clone(), |name| name.0.clone()),
@@ -842,9 +842,12 @@ fn publish_station_projection(
                     station_ratings,
                     control_sources,
                     blackboards,
-                    entities: entities.clone(),
+                    entities: crate::objectives::project_entity_targets(
+                        &entities,
+                        &scoped_objectives,
+                    ),
                     entity_states: entity_states.clone(),
-                    objectives: objectives.clone(),
+                    objectives: scoped_objectives,
                     ship_pose,
                     navigation_waypoint: waypoint.and_then(|waypoint| waypoint.snapshot()),
                     console_hull,
@@ -1526,5 +1529,122 @@ station = "helm"
             .expect("absolute live entity state");
         assert_eq!(live_contact.position, Some([40.0, 3.0, -25.0]));
         assert_eq!(ship.console_hull[0].current, 80.0);
+    }
+
+    #[test]
+    fn crew_objective_markers_are_scoped_after_real_entity_lifecycle_publication() {
+        use crate::server_app::{
+            LastBroadcastEntityHealth, LastBroadcastEntityPositions, SimOutbox, TrackedEntities,
+        };
+        use bevy::ecs::system::RunSystemOnce;
+        let config = crate::ship::config::ShipConfig::from_toml(
+            r#"
+[[station]]
+id = "navigation"
+name = "Navigation"
+description = ""
+rank = ""
+console = "gui/navigation-console.html"
+[[system]]
+id = "nav-main"
+kind = "navigation"
+station = "navigation"
+"#,
+            &["navigation"],
+        )
+        .unwrap();
+        let mut app = App::new();
+        app.insert_resource(BrowserGameMaster)
+            .init_resource::<crate::lobby::WorldResource>()
+            .init_resource::<TrackedEntities>()
+            .init_resource::<LastBroadcastEntityHealth>()
+            .init_resource::<LastBroadcastEntityPositions>()
+            .init_resource::<SimOutbox>()
+            .init_resource::<crate::world::server::ObjectiveManagerRes>()
+            .add_plugins(GmProjectionPlugin);
+        for (slot, id) in [(1, "ship-a"), (2, "ship-b")] {
+            app.world_mut().spawn((
+                crate::server_app::Ship,
+                EntityUuid(id.into()),
+                FleetSlotOf(crate::command_admission::HostSlot(slot)),
+                ShipConfigComponent(config.clone()),
+                ActiveStationRatings::default(),
+                ShipSystemControlSources::default(),
+                crate::server_app::ShipSystemBlackboards::default(),
+            ));
+        }
+        {
+            let manager = &mut app
+                .world_mut()
+                .resource_mut::<crate::world::server::ObjectiveManagerRes>()
+                .0;
+            manager.add(
+                "private",
+                "objective.test",
+                true,
+                vec!["seeded".into(), "spawned".into()],
+            );
+            manager.set_recipients("private", vec!["ship-a".into()]);
+        }
+        for id in ["seeded", "spawned"] {
+            app.world_mut().spawn((
+                EntityUuid(format!("uuid-{id}")),
+                EntityId(id.into()),
+                EntityTagsSection(vec!["objective_marker".into()]),
+                Transform::from_xyz(20.0, 0.0, 10.0),
+                RadarAppearanceSection(RadarAppearanceConfig {
+                    icon: Some("waypoint".into()),
+                    colour: None,
+                    size: None,
+                    region_colour: Some(vec![0.1, 0.2, 0.3]),
+                }),
+            ));
+            app.world_mut()
+                .run_system_once(crate::server_app::reconcile_runtime_entities)
+                .unwrap();
+            let metadata = app
+                .world()
+                .resource::<crate::lobby::WorldResource>()
+                .0
+                .clone();
+            assert!(metadata
+                .entities
+                .iter()
+                .all(|entity| entity.objective_target));
+            app.world_mut().run_schedule(FixedLast);
+            let payload = take_stations(&mut app).pop().unwrap();
+            let recipient = payload
+                .ships
+                .iter()
+                .find(|ship| ship.ship_id == "ship-a")
+                .unwrap();
+            let other = payload
+                .ships
+                .iter()
+                .find(|ship| ship.ship_id == "ship-b")
+                .unwrap();
+            assert_eq!(recipient.objectives.len(), 1);
+            assert!(recipient
+                .entities
+                .iter()
+                .all(|entity| entity.objective_target));
+            assert!(other.objectives.is_empty());
+            assert!(other.entities.iter().all(|entity| !entity.objective_target));
+            assert_eq!(
+                app.world().resource::<crate::lobby::WorldResource>().0,
+                metadata
+            );
+        }
+        app.world_mut()
+            .resource_mut::<crate::world::server::ObjectiveManagerRes>()
+            .0
+            .fail("private");
+        app.world_mut().run_schedule(FixedLast);
+        assert!(take_stations(&mut app)
+            .pop()
+            .unwrap()
+            .ships
+            .iter()
+            .all(|ship| ship.entities.iter().all(|entity| !entity.objective_target)));
     }
 }

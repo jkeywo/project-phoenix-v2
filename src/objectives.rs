@@ -27,6 +27,35 @@ use crate::core::messages::{
 use crate::ship::config::StationStanceConfig;
 use std::collections::BTreeMap;
 
+/// Replace the shared entity metadata's global Objective hint with the exact
+/// recipient's current projection. Never write this presentation back to
+/// WorldData: its snapshot/digest must remain identical on every host.
+pub fn project_entity_targets(
+    entities: &[crate::core::messages::EntitySnapshot],
+    objectives: &[ObjectiveSnapshot],
+) -> Vec<crate::core::messages::EntitySnapshot> {
+    let targets: std::collections::HashSet<&str> = objectives
+        .iter()
+        .filter(|objective| objective.status == ObjectiveStatus::Active)
+        .flat_map(|objective| objective.targets.iter().map(String::as_str))
+        .collect();
+    entities
+        .iter()
+        .map(|entity| {
+            let mut projected = entity.clone();
+            projected.objective_target = [
+                Some(entity.uuid.as_str()),
+                entity.id.as_deref(),
+                entity.name.as_deref(),
+            ]
+            .into_iter()
+            .flatten()
+            .any(|name| targets.contains(name));
+            projected
+        })
+        .collect()
+}
+
 /// Canonical authoring vocabulary and validation for objective Directives.
 /// Entity doctrine and World actions keep their existing TOML field names, but
 /// both adapt into this one typed contract before a runtime `AiDirective` is
@@ -397,8 +426,10 @@ pub fn is_visible_objective(o: &ScoredObjective) -> bool {
 
 // ── Internal record ────────────────────────────────────────────────────────
 
-#[derive(Clone, Debug)]
-struct ObjectiveRecord {
+/// Exact authored and lifecycle state, in insertion order in the manager.
+/// Presentation transition buffers are deliberately stored separately.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ObjectiveRecord {
     id: String,
     text: String,
     /// Values interpolated into `text`'s `{placeholder}` tokens on the client.
@@ -408,6 +439,8 @@ struct ObjectiveRecord {
     mandatory: bool,
     status: ObjectiveStatus,
     targets: Vec<String>,
+    /// Intended ship UUIDs. Empty preserves legacy all-ship visibility.
+    recipients: Vec<String>,
     /// Mission-altitude AI directive for this objective.
     directive: AiDirective,
     /// TOML-authored utility scoring configuration.
@@ -504,6 +537,9 @@ pub struct ObjectiveManager {
     /// `App` unit test) simply never reads it, and it grows only on actual
     /// objective mutations, which are authored and few.
     transitions: Vec<ObjectiveTransition>,
+    /// Presentation-only baseline for the narrative diff after a restore.
+    /// Captured at restoration, so later real transitions are still emitted.
+    restored_statuses: Option<BTreeMap<String, ObjectiveStatus>>,
 }
 
 impl ObjectiveManager {
@@ -611,6 +647,7 @@ impl ObjectiveManager {
             mandatory,
             status: ObjectiveStatus::Active,
             targets,
+            recipients: Vec::new(),
             directive,
             utility,
             source,
@@ -710,6 +747,110 @@ impl ObjectiveManager {
             .iter()
             .find(|objective| objective.id == id)
             .map(|objective| objective.targets.as_slice())
+    }
+
+    /// Status of a retained objective, including terminal records.
+    pub fn status(&self, id: &str) -> Option<&ObjectiveStatus> {
+        self.objectives
+            .iter()
+            .find(|o| o.id == id)
+            .map(|o| &o.status)
+    }
+
+    /// Immutable recipient scope, distinct from the objective's subject targets.
+    pub fn recipients(&self, id: &str) -> Option<&[String]> {
+        self.objectives
+            .iter()
+            .find(|o| o.id == id)
+            .map(|o| o.recipients.as_slice())
+    }
+
+    /// Stamp the scope immediately after a successful authored activation.
+    /// Only the trusted activation seam calls this; existing records are never
+    /// re-scoped by a GM action. Duplicate additions must not call this method.
+    pub(crate) fn set_recipients(&mut self, id: &str, mut recipients: Vec<String>) -> bool {
+        let Some(record) = self
+            .objectives
+            .iter_mut()
+            .find(|o| o.id == id && o.status == ObjectiveStatus::Active && o.recipients.is_empty())
+        else {
+            return false;
+        };
+        recipients.sort();
+        recipients.dedup();
+        record.recipients = recipients;
+        self.dirty = true;
+        true
+    }
+
+    /// Whether a ship is an intended recipient. Missing identity sees only
+    /// legacy unscoped objectives, never another ship's private assignment.
+    pub fn is_for_ship(&self, id: &str, ship: &str) -> bool {
+        self.recipients(id)
+            .is_some_and(|scope| scope.is_empty() || scope.iter().any(|id| id == ship))
+    }
+
+    /// Durable records in their authoritative insertion order.
+    pub fn records(&self) -> &[ObjectiveRecord] {
+        &self.objectives
+    }
+
+    /// Restore exact state without manufacturing lifecycle events or score.
+    pub fn restore_records(&mut self, records: Vec<ObjectiveRecord>) {
+        self.restored_statuses = Some(
+            records
+                .iter()
+                .map(|record| (record.id.clone(), record.status.clone()))
+                .collect(),
+        );
+        self.objectives = records;
+        self.transitions.clear();
+        self.dirty = true;
+    }
+
+    /// Consume the restored baseline before reading new lifecycle transitions.
+    /// This observer state is neither captured nor folded into simulation state.
+    pub(crate) fn take_restored_statuses(&mut self) -> Option<BTreeMap<String, ObjectiveStatus>> {
+        self.restored_statuses.take()
+    }
+
+    /// The ordinary sorted projection restricted to an intended ship.
+    pub fn snapshots_for(&self, ship: &str) -> Vec<ObjectiveSnapshot> {
+        self.sorted_snapshots()
+            .into_iter()
+            .filter(|o| self.is_for_ship(&o.id, ship))
+            .collect()
+    }
+
+    /// Active mission directives available to this ship.
+    pub fn scored_pool_for(
+        &self,
+        conditions: &WorldConditions,
+        ship: &str,
+    ) -> Vec<ScoredObjective> {
+        self.scored_pool_with_boost_for(conditions, None, ship)
+    }
+
+    /// Ship-scoped scoring, with that ship's Captain priority selection.
+    pub fn scored_pool_with_boost_for(
+        &self,
+        conditions: &WorldConditions,
+        boost: Option<&str>,
+        ship: &str,
+    ) -> Vec<ScoredObjective> {
+        self.scored_pool_with_boost(conditions, boost)
+            .into_iter()
+            .filter(|o| self.is_for_ship(&o.id, ship))
+            .collect()
+    }
+
+    /// Objective-contributed Command stances restricted to an intended ship.
+    pub fn active_station_stances_for(&self, ship: &str) -> Vec<(StationId, StationStanceConfig)> {
+        self.objectives
+            .iter()
+            .filter(|o| o.status == ObjectiveStatus::Active && self.is_for_ship(&o.id, ship))
+            .filter_map(|o| o.command_stance.clone())
+            .collect()
     }
 
     /// Remove the objective with `id` entirely (issue #751).
@@ -1756,6 +1897,73 @@ mod tests {
         let mut mgr = ObjectiveManager::new();
         add_with_stance(&mut mgr, "plain", None);
         assert!(mgr.active_station_stances().is_empty());
+    }
+
+    #[test]
+    fn recipient_scope_filters_crew_ai_and_stances_without_changing_subjects() {
+        let mut mgr = ObjectiveManager::new();
+        mgr.add("legacy", "Shared", false, vec!["subject-contact".into()]);
+        add_with_stance(&mut mgr, "escort", Some(objective_stance()));
+        assert!(mgr.set_recipients(
+            "escort",
+            vec!["ship-b".into(), "ship-a".into(), "ship-a".into()]
+        ));
+        assert_eq!(mgr.recipients("escort").unwrap(), &["ship-a", "ship-b"]);
+        assert!(!mgr.set_recipients("escort", vec!["ship-c".into()]));
+        assert_eq!(mgr.targets("legacy").unwrap(), &["subject-contact"]);
+        let conditions = WorldConditions::default();
+        for ship in ["ship-a", "ship-b"] {
+            assert_eq!(mgr.snapshots_for(ship).len(), 2);
+            assert_eq!(mgr.scored_pool_for(&conditions, ship).len(), 2);
+            assert_eq!(
+                mgr.active_station_stances_for(ship),
+                vec![objective_stance()]
+            );
+        }
+        for ship in ["ship-c", ""] {
+            assert_eq!(
+                mgr.snapshots_for(ship)
+                    .iter()
+                    .map(|o| o.id.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["legacy"]
+            );
+            assert_eq!(
+                mgr.scored_pool_with_boost_for(&conditions, Some("escort"), ship)
+                    .len(),
+                1
+            );
+            assert!(mgr.active_station_stances_for(ship).is_empty());
+        }
+        assert!(mgr.complete("escort"));
+        assert_eq!(mgr.status("escort"), Some(&ObjectiveStatus::Completed));
+        assert_eq!(
+            mgr.snapshots_for("ship-a").len(),
+            2,
+            "terminal record stays visible to intended recipients"
+        );
+        assert_eq!(mgr.scored_pool_for(&conditions, "ship-a").len(), 1);
+        assert!(mgr.active_station_stances_for("ship-a").is_empty());
+    }
+
+    #[test]
+    fn restoring_objective_records_preserves_authored_state_and_no_reopen_or_story_beats() {
+        let mut mgr = ObjectiveManager::new();
+        add_with_stance(&mut mgr, "escort", Some(objective_stance()));
+        mgr.set_recipients("escort", vec!["ship-a".into()]);
+        mgr.fail("escort");
+        let wire = serde_json::to_vec(mgr.records()).unwrap();
+        let mut restored = ObjectiveManager::new();
+        restored.add("bootstrap-only", "Bootstrap", false, vec![]);
+        restored.restore_records(serde_json::from_slice(&wire).unwrap());
+        assert_eq!(restored.records(), mgr.records());
+        assert!(restored.drain_transitions().is_empty());
+        assert!(!restored.add("escort", "Cannot reopen", false, vec![]));
+        assert!(!restored.complete("escort"));
+        assert!(!restored.fail("escort"));
+        assert!(!restored.set_recipients("escort", vec!["ship-b".into()]));
+        assert_eq!(restored.recipients("escort").unwrap(), &["ship-a"]);
+        assert!(restored.status("bootstrap-only").is_none());
     }
 
     #[test]

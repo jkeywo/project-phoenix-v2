@@ -1028,6 +1028,8 @@ pub struct RawWorld {
     /// matches the `[[gm_palette]]` array key, so no rename is needed.
     #[serde(default)]
     pub gm_palette: Vec<GmPaletteEntry>,
+    #[serde(default)]
+    pub gm_objective_palette: Vec<crate::gm_objective::RawObjectivePaletteEntry>,
     /// Paths to additional world TOML files to load additively at startup.
     #[serde(default)]
     pub extra_worlds: Vec<String>,
@@ -2027,6 +2029,7 @@ pub struct WorldConfig {
     /// `spawn_entity`'s literal path is; [`parse_world`] refuses a duplicate,
     /// an empty id/label/template, and a duplicate variant id by name.
     pub gm_palette: Vec<GmPaletteEntry>,
+    pub gm_objective_palette: Vec<crate::gm_objective::ObjectivePaletteEntry>,
     /// Every INLINE `[script.*]` Rhai body this world authors, in key order.
     ///
     /// Retained for exactly one reader: [`entity_template_paths`]'s scripted
@@ -2545,6 +2548,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         workforces: raw.workforce,
         gm_role_presets: raw.gm_role_preset,
         gm_palette: raw.gm_palette,
+        gm_objective_palette: crate::gm_objective::parse_palette(&raw.gm_objective_palette)?,
         script_sources: inline_script_sources(raw.script.as_ref()),
     })
 }

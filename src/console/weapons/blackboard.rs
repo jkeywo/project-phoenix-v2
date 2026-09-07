@@ -997,11 +997,13 @@ pub(crate) fn publish_tactical_radar_blackboard(
             Option<&crate::entities::spawner::FactionComponent>,
             &mut crate::server_app::ShipSystemBlackboards,
             Has<crate::server_app::LocalShip>,
+            Option<&crate::entities::spawner::EntityUuid>,
         ),
         With<crate::server_app::Ship>,
     >,
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
     world_res: Res<WorldResource>,
+    objectives: Option<Res<crate::world::server::ObjectiveManagerRes>>,
     faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entities::spawner::EntityUuid>>,
     entity_q: Query<
@@ -1020,8 +1022,15 @@ pub(crate) fn publish_tactical_radar_blackboard(
         .map(|r| &r.0)
         .unwrap_or(&default_registry);
 
-    for (weapons_target, ship_physics, modifiers, self_faction, mut entity_bbs, is_local) in
-        ship_q.iter_mut()
+    for (
+        weapons_target,
+        ship_physics,
+        modifiers,
+        self_faction,
+        mut entity_bbs,
+        is_local,
+        ship_id,
+    ) in ship_q.iter_mut()
     {
         let physics = ship_physics.copied().unwrap_or_default();
         let self_faction = self_faction.map(|f| f.0);
@@ -1049,12 +1058,18 @@ pub(crate) fn publish_tactical_radar_blackboard(
                 .filter_map(|s| crate::entities::tags::EntityTag::from_str(s))
                 .collect();
 
+            let scoped_objectives = objectives
+                .as_ref()
+                .map(|manager| manager.0.snapshots_for(ship_id.map_or("", |id| &id.0)))
+                .unwrap_or_default();
+            let projected_entities = crate::objectives::project_entity_targets(
+                &world_res.0.entities,
+                &scoped_objectives,
+            );
             let entity_meta: std::collections::HashMap<
                 &str,
                 &crate::core::messages::EntitySnapshot,
-            > = world_res
-                .0
-                .entities
+            > = projected_entities
                 .iter()
                 .map(|e| (e.uuid.as_str(), e))
                 .collect();
@@ -1111,10 +1126,11 @@ pub(crate) fn publish_tactical_radar_blackboard(
             }
 
             // ── Region overlays ──────────────────────────────────────────────
-            regions = world_res
-                .0
-                .entities
+            regions = projected_entities
                 .iter()
+                .filter(|e| {
+                    !e.tags.iter().any(|tag| tag == "objective_marker") || e.objective_target
+                })
                 .filter_map(|e| {
                     let shape = e.shape.as_deref()?;
                     Some(RadarRegion {
@@ -1382,6 +1398,11 @@ fn project_blip(
     torpedo_armed: bool,
 ) -> Option<RadarBlip> {
     let raw_tags: &[String] = meta.map(|e| e.tags.as_slice()).unwrap_or(&[]);
+    if raw_tags.iter().any(|tag| tag == "objective_marker")
+        && !meta.is_some_and(|e| e.objective_target)
+    {
+        return None;
+    }
     let radius: f32 = meta.and_then(|e| e.radius).unwrap_or(0.0);
 
     let entity_tags = crate::entities::tags::parse_tags(raw_tags);
@@ -1490,6 +1511,99 @@ fn blip_default_color(icon: &str) -> [f32; 3] {
 #[cfg(test)]
 mod lifecycle_tests {
     use super::*;
+
+    #[test]
+    fn tactical_objective_annotations_and_regions_use_the_observing_ship_scope() {
+        use crate::entities::spawner::EntityUuid;
+        use bevy::ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        let entities = vec![
+            crate::core::messages::EntitySnapshot {
+                uuid: "marker".into(),
+                id: Some("marker".into()),
+                tags: vec!["objective_marker".into()],
+                shape: Some("sphere".into()),
+                radius: Some(10.0),
+                radar_icon: Some("waypoint".into()),
+                objective_target: true,
+                ..Default::default()
+            },
+            crate::core::messages::EntitySnapshot {
+                uuid: "contact".into(),
+                id: Some("contact".into()),
+                tags: vec!["ship".into()],
+                radar_icon: Some("ship".into()),
+                objective_target: true,
+                ..Default::default()
+            },
+        ];
+        app.insert_resource(WorldResource(crate::core::messages::WorldData {
+            entities,
+            ..Default::default()
+        }))
+        .insert_resource(crate::lobby::server::ShipClientConfigResource(
+            crate::core::messages::ShipClientConfig {
+                tactical_radar_range: 100.0,
+                tactical_radar_shows: vec!["ship".into(), "objective_marker".into()],
+                ..Default::default()
+            },
+        ))
+        .init_resource::<crate::world::server::ObjectiveManagerRes>();
+        for id in ["marker", "contact"] {
+            app.world_mut()
+                .spawn((EntityUuid(id.into()), Transform::from_xyz(20.0, 0.0, 0.0)));
+        }
+        let viewer = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                crate::server_app::LocalShip,
+                EntityUuid("ship-b".into()),
+                crate::server_app::ShipSystemBlackboards::default(),
+            ))
+            .id();
+        {
+            let manager = &mut app
+                .world_mut()
+                .resource_mut::<crate::world::server::ObjectiveManagerRes>()
+                .0;
+            manager.add(
+                "private",
+                "objective.test",
+                true,
+                vec!["marker".into(), "contact".into()],
+            );
+            manager.set_recipients("private", vec!["ship-a".into()]);
+        }
+        for (ship, expected_blips, expected_regions) in [("ship-b", 1, 0), ("ship-a", 2, 1)] {
+            app.world_mut().get_mut::<EntityUuid>(viewer).unwrap().0 = ship.into();
+            app.world_mut()
+                .run_system_once(publish_tactical_radar_blackboard)
+                .unwrap();
+            let boards = app
+                .world()
+                .get::<crate::server_app::ShipSystemBlackboards>(viewer)
+                .unwrap();
+            let SystemBlackboard::TacticalRadar(radar) =
+                &boards.0[&crate::ship::system_registry::tactical_radar_system_id()]
+            else {
+                panic!("radar publication")
+            };
+            assert_eq!(radar.blips.len(), expected_blips);
+            assert_eq!(radar.regions.len(), expected_regions);
+            assert!(radar
+                .blips
+                .iter()
+                .all(|blip| blip.objective_target == (ship == "ship-a")));
+        }
+        assert!(app
+            .world()
+            .resource::<WorldResource>()
+            .0
+            .entities
+            .iter()
+            .all(|entity| entity.objective_target));
+    }
 
     #[test]
     fn registered_reset_rearms_initial_default_projection_for_a_second_run() {

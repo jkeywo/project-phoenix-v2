@@ -163,6 +163,16 @@ pub fn emit_scenario_narrative(
     mut out: MessageWriter<NarrativeEvent>,
 ) {
     if let Some(mut objectives) = objectives {
+        // Restoration is history, not a new fictional event. Rebase before
+        // draining the log: genuine transitions since the restore still follow
+        // that baseline and are reported normally on this same continuation.
+        if let Some(restored) = objectives
+            .bypass_change_detection()
+            .0
+            .take_restored_statuses()
+        {
+            *seen_objectives = restored;
+        }
         // ── Primary: the authored log, in the order the tick made it ──────────
         //
         // `bypass_change_detection` because draining the log changes nothing any

@@ -114,6 +114,12 @@ function normaliseAction(value) {
   if (value.type === 'despawn_entity' && typeof value.target === 'string' && value.target) {
     return { type: value.type, target: value.target };
   }
+  if (value.type === 'objective_action' && typeof value.objective === 'string' && value.objective
+      && ['activate', 'complete', 'fail'].includes(value.verb) && Array.isArray(value.recipients)
+      && value.recipients.every((id) => typeof id === 'string' && id)
+      && new Set(value.recipients).size === value.recipients.length) {
+    return { type: value.type, objective: value.objective, verb: value.verb, recipients: [...value.recipients] };
+  }
   if (value.type === 'spawn_palette_entity'
       && typeof value.palette === 'string' && value.palette.length > 0) {
     return { type: value.type, palette: value.palette };
@@ -430,6 +436,12 @@ export function createGmActivityFeed({
           }
         } else if (detail.action.type === 'despawn_entity') {
           action = t('server.gm.activity.action.despawn_entity', { target: detail.action.target });
+        } else if (detail.action.type === 'objective_action') {
+          action = t(`server.gm.activity.action.objective_${detail.action.verb}`, {
+            objective: detail.action.objective,
+            ships: detail.action.recipients.length ? detail.action.recipients.join(', ')
+              : t('server.gm.objective.all_ships'),
+          });
         } else if (detail.action.type === 'spawn_palette_entity') {
           action = t('server.gm.activity.action.spawn_palette_entity', {
             palette: detail.action.palette,

@@ -5,6 +5,180 @@ use crate::gm_action::{
     GmAction, GmActionGrant, GmActionId, GmActionJournal, GmActionOrder, SimulationPaused,
 };
 
+#[test]
+fn restored_objective_history_is_silent_on_continuation_but_new_transitions_remain_visible() {
+    use crate::core::narrative::{NarrativeEvent, NarrativeKind};
+    use crate::world::server::ObjectiveManagerRes;
+    let mut source = App::new();
+    source
+        .add_plugins(MinimalPlugins)
+        .init_resource::<ObjectiveManagerRes>();
+    {
+        let mut objectives = source.world_mut().resource_mut::<ObjectiveManagerRes>();
+        for id in ["completed", "failed", "active"] {
+            objectives.0.add(id, "objective.text", false, vec![]);
+        }
+        objectives.0.complete("completed");
+        objectives.0.fail("failed");
+        objectives.0.set_recipients("active", vec!["ship-a".into()]);
+    }
+    let saved = capture(source.world());
+    for warm_observer in [false, true] {
+        let mut target = App::new();
+        target
+            .add_plugins(MinimalPlugins)
+            .init_resource::<ObjectiveManagerRes>()
+            .add_message::<NarrativeEvent>()
+            .add_systems(Update, crate::narrative::emit_scenario_narrative);
+        if warm_observer {
+            target
+                .world_mut()
+                .resource_mut::<ObjectiveManagerRes>()
+                .0
+                .add("completed", "old.text", false, vec![]);
+            target.update();
+            target
+                .world_mut()
+                .resource_mut::<Messages<NarrativeEvent>>()
+                .clear();
+        }
+        restore(target.world_mut(), &saved);
+        assert_eq!(
+            target.world().resource::<ObjectiveManagerRes>().0.records(),
+            source.world().resource::<ObjectiveManagerRes>().0.records()
+        );
+        target.update();
+        assert!(
+            target
+                .world_mut()
+                .resource_mut::<Messages<NarrativeEvent>>()
+                .drain()
+                .next()
+                .is_none(),
+            "restored historical states must not become new events; warm={warm_observer}"
+        );
+        // A real change after restoration is still reported once.
+        target
+            .world_mut()
+            .resource_mut::<ObjectiveManagerRes>()
+            .0
+            .complete("active");
+        target.update();
+        let events: Vec<_> = target
+            .world_mut()
+            .resource_mut::<Messages<NarrativeEvent>>()
+            .drain()
+            .collect();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, NarrativeKind::ObjectiveCompleted);
+        assert_eq!(events[0].id, "active");
+        target.update();
+        assert!(target
+            .world_mut()
+            .resource_mut::<Messages<NarrativeEvent>>()
+            .drain()
+            .next()
+            .is_none());
+        // A real transition before the first continuation also survives rebasing.
+        restore(target.world_mut(), &saved);
+        target
+            .world_mut()
+            .resource_mut::<ObjectiveManagerRes>()
+            .0
+            .fail("active");
+        target.update();
+        let events: Vec<_> = target
+            .world_mut()
+            .resource_mut::<Messages<NarrativeEvent>>()
+            .drain()
+            .collect();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, NarrativeKind::ObjectiveFailed);
+        assert_eq!(events[0].id, "active");
+    }
+}
+
+#[test]
+fn objective_records_round_trip_and_change_digest_without_journal_or_story_beats() {
+    use crate::core::messages::{AiDirective, ObjectiveSource};
+    use crate::objectives::{ObjectiveManager, UtilityConfig};
+    use crate::world::server::ObjectiveManagerRes;
+    let mut live = App::new();
+    live.add_plugins(MinimalPlugins);
+    let empty_digest = crate::sim_digest::world_digest(live.world());
+    live.insert_resource(ObjectiveManagerRes::default());
+    assert_eq!(
+        empty_digest,
+        crate::sim_digest::world_digest(live.world()),
+        "empty manager preserves the objective-free fold"
+    );
+    let mut manager = ObjectiveManager::new();
+    manager.add_full_with_params(
+        "escort",
+        "objective.escort",
+        [("count".into(), "3".into())].into(),
+        true,
+        vec!["courier".into()],
+        AiDirective::Destroy {
+            target: "raider".into(),
+        },
+        UtilityConfig {
+            base_priority: 12.0,
+            ..Default::default()
+        },
+        ObjectiveSource::Mission,
+        None,
+    );
+    manager.set_recipients("escort", vec!["ship-a".into()]);
+    live.insert_resource(ObjectiveManagerRes(manager));
+    let active_digest = crate::sim_digest::world_digest(live.world());
+    assert_ne!(empty_digest, active_digest);
+    live.world_mut()
+        .resource_mut::<ObjectiveManagerRes>()
+        .0
+        .complete("escort");
+    let complete_digest = crate::sim_digest::world_digest(live.world());
+    assert_ne!(
+        active_digest, complete_digest,
+        "status itself is folded, with no GM journal"
+    );
+    live.world_mut()
+        .resource_mut::<ObjectiveManagerRes>()
+        .0
+        .drain_transitions();
+    live.world_mut()
+        .resource_mut::<ObjectiveManagerRes>()
+        .0
+        .mark_clean();
+    assert_eq!(
+        complete_digest,
+        crate::sim_digest::world_digest(live.world())
+    );
+    let payload: PhoenixSnapshot =
+        serde_json::from_slice(&serde_json::to_vec(&capture(live.world())).unwrap()).unwrap();
+    assert_eq!(
+        payload.objective_records,
+        live.world().resource::<ObjectiveManagerRes>().0.records()
+    );
+    assert!(restore(live.world_mut(), &payload).is_complete());
+    let expected_digest = crate::sim_digest::world_digest(live.world());
+    let mut resumed = App::new();
+    resumed.add_plugins(MinimalPlugins);
+    let mut bootstrap = ObjectiveManager::new();
+    bootstrap.add("bootstrap", "Must disappear", false, vec![]);
+    resumed.insert_resource(ObjectiveManagerRes(bootstrap));
+    assert!(restore(resumed.world_mut(), &payload).is_complete());
+    assert_eq!(
+        crate::sim_digest::world_digest(resumed.world()),
+        expected_digest
+    );
+    let mut restored = resumed.world_mut().resource_mut::<ObjectiveManagerRes>();
+    assert_eq!(restored.0.records(), payload.objective_records);
+    assert!(restored.0.drain_transitions().is_empty());
+    assert!(!restored.0.add("escort", "Cannot reopen", false, vec![]));
+    assert!(restored.0.snapshots_for("ship-b").is_empty());
+}
+
 fn grant(
     slot: u32,
     sequence: u64,

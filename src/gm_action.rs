@@ -186,6 +186,11 @@ pub enum GmAction {
     DespawnEntity {
         target: String,
     },
+    ObjectiveAction {
+        objective: String,
+        verb: crate::gm_objective::ObjectiveVerb,
+        recipients: Vec<String>,
+    },
 }
 
 /// WHICH lever of the authored-event control family one durable result records
@@ -227,6 +232,7 @@ pub enum GmActionKind {
     WorldSpawn,
     /// Entity-inspector removal results, distinct from palette placement results.
     WorldDespawn,
+    ObjectiveControl,
 }
 
 impl GmActionKind {
@@ -240,7 +246,11 @@ impl GmActionKind {
     /// activity feed can only render as an action on the empty id.
     pub fn carries_target(self) -> bool {
         match self {
-            Self::EventControl | Self::DirectEffect | Self::WorldSpawn | Self::WorldDespawn => true,
+            Self::EventControl
+            | Self::DirectEffect
+            | Self::WorldSpawn
+            | Self::WorldDespawn
+            | Self::ObjectiveControl => true,
             Self::SessionPause | Self::StationPuppet | Self::StationCommand => false,
         }
     }
@@ -284,6 +294,7 @@ impl GmAction {
             | Self::ApplyDirectEffect { .. }
             | Self::SpawnPaletteEntity { .. }
             | Self::DespawnEntity { .. }
+            | Self::ObjectiveAction { .. }
             | Self::SetEventPaused { .. }
             | Self::ArmGmEventSkip { .. } => None,
             Self::SetStationPuppet { ship, .. } | Self::IssueStationCommand { ship, .. } => {
@@ -312,19 +323,31 @@ impl GmAction {
             // has to say WHAT the operator placed, and the instance name is
             // minted by the reducer a boundary later.
             Self::SpawnPaletteEntity { palette, .. } => Some(palette.as_str()),
+            Self::ObjectiveAction { objective, .. } => Some(objective),
             Self::SetSessionPaused { .. }
             | Self::SetStationPuppet { .. }
             | Self::IssueStationCommand { .. } => None,
         }
     }
 
-    fn validate(&self) -> Result<(), GmActionRefusalReason> {
+    pub(crate) fn validate(&self) -> Result<(), GmActionRefusalReason> {
         let bounded = |value: &str| {
             !value.is_empty() && value.len() <= 128 && !value.chars().any(char::is_control)
         };
         match self {
             Self::SetSessionPaused { .. } => Ok(()),
             Self::DespawnEntity { target } if bounded(target) => Ok(()),
+            Self::ObjectiveAction {
+                objective,
+                recipients,
+                ..
+            } if bounded(objective)
+                && recipients.len() <= crate::gm_objective::MAX_OBJECTIVE_RECIPIENTS
+                && recipients.iter().all(|id| bounded(id))
+                && recipients.windows(2).all(|pair| pair[0] < pair[1]) =>
+            {
+                Ok(())
+            }
             // The qualified id shape is checked here rather than only against
             // the live table so a malformed one is refused as an invalid
             // ACTION, not mistaken for an unknown event.
@@ -410,6 +433,7 @@ impl GmAction {
             Self::ApplyDirectEffect { .. } => GmActionKind::DirectEffect,
             Self::SpawnPaletteEntity { .. } => GmActionKind::WorldSpawn,
             Self::DespawnEntity { .. } => GmActionKind::WorldDespawn,
+            Self::ObjectiveAction { .. } => GmActionKind::ObjectiveControl,
         }
     }
 
@@ -425,11 +449,24 @@ impl GmAction {
             | Self::ApplyDirectEffect { .. }
             | Self::SpawnPaletteEntity { .. }
             | Self::DespawnEntity { .. }
+            | Self::ObjectiveAction { .. }
             | Self::ArmGmEventSkip { .. } => None,
         }
     }
 
     /// The requested narrowing, independent of whether resolution can succeed.
+    pub fn objective_verb(&self) -> Option<crate::gm_objective::ObjectiveVerb> {
+        match self {
+            Self::ObjectiveAction { verb, .. } => Some(*verb),
+            _ => None,
+        }
+    }
+    pub fn objective_recipients(&self) -> Option<Vec<String>> {
+        match self {
+            Self::ObjectiveAction { recipients, .. } => Some(recipients.clone()),
+            _ => None,
+        }
+    }
     pub fn effect_scope(&self) -> Option<crate::gm_effect::GmDirectEffectScope> {
         match self {
             Self::ApplyDirectEffect { scope, .. }
@@ -450,6 +487,7 @@ impl GmAction {
             | Self::ApplyDirectEffect { .. }
             | Self::SpawnPaletteEntity { .. }
             | Self::DespawnEntity { .. }
+            | Self::ObjectiveAction { .. }
             | Self::ArmGmEventSkip { .. }
             // Not session pause: a paused EVENT stops one authored condition
             // being evaluated and leaves the simulation running.
@@ -473,7 +511,8 @@ impl GmAction {
             | Self::IssueStationCommand { .. }
             | Self::ApplyDirectEffect { .. }
             | Self::SpawnPaletteEntity { .. }
-            | Self::DespawnEntity { .. } => None,
+            | Self::DespawnEntity { .. }
+            | Self::ObjectiveAction { .. } => None,
         }
     }
 
@@ -492,6 +531,7 @@ impl GmAction {
             | Self::ApplyDirectEffect { .. }
             | Self::SpawnPaletteEntity { .. }
             | Self::DespawnEntity { .. }
+            | Self::ObjectiveAction { .. }
             | Self::ArmGmEventSkip { .. } => true,
         }
     }
@@ -621,6 +661,10 @@ pub struct GmActionRefusal {
     /// Requested Station/System scope, retained even when no grant is admitted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effect_scope: Option<crate::gm_effect::GmDirectEffectScope>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub objective_verb: Option<crate::gm_objective::ObjectiveVerb>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub objective_recipients: Option<Vec<String>>,
 }
 
 impl GmActionRefusal {
@@ -637,6 +681,7 @@ impl GmActionRefusal {
         .with_verb(self.verb)
         .with_lever(self.lever)
         .with_effect(None, self.effect_scope.clone())
+        .with_objective(self.objective_verb, self.objective_recipients.clone())
     }
 }
 
@@ -718,6 +763,22 @@ pub fn validate_fleet_frame(
             // recorded.
             if refusal.effect_scope.is_some() && refusal.action_kind != GmActionKind::DirectEffect {
                 return Err(GmActionRefusalReason::InvalidAction);
+            }
+            let is_objective = refusal.action_kind == GmActionKind::ObjectiveControl;
+            if is_objective != refusal.objective_verb.is_some()
+                || is_objective != refusal.objective_recipients.is_some()
+            {
+                return Err(GmActionRefusalReason::InvalidAction);
+            }
+            if let Some(recipients) = &refusal.objective_recipients {
+                if recipients.len() > 32
+                    || recipients.iter().any(|id| {
+                        id.is_empty() || id.len() > 128 || id.chars().any(char::is_control)
+                    })
+                    || !recipients.windows(2).all(|p| p[0] < p[1])
+                {
+                    return Err(GmActionRefusalReason::InvalidAction);
+                }
             }
             let is_event_control = refusal.action_kind == GmActionKind::EventControl;
             if !is_event_control && (refusal.verb.is_some() || refusal.lever.is_some()) {
@@ -812,6 +873,9 @@ pub enum GmActionRefusalReason {
     UnknownSystem,
     /// Live entity is outside the authored safe-removal policy.
     ProtectedEntity,
+    UnknownObjective,
+    ObjectiveNotActive,
+    ObjectiveScopeMismatch,
 }
 
 /// One terminal fact in the GM command log and local activity projection.
@@ -892,6 +956,10 @@ pub struct LoggedGmAction {
     /// the journal window a supplemental local refusal can fall outside of.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effect_scope: Option<crate::gm_effect::GmDirectEffectScope>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub objective_verb: Option<crate::gm_objective::ObjectiveVerb>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub objective_recipients: Option<Vec<String>>,
 }
 
 impl LoggedGmAction {
@@ -917,10 +985,21 @@ impl LoggedGmAction {
             verb: None,
             lever: None,
             effect_scope: None,
+            objective_verb: None,
+            objective_recipients: None,
         }
     }
 
     /// Attach the action's stable target identity to a refusal built above.
+    pub fn with_objective(
+        mut self,
+        verb: Option<crate::gm_objective::ObjectiveVerb>,
+        recipients: Option<Vec<String>>,
+    ) -> Self {
+        self.objective_verb = verb;
+        self.objective_recipients = recipients;
+        self
+    }
     pub fn with_target(mut self, target: Option<String>) -> Self {
         self.target = target;
         self
@@ -974,6 +1053,10 @@ impl LoggedGmAction {
         .with_verb(request.action.verb())
         .with_lever(request.action.event_lever())
         .with_effect(None, request.action.effect_scope())
+        .with_objective(
+            request.action.objective_verb(),
+            request.action.objective_recipients(),
+        )
     }
 }
 
@@ -1359,6 +1442,8 @@ impl GmActionJournal {
             || result.requested_active != grant.action.requested_active()
             || result.tick != grant.apply_tick
             || result.order != Some(grant.order)
+            || result.objective_verb != grant.action.objective_verb()
+            || result.objective_recipients != grant.action.objective_recipients()
             || result.target.as_deref() != grant.action.target_id()
         {
             return Err("GM applied result does not match its canonical grant");
@@ -1536,7 +1621,8 @@ impl GmActionJournal {
                         GmAction::IssueStationCommand { .. }
                         | GmAction::ApplyDirectEffect { .. }
                         | GmAction::SpawnPaletteEntity { .. }
-                        | GmAction::DespawnEntity { .. } => {}
+                        | GmAction::DespawnEntity { .. }
+                        | GmAction::ObjectiveAction { .. } => {}
                     }
                 }
                 entries.push(result.clone());
@@ -1601,7 +1687,8 @@ impl GmActionJournal {
                 GmAction::IssueStationCommand { .. }
                 | GmAction::ApplyDirectEffect { .. }
                 | GmAction::SpawnPaletteEntity { .. }
-                | GmAction::DespawnEntity { .. } => GmActionOutcome::Applied,
+                | GmAction::DespawnEntity { .. }
+                | GmAction::ObjectiveAction { .. } => GmActionOutcome::Applied,
             };
             entries.push(LoggedGmAction {
                 operator_id: grant.operator_id.clone(),
@@ -1617,6 +1704,8 @@ impl GmActionJournal {
                 verb: grant.action.verb(),
                 lever: grant.action.event_lever(),
                 effect_scope: grant.action.effect_scope(),
+                objective_verb: grant.action.objective_verb(),
+                objective_recipients: grant.action.objective_recipients(),
             });
         }
         GmActionLog { entries, paused }
@@ -1699,7 +1788,8 @@ impl GmActionJournal {
                 GmAction::IssueStationCommand { .. }
                 | GmAction::ApplyDirectEffect { .. }
                 | GmAction::SpawnPaletteEntity { .. }
-                | GmAction::DespawnEntity { .. } => GmActionOutcome::Applied,
+                | GmAction::DespawnEntity { .. }
+                | GmAction::ObjectiveAction { .. } => GmActionOutcome::Applied,
             };
             entries.push(LoggedGmAction {
                 operator_id: grant.operator_id.clone(),
@@ -1715,6 +1805,8 @@ impl GmActionJournal {
                 verb: grant.action.verb(),
                 lever: grant.action.event_lever(),
                 effect_scope: grant.action.effect_scope(),
+                objective_verb: grant.action.objective_verb(),
+                objective_recipients: grant.action.objective_recipients(),
             });
         }
         GmActionLog { entries, paused }
@@ -1990,7 +2082,7 @@ pub fn apply_due_actions(
     mut virtual_time: Option<ResMut<Time<Virtual>>>,
     mut fixed_time: Option<ResMut<Time<Fixed>>>,
     mut join_hold: Option<ResMut<crate::gm_join::GmJoinPauseHold>>,
-    removal_targets: crate::gm_despawn::RemovalQuery,
+    mut objective_control: crate::gm_objective::ObjectiveControl,
 ) {
     // Outside a fleet, an empty typed lane must not overwrite the ordinary
     // local host pause surface. Replay and restored saves deliberately carry a
@@ -2017,6 +2109,33 @@ pub fn apply_due_actions(
             losses.as_deref(),
         );
         let (outcome, reason) = match &grant.action {
+            GmAction::ObjectiveAction {
+                objective,
+                verb,
+                recipients,
+            } => {
+                let live_ships: Vec<String> = objective_control
+                    .fleet_ships
+                    .iter()
+                    .map(|uuid| uuid.0.clone())
+                    .collect();
+                match (content.as_deref(), objective_control.manager.as_deref_mut()) {
+                    (Some(runtime), Some(manager)) => crate::gm_objective::apply_control(
+                        runtime,
+                        &mut manager.0,
+                        objective,
+                        *verb,
+                        recipients,
+                        &live_ships,
+                        objective_control.balance.as_deref_mut(),
+                        objective_control.layers.as_deref_mut(),
+                    ),
+                    _ => (
+                        GmActionOutcome::Refused,
+                        Some(GmActionRefusalReason::UnknownObjective),
+                    ),
+                }
+            }
             // A directed effect is RESOLVED here, at the agreed apply tick, and
             // applied by the ordinary damage phase. Same division as a Fire and
             // for the same reason: this PreUpdate reducer holds none of the
@@ -2213,8 +2332,10 @@ pub fn apply_due_actions(
                 Some(runtime) if runtime.pending_gm_despawns.contains(target) => {
                     (GmActionOutcome::NoOp, None)
                 }
-                Some(runtime) => match crate::gm_despawn::validate_target(&removal_targets, target)
-                {
+                Some(runtime) => match crate::gm_despawn::validate_target(
+                    &objective_control.removal_targets,
+                    target,
+                ) {
                     Err(reason) => (GmActionOutcome::Refused, Some(reason)),
                     Ok(()) => {
                         runtime.pending_gm_despawns.push(target.clone());
@@ -2247,6 +2368,8 @@ pub fn apply_due_actions(
                             verb: grant.action.verb(),
                             lever: grant.action.event_lever(),
                             effect_scope: None,
+                            objective_verb: None,
+                            objective_recipients: None,
                         })
                         .expect("live GM result matches its canonical grant");
                     continue;
@@ -2424,6 +2547,8 @@ pub fn apply_due_actions(
                         verb: grant.action.verb(),
                         lever: grant.action.event_lever(),
                         effect_scope: None,
+                        objective_verb: None,
+                        objective_recipients: None,
                     };
                     journal
                         .record_applied_result(result)
@@ -2498,6 +2623,8 @@ pub fn apply_due_actions(
                             verb: grant.action.verb(),
                             lever: grant.action.event_lever(),
                             effect_scope: None,
+                            objective_verb: None,
+                            objective_recipients: None,
                         };
                         journal
                             .record_applied_result(result)
@@ -2591,6 +2718,8 @@ pub fn apply_due_actions(
                 verb: grant.action.verb(),
                 lever: grant.action.event_lever(),
                 effect_scope: requested_scope,
+                objective_verb: grant.action.objective_verb(),
+                objective_recipients: grant.action.objective_recipients(),
             })
             .expect("live GM result matches its canonical grant");
     }
@@ -2679,6 +2808,8 @@ pub(crate) fn refusal_for(
         verb: proposal.action.verb(),
         lever: proposal.action.event_lever(),
         effect_scope: proposal.action.effect_scope(),
+        objective_verb: proposal.action.objective_verb(),
+        objective_recipients: proposal.action.objective_recipients(),
     }
 }
 
@@ -4763,6 +4894,8 @@ station = "helm"
             operator_id: "gm-2".into(),
             correlation: GmActionId::new("auth-refusal").unwrap(),
             effect_scope: None,
+            objective_verb: None,
+            objective_recipients: None,
             action_kind: GmActionKind::SessionPause,
             requested_active: true,
             tick: 7,
@@ -4914,6 +5047,8 @@ station = "helm"
             verb: None,
             lever: None,
             effect_scope: None,
+            objective_verb: None,
+            objective_recipients: None,
         };
         let pause = LoggedGmAction {
             operator_id: "gm-1".into(),
@@ -4929,6 +5064,8 @@ station = "helm"
             verb: None,
             lever: None,
             effect_scope: None,
+            objective_verb: None,
+            objective_recipients: None,
         };
         let station_refused = LoggedGmAction::refused(
             "gm-1".into(),
@@ -4952,6 +5089,8 @@ station = "helm"
             verb: None,
             lever: None,
             effect_scope: None,
+            objective_verb: None,
+            objective_recipients: None,
         };
         let log = GmActionLog {
             entries: vec![pause, station_applied.clone(), station_pending],
@@ -4986,6 +5125,8 @@ station = "helm"
                 effect: None,
                 verb: None,
                 effect_scope: None,
+                objective_verb: None,
+                objective_recipients: None,
             }),
             Err("pending GM result is not a Station command"),
         );
@@ -6145,6 +6286,8 @@ kind = "{id}"
             operator_id: "gm-2".into(),
             correlation: GmActionId::new("effect-refusal").unwrap(),
             effect_scope: None,
+            objective_verb: None,
+            objective_recipients: None,
             action_kind: GmActionKind::DirectEffect,
             requested_active: true,
             tick: 3,

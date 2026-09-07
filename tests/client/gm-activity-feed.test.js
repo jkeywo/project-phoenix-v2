@@ -318,6 +318,32 @@ describe('GM activity feed pure adapter', () => {
       .toBeUndefined();
   });
 
+  it('preserves each Objective verb and intended recipients and refuses malformed scope', () => {
+    for (const verb of ['activate', 'complete', 'fail']) {
+      const action = { type: 'objective_action', objective: 'rescue', verb, recipients: [SHIP] };
+      const row = fireGmEvent({}, action);
+      expect(parseGmActivityFeed(payload([row])).entries[0].detail.data.action).toEqual(action);
+      for (const invalid of [{ recipients: null }, { recipients: [SHIP, SHIP] }, { objective: '' }, { verb: 'reopen' }]) {
+        expect(parseGmActivityFeed(payload([fireGmEvent({}, { ...action, ...invalid })]))).toBeUndefined();
+      }
+    }
+  });
+
+  it('keeps scoped Objective results under their semantic ship filter, including refusals', () => {
+    const rows = ['activate', 'complete', 'fail'].flatMap((verb) => ['applied', 'refused'].map((outcome) => {
+      const action = { type: 'objective_action', objective: 'rescue', verb, recipients: [SHIP] };
+      const row = fireGmEvent({ outcome, reason: outcome === 'refused' ? 'objective-scope-mismatch' : null });
+      row.detail.data.action = action;
+      return { ...row,
+        ships: [ship], links: [{ role: 'ship', entity: ship }] };
+    }));
+    const global = fireGmEvent({}, { type: 'objective_action', objective: 'global', verb: 'activate', recipients: [] });
+    const parsed = parseGmActivityFeed(payload([...rows, global]));
+    expect(filterGmActivityEntries(parsed.entries, { category: 'gm_action', ship: SHIP })).toEqual(rows);
+    expect(filterGmActivityEntries(parsed.entries, { ship: OTHER_SHIP })).toEqual([]);
+    expect(filterGmActivityEntries(parsed.entries, { ship: 'all' })).toHaveLength(7);
+  });
+
   it('accepts an armed Skip and keeps it distinct from a Fire', () => {
     const parsed = parseGmActivityFeed(payload([armGmEventSkip()]));
     expect(parsed.entries).toHaveLength(1);
@@ -539,6 +565,20 @@ describe('GM activity feed presentation and selection links', () => {
       .toContain('{palette}');
     expect(realStrings.has('server.gm.activity.action_reason.unknown-gm-palette-entry'))
       .toBe(true);
+  });
+
+  it('names Objective actions with scope and refusal copy without borrowing an event verb', () => {
+    const rows = ['activate', 'complete', 'fail'].map((verb, index) => fireGmEvent({
+      correlation: `objective-${index}`, outcome: 'refused', reason: 'objective-scope-mismatch',
+    }, { type: 'objective_action', objective: 'rescue', verb, recipients: [SHIP] }));
+    expect(harness.feed.update(payload(rows, 16))).toBe(true);
+    const rendered = [...document.querySelectorAll('[data-category="gm_action"]')];
+    expect(rendered).toHaveLength(3);
+    for (const [index, verb] of ['activate', 'complete', 'fail'].entries()) {
+      expect(rendered[index].textContent).toContain(`server.gm.activity.action.objective_${verb}`);
+      expect(realStrings.get(`server.gm.activity.action.objective_${verb}`)).toContain('{ships}');
+    }
+    expect(realStrings.has('server.gm.activity.action_reason.objective-scope-mismatch')).toBe(true);
   });
 
   it('says paused and resumed rather than fired for the same event', () => {

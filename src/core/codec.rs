@@ -684,6 +684,8 @@ pub fn encode_mesh_frame(frame: &crate::lockstep::MeshFrame) -> Result<String, s
                     // pulls none. Same reading rule as `target` above.
                     "lever": refusal.lever,
                     "effect_scope": refusal.effect_scope,
+                    "objective_verb": refusal.objective_verb,
+                    "objective_recipients": refusal.objective_recipients,
                 }),
             ),
         },
@@ -901,6 +903,18 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
                         action_kind,
                         requested_active: body.get("requested_active")?.as_bool()?,
                         effect_scope,
+                        objective_verb: body
+                            .get("objective_verb")
+                            .filter(|v| !v.is_null())
+                            .map(|v| serde_json::from_value(v.clone()))
+                            .transpose()
+                            .ok()?,
+                        objective_recipients: body
+                            .get("objective_recipients")
+                            .filter(|v| !v.is_null())
+                            .map(|v| serde_json::from_value(v.clone()))
+                            .transpose()
+                            .ok()?,
                         tick,
                         reason: serde_json::from_value(body.get("reason")?.clone()).ok()?,
                         // Absent, `null` or unbounded all read as "this family
@@ -1212,6 +1226,17 @@ pub fn decode_gm_action_request(raw: &str) -> Option<crate::gm_action::GmActionR
         // stays exact rather than accepting two shapes. There is deliberately
         // no template/asset field to smuggle anything through: the palette id
         // IS the vocabulary.
+        "objective_action" if object.len() == 6 => {
+            let action = crate::gm_action::GmAction::ObjectiveAction {
+                objective: bounded_gm_target_id(object.get("objective")?.as_str()?)?,
+                verb: serde_json::from_value(object.get("verb")?.clone()).ok()?,
+                recipients: serde_json::from_value(object.get("recipients")?.clone()).ok()?,
+            };
+            // Reuse canonical bounds and ordering: duplicate or malformed
+            // recipients are invalid vocabulary before they reach admission.
+            action.validate().ok()?;
+            action
+        }
         "despawn_entity" if object.len() == 4 => crate::gm_action::GmAction::DespawnEntity {
             target: bounded_gm_target_id(object.get("target")?.as_str()?)?,
         },
@@ -1669,6 +1694,8 @@ mod mesh_frame_tests {
                 verb: None,
                 lever: None,
                 effect_scope: None,
+                objective_verb: None,
+                objective_recipients: None,
             },
         ));
         // A refused Fire crosses the same lane still naming the event it tried
@@ -1687,6 +1714,8 @@ mod mesh_frame_tests {
                 verb: Some(crate::gm_action::GmEventVerb::Fire),
                 lever: None,
                 effect_scope: None,
+                objective_verb: None,
+                objective_recipients: None,
             },
         ));
         // And a refused SKIP crosses it naming both the event and the lever
@@ -1706,6 +1735,8 @@ mod mesh_frame_tests {
                 verb: None,
                 lever: Some(crate::gm_event::GmEventLever::SkipNext),
                 effect_scope: None,
+                objective_verb: None,
+                objective_recipients: None,
             },
         ));
         for frame in [proposal, refusal, refused_fire, refused_skip] {
@@ -2004,6 +2035,8 @@ mod mesh_frame_tests {
                 verb: Some(crate::gm_action::GmEventVerb::Pause),
                 lever: None,
                 effect_scope: None,
+                objective_verb: None,
+                objective_recipients: None,
             },
         ));
         let text = super::encode_mesh_frame(&refusal).expect("encodes");
@@ -2015,7 +2048,8 @@ mod mesh_frame_tests {
         // `validate_fleet_frame` is what then refuses it, rather than this
         // ingress guessing Fire.
         let legacy = text.replace(r#","verb":"pause""#, "");
-        assert!(!legacy.contains("verb"), "{legacy}");
+        let legacy_value: serde_json::Value = serde_json::from_str(&legacy).unwrap();
+        assert!(legacy_value["d"].get("verb").is_none(), "{legacy}");
         let Some(MeshFrame::GmAction(crate::gm_action::GmActionFrame::Refused(decoded))) =
             super::decode_mesh_frame(&legacy)
         else {

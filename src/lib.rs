@@ -112,6 +112,7 @@ pub mod gm_despawn;
 pub mod gm_effect;
 pub mod gm_event;
 pub mod gm_join;
+pub mod gm_objective;
 pub mod gm_projection;
 pub mod gm_puppet;
 /// Crew-public Game Master identities (issue #1289), kept separate from crew

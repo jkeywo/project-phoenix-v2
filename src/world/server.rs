@@ -186,6 +186,7 @@ pub struct WorldContentRuntime {
     /// rather than captured or folded. A resumed world rebuilds it by replaying
     /// the same load.
     pub gm_palette: Vec<crate::world::config::GmPaletteEntry>,
+    pub gm_objective_palette: Vec<crate::gm_objective::ObjectivePaletteEntry>,
     /// GM placements that have crossed their canonical apply boundary and are
     /// waiting for the trigger pipeline to spawn them (issue #1305).
     ///
@@ -765,6 +766,8 @@ pub struct WorldPlugin;
 
 impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
+        use crate::authoritative::{DeclareState, StateClass};
+        app.declare_state::<ObjectiveManagerRes>(StateClass::Folded, "objective-runtime-state");
         // The comms half of the pre-#816 WorldPlugin lives in
         // `CommsWorldPlugin`. Added here so every app that installs the
         // world also gets comms, and so the cross-plugin ordering
@@ -1675,6 +1678,7 @@ pub(crate) fn init_world_runtime(
 
     // Replace the authored GM palette on each world load (#1305).
     runtime.gm_palette = world_config.gm_palette.clone();
+    runtime.gm_objective_palette = world_config.gm_objective_palette.clone();
 
     // Reset the complete paired table; scripts are the production source.
     runtime.triggers.clear();
@@ -1792,6 +1796,7 @@ pub(crate) fn load_extra_worlds(
 
 /// Broadcast `ObjectiveSummary` when objectives change.
 pub(crate) fn broadcast_objective_summary(
+    local_ship: Query<&crate::entities::spawner::EntityUuid, With<crate::server_app::LocalShip>>,
     mut objectives: ResMut<ObjectiveManagerRes>,
     mut outbox: ResMut<SimOutbox>,
 ) {
@@ -1799,7 +1804,13 @@ pub(crate) fn broadcast_objective_summary(
         return;
     }
 
-    let objectives_snap = objectives.0.sorted_snapshots();
+    let objectives_snap = objectives.0.snapshots_for(
+        local_ship
+            .iter()
+            .next()
+            .map(|uuid| uuid.0.as_str())
+            .unwrap_or(""),
+    );
 
     outbox.push_reliable((
         Target::All,
@@ -3332,48 +3343,15 @@ pub(crate) fn apply_dispatch_result(
 
     for cmd in action_cmds {
         match cmd {
-            ActionCmd::AddObjective {
-                id,
-                text,
-                text_params,
-                mandatory,
-                targets,
-                directive,
-                utility,
-                source,
-                command_stance,
-                origin_layer,
-            } => {
-                let activity_targets = targets.clone();
-                let added = objectives.0.add_full_with_params(
-                    id.clone(),
-                    text,
-                    text_params,
-                    mandatory,
-                    targets,
-                    directive,
-                    utility,
-                    source,
-                    command_stance,
+            cmd @ (ActionCmd::AddObjective { .. }
+            | ActionCmd::CompleteObjective { .. }
+            | ActionCmd::FailObjective { .. }) => {
+                crate::gm_objective::apply_command(
+                    &mut objectives.0,
+                    cmd,
+                    balance_events.as_deref_mut(),
+                    layer_map.as_deref_mut(),
                 );
-                // Record layer ownership (issue #751) so UnloadWorld removes
-                // exactly the objectives this layer's triggers added. Only on
-                // a genuinely new insert, and only for layer-authored
-                // triggers with a live layer-map entry.
-                if added {
-                    if let Some(msgs) = balance_events.as_deref_mut() {
-                        msgs.write(crate::core::balance::BalanceEvent::ObjectiveChanged {
-                            objective_id: id.clone(),
-                            status: crate::core::messages::ObjectiveStatus::Active,
-                            targets: activity_targets,
-                        });
-                    }
-                    if let (Some(path), Some(lm)) = (origin_layer, layer_map.as_deref_mut()) {
-                        if let Some(layer) = lm.0.get_mut(&path) {
-                            layer.owned_objective_ids.push(id);
-                        }
-                    }
-                }
             }
 
             ActionCmd::ResetTrigger { id } => {
@@ -3382,36 +3360,6 @@ pub(crate) fn apply_dispatch_result(
                     bevy::log::warn!(
                         "{log_ctx}: ResetTrigger('{id}') matched no trigger with that id"
                     );
-                }
-            }
-
-            ActionCmd::CompleteObjective { id } => {
-                // Guard the tracer on the actual transition to `Completed`, so
-                // a re-issued CompleteObjective on an already-complete objective
-                // does not double-emit (issue #841).
-                if objectives.0.complete(&id) {
-                    if let Some(msgs) = balance_events.as_deref_mut() {
-                        msgs.write(crate::core::balance::BalanceEvent::ObjectiveCompleted {
-                            objective_id: id.clone(),
-                        });
-                        msgs.write(crate::core::balance::BalanceEvent::ObjectiveChanged {
-                            objective_id: id.clone(),
-                            status: crate::core::messages::ObjectiveStatus::Completed,
-                            targets: objectives.0.targets(&id).unwrap_or_default().to_vec(),
-                        });
-                    }
-                }
-            }
-
-            ActionCmd::FailObjective { id } => {
-                if objectives.0.fail(&id) {
-                    if let Some(msgs) = balance_events.as_deref_mut() {
-                        msgs.write(crate::core::balance::BalanceEvent::ObjectiveChanged {
-                            objective_id: id.clone(),
-                            status: crate::core::messages::ObjectiveStatus::Failed,
-                            targets: objectives.0.targets(&id).unwrap_or_default().to_vec(),
-                        });
-                    }
                 }
             }
 
@@ -4694,6 +4642,16 @@ fn apply_loaded_layer(
         scripts,
     } = layer;
 
+    if scenario_config.gm_objective_palette.iter().any(|entry| {
+        runtime
+            .gm_objective_palette
+            .iter()
+            .any(|live| live.id == entry.id)
+    }) {
+        bevy::log::error!("layer {path} has a duplicate GM Objective palette id");
+        return;
+    }
+
     // A named layer entity is authored identity, not one incarnation of the
     // layer. Unload deliberately leaves the live name registry intact, so a
     // later load can restore the same UUID instead of exposing a removal and
@@ -4790,6 +4748,11 @@ fn apply_loaded_layer(
             script_units,
         },
     );
+
+    for mut entry in scenario_config.gm_objective_palette.clone() {
+        entry.origin_layer = Some(path.to_string());
+        runtime.gm_objective_palette.push(entry);
+    }
 
     // Expose WorldLoaded only after every part of activation is live: ASTs,
     // handlers, deadlines, entities, flags and the layer map.
@@ -5295,6 +5258,9 @@ fn apply_world_layer_changes(
                     // from either one. Shared ASTs remain until their last owner.
                 }
 
+                runtime
+                    .gm_objective_palette
+                    .retain(|entry| entry.origin_layer.as_deref() != Some(path.as_str()));
                 // Remove objectives this layer's triggers added (issue #751)
                 // and prune the runtime state that referenced them (issue #752):
                 // a captain priority boost pointing at a removed objective, and

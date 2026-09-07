@@ -267,11 +267,19 @@ pub(crate) fn ingest_station_importance(world: &mut World) {
     use crate::console::repair::visibility::CORE_BUCKET_ID;
     use crate::core::messages::{StationId, SystemId};
 
-    // Objectives as (id, targets, status) — empty on an `App` with no manager.
+    let local_uuid = {
+        let mut q =
+            world.query_filtered::<&crate::entities::spawner::EntityUuid, With<LocalShip>>();
+        q.iter(world)
+            .next()
+            .map(|u| u.0.clone())
+            .unwrap_or_default()
+    };
+    // Objectives as (id, targets, status) for the local recipient ship.
     let objectives: Vec<(String, Vec<String>, crate::core::messages::ObjectiveStatus)> = world
         .get_resource::<crate::world::server::ObjectiveManagerRes>()
         .map(|m| {
-            m.0.sorted_snapshots()
+            m.0.snapshots_for(&local_uuid)
                 .into_iter()
                 .map(|o| (o.id, o.targets, o.status))
                 .collect()

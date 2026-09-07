@@ -308,6 +308,29 @@ pub struct RadarCenter {
     pub yaw: f32,
 }
 
+/// Hidden widgets retain their bridge sources, including an older centre.
+/// Every projection input belongs to the widget whose bridge produced it.
+fn widget_radar_center(
+    children: Option<&Children>,
+    centers: &Query<&RadarCenter>,
+) -> Option<RadarCenter> {
+    children?
+        .iter()
+        .find_map(|child| centers.get(child).ok().cloned())
+}
+
+fn widget_shows_blip(
+    children: Option<&Children>,
+    source: Entity,
+    filter: &RadarFilter,
+    tags: &[String],
+    appearance: &RadarAppearance,
+) -> bool {
+    children.is_some_and(|children| children.contains(&source))
+        && is_on_radar(filter, tags)
+        && (!tags.iter().any(|tag| tag == "objective_marker") || appearance.objective_target)
+}
+
 // ── Blip world pose ──────────────────────────────────────────────────────────
 
 /// World-space position and heading carried by every radar-blip ECS entity
@@ -975,9 +998,6 @@ fn sync_radar_blip_nodes(
         fallback,
     } = render;
 
-    // Cache the global RadarCenter once; only used for ship-centred widgets.
-    let global_center = centers.iter().next();
-
     for (
         radar_entity,
         mut widget,
@@ -1027,7 +1047,7 @@ fn sync_radar_blip_nodes(
         let (center_x, center_z, effective_yaw) = if world_centred.is_some() {
             (0.0_f32, 0.0_f32, 0.0_f32)
         } else {
-            let Some(center) = global_center else {
+            let Some(center) = widget_radar_center(children, &centers) else {
                 continue;
             };
             let yaw = match widget.orientation {
@@ -1041,7 +1061,9 @@ fn sync_radar_blip_nodes(
         if let Some(auto_scale) = auto_scale {
             let max_dist = blips
                 .iter()
-                .filter(|(_, on_radar, _, _, _, _)| is_on_radar(&widget.filter, &on_radar.0))
+                .filter(|(src, on_radar, appearance, _, _, _)| {
+                    widget_shows_blip(children, *src, &widget.filter, &on_radar.0, appearance)
+                })
                 .filter_map(|(_, _, appearance, blip_pose, _, _)| {
                     let dx = blip_pose.x - center_x;
                     let dz = blip_pose.z - center_z;
@@ -1105,13 +1127,9 @@ fn sync_radar_blip_nodes(
         let mut intended_labels: HashMap<Entity, (String, f32, f32)> = HashMap::new();
 
         for (src, on_radar, appearance, blip_pose, blip_uuid, blip_label) in blips.iter() {
-            if !is_on_radar(&widget.filter, &on_radar.0) {
-                continue;
-            }
-            // Objective-marker beacons are invisible until they become an active
-            // objective target. This keeps the nav chart uncluttered — beacons
-            // that haven't been referenced by any active objective never render.
-            if on_radar.0.iter().any(|t| t == "objective_marker") && !appearance.objective_target {
+            // The active bridge owns the whole picture. A hidden widget's old
+            // Objective annotation must never re-enter this widget's rendering.
+            if !widget_shows_blip(children, src, &widget.filter, &on_radar.0, appearance) {
                 continue;
             }
             let ent_radius = appearance.world_size * 0.5;
@@ -1868,6 +1886,199 @@ impl Plugin for GuiRadarPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "server")]
+    #[test]
+    fn switched_widgets_do_not_render_or_fit_stale_objective_sources_after_resolution() {
+        use crate::core::messages::ViewMode;
+        use crate::entities::spawner::EntityUuid;
+        use crate::lobby::WorldResource;
+        use crate::server_app::LocalShip;
+        use crate::ship::state::{ShipPhysics, ShipViewMode};
+        use crate::world::server::ObjectiveManagerRes;
+        use bevy::ecs::system::RunSystemOnce;
+
+        fn render(world: &mut World) {
+            world
+                .run_system_once(crate::server::radar::sync_server_radar_bridge)
+                .unwrap();
+            world.run_system_once(sync_radar_blip_nodes).unwrap();
+        }
+        fn drawn_counts(world: &World, widget: Entity) -> (usize, usize, usize, usize) {
+            let children = world.get::<Children>(widget).unwrap();
+            (
+                children
+                    .iter()
+                    .filter(|child| world.get::<RadarBlipNode>(*child).is_some())
+                    .count(),
+                children
+                    .iter()
+                    .filter(|child| world.get::<RadarRegionNode>(*child).is_some())
+                    .count(),
+                children
+                    .iter()
+                    .filter(|child| world.get::<RadarLabelNode>(*child).is_some())
+                    .count(),
+                world
+                    .get::<RadarObjectiveRingEntities>(widget)
+                    .unwrap()
+                    .0
+                    .len(),
+            )
+        }
+        for resolution in ["complete", "fail", "unload"] {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+                .init_asset::<Image>()
+                .init_asset::<RadarBlipMaterial>()
+                .init_resource::<RadarIconLookup>()
+                .init_resource::<WorldResource>()
+                .init_resource::<ObjectiveManagerRes>();
+            app.world_mut()
+                .resource_mut::<RadarIconLookup>()
+                .0
+                .insert("waypoint".into(), Handle::default());
+            app.world_mut()
+                .resource_mut::<WorldResource>()
+                .0
+                .entities
+                .push(EntitySnapshot {
+                    uuid: "marker".into(),
+                    name: Some("Objective beacon".into()),
+                    tags: tags(&["objective_marker", "region"]),
+                    position: Some([500.0, 0.0, 0.0]),
+                    radar_icon: Some("waypoint".into()),
+                    radar_size: Some(4.0),
+                    region_colour: Some([0.1, 0.2, 0.3]),
+                    objective_target: true,
+                    ..default()
+                });
+            app.world_mut().resource_mut::<ObjectiveManagerRes>().0.add(
+                "private",
+                "objective.test",
+                true,
+                vec!["marker".into()],
+            );
+            app.world_mut()
+                .resource_mut::<ObjectiveManagerRes>()
+                .0
+                .set_recipients("private", vec!["ship-a".into()]);
+            let mut mode = ShipViewMode::default();
+            mode.view_mode = ViewMode::SystemChart;
+            let ship = app
+                .world_mut()
+                .spawn((
+                    LocalShip,
+                    EntityUuid("ship-a".into()),
+                    ShipPhysics::default(),
+                    mode,
+                ))
+                .id();
+            let mut widgets = Vec::new();
+            for console in [
+                ConsoleRadar::ViewscreenSystemChart,
+                ConsoleRadar::ViewscreenNav,
+            ] {
+                let widget = app
+                    .world_mut()
+                    .spawn((
+                        console,
+                        GenericRadarWidget {
+                            range: 1000.0,
+                            orientation: OrientationMode::WorldFixed,
+                            filter: filter(&["objective_marker"]),
+                            clip_mode: RadarClipMode::Circle,
+                            face_fraction: 1.0,
+                        },
+                        Node::default(),
+                        ComputedNode {
+                            size: Vec2::splat(200.0),
+                            ..default()
+                        },
+                        InheritedVisibility::VISIBLE,
+                        RadarBlipMap::default(),
+                        RadarBlipLabels,
+                        RadarObjectiveRingEntities::default(),
+                    ))
+                    .id();
+                widgets.push(widget);
+            }
+            let [system, nav] = [widgets[0], widgets[1]];
+            app.world_mut().entity_mut(nav).insert((
+                WorldCentredRadar,
+                AutoScaleRadar {
+                    margin: 1.1,
+                    min_range: 50.0,
+                },
+                InheritedVisibility::HIDDEN,
+            ));
+            render(app.world_mut());
+            assert_eq!(drawn_counts(app.world(), system), (1, 1, 1, 1));
+            let stale_source = app.world().get::<RadarBlipMap>(system).unwrap().blips["marker"];
+
+            app.world_mut()
+                .get_mut::<ShipViewMode>(ship)
+                .unwrap()
+                .view_mode = ViewMode::NavigationChart;
+            app.world_mut()
+                .entity_mut(system)
+                .insert(InheritedVisibility::HIDDEN);
+            app.world_mut()
+                .entity_mut(nav)
+                .insert(InheritedVisibility::VISIBLE);
+            render(app.world_mut());
+            assert_eq!(
+                drawn_counts(app.world(), nav),
+                (1, 1, 1, 1),
+                "only the active widget's own source is drawn"
+            );
+            assert!(app.world().get::<GenericRadarWidget>(nav).unwrap().range > 500.0);
+
+            let objectives = &mut app.world_mut().resource_mut::<ObjectiveManagerRes>().0;
+            match resolution {
+                "complete" => assert!(objectives.complete("private")),
+                "fail" => assert!(objectives.fail("private")),
+                _ => assert!(objectives.remove("private")),
+            }
+            render(app.world_mut());
+            assert!(
+                app.world()
+                    .get::<RadarAppearance>(stale_source)
+                    .unwrap()
+                    .objective_target,
+                "hidden source deliberately remains stale"
+            );
+            assert_eq!(
+                drawn_counts(app.world(), nav),
+                (0, 0, 0, 0),
+                "{resolution}: no stale icon, region, label or Objective ring"
+            );
+            assert_eq!(
+                app.world().get::<GenericRadarWidget>(nav).unwrap().range,
+                50.0,
+                "{resolution}: hidden and inactive markers cannot enlarge the chart"
+            );
+
+            // Returning to the old widget refreshes its bridge and removes the
+            // actual UI children it drew before the switch.
+            app.world_mut()
+                .get_mut::<ShipViewMode>(ship)
+                .unwrap()
+                .view_mode = ViewMode::SystemChart;
+            app.world_mut()
+                .entity_mut(nav)
+                .insert(InheritedVisibility::HIDDEN);
+            app.world_mut()
+                .entity_mut(system)
+                .insert(InheritedVisibility::VISIBLE);
+            render(app.world_mut());
+            assert_eq!(drawn_counts(app.world(), system), (0, 0, 0, 0));
+            assert!(
+                app.world().resource::<WorldResource>().0.entities[0].objective_target,
+                "presentation never rewrites shared metadata"
+            );
+        }
+    }
 
     // ── should_label predicate ────────────────────────────────────────────────
 

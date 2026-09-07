@@ -446,6 +446,140 @@ fn logged(
         verb: None,
         lever: None,
         effect_scope: None,
+        objective_verb: None,
+        objective_recipients: None,
+    }
+}
+
+#[test]
+fn canonical_objective_results_keep_their_recipient_ship_filter_metadata() {
+    use crate::command_admission::HostSlot;
+    use crate::gm_action::{
+        GmAction, GmActionGrant, GmActionId, GmActionJournal, GmActionLog, GmActionOrder,
+        SimulationPaused,
+    };
+    use crate::gm_objective::ObjectiveVerb;
+    use crate::world::server::{ObjectiveManagerRes, WorldContentRuntime};
+    use bevy::ecs::system::RunSystemOnce;
+    let mut app = app(32);
+    app.init_resource::<GmActionJournal>()
+        .init_resource::<GmActionLog>()
+        .init_resource::<SimulationPaused>()
+        .init_resource::<ObjectiveManagerRes>()
+        .init_resource::<WorldContentRuntime>();
+    let ship_entity = app
+        .world_mut()
+        .spawn((
+            crate::server_app::Ship,
+            crate::lockstep::FleetSlotOf(HostSlot(1)),
+            EntityUuid(SHIP_A.into()),
+            EntityName("Alliance cruiser".into()),
+        ))
+        .id();
+    app.world_mut().spawn((
+        crate::server_app::Ship,
+        crate::lockstep::FleetSlotOf(HostSlot(2)),
+        EntityUuid(SOURCE.into()),
+        EntityName("Raider".into()),
+    ));
+    let config = crate::world::config::parse_world(&format!(
+        r#"
+[[gm_objective_palette]]
+id = "scoped"
+label = "objective.test"
+text = "objective.test"
+recipients = ["{SHIP_A}"]
+[[gm_objective_palette]]
+id = "scoped-fail"
+label = "objective.test"
+text = "objective.test"
+recipients = ["{SHIP_A}"]
+[[gm_objective_palette]]
+id = "global"
+label = "objective.test"
+text = "objective.test"
+"#
+    ))
+    .unwrap();
+    app.world_mut()
+        .resource_mut::<WorldContentRuntime>()
+        .gm_objective_palette = config.gm_objective_palette;
+    fixed_then_publish(&mut app);
+    take(&mut app);
+    for (index, (objective, verb)) in [
+        ("scoped", ObjectiveVerb::Activate),
+        ("scoped", ObjectiveVerb::Complete),
+        ("scoped-fail", ObjectiveVerb::Activate),
+        ("scoped-fail", ObjectiveVerb::Fail),
+        ("global", ObjectiveVerb::Activate),
+        ("scoped", ObjectiveVerb::Complete),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if index == 5 {
+            app.world_mut().despawn(ship_entity);
+        }
+        app.world_mut()
+            .resource_mut::<GmActionJournal>()
+            .insert(GmActionGrant {
+                from: HostSlot(1),
+                sequenced_by: HostSlot(1),
+                operator_id: "gm-alpha".into(),
+                correlation: GmActionId::new(format!("objective-{index}")).unwrap(),
+                recovery_generation: 0,
+                apply_tick: 0,
+                order: GmActionOrder::new(HostSlot(1), index as u64 + 1),
+                action: GmAction::ObjectiveAction {
+                    objective: objective.into(),
+                    verb,
+                    recipients: if objective == "global" {
+                        vec![]
+                    } else {
+                        vec![SHIP_A.into()]
+                    },
+                },
+            })
+            .unwrap();
+        app.world_mut()
+            .run_system_once(crate::gm_action::apply_due_actions)
+            .unwrap();
+        fixed_then_publish(&mut app);
+    }
+    let published = take(&mut app).pop().unwrap();
+    let rows: Vec<_> = published
+        .entries
+        .iter()
+        .filter(|entry| entry.category == GmActivityCategory::GmAction)
+        .collect();
+    assert_eq!(rows.len(), 6);
+    for row in rows {
+        let GmActivityDetail::GmAction(detail) = &row.detail else {
+            panic!("action")
+        };
+        let GmActivityAction::ObjectiveAction { recipients, .. } = &detail.action else {
+            panic!("Objective action")
+        };
+        if recipients.is_empty() {
+            assert!(row.ships.is_empty());
+            assert!(row.links.is_empty());
+        } else {
+            assert_eq!(
+                row.ships,
+                [GmEntityReference {
+                    entity_id: SHIP_A.into(),
+                    name: "Alliance cruiser".into()
+                }]
+            );
+            assert_eq!(row.links[0].role, GmActivityLinkRole::Ship);
+            assert!(!row.ships.iter().any(|ship| ship.entity_id == SOURCE));
+        }
+        if detail.correlation == "objective-5" {
+            assert_eq!(detail.outcome, GmActivityActionOutcome::Refused);
+            assert_eq!(detail.reason.as_deref(), Some("objective-scope-mismatch"));
+        } else {
+            assert_eq!(detail.outcome, GmActivityActionOutcome::Applied);
+        }
     }
 }
 

@@ -685,23 +685,6 @@ fn ai_power_allocation(
     let tick = tick.map(|t| t.0).unwrap_or(0);
     let base_interval = base_interval.map(|b| b.0).unwrap_or(1);
 
-    // OBJECTIVE fact, scored once per tick: does the active pool carry a Destroy
-    // directive? A broad "the ship has something to kill" signal an authored rule
-    // may use to bias weapons power.
-    let has_destroy_objective = objectives
-        .as_ref()
-        .map(|om| {
-            om.0.scored_pool(&crate::objectives::WorldConditions::default())
-                .iter()
-                .any(|s| {
-                    matches!(
-                        s.directive,
-                        crate::core::messages::AiDirective::Destroy { .. }
-                    )
-                })
-        })
-        .unwrap_or(false);
-
     for (
         ship_entity,
         entity_uuid,
@@ -717,6 +700,20 @@ fn ai_power_allocation(
         mut admitted,
     ) in ships.iter_mut()
     {
+        // An assignment to another ship must not bias this ship's power AI.
+        let has_destroy_objective = objectives.as_ref().is_some_and(|om| {
+            om.0.scored_pool_for(
+                &crate::objectives::WorldConditions::default(),
+                entity_uuid.map_or("", |u| u.0.as_str()),
+            )
+            .iter()
+            .any(|s| {
+                matches!(
+                    s.directive,
+                    crate::core::messages::AiDirective::Destroy { .. }
+                )
+            })
+        });
         // Control-Source gate through the shared AI host spine (issue #1208): not
         // (or no longer) AI-driven — a human Control Source — stands the reactor
         // down. Power resolves a RANKED channel the spine does not model, so only
@@ -1077,7 +1074,10 @@ pub(crate) fn ai_torpedo_auto_fire(
         // absent a direction it is `None` and the seeded value is unchanged.
         let stance_override = crate::console::command::server::weapons_station_stance_high_alert(
             stances_opt,
-            active_objective_stances.as_deref(),
+            active_objective_stances
+                .as_deref()
+                .map(|a| a.for_ship(entity_uuid.map_or("", |u| u.0.as_str())))
+                .as_ref(),
             &ship_config.0,
             &control_sources.0,
             red_alert_opt.is_some_and(|r| r.0),

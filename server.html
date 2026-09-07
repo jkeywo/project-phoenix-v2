@@ -333,6 +333,14 @@
       display: grid; gap: .9rem;
     }
     #gm-mission-events { margin: 0; padding: 0; list-style: none; display: grid; gap: .5rem; }
+    #gm-objective-list { margin: 0; padding: 0; list-style: none; display: grid; gap: .75rem; }
+    .gm-objective-row { border-top: 1px solid var(--edge-control); padding-top: .5rem; }
+    #gm-objective-panel button {
+      min-height: 2.75rem; padding: .5rem .9rem; margin: .25rem; color: var(--ink-primary);
+      background: var(--surface-panel-up); border: 1px solid var(--edge-bright); font: inherit; cursor: pointer;
+    }
+    #gm-objective-panel button:disabled { opacity: .45; cursor: default; }
+    #gm-objective-results { max-height: 12rem; overflow-y: auto; }
     .gm-mission-event {
       display: flex; flex-wrap: wrap; align-items: center; gap: .75rem;
     }
@@ -1978,6 +1986,19 @@
              one lever gets one button. -->
         <section id="gm-mission-panel" role="region" aria-labelledby="gm-mission-heading">
           <h2 id="gm-mission-heading" data-i18n="server.gm.mission.heading"></h2>
+          <section id="gm-objective-panel" aria-labelledby="gm-objective-heading">
+            <h3 id="gm-objective-heading" data-i18n="server.gm.objective.heading"></h3>
+            <ul id="gm-objective-list"></ul>
+            <p id="gm-objective-empty" data-i18n="server.gm.objective.empty"></p>
+            <div id="gm-objective-confirmation" hidden role="group" aria-labelledby="gm-objective-consequence">
+              <p id="gm-objective-consequence"></p>
+              <button id="gm-objective-confirm" type="button" data-i18n="server.gm.objective.confirm"></button>
+              <button id="gm-objective-cancel" type="button" data-i18n="server.gm.objective.cancel"></button>
+            </div>
+            <p id="gm-objective-feedback" role="status" aria-live="polite" aria-atomic="true"></p>
+            <h4 id="gm-objective-results-heading" data-i18n="server.gm.objective.results_heading"></h4>
+            <ol id="gm-objective-results" role="log" aria-labelledby="gm-objective-results-heading" aria-live="polite"></ol>
+          </section>
           <ul id="gm-mission-events" role="list"></ul>
           <p id="gm-mission-empty" role="status" aria-live="polite"
             data-i18n="server.gm.mission.empty"></p>
@@ -2681,6 +2702,7 @@
     import { createGmDirectEffectPanel } from './gui/gm-direct-effect-panel.js';
     import { createGmSessionControls } from './gui/gm-session-controls.js';
     import { createGmMissionPanel } from './gui/gm-mission-panel.js';
+    import { createGmObjectivePanel } from './gui/gm-objective-panel.js';
     import { createGmSpawnPanel } from './gui/gm-spawn-panel.js';
     import { createGmDespawnPanel } from './gui/gm-despawn-panel.js';
     import { createGmStationPuppet } from './gui/gm-station-puppet.js';
@@ -2756,8 +2778,18 @@
       getOperatorName: (id) => typeof window.__hostGmName === 'function'
         ? window.__hostGmName(id) : id,
     });
-    window.__hostGmMissionRefresh = gmMissionPanel.refreshAdmission;
-    window.__hostGmMissionReset = gmMissionPanel.reset;
+    const gmObjectivePanel = createGmObjectivePanel({ doc: document, t, actionFeedback: hostActionFeedback,
+      getOperator: () => window.__hostLocalGm?.() || null,
+      getOperatorName: (id) => window.__hostGmName?.(id) || id,
+      getShipName: (id) => {
+        const ship = window.__hostGmStationState?.().projection?.ships?.find((row) => row.ship_id === id);
+        return ship?.name ? (has(ship.name) ? t(ship.name) : ship.name) : id;
+      },
+      submit: (request) => window.__hostObjectiveAction?.(request) ?? false,
+    });
+    window.__hostGmObjectiveState = gmObjectivePanel.state;
+    window.__hostGmMissionRefresh = () => { gmMissionPanel.refreshAdmission(); gmObjectivePanel.refreshAdmission(); };
+    window.__hostGmMissionReset = () => { gmMissionPanel.reset(); gmObjectivePanel.reset(); };
     window.__hostGmMissionState = gmMissionPanel.state;
     // The placement panel (issue #1305). It reads the SAME chart the omniscient
     // projection renders into, so the gesture that picks a world position is the
@@ -2870,7 +2902,7 @@
           }
         },
         gm_session:   function(p) { gmSessionControls.update(p); },
-        gm_mission:   function(p) { gmMissionPanel.update(p); },
+        gm_mission:   function(p) { gmMissionPanel.update(p); gmObjectivePanel.update(p); },
         gm_spawn:     function(p) { gmSpawnPanel.update(p); },
       },
       strings: { t, has, localiseTree },
@@ -4070,6 +4102,21 @@
      * This seam composes neither, so a GM can neither name a template the
      * simulation did not publish nor submit screen pixels.
      */
+    window.__hostObjectiveAction = function(request) {
+      const gm = localGm();
+      if (!gm || !request || request.operator_id !== gm.id
+          || typeof request.objective !== 'string' || !request.objective
+          || !['activate', 'complete', 'fail'].includes(request.verb)
+          || !Array.isArray(request.recipients)
+          || !request.recipients.every(id => typeof id === 'string' && id)
+          || typeof request.correlation !== 'string' || !request.correlation
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      try {
+        return window.wasm_submit_gm_action(JSON.stringify({ action: 'objective_action',
+          operator_id: gm.id, correlation: request.correlation, objective: request.objective,
+          verb: request.verb, recipients: request.recipients })) !== false;
+      } catch (_) { return false; }
+    };
     window.__hostDespawnEntity = function(request) {
       const operator = localGm();
       if (!operator || !request || typeof request.target !== 'string'

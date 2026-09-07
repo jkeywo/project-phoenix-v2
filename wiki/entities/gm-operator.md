@@ -2,7 +2,7 @@
 title: GM Operator
 type: entity
 tags: [gm, operator, identity, reconnect, roster, readiness, force-start, action, pause, puppeting, backfill, host-mesh, map, activity, damage, destruction, objectives, triggers, red-alert, connections, regions, asteroids]
-sources: [src/gm_event.rs, src/gm_effect.rs, src/gm_spawn.rs, src/world/config.rs, src/world/content.rs, src/world/script/, gui/gm-mission-panel.js, gui/gm-direct-effect-panel.js, gui/gm-effect-scope.js, gui/gm-spawn-panel.js, gui/gm-knowledge-compare.js, gui/gm-role-presets.js, pasm/spec/design/gm-console-t2.yaml, src/gm_roster.rs, src/gm_action.rs, src/gm_join.rs, src/gm_projection.rs, src/gm_activity.rs, src/gm_puppet.rs, src/objectives.rs, src/world/server.rs, src/ship/helm_ai/mod.rs, src/entities/config.rs, src/entities/tags.rs, src/asteroids/lifecycle.rs, src/boot/mod.rs, src/lobby/start_policy.rs, src/core/balance.rs, src/core/messages.rs, src/core/codec.rs, src/command_admission/log.rs, src/lobby/server.rs, src/lockstep/frame.rs, src/lockstep/host_loss.rs, src/lockstep/mod.rs, src/lockstep/snapshot_relay.rs, src/server/bridge.rs, src/server_app/broadcast.rs, src/server_app/world_setup.rs, src/snapshot.rs, src/sim_digest.rs, src/headless/replay.rs, gui/host-channel.js, gui/gm-local-projection.js, gui/gm-activity-feed.js, gui/gm-station-puppet.js, gui/entity-inspector.js, gui/components/ph-navigation-map.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/console-state.js, gui/console-core.js, gui/sim-state.js, gui/host-mesh.js, gui/fleet-session.js, gui/lobby-state.js, server.html, client.html]
+sources: [src/gm_objective.rs, gui/gm-objective-panel.js, src/gm_event.rs, src/gm_effect.rs, src/gm_spawn.rs, src/world/config.rs, src/world/content.rs, src/world/script/, gui/gm-mission-panel.js, gui/gm-direct-effect-panel.js, gui/gm-effect-scope.js, gui/gm-spawn-panel.js, gui/gm-knowledge-compare.js, gui/gm-role-presets.js, pasm/spec/design/gm-console-t2.yaml, src/gm_roster.rs, src/gm_action.rs, src/gm_join.rs, src/gm_projection.rs, src/gm_activity.rs, src/gm_puppet.rs, src/objectives.rs, src/world/server.rs, src/ship/helm_ai/mod.rs, src/entities/config.rs, src/entities/tags.rs, src/asteroids/lifecycle.rs, src/boot/mod.rs, src/lobby/start_policy.rs, src/core/balance.rs, src/core/messages.rs, src/core/codec.rs, src/command_admission/log.rs, src/lobby/server.rs, src/lockstep/frame.rs, src/lockstep/host_loss.rs, src/lockstep/mod.rs, src/lockstep/snapshot_relay.rs, src/server/bridge.rs, src/server_app/broadcast.rs, src/server_app/world_setup.rs, src/snapshot.rs, src/sim_digest.rs, src/headless/replay.rs, gui/host-channel.js, gui/gm-local-projection.js, gui/gm-activity-feed.js, gui/gm-station-puppet.js, gui/entity-inspector.js, gui/components/ph-navigation-map.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/console-state.js, gui/console-core.js, gui/sim-state.js, gui/host-mesh.js, gui/fleet-session.js, gui/lobby-state.js, server.html, client.html]
 updated: 2026-09-07
 ---
 
@@ -287,6 +287,16 @@ consumes an armed Skip: only a qualifying automatic occurrence consumes it
 while the event remains present. `FireGmEvent`, `SetEventPaused`, and `ArmGmEventSkip` use the same
 attributed canonical action journal as session controls.
 
+`src/gm_objective.rs` resolves `[[gm_objective_palette]]` entries and handles
+`ObjectiveAction` activation, completion and failure through the ordinary
+Objective lifecycle. Authored recipient ships are separate from subject
+`targets`; each Objective retains one status for its whole recipient scope.
+Crew and AI consumers filter by their ship UUID. The mission projection carries
+the palette, current records and attributed results to
+`gui/gm-objective-panel.js`, whose preview names the intended ships and closes
+when the selected record or scope changes. Snapshot and digest include the
+complete ordered records, including terminal statuses and recipient scope.
+
 `ApplyDirectEffect` carries an Entity UUID, whole-Entity/Station/System scope,
 damage or healing, and an amount in milli-HP. `src/gm_effect.rs` resolves and
 arms the effect at the canonical action boundary; the ordinary Damage schedule
@@ -302,7 +312,7 @@ templates and closed authored variants. `SpawnPaletteEntity` carries only
 palette/variant ids and resolved position/heading. The shared map placement
 gesture and keyboard controls supply that placement; canonical pending spawns
 enter ordinary scripted `SpawnEntity` dispatch and deterministic UUID minting.
-The activity feed presents event levers, scoped effects and palette placements
+The activity feed presents event levers, Objective changes, scoped effects and palette placements
 as attributed GM Action details; their fictional consequences remain ordinary
 world-category rows.
 
@@ -315,8 +325,9 @@ For intended design, see
 with the GM view. Truth uses `gm_entity`; the selected ship's `gm_station`
 replica passes through the same fold and Sensors/Comms builders used by
 authentic Station consoles. Contacts can differ because of sensor range and
-tag filtering. Objectives and Comms currently use shared, unfiltered inputs
-and therefore show equality. The comparison excludes Station-private hull and
+tag filtering. Both Objective comparison columns use the selected ship's
+recipient-filtered list and therefore show equality; Comms still uses shared
+inputs. The comparison excludes Station-private hull and
 blackboard detail, which remains accessible through Station puppeting.
 
 ## Authentic Station puppeting

@@ -1,0 +1,12 @@
+[global]
+name = "GM Objective layer restore probe"
+
+[[gm_objective_palette]]
+id = "layer-escort"
+label = "objective.escort"
+text = "objective.escort"
+targets = ["courier"]
+directive_kind = "Destroy"
+target = "raider"
+base_priority = 7.0
+command_stance = { station = "tactical", id = "objective-escort", kind = "standard", high_alert = true, persist_behind_human = true, label = "stance.escort" }

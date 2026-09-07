@@ -306,11 +306,13 @@ pub(crate) fn spawn_viewscreen_radar_widgets(
 /// Per-frame the bridge runs for at most one widget (the active one). The
 /// other viewscreen widgets retain their stale blip sets while hidden, which
 /// keeps the work bounded.
-fn sync_server_radar_bridge(
+pub(crate) fn sync_server_radar_bridge(
     mut commands: Commands,
     world: Option<Res<WorldResource>>,
     view_mode_q: Query<&crate::ship::state::ShipViewMode, With<crate::server_app::LocalShip>>,
     physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,
+    ship_id_q: Query<&crate::entities::spawner::EntityUuid, With<crate::server_app::LocalShip>>,
+    objectives: Option<Res<crate::world::server::ObjectiveManagerRes>>,
     mut widgets: Query<(Entity, &ConsoleRadar, &mut RadarBlipMap)>,
 ) {
     let Some(world) = world else { return };
@@ -327,6 +329,15 @@ fn sync_server_radar_bridge(
         return;
     };
     let physics = physics_q.single().ok().copied().unwrap_or_default();
+    let scoped_objectives = objectives
+        .as_ref()
+        .map(|manager| {
+            manager
+                .0
+                .snapshots_for(ship_id_q.single().map_or("", |id| &id.0))
+        })
+        .unwrap_or_default();
+    let entities = crate::objectives::project_entity_targets(&world.0.entities, &scoped_objectives);
     bridge_sim_to_radar(
         &mut commands,
         widget,
@@ -336,7 +347,7 @@ fn sync_server_radar_bridge(
             z: physics.z,
             yaw: physics.yaw,
         },
-        &world.0.entities,
+        &entities,
     );
 }
 
@@ -393,6 +404,7 @@ mod tests {
     use super::*;
     use crate::server_app::LocalShip;
     use crate::ship::state::ShipViewMode;
+    use bevy::ecs::system::RunSystemOnce;
 
     fn test_app() -> App {
         let mut app = App::new();
@@ -481,6 +493,113 @@ mod tests {
         assert_eq!(
             viewscreen_ship_config_path(None),
             "assets/entities/alliance_cruiser.toml"
+        );
+    }
+
+    #[test]
+    fn viewscreen_objective_markers_follow_recipient_scope_for_seeded_and_spawned_metadata() {
+        use crate::entities::spawner::{
+            EntityId, EntityTagsSection, EntityUuid, RadarAppearanceSection,
+        };
+        use crate::server_app::{
+            LastBroadcastEntityHealth, LastBroadcastEntityPositions, SimOutbox, TrackedEntities,
+        };
+        let mut app = App::new();
+        app.init_resource::<WorldResource>()
+            .init_resource::<TrackedEntities>()
+            .init_resource::<LastBroadcastEntityHealth>()
+            .init_resource::<LastBroadcastEntityPositions>()
+            .init_resource::<SimOutbox>()
+            .init_resource::<crate::world::server::ObjectiveManagerRes>();
+        let mut view_mode = ShipViewMode::default();
+        view_mode.view_mode = ViewMode::NavigationChart;
+        let viewer = app
+            .world_mut()
+            .spawn((LocalShip, EntityUuid("ship-b".into()), view_mode))
+            .id();
+        app.world_mut()
+            .spawn((ConsoleRadar::ViewscreenNav, RadarBlipMap::default()));
+        {
+            let manager = &mut app
+                .world_mut()
+                .resource_mut::<crate::world::server::ObjectiveManagerRes>()
+                .0;
+            manager.add(
+                "private",
+                "objective.test",
+                true,
+                vec!["seeded".into(), "spawned".into()],
+            );
+            manager.set_recipients("private", vec!["ship-a".into()]);
+        }
+        for id in ["seeded", "spawned"] {
+            app.world_mut().spawn((
+                EntityUuid(format!("uuid-{id}")),
+                EntityId(id.into()),
+                EntityTagsSection(vec!["objective_marker".into()]),
+                Transform::from_xyz(20.0, 0.0, 10.0),
+                RadarAppearanceSection(crate::entities::config::RadarAppearanceConfig {
+                    icon: Some("waypoint".into()),
+                    region_colour: Some(vec![0.1, 0.2, 0.3]),
+                    colour: None,
+                    size: None,
+                }),
+            ));
+            app.world_mut()
+                .run_system_once(crate::server_app::reconcile_runtime_entities)
+                .unwrap();
+            let metadata = app.world().resource::<WorldResource>().0.clone();
+            assert!(metadata
+                .entities
+                .iter()
+                .all(|entity| entity.objective_target));
+            // Ship B receives those exact seeded / EntitySpawned / reconnect
+            // metadata rows, but its view must not inherit ship A's annotation.
+            app.world_mut()
+                .run_system_once(sync_server_radar_bridge)
+                .unwrap();
+            let mut query = app.world_mut().query::<(
+                &crate::gui::radar::RadarEntityUuid,
+                &crate::gui::radar::RadarAppearance,
+            )>();
+            assert!(query
+                .iter(app.world())
+                .all(|(_, appearance)| !appearance.objective_target));
+            assert_eq!(app.world().resource::<WorldResource>().0, metadata);
+        }
+        app.world_mut().get_mut::<EntityUuid>(viewer).unwrap().0 = "ship-a".into();
+        app.world_mut()
+            .run_system_once(sync_server_radar_bridge)
+            .unwrap();
+        let mut query = app.world_mut().query::<(
+            &crate::gui::radar::RadarEntityUuid,
+            &crate::gui::radar::RadarAppearance,
+        )>();
+        assert_eq!(
+            query
+                .iter(app.world())
+                .filter(|(_, appearance)| appearance.objective_target)
+                .count(),
+            2
+        );
+        app.world_mut()
+            .resource_mut::<crate::world::server::ObjectiveManagerRes>()
+            .0
+            .complete("private");
+        app.world_mut()
+            .run_system_once(sync_server_radar_bridge)
+            .unwrap();
+        assert!(query
+            .iter(app.world())
+            .all(|(_, appearance)| !appearance.objective_target));
+        assert!(
+            app.world()
+                .resource::<WorldResource>()
+                .0
+                .entities
+                .iter()
+                .all(|entity| entity.objective_target),
+            "presentation must not overwrite even stale shared metadata"
         );
     }
 }

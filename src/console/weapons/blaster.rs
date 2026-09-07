@@ -413,7 +413,10 @@ pub(crate) fn tick_blaster_auto_fire(
         let stance_override = ship_config_opt.and_then(|cfg| {
             crate::console::command::server::weapons_station_stance_high_alert(
                 stances_opt,
-                active_objective_stances.as_deref(),
+                active_objective_stances
+                    .as_deref()
+                    .map(|a| a.for_ship(entity_uuid.map_or("", |u| u.0.as_str())))
+                    .as_ref(),
                 &cfg.0,
                 &control_sources.0,
                 red_alert_opt.is_some_and(|r| r.0),

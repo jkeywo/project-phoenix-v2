@@ -72,7 +72,22 @@ pub struct LastDirectedControl(pub HashMap<StationId, bool>);
 /// the sim digest: it is a pure function of the already-authoritative objective
 /// state.
 #[derive(Resource, Clone, Debug, Default, PartialEq)]
-pub struct ActiveObjectiveStances(pub Vec<(StationId, StationStanceConfig)>);
+pub struct ActiveObjectiveStances(
+    pub Vec<(StationId, StationStanceConfig)>,
+    pub std::collections::BTreeMap<String, Vec<(StationId, StationStanceConfig)>>,
+);
+
+impl ActiveObjectiveStances {
+    /// Resolve this projection for a ship before reading any effective catalogue.
+    /// The first list contains legacy all-ship contributions; the map contains
+    /// the complete list for each explicitly scoped recipient.
+    pub fn for_ship(&self, ship: &str) -> Self {
+        Self(
+            self.1.get(ship).unwrap_or(&self.0).clone(),
+            Default::default(),
+        )
+    }
+}
 
 /// The objective-contributed stances lent to one target Station this tick.
 ///
@@ -213,10 +228,20 @@ fn project_active_objective_stances(
     mut projection: ResMut<ActiveObjectiveStances>,
 ) {
     let next = manager
-        .map(|m| m.0.active_station_stances())
+        .map(|m| {
+            let mut scoped = std::collections::BTreeMap::new();
+            for objective in m.0.sorted_snapshots() {
+                for ship in m.0.recipients(&objective.id).unwrap_or_default() {
+                    scoped
+                        .entry(ship.clone())
+                        .or_insert_with(|| m.0.active_station_stances_for(ship));
+                }
+            }
+            ActiveObjectiveStances(m.0.active_station_stances_for(""), scoped)
+        })
         .unwrap_or_default();
-    if projection.0 != next {
-        projection.0 = next;
+    if *projection != next {
+        *projection = next;
     }
 }
 
@@ -298,6 +323,7 @@ fn handle_set_station_stance(
     active: Option<Res<ActiveObjectiveStances>>,
     mut ships: Query<
         (
+            Option<&crate::entities::spawner::EntityUuid>,
             &AdmittedCommands,
             &ShipConfigComponent,
             &ShipSystemControlSources,
@@ -307,7 +333,9 @@ fn handle_set_station_stance(
     >,
 ) {
     let active = active.as_deref();
-    for (admitted, ship_config, control_sources, mut stances) in ships.iter_mut() {
+    for (entity_uuid, admitted, ship_config, control_sources, mut stances) in ships.iter_mut() {
+        let scoped_active = active.map(|a| a.for_ship(entity_uuid.map_or("", |u| u.0.as_str())));
+        let active = scoped_active.as_ref();
         let config = &ship_config.0;
         let Some(command) = command_station(config) else {
             continue;
@@ -353,6 +381,7 @@ fn apply_alert_change_to_stances(
     active: Option<Res<ActiveObjectiveStances>>,
     mut ships: Query<
         (
+            Option<&crate::entities::spawner::EntityUuid>,
             &ShipConfigComponent,
             &crate::ship::state::ShipRedAlert,
             &mut ShipStationStances,
@@ -364,7 +393,9 @@ fn apply_alert_change_to_stances(
     >,
 ) {
     let active = active.as_deref();
-    for (ship_config, red_alert, mut stances) in ships.iter_mut() {
+    for (entity_uuid, ship_config, red_alert, mut stances) in ships.iter_mut() {
+        let scoped_active = active.map(|a| a.for_ship(entity_uuid.map_or("", |u| u.0.as_str())));
+        let active = scoped_active.as_ref();
         let config = &ship_config.0;
         if stances.0.is_empty() {
             continue;
@@ -404,18 +435,24 @@ fn apply_alert_change_to_stances(
 fn reconcile_station_stances(
     active: Option<Res<ActiveObjectiveStances>>,
     mut ships: Query<
-        (&ShipConfigComponent, &mut ShipStationStances),
+        (
+            Option<&crate::entities::spawner::EntityUuid>,
+            &ShipConfigComponent,
+            &mut ShipStationStances,
+        ),
         With<crate::server_app::Ship>,
     >,
 ) {
     let active = active.as_deref();
-    for (ship_config, mut stances) in ships.iter_mut() {
+    for (entity_uuid, ship_config, mut stances) in ships.iter_mut() {
         // Read-only probe first: taking `&mut` does not mark the component
         // changed until it is deref-mutated, so an already-clean map (the
         // overwhelming common case) triggers no spurious change detection.
         if stances.0.is_empty() {
             continue;
         }
+        let scoped_active = active.map(|a| a.for_ship(entity_uuid.map_or("", |u| u.0.as_str())));
+        let active = scoped_active.as_ref();
         let config = &ship_config.0;
         let stale: Vec<StationId> = stances
             .0
@@ -463,6 +500,7 @@ fn reconcile_directed_target_control(
     active: Option<Res<ActiveObjectiveStances>>,
     mut ships: Query<
         (
+            Option<&crate::entities::spawner::EntityUuid>,
             &ShipConfigComponent,
             &ShipSystemControlSources,
             &crate::ship::state::ShipRedAlert,
@@ -473,7 +511,11 @@ fn reconcile_directed_target_control(
     >,
 ) {
     let active = active.as_deref();
-    for (ship_config, control_sources, red_alert, mut stances, mut last) in ships.iter_mut() {
+    for (entity_uuid, ship_config, control_sources, red_alert, mut stances, mut last) in
+        ships.iter_mut()
+    {
+        let scoped_active = active.map(|a| a.for_ship(entity_uuid.map_or("", |u| u.0.as_str())));
+        let active = scoped_active.as_ref();
         let config = &ship_config.0;
         let Some(command) = command_station(config) else {
             continue;
@@ -585,6 +627,8 @@ fn operate_command_ai(
     for (ship_config, control_sources, red_alert, stances, mut admitted, entity_uuid) in
         ships.iter_mut()
     {
+        let scoped_active = active.map(|a| a.for_ship(entity_uuid.map_or("", |u| u.0.as_str())));
+        let active = scoped_active.as_ref();
         let config = &ship_config.0;
         let Some(command) = command_station(config) else {
             continue;
@@ -654,6 +698,7 @@ fn publish_command_blackboard(
     active: Option<Res<ActiveObjectiveStances>>,
     mut ships: Query<
         (
+            Option<&crate::entities::spawner::EntityUuid>,
             &ShipConfigComponent,
             &ShipSystemControlSources,
             &crate::ship::state::ShipRedAlert,
@@ -664,7 +709,10 @@ fn publish_command_blackboard(
     >,
 ) {
     let active = active.as_deref();
-    for (ship_config, control_sources, red_alert, stances, mut bbs) in ships.iter_mut() {
+    for (entity_uuid, ship_config, control_sources, red_alert, stances, mut bbs) in ships.iter_mut()
+    {
+        let scoped_active = active.map(|a| a.for_ship(entity_uuid.map_or("", |u| u.0.as_str())));
+        let active = scoped_active.as_ref();
         let config = &ship_config.0;
         let Some(command) = command_station(config) else {
             continue;

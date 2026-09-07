@@ -189,11 +189,10 @@ fn objective_stance(
 /// Insert the `ActiveObjectiveStances` projection lending `stance` to `station`
 /// (as `project_active_objective_stances` would while its objective is active).
 fn contribute_objective_stance(app: &mut App, station: &str, stance: StationStanceConfig) {
-    app.world_mut()
-        .insert_resource(ActiveObjectiveStances(vec![(
-            StationId(station.into()),
-            stance,
-        )]));
+    app.world_mut().insert_resource(ActiveObjectiveStances(
+        vec![(StationId(station.into()), stance)],
+        Default::default(),
+    ));
 }
 
 /// Clear every objective contribution — what completion, failure or
@@ -662,10 +661,13 @@ fn the_stance_override_feeds_the_weapons_posture_only_when_directed_and_ai() {
     // Issue #1110: a SELECTED objective-contributed stance seeds its authored
     // posture for the fire gate exactly as a permanent one does — resolved
     // through the effective catalogue, not the permanent slice.
-    let active = ActiveObjectiveStances(vec![(
-        tactical(),
-        objective_stance("objective-escort", StanceKind::Standard, true, false),
-    )]);
+    let active = ActiveObjectiveStances(
+        vec![(
+            tactical(),
+            objective_stance("objective-escort", StanceKind::Standard, true, false),
+        )],
+        Default::default(),
+    );
     let mut objective_selection = ShipStationStances::default();
     objective_selection
         .0
@@ -1153,5 +1155,68 @@ fn the_scheduled_projection_exposes_then_drops_an_objective_stance_end_to_end() 
         command_bb(&app, ship).selected_stance,
         "normal",
         "the directed Station settles on the alert-neutral once the objective ends",
+    );
+}
+
+#[test]
+fn scoped_objective_stance_reaches_only_its_recipient_catalogue_and_applier() {
+    let mut app = projection_schedule_app();
+    let intended = spawn_ship(&mut app, true, false);
+    let other = spawn_ship(&mut app, true, false);
+    app.world_mut()
+        .entity_mut(intended)
+        .insert(crate::entities::spawner::EntityUuid("ship-a".into()));
+    app.world_mut()
+        .entity_mut(other)
+        .insert(crate::entities::spawner::EntityUuid("ship-b".into()));
+    author_objective_stance(
+        &mut app,
+        "scoped",
+        "tactical",
+        objective_stance("scoped-escort", StanceKind::Standard, true, true),
+    );
+    app.world_mut()
+        .resource_mut::<crate::world::server::ObjectiveManagerRes>()
+        .0
+        .set_recipients("scoped", vec!["ship-a".into()]);
+    app.update();
+    app.update();
+    assert!(command_bb(&app, intended)
+        .stances
+        .iter()
+        .any(|s| s.id == "scoped-escort"));
+    assert!(!command_bb(&app, other)
+        .stances
+        .iter()
+        .any(|s| s.id == "scoped-escort"));
+    set_admitted(&mut app, intended, "tactical", "scoped-escort");
+    set_admitted(&mut app, other, "tactical", "scoped-escort");
+    app.update();
+    assert_eq!(
+        stances(&app, intended)
+            .0
+            .get(&tactical())
+            .map(String::as_str),
+        Some("scoped-escort")
+    );
+    assert_ne!(
+        stances(&app, other).0.get(&tactical()).map(String::as_str),
+        Some("scoped-escort")
+    );
+    app.world_mut()
+        .resource_mut::<crate::world::server::ObjectiveManagerRes>()
+        .0
+        .fail("scoped");
+    app.update();
+    assert!(!command_bb(&app, intended)
+        .stances
+        .iter()
+        .any(|s| s.id == "scoped-escort"));
+    assert_ne!(
+        stances(&app, intended)
+            .0
+            .get(&tactical())
+            .map(String::as_str),
+        Some("scoped-escort")
     );
 }

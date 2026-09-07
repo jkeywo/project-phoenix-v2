@@ -613,7 +613,8 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// refuses that rather than inventing the difference, which is the same
 /// judgement formats 21 and 22 made about the facts they added.
 /// `27` — #1306 preserves accepted removals waiting for the fixed pipeline.
-pub const SNAPSHOT_FORMAT: u32 = 27;
+/// `28` — #1307 retains Objective records, recipient scope and terminal status.
+pub const SNAPSHOT_FORMAT: u32 = 28;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -1872,6 +1873,11 @@ pub struct LayerFlags {
     /// its newly-minted UUIDs for the captured identities before entity restore.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub declared_entity_uuids: Vec<Option<String>>,
+    /// Retained Objective ownership in the layer's original mutation order.
+    /// The unload path consumes this list even after the activation journal
+    /// has already been applied; recreating the palette does not recreate it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub owned_objective_ids: Vec<String>,
     pub flags: FlagStore,
 }
 
@@ -2482,6 +2488,9 @@ pub struct PhoenixSnapshot {
     /// already claiming an exact hull amount and a lethal flag.
     #[serde(default)]
     pub gm_direct_effects: crate::gm_effect::PendingGmDirectEffects,
+    /// Exact Objective lifecycle/authored state, excluding presentation transitions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub objective_records: Vec<crate::objectives::ObjectiveRecord>,
     pub rng: Option<SimRngState>,
     pub mint: Option<WorldIdMintState>,
     pub phase: Option<GamePhase>,
@@ -2653,6 +2662,10 @@ pub fn capture(world: &World) -> PhoenixSnapshot {
             .cloned()
             .unwrap_or_default(),
         rng: world.get_resource::<SimRng>().map(SimRng::state),
+        objective_records: world
+            .get_resource::<crate::world::server::ObjectiveManagerRes>()
+            .map(|manager| manager.0.records().to_vec())
+            .unwrap_or_default(),
         mint: world.get_resource::<WorldIdMint>().map(WorldIdMint::state),
         phase: world
             .get_resource::<State<GamePhase>>()
@@ -2756,6 +2769,7 @@ fn capture_layer_flags(world: &World) -> Vec<LayerFlags> {
                 })
                 .collect(),
             flags: runtime.flags.clone(),
+            owned_objective_ids: runtime.owned_objective_ids.clone(),
         })
         .collect()
 }
@@ -5418,6 +5432,15 @@ fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut
     // live Station/System admission and are part of the captured boundary.
     world.insert_resource(snapshot.gm_station_commands.clone());
     world.insert_resource(snapshot.gm_direct_effects.clone());
+    if !snapshot.objective_records.is_empty()
+        || world.contains_resource::<crate::world::server::ObjectiveManagerRes>()
+    {
+        let mut manager = crate::world::server::ObjectiveManagerRes::default();
+        manager
+            .0
+            .restore_records(snapshot.objective_records.clone());
+        world.insert_resource(manager);
+    }
     // Consumer reply routes are transient and reconstructed from the accepted
     // pending commands above.  A pre-restore route must never settle a command
     // belonging to the new continuation.
@@ -5571,7 +5594,10 @@ fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut
         if let Some(mut layers) = world.get_resource_mut::<crate::world::server::WorldLayerMap>() {
             for layer in &snapshot.layer_flags {
                 match layers.0.get_mut(&layer.path) {
-                    Some(runtime) => runtime.flags = layer.flags.clone(),
+                    Some(runtime) => {
+                        runtime.flags = layer.flags.clone();
+                        runtime.owned_objective_ids = layer.owned_objective_ids.clone();
+                    }
                     None => missing.push(layer.path.clone()),
                 }
             }

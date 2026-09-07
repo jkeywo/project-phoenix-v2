@@ -22,6 +22,9 @@ export const GM_ACTION_REFUSAL_REASON_LABELS = Object.freeze({
   'unknown-gm-event': 'server.gm.session.reason.unknown_gm_event',
   'protected-entity': 'server.gm.session.reason.protected_entity',
   'unknown-entity': 'server.gm.session.reason.unknown_entity',
+  'unknown-objective': 'server.gm.session.reason.unknown_objective',
+  'objective-not-active': 'server.gm.session.reason.objective_not_active',
+  'objective-scope-mismatch': 'server.gm.session.reason.objective_scope_mismatch',
   'target-not-damageable': 'server.gm.session.reason.target_not_damageable',
   // The two narrowed-scope refusals (issue #1311). They join this table rather
   // than growing a direct-effect-only one: a GM who aims at a Station that is

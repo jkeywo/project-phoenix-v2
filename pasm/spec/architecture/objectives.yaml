@@ -143,7 +143,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/objectives.rs, src/world/server.rs]
+      paths: [src/objectives.rs, src/world/server.rs, src/gm_objective.rs, src/snapshot.rs, src/sim_digest.rs]
       symbols: [ObjectiveManager, ObjectiveManagerRes, scored_pool_with_boost]
       tests: [cargo test]
 
@@ -152,7 +152,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Objective Runtime State
-      summary: Session-lifetime objectives keyed by unique ID, retaining active, completed, and failed records with player text, targets, source, directive, and utility data.
+      summary: Session-lifetime objectives keyed by unique ID, retaining active, completed, and failed records with player text, subject targets, source, directive, utility and immutable recipient scope. Snapshot restore and digest preserve complete records in insertion order.
     architecture:
       classification: authoritative
       owner: objective-manager

@@ -121,6 +121,104 @@ test('a GM confirms safe removal from the map and protected targets remain', { t
 });
 
 const GM_FIELD_PATH = 'assets/entities/smoke_gm_asteroid_field.toml';
+
+const GM_OBJECTIVE_WORLD = `
+[global]
+seed = 1307
+title = "GM Objective smoke fixture"
+description = "Authored Objective controls through the ordinary fleet mission panel."
+
+[[available_ships]]
+template_path = "assets/entities/alliance_cruiser.toml"
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+[[gm_objective_palette]]
+id = "gm_smoke_complete"
+label = "server.gm.objective.complete"
+text = "server.gm.objective.heading"
+mandatory = true
+[[gm_objective_palette]]
+id = "gm_smoke_fail"
+label = "server.gm.objective.fail"
+text = "server.gm.objective.heading"
+mandatory = true
+`;
+
+test('a GM activates and resolves authored Objectives through the real mission panel', { tag: '@core' }, async ({ context }) => {
+  test.setTimeout(120_000);
+  await context.route('**/assets/worlds/default.toml', (route) => {
+    // route.fetch() bypasses the shared fixture and loads the production world's
+    // multi-hull picker, which deliberately withholds PhoenixReady until a pick.
+    return route.fulfill({ contentType: 'text/plain', body: GM_OBJECTIVE_WORLD });
+  });
+  const ship = await context.newPage(), gm = await context.newPage();
+  const shipErrors = captureServerPageErrors(ship), gmErrors = captureServerPageErrors(gm);
+  await ship.goto('/?scenario=assets/worlds/default.toml'); await waitForWasmReady(ship);
+  const hostId = await readHostPeerId(ship);
+  const captain = await createTestClient(context, hostId, { name: 'Objective witness' });
+  await selectAndWait(captain, 'Captain');
+  await ship.evaluate(() => window.__hostFleetOpen()); await waitForJoinCode(ship, 'fleet-code', 30_000);
+  const code = await ship.locator('#fleet-code').textContent();
+  await gm.goto('/?scenario=assets/worlds/default.toml'); await waitForWasmReady(gm);
+  await joinFleetAsGm(gm, code); await captain.send('SetReady', { ready: true });
+  await gm.evaluate(() => document.getElementById('gm-ready-btn').click());
+  await Promise.all([ship, gm].map(page => page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress')));
+  expectFixtureWorld(await captain.waitForMessage('WorldSetup', 10_000), GM_OBJECTIVE_WORLD);
+  // Observe ordinary outbound proposals without replacing their decoder or reducer.
+  await gm.evaluate(() => {
+    window.__objectiveSmokeRequests = [];
+    const submit = window.__hostObjectiveAction;
+    window.__hostObjectiveAction = request => {
+      window.__objectiveSmokeRequests.push(structuredClone(request)); return submit(request);
+    };
+  });
+  const row = id => gm.locator(`#gm-objective-list li[data-objective="${id}"]`);
+  const apply = async (id, verb) => {
+    await row(id).locator(`button[data-verb="${verb}"]`).click();
+    await expect(gm.locator('#gm-objective-consequence')).toContainText('All ships');
+    await gm.locator('#gm-objective-confirm').click();
+    await expect(gm.locator(`#gm-objective-results li[data-objective="${id}"][data-verb="${verb}"][data-outcome="applied"]`)).toHaveCount(1);
+  };
+  const completeId = 'gm_smoke_complete', failId = 'gm_smoke_fail';
+  await expect(row(completeId).locator('button[data-verb="activate"]')).toBeEnabled();
+  await row(completeId).locator('button[data-verb="activate"]').click();
+  await gm.locator('#gm-objective-cancel').click();
+  expect(await gm.evaluate(() => window.__objectiveSmokeRequests.length)).toBe(0);
+  await apply(completeId, 'activate');
+  await captain.page.waitForFunction(id => (window.__messages || []).some(message =>
+    message.type === 'ObjectiveSummary' && message.data.objectives?.some(o => o.id === id && o.status === 'Active')), completeId);
+  await apply(completeId, 'complete');
+  await expect(row(completeId)).toHaveAttribute('data-status', 'Completed');
+  await expect(row(completeId).locator('button[data-verb="activate"]')).toBeDisabled();
+  await apply(failId, 'activate'); await apply(failId, 'fail');
+  await expect(row(failId)).toHaveAttribute('data-status', 'Failed');
+  // Replay an observed exact proposal through the ordinary ingress. Correlation
+  // idempotence must leave one canonical row and one fictional transition.
+  await gm.evaluate(() => window.__hostObjectiveAction(window.__objectiveSmokeRequests[0]));
+  await expect(gm.locator(`#gm-objective-results li[data-objective="${completeId}"][data-verb="activate"]`)).toHaveCount(1);
+  // A stale resolution and an out-of-scope request use the same production
+  // submission seam; neither can rewrite the terminal Objective.
+  await gm.evaluate(({ completeId, failId }) => {
+    const request = window.__objectiveSmokeRequests[0];
+    window.__hostObjectiveAction({ ...request, objective: completeId, verb: 'fail', correlation: 'stale-objective-smoke' });
+    window.__hostObjectiveAction({ ...request, objective: failId, verb: 'complete',
+      recipients: ['00000000-0000-4000-8000-000000000001'], correlation: 'scope-objective-smoke' });
+  }, { completeId, failId });
+  await expect(gm.locator('#gm-objective-results li[data-correlation="stale-objective-smoke"]')).toHaveAttribute('data-outcome', 'refused');
+  await expect(gm.locator('#gm-objective-results li[data-correlation="scope-objective-smoke"]')).toHaveAttribute('data-outcome', 'refused');
+  await expect(row(completeId)).toHaveAttribute('data-status', 'Completed');
+  await expect(row(failId)).toHaveAttribute('data-status', 'Failed');
+  const activity = gm.locator('#gm-activity-list [data-category="gm_action"]');
+  await expect(activity.filter({ hasText: completeId }).first()).toBeVisible();
+  expect(shipErrors).toEqual([]); expect(gmErrors).toEqual([]);
+  await captain.close();
+});
+
 const GM_ROCK_PATH = 'assets/entities/smoke_gm_ordinary_asteroid.toml';
 const GM_REGION_PATH = 'assets/entities/smoke_gm_inert_region.toml';
 const GM_LAYER_PATH = 'assets/worlds/smoke_gm_region_layer.toml';

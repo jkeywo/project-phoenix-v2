@@ -103,6 +103,7 @@ fn publish_comms_blackboard(
         (
             Option<&crate::ship::state::ShipRedAlert>,
             Option<&crate::entities::spawner::EntitySystemHull>,
+            Option<&EntityUuid>,
         ),
         With<crate::server_app::LocalShip>,
     >,
@@ -156,10 +157,10 @@ fn publish_comms_blackboard(
     // utility score is zero. Comms does not apply the captain boost — that is a
     // captain-scoped mechanism — so a zero-gated doctrine objective stays hidden
     // in comms until its own conditions lift it.
-    let (red_alert, hull_fraction) = local_conditions_q
+    let (red_alert, hull_fraction, ship_uuid) = local_conditions_q
         .single()
         .ok()
-        .map(|(ra, hull)| {
+        .map(|(ra, hull, uuid)| {
             let red_alert = ra.map(|r| r.0).unwrap_or(false);
             let hull_fraction = hull
                 .map(|h| {
@@ -171,9 +172,9 @@ fn publish_comms_blackboard(
                     }
                 })
                 .unwrap_or(1.0);
-            (red_alert, hull_fraction)
+            (red_alert, hull_fraction, uuid.map_or("", |u| u.0.as_str()))
         })
-        .unwrap_or((false, 1.0));
+        .unwrap_or((false, 1.0, ""));
     let conditions = crate::objectives::WorldConditions {
         red_alert,
         hull_fraction,
@@ -182,7 +183,7 @@ fn publish_comms_blackboard(
     let objectives_snap: Vec<ObjectiveSnapshot> = objectives
         .as_ref()
         .map(|o| {
-            o.0.scored_pool(&conditions)
+            o.0.scored_pool_for(&conditions, ship_uuid)
                 .into_iter()
                 .filter(crate::objectives::is_visible_objective)
                 .map(|s| s.snapshot)
@@ -1836,7 +1837,10 @@ pub fn operate_comms_ai(
         let mut hits: Vec<DirectiveHit> = Vec::new();
         let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         if let Some(mgr) = objectives.as_ref() {
-            for scored in mgr.0.scored_pool(&conditions) {
+            for scored in mgr
+                .0
+                .scored_pool_for(&conditions, entity_uuid.map_or("", |u| u.0.as_str()))
+            {
                 if !scored
                     .relevance
                     .contains(&crate::core::messages::SystemAffinity::Comms)

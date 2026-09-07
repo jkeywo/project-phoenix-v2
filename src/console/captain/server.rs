@@ -760,7 +760,11 @@ fn publish_captain_blackboard(
             objectives_snap = objectives
                 .as_ref()
                 .map(|obj| {
-                    let scored = obj.0.scored_pool_with_boost(&conditions, captain_boost);
+                    let scored = obj.0.scored_pool_with_boost_for(
+                        &conditions,
+                        captain_boost,
+                        uuid_opt.map_or("", |u| u.0.as_str()),
+                    );
                     scored
                         .into_iter()
                         .filter(crate::objectives::is_visible_objective)

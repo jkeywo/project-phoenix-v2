@@ -345,7 +345,13 @@ pub(crate) fn publish_viewscreen_blackboard(
         let captain_boost = boost.as_ref().and_then(|b| b.boost_arg(scope));
         let mut scored_objectives = objectives
             .as_ref()
-            .map(|o| o.0.scored_pool_with_boost(&conditions, captain_boost))
+            .map(|o| {
+                o.0.scored_pool_with_boost_for(
+                    &conditions,
+                    captain_boost,
+                    uuid.map_or("", |u| u.0.as_str()),
+                )
+            })
             .unwrap_or_default();
 
         // Merge the hull's standing template doctrine into the scenario pool (see

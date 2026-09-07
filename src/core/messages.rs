@@ -1942,8 +1942,9 @@ pub struct EntitySnapshot {
     /// region representation on radar.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub region_colour: Option<[f32; 3]>,
-    /// Set to `true` when this entity is referenced by an active mission
-    /// objective. The client radar renders a visual indicator for these entities.
+    /// Shared metadata may carry a global active-Objective hint. Recipient
+    /// presentation MUST replace it from that ship's current Objective list;
+    /// this cached bit grants no visibility and can outlive a transition.
     #[serde(default)]
     pub objective_target: bool,
     /// Targetability tags from the entity's `[target]` section.

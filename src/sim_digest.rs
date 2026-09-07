@@ -497,6 +497,15 @@ pub fn first_divergent_scope(mine: &World, theirs: &[(&'static str, u64)]) -> Op
 /// ending, captain boosts, world.
 fn fold_run_scope(world: &World, mut acc: u64) -> u64 {
     acc = fold_u64(acc, world.get_resource::<SimTick>().map_or(0, |t| t.0));
+    // Objective-free probes keep their previous digest. Retained terminal
+    // records and exact authored AI/scoring fields are authoritative; dirty
+    // flags and drained presentation transitions are not.
+    if let Some(manager) = world.get_resource::<crate::world::server::ObjectiveManagerRes>() {
+        if !manager.0.records().is_empty() {
+            acc = fold_str(acc, "objective-records");
+            acc = fold_serde(acc, &manager.0.records());
+        }
+    }
 
     // Typed GM control becomes current authoritative state at its application
     // boundary, not when a transport happens to deliver a future owner commit.
@@ -803,7 +812,13 @@ fn fold_scenario_flags(world: &World, mut acc: u64) -> u64 {
         .map(|runtime| sorted_flags(&runtime.flags))
         .unwrap_or_default();
 
-    type LayerRow<'a> = (u64, &'a str, Option<&'a str>, Vec<(&'a str, i64)>);
+    type LayerRow<'a> = (
+        u64,
+        &'a str,
+        Option<&'a str>,
+        Vec<(&'a str, i64)>,
+        &'a [String],
+    );
     let mut layers: Vec<LayerRow<'_>> = world
         .get_resource::<WorldLayerMap>()
         .map(|map| {
@@ -816,6 +831,7 @@ fn fold_scenario_flags(world: &World, mut acc: u64) -> u64 {
                         path.as_str(),
                         layer.loader_path.as_deref(),
                         sorted_flags(&layer.flags),
+                        layer.owned_objective_ids.as_slice(),
                     )
                 })
                 .collect()
@@ -834,11 +850,21 @@ fn fold_scenario_flags(world: &World, mut acc: u64) -> u64 {
     acc = fold_str(acc, "scenario-flags");
     acc = fold_flag_store(acc, &base);
     acc = fold_u64(acc, layers.len() as u64);
-    for (index, (_order, path, loader_path, flags)) in layers.into_iter().enumerate() {
+    for (index, (_order, path, loader_path, flags, objective_ids)) in layers.into_iter().enumerate()
+    {
         acc = fold_u64(acc, index as u64);
         acc = fold_str(acc, path);
         acc = fold_optional_str(acc, loader_path);
         acc = fold_flag_store(acc, &flags);
+        // Empty ownership preserves the pre-Objective fold. Nonempty lists
+        // affect the later unload and therefore must not be digest-invisible.
+        if !objective_ids.is_empty() {
+            acc = fold_str(acc, "layer-objective-ownership");
+            acc = fold_u64(acc, objective_ids.len() as u64);
+            for id in objective_ids {
+                acc = fold_str(acc, id);
+            }
+        }
     }
     acc
 }

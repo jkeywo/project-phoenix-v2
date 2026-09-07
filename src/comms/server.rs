@@ -897,6 +897,7 @@ pub(crate) fn broadcast_comms_state(
         (
             Option<&crate::ship_plugin::ShipConfigComponent>,
             Option<&crate::ship_plugin::HumanSeekingHosts>,
+            Option<&crate::entities::spawner::EntityUuid>,
         ),
         With<crate::server_app::LocalShip>,
     >,
@@ -911,7 +912,7 @@ pub(crate) fn broadcast_comms_state(
     // or the original holder reconnecting and reclaiming the seat — must still
     // receive the current snapshot, and the targeted `CommsState` only ever goes
     // to the resolved host and only on a dirty tick.
-    let Some((ship_config, seeking_hosts)) = ship_query.iter().next() else {
+    let Some((ship_config, seeking_hosts, ship_uuid)) = ship_query.iter().next() else {
         return;
     };
     // A fixture whose LocalShip carries no `ShipConfigComponent`, or a hull
@@ -965,7 +966,9 @@ pub(crate) fn broadcast_comms_state(
             r.available = m.sender_in_range;
         }
     }
-    let objectives_snap = objectives.0.sorted_snapshots();
+    let objectives_snap = objectives
+        .0
+        .snapshots_for(ship_uuid.map_or("", |u| u.0.as_str()));
     let mut contacts = comms.contacts.clone();
     // Auto-derive is_urgent: a contact is urgent when it has at least one
     // unread urgent message in the current inbox.

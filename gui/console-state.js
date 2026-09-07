@@ -228,10 +228,11 @@ export function repairCoreAndTargets(systemHull, stationSystems, damageableSyste
 
 function withObjectiveTargets(entities, objectives) {
   const targets = activeObjectiveTargetNames(objectives);
-  if (targets.size === 0) return entities || [];
   return (entities || []).map(e => {
-    if (!entityMatchesObjectiveTarget(e, targets)) return e;
-    return { ...e, objective_target: true };
+    // WorldSetup / EntitySpawned / reconnect metadata can contain another
+    // ship's global hint, or a stale one after resolution. Only this ship's
+    // ObjectiveSummary grants an annotation; never mutate the shared input.
+    return { ...e, objective_target: entityMatchesObjectiveTarget(e, targets) };
   });
 }
 
@@ -244,6 +245,8 @@ export function buildRadarRegions(entities, objectives = []) {
       // shape geometry still comes from the entity's own [shape]/
       // [asteroid_field] fields.
       if (!e || !e.region_colour) return null;
+      const tags = (e.tags || e.entity_tags || []).map(t => String(t).toLowerCase());
+      if (tags.includes('objective_marker') && !e.objective_target) return null;
       const shape = e.shape
         ? String(e.shape).toLowerCase()
         : ((e.inner_radius || 0) > 0 ? 'torus' : 'sphere');
@@ -333,6 +336,7 @@ export function buildBlips(entities, shipX, shipZ, shipYaw, range, opts = {}) {
     if (!a || !a.radar_icon) return null;
 
     const tags = (a.tags || a.entity_tags || []).map(t => String(t).toLowerCase());
+    if (tags.includes('objective_marker') && !a.objective_target) return null;
     if (shows.length > 0 && !tags.some(t => shows.includes(t)) && !a.objective_target) return null;
 
     const ax = entityX(a), az = entityZ(a);
@@ -796,7 +800,7 @@ export function buildWeaponsConsoleState(state, systemIds = []) {
   }
   if (blips.length === 0) {
     blips = buildBlips(
-      state.asteroids || [],
+      withObjectiveTargets(state.asteroids, state.objectives),
       state.shipX || 0,
       state.shipZ || 0,
       state.shipYaw || 0,
@@ -1189,7 +1193,7 @@ export function buildHelmConsoleState(state, systemIds = []) {
   // damage — see `apply_radar_damage_modifiers`) over the static ship config.
   const range = bb.radar_range ?? state.helmRadarRange ?? HELM_RADAR_RANGE;
   // Exclude objective_marker entities — objectives only show on the nav chart.
-  const helmEntities = (state.asteroids || []).filter(e => {
+  const helmEntities = withObjectiveTargets(state.asteroids, state.objectives).filter(e => {
     const tags = (e.tags || e.entity_tags || []).map(t => String(t).toLowerCase());
     return !tags.includes('objective_marker');
   });
@@ -1876,7 +1880,7 @@ export function buildSensorsConsoleState(state, systemIds = []) {
                           : state.sensorsRadarShows;
   const radarSelects = bb ? (bb.radar_selects ?? state.sensorsRadarSelects)
                           : state.sensorsRadarSelects;
-  const entities = state.asteroids;
+  const entities = withObjectiveTargets(state.asteroids, state.objectives);
   const blips = buildBlips(
     entities, state.shipX || 0, state.shipZ || 0, state.shipYaw || 0,
     range,

@@ -96,6 +96,7 @@ use vellum_ultralight::staging;
 
 use super::document::pane_drain_script;
 use super::frame_stats::{PaneExperiments, PaneFrameSample, PaneFrameStats};
+use super::hud::{hud_z_index, LOBBY_Z_INDEX};
 use super::mirror::{MirrorPane, PaneMirror, VIEW_CRASH_COPY_FAILURES};
 use super::pane_thread::{
     spawn_pane_thread, FrameRect, PaneCommand, PaneEvent, PaneInput, PaneKeyCode, PaneKind,
@@ -1227,14 +1228,15 @@ fn init_pane_host(world: &mut World) {
         // order. Negative only orders it within the UI pass — the UI still
         // draws over the 3-D viewscreen, which is the point of the surface.
         if seat.lobby {
-            world.entity_mut(canvas).insert(ZIndex(-1));
+            world.entity_mut(canvas).insert(ZIndex(LOBBY_Z_INDEX));
         }
-        // The HUD overlay (issue #422, native port) draws OVER the 3-D viewscreen
-        // and above any other UI on the window — the lobby sits at -1, and a
-        // running mission has no panes tiled on the viewscreen. A positive index
-        // keeps the frame on top wherever it is shown.
+        // The HUD normally covers scene UI, but the F9-revealed lobby must be
+        // above its border: the Settings cog and popup are inside that texture.
+        // This also preserves the lobby's existing order below tiled consoles.
         if seat.hud {
-            world.entity_mut(canvas).insert(ZIndex(20));
+            world
+                .entity_mut(canvas)
+                .insert(ZIndex(hud_z_index(lobby_present)));
         }
         windows.insert(
             id,
@@ -1410,18 +1412,16 @@ fn cache_hud_state(
     }
 }
 
-/// Show the viewscreen HUD overlay (issue #422, native port) only while a mission
-/// is `InProgress`, and hide it otherwise.
+/// Show the viewscreen HUD in `InProgress` and `GameOver`, hiding it otherwise.
 ///
-/// The host boots into `Lobby` with the crew-lobby surface on the viewscreen; the
-/// HUD frame belongs over the LIVE 3-D scene, so it and the lobby take the same
-/// window but are never drawn at once — one is hidden by phase while the other
-/// shows, the same mutual exclusion `server.html` gets for free by swapping which
-/// element it displays.
+/// F9 can reveal the lobby over either live phase. Both views remain composited,
+/// but the passive HUD then goes beneath the lobby's interactive controls. This
+/// follows `sync_host_lobby_presence` in the same chain, so draw and input use
+/// the same frame's reveal decision. Hiding chrome restores the normal HUD layer.
 fn sync_viewscreen_hud_presence(
     host: Option<ResMut<PaneHost>>,
     phase: Option<Res<State<GamePhase>>>,
-    mut nodes: Query<&mut Node>,
+    mut nodes: Query<(&mut Node, &mut ZIndex)>,
 ) {
     let (Some(mut host), Some(phase)) = (host, phase) else {
         return;
@@ -1453,11 +1453,15 @@ fn sync_viewscreen_hud_presence(
             });
         }
     }
-    if let Ok(mut node) = nodes.get_mut(canvas) {
+    if let Ok((mut node, mut z_index)) = nodes.get_mut(canvas) {
         // Write only on a real change so an unchanged phase does not dirty the UI
         // layout every frame.
         if node.display != want {
             node.display = want;
+        }
+        let layer = hud_z_index(host.lobby_present);
+        if z_index.0 != layer {
+            z_index.0 = layer;
         }
     }
 }
@@ -1607,8 +1611,8 @@ fn resize_pane_surfaces(
         let ph = window.physical_height().max(1);
         // The host-lobby surface (issue #1325) and the HUD overlay (issue #422,
         // native port) are FULL-WINDOW overlays, not tiled consoles: each fills
-        // the whole window and they stack by ZIndex (the lobby beneath, the HUD
-        // above, shown one at a time by phase). Only genuine console panes tile
+        // the whole window and they stack by ZIndex (revealed lobby above HUD).
+        // Only genuine console panes tile
         // among themselves — counting the overlays in the tile split is what
         // squeezed the HUD into half the viewscreen.
         let tiled: Vec<usize> = idxs

@@ -1353,6 +1353,13 @@ localiseHostPayload → hostLobbyViewModel → renderHostLobby
 | Bevy wiring + `LocalHostLobby` | `src/native_host/host_lobby/mod.rs` |
 | Compositing and input | `src/native_host/panes/ultralight.rs` |
 
+The native HUD and lobby are separate Bevy textures. When F9 reveals the
+lobby, `panes::hud::hud_z_index` puts the passive HUD below it so the frame
+cannot obscure the Settings cog, popup or Station rows. Hiding chrome restores
+the normal HUD layer above scene overlays. The lobby stays below tiled
+consoles, matching their existing input priority; no page is reloaded and
+HUD visibility, updates and copy policy do not change.
+
 Four things are worth knowing before touching it.
 
 **It is not a pane, and deliberately not on the pane bus.** A pane is a

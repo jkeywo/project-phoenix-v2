@@ -477,11 +477,9 @@ mod tests {
         drop(frame);
         let events = observer.events();
         assert_eq!(events.len(), 5);
-        assert!(
-            events
-                .iter()
-                .all(|e| e.surface == Some(surface()) && e.frame == Some(0))
-        );
+        assert!(events
+            .iter()
+            .all(|e| e.surface == Some(surface()) && e.frame == Some(0)));
         assert!(matches!(
             events.last().unwrap().operation,
             Operation::Uploaded {

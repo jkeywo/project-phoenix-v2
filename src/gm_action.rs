@@ -448,9 +448,9 @@ impl GmAction {
     /// Which lever of the event-control family this action pulls, for the
     /// durable result.
     ///
-    /// `None` is Fire — see [`crate::gm_event::GmEventLever`] for why the
-    /// family's first lever is the absent one rather than a named variant, and
-    /// why every family that carries no lever at all answers the same way.
+    /// Fire and Pause return `None` here and identify themselves through
+    /// [`Self::verb`]. Other action families also return `None`; an event
+    /// result needs either a verb or a Skip lever to identify its control.
     pub fn event_lever(&self) -> Option<crate::gm_event::GmEventLever> {
         match self {
             Self::ArmGmEventSkip { .. } => Some(crate::gm_event::GmEventLever::SkipNext),

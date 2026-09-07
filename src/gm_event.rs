@@ -116,13 +116,12 @@ pub fn state_event_id(state: &TriggerState) -> Option<String> {
 
 /// Which lever of the event-control family one durable result reports.
 ///
-/// `None` on a [`crate::gm_action::LoggedGmAction`] is **Fire** — the lever the
-/// family shipped with (#1301) and the shape every pre-#1304 fact already has
-/// on the wire, so a world that only ever fired keeps the digest it had. A new
-/// lever names itself instead, which is what lets ONE
-/// [`crate::gm_action::GmActionKind::EventControl`] carry the whole family the
-/// GM contract describes rather than splitting the mission panel's result feed
-/// across one kind per button.
+/// An absent `LoggedGmAction::lever` means this is not Skip: Fire and Pause
+/// identify themselves through `LoggedGmAction::verb`. Other action families
+/// carry neither field. An event-control fact carrying neither is malformed,
+/// never an implicit Fire. Keeping Skip in its own optional field preserves
+/// the pre-#1304 Fire/Pause wire shape and keeps every control in one
+/// [`crate::gm_action::GmActionKind::EventControl`] result feed.
 ///
 /// Variants are APPEND-ONLY: the durable result is postcard-encoded into the
 /// deterministic digest, which writes an enum by VARIANT INDEX.

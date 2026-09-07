@@ -921,8 +921,8 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
                             .cloned()
                             .and_then(|value| serde_json::from_value(value).ok()),
                         // The event-control lever (issue #1304), on the same
-                        // terms: absent or `null` is Fire, which is what a peer
-                        // that predates the Skip lever sends. An unrecognised
+                        // terms: absent or `null` leaves Fire/Pause identity
+                        // to `verb`, as pre-Skip peers do. An unrecognised
                         // spelling fails the whole frame rather than degrading
                         // to Fire — reporting a refused Skip as a refused Fire
                         // would be the opposite sentence about the same button.

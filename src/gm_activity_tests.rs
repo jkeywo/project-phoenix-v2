@@ -557,7 +557,7 @@ fn a_fired_gm_event_is_attributed_by_the_event_it_fired() {
 /// because it tells every GM the opposite of what their colleague did.
 #[test]
 fn a_skip_arm_is_attributed_by_its_lever_and_never_as_a_fire() {
-    let row = |correlation: &str, lever: Option<crate::gm_event::GmEventLever>| {
+    let row = |correlation: &str, action: crate::gm_action::GmAction| {
         let mut fact = logged(
             "gm-alpha",
             correlation,
@@ -565,16 +565,27 @@ fn a_skip_arm_is_attributed_by_its_lever_and_never_as_a_fire() {
             None,
         );
         fact.action_kind = crate::gm_action::GmActionKind::EventControl;
-        fact.target = Some("base-world::courier_lost".into());
-        fact.lever = lever;
+        fact.target = action.target_id().map(str::to_owned);
+        fact.verb = action.verb();
+        fact.lever = action.event_lever();
         fact
     };
 
     let mut state = GmActivityState::default();
     assert!(terminal_action_entries(&mut state, None, None, None, None).is_empty());
     let mut results = crate::gm_action::LocalGmActionRefusals::default();
-    results.push(row("skip-1", Some(crate::gm_event::GmEventLever::SkipNext)));
-    results.push(row("fire-1", None));
+    results.push(row(
+        "skip-1",
+        crate::gm_action::GmAction::ArmGmEventSkip {
+            event: "base-world::courier_lost".into(),
+        },
+    ));
+    results.push(row(
+        "fire-1",
+        crate::gm_action::GmAction::FireGmEvent {
+            event: "base-world::courier_lost".into(),
+        },
+    ));
 
     let entries = terminal_action_entries(&mut state, None, Some(&results), None, None);
     let actions: Vec<GmActivityAction> = entries
@@ -594,8 +605,78 @@ fn a_skip_arm_is_attributed_by_its_lever_and_never_as_a_fire() {
         actions.contains(&GmActivityAction::FireGmEvent {
             event: "base-world::courier_lost".into(),
         }),
-        "and the absent lever is still a Fire: {actions:?}"
+        "the explicit Fire verb stays distinct from Skip: {actions:?}"
     );
+    assert_eq!(entries.len(), 2);
+    assert!(entries.iter().all(|entry| matches!(&entry.detail,
+        GmActivityDetail::GmAction(detail) if detail.outcome == GmActivityActionOutcome::Applied)));
+    assert!(terminal_action_entries(&mut state, None, Some(&results), None, None).is_empty());
+}
+
+#[test]
+fn refused_skip_and_fire_requests_keep_their_own_activity_attribution() {
+    use crate::gm_action::{
+        GmAction, GmActionId, GmActionRefusalReason, GmActionRequest, LoggedGmAction,
+    };
+    let event = "base-world::courier_lost";
+    let mut state = GmActivityState::default();
+    assert!(terminal_action_entries(&mut state, None, None, None, None).is_empty());
+    let mut results = crate::gm_action::LocalGmActionRefusals::default();
+    for (correlation, action) in [
+        (
+            "skip-1",
+            GmAction::ArmGmEventSkip {
+                event: event.into(),
+            },
+        ),
+        (
+            "fire-1",
+            GmAction::FireGmEvent {
+                event: event.into(),
+            },
+        ),
+    ] {
+        results.push(LoggedGmAction::refused_request(
+            &GmActionRequest {
+                operator_id: "gm-alpha".into(),
+                correlation: GmActionId::new(correlation).unwrap(),
+                action,
+            },
+            12,
+            GmActionRefusalReason::WrongPhase,
+        ));
+    }
+    let entries = terminal_action_entries(&mut state, None, Some(&results), None, None);
+    let details = entries
+        .iter()
+        .map(|entry| {
+            let GmActivityDetail::GmAction(detail) = &entry.detail else {
+                panic!("expected action")
+            };
+            assert_eq!(detail.operator.id, "gm-alpha");
+            assert_eq!(detail.outcome, GmActivityActionOutcome::Refused);
+            assert_eq!(detail.reason.as_deref(), Some("wrong-phase"));
+            (detail.correlation.as_str(), detail.action.clone())
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        details,
+        vec![
+            (
+                "fire-1",
+                GmActivityAction::FireGmEvent {
+                    event: event.into()
+                }
+            ),
+            (
+                "skip-1",
+                GmActivityAction::ArmGmEventSkip {
+                    event: event.into()
+                }
+            ),
+        ]
+    );
+    assert!(terminal_action_entries(&mut state, None, Some(&results), None, None).is_empty());
 }
 
 /// A directed world effect is attributed by WHAT it hit and by what the hull
@@ -810,7 +891,7 @@ fn a_paused_gm_event_is_attributed_as_a_pause_and_not_as_a_fire() {
         ],
     );
 
-    // An event-control fact with no lever names a control nobody pulled, so it
+    // An event-control fact with neither verb nor lever names no control, so it
     // is dropped rather than rendered as the one verb that used to exist.
     let mut leverless = crate::gm_action::LocalGmActionRefusals::default();
     let mut fact = logged(

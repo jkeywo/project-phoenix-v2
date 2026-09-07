@@ -6,7 +6,8 @@ name: CI
 # and a push to main. There is no branch-push run.
 #
 #   PR / push to main   the fast gates (pasm, test, editor-test, viewer-test,
-#                       boundary), the WASM build, and the @core smoke tier.
+#                       boundary), demo-test, tooling-build, the WASM build,
+#                       and the @core smoke tier.
 #                       This is the loop an agent iterates in, and nothing in it
 #                       exists to measure performance.
 #   nightly (03:17 UTC) all of the above with the FULL smoke suite, plus
@@ -171,89 +172,55 @@ jobs:
       - name: Run the native test suite
         run: cargo test --workspace --features headless
 
-      # The demo build, actually compiled (issue #940). PHOENIX_DEMO_BUILD is
-      # set in exactly one place in this repo — deploy-demo.yml — and that job
-      # runs `trunk build` and no tests. So before this step, every
-      # `#[cfg(phoenix_demo_build)]` body was source no job had ever built: the
-      # deleted client cheat route, the deleted client debug/pause messages, and
-      # the demo arms of the tests that pin them. Those tests looked like they
-      # covered the gate and did not — with the variable unset both sides of
-      # `the_cfg_gate_and_the_runtime_flag_agree` answer `false` whatever they
-      # compare against, so the assertion passed vacuously. It found a real bug
-      # the first time it was run.
-      #
-      # Deliberately narrow, and deliberately LAST. Setting the variable
-      # changes a cfg on this crate, so rustc rebuilds the crate (not its
-      # dependencies — the cache above still serves those); putting it after
-      # the steps that want the un-flagged build means it invalidates nothing
-      # behind it. `--lib` keeps it to the one target whose answers the flag
-      # can change; the filters name the tests that read the gate, while
-      # everything in the lib still has to compile, which is most of the value.
-      #
-      # The filters, and why each earns its place:
-      #   build_flags                 — the cfg and the `option_env!` agree.
-      #   command_admission::debug_route — the god-mode cheat route is absent.
-      #   route_is_absent_from_a_demo_build — the two client messages
-      #     (`ToggleDebugFlag`, `TogglePause`) do not DECODE here. That is the
-      #     one asked over the wire rather than through a predicate, and it is
-      #     the one that catches a variant quietly losing its `#[cfg]`.
-      #
-      # `debug_overlay::tests::client_route` is deliberately NOT in this list:
-      # that module is itself `#[cfg(not(phoenix_demo_build))]`, so naming it
-      # here would match zero tests and pass vacuously — the exact trap this
-      # step exists to close.
+  # Separate configurations run independently and remain deployment gates.
+  # Each job has its own Rust cache; the first run must warm the new caches.
+  # PHOENIX_DEMO_BUILD changes this crate's cfg, so isolate its rebuild from
+  # the ordinary suite. Keep the real decode/admission tests (issue #940).
+  demo-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust and cache
+        uses: jkeywo/vellum/actions/setup-fleet-rust@a08dca9ca49033307bb6d5e85cb068205c1164b6
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libudev-dev libxkbcommon-dev libasound2-dev
+
+      # --lib compiles the demo library and runs only tests of its build gate.
+      # debug_overlay::tests::client_route is absent in demo builds; do not
+      # add that filter, which would silently select no tests.
       - name: Run the demo-build gate tests
         env:
           PHOENIX_DEMO_BUILD: 'true'
         run: cargo test --lib -- build_flags command_admission::debug_route route_is_absent_from_a_demo_build
 
-      # `host` and `capture` each gate a binary CI never otherwise builds
-      # (native delivery host / offscreen billboard-atlas + LOD-tuning tools —
-      # neither ships in the default or wasm feature set, and neither test
-      # invocation above passes their feature flags). A debug build is enough
-      # to catch a compile break; nothing here needs to RUN, so this rides the
-      # same cache as the steps above rather than paying for a release profile.
+  # Link the native host and capture tools, which the ordinary test feature
+  # set does not build. Keep debug builds; these binaries need no release run.
+  tooling-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust and cache
+        uses: jkeywo/vellum/actions/setup-fleet-rust@a08dca9ca49033307bb6d5e85cb068205c1164b6
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libudev-dev libxkbcommon-dev libasound2-dev
+
       - name: Build the host and capture-tooling binaries
         run: |
           cargo build --features host --bin phoenix-host
           cargo build --features capture --bins
 
-  # ── Viewer tests (`--features viewer`) ────────────────────────────────────────
-  #
-  # The standalone model/shader viewer's own tests, EXECUTED. Until this job
-  # existed they were compiled by two steps and run by none: `test`'s clippy
-  # step type-checks them (its explicit feature list includes `viewer`), and
-  # nothing else in this workflow ever passes `--features viewer` to `cargo
-  # test`. A
-  # viewer test could therefore go stale rather than red indefinitely, and one
-  # did — the billboard-preview assertion in `src/viewer/lod.rs` claimed a far
-  # level was a procedural sphere for a whole release after the imposter atlases
-  # replaced it, because the only thing that would have said otherwise was a
-  # developer typing the command by hand.
-  #
-  # A SEPARATE JOB RATHER THAN A STEP IN `test`, and that is the whole point:
-  # `viewer` and `headless` are different feature sets, so appending this to
-  # `test` would serialise a second full codegen of the crate and its test
-  # binaries behind the first and add all of it to that job's wall time. Here it
-  # runs concurrently with `test`, `build`, `editor-test`, `pasm` and
-  # `native-build`, none of which it needs and none of which need it — so the
-  # marginal cost to the workflow's critical path (still `build` → `smoke` →
-  # `perf`, where the release WASM build alone is ~20 minutes) is zero, and the
-  # marginal cost overall is this job's own runner minutes.
-  #
-  # Same toolchain action and the same apt packages as every other Rust job, so
-  # rust-cache carries bevy/rapier/nalgebra between runs exactly as it does for
-  # `test`, `build` and `native-build`. The action exposes no shared-key and
-  # rust-cache's default key is per-job, so this job gets its own cache entry —
-  # cold once, warm thereafter, which is the same deal the other three have and
-  # the reason the steady-state marginal wall time here is the test RUN and not
-  # a from-scratch dependency build.
-  #
-  # No fmt and no clippy: `test` already runs both, and its clippy pass names
-  # `viewer` in its explicit feature list, which is what type-checks this
-  # feature set. Duplicating them here would buy nothing and cost a second lint
-  # pass. (If a feature is ever dropped from that list, this sentence stops
-  # being true — which is why the list has a keep-in-sync note of its own.)
+  # Viewer tests run under their own feature set. --lib avoids building all
+  # integration-test binaries, and viewer:: avoids rerunning the general suite.
+  # The library test binary still compiles in full; this is not a codegen filter.
+  # test already owns fmt and clippy, including viewer in its feature list.
   viewer-test:
     runs-on: ubuntu-latest
 
@@ -275,7 +242,11 @@ jobs:
       # `viewer.html` actually ships, `--no-default-features --features viewer`) is
       # covered by the `boundary` job below, which builds exactly that feature set.
       - name: Run the viewer test suite
-        run: cargo test --features viewer
+        run: |
+          set -o pipefail
+          cargo test --lib --features viewer viewer:: | tee viewer-tests.log
+          # libtest succeeds on an empty selection; refuse that silent loss.
+          grep -Eq 'test result: ok\. [1-9][0-9]* passed;' viewer-tests.log
 
   # ── Sim → presentation boundary (`--no-default-features`) ──────────────────────
   #
@@ -1036,7 +1007,7 @@ jobs:
 
   # ── Deploy (main branch only, requires both test + smoke to pass) ─────────────
   deploy:
-    needs: [test, build, editor-test, smoke, viewer-test, boundary]
+    needs: [test, build, editor-test, smoke, viewer-test, demo-test, tooling-build, boundary]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:

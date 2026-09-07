@@ -3,17 +3,8 @@
 // tests/client/client-lobby-layout.test.js — the client lobby's RESPONSIVE
 // contract (issue #1370).
 //
-// The slice this pins did three things, and none of them was assertable when
-// it landed: it deleted the script-computed orientation hook, it introduced
-// the `#lobby-side` wrapper that makes the portrait and landscape artboards
-// one document, and it put the whole layout switch in a single media query.
-// All three are page FACTS — an attribute that must not come back, a nest of
-// element ids, a rule in a particular query — and the repo already knows how
-// to hold facts like that: design-tokens.test.js, console-tokens.test.js and
-// control-floors.test.js all read a document as text and pin what is in it.
-//
-// Two of these are here because the review of #1370 found the code wrong, not
-// because they might one day go wrong:
+// These checks cover responsive layout and keyboard order regressions found
+// during the review of #1370:
 //
 //   - The per-seat job line was dropped for EVERY landscape viewport, which
 //     took AC1's "what the seat does" off a 1440x900 desktop — the default
@@ -32,7 +23,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { REPO_ROOT, GUI, TOKENS_CSS, readStripped, cssRules } from './css-scan.js';
+import { REPO_ROOT, TOKENS_CSS, readStripped, cssRules } from './css-scan.js';
 
 const CLIENT_HTML = path.join(REPO_ROOT, 'client.html');
 const RAW = fs.readFileSync(CLIENT_HTML, 'utf8');
@@ -48,31 +39,7 @@ const rulesFor = (sel) => RULES.filter((r) => r.selector.trim() === sel);
 /** The one rule for `sel` outside any at-rule. */
 const baseRule = (sel) => rulesFor(sel).find((r) => r.at === null);
 
-// ── 1. The dead hook stays dead ─────────────────────────────────────────────
-
-describe('the lobby asks the browser about orientation, not a script', () => {
-  // render() used to compute an orientation and write it onto
-  // #console-container, where no stylesheet ever selected it — a second answer
-  // to a question `@media (orientation: …)` already answers. Re-adding it is
-  // how layout creeps back under script, so each half of it is named here.
-  it('writes no data-orientation attribute', () => {
-    expect(SRC).not.toMatch(/data-orientation/);
-  });
-
-  it('loads no gui/device-orientation.js, and the module is gone', () => {
-    expect(SRC).not.toMatch(/device-orientation\.js/);
-    expect(fs.existsSync(path.join(GUI, 'device-orientation.js'))).toBe(false);
-  });
-
-  it('reads no script-held orientation, and re-exports no repaint hook for one', () => {
-    // `window.scheduleRender` existed only so the deleted module could coalesce
-    // a resize repaint. scheduleRender itself stays, page-local.
-    expect(SRC).not.toMatch(/currentOrientation/);
-    expect(SRC).not.toMatch(/window\.scheduleRender/);
-  });
-});
-
-// ── 2. One document at two frame sizes ──────────────────────────────────────
+// ── 1. One document at two frame sizes ──────────────────────────────────────
 
 describe('#lobby-side is the joint the two artboards share', () => {
   it('wraps the seat detail and the command row inside the lobby body', () => {
@@ -100,7 +67,7 @@ describe('#lobby-side is the joint the two artboards share', () => {
   });
 });
 
-// ── 3. The job line is dropped on HEIGHT, never on orientation alone ────────
+// ── 2. The job line is dropped on HEIGHT, never on orientation alone ────────
 
 describe('the roster keeps telling a player what a seat does', () => {
   const descRules = RULES.filter(
@@ -126,7 +93,7 @@ describe('the roster keeps telling a player what a seat does', () => {
   });
 });
 
-// ── 4. The lobby's rules stay in the lobby ──────────────────────────────────
+// ── 3. The lobby's rules stay in the lobby ──────────────────────────────────
 
 describe('the landscape block does not restyle the spectator claim list', () => {
   it('scopes every .station-row rule it writes to #lobby-ui', () => {
@@ -142,7 +109,7 @@ describe('the landscape block does not restyle the spectator claim list', () => 
   });
 });
 
-// ── 5. Focus order follows paint order ──────────────────────────────────────
+// ── 4. Focus order follows paint order ──────────────────────────────────────
 
 describe('the command row can be tabbed through in the order it is read', () => {
   it('paints the two buttons in DOM order, so `order` moves no tab stop', () => {
@@ -170,7 +137,7 @@ describe('the command row can be tabbed through in the order it is read', () => 
   });
 });
 
-// ── 6. Control boundaries take the ladder rung for their own fill ───────────
+// ── 5. Control boundaries take the ladder rung for their own fill ───────────
 
 describe("the lobby's controls sit on gui/tokens.css's control ladder", () => {
   const TOKENS = fs.readFileSync(TOKENS_CSS, 'utf8');

@@ -3,7 +3,7 @@ title: Testing Strategy
 type: concept
 tags: [tests, rust, javascript, playwright, pasm, ci]
 sources: [AGENTS.md, .github/workflows/ci.yml, tests/client/, tests/smoke/, tests/headless_runner.rs, src/core/codec_tests.rs]
-updated: 2026-08-27
+updated: 2026-09-07
 ---
 
 # Testing Strategy
@@ -51,15 +51,33 @@ suite live in Vellum; Phoenix does not have a local PASM pytest suite.
 
 ## CI gates
 
-The workflow runs independent `pasm`, Rust `test`, and `editor-test` jobs. The
-WASM build follows Rust tests; smoke follows the build; performance and balance
-run on their declared dependencies. The asset performance capture and ratified
-Cruiser balance matrix are gating, while other machine-sensitive performance
-and balance results remain reports.
+The ordinary Rust job runs `cargo test --workspace --features headless`.
+The separate viewer job runs `cargo test --lib --features viewer viewer::`
+and refuses zero matched tests. The library test binary still compiles in full,
+but general tests are executed only by the ordinary suite and integration-test
+binaries are not built for the viewer job.
 
-During implementation, use `cargo check` and targeted tests. Before a commit,
-run the repository's documented fast gate set once. The build and smoke gates
-are exercised between pushes as required by the issue workflow.
+Demo-build tests (`PHOENIX_DEMO_BUILD=true`, with the build flag, debug admission,
+and absent-wire-route filters) and debug host/capture binary builds run in
+independent `demo-test` and `tooling-build` jobs. Both remain deployment gates,
+alongside `test`, `viewer-test`, `boundary`, `editor-test`, `build`, and `smoke`.
+Each Rust job has its own cache; new jobs initially pay a cold-cache cost.
+
+The WASM build runs independently; smoke depends on its artifact. PRs and main
+pushes run the core smoke tier; nightly/manual runs and PRs labelled
+`smoke-full` run the full suite. Native release builds, performance, and balance
+keep their nightly/manual schedules. The Cruiser balance matrix gates its job;
+regular performance comparisons report warnings rather than blocking deployment.
+PASM retains its independent validation, scan and traceability job.
+
+During implementation, use targeted tests. Run the documented final gates once
+before pushing, including the additional native configurations when verifying
+the full CI matrix. See AGENTS.md for commands and PowerShell demo environment
+handling. Check viewer discovery as well as its exit status.
+
+Prefer observable behaviour over source-text pins. The enabled logging filter
+is exercised by the existing world-spawned duel's damage/death assertions;
+there is no separate logging duel or claim that it captures emitted log text.
 
 ## Related
 

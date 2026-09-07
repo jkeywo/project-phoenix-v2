@@ -39,10 +39,11 @@ deadline the design model does not claim is an error by design.
 
 ```bash
 # ── CI gates you can run locally — ALL green before each PUSH, run ONCE ──────
-# These are the three fast CI jobs (test, editor-test, pasm) in full. Anything
+# These are the ordinary native, JavaScript and PASM gates. Anything
 # red here fails the build. `cargo test` alone is NOT sufficient: clippy denies
-# warnings, and `pasm validate` gates on the spec model. The remaining two jobs
-# (build, smoke) need a WASM build — see the trunk/playwright commands below.
+# warnings, and `pasm validate` gates on the spec model. Additional native
+# configurations are listed below. Build and smoke need WASM — see the
+# trunk/playwright commands below.
 #
 # Do NOT run this list after every edit, implementation pass, review pass, or
 # issue commit — clippy alone is a near-full rebuild. While iterating, use
@@ -74,6 +75,22 @@ uv run pasm traceability                       # CI: pasm job, report (still exi
 #   the fleet copy in ada7a172 and its tests went with it to vellum; only the
 #   spec model (pasm/spec/) is phoenix's. Editing a slice still needs the three
 #   commands above, because they assert on that YAML — `cargo test` will not.
+
+# Extra CI configurations, outside the ordinary local pre-push gate list.
+# CI runs these independently and requires them for deployment. Locally, run
+# the relevant configuration when changing viewer/demo/build setup, or each
+# once when verifying the full matrix. Keep local Cargo commands sequential.
+cargo test --lib --features viewer viewer::     # CI: viewer-test; must run >0 tests
+# PowerShell demo invocation (restore any pre-existing value afterward):
+# $savedDemoBuild = $env:PHOENIX_DEMO_BUILD
+# try {
+#   $env:PHOENIX_DEMO_BUILD = 'true'
+#   cargo test --lib -- build_flags command_admission::debug_route route_is_absent_from_a_demo_build
+# } finally { $env:PHOENIX_DEMO_BUILD = $savedDemoBuild }
+# Bash equivalent (CI: demo-test):
+PHOENIX_DEMO_BUILD=true cargo test --lib -- build_flags command_admission::debug_route route_is_absent_from_a_demo_build
+cargo build --features host --bin phoenix-host # CI: tooling-build
+cargo build --features capture --bins          # CI: tooling-build
 
 # Falling Skyway's 55 full-timeline simulations are manual-only. This enables
 # them and runs only that scenario suite; the 14 narrow probe worlds stay in

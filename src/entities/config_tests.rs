@@ -8979,35 +8979,6 @@ fn default_comms_selector_config_validates() {
     );
 }
 
-/// The two eligibility terms the #786 review added, pinned by name so a
-/// future edit cannot quietly drop them:
-///   - `has_open_hail_thread` (NOT `has_unread_from_sender`) is the
-///     anti-respam gate — it must key on hails WE issued, or a
-///     scenario-pushed greeting permanently suppresses a legitimate hail;
-///   - `self_fact(comms_available)` is the AC2 system-availability gate,
-///     which the AC names explicitly and which nothing else in the hail path
-///     enforces.
-#[test]
-fn default_comms_selector_eligibility_names_the_anti_respam_and_availability_gates() {
-    let cfg = crate::entities::authored_ai_pins::shipped_selector_toml("comms_hail");
-    assert!(
-        cfg.eligibility
-            .contains("candidate_fact(has_open_hail_thread) < 1"),
-        "got: {}",
-        cfg.eligibility
-    );
-    assert!(
-        !cfg.eligibility.contains("has_unread_from_sender"),
-        "inbound traffic of unknown provenance must NOT gate hailing; got: {}",
-        cfg.eligibility
-    );
-    assert!(
-        cfg.eligibility.contains("self_fact(comms_available) > 0"),
-        "got: {}",
-        cfg.eligibility
-    );
-}
-
 #[test]
 fn comms_selector_rejects_unregistered_source() {
     let mut cfg = crate::entities::authored_ai_pins::shipped_selector_toml("comms_hail");

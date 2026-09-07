@@ -11,9 +11,8 @@
 //! with forty-odd other tests over who fixes the pool — and the loser is
 //! whichever combat-chaotic duel probe then runs under a scheduler it was not
 //! blessed against. Observed, not theorised: adding these runs to that binary
-//! turned `world_spawned_alliance_hull_returns_fire_and_the_duel_resolves` and
-//! `balance_logging_systems_run_with_an_enabled_filter_and_the_duel_resolves`
-//! red while leaving this test green.
+//! turned `world_spawned_alliance_hull_returns_fire_and_the_duel_resolves`
+//! red while leaving this test green. That duel also covers enabled logging.
 //!
 //! Cargo gives every integration-test file its own process, which is what makes
 //! a byte-equality claim mean what it says. Keep this file to the one test.

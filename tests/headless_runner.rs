@@ -633,6 +633,12 @@ fn world_spawned_alliance_hull_returns_fire_and_the_duel_resolves() {
         // side dies: the current 32-damage, broadside-latched cruiser destroys
         // the spawned hostile while the phase correctly remains InProgress.
         seed: Some(2),
+        // Exercise enabled logging gates during the same damage/death run.
+        // This checks reachability, not emitted log text (no subscriber here).
+        log: project_phoenix::logging::parse_log_spec(
+            "ai=info,weapons=info,power=info,damage=info",
+        )
+        .expect("log spec should parse"),
         ..test_args()
     };
     let mut app = build_headless_app(&args).expect("app should build");
@@ -1886,102 +1892,6 @@ fn player_game_start_spawn_injects_player_identity_onto_local_ship_only() {
     assert!(
         saw_npc_ship,
         "expected at least one world-spawned NPC ship in the patrol world"
-    );
-}
-
-/// Issue #840: the balance-diagnosis-through-logging workflow needs the
-/// `plog!` call sites in the balance-relevant categories to actually be
-/// *reached* during a real fight. The confirmed root cause of #840 was not
-/// broken emission — the parser, gate, subscriber and `EnvFilter` all lined
-/// up — but the near-total *absence of call sites*: `ai`/`power` had none,
-/// `weapons` had a single trace. #840 added the load-bearing ones (target
-/// changes, opened/ceased fire, power energize/brownout, damage/destruction).
-///
-/// This test cannot assert on the emitted text — under `cargo test` no
-/// `tracing` subscriber is installed, so every event short-circuits before it
-/// reaches a writer and a capture-based assertion would pass vacuously (see the
-/// note in `logging::macros`). What it *can* prove is that the systems now
-/// carrying those `plog!` calls run to completion with a real, category-enabled
-/// `LogFilterConfig` inserted (the gate branch is evaluated, not skipped), and
-/// that the decisions the lines narrate actually occur: a target is acquired,
-/// beams fire, and the duel resolves in a destruction. If a future change moved
-/// a `plog!` into a system that panics under a populated config, or dropped the
-/// systems from the schedule, this fails where the pure logging tests would
-/// not. The live acceptance is a manual `--log ai=info,...` run; this is the
-/// cheap automated guard that the code paths are reachable.
-#[test]
-fn balance_logging_systems_run_with_an_enabled_filter_and_the_duel_resolves() {
-    use project_phoenix::logging::parse_log_spec;
-
-    let dt = 1.0 / 30.0;
-    let mut args = HeadlessArgs {
-        world_path: "assets/worlds/probe_duel.toml".into(),
-        dt,
-        // Window re-blessed for issue #907's review, same reason as
-        // `world_spawned_alliance_hull_returns_fire_and_the_duel_resolves`
-        // above (was 60 s): the game-start writer moving into `FixedUpdate`
-        // shifts this combat-chaotic duel's RNG draws by one tick, and it now
-        // settles later than the old window allowed. Confirmed still
-        // resolving in a kill by 180 s.
-        max_ticks: ticks_for_sim_seconds(180.0, dt),
-        deterministic: true,
-        // Re-blessed for issue #896: the "destroyed by" site this test needs
-        // reached only fires in a duel that resolves, and on the new physics
-        // clock seed 34 is one that does inside the (now 180 s, issue #907)
-        // budget. It still is — #929's second pass changed WHO dies on it, not
-        // whether anything does: the destroyer goes at 46.3 s rather than the
-        // cruiser. The assertion below reads the ledger's death rows rather than
-        // the phase for exactly that reason.
-        seed: Some(34),
-        ..test_args()
-    };
-    // The four categories the balancer reaches for, each enabled — exactly what
-    // the CLI builds from `--log ai=info,weapons=info,power=info,damage=info`.
-    // With this present, every `plog!` at those sites evaluates its gate against
-    // a real config rather than the warn-level fallback.
-    args.log = parse_log_spec("ai=info,weapons=info,power=info,damage=info")
-        .expect("log spec should parse");
-
-    let mut app = build_headless_app(&args).expect("app should build");
-    run(&mut app, args.max_ticks);
-    let report = build_report(&mut app, &args, 0.0);
-
-    // The decisions the new lines narrate all happened: both duelists dealt
-    // damage (targets were acquired and beams fired — the `ai` and `weapons`
-    // sites), and the fight ended in a kill (the `damage` "destroyed by" site).
-    let dealt: f32 = report.damage_by_ship.values().map(|l| l.damage_dealt).sum();
-    assert!(
-        dealt > 0.0,
-        "no damage dealt — target-acquisition/weapons-fire paths (the ai/weapons \
-         plog sites) were not reached: {:?}",
-        report.damage_by_ship
-    );
-    // The `destroyed by` site fires on ANY non-asteroid destruction, so what
-    // this test needs is that SOMEBODY died — which is what it now asks.
-    //
-    // It used to ask `final_phase == GameOver` as a proxy, and that proxy broke
-    // under #929's second pass: `GameOver` latches on the LOCAL ship's death,
-    // and on this seed it is now the world-spawned destroyer that dies (46.3 s
-    // of the 180 s window) while the cruiser survives. The site under test was
-    // reached either way; only the proxy stopped tracking it. The player-death
-    // path itself is still covered — deliberately, and next door —
-    // by `world_spawned_alliance_hull_returns_fire_and_the_duel_resolves`, which
-    // pins a seed the player loses precisely because it asserts `GameOver` and
-    // `RunOutcome::Defeat` for their own sake.
-    let deaths: Vec<(&str, f64)> = report
-        .damage_by_ship
-        .values()
-        .filter_map(|l| {
-            l.death
-                .map(|(_, t)| (l.name_id.as_deref().unwrap_or("?"), t))
-        })
-        .collect();
-    assert!(
-        !deaths.is_empty(),
-        "the duel must resolve in a destruction (the damage `destroyed by` site), \
-         and nothing died inside the window — final phase {}, ledger {:?}",
-        report.final_phase,
-        report.damage_by_ship
     );
 }
 

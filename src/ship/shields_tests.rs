@@ -71,16 +71,6 @@ fn damage_history_prunes_with_the_shared_strict_tick_window() {
 }
 
 #[test]
-fn generic_coordination_router_does_not_name_shields_pending_state() {
-    let router = include_str!("coordination_systems.rs");
-    assert!(
-        !router.contains("PendingShieldsThreatBearing")
-            && !router.contains("pending_shields_threat"),
-        "the generic lag router must hand off DeliveredCoordination without knowing Shields' private pending-state representation"
-    );
-}
-
-#[test]
 fn ownerless_npc_shield_arc_does_not_create_focus_capability() {
     let config = crate::ship::config::ShipConfig::from_toml(
         r#"

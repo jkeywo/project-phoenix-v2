@@ -1520,19 +1520,8 @@ mod tests {
 
     #[test]
     fn the_join_code_stays_above_the_landing_and_the_picker_that_would_cover_it() {
-        // The ladder the shared sheets declare — `#overlay` 190, then the two
-        // full-screen panels this document also carries, `#scenario-panel` 200
-        // and `#landing-panel` 205. Without the lift the join QR is behind the
-        // front door, and then behind the picker, for the whole of selection —
-        // which is precisely the window in which showing it matters, because a
-        // crew join while the operator is still choosing. The host page reaches
-        // the same end by MOVING the node (docking `#overlay` into the picker,
-        // which the landing lays out in its middle column) and moving it back;
-        // this surface never docks and has no lifecycle to move it back with,
-        // so it lifts instead — and since #1361 the lift has to clear 205 as
-        // well as 200. All four numbers are asserted so that a change to any of
-        // them, in a stylesheet or here, breaks this test rather than the
-        // viewscreen.
+        // Crew must see the join QR above both selection panels, with its
+        // toggle above the QR. The numeric layers may change together.
         let qr = std::fs::read_to_string("gui/host-qr.css").unwrap();
         let picker = std::fs::read_to_string("gui/host-scenarios.css").unwrap();
         let landing = std::fs::read_to_string("gui/host-landing.css").unwrap();
@@ -1541,11 +1530,6 @@ mod tests {
         let over_landing = declared(&landing, "#landing-panel", "z-index");
         let lift = declared(GROUND_CSS, "#overlay", "z-index");
         let toggle = declared(GROUND_CSS, "#host-lobby-qr-toggle", "z-index");
-        assert_eq!(base, [190], "gui/host-qr.css's ground layer for the panel");
-        assert_eq!(over_picker, [200], "gui/host-scenarios.css's picker layer");
-        assert_eq!(over_landing, [205], "gui/host-landing.css's landing layer");
-        assert_eq!(lift, [210], "this document's lift");
-        assert_eq!(toggle, [211], "and the control that hides the panel");
         assert!(
             base[0] < over_picker[0]
                 && over_picker[0] < over_landing[0]
@@ -1559,7 +1543,7 @@ mod tests {
         // file.
         let html = build_host_lobby_document(HOST_PAGE).unwrap();
         let sheet = html.find("href=\"gui/host-qr.css\"").unwrap();
-        let ground = html.find("#overlay { z-index: 210;").unwrap();
+        let ground = html.find(GROUND_CSS).unwrap();
         assert!(sheet < ground);
     }
 

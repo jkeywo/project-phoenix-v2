@@ -39,6 +39,14 @@
 # the depot's capacity sits where it was authored for the whole run — but the
 # fold applies to every structure that declares one, which is what makes it a
 # guarantee rather than a special case.
+#
+# RECORDED PRE-#1086, AND NO LONGER REPRODUCIBLE. Issue #1086 widened the
+# authoritative digest over the scenario's own state, and this world's own
+# `depot_offline` flag — set and cleared by the `on_flag_set`/`on_field_repair`
+# handlers above — together with the trigger latches that watch it, are now
+# walked by `sim_digest::fold_scenario_flags` / `fold_scenario_records`, neither
+# of which happened when 2482818893733289830 was measured. Re-measure before
+# treating it as a baseline again.
 
 [global]
 seed = 1025

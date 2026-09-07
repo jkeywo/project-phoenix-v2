@@ -1,0 +1,80 @@
+# Probe world for issue #1119 — backfilling a disconnected ship host.
+#
+# A THREE-ship fleet, deliberately one larger than `probe_fleet_duel.toml`. The
+# extra hull is what lets the crown proof drop ONE host and still have TWO
+# survivors left to compare: #1119 AC6 is "both surviving views agree", and a
+# two-ship fleet dropped to one survivor has nothing to hold that agreement
+# against. Dropping slot 3 here leaves slots 1 and 2, which must
+#
+#   * agree the disconnect tick — derived from slot 3's own last watermark, not
+#     from which of them noticed the close first;
+#   * flip slot 3's ship to Backfill at that exact tick, identically; and
+#   * keep folding the same authoritative digest every tick afterwards, with
+#     slot 3's ship now AI-driven by both of them from the same ticks.
+#
+# A lone host still spawns one player ship and treats the other two rows as
+# ordinary NPCs — the roster decides how many of the `ship`-tagged rows are
+# crewed hulls, exactly as `probe_fleet_duel.toml` documents.
+#
+# A hostile is spawned close enough to engage so the fold covers combat: a lost
+# ship coasting in a straight line under Backfill would agree far more cheaply
+# than one whose helm AI is closing with a target and whose weapons are drawing
+# from the beam/torpedo/jitter streams.
+#
+# Deliberately its OWN world rather than three rows added to
+# `probe_fleet_duel.toml`: adding a row there would spawn an extra NPC in every
+# #1116 test that plays that world with a two-ship roster, moving its digests.
+
+[global]
+seed = 1119
+ai_helm_tick_hz = 30.0
+# Two ticks at 60 Hz — 33 ms. Short on purpose, like the #1116 probe: a probe
+# checks the future-tick and host-loss paths are exercised at all, and a longer
+# delay only makes the test wait. A shipped fleet authors the schema default.
+command_delay_ticks = 2
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# Fleet slot 1's ship — the fleet owner's. Takes `[player_spawn]`.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "fleet-ship-1"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# Fleet slot 2's ship. Placed by its own authored transform.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "fleet-ship-2"
+transform = { position = [60.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# Fleet slot 3's ship — the one the crown proof drops. Far enough from the other
+# two not to start inside a collider, close enough that all three engage the
+# same hostile.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "fleet-ship-3"
+transform = { position = [-60.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+[script]
+setup = """
+on_world_loaded("on_load");
+on_timer(0, "on_spawn");
+
+fn on_load(ctx) {
+    ctx.effects.add_faction_enemy("Harrow", "Alliance");
+    ctx.effects.add_faction_enemy("Alliance", "Harrow");
+}
+
+fn on_spawn(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/alliance_cruiser.toml",
+        name: "fleet_probe_hostile",
+        position: [0, 0, 70],
+        overrides: #{ faction: "cccccccc-3333-4333-8333-cccccccccccc" }
+    });
+}
+"""

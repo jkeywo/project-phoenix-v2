@@ -13,6 +13,13 @@ export class PhDamageDetail extends PhElement {
     return `
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
+    /* Callers hide this element with the \`hidden\` attribute — the Station Bar's
+       damage popup does it for a Station that owns no damageable systems
+       (issue #1374). The line above is an AUTHOR declaration, so it beats the
+       UA stylesheet's \`[hidden] { display: none }\` and the attribute would do
+       nothing without this rule; \`ph-station-damage\` carries the same pair for
+       the same reason. */
+    :host([hidden]) { display: none; }
     :host * { box-sizing: border-box; }
     .list { display: flex; flex-direction: column; gap: 0.2rem; }
     .row { display: flex; align-items: center; gap: 0.4rem; font-size: var(--text-xs); }

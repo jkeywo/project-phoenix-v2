@@ -4,7 +4,7 @@
  * Every in-game command a console raises leaves the phone through this module.
  * It is the one place that knows the shape of a `ClientMessage::ControlSystem`
  * envelope (`{ target, payload }`) and the one place that knows how to reach
- * the PeerJS transport owned by `gui/connection-manager.js`.
+ * the Phoenix crew transport owned by `gui/rendezvous-transport.js`.
  *
  * This module is the client-side half of the PASM entity
  * `client-network-interface`. Console modules (e.g. `gui/repair-dispatch.js`)
@@ -13,8 +13,8 @@
  *
  * Deliberately DOM-free and side-effect-free at import time so it is unit
  * testable in Node: the transport is resolved lazily, either from an explicit
- * `send` argument (how `gui/action-map.js` calls in) or from the live
- * `window.connectionManager` singleton.
+ * `send` argument (how `gui/action-map.js` calls in) or from the page's live
+ * link, `window.phoenixLink`.
  *
  * NOTE: this module carries no gameplay values. `target` and `payload` are
  * passed straight through from the caller; anything tunable lives in TOML on
@@ -47,8 +47,15 @@ export function controlSystemEnvelope(target, payload) {
  * Resolve the function used to put a message on the wire.
  *
  * Prefers an explicit `send(type, data)` (the action-map / test path), then
- * falls back to the live `ConnectionManager` singleton, whose `send` has the
- * identical `(type, data, deliveryClass)` signature.
+ * falls back to the page's live link, whose `send` has the identical
+ * `(type, data, deliveryClass)` signature.
+ *
+ * `window.phoenixLink` is a STABLE façade over whichever Phoenix joiner is
+ * current (client.html, issue #1112) — the joiner itself is replaced on every
+ * reconnect, so a reference captured here has to be to the façade. It was
+ * `window.connectionManager` until PeerJS was retired; that global is gone, and
+ * is deliberately NOT read as a fallback, because a fallback to a name nothing
+ * publishes is a branch that can only ever be dead.
  *
  * @param {((type: string, data?: object) => void)} [send]
  * @returns {((type: string, data?: object) => void) | null} null when offline
@@ -56,9 +63,9 @@ export function controlSystemEnvelope(target, payload) {
 export function resolveTransport(send) {
   if (typeof send === 'function') return send;
   const win = (typeof window !== 'undefined') ? window : null;
-  const cm = win && win.connectionManager;
-  if (cm && typeof cm.send === 'function') {
-    return (type, data) => cm.send(type, data);
+  const link = win && win.phoenixLink;
+  if (link && typeof link.send === 'function') {
+    return (type, data) => link.send(type, data);
   }
   return null;
 }

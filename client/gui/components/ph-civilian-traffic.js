@@ -19,6 +19,11 @@
 import '../strings-boot.js';
 import { t } from '../strings.js';
 import { PhElement, phDefine } from './ph-element.js';
+import { activateNavigationAction } from '../stations/navigation-action-control.js';
+import {
+  civilianOrderActionArgs,
+  NAVIGATION_CIVILIAN_ORDER_ACTION_ID,
+} from '../stations/navigation-actions.js';
 
 /**
  * The `strings.csv` id for a compliance state word.
@@ -47,22 +52,7 @@ export function formatLeg(row) {
 }
 
 /** Flatten one authoritative option into the existing action-map shape. */
-export function orderActionArgs(target, order) {
-  if (!target || !order || typeof order.verb !== 'string') return null;
-  if (order.verb === 'hold') return { target, verb: 'hold' };
-  if (order.verb === 'divert') {
-    const hasRoute = typeof order.route === 'string' && order.route.length > 0;
-    const hasAnchor = typeof order.anchor === 'string' && order.anchor.length > 0;
-    if (hasRoute === hasAnchor) return null;
-    return hasRoute
-      ? { target, verb: 'divert', route: order.route }
-      : { target, verb: 'divert', anchor: order.anchor };
-  }
-  if (order.verb === 'dock' && typeof order.structure === 'string' && order.structure.length > 0) {
-    return { target, verb: 'dock', structure: order.structure };
-  }
-  return null;
-}
+export const orderActionArgs = civilianOrderActionArgs;
 
 export class PhCivilianTraffic extends PhElement {
   #rowCache = new Map();
@@ -157,11 +147,15 @@ export class PhCivilianTraffic extends PhElement {
           btn.textContent = t(option.label);
           btn.setAttribute('aria-label', `${t(option.label)} — ${c.name ? t(c.name) : key}`);
           btn.addEventListener('click', () => {
-            if (this.sendAction) this.sendAction('order_civilian', args);
+            activateNavigationAction(this, NAVIGATION_CIVILIAN_ORDER_ACTION_ID, args, () => {
+              if (this.sendAction) this.sendAction('order_civilian', args);
+            });
           });
+          btn.disabled = !!s.auto;
           orders.appendChild(btn);
         });
       }
+      for (const btn of orders.querySelectorAll('.order-btn')) btn.disabled = !!s.auto;
       // The reason a craft gave for refusing, or the one the world gave for it
       // being stuck. Both are strings.csv ids; a row with neither has no title.
       if (c.reason) el.title = t(c.reason); else el.removeAttribute('title');

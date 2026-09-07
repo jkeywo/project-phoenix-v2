@@ -9,13 +9,22 @@
     body { font-size: var(--text-lg); margin: 0; background: var(--surface-void); overflow: hidden; }
     .frame { height: 100%; position: relative; }
     .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
-    .hero { display: flex; align-items: baseline; justify-content: space-between; flex-shrink: 0; gap: 12px; padding: 4px 0; align-self: flex-start; }
-    .hero h1 { font-size: var(--text-2xl); letter-spacing: 0.22em; color: var(--ink); margin: 0; }
-    .hero h1 .sub { font-family: "JetBrains Mono", monospace; font-size: var(--text-sm); letter-spacing: 0.22em; color: var(--ink-faint); margin-top: 2px; font-weight: 400; }
     .console-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
     .console-body .col { display: flex; flex-direction: column; background: rgba(var(--rgb-panel), 0.6); border: 1px solid var(--edge); padding: 12px; min-height: 0; overflow-y: auto; }
     .console-body .col h2 { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
-    ph-shield-facings, ph-power-controls, ph-repair-teams, ph-hull-integrity { flex: 1; min-height: 0; }
+    ph-shield-facings, ph-power-controls, ph-repair-teams { flex: 1; min-height: 0; }
+    /* The hull bar is one strip of readout, so it takes its own height and
+       leaves the rest of the Repair column to the team roster (issue #1384).
+       While it shared `flex: 1` with `ph-repair-teams` it took half the
+       column for a 10px bar, and a card opened onto four lines of scroll. */
+    ph-hull-integrity { flex: 0 0 auto; }
+    /* Shields over Power, left column (issue #1383): one grid cell, two
+       stacked sub-blocks, each keeping its own heading. Every sub-block
+       scrolls internally if its content ever outgrows its share of the
+       cell, so the cell itself — and never the page — is the one that
+       would have to scroll. */
+    .col.stacked-pair { gap: 16px; }
+    .eng-subcol { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
     /* The Power column lays its controls and battery side by side: the battery
        is a vertical gauge on the right edge, so the controls' buttons never
        run under it. The controls scroll internally when the column is short. */
@@ -28,11 +37,6 @@
     .threat-readout { display: flex; justify-content: space-between; gap: 8px; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); padding: 0 0 8px; flex-shrink: 0; visibility: hidden; }
     .threat-readout.active { visibility: visible; }
     .threat-readout strong { color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: var(--text-md); }
-    .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); flex-shrink: 0; padding: 6px 0; }
-    .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
-    .console-footer .sep { color: var(--line-soft); }
-    .console-footer .spacer { flex: 1; }
-    .hero-controls { display: flex; align-items: center; gap: 8px; }
     /* Tractor beam control (issue #1156). */
     .tractor-panel { flex-shrink: 0; border-top: 1px solid var(--edge); padding-top: 6px; margin-top: 8px; }
     .tractor-panel h2 { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; }
@@ -41,33 +45,81 @@
     .tractor-btn.engaged { background: var(--loaded); color: var(--surface-void); border-color: var(--loaded); }
     .tractor-status { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }
     .tractor-refusal { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--reloading); margin-top: 6px; }
-    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: var(--text-xl); } .hero h1 .sub { font-size: var(--text-xs); } .console-body { grid-template-columns: 1fr; gap: 8px; } .console-body .col { padding: 8px; } }
+    /* First panel in the Operations column (issue #1383): the column's own
+       <h2> already draws a divider under "Operations", so the Tractor
+       panel's own border-top/margin-top — written for the case where it
+       trails other Repair content — would just double that line. Umbilical
+       keeps the normal spacing: it still trails Tractor inside the column. */
+    .tractor-panel.flush { border-top: 0; margin-top: 0; padding-top: 0; }
+
+    /* Phone REPAIR | OPS segment (issue #1383): landscape/desktop keep the
+       Repair and Operations columns both on screen at once, same as before
+       — the segment control is invisible there, and this rule makes the
+       JS-toggled `hidden` on the non-selected panel a no-op so both columns
+       stay on screen. Portrait cannot fit shields+power, Repair AND
+       Operations without scrolling the whole console, so the segment
+       actually hides one there. Mirrors gui/destroyer/captain.html's
+       TARGET | MISSION pattern (issue #1377). */
+    #engineering-seg { display: none; }
+    .eng-seg-panel[hidden] { display: flex; }
+
+    @media (orientation: portrait) {
+      .panel-inner { padding: 10px 12px; gap: 8px; }
+      .console-body { display: flex; flex-direction: column; gap: 8px; }
+      .console-body .col { padding: 8px; }
+      /* Shields beside Power (AC #2): the stacked pair goes row-wise and
+         takes only the height its own content needs, leaving the rest of
+         the console for the segment + the one visible Repair/Operations
+         panel below it. */
+      .col.stacked-pair { flex: 0 0 auto; flex-direction: row; max-height: 34vh; }
+      .col.stacked-pair .eng-subcol { min-width: 0; }
+      #engineering-seg { display: flex; }
+      .eng-seg-panel { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+      .eng-seg-panel[hidden] { display: none; }
+    }
   </style>
 </head>
 <body>
   <div class="frame" data-screen-label="Engineering Console" data-i18n-attr="data-screen-label:console.engineering.screen_label">
     <div class="panel"></div>
     <div class="panel-inner">
-      <div class="hero">
-        <h1><span data-i18n="console.engineering.title">ENGINEERING</span><span class="sub" data-i18n="console.destroyer_engineering.subtitle">SHIELDS &middot; POWER &middot; REPAIR</span></h1>
-        <div class="hero-controls">
-          <span class="auto-badge" id="engineering-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
-        </div>
-      </div>
+      <!-- No title row and no footer (issue #1374): the shell's Station Bar
+           names this seat and its selected tab opens the per-system damage
+           popup the footer's `ph-station-damage` used to. The AUTO badge
+           moves into the Power column, the group whose automation it reports.
+           -->
       <div class="console-body">
-        <div class="col">
-          <h2 data-i18n="console.engineering.shields">Shields</h2>
-          <div class="threat-readout" id="threat-row"><span data-i18n="console.shields.threat_bearing">Threat Bearing</span><strong id="threat-bearing">—</strong></div>
-          <ph-shield-facings id="shield-facings"></ph-shield-facings>
-        </div>
-        <div class="col">
-          <h2 data-i18n="console.engineering.power">Power</h2>
-          <div class="power-row">
-            <ph-power-controls id="power-controls"></ph-power-controls>
-            <ph-battery-bar id="battery-bar" orientation="vertical"></ph-battery-bar>
+        <!-- Shields over Power (issue #1383): one grid cell, two stacked
+             sub-blocks. On a phone this cell instead lays the pair out as a
+             row beside the REPAIR | OPS segment below (see the portrait
+             media query above). -->
+        <div class="col stacked-pair">
+          <div class="eng-subcol" id="eng-shields-block">
+            <h2 data-i18n="console.engineering.shields">Shields</h2>
+            <div class="threat-readout" id="threat-row"><span data-i18n="console.shields.threat_bearing">Threat Bearing</span><strong id="threat-bearing">—</strong></div>
+            <ph-shield-facings id="shield-facings"></ph-shield-facings>
+          </div>
+          <div class="eng-subcol" id="eng-power-block">
+            <div class="col-head">
+              <h2 data-i18n="console.engineering.power">Power</h2>
+              <span class="auto-badge" id="engineering-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
+            </div>
+            <div class="power-row">
+              <ph-power-controls id="power-controls"></ph-power-controls>
+              <ph-battery-bar id="battery-bar" orientation="vertical"></ph-battery-bar>
+            </div>
           </div>
         </div>
-        <div class="col">
+
+        <!-- Phone-only segment (issue #1383): hidden by #engineering-seg's own
+             landscape/desktop `display:none` above, so the roving tabindex it
+             wires never competes with Tab order on those layouts. -->
+        <div class="seg" id="engineering-seg" role="tablist" data-i18n-attr="aria-label:console.engineering.seg.label">
+          <button type="button" class="seg-btn" id="engineering-seg-repair" role="tab" aria-selected="true" aria-controls="engineering-panel-repair" data-i18n="console.engineering.repair">REPAIR</button>
+          <button type="button" class="seg-btn" id="engineering-seg-ops" role="tab" aria-selected="false" aria-controls="engineering-panel-ops" tabindex="-1" data-i18n="console.engineering.seg.ops">OPS</button>
+        </div>
+
+        <div class="col eng-seg-panel" id="engineering-panel-repair">
           <h2 data-i18n="console.engineering.repair">Repair</h2>
           <ph-hull-integrity id="hull-integrity"></ph-hull-integrity>
           <ph-station-damage id="core-damage" label="Core" data-i18n-attr="label:console.repair.core"></ph-station-damage>
@@ -75,7 +127,7 @@
           <!-- External repair-team dispatch (issue #1161): shown only on a hull
                that authors [repair.external_dispatch]. On this hull the repair
                system is engineering-owned, so the dispatch control lives on the
-               Engineering console rather than a dedicated Repair one. Reuses the
+               Engineering column rather than a dedicated Repair one. Reuses the
                tractor panel's styling. -->
           <div class="tractor-panel" id="dispatch-panel" hidden>
             <h2 data-i18n="console.repair.dispatch" style="margin-top:10px">Field Repair</h2>
@@ -85,10 +137,17 @@
             </div>
             <div id="dispatch-refusal" class="tractor-refusal" hidden></div>
           </div>
+        </div>
+
+        <div class="col eng-seg-panel" id="engineering-panel-ops" hidden>
+          <h2 data-i18n="console.engineering.operations">Operations</h2>
           <!-- Tractor beam (issue #1156): shown only on a hull that authors a
-               tractor system, so a hull without one is unchanged. -->
-          <div class="tractor-panel" id="tractor-panel" hidden>
-            <h2 data-i18n="console.engineering.tractor" style="margin-top:10px">Tractor</h2>
+               tractor system, so a hull without one is unchanged. `.flush`
+               drops its own top border/margin (issue #1383): it is now the
+               first thing in the column, right under the column's own
+               heading, which already draws that divider. -->
+          <div class="tractor-panel flush" id="tractor-panel" hidden>
+            <h2 data-i18n="console.engineering.tractor">Tractor</h2>
             <div class="tractor-row">
               <button id="tractor-btn" class="tractor-btn" data-i18n="console.tractor.engage">Engage</button>
               <span id="tractor-status" class="tractor-status">—</span>
@@ -108,13 +167,6 @@
           </div>
         </div>
       </div>
-      <footer class="console-footer footer-bar">
-        <span class="dot"></span>
-        <span id="footer-status" data-i18n="console.engineering.station_footer">ENGINEERING STATION</span>
-        <span class="spacer"></span>
-        <ph-station-damage id="station-damage"></ph-station-damage>
-        <span id="footer-right" style="color:var(--ink-faint)">—</span>
-      </footer>
     </div>
   </div>
   <script type="module">
@@ -125,6 +177,13 @@
     import '../components/ph-hull-integrity.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
+    import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
+    import {
+      EXTERNAL_REPAIR_TOGGLE_ACTION_ID,
+      TRACTOR_TOGGLE_ACTION_ID,
+      UMBILICAL_TOGGLE_ACTION_ID,
+    } from '../stations/engineering-actions.js';
+    import { activateEngineeringAction } from '../stations/engineering-action-control.js';
     // The render lives in gui/destroyer/engineering.console.js (issue #1235):
     // the shared Engineering renderer + this hull's variant (Shields + Power +
     // Repair, plus a Tractor/Umbilical/Field-Repair-dispatch tail). s is a
@@ -140,22 +199,72 @@
     // sets it fresh on every push, so it is never stale.
     document.getElementById('tractor-btn').addEventListener('click', function() {
       var engaged = document.getElementById('tractor-btn').classList.contains('engaged');
-      consoleHandle.sendAction(engaged ? 'release_tractor' : 'engage_tractor');
+      activateEngineeringAction(
+        consoleHandle,
+        TRACTOR_TOGGLE_ACTION_ID,
+        null,
+        engaged ? 'release_tractor' : 'engage_tractor',
+      );
     });
 
     // The one umbilical button toggles start/stop through the action map, which
     // sends the same admitted command an umbilical AI would (issue #1160).
     document.getElementById('umbilical-btn').addEventListener('click', function() {
       var running = document.getElementById('umbilical-btn').classList.contains('engaged');
-      consoleHandle.sendAction(running ? 'stop_transfer' : 'start_transfer');
+      activateEngineeringAction(
+        consoleHandle,
+        UMBILICAL_TOGGLE_ACTION_ID,
+        null,
+        running ? 'stop_transfer' : 'start_transfer',
+      );
     });
 
     // The one dispatch button toggles dispatch/recall through the action map,
     // which sends the same admitted command a repair AI would (issue #1161).
     document.getElementById('dispatch-btn').addEventListener('click', function() {
       var working = document.getElementById('dispatch-btn').classList.contains('engaged');
-      consoleHandle.sendAction(working ? 'recall_external_repair' : 'dispatch_external_repair');
+      activateEngineeringAction(
+        consoleHandle,
+        EXTERNAL_REPAIR_TOGGLE_ACTION_ID,
+        null,
+        working ? 'recall_external_repair' : 'dispatch_external_repair',
+      );
     });
+
+    // Phone REPAIR | OPS segment (issue #1383): presentation-only local
+    // selection — no host command, just which column is on screen. Activates
+    // on both click and arrow-driven focus (the same automatic activation the
+    // Station Bar's own tabs use — gui/hero-bar.js), so a keyboard operator
+    // never has to press Enter on top of the arrow move. Mirrors
+    // gui/destroyer/captain.html's TARGET | MISSION wiring (issue #1377).
+    var engSeg = document.getElementById('engineering-seg');
+    var engSegButtons = [
+      document.getElementById('engineering-seg-repair'),
+      document.getElementById('engineering-seg-ops'),
+    ];
+    var engSegPanels = {
+      repair: document.getElementById('engineering-panel-repair'),
+      ops: document.getElementById('engineering-panel-ops'),
+    };
+    function selectEngineeringSeg(key) {
+      engSegButtons.forEach(function(btn, i) {
+        btn.setAttribute('aria-selected', (i === 0) === (key === 'repair') ? 'true' : 'false');
+      });
+      engSegPanels.repair.hidden = key !== 'repair';
+      engSegPanels.ops.hidden = key !== 'ops';
+      syncRovingTabindex(engSegButtons, key === 'repair' ? 0 : 1);
+    }
+    engSeg.addEventListener('click', function(e) {
+      var btn = e.target.closest('.seg-btn');
+      if (!btn) return;
+      selectEngineeringSeg(btn === engSegButtons[1] ? 'ops' : 'repair');
+    });
+    engSeg.addEventListener('focusin', function(e) {
+      var btn = e.target.closest('.seg-btn');
+      if (!btn) return;
+      selectEngineeringSeg(btn === engSegButtons[1] ? 'ops' : 'repair');
+    });
+    installRovingTabindex(engSeg, { getItems: function() { return engSegButtons; }, orientation: 'horizontal' });
   </script>
 </body>
 </html>

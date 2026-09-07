@@ -7,6 +7,10 @@ import { t } from '../strings.js';
 import { weaponReadinessView } from '../weapon-readiness.js';
 import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
 import { PhElement, phDefine } from './ph-element.js';
+import {
+    TACTICAL_BLASTER_CHARGE_ACTION_ID,
+} from '../stations/tactical-actions.js';
+import { activateTacticalAction } from '../stations/tactical-action-control.js';
 
 export class PhBlastersControls extends PhElement {
   #emptyEl = null;
@@ -19,9 +23,19 @@ export class PhBlastersControls extends PhElement {
     :host * { box-sizing: border-box; }
     .header { display: flex; justify-content: space-between; align-items: center; font-size: var(--text-sm); letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
     .bank-row { display: flex; flex-direction: column; gap: 0.2rem; padding: 0.3rem 0; }
-    .bank-top { display: flex; align-items: center; gap: 0.4rem; font-size: var(--text-xs); }
+    /* flex-wrap (issue #1378): same convention as ph-phasers-controls.js —
+       see the comment there for why the browser's own wrap point (three
+       lines whenever the blocking-reason label is non-empty, which is every
+       non-Ready bank) is wrong and '.bank-line-top' (label + bar) /
+       '.bank-line-bottom' (badge + status + button), each forced to a full
+       flex line, fix it. '.bar-wrap' keeps a real minimum width so the
+       charge/cooldown bar stays visible rather than collapsing before the
+       row wraps. */
+    .bank-top { display: flex; flex-wrap: wrap; row-gap: 0.3rem; gap: 0.4rem; font-size: var(--text-xs); }
+    .bank-line-top, .bank-line-bottom { display: flex; align-items: center; gap: 0.4rem; flex: 1 1 100%; min-width: 0; }
+    .bank-line-bottom { justify-content: space-between; }
     .bank-top .lbl { min-width: 2.5rem; color: var(--ink-dim); }
-    .bar-wrap { flex: 1; height: 0.5rem; background: var(--bg-deep); border: 1px solid var(--line-faint); overflow: hidden; }
+    .bar-wrap { flex: 1 1 4rem; min-width: 4rem; height: 0.5rem; background: var(--bg-deep); border: 1px solid var(--line-faint); overflow: hidden; }
     .bar-fill { height: 100%; transition: width 0.15s ease; }
     .bar-fill.charge { background: linear-gradient(90deg, var(--reloading-dim), var(--reloading)); }
     .bar-fill.cooldown { background: linear-gradient(90deg, var(--fire-dim), var(--fire)); }
@@ -94,91 +108,63 @@ export class PhBlastersControls extends PhElement {
 
         const top = document.createElement('div');
         top.className = 'bank-top';
+
+        const lineTop = document.createElement('div');
+        lineTop.className = 'bank-line-top';
         const lbl = document.createElement('span');
         lbl.className = 'lbl';
-        top.appendChild(lbl);
+        lineTop.appendChild(lbl);
         const wrap = document.createElement('div');
         wrap.className = 'bar-wrap';
         const fill = document.createElement('div');
         fill.className = 'bar-fill';
         wrap.appendChild(fill);
-        top.appendChild(wrap);
+        lineTop.appendChild(wrap);
+        top.appendChild(lineTop);
+
+        const lineBottom = document.createElement('div');
+        lineBottom.className = 'bank-line-bottom';
         const badge = document.createElement('span');
         badge.className = 'auto-badge';
         badge.textContent = t('console.common.auto');
-        top.appendChild(badge);
+        lineBottom.appendChild(badge);
         const status = document.createElement('span');
         status.className = 'status';
-        top.appendChild(status);
+        lineBottom.appendChild(status);
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'btn';
         btn.innerHTML = '<span class="btn-bg"></span><span class="led"></span><span class="label">' + t('component.blasters.charge') + '</span>';
         btn.addEventListener('mousedown', () => {
-          if (!btn.disabled && this.sendAction) {
-            this.sendAction('charge_blaster_start', { bank: bank.id });
-          }
-        });
-        btn.addEventListener('mouseup', () => {
-          if (!btn.disabled && this.sendAction) {
-            this.sendAction('fire_blaster', { bank: bank.id });
-          }
-        });
-        btn.addEventListener('mouseleave', () => {
-          if (!btn.disabled && this.sendAction && bank.state === 'charging') {
-            this.sendAction('fire_blaster', { bank: bank.id });
+          if (!btn.disabled) {
+            activateTacticalAction(this, TACTICAL_BLASTER_CHARGE_ACTION_ID,
+              { bank: bank.id }, 'charge_blaster_start');
           }
         });
         btn.addEventListener('touchstart', (e) => {
           e.preventDefault();
-          if (!btn.disabled && this.sendAction) {
-            this.sendAction('charge_blaster_start', { bank: bank.id });
+          if (!btn.disabled) {
+            activateTacticalAction(this, TACTICAL_BLASTER_CHARGE_ACTION_ID,
+              { bank: bank.id }, 'charge_blaster_start');
           }
         }, { passive: false });
-        btn.addEventListener('touchend', (e) => {
-          e.preventDefault();
-          if (!btn.disabled && this.sendAction) {
-            this.sendAction('fire_blaster', { bank: bank.id });
-          }
-        }, { passive: false });
-        btn.addEventListener('touchcancel', () => {
-          if (!btn.disabled && this.sendAction && bank.state === 'charging') {
-            this.sendAction('fire_blaster', { bank: bank.id });
-          }
-        });
-        // Keyboard press = the same hold-to-fire the pointer does (issue
-        // #1170): Enter/Space down charges, the release fires. This mirrors
-        // mousedown/mouseup onto the SAME named actions — a blaster button
-        // takes no plain `click`, so without this it was the one control on
-        // the console the keyboard could reach but not operate. `repeat` is
-        // ignored so a held key does not re-charge every autorepeat tick.
+        // A charge start is the complete operation: instant banks fire from
+        // that one command and charged banks finish their accepted charge on
+        // the server. Pointer/key release must therefore send nothing — both
+        // legacy FireBlaster and ChargeBlasterStart are the same server action,
+        // so a release used to create a spurious second, refused lifecycle.
+        // `repeat` is ignored so a held key does not re-start the operation.
         btn.addEventListener('keydown', (e) => {
           if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
           e.preventDefault();
           if (e.repeat) return;
-          if (!btn.disabled && this.sendAction) {
-            this.sendAction('charge_blaster_start', { bank: bank.id });
+          if (!btn.disabled) {
+            activateTacticalAction(this, TACTICAL_BLASTER_CHARGE_ACTION_ID,
+              { bank: bank.id }, 'charge_blaster_start');
           }
         });
-        btn.addEventListener('keyup', (e) => {
-          if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
-          e.preventDefault();
-          if (!btn.disabled && this.sendAction) {
-            this.sendAction('fire_blaster', { bank: bank.id });
-          }
-        });
-        // Focus-out releases a mid-charge, mirroring `mouseleave`/`touchcancel`
-        // for the pointer (issue #1170): hold Enter/Space to charge, then move
-        // focus before the keyup, and without this the charge sticks forever.
-        // Same guard, same action as `mouseleave` — it only fires while the bank
-        // is still charging, so the keyup path (which clears that state) cannot
-        // double-fire with it.
-        btn.addEventListener('blur', () => {
-          if (!btn.disabled && this.sendAction && bank.state === 'charging') {
-            this.sendAction('fire_blaster', { bank: bank.id });
-          }
-        });
-        top.appendChild(btn);
+        lineBottom.appendChild(btn);
+        top.appendChild(lineBottom);
         row.appendChild(top);
 
         const barRow = document.createElement('div');
@@ -236,13 +222,13 @@ export class PhBlastersControls extends PhElement {
       if (rv.present) {
         status.textContent = rv.label;
         row.className = 'bank-row ' + (rv.unavailable ? 'unavailable' : rv.ready ? 'ready' : 'blocked');
-        // A charge in progress is a valid mid-fire state, not a block — keep the
-        // button live so mouseup/touchend can release the shot.
-        btn.disabled = !rv.ready && !isCharging;
+        // Charge start is itself the complete server operation; a live charge
+        // must not accept a second press while it finishes on the host.
+        btn.disabled = !rv.ready || isCharging;
       } else {
         status.textContent = '';
         row.className = 'bank-row';
-        btn.disabled = isCooling;
+        btn.disabled = isCooling || isCharging;
       }
       // charging → amber (tactical) pill, cooling → dimmed/disabled, else armed.
       btn.className = 'btn ' + (isCharging ? 'tactical' : btn.disabled ? 'disabled' : 'armed');

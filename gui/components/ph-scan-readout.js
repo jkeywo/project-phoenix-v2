@@ -31,6 +31,7 @@
 import '../strings-boot.js';
 import { t } from '../strings.js';
 import { PhElement, phDefine } from './ph-element.js';
+import { SENSORS_SCAN_ACTION_ID } from '../stations/sensors-actions.js';
 
 /**
  * Whole-percent condition, rendered at the precision the answering band bought.
@@ -57,6 +58,36 @@ export function formatCondition(fraction, step) {
 export function formatTolerance(step) {
   const half = (Number(step) || 0) * 100 / 2;
   return half >= 1 ? `±${Math.round(half)}%` : null;
+}
+
+/**
+ * A separation in world units, to the nearest unit (issue #1347).
+ *
+ * Whole units because a closest approach is a projection over an authored
+ * drift, and decimals would claim a precision the drift does not have. Digits
+ * only, so nothing here needs a strings.csv row.
+ * @param {number} units
+ */
+export function formatDistance(units) {
+  return String(Math.round(Number(units) || 0));
+}
+
+/**
+ * A countdown in `m:ss` (issue #1347), or `--` when there is no answer.
+ *
+ * `null`/absent is deliberately NOT rendered as `0:00`: a contact with no
+ * arrival and a contact arriving this second are opposite readings, and a
+ * console that spelled both the same way would be the crew's own version of the
+ * bug the `debris_deadline_known` marker exists to prevent on the AI side.
+ * @param {number|null|undefined} seconds
+ */
+export function formatSeconds(seconds) {
+  if (seconds === null || seconds === undefined || !Number.isFinite(Number(seconds))) {
+    return '--';
+  }
+  const total = Math.max(0, Math.round(Number(seconds)));
+  const mins = Math.floor(total / 60);
+  return `${mins}:${String(total - mins * 60).padStart(2, '0')}`;
 }
 
 export class PhScanReadout extends PhElement {
@@ -108,9 +139,12 @@ export class PhScanReadout extends PhElement {
 
   #onAction() {
     const action = this.action;
-    if (!action || !this.sendAction) return;
-    const { action: name, ...payload } = action;
-    this.sendAction(name, payload);
+    const activate = typeof window !== 'undefined' && window.activateSemanticAction;
+    if (!action || typeof activate !== 'function') return;
+    activate(SENSORS_SCAN_ACTION_ID, {
+      source: 'control',
+      detail: { uuid: action.uuid },
+    });
   }
 
   render(state) {
@@ -159,11 +193,49 @@ export class PhScanReadout extends PhElement {
       // Mass (issue #1154) is content identity, not a live measurement, so —
       // unlike condition — it is never coarser at one band than another and
       // never carries a tolerance.
+      //
+      // The bulk CLASS (issue #1347) rides on the same line rather than taking
+      // one of its own, because it is the same fact said twice: the number, and
+      // what this suite calls a number that size. A hull authoring no
+      // `[[scan.mass_class]]` ladder sends no class and the line reads exactly
+      // as it did before that table existed.
       rows.appendChild(this.#row(
         t('component.scan.mass'),
-        String(reading.mass),
+        reading.mass_class_label
+          ? `${reading.mass} ${t(reading.mass_class_label)}`
+          : String(reading.mass),
         false,
       ));
+      // The hazard projection (issue #1347), present only on a reading of a
+      // moving contact. Three rows and no fourth: WHAT IS UNDER IT, how near it
+      // gets, and when it arrives — which is the whole of what a crew can act
+      // on, and the reason a rock is worth flying out to.
+      //
+      // A contact on no collision course says so on the first line and stops
+      // there. That is a finding rather than an absence: "we looked and there is
+      // nothing under it" is the thing that lets the crew put a contact down.
+      if (reading.debris) {
+        const hazard = reading.debris;
+        rows.appendChild(this.#row(
+          t('component.scan.debris.protected'),
+          hazard.on_collision_course && hazard.protected_name
+            ? t(hazard.protected_name)
+            : t('component.scan.debris.clear'),
+          hazard.on_collision_course,
+        ));
+        if (hazard.on_collision_course) {
+          rows.appendChild(this.#row(
+            t('component.scan.debris.closest'),
+            formatDistance(hazard.closest_approach),
+            false,
+          ));
+          rows.appendChild(this.#row(
+            t('component.scan.debris.impact'),
+            formatSeconds(hazard.seconds_to_impact),
+            true,
+          ));
+        }
+      }
       for (const entry of reading.flags || []) {
         const [label, held] = entry;
         rows.appendChild(this.#row(

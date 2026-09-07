@@ -1,0 +1,71 @@
+# Probe world for issue #1116 — one deterministic mission across two ship hosts.
+#
+# The smallest world that is genuinely a FLEET mission rather than a single-ship
+# one with a spare hull parked next to it:
+#
+#   * TWO `game_start` rows tagged "ship". A lone host still spawns one player
+#     ship and treats the second row as an ordinary NPC, exactly as every other
+#     world does — the roster decides how many of them are crewed hulls. A fleet
+#     of two crews one each, in slot order.
+#   * A hostile third party, spawned from script CLOSE ENOUGH TO ENGAGE, so
+#     both fleet ships have something to shoot at within a probe-length run.
+#     Combat is what makes the cross-host digest
+#     comparison worth making: it draws from `SimRng`'s beam/torpedo/jitter
+#     streams and mints projectile ids mid-run, so a peer that ordered one
+#     tick's input differently diverges within a few ticks rather than silently
+#     agreeing about two ships coasting in a straight line.
+#   * A short `command_delay_ticks`, because a probe wants the lockstep window
+#     exercised in a handful of ticks rather than a hundred.
+#
+# Deliberately NOT `duel.toml`: that world's roster is rewritten by
+# `headless::duel`'s text transform, so a fleet test built on it would be
+# asserting that transform as well as this issue's.
+
+[global]
+seed = 1116
+ai_helm_tick_hz = 30.0
+# Two ticks at 60 Hz — 33 ms. Short on purpose: a probe is checking that the
+# future-tick path is exercised at all, and a longer delay only makes the test
+# wait. A shipped fleet mission authors the schema default (see
+# `GlobalConfig::command_delay_ticks`).
+command_delay_ticks = 2
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# Fleet slot 1's ship — the fleet owner's. Takes `[player_spawn]`, because one
+# anchor can only place one hull.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "fleet-ship-1"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# Fleet slot 2's ship. Placed by its own authored transform — far enough from
+# slot 1 that the two do not start inside each other's collider, close enough
+# that both engage the same hostile.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "fleet-ship-2"
+transform = { position = [60.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+[script]
+setup = """
+on_world_loaded("on_load");
+on_timer(0, "on_spawn");
+
+fn on_load(ctx) {
+    ctx.effects.add_faction_enemy("Harrow", "Alliance");
+    ctx.effects.add_faction_enemy("Alliance", "Harrow");
+}
+
+fn on_spawn(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/alliance_cruiser.toml",
+        name: "fleet_probe_hostile",
+        position: [30, 0, 55],
+        overrides: #{ faction: "cccccccc-3333-4333-8333-cccccccccccc" }
+    });
+}
+"""

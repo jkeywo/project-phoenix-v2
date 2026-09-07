@@ -4,6 +4,10 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import {
+  HELM_ACTION_CONTEXT,
+  HELM_LATERAL_ACTION_ID,
+} from '../stations/helm-actions.js';
 import { PhElement, phDefine } from './ph-element.js';
 
 export class PhLateralThrustJoystick extends PhElement {
@@ -23,8 +27,12 @@ export class PhLateralThrustJoystick extends PhElement {
     :host * { box-sizing: border-box; }
     .header { display: flex; justify-content: space-between; align-items: center; width: 100%; font-size: var(--text-sm); letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; margin-bottom: 0.3rem; }
     .auto-badge { font-size: var(--text-xs); color: var(--reloading); border: 1px solid var(--reloading); padding: 0.1rem 0.4rem; letter-spacing: 0.2em; }
+    /* 180px is the pad's SIZE, not its width — see the note on
+       ph-helm-joystick's well (issue #1375). The drag maths reads the track's
+       own rect, so a narrower rail gives a shorter throw rather than a pad
+       hanging out over the scope beside it. */
     .track {
-      position: relative; width: 180px; height: 32px; border-radius: 16px;
+      position: relative; width: min(180px, 100%); height: 32px; border-radius: 16px;
       background: linear-gradient(to right, var(--surface-panel) 0%, var(--surface-panel) 50%, var(--surface-panel) 100%);
       border: 1px solid var(--line-faint); cursor: grab; touch-action: none; flex-shrink: 0;
     }
@@ -65,7 +73,8 @@ export class PhLateralThrustJoystick extends PhElement {
     this.setAttribute('role', 'group');
     this.setAttribute('aria-label', t('component.lateral.label'));
     if (!this.hasAttribute('tabindex')) this.setAttribute('tabindex', '0');
-    // Q/E + arrows + gamepad bumpers drive set_lateral_thrust. Deliberate
+    // Q/E + arrows drive the same semantic lateral axis as pointer and the
+    // parent-owned gamepad runtime. Deliberate
     // key-relay coexistence (issue #1176): one document-level handler — the
     // same path gui/key-relay.js relays — so a focused track adds a Tab stop
     // and a name but no second arrow handler, and the key state is a set keyed
@@ -76,7 +85,6 @@ export class PhLateralThrustJoystick extends PhElement {
     }
     if (typeof window !== 'undefined') {
       window.addEventListener('blur', this.#onBlur);
-      window.addEventListener('gamepadconnected', this.#onGamepadConnected);
     }
   }
 
@@ -87,7 +95,6 @@ export class PhLateralThrustJoystick extends PhElement {
     }
     if (typeof window !== 'undefined') {
       window.removeEventListener('blur', this.#onBlur);
-      window.removeEventListener('gamepadconnected', this.#onGamepadConnected);
     }
     if (this.#inputRaf) { cancelAnimationFrame(this.#inputRaf); this.#inputRaf = null; }
     if (this.#hbRaf) { cancelAnimationFrame(this.#hbRaf); this.#hbRaf = null; }
@@ -218,32 +225,6 @@ export class PhLateralThrustJoystick extends PhElement {
     this.#startInputLoop();
   };
 
-  #onGamepadConnected = () => {
-    this.#startInputLoop();
-  };
-
-  #getGamepadInput() {
-    if (typeof navigator === 'undefined' || !navigator.getGamepads) return 0;
-    const pads = navigator.getGamepads();
-    for (let i = 0; i < pads.length; i++) {
-      const gp = pads[i];
-      if (!gp || !gp.buttons) continue;
-      // LB = buttons[4], RB = buttons[5]
-      let v = 0;
-      if (gp.buttons[4] && gp.buttons[4].pressed) v -= 1;
-      if (gp.buttons[5] && gp.buttons[5].pressed) v += 1;
-      return v;
-    }
-    return 0;
-  }
-
-  #hasGamepad() {
-    if (typeof navigator === 'undefined' || !navigator.getGamepads) return false;
-    const pads = navigator.getGamepads();
-    for (let i = 0; i < pads.length; i++) if (pads[i]) return true;
-    return false;
-  }
-
   #startInputLoop() {
     if (this.#inputRaf) return;
     this.#inputRaf = requestAnimationFrame(this.#inputLoop);
@@ -252,7 +233,7 @@ export class PhLateralThrustJoystick extends PhElement {
   #inputLoop = () => {
     this.#inputRaf = null;
     const auto = this.state ? !!this.state.auto : false;
-    const keepPolling = Object.keys(this.#keys).length > 0 || this.#hasGamepad();
+    const keepPolling = Object.keys(this.#keys).length > 0;
 
     if (auto || this.#pointerId !== null) {
       if (!auto && keepPolling) this.#inputRaf = requestAnimationFrame(this.#inputLoop);
@@ -263,8 +244,7 @@ export class PhLateralThrustJoystick extends PhElement {
     if (this.#keys['KeyQ'] || this.#keys['ArrowLeft']) kv -= 1;
     if (this.#keys['KeyE'] || this.#keys['ArrowRight']) kv += 1;
 
-    const gp = this.#getGamepadInput();
-    let nv = kv !== 0 ? kv : gp;
+    let nv = kv;
     if (nv > 1) nv = 1;
     if (nv < -1) nv = -1;
 
@@ -288,8 +268,11 @@ export class PhLateralThrustJoystick extends PhElement {
   };
 
   #sendAction() {
-    if (this.sendAction) {
-      this.sendAction('set_lateral_thrust', { lateral: this.#value || 0 });
+    const activate = typeof window !== 'undefined' && window.activateSemanticAction;
+    if (typeof activate === 'function') {
+      activate(HELM_LATERAL_ACTION_ID, {
+        context: HELM_ACTION_CONTEXT, source: 'control', value: this.#value || 0,
+      });
     }
   }
 }

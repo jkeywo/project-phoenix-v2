@@ -29,7 +29,6 @@
  * @property {string} ids.hullIntegrity           `ph-hull-integrity` id
  * @property {string} [ids.coreDamage]            ownerless "core" systems bar id
  * @property {string} ids.repairTeams             `ph-repair-teams` id
- * @property {string} [ids.stationDamage]         footer `ph-station-damage` id
  * @property {string} [ids.autoBadge]             the AUTO badge id
  * @property {function(object, {shields: object|null, power: object, repair: object}, Document, function): void} [tail]
  *   Bespoke per-hull rendering the shared core does not cover (Tractor,
@@ -106,13 +105,16 @@ export function makeEngineeringRender(variant) {
     }
     const repairEl = doc.getElementById(ids.repairTeams);
     if (repairEl) {
-      repairEl.state = { teams: r.teams || [], auto: !!r.repair_auto, targets: r.dispatch_targets || [], damaged: r.damaged_systems || [] };
-    }
-
-    // ── Station-damage footer ──────────────────────────────────────────
-    if (ids.stationDamage) {
-      const el = doc.getElementById(ids.stationDamage);
-      if (el) el.state = s.own_hull || null;
+      repairEl.state = {
+        teams: r.teams || [],
+        auto: !!r.repair_auto,
+        targets: r.dispatch_targets || [],
+        damaged: r.damaged_systems || [],
+        // The field destination an open idle card offers (issue #1384) and the
+        // team abroad on it (issue #1386) — the same shape
+        // `gui/stations/repair-console.js` hands the component.
+        external_dispatch: r.external_dispatch || null,
+      };
     }
 
     // ── AUTO badge ──────────────────────────────────────────────────────

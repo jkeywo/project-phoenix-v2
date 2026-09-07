@@ -12,7 +12,6 @@ export const renderStation = makeHelmRender({
     joystick: 'helm-joystick',
     impulse: 'impulse-btn',
     boost: 'boost-btn',
-    stationDamage: 'station-damage',
     autoBadge: 'helm-auto-badge',
   },
   footer: { id: 'footer-target' },

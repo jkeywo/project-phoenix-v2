@@ -21,31 +21,46 @@ import { sendControlSystem } from './command-gateway.js';
 export const REPAIR_SYSTEM_ID = 'repair';
 
 /**
+ * The console-side spelling of `RepairTarget::External` (issue #1386) — the
+ * field target off the ship, whatever Tactical currently holds locked.
+ *
+ * A reserved destination id rather than a station: no ship authors a station
+ * called this, and it is what `dispatch_targets` can never contain, because the
+ * host builds that list out of the hull's own stations.
+ */
+export const EXTERNAL_REPAIR_TARGET = 'external';
+
+/**
  * Build the `RepairTarget` wire value for a console target string.
  *
- * The console addresses *stations* (`'helm'`, `'power'`, ...) plus the single
- * `'core'` bucket for ownerless ship-wide systems. The host resolves a station
- * to the concrete damaged system using the ship's TOML config — the client
- * never decides which system a station contains.
+ * The console addresses *stations* (`'helm'`, `'power'`, ...), the single
+ * `'core'` bucket for ownerless ship-wide systems, and — since issue #1386 —
+ * `'external'`, the field target off the ship. The host resolves a station to
+ * the concrete damaged system using the ship's TOML config, and resolves the
+ * field target off its own Tactical lock; the client never decides either.
  *
- * @param {string} target lowercase station id, or `'core'`
- * @returns {{type: 'Core'} | {type: 'Station', data: string}}
+ * @param {string} target lowercase station id, `'core'`, or `'external'`
+ * @returns {{type: 'Core'} | {type: 'External'} | {type: 'Station', data: string}}
  */
 export function repairTargetFor(target) {
   if (typeof target !== 'string' || target.length === 0) {
     throw new TypeError('repair-dispatch: target must be a non-empty station id');
   }
-  return target === 'core'
-    ? { type: 'Core' }
-    : { type: 'Station', data: target };
+  if (target === 'core') return { type: 'Core' };
+  if (target === EXTERNAL_REPAIR_TARGET) return { type: 'External' };
+  return { type: 'Station', data: target };
 }
 
 /**
  * Build the `DispatchRepairTeam` payload without sending it. Exposed so tests
  * (and the shell repair button) can assert on the exact wire shape.
  *
+ * One payload for all three destinations (issue #1386): a seat choosing where to
+ * send a team should not have to know that the field target is a claim on the
+ * host rather than a walk across the hull.
+ *
  * @param {number} teamIdx repair team slot index
- * @param {string} target station id or `'core'`
+ * @param {string} target station id, `'core'`, or `'external'`
  */
 export function dispatchRepairTeamPayload(teamIdx, target) {
   if (!Number.isInteger(teamIdx) || teamIdx < 0) {
@@ -63,11 +78,54 @@ export function dispatchRepairTeamPayload(teamIdx, target) {
  * @param {number} teamIdx
  * @param {string} target station id or `'core'`
  * @param {((type: string, data?: object) => void)} [send] explicit transport;
- *   omitted when called from a context that has the live ConnectionManager.
+ *   omitted when called from a context that has the page's live link.
+ * @param {string} [controlSystemId] exact authored Repair owner; the canonical
+ *   id remains the compatibility default for legacy direct actions.
  * @returns {object|null} the envelope that was sent, or null when offline.
  */
-export function dispatchRepairTeam(teamIdx, target, send) {
-  return sendControlSystem(REPAIR_SYSTEM_ID, dispatchRepairTeamPayload(teamIdx, target), send);
+export function dispatchRepairTeam(teamIdx, target, send, controlSystemId = REPAIR_SYSTEM_ID) {
+  return sendControlSystem(controlSystemId, dispatchRepairTeamPayload(teamIdx, target), send);
+}
+
+/**
+ * Build the `RecallRepairTeam` payload without sending it (issue #1385).
+ *
+ * **The one recall** since issue #1386: it brings back whatever the named team
+ * is doing, an internal job or the field repair. It names its team where the
+ * fieldless `RecallExternalRepair` beside it carries nothing at all — that verb
+ * stays for the AI / operate-directive vocabulary, which names no team because
+ * the host picked one.
+ *
+ * Nothing here decides whether the team CAN be recalled. The host owns that
+ * rule — a team that is idle or already walking home is refused, with the same
+ * correlated feedback every other Engineering verb reports — and the card
+ * offers the control off the authoritative status rather than off a second
+ * reading of the rule.
+ *
+ * @param {number} teamIdx repair team slot index
+ * @returns {{type: string, data: object}}
+ */
+export function recallRepairTeamPayload(teamIdx) {
+  if (!Number.isInteger(teamIdx) || teamIdx < 0 || teamIdx > 255) {
+    throw new TypeError('repair-dispatch: team_idx must be an integer 0-255');
+  }
+  return {
+    type: 'RecallRepairTeam',
+    data: { team_idx: teamIdx },
+  };
+}
+
+/**
+ * Recall one dispatched repair team — internal or abroad — through the explicit
+ * command gateway.
+ *
+ * @param {number} teamIdx
+ * @param {((type: string, data?: object) => void)} [send]
+ * @param {string} [controlSystemId] exact authored Repair owner
+ * @returns {object|null} the envelope that was sent, or null when offline.
+ */
+export function recallRepairTeam(teamIdx, send, controlSystemId = REPAIR_SYSTEM_ID) {
+  return sendControlSystem(controlSystemId, recallRepairTeamPayload(teamIdx), send);
 }
 
 /**
@@ -102,10 +160,16 @@ export function setRepairPriorityPayload(teamIdx, priority) {
  * @param {number} teamIdx
  * @param {number} priority
  * @param {((type: string, data?: object) => void)} [send]
+ * @param {string} [controlSystemId] exact authored Repair owner
  * @returns {object|null} the envelope that was sent, or null when offline.
  */
-export function setRepairPriority(teamIdx, priority, send) {
-  return sendControlSystem(REPAIR_SYSTEM_ID, setRepairPriorityPayload(teamIdx, priority), send);
+export function setRepairPriority(
+  teamIdx,
+  priority,
+  send,
+  controlSystemId = REPAIR_SYSTEM_ID,
+) {
+  return sendControlSystem(controlSystemId, setRepairPriorityPayload(teamIdx, priority), send);
 }
 
 /**
@@ -151,8 +215,13 @@ export function setRepairTargetPriorityPayload(systemId) {
  *
  * @param {string} systemId
  * @param {((type: string, data?: object) => void)} [send]
+ * @param {string} [controlSystemId] exact authored Repair owner
  * @returns {object|null} the envelope that was sent, or null when offline.
  */
-export function setRepairTargetPriority(systemId, send) {
-  return sendControlSystem(REPAIR_SYSTEM_ID, setRepairTargetPriorityPayload(systemId), send);
+export function setRepairTargetPriority(
+  systemId,
+  send,
+  controlSystemId = REPAIR_SYSTEM_ID,
+) {
+  return sendControlSystem(controlSystemId, setRepairTargetPriorityPayload(systemId), send);
 }

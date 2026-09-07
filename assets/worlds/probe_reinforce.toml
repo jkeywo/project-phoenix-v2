@@ -52,6 +52,13 @@
 # gains an `EntitySpawnOrigin` component on each: it reproduces
 # 14665104268980394769 (9365114570161849778 at tick 0) exactly, because the
 # record is written to the entity and folded by nothing.
+#
+# RECORDED PRE-#1086, AND NO LONGER REPRODUCIBLE. Issue #1086 widened the
+# authoritative digest over the scenario's own state — the flag stores, the
+# trigger latches, the scheduled queues, the named records and CommsState — so
+# both this world's baseline and the `probe_destroy` numbers above have moved.
+# The claim they support is unaffected: `EntitySpawnOrigin` is still folded by
+# nothing, and that was an A/B on a single build.
 
 [global]
 seed = 863
@@ -82,8 +89,8 @@ on_world_loaded("on_load");
 on_timer(3, "on_reinforce");
 
 fn on_load(ctx) {
-    ctx.effects.add_faction_enemy("Harrow", "Federation");
-    ctx.effects.add_faction_enemy("Federation", "Harrow");
+    ctx.effects.add_faction_enemy("Harrow", "Alliance");
+    ctx.effects.add_faction_enemy("Alliance", "Harrow");
 }
 
 // The mid-run arrival. Two hulls, one call each, both carrying the override

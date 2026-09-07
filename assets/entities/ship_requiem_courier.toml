@@ -219,10 +219,23 @@ station = "captain"
 # combat-lock >> objective >> radar. `switch_margin` is 0 because the gaps
 # between the tiers ARE the anti-thrash mechanism.
 [sensors_console.selector]
-sources = ["combat-lock", "objective-destroy", "radar-contacts"]
+sources = ["combat-lock", "objective-destroy", "radar-contacts", "debris-assessment"]
 horizon = 1e9
 switch_margin = 0.0
-eligibility = "candidate_fact(detectable) > 0 and candidate_fact(hostile) > 0"
+# The `source_debris_assess` disjunct (issue #1347) is what lets a NON-hostile
+# contact reach this seat at all: a moving hazard has no faction, so the
+# `hostile` test that gates every other source refuses it. Kept byte-for-byte
+# identical to the shared `fragments/ai/fleet_baseline.toml` selector, which is
+# where the reasoning lives (this hull authors it inline).
+#
+# INERT ON THIS HULL AS IT STANDS, and deliberately left declared. This ship
+# authors no `[scan]` table, and `operate_sensors_ai` offers the debris source
+# no contact a hull's own suite could not take a reading of - so the terms below
+# score nothing here until somebody gives it an instrument, at which point they
+# start working with no further edit. Diverging this block from the shared
+# fragment to say so would cost that, and would put a second, subtly different
+# Sensors doctrine in the fleet.
+eligibility = "candidate_fact(detectable) > 0 and (candidate_fact(hostile) > 0 or candidate_fact(source_debris_assess) > 0)"
 
 [[sensors_console.selector.score]]
 when = "candidate_fact(source_combat_lock) > 0"
@@ -231,6 +244,23 @@ weight = 1000.0
 [[sensors_console.selector.score]]
 when = "candidate_fact(source_objective) > 0"
 weight = 100.0
+
+# Working down a debris field (issue #1347): a hazard outranks an incidental
+# radar hostile but never a named objective, and the unread bonus is what makes
+# the seat go to the next unknown rather than admire the rock it just read.
+# 10 + 15 = 25 < 40, so a confirmed-but-read contact never displaces an unread
+# one. See `fragments/ai/fleet_baseline.toml`.
+[[sensors_console.selector.score]]
+when = "candidate_fact(source_debris_assess) > 0"
+weight = 10.0
+
+[[sensors_console.selector.score]]
+when = "candidate_fact(debris_unassessed) > 0"
+weight = 30.0
+
+[[sensors_console.selector.score]]
+when = "candidate_fact(debris_confirmed) > 0"
+weight = 15.0
 
 [[sensors_console.selector.score]]
 when = "candidate_fact(source_radar) > 0"
@@ -285,9 +315,14 @@ verb = "bring_torpedoes_to_bear"
 # engagement is not broken off by a fresh attacker. Retune against that
 # inequality, not term by term.
 [weapons_console.selector]
-sources = ["sensors-designation", "objective-destroy", "last-attacker", "radar-contacts", "objective-operate"]
+sources = ["sensors-designation", "objective-destroy", "last-attacker", "radar-contacts", "objective-operate", "confirmed-debris-threat"]
 horizon = 1e9
 switch_margin = 50.0
+# The two urgency bands are read against these, in seconds of dead-reckoned
+# time-to-impact (issue #1347). An inline table because a sub-table header here
+# would swallow every sibling key below it, `eligibility` included. Kept in step
+# with `fragments/ai/fleet_baseline.toml`, where the reasoning lives.
+param = { debris_pressing_secs = 60.0, debris_urgent_secs = 25.0 }
 # Independent revalidation: `detectable` is required of everything, and beyond
 # that a candidate is engageable either because the host already vetted it
 # (objective order / last attacker / retained lock) OR because it is
@@ -300,7 +335,12 @@ switch_margin = 50.0
 # target, so the tractor / external-repair dispatch reach a NON-hostile lock;
 # inert otherwise. Kept byte-for-byte identical to the shared
 # `fragments/ai/fleet_baseline.toml` selector (this hull authors it inline).
-eligibility = "candidate_fact(detectable) > 0 and (candidate_fact(source_objective) > 0 or candidate_fact(source_last_attacker) > 0 or candidate_fact(source_retained) > 0 or candidate_fact(hostile) > 0 or candidate_fact(source_operate) > 0)"
+#
+# The `source_debris_threat` disjunct (issue #1347) is ASSESSMENT-GATED at the
+# host: the marker is only ever attached to a contact whose threat state a scan
+# actually raised, so Backfill cannot fire on a rock the crew were never told
+# about.
+eligibility = "candidate_fact(detectable) > 0 and (candidate_fact(source_objective) > 0 or candidate_fact(source_last_attacker) > 0 or candidate_fact(source_retained) > 0 or candidate_fact(hostile) > 0 or candidate_fact(source_operate) > 0 or candidate_fact(source_debris_threat) > 0)"
 
 [[weapons_console.selector.score]]
 when = "candidate_fact(source_objective) > 0"
@@ -325,6 +365,24 @@ weight = 1.0
 [[weapons_console.selector.score]]
 when = "candidate_fact(source_operate) > 0"
 weight = 1000.0
+
+# Confirmed debris, ranked by deadline (issue #1347). 120 puts a confirmed rock
+# above the ordinary fight and below a named Destroy objective; the two bands
+# rank several rocks against each other so Tactical works the queue
+# earliest-deadline-first. Both bands are guarded on `debris_deadline_known`
+# because an ABSENT `impact_secs` reads as 0, and 0 is a real answer here.
+# See `fragments/ai/fleet_baseline.toml` for the precedence invariant.
+[[weapons_console.selector.score]]
+when = "candidate_fact(source_debris_threat) > 0"
+weight = 120.0
+
+[[weapons_console.selector.score]]
+when = "candidate_fact(debris_deadline_known) > 0 and candidate_fact(impact_secs) < param(debris_pressing_secs)"
+weight = 60.0
+
+[[weapons_console.selector.score]]
+when = "candidate_fact(debris_deadline_known) > 0 and candidate_fact(impact_secs) < param(debris_urgent_secs)"
+weight = 60.0
 
 # Navigation — rank destinations into the shared Waypoint. Only the objective
 # source marks its resolved destination `reachable`, so this policy drives the

@@ -46,6 +46,19 @@ function normalisePlayer(p) {
   return { ready: false, spectator: false, afk: false, ...p, station: playerStationId(p) };
 }
 
+function normaliseGm(gm) {
+  const connected = !!(gm && gm.connected);
+  return {
+    id: gm && gm.id != null ? String(gm.id) : '',
+    name: gm && gm.name != null ? String(gm.name) : '',
+    connected,
+    // Disconnect is an authoritative un-ready. Keeping that invariant at the
+    // client boundary means no view can accidentally present the last ready
+    // value retained on a reconnectable public roster row as current consent.
+    ready: connected && !!(gm && gm.ready),
+  };
+}
+
 function defaultShipStations() {
   return { stations: [] };
 }
@@ -64,6 +77,8 @@ export class LobbyState {
     this.phase = 'Lobby';
     /** Array of { token, name, station: string|null, connected } */
     this.players = [];
+    /** Equal GM peers. They do not occupy player, spectator or Station slots. */
+    this.gms = [];
     /** ShipStations: { stations: [StationDef] } */
     this.shipStations = defaultShipStations();
     /** ShipClientConfig — per-ship static config from Welcome. */
@@ -79,6 +94,12 @@ export class LobbyState {
      *  change with no client work; gui/game-over-view.js documents the
      *  fallback the overlay uses meanwhile. */
     this.gameOverOutcome = null;
+    /** The structured post-mission report for the run that just ended (issue
+     *  #1344): an array of `{ id, heading, outcome, state }` in the order the
+     *  scenario authored them, empty when it authored none. Both text fields
+     *  are `strings.csv` ids; there is no score here and there is none on the
+     *  wire either — see gui/game-over-view.js. */
+    this.gameOverReport = [];
     this.scenarioTitle = '';
     this.scenarioBody = '';
     /** Remaining seconds in the pre-game countdown, 0 when not counting. */
@@ -109,10 +130,11 @@ export class LobbyState {
    * Replace the entire lobby state — used on Welcome, the authoritative
    * initial sync. Mirrors `LobbyState::replace_from`.
    */
-  replaceFrom(state, shipStations, shipConfig) {
+  replaceFrom(state, shipStations, shipConfig, gms) {
     this.phase = state.phase || 'Lobby';
     this.shipStations = shipStations || defaultShipStations();
     this.players = (state.players || []).map(p => normalisePlayer(p));
+    this.gms = (Array.isArray(gms) ? gms : []).map(normaliseGm);
     this.shipConfig = shipConfig || {};
     this.scenarioTitle = (state.world && state.world.scenario_title) || '';
     this.scenarioBody = (state.world && state.world.scenario_description) || '';
@@ -130,7 +152,7 @@ export class LobbyState {
     const d = msg.data || {};
     switch (msg.type) {
       case 'Welcome':
-        this.replaceFrom(d.state || {}, d.ship_stations, d.ship_config);
+        this.replaceFrom(d.state || {}, d.ship_stations, d.ship_config, d.gms);
         this.waitingForScenario = false;
         // The world has loaded — the QR-first picker is done; the normal lobby
         // takes over (issue #755).
@@ -165,6 +187,15 @@ export class LobbyState {
           { effect: REDUCER_EFFECTS.REBUILD_STATIONS },
         );
         break;
+      case 'GmRosterChanged': {
+        // Full replacement, like Welcome: the public GM projection is tiny and
+        // contains no permissions or private reconnect credential to merge.
+        const roster = Array.isArray(d) ? d : d.gms;
+        this.gms = (Array.isArray(roster) ? roster : []).map(normaliseGm);
+        changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
+        changes.effects.push({ effect: REDUCER_EFFECTS.REQUEST_RENDER });
+        break;
+      }
       case 'ScenarioCatalog': {
         // QR-first pre-scenario catalog + current lock state, synthesized by
         // the host before world load (issue #755).
@@ -332,6 +363,9 @@ export class LobbyState {
         this.phase = 'GameOver';
         this.gameOverReason = d.reason != null ? d.reason : '';
         this.gameOverOutcome = d.outcome != null ? d.outcome : null;
+        // A pre-#1344 host sends no `report` key at all; an empty array is the
+        // same answer as "this scenario authored none", so both land here.
+        this.gameOverReport = Array.isArray(d.report) ? d.report : [];
         changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
         changes.effects.push({ effect: REDUCER_EFFECTS.REQUEST_RENDER });
         break;
@@ -339,6 +373,7 @@ export class LobbyState {
         this.phase = 'Lobby';
         this.gameOverReason = null;
         this.gameOverOutcome = null;
+        this.gameOverReport = [];
         this.countdownSecs = 0;
         this.waitingForScenario = true;
         changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);

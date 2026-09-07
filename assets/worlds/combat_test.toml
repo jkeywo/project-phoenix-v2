@@ -4,7 +4,7 @@
 #   - on_timer wave clock + on_all_destroyed completion/victory (#470, #960)
 #   - NPC shields backend + Sensors panel rendering (#471, #473)
 #   - Rebalanced Harrow fleet + Axiom Station (#474)
-#   - Federation-Harrow mutual hostility (#472)
+#   - Alliance-Harrow mutual hostility (#472)
 #
 # Layout: concentric rings centred on the star at the origin.
 #   - Star at [0, 0, 0]
@@ -74,7 +74,7 @@
 # Harrow that spawns is committed to Starbase Alpha, and the scenario is the
 # race between the raid closing on the station and the player breaking it up.
 #
-# Starbase Alpha is now a FEDERATION entity (`assets/entities/station_axiom.toml`
+# Starbase Alpha is now a ALLIANCE entity (`assets/entities/station_axiom.toml`
 # authors the faction, issue #936). It used to be factionless, which made it a
 # thing the enemy could be ordered at but never a thing it owned an opinion
 # about; it is now the player's own station, which is what "defend it" is
@@ -134,7 +134,7 @@
 #
 #   Harrow defaults to neutral so non-combat worlds (Starbase Alpha,
 #   Before the Fire) can reuse the same ship templates as ambient
-#   patrols. This scenario flips both directions of the Federation
+#   patrols. This scenario flips both directions of the Alliance
 #   <-> Harrow relationship hostile on `on_world_loaded` via two
 #   `add_faction_enemy` effects, *before* the first wave's first
 #   acquisition tick — guaranteeing wave 1 engages immediately rather
@@ -222,6 +222,17 @@
 # the player ship AI-backfilled and holding station, so no ship in this world
 # ever reaches the rule whose text changed. The two worlds that DO — `duel` and
 # `rng_coverage` — carry their own baselines and both moved.
+#
+# RECORDED PRE-#1086, AND NO LONGER REPRODUCIBLE. Issue #1086 widened the
+# authoritative digest over the scenario's own state, and this world's own
+# script populates plenty of it: the `mission_threat_remaining`/`ship_power`/
+# `waves_spawned` flags above are FlagStore entries, and the eight
+# `on_timer`/`on_all_destroyed`/`on_destroyed` triggers are latches — both now
+# walked by `sim_digest::fold_scenario_records` / `fold_scenario_flags`, neither
+# of which happened when 14942520827746055774 was measured. The thrust-band A/B
+# is untouched — it is a same-build comparison, and "0 helm power changes" is
+# still the finding — but the absolute value predates the fold and does not
+# reproduce on a clean tree. Re-measure before treating it as a baseline again.
 
 # [ai] Combat Test's timed waves require a human-hosted Navigation surface to
 # retain direct waypoint control. The selector names the hull-agnostic System
@@ -450,7 +461,7 @@ id = "player-ship"
 transform = { position = [400.0, 0.0, 200.0] }
 spawn_on = "game_start"
 
-# Defended object, and since #936 a FEDERATION one — the faction is authored on
+# Defended object, and since #936 a ALLIANCE one — the faction is authored on
 # `assets/entities/station_axiom.toml`, not here, because a station tagged
 # `allied` that belongs to nobody is wrong in every world that fields it. Named
 # "world.entity.starbase_alpha.name" so `on_destroyed` and every wave's
@@ -611,7 +622,7 @@ fn wave_8_overrides(display_name) {
 
 // ── World load ──
 //
-// Make Harrow hostile to the Federation (and vice versa) for the duration of
+// Make Harrow hostile to the Alliance (and vice versa) for the duration of
 // this scenario. The faction TOMLs default both sides to neutral so the same
 // Harrow ship templates can appear as ambient patrols in non-combat worlds
 // (Starbase Alpha, Before the Fire). Two `add_faction_enemy` effects flip both
@@ -635,8 +646,8 @@ fn wave_8_overrides(display_name) {
 // absolute write (`flags.x = v`), matching the declarative `set_flag_value` it
 // replaces, not the composable `increment` the waves use.
 fn arm_the_scenario(ctx) {
-    ctx.effects.add_faction_enemy("Harrow", "Federation");
-    ctx.effects.add_faction_enemy("Federation", "Harrow");
+    ctx.effects.add_faction_enemy("Harrow", "Alliance");
+    ctx.effects.add_faction_enemy("Alliance", "Harrow");
     ctx.flags.mission_threat_remaining = 8;
 }
 

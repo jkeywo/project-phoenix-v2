@@ -30,7 +30,6 @@ export const renderStation = makeEngineeringRender({
     hullIntegrity: 'hull-integrity',
     coreDamage: 'core-damage',
     repairTeams: 'repair-teams',
-    stationDamage: 'station-damage',
     autoBadge: 'engineering-auto-badge',
   },
   tail: (s, views, doc, t) => {

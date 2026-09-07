@@ -8,6 +8,7 @@
 
 import { t } from './strings.js';
 import { stationDisplayName } from './console-state.js';
+import { formatSemanticBinding } from './semantic-action-registry.js';
 
 const HELP_SECTIONS = {
   captain: [['help.captain.0.heading', 'help.captain.0.body'], ['help.captain.1.heading', 'help.captain.1.body'], ['help.captain.2.heading', 'help.captain.2.body']],
@@ -38,7 +39,7 @@ export function hasHelp(stationId) {
  *
  * @returns {boolean} whether help content was rendered
  */
-export function renderStationHelp(root, stationId) {
+export function renderStationHelp(root, stationId, semanticActions = []) {
   if (!root) return false;
   const doc = root.ownerDocument || (typeof document !== 'undefined' ? document : null);
   if (!doc || !hasHelp(stationId)) return false;
@@ -66,6 +67,40 @@ export function renderStationHelp(root, stationId) {
     sections.appendChild(section);
   }
   group.appendChild(sections);
+
+  const matchingActions = (Array.isArray(semanticActions) ? semanticActions : [])
+    .filter((action) => Array.isArray(action.contexts) && action.contexts.includes(stationId));
+  if (matchingActions.length > 0) {
+    const bindingsHeading = doc.createElement('div');
+    bindingsHeading.className = 'station-help-section-title';
+    bindingsHeading.textContent = t('help.bindings.heading');
+    sections.appendChild(bindingsHeading);
+
+    for (const action of matchingActions) {
+      const section = doc.createElement('div');
+      section.className = 'station-help-section station-help-action';
+
+      const title = doc.createElement('div');
+      title.className = 'station-help-section-title';
+      title.textContent = t(action.labelId);
+      section.appendChild(title);
+
+      const accessibility = doc.createElement('div');
+      accessibility.className = 'station-help-section-body';
+      accessibility.textContent = t(action.accessibilityLabelId);
+      section.appendChild(accessibility);
+
+      const slots = doc.createElement('div');
+      slots.className = 'station-help-section-body station-help-bindings';
+      slots.textContent = (action.bindings || []).map((binding, index) => t(
+        'settings.controls.slot_value',
+        { slot: String(index + 1), binding: formatSemanticBinding(binding, t) },
+      )).join(t('input.binding.slots_separator'));
+      section.appendChild(slots);
+      sections.appendChild(section);
+    }
+  }
+
   root.appendChild(group);
   return true;
 }

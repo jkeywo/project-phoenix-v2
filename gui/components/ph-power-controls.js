@@ -6,18 +6,29 @@ import { phAdoptConsoleStyles } from './ph-console-styles.js';
 import '../strings-boot.js';
 import { t } from '../strings.js';
 import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
+import {
+  POWER_DECREASE_ACTION_ID,
+  POWER_INCREASE_ACTION_ID,
+} from '../stations/engineering-actions.js';
+import { activateEngineeringAction } from '../stations/engineering-action-control.js';
 import { PhElement, phDefine } from './ph-element.js';
 
 /**
- * The lowest rung to draw for a group whose entry carries no `min_level`.
+ * The commandable floor assumed for a group whose entry carries no `min_level`
+ * — how far down the `−` stepper will go.
  *
  * Since issue #1004 the server publishes the authored floor on every
  * `PowerGroupEntry`, so this only stands in for a pre-#1004 payload — and there
- * the right answer is 1, not 0. The engine has always clamped every group to
- * `GROUP_LEVEL_MIN` (= 1); a 0 here drew a bottom pip no order could ever light,
- * which is what put nine lights on a three-group console instead of twelve. Same
- * number as `ship::config::default_min_power_level`, which is also the Rust
- * decoder's `#[serde(default)]` for the field.
+ * the right answer is 1, not 0. That server clamped every group to
+ * `GROUP_LEVEL_MIN` (= 1) whatever its hull authored, so a 0 here would offer an
+ * order it was always going to refuse. Same number as
+ * `ship::config::default_min_power_level`, which is also the Rust decoder's
+ * `#[serde(default)]` for the field.
+ *
+ * Since issue #1395 the floor is a real per-group engine clamp and may be 0 — a
+ * group that can be switched off. It still does not decide where the PIP ROW
+ * starts: that is always rung 1, and level 0 is drawn as a dark row under a COLD
+ * tag rather than as a zeroth gem. See the pip loop in `render`.
  */
 const DEFAULT_MIN_LEVEL = 1;
 
@@ -64,6 +75,12 @@ export class PhPowerControls extends PhElement {
     .pip.disabled { cursor: default; opacity: 0.3; }
     .level-text.held { color: var(--reloading); }
     .level-text { font-size: var(--text-xs); color: var(--ink-dim); letter-spacing: 0.1em; min-width: 1.5rem; text-align: center; }
+    /* The group is switched OFF (issue #1395). Carried in the alert colour and
+       boxed like the AUTO badge, because "LVL 0" on its own reads as a very low
+       setting rather than as no guns — and an officer glancing at the panel to
+       ask whether the ship can shoot has to get that answer in one look. */
+    .level-meta { display: flex; align-items: center; gap: 0.35rem; }
+    .cold-tag { font-size: var(--text-xs); color: var(--fire); border: 1px solid var(--fire); padding: 0.05rem 0.3rem; letter-spacing: 0.2em; }
     .empty { font-size: var(--text-xs); color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
   </style>
   <div class="header">
@@ -138,7 +155,10 @@ export class PhPowerControls extends PhElement {
         el.innerHTML = `
           <div class="group-top">
             <span class="group-label"></span>
-            <span class="level-text"></span>
+            <span class="level-meta">
+              <span class="cold-tag" hidden>${t('component.power.cold')}</span>
+              <span class="level-text"></span>
+            </span>
           </div>
           <div class="pip-cluster">
             <button type="button" class="mini-btn" data-action="decr" aria-label="${t('component.power.decrease')}"><span class="mini-bg"></span><span class="lbl">−</span></button>
@@ -149,28 +169,40 @@ export class PhPowerControls extends PhElement {
         const pipRow = el.querySelector('.pip-row');
         pipRow.addEventListener('click', e => {
           const pip = e.target.closest('.pip');
-          if (!pip || auto) return;
+          if (!pip || this.#stateAuto()) return;
           const level = Number(pip.dataset.level);
-          if (!isNaN(level) && this.sendAction) {
-            this.sendAction('set_power', { target: gid, level });
+          const current = this.#currentLevel(gid);
+          if (!isNaN(level) && level !== current) {
+            activateEngineeringAction(
+              this,
+              level < current ? POWER_DECREASE_ACTION_ID : POWER_INCREASE_ACTION_ID,
+              { target: gid, level },
+              'set_power',
+            );
           }
         });
         const incrBtn = el.querySelector('.mini-btn[data-action="incr"]');
         const decrBtn = el.querySelector('.mini-btn[data-action="decr"]');
         incrBtn.addEventListener('click', () => {
-          if (auto) return;
+          if (this.#stateAuto()) return;
           const cur = this.#currentLevel(gid);
-          const max = group.max_level != null ? group.max_level : 4;
-          if (cur < max && this.sendAction) {
-            this.sendAction('set_power', { target: gid, level: cur + 1 });
+          const live = this.#group(gid);
+          const max = live?.max_level != null ? live.max_level : 4;
+          if (cur < max) {
+            activateEngineeringAction(
+              this, POWER_INCREASE_ACTION_ID, { target: gid, level: cur + 1 }, 'set_power',
+            );
           }
         });
         decrBtn.addEventListener('click', () => {
-          if (auto) return;
+          if (this.#stateAuto()) return;
           const cur = this.#currentLevel(gid);
-          const min = group.min_level != null ? group.min_level : DEFAULT_MIN_LEVEL;
-          if (cur > min && this.sendAction) {
-            this.sendAction('set_power', { target: gid, level: cur - 1 });
+          const live = this.#group(gid);
+          const min = live?.min_level != null ? live.min_level : DEFAULT_MIN_LEVEL;
+          if (cur > min) {
+            activateEngineeringAction(
+              this, POWER_DECREASE_ACTION_ID, { target: gid, level: cur - 1 }, 'set_power',
+            );
           }
         });
         // NB: both handlers step from `#currentLevel`, which is the COMMANDED
@@ -191,6 +223,10 @@ export class PhPowerControls extends PhElement {
       const held = commanded > level;
       const minLevel = group.min_level != null ? group.min_level : DEFAULT_MIN_LEVEL;
       const maxLevel = group.max_level != null ? group.max_level : 4;
+      // COLD: the group is switched off, not turned down (issue #1395). The
+      // same predicate the server's `PowerSystem::is_group_cold` uses — a
+      // tracked group at level 0 — so no wire field is needed for it.
+      const cold = level === 0;
 
       el.querySelector('.group-label').textContent = group.label || group.id;
       const levelText = el.querySelector('.level-text');
@@ -198,11 +234,18 @@ export class PhPowerControls extends PhElement {
         ? t('component.power.held', { n: level, c: commanded })
         : t('component.power.level', { n: level });
       levelText.classList.toggle('held', held);
+      const coldTag = el.querySelector('.cold-tag');
+      coldTag.hidden = !cold;
 
       const pipRow = el.querySelector('.pip-row');
 
+      // The row starts at rung 1 whatever the floor says. Level 0 is the
+      // ABSENCE of a lit rung, painted as a dark row under the COLD tag — a
+      // zeroth gem would be a light that means "no light", and it would put
+      // five pips on a coldable group beside four on its neighbours.
+      const firstPip = Math.max(1, minLevel);
       const livePips = new Set();
-      for (let i = minLevel; i <= maxLevel; i++) {
+      for (let i = firstPip; i <= maxLevel; i++) {
         const key = gid + ':' + i;
         livePips.add(key);
         let pip = this.#pipCache.get(key);
@@ -257,10 +300,18 @@ export class PhPowerControls extends PhElement {
    * a pre-#952 server sends.
    */
   #currentLevel(groupId) {
+    const g = this.#group(groupId);
+    return g ? commandedLevel(g) : 0;
+  }
+
+  #group(groupId) {
     const s = this.state || {};
     const groups = Array.isArray(s.groups) ? s.groups : [];
-    const g = groups.find(x => x.id === groupId);
-    return g ? commandedLevel(g) : 0;
+    return groups.find(x => x.id === groupId) || null;
+  }
+
+  #stateAuto() {
+    return !!(this.state && this.state.auto);
   }
 }
 

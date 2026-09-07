@@ -1,0 +1,357 @@
+# Authored join-code format data (issue #1111). THIS FILE is the ONE place the
+# join-identifier scheme is written down, and the one a designer edits.
+#
+# assets/join/join-codes.json beside it is a GENERATED artifact, committed
+# because three consumers must read the table with no parser and no build step:
+# the phone fetches it as plain JSON, tests/client/*.test.js read it from disk,
+# and worker-rendezvous/src/registry.js has it bundled into the Cloudflare
+# Worker by esbuild. None of those three can parse TOML. `node
+# scripts/build-client.mjs` regenerates the JSON from this file, and
+# tests/client/join-codes-data.test.js fails if the committed JSON has drifted
+# from it — the same discipline as the LOD manifest's `npm run lods:check`.
+#
+# Design source: docs/gdd/systems/native-network-foundation.md "Join-code
+# model" and pasm/spec/design/p2p-design-deltas.yaml decision
+# p2p-human-readable-join-namespaces.
+
+# Wire/format revision. gui/join-code.js refuses a table whose format_version
+# it does not implement (JOIN_CODE_FORMAT_VERSION), rather than reading fields
+# that may have moved.
+format_version = 1
+
+[suffix]
+# Eight typed letters. The alphabet deliberately EXCLUDES L, because L
+# normalises to I — a letter that can never survive canonicalisation must never
+# be minted, or the printed code would not round-trip through the very
+# normalisation that makes it typeable. O and I stay in: they are the canonical
+# forms of 0 and 1. J stays distinct and is minted normally.
+#
+# WHY EIGHT AND NOT FIVE. The code is the ONLY secret in front of a game: the
+# join stamp is public (every host serves it), so anyone holding the code can
+# join, open a relay and act as a crew member. Five letters over this alphabet
+# is 25^5 ≈ 9.77e6 codes — 23.2 bits — and a native host accepting LAN joins
+# directly (issue #1353) was measured answering ~2,340 wrong guesses a second
+# to a single machine that reconnected between batches, which walks that
+# keyspace in about 35 MINUTES of expected search. Eight letters is 25^8 ≈
+# 1.526e11 — 37.15 bits — which is ~377 days of expected search at that same
+# unthrottled rate, before the per-source and global attempt limits in
+# src/native_host/direct_join.rs take the achievable rate down by another three
+# orders of magnitude. The cost is three more letters to read off a viewscreen;
+# the QR carries the whole code either way, and both worker and native legs
+# inherit the stronger scheme because all three readers read THIS file.
+length = 8
+alphabet = "ABCDEFGHIJKMNOPQRSTUVWXYZ"
+# Punctuation a player adds while reading a code aloud, dropped before the
+# comparison. `_` is here as well as being the separator inside a full code:
+# gui/join-code.js decides which shape it is looking at BEFORE stripping.
+strip = "-_ \t"
+
+[suffix.normalise]
+# The confusable map, applied after upper-casing.
+"0" = "O"
+"1" = "I"
+"L" = "I"
+
+[namespaces]
+# Two stable project GUIDs, one per join type, so a suffix typed into the crew
+# field can never silently resolve a fleet host. These values are permanent —
+# changing one orphans every printed code of that type.
+#
+# `client` is what a phone/console types; `server` admits ship hosts to a fleet
+# (issue #1114 owns joining it; #1111 only needs it to EXIST so a wrong-type
+# answer is distinguishable from an unknown one).
+client = "2f6b0a11-9c4e-4d7a-8f31-5b90c2d47e18"
+server = "8d13c7a4-0e52-49bb-9a6c-4f27ed3b90d1"
+
+[version]
+# One version GUID marks a compatible release. Bump it when a release can no
+# longer join a host built from the previous one, so the rendezvous can answer
+# "version-mismatch" instead of "unknown" for a suffix registered under an
+# older build. ADVISORY discovery help only: the authoritative protocol/content
+# check is the host's own delivery stamp handshake (src/delivery/stamp.rs,
+# delivery::check_join_stamp).
+guid = "5c0a3e91-7b18-4f26-8d43-9e61af07c25b"
+
+[limits]
+# Registry bounds (issue #1111). The rendezvous registry is an untrusted-facing
+# service: every one of these exists to stop one socket costing the Durable
+# Object unbounded work or memory. See worker-rendezvous/src/registry.js.
+#
+# How long a host record survives without its socket being seen again. The
+# record normally dies with the socket; this is the sweep for the case where a
+# close event never arrives.
+record_ttl_seconds = 43200
+# Lookups (resolve + join) one socket may make before it is cut off. Codes are
+# private, so an unbounded socket could walk the namespace — but note that this
+# bound is charged to a SOCKET, which a guesser simply reconnects to reset. It
+# is the cheapest way to end one abusive connection, not the rate limit; the
+# limits that survive a reconnect are per-SOURCE and global, and they live in
+# src/native_host/direct_join.rs (AdmissionBudgets) because they are transport
+# plane rather than authored scheme.
+max_lookups_per_connection = 60
+# Joiners one host record may hold at once, counting only sockets that have
+# RESOLVED THE CODE. Sockets that upgraded and never joined have a budget of
+# their own (AdmissionBudgets::unjoined_total) so that silence cannot spend the
+# room's places.
+max_peers_per_record = 32
+# How many player-ship slots one fleet may hold, the owner's own included
+# (issue #1114). This is a DESIGN number — how big a fleet the game is meant to
+# field — and it is deliberately smaller than `max_peers_per_record`, which is
+# the service's memory bound on any record and knows nothing about ships. The
+# fleet owner refuses a further host with `fleet-full` before the record's own
+# cap is ever reached.
+max_fleet_hosts = 4
+# What one ship host may say about ITSELF in a fleet roster (issue #1114). The
+# display name and the hull's template path are the only two fields a member
+# writes, and the fleet lead re-broadcasts the whole roster to every admitted
+# host on every change — so these are the bounds that stop one member amplifying
+# an arbitrary payload across the fleet. Protocol hygiene, not a design number:
+# gui/host-mesh.js carries a parse-time default for each so an older table still
+# loads. Anything longer is truncated, never refused; a hull path that is not a
+# non-empty string reads as "no ship chosen yet".
+max_slot_name_length = 48
+max_slot_ship_path_length = 160
+# Longest accepted code string on a resolve/join frame — comfortably longer
+# than PROJECT_GUID_VERSION_GUID_SUFFIX, short enough that parsing is cheap.
+# (There is no stamp bound here: no frame carries a delivery stamp. The
+# compatibility handshake is in-band, host to phone, and the service stores
+# nothing about either build.)
+max_code_length = 160
+# How long a record survives its host's SIGNALLING SOCKET dying before the
+# service drops it for good (issue #1115). A record normally dies with an
+# EXPLICIT host-close; this is the window an ORDINARY transient loss — a
+# Durable Object hiccup, a phone radio killing a backgrounded tab's socket, a
+# brief network blip — has to reclaim the SAME code (by presenting the
+# resume secret its own `hosted` frame carried) before it goes cold. Distinct
+# from and much shorter than `record_ttl_seconds` above, which is the idle
+# sweep for a record whose close event never arrived at all. 120s comfortably
+# outlasts several rounds of the host's own reconnect backoff
+# (gui/connection-manager.js's nextBackoffDelay: 1s, 2s, 4s, 8s, 16s, 30s,
+# 30s, …) without holding a dead code open indefinitely.
+reclaim_grace_seconds = 120
+# The most grace-held records ONE Durable Object instance will carry at once
+# (issue #1115). A deliberate leave/host-close drops a host's record on the
+# spot, so only a socket that genuinely DIES enters grace — this bounds a flood
+# of separate dying sockets, not one looping socket, and over the cap a further
+# loss drops its record for good rather than parking it un-hostable for the
+# whole window. Defence in depth alongside the per-connection bounds above.
+max_grace_records = 256
+
+# ── The WebSocket game relay (issue #1113) ───────────────────────────────────
+# When a joiner's direct WebRTC ladder is exhausted, the SAME rendezvous socket
+# carries the game's own frames instead. That turns a signalling socket into a
+# data path, so it needs bounds of its own: a signalling socket exchanges a
+# handful of SDP blobs and then goes quiet, while a relay session carries every
+# command and every snapshot for as long as the mission lasts.
+#
+# Joiners one record may carry over the relay at once, counted separately from
+# `max_peers_per_record`. Deliberately much smaller: a relayed crew member
+# costs the Durable Object real bandwidth every tick, where a peer that only
+# ever signalled costs it two SDP blobs and then nothing.
+max_relay_peers_per_record = 8
+# Largest single relayed game frame, in bytes. THE SAME NUMBER THE DIRECT PATH
+# HAS TO FIT, and that is the whole reason for it: a DataChannel's ceiling is
+# the SDP-negotiated `max-message-size`, 262144 bytes between two Chromiums and
+# the smallest ceiling any browser pair negotiates in practice (see the note in
+# gui/rendezvous-transport.js). A relay ceiling BELOW it would mean a payload
+# that crosses a good network perfectly well cannot cross a bad one — a mission
+# that works direct and fails relayed, which is the exact failure this fallback
+# exists to prevent, and it failed silently.
+#
+# The two payload classes that scale with content are WorldData (one
+# EntitySnapshot per STATIC entity; the largest world in assets/worlds authors
+# 17 [[entity]] blocks) and the per-tick snapshot (dynamic entities — hundreds
+# of asteroids at worst, a few tens of KB). The SECOND is the one that can
+# approach this bound, not the first. tests/relay_frame_budget.rs measures both
+# against this number rather than calling them "comfortably" under it.
+#
+# Still far below anything that would let one socket park megabytes inside the
+# Durable Object: the queue depths below are what bound a mailbox's total.
+max_relay_frame_bytes = 262144
+# Bounded queue depth per relay peer, per delivery class. This is the
+# lossy/reliable split made structural: the snapshot queue DROPS its oldest
+# entries once full, because a late snapshot is worthless and the next tick
+# supersedes it, while the reliable queue may not drop anything at all — a
+# silently dropped command would fork the guarantee the game protocol makes
+# about its own reliable class. A reliable queue that fills is therefore a dead
+# session, closed and said so, rather than a quietly lossy one.
+max_relay_queue_reliable = 256
+max_relay_queue_snapshot = 32
+# The SENDER's half of the same rule, advertised to both ends on `relay-ready`.
+# A WebSocket is reliable and ordered, so a relay would silently upgrade the
+# snapshot class into a reliable one unless the sender sheds; once its socket's
+# own `bufferedAmount` is past this many bytes, a snapshot frame is dropped
+# rather than queued behind the backlog. Reliable frames are never shed there —
+# the socket buffers them. Browsers and tungstenite both report
+# `bufferedAmount`; a Durable Object's WebSocket does not, which is why this
+# bound belongs to whoever is sending rather than to the service.
+max_relay_send_buffer_bytes = 262144
+
+# ── Deny-list ────────────────────────────────────────────────────────────────
+# Words never minted and never accepted, in ordinary spelling: gui/join-code.js
+# canonicalises each entry before comparing, so one row refuses every
+# confusable spelling of the word (LOGIN also refuses IOGIN, HELLO also refuses
+# HE110).
+#
+# A word is matched ANYWHERE INSIDE a canonicalised suffix, not only as the
+# whole of it. That is what keeps this list meaningful now the suffix is longer
+# than the words on it: a code is refused for READING as one of these, and
+# `QRAPESVW` reads as one exactly as `RAPES` did. (At five letters the two
+# rules were the same rule; nothing about an entry's meaning changed.) The cost
+# to minting is negligible — ~36 words × 4 positions / 25^5 ≈ 1.5e-5 of draws
+# are redrawn — and the ceiling in mintSuffix bounds it regardless.
+#
+# Every entry must therefore be no LONGER than `suffix.length` after
+# canonicalisation, or it could never match — tests/client/join-code.test.js
+# checks that.
+#
+# `reason` is for the next person reading the list, not for the player: the
+# phone only ever says "that is not a code we hand out".
+
+[[deny]]
+word = "ADMIN"
+reason = "misleading: reads as a privileged account rather than a room code"
+
+[[deny]]
+word = "DEBUG"
+reason = "misleading: reads as a diagnostic mode"
+
+[[deny]]
+word = "ERROR"
+reason = "misleading: a player would read the code itself as a failure"
+
+[[deny]]
+word = "FATAL"
+reason = "misleading: reads as a crash report"
+
+[[deny]]
+word = "ABORT"
+reason = "misleading: reads as an instruction to stop"
+
+[[deny]]
+word = "RESET"
+reason = "misleading: reads as an instruction, not an identifier"
+
+[[deny]]
+word = "LOGIN"
+reason = "misleading: implies an account system Phoenix does not have"
+
+[[deny]]
+word = "CRASH"
+reason = "misleading: reads as a failure report"
+
+[[deny]]
+word = "EMPTY"
+reason = "misleading: reads as 'no code issued'"
+
+[[deny]]
+word = "FALSE"
+reason = "misleading: reads as a boolean, not an identifier"
+
+[[deny]]
+word = "STAFF"
+reason = "misleading: implies an official/organiser channel"
+
+[[deny]]
+word = "BITCH"
+reason = "offensive: profanity"
+
+[[deny]]
+word = "CUNTS"
+reason = "offensive: profanity"
+
+[[deny]]
+word = "TWATS"
+reason = "offensive: profanity"
+
+[[deny]]
+word = "SHITE"
+reason = "offensive: profanity"
+
+[[deny]]
+word = "SHITS"
+reason = "offensive: profanity"
+
+[[deny]]
+word = "WANKS"
+reason = "offensive: profanity"
+
+[[deny]]
+word = "PISST"
+reason = "offensive: profanity"
+
+[[deny]]
+word = "WHORE"
+reason = "offensive: slur"
+
+[[deny]]
+word = "SLUTS"
+reason = "offensive: slur"
+
+[[deny]]
+word = "PENIS"
+reason = "offensive: sexual"
+
+[[deny]]
+word = "PUSSY"
+reason = "offensive: sexual"
+
+[[deny]]
+word = "PORNO"
+reason = "offensive: sexual"
+
+[[deny]]
+word = "RAPES"
+reason = "offensive: sexual violence"
+
+[[deny]]
+word = "RAPED"
+reason = "offensive: sexual violence"
+
+[[deny]]
+word = "PEDOS"
+reason = "offensive: sexual abuse"
+
+[[deny]]
+word = "NAZIS"
+reason = "offensive: hate"
+
+[[deny]]
+word = "KKKKK"
+reason = "offensive: hate"
+
+[[deny]]
+word = "COONS"
+reason = "offensive: racial slur"
+
+[[deny]]
+word = "CHINK"
+reason = "offensive: racial slur"
+
+[[deny]]
+word = "SPICS"
+reason = "offensive: racial slur"
+
+[[deny]]
+word = "KIKES"
+reason = "offensive: racial slur"
+
+[[deny]]
+word = "NEGRO"
+reason = "offensive: racial slur"
+
+[[deny]]
+word = "GYPSY"
+reason = "offensive: ethnic slur"
+
+[[deny]]
+word = "DYKES"
+reason = "offensive: homophobic slur"
+
+[[deny]]
+word = "FAGOT"
+reason = "offensive: homophobic slur"
+
+[[deny]]
+word = "TRANY"
+reason = "offensive: transphobic slur"

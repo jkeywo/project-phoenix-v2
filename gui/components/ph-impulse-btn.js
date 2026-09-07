@@ -1,15 +1,16 @@
-import { observeGamepadButton, GAMEPAD_BUTTON } from '../gamepad-button.js';
 // strings-boot first: its top-level await delays this module's evaluation —
 // and therefore this element's registration and upgrade — until the string
 // table is loaded, so the constructor's template t() calls never see an
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import {
+  HELM_ACTION_CONTEXT,
+  HELM_IMPULSE_ACTION_ID,
+} from '../stations/helm-actions.js';
 import { PhElement, phDefine } from './ph-element.js';
 
 export class PhImpulseBtn extends PhElement {
-  #stopGamepad = null;
-
   template() {
     return `
   <style>
@@ -24,6 +25,14 @@ export class PhImpulseBtn extends PhElement {
     .btn.charging { background: linear-gradient(90deg, var(--reloading) calc(var(--charge) * 100%), var(--bg-card) calc(var(--charge) * 100%)); border-color: var(--reloading); color: var(--reloading); }
     .btn.cooldown { background: var(--bg-card); border-color: var(--ink-dim); color: var(--ink-dim); }
     .btn:disabled { opacity: 0.4; cursor: default; }
+    /* Key-binding hints are meaningless on a phone (issue #1376): a touch
+       screen has no CTRL to hold. Same phone query the Station Bar already
+       decides its own label mode on (gui/hero-bar.js's HERO_BAR_CODE_QUERY) —
+       repeated here as a literal because a shadow-root <style> cannot import
+       a JS string, not because this is a second convention. */
+    @media (orientation: portrait) and (max-width: 599px), (orientation: landscape) and (max-height: 500px) {
+      .binding { display: none; }
+    }
   </style>
   <div class="header">
     <span>${t('component.impulse.title')}</span>
@@ -37,40 +46,18 @@ export class PhImpulseBtn extends PhElement {
   connectedCallback() {
     super.connectedCallback();
     this.shadowRoot.getElementById('btn').addEventListener('click', this.#press);
-    // Ctrl and gamepad B fire the same press as the on-screen button, so the
-    // helm keeps impulse under thumb while the other hand flies the stick.
-    if (typeof document !== 'undefined') document.addEventListener('keydown', this.#onKeyDown);
-    this.#stopGamepad = observeGamepadButton(GAMEPAD_BUTTON.B, (pressed) => {
-      if (pressed) this.#press();
-    });
+    // Ctrl and gamepad B are matched by the parent semantic input runtime; the
+    // native button's click (pointer or Enter/Space) reaches the same identity.
   }
-
-  disconnectedCallback() {
-    if (typeof document !== 'undefined') document.removeEventListener('keydown', this.#onKeyDown);
-    if (this.#stopGamepad) { this.#stopGamepad(); this.#stopGamepad = null; }
-  }
-
-  #onKeyDown = (e) => {
-    const tag = e.target && e.target.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-    if (e.code !== 'ControlLeft' && e.code !== 'ControlRight') return;
-    // Held Ctrl auto-repeats; impulse is a discrete press, and a repeat would
-    // otherwise start and immediately cancel the charge over and over.
-    if (e.repeat) return;
-    e.preventDefault();
-    this.#press();
-  };
 
   #press = () => {
     const btn = this.shadowRoot.getElementById('btn');
-    if (!this.sendAction || btn.disabled) return;
-    const s = this.state || {};
-    const st = s.state || 'ready';
-    // Pressing IMPULSE again while it is charging cancels the charge.
-    if (st === 'charging') {
-      this.sendAction('cancel_impulse', {});
-    } else if (st === 'ready') {
-      this.sendAction('start_impulse_charge', {});
+    if (btn.disabled) return;
+    const activate = typeof window !== 'undefined' && window.activateSemanticAction;
+    if (typeof activate === 'function') {
+      activate(HELM_IMPULSE_ACTION_ID, {
+        context: HELM_ACTION_CONTEXT, source: 'control',
+      });
     }
   };
 

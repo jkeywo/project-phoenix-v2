@@ -6,13 +6,26 @@ import '../strings-boot.js';
 import { t } from '../strings.js';
 import {
   COMMS_PRIORITY,
-  commsPreview,
-  commsPriority,
-  isLatestLiveCriticalMessage,
+  sortedThreadsFrom,
 } from '../comms-state.js';
 import { PhElement, phDefine } from './ph-element.js';
 import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
+import { COMMS_SELECT_MESSAGE_ACTION_ID } from '../stations/comms-actions.js';
 
+/**
+ * The Comms inbox: ONE ROW PER THREAD (issue #1380).
+ *
+ * A five-message conversation with one station is one row — the station's
+ * name, the newest line as its preview, and how many messages sit behind it —
+ * rather than five rows repeating the same sender. Activating a row opens that
+ * thread; showing the whole conversation is `ph-comms-current-message`'s job.
+ *
+ * `state.threads` is the projection the shared Comms renderer already computed
+ * with `sortedThreadsFrom` (live Critical first, then urgent+unread, unread,
+ * read). It is optional: given only `state.messages` the component groups them
+ * itself through that same pure function, so a fixture — or any surface that
+ * has a message list and no renderer — still shows the same inbox.
+ */
 export class PhCommsHailList extends PhElement {
   #rowCache = new Map();
   #emptyEl = null;
@@ -42,6 +55,10 @@ export class PhCommsHailList extends PhElement {
     .sender { font-weight: 400; color: var(--ink); min-width: 4rem; }
     .sender.unread { font-weight: 700; }
     .preview { color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+    /* How many messages are folded into this row. Hidden for a one-message
+       thread, where the count would only repeat what the row already is. */
+    .count { flex-shrink: 0; font-size: var(--text-xs); color: var(--ink-faint); border: 1px solid var(--line-faint); border-radius: 2px; padding: 0.05rem 0.25rem; }
+    .count[hidden] { display: none; }
     .priority-cue { display: none; align-items: center; gap: 0.2rem; flex-shrink: 0; border: 1px solid var(--fire-bright); color: var(--fire-bright); padding: 0.08rem 0.25rem; font-size: var(--text-xs); font-weight: 700; letter-spacing: 0.08em; }
     .priority-cue.critical { display: inline-flex; }
     .priority-shape { line-height: 1; }
@@ -79,66 +96,92 @@ export class PhCommsHailList extends PhElement {
     syncRovingTabindex(this.#rovingItems());
   }
 
-  /** Paint aria-selected across the cached rows from the current selection. */
-  #reflectSelection() {
-    for (const [id, row] of this.#rowCache) {
-      row.setAttribute('aria-selected', String(id === this.#selectedId));
-    }
-  }
-
   render(state) {
     const s = state || {};
-    const raw = Array.isArray(s.messages) ? s.messages : [];
+    const threads = Array.isArray(s.threads)
+      ? s.threads
+      : sortedThreadsFrom(s.messages, s.contacts);
     const list = this.shadowRoot.getElementById('list');
+    // Selection is projected by the shared Comms renderer. This component
+    // reflects it but never mutates it optimistically; pointer and bound input
+    // therefore converge on the same semantic adapter and one state owner.
+    this.#selectedId = typeof s.selected_thread_id === 'string'
+      ? s.selected_thread_id : null;
 
-    const live = new Set(raw.map(h => h.id || ''));
+    const live = new Set(threads.map(thread => thread.thread_id || ''));
     for (const [key, el] of this.#rowCache) {
       if (!live.has(key)) { el.remove(); this.#rowCache.delete(key); }
     }
 
-    if (raw.length === 0) {
+    if (threads.length === 0) {
       if (!this.#emptyEl) { this.#emptyEl = document.createElement('div'); this.#emptyEl.className = 'empty'; this.#emptyEl.textContent = t('component.comms_hails.empty'); list.appendChild(this.#emptyEl); }
       return;
     }
     if (this.#emptyEl) { this.#emptyEl.remove(); this.#emptyEl = null; }
 
-    raw.forEach(h => {
-      const id = h.id || '';
-      const sender = h.sender_name || '';
-      const preview = commsPreview(h);
-      const unread = !h.is_read;
-      const critical = isLatestLiveCriticalMessage(h, raw);
+    // The shell pushes console state ~10x a second, and moving a node in the
+    // DOM is a remove+insert that drops focus. So remember who holds focus
+    // before the loop, move only rows that are genuinely out of place, and put
+    // focus back if a real re-sort carried it away (issue #1178's one-Tab-stop,
+    // roving-arrows contract has to survive a repaint).
+    const focused = this.shadowRoot.activeElement;
+
+    threads.forEach((thread, index) => {
+      const id = thread.thread_id || '';
+      const sender = thread.sender_name || '';
+      const preview = thread.subject || '';
+      const unread = !!thread.any_unread;
+      const critical = thread.latest_priority === COMMS_PRIORITY.CRITICAL;
+      const count = Number.isFinite(thread.message_count) ? thread.message_count : 1;
       let row = this.#rowCache.get(id);
       if (!row) {
         row = document.createElement('button');
         row.type = 'button';
         row.className = 'row';
         row.setAttribute('role', 'option');
-        row.innerHTML = '<span class="dot"></span><span class="sender"></span><span class="preview"></span><span class="priority-cue"><span class="priority-shape" aria-hidden="true">◆</span><span class="priority-text"></span></span>';
+        row.innerHTML = '<span class="dot"></span><span class="sender"></span><span class="preview"></span><span class="count" hidden></span><span class="priority-cue"><span class="priority-shape" aria-hidden="true">◆</span><span class="priority-text"></span></span>';
         // Enter/Space (native to the button) and a pointer tap alike run this
-        // one handler, dispatching the SAME select_comms_message action.
+        // one handler, dispatching the SAME local semantic selection action —
+        // naming the THREAD the row stands for, not one of its messages.
         row.addEventListener('click', () => {
-          this.#selectedId = id;
-          this.#reflectSelection();
-          if (this.sendAction) {
-            this.sendAction('select_comms_message', { message_id: id });
+          if (typeof window.activateSemanticAction === 'function') {
+            window.activateSemanticAction(COMMS_SELECT_MESSAGE_ACTION_ID, {
+              source: 'control', detail: { thread_id: id },
+            });
           }
         });
         this.#rowCache.set(id, row);
-        list.appendChild(row);
       }
+      // Row order has to follow the projection — the inbox re-sorts as threads
+      // are read and answered — but ONLY when it actually differs from it.
+      // `#emptyEl` was removed above, so `list.children` holds rows alone and
+      // index-for-index comparison is exact; an unchanged order moves nothing.
+      const at = list.children[index];
+      if (at !== row) list.insertBefore(row, at || null);
       row.dataset.id = id;
-      row.dataset.priority = critical ? COMMS_PRIORITY.CRITICAL : commsPriority(h);
+      row.dataset.priority = thread.latest_priority || COMMS_PRIORITY.ROUTINE;
       row.classList.toggle('critical', critical);
       row.setAttribute('aria-selected', String(id === this.#selectedId));
-      row.children[0].className = unread ? 'dot unread' : 'dot read';
-      row.children[1].className = unread ? 'sender unread' : 'sender';
-      row.children[1].textContent = sender;
-      row.children[2].textContent = preview;
-      row.children[3].className = critical ? 'priority-cue critical' : 'priority-cue';
-      row.children[3].querySelector('.priority-text').textContent = critical
+      const dot = row.querySelector('.dot');
+      const senderEl = row.querySelector('.sender');
+      const countEl = row.querySelector('.count');
+      const cue = row.querySelector('.priority-cue');
+      dot.className = unread ? 'dot unread' : 'dot read';
+      senderEl.className = unread ? 'sender unread' : 'sender';
+      senderEl.textContent = sender;
+      row.querySelector('.preview').textContent = preview;
+      countEl.textContent = count > 1 ? String(count) : '';
+      countEl.hidden = count <= 1;
+      countEl.title = t('component.comms_hails.thread_count', { n: count });
+      cue.className = critical ? 'priority-cue critical' : 'priority-cue';
+      cue.querySelector('.priority-text').textContent = critical
         ? t('component.comms.priority.critical') : '';
     });
+    // A genuine re-sort DID move the focused row; hand focus back to the same
+    // node so the operator keeps their place in the list.
+    if (focused && focused.isConnected && this.shadowRoot.activeElement !== focused) {
+      focused.focus({ preventScroll: true });
+    }
     this.#syncRoving();
   }
 }

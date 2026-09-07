@@ -9,40 +9,68 @@
     body { font-size: var(--text-lg); margin: 0; background: var(--surface-void); overflow: hidden; }
     .frame { height: 100%; position: relative; }
     .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
-    .hero { display: flex; align-items: baseline; justify-content: space-between; flex-shrink: 0; gap: 12px; padding: 4px 0; align-self: flex-start; }
-    .hero h1 { font-size: var(--text-2xl); letter-spacing: 0.22em; color: var(--ink); margin: 0; }
-    .hero h1 .sub { font-family: "JetBrains Mono", monospace; font-size: var(--text-sm); letter-spacing: 0.22em; color: var(--ink-faint); margin-top: 2px; font-weight: 400; }
-    .console-body { flex: 1; min-height: 0; }
-    .console-body .sensors-col { display: flex; }
-    .console-body .sensors-col ph-sensor-radar { width: 100%; height: 100%; }
+    /* The one rail this scope sits beside (issue #1375): the command column.
+       The square left of it is gui/console.css's one `.scope-cell` rule, which
+       replaces the pair of aspect-ratio spellings — one per orientation — this
+       document used to carry for the same square. */
+    .console-body { --scope-rail-end: 380px; }
     .console-body .cmd-col { display: flex; flex-direction: column; min-height: 0; }
     .cmd-col .controls-row { display: flex; gap: 12px; flex-shrink: 0; }
     .cmd-col .controls-row > * { flex: 1; min-width: 0; }
     ph-objective-list { flex: 1; min-height: 0; }
     ph-deadline-list { flex-shrink: 0; padding-top: 4px; border-top: 1px solid var(--line-soft); }
     ph-operation-panel { flex-shrink: 0; padding-top: 4px; border-top: 1px solid var(--line-soft); }
-    ph-scan-readout { flex-shrink: 0; padding-top: 4px; border-top: 1px solid var(--line-soft); }
+    /* No border-top here (issue #1377): the divider used to separate this
+       from ph-deadline-list above it, but the two are now different groups
+       of the TARGET | MISSION segment below and no longer share a DOM
+       parent — ph-scan-readout is the first thing in its own panel. */
+    ph-scan-readout { flex-shrink: 0; }
     ph-sensor-panel { flex: 1; min-height: 0; }
-    .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); flex-shrink: 0; padding: 6px 0; }
-    .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
-    .console-footer .sep { color: var(--line-soft); }
-    .console-footer .spacer { flex: 1; }
 
-    .hero-controls { display: flex; align-items: center; gap: 8px; }
+    /* Phone TARGET | MISSION segment (issue #1377): landscape/desktop keep
+       showing the target card (scan readout + sensor panel) and the mission
+       group (objectives + deadline clock) at once, same as before — the
+       segment control is invisible there, and this rule makes the
+       JS-toggled `hidden` on the non-selected panel a no-op so both stay on
+       screen. Portrait cannot fit the readout, the camera/alert row and both
+       groups without scrolling the whole console, so the segment actually
+       hides one there. Mirrors `gui/battleship/navigation.html`'s
+       TRAFFIC | MISSION pattern (issue #1379). */
+    #captain-seg { display: none; }
+    .cmd-col .cmd-seg-panel { display: flex; flex-direction: column; min-height: 0; }
+    .cmd-col .cmd-seg-panel[hidden] { display: flex; }
 
     @media (orientation: portrait) {
       .panel-inner { padding: 10px 12px; gap: 8px; }
-      .hero h1 { font-size: var(--text-xl); }
-      .hero h1 .sub { font-size: var(--text-xs); }
-      .console-body { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
-      .console-body .sensors-col { width: 100%; aspect-ratio: 1 / 1; flex-shrink: 0; }
-      .console-body .cmd-col { flex: 1; }
       .cmd-col .controls-row { gap: 8px; }
+      #captain-seg { display: flex; }
+      /* Unlike the shared `.scope-row` portrait default (content-sized rail,
+         whole-page scroll — see the comment above `.scope-cell` in
+         console.css), this column now shows only ONE of its two content
+         groups at a time, so it can afford to take the row's real leftover
+         height instead of measuring its own content: `flex: 1 1 auto`
+         overrides console.css's `.scope-row > .scope-cell ~ :not(.scope-cell)
+         { flex: 0 0 auto }`. That selector counts THREE classes once `:not()`'s
+         own argument is counted (`.scope-row`, `.scope-cell`, and `.scope-cell`
+         again inside `:not()`), so `.console-body .cmd-col` (two classes) loses
+         the tie on specificity alone regardless of source order — measured
+         directly (a `flex-grow`/`flex-shrink` diagnostic overlay) after this
+         first shipped losing that fight silently, console.css's `0 0 auto`
+         still winning and console-body overflowing its own box by 44px with
+         no scrollbar to reach it. `.console-body.scope-row .cmd-col` matches
+         the same three-class count on the one element that carries both
+         classes, so this rule now ties and wins on being later in the
+         cascade, after the stylesheet `<link>`. The visible `.cmd-seg-panel`
+         then gets the leftover space and scrolls only itself if its own
+         content still doesn't fit — never the whole console (issue #1377 AC:
+         "neither pane scrolls" means no full console-body scroll, not that an
+         inner panel may never overflow). */
+      .console-body.scope-row .cmd-col { flex: 1 1 auto; min-height: 0; }
+      .cmd-col .cmd-seg-panel { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+      .cmd-col .cmd-seg-panel[hidden] { display: none; }
     }
 
     @media (orientation: landscape) {
-      .console-body { display: grid; grid-template-columns: auto 1fr; gap: 16px; }
-      .console-body .sensors-col { height: 100%; aspect-ratio: 1 / 1; }
       .console-body .cmd-col { overflow-y: auto; }
     }
   </style>
@@ -51,36 +79,41 @@
   <div class="frame" data-screen-label="Captain Console" data-i18n-attr="data-screen-label:console.captain.screen_label">
     <div class="panel"></div>
     <div class="panel-inner">
-      <div class="hero">
-        <h1><span data-i18n="console.captain.title">CAPTAIN</span><span class="sub" data-i18n="console.destroyer_captain.subtitle">COMMAND &amp; SENSORS</span></h1>
-        <div class="hero-controls">
-          <span class="auto-badge" id="captain-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
-        </div>
-      </div>
-      <div class="console-body">
-        <div class="sensors-col">
+      <!-- No title row and no footer (issue #1374): the shell's Station Bar
+           names this seat and its selected tab opens the per-system damage
+           popup the footer's `ph-station-damage` used to. The locked sensor
+           target the footer named heads the command column it belongs to. -->
+      <div class="console-body scope-row">
+        <div class="sensors-col scope-cell">
           <ph-sensor-radar id="sensor-radar"></ph-sensor-radar>
         </div>
         <div class="cmd-col">
+          <div class="readout">
+            <span id="footer-target" data-i18n="console.common.no_target">NO TARGET</span>
+            <span class="spacer"></span>
+            <span class="auto-badge" id="captain-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
+          </div>
           <div class="controls-row">
             <ph-camera-select id="camera-select"></ph-camera-select>
             <ph-red-alert id="red-alert"></ph-red-alert>
           </div>
-          <ph-objective-list id="objective-list"></ph-objective-list>
-          <ph-deadline-list id="deadline-list"></ph-deadline-list>
-          <ph-scan-readout id="scan-readout"></ph-scan-readout>
-          <ph-sensor-panel id="sensor-panel"></ph-sensor-panel>
+          <!-- Phone-only segment (issue #1377): hidden by #captain-seg's own
+               landscape/desktop `display:none` above, so the roving tabindex
+               it wires never competes with Tab order on those layouts. -->
+          <div class="seg" id="captain-seg" role="tablist" data-i18n-attr="aria-label:console.captain.seg.label">
+            <button type="button" class="seg-btn" id="captain-seg-target" role="tab" aria-selected="true" aria-controls="captain-panel-target" data-i18n="console.captain.seg.target">TARGET</button>
+            <button type="button" class="seg-btn" id="captain-seg-mission" role="tab" aria-selected="false" aria-controls="captain-panel-mission" tabindex="-1" data-i18n="console.captain.seg.mission">MISSION</button>
+          </div>
+          <div class="cmd-seg-panel" id="captain-panel-target">
+            <ph-scan-readout id="scan-readout"></ph-scan-readout>
+            <ph-sensor-panel id="sensor-panel"></ph-sensor-panel>
+          </div>
+          <div class="cmd-seg-panel" id="captain-panel-mission" hidden>
+            <ph-objective-list id="objective-list"></ph-objective-list>
+            <ph-deadline-list id="deadline-list"></ph-deadline-list>
+          </div>
         </div>
       </div>
-      <footer class="console-footer footer-bar">
-        <span class="dot"></span>
-        <span id="footer-status" data-i18n="console.captain.station_footer">CAPTAIN STATION</span>
-        <span class="sep">·</span>
-        <span id="footer-target" style="color:var(--ink-faint)" data-i18n="console.common.no_target">NO TARGET</span>
-        <span class="spacer"></span>
-        <ph-station-damage id="station-damage"></ph-station-damage>
-        <span id="footer-right" style="color:var(--ink-faint)">—</span>
-      </footer>
     </div>
   </div>
   <script type="module">
@@ -91,8 +124,8 @@
     import '../components/ph-scan-readout.js';
     import '../components/ph-sensor-radar.js';
     import '../components/ph-sensor-panel.js';
-    import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
+    import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
     // The render lives in gui/destroyer/captain.console.js (issue #1235): the
     // shared Captain renderer + this hull's variant (Sensors absorbed into
     // the same Station — the destroyer has no separate Sensors seat). s is a
@@ -100,6 +133,42 @@
     // renderStation.
     import { renderStation } from './captain.console.js';
     initConsole({ name: 'captain', render: renderStation });
+
+    // Phone TARGET | MISSION segment (issue #1377): presentation-only local
+    // selection — no host command, just which `.cmd-seg-panel` is on screen.
+    // Activates on both click and arrow-driven focus (the same automatic
+    // activation the Station Bar's own tabs use — gui/hero-bar.js), so a
+    // keyboard operator never has to press Enter on top of the arrow move.
+    // Mirrors `gui/battleship/navigation.html`'s TRAFFIC | MISSION wiring
+    // (issue #1379).
+    var captainSeg = document.getElementById('captain-seg');
+    var captainSegButtons = [
+      document.getElementById('captain-seg-target'),
+      document.getElementById('captain-seg-mission'),
+    ];
+    var captainSegPanels = {
+      target: document.getElementById('captain-panel-target'),
+      mission: document.getElementById('captain-panel-mission'),
+    };
+    function selectCaptainSeg(key) {
+      captainSegButtons.forEach(function(btn, i) {
+        btn.setAttribute('aria-selected', (i === 0) === (key === 'target') ? 'true' : 'false');
+      });
+      captainSegPanels.target.hidden = key !== 'target';
+      captainSegPanels.mission.hidden = key !== 'mission';
+      syncRovingTabindex(captainSegButtons, key === 'target' ? 0 : 1);
+    }
+    captainSeg.addEventListener('click', function(e) {
+      var btn = e.target.closest('.seg-btn');
+      if (!btn) return;
+      selectCaptainSeg(btn === captainSegButtons[1] ? 'mission' : 'target');
+    });
+    captainSeg.addEventListener('focusin', function(e) {
+      var btn = e.target.closest('.seg-btn');
+      if (!btn) return;
+      selectCaptainSeg(btn === captainSegButtons[1] ? 'mission' : 'target');
+    });
+    installRovingTabindex(captainSeg, { getItems: function() { return captainSegButtons; }, orientation: 'horizontal' });
   </script>
 </body>
 </html>

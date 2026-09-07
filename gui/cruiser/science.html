@@ -9,57 +9,85 @@
     body { font-size: var(--text-lg); margin: 0; background: var(--surface-void); overflow: hidden; }
     .frame { height: 100%; }
     .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
-    .hero { display: flex; align-items: baseline; justify-content: space-between; flex-shrink: 0; gap: 12px; padding: 4px 0; align-self: flex-start; }
-    .hero h1 { font-size: var(--text-2xl); letter-spacing: 0.22em; color: var(--ink); margin: 0; }
-    .hero h1 .sub { font-family: "JetBrains Mono", monospace; font-size: var(--text-sm); letter-spacing: 0.22em; color: var(--ink-faint); margin-top: 2px; font-weight: 400; }
-    .console-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    .console-body .col { display: flex; flex-direction: column; background: rgba(var(--rgb-panel), 0.6); border: 1px solid var(--edge); padding: 12px; min-height: 0; overflow-y: auto; }
-    .console-body .col h2 { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
-    ph-sensor-radar, ph-sensor-panel, ph-shield-panel, ph-shield-facings { flex: 1; min-height: 0; }
-    /* Compact threat-bearing readout (issue #926) — same standing fact the
+    /* The scope at full size with the target card on one side and the
+       four-facing shield ring on the other (issue #1394), reusing the shared
+       `.scope-row`/`.scope-cell` two-rail pattern (issue #1375) exactly as
+       gui/destroyer/tactical.html and gui/battleship/sensors.html already do
+       — this document states its two rail widths and says nothing else about
+       the scope's size: no aspect-ratio of its own, no per-orientation
+       spelling. `ph-sensor-panel` IS the target card (see its own docstring
+       and ph-target-lock-card.js's "Deliberately narrower than
+       ph-sensor-panel's target card, which this mirrors"), so the start rail
+       needs no bespoke card markup.
+
+       `--scope-rail-min` is 140px, well under the two joystick-driven hulls'
+       160-190px: neither rail here holds a fixed-size widget with a floor of
+       its own to protect. The target-col has ph-sensor-panel's header, which
+       wraps (below) rather than breaking mid-phrase; the shield-col's own
+       `ph-shield-panel { display: none }` rule further down drops out
+       exactly at the narrow-rail pinch point (a landscape window short
+       enough to force the floor also has `max-height: 500px`), leaving only
+       ph-shield-facings' scaling SVG and a heading behind. At 190px both
+       rails held their floor at 650x450 and left the scope 132px square,
+       under `tests/smoke/scope-responsive.spec.js`'s 150px floor for that
+       viewport; at 140px the same viewport measures 225px square. */
+    .console-body { --scope-rail-start: 240px; --scope-rail-end: 240px; --scope-rail-min: 140px; }
+    .console-body .ctrl-col { display: flex; flex-direction: column; gap: 10px; min-height: 0; background: rgba(var(--rgb-panel), 0.6); border: 1px solid var(--edge); padding: 12px; overflow-y: auto; }
+    /* Round 3 of the #1375 slice shipped this exact document with
+       `ph-sensor-panel#sensor-panel` squeezed to zero height by a `flex: 1`
+       rail sharing space with a square that took its basis first (see
+       tests/smoke/scope-responsive.spec.js's doc comment). `flex-shrink: 0`
+       here is what destroyer/tactical.html's weapon controls and target-lock
+       card already carry for the same reason: a rail's fixed-size widgets are
+       exactly as tall as what they hold, and a stack too tall for the rail
+       overflows the rail's own `overflow-y: auto` above rather than being
+       crushed to nothing. */
+    ph-sensor-panel, ph-shield-panel, ph-shield-facings { flex-shrink: 0; }
+    /* Compact threat-bearing readout (issue #926) — the standing fact the
        battleship's dedicated Shields console shows, condensed to one line
-       for this column's tighter layout. Hidden when Sensors holds no threat. */
-    .threat-readout { display: flex; justify-content: space-between; gap: 8px; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); padding: 0 0 8px; flex-shrink: 0; visibility: hidden; }
+       and set beside the ring it describes. Hidden when Sensors holds no
+       threat. */
+    .threat-readout { display: flex; justify-content: space-between; gap: 8px; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); flex-shrink: 0; visibility: hidden; }
     .threat-readout.active { visibility: visible; }
     .threat-readout strong { color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: var(--text-md); }
-    .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); flex-shrink: 0; padding: 6px 0; }
-    .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
-    .console-footer .sep { color: var(--line-soft); }
-    .console-footer .spacer { flex: 1; }
-    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: var(--text-xl); } .hero h1 .sub { font-size: var(--text-xs); } .console-body { grid-template-columns: 1fr; gap: 8px; } .console-body .col { padding: 8px; } }
-    @media (orientation: landscape) { .console-body .col:first-child { border-right: none; } }
+    /* Desktop adds the shield panel rows — grid status, integrity, per-facing
+       bars, focus line (issue #1394's AC) — the ring alone is what a phone's
+       frame has room for. The threshold mirrors gui/hero-bar.js's own
+       phone/desktop split for the Station Bar above this console
+       (HERO_BAR_CODE_QUERY) rather than inventing a second one: a phone held
+       either way is a phone by the same rule the bar already used. */
+    @media (orientation: portrait) and (max-width: 599px), (orientation: landscape) and (max-height: 500px) {
+      ph-shield-panel { display: none; }
+    }
+    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .console-body .ctrl-col { padding: 8px; } }
   </style>
 </head>
 <body>
   <div class="frame" data-screen-label="Science Console" data-i18n-attr="data-screen-label:console.science.screen_label">
     <div class="panel"></div>
     <div class="panel-inner">
-      <div class="hero">
-        <h1><span data-i18n="console.science.title">SCIENCE</span><span class="sub" data-i18n="console.science.subtitle">SENSORS &amp; SHIELDS</span></h1>
-        <span class="auto-badge" id="science-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
-      </div>
-      <div class="console-body">
-        <div class="col">
-          <h2 data-i18n="console.science.sensors">Sensors</h2>
-          <ph-sensor-radar id="sensor-radar"></ph-sensor-radar>
+      <!-- No title row and no footer (issue #1374): the shell's Station Bar
+           names this seat and its selected tab opens the per-system damage
+           popup the footer's `ph-station-damage` used to. The locked target
+           the footer named heads the target-card rail it belongs to. -->
+      <div class="console-body scope-row">
+        <div class="ctrl-col target-col">
+          <div class="readout">
+            <span id="footer-target" data-i18n="console.common.no_target">NO TARGET</span>
+            <span class="spacer"></span>
+            <span class="auto-badge" id="science-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
+          </div>
           <ph-sensor-panel id="sensor-panel"></ph-sensor-panel>
         </div>
-        <div class="col">
-          <h2 data-i18n="console.science.shields">Shields</h2>
-          <div class="threat-readout" id="threat-row"><span data-i18n="console.shields.threat_bearing">Threat Bearing</span><strong id="threat-bearing">—</strong></div>
+        <div class="radar-col scope-cell">
+          <ph-sensor-radar id="sensor-radar"></ph-sensor-radar>
+        </div>
+        <div class="ctrl-col shield-col">
           <ph-shield-panel id="shield-panel"></ph-shield-panel>
+          <div class="threat-readout" id="threat-row"><span data-i18n="console.shields.threat_bearing">Threat Bearing</span><strong id="threat-bearing">—</strong></div>
           <ph-shield-facings id="shield-facings"></ph-shield-facings>
         </div>
       </div>
-      <footer class="console-footer footer-bar">
-        <span class="dot"></span>
-        <span id="footer-status" data-i18n="console.science.station_footer">SCIENCE STATION</span>
-        <span class="sep">·</span>
-        <span id="footer-target" style="color:var(--ink-faint)" data-i18n="console.common.no_target">NO TARGET</span>
-        <span class="spacer"></span>
-        <ph-station-damage id="station-damage"></ph-station-damage>
-        <span id="footer-right" style="color:var(--ink-faint)">—</span>
-      </footer>
     </div>
   </div>
   <script type="module">
@@ -67,7 +95,6 @@
     import '../components/ph-sensor-panel.js';
     import '../components/ph-shield-panel.js';
     import '../components/ph-shield-facings.js';
-    import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
     // The render lives in gui/cruiser/science.console.js (issue #1235): the
     // shared Science renderer + this hull's variant (Sensors + Shields, no

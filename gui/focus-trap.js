@@ -132,15 +132,30 @@ export function createFocusTrap(modal, options = {}) {
   const suspended = [];
 
   /**
-   * The page behind the modal: the modal's siblings, minus the OPENER. The
+   * The page behind the modal: siblings of the modal and of each containing
+   * branch, through the document body. Direct-body overlays retain the
+   * original one-level behaviour; nested confirmations also suspend the rest
+   * of their panel and the page outside it.
+   *
+   * The exact OPENER remains exempt. The
    * opener (the cog that toggles the panel) stays live so a second click on it
    * still closes the panel — it is the one background control the operator must
-   * keep reaching.
+   * keep reaching. A nested opener's containing branch is still background,
+   * so the confirmation cannot leave its host panel interactive.
    */
   function backgroundRoots() {
-    const parent = modal && modal.parentNode;
-    if (!parent || !parent.children) return [];
-    return Array.from(parent.children).filter((el) => el !== modal && el !== opener);
+    const roots = [];
+    let branch = modal;
+    while (branch && branch.parentNode) {
+      const parent = branch.parentNode;
+      if (parent.children) {
+        roots.push(...Array.from(parent.children)
+          .filter((el) => el !== branch && el !== opener));
+      }
+      if (doc && (parent === doc.body || parent === doc.documentElement)) break;
+      branch = parent;
+    }
+    return roots;
   }
 
   function suspendBackground() {

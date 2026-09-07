@@ -1,0 +1,65 @@
+# Probe world for issue #1118 — one deterministic mission across THREE ship hosts.
+#
+# The two-host `probe_fleet_duel.toml` cannot exercise divergence RECOVERY: with
+# two hosts a disagreement is a pure split with no majority, which is a clean
+# failure by design (there is no canonical record to recover from without a
+# coin-flip). Three hosts is the smallest fleet where one host can diverge and the
+# other two form a strict majority — the case recovery actually heals.
+#
+#   * THREE `game_start` rows tagged "ship", one per fleet slot, placed clear of
+#     one another. A lone host still spawns one player ship and treats the rest as
+#     ordinary NPCs, exactly as `probe_fleet_duel.toml` does.
+#   * A hostile third party, spawned from script CLOSE ENOUGH TO ENGAGE, so the
+#     fold the three hosts compare covers combat — beam/torpedo RNG draws and
+#     mid-run projectile mints — rather than three hulls coasting in a line.
+#   * A short `command_delay_ticks`, so the lockstep window is exercised in a
+#     handful of ticks rather than a hundred.
+
+[global]
+seed = 1118
+ai_helm_tick_hz = 30.0
+command_delay_ticks = 2
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# Fleet slot 1's ship — takes `[player_spawn]`, because one anchor places one hull.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "fleet-ship-1"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# Fleet slot 2's ship.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "fleet-ship-2"
+transform = { position = [60.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# Fleet slot 3's ship.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "fleet-ship-3"
+transform = { position = [-60.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+[script]
+setup = """
+on_world_loaded("on_load");
+on_timer(0, "on_spawn");
+
+fn on_load(ctx) {
+    ctx.effects.add_faction_enemy("Harrow", "Alliance");
+    ctx.effects.add_faction_enemy("Alliance", "Harrow");
+}
+
+fn on_spawn(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/alliance_cruiser.toml",
+        name: "fleet_probe_hostile",
+        position: [0, 0, 55],
+        overrides: #{ faction: "cccccccc-3333-4333-8333-cccccccccccc" }
+    });
+}
+"""

@@ -15,6 +15,5 @@ export const renderStation = makeScienceRender({
     threatBearing: 'threat-bearing',
     footer: 'footer-target',
     autoBadge: 'science-auto-badge',
-    stationDamage: 'station-damage',
   },
 });

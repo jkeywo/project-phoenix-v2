@@ -27,6 +27,16 @@
 # the history, oldest first; the first number in them is NOT the one to A/B
 # against.
 #
+# RECORDED PRE-#1086, AND NO LONGER REPRODUCIBLE. Issue #1086 widened the
+# authoritative digest over the scenario's own state, and this world's
+# `on_world_loaded` trigger — the one that makes Alliance and Harrow mutually
+# hostile before anything spawns — is a latch on
+# `WorldContentRuntime::trigger_states`, now walked by
+# `sim_digest::fold_scenario_records`, which did not happen when the CURRENT
+# VALUE above was measured. The whole lineage in this section predates the
+# fold and none of it reproduces on a clean tree. Re-measure before treating
+# any of it as a baseline again.
+#
 # 95852357729946676 was itself moved from 11542528846502171323 by the
 # `thrust_release_threshold` band (the thrust axis's mirror of the battery
 # axis's `min_reserve_*`/`min_restore_*` pair). 11542528846502171323 was itself
@@ -88,7 +98,7 @@
 #
 # ── Sides, factions, and how the run ends ─────────────────────────────────────
 #
-# Side A = Federation (the player's own faction). Side A slot 1 is the PLAYER
+# Side A = Alliance (the player's own faction). Side A slot 1 is the PLAYER
 #   ship (the LocalShip), set from `--side-a`'s first entry via `--ship`/
 #   `PendingShipConfig` — NOT a spawn slot below. Slots `side_a_2`..`side_a_5`
 #   are the player's NPC escorts.
@@ -195,13 +205,13 @@ spawn_on = "game_start"
 
 [script]
 setup = """
-// Make Federation and Harrow mutually hostile before the ships spawn. Both
+// Make Alliance and Harrow mutually hostile before the ships spawn. Both
 // directions of the asymmetric `is_enemy` relationship, at world-load.
 on_world_loaded("on_load");
 
 fn on_load(ctx) {
-    ctx.effects.add_faction_enemy("Federation", "Harrow");
-    ctx.effects.add_faction_enemy("Harrow", "Federation");
+    ctx.effects.add_faction_enemy("Alliance", "Harrow");
+    ctx.effects.add_faction_enemy("Harrow", "Alliance");
 }
 
 // The ONE authored slot body — every slot, authored or generated, goes through

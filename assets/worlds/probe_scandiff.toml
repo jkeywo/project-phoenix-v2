@@ -81,6 +81,17 @@
 # ledger. If a later change moves this number without moving a condition track,
 # something started folding scenario state, and that is the question to ask
 # before re-blessing this line.
+#
+# RECORDED PRE-#1086, AND NO LONGER REPRODUCIBLE. The BUCKET named above just
+# folded: issue #1086's `sim_digest::fold_scenario_records` now walks the
+# deadline table and the commitments ledger this paragraph names, and this
+# world's own `record_filed`/`records_diff_found` flag counters and its five
+# `on_world_loaded`/`on_flag_set`/`on_flag_cleared` trigger latches are exactly
+# the FlagStore and `trigger_states` entries that fold walks. The evidence entry
+# and the raw scan reading are still unfolded — nothing above puts either in a
+# folded field — but the number above predates the fold that now walks the
+# flags and triggers around them, so it does not reproduce on a clean tree.
+# Re-measure before treating it as a baseline again.
 
 [global]
 seed = 1038

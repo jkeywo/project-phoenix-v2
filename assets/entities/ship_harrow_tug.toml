@@ -41,7 +41,7 @@ includes = ["fragments/ai/fleet_baseline.toml", "fragments/ai/captain_alliance.t
 
 class = "courier"  # picker badge / scan subtitle — a light salvage hull
 tags = ["ship", "npc"]
-faction = "cccccccc-3333-4333-8333-cccccccccccc"  # Harrow — hostile to the Federation
+faction = "cccccccc-3333-4333-8333-cccccccccccc"  # Harrow — hostile to the Alliance
 # Authored mass (issue #1154): a light, powerful little tug. Read by the tow-load
 # helm penalty (#1157) as the operator's own mass; the prize's mass is what
 # actually loads the drive.

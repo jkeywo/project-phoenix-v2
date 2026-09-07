@@ -102,6 +102,17 @@
 # `falling_skyway` DID move, and its own header carries the A/B that attributes
 # the move to one authored entity rather than to anything this world does.
 #
+# RECORDED PRE-#1086, AND NO LONGER REPRODUCIBLE. Issue #1086 widened the
+# authoritative digest over the scenario's own state — the flag stores, the
+# trigger latches, the named records (deadlines, commitments, evidence,
+# workforce) and the whole of `CommsState` — so every gate this world's five
+# sites turn on (the RECORDS/settlement flags, the evidence appended to each
+# rung, and the witness threads themselves) is now walked by
+# `sim_digest::fold_scenario_records` / `fold_comms_scope` rather than merely
+# snapshotted. Every number above, this world's own included, predates that
+# fold and does not reproduce on a clean tree. Re-measure before treating any
+# of it as a baseline again.
+#
 # STILL 0x567af1547ec4e45f after the player-ship override fix (the defect found
 # in #1036), for `probe_evidence.toml`'s reason: the fix makes the override
 # below reach the spawned hull for the first time, and what it lands is the rule

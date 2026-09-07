@@ -7,7 +7,7 @@
 # deterministic tripwire for the projection rather than a fight that happens to
 # damage something.
 #
-#   skyway_control      a hailable starbase, Federation      -> affiliation + hailing range
+#   skyway_control      a hailable starbase, Alliance      -> affiliation + hailing range
 #   strike_committee    a hailable hull, Requiem, and the
 #                       party a promise is made to           -> affiliation + range + promise
 #   skyway_depot        a PUBLISHED structure, not hailable  -> condition + the LABELLED
@@ -58,6 +58,15 @@
 # If a later change makes the digest move without moving either, something
 # started folding a projection, and that is the question to ask before
 # re-blessing this line.
+#
+# RECORDED PRE-#1086, AND NO LONGER REPRODUCIBLE. The premise above ("folded by
+# nothing") was true of the projection but never quite the whole story: the
+# promise `give_word` records at t=2 is a `WorldContentRuntime::commitments`
+# entry, and issue #1086's `sim_digest::fold_scenario_records` now walks that
+# ledger — so the SOURCE the dossier derives from is folded even though the
+# projection itself still is not. The number above predates that fold and does
+# not reproduce on a clean tree. Re-measure before treating it as a baseline
+# again.
 
 [global]
 seed = 1030
@@ -74,7 +83,7 @@ spawn_on = "game_start"
 
 # ── Subject: a hailable starbase ─────────────────────────────────────────────
 # On the roster through the comms door, which `station_axiom.toml` opens at the
-# template level (`[comms] hailable = true`, issue #985). Federation, so its
+# template level (`[comms] hailable = true`, issue #985). Alliance, so its
 # affiliation row resolves through the faction's own authored `display_name`.
 [[entity]]
 template_path = "assets/entities/station_axiom.toml"

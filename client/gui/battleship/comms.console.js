@@ -1,8 +1,9 @@
 /**
  * gui/battleship/comms.console.js — the Harrow battleship's Comms seat
- * (issue #1235). The reference hull: a single-family flat `comms` payload,
- * the contact/hail/message core, and a hail-name footer. No bespoke tail
- * beyond that footer text.
+ * (issue #1235). The reference hull: a single-family flat `comms` payload and
+ * nothing but the shared core — the HAILS | CONTACTS pair, the open thread and
+ * the active-hail readout. It has no tail at all (issue #1380 moved the
+ * readout into the core, where both hulls now spell it the same way).
  *
  * The `.html` imports `renderStation` and hands it to `initConsole`; a
  * vitest suite imports the same `renderStation`.
@@ -15,14 +16,9 @@ export const renderStation = makeCommsRender({
     contactList: 'comms-contact-list',
     hailList: 'comms-hail-list',
     currentMessage: 'comms-current-message',
-    stationDamage: 'station-damage',
+    hailsUnread: 'comms-hails-unread',
+    activeHail: 'footer-target',
+    threadPanel: 'comms-thread-panel',
     autoBadge: 'comms-auto-badge',
-  },
-  tail: (s, view, doc, t) => {
-    const el = doc.getElementById('footer-target');
-    if (!el) return;
-    const msgs = view.messages || [];
-    const threadMsg = msgs.find((m) => !m.is_read) || msgs[msgs.length - 1] || null;
-    el.textContent = threadMsg ? (threadMsg.sender_name || t('console.common.active_hail')) : t('console.common.no_active_hail');
   },
 });

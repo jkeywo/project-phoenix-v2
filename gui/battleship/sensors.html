@@ -9,36 +9,39 @@
     body { margin: 0; background: var(--surface-void); overflow: hidden; }
     .frame { height: 100%; }
     .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
-    .hero { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; align-self: flex-start; }
-    .hero h1 { margin: 0; font-size: var(--text-2xl); letter-spacing: 0.22em; color: var(--ink); }
-    .hero h1 .sub { display: block; font-family: "JetBrains Mono", monospace; font-size: var(--text-sm); color: var(--ink-faint); }
-    .console-body { flex: 1; min-height: 0; display: grid; grid-template-columns: auto 1fr; gap: 16px; }
-    .radar-col { height: 100%; aspect-ratio: 1 / 1; }
+    /* The one rail this scope sits beside (issue #1375): the scan readouts.
+       The square left of it is gui/console.css's one `.scope-cell` rule, which
+       replaces the `auto` track this document used to size from the radar
+       column's own aspect-ratio — a shape that only worked while the row's
+       height was definite, which is why portrait needed a second spelling. */
+    .console-body { --scope-rail-end: 320px; }
     .data-col { min-height: 0; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
     .data-panel { display: flex; flex-direction: column; gap: 8px; background: rgba(var(--rgb-panel), 0.6); border: 1px solid var(--edge); padding: 12px; }
     .data-panel h2 { margin: 0; font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; }
     .metric { display: flex; justify-content: space-between; gap: 12px; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }
     .metric strong { color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: var(--text-lg); }
     #btn-cancel-impulse[hidden] { display: none; }
-    .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); padding: 6px 0; }
-    .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
-    .console-footer .spacer { flex: 1; }
-    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: var(--text-xl); } .hero h1 .sub { font-size: var(--text-xs); } .console-body { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; } .radar-col { width: 100%; } }
+    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .console-body { overflow-y: auto; } }
   </style>
 </head>
 <body>
   <div class="frame" data-screen-label="Sensors Console" data-i18n-attr="data-screen-label:console.sensors.screen_label">
     <div class="panel"></div>
     <div class="panel-inner">
-      <div class="hero">
-        <h1><span data-i18n="console.sensors.title">SENSORS</span><span class="sub" data-i18n="console.sensors.subtitle">LONG-RANGE SCAN</span></h1>
-        <span class="auto-badge" id="sensors-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
-      </div>
-      <div class="console-body">
-        <div class="radar-col">
+      <!-- No title row and no footer (issue #1374): the shell's Station Bar
+           names this seat and its selected tab opens the per-system damage
+           popup the footer's `ph-station-damage` used to. The locked target the
+           footer named heads the scan column it belongs to. -->
+      <div class="console-body scope-row">
+        <div class="radar-col scope-cell">
           <ph-sensor-radar id="sensor-radar"></ph-sensor-radar>
         </div>
         <div class="data-col">
+          <div class="readout">
+            <span id="footer-target" data-i18n="console.common.no_target">NO TARGET</span>
+            <span class="spacer"></span>
+            <span class="auto-badge" id="sensors-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
+          </div>
           <div class="data-panel">
             <h2 data-i18n="console.sensors.scan_summary">Scan Summary</h2>
             <div class="metric"><span data-i18n="console.sensors.scan_range">Scan Range</span><strong id="scan-range-val">0</strong></div>
@@ -62,20 +65,13 @@
           <ph-sensor-panel id="sensor-panel" hide-shield-rows></ph-sensor-panel>
         </div>
       </div>
-      <footer class="console-footer footer-bar">
-        <span class="dot"></span>
-        <span data-i18n="console.sensors.station_footer">SENSORS STATION</span>
-        <span class="spacer"></span>
-        <span id="footer-target" data-i18n="console.common.no_target">NO TARGET</span>
-        <ph-station-damage id="station-damage"></ph-station-damage>
-      </footer>
     </div>
   </div>
   <script type="module">
     import '../components/ph-sensor-radar.js';
     import '../components/ph-sensor-panel.js';
-    import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
+    import { SENSORS_CANCEL_IMPULSE_ACTION_ID } from '../stations/sensors-actions.js';
     // The render lives in gui/battleship/sensors.console.js (issue #1235):
     // the shared Sensors renderer + this hull's variant. s is a
     // SensorsConsolePayload — see the @typedef in gui/console-state.js. The
@@ -85,7 +81,7 @@
     var consoleApi = initConsole({ name: 'sensors', render: renderStation });
 
     document.getElementById('btn-cancel-impulse').addEventListener('click', function() {
-      consoleApi.sendAction('cancel_impulse', {});
+      window.activateSemanticAction(SENSORS_CANCEL_IMPULSE_ACTION_ID, { source: 'control' });
     });
   </script>
 </body>

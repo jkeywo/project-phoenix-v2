@@ -21,7 +21,6 @@ export const renderStation = makeCaptainRender({
     camera: 'camera',
     redAlert: 'red-alert',
     objectives: 'objectives',
-    stationDamage: 'damage',
   },
   // The Courier's compact bridge exposes only its Fore hull view and the
   // authored Cinematic view, even if the model carries extra markers.
@@ -65,14 +64,26 @@ export const renderStation = makeCaptainRender({
     const hullEl = doc.getElementById('hull');
     if (hullEl) hullEl.state = { total_pct: repair.overall_hull?.pct ?? 1, destroyed_pct: repair.overall_hull?.destroyed_pct };
     const repairEl = doc.getElementById('repair');
-    if (repairEl) repairEl.state = { teams: repair.teams || [], auto: !!repair.repair_auto, targets: repair.dispatch_targets || [], damaged: repair.damaged_systems || [] };
+    if (repairEl) {
+      repairEl.state = {
+        teams: repair.teams || [],
+        auto: !!repair.repair_auto,
+        targets: repair.dispatch_targets || [],
+        damaged: repair.damaged_systems || [],
+        // The field destination an open idle card offers (issue #1384) and the
+        // team abroad on it (issue #1386) — the same shape the Repair and
+        // Engineering renderers hand the component, so the compact Captain
+        // composite renders the identical card.
+        external_dispatch: repair.external_dispatch || null,
+      };
+    }
 
     const navEl = doc.getElementById('nav');
     if (navEl) {
       navEl.state = {
         blips: nav.blips || [], regions: nav.regions || [], range: nav.radar_range || 800,
         ship_pos: { x: nav.ship_x || 0, z: nav.ship_z || 0 }, ship_heading: nav.ship_heading || 0,
-        waypoint: nav.waypoint || null,
+        waypoint: nav.waypoint || null, auto: !!nav.navigation_auto,
       };
     }
 

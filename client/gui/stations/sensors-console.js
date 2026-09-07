@@ -15,7 +15,6 @@
  * @property {object} ids                       element ids present in this hull's markup
  * @property {string} [ids.radar]                `ph-sensor-radar` id
  * @property {string} [ids.sensorPanel]          `ph-sensor-panel` id
- * @property {string} [ids.stationDamage]        `ph-station-damage` id
  * @property {string} [ids.scanRange]            scan-range readout id
  * @property {string} [ids.contactSub]           contact-count readout id
  * @property {string} [ids.targetName]           target-name readout id
@@ -47,7 +46,6 @@ export function makeSensorsRender(variant) {
 
     if (ids.radar) { const el = doc.getElementById(ids.radar); if (el) el.state = s; }
     if (ids.sensorPanel) { const el = doc.getElementById(ids.sensorPanel); if (el) el.state = s; }
-    if (ids.stationDamage) { const el = doc.getElementById(ids.stationDamage); if (el) el.state = s.own_hull || null; }
     if (ids.scanRange) { const el = doc.getElementById(ids.scanRange); if (el) el.textContent = String(s.scan_range || 0); }
 
     const blipCount = (s.blips || []).length;

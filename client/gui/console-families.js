@@ -50,7 +50,6 @@ export const CONSOLE_SPECS = Object.freeze({
   // Other verified single-family consoles (not currently reused by an NPC
   // hull, kept so the map is authoritative for any future repoint).
   'gui/destroyer/helm.html': Object.freeze({ families: Object.freeze(['helm']) }),
-  'gui/cruiser/tactical.html': Object.freeze({ families: Object.freeze(['tactical']) }),
 
   // ── Multi-family consoles. The Requiem courier's two seats are each
   //    multi-family and reuse the courier consoles.
@@ -60,8 +59,19 @@ export const CONSOLE_SPECS = Object.freeze({
   // Other verified multi-family consoles (the alliance_destroyer's own
   // multi-family seats — kept authoritative, not reused by NPC hulls).
   'gui/destroyer/captain.html': Object.freeze({ families: Object.freeze(['captain', 'sensors']) }),
-  'gui/destroyer/tactical.html': Object.freeze({ families: Object.freeze(['tactical', 'navigation', 'comms']) }),
+  // Tactical also OWNS the Security System on this hull (issue #1346): the seat
+  // authors `kind = "security"` in alliance_destroyer.toml and the console
+  // embeds `<ph-security-teams>`, so it is owned coverage, not a visiting panel.
+  'gui/destroyer/tactical.html': Object.freeze({ families: Object.freeze(['tactical', 'navigation', 'comms', 'security']) }),
   'gui/destroyer/engineering.html': Object.freeze({ families: Object.freeze(['shields', 'power', 'repair']) }),
+  // The cruiser's Tactical seat left the single-family list above when the hull
+  // authored its own Security System (issue #1389): `alliance_cruiser.toml` now
+  // carries `[security]` + `[[system]] kind = "security" station = "tactical"`
+  // and the console embeds `<ph-security-teams>`, so the seat spans two
+  // families and takes the system-id-keyed payload. This is the entry that says
+  // so — and the reason `tactical.console.js` reads its weapons view through
+  // `familyView` rather than treating the payload as flat.
+  'gui/cruiser/tactical.html': Object.freeze({ families: Object.freeze(['tactical', 'security']) }),
 });
 
 /**

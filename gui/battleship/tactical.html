@@ -9,39 +9,37 @@
     body { margin: 0; background: var(--surface-void); overflow: hidden; }
     .frame { height: 100%; }
     .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
-    .hero { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; align-self: flex-start; }
-    .hero h1 { margin: 0; font-size: var(--text-2xl); letter-spacing: 0.22em; color: var(--ink); }
-    .hero h1 .sub { display: block; font-family: "JetBrains Mono", monospace; font-size: var(--text-sm); color: var(--ink-faint); }
     .console-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
-    ph-tactical-radar { width: 100%; aspect-ratio: 1 / 1; }
-    @media (orientation: landscape) { ph-tactical-radar { height: 100%; width: auto; } }
-    .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); padding: 6px 0; }
-    .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
-    .console-footer .spacer { flex: 1; }
-    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: var(--text-xl); } .hero h1 .sub { font-size: var(--text-xs); } }
+    /* The scope is square by gui/console.css's one `.scope-cell` rule
+       (issue #1375): side = min(free width, free height), so it fills the
+       width in this stacked column and the column's height in landscape. The
+       per-orientation aspect-ratio pair this document used to carry said the
+       same thing in two places and had to be re-derived every time the chrome
+       above it changed. */
+    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } }
   </style>
 </head>
 <body>
   <div class="frame" data-screen-label="Tactical Console" data-i18n-attr="data-screen-label:console.tactical.screen_label">
     <div class="panel"></div>
     <div class="panel-inner">
-      <div class="hero">
-        <h1><span data-i18n="console.tactical.title">TACTICAL</span><span class="sub" data-i18n="console.tactical.subtitle">WEAPONS CONTROL</span></h1>
-        <span class="auto-badge" id="tactical-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
-      </div>
+      <!-- No title row and no footer (issue #1374): the shell's Station Bar
+           names this seat and its selected tab opens the per-system damage
+           popup the footer's `ph-station-damage` used to. The locked target the
+           footer named heads the weapons group it belongs to. -->
       <div class="console-body">
-        <ph-tactical-radar id="tactical-radar"></ph-tactical-radar>
+        <div class="readout">
+          <span id="footer-target" data-i18n="console.common.no_target">NO TARGET</span>
+          <span class="spacer"></span>
+          <span class="auto-badge" id="tactical-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
+        </div>
+        <div class="scope-cell">
+          <ph-tactical-radar id="tactical-radar"></ph-tactical-radar>
+        </div>
         <ph-phasers-controls id="phasers-controls"></ph-phasers-controls>
         <ph-blasters-controls id="blasters-controls" hidden></ph-blasters-controls>
         <ph-torpedo-controls id="torpedo-controls"></ph-torpedo-controls>
       </div>
-      <footer class="console-footer footer-bar">
-        <span class="dot"></span>
-        <span data-i18n="console.tactical.station_footer">TACTICAL STATION</span>
-        <span class="spacer"></span>
-        <span id="footer-target" data-i18n="console.common.no_target">NO TARGET</span>
-        <ph-station-damage id="station-damage"></ph-station-damage>
-      </footer>
     </div>
   </div>
   <script type="module">
@@ -49,7 +47,6 @@
     import '../components/ph-phasers-controls.js';
     import '../components/ph-blasters-controls.js';
     import '../components/ph-torpedo-controls.js';
-    import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
     // The render lives in gui/battleship/tactical.console.js (issue #1234): one
     // shared Tactical renderer, this hull's variant. The vitest suite imports

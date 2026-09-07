@@ -1,0 +1,244 @@
+/*
+ * gui/host-scenarios.css - the scenario picker's stylesheet (issue #1328).
+ *
+ * Lifted verbatim out of server.html's inline <style> (issue #755's block) so
+ * that the ONE picker has ONE stylesheet: server.html links it, and so does the
+ * host-lobby document the native host assembles in memory
+ * (src/native_host/host_lobby/document.rs), which since #1328 carries the
+ * scenario panel as well as the crew lobby. This is the same move #1325 made
+ * for gui/host-lobby.css and #1329 for gui/host-qr.css, for the same reason: a
+ * second copy of these rules for the native surface is exactly the drift those
+ * extractions removed, and CSS is half of a render path.
+ *
+ * WHAT DID NOT COME WITH IT: the mod-pack upload and the save importer
+ * (#mod-pack-*, #snapshot-import*). Those are host TOOLING — file inputs with
+ * page-lifetime handlers, removed outright from a demo build - and the native
+ * lobby document strips them from the markup it borrows, so their rules stay
+ * inline in server.html where the only surface that renders them lives.
+ *
+ * `--settings-cog-keepout` is the SURFACE's own: each host that mounts a
+ * settings cog declares the corner its cog occupies, and this sheet only floors
+ * a padding at it. It is referenced here WITH a fallback, which is this sheet
+ * saying the property may legitimately be absent - it was, on the native lobby
+ * surface, until issue #1367 gave that window a cog to clear.
+ *
+ * The logo is `../assets/logo.png`, not `assets/logo.png`: a URL in a
+ * stylesheet resolves against the STYLESHEET, and this file sits one directory
+ * down from the bundle root both surfaces load it from.
+ *
+ * NO RAW HEX BELOW ANY MORE (issue #1357, PRD #1355). #1356 could name only
+ * the two literals with an exact token — --surface-void behind the logo and
+ * rgba(var(--rgb-void), 0.75) for the world column's scrim — because #cce,
+ * #334, #889, #111, #aae, #223, #558, #224, #66c and #ccf were the pre-graphite
+ * picker palette and gui/tokens.css held no rung with those values. #1357 moved
+ * the vocabulary to graphite, so each is named here now, BY ROLE:
+ *
+ *   #111 button fill        → --surface-card, one rung off the void ground
+ *   #223 / #224 hover, on   → --surface-raised / --surface-high, so pressing
+ *                             through rest → hover → chosen is still three
+ *                             visibly separated steps
+ *   #334 column rule        → --edge-faint on the divider, --edge-strong on
+ *                             the button, which is a CONTROL boundary and so
+ *                             measured against the fill it encloses: 3.90:1 on
+ *                             the --surface-card .world-btn paints itself with.
+ *                             --edge-control is 2.94:1 there — the same 0.06
+ *                             shortfall gui/host-lobby.css records at its two
+ *                             control rows, and the reason the picker takes the
+ *                             rung they took. (--edge-control is 3.13:1 on the
+ *                             --surface-void GROUND behind the button, which is
+ *                             the ratio to quote if this button ever loses its
+ *                             fill, and not before.)
+ *   #558 hover edge         → --edge-bright, 4.41:1 on the --surface-raised
+ *                             hover fill, so rest → hover still steps up now
+ *                             that rest is --edge-strong
+ *   #66c chosen edge        → --cyan, the same accent boundary the crew lobby
+ *                             gives a claimed station, so "this one" reads the
+ *                             same on both host screens
+ *   #cce / #ccf / #aae ink  → --ink for the panel and the chosen button,
+ *                             --ink-dim for a resting button and the column
+ *                             label, keeping resting quieter than chosen
+ *
+ * Its KNOWN_LITERALS entry in design-tokens.test.js is gone with them, and that
+ * suite fails on a stale entry as well as on a new literal — so this sheet is
+ * now held at zero rather than at a list somebody has to remember to shrink.
+ * The two controls issue #1362 adds — the World row's hull-count chip and the
+ * Back out of the hull stage — were mapped the same way, by role, and each
+ * carries the measurement it was chosen by at its own rule.
+ *
+ * #world-list-label's 0.75rem became --text-sm in #1356, which is
+ * `max(12px, 0.75rem)` and therefore NOT an identity: no root font-size is set
+ * on this surface, so the label holds 12px on a browser whose default has been
+ * shrunk instead of following it down. .world-btn's 0.95rem joins it at
+ * --text-lg — `max(15px, 1rem)`, a hair larger — on the same reasoning: this is
+ * the first screen the host operator reads, usually across a room.
+ */
+
+/* ── Scenario picker (issue #755) ─────────────────────────────────────── */
+#scenario-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: var(--surface-void) url('../assets/logo.png') center center / min(45vw, 45vh) auto no-repeat;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  font-family: monospace;
+  color: var(--ink);
+}
+#world-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  /* Top padding is the cog keep-out, not a design choice: #world-list-label
+     is the first child and would otherwise sit at y 24, under the cog —
+     "SELECT A WORLD" rendered as "⚙ CT A WORLD" on the first screen the
+     host sees. The label's y is set by this padding alone, so the clash is
+     width-independent.
+
+     The optional fallback is this sheet saying the token may be absent: it is
+     on the native lobby surface, which has no settings cog to clear. Without
+     it the whole `padding` declaration would be invalid there and the column
+     would lose its 1rem sides as well as its top. */
+  padding: var(--settings-cog-keepout, 0px) 1rem 1.5rem;
+  width: 14rem;
+  min-width: 12rem;
+  max-width: 18rem;
+  overflow-y: auto;
+  background: rgba(var(--rgb-void), 0.75);
+  border-right: 1px solid var(--edge-faint);
+  box-sizing: border-box;
+}
+#world-list-label {
+  font-size: var(--text-sm);
+  color: var(--ink-dim);
+  letter-spacing: 0.06em;
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+}
+.world-btn {
+  background: var(--surface-card);
+  color: var(--ink-dim);
+  /* --edge-strong, not --edge-control, for the measurement gui/host-lobby.css
+     states at its own control rows: WCAG 1.4.11 measures a control boundary
+     against the ADJACENT colour, and the adjacent colour here is this button's
+     own --surface-card fill, where --edge-control is 2.94:1 and --edge-strong
+     is 3.90:1. The 3.13:1 --edge-control reads on --surface-void is the ground
+     the panel paints behind the button, not the fill this border encloses. */
+  border: 1px solid var(--edge-strong);
+  padding: 0.55rem 0.9rem;
+  font-family: monospace;
+  font-size: var(--text-lg);
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+  letter-spacing: 0.04em;
+  /* A row, since issue #1362: the World's name and the count of hulls it
+     offers. The ellipsis moved to `.world-btn-name` with the text — a button
+     that is now a flex container cannot truncate its own children. */
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+  transition: background 0.15s, border-color 0.15s;
+}
+.world-btn-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* How many hulls this World offers, read BEFORE it is chosen (issue #1362):
+   a World that will ask a second question and one that goes straight through
+   were the same button until now. `.on` is the one that will ask.
+
+   Mapped from the design's `.chip` by role, per #1357's table: #6a727b as
+   11px TEXT is --ink-faint (the table is explicit that its own rung,
+   --edge-strong, is a stroke and fails the 4.5 text floor); #2a2f38 is a
+   decorative boundary INSIDE a control rather than a control boundary of its
+   own — the button around it is the focus target and the hit target — so it
+   takes --edge-faint, the content-divider rung, and not a 1.4.11 rung. The
+   lit pair is the accent pair the picker already uses: --signal foreground on
+   a --cyan-dim boundary. */
+.world-btn-hulls {
+  flex: 0 0 auto;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--edge-faint);
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: var(--tracking);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.world-btn-hulls.on { color: var(--signal); border-color: var(--cyan-dim); }
+.world-btn.active .world-btn-hulls { border-color: var(--cyan); }
+
+/* The step back out of the hull stage (issue #1362). Rendered only where a
+   surface supplied an arbiter to answer it, so this styles a control that is
+   either operable or absent — never a decoration.
+
+   --edge-strong rather than --edge-control on a transparent fill: the adjacent
+   colour is the column's own ground, where --edge-control clears 1.4.11 at
+   3.02:1 and --edge-strong at 4.01:1. The sibling .world-btn above takes
+   --edge-strong for its own measurement, and two controls in one column that
+   disagree about their resting weight read as a bug rather than a hierarchy. */
+.scenario-back {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding: 0.55rem 0.75rem;
+  min-height: var(--control-hit-min);
+  background: transparent;
+  border: 1px solid var(--edge-strong);
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px);
+}
+/* The arrow is drawn, not written: a glyph in the markup would be one more
+   untranslated string for the string gate to warn about and carries no meaning
+   a reader needs read aloud — the same call gui/host-landing.css makes for the
+   menu entries' chevron. */
+.scenario-back::before {
+  content: "\2039";
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  line-height: 1;
+}
+.scenario-back:hover { color: var(--signal); border-color: var(--cyan); }
+/* Inset, because the clip-path above eats an outset outline along with the
+   corners — the floor tests/client/control-floors.test.js enforces. */
+.scenario-back:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 var(--focus-ring-width) var(--focus-ring);
+}
+/* --edge-bright on the hover, because rest is --edge-strong now: the pair has
+   to keep stepping UP, and --edge-bright is 4.41:1 on the --surface-raised
+   this state fills with (--edge-strong would be 3.72 there — passing, but no
+   brighter than rest). */
+.world-btn:hover { background: var(--surface-raised); border-color: var(--edge-bright); }
+.world-btn.active { background: var(--surface-high); border-color: var(--cyan); color: var(--ink); }
+
+/* Portrait / narrow hosts (carried over in the GM platform merge, #1300): the
+   picker stacks its columns and lets the page scroll them in sequence. The join
+   surface docked after them (gui/host-qr.css's #overlay.pre-scenario) takes the
+   same treatment beside it. #save-slots-panel is no longer named here: since
+   issue #1363 the catalogue is a body-level sibling rather than a column of
+   this panel, and gui/host-landing.css sizes it for the middle column it docks
+   into. Lives here with the rest of the picker's rules rather than in
+   server.html (#1328). */
+@media (orientation: portrait), (max-width: 800px) {
+  #scenario-panel { flex-direction: column; overflow-y: auto; }
+  #world-list { width: 100%; max-width: none; min-width: 0; overflow: visible; }
+}

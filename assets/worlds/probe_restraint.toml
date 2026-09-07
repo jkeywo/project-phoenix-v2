@@ -1,5 +1,9 @@
 # Probe world for issue #1041 — the tactical restraint lever, and the one
-# interaction that turns it into a choice.
+# interaction that turns it into a choice. Re-pointed at POWER by issue #1398:
+# the lever is the same lever and every verb below is unchanged, but what
+# `hold_fire` writes is now the target ship's `weapons` power group at level 0
+# rather than a hidden captain's boolean, and what a scenario listens for is
+# `weapons_cold.*` rather than `weapons_hold.*`.
 #
 # Two things are under test here and they are deliberately kept apart.
 #
@@ -26,18 +30,21 @@
 #
 # ── Timeline (60 Hz), in mission seconds ────────────────────────────────────
 #
-#   t=0    the Harrow and the Federation are made mutually hostile. The
+#   t=0    the Harrow and the Alliance are made mutually hostile. The
 #          enforcer is always-armed and in range; it opens fire on its own.
-#   t=4    `hold_fire` on the enforcer. Its guns stop. Nothing else about the
-#          world changes — it is still hostile, still in range, still at
-#          whatever alert its own captain policy has it at.
-#   t=8    `release_fire` on the enforcer. Its guns resume.
-#   ~t=10  the CREW hold their own fire — their captain's order, not this
+#   t=4    `hold_fire` on the enforcer — its `weapons` group to 0. Its guns
+#          stop. Nothing else about the world changes — it is still hostile,
+#          still in range, still at whatever alert its own captain policy has it
+#          at. The hull authors `[power_groups.weapons] min_level = 0`, which is
+#          what makes the order legal; a hull that authored 1 would refuse it.
+#   t=8    `release_fire` on the enforcer, back to its authored `default_level`.
+#          Its guns resume.
+#   ~t=10  the CREW take their OWN weapons cold — an Engineering order, not this
 #          script's, which is why no timer below issues it. The mirror flag
-#          `weapons_hold.own_ship` goes up, `on_flag_set` chains off it, and the
+#          `weapons_cold.own_ship` goes up, `on_flag_set` chains off it, and the
 #          operator watching the corridor reacts. That is the "an authored party
-#          reacts to the hold" half, proved through the flag rather than through
-#          a Rust hook.
+#          reacts to the restraint" half, proved through the flag rather than
+#          through a Rust hook.
 #   t=14   the disable branch: 80 points off `claimant_disabled`'s condition
 #          drops `probe_claimant_guns_online`, `on_flag_cleared` chains, and the
 #          handler holds its fire and writes the disabled flags. It is still in
@@ -60,9 +67,9 @@
 # What legitimately moves it: this file's entity list and positions, the
 # authored condition and threshold numbers, the script's timings, the hulls it
 # fields, and any engine change to what the authoritative digest folds — which
-# since this issue includes the weapons-hold namespace, and this is the first
-# world in the repository that puts anything in it. What must NOT move with it
-# are the shipped worlds — combat_test 14942520827746055774 and patrol
+# under #1041 included the weapons-hold namespace, and this was the first world
+# in the repository that put anything in it. What must NOT move with it are the
+# shipped worlds — combat_test 14942520827746055774 and patrol
 # 11531679067393217131 — because a lever nobody in those worlds pulls folds
 # nothing at all.
 #
@@ -78,6 +85,14 @@
 # fixes were confirmed the only way they can be: by putting
 # 11434311098359716284 back.
 #
+# RECORDED PRE-#1086, AND NO LONGER REPRODUCIBLE. Issue #1086 widened the
+# authoritative digest over the scenario's own state — the flag stores and the
+# trigger latches this world's disable/destroy branches write (`on_flag_
+# cleared`, `on_destroyed`) among them — so every number above, including the
+# two shipped-world anchors, predates `sim_digest::fold_scenario_records` and
+# does not reproduce on a clean tree. Re-measure before treating any of it as a
+# baseline again.
+#
 # STILL 1078282553163286478 AFTER the AI-thrust-burst fix, and this one is worth
 # stating precisely because — unlike combat_test, patrol and falling_skyway,
 # which record 0 helm power changes — this world's `ship_harrow_patrol` picket
@@ -88,6 +103,40 @@
 # lingers inside it, so a world whose throttle crosses it outright folds the
 # digest it always did. That is a stronger hold than the low-LOD ones above: the
 # rule ran, and still decided the same thing.
+#
+# RECAPTURED IN #1398, AND THIS WORLD IS THE ONLY ONE THAT MOVED.
+#
+#   target/release/phoenix-headless --world assets/worlds/probe_restraint.toml \
+#     --seed 42 --ticks 900 --record target/dig/probe_restraint.ron \
+#     --digest-every 0
+#
+# now gives 0x81d494ec84c5c262 (9355266069516108386), where the same command
+# against a binary built before this change's Rust half — over these same world
+# files, which are neutral, see below — gave 0xb8b06d57b3ae59a9
+# (13308257122323945897). Both numbers are post-#1086 and reproduce; the
+# pre-#1086 figures above still do not.
+#
+# THREE things moved it, all deliberate:
+#
+#   * the `weapons-hold` fold namespace is GONE with the lever it folded, and
+#     this is the only world in the repository that ever put a ship in it — so
+#     most of the delta is one fold stage's contribution subtracted rather than a
+#     run behaving differently;
+#   * `ship_harrow_patrol.toml` now authors a `[power_groups.*]` block, with
+#     `min_level = 0` on weapons so `hold_fire` is legal on this hull at all;
+#   * the two `hold_fire` calls and the `release_fire` move that reactor now
+#     rather than a boolean, and the `weapons_cold.*` mirror emits its flag
+#     events from `ship::power` rather than from the captain plugin.
+#
+# THE SHIPPED ANCHORS DID NOT MOVE, and that was A/B'd rather than assumed:
+# combat_test folds 0xb912074f990e68a8 (13335729485049129128) and patrol folds
+# 0x7044c4b72979b3c3 (8089807121618154435) both before and after the change — a
+# lever nobody in those worlds pulls folds nothing at all, and the retired
+# namespace folded nothing while nobody held. Reverting only the
+# `[power_groups.*]` block on `ship_harrow_patrol.toml` and re-running the same
+# two worlds gives those same two numbers again, which is the separate claim the
+# block's own comment makes: it transcribes the canonical seeding, so it changes
+# nothing except that weapons may now be commanded to 0.
 
 [global]
 seed = 1041
@@ -110,10 +159,10 @@ position = [0.0, 0.0, 0.0]
 
 # The crew's own hull. Unnamed, like every other world's player entry: a
 # game-start ship is spawned by its own path and a reference name declared here
-# would be registered against a uuid that path never uses. The crew's OWN hold
-# is therefore ordered by their captain rather than by this script, and what the
-# script does with it is listen — `weapons_hold.own_ship` is keyed by role for
-# exactly this reason.
+# would be registered against a uuid that path never uses. The crew's OWN
+# restraint is therefore ordered by their Engineering officer rather than by this
+# script, and what the script does with it is listen — `weapons_cold.own_ship` is
+# keyed by role for exactly this reason.
 [[entity]]
 template_path = "assets/entities/alliance_destroyer.toml"
 id = "player-ship"
@@ -185,12 +234,13 @@ on_destroyed("world.probe_restraint.entity.claimant_destroyed.name", "on_claiman
 
 // The authored party's reaction to the crew's own restraint (AC3). It reads the
 // MIRROR flag, exactly as a scenario condition reads `workforce.<id>.on_strike`
-// — no scenario ever touches the component.
-on_flag_set("weapons_hold.own_ship", "on_crew_restraint_noticed");
+// — no scenario ever touches ship state. Re-keyed from `weapons_hold.own_ship`
+// in issue #1398, when the state behind the mirror became the reactor.
+on_flag_set("weapons_cold.own_ship", "on_crew_restraint_noticed");
 
 fn on_load(ctx) {
-    ctx.effects.add_faction_enemy("Harrow", "Federation");
-    ctx.effects.add_faction_enemy("Federation", "Harrow");
+    ctx.effects.add_faction_enemy("Harrow", "Alliance");
+    ctx.effects.add_faction_enemy("Alliance", "Harrow");
 }
 
 fn on_hold_the_enforcer(ctx) {
@@ -203,8 +253,8 @@ fn on_release_the_enforcer(ctx) {
     ctx.flags.enforcer_released = 1;
 }
 
-// The operator watching the corridor notices that the destroyer has not gone
-// weapons-free, and says so in the only way a probe can: a flag, and a count of
+// The operator watching the corridor notices that the destroyer has taken its
+// guns cold, and says so in the only way a probe can: a flag, and a count of
 // how many times it has seen it.
 fn on_crew_restraint_noticed(ctx) {
     ctx.flags.operator_saw_restraint = 1;

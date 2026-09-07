@@ -126,7 +126,11 @@ export class PhShipPicker extends PhElement {
       display: flex; flex-direction: column; gap: 6px; min-height: var(--control-hit-min);
     }
     .ship-card:disabled { cursor: default; }
-    .ship-card:hover { background: var(--surface-panel-up); border-color: var(--edge-control); }
+    /* --edge-bright, not --edge-control (issue #1357): the hover fill is
+       --surface-panel-up and WCAG 1.4.11 measures this border against that,
+       where --edge-control is 2.20:1 and --edge-bright is 3.46:1. See the
+       control ladder in the Edges block of gui/tokens.css. */
+    .ship-card:hover { background: var(--surface-panel-up); border-color: var(--edge-bright); }
     .ship-card:active { background: var(--surface-panel-up); border-color: var(--violet); }
     /* The hull itself (PRD #1023 user story 3). One yaw tile out of the
        captured billboard strip; shipArtStyle() computes the size and offset.
@@ -166,8 +170,10 @@ export class PhShipPicker extends PhElement {
     .ship-badge.cruiser { background: rgba(var(--rgb-cyan), 0.15); border: 1px solid var(--cyan); color: var(--cyan); }
     .ship-badge.destroyer { background: rgba(var(--rgb-violet), 0.15); border: 1px solid var(--violet); color: var(--violet); }
     .ship-badge.unknown { background: rgba(var(--rgb-edge-strong), 0.15); border: 1px solid var(--edge-bright); color: var(--ink-dim); }
-    .ship-hull-id { font-size: var(--text-sm); color: var(--edge-strong); letter-spacing: 0.04em; }
-    .ship-stats { display: flex; gap: 12px; margin-top: 2px; }
+    /* Wraps since issue #1362: the card names three readings now (registry,
+       mass, power rating) and a single row of them overflowed the 200px
+       minimum the grid packs cards to. */
+    .ship-stats { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 2px; }
     .ship-stat { display: flex; flex-direction: column; gap: 1px; }
     .ship-stat-label { font-size: var(--text-xs); letter-spacing: 0.15em; color: var(--edge-strong); text-transform: uppercase; }
     .ship-stat-value { font-size: var(--text-md); color: var(--ink-dim); }
@@ -238,8 +244,18 @@ export class PhShipPicker extends PhElement {
       const cls = (ship.class || 'unknown').toLowerCase();
       const clsId = `component.ship_picker.class.${cls}`;
       const clsLabel = wireText(clsId, cls);
+      // The three readings a host picks a hull BY (issue #1362): its registry,
+      // its mass and its power rating. All three are labelled stats now — the
+      // registry used to be a bare `#AEV-2001` beside the class badge, which
+      // named itself to a reader who already knew it and to nobody else. Each
+      // is drawn only when the datum is there: `hull_id` is optional in the
+      // template, and neither it nor `mass` has arrived until the entity
+      // template has been delivered (the browser fetches it asynchronously),
+      // so a card that has not got there yet shows what it has rather than a
+      // labelled blank.
       const hullId = ship.hull_id ? `#${ship.hull_id}` : '';
-      const power = ship.power_rating != null ? `⚡${ship.power_rating}` : '';
+      const mass = ship.mass != null ? String(ship.mass) : '';
+      const power = ship.power_rating != null ? String(ship.power_rating) : '';
       const stations = ship.station_count || '';
       // The hull's portrait, when the build resolved one for this template.
       // `aria-hidden`: the card's own name is the accessible label, so the
@@ -256,10 +272,11 @@ export class PhShipPicker extends PhElement {
     <div class="ship-name">${name}</div>
     <div class="ship-meta">
       <span class="ship-badge ${cls}">${clsLabel}</span>
-      ${hullId ? `<span class="ship-hull-id">${hullId}</span>` : ''}
     </div>
-    ${(power || stations) ? `
+    ${(hullId || mass || power || stations) ? `
     <div class="ship-stats">
+      ${hullId ? `<div class="ship-stat"><span class="ship-stat-label">${t('component.ship_picker.registry')}</span><span class="ship-stat-value">${hullId}</span></div>` : ''}
+      ${mass ? `<div class="ship-stat"><span class="ship-stat-label">${t('component.ship_picker.mass')}</span><span class="ship-stat-value">${mass}</span></div>` : ''}
       ${power ? `<div class="ship-stat"><span class="ship-stat-label">${t('component.ship_picker.power')}</span><span class="ship-stat-value">${ship.power_rating}</span></div>` : ''}
       ${stations ? `<div class="ship-stat"><span class="ship-stat-label">${t('component.ship_picker.stations')}</span><span class="ship-stat-value">${stations}</span></div>` : ''}
     </div>` : ''}

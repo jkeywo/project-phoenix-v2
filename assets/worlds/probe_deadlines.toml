@@ -29,6 +29,14 @@
 # line. It is a NEW number, not a preserved one — nothing to compare it against
 # yet — so it is written down here to be the thing a later change is A/B'd
 # against, the way the shipped worlds' digests already are.
+#
+# RECORDED PRE-#1086, AND NO LONGER REPRODUCIBLE. Issue #1086 widened the
+# authoritative digest over the scenario's own state — the flag stores, the
+# trigger latches and the named records (deadlines, commitments, evidence,
+# workforce) among them — so `WorldContentRuntime::deadlines`, the whole point
+# of this world, is now walked by `sim_digest::fold_scenario_records` rather
+# than merely snapshotted. The number above predates that fold and does not
+# reproduce on a clean tree. Re-measure before treating it as a baseline again.
 
 [global]
 seed = 1024

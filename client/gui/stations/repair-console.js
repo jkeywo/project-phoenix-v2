@@ -21,7 +21,6 @@
  * @property {string} ids.hullIntegrity           `ph-hull-integrity` id
  * @property {string} [ids.coreDamage]            ownerless "core" systems bar id
  * @property {string} ids.repairTeams             `ph-repair-teams` id
- * @property {string} [ids.stationDamage]         footer `ph-station-damage` id
  * @property {string} [ids.footerRight]           footer active/total-teams status text id
  * @property {string} [ids.autoBadge]             the AUTO badge id
  * @property {string} [ids.dispatchPanel]         External-dispatch panel id (issue #1161),
@@ -60,12 +59,18 @@ export function makeRepairRender(variant) {
 
     const teamsEl = doc.getElementById(ids.repairTeams);
     if (teamsEl) {
-      teamsEl.state = { teams: s.teams || [], auto: !!s.repair_auto, targets: s.dispatch_targets || [], damaged: s.damaged_systems || [] };
-    }
-
-    if (ids.stationDamage) {
-      const el = doc.getElementById(ids.stationDamage);
-      if (el) el.state = s.own_hull || null;
+      teamsEl.state = {
+        teams: s.teams || [],
+        auto: !!s.repair_auto,
+        targets: s.dispatch_targets || [],
+        damaged: s.damaged_systems || [],
+        // The field destination an open idle card offers (issue #1384), and
+        // WHICH team is abroad on it (issue #1386). The whole view: three
+        // renderers used to rebuild a 0/1 committed count beside it and the
+        // card guessed which slot that meant, which was only ever right
+        // because nobody could choose. The claim names its team now.
+        external_dispatch: s.external_dispatch || null,
+      };
     }
 
     if (ids.footerRight) {

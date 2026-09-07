@@ -23,6 +23,48 @@
 import { findScenario, normalizeSelection } from './scenario-arbiter.js';
 
 /**
+ * One catalog scenario as a World row, for either stage that draws the column.
+ *
+ * `hullCount` is what issue #1362 asked the row to say BEFORE it is chosen: a
+ * World that offers a choice of hulls and one that resolves straight to a
+ * single hull are two different clicks, and the operator had no way to tell
+ * them apart until they had made one.
+ *
+ * Zero is deliberately NOT drawn. An empty `ships` list does not mean "this
+ * World has no hulls" — `curatedShipsFor` reads it as UNRESTRICTED, i.e. every
+ * hull the world itself holds — so a "0 hulls" chip would be the one reading
+ * the operator must not take from it. `hullCountLabel` is null there and the
+ * renderer draws nothing, which says "unknown" honestly.
+ *
+ * `hasChoice` is count-based like the auto-resolve in the stage below it, and
+ * keyed on no hull name: it is the row saying whether choosing it will ask a
+ * second question or go straight through.
+ *
+ * @param {Array<object>} list the pre-load catalog.
+ * @param {string|null} selectedId the scenario the arbiter has locked, if any.
+ */
+function worldRows(list, selectedId) {
+  return list.map(function (sc) {
+    const count = (sc.ships && sc.ships.length) || 0;
+    return {
+      scenarioId: sc.id,
+      world: sc.world,
+      label: sc.label,
+      hullCount: count,
+      hasChoice: count > 1,
+      // A {id, params} pair rather than prose, the way gui/lobby-view.js and
+      // gui/host-lobby-view.js carry data-dependent text: the count decides
+      // which id, the string table decides the words.
+      hullCountLabel: count === 0 ? null : {
+        id: count === 1 ? 'server.hulls_offered.one' : 'server.hulls_offered.other',
+        params: { n: count },
+      },
+      selected: selectedId != null && sc.id === selectedId,
+    };
+  });
+}
+
+/**
  * The pure decision behind `renderScenarioLockState()`: which stage of the
  * QR-first picker to show, or that the picker is locked out entirely.
  *
@@ -45,9 +87,9 @@ import { findScenario, normalizeSelection } from './scenario-arbiter.js';
  * @returns {
  *   | {stage: 'locked'}
  *   | {stage: 'scenario-empty', labelId: string}
- *   | {stage: 'scenario-list', labelId: string, entries: Array<{scenarioId: string, world: string, label: *}>}
+ *   | {stage: 'scenario-list', labelId: string, entries: Array<object>}
  *   | {stage: 'ship-auto', templatePath: string}
- *   | {stage: 'ship-picker', labelId: string, ships: Array<{template_path: string, label?: *}>}
+ *   | {stage: 'ship-picker', labelId: string, worldLabelId: string, scenarioId: string, entries: Array<object>, ships: Array<{template_path: string, label?: *}>}
  * } what server.html should render. 'ship-auto' asks the caller to invoke its
  *   own `arbiterSelectShip(templatePath)` (a side effect this module cannot
  *   perform) rather than render anything — mirrors the original inline
@@ -66,7 +108,7 @@ export function scenarioCatalogView(catalog, preSelection, locked) {
     return {
       stage: 'scenario-list',
       labelId: 'server.select_world',
-      entries: list.map((sc) => ({ scenarioId: sc.id, world: sc.world, label: sc.label })),
+      entries: worldRows(list, null),
     };
   }
 
@@ -79,7 +121,20 @@ export function scenarioCatalogView(catalog, preSelection, locked) {
     if (ships.length === 1) {
       return { stage: 'ship-auto', templatePath: ships[0].template_path };
     }
-    return { stage: 'ship-picker', labelId: 'server.select_ship', ships };
+    // The World rows come WITH the hull stage (issue #1362). The picker used
+    // to replace the world column with the hulls, which left an operator who
+    // had mis-clicked with nothing to read and nowhere to go; the rows travel
+    // into this stage so the column that took them there is still on screen,
+    // with the chosen one marked. Which surface puts them side by side and
+    // which stacks them is the renderer's — this only says both are showing.
+    return {
+      stage: 'ship-picker',
+      labelId: 'server.select_ship',
+      worldLabelId: 'server.select_world',
+      scenarioId: sel.scenario_id,
+      entries: worldRows(list, sel.scenario_id),
+      ships,
+    };
   }
 
   // Both locked — world load is about to start (driveWorldLoad requires

@@ -19,7 +19,6 @@
  * @property {object} ids                    element ids present in this hull's markup
  * @property {string} ids.controls            `ph-power-controls` id
  * @property {string} ids.battery             `ph-battery-bar` id
- * @property {string} [ids.stationDamage]     footer `ph-station-damage` id
  * @property {string} [ids.autoBadge]         the AUTO badge id
  * @property {string} [ids.batteryLabel]      footer battery-percent text id
  * @property {string} [ids.dataEl]            hidden `#power-data` element id —
@@ -51,11 +50,6 @@ export function makePowerRender(variant) {
 
     const batteryEl = doc.getElementById(ids.battery);
     if (batteryEl) batteryEl.state = { level_pct: pct, charging: !!s.charging, emergency_threshold_pct: 20 };
-
-    if (ids.stationDamage) {
-      const el = doc.getElementById(ids.stationDamage);
-      if (el) el.state = s.own_hull || null;
-    }
 
     if (ids.batteryLabel) {
       const el = doc.getElementById(ids.batteryLabel);

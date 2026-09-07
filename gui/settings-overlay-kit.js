@@ -42,17 +42,28 @@ export const VOLUME_STEP = 0.01;
  * opens the panel) to rebuild the tab bar and body from current state; this
  * module owns only the reveal/hide mechanics around that rebuild.
  *
+ * The button's PARENT is a caller's decision (issue #1372). The host page has
+ * one home for its cog; the phone's moves — into the Station bar while the bar
+ * is the page's chrome, back to `document.body` for the lobby and for the
+ * full-viewport surfaces it has to stack above. It is one node either way, so
+ * `setButtonContainer` re-parents it rather than the page keeping two twins in
+ * sync. The overlay itself never moves: it is `position: fixed` over the whole
+ * viewport and its focus trap targets the overlay, so a cog that changes parent
+ * mid-session takes nothing with it.
+ *
  * @param {Document} doc
  * @param {{
  *   buttonId: string, overlayId: string,
  *   buttonClass: string, overlayClass: string,
  *   titleId?: string, glyph?: string,
+ *   container?: Element|null,
  *   stopPropagationOnToggle?: boolean,
  * }} opts
  * @returns {{
  *   btn: Element, overlay: Element, focusTrap: object,
  *   buildContent: (function|null),
  *   isOpen: () => boolean, open: () => void, close: () => void,
+ *   setButtonContainer: (host: Element|null, before?: Element|null) => void,
  * }}
  */
 export function mountOverlayShell(doc, {
@@ -62,6 +73,7 @@ export function mountOverlayShell(doc, {
   overlayClass,
   titleId = 'settings.title',
   glyph = '⚙',
+  container = null,
   stopPropagationOnToggle = false,
 } = {}) {
   let btn = doc.getElementById(buttonId);
@@ -70,7 +82,7 @@ export function mountOverlayShell(doc, {
     btn.id = buttonId;
     btn.className = buttonClass;
     btn.type = 'button';
-    doc.body.appendChild(btn);
+    (container || doc.body).appendChild(btn);
   }
   btn.textContent = glyph;
   btn.title = t(titleId);
@@ -108,6 +120,24 @@ export function mountOverlayShell(doc, {
     overlay.classList.add('open');
     btn.setAttribute('aria-expanded', 'true');
     shell.focusTrap.activate();
+  };
+
+  /**
+   * Move the button under `host` (the page body when null), optionally before
+   * `before` so it can be the container's FIRST item rather than its last.
+   * A no-op when it is already there — re-parenting a node blurs it, and this
+   * runs on every render.
+   */
+  shell.setButtonContainer = (host, before = null) => {
+    const target = host || doc.body;
+    if (!target || typeof target.appendChild !== 'function') return;
+    if (btn.parentNode === target && !before) return;
+    if (before && typeof target.insertBefore === 'function') {
+      if (btn.parentNode === target && btn.nextSibling === before) return;
+      target.insertBefore(btn, before);
+      return;
+    }
+    target.appendChild(btn);
   };
 
   shell.close = () => {

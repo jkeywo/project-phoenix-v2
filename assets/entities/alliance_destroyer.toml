@@ -1,7 +1,7 @@
 name = "entity.alliance_destroyer.name"
 display_name = "entity.alliance_destroyer.display_name"
 class = "destroyer"
-hull_id = "NCC-0741"
+hull_id = "AEV-0741"
 power_rating = 70
 css = "gui/themes/cruiser.css"
 # Authored mass (issue #1154), the game's own mass unit. Surfaced on a
@@ -264,6 +264,34 @@ damaged_threshold_pct = 0.5
 disabled_threshold_pct = 0.15
 debuff_magnitude = 0.15
 
+# NO `[[hull.system_hull]]` ENTRY FOR SECURITY (issue #1346), and the reason is
+# the caveat written beside the three coupling compartments above rather than an
+# oversight. Those three already sit outside the 300-point combat ladder "in intent
+# even though the raw `is_destroyed` sum now includes them"; each one a hull
+# authors widens the pool `SystemHull::apply_damage` spreads incoming hull damage
+# across, so it buys durability the ladder never priced.
+#
+# A fourth was not free. Authored at the coupling systems' 30 HP it took this
+# hull's system pool from 390 to 420 and the measurement is on the record:
+# `probe_aggressor` at seed 3 — where a player Alliance cruiser kills a passive
+# one of these — ran 105 ticks longer, and every one of those ticks fell inside
+# the cruiser's torpedo-run bow hold, tipping
+# `headless_runner::the_composed_player_cruiser_rings_its_target_and_breaks_off_
+# to_bear_its_tubes` from 129 bow-hold ticks against 176 on the ring to 234
+# against the same 176. Dropping the entry restores that run tick for tick.
+#
+# So Security is authored the way `[repair]` is — the other people-and-teams
+# System on this hull, which musters two teams, dispatches them across the same
+# 400-unit reach, and carries no compartment of its own either. Twenty of this
+# hull's thirty-three `[[system]]` blocks author no damage entry; a box is what a
+# hull SPENDS on a system it wants knocked out, not a tax every system pays.
+#
+# The lever itself is untouched and stays data-driven: `security_disabled` reads
+# `EntitySystemHull.tier_for("security")`, so any hull that wants its muster
+# wreckable authors the entry and gets `unavailable` teams and a `Disabled`
+# terminal — proved by `security::server_tests::
+# a_disabled_security_system_makes_every_team_unavailable_and_ends_the_work`.
+
 [repair]
 repair_team_count = 2
 travel_duration_secs = 5
@@ -286,6 +314,30 @@ repair_rate_hp_per_sec = 0.5
 [repair.external_dispatch]
 range = 400.0
 repair_rate = 0.5
+
+# Security teams (issue #1346, PRD #1337). TWO teams, dispatched and recalled
+# independently from whichever station the `[[system]] kind = "security"` block
+# below gives them to — Tactical, on this hull — with no Duty Officer standing
+# between the seat and the order.
+#
+# What a team may DO once it gets somewhere is authored on the TARGET, never
+# here: this table is only the hull's own half — how many people it can send, how
+# long they take to get across and come back, and how far they can reach. A hull
+# that authors no `[security]` table musters nobody.
+#
+# [ai] All four unratified. `range = 400` is carried across from
+# `[repair.external_dispatch]` above deliberately: a repair team and a security
+# team cross the same gap by the same means, and two different reaches on one
+# hull would be a difference the crew could see and nobody could explain. The
+# crossing and return times are longer than the internal damage-control walk
+# (`[repair] travel_duration_secs = 5`) because this is a transfer to another
+# structure under way, not a run down a corridor — and the asymmetry (out slower
+# than back) is the encumbrance of going equipped.
+[security]
+team_count = 2
+deploy_duration_secs = 8.0
+withdraw_duration_secs = 6.0
+range = 400.0
 
 [weapons_console]
 power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
@@ -599,6 +651,16 @@ range = 250
 shows = [ "player", "asteroid_field", "ship", "station", "planet", "star" ]
 selects = [ "ship", "station", "planet" ]
 
+# Selected-contact trajectory projection (issue #1339). Renders the Science
+# Target's projected relative path whenever its velocity is known (every
+# ship contact; non-ship contacts carry no velocity and project nothing).
+# These are the initial authored defaults from the approved plan — a hull
+# tunes them without a code change, and a hull that omits this table entirely
+# still gets the same 60s/10s behaviour from the parse defaults.
+[sensors_console.projection]
+horizon_secs = 60.0
+marker_interval_secs = 10.0
+
 # The survey suite (issue #1032). What comes back from a scan is DERIVED from
 # the subject's own [infrastructure] condition track — there is no authored
 # scan text anywhere in this file or any other — so everything authored here is
@@ -636,6 +698,43 @@ condition_step = 0.25
 # A sweep this coarse resolves whether a system is up or down but does not
 # pretend to count berths.
 report_capacities = false
+
+# The BULK ladder (issue #1347), beside the fidelity ladder and for the same
+# reason: what a reading says about a contact's weight is a property of this
+# instrument, not of the contact. "Heavy" is a thing this suite says; the rock
+# just has a mass. A hull that authors no ladder reports no class at all, which
+# is what every hull did before this table existed.
+#
+# Unlike the bands above it does NOT coarsen with range — mass is content
+# identity, so the class is the same answer from 40 units or 240. What range
+# still decides is whether there is a reading at all.
+#
+# The four steps are cut against the masses actually authored in the fleet, so
+# each one separates things a crew would want separated: a courier or a piece of
+# corridor plating from a working hauler, a hauler from a warship, and a warship
+# from a depot or a skyhook. The last class is the open top — anything heavier
+# than 60,000 reports as the heaviest.
+#
+# [ai] All four thresholds unratified.
+[[scan.mass_class]]
+id = "light"
+label = "entity.alliance_destroyer.scan.mass_class.light.label"
+max_mass = 5000.0
+
+[[scan.mass_class]]
+id = "medium"
+label = "entity.alliance_destroyer.scan.mass_class.medium.label"
+max_mass = 20000.0
+
+[[scan.mass_class]]
+id = "heavy"
+label = "entity.alliance_destroyer.scan.mass_class.heavy.label"
+max_mass = 60000.0
+
+[[scan.mass_class]]
+id = "massive"
+label = "entity.alliance_destroyer.scan.mass_class.massive.label"
+max_mass = 1000000.0
 
 [helm_console]
 # Red-alert hostile weapon-arc overlay (issue #874): RGBA 0-1, the fourth
@@ -745,34 +844,46 @@ icon = "ship"
 
 [power_groups.helm]
 label = "entity.alliance_destroyer.power_groups.helm.label"
-# `min_level` is the DISPLAY floor: the lowest rung the Power console's pip row
-# draws, published to the client since issue #1004. It is NOT an allocation
-# clamp — `PowerSystem` floors every group at `GROUP_LEVEL_MIN` (= 1) whatever a
-# hull authors, and nothing else server-side reads this number. It reads 1
-# because a human Power officer can command this group down to 1 to free spare
-# points in the 8-point budget, and a row starting at 2 would hide the rung they
-# are allowed to reach. NOMINAL — the rung whose multiplier is 1.0 — is 2, and
-# that is `default_level`, where the group boots.
+# `min_level` is the COMMANDABLE floor: the lowest level any operator, human or
+# AI, may order this group to. `PowerSystem` stores it per group and clamps
+# every order to it (issue #1395 — before that it was a drawing hint the engine
+# ignored, and the console's pip row is still the other thing it decides).
+#
+# It reads 1 because Helm must never be switched off: a ship with no power to
+# the drive cannot manoeuvre out of anything, and losing the ability to run away
+# is not a trade a Power officer should be able to make with one press. Turning
+# it down to 1 to free a point for the 8-point budget IS a legal order, so rung
+# 1 has to be reachable and drawn. NOMINAL — the rung whose multiplier is 1.0 —
+# is 2, and that is `default_level`, where the group boots.
 default_level = 2
 min_level = 1
 max_level = 4
 
 [power_groups.weapons]
 label = "entity.alliance_destroyer.power_groups.weapons.label"
-# `min_level = 1`: the DISPLAY floor, as on Helm above — the bottom pip of the
-# console's row, not a clamp on what can be ordered. NOMINAL (×1.0) is 2, which
-# is where this group boots; dropping it to 1 is a legal order that spends the
-# freed point elsewhere, so rung 1 has to be drawn.
+# `min_level = 0`: this group may be taken COLD (issue #1395). Weapons is the
+# one group on the hull that can be switched off outright, and that is how this
+# ship expresses RESTRAINT — an Engineering order, visible to anyone watching the
+# reactor, rather than a hidden captain's toggle. Zero is a real commandable
+# level here, not a drawn rung: the console paints four pips whatever the floor
+# says, and level 0 is all four dark under a COLD tag.
+#
+# Helm and Shields keep their floor of 1 (see Helm above). Cutting the drive or
+# the shields to nothing is a way to lose a ship, not a way to make a statement
+# with one; weapons at 0 costs the crew their guns and nothing else.
+#
+# NOMINAL (×1.0) is 2, which is where this group boots; dropping it to 1 is a
+# legal order that spends the freed point elsewhere.
 default_level = 2
-min_level = 1
+min_level = 0
 max_level = 4
 
 [power_groups.shields]
 label = "entity.alliance_destroyer.power_groups.shields.label"
 # Nominal at 2 alongside Helm and Weapons: those three groups make the
 # sustainable resting total of 6. Higher levels buy shield regeneration.
-# `min_level = 1` is the DISPLAY floor (see Helm above), the bottom of the pip
-# row rather than a clamp.
+# `min_level = 1` is the COMMANDABLE floor (see Helm above): shields may be
+# turned down to 1 but not switched off. Only Weapons authors a floor of 0.
 default_level = 2
 min_level = 1
 max_level = 4
@@ -1084,7 +1195,7 @@ description = "entity.alliance_destroyer.station.engineering.description"
 rank = "Ltn."
 short_code = "ENG"
 console = "gui/destroyer/engineering.html"
-manual_overview = "You keep the destroyer running and, on this hull, you also mind the shields. Allocate reactor power between helm, weapons, and shields, focus a shield arc against the bearing you are taking fire from, and dispatch repair teams by priority. You also work the ship's coupling gear: a tractor beam to take a crippled craft under tow, a transfer umbilical to pass supplies across a dock the Helm has made, and a field dispatch to send a repair team across to an ally or structure. The generated Shields section below reads this ship's real arc strength and regen. Simplified rating lets the AI run the repair teams."
+manual_overview = "You keep the destroyer running and, on this hull, you also mind the shields. Allocate reactor power between helm, weapons, and shields, focus a shield arc against the bearing you are taking fire from, and dispatch repair teams by priority. Weapons is the one group you may switch off entirely: take it to LVL 0 and the guns go COLD, which is how this ship shows restraint without standing down from Red Alert — and anyone with sensors on you can see it. You also work the ship's coupling gear: a tractor beam to take a crippled craft under tow, a transfer umbilical to pass supplies across a dock the Helm has made, and a field dispatch to send a repair team across to an ally or structure. The generated Shields section below reads this ship's real arc strength and regen. Simplified rating lets the AI run the repair teams."
 
 [[station.rating]]
 name = "Std"
@@ -1407,6 +1518,40 @@ id = "dock"
 kind = "dock"
 station = "helm"
 power_group = "helm"
+
+# The rescue transporter (issue #1348) — Engineering-owned, on the `helm` group
+# at `min_power_level = 2` like the tractor and umbilical it stands beside, for
+# the same reason spelled out above: a coupling family that adds no new resting
+# draw and takes down with the drive when a Power officer robs Helm. It recovers
+# the civilians a Sensors scan revealed aboard a discovered contact; the terms it
+# runs under are the `[transporter]` table further down.
+[[system]]
+id = "transporter"
+kind = "transporter"
+station = "engineering"
+power_group = "helm"
+
+# ── Security (issue #1346) ───────────────────────────────────────────────────
+#
+# TACTICAL owns the Security teams on this hull. That is an authoring decision
+# rather than an engine one — `kind = "security"` is generic and another hull may
+# hang it off Command or Engineering — but it is the right one here: the seat that
+# already holds the combat lock and reads the tactical picture is the seat that
+# knows which compartment is worth risking people on, and the destroyer's
+# Engineering officer already has the tractor, the umbilical and the damage-
+# control sweep on their hands.
+#
+# NO POWER GROUP, deliberately. Security is people: a Power officer who robs a
+# group does not stop a boarding party crossing, and hanging the teams off `helm`
+# with the couplings would have made "the drive is browned out" mean "nobody can
+# fight a fire". No `[[hull.system_hull]]` compartment either, for the reason
+# written out beside the hull table above — this hull's `[repair]` teams carry
+# none and neither do these, and the engine lever is there for a hull that wants
+# it.
+[[system]]
+id = "security"
+kind = "security"
+station = "tactical"
 
 # ── Reference grid ───────────────────────────────────────────────────────────
 #
@@ -1773,4 +1918,15 @@ min_power_level = 2
 capacity = "reserve_fuel"
 rate = 20.0
 direction = "deliver"
+min_power_level = 2
+
+# TRANSPORTER (issue #1348) — the reach a discovered rescue contact must sit
+# within, how long recovering one civilian takes, and the lowest powered rung.
+# `range = 500` matches the tractor's reach: a rescue is a close-in act like a
+# tow. `seconds_per_civilian = 2` gives a full hold's worth of a dozen souls a
+# tuneable half-minute so the crew watch the recovery advance and can be pulled
+# off it by range, power or a more urgent tractor hold. [ai] Unratified.
+[transporter]
+range = 500.0
+seconds_per_civilian = 2.0
 min_power_level = 2

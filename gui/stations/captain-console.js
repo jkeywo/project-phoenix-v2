@@ -30,7 +30,6 @@
  * @property {string} [ids.camera]            `ph-camera-select` id
  * @property {string} [ids.redAlert]          `ph-red-alert` id
  * @property {string} [ids.objectives]        `ph-objective-list` id
- * @property {string} [ids.stationDamage]     `ph-station-damage` id
  * @property {string} [ids.autoBadge]         the AUTO badge id, if this hull mounts one
  * @property {function(Array): Array} [filterCameraViews]
  *   Transform the view's `camera_views` before handing them to the camera
@@ -62,25 +61,40 @@ import { setAutoState } from '../console-ui.js';
 export function makeCaptainRender(variant) {
   const ids = variant.ids || {};
 
+  function captainView(state) {
+    return variant.captainView ? variant.captainView(state) : state;
+  }
+
+  // This is deliberately a property of the returned renderer: console-core
+  // hands the same resolver to the semantic Captain adapter, so a key/gamepad
+  // cycle can never see a broader set of views than the visible selector.
+  // The courier's filter is the motivating case, but every variant goes
+  // through this one seam.
+  function availableCameraViews(state) {
+    const view = captainView(state);
+    let views = Array.isArray(view?.camera_views) ? view.camera_views : [];
+    if (variant.filterCameraViews) views = variant.filterCameraViews(views);
+    return Array.isArray(views) ? views : [];
+  }
+
   /**
    * @param {object} s   the (shape-normalised) console payload
    * @param {Document} [doc]  the document to render into; defaults to the
    *   ambient `document` in a browser. A vitest suite passes a jsdom document.
    */
-  return function renderStation(s, doc) {
+  function renderStation(s, doc) {
     doc = doc || (typeof document !== 'undefined' ? document : null);
     if (!doc || !s) return;
 
     // The captain view the panels read from — `s` itself for a flat-family
     // hull, a metadata-selected family slice for a keyed one.
-    const view = variant.captainView ? variant.captainView(s) : s;
+    const view = captainView(s);
 
     // ── Camera / viewscreen ─────────────────────────────────────────────
     if (ids.camera) {
       const el = doc.getElementById(ids.camera);
       if (el) {
-        let views = view.camera_views || [];
-        if (variant.filterCameraViews) views = variant.filterCameraViews(views);
+        const views = availableCameraViews(s);
         el.state = { views, current_view: view.view_direction || '', auto: !!view.viewscreen_auto };
       }
     }
@@ -88,20 +102,13 @@ export function makeCaptainRender(variant) {
     // ── Red alert ────────────────────────────────────────────────────────
     if (ids.redAlert) {
       const el = doc.getElementById(ids.redAlert);
-      if (el) el.state = { active: !!view.red_alert, hold: !!view.weapons_hold, auto: !!view.red_alert_auto };
+      if (el) el.state = { active: !!view.red_alert, auto: !!view.red_alert_auto };
     }
 
     // ── Objectives ───────────────────────────────────────────────────────
     if (ids.objectives) {
       const el = doc.getElementById(ids.objectives);
       if (el) el.state = { objectives: view.objectives || [], boosted_objective_id: view.boosted_objective_id ?? null };
-    }
-
-    // ── Station-damage bar ───────────────────────────────────────────────
-    // Station-wide, read off the top-level payload (never per-system).
-    if (ids.stationDamage) {
-      const el = doc.getElementById(ids.stationDamage);
-      if (el) el.state = s.own_hull || null;
     }
 
     // ── Contact-count footer (battleship/cruiser pattern) ────────────────
@@ -115,7 +122,13 @@ export function makeCaptainRender(variant) {
 
     // ── Bespoke per-hull tail ────────────────────────────────────────────
     if (variant.tail) variant.tail(s, view, doc, t);
-  };
+  }
+
+  Object.defineProperty(renderStation, 'availableCameraViews', {
+    value: availableCameraViews,
+    enumerable: false,
+  });
+  return renderStation;
 }
 
 /**

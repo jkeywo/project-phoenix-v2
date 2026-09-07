@@ -22,29 +22,68 @@
                              cannot inherit is class rules, which is what
                              gui/components/ph-console-styles.js carries.
 
-   Retinting the whole fleet is therefore an edit to this file alone.
+   Retinting the whole fleet is therefore an edit to this file alone, and
+   issue #1357 (PRD #1355) is the proof: the palette moved from navy to
+   GRAPHITE by editing the surface ramp, the rgb triplets and the
+   high-contrast block below, and every console, component, lobby and
+   viewscreen followed without being touched. Nine of the ten accent hues did
+   not move — they are semantic, red means danger on every console — so only
+   surfaces, edges, ink and `--fire` are graphite-era values. `--fire` moved
+   because the panel became a lift and took it under AA there; see Accents.
    tests/client/design-tokens.test.js fails if a stylesheet reaches past it.
    ─────────────────────────────────────────────────────────────── */
 
 :root {
   /* ── Surfaces ───────────────────────────────────────────────────
-     Darkest to lightest. The console panels are a navy ramp lifted from
-     panel-bg.png; the lobby sits on the same ramp rather than the near-black
-     neutrals it used to define for itself. */
-  --surface-void:      #000000;   /* the page behind everything */
-  --surface-abyss:     #03050e;   /* frame vignette edge */
-  --surface-deep:      #050818;
-  --surface-base:      #0a1028;   /* the reference background for contrast */
-  --surface-card:      #0d1430;
-  --surface-raised:    #131a3a;
-  --surface-high:      #161e44;
-  --surface-lift:      #1a2148;   /* chamfer stroke floor, pressed states */
-  --surface-ridge:     #2a3568;
-  /* The neutral fill every console draws behind a content column. Warmer and
-     less saturated than the navy ramp, which is why it is its own rung rather
-     than being collapsed into --surface-base. */
-  --surface-panel:     #0e1117;
-  --surface-panel-up:  #1e2332;
+     Darkest to lightest, and GRAPHITE since issue #1357 (PRD #1355). The ramp
+     was navy — lifted from panel-bg.png — and is now anchored on the project's
+     own splash deliverable (raw/gui/deliverables/splash/), which is where this
+     game's visual identity was actually decided:
+
+       screen / void  #050608     panel (graphite dark)  #14171c
+       page           #0a0c10     raised (graphite)      #22262d
+
+     Those four are token values verbatim. The rungs BETWEEN them are
+     interpolated rather than invented: each keeps its predecessor's place in
+     the order and roughly its lightness step, so a rung that read as "one step
+     up" from its neighbour still does. Relative luminance, void → ridge:
+
+       graphite  0.0018  0.0021  0.0030  0.0037  0.0051  0.0079  0.0121  0.0192  0.0417
+       navy      0.0000  0.0016  0.0027  0.0059  0.0080  0.0118  0.0152  0.0178  0.0404
+
+     The top rung is derived from the STEP rather than by interpolation, and
+     was got wrong once. `--surface-ridge` is not one of the four anchors, so
+     it is a free choice — and it is the one the chrome leans on: the chamfered
+     `.inset` in console.css is a gradient from --surface-lift to it, and
+     client.html's `button:active` swaps a --surface-lift button to it. Both
+     are read as a STEP, not as a colour. Navy's lift → ridge was 1.334:1; a
+     first pass at #2a2f38 made it 1.129:1, which is a pressed state you have
+     to look for. The rung is #343a44, where lift → ridge is 1.326:1 and the
+     press reads as hard as it did on navy.
+
+     The one relationship that genuinely MOVED is --surface-panel. On the navy
+     ramp it was a hue shift at the same lightness as --surface-base (0.0056 vs
+     0.0059) — "warmer and less saturated" was the whole of its difference. A
+     neutral ramp has no hue left to shift with, so the splash draws that
+     distinction the way a graphite design does: the panel is a LIFT off the
+     page. It costs every ink rung about 9% of its ratio when measured on a
+     panel rather than on the page, which is why --ink-faint below is derived
+     against BOTH surfaces and not only against the reference one. */
+  --surface-void:      #050608;   /* the page behind everything */
+  --surface-abyss:     #06070a;   /* frame vignette edge */
+  --surface-deep:      #080a0d;
+  --surface-base:      #0a0c10;   /* the reference background for contrast */
+  --surface-card:      #0d1016;
+  --surface-raised:    #12161d;
+  --surface-high:      #191d24;
+  --surface-lift:      #22262d;   /* chamfer stroke floor, pressed states */
+  --surface-ridge:     #343a44;   /*  1.71:1 — chamfer stroke, pressed cap */
+  /* The fill every console draws behind a content column, and the splash's
+     "panel (graphite dark)". A lift off --surface-base rather than a hue shift
+     from it (see above), which is why it is still its own rung rather than
+     being collapsed into --surface-base. */
+  --surface-panel:     #14171c;
+  --surface-panel-up:  #262b33;
 
   /* Legacy names for the same six rungs. The console documents and every
      component already speak these; they are aliases, not a second ramp. */
@@ -59,19 +98,54 @@
 
      `--edge-control` bounds a CONTROL — a button, a stepper, a selection
      ring. WCAG 1.4.11 asks 3:1 for "visual information required to identify
-     user interface components", so this one is tuned to clear 3:1 against
-     --surface-base (measured 3.00).
+     user interface components", and 1.4.11 measures against the ADJACENT
+     colour, which for a filled button is the fill it is drawn around and not
+     the reference background. So a control boundary is a LADDER of three
+     rungs, not one token, and which rung a rule takes is decided by the
+     surface that control is painted on:
+
+       ground (void, abyss, deep, base)  →  `--edge-control`  3.13 … 3.02
+       card, raised, panel, high, lift   →  `--edge-strong`   3.90 … 3.11
+       panel-up and anything lighter     →  `--edge-bright`   3.46
+
+     `--edge-control` is the floor rung, and it clears 3:1 on the four page
+     GROUNDS only — it measures 2.94 on --surface-card, 2.77 on
+     --surface-panel and 2.20 on --surface-panel-up, so a button with a lifted
+     fill that reaches for it is below the floor however good the token's own
+     quoted ratio looks. That is not a defect in the rung; it is what a
+     neutral ramp costs, and the navy ramp paid it too (its control rung was
+     2.50 on --surface-panel-up). gui/host-lobby.css states the same
+     measurement at each of its control rows, and design-tokens.test.js
+     asserts the whole ladder above — every rung against every surface it is
+     claimed to carry — rather than only the floor rung against the reference
+     background, which was green while every real call site was under it.
 
      `--edge` and `--edge-faint` divide CONTENT: the border around a console's
      panel column, a rule under a heading. Those carry no information a player
      must perceive to operate the ship — the column is legible without its
-     border — so they are held at the authored navy and deliberately exempt.
-     The exemption is named in design-tokens.test.js rather than left silent. */
-  --edge-faint:        #1f2750;
-  --edge:              #3a4674;   /* the panel border (see console.css) */
-  --edge-control:      #4d5d9b;   /* 3.00:1 on --surface-base */
-  --edge-strong:       #5a6694;
-  --edge-bright:       #6a7ca4;
+     border — so they are held at the authored graphite and deliberately
+     exempt. The exemption is named in design-tokens.test.js, not left silent.
+
+     That split is why the splash deliverable's edge value #3a4049 lands on
+     `--edge` and NOT on the control rung: it measures 1.87:1, which is fine
+     for a divider and nowhere near a control boundary's floor. The control
+     rung is therefore its own, lighter value, derived to clear 3:1 rather
+     than lifted from the deliverable. `--edge-strong` is the splash's dim
+     grey #6a727b, which is a perfectly good stroke even though it fails as
+     small TEXT — see the ink block below, where that same value was rejected
+     for exactly that reason.
+
+     A WARNING FOR THE NEXT EDITOR OF THIS COMMENT. design-tokens.test.js
+     reads this file WITHOUT stripping comments, and pulls each rung out with
+     `<name>:\s*(#rrggbb)`. Writing a token name, a colon and a hex in prose —
+     even split across a line wrap — hands the suite the comment instead of the
+     declaration, and it fails on a value that is not in the file. Name a rung
+     in backticks and keep the colon out of it, as above. */
+  --edge-faint:        #262c34;   /*  1.39:1 on --surface-base — exempt divider */
+  --edge:              #3a4049;   /*  1.87:1 — the panel border, exempt (console.css) */
+  --edge-control:      #565f6a;   /*  3.02:1 — 1.4.11 floor, on a GROUND only */
+  --edge-strong:       #6a727b;   /*  4.01:1 (3.90 card … 3.11 lift) */
+  --edge-bright:       #767e88;   /*  4.76:1 (3.46 on --surface-panel-up) */
 
   --line:              var(--edge-bright);
   --line-soft:         var(--edge);
@@ -79,51 +153,89 @@
 
   /* ── Ink ────────────────────────────────────────────────────────
      Every rung is text, so every rung clears WCAG AA (4.5:1) against
-     --surface-base at any size. `--ink-faint` was #5a6694 and measured 3.37 —
-     it passed only as large text, and it was being used for 0.6rem console
-     footers. Lifted to 4.53. */
-  --ink:               #d8e2ff;   /* 14.53:1 */
-  --ink-dim:           #8a98c4;   /*  6.59:1 */
-  --ink-faint:         #6f7ba7;   /*  4.53:1 */
+     --surface-base at any size.
+
+     `--ink-faint` has now been lifted twice, both times for the same reason.
+     On the navy ramp it was #5a6694, measured 3.37, passed only as LARGE text
+     and was being used for 0.6rem console footers; it went to 4.53. The
+     graphite retint tried to take it from the splash's dim grey #6a727b — but
+     that is display type on a title screen, and on this page it measures
+     4.01:1 and fails the same floor all over again. #7a828c is the derived
+     rung instead: 5.03:1 on --surface-base AND 4.62:1 on --surface-panel,
+     which is the surface those console footers are actually painted on and the
+     one the panel lift (see Surfaces) made the binding constraint. Stopping at
+     the 4.5 the suite checks would have shipped a 4.37 where the type is
+     smallest. The splash's #6a727b keeps a home one rung down as
+     --edge-strong, where no text floor applies. */
+  --ink:               #b8c0c8;   /* 10.64:1 */
+  --ink-dim:           #8f99a4;   /*  6.77:1 */
+  --ink-faint:         #7a828c;   /*  5.03:1 (4.62:1 on --surface-panel) */
 
   /* ── Accents ────────────────────────────────────────────────────
      Four rungs each: `-bright` for a lit highlight, the bare name for the
      accent as text or stroke, `-dim` for a filled state, `-deep` for the
      recessed body of a control. The bare rung is used as text and clears AA
-     on --surface-base; `--fire` was #e0402c at 4.42 and is nudged to 4.52. */
+     on --surface-base.
+
+     NINE of these ten hues do NOT move with the retint (issue #1357). They are
+     semantic — red means danger on every console — and each was already tuned
+     to clear 4.5:1. The graphite base is DARKER than the navy one it replaces
+     (relative luminance 0.0037 against 0.0059), so every ratio below climbed
+     rather than fell ON --surface-base; each is re-measured, not carried over.
+
+     `--fire` is the tenth, and it moved, for the reason --ink-faint moved:
+     --surface-base is not the only surface an enforced text rung is painted
+     on. The panel lift costs ~8% on --surface-panel, and --fire is the
+     tightest of the accents — it was 4.54 there on navy and #e14330 would
+     have landed at 4.32, below AA, while reading 4.70 against the reference
+     background the suite checks. It is #e64a34 instead: 5.03:1 on
+     --surface-base AND 4.61:1 on --surface-panel, the same headroom
+     --ink-faint was given, and the smallest step that buys it. The hue is
+     unchanged to the eye; --rgb-fire moves with it.
+
+     --surface-panel-up is NOT a text ground and no rung is derived against it:
+     it is a control FILL, and --fire reads 3.66 there even after the lift. If
+     an enforced text rung is ever drawn on it, this is the block that has to
+     move again. */
   --tactical-bright:   #ffb89a;
-  --tactical:          #f08438;   /*  7.21:1 — weapons orange */
+  --tactical:          #f08438;   /*  7.51:1 — weapons orange */
   --tactical-dim:      #8c4818;
   --tactical-deep:     #3a1e0c;
 
   --fire-hot:          #ff2a2a;   /* the red-alert bezel */
-  --fire-bright:       #ff5a3a;   /*  6.06:1 */
-  --fire:              #e14330;   /*  4.52:1 — danger red */
+  --fire-bright:       #ff5a3a;   /*  6.31:1 */
+  --fire:              #e64a34;   /*  5.03:1 (4.61:1 on --surface-panel) — danger red */
   --fire-dim:          #6c1a14;
   --fire-deep:         #2c0a08;
 
   --loaded-bright:     #aef0c0;
-  --loaded:            #4ec870;   /*  8.79:1 — armed / ready */
+  --loaded:            #4ec870;   /*  9.15:1 — armed / ready */
   --loaded-dim:        #1e5028;
   --loaded-deep:       #0e2818;
 
   --reloading-bright:  #ffd896;
-  --reloading:         #d8a040;   /*  8.07:1 — amber */
+  --reloading:         #d8a040;   /*  8.41:1 — amber */
   --reloading-dim:     #5a3c10;
   --reloading-deep:    #2a2410;
 
   --cyan-bright:       #d0f0ff;
-  --cyan:              #6cb6d0;   /*  8.27:1 */
+  --cyan:              #6cb6d0;   /*  8.61:1 */
   --cyan-dim:          #1a3848;
   --cyan-deep:         #0a1c24;
 
-  --science:           #3399ff;   /*  5.55:1 — informational blue: science
+  --science:           #3399ff;   /*  6.66:1 — informational blue: science
                                       targets, comms attention */
-  --signal:            #5fd8e8;   /* 11.16:1 — the lobby's active accent */
+  --signal:            #5fd8e8;   /* 11.63:1 — the lobby's active accent */
   --gold-bright:       #e8c84a;
-  --gold:              #d4a820;   /*  8.43:1 — waypoints, torpedo badges */
-  --sky:               #88aaff;   /*  8.27:1 — links, "this is mine" */
-  --violet:            #8c64c8;
+  --gold:              #d4a820;   /*  8.78:1 — waypoints, torpedo badges */
+  --sky:               #88aaff;   /*  8.61:1 — links, "this is mine" */
+  --violet:            #8c64c8;   /*  4.45:1 — under 4.5, and deliberately so:
+                                      violet is a hover/selection stroke, not
+                                      one of design-tokens.test.js's text
+                                      tokens. It measured 4.27 on the navy base,
+                                      so the retint improves it; nudging it here
+                                      would move an accent the retint promised
+                                      to leave alone. */
 
   /* The lobby's parallel set — `--bg`, `--surface`, `--surface2`, `--dim`,
      `--signal-cyan`, `--alert-red`, `--amber` — is deliberately NOT aliased
@@ -131,24 +243,39 @@
      vocabularies go on quietly coexisting, which is the state this file
      exists to end; every call site now names a rung above.
      tests/client/console-tokens.test.js fails if the lobby grows a `:root`
-     of its own again. */
+     of its own again.
+
+     The HOST lobby's sheets (gui/host-lobby.css, gui/host-scenarios.css) were
+     the last holdouts, and for a reason worth remembering: they held around
+     forty values this file had no rung for, so #1356 could only fence them
+     behind an allowlist. They are named from the rungs above as of #1357 —
+     the retint is what made the naming possible, not the other way round. */
 
   /* ── Channel triplets ───────────────────────────────────────────
      Alpha is genuinely per-use — a scrim, a glow, a translucent arc fill —
      but the COLOUR underneath it is not. These let a rule write
-     `rgba(var(--rgb-cyan), 0.35)` and stay inside the vocabulary. */
-  --rgb-void:            0, 0, 0;
+     `rgba(var(--rgb-cyan), 0.35)` and stay inside the vocabulary.
+
+     Each triplet MIRRORS the hex above it, so a translucent layer stays the
+     same colour as the opaque one beside it. `--rgb-void` moved with
+     --surface-void rather than staying at pure black for that reason: at the
+     alphas it is used at (0.4 to 0.94, as scrims and inset shadows) the three
+     channels are imperceptible, and a "void" that means one colour as a fill
+     and another as a scrim is exactly the drift this file ends. `--rgb-white`
+     is the one that is NOT a rung — it is the highlight channel, and white is
+     white on any ramp. */
+  --rgb-void:            5, 6, 8;
   --rgb-white:           255, 255, 255;
-  --rgb-deep:            5, 8, 24;
-  --rgb-base:            10, 16, 40;
-  --rgb-panel:           14, 17, 23;
-  --rgb-panel-up:        30, 35, 50;
-  --rgb-ink:             216, 226, 255;
-  --rgb-edge:            58, 70, 116;
-  --rgb-edge-control:    77, 93, 155;
-  --rgb-edge-strong:     90, 102, 148;
+  --rgb-deep:            8, 10, 13;
+  --rgb-base:            10, 12, 16;
+  --rgb-panel:           20, 23, 28;
+  --rgb-panel-up:        38, 43, 51;
+  --rgb-ink:             184, 192, 200;
+  --rgb-edge:            58, 64, 73;
+  --rgb-edge-control:    86, 95, 106;
+  --rgb-edge-strong:     106, 114, 123;
   --rgb-tactical:        240, 132, 56;
-  --rgb-fire:            225, 67, 48;
+  --rgb-fire:            230, 74, 52;
   --rgb-loaded:          78, 200, 112;
   --rgb-loaded-bright:   153, 255, 217;
   --rgb-reloading:       216, 160, 64;
@@ -294,8 +421,8 @@
      the ONE place that reads these — it draws every control's `:focus-visible`
      from them. Nothing else hard-codes an outline; a per-component focus
      colour would be exactly the drift this vocabulary exists to end. */
-  --focus-ring:          var(--signal);   /* 11.16:1 on --surface-base — standard ring (see --signal) */
-  --focus-ring-contrast: #ffffff;         /* 18.79:1 on --surface-base — the data-contrast="more" ring (issue #1171) */
+  --focus-ring:          var(--signal);   /* 11.63:1 on --surface-base — standard ring (see --signal) */
+  --focus-ring-contrast: #ffffff;         /* 19.57:1 on --surface-base — the data-contrast="more" ring (issue #1171) */
   --focus-ring-width:    2px;             /* ring thickness; a token so the family reads it, not a literal */
   --focus-ring-offset:   2px;             /* gap between control edge and ring, for the un-clipped outline path */
 }
@@ -318,8 +445,8 @@
    The variant is NOT monochrome. The game reads as hued signals on a dark
    field; high contrast keeps that identity and instead:
      - drops the reference background to pure black, which lifts EVERY
-       colour's ratio against it (the standard ratios were quoted on the
-       navy #0a1028; on #000000 they only climb),
+       colour's ratio against it (the standard ratios are quoted on the
+       graphite page #0a0c10; on #000000 they only climb),
      - flattens the surface ramp toward black so region separation comes
        from BORDERS, and raises those borders — including the content
        dividers the standard palette holds below the UI floor and exempts —
@@ -338,28 +465,28 @@
   --surface-abyss:     #000000;
   --surface-deep:      #000000;
   --surface-base:      #000000;   /* the reference background, now pure black */
-  --surface-card:      #0b0f1e;   /*  1.10:1 — a whisper of panel lift */
-  --surface-raised:    #12182f;   /*  1.20:1 */
-  --surface-high:      #161d38;   /*  1.27:1 */
-  --surface-lift:      #1c2340;   /* pressed / chamfer floor */
-  --surface-ridge:     #2a3568;   /*  1.81:1 — chamfer stroke */
+  --surface-card:      #0e1116;   /*  1.11:1 — a whisper of panel lift */
+  --surface-raised:    #171b21;   /*  1.22:1 */
+  --surface-high:      #1d222a;   /*  1.31:1 */
+  --surface-lift:      #242a32;   /*  1.45:1 — pressed / chamfer floor */
+  --surface-ridge:     #3b434e;   /*  2.10:1 — chamfer stroke */
   --surface-panel:     #000000;   /* the content-column fill, now black */
-  --surface-panel-up:  #1a2030;
+  --surface-panel-up:  #1e232b;   /*  1.33:1 */
 
   /* Edges — the standard palette holds --edge / --edge-faint at the authored
-     navy and exempts them (they divide content, WCAG 1.4.11 does not reach a
-     legible column's border). High contrast wants those regions drawn, so
+     graphite and exempts them (they divide content, WCAG 1.4.11 does not reach
+     a legible column's border). High contrast wants those regions drawn, so
      every edge here is a bright, clearly-visible stroke well past 3:1. */
-  --edge-faint:        #7c88b8;   /*  6.07:1 — content divider, now visible */
-  --edge:              #9aa6d4;   /*  8.78:1 — panel border */
-  --edge-control:      #b6c2f0;   /* 11.96:1 — control boundary */
-  --edge-strong:       #c8d2ff;   /* 14.12:1 */
-  --edge-bright:       #e0e8ff;   /* 17.16:1 */
+  --edge-faint:        #8b929b;   /*  6.68:1 — content divider, now visible */
+  --edge:              #a6adb6;   /*  9.27:1 — panel border */
+  --edge-control:      #c2c9d2;   /* 12.58:1 — control boundary */
+  --edge-strong:       #d4dae1;   /* 14.92:1 */
+  --edge-bright:       #e8ecf0;   /* 17.69:1 */
 
   /* Ink — every text rung to AAA (7:1) and beyond on black. */
   --ink:               #ffffff;   /* 21.00:1 */
-  --ink-dim:           #c8d2ff;   /* 14.12:1 */
-  --ink-faint:         #aab4dc;   /* 10.27:1 */
+  --ink-dim:           #d4dae1;   /* 14.92:1 */
+  --ink-faint:         #b4bcc5;   /* 10.94:1 */
 
   /* Accents — the bare rung is the one used as text/stroke; each brightened
      to clear 7:1 on black while holding its hue (the -dim/-deep filled and
@@ -382,13 +509,14 @@
   /* rgb() channel triplets — the alpha uses (scrims, glows, arc fills) read
      these, not the hexes above, so the changed colours are mirrored here to
      keep the translucent layers coherent with the opaque ones. */
+  --rgb-void:          0, 0, 0;
   --rgb-base:          0, 0, 0;
   --rgb-deep:          0, 0, 0;
   --rgb-panel:         0, 0, 0;
   --rgb-ink:           255, 255, 255;
-  --rgb-edge:          154, 166, 212;
-  --rgb-edge-control:  182, 194, 240;
-  --rgb-edge-strong:   200, 210, 255;
+  --rgb-edge:          166, 173, 182;
+  --rgb-edge-control:  194, 201, 210;
+  --rgb-edge-strong:   212, 218, 225;
   --rgb-tactical:      255, 168, 96;
   --rgb-fire:          255, 106, 74;
   --rgb-loaded:        110, 232, 144;

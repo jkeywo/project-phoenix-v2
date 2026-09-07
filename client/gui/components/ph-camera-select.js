@@ -4,6 +4,10 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import {
+  CAPTAIN_ACTION_CONTEXT,
+  CAPTAIN_VIEW_ACTION_ID,
+} from '../stations/captain-actions.js';
 import { PhElement, phDefine } from './ph-element.js';
 
 export class PhCameraSelect extends PhElement {
@@ -67,8 +71,14 @@ export class PhCameraSelect extends PhElement {
         btn.className = 'cam-btn';
         btn.dataset.view = v;
         btn.addEventListener('click', () => {
-          if (!btn.disabled && this.sendAction) {
-            this.sendAction('set_view', { direction: btn.dataset.view });
+          if (btn.disabled) return;
+          const activate = typeof window !== 'undefined' && window.activateSemanticAction;
+          if (typeof activate === 'function') {
+            activate(CAPTAIN_VIEW_ACTION_ID, {
+              context: CAPTAIN_ACTION_CONTEXT,
+              source: 'control',
+              detail: { direction: btn.dataset.view },
+            });
           }
         });
         this.#btnCache.set(v, btn);
@@ -84,6 +94,13 @@ export class PhCameraSelect extends PhElement {
       else if (/(^|[^a-z])(aft|rear|reverse|back|stern)([^a-z]|$)/.test(n)) area = '3 / 2';
       else if (/(^|[^a-z])(port|left)([^a-z]|$)/.test(n)) area = '2 / 1';
       else if (/(^|[^a-z])(starboard|stbd|right)([^a-z]|$)/.test(n)) area = '2 / 3';
+      // The host-appended cinematic view (issue #1377) gets its own
+      // full-width row under the FWD/PORT/STBD/AFT cross, rather than
+      // competing with other extra views for a corner cell. `#container` has
+      // no `grid-template-rows` of its own (only `grid-auto-rows: 1fr`), so
+      // row 4 is created implicitly the first time something addresses it —
+      // no CSS change needed to make room for it.
+      else if (/(^|[^a-z])cinematic([^a-z]|$)/.test(n)) area = '4 / 1 / 5 / 4';
       else { area = freeCells[flowCell % freeCells.length]; flowCell++; }
       btn.style.gridArea = area;
     });

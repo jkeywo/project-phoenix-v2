@@ -2,7 +2,7 @@
  * gui/settings-panel.js — the phone client's settings cog (issue #940).
  *
  * The mirror of the host page's cog (issue #939, `gui/server-settings.js`):
- * a gear top-left opening the same three tabs, gating the same one in a demo
+ * a gear top-left opening the same shared tabs, gating the same one in a demo
  * build. The tab list itself is shared — `gui/settings-tabs.js` — so the two
  * pages cannot disagree about which controls exist.
  *
@@ -51,6 +51,16 @@ import { visibleClientTabs, resolveClientActiveTab } from './settings-tabs.js';
 import { controlSystemEnvelope } from './command-gateway.js';
 import { renderStationHelp } from './help-panel.js';
 import { renderManual } from './manual-panel.js';
+import {
+  isReservedKeyboardBinding,
+} from './semantic-action-registry.js';
+import { createSemanticControlsRemapper } from './semantic-controls-remapper.js';
+import { OPERATOR_PROFILE_FILENAME } from './operator-profile.js';
+import { downloadArtifact, readFileText } from './snapshot-transfer.js';
+export {
+  isSemanticModifierEvent,
+  semanticModifierCode,
+} from './semantic-controls-remapper.js';
 import { TEXT_SCALE_MIN, TEXT_SCALE_MAX, TEXT_SCALE_STEP } from './accessibility-profile.js';
 import {
   mountOverlayShell,
@@ -122,6 +132,42 @@ export const PAUSE_CONTROL_ID = 'pause';
  */
 export const GOD_MODE_SYSTEM_ID = 'god-mode';
 
+/** Localised status presentation for explicit profile transfer. */
+export function operatorProfileStatusView(result) {
+  if (!result) return null;
+  if (result.status === 'pending') {
+    return { labelId: 'settings.controls.profile.status_reading', alert: false };
+  }
+  if (result.status === 'exported') {
+    return { labelId: 'settings.controls.profile.status_exported', alert: false };
+  }
+  if (result.status === 'migrated') {
+    return { labelId: 'settings.controls.profile.status_migrated', alert: false };
+  }
+  if (result.status === 'imported') {
+    return {
+      labelId: result.diagnostics && result.diagnostics.length
+        ? 'settings.controls.profile.status_imported_normalized'
+        : 'settings.controls.profile.status_imported',
+      alert: false,
+    };
+  }
+  const code = String(result.code || '');
+  if (code === 'profile-version' || code === 'profile-kind') {
+    return { labelId: 'settings.controls.profile.status_refused_version', alert: true };
+  }
+  if (code.includes('binding') || code.includes('tuning') || code === 'profile-controls') {
+    return { labelId: 'settings.controls.profile.status_refused_controls', alert: true };
+  }
+  if (code.includes('storage') || code === 'profile-export') {
+    return { labelId: 'settings.controls.profile.status_refused_storage', alert: true };
+  }
+  if (code === 'profile-read') {
+    return { labelId: 'settings.controls.profile.status_refused_read', alert: true };
+  }
+  return { labelId: 'settings.controls.profile.status_refused_corrupt', alert: true };
+}
+
 // ── Message builders ────────────────────────────────────────────────────────
 
 /**
@@ -151,7 +197,7 @@ export function debugFlagMessage(flag) {
  * not rendered there either. See the module doc.
  *
  * A unit variant on the wire, so it carries NO `data` key — the frame is
- * `{"type":"TogglePause"}`, which is what `connection-manager.js` emits when
+ * `{"type":"TogglePause"}`, which is what the transport's `send()` emits when
  * `send()` is given no data, and the same shape `ReleaseStation` has always
  * used. `data: {}` would be a different message and the host would reject it;
  * `codec::client_settings_menu_wire_shapes_are_pinned` pins both facts.
@@ -195,6 +241,8 @@ export function godModeMessage() {
  *   myToken?: string|null,
  *   demo?: boolean,
  *   activeTab?: string|null,
+ *   semanticActions?: Array<object>,
+ *   gamepad?: object,
  * }} opts
  * @returns {{
  *   tabs: Array<{id: string, labelId: string}>,
@@ -245,6 +293,14 @@ export function buildSettingsState(opts = {}) {
   return {
     tabs: visibleClientTabs(demo).map((tab) => ({ id: tab.id, labelId: tab.labelId })),
     activeTab: resolveClientActiveTab(opts.activeTab || null, demo),
+    semanticActions: Array.isArray(opts.semanticActions) ? opts.semanticActions : [],
+    operatorCapabilities: opts.operatorCapabilities
+      && typeof opts.operatorCapabilities === 'object'
+      ? opts.operatorCapabilities
+      : { gamepad: true, vibration: true, semanticCues: true, accessibility: true },
+    gamepad: opts.gamepad && typeof opts.gamepad === 'object' ? opts.gamepad : {
+      devices: [], selectedIndex: null, status: 'none', capturing: null,
+    },
     stationId,
     afk,
     ratings,
@@ -371,6 +427,18 @@ function persistMasterVolume(value) {
  *   audioEl?: object|null,       // legacy single-channel argument
  *   audioEls?: Array,            // every audio channel master volume scales
  *   myToken?: string|null,
+ *   getSemanticActions?: () => Array<object>,
+ *   onSemanticBinding?: (actionId: string, slot: number, binding: object,
+ *     options?: {replace?: boolean}) => object,
+ *   onSemanticResetAction?: (actionId: string) => object,
+ *   onSemanticResetAll?: () => object,
+ *   onSemanticTuning?: (actionId: string, tuning: object) => object,
+ *   getGamepadState?: () => object,
+ *   onGamepadSelection?: (index: number|null) => object,
+ *   onSemanticCapture?: (actionId: string|null, slot: number|null, active: boolean) => void,
+ *   onOperatorProfileExport?: () => string,
+ *   onOperatorProfileImport?: (json: string) => object|Promise<object>,
+ *   getOperatorCapabilities?: () => object,
  *   doc?: Document,
  *   isDemo?: () => boolean,
  * }} opts
@@ -385,20 +453,36 @@ export function mountSettings({
   getManual,
   myToken,
   onAccessibility: _onAccessibility,
+  getSemanticActions: _getSemanticActions,
+  onSemanticBinding: _onSemanticBinding,
+  onSemanticResetAction: _onSemanticResetAction,
+  onSemanticResetAll: _onSemanticResetAll,
+  onSemanticTuning: _onSemanticTuning,
+  getGamepadState: _getGamepadState,
+  onGamepadSelection: _onGamepadSelection,
+  onSemanticCapture: _onSemanticCapture,
+  onOperatorProfileExport: _onOperatorProfileExport,
+  onOperatorProfileImport: _onOperatorProfileImport,
+  getOperatorCapabilities: _getOperatorCapabilities,
+  downloadOperatorProfile: _downloadOperatorProfile,
+  readOperatorProfileFile: _readOperatorProfileFile,
   doc: _doc,
   isDemo: _isDemo,
+  buttonContainer: _buttonContainer,
 } = {}) {
   const doc = _doc || (typeof document !== 'undefined' ? document : null);
   if (!doc) {
     return {
       open() {}, close() {}, rebuildContent() {},
-      selectTab() {}, isOpen: () => false,
+      selectTab() {}, isOpen: () => false, proposeSemanticBinding() {},
+      updateGamepadState() {}, setButtonContainer() {}, openTab() {},
     };
   }
   const win = doc.defaultView || (typeof window !== 'undefined' ? window : null);
   const isDemo = _isDemo || (() => isDemoBuild({ win, doc }));
 
   let activeTab = null;
+  let operatorProfileStatus = null;
 
   // The documentation surface's own state, deliberately NOT `activeTab`.
   //
@@ -436,6 +520,37 @@ export function mountSettings({
     if (typeof _onAccessibility === 'function') _onAccessibility(effect, value);
   };
 
+  // The live binding profile is parent-owned; operator-profile.js persists it.
+  // The callback updates that registry and explicitly fans it into iframe realms;
+  // this Settings module never assumes module instances share mutable state.
+  const setSemanticBinding = (actionId, slot, binding, options = {}) => {
+    if (typeof _onSemanticBinding === 'function') {
+      return _onSemanticBinding(actionId, slot, binding, options);
+    }
+    return binding && binding.type !== 'gamepad' && isReservedKeyboardBinding(binding)
+      ? { status: 'reserved', actionId, slot, binding }
+      : { status: 'unavailable', actionId, slot, binding };
+  };
+
+  const resetSemanticAction = (actionId) => {
+    if (typeof _onSemanticResetAction === 'function') {
+      return _onSemanticResetAction(actionId);
+    }
+    return { status: 'unavailable', actionId };
+  };
+
+  const resetAllSemanticActions = () => {
+    if (typeof _onSemanticResetAll === 'function') return _onSemanticResetAll();
+    return { status: 'unavailable' };
+  };
+
+  const setSemanticTuning = (actionId, tuning) => {
+    if (typeof _onSemanticTuning === 'function') {
+      return _onSemanticTuning(actionId, tuning);
+    }
+    return { status: 'unavailable', actionId };
+  };
+
   // ── Gear button + overlay ────────────────────────────────────────────────
   //
   // The find-or-create/aria/focus-trap/open-close/backdrop-click mechanics are
@@ -446,6 +561,11 @@ export function mountSettings({
     overlayId: 'settings-overlay',
     buttonClass: 'settings-btn',
     overlayClass: 'settings-overlay',
+    // Where the cog is BORN. It moves afterwards — client.html re-parents it
+    // into the Station bar for the duration of play through
+    // `setButtonContainer` below (issue #1372) — so this is only the home it
+    // has before the first render, which is the lobby's.
+    container: _buttonContainer || null,
     // The gear sits over consoles that have their own click handling; the
     // host page has no such layer beneath its cog, so this stays client-only.
     stopPropagationOnToggle: true,
@@ -488,6 +608,24 @@ export function mountSettings({
     });
     return el;
   }
+
+  // Keyboard capture, conflict confirmation and reset behaviour are shared
+  // with the host Settings Controls tab. The parent registry still owns every
+  // binding; this object owns only the modal's transient presentation.
+  const semanticControls = createSemanticControlsRemapper({
+    doc,
+    root: overlay,
+    setBinding: setSemanticBinding,
+    resetAction: resetSemanticAction,
+    resetAll: resetAllSemanticActions,
+    setTuning: setSemanticTuning,
+    onCapture: (actionId, slot, active) => {
+      if (typeof _onSemanticCapture === 'function') {
+        _onSemanticCapture(actionId, slot, active);
+      }
+    },
+    rebuild: () => { if (shell.isOpen()) buildContent(); },
+  });
 
   // ── Tab bodies ───────────────────────────────────────────────────────────
 
@@ -649,6 +787,128 @@ export function mountSettings({
     body.appendChild(motionSec);
   }
 
+  function buildOperatorProfileSection(body, capabilities) {
+    const profileSection = section('settings.controls.profile.heading');
+    profileSection.appendChild(hint('settings.controls.profile.hint'));
+    profileSection.appendChild(hint('settings.controls.profile.private_hint'));
+    if (capabilities && capabilities.vibration === false) {
+      const unavailable = hint('settings.controls.profile.vibration_unavailable');
+      unavailable.setAttribute('data-control', 'operator-profile-vibration-unavailable');
+      profileSection.appendChild(unavailable);
+    }
+    const profileRow = row('settings-rating-row');
+    const exportProfile = action(
+      t('settings.controls.profile.export'),
+      null,
+      () => {
+        let text = null;
+        try {
+          text = typeof _onOperatorProfileExport === 'function'
+            ? _onOperatorProfileExport() : null;
+        } catch (_) {
+          text = null;
+        }
+        const download = typeof _downloadOperatorProfile === 'function'
+          ? _downloadOperatorProfile : downloadArtifact;
+        operatorProfileStatus = text && download(doc, OPERATOR_PROFILE_FILENAME, text)
+          ? { status: 'exported' }
+          : { status: 'rejected', code: 'profile-export' };
+        buildContent();
+      },
+    );
+    exportProfile.setAttribute('data-control', 'operator-profile-export');
+    profileRow.appendChild(exportProfile);
+
+    const file = doc.createElement('input');
+    file.type = 'file';
+    file.accept = 'application/json,.json';
+    file.hidden = true;
+    file.setAttribute('data-control', 'operator-profile-file');
+    file.addEventListener('change', async () => {
+      const selected = file.files && file.files[0];
+      if (!selected) return;
+      operatorProfileStatus = { status: 'pending' };
+      const current = overlay.querySelector('[data-control="operator-profile-status"]');
+      const pending = operatorProfileStatusView(operatorProfileStatus);
+      if (current && pending) current.textContent = t(pending.labelId);
+      try {
+        const read = typeof _readOperatorProfileFile === 'function'
+          ? _readOperatorProfileFile : readFileText;
+        const text = await read(selected);
+        operatorProfileStatus = typeof _onOperatorProfileImport === 'function'
+          ? await _onOperatorProfileImport(text)
+          : { status: 'rejected', code: 'profile-import-unavailable' };
+      } catch (_) {
+        operatorProfileStatus = { status: 'rejected', code: 'profile-read' };
+      }
+      if (shell.isOpen()) buildContent();
+    });
+    const importProfile = action(
+      t('settings.controls.profile.import'),
+      null,
+      () => file.click(),
+    );
+    importProfile.setAttribute('data-control', 'operator-profile-import');
+    profileRow.appendChild(importProfile);
+    profileSection.appendChild(profileRow);
+    profileSection.appendChild(file);
+
+    const statusView = operatorProfileStatusView(operatorProfileStatus);
+    if (statusView) {
+      const status = doc.createElement('div');
+      status.className = 'settings-section-hint settings-profile-status';
+      status.setAttribute('data-control', 'operator-profile-status');
+      status.setAttribute('role', statusView.alert ? 'alert' : 'status');
+      status.setAttribute('aria-live', statusView.alert ? 'assertive' : 'polite');
+      status.textContent = t(statusView.labelId);
+      profileSection.appendChild(status);
+    }
+    body.appendChild(profileSection);
+  }
+
+  function buildControlsTab(body, view) {
+    const gamepad = view.gamepad || {};
+    // Keep Reset All as the final focusable control in this tab. Existing
+    // conflict Escape/Shift+Tab behavior relies on that stable modal boundary.
+    buildOperatorProfileSection(body, view.operatorCapabilities);
+    semanticControls.render(body, {
+      actions: view.semanticActions,
+      capturing: gamepad.capturing || null,
+      section,
+      hint,
+      row,
+      action: (label, onClick) => action(label, null, onClick),
+      continuousPressPromptId: 'settings.controls.press_axis',
+      beforeActions: (target) => {
+        const gamepadSection = section('settings.controls.gamepad.heading');
+        gamepadSection.appendChild(hint('settings.controls.gamepad.hint'));
+        const gamepadLabel = doc.createElement('label');
+        gamepadLabel.className = 'settings-binding-label';
+        gamepadLabel.textContent = t('settings.controls.gamepad.selector');
+        const selector = doc.createElement('select');
+        selector.setAttribute('data-control', 'semantic-gamepad-select');
+        selector.setAttribute('aria-label', t('settings.controls.gamepad.selector'));
+        updateGamepadSelector(selector, gamepad);
+        selector.addEventListener('change', () => {
+          if (typeof _onGamepadSelection === 'function') {
+            _onGamepadSelection(selector.value === '' ? null : Number(selector.value));
+          }
+          buildContent();
+        });
+        gamepadLabel.appendChild(selector);
+        gamepadSection.appendChild(gamepadLabel);
+
+        const status = doc.createElement('div');
+        status.className = 'settings-section-hint settings-gamepad-status';
+        status.setAttribute('data-control', 'semantic-gamepad-status');
+        updateGamepadStatus(status, gamepad);
+        gamepadSection.appendChild(status);
+        target.appendChild(gamepadSection);
+      },
+    });
+
+  }
+
   function buildGameplayTab(body, view) {
     // Dev builds only — see the module doc. The whole section goes, not just
     // the button: a "Simulation" heading over nothing reads as a bug.
@@ -689,7 +949,14 @@ export function mountSettings({
 
     const qrSection = section('settings.qr_code');
     qrSection.appendChild(
-      action(t('settings.toggle_qr'), null, () => emit('ToggleQrCode', {})),
+      // No data, and that is now load-bearing rather than tidy (issue #1329).
+      // A browser host answers this button in its own JavaScript and the frame
+      // never reaches Rust; a NATIVE host has no page in front of its
+      // simulation, so the same frame decodes into `ClientMessage::ToggleQrCode`
+      // — a unit variant, which `data: {}` is NOT. Same shape as `TogglePause`
+      // and `ReleaseStation`; pinned by
+      // `codec::client_settings_menu_wire_shapes_are_pinned`.
+      action(t('settings.toggle_qr'), null, () => emit('ToggleQrCode')),
     );
     body.appendChild(qrSection);
 
@@ -729,7 +996,7 @@ export function mountSettings({
   function buildStationHelpTab(body, view) {
     const host = doc.createElement('div');
     host.className = 'settings-documentation';
-    if (!view.stationId || !renderStationHelp(host, view.stationId)) {
+    if (!view.stationId || !renderStationHelp(host, view.stationId, view.semanticActions)) {
       const unavailable = doc.createElement('div');
       unavailable.className = 'settings-section-hint';
       unavailable.textContent = t('settings.station_help.unavailable');
@@ -759,6 +1026,15 @@ export function mountSettings({
       myToken,
       demo: !!isDemo(),
       activeTab,
+      semanticActions: typeof _getSemanticActions === 'function'
+        ? _getSemanticActions()
+        : [],
+      operatorCapabilities: typeof _getOperatorCapabilities === 'function'
+        ? _getOperatorCapabilities()
+        : null,
+      gamepad: typeof _getGamepadState === 'function'
+        ? _getGamepadState()
+        : null,
     });
     activeTab = view.activeTab;
 
@@ -780,13 +1056,98 @@ export function mountSettings({
 
     if (activeTab === 'debug') buildDebugTab(body, view);
     else if (activeTab === 'audio') buildAudioTab(body);
+    else if (activeTab === 'controls') buildControlsTab(body, view);
     else if (activeTab === 'accessibility') buildAccessibilityTab(body, view);
     else if (activeTab === 'gameplay') buildGameplayTab(body, view);
     else if (activeTab === 'station-help') buildStationHelpTab(body, view);
     else if (activeTab === 'ship-manual') buildShipManualTab(body);
   }
 
+  function visibleGamepadStatus(gamepad) {
+    const unsupportedOnly = gamepad && gamepad.status === 'none'
+      && (gamepad.devices || []).some((device) => !device.supported)
+      && !(gamepad.devices || []).some((device) => device.supported);
+    return unsupportedOnly ? 'unsupported' : ((gamepad && gamepad.status) || 'none');
+  }
+
+  function updateGamepadSelector(selector, gamepad) {
+    if (!selector) return;
+    selector.innerHTML = '';
+    const unavailable = gamepad && gamepad.status === 'unavailable';
+    selector.disabled = !!unavailable;
+    const none = doc.createElement('option');
+    none.value = '';
+    none.textContent = t('settings.controls.gamepad.none');
+    selector.appendChild(none);
+    const seen = new Set();
+    for (const device of (gamepad && gamepad.devices) || []) {
+      const option = doc.createElement('option');
+      option.value = String(device.index);
+      option.textContent = t(device.supported
+        ? 'settings.controls.gamepad.device'
+        : 'settings.controls.gamepad.device_unsupported', {
+        slot: String(Number(device.index) + 1),
+      });
+      option.disabled = !device.supported;
+      selector.appendChild(option);
+      seen.add(Number(device.index));
+    }
+    if (!unavailable && gamepad && gamepad.selectedIndex != null
+        && !seen.has(Number(gamepad.selectedIndex))) {
+      const disconnected = doc.createElement('option');
+      disconnected.value = String(gamepad.selectedIndex);
+      disconnected.textContent = t('settings.controls.gamepad.device_disconnected', {
+        slot: String(Number(gamepad.selectedIndex) + 1),
+      });
+      selector.appendChild(disconnected);
+    }
+    if (unavailable && gamepad.retainedIndex != null) {
+      const retained = doc.createElement('option');
+      retained.value = String(gamepad.retainedIndex);
+      retained.textContent = t('settings.controls.gamepad.device_retained', {
+        slot: String(Number(gamepad.retainedIndex) + 1),
+      });
+      selector.appendChild(retained);
+      selector.value = retained.value;
+    } else {
+      selector.value = !gamepad || gamepad.selectedIndex == null
+        ? '' : String(gamepad.selectedIndex);
+    }
+  }
+
+  function updateGamepadStatus(status, gamepad) {
+    if (!status) return;
+    const visibleStatus = visibleGamepadStatus(gamepad);
+    status.setAttribute('role', visibleStatus === 'disconnected' ? 'alert' : 'status');
+    status.setAttribute('aria-live', visibleStatus === 'disconnected' ? 'assertive' : 'polite');
+    status.textContent = t(`settings.controls.gamepad.status_${visibleStatus}`);
+  }
+
+  // Gamepad polling can change status while a binding input owns focus. Update
+  // only the selector options and live status; rebuilding the whole modal here
+  // would detach that exact input, losing keyboard/gamepad capture and making
+  // blur unreliable as the disarm boundary.
+  function updateGamepadState(gamepad) {
+    if (!shell.isOpen() || activeTab !== 'controls') return;
+    updateGamepadSelector(
+      overlay.querySelector('[data-control="semantic-gamepad-select"]'),
+      gamepad,
+    );
+    updateGamepadStatus(
+      overlay.querySelector('[data-control="semantic-gamepad-status"]'),
+      gamepad,
+    );
+  }
+
   function selectTab(id) {
+    if (id !== activeTab) {
+      // Conflict prompts and reserved feedback describe a Controls capture.
+      // They cannot remain pending after their origin is hidden on another
+      // tab, or a later Escape would cancel invisible state instead of closing
+      // Settings normally. Current bindings live in the parent registry and
+      // are deliberately untouched here.
+      semanticControls.resetTransient();
+    }
     activeTab = id;
     if (shell.isOpen()) buildContent();
   }
@@ -801,6 +1162,17 @@ export function mountSettings({
     close: shell.close,
     isOpen: shell.isOpen,
     selectTab,
+    // The one cog node, re-parented (issue #1372). Exposed rather than letting
+    // the page reach for `#settings-btn` itself, so the shell that owns the
+    // button owns every move of it.
+    setButtonContainer: shell.setButtonContainer,
+    /** Open Settings directly on one tab — the Station-help button's route. */
+    openTab: (id) => {
+      selectTab(id);
+      if (!shell.isOpen()) shell.open();
+    },
+    proposeSemanticBinding: semanticControls.proposeBinding,
+    updateGamepadState,
     rebuildContent: () => {
       if (shell.isOpen()) buildContent();
     },

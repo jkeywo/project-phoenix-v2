@@ -27,7 +27,6 @@
  *   mounts one (cruiser, destroyer; not battleship)
  * @property {string} ids.impulse              `ph-impulse-btn` id
  * @property {string} ids.boost                `ph-boost-btn` id
- * @property {string} [ids.stationDamage]      `ph-station-damage` id
  * @property {string} [ids.autoBadge]          the AUTO badge id
  * @property {object} [footer]                 target-contact footer config; omit for a hull
  *   whose footer text is static (the destroyer pattern — render never touches it)
@@ -97,11 +96,7 @@ export function makeHelmRender(variant) {
       };
     }
 
-    // ── Station-damage + AUTO badge ─────────────────────────────────────
-    if (ids.stationDamage) {
-      const el = doc.getElementById(ids.stationDamage);
-      if (el) el.state = s.own_hull || null;
-    }
+    // ── AUTO badge ──────────────────────────────────────────────────────
     if (ids.autoBadge) {
       const el = doc.getElementById(ids.autoBadge);
       if (el) setAutoState(null, el, !!s.helm_auto);

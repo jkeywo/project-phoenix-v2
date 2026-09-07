@@ -1,0 +1,199 @@
+/*
+ * gui/host-qr.css - the join panel's stylesheet (issue #1329).
+ *
+ * Lifted verbatim out of server.html's inline <style> so that the ONE join
+ * panel has ONE stylesheet: server.html links it, and so does the host-lobby
+ * document the native host assembles in memory
+ * (src/native_host/host_lobby/document.rs). The same move gui/host-lobby.css
+ * made for the lobby panel in issue #1325, applied to the other surface that
+ * document now carries - and for the same reason, that a second copy of these
+ * rules is a second join panel that drifts the first time either is touched.
+ *
+ * SEPARATE from gui/host-lobby.css rather than appended to it, because the two
+ * are different chrome with different lifetimes: the lobby panel is the lobby,
+ * and the join panel is viewscreen furniture that OUTLIVES it - it is shown in
+ * the lobby phase, hidden at mission start, and toggled back on mid-mission for
+ * a late arrival, at which point there is no lobby panel on screen at all. The
+ * module that owns those decisions, gui/host-qr.js, is likewise its own file
+ * beside gui/host-lobby-render.js.
+ *
+ * `#fleet-*` is deliberately NOT here. The fleet panel shares #overlay with
+ * this one but admits other ship HOSTS rather than crew (issue #1114), and the
+ * native lobby surface carries no fleet UI, so its rules stay inline in
+ * server.html where its markup and its glue are.
+ *
+ * Linked from server.html BEFORE its inline <style>, which is where these rules
+ * sat: nothing between there and here targets a join-panel element, so the
+ * cascade they were written against is unchanged.
+ */
+
+/* ── The overlay this panel lives in ─────────────────────────────────── */
+/* Anchored bottom-right over the viewscreen, above the HUD (z-index 190).
+   `display: none` is the ground state on both surfaces: the join panel is
+   shown by gui/host-qr.js when the phase (or an operator) says so, never by
+   being present. */
+#overlay { position: absolute; bottom: 1rem; right: 1rem; z-index: 190; display: none; }
+#qr { display: none; }
+/* The join panel (PRD #1023 module 4, user story 4): "I want the join QR
+   framed, captioned, and accompanied by a readable URL, so that guests can
+   join from across the room without being talked through it."
+
+   The frame is what makes it read as a thing to act on rather than an
+   artefact on the viewscreen; the caption says what acting on it does; the
+   URL is the fallback for every phone whose camera will not focus, and is
+   therefore SELECTABLE — the point is that it can be copied and read
+   aloud, not that it is present. */
+/* The chamfer, the eyebrow captions and the boxed code are the design canvas's
+   join card (issue #1358, PRD #1355), brought onto the panel the lobby already
+   had rather than rebuilt as one. What is NOT taken from the canvas is its
+   PLACEMENT: the artboard draws the card in the lobby's side rail, and this
+   panel is anchored bottom-right over the viewscreen because it outlives the
+   lobby — it is toggled back on mid-mission for a late arrival, when there is
+   no rail on screen to sit in. The surfaces it can sit on are grounds
+   (--scrim-panel over the viewscreen, or the page under `.pre-scenario`), so
+   --edge-control is the rung that clears WCAG 1.4.11 here — the card fills the
+   lobby uses take --edge-strong instead, which is the whole reason the
+   boundary is a ladder. */
+#qr-panel {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  /* #overlay is a right-anchored block whose shrink-to-fit width is set by
+     its widest sibling (the diagnostics readout), so a plain block panel
+     stretches to that and leaves the code adrift in dead space. Size to the
+     content and keep the panel against the anchored edge. */
+  width: fit-content; margin-left: auto;
+  padding: 14px 16px 12px;
+  background: var(--scrim-panel);
+  border: 1px solid var(--edge-control);
+  font-family: var(--font-display);
+  clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+}
+#qr-caption {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs); font-weight: 600;
+  letter-spacing: var(--tracking-widest); text-transform: uppercase;
+  color: var(--ink-faint);
+}
+/* The padding is the code's quiet zone, so it has to be the same white the
+   QR itself is drawn on — a scanner reads the margin as part of the code. */
+#qr-link { display: block; line-height: 0; padding: 8px; border-radius: 4px;
+  background: rgb(var(--rgb-white)); }
+#qr-url-row {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  max-width: 232px;
+}
+#qr-url-label,
+#join-code-caption {
+  font-family: var(--font-mono); font-weight: 600;
+  font-size: var(--text-xs); letter-spacing: var(--tracking-widest);
+  text-transform: uppercase; color: var(--ink-faint);
+}
+#qr-url {
+  font-family: var(--font-mono); font-size: var(--text-sm);
+  color: var(--cyan-bright); word-break: break-all; text-align: center;
+  line-height: 1.35;
+  -webkit-user-select: all; user-select: all;
+}
+/* The typed join code (issue #1111). Sized to be read across a room
+   — that is the entire reason it exists next to a 90-character URL. */
+#join-code-row {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+}
+/* Boxed and cyan since issue #1358: the canvas draws the code as a lit cell
+   rather than loose type, which is what stops it reading as a caption under the
+   QR. Cyan and not the gold it wore before, because #1357's table makes
+   --cyan the accent BOUNDARY and --signal the accent FOREGROUND across this
+   whole surface, and a lone gold string was the one thing on the lobby that
+   belonged to no family. It keeps --text-display: the canvas's 25px is drawn
+   for a rail on a monitor, and this panel is read from the far side of a room —
+   that size is the entire reason it exists next to a 90-character URL. */
+#join-code {
+  font-family: var(--font-mono); font-size: var(--text-display);
+  letter-spacing: var(--tracking-widest); color: var(--signal);
+  padding: 6px 10px 6px 16px;
+  border: 1px solid var(--cyan);
+  background: var(--cyan-dim);
+  -webkit-user-select: all; user-select: all;
+}
+/* Nobody can join this host at all - a native host run with `--solo`, or with
+   no `--rendezvous` (issue #1329). `gui/host-qr.js` puts the reason in the
+   caption and hides the three rows that would otherwise be an empty frame
+   inviting a crew to scan something that cannot work. Ruled here rather than
+   with inline styles so that "the panel is saying joining is off" is one class
+   on one element, visible in a DOM inspector. */
+#qr-panel.joining-off #qr-link,
+#qr-panel.joining-off #qr-url-row,
+#qr-panel.joining-off #join-code-row { display: none; }
+#qr-panel.joining-off #qr-caption { color: var(--ink-faint); max-width: 232px; text-align: center; }
+
+/* ── The native surface's own toggle (issue #1329) ───────────────────── */
+/* A host page has a settings cog whose Gameplay tab carries "show/hide the QR"
+   (gui/server-settings.js). The native viewscreen window had no cog and no
+   pointer chrome of its own, so the lobby document grows this one control -
+   the smallest honest affordance for the same decision. It renders only there:
+   server.html has no #host-lobby-qr-toggle, and this rule matches nothing on a
+   page that does not carry the element.
+
+   Top-right, because the join panel is bottom-right and a control that moved
+   under the thing it toggles would be unreachable exactly when the panel is
+   shown. Above #overlay's own layer so it stays clickable either way. */
+#host-lobby-qr-toggle {
+  position: absolute; top: 1rem; right: 1rem; z-index: 191;
+  display: inline-flex; align-items: center;
+  /* The target floor gui/host-lobby.css states for every control on this
+     surface: a television driven by a mouse from across a room misses a
+     control drawn at its label's height, whichever sheet rules it. */
+  min-height: var(--control-hit-min);
+  padding: 6px 14px;
+  background: var(--scrim-panel);
+  border: 1px solid var(--edge-control);
+  font-family: var(--font-mono); font-weight: 600;
+  font-size: var(--text-sm); letter-spacing: var(--tracking-wide);
+  text-transform: uppercase; color: var(--ink);
+  cursor: pointer; user-select: none;
+  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+}
+/* #1128's bar: a visible focus ring, from the shared tokens, on a surface a
+   keyboard can reach. The tokens and not a literal - gui/tokens.css defines
+   --focus-ring and --focus-ring-width, and gui/accessibility-profile.js swaps
+   the colour for a data-contrast="more" reader. A hard-coded outline here would
+   not follow that swap, which is exactly the drift the vocabulary exists to end.
+   Same pattern as the shared control family,
+   gui/components/ph-console-styles.js - INCLUDING which of that family's two
+   shapes this is. The toggle chamfers itself above, and a clip-path clips an
+   OUTSET outline away with the corners it cuts, so the ring is drawn INSET on
+   the control's own body where the clip cannot reach it. That is also why
+   --focus-ring-offset is not read here: gui/tokens.css calls it the gap for the
+   un-clipped outline path, and an inset ring has no gap to set. */
+#host-lobby-qr-toggle:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 var(--focus-ring-width) var(--focus-ring);
+}
+
+/* The pre-scenario join surface (issue #865's save catalogue, carried over in
+   the GM platform merge, #1300). Before a world is selected, server.html's
+   `showJoinQrOverPanel` docks the live #overlay INTO #scenario-panel as its
+   last flex child, after the world picker, and adds this class;
+   `resetJoinQrLayer` moves it back out and removes it. Appended and no longer
+   inserted before the save catalogue, because since issue #1363 the catalogue
+   is a panel of its own that Load Game borrows rather than a child of this one:
+   the picker has two surfaces here, not three. Keeping the QR in layout keeps
+   the world list visible and clickable beside it, and lets the portrait layout
+   scroll both surfaces in sequence. The rules live here with the rest of the
+   join panel's rather than back in server.html (#1329); the native lobby
+   document never adds the class, so they are inert there. */
+#overlay.pre-scenario {
+  position: static;
+  flex: 0 1 auto;
+  align-self: center;
+  min-width: 0;
+  max-height: calc(100vh - var(--settings-cog-keepout, 56px) - 1.5rem);
+  margin: var(--settings-cog-keepout, 56px) 1rem 1.5rem;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+#overlay.pre-scenario #qr-panel { margin-left: auto; margin-right: auto; }
+@media (orientation: portrait), (max-width: 800px) {
+  #overlay.pre-scenario {
+    width: 100%; max-height: none; margin: 0; padding: 1rem; overflow: visible;
+  }
+}

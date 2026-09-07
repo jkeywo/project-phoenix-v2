@@ -1,0 +1,218 @@
+/*
+ * gui/native-settings.css — the native host's settings overlay (issue #1367,
+ * PRD #1355).
+ *
+ * The chrome for `gui/native-settings.js`, and ONLY the chrome: the shell, the
+ * tab list and every control's behaviour are the shared ones
+ * (`gui/settings-overlay-kit.js`, `gui/settings-tabs.js`), and this sheet says
+ * where the panel sits and what it is painted in.
+ *
+ * ── Why a sheet at all, when the markup is borrowed ────────────────────────
+ *
+ * Every other surface the native host shows is sliced out of `server.html`'s
+ * own bytes and painted by the same linked stylesheet the browser host links,
+ * which is what keeps one surface from becoming two
+ * (`native_host::host_lobby::document`). The settings overlay cannot be: the
+ * host page paints its cog and modal from an inline `<style>` block in
+ * `server.html`, and there is no `<link>` to borrow. So the surface that mounts
+ * the shared kit brings a sheet, it is written against the token vocabulary
+ * from its first line — the rule `gui/host-landing.css` was created under in
+ * #1360 — and it is on `tests/client/design-tokens.test.js`'s enforced list
+ * from the same first line.
+ *
+ * It is linked ONLY by the native lobby document. The host page has its own
+ * cog and its own overlay; a second one there would be two controls
+ * disagreeing about which is open, which is exactly what
+ * `gui/host-landing.css`'s header says the landing must not grow.
+ *
+ * ── The cog wears the landing's own icon-button chrome ─────────────────────
+ *
+ * `mountNativeSettings` asks the kit for `class="landing-icon-btn
+ * native-settings-btn"`, so the look is `gui/host-landing.css`'s — the same
+ * 46px chamfered square, the same resting and hover colours — and this sheet
+ * only says WHERE. The design draws the cog at the top of the left rail and
+ * the fullscreen control in the opposite corner, which is what those two
+ * offsets are: the rail is 64px wide and the button is 46px, so 9px centres it,
+ * and `top: 34px` is `#landing-fullscreen-btn`'s own, so the pair the design
+ * draws sits level. (At the narrow breakpoint the rail is a 64px top BAR and
+ * both controls take `top: 9px`, by the same centring.)
+ *
+ * That corner is what `--settings-cog-keepout` is sized from, and the sizing
+ * axis is the VERTICAL one: `src/native_host/host_lobby/document.rs` declares
+ * 92px, which is this rule's 34px plus the button's 46px plus a 12px gap — the
+ * same gap `server.html` leaves its own cog. The horizontal extent is only
+ * 55px, so a scalar cut to fit THAT would leave `#world-list`'s label under
+ * this button on an undocked picker. Both floors read one token, so the token
+ * is the deeper of the two axes; move this rule and
+ * `document.rs`'s `the_cog_keep_out_clears_the_corner_its_cog_occupies` fails.
+ * `.native-settings-popup`'s `top` is the same arithmetic at both breakpoints.
+ *
+ * ── z-index ────────────────────────────────────────────────────────────────
+ *
+ * Above everything the native lobby document stacks. The shared sheets declare
+ * `#overlay` at 190, `#scenario-panel` at 200 and `#landing-panel` at 205, and
+ * that document lifts the join panel to 210 and its QR toggle to 211 (see
+ * `GROUND_CSS`). The settings modal takes 212 and the cog 213, in the same
+ * order the host page uses (overlay under cog), so the control that closes the
+ * panel is never underneath it.
+ */
+
+/* ── The cog ──────────────────────────────────────────────────────────────
+   `fixed`, not docked into `.landing-rail`: the settings menu is reachable
+   from the lobby as well as from the landing, and the landing panel is
+   `display: none` for the whole of a running session. A cog parented inside it
+   would vanish with it. */
+.native-settings-btn {
+  position: fixed;
+  top: 34px;
+  left: 9px;
+  z-index: 213;
+}
+
+/* ── The modal ────────────────────────────────────────────────────────── */
+.native-settings-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 212;
+  background: var(--scrim-overlay);
+}
+.native-settings-overlay[hidden] { display: none; }
+
+/* Anchored under the cog rather than centred, so the panel opens beside the
+   control that opened it — the same relationship the host page's popup has to
+   its own cog. */
+.native-settings-popup {
+  position: absolute;
+  top: 92px;
+  left: 9px;
+  width: min(380px, calc(100vw - 32px));
+  max-height: calc(100vh - 124px);
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: var(--space-4);
+  background: var(--surface-card);
+  border: 1px solid var(--edge);
+  color: var(--ink);
+  font-family: var(--font-display);
+  clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+}
+
+.native-settings-title {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  letter-spacing: var(--tracking-widest);
+  text-transform: uppercase;
+  color: var(--signal);
+  margin-bottom: var(--space-3);
+}
+
+/* ── Tabs ─────────────────────────────────────────────────────────────── */
+.native-settings-tabs {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+}
+.native-settings-tab {
+  flex: 1 1 auto;
+  /* The touch floor, in the shared control family's own two-line shape
+     (`gui/components/ph-console-styles.js`): `height` keeps the rung the design
+     was drawn at and `min-height` wins where the two disagree, so raising the
+     floor is one edit in `gui/tokens.css` and the proportion is still written
+     where a designer looks for it. `--control-h-md` is 1.9rem — the authored
+     size of a compact pill, not a target — and this sheet sits outside
+     control-floors.test.js's TOUCH sweep like every other host sheet, so the
+     law `gui/host-lobby.css`'s header states is held by hand: every rule here
+     that declares `cursor: pointer` carries `min-height:
+     var(--control-hit-min)`. */
+  height: var(--control-h-md);
+  min-height: var(--control-hit-min);
+  padding: var(--control-pad-md);
+  background: var(--surface-raised);
+  border: 1px solid var(--edge-control);
+  color: var(--ink-dim);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--control-font-md);
+  letter-spacing: var(--tracking);
+}
+.native-settings-tab:hover {
+  background: var(--cyan-deep);
+  color: var(--ink);
+}
+.native-settings-tab.active {
+  background: var(--cyan-dim);
+  border-color: var(--cyan);
+  color: var(--signal);
+}
+
+/* ── Sections ─────────────────────────────────────────────────────────── */
+.native-settings-section { margin-bottom: var(--space-4); }
+.native-settings-section:last-child { margin-bottom: 0; }
+.native-settings-heading {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  margin-bottom: var(--space-2);
+}
+.native-settings-hint {
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--ink-faint);
+  margin-bottom: var(--space-2);
+}
+.native-settings-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* ── Controls ─────────────────────────────────────────────────────────── */
+.native-settings-control {
+  /* The same two lines, for the same reason, as `.native-settings-tab` above. */
+  height: var(--control-h-md);
+  min-height: var(--control-hit-min);
+  min-width: var(--control-hit-min);
+  padding: var(--control-pad-md);
+  background: var(--surface-raised);
+  border: 1px solid var(--edge-control);
+  color: var(--ink);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--control-font-md);
+  letter-spacing: var(--tracking);
+}
+.native-settings-control:hover {
+  background: var(--cyan-deep);
+  border-color: var(--cyan);
+  color: var(--signal);
+}
+
+/* One focus treatment for every control in the panel, shown by SHAPE as well
+   as colour — the rule `native_host::setup_accessibility` holds the bridge to,
+   and the same inset ring `.landing-icon-btn` wears. */
+.native-settings-tab:focus-visible,
+.native-settings-control:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 var(--focus-ring-width) var(--focus-ring);
+}
+
+/* ── Narrow or portrait ───────────────────────────────────────────────────
+   The landing's rail becomes a top bar at this breakpoint
+   (`gui/host-landing.css`), and its fullscreen control moves with it. The cog
+   moves the same way, to the opposite end of the same bar, so the two controls
+   stay the pair the design draws them as. */
+@media (max-width: 999px), (orientation: portrait) {
+  .native-settings-btn { top: 9px; left: 16px; }
+  .native-settings-popup {
+    top: 66px;
+    left: 16px;
+    width: min(380px, calc(100vw - 32px));
+    max-height: calc(100vh - 96px);
+  }
+}

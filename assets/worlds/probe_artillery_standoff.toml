@@ -39,7 +39,7 @@
 #
 # ── Why the hostility is one-directional ──────────────────────────────────────
 #
-# Only Harrow is told that Federation is an enemy. The battleship therefore
+# Only Harrow is told that Alliance is an enemy. The battleship therefore
 # acquires and closes on the player, while the player's own untargeted Destroy
 # doctrine resolves no hostile and falls through to `alliance_cruiser`'s
 # `hold-station` (target_speed 0.0). A stationary target is what makes "comes to
@@ -71,7 +71,7 @@ on_world_loaded("on_load");
 on_timer(0, "spawn_battleship");
 
 fn on_load(ctx) {
-    ctx.effects.add_faction_enemy("Harrow", "Federation");
+    ctx.effects.add_faction_enemy("Harrow", "Alliance");
 }
 
 fn spawn_battleship(ctx) {

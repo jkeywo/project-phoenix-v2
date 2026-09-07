@@ -500,6 +500,62 @@ export function buildTargetBlip(targetUuid, entities, shipX, shipZ, shipYaw, ran
 }
 
 /**
+ * Project the selected Science Target's future relative path on the Sensors
+ * radar (issue #1339).
+ *
+ * Relative velocity is already target-minus-own (world-space X/Z), so the
+ * future *relative* position at `t` seconds out is simply the current
+ * relative offset plus `relativeVelocity * t` — no re-subtraction of a future
+ * ship position is needed, and no persistent client-side simulation is
+ * introduced: each tick's snapshot re-derives the whole path from scratch,
+ * consistent with the rest of this file. Each future offset is then rotated
+ * into ship-relative radar space with the exact same transform `buildBlips`/
+ * `buildWaypointBlip`/`buildTargetBlip` use for the *current* tick, so a
+ * projection marker and a live blip agree pixel-for-pixel when time catches
+ * up to them.
+ *
+ * Returns `null` when velocity is unknown (no selection, a non-ship contact,
+ * or a stationary contact reporting `[0, 0]` still projects — a real zero
+ * relative velocity is a legitimate "holding station" projection, distinct
+ * from *unknown* velocity, which is the `null`/absent case) — satisfies
+ * "unknown velocity renders no projection".
+ *
+ * @param {number|null} targetDx   Current target X minus ship X (world space)
+ * @param {number|null} targetDz   Current target Z minus ship Z (world space)
+ * @param {[number,number]|null} relativeVelocity  World-space X/Z, target minus own
+ * @param {number} shipYaw
+ * @param {number} range           Radar scan range (normalises radar_x/radar_y)
+ * @param {number} horizonSecs     How far ahead to project, in seconds
+ * @param {number} markerIntervalSecs  Spacing between markers, in seconds
+ * @returns {Array<{radar_x:number, radar_y:number, t:number}>|null}
+ */
+export function buildTargetProjection(
+  targetDx, targetDz, relativeVelocity, shipYaw, range, horizonSecs, markerIntervalSecs
+) {
+  if (targetDx == null || targetDz == null || !relativeVelocity) return null;
+  const safeRange = Math.max(Number(range) || 0, 0.001);
+  const horizon = Number(horizonSecs) || 0;
+  const interval = Number(markerIntervalSecs) || 0;
+  if (horizon <= 0 || interval <= 0) return null;
+  const [vx, vz] = relativeVelocity;
+  if (!Number.isFinite(vx) || !Number.isFinite(vz)) return null;
+
+  const cosY = Math.cos(shipYaw || 0);
+  const sinY = Math.sin(shipYaw || 0);
+  const markers = [];
+  for (let t = interval; t <= horizon + 1e-6; t += interval) {
+    const dx = targetDx + vx * t;
+    const dz = targetDz + vz * t;
+    markers.push({
+      radar_x: (dx * cosY + dz * sinY) / safeRange,
+      radar_y: (dx * sinY - dz * cosY) / safeRange,
+      t,
+    });
+  }
+  return markers;
+}
+
+/**
  * Fold the server's torpedo-capability fact into a display badge (issue #957).
  *
  * The server decides WHO is torpedo-armed — `RadarBlip.torpedo_armed` is set
@@ -581,8 +637,77 @@ export function torpSlotStates(tube) {
 }
 
 /**
+ * Shared target-facts lookup (issue #1378): the identity/tactical facts about
+ * a locked target, derived from its entity snapshot. Originally inline in
+ * `buildSensorsConsoleState` (issue #927 grew it field by field); the
+ * Tactical target lock card (issue #1378) needed the exact same facts off the
+ * WEAPONS builder's own lock, so this is now the one place either builder
+ * reads them from — never a second derivation that could drift from the
+ * first.
+ *
+ * Sensors-only facts stay OUT of this helper on purpose: `target_alert`,
+ * `target_weapons` and `target_projection` are read from the ship's OWN
+ * `SensorRadar` blackboard — a privacy-scoped reading only the Sensors
+ * builder is allowed to see (issues #749, #1397, #1339) — never from the
+ * plain entity snapshot this helper reads. Folding them in here would let a
+ * caller reach them without going through that boundary.
+ *
+ * @param {{ asteroids?: Array, shipX?: number, shipZ?: number }} state
+ * @param {string|null|undefined} uuid  the locked target's uuid, or falsy for no lock
+ * @param {number} [range] scan/weapons radar range — accepted for every
+ *   caller to pass the same shape a future range-gated fact would need;
+ *   unused by today's facts, which are not range-limited.
+ * @returns {object} the `target_*` fields below, defaulted to `null`
+ *   (`target_shields` to `[]`) when there is no lock or `uuid` does not
+ *   resolve against `state.asteroids`.
+ */
+export function targetFactsFor(state, uuid, range) {
+  const entities = state.asteroids;
+  const tgt = (uuid && entities) ? entities.find(a => a.uuid === uuid) : null;
+  if (!tgt) {
+    return {
+      target_name: null, target_kind: null, target_stance: null, target_faction: null,
+      target_bearing: null, target_range: null, target_class: null, target_hull_pct: null,
+      target_heading: null, target_speed: null, target_threat: null,
+      target_shield_freq: null, target_shields: [], target_shield_fraction: null,
+    };
+  }
+
+  const dx = entityX(tgt) - (state.shipX || 0);
+  const dz = entityZ(tgt) - (state.shipZ || 0);
+  const tags = (tgt.tags || tgt.entity_tags || []).map(tag => String(tag).toLowerCase());
+  const stance = tgt.stance || 'neutral';
+
+  return {
+    target_name:  tgt.name || uuid,
+    target_kind:  tags.includes('ship') ? 'ship' : tags.includes('station') ? 'station' : 'asteroid',
+    target_stance: stance,
+    target_faction: tgt.faction || null,
+    target_bearing: (Math.atan2(dx, -dz) * 180 / Math.PI + 360) % 360,
+    target_range: Math.sqrt(dx * dx + dz * dz),
+    target_class: tgt.shipClass || null,
+    target_hull_pct: tgt.hull_pct !== undefined ? tgt.hull_pct : null,
+    target_heading: tgt.yaw != null
+      ? (((tgt.yaw * 180 / Math.PI) % 360) + 360) % 360
+      : null,
+    target_speed: tgt.speed !== undefined ? tgt.speed : null,
+    target_threat: tgt.threat || (stance === 'hostile' ? 'high' : 'low'),
+    target_shield_freq: tgt.shield_freq != null ? tgt.shield_freq : null,
+    target_shields: tgt.shields || [],
+    // Single-facing NPC shield fraction (#473). `null` for shieldless
+    // entities (no [shields] block on the TOML); `0..=1` for shielded NPCs;
+    // `0` for broken shields.
+    target_shield_fraction: tgt.shield_fraction !== undefined && tgt.shield_fraction !== null
+      ? tgt.shield_fraction
+      : null,
+  };
+}
+
+/**
  * Payload contract for the Tactical/Weapons console iframe (issue #827).
- * Rendered by gui/battleship/tactical.html and gui/cruiser/tactical.html.
+ * Rendered flat by gui/battleship/tactical.html; every other Tactical seat
+ * (cruiser since issue #1389, destroyer, courier) reads the same shape as the
+ * `tactical` family view inside its keyed payload.
  *
  * @typedef {{ target_uuid: string|null, target_name: string|null,
  *             banks: Array, tubes: Array, torpedo_count: number,
@@ -593,7 +718,14 @@ export function torpSlotStates(tube) {
  *             phaser_arcs: Array<{range_frac: number|null}>,
  *             torpedo_arcs: Array, blasters: Array,
  *             own_hull: StationHullAggregate, tactical_auto: boolean,
- *             station_rating: string }} WeaponsConsolePayload
+ *             station_rating: string,
+ *             target_stance: string|null, target_class: string|null,
+ *             target_bearing: number|null, target_range: number|null,
+ *             target_hull_pct: number|null, target_shields: Array,
+ *             target_shield_freq: number|null }} WeaponsConsolePayload
+ *   The `target_*` facts beyond `target_uuid`/`target_name` (issue #1378) are
+ *   fed by {@link targetFactsFor} off THIS builder's own Tactical lock — never
+ *   the Sensors selection — for the destroyer's target lock card.
  */
 
 /**
@@ -675,6 +807,14 @@ export function buildWeaponsConsoleState(state, systemIds = []) {
   // Derive target_name from the locked server blip when no explicit name is stored.
   const resolvedTargetName = targetName || (targetUuid && blips.find(b => b.uuid === targetUuid)?.name) || null;
 
+  // Target lock card facts (issue #1378): stance, class, bearing, range, hull,
+  // shield facings and shield frequency for the destroyer's target lock card —
+  // read off THIS builder's own Tactical lock (`targetUuid` above) through the
+  // helper shared with Sensors. Deliberately not `state.sensorsTarget` or the
+  // `SensorRadar` blackboard: a Weapons operator must never learn what
+  // Sensors has independently selected.
+  const targetFacts = targetFactsFor(state, targetUuid, range);
+
   // Add shared target markers (science target + navigation waypoint)
   const entities = state.asteroids || [];
   const sensBb = blackboardOfKind(state, 'Sensors')?.data;
@@ -691,6 +831,7 @@ export function buildWeaponsConsoleState(state, systemIds = []) {
   if (waypoint) blips.push(waypoint);
 
   return JSON.stringify({
+    ...targetFacts,
     target_uuid:   targetUuid,
     target_name:   resolvedTargetName,
     banks,
@@ -718,7 +859,7 @@ export function buildWeaponsConsoleState(state, systemIds = []) {
  * Rendered by gui/battleship/captain.html and gui/cruiser/captain.html.
  *
  * @typedef {{ red_alert: boolean, red_alert_system_id: string,
- *             red_alert_auto: boolean, weapons_hold: boolean,
+ *             red_alert_auto: boolean,
  *             viewscreen_system_id: string,
  *             viewscreen_auto: boolean, view_direction: string,
  *             camera_views: Array, view_mode: string, objectives: Array,
@@ -739,10 +880,6 @@ export function buildCaptainConsoleState(state, systemIds = []) {
       red_alert:             bb.red_alert             ?? false,
       red_alert_system_id:   bb.red_alert_system_id   ?? null,
       red_alert_auto:        bb.red_alert_auto         ?? false,
-      // The tactical restraint lever (issue #1041): guns cold while the ship
-      // stays at stations. Same console and same control source as the alert,
-      // so it rides the captain blackboard beside it.
-      weapons_hold:          bb.weapons_hold           ?? false,
       viewscreen_system_id:  bb.viewscreen_system_id  ?? null,
       viewscreen_auto:       bb.viewscreen_auto        ?? false,
       view_direction:        bb.view_direction         ?? '',
@@ -766,9 +903,6 @@ export function buildCaptainConsoleState(state, systemIds = []) {
     red_alert:             state.redAlert    || false,
     red_alert_system_id:   null,
     red_alert_auto:        false,
-    // No blackboard, no hold: the legacy fallback has no wire source for it,
-    // and "released" is the state a console with nothing to read should show.
-    weapons_hold:          false,
     viewscreen_system_id:  null,
     viewscreen_auto:       false,
     view_direction:        viewDirection,
@@ -790,14 +924,27 @@ export function buildCaptainConsoleState(state, systemIds = []) {
 }
 
 /**
- * Payload contract for the Command console iframe (issue #1107). Rendered by
- * gui/command-console.html.
+ * Payload contract for the Command console iframe (issues #1107, #1381).
+ * Rendered by gui/command-console.html.
  *
+ * One card per directable station: `stations` holds one entry per Command
+ * blackboard this Station owns — exactly one today, since exactly one
+ * Station on a shipped hull ever authors `command_target` — so a hull
+ * authoring more than one Command-family instance renders one card each with
+ * no further change. `red_alert` is the client's own alert flag
+ * (`state.redAlert`, never the Captain blackboard and never a new wire
+ * field), read once here so every card resolves the SAME Default stance.
+ *
+ * @typedef {{ id: string, label: string, kind: string,
+ *             high_alert: boolean }} CommandStanceOption
  * @typedef {{ command_system_id: string, directed_station: string,
  *             directed_station_name: string, directed_station_ai: boolean,
  *             command_auto: boolean, selected_stance: string,
- *             stances: Array<{id: string, label: string, kind: string,
- *                             high_alert: boolean}> }} CommandConsolePayload
+ *             stances: CommandStanceOption[],
+ *             default_stance: CommandStanceOption|null,
+ *             default_selected: boolean }} CommandStationCard
+ * @typedef {{ red_alert: boolean,
+ *             stations: CommandStationCard[] }} CommandConsolePayload
  */
 
 /**
@@ -835,29 +982,84 @@ function blackboardOfKind(state, kind, preferredIds = []) {
 }
 
 /**
- * Command console. Returns JSON of {@link CommandConsolePayload}.
+ * Resolve one exact authored System instance by System kind.
  *
- * Reads the `Command` blackboard variant under the authored instance id. It
- * carries the directed proving Station, whether it is currently AI-controlled
- * (and therefore directable), the selectable stances and the stance in force.
- * The persistent non-colour automation cue the console renders is derived from
- * `directed_station_ai` / `command_auto` — never from a colour change.
+ * Preferred ids preserve Station-authored order. The complete selected-ship
+ * projection follows in lexical order so cross-station capabilities such as
+ * Viewscreen remain available without making the instance id a convention.
+ * The map is optional on the wire; absence intentionally resolves to `null`.
  *
- * @param {{ blackboards?, blackboardKinds? }} state
+ * @param {{systemKinds?: Object<string,string>}} state
+ * @param {string} kind authored `[[system]].kind`
+ * @param {string[]} [preferredIds]
+ * @returns {string|null}
+ */
+function authoredSystemIdOfKind(state, kind, preferredIds = []) {
+  const kinds = state.systemKinds || {};
+  const seen = new Set();
+  for (const id of preferredIds) {
+    seen.add(id);
+    if (kinds[id] === kind) return id;
+  }
+  for (const id of Object.keys(kinds).filter(id => !seen.has(id)).sort()) {
+    if (kinds[id] === kind) return id;
+  }
+  return null;
+}
+
+/**
+ * Command console (issue #1381). Returns JSON of {@link CommandConsolePayload}.
+ *
+ * One card per `Command` blackboard this Station owns, walked through the
+ * SAME `blackboardsOfKind` every other multi-instance builder in this file
+ * uses (see `buildHelmConsoleState`'s `HelmEngine` read) — never a hardcoded
+ * single card, so the singular `command_target` every shipped hull authors
+ * today renders through the general N-card path rather than a special case
+ * of it. Each card carries the directed proving Station, whether it is
+ * currently AI-controlled (and therefore directable), the STANDARD stances
+ * only (issue #1381 criterion 2 — the two alert-neutral fallbacks are folded
+ * into `default_stance` instead of appearing as ordinary buttons) and the
+ * stance in force.
+ *
+ * The synthesized Default row resolves to whichever neutral stance matches
+ * `red_alert` — the client's own alert flag, never the Captain blackboard and
+ * never a new wire field — and `src/ship/command_stance.rs
+ * ::selection_after_alert_change` already keeps the server-side selection
+ * tracking it across an alert change with no command from this console.
+ * `default_selected` marks the row whenever the stance in force is EITHER
+ * neutral kind (not only the one `red_alert` currently picks), so the row
+ * stays visibly current through that reconciliation.
+ *
+ * @param {{ blackboards?, blackboardKinds?, redAlert? }} state
  * @param {string[]} [systemIds] authored Command-family ids for this Station
  */
 export function buildCommandConsoleState(state, systemIds = []) {
-  const entry = blackboardOfKind(state, 'Command', systemIds);
-  const bb = entry?.data || null;
-  return JSON.stringify({
-    command_system_id:      bb?.command_system_id     ?? entry?.systemId ?? systemIds[0] ?? null,
-    directed_station:       bb?.directed_station       ?? '',
-    directed_station_name:  bb?.directed_station_name  ?? '',
-    directed_station_ai:    bb?.directed_station_ai    ?? false,
-    command_auto:           bb?.command_auto           ?? false,
-    selected_stance:        bb?.selected_stance        ?? '',
-    stances:                bb?.stances                ?? [],
+  const redAlert = !!state.redAlert;
+  const neutralKind = redAlert ? 'high_alert_neutral' : 'normal_alert_neutral';
+  const entries = blackboardsOfKind(state, 'Command', systemIds);
+  const stations = entries.map(entry => {
+    const bb = entry.data || {};
+    const allStances = bb.stances ?? [];
+    const defaultStance = allStances.find(st => st.kind === neutralKind) ?? null;
+    const selectedKind = allStances.find(st => st.id === bb.selected_stance)?.kind ?? null;
+    return {
+      command_system_id:     bb.command_system_id     ?? entry.systemId,
+      directed_station:      bb.directed_station       ?? '',
+      directed_station_name: bb.directed_station_name  ?? '',
+      directed_station_ai:   bb.directed_station_ai    ?? false,
+      // Command's own automation cue is per-card (issue #1381): the live
+      // control-source truth for THIS card's system id, the same pattern
+      // `repair_auto` uses (see `buildRepairConsoleState` above) — never the
+      // raw blackboard field, which can lag a control-source change that
+      // landed on a live projection this tick.
+      command_auto:          state.controlSources?.[entry.systemId] === 'Ai',
+      selected_stance:       bb.selected_stance         ?? '',
+      stances:               allStances.filter(st => st.kind === 'standard'),
+      default_stance:        defaultStance,
+      default_selected:      selectedKind === 'normal_alert_neutral' || selectedKind === 'high_alert_neutral',
+    };
   });
+  return JSON.stringify({ red_alert: redAlert, stations });
 }
 
 /**
@@ -926,6 +1128,9 @@ export function withCommandAdvice(consoleName, state, json) {
  *             z: number, yaw: number, impulse_charge_progress: number,
  *             on_screen: boolean, blips: RadarBlip[],
  *             waypoint: {x: number, z: number}|null,
+ *             thrust_system_id: string|null, steering_system_id: string|null,
+ *             lateral_system_id: string|null, impulse_system_id: string|null,
+ *             boost_system_id: string|null, viewscreen_system_id: string|null,
  *             own_hull: StationHullAggregate, boost_enabled: boolean,
  *             boost_battery: number, boost_active: boolean,
  *             helm_auto: boolean, engine_port_thrust: number,
@@ -1022,6 +1227,18 @@ export function buildHelmConsoleState(state, systemIds = []) {
     on_screen:               state.currentView === 'Radar',
     blips,
     waypoint:                state.navigationWaypoint || null,
+    // Exact command owners from the selected hull's authored System kinds.
+    // Instance ids are opaque: no canonical-id or prefix inference belongs on
+    // the client. A legacy server that omits the projection yields null, which
+    // lets older action paths retain their own compatibility fallback.
+    thrust_system_id:        authoredSystemIdOfKind(state, 'helm_thrust', systemIds),
+    steering_system_id:      authoredSystemIdOfKind(state, 'helm_steering', systemIds),
+    lateral_system_id:       authoredSystemIdOfKind(state, 'lateral_thrust', systemIds),
+    impulse_system_id:       authoredSystemIdOfKind(state, 'helm_impulse', systemIds),
+    boost_system_id:         authoredSystemIdOfKind(state, 'helm_boost', systemIds),
+    // Viewscreen is Captain-owned on shipped hulls, so it deliberately falls
+    // through from the preferred Helm ids to the complete selected-ship map.
+    viewscreen_system_id:    authoredSystemIdOfKind(state, 'viewscreen', systemIds),
     own_hull:                aggregateStationHull('helm', state.consoleHull, state.stationSystems),
     boost_enabled:           !!boostEnabled,
     boost_battery:           boostBattery,
@@ -1113,7 +1330,7 @@ export function buildHelmTowLoadView(state) {
  * is when the Dock control shows, `docked` when it becomes Undock, and `refusal`
  * is a `strings.csv` id the console resolves.
  *
- * @param {{ blackboards?, blackboardKinds?, systemConsoleFamilies? }} state
+ * @param {{ blackboards?, blackboardKinds?, systemConsoleFamilies?, systemKinds? }} state
  * @param {string[]} [systemIds] authored Helm-family ids for this Station
  * @returns {object|null}
  */
@@ -1123,7 +1340,14 @@ export function buildHelmDockView(state, systemIds = []) {
     : Object.entries(state.systemConsoleFamilies || {})
       .filter(([, family]) => family === 'helm')
       .map(([id]) => id);
-  const entry = blackboardOfKind(state, 'Dock', owned);
+  const projectedSystemId = authoredSystemIdOfKind(state, 'dock', owned);
+  const hasKindProjection = Object.keys(state.systemKinds || {}).length > 0;
+  const entry = projectedSystemId
+    && Object.prototype.hasOwnProperty.call(state.blackboards || {}, projectedSystemId)
+    ? { systemId: projectedSystemId, data: state.blackboards[projectedSystemId] }
+    // Pre-projection Welcome payloads remain readable through the typed
+    // blackboard discriminator. Once the authored map exists it is decisive.
+    : (!hasKindProjection ? blackboardOfKind(state, 'Dock', owned) : null);
   const systemId = entry?.systemId || null;
   const bb = entry?.data || null;
   if (!bb) return null;
@@ -1276,7 +1500,10 @@ const TIER_SEVERITY = { Operational: 0, Damaged: 1, Disabled: 2, Destroyed: 3 };
  * `system_id` and nothing else; the host decides whether any team can act on it.
  *
  * `prioritised` is a pure echo of the host's resolved pin, so a highlight can
- * only ever show a choice the server actually made.
+ * only ever show a choice the server actually made. `prioritisable` is the
+ * host's current reachability verdict from the same sweep predicate that will
+ * apply a named priority; the client cannot reconstruct station groups from
+ * this deliberately partial hull projection.
  *
  * The `current < max_hp` half of the filter mirrors the host's own candidate
  * guard rather than duplicating a rule for its own sake: a `max_hp = 0` row is
@@ -1289,10 +1516,12 @@ const TIER_SEVERITY = { Operational: 0, Damaged: 1, Disabled: 2, Destroyed: 3 };
  *
  * @param {Array<{system_id,display_name,current,max_hp,tier}>} systemHull
  * @param {Array<{status,system_id,priority_system_id}>} teams normalized slots
+ * @param {string[]} priorityTargets exact currently reachable SystemIds
  */
-export function repairDamagedSystems(systemHull, teams) {
+export function repairDamagedSystems(systemHull, teams, priorityTargets = []) {
   const rows = Array.isArray(systemHull) ? systemHull : [];
   const slots = Array.isArray(teams) ? teams : [];
+  const eligible = new Set(Array.isArray(priorityTargets) ? priorityTargets : []);
   const pinned = new Set(slots.map(s => s && s.priority_system_id).filter(Boolean));
   const onSite = new Set(
     slots.filter(s => s && s.status === 'repairing').map(s => s.system_id).filter(Boolean)
@@ -1313,6 +1542,7 @@ export function repairDamagedSystems(systemHull, teams) {
         damage_pct:   max > 0 ? 1 - current / max : 0,
         prioritised:  pinned.has(h.system_id),
         in_progress:  onSite.has(h.system_id),
+        prioritisable: eligible.has(h.system_id),
       };
     })
     .sort((a, b) =>
@@ -1334,7 +1564,7 @@ export function repairDamagedSystems(systemHull, teams) {
  *             damaged_systems: Array<{system_id: string, display_name: string,
  *               tier: string, current: number, max_hp: number,
  *               damage_pct: number, prioritised: boolean,
- *               in_progress: boolean}>,
+ *               in_progress: boolean, prioritisable: boolean}>,
  *             overall_hull: {current: number, max: number, pct: number,
  *                            destroyed_pct: number},
  *             core_systems: Array, dispatch_targets: Array<{id: string,
@@ -1371,7 +1601,11 @@ export function buildRepairConsoleState(state, systemIds = []) {
       damageable_systems:   damageableSystems,
       // Tap-to-prioritise list (issue #1015) — the visible rows that are
       // actually broken, worst-first.
-      damaged_systems:      repairDamagedSystems(systemHull, teams),
+      damaged_systems:      repairDamagedSystems(
+        systemHull,
+        teams,
+        bb.priority_targets ?? [],
+      ),
       // Authoritative ship-wide hull aggregate from the host — the only
       // whole-ship figures available now that `system_hull` is a projection,
       // and `destroyed_pct` is the share of it that is gone for good (#1014).
@@ -1394,6 +1628,12 @@ export function buildRepairConsoleState(state, systemIds = []) {
         target:      bb.external_dispatch_target ?? null,
         target_name: bb.external_dispatch_target_name ?? null,
         refusal:     bb.external_dispatch_refusal ?? null,
+        // WHICH team is abroad, and how the target it is working is doing
+        // (issue #1386). The team index is authoritative — the console used to
+        // reconstruct it by truncating the idle list, which was only ever right
+        // because nobody could choose which team went.
+        team_idx:    bb.external_dispatch_team_idx ?? null,
+        target_condition: bb.external_dispatch_target_condition ?? null,
       },
     });
   }
@@ -1437,7 +1677,8 @@ export function buildRepairConsoleState(state, systemIds = []) {
  *             battery_charge: number, battery_max: number, draining: boolean,
  *             charging: boolean,
  *             reactor_online: boolean, battery_online: boolean,
- *             own_hull: StationHullAggregate, power_auto: boolean,
+ *             own_hull: StationHullAggregate, system_id: string|null,
+ *             power_auto: boolean,
  *             station_rating: string }} PowerConsolePayload
  */
 
@@ -1484,6 +1725,9 @@ export function buildPowerConsoleState(state, systemIds = []) {
     locked:         bb.locked         || false,
     reactor_online: reactorOnline,
     battery_online: batteryOnline,
+    // The exact authored reactor instance owns allocation commands. Do not
+    // reconstruct it from a family name in the iframe/action map.
+    system_id:      reactorEntry?.systemId ?? null,
     own_hull:       aggregateStationHull('power', state.consoleHull, state.stationSystems),
     power_auto:     systemIds.length > 0
       ? systemIds.every(id => state.controlSources?.[id] === 'Ai')
@@ -1563,6 +1807,13 @@ export function buildShieldsConsoleState(state, systemIds = []) {
  * Payload contract for the Sensors console iframe (issue #827). Rendered by
  * gui/battleship/sensors.html.
  *
+ * Every `target_*` field from `target_name` through `target_shield_fraction`
+ * (issue #1378) is fed by {@link targetFactsFor}, shared with the Weapons
+ * builder's target lock card. `target_alert`, `target_weapons` and
+ * `target_projection` stay OUTSIDE that helper — they are read from this
+ * ship's own `SensorRadar` blackboard, a privacy-scoped reading Weapons never
+ * sees.
+ *
  * @typedef {{ scan_range: number, ship_x: number, ship_z: number,
  *             ship_heading: number, ship_speed: number, complexity: string,
  *             impulse_charge_progress: number, on_screen: boolean,
@@ -1576,6 +1827,7 @@ export function buildShieldsConsoleState(state, systemIds = []) {
  *             target_shield_freq: number|null, target_shields: Array,
  *             target_shield_fraction: number|null,
  *             target_alert: boolean|null,
+ *             target_weapons: 'cold'|'powered'|null,
  *             scan: {capable: boolean, reading: object|null,
  *                    refusal: string|null},
  *             own_hull: StationHullAggregate,
@@ -1633,40 +1885,21 @@ export function buildSensorsConsoleState(state, systemIds = []) {
     }
   );
 
-  let targetBearing = null, targetRange = null;
-  let targetName = null, targetKind = null, targetStance = null, targetFaction = null;
-  let targetClass = null, targetHullPct = null, targetHeading = null, targetSpeed = null;
-  let targetThreat = null, targetShieldFreq = null, targetShields = [];
-  let targetShieldFraction = null;
+  // Target identity/tactical facts (issue #1378): shared with the Weapons
+  // builder's own target lock card through the one helper, so the two never
+  // derive these fields two different ways. `range` is passed for symmetry
+  // with that caller and unused here, same as there.
+  const facts = targetFactsFor(state, state.sensorsTarget, range);
 
+  // Target-relative offset for the trajectory projection below — sensors-only
+  // (targetFactsFor deliberately does not expose it), so this is the one
+  // small piece of the original entity lookup that still happens here.
+  let targetDx = null, targetDz = null;
   if (state.sensorsTarget && entities) {
     const tgt = entities.find(a => a.uuid === state.sensorsTarget);
     if (tgt) {
-      const dx   = entityX(tgt) - (state.shipX || 0);
-      const dz   = entityZ(tgt) - (state.shipZ || 0);
-      targetBearing   = (Math.atan2(dx, -dz) * 180 / Math.PI + 360) % 360;
-      targetRange     = Math.sqrt(dx * dx + dz * dz);
-      targetName      = tgt.name      || state.sensorsTarget;
-      const tags      = (tgt.tags || tgt.entity_tags || []).map(t => String(t).toLowerCase());
-      targetKind      = tags.includes('ship')    ? 'ship'
-                      : tags.includes('station') ? 'station' : 'asteroid';
-      targetStance    = tgt.stance    || 'neutral';
-      targetFaction   = tgt.faction   || null;
-      targetClass     = tgt.shipClass || null;
-      targetHullPct   = tgt.hull_pct  !== undefined ? tgt.hull_pct  : null;
-      targetHeading   = tgt.yaw != null
-        ? (((tgt.yaw * 180 / Math.PI) % 360) + 360) % 360
-        : null;
-      targetSpeed     = tgt.speed     !== undefined ? tgt.speed     : null;
-      targetThreat    = tgt.threat    || (targetStance === 'hostile' ? 'high' : 'low');
-      targetShieldFreq = tgt.shield_freq != null ? tgt.shield_freq : null;
-      targetShields    = tgt.shields     || [];
-      // Single-facing NPC shield fraction (#473). `null` for shieldless
-      // entities (no [shields] block on the TOML); `0..=1` for shielded
-      // NPCs; `0` for broken shields.
-      targetShieldFraction = tgt.shield_fraction !== undefined && tgt.shield_fraction !== null
-        ? tgt.shield_fraction
-        : null;
+      targetDx = entityX(tgt) - (state.shipX || 0);
+      targetDz = entityZ(tgt) - (state.shipZ || 0);
     }
   }
 
@@ -1677,6 +1910,30 @@ export function buildSensorsConsoleState(state, systemIds = []) {
   // absent field (non-ship/incapable/no selection) reads as `null` → no row.
   const sensorRadarBb = blackboardOfKind(state, 'SensorRadar', systemIds)?.data;
   const targetAlert = sensorRadarBb?.selected_target_alert ?? null;
+
+  // Selected-target weapons power (issue #1397). Same authoritative path and
+  // same visibility boundary as the alert above — read ONLY from this ship's
+  // own sensor-radar blackboard, never from the per-entity snapshot, which
+  // carries no power level at all. The host publishes `Some(bool)` only for a
+  // ship whose reactor tracks a weapons group; absent (non-ship contact, a hull
+  // with no weapons bus, or no selection) reads as `null` -> no row. The wire
+  // field is a boolean "is it cold"; the payload carries the reading itself so
+  // the panel renders a value rather than inverting a flag.
+  const targetWeaponsCold = sensorRadarBb?.selected_target_weapons_cold ?? null;
+  const targetWeapons = targetWeaponsCold == null ? null : (targetWeaponsCold ? 'cold' : 'powered');
+
+  // Selected-target trajectory projection (issue #1339). Relative velocity is
+  // authoritative, read the same way as the alert above — only from this
+  // ship's own sensor-radar blackboard, `null` for no selection/non-ship
+  // contact/unresolvable target. `null` velocity renders no projection; the
+  // authored horizon/marker spacing come from the ship's own client config
+  // (data-driven, 60s/10s parse defaults when a hull omits the TOML table).
+  const targetRelativeVelocity = sensorRadarBb?.selected_target_relative_velocity ?? null;
+  const targetProjection = buildTargetProjection(
+    targetDx, targetDz, targetRelativeVelocity, state.shipYaw || 0, range,
+    state.sensorsProjectionHorizonSecs ?? 60.0,
+    state.sensorsProjectionMarkerIntervalSecs ?? 10.0,
+  );
 
   // Shared target markers (tactical target + navigation waypoint)
   const shipX = state.shipX || 0, shipZ = state.shipZ || 0, shipYaw = state.shipYaw || 0;
@@ -1711,21 +1968,26 @@ export function buildSensorsConsoleState(state, systemIds = []) {
     ),
     blips,
     target_uuid:        state.sensorsTarget || null,
-    target_name:        targetName,
-    target_kind:        targetKind,
-    target_stance:      targetStance,
-    target_faction:     targetFaction,
-    target_bearing:     targetBearing,
-    target_range:       targetRange,
-    target_class:       targetClass,
-    target_hull_pct:    targetHullPct,
-    target_heading:     targetHeading,
-    target_speed:       targetSpeed,
-    target_threat:      targetThreat,
-    target_shield_freq: targetShieldFreq,
-    target_shields:     targetShields,
-    target_shield_fraction: targetShieldFraction,
+    target_name:        facts.target_name,
+    target_kind:        facts.target_kind,
+    target_stance:      facts.target_stance,
+    target_faction:     facts.target_faction,
+    target_bearing:     facts.target_bearing,
+    target_range:       facts.target_range,
+    target_class:       facts.target_class,
+    target_hull_pct:    facts.target_hull_pct,
+    target_heading:     facts.target_heading,
+    target_speed:       facts.target_speed,
+    target_threat:      facts.target_threat,
+    target_shield_freq: facts.target_shield_freq,
+    target_shields:     facts.target_shields,
+    target_shield_fraction: facts.target_shield_fraction,
     target_alert:       targetAlert,
+    target_weapons:     targetWeapons,
+    // Selected-target trajectory projection (issue #1339). `null` when
+    // velocity is unknown (no selection, non-ship contact, or unresolvable
+    // target) — the client draws no projection in that case.
+    target_projection:  targetProjection,
     // The last scan reading (issue #1032) — a blackboard of its own, so it is
     // read from its own channel key rather than off the sensors one.
     scan:               scanPayload(state),
@@ -1999,6 +2261,42 @@ export function buildUmbilicalConsoleState(state, systemIds = []) {
 }
 
 /**
+ * Security console family (issue #1346). Reads the raw Security blackboard the
+ * station-owned `security` system publishes under its own system id and returns
+ * JSON of the view the Security panel renders: the authored reach, the team list
+ * (each team's state, assignment, progress and risk), every target that offers
+ * Security work with its separation, whether the SERVER says it is in reach and
+ * the actions it offers, and the `strings.csv` id of the last refusal (which the
+ * console resolves through `t()` — no English crosses the wire).
+ *
+ * A family of its own rather than a corner of the Tactical view, even though the
+ * shipped destroyer's Tactical station owns the system: which station owns
+ * Security is a hull's authoring decision, so a console reaches it through
+ * `familyView(s, 'security')` and never through a station-role key. A hull with
+ * no Security teams publishes no such blackboard, so this returns the empty shape
+ * and the panel renders its own "no teams" state.
+ *
+ * The arrays are passed through whole rather than reshaped: every field on them
+ * is already a machine id or a server-decided number (`in_range` especially — see
+ * gui/security-dispatch.js), and re-deriving any of it here is how a panel comes
+ * to offer a dispatch the server refuses.
+ *
+ * @param {{ blackboards, blackboardKinds? }} state
+ * @param {string[]} [systemIds] authored Security-family ids for this Station
+ */
+export function buildSecurityConsoleState(state, systemIds = []) {
+  const entry = blackboardOfKind(state, 'Security', systemIds);
+  const bb = entry?.data || {};
+  return JSON.stringify({
+    system_id: entry?.systemId ?? systemIds[0] ?? null,
+    range: bb.range ?? 0,
+    teams: Array.isArray(bb.teams) ? bb.teams : [],
+    targets: Array.isArray(bb.targets) ? bb.targets : [],
+    refusal: bb.refusal ?? null,
+  });
+}
+
+/**
  * Console Family presentation registry. Every family owns its flat builder and
  * (where appropriate) a payload field that reports family-wide AI operation.
  * Tactical computes its narrower PhaserBank cue inside its builder instead.
@@ -2026,9 +2324,14 @@ const FAMILY_BUILDERS = Object.freeze({
   shields: Object.freeze({ build: buildShieldsConsoleState, autoField: 'shields_auto', autoScope: 'first' }),
   power: Object.freeze({ build: buildPowerConsoleState, autoField: 'power_auto', autoScope: 'first' }),
   repair: Object.freeze({ build: buildRepairConsoleState, autoField: 'repair_auto', autoScope: 'first' }),
-  command: Object.freeze({ build: buildCommandConsoleState, autoField: 'command_auto' }),
+  // No `autoField` here: the per-card `command_auto` above (keyed by each
+  // card's own `command_system_id`) is already authoritative, so the generic
+  // top-level overlay in `buildFamilyConsoleView` would only ever write a
+  // dead `view.command_auto` key nothing reads (issue #1381 fix round).
+  command: Object.freeze({ build: buildCommandConsoleState }),
   tractor: Object.freeze({ build: buildTractorConsoleState, autoField: 'tractor_auto', autoScope: 'first' }),
   umbilical: Object.freeze({ build: buildUmbilicalConsoleState, autoField: 'umbilical_auto', autoScope: 'first' }),
+  security: Object.freeze({ build: buildSecurityConsoleState, autoField: 'security_auto', autoScope: 'first' }),
 });
 
 /** Build and normalize one registered family view from actual owned ids. */
@@ -2065,7 +2368,7 @@ function projectSystemFamilies(systemIds, state) {
  * family. `systems` holds one per-family view (a *ConsolePayload above)
  * under EACH owning fine-system id — a console selects an actual id through
  * `system_families`, never through a station-role key. Rendered by
- * gui/cruiser/{comms,engineering,science}.html,
+ * gui/cruiser/{comms,engineering,science,tactical}.html,
  * gui/destroyer/{captain,engineering,tactical}.html and
  * gui/courier/{captain,pilot,tactical}.html.
  *
@@ -2279,6 +2582,21 @@ export function withTutorialOverlay(consoleName, state, json) {
   }
 }
 
+/**
+ * Add the crew-public GM takeover projection to every authentic Station
+ * payload. The iframe remains the authored interface; console-core renders one
+ * shared status banner from this metadata without station-specific clones.
+ */
+export function withGmTakeover(consoleName, state, json) {
+  try {
+    const obj = JSON.parse(json);
+    obj.gm_takeover = (state.stationPuppets || {})[consoleName] || null;
+    return JSON.stringify(obj);
+  } catch (_) {
+    return json;
+  }
+}
+
 if (typeof window !== 'undefined') {
   // Station labels for the inline client.html script (lobby chips, console
   // title) — the tab-bar CONSOLE_LABEL map was deleted with the tab bar (#827).
@@ -2288,16 +2606,20 @@ if (typeof window !== 'undefined') {
     // Visiting systems are merged BEFORE the tutorial pass, so a station's
     // authored `state`-kind triggers can reference a sought system's view the
     // same way they reference an owned one.
-    return withTutorialOverlay(
+    return withGmTakeover(
       consoleName,
       state,
-      withStationDamage(
+      withTutorialOverlay(
         consoleName,
         state,
-        withCommandAdvice(
+        withStationDamage(
           consoleName,
           state,
-          withVisitingSystems(consoleName, state, inner),
+          withCommandAdvice(
+            consoleName,
+            state,
+            withVisitingSystems(consoleName, state, inner),
+          ),
         ),
       ),
     );

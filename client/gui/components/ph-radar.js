@@ -263,6 +263,12 @@ export class PhRadar extends PhElement {
       this.#projectedBlips.push({ uuid: b.uuid, bx, by, dotR });
     }
 
+    // Selected-target trajectory projection (issue #1339). Drawn after the
+    // blips so the marker trail isn't hidden under an icon it happens to
+    // pass behind; absent/`null` when the Science Target's velocity is
+    // unknown, so a stationary or non-ship contact draws nothing here.
+    this.#drawProjection(octx, cx, cy, R, px, state.target_projection);
+
     this.#drawLabels(octx, labels, px);
 
     if (this.#offscreen) {
@@ -316,19 +322,30 @@ export class PhRadar extends PhElement {
     const readout = plan.length > 0 ? scaleReadout(range) : '';
     if (!readout) return;
 
-    // Against the outer ring on the forward-starboard diagonal, where the
-    // corner labels are not and where a contact clamped to the rim is least
-    // likely to be — the same reasoning that put the three corner readouts in
-    // corners.
+    // Against the outer ring on the AFT-PORT diagonal — the bottom-left — and
+    // reading outwards from it, where a contact clamped to the rim is least
+    // likely to be. The same reasoning that put the three corner readouts in
+    // corners, with one correction (issue #1375).
+    //
+    // It used to sit on the aft-starboard diagonal, which is the corner ON
+    // SCREEN now occupies. That button is ~90px of near-opaque chrome anchored
+    // 6% in from the bottom-right, so on a 350px scope its inner corner reaches
+    // to radius 128 of 175 — comfortably over the 0.707R point the readout was
+    // painted at, and the scale simply disappeared underneath it.
+    //
+    // Aft-PORT shares its corner with the speed readout instead, and the two
+    // provably clear each other at every scope size: the corner label's top
+    // edge sits at 0.94S − lineHeight and this baseline at 0.8536S, so the gap
+    // is 0.0864S − 10 CSS px, positive for any scope wider than 116px.
     const font = this.#labelFontPx(px);
     const diagonal = Math.SQRT1_2;
     ctx.save();
     ctx.font = font + 'px ' + this.#labelFontFamily();
-    ctx.textAlign = 'right';
+    ctx.textAlign = 'left';
     ctx.textBaseline = 'bottom';
     this.#paintHaloed(
       ctx, readout,
-      cx + R * diagonal - LABEL_GAP_CSS * px,
+      cx - R * diagonal + LABEL_GAP_CSS * px,
       cy + R * diagonal - LABEL_GAP_CSS * px,
       px, 'rgba(var(--rgb-edge-strong), 0.95)',
     );
@@ -429,6 +446,32 @@ export class PhRadar extends PhElement {
       if (m && Number.isFinite(m.width) && m.width > 0) return m.width;
     }
     return String(text).length * font * 0.6;
+  }
+
+  /**
+   * Selected-target trajectory projection markers (issue #1339).
+   *
+   * Small ticks along the Science Target's future relative path, fading with
+   * distance into the future so the near-term markers (where a manoeuvre
+   * decision actually gets made) read strongest. `markers` is `null`/absent
+   * whenever the target's velocity is unknown — no selection, a non-ship
+   * contact, or an unresolvable target — in which case nothing is drawn.
+   */
+  #drawProjection(ctx, cx, cy, R, px, markers) {
+    if (!markers || markers.length === 0) return;
+    const dotR = 2.5 * px;
+    ctx.save();
+    ctx.fillStyle = phColor(this, 'var(--science)');
+    markers.forEach((m, i) => {
+      const bx = cx + (m.radar_x != null ? m.radar_x : 0) * R;
+      const by = cy - (m.radar_y != null ? m.radar_y : 0) * R;
+      // Fades from ~0.85 at the nearest marker to ~0.25 at the furthest.
+      ctx.globalAlpha = Math.max(0.25, 0.85 - (i / markers.length) * 0.6);
+      ctx.beginPath();
+      ctx.arc(bx, by, dotR, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.restore();
   }
 
   #drawRing(ctx, x, y, r, lineWidth, color) {

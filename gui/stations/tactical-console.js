@@ -26,15 +26,18 @@
  * @property {function(object): object} weaponsView
  *   Given the (already shape-normalised) console payload, return the weapons
  *   "view" the radar/phaser/blaster/torpedo panels read from. A flat-family
- *   hull (battleship, cruiser) returns `s` itself; a system-id-keyed hull
- *   (destroyer, courier) returns `familyView(s, 'tactical')`.
+ *   hull (battleship) returns `s` itself; a system-id-keyed hull (cruiser
+ *   since issue #1389, destroyer, courier) returns `familyView(s, 'tactical')`.
  * @property {object} ids                     element ids present in this hull's markup
  * @property {string} ids.radar               the `ph-tactical-radar` id (always present)
  * @property {string} [ids.phasers]           `ph-phasers-controls` id, if the hull mounts phasers
  * @property {string} [ids.blasters]          `ph-blasters-controls` id, if the hull mounts blasters
  * @property {string} [ids.torpedo]           `ph-torpedo-controls` id, if the hull mounts tubes
- * @property {string} [ids.stationDamage]     `ph-station-damage` id
  * @property {string} [ids.autoBadge]         the AUTO badge id
+ * @property {string} [ids.targetCard]        the `ph-target-lock-card` id, if the hull
+ *   mounts one (issue #1378 — currently just the destroyer). A hull that omits it is
+ *   unaffected: the card block below is strictly additive, mirroring every other
+ *   optional panel in this list.
  * @property {boolean} [blastersHideWhenEmpty] hide the blaster panel when there are no banks
  *   (the battleship pattern — a hull with no blaster mount shows nothing;
  *   see issue #925). Off by default: a hull that authored a blaster column
@@ -136,15 +139,15 @@ export function makeTacticalRender(variant) {
       }
     }
 
-    // ── Station-damage bar ───────────────────────────────────────────────
-    // Station-wide, read off the top-level payload (never per-system).
-    if (ids.stationDamage) {
-      const el = doc.getElementById(ids.stationDamage);
-      if (el) el.state = s.own_hull || null;
-    }
-
     // ── Target footer ────────────────────────────────────────────────────
     renderFooter(variant.footer, w, doc);
+
+    // ── Target lock card (issue #1378) ──────────────────────────────────
+    // Beside the footer above, not instead of it: the footer stays the
+    // scope's own compact "locked: X" readout, and this is the richer card
+    // — name, stance, class, bearing, range, hull, shield facings and shield
+    // frequency — that a hull mounts wherever it has room for one.
+    renderTargetCard(ids.targetCard, w, doc);
 
     // ── AUTO badge ───────────────────────────────────────────────────────
     if (ids.autoBadge) {
@@ -182,4 +185,33 @@ function renderFooter(cfg, w, doc) {
   if (cfg.colorize) {
     el.style.color = w.target_uuid ? 'var(--fire-bright)' : 'var(--ink-faint)';
   }
+}
+
+/**
+ * The target lock card (issue #1378): identity + tactical facts about the
+ * Tactical lock, fed by the shared `targetFactsFor` helper on `w`
+ * (`gui/console-state.js::buildWeaponsConsoleState`). Guards every field the
+ * same way the panels above do — a hull that publishes a `target_uuid` with
+ * none of the fact fields set (the combat-keyboard smoke fixture) renders the
+ * card's own no-target-facts defaults rather than throwing.
+ *
+ * @param {string|undefined} id  the `ph-target-lock-card` id, if this hull mounts one
+ * @param {object} w             the weapons view
+ * @param {Document} doc
+ */
+function renderTargetCard(id, w, doc) {
+  if (!id) return;
+  const el = doc.getElementById(id);
+  if (!el) return;
+  el.state = {
+    target_uuid: w.target_uuid || null,
+    target_name: w.target_name || null,
+    target_stance: w.target_stance || null,
+    target_class: w.target_class || null,
+    target_bearing: w.target_bearing != null ? w.target_bearing : null,
+    target_range: w.target_range != null ? w.target_range : null,
+    target_hull_pct: w.target_hull_pct != null ? w.target_hull_pct : null,
+    target_shields: w.target_shields || [],
+    target_shield_freq: w.target_shield_freq != null ? w.target_shield_freq : null,
+  };
 }

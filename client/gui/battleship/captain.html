@@ -9,20 +9,12 @@
     body { margin: 0; background: var(--surface-void); overflow: hidden; }
     .frame { height: 100%; }
     .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
-    .hero { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; align-self: flex-start; }
-    .hero h1 { margin: 0; font-size: var(--text-2xl); letter-spacing: 0.22em; color: var(--ink); }
-    .hero h1 .sub { display: block; font-family: "JetBrains Mono", monospace; font-size: var(--text-sm); color: var(--ink-faint); }
     .console-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
     .controls-row { display: flex; gap: 12px; }
     .controls-row > * { flex: 1; min-width: 0; }
     ph-objective-list { flex: 1; min-height: 0; }
-    .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); padding: 6px 0; }
-    .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
-    .console-footer .spacer { flex: 1; }
     @media (orientation: portrait) {
       .panel-inner { padding: 10px 12px; gap: 8px; }
-      .hero h1 { font-size: var(--text-xl); }
-      .hero h1 .sub { font-size: var(--text-xs); }
       .controls-row { gap: 8px; }
     }
   </style>
@@ -34,31 +26,29 @@
   <div class="frame" data-screen-label="Captain Console" data-i18n-attr="data-screen-label:console.captain.screen_label">
     <div class="panel"></div>
     <div class="panel-inner">
-      <div class="hero">
-        <h1><span data-i18n="console.captain.title">CAPTAIN</span><span class="sub" data-i18n="console.battleship_captain.subtitle">COMMAND &amp; BATTLESPACE</span></h1>
-        <span class="auto-badge" id="captain-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
-      </div>
+      <!-- No title row and no footer (issue #1374): the shell's Station Bar
+           names this seat, and its selected tab opens the per-system damage
+           popup the footer's `ph-station-damage` used to. What the footer said
+           that the bar cannot — the battlespace contact count — is this
+           readout, at the head of the command group it describes. -->
       <div class="console-body">
+        <div class="readout">
+          <span id="footer-target" data-i18n="console.common.no_target">NO TARGET</span>
+          <span class="spacer"></span>
+          <span class="auto-badge" id="captain-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
+        </div>
         <div class="controls-row">
           <ph-camera-select id="camera-select"></ph-camera-select>
           <ph-red-alert id="red-alert"></ph-red-alert>
         </div>
         <ph-objective-list id="objective-list"></ph-objective-list>
       </div>
-      <footer class="console-footer footer-bar">
-        <span class="dot"></span>
-        <span data-i18n="console.captain.station_footer">CAPTAIN STATION</span>
-        <span class="spacer"></span>
-        <span id="footer-target" data-i18n="console.common.no_target">NO TARGET</span>
-        <ph-station-damage id="station-damage"></ph-station-damage>
-      </footer>
     </div>
   </div>
   <script type="module">
     import '../components/ph-camera-select.js';
     import '../components/ph-red-alert.js';
     import '../components/ph-objective-list.js';
-    import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
     // The render lives in gui/battleship/captain.console.js (issue #1235):
     // one shared Captain renderer, this hull's variant. The battleship's

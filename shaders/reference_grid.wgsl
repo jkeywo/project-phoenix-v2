@@ -102,8 +102,10 @@ fn lattice_coverage(
 // the endpoints are pow-invariant, so no exponent lights a bright far rim.
 fn radial_fade(world_distance: f32, fade_start: f32, fade_span: f32, fade_exponent: f32) -> f32 {
     let t = clamp((world_distance - fade_start) / fade_span, 0.0, 1.0);
-    let smooth = 1.0 - t * t * (3.0 - 2.0 * t);
-    return pow(smooth, fade_exponent);
+    // `smooth` is a reserved WGSL keyword (an interpolation qualifier), so the
+    // 1 - smoothstep(t) value is named `fade` — naga rejects the identifier.
+    let fade = 1.0 - t * t * (3.0 - 2.0 * t);
+    return pow(fade, fade_exponent);
 }
 
 @fragment

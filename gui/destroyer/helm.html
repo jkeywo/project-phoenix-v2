@@ -10,20 +10,29 @@
     body { font-size: var(--text-lg); margin: 0; background: var(--surface-void); overflow: hidden; }
     .frame { height: 100%; position: relative; }
     .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
-    .hero { display: flex; align-items: baseline; justify-content: space-between; flex-shrink: 0; gap: 12px; padding: 4px 0; align-self: flex-start; }
-    .hero h1 { font-size: var(--text-2xl); letter-spacing: 0.22em; color: var(--ink); margin: 0; }
-    .hero h1 .sub { font-family: "JetBrains Mono", monospace; font-size: var(--text-sm); letter-spacing: 0.22em; color: var(--ink-faint); margin-top: 2px; font-weight: 400; }
-    .console-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 280px) 1fr minmax(0, 280px); gap: 16px; }
-    .console-body .radar-col { display: flex; flex-direction: column; min-height: 0; }
+    /* The two rails this scope sits between (issue #1375). 200px is what
+       ph-lateral-thrust-joystick's 180px pad wants; 240px is ph-helm-joystick's
+       dial at full size. Everything else about the scope's size — square, side
+       = min(free width, free height) — is gui/console.css's one `.scope-cell`
+       rule, which is why this document no longer carries an aspect-ratio of its
+       own or a landscape variant of one.
+
+       `--scope-rail-min` is where those rails STOP shrinking, and this is the
+       only console that needs one: no other hull puts a scope between two
+       control rails, and 200 + 240 + two gutters is more than a 650x450 window
+       has to give. Both rails yield alongside the square rather than the
+       square alone taking the shortfall, and 160px is the floor — below it
+       ph-helm-joystick's dial (inset rings at 52px, a 56px nub) stops being a
+       dial. Both widgets size themselves to the rail, so a shrunk rail is a
+       smaller control, never a control drawn over the scope. */
+    .console-body { --scope-rail-start: 200px; --scope-rail-end: 240px; --scope-rail-min: 160px; }
     .console-body .ctrl-col { display: flex; flex-direction: column; justify-content: space-evenly; gap: 12px; min-height: 0; background: rgba(var(--rgb-panel), 0.6); border: 1px solid var(--edge); padding: 12px; }
-    ph-helm-radar { flex: 1; min-height: 0; }
-    .btn-row { display: flex; gap: 8px; }
-    .btn-row > * { flex: 1; }
-    .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); flex-shrink: 0; padding: 6px 0; }
-    .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
-    .console-footer .sep { color: var(--line-soft); }
-    .console-footer .spacer { flex: 1; }
-    .hero-controls { display: flex; align-items: center; gap: 8px; }
+    /* Wraps because this rail shrinks (issue #1375). IMPULSE and BOOST side by
+       side want ~216px of type; the rail's floor is 160px, so on a small
+       landscape screen they go one above the other instead of running out
+       past the rail and over the scope. */
+    .btn-row { display: flex; flex-wrap: wrap; gap: 8px; }
+    .btn-row > * { flex: 1 1 6rem; }
     /* Contextual dock control (issue #1159): shown only while a berth is in
        range or a dock is held, so a hull with no dock system is unchanged. */
     .dock-panel { flex-shrink: 0; border-top: 1px solid var(--edge); padding-top: 8px; margin-top: 4px; }
@@ -40,67 +49,51 @@
     .tow-load-label { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); letter-spacing: 0.14em; color: var(--reloading); }
     .tow-load-target { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }
 
-    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: var(--text-xl); } .hero h1 .sub { font-size: var(--text-xs); } .console-body { grid-template-columns: 1fr; gap: 8px; } .console-body .ctrl-col { padding: 8px; } .console-body .radar-col { order: -2; } .console-body .joystick-col { order: -1; } }
-    /* Landscape is height-starved, so the hero stops being an in-flow row and
-       becomes a bar floating over the top of the chart: `.console-body` then
-       gets the panel's whole content height and the radar grows into it. The
-       offsets mirror the landscape `body .panel-inner` padding console.css
-       forces (16px top / 20px right / 44px left) so the bar starts exactly at
-       the content box — the 44px is the settings cog's gutter, which the bar
-       must never cover. `pointer-events: none` keeps the radar draggable
-       underneath. Portrait keeps the hero in flow.
-
-       Only the chart runs under the bar; the control columns are pushed clear
-       of it — and still end up taller than they were with the hero in flow.
-
-       The track caps shrink here too. A `1fr` middle track was starved because
-       both 280px side tracks are maximised before the middle sees anything —
-       at 650x450 that left the radar 0px wide. `minmax(0, 1fr)` lets the
-       middle shrink-and-grow properly, and the caps are cut to what the
-       widgets actually need: 240px for ph-helm-joystick's fixed 240px disc,
-       200px for ph-lateral-thrust-joystick's 180px pad. */
-    @media (orientation: landscape) {
-      /* The floating bar's height: its own floor, and what the control
-         columns clear so that only the chart runs underneath it. */
-      :root { --hero-bar: 34px; }
-      .hero {
-        position: absolute; z-index: 3; pointer-events: none;
-        top: 16px; left: 44px; right: 20px;
-        min-height: var(--hero-bar); align-items: center; padding: 2px 10px;
-        background: rgba(var(--rgb-base), 0.92); border: 1px solid var(--line-faint);
-      }
-      .hero h1 { font-size: var(--text-xl); line-height: 26px; }
-      .hero h1 .sub { display: inline; margin-top: 0; margin-left: 14px; }
-      /* The bar is `pointer-events: none` so the chart stays draggable
-         underneath it. Its CONTROLS are not — the AUTO badge still needs taps
-         to reach it. Compacted to fit the 34px bar. */
-      .hero-controls { pointer-events: auto; }
-      .console-body { grid-template-columns: minmax(0, 200px) minmax(0, 1fr) minmax(0, 240px); }
-      /* 8px rather than the 12px of the base rule: ph-helm-joystick's disc is
-         a fixed 240px and the column has to fit it inside a phone's landscape
-         height, where every pixel of chrome counts. */
-      .console-body .ctrl-col { margin-top: calc(var(--hero-bar) + 6px); padding: 8px; }
-      .console-body .radar-col { align-items: center; }
-      /* `isolation` matters: ph-helm-radar's readouts are `z-index: 10` inside
-         its shadow root, and the host is only `position: relative` — with no
-         stacking context of its own they escape into the root one and paint
-         straight through the bar that is supposed to be above them. */
-      ph-helm-radar { flex: none; width: auto; height: 100%; aspect-ratio: 1 / 1; max-width: 100%; max-height: 100%; isolation: isolate; }
+    /* Portrait (issue #1376, John's 2026-09-06 decision): nothing scrolls.
+       Stacking three full-width blocks — the scope, then this rail's own
+       240px dial, 180px pad and two buttons — stood 1035px tall on an 812px
+       phone with only the `overflow-y: auto` below to reach BOOST, which is
+       exactly what the old `order: -2`/`order: -1` stack did. Instead the
+       full-width square scope sits on top and the two rails share ONE ROW
+       beneath it, each shrinking to its half of the width — the joystick's
+       well is fluid down to that width (see ph-helm-joystick.js's `.well`),
+       and the lateral pad the same way. `.helm-scope-row` (gui/console.css)
+       is the shared rule this document opts into rather than spelling out a
+       grid track list of its own — the plain `.scope-row` stack every other
+       console keeps still applies where this class is absent.
+       `--scope-rail-start/-end/-min` are the landscape rail's own properties;
+       they are simply inert in portrait, same as before. `overflow-y: auto`
+       stays as the safety net #1375 established — proved by screenshot
+       (issue #1376 commit) never to trigger at 375x812 or 390x844, it is
+       what a console whose stack outgrows some future viewport falls back on
+       instead of clipping. */
+    @media (orientation: portrait) {
+      .panel-inner { padding: 10px 12px; gap: 8px; }
+      .console-body { overflow-y: auto; }
+      .console-body .ctrl-col { padding: 8px; }
     }
+    /* 8px rather than the 12px of the base rule: ph-helm-joystick's disc is a
+       fixed 240px and the column has to fit it inside a phone's landscape
+       height, where every pixel of chrome counts. */
+    @media (orientation: landscape) { .console-body .ctrl-col { padding: 8px; } }
   </style>
 </head>
 <body>
   <div class="frame" data-screen-label="Helm Console" data-i18n-attr="data-screen-label:console.helm.screen_label">
     <div class="panel"></div>
     <div class="panel-inner">
-      <div class="hero">
-        <h1><span data-i18n="console.helm.title">HELM</span><span class="sub" data-i18n="console.destroyer_helm.subtitle">PILOTING</span></h1>
-        <div class="hero-controls">
-          <span class="auto-badge" id="helm-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
-        </div>
-      </div>
-      <div class="console-body">
+      <!-- No title row and no footer (issue #1374): the shell's Station Bar
+           names this seat and its selected tab opens the per-system damage
+           popup the footer's `ph-station-damage` used to. The locked target
+           the footer named heads the movement column the AUTO badge belongs
+           to. -->
+      <div class="console-body scope-row helm-scope-row">
         <div class="ctrl-col movement-col">
+          <div class="readout">
+            <span id="footer-target" data-i18n="console.common.no_target">NO TARGET</span>
+            <span class="spacer"></span>
+            <span class="auto-badge" id="helm-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
+          </div>
           <ph-lateral-thrust-joystick id="lateral-thrust-joystick"></ph-lateral-thrust-joystick>
           <div class="btn-row">
             <ph-impulse-btn id="impulse-btn"></ph-impulse-btn>
@@ -127,22 +120,13 @@
             <span id="tow-load-target" class="tow-load-target"></span>
           </div>
         </div>
-        <div class="radar-col">
+        <div class="radar-col scope-cell">
           <ph-helm-radar id="helm-radar"></ph-helm-radar>
         </div>
         <div class="ctrl-col joystick-col">
           <ph-helm-joystick id="helm-joystick"></ph-helm-joystick>
         </div>
       </div>
-      <footer class="console-footer footer-bar">
-        <span class="dot"></span>
-        <span id="footer-status" data-i18n="console.helm.station_footer">HELM STATION</span>
-        <span class="sep">·</span>
-        <span id="footer-target" style="color:var(--ink-faint)" data-i18n="console.common.no_target">NO TARGET</span>
-        <span class="spacer"></span>
-        <ph-station-damage id="station-damage"></ph-station-damage>
-        <span id="footer-right" style="color:var(--ink-faint)">—</span>
-      </footer>
     </div>
   </div>
   <script type="module">
@@ -151,8 +135,8 @@
     import '../components/ph-lateral-thrust-joystick.js';
     import '../components/ph-impulse-btn.js';
     import '../components/ph-boost-btn.js';
-    import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
+    import { HELM_ACTION_CONTEXT, HELM_DOCK_ACTION_ID } from '../stations/helm-actions.js';
     // The render lives in gui/destroyer/helm.console.js (issue #1235): the
     // shared Helm renderer + this hull's variant (lateral joystick, static
     // footer, plus a bespoke Dock/under-tow-load tail). s is a
@@ -164,12 +148,12 @@
 
     // The one dock button toggles dock/undock through the action map, which
     // sends the same admitted command a dock AI would (issues #1159, #1251).
-    // "Which one" and the authored Dock SystemId are read off button state
-    // renderStation refreshes on every push, so neither can go stale.
+    // The semantic adapter reads the current authoritative dock view, so the
+    // contextual ship variant cannot dispatch a stale system id or verb.
     document.getElementById('dock-btn').addEventListener('click', function() {
-      var button = document.getElementById('dock-btn');
-      var docked = button.classList.contains('docked');
-      consoleHandle.sendAction(docked ? 'undock' : 'dock', { target: button.dataset.systemId });
+      consoleHandle.activateSemanticAction(HELM_DOCK_ACTION_ID, {
+        context: HELM_ACTION_CONTEXT, source: 'control',
+      });
     });
   </script>
 </body>

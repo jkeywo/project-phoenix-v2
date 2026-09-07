@@ -244,7 +244,9 @@ fn runtime_materialization_restores_the_live_tick_and_next_mint_sequence() {
 fn both_schedules_register_the_same_materialization_members_once() {
     use bevy::ecs::schedule::{graph::Direction, NodeId, ScheduleLabel, SystemSet};
     use project_phoenix::world::materialization::WorldMaterialization;
-    let app = loaded_lobby_host();
+    // Inspect registration before either schedule runs: Bevy moves initialized
+    // systems from the graph into its executable schedule on first use.
+    let app = build_native_host_app(&lobby_config(), &preload()).unwrap();
     let members = |label: bevy::ecs::schedule::InternedScheduleLabel| {
         let graph = app.get_schedule(label).unwrap().graph();
         let set = graph

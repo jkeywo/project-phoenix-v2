@@ -151,7 +151,11 @@ impl NativeFrameCapture {
         };
         let file = std::fs::File::create(&self.path).map_err(|e| e.to_string())?;
         let mut writer = std::io::BufWriter::new(file);
-        serde_json::to_writer(&mut writer, &artifact).map_err(|e| e.to_string())?;
+        let json = crate::core::codec::encode_presentation_capture(&artifact)
+            .map_err(|e| e.to_string())?;
+        writer
+            .write_all(json.as_bytes())
+            .map_err(|e| e.to_string())?;
         writer.flush().map_err(|e| e.to_string())
     }
 }
@@ -306,6 +310,11 @@ mod tests {
 
     #[test]
     fn artifact_completion_requires_the_whole_interval_and_a_successful_runner_exit() {
+        #[derive(serde::Deserialize)]
+        struct Probe {
+            complete: bool,
+            capture: Capture,
+        }
         for (elapsed, exit, complete) in [
             (500, AppExit::Success, false),
             (1000, AppExit::error(), false),
@@ -326,13 +335,14 @@ mod tests {
                 duration: Duration::from_secs(1),
             };
             capture.finish(&exit).unwrap();
-            let artifact: serde_json::Value =
-                serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            let artifact: Probe =
+                crate::core::codec::decode_presentation_capture(&std::fs::read(&path).unwrap())
+                    .unwrap();
             std::fs::remove_file(path).unwrap();
-            assert_eq!(artifact["complete"], complete);
+            assert_eq!(artifact.complete, complete);
             assert_eq!(
-                artifact["capture"]["series"]["native.fixed_ticks"]["samples"],
-                serde_json::json!([2.0])
+                artifact.capture.series["native.fixed_ticks"].samples,
+                vec![2.0]
             );
         }
     }

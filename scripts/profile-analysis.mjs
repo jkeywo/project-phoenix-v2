@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { analyzeSurfaceCapture } from './profile-surfaces.mjs';
 
 export function summarizeSamples(samples) {
   if (!Array.isArray(samples) || samples.some(n => !Number.isFinite(n) || n < 0)) {
@@ -180,7 +181,55 @@ export function readJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
 }
 
-export function analyzeNativeRun(directory) {
+export function surfacesForNativeRun(artifact, frameCapture, manifest) {
+  if (!artifact || !Number.isSafeInteger(artifact.started_unix_ms)
+      || artifact.started_unix_ms !== frameCapture.startedUnixMs) {
+    return { comparable: false, problems: ['surface capture missing or capture origins differ'] };
+  }
+  try {
+    const report = analyzeSurfaceCapture(artifact, manifest);
+    if (!report.main.frames) report.problems.push('no main-frame surface observations in the window');
+    if (manifest.condition !== 'renderer' && !report.worker.iterations)
+      report.problems.push('no pane-worker iterations in the window');
+    if (manifest.condition !== 'renderer' && !artifact.omitted_events)
+      report.problems.push(...hudWorkloadProblems(artifact.events, manifest));
+    report.comparable = report.problems.length === 0;
+    return report;
+  } catch (error) {
+    return { comparable: false, problems: ['invalid surface capture: ' + error.message] };
+  }
+}
+
+function hudWorkloadProblems(events, { warmupSeconds, measureSeconds }) {
+  const start = warmupSeconds * 1e9, end = (warmupSeconds + measureSeconds) * 1e9;
+  const hud = events.filter(event => event.surface?.kind === 'hud').sort((a, b) => a.at_ns - b.at_ns);
+  const sameView = (a, b) => a.surface.id === b.surface.id && a.surface.epoch === b.surface.epoch;
+  // A successful state push followed by production and upload proves that the
+  // expected chrome reached the renderer before measuring. P2 may then leave
+  // a static HUD untouched; zero later pushes/uploads is a valid improvement.
+  const ready = hud.filter(event => event.event === 'uploaded' && event.at_ns < start
+    && event.pixels > 0 && event.surface.visible).findLast(upload => {
+    const produced = hud.find(event => event.event === 'produced' && event.frame === upload.frame);
+    return produced && produced.hud_revision !== null && hud.some(event => event.event === 'push'
+      && sameView(event, upload) && event.at_ns <= produced.at_ns && event.applied > 0
+      && event.revision === produced.hud_revision);
+  });
+  if (!ready) return ['visible HUD state did not reach the renderer before warm-up'];
+  const later = hud.filter(event => event.at_ns >= ready.at_ns && event.at_ns < end);
+  if (later.some(event => !sameView(event, ready) || !event.surface.visible
+      || (event.event === 'lifecycle' && ['closed', 'resized'].includes(event.action))
+      || (event.event === 'push' && event.failed > 0)
+      || (event.event === 'copy' && event.outcome === 'failed')))
+    return ['HUD changed lifetime, visibility or health during observation'];
+  const measured = later.filter(event => event.at_ns >= start && event.event === 'push'
+    && event.channel === 'bridge_pump');
+  if (!measured.length || measured[0].at_ns > start + 3e9 || measured.at(-1).at_ns < end - 3e9
+      || measured.some((event, i) => i > 0 && event.at_ns - measured[i - 1].at_ns > 3e9))
+    return ['HUD liveness was not observed throughout the window'];
+  return [];
+}
+
+export function analyzeNativeRun(directory, { surfaceAttribution = true } = {}) {
   const manifest = readJson(path.join(directory, 'manifest.json'));
   const readOptional = (file, fallback) => fs.existsSync(path.join(directory, file))
     ? readJson(path.join(directory, file)) : fallback;
@@ -201,8 +250,12 @@ export function analyzeNativeRun(directory) {
   const stderr = fs.readFileSync(path.join(directory, 'stderr.log'), 'utf8');
   const workload = frameCapture.workload || [];
   const validation = validateRun({ manifest, processSamples, diagnostics, frames, workload, stderr });
+  const surfaces = surfaceAttribution
+    ? surfacesForNativeRun(readOptional('frames.surfaces.json', null), frameCapture, manifest) : null;
+  if (surfaces) validation.reasons.push(...surfaces.problems.map(problem => 'Surface attribution: ' + problem));
+  validation.comparable = validation.reasons.length === 0;
   return {
-    manifest, validation, frame: summarizeSamples(frames),
+    manifest, validation, surfaces, frame: summarizeSamples(frames),
     fixedTicksPerFrame: summarizeSamples(records.filter(r => r.elapsedSeconds - r.frameMs / 1000 >= manifest.warmupSeconds
       && r.elapsedSeconds <= manifest.warmupSeconds + manifest.measureSeconds).map(r => r.fixedTicks)),
     caveat: 'App frame cadence, not GPU time. Pane iteration and main-frame work have different denominators.',

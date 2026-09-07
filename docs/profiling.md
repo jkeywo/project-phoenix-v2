@@ -33,7 +33,9 @@ The matrix rotates Combat Test/Falling Skyway and renderer-only/HUD-lobby/one/tw
 
 `summary.json` retains diagnostic results and refuses comparative status for missing provenance, changed inputs, incomplete capture, runtime/content errors, observed compilation, excess background CPU, or a Station not visibly ready/AFK/Backfill before observation and live through its end. The default background allowance is one CPU core; an individual runner can set `-MaxBackgroundCpuCores` explicitly. Process polling is sampled evidence, so short activity between polls can be missed. Keep raw logs and process evidence with conclusions.
 
-Pane-thread iterations, main-frame upload work and global SDK update/render work have different denominators. The ordinary frame-stats log is retained, but rounded log windows do not establish exact event totals or run p99. The #1405 surface collector supplies that additional evidence; until present, mark event volume/age unavailable rather than deriving false precision. Likewise, native App cadence says nothing about GPU duration or frame presentation on every monitor.
+`frames.surfaces.json` records bounded raw surface events from the same monotonic origin as `frames.json`. The native summary reduces the same observation interval and refuses missing, truncated, failed or misaligned surface captures. It retains immutable pane/epoch/geometry/visibility identities, copy reasons, uploads, drops and queue ages. The separate named renderer example installs only the frame collector and records no pane attribution.
+
+Pane-thread iterations, main-frame upload work and global SDK update/render work have different denominators. The ordinary frame-stats log is retained, but rounded log windows do not establish exact event totals or run p99. Frame queue age is not input-to-paint latency; no input latency is inferred from it. Likewise, native App cadence says nothing about GPU duration or frame presentation on every monitor. See [surface attribution](acceptance/1405-surface-attribution.md) for the event schema and boundary accounting.
 
 ## Headless matrix
 

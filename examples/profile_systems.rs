@@ -25,6 +25,35 @@ fn main() {
         time::{Duration, Instant},
     };
 
+    #[derive(serde::Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Update {
+        update: u64,
+        tick: u64,
+        duration_ms: f64,
+    }
+    #[derive(serde::Serialize)]
+    struct Continuation {
+        tick: u64,
+        digest: String,
+    }
+    #[derive(serde::Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Artifact<'a> {
+        runtime: &'a str,
+        mode: &'a str,
+        world: &'a str,
+        trace_truncated: bool,
+        systems: Vec<&'a timing::Row>,
+        updates: Vec<Update>,
+        continuation: Option<Continuation>,
+        window_seconds: Option<[f64; 2]>,
+        native_update_tag: &'static str,
+        render_diagnostics: &'a gpu::Capture,
+        gpu_interpretation: &'static str,
+        interpretation: &'static str,
+    }
+
     let args: Vec<_> = std::env::args().skip(1).collect();
     assert!(
         args.len() >= 4,
@@ -151,7 +180,14 @@ fn main() {
             app.update();
             let duration_ms = start.elapsed().as_secs_f64() * 1000.0;
             if update >= 300 {
-                updates.push(serde_json::json!({ "update": update, "tick": app.world().resource::<project_phoenix::sim_tick::SimTick>().0, "durationMs": duration_ms }));
+                updates.push(Update {
+                    update,
+                    tick: app
+                        .world()
+                        .resource::<project_phoenix::sim_tick::SimTick>()
+                        .0,
+                    duration_ms,
+                });
             }
             if app
                 .world()
@@ -162,10 +198,16 @@ fn main() {
                 break;
             }
         }
-        continuation = Some(
-            serde_json::json!({ "tick": app.world().resource::<project_phoenix::sim_tick::SimTick>().0,
-            "digest": format!("{:016x}", project_phoenix::sim_digest::world_digest(app.world())) }),
-        );
+        continuation = Some(Continuation {
+            tick: app
+                .world()
+                .resource::<project_phoenix::sim_tick::SimTick>()
+                .0,
+            digest: format!(
+                "{:016x}",
+                project_phoenix::sim_digest::world_digest(app.world())
+            ),
+        });
         std::fs::write(
             output.join("report.json"),
             headless::build_report(&mut app, &config, 0.0).to_json(),
@@ -175,15 +217,17 @@ fn main() {
     control.active.store(false, Ordering::Relaxed);
     let rows = rows.lock().unwrap();
     let rows: Vec<_> = rows.iter().map(|row| row.as_ref()).collect();
-    let artifact = serde_json::json!({ "runtime": args[0], "mode": args[1], "world": args[2],
-        "traceTruncated": control.truncated.load(Ordering::Relaxed), "systems": rows, "updates": updates, "continuation": continuation,
-        "windowSeconds": control.window.map(|(start, end)| [start.as_secs_f64(), end.as_secs_f64()]),
-        "nativeUpdateTag": "Main counter observed at span start, not a causal render-frame ID; unordered First systems can see the previous value. Native windows use the exact frames.json monotonic origin.",
-        "renderDiagnostics": &*gpu.lock().unwrap(),
-        "gpuInterpretation": "elapsed_gpu paths contain supported GPU timestamp milliseconds. Their absence means no GPU result. Other paths are CPU milliseconds or pipeline counts. Nested render-pass paths overlap; samples are delivered asynchronously, not aligned to every main frame.",
-        "interpretation": "Overlapping system wall spans, not exclusive CPU or GPU durations. ExtractSchedule deferred work is nested inside ExtractCommands and must be counted once." });
+    let gpu_capture = gpu.lock().unwrap();
+    let artifact = Artifact { runtime: &args[0], mode: &args[1], world: &args[2],
+        trace_truncated: control.truncated.load(Ordering::Relaxed), systems: rows, updates, continuation,
+        window_seconds: control.window.map(|(start, end)| [start.as_secs_f64(), end.as_secs_f64()]),
+        native_update_tag: "Main counter observed at span start, not a causal render-frame ID; unordered First systems can see the previous value. Native windows use the exact frames.json monotonic origin.",
+        render_diagnostics: &gpu_capture,
+        gpu_interpretation: "elapsed_gpu paths contain supported GPU timestamp milliseconds. Their absence means no GPU result. Other paths are CPU milliseconds or pipeline counts. Nested render-pass paths overlap; samples are delivered asynchronously, not aligned to every main frame.",
+        interpretation: "Overlapping system wall spans, not exclusive CPU or GPU durations. ExtractSchedule deferred work is nested inside ExtractCommands and must be counted once." };
     let file = std::fs::File::create(output.join("systems.json")).unwrap();
     let mut writer = std::io::BufWriter::new(file);
-    serde_json::to_writer(&mut writer, &artifact).unwrap();
+    let json = project_phoenix::core::codec::encode_presentation_capture(&artifact).unwrap();
+    std::io::Write::write_all(&mut writer, json.as_bytes()).unwrap();
     std::io::Write::flush(&mut writer).unwrap();
 }

@@ -136,15 +136,30 @@ fn main() {
         .as_deref()
         .filter(|path| *path != "-")
     {
-        let continuation = serde_json::json!({
-            "tick": app.world().resource::<project_phoenix::sim_tick::SimTick>().0,
-            "digest": format!("{:016x}", project_phoenix::sim_digest::world_digest(app.world())),
-        });
-        if let Err(error) = std::fs::write(
-            format!("{path}.continuation.json"),
-            continuation.to_string(),
-        ) {
-            eprintln!("phoenix-headless: could not write capture continuation: {error}");
+        #[derive(serde::Serialize)]
+        struct Continuation {
+            tick: u64,
+            digest: String,
+        }
+        let continuation = Continuation {
+            tick: app
+                .world()
+                .resource::<project_phoenix::sim_tick::SimTick>()
+                .0,
+            digest: format!(
+                "{:016x}",
+                project_phoenix::sim_digest::world_digest(app.world())
+            ),
+        };
+        let json = project_phoenix::core::codec::encode_presentation_capture(&continuation)
+            .expect("capture continuation contains only a tick and digest");
+        if let Err(error) = std::fs::write(format!("{path}.continuation.json"), json) {
+            project_phoenix::perror!(
+                app.world()
+                    .get_resource::<project_phoenix::logging::LogFilterConfig>(),
+                project_phoenix::logging::LogCat::Config,
+                "phoenix-headless: could not write capture continuation: {error}"
+            );
             std::process::exit(1);
         }
     }

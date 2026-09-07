@@ -58,7 +58,9 @@ export function analyzeSystemsRun(directory) {
   if (/failed to load (?:asset|shader)|path not found|asset.*does not exist|panic(?:ked)? at/i.test(stderr)) reasons.push('Content or runtime error');
   let native;
   if (manifest.runtime === 'native') {
-    native = analyzeNativeRun(directory);
+    // The separate renderer attribution example carries no Ultralight surfaces
+    // and installs only the frame collector, identically in both control modes.
+    native = analyzeNativeRun(directory, { surfaceAttribution: false });
     reasons.push(...native.validation.reasons);
   } else if (!artifact.updates.length || !/^[0-9a-f]{16}$/i.test(artifact.continuation?.digest || '')) reasons.push('Headless continuation or raw updates missing');
   return { manifest, validation: { comparable: reasons.length === 0, reasons: [...new Set(reasons)], backgroundCpuCores: background },

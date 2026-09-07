@@ -351,6 +351,13 @@ pub fn encode_presentation_capture<T: serde::Serialize>(
     serde_json::to_string(capture)
 }
 
+#[cfg(test)]
+pub(crate) fn decode_presentation_capture<T: serde::de::DeserializeOwned>(
+    capture: &[u8],
+) -> Result<T, serde_json::Error> {
+    serde_json::from_slice(capture)
+}
+
 fn stamp_json(stamp: &crate::delivery::stamp::DeliveryStamp) -> serde_json::Value {
     serde_json::json!({
         "protocol": stamp.protocol,

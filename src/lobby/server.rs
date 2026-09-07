@@ -10,11 +10,11 @@ mod result_application;
 pub use crate::lobby::handler::Target;
 use crate::lobby::session::SessionManager;
 use crate::lobby::stations_config::{stations_from_ship_config, ShipStations};
+#[cfg(test)]
 use crate::ship::rating;
-use crate::ship_plugin::{
-    load_ship_config_from_disk, ActiveStationRatings, PendingShipConfig, ShipConfigComponent,
-    ShipSystemControlSources,
-};
+use crate::ship_plugin::{load_ship_config_from_disk, PendingShipConfig, ShipConfigComponent};
+#[cfg(test)]
+use crate::ship_plugin::{ActiveStationRatings, ShipSystemControlSources};
 pub use result_application::LobbyResultApplier;
 
 /// Server-authoritative pre-game countdown. When `remaining_secs > 0.0` the

@@ -880,22 +880,6 @@ fn a_runtime_load_clears_the_ready_flags_the_world_less_lobby_collected() {
 
 /// A world-less host that has loaded its world — the state both schedules have
 /// been initialized in, which `Schedule::systems` requires.
-fn loaded_lobby_host() -> App {
-    let preload = preload();
-    let mut cfg = lobby_config();
-    cfg.solo = true;
-    let mut app = build_native_host_app(&cfg, &preload).expect("a world-less host assembles");
-    pump(&mut app, 4);
-    let (scenario_id, hull) = pick();
-    select(&mut app, "phone-1", &scenario_id, &hull);
-    pump(&mut app, 60);
-    assert!(
-        app.world().get_resource::<WorldConfig>().is_some(),
-        "the runtime load ran"
-    );
-    app
-}
-
 /// A catalogue that publishes `world` under a synthetic scenario id, alongside
 /// every real entry — so a test can drive a doomed pick and then a good one
 /// through the ordinary arbiter.

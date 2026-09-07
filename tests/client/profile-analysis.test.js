@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  summarizeSamples, buildNativeMatrix, framesInWindow, compilerContention, validateRun, nativeRecords, backgroundCpu,
+  summarizeSamples, buildNativeMatrix, framesInWindow, compilerContention, validateRun, nativeRecords, backgroundCpu, surfacesForNativeRun,
 } from '../../scripts/profile-analysis.mjs';
 
 const manifest = () => ({
@@ -29,6 +29,45 @@ const valid = () => ({ manifest: manifest(), processSamples: quiet(),
   ...Array.from({ length: 32 }, (_, i) => ({ ...visible(), elapsedSeconds: i + 38 }))], frames: [16, 17] });
 
 describe('profile evidence', () => {
+  it('requires a shared surface/frame origin and observations from every active capture layer', () => {
+    const capture = { schema: 1, started_unix_ms: 1234, successful_exit: true, elapsed_ns: 70e9,
+      omitted_events: 0, in_flight_at_close: 0, totals: { main_frames: 1 },
+      events: [{ event: 'main_frame', at_ns: 50e9, frame: null, surface: null }] };
+    const frames = { startedUnixMs: 1234 };
+    const renderer = { ...manifest(), condition: 'renderer' };
+    expect(surfacesForNativeRun(capture, frames, renderer).comparable).toBe(true);
+    expect(surfacesForNativeRun(capture, frames, manifest()).problems).toContain('no pane-worker iterations in the window');
+    expect(surfacesForNativeRun(capture, { startedUnixMs: 1235 }, renderer).comparable).toBe(false);
+    expect(surfacesForNativeRun(null, frames, renderer).comparable).toBe(false);
+    expect(surfacesForNativeRun({ ...capture, omitted_events: 1 }, frames, renderer).comparable).toBe(false);
+    expect(surfacesForNativeRun({ ...capture, totals: {}, events: [] }, frames, renderer).comparable).toBe(false);
+  });
+  it('refuses missing or lost HUD work but accepts an unchanged HUD without repeated painting', () => {
+    const surface = { id: 9, epoch: 1, kind: 'hud', width: 1920, height: 1080, device_scale: 1, visible: true };
+    const point = (event, seconds, fields = {}) => ({ event, at_ns: seconds * 1e9, surface: null, frame: null, ...fields });
+    const push = (seconds, applied) => point('push', seconds, { surface, channel: 'bridge_pump', revision: 2,
+      applied, failed: 0, deferred_messages: 0, duration_ns: 1 });
+    const warm = [push(10, 1), point('produced', 11, { surface, frame: 1, pixels: 2073600,
+      forced: true, reasons: { hud_push: true }, hud_revision: 2 }),
+    point('uploaded', 12, { surface, frame: 1, pixels: 2073600, full: true, age_ns: 1e9, write_texture_ns: 1 })];
+    const observed = [point('main_frame', 50), point('iteration', 50, { update_ns: 1, pump_ns: 1,
+      render_ns: 1, copy_ns: 1, publish_ns: 1, total_ns: 5 }),
+    ...Array.from({ length: 30 }, (_, i) => push(40 + i, 0))];
+    const run = events => {
+      const names = { main_frame: 'main_frames', iteration: 'worker_iterations', push: 'push_batches',
+        produced: 'produced', uploaded: 'uploaded', lifecycle: 'lifecycle_events' };
+      const totals = {};
+      for (const event of events) totals[names[event.event]] = (totals[names[event.event]] || 0) + 1;
+      return surfacesForNativeRun({ schema: 1, started_unix_ms: 1234, successful_exit: true, elapsed_ns: 70e9,
+        omitted_events: 0, in_flight_at_close: 0, totals, events }, { startedUnixMs: 1234 }, { ...manifest(), condition: 'chrome' });
+    };
+    expect(run([...warm, ...observed]).comparable).toBe(true);
+    expect(run(observed).comparable).toBe(false);
+    expect(run([...warm, ...observed.filter(event => event.at_ns < 55e9)]).comparable).toBe(false);
+    expect(run([...warm, ...observed, point('lifecycle', 52, { surface, action: 'closed' })]).comparable).toBe(false);
+    expect(run([...warm, ...observed, point('lifecycle', 52, { surface: { ...surface, visible: false }, action: 'visibility' })]).comparable).toBe(false);
+    expect(run([...warm, ...observed, { ...push(52, 0), failed: 1 }]).comparable).toBe(false);
+  });
   it('refuses incomplete asset loading and windows on an unintended monitor or scale', () => {
     for (const patch of [{ monitor: 'wrong-display' }, { width: 1280 }, { scale: 1.25 }]) {
       const input = valid();

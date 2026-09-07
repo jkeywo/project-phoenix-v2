@@ -539,7 +539,7 @@ jobs:
       # well as the local Playwright harness so Node resolves those imports
       # from their owning source directory.
       - name: Install root Node dependencies
-        run: npm ci
+        run: npm install
 
       - name: Install smoke harness dependencies
         working-directory: tests/smoke

@@ -7000,7 +7000,7 @@ fn game_over_broadcasts_the_latched_outcome() {
     use bevy::ecs::system::RunSystemOnce;
 
     let mut world = World::new();
-    world.init_resource::<SimOutbox>();
+    world.init_resource::<Messages<OutboundMessage>>();
     // The `ReportFinalized` beat's writer (issue #1344). Present but unused on
     // an ending that authored no report, which is this test's case.
     world.init_resource::<bevy::ecs::message::Messages<crate::core::narrative::NarrativeEvent>>();
@@ -7011,9 +7011,14 @@ fn game_over_broadcasts_the_latched_outcome() {
 
     world.run_system_once(on_game_over_enter).unwrap();
 
-    let outbox = world.resource::<SimOutbox>();
+    let outbox: Vec<_> = world
+        .resource_mut::<Messages<OutboundMessage>>()
+        .drain()
+        .collect();
     assert_eq!(outbox.len(), 1);
-    match outbox.iter().next().map(|(_, message)| message) {
+    assert_eq!(outbox[0].target, Target::All);
+    assert_eq!(outbox[0].delivery, DeliveryClass::Reliable);
+    match outbox.first().map(|message| &message.msg) {
         Some(ServerMessage::GameOver {
             reason,
             outcome,
@@ -7052,18 +7057,17 @@ fn game_over_publishes_no_outcome_when_none_was_declared() {
     use bevy::ecs::system::RunSystemOnce;
 
     let mut world = World::new();
-    world.init_resource::<SimOutbox>();
+    world.init_resource::<Messages<OutboundMessage>>();
     world.init_resource::<bevy::ecs::message::Messages<crate::core::narrative::NarrativeEvent>>();
     world.insert_resource(GameOverReason(None, None));
 
     world.run_system_once(on_game_over_enter).unwrap();
 
-    match world
-        .resource::<SimOutbox>()
-        .iter()
-        .next()
-        .map(|(_, message)| message)
-    {
+    let outbox: Vec<_> = world
+        .resource_mut::<Messages<OutboundMessage>>()
+        .drain()
+        .collect();
+    match outbox.first().map(|message| &message.msg) {
         Some(ServerMessage::GameOver {
             reason,
             outcome,
@@ -7089,7 +7093,7 @@ fn game_over_publishes_the_report_rows_without_their_scores() {
     use bevy::ecs::system::RunSystemOnce;
 
     let mut world = World::new();
-    world.init_resource::<SimOutbox>();
+    world.init_resource::<Messages<OutboundMessage>>();
     world.init_resource::<bevy::ecs::message::Messages<crate::core::narrative::NarrativeEvent>>();
     world.insert_resource(GameOverReason(
         Some("world.falling_skyway.game_over.lark_collision".into()),
@@ -7107,12 +7111,11 @@ fn game_over_publishes_the_report_rows_without_their_scores() {
 
     world.run_system_once(on_game_over_enter).unwrap();
 
-    match world
-        .resource::<SimOutbox>()
-        .iter()
-        .next()
-        .map(|(_, message)| message)
-    {
+    let outbox: Vec<_> = world
+        .resource_mut::<Messages<OutboundMessage>>()
+        .drain()
+        .collect();
+    match outbox.first().map(|message| &message.msg) {
         Some(ServerMessage::GameOver {
             outcome, report, ..
         }) => {
@@ -7152,7 +7155,7 @@ fn game_over_beats_report_finalized_only_when_there_are_rows() {
 
     let finalized = |report: MissionReport| -> Vec<NarrativeEvent> {
         let mut world = World::new();
-        world.init_resource::<SimOutbox>();
+        world.init_resource::<Messages<OutboundMessage>>();
         world.init_resource::<bevy::ecs::message::Messages<NarrativeEvent>>();
         world.insert_resource(GameOverReason(
             Some("world.falling_skyway.game_over.mission_complete".into()),
@@ -7214,7 +7217,7 @@ fn a_second_round_does_not_inherit_the_first_rounds_report() {
     use bevy::ecs::system::RunSystemOnce;
 
     let mut world = World::new();
-    world.init_resource::<SimOutbox>();
+    world.init_resource::<Messages<OutboundMessage>>();
     world.init_resource::<bevy::ecs::message::Messages<NarrativeEvent>>();
     world.init_resource::<EffectQueue<ReportRow>>();
     world.init_resource::<MissionReport>();
@@ -7232,7 +7235,7 @@ fn a_second_round_does_not_inherit_the_first_rounds_report() {
         Some(crate::core::balance::Outcome::Defeat),
     ));
     world.run_system_once(on_game_over_enter).unwrap();
-    world.resource_mut::<SimOutbox>().clear();
+    world.resource_mut::<Messages<OutboundMessage>>().clear();
     world
         .resource_mut::<bevy::ecs::message::Messages<NarrativeEvent>>()
         .clear();
@@ -7246,12 +7249,11 @@ fn a_second_round_does_not_inherit_the_first_rounds_report() {
     ));
     world.run_system_once(on_game_over_enter).unwrap();
 
-    match world
-        .resource::<SimOutbox>()
-        .iter()
-        .next()
-        .map(|(_, message)| message)
-    {
+    let outbox: Vec<_> = world
+        .resource_mut::<Messages<OutboundMessage>>()
+        .drain()
+        .collect();
+    match outbox.first().map(|message| &message.msg) {
         Some(ServerMessage::GameOver {
             reason,
             outcome,

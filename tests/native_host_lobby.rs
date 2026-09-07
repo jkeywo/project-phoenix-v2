@@ -230,6 +230,138 @@ fn a_host_with_no_world_boots_into_an_empty_lobby_holding_the_catalogue() {
 }
 
 #[test]
+fn game_over_reaches_the_native_transport_and_final_hud_after_simulation_stops() {
+    use project_phoenix::console_bridge::HudStateChanged;
+    use project_phoenix::core::balance::Outcome;
+    use project_phoenix::core::messages::DeliveryClass;
+    use project_phoenix::core::report::{MissionReport, ReportRow, ReportRowState};
+    use project_phoenix::server::ViewscreenBorderPlugin;
+    use project_phoenix::server_app::GameOverReason;
+
+    let mut cfg = lobby_config();
+    cfg.solo = true;
+    let mut app = build_native_host_app(&cfg, &preload()).expect("native host assembles");
+    // Contract omits the GPU and its presentation plugins. Install the actual
+    // HUD plugin, including its OnEnter ordering, without opening a window.
+    app.add_plugins(ViewscreenBorderPlugin);
+    let transport = LoopbackHandle::default();
+    app.insert_resource(NativeTransportLink::new(transport.transport()));
+    pump(&mut app, 4);
+    let (scenario, hull) = pick();
+    select(&mut app, "phase-operator", &scenario, &hull);
+    pump(&mut app, 120);
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::InProgress
+    );
+
+    const TOKEN: &str = "3f1a6c2e-0a11-4b3c-9d55-000000000043";
+    transport.send(
+        TOKEN,
+        ClientMessage::Identify {
+            token: TOKEN.into(),
+            name: "Ending witness".into(),
+        },
+    );
+    pump(&mut app, 2);
+    assert!(
+        transport
+            .drain_outbound()
+            .iter()
+            .any(|(target, message, _)| {
+                *target == Target::Token(TOKEN.into())
+                    && matches!(message, ServerMessage::Welcome { .. })
+            }),
+        "the crew transport is connected before the terminal transition"
+    );
+    let mut hud_cursor = app
+        .world()
+        .resource::<Messages<HudStateChanged>>()
+        .get_cursor_current();
+
+    const REASON: &str = "server.game_over.ship_destroyed";
+    app.world_mut()
+        .insert_resource(GameOverReason(Some(REASON.into()), Some(Outcome::Defeat)));
+    app.world_mut()
+        .resource_mut::<MissionReport>()
+        .set_row(ReportRow {
+            id: "lyra".into(),
+            heading_id: "world.falling_skyway.report.lyra.heading".into(),
+            outcome_id: "world.falling_skyway.report.lyra.lost".into(),
+            state: ReportRowState::Lost,
+            score: -6,
+        });
+    app.world_mut()
+        .resource_mut::<NextState<GamePhase>>()
+        .set(GamePhase::GameOver);
+    pump(&mut app, 1);
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::GameOver
+    );
+
+    let outbound = transport.drain_outbound();
+    let endings: Vec<_> = outbound
+        .iter()
+        .filter(|(_, message, _)| matches!(message, ServerMessage::GameOver { .. }))
+        .collect();
+    assert_eq!(
+        endings.len(),
+        1,
+        "the phase entry reaches the real frame-driven transport exactly once"
+    );
+    assert_eq!(endings[0].0, Target::All);
+    assert_eq!(endings[0].2, DeliveryClass::Reliable);
+    let ServerMessage::GameOver {
+        reason,
+        outcome,
+        report,
+    } = &endings[0].1
+    else {
+        unreachable!()
+    };
+    assert_eq!(reason, REASON);
+    assert_eq!(outcome.as_deref(), Some("defeat"));
+    assert_eq!(report.len(), 1);
+    assert_eq!(report[0].id, "lyra");
+    assert_eq!(report[0].state, "lost");
+    let hud: Vec<_> = hud_cursor
+        .read(app.world().resource::<Messages<HudStateChanged>>())
+        .collect();
+    assert_eq!(hud.len(), 1, "GameOver publishes one final HUD snapshot");
+    assert!(
+        hud[0]
+            .json
+            .contains(&format!("\"game_over_message\":\"{REASON}\"")),
+        "the registered HUD captures the nonempty reason before its consumption: {}",
+        hud[0].json
+    );
+    let latch = app.world().resource::<GameOverReason>();
+    assert_eq!(
+        latch.0, None,
+        "preserve the reason's existing consumption/digest contract"
+    );
+    assert_eq!(latch.1, Some(Outcome::Defeat));
+    assert_eq!(app.world().resource::<MissionReport>().total(), -6);
+
+    pump(&mut app, 3);
+    assert!(
+        !transport
+            .drain_outbound()
+            .iter()
+            .any(|(_, message, _)| matches!(message, ServerMessage::GameOver { .. })),
+        "later GameOver frames must not repeat the ending"
+    );
+    assert_eq!(
+        hud_cursor
+            .read(app.world().resource::<Messages<HudStateChanged>>())
+            .count(),
+        0,
+        "later frames must not replace the final HUD with an empty reason"
+    );
+}
+
+#[test]
 fn a_selection_pair_loads_the_world_and_the_mission_starts() {
     // Acceptance criterion 2, at its most direct: the two arbitrated messages,
     // then a running mission over the world they named.

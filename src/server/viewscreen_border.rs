@@ -243,8 +243,12 @@ impl Plugin for ViewscreenBorderPlugin {
                 )
                     .run_if(in_state(GamePhase::InProgress)),
             )
-            // On GameOver, push one final HUD state with the game-over message.
-            .add_systems(OnEnter(GamePhase::GameOver), push_game_over_hud_state);
+            // Capture the final HUD before the terminal broadcast consumes the
+            // per-ending reason. Both native and browser hosts use this edge.
+            .add_systems(
+                OnEnter(GamePhase::GameOver),
+                push_game_over_hud_state.before(crate::server_app::on_game_over_enter),
+            );
 
         // Reduced-motion source, one per render path (issue #1173, AC3). The
         // WASM host forwards `prefers-reduced-motion` live; the native build

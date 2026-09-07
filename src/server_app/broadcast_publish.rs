@@ -490,7 +490,7 @@ pub(crate) struct WorldSetupBroadcast {
 pub(crate) fn on_game_over_enter(
     mut game_over_reason: ResMut<GameOverReason>,
     mission_report: Option<Res<crate::core::report::MissionReport>>,
-    mut outbox: ResMut<SimOutbox>,
+    mut outbound: MessageWriter<OutboundMessage>,
     mut narrative: MessageWriter<crate::core::narrative::NarrativeEvent>,
 ) {
     let outcome = game_over_reason.1.map(|o| o.as_str().to_string());
@@ -522,14 +522,18 @@ pub(crate) fn on_game_over_enter(
         }
     }
 
-    outbox.push_reliable((
-        Target::All,
-        ServerMessage::GameOver {
+    // This is a phase-entry message: the InProgress-only SimSet::Broadcast
+    // dispatcher has stopped by the time OnEnter(GameOver) runs. Publish to
+    // the frame-driven transport seam so the ending reaches the crew now.
+    outbound.write(OutboundMessage {
+        target: Target::All,
+        delivery: DeliveryClass::Reliable,
+        msg: ServerMessage::GameOver {
             reason,
             outcome,
             report,
         },
-    ));
+    });
 }
 
 /// Reset all change-detection caches when entering InProgress so the first

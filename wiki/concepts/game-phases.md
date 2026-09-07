@@ -2,7 +2,7 @@
 title: Game Phases
 type: concept
 tags: [phases, lobby, loading, in-progress, game-over, reconnect]
-sources: [src/delivery/payload.rs, tests/native_host_catalogue.rs, tests/client/scenario-catalogue-wire.test.js, src/core/messages.rs, src/lobby/start_policy.rs, src/lobby/handler.rs, src/lobby/server.rs, src/lockstep/mod.rs, src/server/bridge.rs, src/server_app/registration.rs, src/server_app/broadcast_publish.rs]
+sources: [src/delivery/payload.rs, tests/native_host_catalogue.rs, tests/client/scenario-catalogue-wire.test.js, src/core/messages.rs, src/lobby/start_policy.rs, src/lobby/handler.rs, src/lobby/server.rs, src/lockstep/mod.rs, src/server/bridge.rs, src/server_app/registration.rs, src/server_app/broadcast_publish.rs, src/server/viewscreen_border.rs, tests/native_host_lobby.rs]
 updated: 2026-09-07
 ---
 
@@ -78,6 +78,13 @@ rating if no connected player took the seat.
 
 Player-ship destruction or a scripted `game_over` action records an optional
 reason and outcome, enters `GameOver`, and broadcasts the terminal message.
+`on_game_over_enter` writes a reliable `OutboundMessage` directly to the
+frame-driven browser/native transport seam: the `SimOutbox` dispatcher runs
+only during `InProgress`. `ViewscreenBorderPlugin` captures the final HUD before
+that broadcast consumes the reason, preserving the ending text while retaining
+the outcome and Mission Report for the digest and after-action report. The
+native App regression in `tests/native_host_lobby.rs` covers both transport
+delivery and the final HUD through their production registrations.
 The game-over UI can issue `ReturnToLobby`; the server resets round readiness
 and returns to the lobby through the authoritative lobby handler.
 

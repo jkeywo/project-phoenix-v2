@@ -240,14 +240,18 @@ entities:
       confidence: confirmed
       title: Terminal Round Outcome Router
       summary: Routes player-ship destruction and authored world or Comms GameOver actions into one authoritative terminal reason and GameOver phase transition; NPC destruction remains a local entity-lifecycle event unless authored content makes it terminal.
+      rationale:
+        - "[ai] A terminal transition publishes GameOver directly as a reliable OutboundMessage for the frame-driven browser/native transport. The simulation outbox dispatcher is InProgress-only and cannot carry an event produced after that phase ends."
+        - "[ai] The final viewscreen HUD is captured before on_game_over_enter consumes the reason. Consumption remains unchanged for snapshot/digest compatibility; the outcome and authoritative Mission Report remain latched, and the outbound report projection remains score-free."
     architecture:
       kind: outcome-router
       authority: authoritative
       reads: [spawned-entity-state, game-phase-state]
       writes: [game-phase-state, game-over-reason-state]
       coordinates: [entity-destruction-lifecycle, world-trigger-action-dispatcher]
-      runs_in: [host-browser-runtime]
+      runs_in: [host-browser-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [src/server_app/broadcast.rs, src/world/server.rs, src/console/comms/server.rs]
-      tests: [cargo test]
+      paths: [src/server_app/broadcast_publish.rs, src/server_app/registration.rs, src/server/viewscreen_border.rs, src/world/server.rs, src/console/comms/server.rs]
+      symbols: [on_game_over_enter, push_game_over_hud_state]
+      tests: [cargo test, tests/native_host_lobby.rs, tests/snapshot_resume.rs]

@@ -27,11 +27,11 @@
 
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 
-use bevy::prelude::{NextState, State};
+use bevy::prelude::{Messages, NextState, State};
 use project_phoenix::content_ledger;
 use project_phoenix::core::messages::{GamePhase, ServerMessage};
 use project_phoenix::headless::{build_headless_app, HeadlessArgs};
-use project_phoenix::server_app::{GameOverReason, SimOutbox};
+use project_phoenix::server_app::GameOverReason;
 use project_phoenix::sim_digest::world_digest;
 use project_phoenix::snapshot::{
     capture, load_from, ready_to_rebuild, ready_to_restore, reconcile_world_layers, restore,
@@ -4065,10 +4065,28 @@ fn a_restored_game_over_reruns_its_entry_effects() {
          on_game_over_enter only takes the reason half"
     );
 
-    let outbox = resumed.world().resource::<SimOutbox>();
-    let reasons: Vec<&str> = outbox
+    let outbox = resumed
+        .world()
+        .resource::<Messages<project_phoenix::lobby::OutboundMessage>>();
+    let mut cursor = outbox.get_cursor();
+    let messages: Vec<_> = cursor.read(outbox).collect();
+    let endings: Vec<_> = messages
         .iter()
-        .filter_map(|(_, msg)| match msg {
+        .filter(|out| matches!(out.msg, ServerMessage::GameOver { .. }))
+        .collect();
+    assert_eq!(
+        endings.len(),
+        1,
+        "restore publishes exactly one terminal message"
+    );
+    assert_eq!(endings[0].target, project_phoenix::lobby::Target::All);
+    assert_eq!(
+        endings[0].delivery,
+        project_phoenix::core::messages::DeliveryClass::Reliable
+    );
+    let reasons: Vec<&str> = messages
+        .iter()
+        .filter_map(|out| match &out.msg {
             ServerMessage::GameOver { reason, .. } => Some(reason.as_str()),
             _ => None,
         })
@@ -4077,9 +4095,9 @@ fn a_restored_game_over_reruns_its_entry_effects() {
         reasons,
         vec![""],
         "restoring a captured GameOver should have re-run on_game_over_enter \
-         and pushed the ServerMessage::GameOver the fresh app's own game \
+         and routed the ServerMessage::GameOver the fresh app's own game \
          start never emitted (found {} other outbox entries)",
-        outbox.len() - reasons.len()
+        messages.len() - reasons.len()
     );
 }
 

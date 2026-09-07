@@ -25,5 +25,4 @@ consumer; the consumer returns `Applied` even for an idempotent same-state
 success. This metadata is absent from Red Alert gameplay state, payloads,
 command logs, mesh traffic, snapshots and replay. Consequently Pending never
 paints the control as active: only the published `ShipRedAlert` state can do
-that. (The Weapons Hold that shared this lifecycle from issue #1041 was retired
-in #1398; restraint is a Power order, and its readout is the reactor's own.)
+that. Fire restraint is a Power order, and its readout belongs to the reactor.

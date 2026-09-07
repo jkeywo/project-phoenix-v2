@@ -146,5 +146,19 @@ test('Impulse/Boost binding hints hide on a phone and show on desktop', async ({
 
   // Desktop, landscape: a keyboard is assumed, so both hints show.
   await page.setViewportSize({ width: 1600, height: 1000 });
-  await expect.poll(bindingDisplay).toEqual({ impulse: 'inline', boost: 'inline' });
+  // Flex items are blockified by CSS even when authored as inline spans.
+  // Assert the user-facing contract: both labels are painted and readable.
+  for (const tag of ['ph-impulse-btn', 'ph-boost-btn']) {
+    const hint = page.locator(tag).locator('#binding');
+    await expect(hint).toBeVisible();
+    await expect(hint).toHaveText(/\S/);
+    const box = await hint.boundingBox();
+    expect(box.width).toBeGreaterThan(0);
+    expect(box.height).toBeGreaterThan(0);
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(1600);
+    expect(box.y + box.height).toBeLessThanOrEqual(1000);
+    expect(await hint.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  }
 });

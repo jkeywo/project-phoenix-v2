@@ -143,14 +143,14 @@
     // vitest suite imports the same renderStation.
     import { renderStation } from './helm.console.js';
 
-    var consoleHandle = initConsole({ name: 'helm', render: renderStation });
+    initConsole({ name: 'helm', render: renderStation });
 
     // The one dock button toggles dock/undock through the action map, which
     // sends the same admitted command a dock AI would (issues #1159, #1251).
     // The semantic adapter reads the current authoritative dock view, so the
     // contextual ship variant cannot dispatch a stale system id or verb.
     document.getElementById('dock-btn').addEventListener('click', function() {
-      consoleHandle.activateSemanticAction(HELM_DOCK_ACTION_ID, {
+      window.activateSemanticAction(HELM_DOCK_ACTION_ID, {
         context: HELM_ACTION_CONTEXT, source: 'control',
       });
     });

@@ -81,7 +81,8 @@ test('reduced-motion round-trip: data-reduced-motion="reduce" stops a looping an
 
   // The change is a genuine round-trip: it persisted to the private profile.
   const persisted = await page.evaluate(() => {
-    try { return JSON.parse(localStorage.getItem('phoenix-accessibility-v1')); }
+    // Accessibility is nested in the portable operator profile since #1279.
+    try { return JSON.parse(localStorage.getItem('phoenix-operator-profile-v1'))?.accessibility; }
     catch (_) { return null; }
   });
   expect(persisted && persisted.presentation && persisted.presentation.reducedMotion).toBe('on');

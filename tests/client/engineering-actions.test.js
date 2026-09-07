@@ -1,3 +1,4 @@
+import { createGamepadInputRuntime } from '../../gui/gamepad-input.js';
 import { describe, expect, it, vi } from 'vitest';
 import { ActionFeedbackLifecycle } from '../../gui/action-feedback.js';
 import { createSemanticActionRegistry } from '../../gui/semantic-action-registry.js';
@@ -457,14 +458,14 @@ describe('Engineering, Power, and Repair semantic actions', () => {
     let state = keyed({
       tractor: { engaged: false },
       umbilical: { running: true },
-      repair: { ...repair(), external_dispatch: { target: 'ally-1' } },
+      repair: { ...repair(), external_dispatch: { target: 'ally-1', team_idx: 0 } },
     }, { tractor: 'tractor', umbilical: 'umbilical', repair: 'repair' });
     const actions = registry({ getState: () => state, sendAction });
     expect(actions.activate(TRACTOR_TOGGLE_ACTION_ID, { context: ENGINEERING_ACTION_CONTEXT })).toMatchObject({ handled: true });
     expect(actions.activate(UMBILICAL_TOGGLE_ACTION_ID, { context: ENGINEERING_ACTION_CONTEXT })).toMatchObject({ handled: true });
     expect(actions.activate(EXTERNAL_REPAIR_TOGGLE_ACTION_ID, { context: ENGINEERING_ACTION_CONTEXT })).toMatchObject({ handled: true });
     expect(sendAction.mock.calls.map(([name]) => name)).toEqual([
-      'engage_tractor', 'stop_transfer', 'recall_external_repair',
+      'engage_tractor', 'stop_transfer', 'recall_repair_team',
     ]);
     expect(sendAction.mock.calls.map(([, payload]) => payload.control_system_id))
       .toEqual(['tractor', 'umbilical', 'repair']);
@@ -472,16 +473,58 @@ describe('Engineering, Power, and Repair semantic actions', () => {
     state = keyed({
       tractor: { engaged: true },
       umbilical: { running: false },
-      repair: { ...repair(), external_dispatch: { target: null } },
+      repair: { ...repair(), external_dispatch: { target: null, candidate_name: 'Ally' } },
     }, { tractor: 'tractor', umbilical: 'umbilical', repair: 'repair' });
     actions.activate(TRACTOR_TOGGLE_ACTION_ID, { context: ENGINEERING_ACTION_CONTEXT });
     actions.activate(UMBILICAL_TOGGLE_ACTION_ID, { context: ENGINEERING_ACTION_CONTEXT });
     actions.activate(EXTERNAL_REPAIR_TOGGLE_ACTION_ID, { context: ENGINEERING_ACTION_CONTEXT });
     expect(sendAction.mock.calls.slice(3).map(([name]) => name)).toEqual([
-      'release_tractor', 'start_transfer', 'dispatch_external_repair',
+      'release_tractor', 'start_transfer', 'dispatch_repair_team',
     ]);
     expect(sendAction.mock.calls.slice(3).map(([, payload]) => payload.control_system_id))
       .toEqual(['tractor', 'umbilical', 'repair']);
+  });
+
+  it('routes standard-gamepad field dispatch and recall through exact named-team commands', () => {
+    const sendAction = vi.fn();
+    let view = { ...repair(), teams: [{ id: 0, status: 'repairing' }, { id: 1, status: 'idle' }],
+      external_dispatch: { target: null, team_idx: null, candidate_name: 'Ally', candidate_refusal: null } };
+    const actions = registry({ getState: () => keyed({ repair: view }, { repair: 'repair' }), sendAction });
+    const snapshot = pressed => [{ index: 0, mapping: 'standard', axes: [0, 0, 0, 0],
+      buttons: Array.from({ length: 17 }, (_, i) => ({ pressed: pressed && i === 15, value: pressed && i === 15 ? 1 : 0 })) }];
+    const runtime = createGamepadInputRuntime({
+      getGamepads: () => snapshot(false),
+      getContext: () => REPAIR_ACTION_CONTEXT,
+      getActions: () => actions.list(),
+      activate: (id, options) => actions.activate(id, options),
+    });
+    runtime.select(0);
+    const press = () => { runtime.poll(snapshot(false)); runtime.poll(snapshot(true)); };
+    press();
+    expect(sendAction).toHaveBeenLastCalledWith('dispatch_repair_team', expect.objectContaining({
+      team_idx: 1, target: 'external', control_system_id: 'repair',
+    }));
+    view = { ...view, external_dispatch: { ...view.external_dispatch, target: 'ally-1', team_idx: 1 } };
+    press();
+    expect(sendAction).toHaveBeenLastCalledWith('recall_repair_team', expect.objectContaining({ team_idx: 1 }));
+    expect(sendAction).toHaveBeenCalledTimes(2);
+    for (const external_dispatch of [
+      { target: null, candidate_name: null },
+      { target: null, candidate_name: 'Ally', candidate_refusal: 'out_of_range' },
+    ]) {
+      view = { ...view, external_dispatch };
+      press();
+    }
+    expect(sendAction).toHaveBeenCalledTimes(2);
+    view = { ...view, teams: [{ id: 0, status: 'idle' }, { id: 1, status: 'idle' }],
+      external_dispatch: { target: null, candidate_name: 'Ally' } };
+    actions.activate(EXTERNAL_REPAIR_TOGGLE_ACTION_ID, {
+      context: REPAIR_ACTION_CONTEXT, detail: { team_idx: 1 }, source: 'keyboard',
+    });
+    expect(sendAction).toHaveBeenLastCalledWith('dispatch_repair_team', expect.objectContaining({ team_idx: 1 }));
+    view = { ...view, repair_auto: true };
+    press();
+    expect(sendAction).toHaveBeenCalledTimes(3);
   });
 
   it('enters Pending only after a real authoritative request is emitted', () => {

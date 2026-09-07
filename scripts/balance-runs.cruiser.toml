@@ -13,6 +13,13 @@ seeds       = [1, 2, 3, 4, 5]
 sim_seconds = 120
 world       = "assets/worlds/duel.toml"
 
+# RECHECKED 2026-09-07 (issue #1399), including #1390's tractor/umbilical
+# hull rows and #1391's field repair: all 20 runs won and all 16 thresholds
+# passed. Median TTKs remain 4.78 / 13.82 / 8.58 / 15.70 seconds; mean damage
+# margins are +163.00 / +283.80 / +310.20 / +47.24. No threshold changed:
+# #1388's approved warhawk floor remains 25. The original Dock comparison
+# and the rationale for that floor are preserved below.
+#
 # RE-RATIFIED 2026-09-06 (issue #1388) against the report produced by the
 # command above: 5/5 cruiser wins in every row, with medians
 # 4.78 / 13.82 / 8.58 / 15.70 seconds and mean damage margins

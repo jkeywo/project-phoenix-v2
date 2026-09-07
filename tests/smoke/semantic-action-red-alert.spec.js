@@ -248,7 +248,11 @@ test('remapped Captain Red Alert binding reaches the authoritative command path'
   await expect(captain.locator('[data-control="operator-profile-status"]'))
     .toContainText(ts('settings.controls.profile.status_exported'));
 
-  storedProfile.bindings['captain.red-alert'][0].code = 'KeyU';
+  // Unmodified U is a shipped Sensors/Umbilical shortcut in overlapping
+  // composite contexts. Import a deliberately distinct chord, not a conflict.
+  Object.assign(storedProfile.bindings['captain.red-alert'][0], {
+    code: 'KeyY', ctrlKey: true, shiftKey: true,
+  });
   await captain.locator('[data-control="operator-profile-file"]').setInputFiles({
     name: 'operator-profile.json',
     mimeType: 'application/json',
@@ -258,7 +262,7 @@ test('remapped Captain Red Alert binding reaches the authoritative command path'
     .toContainText(ts('settings.controls.profile.status_imported'));
   await expect(captain.locator(
     '[data-control="semantic-binding-captain.red-alert-0"]',
-  )).toHaveValue('U');
+  )).toHaveValue('Ctrl + Shift + Y');
 
   // Close Settings so the key relay may hand the host-page event to the
   // active Captain iframe. The remap capture itself stops propagation, so the
@@ -266,7 +270,7 @@ test('remapped Captain Red Alert binding reaches the authoritative command path'
   await captain.keyboard.press('Escape');
   await expect(captain.locator('#settings-overlay')).toBeHidden();
   await installCaptainFeedbackProbe(frameBody);
-  await captain.keyboard.press('KeyU');
+  await captain.keyboard.press('Control+Shift+KeyY');
 
   const alertEvents = await expectAppliedLifecycle(frameBody, 'captain.red-alert');
   const alertPending = alertEvents.find((event) => event.state === 'Pending');

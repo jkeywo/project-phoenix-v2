@@ -17,7 +17,7 @@ updated: 2026-08-31
 - runs Captain Backfill policy on the shared deterministic AI cadence and emits ordinary admitted commands;
 - publishes the Captain blackboard from authoritative ship, objective, and combat state.
 
-Restraint is NOT here. The Captain's Weapons Hold (issue #1041) was retired by issue #1398: a ship holds fire by taking its `weapons` power group to level 0, which is an Engineering order on `ShipPowerSystem`, mirrored into the `weapons_cold.*` world flags by `ship::power::mirror_weapons_cold_flags` and read by every fire gate through `WeaponsAlertPosture`. The Rhai `hold_fire()` / `release_fire()` verbs kept their names and became power orders drained by `ship::power::drain_scripted_power_orders`.
+A ship holds fire by taking its `weapons` power group to level 0, which is an Engineering order on `ShipPowerSystem`, mirrored into the `weapons_cold.*` world flags by `ship::power::mirror_weapons_cold_flags` and read by every fire gate through `WeaponsAlertPosture`. The Rhai `hold_fire()` / `release_fire()` verbs kept their names and became power orders drained by `ship::power::drain_scripted_power_orders`.
 
 Captain authority is resolved at admission from the fine system named by the command. Correlated requests are admitted only for the exact Captain target/payload combinations whose consumer owns terminal feedback; invalid pairs are refused before they can enter the command stream. `SetView` is authorized from the selected view mode's source system; it is not a blanket client-side camera permission. `SetRedAlert { active }` is an idempotent assignment, not a toggle.
 

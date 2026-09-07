@@ -181,6 +181,16 @@ test('science can set view to SensorsRadar', async ({ context }) => {
 test('comms can set view to NavigationChart', async ({ context }) => {
   const { captainPlayer, helmPlayer, sciencePlayer, commsPlayer } = await startGame(context);
 
+  // Navigation is a visiting auxiliary Station. GameStarted precedes the
+  // first allocation snapshot, so wait for its authoritative Comms host:
+  // sending before that first fixed tick is correctly refused as unowned.
+  await commsPlayer.page.waitForFunction(() => {
+    const snapshots = (window.__messages || []).filter(message => message.type === 'SimState');
+    return snapshots.at(-1)?.data.snapshot.station_hosts?.some(
+      placement => placement.station === 'navigation' && placement.host === 'comms',
+    );
+  });
+
   await commsPlayer.send('ControlSystem', { target: 'viewscreen', payload: { type: 'SetView', data: { mode: { kind: 'NavigationChart' } } } });
   await waitForViewMode(commsPlayer, { kind: 'NavigationChart' });
 

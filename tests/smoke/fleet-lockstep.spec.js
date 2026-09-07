@@ -210,11 +210,22 @@ test.describe('two ship hosts hold one tick clock', () => {
       );
     }
 
-    for (const page of [lead, member]) {
-      const status = await meshStatus(page);
-      expect(status.stalled, 'a fleet that is hearing from itself does not wait').toBe(false);
-      expect(status.waiting_on, 'and has nobody outstanding').toEqual([]);
-    }
+    // A connected host can briefly reach its peer's watermark and wait for
+    // the next frame. Sample continued progress and the cleared barrier in
+    // the SAME readback, rather than demanding that an arbitrary frame never
+    // waits. Both hosts must advance another full window and resume within
+    // the existing bound; a deadlocked or silent peer cannot satisfy this.
+    const hosts = [lead, member];
+    const starts = await Promise.all(hosts.map(page => meshStatus(page)));
+    await Promise.all(hosts.map((page, index) => page.waitForFunction(
+      from => {
+        const status = window.__hostMeshStatus();
+        return status && status.tick > from && !status.stalled
+          && status.waiting_on.length === 0;
+      },
+      starts[index].tick + DELAY_TICKS + 30,
+      { timeout: 60_000 },
+    )));
   });
 
   test('a host that stops hearing its peer withholds the tick and says whose', async ({ context }) => {

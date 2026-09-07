@@ -192,6 +192,8 @@ test('cruiser helm shows the Dock control in range and docks with a berth', asyn
 
   // The real client page, claiming Helm the way a player does.
   const helm = await context.newPage();
+  const helmErrors = [];
+  helm.on('pageerror', error => helmErrors.push(error.message));
   await helm.goto(`/client/#${hostId}`, { waitUntil: 'domcontentloaded' });
   await helm.waitForSelector('#station-list .station-row', { timeout: 15_000 });
   await helm.click('#station-list .station-row:has-text("Helm") button.claim-btn');
@@ -220,6 +222,7 @@ test('cruiser helm shows the Dock control in range and docks with a berth', asyn
     const cls = (await dockBtn.getAttribute('class')) || '';
     if (cls.includes('docked')) break;
     await dockBtn.click();
+    expect(helmErrors, 'Dock click must not throw in the console').toEqual([]);
     await helm.waitForTimeout(1_500);
   }
   await expect(dockBtn, 'the two hulls must reach a mated dock')

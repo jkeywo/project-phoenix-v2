@@ -6,6 +6,9 @@ sources:
   - gui/components/
   - gui/console-ui.js
   - gui/mount-plan.js
+  - gui/hero-bar.js
+  - gui/cruiser/engineering.html
+  - gui/components/ph-repair-teams.js
   - gui/console.css
   - gui/cruiser/tactical.html
 updated: 2026-08-27
@@ -36,3 +39,20 @@ Cruiser Tactical opts into `tactical-scope-row` for its portrait layout: a
 full-width scope, paired bounded weapon rails, and a full-width target strip.
 The torpedo and target components opt into compact rendering through `compact-rail` (all orientations) and
 `portrait-strip` (portrait only). The target card sits below the phasers in landscape and desktop.
+
+The shell's `gui/hero-bar.js` owns Station identity, settings/help chrome, and
+the roving Station/overlay tablist. Console documents contain only their
+working controls; they reserve no legacy settings gutter or repeated title
+and damage footer. `gui/console.css` supplies the shared
+Captain and Engineering segmented selectors.
+
+Cruiser Engineering composes Power and Repair with the Engineering-owned
+tractor and umbilical controls. Named repair-team cards render the external
+target row and dispatch through the same semantic action adapter as internal
+assignments. Helm owns the contextual Dock control and the passive tow readout.
+
+
+The explicit field-repair shortcut also emits the named-team command: it keeps
+an explicit team context or selects the first available team, and recalls the
+team named by the authoritative external claim. The generic internal dispatch
+shortcut never silently selects the field.

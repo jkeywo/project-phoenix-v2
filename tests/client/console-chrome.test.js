@@ -142,10 +142,8 @@ describe('the readouts the footer carried moved into the console body', () => {
 });
 
 describe('the shared segment control (issue #1374)', () => {
-  // Presentation only in this slice — the Captain's TARGET | MISSION column
-  // and Engineering's system picker are the consumers, and neither is built
-  // yet. It lands here so both reach for the same thing rather than each
-  // inventing a two-way switch, which is how twenty-two footers happened.
+  // The shipped Captain TARGET | MISSION column and Engineering system
+  // picker share this primitive and its roving keyboard contract.
 
   it('declares .seg and .seg-btn in the shared console stylesheet', () => {
     expect(CONSOLE_CSS).toMatch(/(^|\n)\.seg\s*\{/);

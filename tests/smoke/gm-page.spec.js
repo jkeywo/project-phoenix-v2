@@ -816,7 +816,9 @@ test('a GM reaches and operates a spatial Helm Station at 1280x720, then release
   // the GM surface's real scroll container, prove its bounding box is visible,
   // and use an ordinary Playwright click (no force/evaluate bypass).
   expect(gm.viewportSize()).toEqual({ width: 1280, height: 720 });
-  await expect(gm.locator('#overlay')).toBeHidden();
+  // Scope the host's crew QR overlay: Playwright also pierces the GM map's
+  // shadow root, which has its own unrelated private #overlay.
+  await expect(gm.locator('#overlay:has(> #qr-panel)')).toBeHidden();
   const takeover = gm.locator('#gm-station-toggle');
   await takeover.scrollIntoViewIfNeeded();
   await expect(takeover).toBeVisible();

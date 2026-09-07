@@ -423,20 +423,28 @@ export function registerEngineeringActions(registry, options = {}) {
   });
 
   registry.register(EXTERNAL_REPAIR_TOGGLE_ACTION, ({
-    actionId, correlation, inputMs,
+    actionId, correlation, inputMs, detail,
   } = {}) => {
     const state = getState();
     const view = repairActionView(state);
     const dispatch = view && view.external_dispatch;
     const systemId = ownerSystemId(state, view, 'repair');
     if (!dispatch || !systemId) return false;
-    return send(
-      actionId,
-      correlation,
-      inputMs,
-      dispatch.target != null ? 'recall_external_repair' : 'dispatch_external_repair',
-      { control_system_id: systemId },
-    );
+    // This explicitly requests the field destination, unlike the generic
+    // parameter-free dispatch action. Preserve a requested team, otherwise
+    // use the same first-available convention as internal dispatch. Every human
+    // input names its team on the wire; the fieldless verbs remain for AI.
+    const recalling = dispatch.target != null;
+    if (recalling && !Number.isInteger(dispatch.team_idx)) return false;
+    if (!recalling && (!dispatch.candidate_name || dispatch.candidate_refusal)) return false;
+    const selected = recalling
+      ? chooseRepairRecall(view, { team_idx: dispatch.team_idx })
+      : chooseRepairDispatch(view, { ...detail, target: EXTERNAL_REPAIR_TARGET });
+    return selected
+      ? send(actionId, correlation, inputMs,
+          recalling ? 'recall_repair_team' : 'dispatch_repair_team',
+          { ...selected, control_system_id: systemId })
+      : false;
   });
   return registry;
 }

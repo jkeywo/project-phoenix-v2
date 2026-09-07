@@ -20,6 +20,10 @@ test('host QR button and closed-Settings remap share local lifecycle and readbac
   await page.goto('/?scenario=assets/worlds/default.toml');
   await waitForWasmReady(page, 90_000);
   await settings(page).waitFor({ state: 'visible' });
+  // Lobby deliberately keeps the join code shown. During a mission the
+  // shared QR law yields to operator toggles, which is this test's contract.
+  await page.locator('#ai-launch-btn').click();
+  await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress');
 
   await page.evaluate(() => {
     window.__hostQrFeedback = [];

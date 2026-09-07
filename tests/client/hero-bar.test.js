@@ -428,6 +428,10 @@ describe('keyboard roving focus', () => {
     expect(heroBarKeyTarget(ids, 'comms', 'ArrowRight')).toBe('helm');
     expect(heroBarKeyTarget(ids, 'helm', 'ArrowLeft')).toBe('comms');
   });
+  it('supports the vertical rail with Up and Down, including wrap', () => {
+    expect(heroBarKeyTarget(ids, 'comms', 'ArrowDown')).toBe('helm');
+    expect(heroBarKeyTarget(ids, 'helm', 'ArrowUp')).toBe('comms');
+  });
   it('supports Home and End', () => {
     expect(heroBarKeyTarget(ids, 'navigation', 'Home')).toBe('helm');
     expect(heroBarKeyTarget(ids, 'navigation', 'End')).toBe('comms');

@@ -4742,6 +4742,11 @@ fn a_same_drain_load_then_unload_of_a_scripted_layer_ends_unloaded() {
 #[test]
 fn layer_deadlines_use_activation_tick_root_cadence_and_reload_fresh() {
     let mut app = scripted_layer_test_app();
+    // This fixture drives SimTick explicitly. AiPlugin also installs the fixed
+    // clock, so wall time must not add a tick between the manual assignments.
+    app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+        std::time::Duration::ZERO,
+    ));
     let mut root = crate::world::config::WorldConfig::default();
     root.global.sim_tick_hz = 10.0;
     app.world_mut().insert_resource(root);
@@ -4840,6 +4845,11 @@ fn layer_deadlines_use_activation_tick_root_cadence_and_reload_fresh() {
 #[test]
 fn same_tick_unload_precedes_a_layer_deadline_callback_drain() {
     let mut app = scripted_layer_test_app();
+    // This fixture drives SimTick explicitly. AiPlugin also installs the fixed
+    // clock, so wall time must not add a tick between the manual assignments.
+    app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+        std::time::Duration::ZERO,
+    ));
     let mut root = crate::world::config::WorldConfig::default();
     root.global.sim_tick_hz = 10.0;
     app.world_mut().insert_resource(root);

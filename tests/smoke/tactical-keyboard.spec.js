@@ -73,32 +73,26 @@ test('Tactical console: every principal action fires from the keyboard, with no 
   await page.evaluate((s) => window.__updateConsole('tactical', JSON.stringify(s)), STATE);
 
   // ── Tab walks between the console's components (AC #2) ──────────────────────
-  // Roving tabindex leaves each composite a single Tab stop, so the sequence is
-  // one stop per component: the radar scope, then the three weapon toolbars.
-  // The Intel and Security toggles used to come first; since issue #1374 the
-  // console authors none — the shell's Station Bar offers those panels as tabs
-  // of its own — so the scope is the first thing a Tab lands on.
+  // Each composite is one Tab stop. Desktop follows the authored columns:
+  // phasers and blasters on the left, radar in the middle, tubes on the right.
+  await page.keyboard.press('Tab');
+  expect(await activeId(page)).toBe('#phasers-controls');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+
+  await page.keyboard.press('Tab');
+  expect(await activeId(page)).toBe('#blasters-controls');
+  await page.keyboard.down('Space');
+  await page.keyboard.down('Space'); // browser repeat must not start a second charge
+  await page.keyboard.up('Space');
+
   await page.keyboard.press('Tab');
   expect(await activeId(page)).toBe('#tactical-radar');
-
-  // ── Arrow keys move within the radar composite; Enter locks a target ────────
-  await page.keyboard.press('ArrowDown');            // cursor → first contact
-  await page.keyboard.press('Enter');                // set_target raider-1
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
   await expect.poll(() => page.evaluate(() => window.__sent.some((a) => a.action === 'set_target')))
     .toBe(true);
 
-  // ── Phasers toolbar: arrow to a FIRE button, Enter fires it ─────────────────
-  await page.keyboard.press('Tab');
-  expect(await activeId(page)).toBe('#phasers-controls');
-  await page.keyboard.press('ArrowDown');            // mode toggle → FIRE button
-  await page.keyboard.press('Enter');                // fire_phaser
-
-  // ── Blasters toolbar: Space is the hold-to-fire the pointer does ────────────
-  await page.keyboard.press('Tab');
-  expect(await activeId(page)).toBe('#blasters-controls');
-  await page.keyboard.press('Space');                // charge_blaster_start + fire_blaster
-
-  // ── Torpedoes toolbar: End jumps to the tube's FIRE button, Enter fires ─────
   await page.keyboard.press('Tab');
   expect(await activeId(page)).toBe('#torpedo-controls');
   await page.keyboard.press('End');                  // − → FIRE (last control in the tube)
@@ -109,10 +103,16 @@ test('Tactical console: every principal action fires from the keyboard, with no 
   expect(actions).toContain('set_target');
   expect(actions).toContain('fire_phaser');
   expect(actions).toContain('charge_blaster_start');
-  expect(actions).toContain('fire_blaster');
+  // Instant banks fire from one charge-start command; releasing Space must
+  // neither send the retired fire alias nor cancel a completed instant shot.
+  expect(actions.filter(action => action === 'charge_blaster_start')).toHaveLength(1);
+  expect(actions).not.toContain('fire_blaster');
+  expect(actions).not.toContain('charge_blaster_cancel');
   expect(actions).toContain('fire_torpedo');
 
   // The envelopes carry the right named-action payloads (same as touch).
+  expect(await page.evaluate(() => window.__sent.find((a) => a.action === 'charge_blaster_start')))
+    .toMatchObject({ action: 'charge_blaster_start', console: 'tactical', bank: 'port' });
   expect(await page.evaluate(() => window.__sent.find((a) => a.action === 'fire_phaser')))
     .toMatchObject({ action: 'fire_phaser', console: 'tactical', bank: 'omni' });
   expect(await page.evaluate(() => window.__sent.find((a) => a.action === 'set_target')))

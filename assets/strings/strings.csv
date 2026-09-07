@@ -2541,7 +2541,6 @@ server.gm.station.heading,Accessible heading for authentic Station puppeting con
 server.gm.station.pending,Shown before a player-ship Station interface projection is available,[Waiting for a player-ship Station interface…]
 server.gm.station.take_over,Control that adds this equal GM to a Backfill Station takeover,[Take over]
 server.gm.station.release,Control that removes this equal GM from a Station takeover,[Release]
-server.gm.station.backfill_only,Status when an authored interface is not currently eligible for takeover,[Takeover requires the Backfill rating]
 server.gm.station.operators,Status listing equal GMs currently operating the selected Station. {operators} is their public identity list,[Operating Game Masters: {operators}]
 server.gm.station.activity_heading,Accessible heading for the bounded attributed Station activity feed,[Station activity]
 server.gm.station.activity,Attributed Station command row. {operator} is the GM identity; {action} the typed command; {target} the authored System id; {tick} the authoritative tick,[{operator} issued {action} to {target} at tick {tick}.]

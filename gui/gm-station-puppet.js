@@ -306,21 +306,18 @@ export function createGmStationPuppet({
     const operator = getOperator();
     const operatorId = operator && operator.id;
     const locallyActive = !!operatorId && selectedRow.station.operators.includes(operatorId);
-    const eligible = selectedRow.station.rating === 'Backfill';
     if (button) {
       button.textContent = t(locallyActive
         ? 'server.gm.station.release'
         : 'server.gm.station.take_over');
       button.dataset.active = locallyActive ? 'true' : 'false';
-      button.disabled = !operatorId || (!locallyActive && !eligible);
+      button.disabled = !operatorId;
     }
     if (status) {
       if (selectedRow.station.operators.length > 0) {
         status.textContent = t('server.gm.station.operators', {
           operators: selectedRow.station.operators.join(', '),
         });
-      } else if (!eligible) {
-        status.textContent = t('server.gm.station.backfill_only');
       } else {
         status.textContent = '';
       }

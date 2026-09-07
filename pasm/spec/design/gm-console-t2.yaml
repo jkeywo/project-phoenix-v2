@@ -234,17 +234,24 @@ entities:
 
   - mechanic: gm-t2-station-puppeting
     core:
-      status: accepted
+      status: partially-implemented
       confidence: confirmed
       title: Station-Scoped GM Puppeting Alongside Players
       summary: "A GM may open an authentic Station interface and puppet a player or NPC ship when that ship defines the interface and corresponding command consumers. Takeover is Station-scoped: it suppresses AI/Backfill emissions for that Station but does not change seat ownership. Human commands and GM commands remain accepted together and resolve through deterministic Admission ordering. Releasing takeover restores AI only where the Station would ordinarily receive it. Multiple GMs remain equal and every command is attributed."
       rationale:
         - "The GM takes over AI and acts alongside players; puppeting is not exclusive possession of a human Station and does not create a second downstream human-versus-GM authority branch."
+        - "[ai] Issue #1313 extends the delivered player-Station tracer to every live human rating: takeover and its exact apply-boundary revalidation never require Backfill or change Player.station. Ordinary human Admission stays enabled alongside canonical equal-GM commands, with humans ordered first and GM commands ordered by the existing owner-assigned key. The last release or agreed GM loss reapplies the CURRENT authored rating, including a mixed human/AI rating selected during takeover; a surviving equal operator keeps the overlay. The shared authored iframe and crew-public attribution require no new simulation state or snapshot shape. The seeded attended fixture replays the complete recorded human command log and GM journal through production Admission under the same deterministic human-seat setup; portable ReplayArtifact still omits human tenure, as documented in headless/replay.rs."
     architecture:
       kind: station-control-policy
       authority: authoritative
       coordinates: [gm-milestone-directing]
       runs_in: [host-browser-runtime, headless-runtime]
+
+    implementation:
+      status: declared
+      paths: [src/gm_puppet.rs, src/gm_action.rs, gui/gm-station-puppet.js, assets/strings/strings.csv]
+      symbols: [validate_station_action, reconcile_station_puppet_control, admit_station_puppet_commands, createGmStationPuppet]
+      tests: [src/gm_puppet.rs, src/gm_action.rs, src/snapshot_tests.rs, tests/replay_simulation.rs, tests/client/gm-station-puppet.test.js, tests/smoke/gm-page.spec.js]
 
   - component: gm-t2-performing-surface
     core:

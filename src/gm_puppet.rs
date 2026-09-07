@@ -240,7 +240,7 @@ pub fn validate_station_action(
     operator_id: &str,
     puppets: &StationPuppets,
     config: Option<&crate::ship::config::ShipConfig>,
-    ratings: Option<&ActiveStationRatings>,
+    _ratings: Option<&ActiveStationRatings>,
 ) -> Result<(), crate::gm_action::GmActionRefusalReason> {
     use crate::gm_action::{GmAction, GmActionRefusalReason};
     let station = match action {
@@ -272,15 +272,10 @@ pub fn validate_station_action(
         station.clone(),
     );
     match action {
-        GmAction::SetStationPuppet { active: false, .. } => Ok(()),
-        GmAction::SetStationPuppet { active: true, .. } => {
-            let backfill = ratings
-                .and_then(|ratings| ratings.0.get(station))
-                .is_some_and(|rating| rating == crate::ship::rating::BACKFILL_RATING);
-            backfill
-                .then_some(())
-                .ok_or(GmActionRefusalReason::StationNotBackfill)
-        }
+        // Membership overlays AI operation, never human tenure. A holder's
+        // live rating (including a reconnect before this boundary) does not
+        // grant an exclusive lock against an equal GM operator.
+        GmAction::SetStationPuppet { .. } => Ok(()),
         GmAction::IssueStationCommand {
             target: system,
             payload,
@@ -736,6 +731,10 @@ console = "helm.html"
 name = "Manual"
 automated_systems = []
 
+[[station.rating]]
+name = "Assisted"
+automated_systems = ["impulse-drive"]
+
 [[station]]
 id = "tactical"
 name = "Tactical"
@@ -869,6 +868,108 @@ station = "tactical"
                 .source_for(&crate::core::messages::SystemId("helm-thrust".into())),
             ControlSource::Ai,
             "release restores the Station's ordinary Backfill rating",
+        );
+    }
+
+    #[test]
+    fn human_holder_keeps_authority_and_release_restores_the_live_mixed_rating() {
+        use crate::core::messages::{SystemControlPayload, SystemId};
+        let config = control_test_config();
+        let helm = StationId("helm".into());
+        let thrust = SystemId("helm-thrust".into());
+        let impulse = SystemId("impulse-drive".into());
+        let mut sessions = crate::lobby::Sessions(Default::default());
+        sessions
+            .0
+            .register("crew".into(), "Helm player".into())
+            .unwrap();
+        sessions.0.set_station("crew", Some(helm.clone()));
+        let (sources, ratings) = crate::ship::rating::seed_boot_ratings(&config, |station| {
+            if station.id == helm {
+                "Manual".into()
+            } else {
+                "Backfill".into()
+            }
+        });
+        let target = target("player-1", "helm");
+        let mut app = App::new();
+        app.insert_resource(sessions)
+            .init_resource::<StationPuppets>()
+            .init_resource::<PreviousStationPuppetTargets>()
+            .add_systems(Update, reconcile_station_puppet_control);
+        let entity = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                EntityUuid("player-1".into()),
+                ShipConfigComponent(config.clone()),
+                ShipSystemControlSources(sources),
+                ActiveStationRatings(ratings),
+            ))
+            .id();
+        for operator in ["gm-b", "gm-a"] {
+            let action = crate::gm_action::GmAction::SetStationPuppet {
+                ship: target.ship.clone(),
+                station: helm.clone(),
+                active: true,
+            };
+            assert_eq!(
+                validate_station_action_in_world(app.world_mut(), &action, operator),
+                Ok(())
+            );
+            assert!(app
+                .world_mut()
+                .resource_mut::<StationPuppets>()
+                .set_operator(target.clone(), operator.into(), true));
+        }
+        app.update();
+        // A human changes their ordinary rating during takeover. Release must
+        // restore THIS live rating, rather than the rating at takeover time.
+        app.world_mut()
+            .get_mut::<ActiveStationRatings>(entity)
+            .unwrap()
+            .0
+            .insert(helm.clone(), "Assisted".into());
+        app.update();
+        let sources = app.world().get::<ShipSystemControlSources>(entity).unwrap();
+        let sessions = app.world().resource::<crate::lobby::Sessions>();
+        assert!(crate::command_admission::is_command_authorized(
+            "crew",
+            &thrust,
+            &SystemControlPayload::SetThrust { value: 0.4 },
+            sources,
+            sessions,
+            &config,
+            None,
+        ));
+        assert!(!sources.0.policy_for(&impulse).operate_ai);
+        assert_eq!(sessions.0.station_for_token("crew"), Some(&helm));
+        app.world_mut()
+            .resource_mut::<StationPuppets>()
+            .remove_operator_everywhere("gm-a");
+        app.update();
+        assert!(
+            !app.world()
+                .get::<ShipSystemControlSources>(entity)
+                .unwrap()
+                .0
+                .policy_for(&impulse)
+                .operate_ai,
+            "equal surviving GM retains takeover"
+        );
+        app.world_mut()
+            .resource_mut::<StationPuppets>()
+            .remove_operator_everywhere("gm-b");
+        app.update();
+        let sources = app.world().get::<ShipSystemControlSources>(entity).unwrap();
+        assert_eq!(sources.0.source_for(&thrust), ControlSource::Human);
+        assert_eq!(sources.0.source_for(&impulse), ControlSource::Ai);
+        assert_eq!(
+            app.world()
+                .resource::<crate::lobby::Sessions>()
+                .0
+                .station_for_token("crew"),
+            Some(&helm)
         );
     }
 

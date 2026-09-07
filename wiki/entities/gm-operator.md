@@ -259,8 +259,8 @@ command alone records an internal Pending boundary after admission, then
 replaces it exactly once with the ordinary System consumer's terminal Applied
 or Refused feedback; Pending is neither projected nor a terminal idempotency
 fact. Sequencing therefore
-cannot promise a takeover after a holder has reconnected or call a same-tick
-command Applied after an earlier release removed its authority.
+must preserve a takeover when a human holder reconnects, while refusing a
+same-tick command after an earlier release removed its authority.
 The existing lockstep gate still owns the combined virtual-time decision, so a
 GM resume cannot release a peer, recovery, or model-readiness hold.
 
@@ -334,7 +334,7 @@ blackboard detail, which remains accessible through Station puppeting.
 
 `SetStationPuppet` and `IssueStationCommand` extend the same attributed,
 idempotent `GmActionJournal`. A takeover may begin only on an authored Station
-whose live `ActiveStationRatings` entry is `Backfill`. `StationPuppets` stores
+on a player ship, including a human-held Station on any live rating. `StationPuppets` stores
 the canonical `(ship, station, sorted equal-operator set)` membership; it is
 captured in snapshots and folded into the simulation digest alongside the
 applied GM journal. A Station command is decoded and passes the shared
@@ -387,14 +387,15 @@ Backfill AI emitters stop; it never changes `Player.station`. The crew's
 `SimState` identifies active operators and the latest admitted activity, and
 the shared console runtime renders that truth in the affected authentic
 interface. Releasing the last operator reapplies the Station's ordinary live
-rating, so an absent holder returns to Backfill and the original token can
+rating, including a mixed human/AI rating changed during takeover, so a present
+holder retains their human Systems and an absent holder returns to Backfill and the original token can
 still reconnect to the same Station.
 
 At an agreed GM host-loss boundary, that operator is removed from every
 takeover and its activity projection. Equal surviving operators retain their
 membership; when the departed GM was last, the Station's ordinary rating is
 reapplied at that same boundary. The frozen GM binding remains available to an
-authenticated recovered peer, which may take a Backfill Station again. Each
+authenticated recovered peer, which may take a player Station again. Each
 recovery advances a canonical slot generation recorded in the journal: grants
 retain the generation in which they were sequenced, so pre-loss work remains
 durably Refused even after `rejoin` clears the transient departed flag, while

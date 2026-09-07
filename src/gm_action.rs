@@ -4462,7 +4462,7 @@ station = "helm"
     }
 
     #[test]
-    fn delayed_takeover_revalidates_backfill_at_the_apply_boundary() {
+    fn delayed_takeover_accepts_a_holder_reconnecting_before_the_apply_boundary() {
         let helm = crate::core::messages::StationId("helm".into());
         let ship = crate::command_admission::ShipKey("player-1".into());
         let action = GmAction::SetStationPuppet {
@@ -4487,20 +4487,17 @@ station = "helm"
         app.update();
 
         let target = crate::gm_puppet::StationPuppetTarget::new(ship, helm);
-        assert!(!app
+        assert!(app
             .world()
             .resource::<crate::gm_puppet::StationPuppets>()
             .is_active(&target));
         let entry = &app.world().resource::<GmActionLog>().entries()[0];
-        assert_eq!(entry.outcome, GmActionOutcome::Refused);
-        assert_eq!(
-            entry.reason,
-            Some(GmActionRefusalReason::StationNotBackfill)
-        );
+        assert_eq!(entry.outcome, GmActionOutcome::Applied);
+        assert_eq!(entry.reason, None);
         assert_eq!(
             app.world().resource::<GmActionJournal>().applied_results(),
             app.world().resource::<GmActionLog>().entries(),
-            "the apply-time refusal is durable journal state",
+            "the shared takeover is durable journal state",
         );
     }
 

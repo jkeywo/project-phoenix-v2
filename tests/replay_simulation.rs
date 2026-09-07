@@ -1223,3 +1223,225 @@ fn rebuild_log(entries: &[LoggedCommand]) -> project_phoenix::command_admission:
 struct Wrapper {
     entries: Vec<LoggedCommand>,
 }
+
+/// #1313: replay an attended fixture with its exact deterministic seat schedule.
+/// Portable ReplayArtifact deliberately does not record human tenure yet (see
+/// headless/replay.rs), so this driver reinstalls that same environment while
+/// replaying EVERY recorded human command and the production GM journal.
+#[test]
+fn human_held_station_mixed_commands_replay_through_production_admission() {
+    use bevy::prelude::*;
+    use project_phoenix::gm_puppet::{StationPuppetActivity, StationPuppets};
+    use project_phoenix::ship::components::{
+        ActiveStationRatings, ShipConfigComponent, ShipSystemControlSources,
+    };
+
+    #[derive(Resource)]
+    struct HumanInputs {
+        entries: Vec<LoggedCommand>,
+        next: usize,
+        seated: bool,
+    }
+    #[derive(Resource, Default)]
+    struct ObservedAdmission(Vec<SystemControlPayload>);
+
+    fn inject_human(world: &mut World) {
+        let tick = world.resource::<project_phoenix::sim_tick::SimTick>().0;
+        if tick < 100 {
+            return;
+        }
+        if !world.resource::<HumanInputs>().seated {
+            let helm = StationId("helm".into());
+            let mut sessions = world.resource_mut::<project_phoenix::lobby::Sessions>();
+            sessions
+                .0
+                .register("seeded-human".into(), "Helm player".into())
+                .unwrap();
+            sessions.0.set_station("seeded-human", Some(helm.clone()));
+            let mut query = world.query_filtered::<(
+                &ShipConfigComponent,
+                &mut ActiveStationRatings,
+                &mut ShipSystemControlSources,
+            ), With<project_phoenix::server_app::LocalShip>>();
+            let (config, mut ratings, mut sources) = query.single_mut(world).unwrap();
+            ratings.0.insert(helm.clone(), "Std".into());
+            project_phoenix::ship::rating::apply_rating(&config.0, &helm, "Std", &mut sources.0);
+            world.resource_mut::<HumanInputs>().seated = true;
+        }
+        loop {
+            let mut inputs = world.resource_mut::<HumanInputs>();
+            let Some(command) = inputs
+                .entries
+                .get(inputs.next)
+                .filter(|entry| entry.tick <= tick)
+                .cloned()
+            else {
+                break;
+            };
+            inputs.next += 1;
+            world
+                .resource_mut::<Messages<project_phoenix::lobby::InboundMessage>>()
+                .write(project_phoenix::lobby::InboundMessage {
+                    token: "seeded-human".into(),
+                    msg: project_phoenix::core::messages::ClientMessage::ControlSystem {
+                        target: command.target,
+                        payload: command.payload,
+                    },
+                });
+        }
+    }
+    fn observe_admission(
+        tick: Res<project_phoenix::sim_tick::SimTick>,
+        ships: Query<
+            &project_phoenix::core::messages::AdmittedCommands,
+            With<project_phoenix::server_app::LocalShip>,
+        >,
+        mut observed: ResMut<ObservedAdmission>,
+    ) {
+        if tick.0 == 145 {
+            observed.0 = ships
+                .single()
+                .unwrap()
+                .0
+                .iter()
+                .map(|command| command.payload.clone())
+                .collect();
+        }
+    }
+    let args = args();
+    let mut discovery = drive_run(&args, &[], 0).unwrap();
+    let ship = {
+        let world = discovery.app_mut().world_mut();
+        let mut query = world.query_filtered::<&project_phoenix::entities::spawner::EntityUuid, With<project_phoenix::server_app::LocalShip>>();
+        ShipKey(query.single(world).unwrap().0.clone())
+    };
+    let helm = StationId("helm".into());
+    let membership = |active| GmAction::SetStationPuppet {
+        ship: ship.clone(),
+        station: helm.clone(),
+        active,
+    };
+    let thrust = |value| GmAction::IssueStationCommand {
+        ship: ship.clone(),
+        station: helm.clone(),
+        target: SystemId("helm-thrust".into()),
+        payload: project_phoenix::core::codec::canonical_system_command(
+            &SystemControlPayload::SetThrust { value },
+        )
+        .unwrap(),
+    };
+    let mut journal = GmActionJournal::default();
+    for grant in [
+        station_grant(HostSlot(3), "gm-b", 1, 120, "b-take", membership(true)),
+        station_grant(HostSlot(2), "gm-a", 2, 120, "a-take", membership(true)),
+        station_grant(HostSlot(2), "gm-a", 3, 145, "a-thrust", thrust(0.65)),
+        station_grant(HostSlot(3), "gm-b", 4, 145, "b-thrust", thrust(0.85)),
+        station_grant(HostSlot(2), "gm-a", 5, 180, "a-release", membership(false)),
+        station_grant(HostSlot(3), "gm-b", 6, 205, "b-release", membership(false)),
+    ] {
+        journal.insert(grant.clone()).unwrap();
+        let count = journal.len();
+        journal.insert(grant).unwrap();
+        assert_eq!(journal.len(), count, "exact retransmission is inert");
+    }
+    let inputs = [(145, 0.15), (145, 0.25), (190, -0.5), (210, 0.5)]
+        .into_iter()
+        .map(|(tick, value)| {
+            command(
+                tick,
+                SystemId("helm-thrust".into()),
+                SystemControlPayload::SetThrust { value },
+            )
+        })
+        .collect::<Vec<_>>();
+    let run = |inputs: Vec<LoggedCommand>, mut journal: GmActionJournal| {
+        // The recorded outcomes are re-derived at their original boundaries.
+        journal.restore_applied_frontier(0).unwrap();
+        let mut sim = PhoenixSim::new(&args, 0, CHECKPOINT_EVERY).unwrap();
+        sim.app_mut()
+            .insert_resource(HumanInputs {
+                entries: inputs,
+                next: 0,
+                seated: false,
+            })
+            .insert_resource(SeededLossGmActions(journal))
+            .init_resource::<ObservedAdmission>()
+            .add_systems(
+                OnEnter(GamePhase::InProgress),
+                seed_loss_gm_actions.after(project_phoenix::gm_action::reset),
+            )
+            .add_systems(
+                FixedUpdate,
+                inject_human
+                    .after(project_phoenix::lobby::LobbySystemSet)
+                    .before(project_phoenix::gm_puppet::reconcile_station_puppet_control),
+            )
+            .add_systems(
+                FixedUpdate,
+                observe_admission
+                    .after(project_phoenix::gm_puppet::StationPuppetAdmissionSet)
+                    .before(project_phoenix::sim_sets::SimSet::Input),
+            );
+        vellum_replay::replay_into(&mut sim, &[]).unwrap();
+        let world = sim.app_mut().world_mut();
+        assert_eq!(
+            world
+                .resource::<project_phoenix::lobby::Sessions>()
+                .0
+                .station_for_token("seeded-human"),
+            Some(&helm)
+        );
+        assert!(world.resource::<StationPuppets>().entries().is_empty());
+        let mut query = world.query_filtered::<(
+            &ShipSystemControlSources,
+            &project_phoenix::ship::state::ShipPhysics,
+        ), With<project_phoenix::server_app::LocalShip>>();
+        let (sources, physics) = query.single(world).unwrap();
+        assert_eq!(
+            sources.0.source_for(&SystemId("helm-thrust".into())),
+            project_phoenix::ship::control_source::ControlSource::Human
+        );
+        let physics = *physics;
+        let observed = world.resource::<ObservedAdmission>().0.clone();
+        let activity = world.resource::<StationPuppetActivity>().entries().to_vec();
+        (
+            sim.recorded_log(),
+            sim.recorded_gm_actions(),
+            observed,
+            activity,
+            physics,
+            sim.seal(),
+        )
+    };
+    let first = run(inputs, journal);
+    assert_eq!(
+        first.0.len(),
+        4,
+        "every human command crossed normal Admission, including after release"
+    );
+    assert_eq!(
+        first.2,
+        [0.15, 0.25, 0.65, 0.85]
+            .into_iter()
+            .map(|value| SystemControlPayload::SetThrust { value })
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        first
+            .3
+            .iter()
+            .map(|entry| entry.operator_id.as_str())
+            .collect::<Vec<_>>(),
+        ["gm-a", "gm-b"]
+    );
+    assert!(first
+        .1
+        .applied_results()
+        .iter()
+        .all(|result| result.outcome == GmActionOutcome::Applied));
+    let replay = run(first.0.entries().to_vec(), first.1.clone());
+    assert_eq!(
+        replay, first,
+        "human log/order, GM journal, anonymous commands, effects and every digest replay exactly"
+    );
+}

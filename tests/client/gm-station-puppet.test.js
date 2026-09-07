@@ -9,7 +9,7 @@ import {
 } from '../../gui/gm-station-puppet.js';
 import { initConsole } from '../../gui/console-core.js';
 
-function projection({ operators = [], activity = [], results = [] } = {}) {
+function projection({ operators = [], activity = [], results = [], rating = 'Backfill' } = {}) {
   return {
     ships: [{
       ship_id: 'ship-player-1',
@@ -18,7 +18,7 @@ function projection({ operators = [], activity = [], results = [] } = {}) {
         station_id: 'captain',
         name: 'Captain',
         console: 'gui/captain-console.html',
-        rating: 'Backfill',
+        rating,
         operators,
       }],
       ship_config: {
@@ -29,7 +29,7 @@ function projection({ operators = [], activity = [], results = [] } = {}) {
         station_tutorials: {},
         station_assist_gaps: {},
       },
-      station_ratings: { captain: 'Backfill' },
+      station_ratings: { captain: rating },
       control_sources: { 'red-alert': operators.length ? 'Human' : 'Ai' },
       blackboards: [['red-alert', {
         kind: 'Captain',
@@ -248,6 +248,30 @@ describe('GM authentic Station projection', () => {
       active: false,
       correlation: 'corr-release',
     }));
+  });
+
+  it('offers a human-held Station to two equal operators and retains the live rating on release', () => {
+    const submitStationPuppet = vi.fn(() => true);
+    const controller = createGmStationPuppet({
+      doc: document, win: window, t: id => id,
+      getOperator: () => ({ id: 'gm-2' }), submitStationPuppet,
+      correlation: kind => 'human-' + kind,
+    });
+    const button = document.getElementById('gm-station-toggle');
+    controller.update(projection({ rating: 'Manual', operators: ['gm-1'] }));
+    expect(button.disabled).toBe(false);
+    button.click();
+    expect(submitStationPuppet).toHaveBeenLastCalledWith(expect.objectContaining({ active: true }));
+    controller.update(projection({ rating: 'Manual', operators: ['gm-1', 'gm-2'] }));
+    expect(controller.state().selectedRow.station.rating).toBe('Manual');
+    expect(button.dataset.active).toBe('true');
+    button.click();
+    expect(submitStationPuppet).toHaveBeenLastCalledWith(expect.objectContaining({ active: false }));
+    controller.update(projection({ rating: 'Manual', operators: ['gm-1'] }));
+    expect(button.disabled).toBe(false);
+    expect(button.dataset.active).toBe('false');
+    expect(document.getElementById('gm-station-status').textContent)
+      .toBe('server.gm.station.operators');
   });
 
   it('preserves authentic correlations and settles applied/refused feedback on the originating iframe', () => {

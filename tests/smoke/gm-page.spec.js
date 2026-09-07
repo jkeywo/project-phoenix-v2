@@ -2575,3 +2575,152 @@ test(
     expect(errors).toEqual([]);
   },
 );
+
+// #1313: actual human and two equal GM operators share the authored Captain
+// interface. Every effect and receipt below comes back from ordinary consumers.
+test('two equal GMs puppet a human-held Station without blocking its player', { tag: '@core' }, async ({ context }) => {
+  test.setTimeout(180_000);
+  const ship = await context.newPage();
+  const errors = captureServerPageErrors(ship);
+  await ship.goto('/?scenario=assets/worlds/default.toml');
+  await waitForWasmReady(ship);
+  const hostId = await readHostPeerId(ship);
+  const crew = [];
+  for (const name of ['Captain', 'Helm', 'Engineering', 'Science']) {
+    const client = await createTestClient(context, hostId, { name });
+    crew.push(client);
+  }
+  // Let the crew-count layout settle before seating anyone, as in the
+  // established four-crew Helm fixture above. A later layout change clears
+  // earlier seats and would accidentally test Backfill instead of #1313.
+  for (const [index, name] of ['Captain', 'Helm', 'Engineering', 'Science'].entries()) {
+    await selectAndWait(crew[index], name);
+  }
+  const captain = crew[0];
+  await ship.evaluate(() => window.__hostFleetOpen());
+  await waitForJoinCode(ship, 'fleet-code', 30_000);
+  const fleetCode = await ship.locator('#fleet-code').textContent();
+  const gms = [];
+  const gmErrors = [];
+  for (let index = 0; index < 2; index += 1) {
+    const gm = await context.newPage();
+    gmErrors.push(captureServerPageErrors(gm));
+    await gm.goto('/?scenario=assets/worlds/default.toml');
+    await waitForWasmReady(gm);
+    await joinFleetAsGm(gm, fleetCode);
+    gms.push(gm);
+  }
+  for (const client of crew) await client.send('SetReady', { ready: true });
+  for (const gm of gms) await gm.locator('#gm-ready-btn').click();
+  await captain.waitForMessage('GameStarted', 30_000);
+  const expectHeldCaptain = async () => {
+    const assigned = await captain.page.evaluate(token => window.__messages
+      .filter(message => message.type === 'StationAssigned' && message.data.token === token)
+      .at(-1)?.data.station_id, captain.token);
+    expect(assigned).toBe('captain');
+  };
+  await expectHeldCaptain();
+  // The existing fleet browser adapter currently freezes crew: [] and primes
+  // its rating replication from that boot. Establish the attended fixture via
+  // the player's ordinary live rating control, which also proves their tenure
+  // authorizes it. This is a real human Station, never a Backfill substitute.
+  await Promise.all([ship, ...gms].map(page => page.waitForFunction(
+    () => window.__saveSlotsPhase === 'InProgress', undefined, { timeout: 30_000 },
+  )));
+  await gms[0].waitForFunction(() => window.__hostGmStationState?.().projection?.ships
+    ?.some(ship => ship.blackboards.length > 0), undefined, { timeout: 30_000 });
+  await captain.send('SetStationRating', { rating_name: 'Std' });
+  const operators = [];
+  for (const gm of gms) {
+    try {
+      await gm.waitForFunction(() => window.__hostGmStationState?.().projection?.ships?.some(row =>
+        row.stations.some(station => station.station_id === 'captain' && station.rating === 'Std')),
+      undefined, { timeout: 30_000 });
+    } catch (error) {
+      const state = await gm.evaluate(() => ({
+        phase: window.__saveSlotsPhase,
+        start: window.__hostGmStartState?.(),
+        ships: window.__hostGmStationState?.().projection?.ships?.map(ship => ({ id: ship.ship_id, stations: ship.stations })),
+      }));
+      throw new Error('Held Captain projection missing: ' + JSON.stringify({ state, errors, gmErrors }), { cause: error });
+    }
+    await gm.evaluate(() => {
+      const select = document.getElementById('gm-station-select');
+      select.value = [...select.options].find(option => option.textContent.endsWith('Captain')).value;
+      select.dispatchEvent(new Event('change'));
+    });
+    await expect(gm.locator('#gm-station-frame')).toHaveAttribute('src', 'gui/cruiser/captain.html');
+    await gm.locator('#gm-station-toggle').scrollIntoViewIfNeeded();
+    await expect(gm.locator('#gm-station-toggle')).toBeEnabled();
+    await gm.locator('#gm-station-toggle').click();
+    operators.push(await gm.evaluate(() => window.__hostLocalGm().id));
+  }
+  const [gm, second] = gms;
+  await gm.waitForFunction(ids => {
+    const row = window.__hostGmStationState?.().selectedRow;
+    return row?.station.operators.length === 2 && ids.every(id => row.station.operators.includes(id))
+      && row.station.rating === 'Std' && row.ship.control_sources['red-alert'] === 'Human';
+  }, operators);
+  const alert = gm.frameLocator('#gm-station-frame').locator('ph-red-alert');
+  await gm.locator('#gm-station-frame').scrollIntoViewIfNeeded();
+  const initialAlert = await alert.locator('#alert-btn').evaluate(button => button.classList.contains('active'));
+  await alert.locator('#alert-btn').click();
+  await expect(alert.locator('#feedback-status')).toHaveAttribute('data-state', 'Applied');
+  await gm.waitForFunction(active => window.__hostGmStationState().selectedRow.ship.blackboards
+    .some(([, board]) => board.kind === 'Captain' && board.data?.red_alert === active),
+  !initialAlert, { timeout: 30_000 });
+
+  const humanOrder = async (active, correlation) => {
+    await captain.send('ControlSystemCorrelated', {
+      correlation, target: 'red-alert', payload: { type: 'SetRedAlert', data: { active } },
+    });
+    await captain.page.waitForFunction(correlation => window.__messages.some(message =>
+      message.type === 'ActionFeedback' && message.data.correlation === correlation
+        && message.data.outcome === 'Applied'), correlation);
+    await gm.waitForFunction(active => window.__hostGmStationState().selectedRow.ship.blackboards
+      .some(([, board]) => board.kind === 'Captain' && board.data?.red_alert === active),
+    active, { timeout: 30_000 });
+  };
+  await humanOrder(initialAlert, 'human-during-takeover');
+  await second.evaluate(active => {
+    const row = window.__hostGmStationState().selectedRow;
+    const request = { ship: row.ship.ship_id, station: 'captain', target: 'red-alert',
+      payload: { type: 'SetRedAlert', data: { active } }, correlation: 'equal-gm-exact-duplicate' };
+    if (!window.__hostIssueStationCommand(request) || !window.__hostIssueStationCommand(request)) {
+      throw new Error('duplicate submission did not enter the GM ingress');
+    }
+  }, !initialAlert);
+  await gm.waitForFunction(id => window.__hostGmStationState().projection.results.some(result =>
+    result.operator_id === id && result.correlation === 'equal-gm-exact-duplicate'
+      && result.outcome === 'applied'), operators[1]);
+  expect(await gm.evaluate(id => window.__hostGmStationState().projection.results.filter(result =>
+    result.operator_id === id && result.correlation === 'equal-gm-exact-duplicate').length, operators[1])).toBe(1);
+  await captain.page.waitForFunction(ids => {
+    const snapshot = window.__messages.filter(message => message.type === 'SimState').at(-1)?.data.snapshot;
+    const row = snapshot?.station_puppets?.find(row => row.station === 'captain');
+    return row?.operators?.length === 2 && row.latest_activity?.operator_id === ids[1];
+  }, operators);
+
+  await second.close();
+  await gm.waitForFunction(id => {
+    const row = window.__hostGmStationState().selectedRow;
+    return row.station.operators.length === 1 && row.station.operators[0] === id;
+  }, operators[0]);
+  await humanOrder(initialAlert, 'human-after-gm-disconnect');
+  await gm.locator('#gm-station-toggle').scrollIntoViewIfNeeded();
+  await gm.locator('#gm-station-toggle').click();
+  await gm.waitForFunction(() => {
+    const row = window.__hostGmStationState().selectedRow;
+    return row.station.operators.length === 0 && row.station.rating === 'Std'
+      && row.ship.control_sources['red-alert'] === 'Human';
+  });
+  await humanOrder(!initialAlert, 'human-after-release');
+  await expectHeldCaptain();
+  const token = captain.token;
+  await captain.close();
+  await ship.waitForFunction(token => !(0, eval)('tokenConns').has(token), token);
+  const reconnected = await reconnectRealCrew(context, hostId, token, 'captain');
+  await expect(reconnected.frameLocator('#captain-iframe').locator('ph-red-alert #alert-btn')).toBeEnabled();
+  expect(errors).toEqual([]);
+  for (const errors of gmErrors) expect(errors).toEqual([]);
+});

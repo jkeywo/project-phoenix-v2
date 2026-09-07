@@ -82,6 +82,8 @@ use bevy::asset::AssetId;
 use bevy::image::Image;
 use bevy::prelude::*;
 
+use super::surface_stats::{elapsed_ns, DiscardReason};
+use std::time::Instant;
 use vellum_ultralight::surface::DirtyRect;
 
 /// The staging buffer a frame travels in.
@@ -285,13 +287,22 @@ pub struct PaneUploadQueue {
 pub fn defer(deferred: &mut Vec<PaneUpload>, mut upload: PaneUpload, tally: &mut PaneUploadTally) {
     upload.attempts = upload.attempts.saturating_add(1);
     if upload.attempts >= UPLOAD_DEFER_ATTEMPTS {
+        if let Some(trace) = upload.bytes.trace() {
+            trace.deferred(upload.attempts);
+        }
         tally.dropped += 1;
+        if let Some(trace) = upload.bytes.trace_mut() {
+            trace.discarded(DiscardReason::DeferralExhausted);
+        }
         return;
     }
     if let Some(slot) = deferred.iter_mut().find(|held| held.image == upload.image) {
         // Carry the older frame's patience forward, so an image that never
         // arrives still ages out rather than being renewed by every new frame.
         upload.attempts = upload.attempts.max(slot.attempts);
+        if let Some(trace) = upload.bytes.trace() {
+            trace.deferred(upload.attempts);
+        }
         if slot.full && !upload.full {
             upload.rect = DirtyRect {
                 left: 0,
@@ -300,11 +311,20 @@ pub fn defer(deferred: &mut Vec<PaneUpload>, mut upload: PaneUpload, tally: &mut
                 bottom: upload.surface.1,
             };
             upload.full = true;
+            if let Some(trace) = upload.bytes.trace() {
+                trace.promoted(u64::from(upload.surface.0) * u64::from(upload.surface.1));
+            }
         }
-        let superseded = std::mem::replace(slot, upload);
+        let mut superseded = std::mem::replace(slot, upload);
+        if let Some(trace) = superseded.bytes.trace_mut() {
+            trace.discarded(DiscardReason::SupersededDeferral);
+        }
         drop(superseded);
         tally.dropped += 1;
     } else {
+        if let Some(trace) = upload.bytes.trace() {
+            trace.deferred(upload.attempts);
+        }
         deferred.push(upload);
     }
     tally.deferred += 1;
@@ -367,6 +387,11 @@ pub fn extract_pane_uploads(
     let Some(mut pending) = main.get_resource_mut::<PanePendingUploads>() else {
         return;
     };
+    for upload in &pending.uploads {
+        if let Some(trace) = upload.bytes.trace() {
+            trace.extracted();
+        }
+    }
     queue.incoming.append(&mut pending.uploads);
     pending.tally = std::mem::take(&mut queue.tally);
 }
@@ -393,7 +418,7 @@ pub fn upload_pane_frames(
     let mut tally = std::mem::take(&mut queue.tally);
     let mut deferred = Vec::new();
     let mut warn_refusal = false;
-    for upload in batch {
+    for mut upload in batch {
         let Some(gpu) = gpu_images.get(upload.image) else {
             defer(&mut deferred, upload, &mut tally);
             continue;
@@ -402,10 +427,14 @@ pub fn upload_pane_frames(
         let Some(layout) = upload_layout(upload.rect, upload.surface, texture, upload.bytes.len())
         else {
             tally.dropped += 1;
+            if let Some(trace) = upload.bytes.trace_mut() {
+                trace.discarded(DiscardReason::RefusedLayout);
+            }
             warn_refusal = true;
             // Dropped here, which recycles the buffer.
             continue;
         };
+        let write_started = upload.bytes.trace().map(|_| Instant::now());
         render_queue.write_texture(
             TexelCopyTextureInfo {
                 texture: &gpu.texture,
@@ -429,6 +458,14 @@ pub fn upload_pane_frames(
                 depth_or_array_layers: 1,
             },
         );
+        let write_texture_ns = elapsed_ns(write_started);
+        if let Some(trace) = upload.bytes.trace_mut() {
+            trace.uploaded(
+                u64::from(layout.size.0) * u64::from(layout.size.1),
+                upload.full,
+                write_texture_ns,
+            );
+        }
         tally.uploaded += 1;
         if upload.full {
             tally.uploaded_full += 1;
@@ -455,6 +492,11 @@ pub fn upload_pane_frames(
 pub fn discard_pane_uploads(mut pending: ResMut<PanePendingUploads>) {
     if !pending.uploads.is_empty() {
         let dropped = pending.uploads.len() as u32;
+        for upload in &mut pending.uploads {
+            if let Some(trace) = upload.bytes.trace_mut() {
+                trace.discarded(DiscardReason::NoRenderer);
+            }
+        }
         pending.uploads.clear();
         pending.tally = PaneUploadTally {
             dropped,
@@ -495,6 +537,109 @@ mod tests {
             bytes: buffer(len),
             attempts: 0,
         }
+    }
+
+    fn observed_upload(
+        observer: &super::super::surface_stats::SurfaceObserver,
+        full: bool,
+    ) -> PaneUpload {
+        use super::super::surface_stats::{FullCopyReasons, SurfaceIdentity};
+        let mut upload = upload(AssetId::<Image>::invalid(), 2, 64);
+        upload.full = full;
+        if !full {
+            upload.rect = rect(1, 1, 2, 2);
+        }
+        let identity = SurfaceIdentity {
+            id: PANE.0,
+            epoch: 2,
+            kind: "console",
+            width: 4,
+            height: 4,
+            device_scale: 2.0,
+            visible: true,
+        };
+        upload.bytes = upload.bytes.with_trace(Some(observer.produced(
+            identity,
+            upload.rect.pixel_count(),
+            full,
+            FullCopyReasons::default(),
+            None,
+        )));
+        upload
+    }
+
+    #[test]
+    fn attribution_records_supersession_full_promotion_and_inherited_deferral_age() {
+        use super::super::surface_stats::{Operation, SurfaceObserver};
+        let observer = SurfaceObserver::new(Instant::now(), 64);
+        let mut deferred = Vec::new();
+        let mut tally = PaneUploadTally::default();
+        let mut first = observed_upload(&observer, true);
+        first.attempts = 3;
+        defer(&mut deferred, first, &mut tally);
+        let next = observed_upload(&observer, false);
+        defer(&mut deferred, next, &mut tally);
+        assert_eq!(deferred.len(), 1);
+        assert_eq!(deferred[0].attempts, 4);
+        assert!(deferred[0].full);
+        let events = observer.events();
+        assert!(events.iter().any(|e| e.frame == Some(1)
+            && matches!(e.operation, Operation::Deferred { attempts: 4, .. })));
+        assert!(events
+            .iter()
+            .any(|e| e.frame == Some(1)
+                && matches!(e.operation, Operation::PromotedFull { pixels: 16 })));
+        assert!(events.iter().any(|e| e.frame == Some(0)
+            && matches!(
+                e.operation,
+                Operation::Discarded {
+                    reason: DiscardReason::SupersededDeferral,
+                    ..
+                }
+            )));
+        let mut last = deferred.pop().unwrap();
+        last.attempts = UPLOAD_DEFER_ATTEMPTS - 1;
+        defer(&mut deferred, last, &mut tally);
+        assert!(deferred.is_empty());
+        let events = observer.events();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| matches!(e.operation, Operation::Discarded { .. }))
+                .count(),
+            2
+        );
+        assert!(matches!(
+            events.last().unwrap().operation,
+            Operation::Discarded {
+                reason: DiscardReason::DeferralExhausted,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn attribution_marks_contract_disposal_before_buffer_recycling() {
+        use super::super::surface_stats::{Operation, SurfaceObserver};
+        let observer = SurfaceObserver::new(Instant::now(), 16);
+        let mut app = App::new();
+        app.add_plugins(PaneUploadPlugin);
+        app.world_mut()
+            .resource_mut::<PanePendingUploads>()
+            .uploads
+            .push(observed_upload(&observer, true));
+        app.update();
+        app.update();
+        let events = observer.events();
+        assert_eq!(events.len(), 2);
+        assert!(matches!(
+            events[1].operation,
+            Operation::Discarded {
+                reason: DiscardReason::NoRenderer,
+                ..
+            }
+        ));
+        assert_eq!(events[1].surface.unwrap().epoch, 2);
     }
 
     #[test]

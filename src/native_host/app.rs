@@ -38,12 +38,12 @@ use crate::asteroids::lifecycle::AsteroidLifecyclePlugin;
 use crate::boot::{BootError, BootPlan, BootProfile, NativeRenderSurface, WorldIngest};
 use crate::core::messages::{GamePhase, ServerMessage};
 use crate::entities::loader::TemplateLoader;
-use crate::entities::template_preload::{preload_entity_templates, TemplatePreload};
+use crate::entities::template_preload::{TemplatePreload, preload_entity_templates};
 use crate::lobby::{LobbyOutbox, LobbyPlugin, SelectedShipResource, Target};
 use crate::logging::{LogFilterConfig, LoggingPlugin};
 use crate::modifiers::coordination::ModifierCoordinationPlugin;
 use crate::native_host::transport::NativeTransportPlugin;
-use crate::server_app::{add_simulation_plugins_with, SimPluginOptions};
+use crate::server_app::{SimPluginOptions, add_simulation_plugins_with};
 use crate::ship_plugin::PendingShipConfig;
 use crate::sim_rng::{SeedSource, SimRng};
 use crate::world::WorldPlugin;
@@ -1049,7 +1049,7 @@ fn solo_auto_start(
 /// therefore lives on other threads, and this call is the last thing the
 /// binary's `main` does.
 pub fn run(mut app: App) {
-    let capture =
+    let frames =
         match crate::perf::native_frames::NativeFrameCapture::install_from_environment(&mut app) {
             Ok(capture) => capture,
             Err(error) => {
@@ -1057,14 +1057,33 @@ pub fn run(mut app: App) {
                 return;
             }
         };
+    let origin = frames
+        .as_ref()
+        .map(|capture| (capture.clock_origin(), capture.started_unix_ms()));
+    let surfaces =
+        match crate::native_host::panes::surface_stats::SurfaceCapture::install_from_environment(
+            &mut app, origin,
+        ) {
+            Ok(capture) => capture,
+            Err(error) => {
+                eprintln!("surface capture refused: {error}");
+                return;
+            }
+        };
     let exit = app.run();
-    if let Some(capture) = capture {
+    // Close the live worker observer before serializing frame samples, which
+    // were already frozen by the final First schedule.
+    if let Some(capture) = surfaces {
+        if let Err(error) = capture.finish(&exit) {
+            eprintln!("surface capture failed: {error}");
+        }
+    }
+    if let Some(capture) = frames {
         if let Err(error) = capture.finish(&exit) {
             eprintln!("native frame capture failed: {error}");
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1105,11 +1124,13 @@ mod tests {
         // exact and case-sensitive, because `open_pane_for_name` is — a guard
         // that judged by a looser rule than the lookup it protects would refuse
         // a name the lookup never confuses.
-        assert!(pane_labels_shadowing_stations(
-            &["Ada".to_string(), "Grace".to_string()],
-            &stations(&["helm", "weapons"]),
-        )
-        .is_empty());
+        assert!(
+            pane_labels_shadowing_stations(
+                &["Ada".to_string(), "Grace".to_string()],
+                &stations(&["helm", "weapons"]),
+            )
+            .is_empty()
+        );
         assert!(
             pane_labels_shadowing_stations(&["Helm".to_string()], &stations(&["helm"]),).is_empty()
         );

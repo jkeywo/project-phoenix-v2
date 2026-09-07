@@ -105,6 +105,7 @@ use super::placement::{home_for_pane, PaneHome, PaneTile};
 use super::recovery::{close_after_thread_failure, service_faults, PaneFault};
 use super::registry::PaneId;
 use super::surface::{PaneSurface, PaneSurfaceError};
+use super::surface_stats::{elapsed_ns, DiscardReason, Operation, SurfaceObserver};
 use super::upload::{PanePendingUploads, PaneUpload};
 use super::PaneBusResource;
 use crate::console_bridge::HudStateChanged;
@@ -1026,6 +1027,7 @@ fn init_pane_host(world: &mut World) {
                 .get_resource::<HostLobbyBridgeResource>()
                 .map(|l| l.0.clone()),
             measure: world.contains_resource::<PaneFrameStats>(),
+            observer: world.get_resource::<SurfaceObserver>().cloned(),
             on_shutdown_timeout: Some(report_pane_shutdown_timeout),
             ..Default::default()
         };
@@ -2068,6 +2070,7 @@ fn drive_pane_host(
     // `--frame-stats` (see `super::frame_stats`): present only on a host asked
     // to measure, in which case the five phases below are stamped and recorded.
     mut stats: Option<ResMut<PaneFrameStats>>,
+    observer: Option<Res<SurfaceObserver>>,
 ) {
     if failed.is_some() {
         if let Some(bus) = &bus {
@@ -2086,7 +2089,8 @@ fn drive_pane_host(
         }
         return;
     }
-    let started = stats.is_some().then(Instant::now);
+    let started = (stats.is_some() || observer.is_some()).then(Instant::now);
+    let mut upload_ns = 0u64;
     let script = hud_latest.json.as_ref().map(|json| {
         let arg = serde_json::to_string(json).unwrap_or_else(|_| "\"{}\"".into());
         format!("window.__updateHud({arg})")
@@ -2172,15 +2176,25 @@ fn drive_pane_host(
                     }
                 }
             }
-            Ok(PaneEvent::Frame(frame)) => {
+            Ok(PaneEvent::Frame(mut frame)) => {
                 sample.frames += 1;
+                if let Some(trace) = frame.bytes.trace() {
+                    trace.drained();
+                }
                 if !host.mirror.accepts_frame(frame.id, frame.epoch) {
                     sample.stale += 1;
+                    if let Some(trace) = frame.bytes.trace_mut() {
+                        trace.discarded(if host.mirror.get(frame.id).is_some() {
+                            DiscardReason::StaleEpoch
+                        } else {
+                            DiscardReason::Closed
+                        });
+                    }
                     continue;
                 }
                 host.mirror.record_copy_ok(frame.id);
                 let pane = host.mirror.get(frame.id).unwrap();
-                let upload_start = stats.is_some().then(Instant::now);
+                let upload_start = (stats.is_some() || observer.is_some()).then(Instant::now);
                 pending.uploads.push(PaneUpload {
                     image: pane.image.id(),
                     epoch: frame.epoch,
@@ -2190,8 +2204,7 @@ fn drive_pane_host(
                     bytes: frame.bytes,
                     attempts: 0,
                 });
-                sample.upload_ms +=
-                    upload_start.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
+                upload_ns += elapsed_ns(upload_start);
             }
             Ok(PaneEvent::Stats(iteration)) => {
                 if let Some(stats) = stats.as_mut() {
@@ -2201,7 +2214,26 @@ fn drive_pane_host(
             Ok(PaneEvent::Started(_)) => {}
         }
     }
+    let drain_ns = elapsed_ns(started).saturating_sub(upload_ns);
+    if let Some(observer) = &observer {
+        observer.record(
+            None,
+            Operation::MainPass {
+                drain_ns,
+                queue_ns: upload_ns,
+                frames: sample.frames as u64,
+            },
+        );
+    }
     if let Some(reason) = failure {
+        if let Some(observer) = &observer {
+            observer.record(
+                None,
+                Operation::Lifecycle {
+                    action: "worker_failed",
+                },
+            );
+        }
         crate::perror!(
             log,
             LogCat::Lobby,
@@ -2223,8 +2255,8 @@ fn drive_pane_host(
         commands.insert_resource(PaneHostFailed);
         return;
     }
-    sample.drain_ms =
-        started.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0) - sample.upload_ms;
+    sample.upload_ms = upload_ns as f64 / 1_000_000.0;
+    sample.drain_ms = drain_ns as f64 / 1_000_000.0;
     sample.uploads = pending.tally.uploaded as usize;
     sample.uploads_full = pending.tally.uploaded_full as usize;
     sample.upload_bytes = pending.tally.bytes;

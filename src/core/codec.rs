@@ -344,6 +344,13 @@ pub fn decode_handshake_frame(
 //
 // Catalogue field names and defaults are the serde wire types' own.
 
+/// Encode a presentation diagnostic artifact, outside the crew protocol.
+pub fn encode_presentation_capture<T: serde::Serialize>(
+    capture: &T,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(capture)
+}
+
 fn stamp_json(stamp: &crate::delivery::stamp::DeliveryStamp) -> serde_json::Value {
     serde_json::json!({
         "protocol": stamp.protocol,

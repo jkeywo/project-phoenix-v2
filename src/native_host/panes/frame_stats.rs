@@ -7,6 +7,12 @@
 //! frame. Every received Stats event is accumulated, even when several pane
 //! iterations complete between two Bevy frames.
 //!
+//! The rounded console report is an orientation aid. [`super::surface_stats`]
+//! records opt-in bounded integer-nanosecond events, immutable surface/frame
+//! identities and exact terminal counters for attribution. It separates buffer
+//! starvation from discarded produced frames and explicitly reports truncation
+//! and frames still in flight when capture closes.
+//!
 //! The residual subtracts only main-world pane work and the fixed loop. Work
 //! performed concurrently on the pane thread is never subtracted from Bevy's
 //! frame budget. Pane textures are persistent: Image Modified events count

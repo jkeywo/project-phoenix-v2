@@ -132,6 +132,11 @@ impl NativeFrameCapture {
         self.origin
     }
 
+    /// Wall-clock label for collectors sharing `clock_origin`.
+    pub fn started_unix_ms(&self) -> u128 {
+        self.started_unix_ms
+    }
+
     /// A successful, fully observed bounded run is the only complete capture.
     /// Early operator exit remains useful evidence with `complete: false`.
     pub fn finish(self, exit: &AppExit) -> Result<(), String> {

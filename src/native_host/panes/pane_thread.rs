@@ -77,6 +77,9 @@ use std::time::{Duration, Instant};
 
 use super::registry::PaneId;
 use super::surface::{pump_pane, PaneSurface, PaneSurfaceError};
+use super::surface_stats::{
+    elapsed_ns, FrameTrace, FullCopyReasons, Operation, SurfaceIdentity, SurfaceObserver,
+};
 use super::transport::{PaneBus, PaneInputRefusal};
 use crate::native_host::host_lobby::{pump_host_lobby, HostLobbyBridge};
 
@@ -394,6 +397,7 @@ pub struct PaneFrameBuffer {
     pane: PaneId,
     bytes: Vec<u8>,
     recycle: Option<Sender<(PaneId, Vec<u8>)>>,
+    trace: Option<FrameTrace>,
 }
 
 impl PaneFrameBuffer {
@@ -403,12 +407,26 @@ impl PaneFrameBuffer {
             pane,
             bytes,
             recycle,
+            trace: None,
         }
     }
 
     /// Which pane's pool this buffer belongs to.
     pub fn pane(&self) -> PaneId {
         self.pane
+    }
+
+    pub fn trace(&self) -> Option<&FrameTrace> {
+        self.trace.as_ref()
+    }
+    pub fn trace_mut(&mut self) -> Option<&mut FrameTrace> {
+        self.trace.as_mut()
+    }
+
+    /// Attach this production's attribution to its allocation until disposal.
+    pub(crate) fn with_trace(mut self, trace: Option<FrameTrace>) -> Self {
+        self.trace = trace;
+        self
     }
 }
 
@@ -428,6 +446,9 @@ impl DerefMut for PaneFrameBuffer {
 
 impl Drop for PaneFrameBuffer {
     fn drop(&mut self) {
+        // Record disposal before making the allocation available for a new
+        // frame; the trace itself never follows the returned Vec into the pool.
+        drop(self.trace.take());
         if let Some(recycle) = self.recycle.take() {
             let bytes = std::mem::take(&mut self.bytes);
             // A closed receiver means the producer is gone (the pane host was
@@ -528,6 +549,20 @@ pub trait PaneFrameSink {
     /// about.
     fn publish(&mut self, id: PaneId, epoch: u64, rect: FrameRect, full: bool);
 
+    /// The same publication with opt-in accounting. A sink that discards the
+    /// observation is recorded as such; only the real pool forwards its lifetime.
+    fn publish_observed(
+        &mut self,
+        id: PaneId,
+        epoch: u64,
+        rect: FrameRect,
+        full: bool,
+        trace: Option<FrameTrace>,
+    ) {
+        self.publish(id, epoch, rect, full);
+        drop(trace);
+    }
+
     /// Forget everything held for a pane that has gone.
     fn drop_pane(&mut self, id: PaneId);
 }
@@ -557,6 +592,7 @@ pub struct PaneThreadConfig {
     pub period: Duration,
     pub buffers_per_pane: usize,
     pub measure: bool,
+    pub observer: Option<SurfaceObserver>,
     /// Optional adapter diagnostic, called on the stopping thread if bounded
     /// shutdown must detach the renderer. Also applies when the handle drops.
     pub on_shutdown_timeout: Option<fn()>,
@@ -569,6 +605,7 @@ impl Default for PaneThreadConfig {
             period: Duration::from_millis(16),
             buffers_per_pane: PANE_STAGING_BUFFERS,
             measure: false,
+            observer: None,
             on_shutdown_timeout: None,
         }
     }
@@ -650,6 +687,16 @@ impl PaneFrameSink for PooledFrames {
         self.staged.as_mut().map(|(_, bytes)| bytes.as_mut_slice())
     }
     fn publish(&mut self, id: PaneId, epoch: u64, rect: FrameRect, full: bool) {
+        self.publish_observed(id, epoch, rect, full, None);
+    }
+    fn publish_observed(
+        &mut self,
+        id: PaneId,
+        epoch: u64,
+        rect: FrameRect,
+        full: bool,
+        trace: Option<FrameTrace>,
+    ) {
         let Some((staged_id, bytes)) = self.staged.take() else {
             return;
         };
@@ -657,12 +704,13 @@ impl PaneFrameSink for PooledFrames {
         let Some(pool) = self.pools.get(&id) else {
             return;
         };
+        let buffer = PaneFrameBuffer::new(id, bytes, Some(pool.recycle.clone())).with_trace(trace);
         self.frames.push(PaneEvent::Frame(PaneFrame {
             id,
             epoch,
             rect,
             full,
-            bytes: PaneFrameBuffer::new(id, bytes, Some(pool.recycle.clone())),
+            bytes: buffer,
         }));
     }
     fn drop_pane(&mut self, id: PaneId) {
@@ -805,6 +853,7 @@ where
                 driver.set_bus(config.bus);
                 driver.set_lobby(config.lobby);
                 driver.set_measure(config.measure);
+                driver.set_observer(config.observer);
                 let mut sink = PooledFrames::new(config.buffers_per_pane);
                 let period = config.period.max(Duration::from_millis(1));
                 loop {
@@ -890,6 +939,7 @@ struct LoopPane<V> {
     /// The surface's size in physical pixels, which is what a full-size staging
     /// buffer has to be long enough for.
     size: (u32, u32),
+    device_scale: f64,
     /// The texture generation this view's frames belong to.
     epoch: u64,
     /// Whether the surface is drawn. A hidden surface is still pumped — so a
@@ -900,6 +950,7 @@ struct LoopPane<V> {
     /// rest of it blank — and after every resize and reveal, and kept across an
     /// iteration the pane had to skip for want of a buffer.
     needs_full: bool,
+    full_reasons: FullCopyReasons,
     /// Whether something was pushed into this page during **this** iteration's
     /// pump. A push is trusted on its own regardless of what the surface
     /// reports: a plain attribute write is real DOM state that changed and
@@ -910,6 +961,25 @@ struct LoopPane<V> {
     /// what a crash means (a station on Backfill, or a blank rectangle) is
     /// decided by what the surface is.
     copy_failures: u32,
+    applied_hud_revision: Option<u64>,
+}
+
+impl<V> LoopPane<V> {
+    fn identity(&self) -> SurfaceIdentity {
+        SurfaceIdentity {
+            id: self.id.0,
+            epoch: self.epoch,
+            kind: match self.kind {
+                PaneKind::Console => "console",
+                PaneKind::Lobby => "lobby",
+                PaneKind::Hud => "hud",
+            },
+            width: self.size.0,
+            height: self.size.1,
+            device_scale: self.device_scale,
+            visible: self.visible,
+        }
+    }
 }
 
 /// The per-iteration policy: what is driven, in what order, and what comes back.
@@ -946,12 +1016,14 @@ pub struct PaneLoop<R: PaneRuntime> {
     /// The HUD readout to keep pushing while it is held — a latest-wins slot,
     /// see the module note.
     hud_script: Option<String>,
+    hud_revision: u64,
     /// The gamepad snapshot to keep pushing into every console, likewise.
     gamepad_script: Option<String>,
     /// Whether to read a clock. Presentation only: an unmeasured host takes no
     /// timestamps at all, and a measured one stamps nothing the simulation can
     /// observe.
     measure: bool,
+    observer: Option<SurfaceObserver>,
 }
 
 impl<R: PaneRuntime> PaneLoop<R> {
@@ -963,8 +1035,10 @@ impl<R: PaneRuntime> PaneLoop<R> {
             bus: None,
             lobby: None,
             hud_script: None,
+            hud_revision: 0,
             gamepad_script: None,
             measure: false,
+            observer: None,
         }
     }
 
@@ -982,6 +1056,10 @@ impl<R: PaneRuntime> PaneLoop<R> {
     /// Whether to time the phases of each iteration.
     pub fn set_measure(&mut self, measure: bool) {
         self.measure = measure;
+    }
+
+    pub fn set_observer(&mut self, observer: Option<SurfaceObserver>) {
+        self.observer = observer;
     }
 
     /// How many views the loop is driving.
@@ -1031,6 +1109,7 @@ impl<R: PaneRuntime> PaneLoop<R> {
         sink: &mut dyn PaneFrameSink,
         out: &mut Vec<PaneEvent>,
     ) -> LoopControl {
+        let observer = self.observer.clone();
         match cmd {
             PaneCommand::Create {
                 id,
@@ -1049,14 +1128,26 @@ impl<R: PaneRuntime> PaneLoop<R> {
                             kind,
                             view,
                             size: (spec.width, spec.height),
+                            device_scale: spec.device_scale,
                             epoch,
                             visible,
                             // A texture that holds only its fill: the first
                             // frame into it must cover the whole surface.
                             needs_full: true,
+                            full_reasons: FullCopyReasons {
+                                initial: true,
+                                ..Default::default()
+                            },
                             pushed_this_iteration: false,
                             copy_failures: 0,
+                            applied_hud_revision: None,
                         });
+                        if let Some(observer) = &observer {
+                            observer.record(
+                                Some(self.panes.last().unwrap().identity()),
+                                Operation::Lifecycle { action: "created" },
+                            );
+                        }
                         Ok(())
                     }
                     Err(e) => Err(e.to_string()),
@@ -1064,6 +1155,12 @@ impl<R: PaneRuntime> PaneLoop<R> {
                 out.push(PaneEvent::Created { id, result });
             }
             PaneCommand::Close(id) => {
+                if let (Some(observer), Some(pane)) = (&observer, self.pane_mut(id)) {
+                    observer.record(
+                        Some(pane.identity()),
+                        Operation::Lifecycle { action: "closed" },
+                    );
+                }
                 // Dropping the view is the teardown: a view left behind is not
                 // inert — it would still be pumped, and its page's records would
                 // still be drained into a registry that refuses them, once per
@@ -1085,6 +1182,13 @@ impl<R: PaneRuntime> PaneLoop<R> {
                     // command rather than incremented here.
                     pane.epoch = epoch;
                     pane.needs_full = true;
+                    pane.full_reasons.resize = true;
+                    if let Some(observer) = &observer {
+                        observer.record(
+                            Some(pane.identity()),
+                            Operation::Lifecycle { action: "resized" },
+                        );
+                    }
                 }
             }
             PaneCommand::SetVisible { id, visible } => {
@@ -1094,8 +1198,17 @@ impl<R: PaneRuntime> PaneLoop<R> {
                     // however stale it is: the reveal owes a whole frame.
                     if visible && !pane.visible {
                         pane.needs_full = true;
+                        pane.full_reasons.reveal = true;
                     }
                     pane.visible = visible;
+                    if let Some(observer) = &observer {
+                        observer.record(
+                            Some(pane.identity()),
+                            Operation::Lifecycle {
+                                action: "visibility",
+                            },
+                        );
+                    }
                 }
             }
             PaneCommand::Input { id, input } => {
@@ -1103,7 +1216,22 @@ impl<R: PaneRuntime> PaneLoop<R> {
                     pane.view.input(&input);
                 }
             }
-            PaneCommand::SetHudScript(script) => self.hud_script = script,
+            PaneCommand::SetHudScript(script) => {
+                // The sender already deduplicates its encoded value. Count each
+                // accepted slot replacement, including None, without changing
+                // the existing every-iteration application policy.
+                self.hud_revision = self.hud_revision.wrapping_add(1);
+                if let Some(observer) = &observer {
+                    observer.record(
+                        None,
+                        Operation::HudSlot {
+                            revision: self.hud_revision,
+                            has_script: script.is_some(),
+                        },
+                    );
+                }
+                self.hud_script = script;
+            }
             PaneCommand::SetGamepadScript(script) => self.gamepad_script = script,
             PaneCommand::Shutdown => return LoopControl::Stop,
         }
@@ -1119,15 +1247,15 @@ impl<R: PaneRuntime> PaneLoop<R> {
             bus,
             lobby,
             hud_script,
+            hud_revision,
             gamepad_script,
             measure,
+            observer,
         } = self;
         // Presentation time, never simulation time: an unmeasured loop reads no
         // clock here at all — see the module note in `super::frame_stats`.
-        let clock = *measure;
+        let clock = *measure || observer.is_some();
         let stamp = |on: bool| on.then(Instant::now);
-        let elapsed_ms =
-            |from: Option<Instant>| from.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
         let iteration = stamp(clock);
 
         // Pre-update: the gamepad snapshot, and nothing else.
@@ -1149,18 +1277,36 @@ impl<R: PaneRuntime> PaneLoop<R> {
         if let Some(script) = &*gamepad_script {
             for pane in panes.iter_mut() {
                 if matches!(pane.kind, PaneKind::Console) && pane.view.is_ready() {
-                    let _ = pane.view.push(script);
+                    let started = observer.as_ref().map(|_| Instant::now());
+                    let applied = pane.view.push(script).is_ok();
+                    if let Some(observer) = &observer {
+                        observer.record(
+                            Some(pane.identity()),
+                            Operation::Push {
+                                channel: "gamepad",
+                                revision: None,
+                                applied: u64::from(applied),
+                                failed: u64::from(!applied),
+                                deferred_messages: 0,
+                                duration_ns: elapsed_ns(started),
+                            },
+                        );
+                    }
                 }
             }
         }
-        let mut pump_ms = elapsed_ms(phase);
+        let mut pump_ns = elapsed_ns(phase);
 
         let phase = stamp(clock);
         runtime.update();
-        let update_ms = elapsed_ms(phase);
+        let update_ns = elapsed_ns(phase);
 
         let phase = stamp(clock);
         for pane in panes.iter_mut() {
+            let pump_started = observer.as_ref().map(|_| Instant::now());
+            let mut applied = 0;
+            let mut failed = 0;
+            let mut deferred_messages = 0;
             pane.pushed_this_iteration = false;
             // A load that has finished is what makes pushes legal. Asking the
             // view each iteration (rather than trusting a callback) keeps this
@@ -1179,6 +1325,10 @@ impl<R: PaneRuntime> PaneLoop<R> {
                     if let (Some(script), true) = (&*hud_script, pane.view.is_ready()) {
                         if pane.view.push(script).is_ok() {
                             pane.pushed_this_iteration = true;
+                            pane.applied_hud_revision = Some(*hud_revision);
+                            applied = 1;
+                        } else {
+                            failed = 1;
                         }
                     }
                 }
@@ -1190,6 +1340,9 @@ impl<R: PaneRuntime> PaneLoop<R> {
                     if let Some(bridge) = &*lobby {
                         let report = pump_host_lobby(bridge, &mut pane.view);
                         pane.pushed_this_iteration = report.pushed > 0;
+                        applied = report.pushed as u64;
+                        failed = u64::from(report.push_failure.is_some());
+                        deferred_messages = report.deferred as u64;
                         if let Some(failure) = &report.push_failure {
                             out.push(PaneEvent::PushDeferred {
                                 id: pane.id,
@@ -1204,6 +1357,9 @@ impl<R: PaneRuntime> PaneLoop<R> {
                     let Some(bus) = &*bus else { continue };
                     let report = pump_pane(bus, pane.id, &mut pane.view);
                     pane.pushed_this_iteration = report.pushed > 0;
+                    applied = report.pushed as u64;
+                    failed = u64::from(report.push_failure.is_some());
+                    deferred_messages = report.deferred as u64;
                     for refusal in report.refusals {
                         out.push(PaneEvent::Refused {
                             id: pane.id,
@@ -1212,15 +1368,29 @@ impl<R: PaneRuntime> PaneLoop<R> {
                     }
                 }
             }
+            if let Some(observer) = &observer {
+                observer.record(
+                    Some(pane.identity()),
+                    Operation::Push {
+                        channel: "bridge_pump",
+                        revision: matches!(pane.kind, PaneKind::Hud).then_some(*hud_revision),
+                        applied,
+                        failed,
+                        deferred_messages,
+                        duration_ns: elapsed_ns(pump_started),
+                    },
+                );
+            }
         }
-        pump_ms += elapsed_ms(phase);
+        pump_ns += elapsed_ns(phase);
 
         let phase = stamp(clock);
         runtime.render();
-        let render_ms = elapsed_ms(phase);
+        let render_ns = elapsed_ns(phase);
 
         let phase = stamp(clock);
-        let mut copy_ms = 0.0;
+        let mut copy_ns = 0u64;
+        let mut published_ns = 0u64;
         let mut copied = 0usize;
         let mut forced = 0usize;
         let mut pixels = 0u64;
@@ -1236,6 +1406,14 @@ impl<R: PaneRuntime> PaneLoop<R> {
             // honour — a fresh texture, a resize, or an iteration skipped for
             // want of a buffer.
             let force = pane.pushed_this_iteration || pane.needs_full;
+            let mut reasons = pane.full_reasons;
+            if pane.pushed_this_iteration {
+                if matches!(pane.kind, PaneKind::Hud) {
+                    reasons.hud_push = true;
+                } else {
+                    reasons.bridge_push = true;
+                }
+            }
             let len = pane.size.0 as usize * pane.size.1 as usize * 4;
             let staged = match sink.stage(pane.id, len) {
                 Some(buffer) => buffer,
@@ -1245,12 +1423,51 @@ impl<R: PaneRuntime> PaneLoop<R> {
                     // keeps unioning its dirty bounds until the next successful
                     // copy, so nothing is silently lost — but the frame is.
                     pane.needs_full |= force;
+                    if force {
+                        pane.full_reasons.merge(reasons);
+                        pane.full_reasons.buffer_retry = true;
+                    }
+                    if let Some(observer) = &observer {
+                        observer.record(
+                            Some(pane.identity()),
+                            Operation::Copy {
+                                outcome: "buffer_starved",
+                                dirty_pixels: None,
+                                copied_pixels: 0,
+                                forced: force,
+                                reasons,
+                                duration_ns: 0,
+                            },
+                        );
+                    }
                     continue;
                 }
             };
             let copy_started = stamp(clock);
             let outcome = pane.view.copy_frame(staged, force);
-            copy_ms += elapsed_ms(copy_started);
+            let duration_ns = elapsed_ns(copy_started);
+            copy_ns += duration_ns;
+            if let Some(observer) = &observer {
+                let (result, pixels) = match &outcome {
+                    Ok(Some(rect)) => ("copied", rect.pixel_count()),
+                    Ok(None) => ("clean", 0),
+                    Err(_) => ("failed", 0),
+                };
+                // The current SDK wrapper returns copied bounds, not pre-force
+                // dirty bounds. Only an unforced successful copy reveals dirty.
+                let dirty_pixels = (!force && outcome.is_ok()).then_some(pixels);
+                observer.record(
+                    Some(pane.identity()),
+                    Operation::Copy {
+                        outcome: result,
+                        dirty_pixels,
+                        copied_pixels: pixels,
+                        forced: force,
+                        reasons,
+                        duration_ns,
+                    },
+                );
+            }
             match outcome {
                 Ok(rect) => {
                     pane.copy_failures = 0;
@@ -1263,7 +1480,19 @@ impl<R: PaneRuntime> PaneLoop<R> {
                         // The force has been honoured: the whole surface is in
                         // this buffer, so the texture is whole once it lands.
                         pane.needs_full = false;
-                        sink.publish(pane.id, pane.epoch, rect, force);
+                        pane.full_reasons = FullCopyReasons::default();
+                        let trace = observer.as_ref().map(|observer| {
+                            observer.produced(
+                                pane.identity(),
+                                rect.pixel_count(),
+                                force,
+                                reasons,
+                                pane.applied_hud_revision,
+                            )
+                        });
+                        let publish_start = observer.as_ref().map(|_| Instant::now());
+                        sink.publish_observed(pane.id, pane.epoch, rect, force, trace);
+                        published_ns += elapsed_ns(publish_start);
                     }
                     // `Ok(None)` is a still page. The buffer was never filled,
                     // and the sink takes it back unpublished.
@@ -1273,6 +1502,10 @@ impl<R: PaneRuntime> PaneLoop<R> {
                     // in Ultralight's own dirty bounds — so it is carried to the
                     // next attempt.
                     pane.needs_full |= force;
+                    if force {
+                        pane.full_reasons.merge(reasons);
+                        pane.full_reasons.copy_retry = true;
+                    }
                     pane.copy_failures += 1;
                     out.push(PaneEvent::CopyFailed {
                         id: pane.id,
@@ -1282,19 +1515,33 @@ impl<R: PaneRuntime> PaneLoop<R> {
                 }
             }
         }
-        let publish_ms = (elapsed_ms(phase) - copy_ms).max(0.0);
+        let publish_ms = elapsed_ns(phase).saturating_sub(copy_ns) as f64 / 1_000_000.0;
+        let total_ns = elapsed_ns(iteration);
+        if let Some(observer) = &observer {
+            observer.record(
+                None,
+                Operation::Iteration {
+                    update_ns,
+                    pump_ns,
+                    render_ns,
+                    copy_ns,
+                    publish_ns: published_ns,
+                    total_ns,
+                },
+            );
+        }
 
         out.push(PaneEvent::Stats(PaneThreadSample {
-            update_ms,
-            pump_ms,
-            render_ms,
-            copy_ms,
+            update_ms: update_ns as f64 / 1_000_000.0,
+            pump_ms: pump_ns as f64 / 1_000_000.0,
+            render_ms: render_ns as f64 / 1_000_000.0,
+            copy_ms: copy_ns as f64 / 1_000_000.0,
             publish_ms,
             panes: panes.len(),
             copied,
             forced,
             pixels,
-            iteration_ms: elapsed_ms(iteration),
+            iteration_ms: total_ns as f64 / 1_000_000.0,
             starved: 0,
         }));
     }
@@ -2392,6 +2639,218 @@ mod loop_tests {
             Some(PaneEvent::Stats(sample)) => *sample,
             other => panic!("every iteration ends with its own cost, not {other:?}"),
         }
+    }
+
+    #[test]
+    fn disabled_attribution_attaches_no_trace_or_phase_clock_samples() {
+        let mut driver = one_pane(HUD, PaneKind::Hud);
+        let mut sink = PooledFrames::new(PANE_STAGING_BUFFERS);
+        sink.configure(HUD, PaneKind::Hud, (WIDTH * HEIGHT * 4) as usize);
+        let mut out = Vec::new();
+        driver.iterate(&mut sink, &mut out);
+        let PaneEvent::Frame(frame) = &sink.frames[0] else {
+            panic!("a real frame")
+        };
+        assert!(frame.bytes.trace().is_none());
+        let sample = stats(&out);
+        assert_eq!(
+            [
+                sample.update_ms,
+                sample.pump_ms,
+                sample.render_ms,
+                sample.copy_ms,
+                sample.publish_ms,
+                sample.iteration_ms
+            ],
+            [0.0; 6]
+        );
+    }
+
+    #[test]
+    fn attribution_keeps_hud_revisions_separate_from_repeated_and_hidden_applications() {
+        let observer = SurfaceObserver::new(Instant::now(), 128);
+        let mut driver = one_pane(HUD, PaneKind::Hud);
+        driver.set_observer(Some(observer.clone()));
+        let mut sink = RecordingSink::new();
+        let mut out = Vec::new();
+        driver.apply(
+            PaneCommand::SetHudScript(Some("first".into())),
+            &mut sink,
+            &mut out,
+        );
+        driver.iterate(&mut sink, &mut out);
+        driver.iterate(&mut sink, &mut out);
+        driver.apply(
+            PaneCommand::SetVisible {
+                id: HUD,
+                visible: false,
+            },
+            &mut sink,
+            &mut out,
+        );
+        driver.iterate(&mut sink, &mut out);
+        driver.apply(
+            PaneCommand::SetHudScript(Some("second".into())),
+            &mut sink,
+            &mut out,
+        );
+        driver.view_mut(HUD).unwrap().surface.failing_pushes = 1;
+        driver.iterate(&mut sink, &mut out);
+        driver.apply(
+            PaneCommand::SetVisible {
+                id: HUD,
+                visible: true,
+            },
+            &mut sink,
+            &mut out,
+        );
+        driver.iterate(&mut sink, &mut out);
+
+        let events = observer.events();
+        let applications: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event.operation {
+                Operation::Push {
+                    revision: Some(revision),
+                    applied,
+                    failed,
+                    ..
+                } => Some((revision, applied, failed, event.surface.unwrap().visible)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            applications,
+            vec![
+                (1, 1, 0, true),
+                (1, 1, 0, true),
+                (1, 1, 0, false),
+                (2, 0, 1, false),
+                (2, 1, 0, true)
+            ]
+        );
+        let produced: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event.operation {
+                Operation::Produced {
+                    hud_revision,
+                    reasons,
+                    ..
+                } => Some((hud_revision, reasons)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            produced.len(),
+            3,
+            "hidden views still pump but publish no pixels"
+        );
+        assert!(produced[0].1.initial && produced[0].1.hud_push);
+        assert_eq!(
+            produced[1].0,
+            Some(1),
+            "P1 observes the existing repeated push"
+        );
+        assert!(produced[2].1.reveal && produced[2].1.hud_push);
+        assert_eq!(produced[2].0, Some(2));
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| matches!(e.operation, Operation::Iteration { .. }))
+                .count(),
+            5
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| matches!(e.operation, Operation::HudSlot { .. }))
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn attribution_distinguishes_failed_copy_and_starvation_from_produced_frames() {
+        let observer = SurfaceObserver::new(Instant::now(), 64);
+        let mut driver = one_pane(HUD, PaneKind::Hud);
+        driver.set_observer(Some(observer.clone()));
+        let mut sink = RecordingSink::new();
+        let mut out = Vec::new();
+        driver.view_mut(HUD).unwrap().fail_copies = 1;
+        driver.iterate(&mut sink, &mut out);
+        sink.starve = true;
+        driver.iterate(&mut sink, &mut out);
+        sink.starve = false;
+        driver.iterate(&mut sink, &mut out);
+        let events = observer.events();
+        let outcomes: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event.operation {
+                Operation::Copy { outcome, .. } => Some(outcome),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(outcomes, ["failed", "buffer_starved", "copied"]);
+        let produced: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event.operation {
+                Operation::Produced { reasons, .. } => Some(reasons),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(produced.len(), 1);
+        assert!(produced[0].initial && produced[0].copy_retry && produced[0].buffer_retry);
+    }
+
+    #[test]
+    fn observed_pool_preserves_old_frame_identity_across_resize_and_recycles_once() {
+        let observer = SurfaceObserver::new(Instant::now(), 128);
+        let mut driver = one_pane(HUD, PaneKind::Hud);
+        driver.set_observer(Some(observer.clone()));
+        let mut sink = PooledFrames::new(PANE_STAGING_BUFFERS);
+        sink.configure(HUD, PaneKind::Hud, (WIDTH * HEIGHT * 4) as usize);
+        let mut out = Vec::new();
+        for _ in 0..PANE_STAGING_BUFFERS + 1 {
+            driver.iterate(&mut sink, &mut out);
+        }
+        assert_eq!(sink.frames.len(), PANE_STAGING_BUFFERS);
+        assert_eq!(sink.starved, 1);
+        let old_frames = std::mem::take(&mut sink.frames);
+        driver.apply(
+            PaneCommand::Resize {
+                id: HUD,
+                width: WIDTH * 2,
+                height: HEIGHT,
+                epoch: 7,
+            },
+            &mut sink,
+            &mut out,
+        );
+        sink.configure(HUD, PaneKind::Hud, (WIDTH * 2 * HEIGHT * 4) as usize);
+        driver.view_mut(HUD).unwrap().paint = Some(FrameRect::full(WIDTH * 2, HEIGHT));
+        driver.iterate(&mut sink, &mut out);
+        drop(old_frames);
+        sink.frames.clear();
+        let events = observer.events();
+        let terminal: Vec<_> = events
+            .iter()
+            .filter(|event| matches!(event.operation, Operation::Discarded { .. }))
+            .collect();
+        assert_eq!(terminal.len(), PANE_STAGING_BUFFERS + 1);
+        assert!(terminal[..PANE_STAGING_BUFFERS].iter().all(|event| {
+            let identity = event.surface.unwrap();
+            identity.epoch == 0 && identity.width == WIDTH && identity.device_scale == 1.0
+        }));
+        assert_eq!(terminal.last().unwrap().surface.unwrap().epoch, 7);
+        // The old generation returns to its retired channel, never the new pool.
+        assert!(sink.stage(HUD, (WIDTH * 2 * HEIGHT * 4) as usize).is_some());
+        sink.return_staged();
+        assert_eq!(sink.pools[&HUD].free.len(), PANE_STAGING_BUFFERS);
+        assert_eq!(
+            observer.events().len(),
+            events.len(),
+            "recycling does not duplicate disposal"
+        );
     }
 
     #[test]

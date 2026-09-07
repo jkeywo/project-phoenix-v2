@@ -92,6 +92,7 @@ pub mod recovery;
 pub mod registry;
 pub mod routing;
 pub mod surface;
+pub mod surface_stats;
 pub mod transport;
 pub mod upload;
 

@@ -26,7 +26,13 @@ use std::collections::{BTreeMap, VecDeque};
 // `bevy::prelude::*` glob in the gated `use` block below, and under a demo build
 // the drain is compiled out entirely, so the import is scoped to match.
 #[cfg(all(not(target_arch = "wasm32"), not(phoenix_demo_build)))]
-use bevy::prelude::{Commands, MessageReader, World};
+use bevy::prelude::{Commands, MessageReader};
+
+// The public GM-roster replacement is covered by native unit tests, including
+// the demo-build gate. Keep `World` available for that test-only path even
+// though the browser debug drain above is intentionally absent from a demo.
+#[cfg(all(not(target_arch = "wasm32"), any(not(phoenix_demo_build), test)))]
+use bevy::prelude::World;
 
 // The force-start path stopped being wasm-only in issue #1328: a native host's
 // lobby is its viewscreen, and a lobby with only phone crew has to be

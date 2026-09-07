@@ -534,7 +534,14 @@ jobs:
           cache: 'npm'
           cache-dependency-path: tests/smoke/package-lock.json
 
-      - name: Install Node dependencies
+      # Smoke specs import root-level editor modules, which in turn import
+      # root package dependencies such as smol-toml. Install that graph as
+      # well as the local Playwright harness so Node resolves those imports
+      # from their owning source directory.
+      - name: Install root Node dependencies
+        run: npm ci
+
+      - name: Install smoke harness dependencies
         working-directory: tests/smoke
         run: npm ci
 

@@ -414,11 +414,10 @@ test('catalogue parity: two real packs survive selection and a late phone reconn
   const hostId = await readHostPeerId(page);
   const phone = await createTestClient(context, hostId, { name: 'Catalogue crew', waitFor: 'ScenarioCatalog' });
   const fold = async client => {
-    const message = await client.lastMessage('ScenarioCatalog');
-    return client.page.evaluate(async message => {
+    return client.page.evaluate(async () => {
       const { LobbyState, activePacksView, scenarioOriginBadge } = await import('/gui/lobby-state.js');
       const state = new LobbyState();
-      state.apply(message);
+      for (const message of window.__messages || []) state.apply(message);
       return {
         packs: state.activePacks,
         rows: activePacksView(state.activePacks),
@@ -428,7 +427,7 @@ test('catalogue parity: two real packs survive selection and a late phone reconn
         locked: state.selectionLocked,
         picker: state.scenarioCatalog,
       };
-    }, message);
+    });
   };
   expect((await fold(phone)).packs).toEqual([]);
   const expected = [];
@@ -447,15 +446,17 @@ test('catalogue parity: two real packs survive selection and a late phone reconn
     expect(view.badges.filter(s => s.source === 'base').every(s => s.badge === null)).toBe(true);
   }
   await scenarioButton(page, 'combat_test').click();
-  const destroyer = page.locator('#landing-ship ph-ship-picker .ship-card[data-template="assets/entities/alliance_destroyer.toml"]');
+  const destroyerPath = 'assets/entities/alliance_destroyer.toml';
+  const destroyer = page.locator(`#landing-ship ph-ship-picker .ship-card[data-template="${destroyerPath}"]`);
   await destroyer.waitFor({ state: 'visible', timeout: 30_000 });
   await destroyer.click();
   await expect(page.locator('#lobby-panel')).toBeVisible({ timeout: 60_000 });
-  await phone.page.waitForFunction(() => window.__messages?.some(
-    m => m.type === 'ScenarioCatalog' && m.data.locked_scenario && m.data.locked_ship,
-  ));
+  // First load leaves the picker through Welcome. The fully locked catalogue
+  // broadcast belongs to later rounds that reuse the already running App.
+  await phone.waitForMessage('Welcome');
   const locked = await fold(phone);
   expect(locked.packs).toEqual(expected);
+  expect(locked.rows).toEqual(expected.map(({ name, version }) => ({ name, version })));
   expect(locked.picker).toBeNull();
   await phone.close();
 
@@ -465,7 +466,7 @@ test('catalogue parity: two real packs survive selection and a late phone reconn
     const restored = await fold(late);
     expect(restored.packs).toEqual(expected);
     expect(restored.rows).toEqual(locked.rows);
-    expect(restored.locked).toEqual(locked.locked);
+    expect(restored.locked).toEqual({ scenario_id: 'combat_test', template_path: destroyerPath });
     expect(restored.picker).toBeNull();
     await late.close();
   }

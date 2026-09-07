@@ -2,8 +2,8 @@
 title: WeaponsPlugin
 type: concept
 tags: [weapons, tactical, phaser, torpedo, blaster, targeting, ai]
-sources: [src/console/weapons/mod.rs, src/console/weapons/server.rs, src/console/weapons/beam.rs, src/console/weapons/torpedo.rs, src/console/weapons/blaster.rs, src/console/weapons/blackboard.rs, src/console/weapons/shared.rs, src/console/helm/server.rs, src/weapons/, src/server_app/registration.rs, src/server_app/world_setup.rs]
-updated: 2026-08-27
+sources: [src/console/weapons/mod.rs, src/console/weapons/server.rs, src/console/weapons/beam.rs, src/console/weapons/torpedo.rs, src/console/weapons/blaster.rs, src/console/weapons/blackboard.rs, src/console/weapons/shared.rs, src/console/helm/server.rs, src/weapons/, src/server_app/registration.rs, src/server_app/world_setup.rs, gui/sim-state.js, gui/console-state.js, gui/weapon-cooldown.js, pasm/spec/architecture/weapons.yaml]
+updated: 2026-09-07
 ---
 
 # WeaponsPlugin
@@ -52,6 +52,8 @@ Weapon reach, arcs, cooldowns, load times, payloads, colours, and AI policy para
 ## Publication
 
 Publish systems build per-system blackboards plus the Tactical radar aggregate. `weapons_update_broadcaster` sends the LocalShip summary at 10 Hz to the projected weapons holder. Client panels render the authored bank/tube ids and arcs from `ShipClientConfig`; they do not own firing state.
+
+`gui/sim-state.js` retains the Welcome's Phaser and Blaster bank configuration. `gui/console-state.js` uses `gui/weapon-cooldown.js` to join authored cooldown durations onto live bank states by bank id, separately for each weapon family, before the shared Tactical renderer passes them to the controls. The same helper supplies the bounded remaining-time percentage for both progress bars; the `tactical-weapons-projection` component in `pasm/spec/architecture/weapons.yaml` records the presentation contract.
 
 ## Related
 

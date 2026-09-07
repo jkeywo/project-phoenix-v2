@@ -2,8 +2,8 @@
 title: World Data
 type: entity
 tags: [world, scenario, transform, ambient_light, snapshot, includes]
-sources: [src/world/config.rs, src/world/server.rs, src/world/server_tests.rs, src/world/layers.rs, src/world/validate.rs, src/world/deadlines.rs, src/world/script/load.rs, src/world/script/schedule.rs, src/comms/scripted.rs, src/entities/config_cache.rs, src/snapshot.rs, src/gm_action.rs, src/sim_digest.rs, src/headless/replay.rs, src/server/bridge.rs, server.html, src/server/renderer.rs, src/entities/config.rs, src/entities/entity_override.rs, src/entities/include_resolve.rs, src/objectives/directive.rs, tests/snapshot_resume.rs, assets/worlds/default.toml]
-updated: 2026-09-01
+sources: [src/gm_spawn.rs, gui/gm-role-presets.js, src/world/config.rs, src/world/server.rs, src/world/server_tests.rs, src/world/layers.rs, src/world/validate.rs, src/world/deadlines.rs, src/world/script/load.rs, src/world/script/schedule.rs, src/comms/scripted.rs, src/entities/config_cache.rs, src/snapshot.rs, src/gm_action.rs, src/sim_digest.rs, src/headless/replay.rs, src/server/bridge.rs, server.html, src/server/renderer.rs, src/entities/config.rs, src/entities/entity_override.rs, src/entities/include_resolve.rs, src/objectives/directive.rs, tests/snapshot_resume.rs, assets/worlds/default.toml]
+updated: 2026-09-07
 ---
 
 # World Data
@@ -42,6 +42,12 @@ transform = { position = [0.0, 50.0, 0.0], rotation = [0.0, 0.0, 0.0], scale = [
 Scenario logic — event registrations, effects, and Comms dialogue — is authored
 in `[script]` and documented under [World Plugin](../concepts/world-plugin.md).
 Declarative `[[trigger]]` and `[[comms]]` blocks are rejected at load.
+
+`[[gm_palette]]` entries bind a template and closed authored variants for GM
+map placement; their templates join the ordinary preload/content set.
+`[[gm_role_preset]]` entries define personal presentation choices, exposed to
+the browser without changing GM authority. `src/world/config.rs` owns both
+schemas; [GM Operator](./gm-operator.md) indexes their current runtime consumers.
 
 `scenario_detail_floor` is root-world-only: additive/supporting world loads reject
 it rather than ambiguously overriding or discarding the selected scenario's

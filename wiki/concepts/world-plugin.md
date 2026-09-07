@@ -2,7 +2,7 @@
 title: WorldPlugin
 type: concept
 tags: [world, plugin, server]
-sources: [src/world/materialization.rs, tests/native_host_lobby/materialization.rs, src/boot/mod.rs, src/content_ledger.rs, src/world/server.rs, src/world/server_tests.rs, src/world/dispatch.rs, src/world/config.rs, src/world/content.rs, src/world/trigger_registry.rs, src/world/layers.rs, src/world/validate.rs, src/world/deadlines.rs, src/world/load/mod.rs, src/world/script/load.rs, src/world/script/schedule.rs, src/world/script/effects.rs, src/world/delayed.rs, src/comms/scripted.rs, src/entities/config_cache.rs, src/objectives/directive.rs, src/console/navigation/server.rs, src/civilian/server.rs, src/infrastructure/condition.rs, src/infrastructure/server.rs, src/campaign/projection.rs, src/tractor/server.rs, src/dock/server.rs, src/umbilical/server.rs, src/console/repair/external_server.rs, src/snapshot.rs, src/server/bridge.rs, server.html, src/server_app/mod.rs, src/server_app/world_setup.rs, src/ai/server.rs, src/ai/faction.rs, tests/snapshot_resume.rs, assets/worlds/default.toml, assets/worlds/combat_test.toml, assets/worlds/falling_skyway.toml, assets/factions/]
+sources: [src/gm_event.rs, src/gm_spawn.rs, src/world/script/, src/world/materialization.rs, tests/native_host_lobby/materialization.rs, src/boot/mod.rs, src/content_ledger.rs, src/world/server.rs, src/world/server_tests.rs, src/world/dispatch.rs, src/world/config.rs, src/world/content.rs, src/world/trigger_registry.rs, src/world/layers.rs, src/world/validate.rs, src/world/deadlines.rs, src/world/load/mod.rs, src/world/script/load.rs, src/world/script/schedule.rs, src/world/script/effects.rs, src/world/delayed.rs, src/comms/scripted.rs, src/entities/config_cache.rs, src/objectives/directive.rs, src/console/navigation/server.rs, src/civilian/server.rs, src/infrastructure/condition.rs, src/infrastructure/server.rs, src/campaign/projection.rs, src/tractor/server.rs, src/dock/server.rs, src/umbilical/server.rs, src/console/repair/external_server.rs, src/snapshot.rs, src/server/bridge.rs, server.html, src/server_app/mod.rs, src/server_app/world_setup.rs, src/ai/server.rs, src/ai/faction.rs, tests/snapshot_resume.rs, assets/worlds/default.toml, assets/worlds/combat_test.toml, assets/worlds/falling_skyway.toml, assets/factions/]
 updated: 2026-09-07
 ---
 
@@ -36,6 +36,16 @@ A session's map composition and scenario script share one world asset:
 - **Layer effects:** `load_world` and `unload_world` are live additive layer-management effects. They are not scenario replacement; the root world remains active throughout the session.
 
 ## Load path
+
+GM-operable event registrations share the ordinary script trigger pipeline:
+`gm_event(id, label, handler)` declares a manual event, while
+`.gm_controls(id, label)` adds controls to an automatic registration.
+`.pauseable()` and `.skip()` add per-event Pause/Resume and Skip-next.
+`src/gm_event.rs` resolves their stable identities and mission projection;
+`WorldContentRuntime` holds their pending fires, pause state and skip arms.
+GM palette placements likewise enter ordinary `SpawnEntity` dispatch through
+`src/gm_spawn.rs`. See [GM Operator](../entities/gm-operator.md) for action and
+browser navigation.
 
 ```
 JS (server.html)

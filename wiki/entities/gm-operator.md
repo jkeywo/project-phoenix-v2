@@ -2,8 +2,8 @@
 title: GM Operator
 type: entity
 tags: [gm, operator, identity, reconnect, roster, readiness, force-start, action, pause, puppeting, backfill, host-mesh, map, activity, damage, destruction, objectives, triggers, red-alert, connections, regions, asteroids]
-sources: [src/gm_roster.rs, src/gm_action.rs, src/gm_join.rs, src/gm_projection.rs, src/gm_activity.rs, src/gm_puppet.rs, src/objectives.rs, src/world/server.rs, src/ship/helm_ai/mod.rs, src/entities/config.rs, src/entities/tags.rs, src/asteroids/lifecycle.rs, src/boot/mod.rs, src/lobby/start_policy.rs, src/core/balance.rs, src/core/messages.rs, src/core/codec.rs, src/command_admission/log.rs, src/lobby/server.rs, src/lockstep/frame.rs, src/lockstep/host_loss.rs, src/lockstep/mod.rs, src/lockstep/snapshot_relay.rs, src/server/bridge.rs, src/server_app/broadcast.rs, src/server_app/world_setup.rs, src/snapshot.rs, src/sim_digest.rs, src/headless/replay.rs, gui/host-channel.js, gui/gm-local-projection.js, gui/gm-activity-feed.js, gui/gm-station-puppet.js, gui/entity-inspector.js, gui/components/ph-navigation-map.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/console-state.js, gui/console-core.js, gui/sim-state.js, gui/host-mesh.js, gui/fleet-session.js, gui/lobby-state.js, server.html, client.html]
-updated: 2026-09-02
+sources: [src/gm_event.rs, src/gm_effect.rs, src/gm_spawn.rs, src/world/config.rs, src/world/content.rs, src/world/script/, gui/gm-mission-panel.js, gui/gm-direct-effect-panel.js, gui/gm-effect-scope.js, gui/gm-spawn-panel.js, gui/gm-knowledge-compare.js, gui/gm-role-presets.js, pasm/spec/design/gm-console-t2.yaml, src/gm_roster.rs, src/gm_action.rs, src/gm_join.rs, src/gm_projection.rs, src/gm_activity.rs, src/gm_puppet.rs, src/objectives.rs, src/world/server.rs, src/ship/helm_ai/mod.rs, src/entities/config.rs, src/entities/tags.rs, src/asteroids/lifecycle.rs, src/boot/mod.rs, src/lobby/start_policy.rs, src/core/balance.rs, src/core/messages.rs, src/core/codec.rs, src/command_admission/log.rs, src/lobby/server.rs, src/lockstep/frame.rs, src/lockstep/host_loss.rs, src/lockstep/mod.rs, src/lockstep/snapshot_relay.rs, src/server/bridge.rs, src/server_app/broadcast.rs, src/server_app/world_setup.rs, src/snapshot.rs, src/sim_digest.rs, src/headless/replay.rs, gui/host-channel.js, gui/gm-local-projection.js, gui/gm-activity-feed.js, gui/gm-station-puppet.js, gui/entity-inspector.js, gui/components/ph-navigation-map.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/console-state.js, gui/console-core.js, gui/sim-state.js, gui/host-mesh.js, gui/fleet-session.js, gui/lobby-state.js, server.html, client.html]
+updated: 2026-09-07
 ---
 
 # GM Operator
@@ -33,10 +33,13 @@ the private capability names the exact disconnected public operator and the
 frozen roster maps that operator to the exact departed technical slot. A live,
 mismatched, or competing duplicate is refused without changing the roster.
 
-The optional GM role preset currently has no gameplay value. Its explicit
-`rolePreset: null` placeholder is retained only with the browser's private
-identity and local-storage capability. It never enters `GmOperator`, a public
-roster, a snapshot, or a digest.
+Scenario-authored role presets are personal presentation choices, managed by
+`gui/gm-role-presets.js` and read through `wasm_get_gm_role_presets`. An operator
+can switch presets live; the built-in All is the default and fallback. The
+selection persists with that operator's private reconnectable identity. The
+current controller filters the map, inspector and activity panels and the
+Pause/Resume quick actions. Presets never change action authority or enter
+`GmOperator`, a public roster, a snapshot, or a digest.
 
 ## First-time mid-session admission
 
@@ -158,8 +161,10 @@ become individual contacts. A named/selectable asteroid authored in world
 content is the only asteroid point contact. Each row contains stable
 `EntityUuid`, position, String Table display ids, broad hull/infrastructure
 condition, current Tactical target where applicable, and narrowed authored
-radar appearance. It carries no Bevy entity id, component inventory, layer
-identity, effect tuning, System detail, or M2 action capability. The Host
+radar appearance. It carries no Bevy entity id, component inventory or layer
+identity. Hull-bearing rows also carry current and
+maximum milli-HP and a per-System hull breakdown with authored Station
+ownership, which the direct-effect panel uses for scope selection and preview. The Host
 Channel dispatcher exempts this strict DTO from recursive localisation, keeping
 those identities and display ids raw until the map or inspector presents them.
 
@@ -207,7 +212,7 @@ the agreed fixed tick, so every peer derives the same ship-scoped disconnected
 edge; restoring the cohort derives the matching connected edge. A standalone
 App falls back to its local `Sessions`. GM presence reuses
 `GmRoster` public identity. No row copies session tokens, rendezvous peer ids,
-mesh slots, or reconnect capabilities. Pause/Resume results come from the
+mesh slots, or reconnect capabilities. Attributed GM action results come from the
 terminal `GmActionLog` plus local refusals and deduplicate by
 `(operator, correlation)` while retaining the canonical action order. Force
 Start observes the existing typed grant result before the browser bridge drains
@@ -229,7 +234,7 @@ transport.
 
 ## Typed session actions
 
-`SetSessionPaused { active }` is the first complete GM action. The page submits
+`SetSessionPaused { active }` controls the session pause. The page submits
 an absolute value plus the public operator id and a bounded durable
 `GmActionId`; it never calls the local/debug toggle. Rust binds that identity to
 the authenticated GM slot in the frozen private `FleetRoster`. Any GM may send
@@ -265,6 +270,54 @@ zero frontier, then re-applies those recorded boundaries through the production
 reducer; an unapplied suffix never extends replay beyond the artifact's final
 tick. The GM page receives only an absolute local `gm_session` Host Channel
 projection and does not optimistically change the displayed pause state.
+
+## Authored events and directed world actions
+
+`src/gm_event.rs` resolves authored event controls and publishes the absolute,
+page-local `gm_mission` projection for `gui/gm-mission-panel.js`. Scripted
+`gm_event(id, label, handler)` and automatic registrations with
+`.gm_controls(id, label)` share one control set and ordinary trigger lifecycle.
+`.pauseable()` adds persistent per-event Pause/Resume; `.skip()` arms the next
+qualifying automatic occurrence. Fire substitutes for the automatic event
+match and bypasses per-event Pause, but still obeys the authored `.when(...)`
+predicate, once/repeat latch and cooldown. A false predicate or unelapsed
+cooldown retains the Fire arm until it can run the ordinary handler; a spent
+once-only event cannot fire again. Neither the manual Fire pass nor Pause
+consumes an armed Skip: only a qualifying automatic occurrence consumes it
+while the event remains present. `FireGmEvent`, `SetEventPaused`, and `ArmGmEventSkip` use the same
+attributed canonical action journal as session controls.
+
+`ApplyDirectEffect` carries an Entity UUID, whole-Entity/Station/System scope,
+damage or healing, and an amount in milli-HP. `src/gm_effect.rs` resolves and
+arms the effect at the canonical action boundary; the ordinary Damage schedule
+applies it through the hull path and normal destruction lifecycle. It bypasses
+shields, clamps to the selected scope and records discarded overflow.
+`gui/gm-direct-effect-panel.js` reads the selected inspector entity's live
+hull totals and authored ownership; `gui/gm-effect-scope.js` supplies the
+shared browser scope vocabulary.
+
+`src/gm_spawn.rs` publishes the local `gm_spawn` palette projection for
+`gui/gm-spawn-panel.js`. Scenario/mod `[[gm_palette]]` entries bind preloaded
+templates and closed authored variants. `SpawnPaletteEntity` carries only
+palette/variant ids and resolved position/heading. The shared map placement
+gesture and keyboard controls supply that placement; canonical pending spawns
+enter ordinary scripted `SpawnEntity` dispatch and deterministic UUID minting.
+The activity feed presents event levers, scoped effects and palette placements
+as attributed GM Action details; their fictional consequences remain ordinary
+world-category rows.
+
+For intended design, see
+[`gm-console-t2.yaml`](../../pasm/spec/design/gm-console-t2.yaml).
+
+## Truth and crew knowledge
+
+`gui/gm-knowledge-compare.js` compares a separately selected ship's knowledge
+with the GM view. Truth uses `gm_entity`; the selected ship's `gm_station`
+replica passes through the same fold and Sensors/Comms builders used by
+authentic Station consoles. Contacts can differ because of sensor range and
+tag filtering. Objectives and Comms currently use shared, unfiltered inputs
+and therefore show equality. The comparison excludes Station-private hull and
+blackboard detail, which remains accessible through Station puppeting.
 
 ## Authentic Station puppeting
 

@@ -11,7 +11,7 @@ $receiptData = Get-Content -LiteralPath $Receipt -Raw | ConvertFrom-Json
 if ($receiptData.runtime -ne 'headless') { throw 'Headless build receipt required.' }
 $binary = (Resolve-Path -LiteralPath $receiptData.executable).Path
 $ContentRoot = (Resolve-Path -LiteralPath $ContentRoot).Path
-$root = [IO.Path]::GetFullPath($Output)
+$root = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Output)
 if (Test-Path -LiteralPath $root) { throw 'Output directory already exists.' }
 $verified = & node (Join-Path $PSScriptRoot 'profile-provenance.mjs') verify $ContentRoot $Receipt $binary
 if ($LASTEXITCODE -ne 0 -or -not ($verified | ConvertFrom-Json).verified) { throw 'Build receipt verification failed.' }

@@ -20,7 +20,7 @@ $receiptData = Get-Content -LiteralPath $Receipt -Raw | ConvertFrom-Json
 $binary = (Resolve-Path -LiteralPath $receiptData.executable).Path
 $ContentRoot = (Resolve-Path -LiteralPath $ContentRoot).Path
 $Profile = (Resolve-Path -LiteralPath $Profile).Path
-$runRoot = [IO.Path]::GetFullPath($Output)
+$runRoot = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Output)
 if (Test-Path -LiteralPath $runRoot) { throw 'Run directory already exists.' }
 if ($receiptData.runtime -ne 'native') { throw 'Native build receipt required.' }
 $verifyArgs = @((Join-Path $PSScriptRoot 'profile-provenance.mjs'), 'verify', $ContentRoot, $Receipt, $binary)

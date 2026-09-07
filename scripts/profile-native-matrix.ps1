@@ -9,7 +9,7 @@ param(
     [ValidateRange(1, 10)][int]$Repetitions = 3
 )
 $ErrorActionPreference = 'Stop'
-$root = [IO.Path]::GetFullPath($Output)
+$root = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Output)
 if (Test-Path -LiteralPath $root) { throw 'Matrix directory already exists.' }
 $tasks = & node (Join-Path $PSScriptRoot 'profile-matrix.mjs') $Repetitions | ConvertFrom-Json
 if ($LASTEXITCODE -ne 0) { throw 'Could not prepare matrix.' }

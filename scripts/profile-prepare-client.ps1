@@ -5,7 +5,7 @@ param(
     [ValidateRange(1024, 65535)][int]$DiagnosticPort = 18181
 )
 $ErrorActionPreference = 'Stop'
-$destination = [IO.Path]::GetFullPath($Destination)
+$destination = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Destination)
 if (Test-Path -LiteralPath $destination) { throw "Scratch bundle already exists: $destination" }
 New-Item -ItemType Directory -Path $destination | Out-Null
 # Copy documents and GUI code; reference large immutable assets in place.

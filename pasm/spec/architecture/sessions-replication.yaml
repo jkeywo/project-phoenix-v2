@@ -9,17 +9,19 @@ entities:
       rationale:
         - "[ai] R2a/#1410: one current connection per Session across native LAN, cloud and panes. A handle carries a transport leg and a never-reused incarnation; last accepted Identify replaces the owner before physical teardown. Late commands and departures of the old incarnation cannot reach Session policy. Same-token Identify is idempotent; a connection cannot change identity or reclaim ownership after supersession."
         - "[ai] The existing 64-character token bound is validated at ingress, without trimming or truncation. Empty, whitespace/control-containing, overlong and reserved identities are refused; bounded opaque tokens, browser hex and native UUIDs remain valid. Compatibility/role admission precedes binding. Physical sockets, channel readiness, reliable ordering, snapshot coalescing/shedding and send/close remain in adapters."
-        - "[ai] Panes bind on actual Identify, never view creation, preserving the ordinary Backfill interval during page reload. Superseded glass is inert with queues cleared, does not enter crash recovery and does not change layout. Explicit operator closure remains possible. This registry is transient host transport state, outside snapshot/digest; it creates no authoritative Session or Station entitlement. Browser adoption is R2b/#1411 and is not claimed by this slice."
+        - "[ai] Panes bind on actual Identify, never view creation, preserving the ordinary Backfill interval during page reload. Superseded glass is inert with queues cleared, does not enter crash recovery and does not change layout. Explicit operator closure remains possible. This registry is transient host transport state, outside snapshot/digest; it creates no authoritative Session or Station entitlement. R2b/#1411 exposes the same owner as BrowserConnections in the browser host; phone clients remain pure JS."
+        - "[ai] BrowserConnections is constructed when Trunk exposes the WASM module, before crew registration and independently of World selection or ECS App initialization. The browser adapter holds opaque-handle-to-physical-connection objects only. Every Identify invokes the Rust binder, every inbound callback checks current sender before pre-World picks or simulation dispatch, and outbound targets resolve through the registry for both delivery classes. Replacement precedes old physical close; late old snapshot/close/input events cannot alter the new owner."
+        - "[ai] Pre-ECS messages retain their physical incarnation and recheck current ownership when the bridge flushes. A connection closed before that flush does not queue an authoritative departure, since its Identify never entered the App. This prevents a departed or superseded pre-World client from becoming a ghost Session on World load."
     architecture:
       kind: transport-adapter
       authority: non-authoritative
       coordinates: [session-identity-manager, native-relay-transport, native-station-pane]
-      runs_in: [native-host-runtime]
+      runs_in: [native-host-runtime, host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/session_connections.rs, src/native_host/connections.rs, src/native_host/transport.rs, src/native_host/relay_transport.rs, src/native_host/panes/transport.rs, src/native_host/panes/registry.rs, src/native_host/bridge_display.rs]
-      symbols: [ConnectionRegistry, ConnectionId, SharedConnections, PairedTransport, RelayTransport, PaneTransport]
-      tests: [src/session_connections.rs, src/native_host/relay_transport_tests.rs, tests/native_host_panes/session_connections.rs, tests/native_host_panes.rs]
+      paths: [src/session_connections.rs, src/session_connections/browser.rs, src/core/codec.rs, gui/host-peer-routing.js, server.html, src/native_host/connections.rs, src/native_host/transport.rs, src/native_host/relay_transport.rs, src/native_host/panes/transport.rs, src/native_host/panes/registry.rs, src/native_host/bridge_display.rs]
+      symbols: [ConnectionRegistry, ConnectionId, BrowserConnections, createHostConnections, hostConnectionRegistryReady, SharedConnections, PairedTransport, RelayTransport, PaneTransport]
+      tests: [src/session_connections.rs, src/session_connections/browser.rs, tests/fixtures/session-connections.json, tests/client/host-peer-routing.test.js, tests/smoke/session-connections.spec.js, tests/smoke/reconnect.spec.js, src/native_host/relay_transport_tests.rs, tests/native_host_panes/session_connections.rs, tests/native_host_panes.rs]
 
   - component: session-identity-manager
     core:
@@ -111,7 +113,7 @@ entities:
       rationale:
         - Mandated by p2p-delta-transport-is-a-star-today — Phoenix replaces PeerJS rather than layering more product behaviour onto a public broker.
         - "[ai] Complete rather than adapter-shaped, because there was nothing left to adapt: the JS-to-WASM networking surface is three functions that never knew what a peer was, so retiring the transport touched no Rust beyond the version-pin flip in join-compatibility-gate."
-        - "[ai] gui/host-peer-routing.js survived verbatim — its isOpen() already accepted a raw RTCDataChannel as well as a PeerJS DataConnection, so the outbound router needed no change at all."
+        - "[ai] gui/host-peer-routing.js retained its channel-readiness behavior through the transport cutover. R2b/#1411 later replaced its duplicated ownership/recipient policy with BrowserConnections while retaining per-connection snapshot fallback."
         - "[ai] gui/connection-manager.js kept its name and its ICE/timing exports and lost only the ConnectionManager class; the reconnect, backoff and snapshot-channel behaviour it carried moved into the joiner half of gui/rendezvous-transport.js, so there is one connection lifecycle instead of two."
         - "[ai] The smoke suite's PeerJS shim went with it. tests/smoke/rendezvous-shim.js is now the ONE transport stand-in, behind the tests/smoke/transport-fixture.js seam, so the ~40 specs that take a test client did not change."
         - "[ai] REPLACES peer-transport-bridge (this slice, now `removed`); TARGET is rendezvous-transport-bridge in architecture/rendezvous-transport.yaml. Written as prose rather than WRITING_PASM §10's `replaces:`/`target:`/`removal_conditions:` keys because the pinned pasm schema rejects those as unknown fields under `architecture:` and reads a second `migration:` block as a duplicate key — the guide's §10 example does not validate against the tool this repo runs. Removal conditions, for the record: no `ConnectionManager` class and no `window.Peer` anywhere in the tree."

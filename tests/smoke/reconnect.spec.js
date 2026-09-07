@@ -71,3 +71,23 @@ test('refresh mid-game rejoins straight onto the same console', { tag: '@core' }
 
   await c1b.close();
 });
+
+test('replacement retains its Station when the old page closes after the handoff', async ({ context }) => {
+  const hostId = await bootServer(context);
+  const token = 'overlapping-reconnect';
+  const old = await createTestClient(context, hostId, { token, name: 'P1' });
+  await selectAndWait(old, 'Captain');
+
+  const current = await createTestClient(context, hostId, { token, name: 'P1' });
+  expect(stationInWelcome(await current.waitForMessage('Welcome'), token)).toBe('captain');
+  // Old page teardown comes AFTER the new Identify/Welcome, not before it.
+  await old.close();
+  await current.send('SetReady', { ready: true });
+  await current.waitForMessage('GameStarted');
+  await current.send('Identify', { token, name: 'P1' });
+  await current.page.waitForFunction(t => window.__messages.some(m =>
+    m.type === 'Welcome' && m.data.state.phase === 'InProgress' &&
+    m.data.state.players.some(p => p.token === t && p.station === 'captain')
+  ), token);
+  await current.close();
+});

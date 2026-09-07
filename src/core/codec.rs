@@ -8,6 +8,69 @@ pub trait MessageCodec {
     fn decode_server(&self, s: &str) -> Result<ServerMessage, Self::Error>;
 }
 
+/// Browser-host local FFI reply. This does not change the game wire protocol.
+pub fn encode_connection_binding(
+    result: Result<
+        Option<crate::session_connections::ConnectionId>,
+        crate::session_connections::BindRefusal,
+    >,
+) -> String {
+    use crate::session_connections::BindRefusal;
+    match result {
+        Ok(previous) => serde_json::json!({
+            "ok": true,
+            "previous": previous.map(|id| id.incarnation.to_string()),
+        }),
+        Err(reason) => serde_json::json!({
+            "ok": false,
+            "code": match reason {
+                BindRefusal::ReservedToken => "reserved-token",
+                _ => "invalid-token",
+            },
+        }),
+    }
+    .to_string()
+}
+
+/// Opaque physical handles stay strings across the JavaScript number boundary.
+pub fn encode_connection_recipients(ids: &[crate::session_connections::ConnectionId]) -> String {
+    let handles: Vec<_> = ids.iter().map(|id| id.incarnation.to_string()).collect();
+    serde_json::to_string(&handles).expect("connection handles serialize")
+}
+
+/// Shared adapter transcript; decoding remains at the codec boundary in tests too.
+#[cfg(test)]
+#[derive(serde::Deserialize, Debug)]
+pub(crate) struct ConnectionTranscriptStep {
+    pub op: String,
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub leg: usize,
+    pub message: Option<ClientMessage>,
+    pub sender: Option<String>,
+    #[serde(default)]
+    pub departed: Vec<String>,
+    pub refusal: Option<String>,
+    #[serde(default)]
+    pub target: String,
+    #[serde(default)]
+    pub recipients: Vec<String>,
+}
+
+#[cfg(test)]
+pub(crate) fn connection_transcript() -> Vec<ConnectionTranscriptStep> {
+    #[derive(serde::Deserialize)]
+    struct Fixture {
+        steps: Vec<ConnectionTranscriptStep>,
+    }
+    serde_json::from_str::<Fixture>(include_str!(
+        "../../tests/fixtures/session-connections.json"
+    ))
+    .expect("shared connection transcript")
+    .steps
+}
+
 pub struct JsonCodec;
 
 impl MessageCodec for JsonCodec {

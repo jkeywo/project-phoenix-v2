@@ -1,0 +1,357 @@
+{
+  "description": "Same accepted-link ownership transcript for native paired relay adapters and browser physical adapter with real WASM registry. Open includes role/stamp admission. Physical teardown may be immediate or delayed; each operation settles pending native close events.",
+  "steps": [
+    {
+      "op": "open",
+      "id": "old",
+      "leg": 0
+    },
+    {
+      "op": "message",
+      "id": "old",
+      "message": {
+        "type": "SelectScenario",
+        "data": {
+          "scenario_id": "before-identify"
+        }
+      },
+      "sender": null,
+      "departed": [],
+      "refusal": null
+    },
+    {
+      "op": "message",
+      "id": "old",
+      "message": {
+        "type": "Identify",
+        "data": {
+          "token": "crew-A",
+          "name": "Ada"
+        }
+      },
+      "sender": "crew-A",
+      "departed": [],
+      "refusal": null
+    },
+    {
+      "op": "open",
+      "id": "current",
+      "leg": 1
+    },
+    {
+      "op": "message",
+      "id": "current",
+      "message": {
+        "type": "Identify",
+        "data": {
+          "token": "crew-A",
+          "name": "Ada"
+        }
+      },
+      "sender": "crew-A",
+      "departed": [],
+      "refusal": null
+    },
+    {
+      "op": "open",
+      "id": "other",
+      "leg": 0
+    },
+    {
+      "op": "message",
+      "id": "other",
+      "message": {
+        "type": "Identify",
+        "data": {
+          "token": "crew-B",
+          "name": "Ada"
+        }
+      },
+      "sender": "crew-B",
+      "departed": [],
+      "refusal": null
+    },
+    {
+      "op": "send",
+      "target": "all",
+      "recipients": [
+        "current",
+        "other"
+      ]
+    },
+    {
+      "op": "send",
+      "target": "token:crew-A",
+      "recipients": [
+        "current"
+      ]
+    },
+    {
+      "op": "send",
+      "target": "except:crew-A",
+      "recipients": [
+        "other"
+      ]
+    },
+    {
+      "op": "message",
+      "id": "old",
+      "message": {
+        "type": "ReleaseStation"
+      },
+      "sender": null,
+      "departed": [],
+      "refusal": null
+    },
+    {
+      "op": "close",
+      "id": "old",
+      "departed": []
+    },
+    {
+      "op": "message",
+      "id": "current",
+      "message": {
+        "type": "Identify",
+        "data": {
+          "token": "crew-A",
+          "name": "Ada"
+        }
+      },
+      "sender": "crew-A",
+      "departed": [],
+      "refusal": null
+    },
+    {
+      "op": "message",
+      "id": "current",
+      "message": {
+        "type": "SetReady",
+        "data": {
+          "ready": true
+        }
+      },
+      "sender": "crew-A",
+      "departed": [],
+      "refusal": null
+    },
+    {
+      "op": "message",
+      "id": "current",
+      "message": {
+        "type": "Identify",
+        "data": {
+          "token": "crew-B",
+          "name": "Ada"
+        }
+      },
+      "sender": null,
+      "departed": [
+        "crew-A"
+      ],
+      "refusal": "invalid-token"
+    },
+    {
+      "op": "message",
+      "id": "current",
+      "message": {
+        "type": "ReleaseStation"
+      },
+      "sender": null,
+      "departed": [],
+      "refusal": null
+    },
+    {
+      "op": "send",
+      "target": "all",
+      "recipients": [
+        "other"
+      ]
+    },
+    {
+      "op": "close",
+      "id": "other",
+      "departed": [
+        "crew-B"
+      ]
+    },
+    {
+      "op": "open",
+      "id": "invalid-0",
+      "leg": 0
+    },
+    {
+      "op": "message",
+      "id": "invalid-0",
+      "message": {
+        "type": "Identify",
+        "data": {
+          "token": "",
+          "name": "Ada"
+        }
+      },
+      "sender": null,
+      "departed": [],
+      "refusal": "invalid-token"
+    },
+    {
+      "op": "open",
+      "id": "invalid-1",
+      "leg": 0
+    },
+    {
+      "op": "message",
+      "id": "invalid-1",
+      "message": {
+        "type": "Identify",
+        "data": {
+          "token": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "name": "Ada"
+        }
+      },
+      "sender": null,
+      "departed": [],
+      "refusal": "invalid-token"
+    },
+    {
+      "op": "open",
+      "id": "invalid-2",
+      "leg": 0
+    },
+    {
+      "op": "message",
+      "id": "invalid-2",
+      "message": {
+        "type": "Identify",
+        "data": {
+          "token": "a b",
+          "name": "Ada"
+        }
+      },
+      "sender": null,
+      "departed": [],
+      "refusal": "invalid-token"
+    },
+    {
+      "op": "open",
+      "id": "invalid-3",
+      "leg": 0
+    },
+    {
+      "op": "message",
+      "id": "invalid-3",
+      "message": {
+        "type": "Identify",
+        "data": {
+          "token": "a\nb",
+          "name": "Ada"
+        }
+      },
+      "sender": null,
+      "departed": [],
+      "refusal": "invalid-token"
+    },
+    {
+      "op": "open",
+      "id": "invalid-4",
+      "leg": 0
+    },
+    {
+      "op": "message",
+      "id": "invalid-4",
+      "message": {
+        "type": "Identify",
+        "data": {
+          "token": "__local_console__",
+          "name": "Ada"
+        }
+      },
+      "sender": null,
+      "departed": [],
+      "refusal": "reserved-token"
+    },
+    {
+      "op": "open",
+      "id": "invalid-5",
+      "leg": 0
+    },
+    {
+      "op": "message",
+      "id": "invalid-5",
+      "message": {
+        "type": "Identify",
+        "data": {
+          "token": "ai:helm",
+          "name": "Ada"
+        }
+      },
+      "sender": null,
+      "departed": [],
+      "refusal": "reserved-token"
+    },
+    {
+      "op": "open",
+      "id": "unicode",
+      "leg": 0
+    },
+    {
+      "op": "message",
+      "id": "unicode",
+      "message": {
+        "type": "Identify",
+        "data": {
+          "token": "🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰",
+          "name": "Ada"
+        }
+      },
+      "sender": "🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰",
+      "departed": [],
+      "refusal": null
+    },
+    {
+      "op": "send",
+      "target": "all",
+      "recipients": [
+        "unicode"
+      ]
+    },
+    {
+      "op": "close",
+      "id": "unicode",
+      "departed": [
+        "🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰🛰"
+      ]
+    },
+    {
+      "op": "open",
+      "id": "reused",
+      "leg": 1
+    },
+    {
+      "op": "message",
+      "id": "reused",
+      "message": {
+        "type": "Identify",
+        "data": {
+          "token": "crew-A",
+          "name": "Ada"
+        }
+      },
+      "sender": "crew-A",
+      "departed": [],
+      "refusal": null
+    },
+    {
+      "op": "close",
+      "id": "current",
+      "departed": []
+    },
+    {
+      "op": "send",
+      "target": "token:crew-A",
+      "recipients": [
+        "reused"
+      ]
+    }
+  ]
+}

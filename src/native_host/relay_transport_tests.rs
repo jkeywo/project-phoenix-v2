@@ -1076,3 +1076,119 @@ fn superseded_pane_does_not_recover_or_reclaim_its_session() {
         "closing stale glass cannot evict the phone"
     );
 }
+
+#[test]
+fn native_adapters_follow_the_shared_browser_ownership_transcript() {
+    use crate::native_host::transport::PairedTransport;
+    use std::collections::BTreeMap;
+
+    let (lan, lan_socket) = transport();
+    let (cloud, cloud_socket) = transport();
+    let mut host = PairedTransport::new(lan, cloud);
+    let sockets = [lan_socket, cloud_socket];
+    let mut legs = BTreeMap::new();
+    for step in crate::core::codec::connection_transcript() {
+        for socket in &sockets {
+            socket.outbound.lock().unwrap().clear();
+        }
+        let id = step.id.as_str();
+        let op = step.op.as_str();
+        match op {
+            "open" => {
+                let leg = step.leg;
+                legs.insert(id.to_owned(), leg);
+                let socket = &sockets[leg];
+                socket.arrive(&peer_joined(id));
+                let handshake = encode_handshake_frame(&HandshakeFrame {
+                    kind: JOIN_HANDSHAKE.to_string(),
+                    data: crate::core::rendezvous::HandshakeData {
+                        stamp: Some(matching_stamp_field()),
+                        ..Default::default()
+                    },
+                })
+                .unwrap();
+                socket.arrive(&relayed(id, &handshake));
+            }
+            "message" => sockets[legs[id]].arrive(&relayed(
+                id,
+                &JsonCodec
+                    .encode_client(step.message.as_ref().unwrap())
+                    .unwrap(),
+            )),
+            "close" => sockets[legs[id]].arrive(&RendezvousFrame {
+                peer: Some(id.to_owned()),
+                ..frame("relay-peer-left")
+            }),
+            "send" => {
+                let wire = step.target.as_str();
+                let target = if wire == "all" {
+                    Target::All
+                } else if let Some(token) = wire.strip_prefix("token:") {
+                    Target::Token(token.to_owned())
+                } else {
+                    Target::AllExcept(wire.strip_prefix("except:").unwrap().to_owned())
+                };
+                for delivery in [DeliveryClass::Reliable, DeliveryClass::Snapshot] {
+                    for socket in &sockets {
+                        socket.outbound.lock().unwrap().clear();
+                    }
+                    host.dispatch(TransportDispatch {
+                        target: &target,
+                        msg: &ServerMessage::GameStarted,
+                        delivery,
+                    });
+                    let frames: Vec<_> = sockets
+                        .iter()
+                        .flat_map(|socket| socket.sent_of("relay"))
+                        .collect();
+                    let mut recipients: Vec<_> =
+                        frames.iter().filter_map(|f| f.to.clone()).collect();
+                    recipients.sort();
+                    assert_eq!(recipients, step.recipients, "{step:?}");
+                    let class = if delivery == DeliveryClass::Reliable {
+                        CLASS_RELIABLE
+                    } else {
+                        CLASS_SNAPSHOT
+                    };
+                    assert!(frames.iter().all(|f| f.class.as_deref() == Some(class)));
+                }
+            }
+            _ => panic!("unknown transcript action: {op}"),
+        }
+        let events: Vec<_> = host.poll().into_iter().chain(host.poll()).collect();
+        let received: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                TransportEvent::Received { token, msg } => Some((token.as_str(), msg)),
+                _ => None,
+            })
+            .collect();
+        if let Some(token) = step.sender.as_deref() {
+            assert_eq!(
+                received,
+                vec![(token, step.message.as_ref().unwrap())],
+                "{step:?}"
+            );
+        } else {
+            assert!(received.is_empty(), "{step:?}: {received:?}");
+        }
+        let departures: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                TransportEvent::Disconnected { token } => Some(token.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(departures, step.departed, "{step:?}");
+        if let Some(code) = step.refusal.as_deref() {
+            let refusals: Vec<_> = sockets
+                .iter()
+                .flat_map(|socket| socket.sent_of("relay"))
+                .filter_map(|f| decode_handshake_frame(f.payload.as_deref()?).ok())
+                .filter(|frame| frame.kind == JOIN_REFUSED)
+                .collect();
+            assert_eq!(refusals.len(), 1, "{step:?}");
+            assert_eq!(refusals[0].data.code.as_deref(), Some(code), "{step:?}");
+        }
+    }
+}

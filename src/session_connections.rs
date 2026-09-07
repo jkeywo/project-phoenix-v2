@@ -9,6 +9,8 @@ use std::collections::BTreeMap;
 
 use crate::lobby::handler::Target;
 
+pub mod browser;
+
 /// The existing Session-token bound, measured in Unicode characters.
 pub const MAX_TOKEN_CHARS: usize = 64;
 

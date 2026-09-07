@@ -1090,8 +1090,8 @@ describe('isDemoBuild', () => {
 
 // ── server.html source guards ────────────────────────────────────────
 //
-// Two behaviours live in server.html's classic scripts, which no module can
-// import: the peer-Identify token gate and the unpause-before-exit funnel.
+// The unpause-before-exit funnel lives in server.html's classic scripts.
+// Connection admission is exercised through its importable adapter and WASM smoke.
 // Neither is reachable from jsdom, so these assert on the shipped source --
 // deliberately shape checks, to catch silent removal of a security gate and of
 // a fix whose absence is invisible until a host pauses mid-mission.
@@ -1117,18 +1117,6 @@ describe('server.html host-page guards', () => {
     expect(setAt).toBeGreaterThan(awaitAt);
   });
 
-  it('refuses a peer that identifies under a reserved host-runtime token', () => {
-    expect(SRC).toMatch(/function isPeerTokenAllowed\s*\(/);
-    expect(SRC).toMatch(/token === LOCAL_CONSOLE_TOKEN\) return false/);
-    expect(SRC).toMatch(/token\.startsWith\(AI_TOKEN_PREFIX\)\) return false/);
-    // The gate must run before the token is recorded for the connection.
-    const identify = SRC.indexOf("msg.type === 'Identify'");
-    const gate = SRC.indexOf('isPeerTokenAllowed(claimed)', identify);
-    const record = SRC.indexOf('peerTokens.set(conn.peer, token)', identify);
-    expect(identify).toBeGreaterThan(-1);
-    expect(gate).toBeGreaterThan(identify);
-    expect(record).toBeGreaterThan(gate);
-  });
 
   it('unpauses before sending the return, since pause starves FixedUpdate', () => {
     const fn = SRC.indexOf('function hostReturnToLobby()');

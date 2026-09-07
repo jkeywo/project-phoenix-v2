@@ -1,123 +1,168 @@
-// tests/client/host-peer-routing.test.js — issue #1230: server.html's
-// routeOutbound() closed over the live tokenConns/tokenSnapshotConns Maps and
-// called `.send()` inline, so there was no importable target-resolution logic
-// to test without a live WebRTC session. This suite exercises the pure
-// resolution lifted out of it (gui/host-peer-routing.js) with plain
-// `Map([[token, fakeConn]])` fixtures.
+import { describe, it, expect, vi } from 'vitest';
+import { createHostConnections, hostConnectionRegistryReady } from '../../gui/host-peer-routing.js';
 
-import { describe, it, expect } from 'vitest';
-import { outboundTargets } from '../../gui/host-peer-routing.js';
+/** Scripted registry decisions: these tests cover physical event/readiness
+ * application only. The shared transcript runs the REAL Rust owner on native
+ * and in the rebuilt-WASM smoke; no JS policy imitation is used here. */
+function registryStub(handles = ['first', 'second']) {
+  return {
+    open: vi.fn(() => handles.shift()),
+    bind: vi.fn(() => JSON.stringify({ ok: true, previous: null })),
+    sender: vi.fn(() => null),
+    close: vi.fn(() => null),
+    recipients: vi.fn(() => '[]'),
+  };
+}
 
-/** A fake connection: `open` is the flag routeOutbound reads. */
-const conn = (open = true) => ({ open, sent: [] });
-/** A fake raw-RTCDataChannel-shaped stub: `readyState` instead of `open`. */
-const rtcConn = (readyState = 'open') => ({ readyState, sent: [] });
+function connection({ open = true, snapshotChannel, delayedClose = false } = {}) {
+  const events = new Map();
+  const conn = {
+    peer: 'same-physical-peer-id',
+    open, snapshotChannel,
+    send: vi.fn(),
+    on(type, fn) {
+      const handlers = events.get(type) || [];
+      handlers.push(fn);
+      events.set(type, handlers);
+    },
+    emit(type, value) { for (const fn of events.get(type) || []) fn(value); },
+    close: vi.fn(() => { if (!delayedClose) { conn.open = false; conn.emit('close'); } }),
+  };
+  return conn;
+}
 
-describe('outboundTargets — target resolution', () => {
-  it('all: returns every open reliable connection, skipping closed ones', () => {
-    const a = conn(true), b = conn(false), c = conn(true);
-    const tokenConns = new Map([['a', a], ['b', b], ['c', c]]);
-    const out = outboundTargets('all', 'reliable', { tokenConns, tokenSnapshotConns: new Map() });
-    expect(out).toEqual([a, c]);
+describe('physical host connection adapter', () => {
+  it('applies owner replacement before synchronous old close, with no stale departure', () => {
+    const registry = registryStub();
+    const onMessage = vi.fn(), onDeparture = vi.fn();
+    const host = createHostConnections(registry, { onMessage, onDeparture });
+    const old = connection(), current = connection();
+    host.attach(old);
+    host.attach(current);
+    registry.bind.mockImplementation(() => {
+      registry.sender.mockImplementation(id => id === 'second' ? 'A' : null);
+      registry.recipients.mockReturnValue('["second"]');
+      return JSON.stringify({ ok: true, previous: 'first' });
+    });
+    current.emit('data', { type: 'Identify', data: { token: 'A' } });
+    expect(old.close).toHaveBeenCalledOnce();
+    expect(registry.close).toHaveBeenCalledWith('first');
+    expect(onDeparture).not.toHaveBeenCalled();
+    expect(host.targets('all', 'reliable')).toEqual([current]);
+    old.emit('data', { type: 'ReleaseStation' });
+    old.emit('close');
+    expect(onMessage).toHaveBeenCalledExactlyOnceWith('A', JSON.stringify({ type: 'Identify', data: { token: 'A' } }), 'second');
   });
 
-  it('token:<id>: returns exactly that one connection when open', () => {
-    const a = conn(true), b = conn(true);
-    const tokenConns = new Map([['a', a], ['b', b]]);
-    const out = outboundTargets('token:b', 'reliable', { tokenConns, tokenSnapshotConns: new Map() });
-    expect(out).toEqual([b]);
+  it('refuses through the Rust verdict, forgets immediately, and cannot rename on a live link', () => {
+    const registry = registryStub();
+    const onMessage = vi.fn(), onDeparture = vi.fn();
+    const host = createHostConnections(registry, { onMessage, onDeparture });
+    const conn = connection({ delayedClose: true });
+    host.attach(conn);
+    registry.sender.mockReturnValue('A');
+    registry.bind.mockReturnValue('{"ok":false,"code":"invalid-token"}');
+    registry.close.mockImplementation(() => { registry.sender.mockReturnValue(null); return 'A'; });
+    conn.emit('data', { type: 'Identify', data: { token: 'B' } });
+    expect(registry.bind).toHaveBeenCalledWith('first', 'B');
+    expect(JSON.parse(conn.send.mock.calls[0][0])).toEqual({ type: 'JoinRefused', data: { code: 'invalid-token' } });
+    expect(onDeparture).toHaveBeenCalledExactlyOnceWith('A');
+    conn.emit('data', { type: 'SetReady', data: { ready: true } });
+    conn.emit('close');
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(onDeparture).toHaveBeenCalledTimes(1);
   });
 
-  it('token:<id>: returns nothing for an unknown or closed token', () => {
-    const tokenConns = new Map([['a', conn(false)]]);
-    expect(outboundTargets('token:a', 'reliable', { tokenConns, tokenSnapshotConns: new Map() })).toEqual([]);
-    expect(outboundTargets('token:missing', 'reliable', { tokenConns, tokenSnapshotConns: new Map() })).toEqual([]);
+  it('gates pre-Identify picks, bad JSON and invalid shapes before host callbacks', () => {
+    const registry = registryStub();
+    const onMessage = vi.fn(), onIdentified = vi.fn();
+    const host = createHostConnections(registry, { onMessage, onIdentified });
+    const conn = connection();
+    host.attach(conn);
+    for (const raw of ['garbage', 'null', { type: 'SelectScenario', data: { scenario_id: 'early' } }]) conn.emit('data', raw);
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(onIdentified).not.toHaveBeenCalled();
+    registry.bind.mockReturnValue('{"ok":false,"code":"invalid-token"}');
+    conn.emit('data', { type: 'Identify', data: { token: { bad: true } } });
+    expect(registry.bind).toHaveBeenCalledWith('first', '');
+    expect(onMessage).not.toHaveBeenCalled();
   });
 
-  it('except:<id>: returns every open connection except the named token', () => {
-    const a = conn(true), b = conn(true), c = conn(true);
-    const tokenConns = new Map([['a', a], ['b', b], ['c', c]]);
-    const out = outboundTargets('except:b', 'reliable', { tokenConns, tokenSnapshotConns: new Map() });
-    expect(out).toEqual([a, c]);
-  });
-
-  it('an unrecognised target shape resolves to no connections', () => {
-    const tokenConns = new Map([['a', conn(true)]]);
-    expect(outboundTargets('bogus', 'reliable', { tokenConns, tokenSnapshotConns: new Map() })).toEqual([]);
-  });
-
-  it('recognises open via readyState for a raw-channel-shaped connection', () => {
-    const a = rtcConn('open'), b = rtcConn('connecting');
-    const tokenConns = new Map([['a', a], ['b', b]]);
-    const out = outboundTargets('all', 'reliable', { tokenConns, tokenSnapshotConns: new Map() });
-    expect(out).toEqual([a]);
+  it('uses only Rust recipients and falls back independently to each ready reliable link', () => {
+    const registry = registryStub(['a', 'b', 'closed']);
+    const host = createHostConnections(registry, { onMessage: vi.fn() });
+    const snapshotA = { readyState: 'open' };
+    const a = connection({ snapshotChannel: snapshotA });
+    const b = connection({ snapshotChannel: { readyState: 'connecting' } });
+    const closed = connection({ open: false, snapshotChannel: { readyState: 'open' } });
+    host.attach(a); host.attach(b); host.attach(closed);
+    registry.recipients.mockReturnValue('["a","b","closed"]');
+    expect(host.targets('except:some-token', 'snapshot')).toEqual([snapshotA, b, closed.snapshotChannel]);
+    expect(registry.recipients).toHaveBeenLastCalledWith('except:some-token');
+    expect(host.targets('all', 'reliable')).toEqual([a, b]);
+    registry.recipients.mockReturnValue('["b"]');
+    expect(host.targets('token:opaque', 'snapshot')).toEqual([b]);
+    b.snapshotChannel = { readyState: 'open' };
+    expect(host.targets('token:opaque', 'snapshot')).toEqual([b.snapshotChannel]);
+    b.snapshotChannel = null;
+    expect(host.targets('token:opaque', 'snapshot')).toEqual([b]);
+    registry.recipients.mockReturnValue('[]');
+    expect(host.targets('all', 'snapshot')).toEqual([]);
   });
 });
 
-describe('outboundTargets — snapshot delivery + reliable fallback', () => {
-  it('prefers the snapshot connection when open', () => {
-    const snap = conn(true), reliable = conn(true);
-    const out = outboundTargets('token:a', 'snapshot', {
-      tokenConns: new Map([['a', reliable]]),
-      tokenSnapshotConns: new Map([['a', snap]]),
-    });
-    expect(out).toEqual([snap]);
+describe('registry bootstrap before ECS', () => {
+  it('waits for Trunk exports when ICE is ready first, without waiting for PhoenixReady', async () => {
+    const hostWindow = new EventTarget();
+    let ready = false;
+    const pending = hostConnectionRegistryReady(hostWindow).then(value => { ready = true; return value; });
+    await Promise.resolve();
+    expect(ready).toBe(false);
+    class BrowserConnections {}
+    hostWindow.wasmBindings = { BrowserConnections };
+    hostWindow.dispatchEvent(new Event('TrunkApplicationStarted'));
+    expect(await pending).toBeInstanceOf(BrowserConnections);
   });
 
-  it('falls back to the reliable connection when only the snapshot channel is missing', () => {
-    const reliable = conn(true);
-    const out = outboundTargets('token:a', 'snapshot', {
-      tokenConns: new Map([['a', reliable]]),
-      tokenSnapshotConns: new Map(),
-    });
-    expect(out).toEqual([reliable]);
+  it('handles exports arriving before ICE without requiring a second event', async () => {
+    class BrowserConnections {}
+    const hostWindow = { wasmBindings: { BrowserConnections }, addEventListener: vi.fn() };
+    expect(await hostConnectionRegistryReady(hostWindow)).toBeInstanceOf(BrowserConnections);
+    expect(hostWindow.addEventListener).not.toHaveBeenCalled();
   });
 
-  it('falls back to the reliable connection when the snapshot channel exists but is closed', () => {
-    const reliable = conn(true);
-    const out = outboundTargets('token:a', 'snapshot', {
-      tokenConns: new Map([['a', reliable]]),
-      tokenSnapshotConns: new Map([['a', conn(false)]]),
-    });
-    expect(out).toEqual([reliable]);
+  it('refuses startup when the built module does not export the owner', async () => {
+    await expect(hostConnectionRegistryReady({ wasmBindings: {} })).rejects.toThrow();
   });
+});
 
-  it('never sends on both channels for the same token', () => {
-    const snap = conn(true), reliable = conn(true);
-    const out = outboundTargets('token:a', 'snapshot', {
-      tokenConns: new Map([['a', reliable]]),
-      tokenSnapshotConns: new Map([['a', snap]]),
-    });
-    expect(out).toHaveLength(1);
-  });
 
-  it('a reliable delivery never falls back to the snapshot channel', () => {
-    // No 'a' entry in tokenConns at all — a reliable delivery must not borrow
-    // the snapshot-only connection for it.
-    const snap = conn(true);
-    const out = outboundTargets('token:a', 'reliable', {
-      tokenConns: new Map(),
-      tokenSnapshotConns: new Map([['a', snap]]),
-    });
-    expect(out).toEqual([]);
-  });
-
-  it('all + snapshot: falls back per-token independently, not as an all-or-nothing switch', () => {
-    // 'a' has a snapshot channel; 'b' only ever opened the reliable one.
-    const snapA = conn(true), reliableA = conn(true), reliableB = conn(true);
-    const out = outboundTargets('all', 'snapshot', {
-      tokenConns: new Map([['a', reliableA], ['b', reliableB]]),
-      tokenSnapshotConns: new Map([['a', snapA]]),
-    });
-    expect(out).toEqual([snapA, reliableB]);
-  });
-
-  it('except + snapshot: excludes the named token from both the primary pass and its fallback', () => {
-    const reliableA = conn(true), reliableB = conn(true);
-    const out = outboundTargets('except:a', 'snapshot', {
-      tokenConns: new Map([['a', reliableA], ['b', reliableB]]),
-      tokenSnapshotConns: new Map(), // neither token has a snapshot channel
-    });
-    expect(out).toEqual([reliableB]);
+describe('the shipped pre-ECS message queue', () => {
+  it('forgets stale incarnations at the real flush and keeps current reliable order', async () => {
+    const { readFileSync } = await import('node:fs');
+    const html = readFileSync(new URL('../../server.html', import.meta.url), 'utf8');
+    const dispatch = html.match(/function dispatchToWasm\(handle, json\) \{[\s\S]*?\n    \}/)[0];
+    const flush = html.match(/for \(const \[handle, json\] of msgQueue\.splice\(0\)\) dispatchToWasm\(handle, json\);/)[0];
+    const owners = new Map([['old', 'A']]);
+    const host = { sender: handle => owners.get(handle) };
+    const bridge = new Function('hostConnections', [
+      'let wasm_receive_message;',
+      'const msgQueue = [];',
+      dispatch,
+      'return { dispatch: dispatchToWasm, start(send) { wasm_receive_message = send;',
+      flush,
+      '} };',
+    ].join('\n'))(host);
+    bridge.dispatch('old', '{"type":"Identify"}');
+    bridge.dispatch('old', '{"type":"SetReady"}');
+    owners.delete('old');
+    owners.set('new', 'A');
+    bridge.dispatch('new', '{"type":"Identify"}');
+    bridge.dispatch('new', '{"type":"SelectStation"}');
+    const receive = vi.fn();
+    bridge.start(receive);
+    expect(receive.mock.calls).toEqual([
+      ['A', '{"type":"Identify"}'], ['A', '{"type":"SelectStation"}'],
+    ]);
   });
 });

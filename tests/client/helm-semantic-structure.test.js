@@ -5,9 +5,13 @@ function source(path) {
   return readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8');
 }
 
+// [hull, mounts a lateral-thrust pad, mounts the contextual Dock control].
+// The Dock column tracks which hulls author a `kind = "dock"` System: the
+// destroyer since #1164 S11a, the cruiser since #1388. The battleship authors
+// none, so its Helm must still carry no dock button at all.
 const HELM_VARIANTS = [
   ['battleship', false, false],
-  ['cruiser', true, false],
+  ['cruiser', true, true],
   ['destroyer', true, true],
 ];
 
@@ -51,12 +55,16 @@ describe('Helm semantic-action structural coverage', () => {
     });
   }
 
-  it('Destroyer dock uses the semantic identity and no direct action-map call', () => {
-    const html = source('gui/destroyer/helm.html');
-    expect(html).toContain('HELM_DOCK_ACTION_ID');
-    expect(html).toContain('activateSemanticAction');
-    expect(html).not.toContain('consoleHandle.sendAction');
-  });
+  // Every hull that mounts the Dock control reaches it the same way: through
+  // the semantic identity, never a direct action-map call.
+  for (const [hull] of HELM_VARIANTS.filter(([, , dock]) => dock)) {
+    it(`${hull} dock uses the semantic identity and no direct action-map call`, () => {
+      const html = source(`gui/${hull}/helm.html`);
+      expect(html).toContain('HELM_DOCK_ACTION_ID');
+      expect(html).toContain('activateSemanticAction');
+      expect(html).not.toContain('consoleHandle.sendAction');
+    });
+  }
 
   it('registers the complete Helm family once in each console and the private catalogue', () => {
     const consoleCore = source('gui/console-core.js');

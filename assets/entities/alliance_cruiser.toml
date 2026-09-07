@@ -348,6 +348,31 @@ damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
 
+# ── Dock-system damage entry (issue #1388) ───────────────────────────────────
+# The dock (authored as a system further down) carries a hull entry so a storm
+# can KNOCK IT OUT — a docking clamp is gear on the outside of the hull, and a
+# radiation band's `damage_zone` picks it the same way it picks any other system
+# (issue #1052's ordered `RegionDamage` draw over `EntitySystemHull`). Damaged to
+# `Disabled` the dock refuses (`dock.refused.disabled`) and a held mate parts, so
+# danger reaches the crew's external work exactly as it reaches a gun or an
+# engine.
+#
+# 30 HP and the 0.5/0.15/0.15 shape MIRROR the destroyer's own dock row
+# (`alliance_destroyer.toml`) and the NPC hulls carrying the identical system
+# (`alliance_tender.toml`) — the player/NPC symmetry PRD #1143 is built on.
+#
+# THIS IS THIS HULL'S FIRST OPERATIONAL (non-combat) SYSTEM ROW. Every entry
+# above is part of the 500-point combat durability ladder the #915 tuning pass
+# pegged; the dock sits OUTSIDE it, so the hull's combat pool is unchanged in
+# intent even though the raw `is_destroyed` sum now includes these 30 points.
+# `npm run balance:cruiser` is the standing check on that claim.
+[[hull.system_hull]]
+system_id = "dock"
+max_hp = 30
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
+debuff_magnitude = 0.15
+
 [repair]
 repair_team_count = 2
 travel_duration_secs = 5
@@ -1134,7 +1159,7 @@ description = "entity.alliance_cruiser.station.helm.description"
 rank = "Ltn."
 short_code = "HLM"
 console = "gui/cruiser/helm.html"
-manual_overview = "You fly the ship. Throttle and steering set your heading and speed; lateral thrust slides you sideways to line up firing arcs or dodge incoming fire; boost and impulse give you short bursts of speed. Watch the short-range radar for hazards. Simplified rating lets the AI hold lateral thrust so you keep the stick and throttle."
+manual_overview = "You fly the ship. Throttle and steering set your heading and speed; lateral thrust slides you sideways to line up firing arcs or dodge incoming fire; boost and impulse give you short bursts of speed. Watch the short-range radar for hazards. When a berth comes into range a Dock control appears; press it to mate the ship to a structure or tender, and press it again to back clear. Simplified rating lets the AI hold lateral thrust so you keep the stick and throttle."
 
 [[station.rating]]
 name = "Std"
@@ -1626,6 +1651,26 @@ id = "repair"
 kind = "repair"
 station = "engineering"
 
+# ── Dock (issue #1388) ───────────────────────────────────────────────────────
+# The cruiser's docking clamps: Helm-owned, because the dock is flown — the
+# server flies the mate manoeuvre onto the nearest viable dock-marker pair, so
+# the seat that flies the ship is the seat that presses Dock. `kind = "dock"`
+# is what maps it onto the Helm Console Family (`ship::system_registry`) and
+# what makes `DockControl` appear at spawn; the approach terms it runs under are
+# the `[dock]` table at the foot of this file, and the plates it mates on are
+# authored in the rig sidecar (`assets/models/alliance_cruiser.model.toml`).
+#
+# On the `helm` power group at the table's `min_power_level = 2`, exactly as the
+# destroyer's dock is, and for the reason spelled out there: docking gear adds no
+# new resting draw of its own, and a Power officer who robs Helm below level 2
+# takes the docking clamps down with the drive. It is listed in NO rating's
+# `automated_systems` — an unmanned Helm flies, it does not dock on its own.
+[[system]]
+id = "dock"
+kind = "dock"
+station = "helm"
+power_group = "helm"
+
 [[system]]
 id = "comms"
 kind = "comms"
@@ -2110,3 +2155,28 @@ weak_shield_flip_dwell_secs = 4.0
 # doctrine above; do not retune them outside the same seeded matrix.
 aggression = 0.8
 sensor_range = 350.0
+
+# ── Dock terms (issue #1388) ─────────────────────────────────────────────────
+#
+# The approach terms the `[[system]] kind = "dock"` above runs under. The table's
+# PRESENCE is also the opt-in that makes this hull dockable at all: it, and only
+# it, triggers the one spawn-time read of the rig sidecar for `dock`-prefixed
+# markers (`entities::spawner`'s `DockSpawn`), so a hull that authors no `[dock]`
+# reads no sidecar and its world's `content_digest` is unchanged.
+#
+# The values are the shipped fleet dock vocabulary verbatim
+# (`alliance_destroyer.toml`, `alliance_tender.toml`, `dock_probe`): the reach the
+# control appears within and a held dock parts past, the close-in engage distance,
+# the low approach speed, the mate tolerance, how far undock backs clear, and the
+# lowest powered rung. Deliberately IDENTICAL to the destroyer's rather than
+# scaled to this bigger hull — a berth is a berth, and a shared reach is what lets
+# one authored structure be dockable by either hull without per-hull tuning. The
+# dock MARKERS themselves are authored in the rig sidecar
+# (`assets/models/alliance_cruiser.model.toml`), not here. [ai] Unratified.
+[dock]
+range = 200.0
+engage_distance = 400.0
+approach_speed = 60.0
+mate_tolerance = 4.0
+undock_clear_distance = 120.0
+min_power_level = 2

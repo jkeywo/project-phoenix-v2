@@ -32,6 +32,8 @@ const BATTLESHIP_FIXTURE =
   '<span id="helm-auto-badge" hidden></span>' +
   '<span id="footer-target"></span>';
 
+// The cruiser mounts the contextual dock panel since #1388 (its Helm owns a
+// `kind = "dock"` System), but no tow-load panel — this hull carries no tractor.
 const CRUISER_FIXTURE =
   '<ph-helm-radar id="helm-radar"></ph-helm-radar>' +
   '<ph-helm-joystick id="helm-joystick"></ph-helm-joystick>' +
@@ -39,7 +41,11 @@ const CRUISER_FIXTURE =
   '<ph-impulse-btn id="impulse-btn"></ph-impulse-btn>' +
   '<ph-boost-btn id="boost-btn"></ph-boost-btn>' +
   '<span id="helm-auto-badge" hidden></span>' +
-  '<span id="footer-target"></span>';
+  '<span id="footer-target"></span>' +
+  '<div id="dock-panel" hidden>' +
+    '<button id="dock-btn"></button><span id="dock-status"></span>' +
+    '<div id="dock-refusal" hidden></div>' +
+  '</div>';
 
 const DESTROYER_FIXTURE =
   '<ph-helm-radar id="helm-radar"></ph-helm-radar>' +
@@ -114,8 +120,37 @@ describe('cruiser helm renderStation', () => {
     expect(el('footer-target').textContent).toBe('◉ ' + t('console.common.contacts.other', { n: 2 }));
   });
 
-  it('carries no dock/tow-load panels', () => {
-    expect(el('dock-panel')).toBeNull();
+  it('hides the dock panel when no dock view is available/engaged/docked', () => {
+    cruiserRender(payload, document);
+    expect(el('dock-panel').hidden).toBe(true);
+  });
+
+  it('shows the dock panel and toggles dock/undock text+class', () => {
+    const available = { ...payload, dock: { system_id: 'dock', available: true, engaged: false, docked: false, available_target_name: 'console.tractor.idle' } };
+    cruiserRender(available, document);
+    expect(el('dock-panel').hidden).toBe(false);
+    expect(el('dock-btn').classList.contains('docked')).toBe(false);
+    expect(el('dock-btn').textContent).toBe(t('console.dock.dock'));
+    expect(el('dock-btn').dataset.systemId).toBe('dock');
+    expect(el('dock-status').textContent).toContain(t('console.dock.available'));
+
+    const docked = { ...payload, dock: { system_id: 'dock', available: false, engaged: true, docked: true, docked_to_name: 'console.tractor.idle' } };
+    cruiserRender(docked, document);
+    expect(el('dock-btn').classList.contains('docked')).toBe(true);
+    expect(el('dock-btn').textContent).toBe(t('console.dock.undock'));
+    expect(el('dock-status').textContent).toContain(t('console.dock.docked'));
+  });
+
+  it('shows a dock refusal when present and clears it when absent', () => {
+    cruiserRender({ ...payload, dock: { available: true, refusal: 'console.tractor.idle' } }, document);
+    expect(el('dock-refusal').hidden).toBe(false);
+    cruiserRender({ ...payload, dock: { available: true } }, document);
+    expect(el('dock-refusal').hidden).toBe(true);
+  });
+
+  // The tow-load banner reads a `tractor` blackboard; this hull mounts no
+  // tractor, so the panel stays destroyer-only and the cruiser markup has none.
+  it('carries no tow-load panel', () => {
     expect(el('tow-load-panel')).toBeNull();
   });
 });

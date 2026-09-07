@@ -8,8 +8,11 @@
  * badge core, differing in: whether the hull mounts a lateral-thrust
  * joystick (cruiser, destroyer; not battleship), how the target-contact
  * footer text is built (or whether it is touched at all — the destroyer's
- * stays a static "NO TARGET"), and a bespoke tail (the destroyer's
- * contextual Dock control and under-tow-load banner).
+ * stays a static "NO TARGET"), and a bespoke tail: the contextual Dock
+ * control on the two hulls whose Helm owns a `dock` System (destroyer
+ * #1164 S11a, cruiser #1388) plus the destroyer's own under-tow-load
+ * banner. The Dock half of that tail is `renderDockPanel` below — shared,
+ * not copied, so the two hulls cannot drift apart.
  *
  * Helm is a FLAT single-family payload — every hull calls `initConsole`
  * as an authoritative flat Helm-family payload — so `renderStation` reads
@@ -38,9 +41,9 @@
  * @property {boolean} [footer.colorize]       tint the footer text by contact count
  *   (paired with zeroFallback — the cruiser pattern)
  * @property {function(object, Document, function): void} [tail]
- *   Bespoke per-hull rendering the shared core does not cover (the destroyer's
- *   Dock control and under-tow-load banner), called with `(s, doc, t)` after
- *   the common panels are set.
+ *   Bespoke per-hull rendering the shared core does not cover (the contextual
+ *   Dock control, the destroyer's under-tow-load banner), called with
+ *   `(s, doc, t)` after the common panels are set.
  */
 
 import { t } from '../strings.js';
@@ -108,6 +111,57 @@ export function makeHelmRender(variant) {
     // ── Bespoke per-hull tail ────────────────────────────────────────────
     if (variant.tail) variant.tail(s, doc, t);
   };
+}
+
+/**
+ * The contextual dock control (issues #1159, #1388), shared by every hull whose
+ * Helm owns a `kind = "dock"` System — the destroyer since #1164 S11a and the
+ * cruiser since #1388. It lives here rather than in either hull's variant
+ * because it is ONE control reading ONE authoritative view: a second copy would
+ * be a second place for the dock/undock decision to drift.
+ *
+ * Hidden entirely unless the payload carries a dock view that is available,
+ * engaged or docked, so a hull with no dock system — or one nowhere near a
+ * berth — shows nothing at all. The button carries the authored System id in
+ * `data-system-id` for the semantic adapter, toggles its label and `docked`
+ * class off the server's own `docked` flag rather than re-deriving one, and
+ * every string it writes is a `strings.csv` id through `t()` — no English
+ * crosses here.
+ *
+ * A hull opts in by naming this as (or calling it from) its variant `tail`; its
+ * markup supplies `dock-panel` / `dock-btn` / `dock-status` / `dock-refusal`.
+ *
+ * @param {object} s        the Helm console payload
+ * @param {Document} doc
+ * @param {function} tr     the string resolver (the shared `t`)
+ */
+export function renderDockPanel(s, doc, tr) {
+  const dockPanel = doc.getElementById('dock-panel');
+  const d = s.dock || null;
+  const dockBtn = doc.getElementById('dock-btn');
+  if (dockBtn) dockBtn.dataset.systemId = d?.system_id || '';
+  if (!dockPanel) return;
+  if (!d || (!d.available && !d.engaged && !d.docked)) {
+    dockPanel.hidden = true;
+    return;
+  }
+  dockPanel.hidden = false;
+  const docked = !!d.docked;
+  if (dockBtn) {
+    dockBtn.classList.toggle('docked', docked);
+    dockBtn.textContent = tr(docked ? 'console.dock.undock' : 'console.dock.dock');
+  }
+  const dockStatus = doc.getElementById('dock-status');
+  if (dockStatus) {
+    dockStatus.textContent = docked
+      ? tr('console.dock.docked') + (d.docked_to_name ? ' · ' + tr(d.docked_to_name) : '')
+      : tr('console.dock.available') + (d.available_target_name ? ' · ' + tr(d.available_target_name) : '');
+  }
+  const dockRefusal = doc.getElementById('dock-refusal');
+  if (dockRefusal) {
+    if (d.refusal) { dockRefusal.hidden = false; dockRefusal.textContent = tr(d.refusal); }
+    else { dockRefusal.hidden = true; dockRefusal.textContent = ''; }
+  }
 }
 
 /**

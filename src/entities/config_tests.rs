@@ -42,6 +42,53 @@ fn resolved_text(stem: &str) -> String {
         .toml
 }
 
+/// Every shipped `.toml` under `assets/entities`, recursively, except the
+/// fragment tree — sorted, so the failure a designer sees is the same on every
+/// filesystem.
+///
+/// The walk is RECURSIVE, mirroring `spawnable_templates_under` in
+/// `src/headless/app.rs`, which issue #954 made recursive for the same reason:
+/// that issue filed a spawned hull under
+/// `assets/entities/test/rng_coverage_lancer.toml`, and
+/// `assets/worlds/rng_coverage.toml` fields it twice. A top-level `read_dir`
+/// would leave that hull — and anything else a later issue files in a
+/// subdirectory — outside guards whose whole purpose is to catch the template
+/// nobody remembered to author.
+///
+/// `fragments/` is the one exclusion, and it is excluded for a property of its
+/// contents rather than of its name: nothing in it is spawnable. A fragment is a
+/// partial document that hulls compose FROM, so it is never itself a spawned
+/// body, and `composed_escort.toml` is a mechanism fixture rather than shipped
+/// content.
+fn shipped_templates() -> Vec<std::path::PathBuf> {
+    fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        let entries = std::fs::read_dir(dir)
+            .unwrap_or_else(|e| panic!("{} must be readable: {e}", dir.display()));
+        let mut paths: Vec<std::path::PathBuf> = entries.flatten().map(|e| e.path()).collect();
+        paths.sort();
+        for path in paths {
+            if path.is_dir() {
+                if path.file_name().is_some_and(|n| n == "fragments") {
+                    continue;
+                }
+                walk(&path, out);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("toml") {
+                out.push(path);
+            }
+        }
+    }
+
+    let dir = std::path::Path::new("assets/entities");
+    let mut out = Vec::new();
+    walk(dir, &mut out);
+    assert!(
+        !out.is_empty(),
+        "no templates found under {}",
+        dir.display()
+    );
+    out
+}
+
 fn harrow_destroyer_toml() -> String {
     resolved_text("ship_harrow_destroyer")
 }
@@ -522,47 +569,15 @@ movable = true
 /// station, planet, moon, star, asteroid — and must stay static, so it is
 /// avoided at any relative size.
 ///
-/// The walk is RECURSIVE, mirroring `spawnable_templates_under` in
-/// `src/headless/app.rs`, which issue #954 made recursive for the same
-/// reason: that issue filed a spawned hull under
-/// `assets/entities/test/rng_coverage_lancer.toml`, and
-/// `assets/worlds/rng_coverage.toml` fields it twice. A top-level
-/// `read_dir` would leave that hull — and anything else a later issue files
-/// in a subdirectory — outside a guard whose whole purpose is to catch the
-/// template nobody remembered to author.
-///
-/// `fragments/` is the one exclusion, and it is excluded for a property of
-/// its contents rather than of its name: nothing in it is spawnable. A
-/// fragment is a partial document that hulls compose FROM, so it is never
-/// itself a body publishing a hazard, and `composed_escort.toml` is a
-/// mechanism fixture rather than shipped content. That does leave the
-/// ship-shaped `npc_escort_core.toml` unguarded by construction: it authors
+/// The walk is `shipped_templates()` — RECURSIVE, and excluding only the
+/// fragment tree; see that helper for why. That does leave the ship-shaped
+/// `npc_escort_core.toml` unguarded by construction: it authors
 /// `movable = true` because anything composing from it is by construction a
 /// hull, but that authoring is a convention this test cannot hold.
 #[test]
 fn shipped_hulls_are_mobile_and_shipped_terrain_is_not() {
-    /// Every `.toml` under `dir` except the fragment tree, sorted so the
-    /// failure a designer sees is the same on every filesystem.
-    fn templates_under(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-        let entries = std::fs::read_dir(dir)
-            .unwrap_or_else(|e| panic!("{} must be readable: {e}", dir.display()));
-        let mut paths: Vec<std::path::PathBuf> = entries.flatten().map(|e| e.path()).collect();
-        paths.sort();
-        for path in paths {
-            if path.is_dir() {
-                if path.file_name().is_some_and(|n| n == "fragments") {
-                    continue;
-                }
-                templates_under(&path, out);
-            } else if path.extension().and_then(|e| e.to_str()) == Some("toml") {
-                out.push(path);
-            }
-        }
-    }
-
     let dir = std::path::Path::new("assets/entities");
-    let mut templates = Vec::new();
-    templates_under(dir, &mut templates);
+    let templates = shipped_templates();
     assert!(
         !templates.is_empty(),
         "no templates found under {}",
@@ -595,6 +610,69 @@ fn shipped_hulls_are_mobile_and_shipped_terrain_is_not() {
     }
     assert!(hulls > 0, "no flyable hulls found in {}", dir.display());
     assert!(terrain > 0, "no static terrain found in {}", dir.display());
+}
+
+/// Issue #1388: a `[dock]` table is only half of a dockable hull — the plates
+/// it mates on live in the model rig sidecar, and `EntityConfig` validation
+/// cannot see them (it never opens a model file).
+///
+/// So the failure this guards is silent by construction: a hull that authors the
+/// table and forgets the markers parses, spawns, validates, and publishes a dock
+/// blackboard that reports `available: false` for ever, because
+/// `dock::mating` finds no pair to fly onto. The crew press a control that can
+/// never do anything. A walk rather than a list, so the NEXT hull to gain a dock
+/// (cruiser #1388 was the second) cannot land on the wrong side of it either.
+///
+/// The check runs the real spawn-time path — `resolve_sidecar_rig` for the
+/// hull's own `[mesh]` model and variant, then `resolve_dock_markers` — rather
+/// than grepping the sidecar, so a rig that resolves through a variant, or one
+/// whose base transform collapses its markers, fails here too.
+#[test]
+fn every_dock_authoring_hull_declares_dock_markers_in_its_rig() {
+    let mut dockable = 0;
+    let mut active_dockers = 0;
+    for path in shipped_templates() {
+        let key = path.to_string_lossy().replace('\\', "/");
+        let cfg = crate::entities::include_resolve::load_entity_config(&key)
+            .unwrap_or_else(|e| panic!("{key} must parse: {e}"));
+        if cfg.dock.is_none() {
+            continue;
+        }
+        dockable += 1;
+
+        let model = cfg
+            .mesh
+            .as_ref()
+            .and_then(|m| m.model.as_deref())
+            .unwrap_or_else(|| {
+                panic!("{key} authors a [dock] table, so it must author a [mesh] model whose rig carries its dock plates")
+            });
+        let variant = cfg.mesh.as_ref().and_then(|m| m.variant.as_deref());
+        let rig = crate::entities::model_markers::resolve_sidecar_rig(model, variant)
+            .unwrap_or_else(|| panic!("{key}: {model} must resolve a rig sidecar"));
+        let markers = crate::dock::resolve_dock_markers(&rig);
+        assert!(
+            !markers.is_empty(),
+            "{key} authors a [dock] table but its rig ({model}, variant {variant:?}) \
+             declares no `dock`-prefixed markers — nothing can ever mate with it"
+        );
+
+        // A hull that also authors the SYSTEM is an active docker, so the same
+        // markers are what its own control flies onto. `DockSpawn` inserts
+        // `DockControl` from exactly this pairing.
+        if cfg.ship_config.as_ref().is_some_and(|sc| {
+            sc.systems
+                .iter()
+                .any(|s| s.kind == crate::ship::system_registry::DOCK_KIND)
+        }) {
+            active_dockers += 1;
+        }
+    }
+    assert!(dockable > 0, "no dockable shipped templates found");
+    assert!(
+        active_dockers > 0,
+        "no shipped template authors an active dock control"
+    );
 }
 
 #[test]
@@ -3602,23 +3680,6 @@ fn station_axiom_template_has_explicit_disc_collider() {
 /// a silent pass-through.
 #[test]
 fn every_station_mesh_user_authors_the_disc_its_mesh_draws() {
-    fn templates_under(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-        let entries = std::fs::read_dir(dir)
-            .unwrap_or_else(|e| panic!("{} must be readable: {e}", dir.display()));
-        let mut paths: Vec<std::path::PathBuf> = entries.flatten().map(|e| e.path()).collect();
-        paths.sort();
-        for path in paths {
-            if path.is_dir() {
-                if path.file_name().is_some_and(|n| n == "fragments") {
-                    continue;
-                }
-                templates_under(&path, out);
-            } else if path.extension().and_then(|e| e.to_str()) == Some("toml") {
-                out.push(path);
-            }
-        }
-    }
-
     // (model, radius, half_height) — radius is the widest half-extent of the
     // drawn hull and half_height is half its drawn height, both read off the
     // model's own rig sidecar `[extents].size`.
@@ -3627,8 +3688,7 @@ fn every_station_mesh_user_authors_the_disc_its_mesh_draws() {
         ("assets/models/alliance_research_outpost.glb", 3.8, 1.68),
     ];
 
-    let mut templates = Vec::new();
-    templates_under(std::path::Path::new("assets/entities"), &mut templates);
+    let templates = shipped_templates();
     assert!(!templates.is_empty(), "no templates found");
 
     let (mut checked, mut colliderless) = (0, 0);

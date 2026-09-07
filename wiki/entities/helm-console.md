@@ -1,9 +1,9 @@
 ---
 title: Helm Console
 type: entity
-tags: [console, helm, input, ship, physics, radar, impulse, boost]
-sources: [gui/battleship/helm.html, gui/cruiser/helm.html, gui/destroyer/helm.html, gui/console-state.js, gui/components/ph-helm-radar.js, gui/components/ph-helm-joystick.js, gui/stations/helm-actions.js, gui/gamepad-input.js, src/console/helm/server.rs, src/ship/helm_admission.rs, src/ship/physics_systems.rs, src/ship/physics.rs, src/ship/impulse.rs, src/ship/boost.rs, src/ship/impulse_boost_systems.rs, src/modifiers/coordination.rs, assets/entities/alliance_destroyer.toml]
-updated: 2026-08-31
+tags: [console, helm, input, ship, physics, radar, impulse, boost, dock]
+sources: [gui/battleship/helm.html, gui/cruiser/helm.html, gui/destroyer/helm.html, gui/stations/helm-console.js, gui/console-state.js, gui/components/ph-helm-radar.js, gui/components/ph-helm-joystick.js, gui/stations/helm-actions.js, gui/gamepad-input.js, src/console/helm/server.rs, src/ship/helm_admission.rs, src/ship/physics_systems.rs, src/ship/physics.rs, src/ship/impulse.rs, src/ship/boost.rs, src/ship/impulse_boost_systems.rs, src/modifiers/coordination.rs, src/dock/server.rs, src/entities/spawner.rs, assets/entities/alliance_destroyer.toml, assets/entities/alliance_cruiser.toml]
+updated: 2026-09-06
 ---
 
 # Helm Console
@@ -50,6 +50,32 @@ console constants.
 
 The client derives the charging/active presentation from the published Helm
 state; it does not run either state machine locally.
+
+## Contextual dock control
+
+A hull whose Helm owns a `kind = "dock"` System carries a Dock control, and only
+that hull: the control is a panel the shared renderer keeps hidden until the
+payload carries a dock view that is available, engaged or docked, so a Helm with
+no dock system renders nothing extra. The Alliance destroyer and the Alliance
+cruiser author one; the battleship does not.
+
+Two things have to be authored together for the control to work. The `[dock]`
+table gives the approach terms — the reach the control appears within, the
+engage distance, the approach speed, the mate tolerance, how far Undock backs
+clear, and the lowest powered rung — and its presence alone is what makes a hull
+dockable. The dock PLATES are markers in the hull's model rig sidecar whose names
+begin with `dock`; a hull whose rig declares none can never mate, and validation
+cannot catch that because it never opens a model file (the guard is the shipped
+content walk in `src/entities/config_tests.rs`). Spawn reads both: `[dock]` plus
+markers gives `DockMarkers` (dockable), and the `kind = "dock"` System on top of
+them gives `DockControl` (an active docker).
+
+The one button toggles Dock and Undock through the `helm.dock` semantic action,
+so a human sends exactly the admitted command a dock AI sends; the adapter reads
+the current authoritative dock view for the verb and the authored System id,
+rather than the rendered label. Docking is FLOWN — the server closes the nearest
+viable dock-marker pair — which is why the dock is Helm's and not Engineering's,
+even though the umbilical that runs across the finished dock is Engineering's.
 
 ## Radar and coordination
 

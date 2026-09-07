@@ -52,6 +52,25 @@ direction = [ 1, 0, 0 ]
 position = [ -1, 0, 0 ]
 direction = [ -1, 0, 0 ]
 
+# ── Dock plates (issue #1388, #1159 vocabulary) ──────────────────────────────
+# The two dock markers the cruiser's helm-owned `dock` system mates on — a marker
+# whose name begins with `dock` is a dock marker, and a hull whose rig declares
+# none can never be docked with (issue #1159). Same arrangement as the
+# destroyer's own plates: they sit on the port and starboard beams, at the same
+# lateral offset as this rig's own side cameras (a known-good "on the beam"
+# position in the model's local frame), each facing outward along its own beam,
+# so a structure or tender drawn up alongside mates plate-to-plate. The base
+# transform (offset/rotation/scale) is folded in by the dock adapter, so these
+# are the raw model-local points the mating maths reads. Port/starboard follow
+# this rig's own camera-marker convention (`camera_port` at local +X).
+[markers.dock_port]
+position = [ 1, 0, 0 ]
+direction = [ 1, 0, 0 ]
+
+[markers.dock_starboard]
+position = [ -1, 0, 0 ]
+direction = [ -1, 0, 0 ]
+
 [[lod]]
 max_distance = 15.0
 model = "assets/models/alliance_cruiser.glb"

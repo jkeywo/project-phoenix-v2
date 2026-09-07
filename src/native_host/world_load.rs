@@ -39,16 +39,12 @@
 //!   resources come from
 //!   [`app::install_world_selection`](crate::native_host::app::install_world_selection),
 //!   which `build_native_host_app` also calls.
-//! * The spawn pass is [`RuntimeWorldLoad`], whose chain is the `Startup`
-//!   topological order stated explicitly — including the
-//!   `compile_world_scripts < setup_world < spawn_world_entities` pin
-//!   `server_app::registration` expresses with `.after`/`.before` edges, and
-//!   whose flip once moved the authoritative digest. Because that chain is a
-//!   DUPLICATE of a list that lives elsewhere, it is guarded structurally:
-//!   `the_runtime_spawn_pass_cannot_silently_fall_behind_the_startup_chain`
-//!   (`tests/native_host_lobby.rs`) reads both schedules out of a live app and
-//!   asserts the runtime set covers `WorldPlugin`'s `Startup` chain, so a system
-//!   added there cannot silently not-run here.
+//! * The spawn pass is [`RuntimeWorldLoad`], registered by the same
+//!   [`world::materialization::register`](crate::world::materialization::register)
+//!   that `WorldPlugin` uses for `Startup`. Both schedules therefore contain the
+//!   same compile → anonymous spawn → named spawn → init → layer-load chain,
+//!   as ordinary systems preserving cross-plugin ordering edges. Only the
+//!   native hull-dependent roster/reference-grid/radar tail is registered here.
 //! * The ids those spawns mint are minted from a [`WorldIdMint`] parked at tick
 //!   0, then the live mint is restored — see [`park_mint`]. Without that, every
 //!   world entity's id would carry the tick the operator happened to press the
@@ -155,57 +151,22 @@ pub struct NativeWorldLoadPlugin;
 
 impl Plugin for NativeWorldLoadPlugin {
     fn build(&self, app: &mut App) {
-        // ── The spawn pass ────────────────────────────────────────────────
-        //
-        // Registered unconditionally so `run_schedule` never meets an absent
-        // schedule, and never RUN unless a runtime load asks for it — which is
-        // what keeps a `--world` host byte-for-byte unchanged.
-        //
-        // This is the one place the runtime order could drift from `Startup`'s,
-        // so it is written as the **topological order `Startup` actually
-        // produces**, not as a fresh design:
-        //
-        //  * `world::server`'s own `.chain()` — `insert_world_config_resource`,
-        //    `insert_raw_world_source_resource`, `compile_world_scripts`,
-        //    `spawn_world_entities`, `init_world_runtime`, `load_extra_worlds`.
-        //  * `server_app::registration`'s three edges on `setup_world`:
-        //    `.after(insert_world_config_resource)`,
-        //    `.after(compile_world_scripts)`, `.before(spawn_world_entities)`.
-        //    That last one is a determinism pin, not tidiness — `setup_world`
-        //    (anonymous stars and planets) and `spawn_world_entities` (named and
-        //    asteroid entities) both mint from the shared `WorldIdMint`, and
-        //    letting a scheduling tie-break decide their order moved the
-        //    authoritative digest once already.
-        //  * `lobby::server::update_session_with_config`,
-        //    `server::reference_grid::resolve_reference_grid_config` and
-        //    `server::radar::spawn_viewscreen_radar_widgets` are unordered
-        //    against the world chain at `Startup` and mint nothing, so their
-        //    position here is free; they sit last because each reads the hull
-        //    `install_world_selection` has just selected. The radar pass
-        //    despawns first — `Startup` already ran the spawn once, against
-        //    whatever hull the world-less lobby defaulted to, and re-running it
-        //    bare would stack two sets of widgets on the viewscreen.
-        //
-        // The first two systems are native no-ops (`get_world_config` and
-        // `BridgeWorldSource` are browser-side) and are included anyway: leaving
-        // a system out because *today* it does nothing on this target is how the
-        // two orders start to drift.
+        // The same authoritative pass as Startup, in this schedule rather
+        // than behind a nested schedule that would hide cross-plugin edges.
+        crate::world::materialization::register(app, RuntimeWorldLoad);
+        // Startup already ran these hull-dependent systems against the empty
+        // lobby's fallback hull. Selection replaces that input, so rerun them
+        // after materialization and replace the old radar widgets first.
         app.add_systems(
             RuntimeWorldLoad,
             (
-                crate::world::server::insert_world_config_resource,
-                crate::world::server::insert_raw_world_source_resource,
-                crate::world::server::compile_world_scripts,
-                crate::server_app::setup_world,
-                crate::world::server::spawn_world_entities,
-                crate::world::server::init_world_runtime,
-                crate::world::server::load_extra_worlds,
                 crate::lobby::server::update_session_with_config,
                 crate::server::reference_grid::resolve_reference_grid_config,
                 crate::server::radar::despawn_viewscreen_radar_widgets,
                 crate::server::radar::spawn_viewscreen_radar_widgets,
             )
-                .chain(),
+                .chain()
+                .after(crate::world::materialization::WorldMaterialization),
         );
 
         app.init_resource::<LobbySelection>().add_systems(

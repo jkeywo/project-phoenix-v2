@@ -19,6 +19,7 @@ pub mod layers;
 /// `parse_world` / `validate_composition` / `load_world_scripts`.
 pub mod load;
 pub mod manifest;
+pub mod materialization;
 pub mod mod_pack;
 pub mod script;
 pub mod server;

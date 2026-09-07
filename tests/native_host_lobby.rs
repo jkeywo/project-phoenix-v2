@@ -17,8 +17,6 @@
 //! ordinary transport seam, or written straight onto `Messages<InboundMessage>`
 //! where the test is not about the transport.
 
-use std::collections::BTreeSet;
-
 use bevy::prelude::*;
 
 use project_phoenix::boot::NativeRenderSurface;
@@ -46,6 +44,9 @@ const MANIFEST: &str = "assets/scenarios.toml";
 const SCENARIO: &str = "combat_test";
 /// A fixed seed, so two hosts of one world are comparable.
 const SEED: u64 = 20260894;
+
+#[path = "native_host_lobby/materialization.rs"]
+mod materialization;
 
 /// Populate the process-global template cache from the repository's own tree.
 /// Idempotent (a map keyed by template path), and cargo runs this file as its
@@ -893,125 +894,6 @@ fn loaded_lobby_host() -> App {
         "the runtime load ran"
     );
     app
-}
-
-/// Every system registered in `label`'s schedule that belongs to this crate,
-/// by fully-qualified name.
-///
-/// Bevy's auto-inserted sync points and any third-party system are filtered out
-/// by the `project_phoenix::` prefix — what is being compared is *our* two
-/// registrations, not the executor's plumbing.
-fn crate_systems(app: &App, label: impl bevy::ecs::schedule::ScheduleLabel) -> BTreeSet<String> {
-    app.get_schedule(label)
-        .expect("the schedule is registered on this app")
-        .systems()
-        .expect("the schedule has run at least once, so its executor is initialized")
-        .map(|(_, system)| system.name().to_string())
-        .filter(|name| name.starts_with("project_phoenix::"))
-        .collect()
-}
-
-#[test]
-fn the_runtime_spawn_pass_cannot_silently_fall_behind_the_startup_chain() {
-    // `RuntimeWorldLoad` is a hand-written restatement of the order `Startup`
-    // produces, which means it is a DUPLICATE of a list that lives somewhere
-    // else — and the failure mode of a duplicate is not that it says something
-    // wrong but that it stops saying something the original now says. Add a
-    // system to `WorldPlugin`'s `Startup` chain and a `--world` host runs it
-    // while a runtime-loaded host silently does not: same world file, two
-    // different worlds.
-    //
-    // The ids test above cannot catch that on its own. A system that spawns
-    // nothing (a resource init, a runtime merge, an objective seed) moves no
-    // uuid at all; it just fails to happen on one path.
-    //
-    // So this compares the two REGISTRATIONS rather than their effects. It is
-    // structural in the only sense that matters here: nobody has to remember to
-    // update it, because it reads both schedules out of a live app.
-    let app = loaded_lobby_host();
-    let startup = crate_systems(&app, Startup);
-    let runtime = crate_systems(&app, RuntimeWorldLoad);
-
-    assert!(
-        startup
-            .iter()
-            .any(|name| name.ends_with("::spawn_world_entities")),
-        "system names came back as placeholders — this guard is blind without \
-         `bevy/debug`, which Cargo.toml declares as a dev-dependency for exactly \
-         this reason. Names seen: {startup:?}"
-    );
-
-    // 1. Everything `WorldPlugin` puts in its `Startup` chain. That plugin's
-    //    whole chain lives in `world::server`, so the module prefix IS the
-    //    membership test — no hand-kept list to fall behind.
-    const WORLD_CHAIN: &str = "project_phoenix::world::server::";
-    let missing: Vec<&str> = startup
-        .iter()
-        .filter(|name| name.starts_with(WORLD_CHAIN))
-        .filter(|name| !runtime.contains(*name))
-        .map(String::as_str)
-        .collect();
-    assert!(
-        missing.is_empty(),
-        "these `world::server` systems run at Startup on a --world host but \
-         NOT on the runtime path, so a runtime-loaded host would silently skip \
-         them — add them to `RuntimeWorldLoad` in src/native_host/world_load.rs \
-         at the position `Startup`'s topological order gives them: {missing:?}\n\
-         There is deliberately no boot-only escape hatch under this prefix. A \
-         `world::server` system that genuinely must not re-run on the runtime \
-         path is not exempted here by an allow-list — fail-loud is the policy, \
-         because an exemption list is a second hand-kept duplicate of the same \
-         chain and would silently absorb the next system that really does need \
-         to run. The decision gets made in `RuntimeWorldLoad` itself, in the \
-         open, with the reason written beside it"
-    );
-
-    // 2. The systems pinned INTO that chain from outside `world::server` —
-    //    `setup_world`'s three ordering edges in `server_app::registration`, and
-    //    the three hull-reading tail systems. The prefix test above cannot see
-    //    them, so they are named.
-    //
-    //    THIS LIST IS THE GUARD'S RESIDUAL, and it is honest about it: unlike
-    //    check 1 (a module prefix, so nothing to keep up to date) this is a
-    //    hand-kept list of four names, merely displaced from `world_load.rs`
-    //    into a test. A NEW `Startup` system added outside `world::server` and
-    //    ordered into the world chain slips all three checks here — check 1
-    //    filters it out by prefix, this list does not name it, and check 3 only
-    //    looks for runtime-only systems, which it is the opposite of. What the
-    //    three checks together DO cover is the failure that has actually
-    //    happened: `world::server` growing a system the runtime pass never
-    //    learned about. Closing the residual properly needs the registration
-    //    itself to name its members, which is `world_load.rs`'s to give, not a
-    //    test's to infer.
-    for pinned in [
-        "::setup_world",
-        "::update_session_with_config",
-        "::resolve_reference_grid_config",
-        "::spawn_viewscreen_radar_widgets",
-    ] {
-        assert!(
-            runtime.iter().any(|name| name.ends_with(pinned)),
-            "`{pinned}` runs at Startup against the hull the host booted with; \
-             the runtime path has to run it against the hull that was CHOSEN"
-        );
-    }
-
-    // 3. Nothing on the runtime path that a boot host never runs — with one
-    //    deliberate exception. `Startup` already spawned the viewscreen radar
-    //    widgets once, against whatever hull the world-less lobby defaulted to,
-    //    so the runtime pass takes them down before re-spawning; a boot host has
-    //    nothing to take down.
-    let extra: Vec<&str> = runtime
-        .iter()
-        .filter(|name| !startup.contains(*name))
-        .map(String::as_str)
-        .collect();
-    assert_eq!(
-        extra,
-        vec!["project_phoenix::server::radar::despawn_viewscreen_radar_widgets"],
-        "a system that runs only on the runtime path is a second world-load \
-         design, not a restatement of the first"
-    );
 }
 
 /// A catalogue that publishes `world` under a synthetic scenario id, alongside

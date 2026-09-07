@@ -1,0 +1,19 @@
+# Same handler names in differently ordered layers must retain their owner.
+[global]
+seed = 42
+
+[[entity]]
+template_path = "assets/entities/station_axiom.toml"
+name = "test.materialization.a"
+id = "a-station"
+transform = { position = [6000.0, 0.0, 0.0] }
+
+[script]
+setup = """
+on_world_loaded("arrived");
+on_flag_set("probe", "chained");
+on_flag_set("never", "later");
+fn arrived(ctx) { ctx.flags.probe = 1; }
+fn chained(ctx) { ctx.flags.increment("arrived", 1); }
+fn later(ctx) { ctx.flags.increment("later", 1); }
+"""

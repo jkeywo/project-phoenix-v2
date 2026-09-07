@@ -2,7 +2,7 @@
 title: Native Host
 type: concept
 tags: [native, viewscreen, lobby, scenario-selection, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile, saved-layouts, media-devices, camera, microphone, saves]
-sources: [src/delivery/payload.rs, tests/native_host_catalogue.rs, tests/client/scenario-catalogue-wire.test.js, src/native_host/mod.rs, src/native_host/direct_join.rs, src/native_host/join_codes.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/lobby/handler.rs, src/content_ledger.rs, tests/fixtures/scenario-arbiter-parity.json, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/layout_store.rs, src/native_host/layout_store_systems.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/frame_stats.rs, src/native_host/panes/pane_thread.rs, src/native_host/panes/mirror.rs, src/native_host/panes/upload.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs, src/delivery/args.rs, src/save_slots_store.rs]
+sources: [src/world/materialization.rs, tests/native_host_lobby/materialization.rs, src/delivery/payload.rs, tests/native_host_catalogue.rs, tests/client/scenario-catalogue-wire.test.js, src/native_host/mod.rs, src/native_host/direct_join.rs, src/native_host/join_codes.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/lobby/handler.rs, src/content_ledger.rs, tests/fixtures/scenario-arbiter-parity.json, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/layout_store.rs, src/native_host/layout_store_systems.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/frame_stats.rs, src/native_host/panes/pane_thread.rs, src/native_host/panes/mirror.rs, src/native_host/panes/upload.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs, src/delivery/args.rs, src/save_slots_store.rs]
 updated: 2026-09-07
 ---
 
@@ -136,8 +136,10 @@ The claim rests on reuse, and the guards are tests rather than comments — all 
 `(who, uuid)` pairs and the world's own `name -> uuid` map, not a bare id list
 (a bare list is a multiset, so the two spawn passes swapping places permutes ids
 between entities and still compares equal), and
-`the_runtime_spawn_pass_cannot_silently_fall_behind_the_startup_chain` compares
-the two *registrations*.
+`tests/native_host_lobby/materialization.rs` compares the shared registration's
+membership and actual composed-world state after different lobby delays. It
+checks the selected hull and roster, layer order, scoped flags and trigger
+continuation, and the next live mint sequence after a deferred load.
 
 - **`boot::ingest_world` takes a `&mut World`, not a `&mut App`**, precisely so
   both callers are the same function: reset → read → validate → compile →
@@ -150,17 +152,14 @@ the two *registrations*.
   resolution, hull template-cache gate, #935 hull re-record + re-freeze,
   `PendingShipConfig` and canonical `SelectedShipResource`.
   `build_native_host_app` calls it too.
-- **The `RuntimeWorldLoad` schedule** restates the `Startup` *topological*
-  order, including the `compile_world_scripts < setup_world <
-  spawn_world_entities` pin `server_app::registration` expresses with
-  `.after`/`.before` edges — a pin whose tie-break flip moved the authoritative
-  digest once already. Being a hand-written duplicate of a list that lives
-  elsewhere, it carries a structural guard of its own: the drift test above
-  reads both schedules out of a live app and asserts the runtime set covers
-  `WorldPlugin`'s `Startup` chain, names the systems pinned in from outside
-  `world::server`, and allows exactly one runtime-only system (the radar
-  despawn). The id test cannot see that hazard — a system that spawns nothing
-  moves no uuid, it just fails to happen on one path.
+- **`world::materialization::register`** supplies the same ordered systems to
+  `Startup` and `RuntimeWorldLoad`: compilation, anonymous setup, named/asteroid
+  spawn, runtime initialization and queued supporting layers. They remain in
+  the caller's schedule, preserving other plugins' function-identity edges.
+  Native hull/session refresh and radar replacement follow `WorldMaterialization`.
+  GameStart roster completion and render-only startup remain separate. The
+  runtime pass does not manufacture the durable GameStart marker used by startup
+  restore; tests compare GameStart and layers at matching logical start ticks.
 - **`WorldIdMint` is parked at tick 0** across that pass and the live mint
   restored after. `begin_tick` resets a namespace's sequence only when the tick
   *moves*, so without parking the same authored world would mint different

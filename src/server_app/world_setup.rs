@@ -12,8 +12,8 @@
 //! full lobby-selected loadout) when the game enters `InProgress`.
 //!
 //! Load-bearing invariant: this is one half of the immediate spawn; the atomic
-//! activation gate (`world_activation_blocked`) and the `setup_world` ordering
-//! edges in registration keep it agreeing with `world::server::spawn_world_entities`
+//! activation gate (`world_activation_blocked`) and the shared World materialization
+//! chain keep it agreeing with `world::server::spawn_world_entities`
 //! on which entries it owns and on the shared `WorldIdMint` order — the entity
 //! mint order feeds the authoritative digest, so the spawn sequence is fixed.
 
@@ -206,7 +206,8 @@ pub(crate) fn spawn_anonymous_entities_internal(
 ) -> usize {
     // Atomic-activation guard (issues #750/#752/#906/#969/#973). This system owns one
     // half of the immediate spawn; `spawn_world_entities` owns the other, and
-    // the two carry no ordering relationship. The loop below answers a failed
+    // both run in the ordered World materialization pass. Each half still
+    // guards activation: the loop below answers a failed
     // resolve by logging and `continue`ing, so without this gate an invalid
     // world still ships its stars, planets and nebulae while every named entity
     // and asteroid field silently vanishes — a *more* partial failure than the

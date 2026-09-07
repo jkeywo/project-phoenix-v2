@@ -774,107 +774,90 @@ impl Plugin for WorldPlugin {
             .init_resource::<PendingScenarioLoad>()
             .init_resource::<WorldLayerMap>()
             .init_resource::<PendingWorldLayerChanges>()
-            .init_resource::<WorldEventBuffer>()
-            .add_systems(
-                Startup,
-                (
-                    insert_world_config_resource,
-                    // The scripting seam (issue #984, Rhai M6 phase 2a): source
-                    // the raw world TOML and compile its scripts BEFORE the
-                    // spawn pass (so a script error blocks it, atomically with
-                    // the composition gate) and before `init_world_runtime` (so
-                    // its trigger-merge sees the compiled `ScriptTrigger`s).
-                    insert_raw_world_source_resource,
-                    compile_world_scripts,
-                    spawn_world_entities,
-                    init_world_runtime,
-                    load_extra_worlds,
-                )
-                    .chain(),
+            .init_resource::<WorldEventBuffer>();
+        super::materialization::register(app, Startup);
+        app.add_systems(
+            FixedUpdate,
+            broadcast_objective_summary
+                .in_set(crate::sim_sets::SimSet::Broadcast)
+                .after(crate::comms::server::broadcast_comms_state),
+        )
+        // The comms half of the Physics set is registered by
+        // `CommsWorldPlugin`, ordered against these systems from that side.
+        // It was a four-system `.chain()` (#718/#719) until issue #985
+        // deleted `tick_pending_follow_ups` and `inject_comms_templates`;
+        // `open_scripted_comms_threads` is what remains, and it sits after
+        // the callback drain rather than around the event collector.
+        // The mission clock (#960). `SimSet::Physics` is gated on
+        // `GamePhase::InProgress`, so the first run of
+        // `anchor_mission_clock` is the first simulation tick of the
+        // mission; `arm_mission_clock` re-opens it for a second round.
+        .add_systems(OnEnter(GamePhase::InProgress), arm_mission_clock)
+        .add_systems(
+            FixedUpdate,
+            (
+                anchor_mission_clock,
+                // Immediately after the anchor and before anything reads the
+                // table: a `[[deadline]]` is due N seconds into the MISSION,
+                // so it is keyed off the same first-InProgress-tick moment
+                // (issue #1024). Runs its body exactly once per mission.
+                arm_mission_deadlines,
+                // Beside the deadline arm, and for its reason: a
+                // `[[workforce]]`'s authored strike status is the situation
+                // the crew ARRIVE INTO, so it must be true before the first
+                // handler runs and before any operation is offered
+                // (issue #1035). Runs its body exactly once per mission.
+                arm_mission_workforces,
+                collect_world_events,
+                tick_trigger_pipeline,
             )
-            .add_systems(
-                FixedUpdate,
-                broadcast_objective_summary
-                    .in_set(crate::sim_sets::SimSet::Broadcast)
-                    .after(crate::comms::server::broadcast_comms_state),
-            )
-            // The comms half of the Physics set is registered by
-            // `CommsWorldPlugin`, ordered against these systems from that side.
-            // It was a four-system `.chain()` (#718/#719) until issue #985
-            // deleted `tick_pending_follow_ups` and `inject_comms_templates`;
-            // `open_scripted_comms_threads` is what remains, and it sits after
-            // the callback drain rather than around the event collector.
-            // The mission clock (#960). `SimSet::Physics` is gated on
-            // `GamePhase::InProgress`, so the first run of
-            // `anchor_mission_clock` is the first simulation tick of the
-            // mission; `arm_mission_clock` re-opens it for a second round.
-            .add_systems(OnEnter(GamePhase::InProgress), arm_mission_clock)
-            .add_systems(
-                FixedUpdate,
-                (
-                    anchor_mission_clock,
-                    // Immediately after the anchor and before anything reads the
-                    // table: a `[[deadline]]` is due N seconds into the MISSION,
-                    // so it is keyed off the same first-InProgress-tick moment
-                    // (issue #1024). Runs its body exactly once per mission.
-                    arm_mission_deadlines,
-                    // Beside the deadline arm, and for its reason: a
-                    // `[[workforce]]`'s authored strike status is the situation
-                    // the crew ARRIVE INTO, so it must be true before the first
-                    // handler runs and before any operation is offered
-                    // (issue #1035). Runs its body exactly once per mission.
-                    arm_mission_workforces,
-                    collect_world_events,
-                    tick_trigger_pipeline,
-                )
-                    .chain()
-                    .in_set(crate::sim_sets::SimSet::Physics),
-            )
-            // Cursor advancement is a `Modifiers` evaluator: `Physics` has
-            // finished moving every ship by then, so waypoint arrival is
-            // judged against this tick's final positions. It emits
-            // `AiWaypointReached`, which `collect_world_events` turns into a
-            // `WorldEvent::WaypointReached` on the next tick (the same
-            // one-tick event bridge `AiEntityAttacked` already uses).
-            .add_systems(
-                FixedUpdate,
-                crate::ai::server::advance_objective_cursors
-                    .in_set(crate::sim_sets::SimSet::Modifiers),
-            )
-            // The scripted-callback drain (issue #984, Rhai M6 phase 2b):
-            // `after(n, |ctx| …)` callbacks that scripted handlers scheduled are
-            // drained here once due. Ordered AFTER `tick_trigger_pipeline` (so it
-            // shares that system's per-tick budget reset, and sees this tick's
-            // freshly-scheduled callbacks) and BEFORE `tick_delayed_actions` (so a
-            // callback's own `in_seconds` effect reaches the delayed queue in the
-            // same tick a trigger's would). A no-op for every script-free world:
-            // no `WorldScriptRuntime` → early return before any `DerefMut`.
-            .add_systems(
-                FixedUpdate,
-                tick_script_callbacks
-                    .in_set(crate::sim_sets::SimSet::Physics)
-                    .after(tick_trigger_pipeline)
-                    .before(tick_delayed_actions),
-            )
-            .add_systems(
-                FixedUpdate,
-                tick_delayed_actions
-                    .in_set(crate::sim_sets::SimSet::Physics)
-                    .after(tick_trigger_pipeline),
-            )
-            .add_systems(
-                FixedUpdate,
-                apply_pending_scenario_loads.in_set(crate::sim_sets::SimSet::Physics),
-            )
-            .add_systems(
-                FixedUpdate,
-                apply_world_layer_changes
-                    .in_set(crate::sim_sets::SimSet::Physics)
-                    .before(collect_world_events)
-                    .before(tick_script_callbacks),
-            )
-            .add_observer(handle_region_entered_event)
-            .add_observer(handle_region_exited_event);
+                .chain()
+                .in_set(crate::sim_sets::SimSet::Physics),
+        )
+        // Cursor advancement is a `Modifiers` evaluator: `Physics` has
+        // finished moving every ship by then, so waypoint arrival is
+        // judged against this tick's final positions. It emits
+        // `AiWaypointReached`, which `collect_world_events` turns into a
+        // `WorldEvent::WaypointReached` on the next tick (the same
+        // one-tick event bridge `AiEntityAttacked` already uses).
+        .add_systems(
+            FixedUpdate,
+            crate::ai::server::advance_objective_cursors.in_set(crate::sim_sets::SimSet::Modifiers),
+        )
+        // The scripted-callback drain (issue #984, Rhai M6 phase 2b):
+        // `after(n, |ctx| …)` callbacks that scripted handlers scheduled are
+        // drained here once due. Ordered AFTER `tick_trigger_pipeline` (so it
+        // shares that system's per-tick budget reset, and sees this tick's
+        // freshly-scheduled callbacks) and BEFORE `tick_delayed_actions` (so a
+        // callback's own `in_seconds` effect reaches the delayed queue in the
+        // same tick a trigger's would). A no-op for every script-free world:
+        // no `WorldScriptRuntime` → early return before any `DerefMut`.
+        .add_systems(
+            FixedUpdate,
+            tick_script_callbacks
+                .in_set(crate::sim_sets::SimSet::Physics)
+                .after(tick_trigger_pipeline)
+                .before(tick_delayed_actions),
+        )
+        .add_systems(
+            FixedUpdate,
+            tick_delayed_actions
+                .in_set(crate::sim_sets::SimSet::Physics)
+                .after(tick_trigger_pipeline),
+        )
+        .add_systems(
+            FixedUpdate,
+            apply_pending_scenario_loads.in_set(crate::sim_sets::SimSet::Physics),
+        )
+        .add_systems(
+            FixedUpdate,
+            apply_world_layer_changes
+                .in_set(crate::sim_sets::SimSet::Physics)
+                .before(collect_world_events)
+                .before(tick_script_callbacks),
+        )
+        .add_observer(handle_region_entered_event)
+        .add_observer(handle_region_exited_event);
     }
 }
 

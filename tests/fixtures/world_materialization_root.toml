@@ -1,0 +1,40 @@
+# Technical boot/deferred materialization fixture (#1415).
+extra_worlds = ["tests/fixtures/world_materialization_z.toml", "tests/fixtures/world_materialization_a.toml"]
+
+[global]
+seed = 42
+sim_tick_hz = 60.0
+
+[[available_ships]]
+template_path = "assets/entities/alliance_cruiser.toml"
+
+[[available_ships]]
+template_path = "assets/entities/alliance_destroyer.toml"
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# Exercise the anonymous spawn half before the named half.
+[[entity]]
+template_path = "assets/entities/star_sun.toml"
+transform = { position = [10000.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/station_axiom.toml"
+name = "test.materialization.root"
+id = "root-station"
+transform = { position = [2000.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+spawn_on = "game_start"
+transform = { position = [0.0, 0.0, 0.0] }
+
+[script]
+setup = """
+on_world_loaded("arrived");
+on_flag_set("never", "later");
+fn arrived(ctx) { ctx.flags.increment("root_arrived", 1); }
+fn later(ctx) { ctx.flags.increment("root_later", 1); }
+"""

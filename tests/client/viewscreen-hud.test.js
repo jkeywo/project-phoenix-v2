@@ -218,6 +218,56 @@ describe('the page localises itself from the String Table', () => {
   });
 });
 
+describe.each([false, true])('HUD DOM changes (localising renderer: %s)', (useIsland) => {
+  it('leaves identical readouts untouched and changes only the changed heading', () => {
+    mountPage();
+    if (useIsland) runIsland();
+    push({});
+    const observer = new MutationObserver(() => {});
+    observer.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
+    try {
+      push({});
+      expect(observer.takeRecords()).toEqual([]);
+      push({ heading: 91 });
+      const changed = observer.takeRecords();
+      expect(changed.length).toBeGreaterThan(0);
+      expect(changed.every((record) => record.target.id === 'v-nav')).toBe(true);
+      expect(text('v-nav')).toBe(useIsland ? t('server.hud_heading', { deg: '091' }) : '091');
+      push({ heading: 91 });
+      expect(observer.takeRecords()).toEqual([]);
+    } finally {
+      observer.disconnect();
+    }
+  });
+
+  it('updates hull, alert and ending transitions without repeating their DOM writes', () => {
+    mountPage();
+    if (useIsland) runIsland();
+    push({});
+    const observer = new MutationObserver(() => {});
+    observer.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
+    try {
+      const state = { hull_pct: 12, red_alert: true, condition: 'server.hud_alert', game_over_message: 'The skyway holds.' };
+      push(state);
+      expect(observer.takeRecords().length).toBeGreaterThan(0);
+      expect(text('v-eng')).toBe(useIsland ? t('server.hud_hull', { pct: 12 }) : '12');
+      expect(document.getElementById('hud-overlay').classList.contains('alert-on')).toBe(true);
+      expect(text('game-over-message')).toBe(state.game_over_message);
+      expect(document.getElementById('game-over-overlay').style.display).toBe('flex');
+      push(state);
+      expect(observer.takeRecords()).toEqual([]);
+      push({});
+      expect(observer.takeRecords().length).toBeGreaterThan(0);
+      expect(document.getElementById('hud-overlay').classList.contains('alert-on')).toBe(false);
+      expect(document.getElementById('game-over-overlay').style.display).toBe('none');
+      push({});
+      expect(observer.takeRecords()).toEqual([]);
+    } finally {
+      observer.disconnect();
+    }
+  });
+});
+
 describe('the page degrades rather than going blank', () => {
   it('paints a push that landed before the deferred module evaluated', () => {
     // The gap the classic prelude exists to cover: the host pushes as soon as

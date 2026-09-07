@@ -16,9 +16,10 @@
 //!
 //! Two of the commands — [`PaneCommand::SetHudScript`] and
 //! [`PaneCommand::SetGamepadScript`] — carry a script the producing side wants
-//! *evaluated every iteration while it is held*, not once per send. They are
-//! **slots**: sending one replaces whatever the slot held, and the thread
-//! re-pushes the current value on its own cadence.
+//! retained until replaced. They are **slots**: sending one replaces whatever
+//! the slot held. A HUD revision is applied once successfully per loaded view,
+//! with a fresh application owed after load, reveal or resize. The gamepad
+//! snapshot is re-pushed each iteration so the page can poll it on its cadence.
 //!
 //! The two are pushed at different points of an iteration, and deliberately:
 //! the HUD's goes in with the rest of the pumping, *after* `Renderer::update`,
@@ -28,9 +29,9 @@
 //! inside `update` — pushing it later would cost a whole iteration of stick
 //! latency. See [`PaneLoop::iterate`].
 //!
-//! That is both what the main thread does today (`cache_hud_state` keeps the
-//! newest HUD JSON and `drive_pane_host` pushes it each frame it draws) and the only
-//! shape that is bounded by construction. Queued pushes would let a 60 Hz
+//! The main thread encodes HUD state only when its value changes and sends the
+//! new revision to the worker. These slots are bounded by construction. Queued
+//! pushes would let a 60 Hz
 //! producer outrun a 45 Hz renderer and grow an unbounded backlog of states
 //! nobody will ever see — the newest is the only one that matters, and a slot
 //! cannot accumulate.
@@ -281,8 +282,8 @@ pub enum PaneCommand {
         id: PaneId,
         input: PaneInput,
     },
-    /// The HUD readout to keep pushing, or `None` to stop. A **slot**, not a
-    /// queued push — see the module note.
+    /// The newest HUD readout to retain and apply, or `None` to stop. A **slot**,
+    /// not a queued push — see the module note.
     SetHudScript(Option<String>),
     /// The gamepad snapshot to keep pushing into every console, or `None`.
     /// A slot, like the HUD's.
@@ -961,7 +962,12 @@ struct LoopPane<V> {
     /// what a crash means (a station on Backfill, or a blank rectangle) is
     /// decided by what the surface is.
     copy_failures: u32,
+    /// The revision this view actually accepted, retained through failed refresh
+    /// attempts so produced-frame metadata never claims an unapplied revision.
     applied_hud_revision: Option<u64>,
+    /// A lifecycle edge may need the same revision again. Clear only on a
+    /// successful push, independently of the copy obligation in `needs_full`.
+    hud_apply_owed: bool,
 }
 
 impl<V> LoopPane<V> {
@@ -1013,8 +1019,8 @@ pub struct PaneLoop<R: PaneRuntime> {
     /// the lobby says is a participant's `ClientMessage`, so nothing it says may
     /// reach the bus.
     lobby: Option<HostLobbyBridge>,
-    /// The HUD readout to keep pushing while it is held — a latest-wins slot,
-    /// see the module note.
+    /// The newest HUD readout, retained for changed revisions and lifecycle
+    /// reapplication — a latest-wins slot, see the module note.
     hud_script: Option<String>,
     hud_revision: u64,
     /// The gamepad snapshot to keep pushing into every console, likewise.
@@ -1141,6 +1147,7 @@ impl<R: PaneRuntime> PaneLoop<R> {
                             pushed_this_iteration: false,
                             copy_failures: 0,
                             applied_hud_revision: None,
+                            hud_apply_owed: true,
                         });
                         if let Some(observer) = &observer {
                             observer.record(
@@ -1183,6 +1190,7 @@ impl<R: PaneRuntime> PaneLoop<R> {
                     pane.epoch = epoch;
                     pane.needs_full = true;
                     pane.full_reasons.resize = true;
+                    pane.hud_apply_owed = true;
                     if let Some(observer) = &observer {
                         observer.record(
                             Some(pane.identity()),
@@ -1199,6 +1207,7 @@ impl<R: PaneRuntime> PaneLoop<R> {
                     if visible && !pane.visible {
                         pane.needs_full = true;
                         pane.full_reasons.reveal = true;
+                        pane.hud_apply_owed = true;
                     }
                     pane.visible = visible;
                     if let Some(observer) = &observer {
@@ -1218,8 +1227,8 @@ impl<R: PaneRuntime> PaneLoop<R> {
             }
             PaneCommand::SetHudScript(script) => {
                 // The sender already deduplicates its encoded value. Count each
-                // accepted slot replacement, including None, without changing
-                // the existing every-iteration application policy.
+                // accepted slot replacement, including None. Each view retries
+                // it until one application succeeds.
                 self.hud_revision = self.hud_revision.wrapping_add(1);
                 if let Some(observer) = &observer {
                     observer.record(
@@ -1313,19 +1322,26 @@ impl<R: PaneRuntime> PaneLoop<R> {
             // to one place.
             let was_loaded = pane.view.is_ready();
             if pane.view.refresh_loaded() && !was_loaded {
+                pane.hud_apply_owed = true;
                 out.push(PaneEvent::Loaded(pane.id));
             }
             match pane.kind {
                 // The HUD overlay is driven by the host's own readout, held in
-                // the slot and pushed every iteration it is drawn — one
-                // idempotent update on an already-repainting transparent
-                // surface, evaluated here so the DOM change is picked up by the
-                // render below.
+                // the slot until replaced. Apply a revision once successfully
+                // per loaded view, or again when its lifecycle owes a refresh.
+                // This runs before render so the new DOM is painted this pass;
+                // a quiet revision leaves animation dirty detection intact.
                 PaneKind::Hud => {
-                    if let (Some(script), true) = (&*hud_script, pane.view.is_ready()) {
+                    if let (Some(script), true) = (
+                        &*hud_script,
+                        pane.view.is_ready()
+                            && (pane.hud_apply_owed
+                                || pane.applied_hud_revision != Some(*hud_revision)),
+                    ) {
                         if pane.view.push(script).is_ok() {
                             pane.pushed_this_iteration = true;
                             pane.applied_hud_revision = Some(*hud_revision);
+                            pane.hud_apply_owed = false;
                             applied = 1;
                         } else {
                             failed = 1;
@@ -2667,7 +2683,7 @@ mod loop_tests {
     }
 
     #[test]
-    fn attribution_keeps_hud_revisions_separate_from_repeated_and_hidden_applications() {
+    fn attribution_distinguishes_quiet_hud_revisions_hidden_failure_and_reveal() {
         let observer = SurfaceObserver::new(Instant::now(), 128);
         let mut driver = one_pane(HUD, PaneKind::Hud);
         driver.set_observer(Some(observer.clone()));
@@ -2723,8 +2739,8 @@ mod loop_tests {
             applications,
             vec![
                 (1, 1, 0, true),
-                (1, 1, 0, true),
-                (1, 1, 0, false),
+                (1, 0, 0, true),
+                (1, 0, 0, false),
                 (2, 0, 1, false),
                 (2, 1, 0, true)
             ]
@@ -2746,11 +2762,8 @@ mod loop_tests {
             "hidden views still pump but publish no pixels"
         );
         assert!(produced[0].1.initial && produced[0].1.hud_push);
-        assert_eq!(
-            produced[1].0,
-            Some(1),
-            "P1 observes the existing repeated push"
-        );
+        assert_eq!(produced[1].0, Some(1));
+        assert!(!produced[1].1.hud_push, "unchanged HUD is not reapplied");
         assert!(produced[2].1.reveal && produced[2].1.hud_push);
         assert_eq!(produced[2].0, Some(2));
         assert_eq!(
@@ -2889,6 +2902,11 @@ mod loop_tests {
         // One iteration to settle the load edges: a push, of either kind, goes
         // only into a document that has finished loading.
         driver.iterate(&mut sink, &mut out);
+        driver.apply(
+            PaneCommand::SetHudScript(Some("window.__updateHud({heading:1})".to_string())),
+            &mut NoFrameSink,
+            &mut out,
+        );
         sink.published.clear();
         out.clear();
         trace.borrow_mut().clear();
@@ -2989,8 +3007,8 @@ mod loop_tests {
         let frames = sink.frames_for(HUD);
         assert_eq!(
             frames.iter().map(|f| f.full).collect::<Vec<_>>(),
-            vec![true, true, false],
-            "the first owes a whole texture, the second was pushed to, the third is quiet"
+            vec![true, false, false],
+            "the first update is whole; unchanged and cleared HUD slots do not force copying"
         );
         assert!(
             frames.iter().all(|f| f.first_byte == 0xAB),
@@ -2998,6 +3016,156 @@ mod loop_tests {
         );
         assert_eq!(stats(&out).copied, 1);
         assert_eq!(stats(&out).forced, 0);
+    }
+
+    #[test]
+    fn quiet_hud_keeps_animation_dirty_copies_and_retries_without_reapplying() {
+        let observer = SurfaceObserver::new(Instant::now(), 256);
+        let mut driver = one_pane(HUD, PaneKind::Hud);
+        driver.set_observer(Some(observer.clone()));
+        let mut sink = RecordingSink::new();
+        let mut out = Vec::new();
+        driver.apply(
+            PaneCommand::SetHudScript(Some("first".into())),
+            &mut sink,
+            &mut out,
+        );
+        driver.iterate(&mut sink, &mut out);
+        driver.view_mut(HUD).unwrap().paint = None;
+        for _ in 0..3 {
+            driver.iterate(&mut sink, &mut out);
+        }
+        assert_eq!(driver.view_mut(HUD).unwrap().surface.pushed, ["first"]);
+        assert_eq!(
+            sink.published.len(),
+            1,
+            "a static HUD produces no more frames"
+        );
+        assert_eq!(driver.view_mut(HUD).unwrap().forced_copies, 1);
+
+        // A CSS animation can repaint without a new HUD revision. The ordinary
+        // render/copy pass still sees that rectangle and does not force it full.
+        let animated = FrameRect {
+            left: 1,
+            top: 0,
+            right: 3,
+            bottom: 1,
+        };
+        driver.view_mut(HUD).unwrap().paint = Some(animated);
+        driver.iterate(&mut sink, &mut out);
+        assert_eq!(sink.published[1].rect, animated);
+        assert!(!sink.published[1].full);
+
+        driver.apply(
+            PaneCommand::SetHudScript(Some("second".into())),
+            &mut sink,
+            &mut out,
+        );
+        driver.view_mut(HUD).unwrap().surface.failing_pushes = 1;
+        driver.view_mut(HUD).unwrap().paint = None;
+        driver.iterate(&mut sink, &mut out);
+        assert_eq!(driver.pane_mut(HUD).unwrap().applied_hud_revision, Some(1));
+
+        // A successful retry owes a whole copy even if no staging buffer is
+        // free, and then the copy itself fails. No further HUD push is needed
+        // for that same obligation to reach the eventual successful frame.
+        driver.view_mut(HUD).unwrap().paint = Some(FrameRect::full(WIDTH, HEIGHT));
+        sink.starve = true;
+        driver.iterate(&mut sink, &mut out);
+        assert_eq!(driver.pane_mut(HUD).unwrap().applied_hud_revision, Some(2));
+        sink.starve = false;
+        driver.view_mut(HUD).unwrap().fail_copies = 1;
+        driver.iterate(&mut sink, &mut out);
+        driver.iterate(&mut sink, &mut out);
+        assert_eq!(
+            driver.view_mut(HUD).unwrap().surface.pushed,
+            ["first", "second"]
+        );
+        assert_eq!(sink.published.len(), 3);
+        assert!(sink.published[2].full);
+        let events = observer.events();
+        let (revision, reasons) = events
+            .iter()
+            .rev()
+            .find_map(|event| match event.operation {
+                Operation::Produced {
+                    hud_revision,
+                    reasons,
+                    ..
+                } => Some((hud_revision, reasons)),
+                _ => None,
+            })
+            .expect("the retry produced a frame");
+        assert_eq!(revision, Some(2));
+        assert!(reasons.hud_push && reasons.buffer_retry && reasons.copy_retry);
+    }
+
+    #[test]
+    fn latest_hud_survives_loading_recreation_reveal_and_resize() {
+        let mut driver = one_pane(HUD, PaneKind::Hud);
+        driver.view_mut(HUD).unwrap().finishes_loading_after = 1;
+        let mut sink = RecordingSink::new();
+        let mut out = Vec::new();
+        driver.apply(
+            PaneCommand::SetHudScript(Some("before load".into())),
+            &mut sink,
+            &mut out,
+        );
+        driver.iterate(&mut sink, &mut out);
+        assert!(driver.view_mut(HUD).unwrap().surface.pushed.is_empty());
+        driver.apply(
+            PaneCommand::SetHudScript(Some("latest".into())),
+            &mut sink,
+            &mut out,
+        );
+        driver.iterate(&mut sink, &mut out);
+        assert_eq!(driver.view_mut(HUD).unwrap().surface.pushed, ["latest"]);
+
+        driver.apply(PaneCommand::Close(HUD), &mut sink, &mut out);
+        driver.apply(create(HUD, PaneKind::Hud), &mut sink, &mut out);
+        driver.view_mut(HUD).unwrap().paint = Some(FrameRect::full(WIDTH, HEIGHT));
+        driver.iterate(&mut sink, &mut out);
+        assert_eq!(driver.view_mut(HUD).unwrap().surface.pushed, ["latest"]);
+        for visible in [false, true] {
+            driver.apply(
+                PaneCommand::SetVisible { id: HUD, visible },
+                &mut sink,
+                &mut out,
+            );
+            driver.iterate(&mut sink, &mut out);
+        }
+        assert_eq!(
+            driver.view_mut(HUD).unwrap().surface.pushed,
+            ["latest", "latest"]
+        );
+        driver.apply(
+            PaneCommand::Resize {
+                id: HUD,
+                width: WIDTH * 2,
+                height: HEIGHT,
+                epoch: 7,
+            },
+            &mut sink,
+            &mut out,
+        );
+        driver.view_mut(HUD).unwrap().paint = Some(FrameRect::full(WIDTH * 2, HEIGHT));
+        driver.view_mut(HUD).unwrap().surface.failing_pushes = 1;
+        driver.iterate(&mut sink, &mut out);
+        assert_eq!(driver.pane_mut(HUD).unwrap().applied_hud_revision, Some(2));
+        assert!(driver.pane_mut(HUD).unwrap().hud_apply_owed);
+        driver.iterate(&mut sink, &mut out);
+        assert!(!driver.pane_mut(HUD).unwrap().hud_apply_owed);
+        assert_eq!(
+            driver.view_mut(HUD).unwrap().surface.pushed,
+            ["latest", "latest", "latest"]
+        );
+        let frame = sink.published.last().unwrap();
+        assert_eq!(frame.epoch, 7);
+        assert_eq!(frame.rect, FrameRect::full(WIDTH * 2, HEIGHT));
+        assert!(
+            frame.full,
+            "the retried resize application is painted whole"
+        );
     }
 
     #[test]
@@ -3214,6 +3382,11 @@ mod loop_tests {
         );
 
         driver.iterate(&mut sink, &mut out);
+        driver.apply(
+            PaneCommand::SetHudScript(Some("window.__updateHud({heading:1})".to_string())),
+            &mut NoFrameSink,
+            &mut out,
+        );
         driver.iterate(&mut sink, &mut out);
         assert_eq!(
             driver.view_mut(HUD).unwrap().surface.pushed.len(),

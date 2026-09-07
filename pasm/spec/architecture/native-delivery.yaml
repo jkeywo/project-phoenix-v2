@@ -305,6 +305,7 @@ entities:
         - "[ai] The outbound queue is capped per delivery class rather than as a ring buffer. Snapshot messages are superseded by the next one and may be dropped; Welcome, StationAssigned and GameStarted are one-shot transitions, and a pane that missed its Welcome sits in the lobby forever with a completely clean log. A pane whose page stops draining and overflows its RELIABLE budget is closed, which hands the lobby the same disconnect a dropped phone produces — and reaching that state takes BOTH caps: this queue holds only what the host has not handed over, so a wedged page that kept accepting pushes would never fill it. pane_boot.js therefore caps the page's own inbox and THROWS past it, which pump_pane requeues as an ordinary failed push. A closed or faulted pane loses its view, its canvas node and its document at the top of the next frame; recreating it on the same identity is issue #1125's (native-pane-recovery, below) — a PaneId is never reissued, so recreation is a fresh PaneId carrying the same session token, and the station it held is already on Backfill waiting for that token's reconnect."
         - "[ai] The Ultralight runtime and its views are created, updated, pumped, rendered, copied and dropped on the dedicated phoenix-panes thread (issue #1404); synchronous evaluate_script never runs on the Bevy simulation thread. The main world's PaneHost sends owned commands and accepts pane events, admitting copied frames only for a live surface with the current texture epoch before queueing GPU uploads; the upload path also validates the frame geometry. pump_pane still bounds each console's push count per pane-thread iteration so a load-time backlog cannot monopolise the other views. Failed and budget-deferred batches are reconciled with traffic the simulation enqueued during evaluation: older reliable messages stay first, newer snapshots supersede their returned kind, and the same bounded queue reports ReliableOverflow when its reliable budget is exceeded."
         - "[ai] Issue #1405's native-surface-attribution observer follows each frame's original kind, dimensions, device scale, visibility and texture epoch through its owned buffer. Raw integer-nanosecond events distinguish HUD source revisions from per-view applications, copy causes, staging starvation, queue age and terminal uploads/disposals. Global SDK update/render remain aggregate worker costs; main-frame drain/queue time uses its own denominator. Capture is opt-in and bounded, with truncation and in-flight shutdown frames disclosed rather than silently counted as loss; see performance-measurement.yaml and docs/acceptance/1405-surface-attribution.md."
+        - "[ai] Issue #1405 P2 retains an encoded HUD command per changed source revision. Each loaded HUD view applies the latest revision once successfully, retries failed pushes, and reapplies after load/recreation, reveal or resize. Last-success metadata remains distinct from a lifecycle refresh still owed. Same-value text, alert-class and ending-display writes are skipped by both the fallback and localised HUD renderers. A quiet HUD no longer forces whole copies every iteration; SDK update/render and animation dirty-rectangle copying remain active, and successful DOM changes still force a whole copy for the known dirty-bound exceptions. Copy failure and staging starvation retain that copy obligation independently of HUD application. New hidden HUD revisions still apply in P2; hidden DOM deferral is a separate slice."
         - "[ai] Each pane's view is created in its OWN Ultralight Session, named after the pane and never written to disk. Ultralight keys cookies, localStorage and IndexedDB on the Session rather than on the view, and a view created without one lands in the renderer's single persistent default session — so, since every pane document is served from this host's one origin, panes would otherwise share a localStorage including gui/session-token.js's session-token key, which is the single value deciding which participant a page is."
         - "[ai] Everything about what a pane may say and hear compiles and is tested with the SDK feature OFF, which is how every CI job builds — an arrangement rather than a fact, because --all-features enables the feature regardless. ci.yml's clippy step therefore names its features explicitly (every one declared except ultralight) and vellum's engine job excludes the crate. That split is where the acceptance criteria live: a claim checkable only on a Windows machine with a GPU is a claim nobody checks. Only the drawing and the input translation are behind --features ultralight."
         - "[ai] Deferred, and the deferral is issue #1121's own: a real BROWSER participant beside a pane needs the Phoenix transport (#1112), so acceptance criterion 5's concurrency claim is proved against a LoopbackTransport participant — literally the seam that transport plugs into. THE CRITERION STAYS UNTICKED ON #1122 and is carried as an acceptance item on #1112, where the same test swaps LoopbackTransport for the real network transport and changes nothing else, which is what PairedTransport was built for. Display profiles are #1123's (bridge-display-profile, below); independent input routing AND pane→Station-window compositing landed in #1124 (bridge-input-routing, below) — a pane the profile seats is now rendered on its Station window and receives that window's input, and a pane left unseated still tiles on the viewscreen, so nothing regresses."
@@ -325,6 +326,11 @@ entities:
           src/native_host/panes/surface.rs,
           src/native_host/panes/document.rs,
           src/native_host/panes/ultralight.rs,
+          src/native_host/panes/hud.rs,
+          src/native_host/panes/pane_thread.rs,
+          src/core/codec.rs,
+          gui/viewscreen-hud.html,
+          tests/client/viewscreen-hud.test.js,
           src/native_host/panes/pane_boot.js,
           src/native_host/panes/pane_link.js,
           src/delivery/serve.rs,
@@ -357,6 +363,8 @@ entities:
           PeerOrigin,
           peer_origin,
           PaneDisplayPlugin,
+          HudScriptCache,
+          encode_hud_update_script,
           stage_sdk,
         ]
       tests:
@@ -364,6 +372,7 @@ entities:
           cargo test,
           tests/native_host_panes.rs,
           tests/native_host_pane_ultralight.rs,
+          "npx vitest run tests/client/viewscreen-hud.test.js",
         ]
 
   - component: bridge-display-profile

@@ -174,13 +174,11 @@ pub struct ViewscreenHudDisplayConfig {
     pub url: String,
 }
 
-/// The latest HUD state pushed to the viewscreen overlay, cached so a state that
-/// arrives before the surface has finished loading still reaches it, and so the
-/// overlay always reflects the newest state each frame it is drawn.
-#[derive(Resource, Clone, Debug, Default)]
-struct ViewscreenHudLatest {
-    json: Option<String>,
-}
+/// The latest HUD state and encoded command, cached by source revision. The
+/// worker retains the command until each loaded view has applied it and for
+/// reapplication after load, reveal or resize.
+#[derive(Resource, Debug, Default)]
+struct ViewscreenHudLatest(super::hud::HudScriptCache);
 
 /// The viewscreen HUD-overlay surface's reserved id. Like
 /// [`HOST_LOBBY_SURFACE_ID`](crate::native_host::host_lobby::HOST_LOBBY_SURFACE_ID)
@@ -602,7 +600,7 @@ impl PaneWindow {
 pub struct PaneHost {
     mirror: PaneMirror<PaneCanvasData>,
     thread: Option<PaneThreadHandle>,
-    hud_last_sent: Option<String>,
+    hud_last_sent_revision: u64,
     gamepads_last_sent: Option<String>,
     /// Each **tiled** pane's slot on the primary window, so a recreated pane
     /// rebuilds where its predecessor sat (issue #1125).
@@ -1292,7 +1290,7 @@ fn init_pane_host(world: &mut World) {
     world.insert_resource(PaneHost {
         mirror: windows,
         thread: Some(thread),
-        hud_last_sent: None,
+        hud_last_sent_revision: 0,
         gamepads_last_sent: None,
         tiles,
         primary_window: primary_entity,
@@ -1385,16 +1383,15 @@ fn sync_host_lobby_presence(
 /// the native path) from the host's `HudStateChanged`.
 ///
 /// The host emits `HudStateChanged` only on a real change (heading, hull,
-/// condition, red alert). Caching the latest — rather than pushing it straight
-/// through — lets [`drive_pane_host`] hand it to the overlay every frame it draws,
-/// so a state that arrived while the transparent surface was still loading, and
-/// the very first frame after it finishes loading, both reach it.
+/// condition, red alert). Encode only a changed value; [`drive_pane_host`] sends
+/// each revision to the worker's retained slot. A state that arrives before the
+/// surface is ready therefore still reaches its first loaded frame.
 fn cache_hud_state(
     mut latest: ResMut<ViewscreenHudLatest>,
     mut events: MessageReader<HudStateChanged>,
 ) {
-    for event in events.read() {
-        latest.json = Some(event.json.clone());
+    if let Some(event) = events.read().last() {
+        latest.0.update(&event.json);
     }
 }
 
@@ -2058,8 +2055,8 @@ fn drive_pane_host(
     // has no slot to offer — see `super::placement`.
     bridge: Option<Res<BridgeLayoutResource>>,
     // The latest viewscreen HUD state (issue #422, native port), cached from
-    // `HudStateChanged` by `cache_hud_state`. Read here so the newest reaches the
-    // overlay every frame it draws, including the first frame after it loads.
+    // `HudStateChanged` by `cache_hud_state`. Send only changed source revisions;
+    // the worker owns per-view success and lifecycle reapplication.
     hud_latest: Res<ViewscreenHudLatest>,
     mut images: ResMut<Assets<Image>>,
     // Where a copied frame is published (issue #1404). The render world empties
@@ -2091,13 +2088,12 @@ fn drive_pane_host(
     }
     let started = (stats.is_some() || observer.is_some()).then(Instant::now);
     let mut upload_ns = 0u64;
-    let script = hud_latest.json.as_ref().map(|json| {
-        let arg = serde_json::to_string(json).unwrap_or_else(|_| "\"{}\"".into());
-        format!("window.__updateHud({arg})")
-    });
-    if host.hud_last_sent != script {
-        host.send(PaneCommand::SetHudScript(script.clone()));
-        host.hud_last_sent = script;
+    let revision = hud_latest.0.revision();
+    if host.hud_last_sent_revision != revision {
+        host.send(PaneCommand::SetHudScript(
+            hud_latest.0.script().map(str::to_owned),
+        ));
+        host.hud_last_sent_revision = revision;
     }
     if let Some(bus) = &bus {
         retire_closed_panes(&mut host, bus, &mut commands, &log);

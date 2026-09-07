@@ -125,3 +125,53 @@ repeatable changes beyond control variation and the relevant visual/input pass:
 first paint, HUD updates and alerts, resize/recovery, F9 hide/reveal, phase
 transitions, and Station input. The P1 unit seams establish attribution and
 ownership behavior; they do not establish a speedup or close hardware checks.
+
+## P2: HUD revision acceptance
+
+Keep the P1 checkpoint as a separate executable/content baseline. P2 caches the
+encoded HUD command until its source value changes, applies each revision once
+successfully per loaded view, and retains the latest for load/recreation,
+reveal and resize. A failed application retries. Same-value DOM writes are
+skipped in both page renderers. SDK update/render, animation dirty detection,
+full copies after successful DOM pushes, and buffer/copy retry obligations
+remain active. Hidden views still receive new revisions in this slice.
+
+The SDK-independent tests cover:
+
+- `unchanged_hud_input_keeps_its_revision_and_retained_command`: repeated source
+  state retains one encoded command and revision.
+- `quiet_hud_keeps_animation_dirty_copies_and_retries_without_reapplying`: a
+  static HUD stops producing frames; an animation rectangle still copies;
+  failed application, buffer starvation and failed copy recover without
+  repeated successful pushes.
+- `latest_hud_survives_loading_recreation_reveal_and_resize`: loading receives
+  the newest state, recreation retains it, reveal and resize reapply it, and a
+  failed refresh does not erase last-success metadata.
+- `attribution_distinguishes_quiet_hud_revisions_hidden_failure_and_reveal`:
+  the raw observer distinguishes quiet revisions, failure and legitimate
+  lifecycle reapplication.
+
+`tests/client/viewscreen-hud.test.js` executes the shipped markup and scripts.
+Mutation observations prove unchanged values leave the DOM untouched in both
+the fallback and localised renderer; changed heading/hull, alert transitions and
+game-over text/display still update. Existing localisation and deferred-module
+first-paint coverage remains in that suite.
+
+Rust and SDK validation, then the real visual pass, are required before accepting
+the slice. On the frozen native build, inspect first paint, a turning heading,
+changing hull, red-alert animation, game-over and return to a new run. Exercise
+F9/phase transitions, resize and recovery, including hidden resize followed by
+reveal. Each reveal must show the current values on the retained page. Keep
+Station input working during these transitions. Unit doubles establish policy,
+not SDK raster behavior or what a bridge operator sees.
+
+Run the G0 quiet 1080p matrix against the separate P1 baseline and P2 build with
+matched source, SDK, bundle, geometry, readiness and observation windows. In a
+stable non-alert interval, expect successful repeated HUD applications and
+`hud_push` full-copy causes to cease between state/lifecycle changes. Report
+copied/uploaded pixels, per-view application counts and global SDK costs
+separately; remaining animated pixels are not evidence of a repeated push.
+Classify legitimate load/reveal/resize reapplications explicitly. Only keep the
+performance claim if its effect repeats beyond bracketing-control variation
+and the visual/input checks pass; otherwise record the no-benefit or regression
+result. No percentage speedup or hardware acceptance follows from these tests.

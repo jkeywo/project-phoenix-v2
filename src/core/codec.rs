@@ -421,6 +421,12 @@ pub(crate) fn decode_presentation_capture<T: serde::de::DeserializeOwned>(
     serde_json::from_slice(capture)
 }
 
+/// The native HUD accepts the same JSON string as the browser HUD bridge.
+pub fn encode_hud_update_script(json: &str) -> String {
+    let argument = serde_json::to_string(json).unwrap_or_else(|_| "\"{}\"".into());
+    format!("window.__updateHud({argument})")
+}
+
 fn stamp_json(stamp: &crate::delivery::stamp::DeliveryStamp) -> serde_json::Value {
     serde_json::json!({
         "protocol": stamp.protocol,

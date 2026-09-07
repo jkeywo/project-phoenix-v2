@@ -14,6 +14,8 @@ use bevy::app::AppExit;
 use bevy::prelude::*;
 use serde::Serialize;
 
+use super::pane_thread::FrameRect;
+use super::surface::PaneSurfaceError;
 use crate::authoritative::{DeclareState, StateClass};
 
 pub const CAPTURE_ENV: &str = "PHOENIX_SURFACE_CAPTURE";
@@ -41,6 +43,77 @@ pub struct FullCopyReasons {
     pub hud_push: bool,
     pub copy_retry: bool,
     pub buffer_retry: bool,
+}
+
+/// An observed dirty region and a copied region are different facts. The
+/// pinned SDK wrapper exposes no pre-force bounds, so force/failure stays
+/// unknown even when a full rectangle was copied successfully.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CopyObservation {
+    pub outcome: &'static str,
+    pub dirty_rect: Option<FrameRect>,
+    pub copied_rect: Option<FrameRect>,
+    pub forced: bool,
+    pub reasons: FullCopyReasons,
+}
+
+impl CopyObservation {
+    pub fn from_result(
+        result: &Result<Option<FrameRect>, PaneSurfaceError>,
+        forced: bool,
+        reasons: FullCopyReasons,
+    ) -> Self {
+        let (outcome, copied_rect) = match result {
+            Ok(Some(rect)) => ("copied", Some(*rect)),
+            Ok(None) => ("clean", None),
+            Err(_) => ("failed", None),
+        };
+        Self {
+            outcome,
+            copied_rect,
+            dirty_rect: (!forced && result.is_ok()).then_some(copied_rect.unwrap_or_default()),
+            forced,
+            reasons,
+        }
+    }
+
+    pub fn unobserved(outcome: &'static str, forced: bool, reasons: FullCopyReasons) -> Self {
+        Self {
+            outcome,
+            dirty_rect: None,
+            copied_rect: None,
+            forced,
+            reasons,
+        }
+    }
+
+    pub fn operation(self, duration_ns: u64) -> Operation {
+        Operation::Copy {
+            outcome: self.outcome,
+            dirty_pixels: self.dirty_rect.map(|rect| rect.pixel_count()),
+            copied_pixels: self.copied_rect.map_or(0, |rect| rect.pixel_count()),
+            dirty_rect: self.dirty_rect,
+            copied_rect: self.copied_rect,
+            forced: self.forced,
+            reasons: self.reasons,
+            duration_ns,
+        }
+    }
+
+    /// Literal half-open raster coordinates, suitable for the ordinary
+    /// measured host's Lobby log. No formatting or allocation in an unmeasured
+    /// worker; the main adapter invokes this only while draining observations.
+    pub fn log_line(self, surface: SurfaceIdentity) -> String {
+        fn rect(rect: Option<FrameRect>, absent: &str) -> String {
+            rect.map_or_else(
+                || absent.into(),
+                |r| format!("[{},{},{},{}]", r.left, r.top, r.right, r.bottom),
+            )
+        }
+        format!("pane surface: id={} epoch={} kind={} raster={}x{} device_scale={} visible={} outcome={} dirty_rect={} copied_rect={} forced={} reasons={:?}",
+            surface.id, surface.epoch, surface.kind, surface.width, surface.height, surface.device_scale, surface.visible, self.outcome,
+            rect(self.dirty_rect, "unknown"), rect(self.copied_rect, "none"), self.forced, self.reasons)
+    }
 }
 
 impl FullCopyReasons {
@@ -104,6 +177,8 @@ pub enum Operation {
         outcome: &'static str,
         dirty_pixels: Option<u64>,
         copied_pixels: u64,
+        dirty_rect: Option<FrameRect>,
+        copied_rect: Option<FrameRect>,
         forced: bool,
         reasons: FullCopyReasons,
         duration_ns: u64,
@@ -463,6 +538,61 @@ mod tests {
             device_scale: 1.5,
             visible: true,
         }
+    }
+
+    #[test]
+    fn rectangle_log_and_capture_keep_dirty_knowledge_separate_from_copied_bounds() {
+        let rect = FrameRect {
+            left: 2,
+            top: 3,
+            right: 7,
+            bottom: 9,
+        };
+        let partial =
+            CopyObservation::from_result(&Ok(Some(rect)), false, FullCopyReasons::default());
+        let json = serde_json::to_value(partial.operation(42)).unwrap();
+        assert_eq!(
+            json["dirty_rect"],
+            serde_json::json!({ "left": 2, "top": 3, "right": 7, "bottom": 9 })
+        );
+        assert_eq!(json["copied_rect"], json["dirty_rect"]);
+        assert_eq!(json["dirty_pixels"], 30);
+        assert_eq!(json["copied_pixels"], 30);
+        assert_eq!(json["duration_ns"], 42);
+        assert!(partial.log_line(surface()).contains("id=7 epoch=2 kind=console raster=10x20 device_scale=1.5 visible=true outcome=copied dirty_rect=[2,3,7,9] copied_rect=[2,3,7,9] forced=false"));
+
+        let forced = CopyObservation::from_result(
+            &Ok(Some(FrameRect::full(10, 20))),
+            true,
+            FullCopyReasons {
+                reveal: true,
+                ..Default::default()
+            },
+        );
+        let json = serde_json::to_value(forced.operation(0)).unwrap();
+        assert!(json["dirty_rect"].is_null() && json["dirty_pixels"].is_null());
+        assert_eq!(json["copied_pixels"], 200);
+        assert!(forced
+            .log_line(surface())
+            .contains("dirty_rect=unknown copied_rect=[0,0,10,20] forced=true"));
+        assert_eq!(json["reasons"]["reveal"], true);
+
+        let clean = CopyObservation::from_result(&Ok(None), false, FullCopyReasons::default());
+        assert_eq!(clean.dirty_rect, Some(FrameRect::default()));
+        assert!(clean
+            .log_line(surface())
+            .contains("outcome=clean dirty_rect=[0,0,0,0] copied_rect=none"));
+        let failed = CopyObservation::from_result(
+            &Err(PaneSurfaceError::Frame("lock".into())),
+            false,
+            FullCopyReasons::default(),
+        );
+        assert!(failed
+            .log_line(surface())
+            .contains("outcome=failed dirty_rect=unknown copied_rect=none"));
+        let json = serde_json::to_value(failed.operation(1)).unwrap();
+        assert!(json["dirty_pixels"].is_null());
+        assert_eq!(json["copied_pixels"], 0);
     }
 
     #[test]

@@ -92,6 +92,7 @@ pub mod pane_thread;
 pub mod placement;
 pub mod recovery;
 pub mod registry;
+pub mod render_geometry;
 pub mod surface;
 pub mod surface_stats;
 pub mod transport;

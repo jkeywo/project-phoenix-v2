@@ -36,6 +36,32 @@ function surfaceKey(surface) {
   return JSON.stringify([surface.id, surface.epoch, surface.kind, surface.width,
     surface.height, surface.device_scale, surface.visible]);
 }
+// Schema 1 captures made before the rectangle increment have only pixel
+// counts. Do not infer a shape for them or relabel copied pixels as dirtiness.
+function validateCopyRectangles(event) {
+  const fields = ['dirty_rect', 'copied_rect'];
+  if (fields.every(key => !Object.hasOwn(event, key))) return;
+  if (fields.some(key => !Object.hasOwn(event, key))) throw new Error('Incomplete copy rectangles');
+  for (const key of fields) {
+    const rect = event[key];
+    if (rect === null) continue;
+    if (!rect || typeof rect !== 'object') throw new Error(`Invalid ${key}`);
+    for (const edge of ['left', 'top', 'right', 'bottom']) integer(rect[edge], `${key}.${edge}`);
+    if (rect.right < rect.left || rect.bottom < rect.top
+        || rect.right > event.surface.width || rect.bottom > event.surface.height)
+      throw new Error(`Out-of-bounds ${key}`);
+    const pixels = integer((rect.right - rect.left) * (rect.bottom - rect.top), `${key} area`);
+    if (pixels !== event[key === 'dirty_rect' ? 'dirty_pixels' : 'copied_pixels'])
+      throw new Error(`Pixel count disagrees with ${key}`);
+  }
+  if ((event.dirty_rect === null) !== (event.dirty_pixels === null)
+      || (event.copied_rect === null && event.copied_pixels !== 0))
+    throw new Error('Copy rectangle knowledge disagrees with pixel count');
+  if (event.outcome === 'copied' ? event.copied_rect === null || event.copied_pixels === 0 : event.copied_rect !== null)
+    throw new Error('Copy rectangle disagrees with outcome');
+  if ((event.forced || ['failed', 'buffer_starved'].includes(event.outcome)) && event.dirty_rect !== null)
+    throw new Error('Unobserved dirty rectangle must remain unknown');
+}
 function timing(values) {
   if (!values.length) return null;
   const sorted = [...values].sort((a, b) => a - b);
@@ -110,6 +136,7 @@ export function analyzeSurfaceCapture(artifact, { warmupSeconds, measureSeconds 
     if (event.event === 'copy') {
       if (!['copied', 'clean', 'failed', 'buffer_starved'].includes(event.outcome)) throw new Error('Invalid copy outcome');
       if (event.dirty_pixels !== null) integer(event.dirty_pixels, 'dirty_pixels');
+      validateCopyRectangles(event);
     }
     if (event.event === 'discarded' && !losses.includes(event.reason)) throw new Error('Invalid discard reason');
     if (['copy', 'produced'].includes(event.event) && typeof event.forced !== 'boolean') throw new Error('Invalid forced flag');

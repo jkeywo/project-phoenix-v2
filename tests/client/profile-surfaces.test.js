@@ -100,6 +100,37 @@ describe('surface capture reduction', () => {
     expect(reduce(capture([], { successful_exit: false })).comparable).toBe(false);
   });
 
+  it('accepts literal partial and clean rectangles while preserving legacy schema 1 reduction', () => {
+    const partial = { left: 7, top: 3, right: 17, bottom: 8 };
+    const empty = { left: 0, top: 0, right: 0, bottom: 0 };
+    const full = { left: 0, top: 0, right: 100, bottom: 50 };
+    const copy = (seconds, fields) => event('copy', seconds, { surface: surface(), outcome: 'copied',
+      copied_pixels: 50, dirty_pixels: 50, dirty_rect: partial, copied_rect: partial,
+      forced: false, reasons: {}, duration_ns: 20, ...fields });
+    const events = [copy(11, {}), copy(12, { outcome: 'clean', copied_pixels: 0, dirty_pixels: 0,
+      dirty_rect: empty, copied_rect: null }), copy(13, { forced: true, dirty_pixels: null,
+      dirty_rect: null, copied_rect: full, copied_pixels: 5000 }),
+    copy(14, { outcome: 'failed', copied_pixels: 0, dirty_pixels: null, dirty_rect: null, copied_rect: null }),
+    copy(15, { outcome: 'buffer_starved', copied_pixels: 0, dirty_pixels: null, dirty_rect: null, copied_rect: null })];
+    const report = reduce(capture(events));
+    const legacy = events.map(({ dirty_rect, copied_rect, ...fields }) => fields);
+    expect(report).toEqual(reduce(capture(legacy)));
+    expect(report.surfaces[0].copy).toMatchObject({ copiedPixels: 5050, knownDirtyPixels: 50, unknownDirtyDecisions: 3 });
+
+    const check = fields => () => reduce(capture([copy(11, fields)]));
+    expect(check({ dirty_rect: { ...partial, left: -1 } })).toThrow('exact integer');
+    expect(check({ copied_rect: { ...partial, right: 101 } })).toThrow('Out-of-bounds');
+    expect(check({ copied_rect: { ...partial, left: 18 } })).toThrow('Out-of-bounds');
+    expect(check({ copied_pixels: 51 })).toThrow('Pixel count');
+    expect(check({ dirty_rect: null })).toThrow('knowledge');
+    expect(check({ forced: true })).toThrow('unknown');
+    expect(check({ outcome: 'failed' })).toThrow('outcome');
+    expect(check({ copied_rect: null, copied_pixels: 0 })).toThrow('outcome');
+    const incomplete = { ...events[0] };
+    delete incomplete.dirty_rect;
+    expect(() => reduce(capture([incomplete]))).toThrow('Incomplete');
+  });
+
   it('refuses broken identity, duplicate terminal outcomes, rounded integers and mismatched counters', () => {
     expect(() => reduce(capture([produced(0, 11), uploaded(0, 12, 11, surface({ epoch: 3 }))]))).toThrow('ownership');
     expect(() => reduce(capture([produced(0, 11), uploaded(0, 12, 11), discarded(0, 13, 11)]))).toThrow();

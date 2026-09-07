@@ -79,7 +79,8 @@ use std::time::{Duration, Instant};
 use super::registry::PaneId;
 use super::surface::{pump_pane, PaneSurface, PaneSurfaceError};
 use super::surface_stats::{
-    elapsed_ns, FrameTrace, FullCopyReasons, Operation, SurfaceIdentity, SurfaceObserver,
+    elapsed_ns, CopyObservation, FrameTrace, FullCopyReasons, Operation, SurfaceIdentity,
+    SurfaceObserver,
 };
 use super::transport::{PaneBus, PaneInputRefusal};
 use crate::native_host::host_lobby::{pump_host_lobby, HostLobbyBridge};
@@ -155,7 +156,7 @@ pub struct PaneSpecOwned {
 /// with the SDK feature off — so depending on it here costs nothing.
 /// [`super::upload`] keeps speaking `DirtyRect` — it is talking to the copy
 /// that produced it — and converts at the seam.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct FrameRect {
     pub left: u32,
     pub top: u32,
@@ -346,6 +347,12 @@ pub enum PaneEvent {
     PushDeferred { id: PaneId, reason: String },
     /// One iteration's cost, for `--frame-stats`.
     Stats(PaneThreadSample),
+    /// Per-pane rectangle facts for the opt-in --frame-stats log. The identity
+    /// is captured on the worker, so a later resize cannot rename old pixels.
+    CopyObserved {
+        surface: SurfaceIdentity,
+        observation: CopyObservation,
+    },
     /// The renderer stopped, and no further event will arrive.
     ThreadFailed { reason: String },
 }
@@ -1415,6 +1422,16 @@ impl<R: PaneRuntime> PaneLoop<R> {
             // a reveal is a `display` flip rather than a page load, and the
             // reveal itself owes the whole frame.
             if !pane.visible {
+                if self.measure {
+                    out.push(PaneEvent::CopyObserved {
+                        surface: pane.identity(),
+                        observation: CopyObservation::unobserved(
+                            "hidden",
+                            false,
+                            FullCopyReasons::default(),
+                        ),
+                    });
+                }
                 continue;
             }
             // A push we just made is trusted on its own regardless of what the
@@ -1443,18 +1460,15 @@ impl<R: PaneRuntime> PaneLoop<R> {
                         pane.full_reasons.merge(reasons);
                         pane.full_reasons.buffer_retry = true;
                     }
+                    let observation = CopyObservation::unobserved("buffer_starved", force, reasons);
+                    if self.measure {
+                        out.push(PaneEvent::CopyObserved {
+                            surface: pane.identity(),
+                            observation,
+                        });
+                    }
                     if let Some(observer) = &observer {
-                        observer.record(
-                            Some(pane.identity()),
-                            Operation::Copy {
-                                outcome: "buffer_starved",
-                                dirty_pixels: None,
-                                copied_pixels: 0,
-                                forced: force,
-                                reasons,
-                                duration_ns: 0,
-                            },
-                        );
+                        observer.record(Some(pane.identity()), observation.operation(0));
                     }
                     continue;
                 }
@@ -1463,26 +1477,15 @@ impl<R: PaneRuntime> PaneLoop<R> {
             let outcome = pane.view.copy_frame(staged, force);
             let duration_ns = elapsed_ns(copy_started);
             copy_ns += duration_ns;
+            let observation = CopyObservation::from_result(&outcome, force, reasons);
+            if self.measure {
+                out.push(PaneEvent::CopyObserved {
+                    surface: pane.identity(),
+                    observation,
+                });
+            }
             if let Some(observer) = &observer {
-                let (result, pixels) = match &outcome {
-                    Ok(Some(rect)) => ("copied", rect.pixel_count()),
-                    Ok(None) => ("clean", 0),
-                    Err(_) => ("failed", 0),
-                };
-                // The current SDK wrapper returns copied bounds, not pre-force
-                // dirty bounds. Only an unforced successful copy reveals dirty.
-                let dirty_pixels = (!force && outcome.is_ok()).then_some(pixels);
-                observer.record(
-                    Some(pane.identity()),
-                    Operation::Copy {
-                        outcome: result,
-                        dirty_pixels,
-                        copied_pixels: pixels,
-                        forced: force,
-                        reasons,
-                        duration_ns,
-                    },
-                );
+                observer.record(Some(pane.identity()), observation.operation(duration_ns));
             }
             match outcome {
                 Ok(rect) => {
@@ -2668,6 +2671,11 @@ mod loop_tests {
             panic!("a real frame")
         };
         assert!(frame.bytes.trace().is_none());
+        assert!(
+            !out.iter()
+                .any(|event| matches!(event, PaneEvent::CopyObserved { .. })),
+            "the ordinary unmeasured path sends no per-pane log events"
+        );
         let sample = stats(&out);
         assert_eq!(
             [
@@ -2679,6 +2687,164 @@ mod loop_tests {
                 sample.iteration_ms
             ],
             [0.0; 6]
+        );
+    }
+
+    #[test]
+    fn measured_rectangle_events_follow_real_copy_retry_hidden_and_resize_decisions() {
+        fn step(
+            driver: &mut PaneLoop<RecordingRuntime>,
+            sink: &mut RecordingSink,
+        ) -> (SurfaceIdentity, CopyObservation, PaneThreadSample) {
+            let mut out = Vec::new();
+            driver.iterate(sink, &mut out);
+            let observations: Vec<_> = out
+                .iter()
+                .filter_map(|event| match event {
+                    PaneEvent::CopyObserved {
+                        surface,
+                        observation,
+                    } => Some((*surface, *observation)),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                observations.len(),
+                1,
+                "one decision per measured pane iteration"
+            );
+            (observations[0].0, observations[0].1, stats(&out))
+        }
+        let observer = SurfaceObserver::new(Instant::now(), 128);
+        let mut driver = one_pane(CONSOLE, PaneKind::Console);
+        driver.set_measure(true);
+        driver.set_observer(Some(observer.clone()));
+        let mut sink = RecordingSink::new();
+        let (old_identity, initial, _) = step(&mut driver, &mut sink);
+        assert!(initial.forced && initial.reasons.initial);
+        assert_eq!(initial.dirty_rect, None);
+        assert_eq!(initial.copied_rect, Some(FrameRect::full(WIDTH, HEIGHT)));
+
+        let partial = FrameRect {
+            left: 1,
+            top: 0,
+            right: 3,
+            bottom: 1,
+        };
+        driver.view_mut(CONSOLE).unwrap().paint = Some(partial);
+        let (_, copied, sample) = step(&mut driver, &mut sink);
+        assert_eq!(
+            (copied.dirty_rect, copied.copied_rect),
+            (Some(partial), Some(partial))
+        );
+        assert_eq!(sample.copied, 1);
+        assert!(!copied.forced);
+        driver.view_mut(CONSOLE).unwrap().paint = None;
+        let (_, clean, sample) = step(&mut driver, &mut sink);
+        assert_eq!(clean.dirty_rect, Some(FrameRect::default()));
+        assert_eq!(sample.copied, 0);
+
+        // A failed unforced copy does not create a new full-copy obligation.
+        // A real reveal does; exercise its preservation through both failures.
+        for visible in [false, true] {
+            driver.apply(
+                PaneCommand::SetVisible {
+                    id: CONSOLE,
+                    visible,
+                },
+                &mut sink,
+                &mut Vec::new(),
+            );
+        }
+        driver.view_mut(CONSOLE).unwrap().paint = Some(FrameRect::full(WIDTH, HEIGHT));
+        driver.view_mut(CONSOLE).unwrap().fail_copies = 1;
+        let (_, failed, _) = step(&mut driver, &mut sink);
+        assert!(failed.forced && failed.reasons.reveal);
+        assert_eq!(
+            (failed.outcome, failed.dirty_rect, failed.copied_rect),
+            ("failed", None, None)
+        );
+        sink.starve = true;
+        let (_, starved, _) = step(&mut driver, &mut sink);
+        assert_eq!(
+            (starved.outcome, starved.dirty_rect, starved.copied_rect),
+            ("buffer_starved", None, None)
+        );
+        assert!(starved.forced && starved.reasons.copy_retry);
+        sink.starve = false;
+        let (_, retried, _) = step(&mut driver, &mut sink);
+        assert!(retried.forced && retried.reasons.copy_retry && retried.reasons.buffer_retry);
+        assert_eq!(retried.dirty_rect, None);
+
+        driver.apply(
+            PaneCommand::SetVisible {
+                id: CONSOLE,
+                visible: false,
+            },
+            &mut sink,
+            &mut Vec::new(),
+        );
+        let before = sink.published.len();
+        let (hidden_identity, hidden, sample) = step(&mut driver, &mut sink);
+        assert!(!hidden_identity.visible);
+        assert_eq!(
+            (hidden.outcome, hidden.dirty_rect, hidden.copied_rect),
+            ("hidden", None, None)
+        );
+        assert_eq!(sample.copied, 0);
+        assert_eq!(sink.published.len(), before);
+        driver.apply(
+            PaneCommand::Resize {
+                id: CONSOLE,
+                width: 8,
+                height: 6,
+                epoch: 3,
+            },
+            &mut sink,
+            &mut Vec::new(),
+        );
+        driver.apply(
+            PaneCommand::SetVisible {
+                id: CONSOLE,
+                visible: true,
+            },
+            &mut sink,
+            &mut Vec::new(),
+        );
+        driver.view_mut(CONSOLE).unwrap().paint = Some(FrameRect::full(8, 6));
+        let (resized, reveal, _) = step(&mut driver, &mut sink);
+        assert_eq!(
+            (
+                resized.epoch,
+                resized.width,
+                resized.height,
+                resized.visible
+            ),
+            (3, 8, 6, true)
+        );
+        assert!(reveal.forced && reveal.reasons.resize && reveal.reasons.reveal);
+        assert_eq!(
+            (reveal.dirty_rect, reveal.copied_rect),
+            (None, Some(FrameRect::full(8, 6)))
+        );
+        assert_eq!(driver.view_mut(CONSOLE).unwrap().resizes, [(8, 6)]);
+        // Already queued observations keep the old raster/epoch after resize.
+        assert_eq!(
+            (old_identity.epoch, old_identity.width, old_identity.height),
+            (0, WIDTH, HEIGHT)
+        );
+        let copies: Vec<_> = observer
+            .events()
+            .into_iter()
+            .filter(|event| matches!(event.operation, Operation::Copy { .. }))
+            .collect();
+        assert_eq!(
+            copies.len(),
+            7,
+            "a hidden view never calls or records a copy"
+        );
+        assert!(
+            matches!(copies[1].operation, Operation::Copy { dirty_rect: Some(rect), copied_rect: Some(copied), dirty_pixels: Some(2), copied_pixels: 2, .. } if rect == partial && copied == partial)
         );
     }
 

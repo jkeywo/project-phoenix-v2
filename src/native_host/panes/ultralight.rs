@@ -95,7 +95,7 @@ use vellum_ultralight::runtime::{
 use vellum_ultralight::staging;
 
 use super::document::pane_drain_script;
-use super::frame_stats::{PaneFrameSample, PaneFrameStats};
+use super::frame_stats::{PaneExperiments, PaneFrameSample, PaneFrameStats};
 use super::mirror::{MirrorPane, PaneMirror, VIEW_CRASH_COPY_FAILURES};
 use super::pane_thread::{
     spawn_pane_thread, FrameRect, PaneCommand, PaneEvent, PaneInput, PaneKeyCode, PaneKind,
@@ -104,6 +104,7 @@ use super::pane_thread::{
 use super::placement::{home_for_pane, PaneHome, PaneTile};
 use super::recovery::{close_after_thread_failure, service_faults, PaneFault};
 use super::registry::PaneId;
+use super::render_geometry::PaneRenderScale;
 use super::surface::{PaneSurface, PaneSurfaceError};
 use super::surface_stats::{elapsed_ns, DiscardReason, Operation, SurfaceObserver};
 use super::upload::{PanePendingUploads, PaneUpload};
@@ -563,6 +564,7 @@ struct PaneCanvasData {
     origin: (u32, u32),
     size: (u32, u32),
     scale: f64,
+    render_scale: PaneRenderScale,
     window_origin: (i32, i32),
     /// The camera targeted while creation is pending. Cleanup rechecks all
     /// live seats because another create may have joined it before a refusal.
@@ -571,6 +573,10 @@ struct PaneCanvasData {
 type PaneWindow = MirrorPane<PaneCanvasData>;
 
 impl PaneWindow {
+    fn raster_size(&self) -> (u32, u32) {
+        self.render_scale.geometry(self.size, self.scale).size
+    }
+
     /// Whether this window is the host-lobby surface rather than a participant's
     /// pane (issue #1325).
     ///
@@ -599,6 +605,7 @@ impl PaneWindow {
 #[derive(Resource)]
 pub struct PaneHost {
     mirror: PaneMirror<PaneCanvasData>,
+    console_render_scale: PaneRenderScale,
     thread: Option<PaneThreadHandle>,
     hud_last_sent_revision: u64,
     gamepads_last_sent: Option<String>,
@@ -1076,6 +1083,10 @@ fn init_pane_host(world: &mut World) {
     let bus = world.get_resource::<PaneBusResource>().cloned();
 
     let mut windows = PaneMirror::new();
+    let experiments = world
+        .get_resource::<PaneExperiments>()
+        .copied()
+        .unwrap_or_default();
     let mut station_cameras: Vec<(Entity, Entity)> = Vec::new();
     let mut tiles: Vec<PaneTile> = Vec::new();
     for seat in seats {
@@ -1143,13 +1154,15 @@ fn init_pane_host(world: &mut World) {
             PaneKind::Console
         };
         let visible = !(seat.hud || seat.lobby && !lobby_present);
+        let render_scale = experiments.render_scale(kind);
+        let raster = render_scale.geometry(seat.size, seat.scale);
         let _ = thread.send(PaneCommand::Create {
             id,
             kind,
             spec: PaneSpecOwned {
-                width: seat.size.0,
-                height: seat.size.1,
-                device_scale: seat.scale,
+                width: raster.size.0,
+                height: raster.size.1,
+                device_scale: raster.device_scale,
             },
             url: url.to_owned(),
             epoch: 0,
@@ -1160,8 +1173,8 @@ fn init_pane_host(world: &mut World) {
         // start black — see `pane_fill`.
         let image = Image::new_fill(
             Extent3d {
-                width: seat.size.0,
-                height: seat.size.1,
+                width: raster.size.0,
+                height: raster.size.1,
                 depth_or_array_layers: 1,
             },
             TextureDimension::D2,
@@ -1234,6 +1247,7 @@ fn init_pane_host(world: &mut World) {
                 origin: seat.origin,
                 size: seat.size,
                 scale: seat.scale,
+                render_scale,
                 window_origin: seat.window_origin,
                 pending_camera: station_camera,
             },
@@ -1289,6 +1303,7 @@ fn init_pane_host(world: &mut World) {
     }
     world.insert_resource(PaneHost {
         mirror: windows,
+        console_render_scale: experiments.render_scale(PaneKind::Console),
         thread: Some(thread),
         hud_last_sent_revision: 0,
         gamepads_last_sent: None,
@@ -1636,10 +1651,11 @@ fn resize_pane_surfaces(
         // world a fresh texture at the new size, and the epoch bump is what
         // makes any frame still in flight against the old one recognisable.
         let transparent = pane.is_hud_overlay();
+        let raster = pane.render_scale.geometry(size, pane.scale);
         let handle = images.add(Image::new_fill(
             Extent3d {
-                width: size.0,
-                height: size.1,
+                width: raster.size.0,
+                height: raster.size.1,
                 depth_or_array_layers: 1,
             },
             TextureDimension::D2,
@@ -1660,8 +1676,8 @@ fn resize_pane_surfaces(
         // frames still arriving at the old epoch are discarded by the mirror.
         resize_commands.push(PaneCommand::Resize {
             id: pane.id,
-            width: size.0,
-            height: size.1,
+            width: raster.size.0,
+            height: raster.size.1,
             epoch: pane.epoch,
         });
         if let Ok(mut canvas) = canvases.get_mut(pane.canvas) {
@@ -2195,7 +2211,7 @@ fn drive_pane_host(
                     image: pane.image.id(),
                     epoch: frame.epoch,
                     rect: frame.rect.into(),
-                    surface: pane.size,
+                    surface: pane.raster_size(),
                     full: frame.full,
                     bytes: frame.bytes,
                     attempts: 0,
@@ -2206,6 +2222,12 @@ fn drive_pane_host(
                 if let Some(stats) = stats.as_mut() {
                     stats.record_thread(iteration);
                 }
+            }
+            Ok(PaneEvent::CopyObserved {
+                surface,
+                observation,
+            }) => {
+                crate::pinfo!(log, LogCat::Lobby, "{}", observation.log_line(surface));
             }
             Ok(PaneEvent::Started(_)) => {}
         }
@@ -2521,13 +2543,15 @@ fn make_pane_view(
         scale,
         window_origin,
     } = placement;
+    let render_scale = host.console_render_scale;
+    let raster = render_scale.geometry(size, scale);
     host.send(PaneCommand::Create {
         id,
         kind: PaneKind::Console,
         spec: PaneSpecOwned {
-            width: size.0,
-            height: size.1,
-            device_scale: scale,
+            width: raster.size.0,
+            height: raster.size.1,
+            device_scale: raster.device_scale,
         },
         url: url.to_owned(),
         epoch: 0,
@@ -2535,8 +2559,8 @@ fn make_pane_view(
     });
     let image = Image::new_fill(
         Extent3d {
-            width: size.0,
-            height: size.1,
+            width: raster.size.0,
+            height: raster.size.1,
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
@@ -2573,6 +2597,7 @@ fn make_pane_view(
         origin,
         size,
         scale,
+        render_scale,
         window_origin,
         pending_camera: station_camera,
     }

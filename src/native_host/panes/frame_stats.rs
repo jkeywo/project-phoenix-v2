@@ -38,14 +38,16 @@
 //! |---|---|---|
 //! | `novsync` | Station windows present with `AutoNoVsync` | serialised vblank waits across monitors |
 //! | `raf33` | console pages run their render loop at 33 ms instead of 16 | page-side raster and script cost |
+//! | `scale2` | console view/texture dimensions and device scale are halved | real raster reduction versus softer text; human acceptance pending |
 //!
 //! Two earlier toggles — `untracked` (fetch the pane image untracked) and
 //! `noforce` (trust Ultralight's dirty bounds over a push) — were measured
 //! and retired: neither moved the frame, because every console repaints
-//! nearly its whole surface every frame. Both remaining ones measured *worse*
+//! nearly its whole surface every frame. `novsync` and `raf33` measured *worse*
 //! than the baseline on the four-screen rig (CPU contention once the render
 //! thread stops blocking; a slower page loop makes each push dearer) and are
 //! kept only so the raster work in #1405 can re-check them.
+//! The new `scale2` prototype has no adopted performance or legibility result.
 //!
 //! They are scaffolding, not features: once the measurement has picked the
 //! fixes, the fixes land as ordinary code and the toggles go with them.
@@ -82,11 +84,13 @@ pub struct PaneExperiments {
     pub novsync: bool,
     /// Console pages run their render loop at [`EXPERIMENT_FRAME_MS`].
     pub raf33: bool,
+    /// Console views/textures use half-size rasters; display/input stay physical.
+    pub scale2: bool,
 }
 
 impl PaneExperiments {
     /// Every name [`parse`](Self::parse) accepts, in display order.
-    pub const NAMES: [&'static str; 2] = ["novsync", "raf33"];
+    pub const NAMES: [&'static str; 3] = ["novsync", "raf33", "scale2"];
 
     /// Parse a comma-separated list of experiment names. Whitespace and case
     /// are forgiven; an unknown name is refused, because a run that silently
@@ -101,6 +105,7 @@ impl PaneExperiments {
             match name.to_ascii_lowercase().as_str() {
                 "novsync" => out.novsync = true,
                 "raf33" => out.raf33 = true,
+                "scale2" => out.scale2 = true,
                 other => {
                     return Err(format!(
                         "unknown frame experiment {other:?}; the known ones are {}",
@@ -128,7 +133,7 @@ impl PaneExperiments {
 
     /// The names switched on, in [`NAMES`](Self::NAMES) order.
     pub fn active(&self) -> Vec<&'static str> {
-        [self.novsync, self.raf33]
+        [self.novsync, self.raf33, self.scale2]
             .into_iter()
             .zip(Self::NAMES)
             .filter_map(|(on, name)| on.then_some(name))
@@ -141,6 +146,19 @@ impl PaneExperiments {
             PresentMode::AutoNoVsync
         } else {
             PresentMode::default()
+        }
+    }
+
+    /// The prototype scales Console rasters only. Permanent chrome stays at
+    /// native resolution, and no experiment changes the ordinary phone page.
+    pub fn render_scale(
+        &self,
+        kind: super::pane_thread::PaneKind,
+    ) -> super::render_geometry::PaneRenderScale {
+        if self.scale2 && matches!(kind, super::pane_thread::PaneKind::Console) {
+            super::render_geometry::PaneRenderScale::Half
+        } else {
+            super::render_geometry::PaneRenderScale::Native
         }
     }
 
@@ -604,6 +622,24 @@ mod tests {
         let raf33 = PaneExperiments::parse("raf33").unwrap();
         assert_eq!(raf33.station_present_mode(), PresentMode::default());
         assert_eq!(raf33.document_options().frame_ms, Some(EXPERIMENT_FRAME_MS));
+
+        let scale2 = PaneExperiments::parse("scale2").unwrap();
+        assert_eq!(scale2.station_present_mode(), PresentMode::default());
+        assert_eq!(scale2.document_options(), PaneDocumentOptions::default());
+        use super::super::{pane_thread::PaneKind, render_geometry::PaneRenderScale};
+        assert_eq!(
+            scale2.render_scale(PaneKind::Console),
+            PaneRenderScale::Half
+        );
+        for kind in [PaneKind::Lobby, PaneKind::Hud] {
+            assert_eq!(scale2.render_scale(kind), PaneRenderScale::Native);
+        }
+        for experiments in [none, novsync, raf33] {
+            assert_eq!(
+                experiments.render_scale(PaneKind::Console),
+                PaneRenderScale::Native
+            );
+        }
     }
 
     #[test]

@@ -69,7 +69,10 @@ not interchangeable. Concurrent producers may acquire the recorder lock in a
 different order from their timestamps; sort by `at_ns` for a timeline.
 
 Each surface event carries pane `id`, texture `epoch`, `kind` (console, lobby or
-hud), physical `width` and `height`, `device_scale` and compositor `visible`.
+hud), raster `width` and `height`, `device_scale` and compositor `visible`.
+At native scale the raster matches the physical display rectangle. Under the
+opt-in scale experiment below it is smaller; retain the native-frame capture's
+actual window geometry separately.
 Visibility records Phoenix's decision, not an OS occlusion query. Frame events
 carry a unique `frame` sequence and retain the identity captured when the
 pixels were produced, even after resize, close, or a new texture at that pane.
@@ -85,6 +88,24 @@ pixels were produced, even after resize, close, or a new texture at that pane.
 | `deferred` / `promoted_full` | Attempt count including inherited patience, and full upload inherited when superseding a full deferral. A deferral is not a terminal loss. |
 | `uploaded` | Actual rectangle pixels and bytes (pixels × 4), age, full flag, and host `write_texture` enqueue time. This is not GPU execution time. |
 | `discarded` | Exactly one terminal outcome per disposed frame, with closed/stale epoch, superseded deferral, exhausted retry, refused layout, no renderer, or generic buffer teardown reason. |
+
+Current `copy` events also carry `dirty_rect` and `copied_rect`, each either null
+or `{left, top, right, bottom}` in half-open raster pixel coordinates. An
+unforced successful copy reports its returned rectangle as both facts. A clean
+unforced decision has the empty dirty rectangle and no copied rectangle. Forced,
+failed and buffer-starved decisions have unknown dirty bounds; a forced copy's
+full copied rectangle must never be described as measured dirtiness. The pinned
+Vellum wrapper does not expose raw pre-force SDK bounds. The reducer accepts
+older schema 1 events without either rectangle field, preserves their counts
+and refuses inconsistent bounds/counts on new events. It invents no old shapes.
+
+`--frame-stats --log info` also logs one `pane surface:` line per live pane per
+worker iteration, with identity, raster geometry, visibility, outcome, literal
+dirty/copy coordinates and full-copy causes. A hidden pane logs `hidden` and
+unknown bounds without calling the copy routine. These per-pane log events are
+absent when frame statistics are disabled. This verbose output has its own
+observer cost: keep it disabled for ordinary structured baseline captures, or
+match it in all controls and variants. It is not a new simulation frame clock.
 
 SDK update and render are global operations. Per-surface push/copy observations
 and controlled single-surface experiments identify contributors; dividing the
@@ -175,3 +196,34 @@ Classify legitimate load/reveal/resize reapplications explicitly. Only keep the
 performance claim if its effect repeats beyond bracketing-control variation
 and the visual/input checks pass; otherwise record the no-benefit or regression
 result. No percentage speedup or hardware acceptance follows from these tests.
+
+## Opt-in Console render-scale prototype
+
+`PHOENIX_FRAME_EXPERIMENTS=scale2` halves each Console SDK view's raster width
+and height (rounding upward), and divides its device scale by two. For example,
+a 1920×1200 Station at 125% uses a 960×600 raster at 0.625 device scale. Its CSS
+viewport stays 1536×960 and its ImageNode stretches that smaller texture across
+the original physical Station rectangle. Setting device scale alone would
+change layout, so both quantities change together. An odd physical extent adds
+at most one physical pixel's worth of CSS viewport from rounding; inspect edge
+layout and pointer alignment explicitly when testing such sizes.
+
+The existing compositor tiling and physical-to-CSS input router keep their
+original display geometry and monitor scale. Creation, runtime Station opening,
+recovery and resize use the selected raster size for the SDK view, staging
+buffer and texture upload. Epoch replacement still discards old frames. Lobby
+and HUD views keep native resolution, as do all panes with the flag absent.
+The phone bundle, document CSS, message delivery, SDK update/render cadence and
+full-copy obligations are unchanged. This flag adds no 30 Hz cadence policy.
+
+This is a prototype pending native/SDK execution and hardware judgment. A
+quarter-sized raster is arithmetic, not evidence of a measured speedup. Preserve
+the accepted two-Station evidence as its own baseline; three-Station comparison
+and the choice of an acceptable lever remain pending. After building, bracket
+`scale2` with native-scale controls using identical frozen scenario, seed, SDK,
+bundle, Station claims and observation windows. Report global SDK render cost,
+per-pane copied/uploaded pixels and actual Station cadence separately. Inspect
+small text, radar/SVG lines, focus/keyboard/pointer/touch mapping, first paint,
+retile/move/recovery, visible and hidden resize/reveal, and terminal return on the
+real display sizes. Human legibility and input comfort are not established by
+the SDK-free geometry/router or worker lifecycle tests.

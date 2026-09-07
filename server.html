@@ -77,6 +77,7 @@
      sizes. Defined once and consumed by this page, the host viewscreen, and
      every console document (which reaches it through gui/console.css). -->
 <link rel="stylesheet" href="gui/tokens.css" />
+<link rel="stylesheet" href="gui/gm-confirmation.css" />
 <!-- The lobby panel's stylesheet (issue #1325), lifted out of the inline
      <style> below so that this page and the host-lobby document the NATIVE
      host assembles in memory load the same one. Linked here, before that
@@ -425,7 +426,10 @@
     .gm-spawn-log-entry[data-outcome="timed-out"] { color: var(--fire-bright); }
     #gm-workspace {
       display: grid; grid-template-columns: minmax(20rem, 2fr) minmax(18rem, 1fr);
-      gap: 1rem; min-height: 28rem;
+      gap: 1rem; min-height: 28rem; flex-shrink: 0;
+      /* The outer GM column scrolls. Keep the grid's full content height so
+         a long inspector cannot paint its action controls under the Station
+         section that follows it. */
     }
     #gm-map-panel, #gm-inspector, #gm-activity {
       min-width: 0; padding: 1rem; border: 1px solid var(--edge-control);
@@ -2713,6 +2717,7 @@
     import { createGmActivityFeed } from './gui/gm-activity-feed.js';
     import { createGmLocalProjection } from './gui/gm-local-projection.js';
     import { createGmDirectEffectPanel } from './gui/gm-direct-effect-panel.js';
+    import { createGmConfirmationProfile, createGmConfirmationController } from './gui/gm-confirmation.js';
     import { createGmSessionControls } from './gui/gm-session-controls.js';
     import { createGmMissionPanel } from './gui/gm-mission-panel.js';
     import { createGmObjectivePanel } from './gui/gm-objective-panel.js';
@@ -2775,11 +2780,24 @@
     window.__hostGmSessionRefresh = gmSessionControls.refreshAdmission;
     window.__hostGmSessionReset = gmSessionControls.reset;
     window.__hostGmSessionState = gmSessionControls.state;
+    let operatorStorage = null;
+    try { operatorStorage = window.localStorage; } catch (_) { /* Settings reports unavailable storage. */ }
+    const gmConfirmationProfile = createGmConfirmationProfile({ storage: operatorStorage, registry: hostSemanticActions });
+    const gmConfirmations = createGmConfirmationController({ doc: document, t, profile: gmConfirmationProfile });
+    window.__hostGmConfirmationProfile = gmConfirmationProfile;
+    window.__hostGmConfirmations = gmConfirmations;
+    hostSemanticActions.setConfirmationHandler(({ definition, accept }) => gmConfirmations.request({
+      category: definition.confirmationCategory,
+      description: t(definition.labelId),
+      preview: () => t(definition.accessibilityLabelId),
+      accept,
+    }));
     const gmMissionPanel = createGmMissionPanel({
       doc: document,
       win: window,
       t,
       actionFeedback: hostActionFeedback,
+      confirmAction: gmConfirmations.request,
       submitFireEvent: (request) =>
         typeof window.__hostFireGmEvent === 'function'
           && window.__hostFireGmEvent(request),
@@ -2795,6 +2813,7 @@
         ? window.__hostGmName(id) : id,
     });
     const gmObjectivePanel = createGmObjectivePanel({ doc: document, t, actionFeedback: hostActionFeedback,
+      confirmAction: gmConfirmations.request,
       getOperator: () => window.__hostLocalGm?.() || null,
       getOperatorName: (id) => window.__hostGmName?.(id) || id,
       getShipName: (id) => {
@@ -2815,6 +2834,7 @@
       win: window,
       t,
       actionFeedback: hostActionFeedback,
+      confirmAction: gmConfirmations.request,
       getMap: () => document.getElementById('gm-entity-map'),
       submitPlacement: (request) =>
         typeof window.__hostSpawnPaletteEntity === 'function'
@@ -2832,6 +2852,7 @@
       doc: document,
       win: window,
       t,
+      confirmAction: gmConfirmations.request,
       getOperator: () => typeof window.__hostLocalGm === 'function'
         ? window.__hostLocalGm() : null,
       submitStationPuppet: (request) =>
@@ -2873,6 +2894,8 @@
       win: window,
       t,
       actionFeedback: hostActionFeedback,
+      confirmAction: gmConfirmations.request,
+      getEntity: (id) => gmProjection.state().entities.find((entity) => entity.entity_id === id),
       submitDirectEffect: (request) =>
         typeof window.__hostApplyDirectEffect === 'function'
           && window.__hostApplyDirectEffect(request),
@@ -2882,18 +2905,20 @@
         ? window.__hostGmName(id) : id,
     });
     gmContact = createGmContactPanel({ doc: document, t,
+      confirmAction: gmConfirmations.request,
       getOperator: () => typeof window.__hostLocalGm === 'function' ? window.__hostLocalGm() : null,
       submit: request => window.__hostSetContactOverride(request),
     });
     window.__hostGmContactState = gmContact.state;
     gmDespawn = createGmDespawnPanel({ doc: document, t,
+      confirmAction: gmConfirmations.request,
       getOperator: () => typeof window.__hostLocalGm === 'function' ? window.__hostLocalGm() : null,
       submit: (request) => window.__hostDespawnEntity(request),
     });
     window.__hostGmDespawnState = gmDespawn.state;
     window.__hostGmEffectRefresh = function() { gmDirectEffect.refreshAdmission(); gmDespawn.refreshAdmission(); gmContact.refreshAdmission(); };
 
-    window.__hostGmEffectReset = function() { gmDirectEffect.reset(); gmDespawn.reset(); gmContact.reset(); };
+    window.__hostGmEffectReset = function() { gmConfirmations.cancel(); gmDirectEffect.reset(); gmDespawn.reset(); gmContact.reset(); };
     window.__hostGmEffectState = gmDirectEffect.state;
     window.__hostSemanticActions = hostSemanticActions;
     window.__hostActionFeedback = hostActionFeedback;
@@ -2916,6 +2941,7 @@
           // The directed-effect results ride the same payload, so they fold
           // even if the entity list itself was rejected as malformed.
           if (gmDirectEffect) gmDirectEffect.update(p);
+          gmConfirmations.refresh();
         },
         gm_activity:  function(p) { gmActivity.update(p); },
         gm_station:   function(p) {
@@ -5545,13 +5571,24 @@
     });
 
     document.getElementById('gm-force-start-btn')?.addEventListener('click', () => {
-      if (!localGm() || !fleetHandle || typeof fleetHandle.forceStart !== 'function'
-          || !fleetHandle.forceStart()) {
-        fleetStartResultView = {
-          id: 'server.gm.start.force_refused', params: {}, refused: true,
-        };
-        paintGmStartControls();
-      }
+      const gm = localGm();
+      const requestedFleet = fleetHandle;
+      if (!gm) return;
+      window.__hostGmConfirmations.request({ category: 'session.force-start',
+        description: t('server.gm.start.force'),
+        preview: () => t('server.gm.start.force'),
+        accept: () => {
+          if (localGm()?.id !== gm.id || fleetHandle !== requestedFleet
+              || typeof requestedFleet?.forceStart !== 'function' || !requestedFleet.forceStart()) {
+            fleetStartResultView = {
+              id: 'server.gm.start.force_refused', params: {}, refused: true,
+            };
+            paintGmStartControls();
+            return false;
+          }
+          return true;
+        },
+      });
     });
 
     /**

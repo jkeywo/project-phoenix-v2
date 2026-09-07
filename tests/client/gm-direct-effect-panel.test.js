@@ -19,6 +19,7 @@ import {
   parseGmEffectScope,
 } from '../../gui/gm-effect-scope.js';
 import { t } from '../../gui/strings.js';
+import { createGmConfirmationProfile, createGmConfirmationController } from '../../gui/gm-confirmation.js';
 
 function mount({
   correlations = ['gm-effect-1', 'gm-effect-2', 'gm-effect-3'],
@@ -28,6 +29,8 @@ function mount({
   timeoutMs,
   schedule = vi.fn(),
   cancelSchedule = vi.fn(),
+  confirmAction,
+  getEntity,
 } = {}) {
   const queue = [...correlations];
   const panel = createGmDirectEffectPanel({
@@ -41,6 +44,8 @@ function mount({
     now: () => 7,
     schedule,
     cancelSchedule,
+    ...(confirmAction ? { confirmAction } : {}),
+    ...(getEntity ? { getEntity } : {}),
     ...(capacity == null ? {} : { capacity }),
     ...(timeoutMs == null ? {} : { timeoutMs }),
   });
@@ -181,6 +186,69 @@ describe('GM direct effect panel', () => {
         <ol id="gm-effect-log"></ol>
       </section>
     `;
+  });
+
+  describe('shared private confirmation tracer', () => {
+    function confirmations() {
+      const values = new Map();
+      const profile = createGmConfirmationProfile({ storage: {
+        getItem: (key) => values.get(key) ?? null,
+        setItem: (key, value) => values.set(key, value),
+      } });
+      return { profile, controller: createGmConfirmationController({ doc: document, t, profile }) };
+    }
+
+    it.each(['immediate', 'confirm', 'confirm-preview'])('ordinary damage uses %s and still waits for authority', (mode) => {
+      const { profile, controller } = confirmations();
+      profile.setMode('effect.damage', mode);
+      const { panel, submitDirectEffect } = mount({ confirmAction: controller.request });
+      panel.select(entity());
+      typeAmount(5);
+      damageButton().click();
+      if (mode !== 'immediate') {
+        expect(panel.state().pending).toBe(0);
+        expect(submitDirectEffect).not.toHaveBeenCalled();
+        document.querySelector('[data-confirmation-accept]').click();
+      }
+      expect(submitDirectEffect).toHaveBeenCalledOnce();
+      expect(panel.state().pending).toBe(1);
+      expect(document.getElementById('gm-effect-feedback').dataset.state).toBe('Pending');
+      panel.update({ results: [result({ effect: { ...result().effect, applied_milli_hp: 5000 } })] });
+      expect(panel.state().pending).toBe(0);
+      expect(logRows()[0].dataset.outcome).toBe('applied');
+      controller.destroy();
+      panel.destroy();
+    });
+
+    it('cancels lethal damage then submits its captured amount despite a stale projection', () => {
+      const { controller } = confirmations();
+      let live = entity();
+      const { panel, submitDirectEffect } = mount({
+        confirmAction: controller.request, getEntity: () => live,
+      });
+      panel.select(live);
+      typeAmount(1000);
+      damageButton().click();
+      expect(document.querySelector('#gm-action-confirmation').dataset.category).toBe('effect.lethal');
+      document.querySelector('[data-confirmation-cancel]').click();
+      expect(submitDirectEffect).not.toHaveBeenCalled();
+      expect(panel.state().pending).toBe(0);
+      damageButton().click();
+      live = null;
+      panel.select(null);
+      controller.refresh();
+      expect(document.querySelector('[data-confirmation-preview]').textContent)
+        .toBe(t('settings.gm.confirmation.preview_unavailable'));
+      document.querySelector('[data-confirmation-accept]').click();
+      expect(submitDirectEffect).toHaveBeenCalledWith(expect.objectContaining({
+        entity: 'npc-1', effect: 'damage', amount_milli_hp: 1000000,
+      }));
+      panel.update({ results: [result({ outcome: 'refused', reason: 'unknown-entity', effect: undefined })] });
+      expect(logRows()[0].dataset.outcome).toBe('refused');
+      expect(document.getElementById('gm-effect-feedback').dataset.state).toBe('Refused');
+      controller.destroy();
+      panel.destroy();
+    });
   });
 
   describe('pure helpers', () => {

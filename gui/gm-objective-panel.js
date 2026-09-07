@@ -49,7 +49,7 @@ export function parseGmObjectivePayload(payload) {
 
 export function createGmObjectivePanel({ doc = globalThis.document, t = (id) => id,
   getOperator = () => null, getOperatorName = (id) => id, getShipName = (id) => id,
-  submit = () => false, correlation, actionFeedback: suppliedFeedback,
+  submit = () => false, correlation, actionFeedback: suppliedFeedback, confirmAction = null,
   schedule = globalThis.setTimeout, cancelSchedule = globalThis.clearTimeout } = {}) {
   const el = (suffix) => doc?.getElementById(`gm-objective-${suffix}`);
   const actionFeedback = suppliedFeedback || new ActionFeedbackLifecycle({ ...(correlation ? { correlation } : {}) });
@@ -91,11 +91,15 @@ export function createGmObjectivePanel({ doc = globalThis.document, t = (id) => 
   function openPreview(id, verb) {
     const row = rowFor(id, verb);
     if (!VERBS.includes(verb) || !eligible(row, verb)) return false;
-    preview = { ...row, recipients: [...row.recipients], verb, operator: getOperator().id };
-    opener = { id, verb };
-    if (el('consequence')) el('consequence').textContent = t(`server.gm.objective.preview_${verb}`, {
+    const chosen = { ...row, recipients: [...row.recipients], verb, operator: getOperator().id };
+    const description = t(`server.gm.objective.preview_${verb}`, {
       objective: text(row.text, row.text_params), ships: scopeText(row.recipients),
     });
+    if (confirmAction) return confirmAction({ category: `objective.${verb}`, description,
+      preview: () => description, accept: () => submitChosen(chosen) });
+    preview = chosen;
+    opener = { id, verb };
+    if (el('consequence')) el('consequence').textContent = description;
     if (el('confirmation')) el('confirmation').hidden = false;
     el('confirm')?.focus();
     return true;
@@ -104,10 +108,14 @@ export function createGmObjectivePanel({ doc = globalThis.document, t = (id) => 
     refreshAdmission();
     if (!preview) return false;
     const chosen = preview;
+    closePreview();
+    return submitChosen(chosen);
+  }
+  function submitChosen(chosen) {
+    if (pending || getOperator()?.id !== chosen.operator) return false;
     const action = actionFeedback.press(`gm.objective.${chosen.verb}:${chosen.id}`);
     const request = { operator_id: chosen.operator, correlation: action.correlation,
       objective: chosen.id, verb: chosen.verb, recipients: [...chosen.recipients] };
-    closePreview();
     pending = request;
     actionFeedback.pending(request.correlation);
     let accepted = false;

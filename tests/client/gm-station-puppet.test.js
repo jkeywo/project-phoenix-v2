@@ -8,6 +8,7 @@ import {
   parseGmStationProjection,
 } from '../../gui/gm-station-puppet.js';
 import { initConsole } from '../../gui/console-core.js';
+import { createGmConfirmationProfile, createGmConfirmationController } from '../../gui/gm-confirmation.js';
 
 function projection({ operators = [], activity = [], results = [], rating = 'Backfill' } = {}) {
   return {
@@ -105,6 +106,84 @@ describe('GM authentic Station projection', () => {
       action_kind: 'station-command', operator_id: 'gm-1', correlation: 'old-mount', outcome: 'applied',
     }])).toBe(0);
     expect(feedback).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['set_helm_thrust', 'value', 0.75, 0, 'SetThrust', 'value'],
+    ['set_helm_steering', 'value', -0.5, 0, 'SetSteering', 'value'],
+    ['set_helm_lateral', 'value', 0.75, 0, 'LateralThrustInput', 'lateral'],
+    ['set_lateral_thrust', 'lateral', -0.5, 0, 'LateralThrustInput', 'lateral'],
+    ['set_boost', 'active', true, false, 'SetBoost', 'active'],
+  ])('releases %s through the real action map without reviving held input behind a modal',
+    (action, field, held, neutral, type, wireField) => {
+      const values = new Map();
+      const profile = createGmConfirmationProfile({ storage: {
+        getItem: (key) => values.get(key) ?? null,
+        setItem: (key, value) => values.set(key, value),
+      } });
+      profile.setMode('station.command', 'confirm');
+      const confirmation = createGmConfirmationController({ doc: document, profile });
+      const submitStationCommand = vi.fn(() => true);
+      const controller = createGmStationPuppet({ doc: document, win: window,
+        getOperator: () => ({ id: 'gm-1' }), submitStationCommand,
+        confirmAction: confirmation.request,
+      });
+      controller.update(projection({ operators: ['gm-1'] }));
+      const issue = (value) => controller.issueConsoleAction({ action, console: 'helm', [field]: value });
+      const payload = (value) => expect.objectContaining({ payload: { type, data: { [wireField]: value } } });
+
+      expect(issue(held)).toBe(true);
+      expect(confirmation.isOpen()).toBe(true);
+      expect(submitStationCommand).not.toHaveBeenCalled();
+      expect(issue(neutral)).toBe(true);
+      expect(confirmation.isOpen()).toBe(false);
+      document.querySelector('[data-confirmation-accept]').click();
+      expect(submitStationCommand).toHaveBeenCalledExactlyOnceWith(payload(neutral));
+
+      issue(held);
+      document.querySelector('[data-confirmation-accept]').click();
+      expect(submitStationCommand).toHaveBeenLastCalledWith(payload(held));
+      const damage = vi.fn();
+      confirmation.request({ category: 'effect.damage', description: 'Damage', accept: damage });
+      expect(issue(neutral)).toBe(true);
+      expect(submitStationCommand).toHaveBeenLastCalledWith(payload(neutral));
+      expect(confirmation.isOpen()).toBe(true);
+      expect(damage).not.toHaveBeenCalled();
+      document.querySelector('[data-confirmation-accept]').click();
+      expect(damage).toHaveBeenCalledOnce();
+      confirmation.destroy();
+    });
+
+  it('confirms a Station command privately and refuses cancellation or a retired selection without sending', () => {
+    const values = new Map();
+    const profile = createGmConfirmationProfile({ storage: {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => values.set(key, value),
+    } });
+    profile.setMode('station.command', 'confirm');
+    const confirmation = createGmConfirmationController({ doc: document, profile });
+    const submitStationCommand = vi.fn(() => true);
+    const feedback = vi.fn();
+    const controller = createGmStationPuppet({ doc: document, win: window,
+      getOperator: () => ({ id: 'gm-1' }), submitStationCommand,
+      confirmAction: confirmation.request,
+    });
+    controller.update(projection({ operators: ['gm-1'] }));
+    document.getElementById('gm-station-frame').contentWindow.__updateActionFeedback = feedback;
+    const action = { action: 'set_red_alert', console: 'captain', active: true, correlation: 'private-confirm-1' };
+    expect(controller.issueConsoleAction(action)).toBe(true);
+    expect(controller.state().pendingCommands.size).toBe(0);
+    expect(submitStationCommand).not.toHaveBeenCalled();
+    document.querySelector('[data-confirmation-cancel]').click();
+    expect(feedback).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      correlation: 'private-confirm-1', state: 'Refused',
+    }));
+    controller.issueConsoleAction({ ...action, correlation: 'private-confirm-2' });
+    controller.update({ ships: [], activity: [], results: [] });
+    document.querySelector('[data-confirmation-accept]').click();
+    expect(submitStationCommand).not.toHaveBeenCalled();
+    expect(controller.state().pendingCommands.size).toBe(0);
+    confirmation.destroy();
   });
 
   it('pins the local projection shape and unwraps ordinary tagged blackboards', () => {

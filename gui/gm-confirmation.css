@@ -1,0 +1,21 @@
+.gm-action-confirmation[hidden] { display: none; }
+.gm-action-confirmation {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 75%);
+  padding: 1rem;
+}
+.gm-action-confirmation > div {
+  max-width: 36rem;
+  max-height: 90vh;
+  overflow: auto;
+  padding: 1.5rem;
+  border: 2px solid currentColor;
+  background: #101722;
+  color: #eef4ff;
+}
+.gm-action-confirmation button { min-height: 44px; margin: .5rem; padding: .5rem 1rem; }
+.gm-action-confirmation :focus-visible { outline: 3px solid #8ce6ff; outline-offset: 3px; }

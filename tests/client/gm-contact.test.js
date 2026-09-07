@@ -3,6 +3,7 @@ import { expect, it, vi } from 'vitest';
 import { buildSensorsConsoleState, buildCommsConsoleState } from '../../gui/console-state.js';
 import { crewContactRows } from '../../gui/gm-knowledge-compare.js';
 import { createGmContactPanel } from '../../gui/gm-contact-panel.js';
+import { createGmConfirmationController } from '../../gui/gm-confirmation.js';
 
 const secret = { uuid: 'target', x: 200, z: 0, name: 'SECRET-NAME', faction: 'SECRET-FACTION',
   radar_icon: 'ship', radar_size: 99, tags: ['ship'], shipClass: 'SECRET-CLASS', hull_pct: 10,
@@ -66,6 +67,21 @@ it.each(['reveal', 'conceal', 'normal'])('submits typed %s once and waits for it
   expect(panel.choose(mode)).toBe(false);
   panel.update({ entities, contact_results: [{ action_kind: `contact-${mode}`, observer: 'observer', target: 'target', operator_id: 'gm', correlation: 'request', tick: 42, outcome: 'applied' }] });
   expect(panel.state().pending).toBeNull();
+});
+it('confirms the captured observer and target before starting the ordinary contact lifecycle', () => {
+  let confirmation;
+  const { panel, submit } = mount({ confirmAction: request => confirmation.request(request) });
+  confirmation = createGmConfirmationController({ doc: document, profile: { mode: () => 'confirm' } });
+  panel.choose('conceal');
+  expect(panel.state().pending).toBeNull();
+  document.querySelector('[data-confirmation-cancel]').click();
+  expect(submit).not.toHaveBeenCalled();
+  panel.choose('conceal');
+  panel.update({ entities: [] });
+  document.querySelector('[data-confirmation-accept]').click();
+  expect(submit).toHaveBeenCalledExactlyOnceWith({ operator_id: 'gm', correlation: 'request',
+    ship: 'observer', target: 'target', mode: 'conceal' });
+  confirmation.destroy();
 });
 it('refuses stale target or observer, unadmitted operators and reset state', () => {
   for (const missing of ['target', 'observer']) {

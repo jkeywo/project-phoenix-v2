@@ -23,6 +23,7 @@ const definition = (id, verb, code) => Object.freeze({
   accessibilityLabelId: `semantic_action.gm.session_${verb}.accessibility`,
   authoritativeFeedback: true,
   confirmationCategory: GM_SESSION_CONFIRMATION_CATEGORY,
+  confirmationDefault: 'immediate',
   bindings: Object.freeze([key(code), null]),
 });
 

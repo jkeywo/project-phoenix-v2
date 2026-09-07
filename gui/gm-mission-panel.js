@@ -242,6 +242,7 @@ export function createGmMissionPanel({
   win = doc && doc.defaultView,
   t = (id) => id,
   submitFireEvent = null,
+  confirmAction = (request) => request.accept(),
   submitSetEventPaused = null,
   submitArmSkip = null,
   getOperator = () => null,
@@ -502,6 +503,15 @@ export function createGmMissionPanel({
       : lever === SKIP ? eventIsSkippable(event)
       : eventIsFireable(event);
     if (!current || !eligible || hasPendingFor(eventId, lever)) return false;
+    const category = lever === PAUSE ? 'event.pause' : lever === SKIP ? 'event.skip' : 'event.fire';
+    const description = controlAccessibility(lever, active, t(event.label));
+    return confirmAction({ category, description, preview: () => description,
+      accept: () => submitPress(current, lever, eventId, active),
+    });
+  }
+
+  function submitPress(current, lever, eventId, active) {
+    if (operator()?.id !== current.id || hasPendingFor(eventId, lever)) return false;
     while (pending.size >= boundedCapacity) {
       const oldest = pending.keys().next().value;
       if (oldest === undefined) break;

@@ -183,6 +183,7 @@ export function createGmSpawnPanel({
   win = doc && doc.defaultView,
   t = (id) => id,
   submitPlacement = null,
+  confirmAction = (request) => request.accept(),
   getOperator = () => null,
   getOperatorName = (id) => id,
   getMap = () => (doc ? doc.getElementById('gm-entity-map') : null),
@@ -398,6 +399,16 @@ export function createGmSpawnPanel({
     if (variant !== null && !entry.variants.some((candidate) => candidate.id === variant)) {
       return false;
     }
+    const description = t('settings.gm.confirmation.spawn', {
+      name: t(entry.label), x: placement.x, z: placement.z,
+    });
+    return confirmAction({ category: 'world.spawn', description, preview: () => description,
+      accept: () => submitPlacementIntent(current, paletteId, variant, wire),
+    });
+  }
+
+  function submitPlacementIntent(current, paletteId, variant, wire) {
+    if (operator()?.id !== current.id) return false;
     while (pending.size >= boundedCapacity) {
       const oldest = pending.keys().next().value;
       if (oldest === undefined) break;

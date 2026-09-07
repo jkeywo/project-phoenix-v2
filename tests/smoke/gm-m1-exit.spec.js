@@ -699,6 +699,8 @@ test('M1 exits through a retained deterministic GM peer trace', async ({ context
     await captain.send('SetReady', { ready: true });
     const started = captain.waitForMessage('GameStarted', 30_000);
     await clickGmControl(gmOne, 'gm-force-start-btn');
+    await expect(gmOne.locator('#gm-action-confirmation')).toHaveAttribute('data-category', 'session.force-start');
+    await gmOne.locator('[data-confirmation-accept]').click();
     await started;
     await Promise.all([ship, gmOne].map((page) => page.waitForFunction(
       () => window.__saveSlotsPhase === 'InProgress'

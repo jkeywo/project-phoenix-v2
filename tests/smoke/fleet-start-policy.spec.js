@@ -390,6 +390,8 @@ test.describe('fleet lobby start policy', () => {
     );
 
     await clickGmControl(gm, 'gm-force-start-btn');
+    await expect(gm.locator('#gm-action-confirmation')).toHaveAttribute('data-category', 'session.force-start');
+    await gm.locator('[data-confirmation-accept]').click();
     await expect(gm.locator('#gm-start-result')).toContainText(/validation failed/i, {
       timeout: 30_000,
     });
@@ -414,6 +416,8 @@ test.describe('fleet lobby start policy', () => {
     );
 
     await clickGmControl(gm, 'gm-force-start-btn');
+    await expect(gm.locator('#gm-action-confirmation')).toHaveAttribute('data-category', 'session.force-start');
+    await gm.locator('[data-confirmation-accept]').click();
     await expect(gm.locator('#gm-start-result')).toContainText(/validation failed/i, {
       timeout: 30_000,
     });
@@ -434,6 +438,8 @@ test.describe('fleet lobby start policy', () => {
       { timeout: 30_000 },
     );
     await clickGmControl(gm, 'gm-force-start-btn');
+    await expect(gm.locator('#gm-action-confirmation')).toHaveAttribute('data-category', 'session.force-start');
+    await gm.locator('[data-confirmation-accept]').click();
     await expect(gm.locator('#gm-start-result')).toContainText(/validation failed/i, {
       timeout: 30_000,
     });

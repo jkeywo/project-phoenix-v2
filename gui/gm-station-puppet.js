@@ -21,6 +21,10 @@ const STATION_COMMAND_OUTCOMES = new Set(['applied', 'no-op', 'refused']);
 const LOCAL_INGRESS_REFUSAL = 'ingress-rejected';
 const LOCAL_FEEDBACK_CAPACITY = 'feedback-capacity';
 const LOCAL_FEEDBACK_TIMEOUT = 'feedback-timeout';
+const HELD_COMMAND_FIELDS = new Map([
+  ['SetThrust', 'value'], ['SetSteering', 'value'],
+  ['LateralThrustInput', 'lateral'], ['SetBoost', 'active'],
+]);
 
 export const GM_STATION_PENDING_CAPACITY = DEFAULT_ACTION_FEEDBACK_CAPACITY;
 
@@ -177,6 +181,7 @@ export function createGmStationPuppet({
   getOperator = () => null,
   submitStationPuppet = () => false,
   submitStationCommand = () => false,
+  confirmAction = (request) => request.accept(),
   pendingCapacity = GM_STATION_PENDING_CAPACITY,
   feedbackTimeoutMs = DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS,
   schedule = (fn, delay) => setTimeout(fn, delay),
@@ -406,12 +411,19 @@ export function createGmStationPuppet({
     const operator = getOperator();
     if (!operator || !operator.id) return false;
     const active = !selectedRow.station.operators.includes(operator.id);
-    return submitStationPuppet({
-      ship: selectedRow.ship.ship_id,
-      station: selectedRow.station.station_id,
-      active,
-      correlation: correlation(active ? 'takeover' : 'release'),
-    }) === true;
+    const target = selectedRow;
+    const category = !active ? 'station.release'
+      : target.station.rating === 'Backfill' ? 'station.takeover' : 'station.takeover-human';
+    const description = t('settings.gm.confirmation.station', {
+      action: t(`settings.gm.confirmation.${category}`),
+      ship: target.ship.name, station: target.station.name,
+    });
+    return confirmAction({ category, description, preview: () => description,
+      accept: () => getOperator()?.id === operator.id && submitStationPuppet({
+        ship: target.ship.ship_id, station: target.station.station_id, active,
+        correlation: correlation(active ? 'takeover' : 'release'),
+      }) === true,
+    });
   }
 
   function issueConsoleAction(raw) {
@@ -425,33 +437,54 @@ export function createGmStationPuppet({
       const originatingCorrelation = isValidActionCorrelation(data.correlation)
         ? data.correlation
         : isValidActionCorrelation(action.correlation) ? action.correlation : null;
-      const requestCorrelation = originatingCorrelation || correlation('command');
       const operator = getOperator();
       const frameWindow = frame && frame.contentWindow;
-      if (operator && operator.id) {
+      const requestGeneration = mountGeneration;
+      const targetRow = selectedRow;
+      let attempted = false;
+      const refuseLocal = () => {
+        if (originatingCorrelation) deliverCommandFeedback({
+          correlation: originatingCorrelation, frameWindow, mountGeneration: requestGeneration,
+        }, ACTION_FEEDBACK_STATE.REFUSED, LOCAL_INGRESS_REFUSAL);
+      };
+      const acceptCommand = () => {
+        attempted = true;
+        if (!operator?.id || getOperator()?.id !== operator.id
+            || mountGeneration !== requestGeneration
+            || frame?.contentWindow !== frameWindow || selectedRow?.key !== targetRow.key) {
+          refuseLocal();
+          return false;
+        }
+        let accepted = false;
         try {
-          submitted = submitStationCommand({
-            ship: selectedRow.ship.ship_id,
-            station: selectedRow.station.station_id,
+          accepted = submitStationCommand({
+            ship: targetRow.ship.ship_id,
+            station: targetRow.station.station_id,
             target: data.target,
             payload: data.payload,
-            correlation: requestCorrelation,
+            correlation: originatingCorrelation || correlation('command'),
           }) === true;
         } catch (_) {
-          submitted = false;
+          accepted = false;
         }
-      }
-      if (originatingCorrelation) {
-        if (submitted && operator && operator.id) {
+        if (accepted && originatingCorrelation) {
           trackPendingCommand(operator.id, originatingCorrelation, frameWindow);
-        } else {
-          deliverCommandFeedback({
-            correlation: originatingCorrelation,
-            frameWindow,
-            mountGeneration,
-          }, ACTION_FEEDBACK_STATE.REFUSED, LOCAL_INGRESS_REFUSAL);
-        }
-      }
+        } else if (!accepted) refuseLocal();
+        return accepted;
+      };
+      const description = t('settings.gm.confirmation.station_command', {
+        ship: targetRow.ship.name, station: targetRow.station.name,
+      });
+      const heldField = HELD_COMMAND_FIELDS.get(data.payload.type);
+      const heldValue = data.payload.data?.[heldField];
+      submitted = confirmAction({ category: 'station.command',
+        key: heldField
+          ? `${operator?.id}:${targetRow.key}:${data.target}:${data.payload.type}` : null,
+        controlRelease: !!heldField && (heldValue === 0 || heldValue === false),
+        description, preview: () => description,
+        accept: acceptCommand, onCancel: refuseLocal,
+      }) !== false;
+      if (!submitted && !attempted) refuseLocal();
     }, patch => {
       if (!consoleInput || !patch || typeof patch !== 'object') return;
       Object.assign(consoleInput, patch);

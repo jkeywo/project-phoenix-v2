@@ -5,6 +5,7 @@ import { createActionCorrelation, DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS } from './a
 
 export function createGmDespawnPanel({ doc = globalThis.document, t = (id) => id,
   getOperator = () => null, submit = () => false, correlation = createActionCorrelation,
+  confirmAction = null,
   schedule = globalThis.setTimeout, cancelSchedule = globalThis.clearTimeout } = {}) {
   const el = (suffix) => doc?.getElementById(`gm-despawn-${suffix}`);
   let selected = null;
@@ -33,6 +34,12 @@ export function createGmDespawnPanel({ doc = globalThis.document, t = (id) => id
   function preview() {
     if (!eligible()) return false;
     previewId = selected.entity_id;
+    if (confirmAction) {
+      const description = t('server.gm.despawn.consequence', { name: name(selected) });
+      return confirmAction({ category: 'world.despawn', description,
+        preview: () => description, accept: confirm,
+      });
+    }
     if (el('consequence')) el('consequence').textContent = t('server.gm.despawn.consequence', { name: name(selected) });
     if (el('confirmation')) el('confirmation').hidden = false;
     el('confirm')?.focus();

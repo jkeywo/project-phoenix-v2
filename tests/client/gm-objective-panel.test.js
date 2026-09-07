@@ -2,6 +2,7 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { createGmObjectivePanel, parseGmObjectivePayload } from '../../gui/gm-objective-panel.js';
 import { t } from '../../gui/strings.js';
+import { createGmConfirmationController, createGmConfirmationProfile } from '../../gui/gm-confirmation.js';
 
 beforeEach(() => {
   document.body.innerHTML = `<ul id="gm-objective-list"></ul><p id="gm-objective-empty"></p>
@@ -16,15 +17,33 @@ const payload = (changes = {}) => ({ objective_palette: [authored()], objectives
 const result = (changes = {}) => ({ action_kind: 'objective-control', target: 'rescue', operator_id: 'gm-a',
   correlation: 'objective-1', tick: 9, outcome: 'applied', objective_verb: 'activate', objective_recipients: ['ship-a'], ...changes });
 const button = (verb) => document.querySelector(`#gm-objective-list button[data-verb="${verb}"]`);
-function mount() {
+function mount(options = {}) {
   let operator = { id: 'gm-a' };
   let sequence = 0;
   const submit = vi.fn(() => true), schedule = vi.fn(() => 7), cancelSchedule = vi.fn();
   const panel = createGmObjectivePanel({ doc: document, t, submit, schedule, cancelSchedule,
     getOperator: () => operator, getShipName: () => 'Courier', getOperatorName: () => 'Alice',
-    correlation: () => `objective-${++sequence}` });
+    correlation: () => `objective-${++sequence}`, ...options });
   return { panel, submit, schedule, cancelSchedule, setOperator: (value) => { operator = value; panel.refreshAdmission(); } };
 }
+
+it('uses the shared Objective policy and retains captured scope for ordinary stale admission', () => {
+  const profile = createGmConfirmationProfile();
+  const confirmation = createGmConfirmationController({ doc: document,
+    profile: { mode: id => id === 'objective.activate' ? 'confirm-preview' : profile.mode(id) } });
+  const { panel, submit } = mount({ confirmAction: confirmation.request });
+  panel.update(payload());
+  button('activate').click();
+  expect(panel.state().pending).toBeNull();
+  document.querySelector('[data-confirmation-cancel]').click();
+  expect(submit).not.toHaveBeenCalled();
+  button('activate').click();
+  panel.update(payload({ objective_palette: [] }));
+  document.querySelector('[data-confirmation-accept]').click();
+  expect(submit).toHaveBeenCalledExactlyOnceWith({ operator_id: 'gm-a', correlation: 'objective-1',
+    objective: 'rescue', verb: 'activate', recipients: ['ship-a'] });
+  confirmation.destroy();
+});
 
 it('shows authored text and intended ships, with preview/cancel and no optimistic state change', () => {
   const { panel, submit } = mount(); panel.update(payload());

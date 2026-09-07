@@ -75,6 +75,27 @@ entities:
       coordinates: [t2-semantic-action-registry, gm-milestone-directing]
       runs_in: [host-browser-runtime, native-host-runtime]
 
+  - component: t2-gm-confirmation-runtime
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Private GM Confirmation Dispatch
+      summary: "The host Settings Controls tab edits every registered GM category's Immediate, Confirm, or Confirm plus Preview policy in the existing private portable operator profile. Each panel captures its target and intent before asking; only acceptance starts its ordinary correlated submission. Damage previews reread absolute hull and scope data from the authoritative projection without making the prediction an admission condition. Cancellation sends no game action, and normal result/status/activity processing is unchanged."
+      rationale:
+        - "[ai] Categories carry explicit default metadata and a test compares registered typed actions with the actual GmAction enum. Portable import/export preserves inactive console bindings and excludes identity, Station ownership and save data. A failed persistence operation leaves the live choice unchanged."
+        - "[ai] Non-damage actions supply a captured target/intent preview through the same thin callback seam. A modal holds one request. Further values of the same held Helm control replace its unsent intent; release retires that intent and reaches ordinary admission immediately, including while a different modal remains open. Thrust, steering, lateral thrust and held boost therefore cannot stay active solely because confirmation intercepted their release. Operator, Station selection and originating console are checked again before delayed Station submission."
+    architecture:
+      kind: client-safety-policy
+      authority: non-authoritative
+      coordinates: [t2-gm-confirmation-settings, t2-semantic-action-registry, t2-private-operator-profile]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [gui/gm-confirmation.js, gui/gm-confirmation-settings.js, gui/gm-confirmation.css, gui/semantic-action-registry.js, gui/gm-direct-effect-panel.js, gui/gm-mission-panel.js, gui/gm-spawn-panel.js, gui/gm-despawn-panel.js, gui/gm-objective-panel.js, gui/gm-contact-panel.js, gui/gm-station-puppet.js, gui/server-settings.js, server.html]
+      symbols: [GM_CONFIRMATION_CATEGORIES, GM_ACTION_CONFIRMATION_METADATA, gmConfirmationMetadata, createGmConfirmationProfile, createGmConfirmationController, renderGmConfirmationSettings]
+      tests: [npx vitest run tests/client/gm-confirmation.test.js tests/client/gm-station-puppet.test.js tests/client/gm-direct-effect-panel.test.js, tests/smoke/gm-confirmation.spec.js]
+
   - state: t2-private-operator-profile
     core:
       status: accepted

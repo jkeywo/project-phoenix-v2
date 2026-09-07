@@ -85,20 +85,20 @@ test('a GM confirms safe removal from the map and protected targets remain', { t
   for (const name of ['Protected courier', 'Foundational hazard']) {
     await select(name);
     await expect(page.locator('#gm-despawn-preview')).toBeDisabled();
-    await expect(page.locator('#gm-despawn-confirmation')).toBeHidden();
+    await expect(page.locator('#gm-action-confirmation')).toBeHidden();
   }
   await select('Removable courier');
   await page.locator('#gm-despawn-preview').click();
-  await expect(page.locator('#gm-despawn-consequence')).toContainText('Removable courier');
-  await page.locator('#gm-despawn-cancel').click();
-  await expect(page.locator('#gm-despawn-confirmation')).toBeHidden();
+  await expect(page.locator('[data-confirmation-preview]')).toContainText('Removable courier');
+  await page.locator('[data-confirmation-cancel]').click();
+  await expect(page.locator('#gm-action-confirmation')).toBeHidden();
   expect(await page.evaluate(() => window.__hostGmDespawnState().results.length)).toBe(0);
   let count = 0;
   for (const name of ['Removable courier', 'Removable structure']) {
     await select(name);
     const id = await page.evaluate(() => window.__hostGmDespawnState().selected.entity_id);
     await page.locator('#gm-despawn-preview').click();
-    await page.locator('#gm-despawn-confirm').click();
+    await page.locator('[data-confirmation-accept]').click();
     await expect(page.locator('#gm-despawn-results li[data-outcome="applied"]')).toHaveCount(++count);
     await page.waitForFunction(uuid => !document.getElementById('gm-entity-map').state.blips.some(b => b.uuid === uuid), id);
     await expect(page.locator('#gm-entity-card')).toBeHidden();
@@ -113,7 +113,7 @@ test('a GM confirms safe removal from the map and protected targets remain', { t
   const hazardName = await page.evaluate(() => document.getElementById('gm-entity-map').state.regions.find(r => r.name.startsWith('removable_hazard')).name);
   await select(hazardName);
   await expect(page.locator('#gm-despawn-preview')).toBeEnabled();
-  await page.locator('#gm-despawn-preview').click(); await page.locator('#gm-despawn-confirm').click();
+  await page.locator('#gm-despawn-preview').click(); await page.locator('[data-confirmation-accept]').click();
   await expect(page.locator('#gm-despawn-results li[data-outcome="applied"]')).toHaveCount(3);
   await select('Protected courier');
   await expect(page.locator('#gm-despawn-preview')).toBeDisabled();
@@ -169,6 +169,12 @@ test('a GM activates and resolves authored Objectives through the real mission p
   await gm.evaluate(() => document.getElementById('gm-ready-btn').click());
   await Promise.all([ship, gm].map(page => page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress')));
   expectFixtureWorld(await captain.waitForMessage('WorldSetup', 10_000), GM_OBJECTIVE_WORLD);
+  // Activation defaults to Immediate; this operator explicitly asks to confirm
+  // it so the cancellation leg exercises the private policy's real setting.
+  await gm.locator('#server-settings-btn').click();
+  await gm.locator('.server-settings-tab[data-tab="controls"]').click();
+  await gm.locator('[data-gm-confirmation-category="objective.activate"]').selectOption('confirm');
+  await gm.locator('#server-settings-btn').click();
   // Observe ordinary outbound proposals without replacing their decoder or reducer.
   await gm.evaluate(() => {
     window.__objectiveSmokeRequests = [];
@@ -180,14 +186,14 @@ test('a GM activates and resolves authored Objectives through the real mission p
   const row = id => gm.locator(`#gm-objective-list li[data-objective="${id}"]`);
   const apply = async (id, verb) => {
     await row(id).locator(`button[data-verb="${verb}"]`).click();
-    await expect(gm.locator('#gm-objective-consequence')).toContainText('All ships');
-    await gm.locator('#gm-objective-confirm').click();
+    await expect(gm.locator('[data-confirmation-description]')).toContainText('All ships');
+    await gm.locator('[data-confirmation-accept]').click();
     await expect(gm.locator(`#gm-objective-results li[data-objective="${id}"][data-verb="${verb}"][data-outcome="applied"]`)).toHaveCount(1);
   };
   const completeId = 'gm_smoke_complete', failId = 'gm_smoke_fail';
   await expect(row(completeId).locator('button[data-verb="activate"]')).toBeEnabled();
   await row(completeId).locator('button[data-verb="activate"]').click();
-  await gm.locator('#gm-objective-cancel').click();
+  await gm.locator('[data-confirmation-cancel]').click();
   expect(await gm.evaluate(() => window.__objectiveSmokeRequests.length)).toBe(0);
   await apply(completeId, 'activate');
   await captain.page.waitForFunction(id => (window.__messages || []).some(message =>
@@ -956,6 +962,8 @@ test('a manual gm_event is listed, fired once, and then spent in the GM mission 
   const fire = row.locator('button[data-role="fire"]');
   await expect(fire).toBeEnabled();
   await fire.click();
+  await expect(page.locator('#gm-action-confirmation')).toHaveAttribute('data-category', 'event.fire');
+  await page.locator('[data-confirmation-accept]').click();
 
   // One attributed Applied result, and the authored one-shot lifecycle spent.
   const applied = page.locator('#gm-mission-log .gm-mission-log-entry[data-outcome="applied"]');
@@ -1016,6 +1024,8 @@ test('an automatic event declaring gm_controls is listed and fireable, and an un
   const fire = row.locator('button[data-role="fire"]');
   await expect(fire).toBeEnabled();
   await fire.click();
+  await expect(page.locator('#gm-action-confirmation')).toHaveAttribute('data-category', 'event.fire');
+  await page.locator('[data-confirmation-accept]').click();
 
   const applied = page.locator('#gm-mission-log .gm-mission-log-entry[data-outcome="applied"]');
   await expect(applied).toHaveCount(1, { timeout: 30_000 });
@@ -1076,6 +1086,8 @@ test('a GM arms a Skip of an authored event and a second arm reports the No-op',
   const fire = row.locator('button[data-role="fire"]');
   await expect(skip).toBeEnabled();
   await skip.click();
+  await expect(page.locator('#gm-action-confirmation')).toHaveAttribute('data-category', 'event.skip');
+  await page.locator('[data-confirmation-accept]').click();
 
   // The authoritative projection reports the arm, and the panel says so.
   const applied = page.locator('#gm-mission-log .gm-mission-log-entry[data-outcome="applied"]');
@@ -1096,6 +1108,8 @@ test('a GM arms a Skip of an authored event and a second arm reports the No-op',
   // A second arm is a deterministic No-op, and the operator can SEE it.
   await expect(skip).toBeEnabled();
   await skip.click();
+  await expect(page.locator('#gm-action-confirmation')).toHaveAttribute('data-category', 'event.skip');
+  await page.locator('[data-confirmation-accept]').click();
   const noOp = page.locator('#gm-mission-log .gm-mission-log-entry[data-outcome="no-op"]');
   await expect(noOp).toHaveCount(1, { timeout: 30_000 });
   await expect(noOp).toContainText('base-world::raider_lost');
@@ -1159,6 +1173,8 @@ test('a GM damages and repairs one Entity through the typed action path', { tag:
   await page.locator('#gm-effect-amount').fill('5');
   await expect(page.locator('#gm-effect-damage')).toBeEnabled();
   await page.locator('#gm-effect-damage').click();
+  await expect(page.locator('#gm-action-confirmation')).toHaveAttribute('data-category', 'effect.damage');
+  await page.locator('[data-confirmation-accept]').click();
 
   const applied = page.locator('#gm-effect-log .gm-effect-log-entry[data-outcome="applied"]');
   await expect(applied).toHaveCount(1, { timeout: 30_000 });
@@ -1276,6 +1292,8 @@ test('a GM damages and repairs one Station and one System without touching their
   await expect(warning).toHaveAttribute('data-emptied', 'true');
   await expect(warning).not.toHaveAttribute('data-lethal', 'true');
   await page.locator('#gm-effect-damage').click();
+  await expect(page.locator('#gm-action-confirmation')).toHaveAttribute('data-category', 'effect.damage');
+  await page.locator('[data-confirmation-accept]').click();
 
   const applied = page.locator('#gm-effect-log .gm-effect-log-entry[data-outcome="applied"]');
   await expect(applied).toHaveCount(1, { timeout: 30_000 });
@@ -1317,6 +1335,8 @@ test('a GM damages and repairs one Station and one System without touching their
   // Station, and none to the rest of the hull.
   await page.locator('#gm-effect-amount').fill('9999');
   await page.locator('#gm-effect-damage').click();
+  await expect(page.locator('#gm-action-confirmation')).toHaveAttribute('data-category', 'effect.damage');
+  await page.locator('[data-confirmation-accept]').click();
   const coreHit = page.locator(
     '#gm-effect-log .gm-effect-log-entry[data-scope="system:core"]',
   );
@@ -1569,6 +1589,8 @@ test('a pausable authored event toggles end to end and an undeclared one has no 
   const fire = row.locator('button[data-role="fire"]');
   await expect(fire).toBeEnabled();
   await fire.click();
+  await expect(page.locator('#gm-action-confirmation')).toHaveAttribute('data-category', 'event.fire');
+  await page.locator('[data-confirmation-accept]').click();
   await expect(applied).toHaveCount(2, { timeout: 30_000 });
   await expect(row).toHaveAttribute('data-spent', 'true', { timeout: 30_000 });
   await expect(row).toHaveAttribute('data-paused', 'true');
@@ -2653,6 +2675,8 @@ test('two equal GMs puppet a human-held Station without blocking its player', { 
     await gm.locator('#gm-station-toggle').scrollIntoViewIfNeeded();
     await expect(gm.locator('#gm-station-toggle')).toBeEnabled();
     await gm.locator('#gm-station-toggle').click();
+    await expect(gm.locator('#gm-action-confirmation')).toHaveAttribute('data-category', 'station.takeover-human');
+    await gm.locator('[data-confirmation-accept]').click();
     operators.push(await gm.evaluate(() => window.__hostLocalGm().id));
   }
   const [gm, second] = gms;

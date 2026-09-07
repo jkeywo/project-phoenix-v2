@@ -6,6 +6,7 @@ const MODES = ['reveal', 'conceal', 'normal'];
 /** One observing player ship and one real world target; absolute state survives reconnect. */
 export function createGmContactPanel({ doc = globalThis.document, t = id => id,
   getOperator = () => null, submit = () => false, correlation = createActionCorrelation,
+  confirmAction = request => request.accept(),
   schedule = globalThis.setTimeout, cancelSchedule = globalThis.clearTimeout } = {}) {
   const el = suffix => doc?.getElementById(`gm-contact-${suffix}`);
   let selected = null, observer = '', entities = [], overrides = {}, pending = null, timer = null;
@@ -22,8 +23,18 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
   }
   function choose(mode) {
     if (!MODES.includes(mode) || !valid()) return false;
-    const request = { operator_id: getOperator().id, correlation: correlation(), ship: observer,
+    const chosen = { operator_id: getOperator().id, ship: observer,
       target: selected.entity_id, mode };
+    const description = t('settings.gm.confirmation.contact', {
+      mode: t(`server.gm.contact.${mode}`), target: wireText(selected.name),
+      ship: wireText(entities.find(row => row.entity_id === observer)?.name || observer),
+    });
+    return confirmAction({ category: 'contact.override', description, preview: () => description,
+      accept: () => submitChosen(chosen) });
+  }
+  function submitChosen(chosen) {
+    if (pending || getOperator()?.id !== chosen.operator_id) return false;
+    const request = { ...chosen, correlation: correlation() };
     let accepted = false;
     try { accepted = submit(request) !== false; } catch (_) { /* report below */ }
     if (!accepted) { feedback('refused'); return false; }

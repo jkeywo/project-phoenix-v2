@@ -229,6 +229,8 @@ export function createGmDirectEffectPanel({
   schedule = (fn, delay) => setTimeout(fn, delay),
   cancelSchedule = (timer) => clearTimeout(timer),
   actionFeedback: suppliedActionFeedback = null,
+  confirmAction = (request) => request.accept(),
+  getEntity = null,
 } = {}) {
   const region = doc && doc.getElementById('gm-effect-panel');
   const empty = doc && doc.getElementById('gm-effect-empty');
@@ -631,7 +633,7 @@ export function createGmDirectEffectPanel({
     return false;
   }
 
-  /** Submit one absolute direct effect against the current selection. */
+  /** Capture the operator's intent before any private confirmation opens. */
   function apply(kind) {
     const current = operator();
     const amount = requestedMilliHp();
@@ -642,16 +644,43 @@ export function createGmDirectEffectPanel({
     // should never take a journal slot.
     if (!current || !EFFECT_KINDS.has(kind) || !scopeIsDamageable(selected, chosen)
         || amount === null || hasPendingFor(selected.entity_id)) return false;
+    const target = selected;
+    const predicted = previewDirectEffect(target, kind, amount, chosen);
+    const category = kind === 'heal' ? 'effect.heal'
+      : predicted?.destroyed ? 'effect.lethal' : 'effect.damage';
+    return confirmAction({
+      category,
+      description: t('settings.gm.confirmation.effect', {
+        effect: t(`server.gm.effect.${kind}`), name: displayText(target.name),
+        amount: hullPoints(amount), scope: scopeText(chosen),
+      }),
+      preview: () => {
+        const live = getEntity ? getEntity(target.entity_id)
+          : selected?.entity_id === target.entity_id ? selected : null;
+        const prediction = previewDirectEffect(live, kind, amount, chosen);
+        return prediction ? t('settings.gm.confirmation.effect_preview', {
+          amount: hullPoints(prediction.applied_milli_hp),
+          discarded: hullPoints(prediction.discarded_milli_hp),
+          result: t(prediction.destroyed ? 'settings.gm.confirmation.destroys'
+            : 'settings.gm.confirmation.survives'),
+        }) : t('settings.gm.confirmation.preview_unavailable');
+      },
+      accept: () => submitEffect(kind, current, target.entity_id, amount, chosen),
+    });
+  }
+
+  function submitEffect(kind, current, entityId, amount, chosen) {
+    if (operator()?.id !== current.id || hasPendingFor(entityId)) return false;
     while (pending.size >= boundedCapacity) {
       const oldest = pending.keys().next().value;
       if (oldest === undefined) break;
       finishLocalPending(oldest, 'timed-out', null);
     }
     const press = actionFeedback.press(
-      `${GM_EFFECT_ACTION_PREFIX}${kind}:${selected.entity_id}:${gmEffectScopeKey(chosen)}`,
+      `${GM_EFFECT_ACTION_PREFIX}${kind}:${entityId}:${gmEffectScopeKey(chosen)}`,
     );
     const meta = {
-      entity: selected.entity_id,
+      entity: entityId,
       kind,
       scope: chosen,
       amountMilliHp: amount,

@@ -292,7 +292,14 @@ fn control_continuation_frontier(
 
 #[test]
 fn control_continuation_replaces_bootstrap_inputs_and_targets_before_the_first_resumed_action() {
-    use project_phoenix::{entities::spawner::EntityUuid, snapshot::ControlState};
+    use project_phoenix::console::weapons::beam::TacticalRadarSelection;
+    use project_phoenix::entities::spawner::EntityUuid;
+    use project_phoenix::ship::components::LastHelmInput;
+    use project_phoenix::ship::helm::{
+        LateralThrustInput, SteeringInput, ThrustInput, VerticalThrustInput,
+    };
+    use project_phoenix::ship::sensors::SensorRadarSelection;
+    use project_phoenix::snapshot::ControlState;
     for clear in [false, true] {
         let mut live = duel();
         step(&mut live, CAPTURE_AT);
@@ -304,20 +311,25 @@ fn control_continuation_replaces_bootstrap_inputs_and_targets_before_the_first_r
             saved.steering = if clear { 0.0 } else { -0.4 };
             saved.lateral = if clear { 0.0 } else { 0.3 };
             saved.vertical = 0.0;
-            saved.boost = false;
-            saved.impulse_phase = 0;
             saved.last_helm = if clear { [0.0; 3] } else { [0.1, 0.2, -0.3] };
             if clear {
                 saved.target_lock = None;
                 saved.sensor_lock = None;
-                saved.last_attacker = None;
             } else {
                 let other = ship_ids.iter().find(|id| *id != uuid).unwrap().clone();
                 saved.target_lock = Some(other.clone());
                 saved.sensor_lock = Some(other);
             }
         }
-        let install =
+        // Seed only the axes and locks this fixture exercises, independently
+        // of the continuation operation under test. Rewriting a whole saved
+        // control row here also marks BoostCommand/ImpulseCommand changed:
+        // that manufactures a pending drive transition on the live ship,
+        // whereas a freshly restored high-fidelity bundle deliberately skips
+        // those commands on its insertion tick. Keep the real completed-tick
+        // drive intents and attacker/policy/recovery memory intact; the full
+        // frontier below still compares all of them after every resumed action.
+        let install_axes_and_locks =
             |world: &mut bevy::prelude::World,
              states: &std::collections::BTreeMap<String, ControlState>| {
                 let rows = world
@@ -327,11 +339,35 @@ fn control_continuation_replaces_bootstrap_inputs_and_targets_before_the_first_r
                     .collect::<Vec<_>>();
                 for (entity, uuid) in rows {
                     if let Some(saved) = states.get(&uuid) {
-                        saved.restore_into(&mut world.entity_mut(entity));
+                        let mut entity = world.entity_mut(entity);
+                        if let Some(mut value) = entity.get_mut::<ThrustInput>() {
+                            value.0 = saved.thrust;
+                        }
+                        if let Some(mut value) = entity.get_mut::<SteeringInput>() {
+                            value.0 = saved.steering;
+                        }
+                        if let Some(mut value) = entity.get_mut::<LateralThrustInput>() {
+                            value.0 = saved.lateral;
+                        }
+                        if let Some(mut value) = entity.get_mut::<VerticalThrustInput>() {
+                            value.0 = saved.vertical;
+                        }
+                        if let Some(mut value) = entity.get_mut::<LastHelmInput>() {
+                            value.thrust = saved.last_helm[0];
+                            value.steering = saved.last_helm[1];
+                            value.lateral = saved.last_helm[2];
+                        }
+                        if let Some(mut value) = entity.get_mut::<TacticalRadarSelection>() {
+                            value.0 = saved.target_lock.clone();
+                        }
+                        if let Some(mut value) = entity.get_mut::<SensorRadarSelection>() {
+                            value.0 = saved.sensor_lock.clone();
+                        }
                     }
                 }
             };
-        install(live.world_mut(), &frontier);
+        install_axes_and_locks(live.world_mut(), &frontier);
+        assert_eq!(control_continuation_frontier(live.world()), frontier);
         let payload = capture(live.world());
         if !clear {
             assert!(payload
@@ -348,11 +384,16 @@ fn control_continuation_replaces_bootstrap_inputs_and_targets_before_the_first_r
             state.target_lock = Some("bootstrap-only".into());
             state.sensor_lock = Some("bootstrap-only".into());
         }
-        install(resumed.world_mut(), &different);
+        install_axes_and_locks(resumed.world_mut(), &different);
         assert_ne!(control_continuation_frontier(resumed.world()), frontier);
         let report = restore(resumed.world_mut(), &payload);
         assert!(report.is_complete(), "{:?}", report.gaps);
         assert_eq!(control_continuation_frontier(resumed.world()), frontier);
+        assert_eq!(
+            world_digest(resumed.world()),
+            world_digest(live.world()),
+            "the restored capture agrees before the first action, clear={clear}"
+        );
         for frame in 1..=12 {
             live.update();
             resumed.update();

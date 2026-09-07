@@ -154,9 +154,11 @@ fn main() {
         let json = project_phoenix::core::codec::encode_presentation_capture(&continuation)
             .expect("capture continuation contains only a tick and digest");
         if let Err(error) = std::fs::write(format!("{path}.continuation.json"), json) {
+            let log = app
+                .world()
+                .get_resource::<project_phoenix::logging::LogFilterConfig>();
             project_phoenix::perror!(
-                app.world()
-                    .get_resource::<project_phoenix::logging::LogFilterConfig>(),
+                log,
                 project_phoenix::logging::LogCat::Config,
                 "phoenix-headless: could not write capture continuation: {error}"
             );

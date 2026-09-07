@@ -878,8 +878,6 @@ fn a_runtime_load_clears_the_ready_flags_the_world_less_lobby_collected() {
     );
 }
 
-/// A world-less host that has loaded its world — the state both schedules have
-/// been initialized in, which `Schedule::systems` requires.
 /// A catalogue that publishes `world` under a synthetic scenario id, alongside
 /// every real entry — so a test can drive a doomed pick and then a good one
 /// through the ordinary arbiter.

@@ -224,6 +224,9 @@ fn a_root_fns_effects_apply_through_the_shared_dispatch_path() {
             .flag("hailed"),
         "the root fn's flag write must land on the live store"
     );
+    assert!(app.world().resource::<WorldContentRuntime>().pending_world_events.iter().any(
+        |event| matches!(event, crate::world::content::WorldEvent::FlagSet { name, .. } if name == "hailed")
+    ), "a root call leaves its event for the next World event collection");
     assert_eq!(
         app.world().resource::<CommsInboxRes>().0.messages().len(),
         1,

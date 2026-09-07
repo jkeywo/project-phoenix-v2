@@ -785,11 +785,17 @@ pub(crate) fn handle_respond_to_message(
             }
         };
 
-        let mut new_events: Vec<WorldEvent> = Vec::new();
-        crate::world::server::apply_script_commands(
-            effects.commands,
-            "handle_respond_to_message (script)",
-            &mut new_events,
+        crate::world::server::apply_script_call(
+            effects,
+            crate::world::server::ScriptCallContext {
+                log_ctx: "handle_respond_to_message (script)",
+                clock: script_clock,
+                mission_clock_anchored: elapsed_secs.is_some(),
+                origin_layer: origin_layer.clone(),
+                entity_name: sender_entity_name.clone(),
+            },
+            crate::world::server::ScriptEventTarget::Pending,
+            sr,
             &uuid_to_entity,
             &mut runtime,
             &mut objectives,
@@ -809,38 +815,7 @@ pub(crate) fn handle_respond_to_message(
                 .as_ref()
                 .map(|wc| &wc.anchors)
                 .unwrap_or(&empty_anchors),
-            origin_layer.clone(),
-            sender_entity_name.clone(),
             &mut effect_queues.out(),
-        );
-        // Single-shot dispatch, not a chaining pass — `new_events` go onto
-        // `pending_world_events` for `tick_trigger_pipeline` to observe, the
-        // same routing the declarative arm below uses.
-        runtime.pending_world_events.extend(new_events);
-        // An `on_pick`'s own deferred work: `in_seconds` effects join the
-        // delayed queue (dropped when the mission clock is unanchored, the
-        // trigger path's rule), `after` callbacks join the callback queue,
-        // and an `open_comms` from a response queues for the next drain —
-        // which is how a DELAYED scripted reply is authored.
-        if elapsed_secs.is_some() {
-            runtime.pending_delayed_actions.extend(effects.delayed);
-        }
-        sr.pending_callbacks.extend(effects.callbacks);
-        sr.pending_comms_opens.extend(effects.comms_opens);
-        // And an `on_pick` that slipped or cancelled a named deadline (issue
-        // #1024): the player's answer moves the mission's clock.
-        crate::world::server::apply_deadline_changes(
-            &effects.deadline_changes,
-            &mut runtime.deadlines,
-            &mut sr.pending_callbacks,
-            script_clock.tick,
-            script_clock.tick_hz,
-        );
-        // And a beat that gave the captain's word, or settled it (issue #1029).
-        crate::world::server::apply_commitment_changes(
-            &effects.commitment_changes,
-            &mut runtime.commitments,
-            script_clock.tick,
         );
 
         // The malformed-return refusal, taken here so the effects the call

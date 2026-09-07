@@ -513,6 +513,184 @@ fn compile_fixture_scripts(world_toml: &str) -> WorldScriptRuntime {
     crate::world::script::fixture::compile_world_runtime("fixture/scripted.toml", world_toml)
 }
 
+/// A single successful call crosses every completion route. The following
+/// trigger reads the commitment in the same chaining pass, after its flag has
+/// been emitted but only once the whole originating call has committed.
+const SCRIPT_COMPLETE_CALL: &str = r#"
+[[deadline]]
+id = "window"
+due_secs = 100
+[script]
+setup = '''
+on_world_loaded("complete_call");
+on_flag_set("commitment.promise.kept", "observe_promise");
+on_deadline("window", "window_closed");
+fn complete_call(ctx) {
+    ctx.effects.complete_objective("immediate");
+    ctx.flags.immediate = 1;
+    ctx.schedule.in_seconds(7).complete_objective("delayed");
+    ctx.schedule.after(8, |ctx| { ctx.flags.callback = 1; });
+    ctx.effects.open_comms(#{ from: "axiom", node_fn: "hail" });
+    ctx.deadlines.slip("window", 5);
+    ctx.commitments.record(#{ id: "promise", made_to: "axiom", terms: "test.terms" });
+    ctx.commitments.keep("promise");
+}
+fn observe_promise(ctx) {
+    if ctx.commitments.state("promise") == "kept" { ctx.flags.observed = 1; }
+}
+fn window_closed(ctx) { }
+fn hail(ctx) { }
+'''
+"#;
+
+#[test]
+fn complete_script_call_applies_all_six_collections_with_clock_and_owner_context() {
+    for origin in [None, Some("fixture/layer.toml")] {
+        for anchored in [false, true] {
+            let mut app = ai_trigger_test_app();
+            let mut sr = compile_fixture_scripts(SCRIPT_COMPLETE_CALL);
+            let mut cfg = crate::world::config::WorldConfig::default();
+            cfg.global.sim_tick_hz = 2.0;
+            app.insert_resource(cfg)
+                .insert_resource(crate::sim_tick::SimTick(12))
+                .init_resource::<WorldLayerMap>();
+            if let Some(path) = origin {
+                app.world_mut()
+                    .resource_mut::<WorldLayerMap>()
+                    .0
+                    .insert(path.into(), WorldRuntime::default());
+            }
+            {
+                let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+                runtime.mission_clock_anchor_secs = anchored.then_some(0.0);
+                let queued = runtime.deadlines.arm_scoped(
+                    &[crate::world::deadlines::Deadline {
+                        id: "window".into(),
+                        due_secs: 100,
+                        ..Default::default()
+                    }],
+                    &sr.deadline_handlers,
+                    0,
+                    2.0,
+                    origin,
+                );
+                sr.pending_callbacks.extend(queued);
+                merge_script_triggers(&mut runtime, &mut sr, origin);
+                runtime.pending_world_events.push(WorldEvent::WorldLoaded);
+            }
+            app.insert_resource(sr);
+            app.world_mut().resource_mut::<ObjectiveManagerRes>().0.add(
+                "immediate",
+                "test.objective",
+                true,
+                vec![],
+            );
+
+            app.update();
+
+            assert!(objective_is_completed(&app, "immediate"));
+            let runtime = app.world().resource::<WorldContentRuntime>();
+            let layers = app.world().resource::<WorldLayerMap>();
+            let flags = origin.map_or(&runtime.flags, |path| &layers.0[path].flags);
+            assert!(
+                flags.flag("immediate"),
+                "the call writes in its owner's scope"
+            );
+            assert!(
+                flags.flag("observed"),
+                "chaining sees the settled commitment"
+            );
+            if origin.is_some() {
+                assert!(
+                    !runtime.flags.flag("immediate"),
+                    "no write escapes to the root"
+                );
+            }
+            assert!(
+                runtime.pending_world_events.is_empty(),
+                "trigger events chain here"
+            );
+            assert_eq!(runtime.pending_delayed_actions.len(), usize::from(anchored));
+            for delayed in &runtime.pending_delayed_actions {
+                assert_eq!(delayed.origin_layer.as_deref(), origin);
+            }
+            let deadline = runtime.deadlines.get_scoped(origin, "window").unwrap();
+            assert_eq!(
+                deadline.due_tick, 210,
+                "the five-second slip uses authored Hz"
+            );
+            assert_eq!(runtime.commitments.state_of("promise"), "kept");
+            let sr = app.world().resource::<WorldScriptRuntime>();
+            assert_eq!(sr.pending_callbacks.len(), 2);
+            assert!(sr
+                .pending_callbacks
+                .0
+                .iter()
+                .any(|call| call.fire_tick == 28));
+            assert!(sr
+                .pending_callbacks
+                .0
+                .iter()
+                .any(|call| call.fire_tick == 210));
+            assert!(!sr
+                .pending_callbacks
+                .0
+                .iter()
+                .any(|call| call.fire_tick == 200));
+            assert!(sr
+                .pending_callbacks
+                .0
+                .iter()
+                .all(|call| call.origin_layer.as_deref() == origin));
+            assert_eq!(sr.pending_comms_opens.len(), 1);
+            assert_eq!(sr.pending_comms_opens[0].origin_layer.as_deref(), origin);
+        }
+    }
+}
+
+#[test]
+fn completed_callback_events_wait_for_the_next_trigger_collection() {
+    let mut app = ai_trigger_test_app();
+    let mut sr = compile_fixture_scripts(
+        r#"[script]
+setup = '''
+on_world_loaded("schedule");
+on_flag_set("callback", "observe");
+fn schedule(ctx) { ctx.schedule.after(0, |ctx| { ctx.flags.callback = 1; }); }
+fn observe(ctx) { ctx.flags.observed = 1; }
+'''
+"#,
+    );
+    {
+        let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+        merge_script_triggers(&mut runtime, &mut sr, None);
+        runtime.pending_world_events.push(WorldEvent::WorldLoaded);
+    }
+    app.insert_resource(sr)
+        .add_systems(Update, tick_script_callbacks.after(tick_trigger_pipeline));
+
+    app.update();
+    let runtime = app.world().resource::<WorldContentRuntime>();
+    assert!(runtime.flags.flag("callback"));
+    assert!(
+        !runtime.flags.flag("observed"),
+        "a callback is not a trigger chaining pass"
+    );
+    assert!(runtime
+        .pending_world_events
+        .iter()
+        .any(|event| matches!(event,
+            WorldEvent::FlagSet { name, .. } if name == "callback"
+        )));
+
+    app.update();
+    assert!(app
+        .world()
+        .resource::<WorldContentRuntime>()
+        .flags
+        .flag("observed"));
+}
+
 /// Issue #984 (Rhai M6 phase 2a), smallest-slice proof: a scripted trigger
 /// authored inline fires through the LIVE `tick_trigger_pipeline` (not a
 /// direct `RuntimeHost` call) and its handler's `complete_objective` effect

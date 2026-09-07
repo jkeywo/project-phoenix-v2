@@ -32,12 +32,12 @@ use crate::comms::content::{response_views, ActiveDialogue, ScriptedDialogue};
 use crate::comms::server::{CommsChannel2Event, CommsRuntime};
 use crate::core::messages::{CommsMessage, GamePhase};
 use crate::entities::spawner::EntityUuid;
-use crate::world::content::WorldEvent;
 use crate::world::script::comms::{enter_node_scoped, project_node, EnterError};
 use crate::world::script::schedule::{SchedClock, TickBudget};
 use crate::world::server::{
-    apply_script_commands, EffectQueues, ObjectiveManagerRes, ScriptRuntimeParams,
-    ShipModifiersParams, WorldContentRuntime, WorldLayerParams, WorldScriptRuntime,
+    apply_script_call, EffectQueues, ObjectiveManagerRes, ScriptCallContext, ScriptEventTarget,
+    ScriptRuntimeParams, ShipModifiersParams, WorldContentRuntime, WorldLayerParams,
+    WorldScriptRuntime,
 };
 
 /// The three tick-scoped reads [`open_scripted_comms_threads`] needs that are
@@ -80,16 +80,10 @@ pub(crate) struct ScriptedCommsAux<'w> {
 ///    always-readable);
 /// 2. enter the root node under the tick's SHARED [`TickBudget`], gated on a
 ///    pre-flight [`can_admit`](TickBudget::can_admit) check;
-/// 3. route the call's `commands` through [`apply_script_commands`] with the
-///    same `uuid_source` / `template_loader` / anchors bindings the trigger and
-///    callback paths bind — so a root fn's `spawn_entity` / `add_objective`
-///    resolves through `dispatch_action` identically to its declarative twin;
-/// 4. re-queue the call's own deferred work: `delayed` onto
-///    `pending_delayed_actions` (dropped when the mission clock is unanchored,
-///    the trigger path's rule), `callbacks` onto `pending_callbacks`, and any
-///    NESTED `comms_opens` back onto `pending_comms_opens` — drained on the NEXT
-///    tick, never re-entrantly, the same rule the callback queue follows;
-/// 5. mint the message id, project the node onto the wire shape, write the
+/// 3. commit the complete call through [`apply_script_call`], using the same
+///    dispatch bindings as triggers/callbacks and the pending World event queue.
+///    Nested `comms_opens` wait for the NEXT drain, never re-entrantly;
+/// 4. mint the message id, project the node onto the wire shape, write the
 ///    channel-2 delivery, and record the [`ActiveDialogue`] carrying the
 ///    [`ScriptedDialogue`] the response handler answers from.
 ///
@@ -326,11 +320,17 @@ pub(crate) fn open_scripted_comms_threads(
         // returns a node has its flag applied before the message is delivered —
         // this system runs in `SimSet::Physics`, the channel-2 delivery it writes
         // is consumed in `SimSet::Broadcast`.
-        let mut out_events: Vec<WorldEvent> = Vec::new();
-        apply_script_commands(
-            effects.commands,
-            "open_scripted_comms_threads",
-            &mut out_events,
+        apply_script_call(
+            effects,
+            ScriptCallContext {
+                log_ctx: "open_scripted_comms_threads",
+                clock: script_clock,
+                mission_clock_anchored: elapsed_secs.is_some(),
+                origin_layer: req.origin_layer.clone(),
+                entity_name: Some(req.from.clone()),
+            },
+            ScriptEventTarget::Pending,
+            sr,
             &uuid_to_entity,
             runtime,
             &mut objectives,
@@ -350,31 +350,7 @@ pub(crate) fn open_scripted_comms_threads(
                 .as_ref()
                 .map(|wc| &wc.anchors)
                 .unwrap_or(&empty_anchors),
-            req.origin_layer.clone(),
-            Some(req.from.clone()),
             &mut effect_queues.out(),
-        );
-        runtime.pending_world_events.extend(out_events);
-        if elapsed_secs.is_some() {
-            runtime.pending_delayed_actions.extend(effects.delayed);
-        }
-        sr.pending_callbacks.extend(effects.callbacks);
-        sr.pending_comms_opens.extend(effects.comms_opens);
-        // A dialogue node that slipped or cancelled a named deadline (issue
-        // #1024) — the shape a negotiation beat takes: promise safe passage,
-        // push the transfer window out.
-        crate::world::server::apply_deadline_changes(
-            &effects.deadline_changes,
-            &mut runtime.deadlines,
-            &mut sr.pending_callbacks,
-            script_clock.tick,
-            script_clock.tick_hz,
-        );
-        // And a beat that gave the captain's word, or settled it (issue #1029).
-        crate::world::server::apply_commitment_changes(
-            &effects.commitment_changes,
-            &mut runtime.commitments,
-            script_clock.tick,
         );
 
         // A malformed return was already logged above; its effects have now been

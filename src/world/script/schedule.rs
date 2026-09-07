@@ -52,7 +52,8 @@ use crate::world::script::registry::{host_fn, HostRegistry};
 use crate::world::script::{MAX_CALLS_PER_TICK, MAX_OPS_PER_TICK};
 
 /// Everything one script call produced: its immediate effects and the deferred
-/// work it scheduled.
+/// work it scheduled. Production adapters hand the whole value to
+/// `world::server::apply_script_call`; they do not replay individual collections.
 ///
 /// `commands` are applied this tick (effects and flag writes, in the order the
 /// script authored them); `delayed` extend the existing `pending_delayed_actions`
@@ -80,8 +81,8 @@ pub struct CallEffects {
     /// authored order (issue #1024). A FIFTH field for `comms_opens`' reason: a
     /// deadline mutation edits `WorldScriptRuntime::pending_callbacks`, a queue
     /// the generic action applier holds no handle on. Buffered, never deferred —
-    /// the adapter replays them in the same tick, at the same point as the call's
-    /// other effects.
+    /// complete call application replays them in the same tick, at the same point
+    /// as the call's other effects.
     pub deadline_changes: Vec<crate::world::deadlines::DeadlineChange>,
     /// Commitment mutations from `ctx.commitments.record(…)` / `.keep(…)` /
     /// `.break_promise(…)`, in authored order (issue #1029). A SIXTH field for

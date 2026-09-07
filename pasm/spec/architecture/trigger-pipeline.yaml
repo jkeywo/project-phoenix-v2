@@ -131,7 +131,8 @@ entities:
         - "determinism contract: each pass is two-phase - every trigger condition is evaluated against the live flag stores before any fired action dispatches, so all triggers in a pass see the same values and their mutations become visible only to the next pass"
         - "[ai] live-store freshness: action dispatch re-projects the live flag stores per action, never a pre-pass snapshot, so duplicate mutations preview correct before/after transitions and each boolean flip emits exactly one event"
         - "the dispatch name map is rebuilt at the top of every pass, so an action can resolve an entity name that a spawn registered in an earlier pass of the same tick"
-        - "event routing is per-caller: this loop feeds produced events into its own next pass (same tick); the delayed-action scheduler queues them for the next tick; the comms-response site pushes onto pending_world_events from SimSet::Input, which the pipeline drains later the same tick"
+        - "Issue #1408: apply_script_call owns complete successful-call application for the trigger, callback, Comms root and Comms response adapters. It exhaustively consumes CallEffects, applies ordered commands through the existing dispatcher, routes future work, then applies deadline and commitment changes. Callers provide invocation context and ScriptEventTarget, not the six-collection completion protocol."
+        - "Event eligibility remains per-adapter: ScriptEventTarget::TriggerChain feeds this loop's next pass in the same tick; Pending feeds pending_world_events for the next collection. The callback and Comms root run after the pipeline, while the Comms response runs in SimSet::Input before it and can therefore be collected later in the same tick. The delayed-action scheduler retains its existing pending routing."
         - "[ai] a fire runs the trigger's SCRIPT HANDLER and nothing else. It also dispatched the trigger's own declarative action array, per-action `when` predicate and per-action delay; issue #985 deleted the `[[trigger]]` parser that was their only writer, so `Trigger` lost `actions`/`action_predicates`/`action_delays` and the loop lost the arm that read them. A handler defers with ctx.schedule.in_seconds and gates with ordinary Rhai control flow"
         - "Issue #1045 threads `origin_layer` through a fired handler, every scheduled callback and nested drain, deadline mutations, buffered actions and scripted Comms. The origin selects the same layer flag chain the trigger used; it is never inferred from `script_path`, because one sibling AST may have several owners."
         - "The schedule edge `apply_world_layer_changes.before(tick_script_callbacks)` is authoritative behavior: unloading on a callback's due tick retracts it before partition/drain. Activation similarly completes scripts, deadline arming and ownership before `WorldLoaded` can chain."
@@ -144,12 +145,15 @@ entities:
     implementation:
       status: declared
       paths: [src/world/server.rs, src/world/content.rs, src/world/script/engine.rs, src/world/script/schedule.rs]
-      symbols: [tick_trigger_pipeline, tick_script_callbacks, apply_world_layer_changes, ScheduledCall, MAX_CHAIN_PASSES, evaluate_single_trigger, apply_dispatch_result]
+      symbols: [tick_trigger_pipeline, tick_script_callbacks, apply_script_call, ScriptCallContext, ScriptEventTarget, apply_world_layer_changes, ScheduledCall, MAX_CHAIN_PASSES, evaluate_single_trigger, apply_dispatch_result]
       tests: [cargo test]
     evidence:
       - kind: test
         reference: trigger_chain_exceeding_max_passes_stops_at_the_cap
         summary: A chain longer than the cap performs exactly the capped number of passes, then breaks.
+      - kind: test
+        reference: completed_callback_events_wait_for_the_next_trigger_collection
+        summary: "Callback application commits its flag immediately but its event waits in pending_world_events until the next collection; it does not re-enter the completed chaining pass."
       - kind: test
         reference: scripted_flag_write_chains_a_declarative_on_flag_set
         summary: A scripted handler's flag write chains a downstream on_flag_set trigger in the same Bevy frame.

@@ -21,7 +21,7 @@ use crate::world::layers::{evaluate_layer_load, LayerLoadOutcome, LayerValidatio
 use crate::world::load::{load, LoadError, LoadPolicy, LoadRequest, MemoryReader};
 use crate::world::script::effects::BufferedEffect;
 use crate::world::script::engine::{RuntimeHost, ScriptTrigger};
-use crate::world::script::schedule::{PendingCallbacks, SchedClock, TickBudget};
+use crate::world::script::schedule::{CallEffects, PendingCallbacks, SchedClock, TickBudget};
 
 // -- Resources --------------------------------------------------------------
 
@@ -607,7 +607,7 @@ pub struct WorldScriptRuntime {
     /// Queue of scripted `ctx.effects.open_comms(#{…})` requests awaiting a comms
     /// system to materialise them into threads (issue #984). Sibling of
     /// [`pending_callbacks`](Self::pending_callbacks) and populated the same way:
-    /// every script call site extends it with its [`CallEffects`] `comms_opens`.
+    /// [`apply_script_call`] extends it from the call's [`CallEffects`].
     ///
     /// It lives here, not on a comms resource, for the same reason the callback
     /// queue does — this is the resource the script systems already borrow, so
@@ -2161,11 +2161,9 @@ pub(crate) fn arm_mission_workforces(
 /// replacement is pushed. Nothing reconciles a table against a queue later;
 /// there is one edit, applied at the point the script authored it.
 ///
-/// Free function rather than a system because it is called from all four sites
-/// that consume a call's [`CallEffects`] — the trigger pipeline, the callback
-/// drain, and the two comms answer paths — each of which already holds both
-/// borrows.
-pub(crate) fn apply_deadline_changes(
+/// Private to complete script-call application: the action dispatcher does not
+/// own the callback queue, and callers must not replay this part separately.
+fn apply_deadline_changes(
     changes: &[crate::world::deadlines::DeadlineChange],
     deadlines: &mut crate::world::deadlines::DeadlineTable,
     pending_callbacks: &mut PendingCallbacks,
@@ -2194,9 +2192,10 @@ pub(crate) fn apply_deadline_changes(
 /// here — it was emitted into the call's ordered effect buffer at the point the
 /// script authored it, and `apply_script_commands` has already written it by the
 /// time this runs. That ordering is deliberate rather than incidental: the
-/// `FlagSet` it produces is queued as a `WorldEvent` and evaluated by the
-/// trigger pipeline on a LATER tick, so an `on_flag_set` handler reading
-/// `ctx.commitments.state(…)` sees the settled promise.
+/// `FlagSet` it produces is evaluated only after the complete call returns,
+/// whether in the next trigger chaining pass or after pending-event collection,
+/// so an `on_flag_set` handler reading `ctx.commitments.state(…)` sees the settled
+/// promise.
 ///
 /// A duplicate id is logged rather than propagated. The script surface already
 /// raised on it — dropping that call's whole buffer under settled decision 10,
@@ -2205,9 +2204,9 @@ pub(crate) fn apply_deadline_changes(
 /// only two calls resolving the same new id in one tick can produce. Refusing
 /// the second is the same answer the snapshot would have given.
 ///
-/// Free function rather than a system, for [`apply_deadline_changes`]' reason:
-/// it is called from all four sites that consume a call's [`CallEffects`].
-pub(crate) fn apply_commitment_changes(
+/// Private to [`apply_script_call`], which commits the whole call before any
+/// emitted event is evaluated by another handler.
+fn apply_commitment_changes(
     changes: &[crate::world::commitments::CommitmentChange],
     commitments: &mut crate::world::commitments::CommitmentLedger,
     now_tick: u64,
@@ -2645,10 +2644,17 @@ pub(crate) fn tick_trigger_pipeline(
                         }
                     };
                     if let Some(effects) = effects {
-                        apply_script_commands(
-                            effects.commands,
-                            "tick_trigger_pipeline (script)",
-                            &mut next_events,
+                        apply_script_call(
+                            effects,
+                            ScriptCallContext {
+                                log_ctx: "tick_trigger_pipeline (script)",
+                                clock: script_clock,
+                                mission_clock_anchored: elapsed_secs.is_some(),
+                                origin_layer: ft.origin_layer.clone(),
+                                entity_name: ft.entity_name.clone(),
+                            },
+                            ScriptEventTarget::TriggerChain(&mut next_events),
+                            sr,
                             &uuid_to_entity,
                             runtime,
                             &mut objectives,
@@ -2673,40 +2679,7 @@ pub(crate) fn tick_trigger_pipeline(
                                 .as_ref()
                                 .map(|wc| &wc.anchors)
                                 .unwrap_or(&empty_anchors),
-                            ft.origin_layer.clone(),
-                            ft.entity_name.clone(),
                             &mut effect_queues.out(),
-                        );
-                        // Script-scheduled delayed effects join the SAME queue a
-                        // TOML `action_delays` entry uses; dropped when the
-                        // mission clock is unanchored, matching the declarative
-                        // path above.
-                        if elapsed_secs.is_some() {
-                            runtime.pending_delayed_actions.extend(effects.delayed);
-                        }
-                        // Deferred `after(..)` callbacks join the runtime's
-                        // serialisable future-work queue (issue #984, phase 2b);
-                        // `tick_script_callbacks` drains the due ones each tick.
-                        // 2a dropped these — now they are retained.
-                        sr.pending_callbacks.extend(effects.callbacks);
-                        // A scripted `open_comms` queues for the comms module to
-                        // materialise; empty for every world that authors none.
-                        sr.pending_comms_opens.extend(effects.comms_opens);
-                        // And its named-deadline mutations (issue #1024): applied
-                        // against the live table, each taking its edit to the SAME
-                        // callback queue above — which is what stops a slipped
-                        // deadline also firing at its old tick.
-                        apply_deadline_changes(
-                            &effects.deadline_changes,
-                            &mut runtime.deadlines,
-                            &mut sr.pending_callbacks,
-                            script_clock.tick,
-                            script_clock.tick_hz,
-                        );
-                        apply_commitment_changes(
-                            &effects.commitment_changes,
-                            &mut runtime.commitments,
-                            script_clock.tick,
                         );
                     }
                 }
@@ -2858,6 +2831,127 @@ fn scope_scripted_flag_write(
     }
 }
 
+/// The invocation facts that differ between trigger, callback and Comms calls.
+/// Ownership is captured by the adapter; effect routing is owned by
+/// [`apply_script_call`].
+pub(crate) struct ScriptCallContext<'a> {
+    pub log_ctx: &'a str,
+    pub clock: SchedClock,
+    /// A zero scheduling clock also exists before the mission has an anchor.
+    /// Only an anchored mission accepts `in_seconds` work into its queue.
+    pub mission_clock_anchored: bool,
+    pub origin_layer: Option<String>,
+    pub entity_name: Option<String>,
+}
+
+/// Where a completed call's World events next become eligible. Only a trigger
+/// handler is inside a chaining pass. The other adapters use the ordinary
+/// pending queue, observed when the World event collector next runs.
+pub(crate) enum ScriptEventTarget<'a> {
+    TriggerChain(&'a mut Vec<WorldEvent>),
+    Pending,
+}
+
+/// Commit every effect of one successful script call (issue #1408).
+///
+/// Immediate actions retain their authored order and the existing pure
+/// dispatcher. Future work then joins its owner queues, followed by deadline
+/// edits (which can retract/re-key those callbacks) and commitment edits. The
+/// exhaustive destructuring makes a new effect collection an implementation
+/// obligation here, rather than a silent omission in one of four adapters.
+///
+/// A raising/refused script produces no effects at the runtime-host seam. A
+/// successful Comms call with a malformed return still commits its effects;
+/// deciding whether to display that return remains the Comms adapter's job.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn apply_script_call(
+    call: CallEffects,
+    context: ScriptCallContext<'_>,
+    event_target: ScriptEventTarget<'_>,
+    script_runtime: &mut WorldScriptRuntime,
+    uuid_to_entity: &HashMap<String, Entity>,
+    runtime: &mut WorldContentRuntime,
+    objectives: &mut ObjectiveManagerRes,
+    commands: &mut Commands,
+    ship_modifiers: &mut ShipModifiersParams,
+    pending_layers: Option<&mut PendingWorldLayerChanges>,
+    layer_map: Option<&mut WorldLayerMap>,
+    next_state: Option<&mut NextState<GamePhase>>,
+    game_over_reason: Option<&mut crate::server_app::GameOverReason>,
+    faction_dispatch: &mut FactionDispatchParams,
+    ai_query: &mut Query<
+        (
+            &EntityUuid,
+            Option<&mut crate::console::weapons::TacticalRadarSelection>,
+            Option<&crate::entities::spawner::FactionComponent>,
+        ),
+        With<BehaviourSection>,
+    >,
+    balance_events: Option<&mut bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>,
+    uuid_source: &dyn Fn() -> String,
+    template_loader: &dyn crate::entities::loader::TemplateLoader,
+    base_anchors: &HashMap<String, [f32; 3]>,
+    effect_queues: &mut EffectQueuesOut,
+) {
+    let CallEffects {
+        commands: immediate,
+        delayed,
+        callbacks,
+        comms_opens,
+        deadline_changes,
+        commitment_changes,
+    } = call;
+    let queue_events = matches!(&event_target, ScriptEventTarget::Pending);
+    let mut pending_events = Vec::new();
+    let events_out = match event_target {
+        ScriptEventTarget::TriggerChain(events) => events,
+        ScriptEventTarget::Pending => &mut pending_events,
+    };
+    apply_script_commands(
+        immediate,
+        context.log_ctx,
+        events_out,
+        uuid_to_entity,
+        runtime,
+        objectives,
+        commands,
+        ship_modifiers,
+        pending_layers,
+        layer_map,
+        next_state,
+        game_over_reason,
+        faction_dispatch,
+        ai_query,
+        balance_events,
+        uuid_source,
+        template_loader,
+        base_anchors,
+        context.origin_layer,
+        context.entity_name,
+        effect_queues,
+    );
+    if queue_events {
+        runtime.pending_world_events.extend(pending_events);
+    }
+    if context.mission_clock_anchored {
+        runtime.pending_delayed_actions.extend(delayed);
+    }
+    script_runtime.pending_callbacks.extend(callbacks);
+    script_runtime.pending_comms_opens.extend(comms_opens);
+    apply_deadline_changes(
+        &deadline_changes,
+        &mut runtime.deadlines,
+        &mut script_runtime.pending_callbacks,
+        context.clock.tick,
+        context.clock.tick_hz,
+    );
+    apply_commitment_changes(
+        &commitment_changes,
+        &mut runtime.commitments,
+        context.clock.tick,
+    );
+}
+
 /// Apply a scripted handler's raw [`ActionCmd`]s through the same path as a
 /// declarative action, computing each flag mutation's transition event first
 /// (issue #984, Rhai M6 phase 2a).
@@ -2876,7 +2970,7 @@ fn scope_scripted_flag_write(
 /// each mutation is applied to the live store before the next command's preview,
 /// mirroring the per-action decide-then-apply cycle the declarative loop uses.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn apply_script_commands(
+fn apply_script_commands(
     commands_in: Vec<BufferedEffect>,
     log_ctx: &str,
     events_out: &mut Vec<WorldEvent>,
@@ -4179,11 +4273,17 @@ pub(crate) fn tick_script_callbacks(
         // A callback's chaining events queue for the NEXT tick, exactly as
         // `tick_delayed_actions` does — this system runs after
         // `tick_trigger_pipeline` has already drained `pending_world_events`.
-        let mut out_events: Vec<WorldEvent> = Vec::new();
-        apply_script_commands(
-            effects.commands,
-            "tick_script_callbacks",
-            &mut out_events,
+        apply_script_call(
+            effects,
+            ScriptCallContext {
+                log_ctx: "tick_script_callbacks",
+                clock: script_clock,
+                mission_clock_anchored: elapsed_secs.is_some(),
+                origin_layer: callback_origin.clone(),
+                entity_name: None,
+            },
+            ScriptEventTarget::Pending,
+            sr,
             &uuid_to_entity,
             runtime,
             &mut objectives,
@@ -4205,35 +4305,7 @@ pub(crate) fn tick_script_callbacks(
                 .as_ref()
                 .map(|wc| &wc.anchors)
                 .unwrap_or(&empty_anchors),
-            callback_origin.clone(),
-            None,
             &mut effect_queues.out(),
-        );
-        runtime.pending_world_events.extend(out_events);
-        // A callback-scheduled `in_seconds` effect joins the SAME delayed queue,
-        // dropped when the mission clock is unanchored (matching the trigger path).
-        if elapsed_secs.is_some() {
-            runtime.pending_delayed_actions.extend(effects.delayed);
-        }
-        // A callback that scheduled another callback re-queues it for a future
-        // tick (drained the next time this system observes it due).
-        sr.pending_callbacks.extend(effects.callbacks);
-        // A callback that opened a comms thread queues it for the comms module.
-        sr.pending_comms_opens.extend(effects.comms_opens);
-        // A callback that slipped or cancelled a deadline re-keys it here
-        // (issue #1024) — including a deadline's OWN fire handler, which may
-        // legitimately arm the next one in a chain.
-        apply_deadline_changes(
-            &effects.deadline_changes,
-            &mut runtime.deadlines,
-            &mut sr.pending_callbacks,
-            script_clock.tick,
-            script_clock.tick_hz,
-        );
-        apply_commitment_changes(
-            &effects.commitment_changes,
-            &mut runtime.commitments,
-            script_clock.tick,
         );
     }
 }

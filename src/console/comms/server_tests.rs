@@ -3343,6 +3343,39 @@ fn a_scripted_response_runs_its_on_pick_and_injects_the_follow_up() {
     assert_eq!(script.on_pick, vec!["on_confirm".to_string()]);
 }
 
+#[test]
+fn completed_scripted_response_events_use_the_pending_world_queue() {
+    let station_uuid = "a1b2c3d4-e5f6-4789-abcd-ef0123451408";
+    let mut app = comms_test_app();
+    setup_game_with_comms(&mut app, station_uuid);
+    app.insert_resource(crate::comms::scripted::tests::compile_fixture(
+        "fn on_ack(ctx) { ctx.flags.responded = 1; }",
+    ));
+    let id = seat_scripted_dialogue(
+        &mut app,
+        station_uuid,
+        "test.message",
+        vec!["on_ack"],
+        false,
+    );
+
+    let _ = respond(&mut app, &id, 0);
+
+    let runtime = app
+        .world()
+        .resource::<crate::world::server::WorldContentRuntime>();
+    assert!(runtime.flags.flag("responded"));
+    assert!(
+        runtime
+            .pending_world_events
+            .iter()
+            .any(|event| matches!(event,
+                WorldEvent::FlagSet { name, .. } if name == "responded"
+            )),
+        "response effects enter the ordinary World event queue"
+    );
+}
+
 /// A scripted `on_pick` that returns `()` is a terminal response: its
 /// effects apply and the thread ends with no further message.
 #[test]

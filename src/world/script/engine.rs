@@ -1245,6 +1245,88 @@ mod tests {
     }
 
     #[test]
+    fn failed_script_call_discards_all_six_effect_buffers() {
+        use crate::world::deadlines::{Deadline, DeadlineHandler, DeadlineTable};
+
+        let host = RuntimeHost::new();
+        let ast = host
+            .engine()
+            .compile(
+                r#"
+            fn boom(ctx) {
+                ctx.effects.complete_objective("immediate");
+                ctx.schedule.in_seconds(7).complete_objective("delayed");
+                ctx.schedule.after(8, |ctx| { ctx.flags.callback = 1; });
+                ctx.effects.open_comms(#{ from: "axiom", node_fn: "clean" });
+                ctx.deadlines.slip("window", 5);
+                ctx.commitments.record(#{ id: "promise", made_to: "axiom", terms: "test.terms" });
+                throw "abort the complete call";
+            }
+            fn clean(ctx) { }
+        "#,
+            )
+            .unwrap();
+        let mut deadlines = DeadlineTable::default();
+        let _ = deadlines.arm(
+            &[Deadline {
+                id: "window".into(),
+                due_secs: 100,
+                ..Default::default()
+            }],
+            &[DeadlineHandler {
+                deadline_id: "window".into(),
+                handler: "clean".into(),
+                source_path: "t.rhai".into(),
+            }],
+            0,
+            SchedClock::ZERO.tick_hz,
+        );
+        let commitments = crate::world::commitments::CommitmentLedger::default();
+        let evidence = crate::dossier::evidence::EvidenceLog::default();
+        let flags = [FlagStore::new()];
+        let failed = host.try_call(
+            &SchedClock::ZERO,
+            &ast,
+            "t.rhai",
+            "boom",
+            &flags,
+            &deadlines,
+            &commitments,
+            &evidence,
+            Map::new(),
+        );
+        assert!(
+            failed.is_err(),
+            "a raising call exposes no effects to commit"
+        );
+        assert_eq!(deadlines.get("window").unwrap().due_tick, 6000);
+        assert!(commitments.get("promise").is_none());
+
+        let (effects, _) = host
+            .try_call(
+                &SchedClock::ZERO,
+                &ast,
+                "t.rhai",
+                "clean",
+                &flags,
+                &deadlines,
+                &commitments,
+                &evidence,
+                Map::new(),
+            )
+            .unwrap();
+        assert!(effects.commands.is_empty());
+        assert!(effects.delayed.is_empty());
+        assert!(effects.callbacks.is_empty());
+        assert!(effects.comms_opens.is_empty());
+        assert!(effects.deadline_changes.is_empty());
+        assert!(
+            effects.commitment_changes.is_empty(),
+            "no failed work leaks to a later call"
+        );
+    }
+
+    #[test]
     #[should_panic(expected = "script error")]
     fn call_panics_in_dev_on_a_script_error() {
         // `cargo test` runs with `debug_assertions`, so `call` takes the panic

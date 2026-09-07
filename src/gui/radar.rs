@@ -1196,13 +1196,17 @@ fn sync_radar_blip_nodes(
                 let half = size_px * 0.5;
                 let (left, top) =
                     blip_local_offset(nx, ny, center_x_px, center_y_px, radar_radius_px, half);
-                let icon_handle = appearance.icon.as_ref().map(|name| {
-                    icons
-                        .0
-                        .entry(name.clone())
-                        .or_insert_with(|| asset_server.load(icon_asset_path(name)))
-                        .clone()
-                });
+                let icon_handle = appearance
+                    .icon
+                    .as_ref()
+                    .filter(|name| name.as_str() != crate::gm_contact::BASIC_RADAR_ICON)
+                    .map(|name| {
+                        icons
+                            .0
+                            .entry(name.clone())
+                            .or_insert_with(|| asset_server.load(icon_asset_path(name)))
+                            .clone()
+                    });
                 let size_frac = half / radar_radius_px;
                 let clip_circle = if widget.clip_mode == RadarClipMode::Circle {
                     1.0_f32
@@ -1281,9 +1285,9 @@ fn sync_radar_blip_nodes(
                             mat.size_frac = intent.size_frac;
                             mat.clip_circle = intent.clip_circle;
                             mat.highlighted = if intent.highlighted { 1.0 } else { 0.0 };
-                            if let Some(h) = intent.icon {
-                                mat.icon = h;
-                            }
+                            mat.icon = intent.icon.unwrap_or_else(|| {
+                                fallback.as_ref().map(|f| f.0.clone()).unwrap_or_default()
+                            });
                         }
                     } else {
                         commands.entity(child).try_despawn();
@@ -2133,6 +2137,163 @@ mod tests {
             icon_asset_path("playerShip"),
             "radar_icons/Icon-PlayerShip.png"
         );
+    }
+
+    #[test]
+    fn contact_override_existing_material_changes_ordinary_basic_and_back() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+            .init_asset::<Image>()
+            .init_asset::<RadarBlipMaterial>()
+            .init_resource::<RadarIconLookup>();
+        let authored = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(Image::default());
+        let basic = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(Image::default());
+        assert_ne!(authored, basic);
+        app.insert_resource(RadarBlipFallbackIcon(basic.clone()));
+        app.world_mut()
+            .resource_mut::<RadarIconLookup>()
+            .0
+            .insert("frigate".into(), authored.clone());
+        let widget = app
+            .world_mut()
+            .spawn((
+                GenericRadarWidget {
+                    range: 100.0,
+                    orientation: OrientationMode::WorldFixed,
+                    filter: filter(&["ship", crate::gm_contact::BASIC_RADAR_TAG]),
+                    clip_mode: RadarClipMode::Circle,
+                    face_fraction: 1.0,
+                },
+                Node::default(),
+                ComputedNode {
+                    size: Vec2::splat(200.0),
+                    ..default()
+                },
+                InheritedVisibility::VISIBLE,
+                RadarBlipMap::default(),
+            ))
+            .id();
+        let overrides = [("target".into(), crate::gm_contact::ContactMode::Reveal)].into();
+        let shows = ["ship".into(), crate::gm_contact::BASIC_RADAR_TAG.into()].into();
+        let mut retained_node = None;
+        for (x, expected) in [(20.0, authored.clone()), (200.0, basic), (20.0, authored)] {
+            let entities = crate::gm_contact::viewscreen_contacts(
+                &[EntitySnapshot {
+                    uuid: "target".into(),
+                    position: Some([x, 0.0, 0.0]),
+                    tags: tags(&["ship"]),
+                    radar_icon: Some("frigate".into()),
+                    radar_size: Some(4.0),
+                    ..default()
+                }],
+                &overrides,
+                0.0,
+                0.0,
+                100.0,
+                &shows,
+            );
+            app.world_mut()
+                .run_system_once(
+                    move |mut commands: Commands, mut maps: Query<&mut RadarBlipMap>| {
+                        bridge_sim_to_radar(
+                            &mut commands,
+                            widget,
+                            &mut maps.get_mut(widget).unwrap(),
+                            RadarCenterPose {
+                                x: 0.0,
+                                z: 0.0,
+                                yaw: 0.0,
+                            },
+                            &entities,
+                        );
+                    },
+                )
+                .unwrap();
+            app.world_mut()
+                .run_system_once(sync_radar_blip_nodes)
+                .unwrap();
+            let source = app.world().get::<RadarBlipMap>(widget).unwrap().blips["target"];
+            let mut nodes =
+                app.world_mut()
+                    .query::<(Entity, &RadarBlipNode, &MaterialNode<RadarBlipMaterial>)>();
+            let (node, _, material) = nodes
+                .iter(app.world())
+                .find(|(_, tag, _)| tag.source == source)
+                .unwrap();
+            let identity = (node, material.0.clone());
+            if let Some(previous) = &retained_node {
+                assert_eq!(
+                    &identity, previous,
+                    "existing UI node and material must reconcile in place"
+                );
+            }
+            retained_node = Some(identity);
+            assert_eq!(
+                app.world()
+                    .resource::<Assets<RadarBlipMaterial>>()
+                    .get(&material.0)
+                    .unwrap()
+                    .icon,
+                expected,
+                "actual texture must follow the current contact picture at x={x}"
+            );
+        }
+    }
+
+    #[test]
+    fn contact_override_projection_uses_its_current_widget_center_after_a_view_switch() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = World::new();
+        let helm = world.spawn_empty().id();
+        let stale_center = world.spawn(RadarCenter::default()).id();
+        world.entity_mut(helm).add_child(stale_center);
+        let sensors = world.spawn_empty().id();
+        let current_center = world
+            .spawn(RadarCenter {
+                world_x: 1000.0,
+                world_z: 2000.0,
+                yaw: 1.0,
+            })
+            .id();
+        world.entity_mut(sensors).add_child(current_center);
+        let center = world
+            .run_system_once(
+                move |widgets: Query<&Children>, centers: Query<&RadarCenter>| {
+                    widget_radar_center(widgets.get(sensors).ok(), &centers).unwrap()
+                },
+            )
+            .unwrap();
+        // Reveal's edge-clamped contact is visible around the newly active
+        // Sensors bridge even while Helm still carries the old position.
+        let projected = project_radar_entity(
+            1096.0,
+            2000.0,
+            center.world_x,
+            center.world_z,
+            center.yaw,
+            100.0,
+            2.0,
+            &OrientationMode::WorldFixed,
+        );
+        assert_eq!(projected, Some((0.96, 0.0)));
+        assert!(project_radar_entity(
+            1096.0,
+            2000.0,
+            0.0,
+            0.0,
+            0.0,
+            100.0,
+            2.0,
+            &OrientationMode::WorldFixed
+        )
+        .is_none());
     }
 
     #[test]

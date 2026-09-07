@@ -995,6 +995,13 @@ fn fold_scenario_triggers(world: &World, mut acc: u64) -> u64 {
     // The queue's own order is folded rather than a sorted copy of it: two
     // placements swapped would draw each other's `WorldIdMint` id, which is a
     // real divergence this fold exists to catch.
+    if !runtime.contact_overrides.is_empty() {
+        acc = fold_str(acc, "contact_overrides");
+        acc = fold_u64(
+            acc,
+            vellum_digest::digest_postcard(&runtime.contact_overrides),
+        );
+    }
     if !runtime.pending_gm_despawns.is_empty() {
         acc = fold_str(acc, "pending_gm_despawns");
         acc = fold_u64(acc, runtime.pending_gm_despawns.len() as u64);

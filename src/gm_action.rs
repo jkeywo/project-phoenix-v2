@@ -191,6 +191,11 @@ pub enum GmAction {
         verb: crate::gm_objective::ObjectiveVerb,
         recipients: Vec<String>,
     },
+    SetContactOverride {
+        ship: crate::command_admission::log::ShipKey,
+        target: String,
+        mode: crate::gm_contact::ContactMode,
+    },
 }
 
 /// WHICH lever of the authored-event control family one durable result records
@@ -233,6 +238,9 @@ pub enum GmActionKind {
     /// Entity-inspector removal results, distinct from palette placement results.
     WorldDespawn,
     ObjectiveControl,
+    ContactReveal,
+    ContactConceal,
+    ContactNormal,
 }
 
 impl GmActionKind {
@@ -250,7 +258,10 @@ impl GmActionKind {
             | Self::DirectEffect
             | Self::WorldSpawn
             | Self::WorldDespawn
-            | Self::ObjectiveControl => true,
+            | Self::ObjectiveControl
+            | Self::ContactReveal
+            | Self::ContactConceal
+            | Self::ContactNormal => true,
             Self::SessionPause | Self::StationPuppet | Self::StationCommand => false,
         }
     }
@@ -287,6 +298,12 @@ impl GmActionProposal {
 }
 
 impl GmAction {
+    pub fn observer_id(&self) -> Option<String> {
+        match self {
+            Self::SetContactOverride { ship, .. } => Some(ship.0.clone()),
+            _ => None,
+        }
+    }
     pub fn ship_key(&self) -> Option<&crate::command_admission::log::ShipKey> {
         match self {
             Self::SetSessionPaused { .. }
@@ -297,9 +314,9 @@ impl GmAction {
             | Self::ObjectiveAction { .. }
             | Self::SetEventPaused { .. }
             | Self::ArmGmEventSkip { .. } => None,
-            Self::SetStationPuppet { ship, .. } | Self::IssueStationCommand { ship, .. } => {
-                Some(ship)
-            }
+            Self::SetStationPuppet { ship, .. }
+            | Self::IssueStationCommand { ship, .. }
+            | Self::SetContactOverride { ship, .. } => Some(ship),
         }
     }
 
@@ -316,9 +333,9 @@ impl GmAction {
             Self::FireGmEvent { event }
             | Self::SetEventPaused { event, .. }
             | Self::ArmGmEventSkip { event } => Some(event.as_str()),
-            Self::ApplyDirectEffect { target, .. } | Self::DespawnEntity { target } => {
-                Some(target.as_str())
-            }
+            Self::ApplyDirectEffect { target, .. }
+            | Self::DespawnEntity { target }
+            | Self::SetContactOverride { target, .. } => Some(target.as_str()),
             // The palette id, not the derived instance name: the durable fact
             // has to say WHAT the operator placed, and the instance name is
             // minted by the reducer a boundary later.
@@ -345,6 +362,11 @@ impl GmAction {
                 && recipients.len() <= crate::gm_objective::MAX_OBJECTIVE_RECIPIENTS
                 && recipients.iter().all(|id| bounded(id))
                 && recipients.windows(2).all(|pair| pair[0] < pair[1]) =>
+            {
+                Ok(())
+            }
+            Self::SetContactOverride { ship, target, .. }
+                if bounded(&ship.0) && bounded(target) && ship.0 != *target =>
             {
                 Ok(())
             }
@@ -434,6 +456,11 @@ impl GmAction {
             Self::SpawnPaletteEntity { .. } => GmActionKind::WorldSpawn,
             Self::DespawnEntity { .. } => GmActionKind::WorldDespawn,
             Self::ObjectiveAction { .. } => GmActionKind::ObjectiveControl,
+            Self::SetContactOverride { mode, .. } => match mode {
+                crate::gm_contact::ContactMode::Reveal => GmActionKind::ContactReveal,
+                crate::gm_contact::ContactMode::Conceal => GmActionKind::ContactConceal,
+                crate::gm_contact::ContactMode::Normal => GmActionKind::ContactNormal,
+            },
         }
     }
 
@@ -448,6 +475,7 @@ impl GmAction {
             | Self::IssueStationCommand { .. }
             | Self::ApplyDirectEffect { .. }
             | Self::SpawnPaletteEntity { .. }
+            | Self::SetContactOverride { .. }
             | Self::DespawnEntity { .. }
             | Self::ObjectiveAction { .. }
             | Self::ArmGmEventSkip { .. } => None,
@@ -486,6 +514,7 @@ impl GmAction {
             | Self::FireGmEvent { .. }
             | Self::ApplyDirectEffect { .. }
             | Self::SpawnPaletteEntity { .. }
+            | Self::SetContactOverride { .. }
             | Self::DespawnEntity { .. }
             | Self::ObjectiveAction { .. }
             | Self::ArmGmEventSkip { .. }
@@ -511,6 +540,7 @@ impl GmAction {
             | Self::IssueStationCommand { .. }
             | Self::ApplyDirectEffect { .. }
             | Self::SpawnPaletteEntity { .. }
+            | Self::SetContactOverride { .. }
             | Self::DespawnEntity { .. }
             | Self::ObjectiveAction { .. } => None,
         }
@@ -530,6 +560,7 @@ impl GmAction {
             | Self::FireGmEvent { .. }
             | Self::ApplyDirectEffect { .. }
             | Self::SpawnPaletteEntity { .. }
+            | Self::SetContactOverride { .. }
             | Self::DespawnEntity { .. }
             | Self::ObjectiveAction { .. }
             | Self::ArmGmEventSkip { .. } => true,
@@ -665,6 +696,8 @@ pub struct GmActionRefusal {
     pub objective_verb: Option<crate::gm_objective::ObjectiveVerb>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub objective_recipients: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observer: Option<String>,
 }
 
 impl GmActionRefusal {
@@ -678,6 +711,7 @@ impl GmActionRefusal {
             self.reason,
         )
         .with_target(self.target.clone())
+        .with_observer(self.observer.clone())
         .with_verb(self.verb)
         .with_lever(self.lever)
         .with_effect(None, self.effect_scope.clone())
@@ -750,6 +784,23 @@ pub fn validate_fleet_frame(
             // no event could only be published as a fire of the empty id, and a
             // pause refusal with one would invent a second identity for a family
             // that has none. Both are malformed frames, not facts to project.
+            if matches!(
+                refusal.action_kind,
+                GmActionKind::ContactReveal
+                    | GmActionKind::ContactConceal
+                    | GmActionKind::ContactNormal
+            ) != refusal.observer.is_some()
+            {
+                return Err(GmActionRefusalReason::InvalidAction);
+            }
+            if refusal.observer.as_ref().is_some_and(|observer| {
+                observer.is_empty()
+                    || observer.len() > 128
+                    || observer.chars().any(char::is_control)
+                    || Some(observer) == refusal.target.as_ref()
+            }) {
+                return Err(GmActionRefusalReason::InvalidAction);
+            }
             if refusal.action_kind.carries_target() != refusal.target.is_some() {
                 return Err(GmActionRefusalReason::InvalidAction);
             }
@@ -960,6 +1011,8 @@ pub struct LoggedGmAction {
     pub objective_verb: Option<crate::gm_objective::ObjectiveVerb>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub objective_recipients: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observer: Option<String>,
 }
 
 impl LoggedGmAction {
@@ -987,6 +1040,7 @@ impl LoggedGmAction {
             effect_scope: None,
             objective_verb: None,
             objective_recipients: None,
+            observer: None,
         }
     }
 
@@ -998,6 +1052,10 @@ impl LoggedGmAction {
     ) -> Self {
         self.objective_verb = verb;
         self.objective_recipients = recipients;
+        self
+    }
+    pub fn with_observer(mut self, observer: Option<String>) -> Self {
+        self.observer = observer;
         self
     }
     pub fn with_target(mut self, target: Option<String>) -> Self {
@@ -1050,6 +1108,7 @@ impl LoggedGmAction {
             reason,
         )
         .with_target(request.action.target_id().map(str::to_string))
+        .with_observer(request.action.observer_id())
         .with_verb(request.action.verb())
         .with_lever(request.action.event_lever())
         .with_effect(None, request.action.effect_scope())
@@ -1445,6 +1504,7 @@ impl GmActionJournal {
             || result.objective_verb != grant.action.objective_verb()
             || result.objective_recipients != grant.action.objective_recipients()
             || result.target.as_deref() != grant.action.target_id()
+            || result.observer != grant.action.observer_id()
         {
             return Err("GM applied result does not match its canonical grant");
         }
@@ -1621,6 +1681,7 @@ impl GmActionJournal {
                         GmAction::IssueStationCommand { .. }
                         | GmAction::ApplyDirectEffect { .. }
                         | GmAction::SpawnPaletteEntity { .. }
+                        | GmAction::SetContactOverride { .. }
                         | GmAction::DespawnEntity { .. }
                         | GmAction::ObjectiveAction { .. } => {}
                     }
@@ -1687,6 +1748,7 @@ impl GmActionJournal {
                 GmAction::IssueStationCommand { .. }
                 | GmAction::ApplyDirectEffect { .. }
                 | GmAction::SpawnPaletteEntity { .. }
+                | GmAction::SetContactOverride { .. }
                 | GmAction::DespawnEntity { .. }
                 | GmAction::ObjectiveAction { .. } => GmActionOutcome::Applied,
             };
@@ -1706,6 +1768,7 @@ impl GmActionJournal {
                 effect_scope: grant.action.effect_scope(),
                 objective_verb: grant.action.objective_verb(),
                 objective_recipients: grant.action.objective_recipients(),
+                observer: grant.action.observer_id(),
             });
         }
         GmActionLog { entries, paused }
@@ -1788,6 +1851,7 @@ impl GmActionJournal {
                 GmAction::IssueStationCommand { .. }
                 | GmAction::ApplyDirectEffect { .. }
                 | GmAction::SpawnPaletteEntity { .. }
+                | GmAction::SetContactOverride { .. }
                 | GmAction::DespawnEntity { .. }
                 | GmAction::ObjectiveAction { .. } => GmActionOutcome::Applied,
             };
@@ -1807,6 +1871,7 @@ impl GmActionJournal {
                 effect_scope: grant.action.effect_scope(),
                 objective_verb: grant.action.objective_verb(),
                 objective_recipients: grant.action.objective_recipients(),
+                observer: grant.action.observer_id(),
             });
         }
         GmActionLog { entries, paused }
@@ -2324,6 +2389,36 @@ pub fn apply_due_actions(
             // from a scripted one. Everything that decides the RESULT (the
             // palette entry, the variant, the placement) is answered here, at
             // the agreed apply tick, so every peer commits the same outcome.
+            GmAction::SetContactOverride { ship, target, mode } => {
+                let observer = removal_targets.iter().find(|(uuid, ..)| uuid.0 == ship.0);
+                let target_live = removal_targets.iter().any(|(uuid, ..)| uuid.0 == *target);
+                match (content.as_deref_mut(), observer, target_live) {
+                    (None, _, _) => (
+                        GmActionOutcome::Refused,
+                        Some(GmActionRefusalReason::UnknownEntity),
+                    ),
+                    (Some(runtime), Some((_, _, true, true, ..)), true) if ship.0 != *target => {
+                        let changed = crate::gm_contact::set(
+                            &mut runtime.contact_overrides,
+                            &ship.0,
+                            target,
+                            *mode,
+                        );
+                        (
+                            if changed {
+                                GmActionOutcome::Applied
+                            } else {
+                                GmActionOutcome::NoOp
+                            },
+                            None,
+                        )
+                    }
+                    _ => (
+                        GmActionOutcome::Refused,
+                        Some(GmActionRefusalReason::UnknownEntity),
+                    ),
+                }
+            }
             GmAction::DespawnEntity { target } => match content.as_deref_mut() {
                 None => (
                     GmActionOutcome::Refused,
@@ -2370,6 +2465,7 @@ pub fn apply_due_actions(
                             effect_scope: None,
                             objective_verb: None,
                             objective_recipients: None,
+                            observer: None,
                         })
                         .expect("live GM result matches its canonical grant");
                     continue;
@@ -2549,6 +2645,7 @@ pub fn apply_due_actions(
                         effect_scope: None,
                         objective_verb: None,
                         objective_recipients: None,
+                        observer: None,
                     };
                     journal
                         .record_applied_result(result)
@@ -2625,6 +2722,7 @@ pub fn apply_due_actions(
                             effect_scope: None,
                             objective_verb: None,
                             objective_recipients: None,
+                            observer: None,
                         };
                         journal
                             .record_applied_result(result)
@@ -2720,6 +2818,7 @@ pub fn apply_due_actions(
                 effect_scope: requested_scope,
                 objective_verb: grant.action.objective_verb(),
                 objective_recipients: grant.action.objective_recipients(),
+                observer: grant.action.observer_id(),
             })
             .expect("live GM result matches its canonical grant");
     }
@@ -2759,6 +2858,10 @@ pub fn apply_due_actions(
 
 /// Reset the replicated GM lane at a new fleet/run boundary.
 pub fn reset(world: &mut World) {
+    if let Some(mut content) = world.get_resource_mut::<crate::world::server::WorldContentRuntime>()
+    {
+        content.contact_overrides.clear();
+    }
     // The armed direct effects go with the journal that authorised them: an
     // arm that outlived its run would land damage in the NEXT one, attributed
     // to nobody and reported on no feed (issue #1310).
@@ -2810,6 +2913,7 @@ pub(crate) fn refusal_for(
         effect_scope: proposal.action.effect_scope(),
         objective_verb: proposal.action.objective_verb(),
         objective_recipients: proposal.action.objective_recipients(),
+        observer: proposal.action.observer_id(),
     }
 }
 
@@ -4896,6 +5000,7 @@ station = "helm"
             effect_scope: None,
             objective_verb: None,
             objective_recipients: None,
+            observer: None,
             action_kind: GmActionKind::SessionPause,
             requested_active: true,
             tick: 7,
@@ -5049,6 +5154,7 @@ station = "helm"
             effect_scope: None,
             objective_verb: None,
             objective_recipients: None,
+            observer: None,
         };
         let pause = LoggedGmAction {
             operator_id: "gm-1".into(),
@@ -5066,6 +5172,7 @@ station = "helm"
             effect_scope: None,
             objective_verb: None,
             objective_recipients: None,
+            observer: None,
         };
         let station_refused = LoggedGmAction::refused(
             "gm-1".into(),
@@ -5091,6 +5198,7 @@ station = "helm"
             effect_scope: None,
             objective_verb: None,
             objective_recipients: None,
+            observer: None,
         };
         let log = GmActionLog {
             entries: vec![pause, station_applied.clone(), station_pending],
@@ -5127,6 +5235,7 @@ station = "helm"
                 effect_scope: None,
                 objective_verb: None,
                 objective_recipients: None,
+                observer: None,
             }),
             Err("pending GM result is not a Station command"),
         );
@@ -6288,6 +6397,7 @@ kind = "{id}"
             effect_scope: None,
             objective_verb: None,
             objective_recipients: None,
+            observer: None,
             action_kind: GmActionKind::DirectEffect,
             requested_active: true,
             tick: 3,

@@ -2753,3 +2753,129 @@ fn backfilled_sensors_takes_the_reading_once_the_hazard_is_in_the_suite_s_reach(
         "a hazard that has drifted into the suite's reach gets read"
     );
 }
+
+#[test]
+fn contact_override_ai_skips_concealed_nearest_and_accepts_basic_reveal_without_hostility() {
+    let (mut app, _, harrow) = sensors_ai_test_app_with_factions();
+    let ship = app
+        .world_mut()
+        .query_filtered::<Entity, With<crate::server_app::Ship>>()
+        .single(app.world())
+        .unwrap();
+    app.world_mut()
+        .entity_mut(ship)
+        .insert(crate::entities::spawner::EntityUuid("observer".into()));
+    let near = uuid::Uuid::new_v4().to_string();
+    let far = uuid::Uuid::new_v4().to_string();
+    spawn_faction_contact(&mut app, &near, 10.0, 0.0, harrow);
+    spawn_faction_contact(&mut app, &far, 20.0, 0.0, harrow);
+    crate::gm_contact::set(
+        &mut app
+            .world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .contact_overrides,
+        "observer",
+        &near,
+        crate::gm_contact::ContactMode::Conceal,
+    );
+    tick_sensors_ai(&mut app);
+    assert_eq!(get_sensors_target(&mut app).as_deref(), Some(far.as_str()));
+    let mut app = sensors_ai_test_app();
+    let ship = app
+        .world_mut()
+        .query_filtered::<Entity, With<crate::server_app::Ship>>()
+        .single(app.world())
+        .unwrap();
+    let cfg = crate::entities::config::FineSystemAiSelectorToml {
+        param: Default::default(),
+        sources: vec!["radar-contacts".into()],
+        horizon: 100.0,
+        switch_margin: 0.0,
+        eligibility: "candidate_fact(detectable) > 0".into(),
+        score: vec![crate::entities::config::ScoreTermToml {
+            when: "candidate_fact(source_radar) > 0".into(),
+            weight: 1.0,
+        }],
+    };
+    app.world_mut().entity_mut(ship).insert((
+        crate::entities::spawner::EntityUuid("observer".into()),
+        SensorsTargetSelector {
+            selector: cfg.to_selector().unwrap(),
+            power_rating: None,
+        },
+    ));
+    spawn_target_at(&mut app, "revealed", 0.0, -10000.0);
+    tick_sensors_ai(&mut app);
+    assert_eq!(get_sensors_target(&mut app), None);
+    crate::gm_contact::set(
+        &mut app
+            .world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .contact_overrides,
+        "observer",
+        "revealed",
+        crate::gm_contact::ContactMode::Reveal,
+    );
+    tick_sensors_ai(&mut app);
+    assert_eq!(get_sensors_target(&mut app).as_deref(), Some("revealed"));
+    // Missing hostility is unknown, not a false/neutral reading. A policy
+    // requiring measured hostility must still refuse this same basic contact.
+    let mut classified = cfg;
+    classified.eligibility = "candidate_fact(hostile) > 0".into();
+    app.world_mut()
+        .entity_mut(ship)
+        .insert(SensorsTargetSelector {
+            selector: classified.to_selector().unwrap(),
+            power_rating: None,
+        });
+    tick_sensors_ai(&mut app);
+    assert_eq!(get_sensors_target(&mut app), None);
+}
+
+#[test]
+fn concealed_contact_stops_low_fidelity_frequency_hints_until_normal() {
+    let mut app = test_app();
+    start_game_with_sensors_and_tactical(&mut app);
+    let ship = app
+        .world_mut()
+        .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
+        .single(app.world())
+        .unwrap();
+    app.world_mut()
+        .entity_mut(ship)
+        .insert(crate::entities::spawner::EntityUuid("observer".into()));
+    app.init_resource::<crate::world::server::WorldContentRuntime>();
+    crate::gm_contact::set(
+        &mut app
+            .world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .contact_overrides,
+        "observer",
+        "target",
+        crate::gm_contact::ContactMode::Conceal,
+    );
+    set_local_weapons_target(&mut app, Some("target".into()));
+    tick(&mut app);
+    assert!(!app
+        .world()
+        .resource::<EnqueueLog>()
+        .0
+        .iter()
+        .any(|row| matches!(row.payload, CoordinationPayload::FrequencyHint { .. })));
+    crate::gm_contact::set(
+        &mut app
+            .world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .contact_overrides,
+        "observer",
+        "target",
+        crate::gm_contact::ContactMode::Normal,
+    );
+    tick(&mut app);
+    assert!(app
+        .world()
+        .resource::<EnqueueLog>()
+        .0
+        .iter()
+        .any(|row| matches!(row.payload, CoordinationPayload::FrequencyHint { .. })));
+}

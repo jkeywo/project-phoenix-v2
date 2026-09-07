@@ -86,6 +86,14 @@ pub fn remove_entity(world: &mut World, entity: Entity) {
     let Some(uuid) = world.get::<EntityUuid>(entity).map(|uuid| uuid.0.clone()) else {
         return;
     };
+    if let Some(mut content) = world.get_resource_mut::<crate::world::server::WorldContentRuntime>()
+    {
+        content.contact_overrides.remove(&uuid);
+        for rows in content.contact_overrides.values_mut() {
+            rows.remove(&uuid);
+        }
+        content.contact_overrides.retain(|_, rows| !rows.is_empty());
+    }
     // Close presentation activations in stable slot order, including starts
     // still queued this tick. Independent component clears below commute.
     use crate::core::task_lifecycle::{TaskLifecycleRequest, TaskLifecycles, TaskTerminalReason};

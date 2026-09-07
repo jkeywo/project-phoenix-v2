@@ -1015,6 +1015,8 @@ fn encode_chatter_wire_shape_matches_js_handler() {
 fn encode_gm_entity_projection_pins_the_local_host_channel_shape() {
     let payload = crate::gm_projection::GmEntityProjectionPayload {
         despawn_results: Vec::new(),
+        contact_results: Vec::new(),
+        contact_overrides: Default::default(),
         entities: vec![
             crate::gm_projection::GmEntityProjection {
                 removable: false,

@@ -243,7 +243,11 @@ pub(crate) fn spawn_viewscreen_radar_widgets(
             console_radar: ConsoleRadar::ViewscreenScience,
             range: science_radar.range,
             orientation: OrientationMode::WorldFixed,
-            filter: radar_filter_from_shows(&science_radar.shows),
+            filter: {
+                let mut filter = radar_filter_from_shows(&science_radar.shows);
+                filter.0.insert(crate::gm_contact::BASIC_RADAR_TAG.into());
+                filter
+            },
             world_centred: false,
             auto_scale: None,
         },
@@ -309,11 +313,17 @@ pub(crate) fn spawn_viewscreen_radar_widgets(
 pub(crate) fn sync_server_radar_bridge(
     mut commands: Commands,
     world: Option<Res<WorldResource>>,
+    contact_runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    observer_q: Query<&crate::entities::spawner::EntityUuid, With<crate::server_app::LocalShip>>,
     view_mode_q: Query<&crate::ship::state::ShipViewMode, With<crate::server_app::LocalShip>>,
     physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,
-    ship_id_q: Query<&crate::entities::spawner::EntityUuid, With<crate::server_app::LocalShip>>,
     objectives: Option<Res<crate::world::server::ObjectiveManagerRes>>,
-    mut widgets: Query<(Entity, &ConsoleRadar, &mut RadarBlipMap)>,
+    mut widgets: Query<(
+        Entity,
+        &ConsoleRadar,
+        &crate::gui::radar::GenericRadarWidget,
+        &mut RadarBlipMap,
+    )>,
 ) {
     let Some(world) = world else { return };
     let view_mode = view_mode_q
@@ -325,7 +335,9 @@ pub(crate) fn sync_server_radar_bridge(
     let Some(active) = view_mode_to_console_radar(&view_mode) else {
         return;
     };
-    let Some((widget, _, mut map)) = widgets.iter_mut().find(|(_, c, _)| **c == active) else {
+    let Some((widget, _, settings, mut map)) =
+        widgets.iter_mut().find(|(_, c, _, _)| **c == active)
+    else {
         return;
     };
     let physics = physics_q.single().ok().copied().unwrap_or_default();
@@ -334,10 +346,28 @@ pub(crate) fn sync_server_radar_bridge(
         .map(|manager| {
             manager
                 .0
-                .snapshots_for(ship_id_q.single().map_or("", |id| &id.0))
+                .snapshots_for(observer_q.single().map_or("", |id| &id.0))
         })
         .unwrap_or_default();
     let entities = crate::objectives::project_entity_targets(&world.0.entities, &scoped_objectives);
+    let projected = if active == ConsoleRadar::ViewscreenScience {
+        observer_q
+            .single()
+            .ok()
+            .and_then(|observer| contact_runtime.as_ref()?.contact_overrides.get(&observer.0))
+            .map(|rows| {
+                crate::gm_contact::viewscreen_contacts(
+                    &entities,
+                    rows,
+                    physics.x,
+                    physics.z,
+                    settings.range,
+                    &settings.filter.0,
+                )
+            })
+    } else {
+        None
+    };
     bridge_sim_to_radar(
         &mut commands,
         widget,
@@ -347,7 +377,7 @@ pub(crate) fn sync_server_radar_bridge(
             z: physics.z,
             yaw: physics.yaw,
         },
-        &entities,
+        projected.as_deref().unwrap_or(&entities),
     );
 }
 
@@ -517,8 +547,17 @@ mod tests {
             .world_mut()
             .spawn((LocalShip, EntityUuid("ship-b".into()), view_mode))
             .id();
-        app.world_mut()
-            .spawn((ConsoleRadar::ViewscreenNav, RadarBlipMap::default()));
+        app.world_mut().spawn((
+            ConsoleRadar::ViewscreenNav,
+            RadarBlipMap::default(),
+            crate::gui::radar::GenericRadarWidget {
+                range: 100.0,
+                orientation: OrientationMode::WorldFixed,
+                filter: RadarFilter(["objective_marker".into()].into_iter().collect()),
+                clip_mode: RadarClipMode::None,
+                face_fraction: 1.0,
+            },
+        ));
         {
             let manager = &mut app
                 .world_mut()
@@ -601,5 +640,107 @@ mod tests {
                 .all(|entity| entity.objective_target),
             "presentation must not overwrite even stale shared metadata"
         );
+    }
+}
+
+#[cfg(test)]
+mod contact_override_tests {
+    use super::*;
+    use crate::gui::radar::{BlipLabel, BlipWorldPose, GenericRadarWidget, RadarAppearance};
+    use bevy::ecs::system::RunSystemOnce;
+    #[test]
+    fn sensors_viewscreen_bridge_preserves_normal_and_reconciles_conceal_and_basic_reveal() {
+        let mut app = App::new();
+        app.init_resource::<WorldResource>()
+            .init_resource::<crate::world::server::WorldContentRuntime>();
+        app.world_mut().spawn((
+            crate::server_app::LocalShip,
+            crate::entities::spawner::EntityUuid("observer".into()),
+            ShipPhysics::default(),
+            {
+                let mut mode = crate::ship::state::ShipViewMode::default();
+                mode.view_mode = ViewMode::SensorsRadar;
+                mode
+            },
+        ));
+        let widget = app
+            .world_mut()
+            .spawn((
+                ConsoleRadar::ViewscreenScience,
+                RadarBlipMap::default(),
+                GenericRadarWidget {
+                    range: 100.0,
+                    orientation: OrientationMode::WorldFixed,
+                    filter: RadarFilter(
+                        ["ship".into(), crate::gm_contact::BASIC_RADAR_TAG.into()]
+                            .into_iter()
+                            .collect(),
+                    ),
+                    clip_mode: RadarClipMode::Circle,
+                    face_fraction: 1.0,
+                },
+            ))
+            .id();
+        app.world_mut().resource_mut::<WorldResource>().0.entities =
+            vec![crate::core::messages::EntitySnapshot {
+                uuid: "target".into(),
+                name: Some("protected name".into()),
+                tags: vec!["ship".into()],
+                position: Some([200.0, 0.0, 0.0]),
+                radar_icon: Some("ship".into()),
+                hull_fraction: Some(0.2),
+                ..Default::default()
+            }];
+        for mode in [
+            crate::gm_contact::ContactMode::Reveal,
+            crate::gm_contact::ContactMode::Conceal,
+            crate::gm_contact::ContactMode::Normal,
+        ] {
+            crate::gm_contact::set(
+                &mut app
+                    .world_mut()
+                    .resource_mut::<crate::world::server::WorldContentRuntime>()
+                    .contact_overrides,
+                "observer",
+                "target",
+                mode,
+            );
+            app.world_mut()
+                .run_system_once(sync_server_radar_bridge)
+                .unwrap();
+            let map = app.world().get::<RadarBlipMap>(widget).unwrap();
+            if mode == crate::gm_contact::ContactMode::Conceal {
+                assert!(!map.blips.contains_key("target"));
+                continue;
+            }
+            let source = map.blips["target"];
+            let appearance = app.world().get::<RadarAppearance>(source).unwrap();
+            let pose = app.world().get::<BlipWorldPose>(source).unwrap();
+            if mode == crate::gm_contact::ContactMode::Reveal {
+                assert_eq!(
+                    appearance.icon.as_deref(),
+                    Some(crate::gm_contact::BASIC_RADAR_ICON)
+                );
+                assert!(pose.x.abs() < 100.0);
+                assert_eq!(
+                    app.world().get::<BlipLabel>(source).unwrap().0.as_deref(),
+                    Some("console.sensors.basic_contact")
+                );
+                assert!(crate::gui::radar::project_radar_entity(
+                    pose.x,
+                    pose.z,
+                    0.0,
+                    0.0,
+                    0.0,
+                    100.0,
+                    2.0,
+                    &OrientationMode::WorldFixed
+                )
+                .is_some());
+            } else {
+                assert_eq!(appearance.icon.as_deref(), Some("ship"));
+                assert_eq!(pose.x, 200.0);
+            }
+        }
     }
 }

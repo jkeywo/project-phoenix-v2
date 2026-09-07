@@ -1475,6 +1475,70 @@ mod tests {
     }
 
     #[test]
+    fn pre_contact_override_scenario_ron_keeps_metadata_and_reaches_format_refusal() {
+        let store = FakeStore::default();
+        let current =
+            vellum_save::Versions::new(crate::snapshot::SNAPSHOT_FORMAT, "rules-a", 0x1234);
+        let mut old = stored_run(
+            42,
+            "historical-scenario",
+            1309,
+            vellum_save::Versions::new(27, "rules-a", 0x1234),
+        );
+        old.snapshot.as_mut().unwrap().state.scenario =
+            Some(crate::snapshot::ScenarioState::default());
+        let mut ron = old.to_ron().unwrap();
+        // Remove the new field itself: merely editing the version number leaves
+        // a current-shaped payload and cannot exercise historical deserialization.
+        let start = ron
+            .find("contact_overrides:")
+            .expect("current scenario writes its contact map");
+        let end = start + ron[start..].find('}').unwrap() + 1;
+        assert!(ron[start..end].ends_with("{}"));
+        let comma = end + ron[end..].find(',').unwrap();
+        assert!(ron[end..comma].trim().is_empty());
+        ron.replace_range(start..=comma, "");
+        assert!(!ron.contains("contact_overrides"));
+        store.put(SLOT_A, &ron);
+        let parsed = crate::snapshot::StoredRun::from_ron(&ron).unwrap();
+        assert!(parsed
+            .snapshot
+            .unwrap()
+            .state
+            .scenario
+            .unwrap()
+            .contact_overrides
+            .is_empty());
+        let entries = list_slots(&store, &current).unwrap();
+        let entry = manual_entry(&entries, SLOT_A);
+        let summary = entry
+            .record
+            .as_ref()
+            .expect("historical metadata survives parsing");
+        assert_eq!(summary.scenario, "historical-scenario");
+        assert_eq!(summary.seed, 1309);
+        assert_eq!(summary.capture_tick, 42);
+        assert!(matches!(
+            &entry.start,
+            StartState::Refused(crate::snapshot::LoadRefusal::Moved(
+                vellum_save::Moved::Format { .. }
+            ))
+        ));
+        assert!(matches!(
+            load_slot(&store, SLOT_A, &current),
+            Err(crate::snapshot::LoadRefusal::Moved(
+                vellum_save::Moved::Format { .. }
+            ))
+        ));
+        assert!(matches!(
+            crate::snapshot::load_from(&store, SLOT_A, &current),
+            Err(crate::snapshot::LoadRefusal::Moved(
+                vellum_save::Moved::Format { .. }
+            ))
+        ));
+    }
+
+    #[test]
     fn unfrozen_catalogue_defers_only_content_and_full_load_still_refuses_it() {
         let store = FakeStore::default();
         let current = current_versions();

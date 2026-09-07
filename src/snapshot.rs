@@ -614,7 +614,8 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// judgement formats 21 and 22 made about the facts they added.
 /// `27` — #1306 preserves accepted removals waiting for the fixed pipeline.
 /// `28` — #1307 retains Objective records, recipient scope and terminal status.
-pub const SNAPSHOT_FORMAT: u32 = 28;
+/// Format 29 persists per-observer contact overrides without granting scan knowledge.
+pub const SNAPSHOT_FORMAT: u32 = 29;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -2122,6 +2123,10 @@ pub struct ScenarioState {
     pub pending_gm_spawns: Vec<crate::gm_spawn::PendingGmSpawn>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_gm_despawns: Vec<String>,
+    // Historical scenarios must parse so the version gate can refuse them
+    // while the save catalogue still retains their scenario/seed/tick metadata.
+    #[serde(default)]
+    pub contact_overrides: crate::gm_contact::ContactOverrides,
     /// `WorldContentRuntime::paused_gm_events` (issue #1303): the
     /// layer-qualified ids of GM-operable events a Game Master has paused.
     ///
@@ -2940,6 +2945,7 @@ fn capture_scenario(world: &World) -> Option<ScenarioState> {
         // is every shipped world today.
         pending_gm_spawns: runtime.pending_gm_spawns.clone(),
         pending_gm_despawns: runtime.pending_gm_despawns.clone(),
+        contact_overrides: runtime.contact_overrides.clone(),
         // The GM's paused events (issue #1303). Empty — and so absent from the
         // payload — for every world that authors no pausable event, which is
         // every shipped world today.
@@ -5692,6 +5698,7 @@ fn restore_scenario(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
         // that decides which draws which uuid.
         runtime.pending_gm_spawns = stored.pending_gm_spawns.clone();
         runtime.pending_gm_despawns = stored.pending_gm_despawns.clone();
+        runtime.contact_overrides = stored.contact_overrides.clone();
         // The GM's paused events (issue #1303). Wholesale replacement on the
         // same rule and for the sharper reason on `ScenarioState`: a
         // freshly-loaded world pauses nothing, so anything short of replacement

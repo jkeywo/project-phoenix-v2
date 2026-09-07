@@ -199,6 +199,7 @@ pub struct WorldContentRuntime {
     pub pending_gm_spawns: Vec<crate::gm_spawn::PendingGmSpawn>,
     /// Canonically ordered UUID removals accepted before the fixed pipeline.
     pub pending_gm_despawns: Vec<String>,
+    pub contact_overrides: crate::gm_contact::ContactOverrides,
     /// Layer-qualified ids of GM-operable events a Game Master has PAUSED
     /// (issue #1303).
     ///

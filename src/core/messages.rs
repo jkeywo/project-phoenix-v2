@@ -5637,6 +5637,8 @@ pub struct ViewscreenBlackboard {
 /// blackboard (issue #566).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SensorsBlackboard {
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub contact_overrides: std::collections::BTreeMap<String, crate::gm_contact::ContactMode>,
     /// Detection range for the long-range radar widget, in world units.
     #[serde(default = "default_sensors_radar_range")]
     pub radar_range: f32,
@@ -5656,6 +5658,7 @@ impl Default for SensorsBlackboard {
     fn default() -> Self {
         Self {
             radar_range: default_sensors_radar_range(),
+            contact_overrides: Default::default(),
             radar_shows: Vec::new(),
             radar_selects: Vec::new(),
             science_target_uuid: None,

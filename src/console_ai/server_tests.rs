@@ -3455,3 +3455,44 @@ fn ai_torpedo_load_flag_guard_reads_the_world_in_both_directions() {
         "with the world flag set the same guard must fire the load order"
     );
 }
+
+#[test]
+fn concealed_contact_stops_high_fidelity_frequency_hints_until_normal() {
+    let mut app = freq_hint_test_app();
+    let source = app.world().resource::<SourceShip>().0;
+    app.world_mut()
+        .entity_mut(source)
+        .insert(crate::entities::spawner::EntityUuid("observer".into()));
+    crate::gm_contact::set(
+        &mut app
+            .world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .contact_overrides,
+        "observer",
+        "target-1",
+        crate::gm_contact::ContactMode::Conceal,
+    );
+    tick_with_dt(&mut app, 4.0);
+    assert!(!app
+        .world()
+        .resource::<CoordBox>()
+        .0
+        .iter()
+        .any(|row| matches!(row.payload, CoordinationPayload::FrequencyHint { .. })));
+    crate::gm_contact::set(
+        &mut app
+            .world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .contact_overrides,
+        "observer",
+        "target-1",
+        crate::gm_contact::ContactMode::Normal,
+    );
+    tick_with_dt(&mut app, 4.0);
+    assert!(app
+        .world()
+        .resource::<CoordBox>()
+        .0
+        .iter()
+        .any(|row| matches!(row.payload, CoordinationPayload::FrequencyHint { .. })));
+}

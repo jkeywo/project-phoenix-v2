@@ -155,9 +155,14 @@ impl Plugin for ShipSensorsPlugin {
 /// (player + NPC), matching how `tick_sensors_frequency_hint` already
 /// handles both.
 pub fn handle_sensors_messages(
+    content: Option<Res<crate::world::server::WorldContentRuntime>>,
+    snapshot: Option<Res<crate::lobby::WorldResource>>,
     mut ship_query: Query<
         (
             Entity,
+            Option<&crate::entities::spawner::EntityUuid>,
+            Option<&crate::server_app::ShipSystemBlackboards>,
+            Option<&crate::ship::state::ShipPhysics>,
             &crate::core::messages::AdmittedCommands,
             &crate::ship_plugin::ShipConfigComponent,
             &mut SensorRadarSelection,
@@ -174,7 +179,16 @@ pub fn handle_sensors_messages(
         ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
     >,
 ) {
-    for (entity, admitted, ship_config, mut entity_target, control_sources) in ship_query.iter_mut()
+    for (
+        entity,
+        observer_uuid,
+        blackboards,
+        physics,
+        admitted,
+        ship_config,
+        mut entity_target,
+        control_sources,
+    ) in ship_query.iter_mut()
     {
         for cmd in admitted.for_target(crate::ship::system_registry::SENSORS_SYSTEM_ID) {
             let uuid = match &cmd.payload {
@@ -193,6 +207,21 @@ pub fn handle_sensors_messages(
                 _ => continue,
             };
 
+            let contact_mode = observer_uuid
+                .and_then(|observer| {
+                    content.as_ref().map(|runtime| {
+                        crate::gm_contact::mode(&runtime.contact_overrides, &observer.0, uuid)
+                    })
+                })
+                .unwrap_or_default();
+            if contact_mode == crate::gm_contact::ContactMode::Conceal {
+                crate::command_admission::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    ActionFeedbackOutcome::Refused,
+                );
+                continue;
+            }
             // Write to this ship's own SensorRadarSelection component (player or NPC).
             entity_target.0 = Some(uuid.clone());
             crate::command_admission::finish_action_feedback(
@@ -204,10 +233,40 @@ pub fn handle_sensors_messages(
             // Resolve a human-readable label for the target, falling back to
             // the raw uuid if no matching EntityName is found (e.g. asteroids
             // don't carry EntityName).
-            let label = entity_name_q
-                .iter()
-                .find_map(|(u, n)| (u.0 == *uuid).then(|| n.0.clone()))
-                .unwrap_or_else(|| uuid.clone());
+            let ordinarily_visible = blackboards
+                .and_then(|bbs| {
+                    bbs.0.values().find_map(|bb| match bb {
+                        SystemBlackboard::Sensors(bb) => Some(bb),
+                        _ => None,
+                    })
+                })
+                .zip(physics)
+                .is_some_and(|(bb, physics)| {
+                    snapshot.as_ref().is_some_and(|snapshot| {
+                        snapshot.0.entities.iter().any(|target| {
+                            target.uuid == *uuid
+                                && target.radar_icon.is_some()
+                                && (target.x() - physics.x).hypot(target.z() - physics.z)
+                                    <= bb.radar_range
+                                && (bb.radar_shows.is_empty()
+                                    || target.tags.iter().any(|tag| {
+                                        bb.radar_shows
+                                            .iter()
+                                            .any(|show| show.eq_ignore_ascii_case(tag))
+                                    })
+                                    || target.objective_target)
+                        })
+                    })
+                });
+            let label =
+                if contact_mode == crate::gm_contact::ContactMode::Reveal && !ordinarily_visible {
+                    "console.sensors.basic_contact".to_string()
+                } else {
+                    entity_name_q
+                        .iter()
+                        .find_map(|(u, n)| (u.0 == *uuid).then(|| n.0.clone()))
+                        .unwrap_or_else(|| uuid.clone())
+                };
 
             let sender_origin = control_sources
                 .0
@@ -264,9 +323,11 @@ pub fn handle_sensors_messages(
 /// and `sender_origin` below is a routing tag stamped after that decision, never
 /// an input to it.
 pub fn tick_sensors_frequency_hint(
+    contact_runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     mut ship_q: Query<
         (
             Entity,
+            Option<&crate::entities::spawner::EntityUuid>,
             &crate::server_app::ShipSystemBlackboards,
             &crate::ship_plugin::ShipSystemControlSources,
             &crate::ship_plugin::ShipConfigComponent,
@@ -281,8 +342,15 @@ pub fn tick_sensors_frequency_hint(
         &crate::ship::shields::ShipShields,
     )>,
 ) {
-    for (entity, blackboards, control_sources, ship_config, mut state, is_high_fidelity) in
-        ship_q.iter_mut()
+    for (
+        entity,
+        observer_uuid,
+        blackboards,
+        control_sources,
+        ship_config,
+        mut state,
+        is_high_fidelity,
+    ) in ship_q.iter_mut()
     {
         // LOD split only (issue #873) — see this system's doc comment. Do NOT
         // re-add an `operate_ai` conjunct here: it would put the emission of a
@@ -308,6 +376,23 @@ pub fn tick_sensors_frequency_hint(
             }
         };
 
+        if observer_uuid
+            .and_then(|observer| {
+                contact_runtime.as_ref().map(|runtime| {
+                    crate::gm_contact::mode(
+                        &runtime.contact_overrides,
+                        &observer.0,
+                        &current_target,
+                    )
+                })
+            })
+            .unwrap_or_default()
+            == crate::gm_contact::ContactMode::Conceal
+        {
+            state.last_sent_target = None;
+            state.last_sent_frequency = None;
+            continue;
+        }
         // Look up the target entity's shield frequency; fall back to 0.5.
         let frequency = target_shields_q
             .iter()
@@ -479,6 +564,7 @@ pub struct SensorScanSurfaces<'w, 's> {
 /// (> configured `threat_bearing_epsilon_rad`, default ~10°). Iterates every ship
 /// (player + NPC) so AI sensors feed AI shields through the coordination bus.
 pub fn tick_sensors_threat_warning(
+    content: Option<Res<crate::world::server::WorldContentRuntime>>,
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
     faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
     // The two threat-candidate position surfaces bundled as one `SystemParam`
@@ -565,6 +651,12 @@ pub fn tick_sensors_threat_warning(
         // Find the closest enemy within sensor range.
         let mut closest: Option<(String, f32, f32, f32)> = None; // uuid, dx, dz, dist_sq
         for (other_uuid, ox, oz, other_faction) in &candidates {
+            if content.as_ref().is_some_and(|runtime| {
+                crate::gm_contact::mode(&runtime.contact_overrides, &self_uuid.0, other_uuid)
+                    == crate::gm_contact::ContactMode::Conceal
+            }) {
+                continue;
+            }
             if other_uuid == &self_uuid.0 {
                 continue;
             }
@@ -673,9 +765,11 @@ pub fn tick_sensors_threat_warning(
 ///   only, so they are gated on `is_local`; NPCs don't render a radar and
 ///   get empty filters.
 pub fn publish_sensors_blackboard(
+    content: Option<Res<crate::world::server::WorldContentRuntime>>,
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
     mut ships_q: Query<
         (
+            Option<&crate::entities::spawner::EntityUuid>,
             Option<&SensorRadarSelection>,
             Option<&crate::modifiers::ShipModifiers>,
             Option<&crate::ai::server::AiProfile>,
@@ -686,7 +780,7 @@ pub fn publish_sensors_blackboard(
     >,
 ) {
     let cfg = &ship_config.0;
-    for (sensors_target, modifiers, ai_profile, mut bbs, is_local) in ships_q.iter_mut() {
+    for (uuid, sensors_target, modifiers, ai_profile, mut bbs, is_local) in ships_q.iter_mut() {
         let radar_mult = modifiers
             .map(|m| m.get(&ModifierSlot::SensorRadarRange))
             .unwrap_or(1.0);
@@ -708,11 +802,18 @@ pub fn publish_sensors_blackboard(
         } else {
             (Vec::new(), Vec::new())
         };
+        let overrides = uuid
+            .and_then(|uuid| content.as_ref()?.contact_overrides.get(&uuid.0))
+            .cloned()
+            .unwrap_or_default();
         let bb = SensorsBlackboard {
+            contact_overrides: overrides.clone(),
             radar_range: base_range * radar_mult,
             radar_shows,
             radar_selects,
-            science_target_uuid: sensors_target.and_then(|st| st.0.clone()),
+            science_target_uuid: sensors_target.and_then(|st| st.0.clone()).filter(|target| {
+                overrides.get(target) != Some(&crate::gm_contact::ContactMode::Conceal)
+            }),
         };
         bbs.0.insert(
             SystemId(crate::ship::system_registry::SENSORS_SYSTEM_ID.to_string()),
@@ -728,8 +829,10 @@ pub fn publish_sensors_blackboard(
 /// Reading the ship's own selection here is the sensor-radar authority, not a
 /// cross-system read (spec §3).
 pub fn publish_sensor_radar_blackboard(
+    content: Option<Res<crate::world::server::WorldContentRuntime>>,
     mut ships_q: Query<
         (
+            Option<&crate::entities::spawner::EntityUuid>,
             Option<&SensorRadarSelection>,
             Option<&crate::ship::state::ShipPhysics>,
             &mut crate::server_app::ShipSystemBlackboards,
@@ -773,8 +876,16 @@ pub fn publish_sensor_radar_blackboard(
         With<crate::server_app::Ship>,
     >,
 ) {
-    for (sensors_target, own_physics, mut bbs) in ships_q.iter_mut() {
-        let selected_target = sensors_target.and_then(|st| st.0.clone());
+    for (uuid, sensors_target, own_physics, mut bbs) in ships_q.iter_mut() {
+        let selected_target = sensors_target.and_then(|st| st.0.clone()).filter(|target| {
+            uuid.and_then(|uuid| {
+                content.as_ref().map(|content| {
+                    crate::gm_contact::mode(&content.contact_overrides, &uuid.0, target)
+                })
+            })
+            .unwrap_or_default()
+                != crate::gm_contact::ContactMode::Conceal
+        });
         // Resolve the selected target's authoritative Red Alert state. `Some(..)`
         // only when the selection names a Red-Alert-capable ship; `None` for no
         // selection, a non-ship contact, or an incapable target.
@@ -973,6 +1084,7 @@ fn debris_candidate(
 /// by a single unit test. The rate is unchanged: the derived slower snapshot
 /// cadence, `[global] ai_tick_hz / ai_snapshot_hz` base ticks apart.
 pub fn operate_sensors_ai(
+    content: Option<Res<crate::world::server::WorldContentRuntime>>,
     sessions: Res<crate::lobby::Sessions>,
     mut ships: Query<
         (
@@ -1268,7 +1380,16 @@ pub fn operate_sensors_ai(
             let self_uuid = entity_uuid.map(|u| u.0.as_str()).unwrap_or("");
             let entities: Vec<crate::ai::AiWorldEntity> = hostile_candidates
                 .iter()
-                .filter(|(u, _, _)| u != self_uuid)
+                .filter(|(u, _, _)| {
+                    u != self_uuid
+                        && content
+                            .as_ref()
+                            .map(|runtime| {
+                                crate::gm_contact::mode(&runtime.contact_overrides, self_uuid, u)
+                                    != crate::gm_contact::ContactMode::Conceal
+                            })
+                            .unwrap_or(true)
+                })
                 .filter_map(|(u, pos, faction)| {
                     Some(crate::ai::AiWorldEntity {
                         uuid: uuid::Uuid::parse_str(u).ok()?,
@@ -1343,7 +1464,53 @@ pub fn operate_sensors_ai(
         // tick (AC4). The scenario flag chain is anchored at the layer that
         // spawned this ship (issue #891 stage 2).
         let flag_chain = ai_env.flag_chain(ship_entity);
-        let decided = selector_comp.selector.select(
+        candidates.retain(|candidate| {
+            entity_uuid
+                .and_then(|observer| {
+                    content.as_ref().map(|runtime| {
+                        crate::gm_contact::mode(
+                            &runtime.contact_overrides,
+                            &observer.0,
+                            &candidate.uuid,
+                        )
+                    })
+                })
+                .unwrap_or_default()
+                != crate::gm_contact::ContactMode::Conceal
+        });
+        let mut selector = selector_comp.selector.clone();
+        candidates.retain(|candidate| {
+            let dx = candidate.position[0] - physics.x;
+            let dz = candidate.position[2] - physics.z;
+            dx.hypot(dz) <= selector.horizon
+        });
+        // Reveal supplies position and detectability only; authored eligibility still decides.
+        if let Some(rows) =
+            entity_uuid.and_then(|observer| content.as_ref()?.contact_overrides.get(&observer.0))
+        {
+            for (uuid, mode) in rows {
+                if *mode != crate::gm_contact::ContactMode::Reveal
+                    || candidates.iter().any(|candidate| candidate.uuid == *uuid)
+                {
+                    continue;
+                }
+                if let Some((_, _, transform)) = entity_q.iter().find(|(id, ..)| id.0 == *uuid) {
+                    let mut facts = crate::world::flags::AiFacts::new();
+                    facts.set_fact(crate::entities::ai_flag_hosts::DETECTABLE, 1.0);
+                    facts.set_fact(crate::entities::ai_flag_hosts::SOURCE_RADAR, 1.0);
+                    selector.horizon = selector.horizon.max(
+                        (transform.translation.x - physics.x)
+                            .hypot(transform.translation.z - physics.z),
+                    );
+                    candidates.push(SelectorCandidate {
+                        uuid: uuid.clone(),
+                        position: transform.translation.to_array(),
+                        facts,
+                    });
+                }
+            }
+        }
+        let decided = selector.select(
             &self_ctx,
             &candidates,
             sensors_target.0.as_deref(),

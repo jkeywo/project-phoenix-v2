@@ -783,6 +783,74 @@ test('rendererless GM maps and inspects stable local ship truth', { tag: '@core'
 // at the pure/DOM-controller level in tests/client/gm-knowledge-compare.test.js;
 // what only a real end-to-end run proves is that the actual WASM wiring
 // renders something at all (issue #1318 review, finding 6).
+test('a GM changes Reveal Conceal Normal for one real observing fleet ship', { tag: '@core' }, async ({ context }) => {
+  test.setTimeout(120_000);
+  const ship = await context.newPage();
+  const shipErrors = captureServerPageErrors(ship);
+  await ship.goto('/?scenario=assets/worlds/default.toml');
+  await waitForWasmReady(ship);
+  await ship.evaluate(() => window.__hostFleetOpen());
+  await waitForJoinCode(ship, 'fleet-code', 30_000);
+  const code = await ship.locator('#fleet-code').textContent();
+  const gm = await context.newPage();
+  const gmErrors = captureServerPageErrors(gm);
+  await gm.goto('/?scenario=assets/worlds/default.toml');
+  await waitForWasmReady(gm); await joinFleetAsGm(gm, code);
+  await gm.locator('#gm-ready-btn').click();
+  await Promise.all([ship.waitForFunction(() => window.__saveSlotsPhase === 'InProgress'), gm.waitForFunction(() => window.__saveSlotsPhase === 'InProgress')]);
+  await gm.waitForFunction(() => document.querySelectorAll('#gm-contact-observer option').length > 1);
+  const observer = await gm.locator('#gm-contact-observer option').nth(1).getAttribute('value');
+  await gm.locator('#gm-contact-observer').selectOption(observer);
+  const map = gm.locator('#gm-entity-map');
+  await map.scrollIntoViewIfNeeded(); await map.focus();
+  for (let index = 0; index < 30; index++) {
+    await map.press('ArrowRight');
+    if (await gm.locator('#gm-contact-reveal').isEnabled()) break;
+  }
+  const target = await gm.evaluate(() => window.__hostGmContactState().target);
+  expect(target).toBeTruthy(); expect(target).not.toBe(observer);
+  const hostId = await readHostPeerId(ship);
+  let phone = await createTestClient(context, hostId, { name: 'Contact observer' });
+  const phonePicture = async () => phone.page.evaluate(async target => {
+    const { ClientSimState } = await import('/gui/sim-state.js');
+    const { buildSensorsConsoleState } = await import('/gui/console-state.js');
+    const state = new ClientSimState();
+    for (const message of window.__messages) state.apply(message);
+    const picture = JSON.parse(buildSensorsConsoleState(state));
+    const sensorsId = Object.keys(state.blackboardKinds).find(id => state.blackboardKinds[id] === 'Sensors');
+    return { mode: state.blackboards[sensorsId]?.contact_overrides?.[target] || 'normal',
+      contact: picture.blips.find(blip => blip.uuid === target) || null };
+  }, target);
+  await gm.evaluate(() => {
+    const submit = window.__hostSetContactOverride;
+    window.__hostSetContactOverride = request => { window.__contactLastRequest = request; return submit(request); };
+  });
+  for (const mode of ['reveal', 'conceal', 'normal']) {
+    await gm.locator(`#gm-contact-${mode}`).click();
+    await gm.waitForFunction(({ observer, target, mode }) => {
+      const state = window.__hostGmContactState();
+      return state.pending === null && (state.overrides[observer]?.[target] || 'normal') === mode;
+    }, { observer, target, mode });
+    await expect(gm.locator('#gm-contact-mode')).toHaveText(ts(`server.gm.contact.${mode}`));
+    await expect.poll(async () => (await phonePicture()).mode).toBe(mode);
+    if (mode === 'reveal') await expect.poll(async () => !!(await phonePicture()).contact).toBe(true);
+    if (mode === 'conceal') {
+      await expect.poll(async () => (await phonePicture()).contact).toBeNull();
+      const token = phone.token; await phone.close();
+      phone = await createTestClient(context, hostId, { token, name: 'Contact observer' });
+      await expect.poll(async () => (await phonePicture()).mode).toBe('conceal');
+      expect((await phonePicture()).contact).toBeNull();
+    }
+    // Retransmit the exact real request, including correlation, through the production wrapper.
+    const count = await gm.locator('#gm-contact-results li').count();
+    await gm.evaluate(() => window.__hostSetContactOverride(window.__contactLastRequest));
+    await expect(gm.locator('#gm-contact-results li')).toHaveCount(count);
+  }
+  await expect(gm.locator('#gm-contact-results li[data-outcome="applied"]')).toHaveCount(3);
+  expect(await gm.evaluate(() => ['false_contact', 'delay', 'degradation'].every(mode => !window.__hostSetContactOverride({ ...window.__contactLastRequest, mode })))).toBe(true);
+  expect(shipErrors).toEqual([]); expect(gmErrors).toEqual([]);
+});
+
 test('a GM compares Truth and Crew Knowledge for the one connected fleet ship', { tag: '@core' }, async ({ context }) => {
   test.setTimeout(60_000);
 

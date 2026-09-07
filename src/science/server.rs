@@ -328,9 +328,19 @@ pub fn tick_scans(
             let SystemControlPayload::ScanTarget { uuid: target_uuid } = &cmd.payload else {
                 continue;
             };
-            let found = subjects
-                .iter()
-                .find(|(uuid, ..)| uuid.0.as_str() == target_uuid.as_str());
+            let found = subjects.iter().find(|(uuid, ..)| {
+                uuid.0.as_str() == target_uuid.as_str()
+                    && runtime
+                        .as_ref()
+                        .map(|runtime| {
+                            crate::gm_contact::mode(
+                                &runtime.contact_overrides,
+                                &operator_uuid,
+                                target_uuid,
+                            ) != crate::gm_contact::ContactMode::Conceal
+                        })
+                        .unwrap_or(true)
+            });
             let Some((_, subject_transform, name, condition, authored_id, mass, debris)) = found
             else {
                 record.last = None;
@@ -696,17 +706,36 @@ fn operator_region_effects(
 /// `ShipSystemBlackboards` feeds the diffed `BlackboardUpdate` broadcast, so a
 /// ship that has not scanned since last tick costs nothing.
 pub fn publish_scan_blackboard(
+    runtime: Option<Res<WorldContentRuntime>>,
     mut ships: Query<(
+        Option<&EntityUuid>,
         &ShipScanRecord,
         &mut crate::server_app::ShipSystemBlackboards,
     )>,
 ) {
-    for (record, mut blackboards) in ships.iter_mut() {
+    for (observer, record, mut blackboards) in ships.iter_mut() {
         let blackboard = SystemBlackboard::Scan(ScanBlackboard {
             // A hull with no bands can be asked and refused, which the console
             // renders as "no scan capability" rather than as an empty box.
             capable: !record.config.bands.is_empty(),
-            reading: record.last.as_ref().map(ScanReadingSnapshot::from_reading),
+            reading: record
+                .last
+                .as_ref()
+                .filter(|reading| {
+                    observer
+                        .and_then(|observer| {
+                            runtime.as_ref().map(|runtime| {
+                                crate::gm_contact::mode(
+                                    &runtime.contact_overrides,
+                                    &observer.0,
+                                    &reading.subject_uuid,
+                                )
+                            })
+                        })
+                        .unwrap_or_default()
+                        != crate::gm_contact::ContactMode::Conceal
+                })
+                .map(ScanReadingSnapshot::from_reading),
             refusal: record.refusal.map(|r| r.string_id().to_string()),
         });
         let key = scan_blackboard_key();

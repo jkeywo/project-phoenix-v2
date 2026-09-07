@@ -686,6 +686,7 @@ pub fn encode_mesh_frame(frame: &crate::lockstep::MeshFrame) -> Result<String, s
                     "effect_scope": refusal.effect_scope,
                     "objective_verb": refusal.objective_verb,
                     "objective_recipients": refusal.objective_recipients,
+                    "observer": refusal.observer,
                 }),
             ),
         },
@@ -889,6 +890,19 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
                         None | Some(serde_json::Value::Null) => None,
                         Some(value) => Some(serde_json::from_value(value.clone()).ok()?),
                     };
+                    let observer = match body.get("observer") {
+                        None | Some(serde_json::Value::Null) => None,
+                        Some(value) => Some(bounded_gm_target_id(value.as_str()?)?),
+                    };
+                    if matches!(
+                        action_kind,
+                        crate::gm_action::GmActionKind::ContactReveal
+                            | crate::gm_action::GmActionKind::ContactConceal
+                            | crate::gm_action::GmActionKind::ContactNormal
+                    ) != observer.is_some()
+                    {
+                        return None;
+                    }
                     if effect_scope.is_some()
                         && action_kind != crate::gm_action::GmActionKind::DirectEffect
                     {
@@ -915,6 +929,7 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
                             .map(|v| serde_json::from_value(v.clone()))
                             .transpose()
                             .ok()?,
+                        observer,
                         tick,
                         reason: serde_json::from_value(body.get("reason")?.clone()).ok()?,
                         // Absent, `null` or unbounded all read as "this family
@@ -1236,6 +1251,15 @@ pub fn decode_gm_action_request(raw: &str) -> Option<crate::gm_action::GmActionR
             // recipients are invalid vocabulary before they reach admission.
             action.validate().ok()?;
             action
+        }
+        "set_contact_override" if object.len() == 6 => {
+            crate::gm_action::GmAction::SetContactOverride {
+                ship: crate::command_admission::log::ShipKey(
+                    object.get("ship")?.as_str()?.to_owned(),
+                ),
+                target: object.get("target")?.as_str()?.to_owned(),
+                mode: serde_json::from_value(object.get("mode")?.clone()).ok()?,
+            }
         }
         "despawn_entity" if object.len() == 4 => crate::gm_action::GmAction::DespawnEntity {
             target: bounded_gm_target_id(object.get("target")?.as_str()?)?,
@@ -1696,6 +1720,7 @@ mod mesh_frame_tests {
                 effect_scope: None,
                 objective_verb: None,
                 objective_recipients: None,
+                observer: None,
             },
         ));
         // A refused Fire crosses the same lane still naming the event it tried
@@ -1716,6 +1741,7 @@ mod mesh_frame_tests {
                 effect_scope: None,
                 objective_verb: None,
                 objective_recipients: None,
+                observer: None,
             },
         ));
         // And a refused SKIP crosses it naming both the event and the lever
@@ -1737,6 +1763,7 @@ mod mesh_frame_tests {
                 effect_scope: None,
                 objective_verb: None,
                 objective_recipients: None,
+                observer: None,
             },
         ));
         for frame in [proposal, refusal, refused_fire, refused_skip] {
@@ -2037,6 +2064,7 @@ mod mesh_frame_tests {
                 effect_scope: None,
                 objective_verb: None,
                 objective_recipients: None,
+                observer: None,
             },
         ));
         let text = super::encode_mesh_frame(&refusal).expect("encodes");

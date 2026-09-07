@@ -252,6 +252,7 @@ pub fn validate_station_action(
         | GmAction::SpawnPaletteEntity { .. }
         | GmAction::DespawnEntity { .. }
         | GmAction::ObjectiveAction { .. }
+        | GmAction::SetContactOverride { .. }
         | GmAction::SetEventPaused { .. }
         | GmAction::ArmGmEventSkip { .. } => return Ok(()),
         GmAction::SetStationPuppet { station, .. }
@@ -304,6 +305,7 @@ pub fn validate_station_action(
         | GmAction::SpawnPaletteEntity { .. }
         | GmAction::DespawnEntity { .. }
         | GmAction::ObjectiveAction { .. }
+        | GmAction::SetContactOverride { .. }
         | GmAction::SetEventPaused { .. }
         | GmAction::ArmGmEventSkip { .. } => unreachable!(),
     }
@@ -1011,6 +1013,7 @@ station = "tactical"
                     effect_scope: None,
                     objective_verb: None,
                     objective_recipients: None,
+                    observer: None,
                 })
                 .unwrap();
             let provisional_log = journal.applied_log();

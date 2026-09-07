@@ -162,6 +162,11 @@ pub enum GmActivityAction {
     DespawnEntity {
         target: String,
     },
+    SetContactOverride {
+        observer: String,
+        target: String,
+        mode: crate::gm_contact::ContactMode,
+    },
     SpawnPaletteEntity {
         palette: String,
     },
@@ -432,6 +437,7 @@ fn action_key(action: &GmActivityAction) -> (u8, bool, &str) {
         GmActivityAction::ObjectiveAction {
             objective, verb, ..
         } => (8 + *verb as u8, false, objective.as_str()),
+        GmActivityAction::SetContactOverride { target, .. } => (11, false, target.as_str()),
         GmActivityAction::SpawnPaletteEntity { palette } => (4, false, palette.as_str()),
         GmActivityAction::SetEventPaused { event, active } => (5, *active, event.as_str()),
         // Its own rank rather than the Fire's, so two rows about one event at
@@ -1238,6 +1244,19 @@ fn terminal_action_entries(
                     .iter()
                     .map(|id| reference(id, &state.identities))
                     .collect::<Vec<_>>()
+            } else if matches!(
+                fact.action_kind,
+                crate::gm_action::GmActionKind::ContactReveal
+                    | crate::gm_action::GmActionKind::ContactConceal
+                    | crate::gm_action::GmActionKind::ContactNormal
+            ) {
+                // Contact history retains its recorded observer even after that
+                // ship disappears; reference supplies the cached name or UUID.
+                fact.observer
+                    .as_deref()
+                    .map(|observer| reference(observer, &state.identities))
+                    .into_iter()
+                    .collect()
             } else {
                 Vec::new()
             };
@@ -1330,6 +1349,24 @@ fn terminal_action_entries(
                                 recipients: fact.objective_recipients.clone()?,
                             }
                         }
+                        (
+                            kind @ (crate::gm_action::GmActionKind::ContactReveal
+                            | crate::gm_action::GmActionKind::ContactConceal
+                            | crate::gm_action::GmActionKind::ContactNormal),
+                            _,
+                        ) => GmActivityAction::SetContactOverride {
+                            observer: fact.observer.clone()?,
+                            target: fact.target.clone()?,
+                            mode: match kind {
+                                crate::gm_action::GmActionKind::ContactReveal => {
+                                    crate::gm_contact::ContactMode::Reveal
+                                }
+                                crate::gm_action::GmActionKind::ContactConceal => {
+                                    crate::gm_contact::ContactMode::Conceal
+                                }
+                                _ => crate::gm_contact::ContactMode::Normal,
+                            },
+                        },
                         (crate::gm_action::GmActionKind::WorldDespawn, _) => {
                             GmActivityAction::DespawnEntity {
                                 target: fact.target.clone()?,

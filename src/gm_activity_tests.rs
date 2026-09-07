@@ -446,6 +446,7 @@ fn logged(
         verb: None,
         lever: None,
         effect_scope: None,
+        observer: None,
         objective_verb: None,
         objective_recipients: None,
     }
@@ -581,6 +582,114 @@ text = "objective.test"
             assert_eq!(detail.outcome, GmActivityActionOutcome::Applied);
         }
     }
+}
+
+#[test]
+fn canonical_contact_actions_keep_observer_ship_scope_for_no_op_and_departed_refusal() {
+    use crate::command_admission::{log::ShipKey, HostSlot};
+    use crate::gm_action::*;
+    use bevy::ecs::system::RunSystemOnce;
+    let mut app = App::new();
+    app.insert_resource(crate::sim_tick::SimTick(42))
+        .init_resource::<SimulationPaused>()
+        .init_resource::<GmActionJournal>()
+        .init_resource::<GmActionLog>()
+        .init_resource::<crate::world::server::WorldContentRuntime>();
+    let observer = app
+        .world_mut()
+        .spawn((
+            EntityUuid(SHIP_A.into()),
+            crate::server_app::Ship,
+            crate::lockstep::FleetSlotOf(HostSlot(1)),
+        ))
+        .id();
+    app.world_mut().spawn(EntityUuid(SOURCE.into()));
+    let mut state = GmActivityState::default();
+    state.identities.insert(
+        SHIP_A.into(),
+        IdentityRecord {
+            name: "Observer A".into(),
+            is_ship: true,
+        },
+    );
+    assert!(terminal_action_entries(&mut state, None, None, None, None).is_empty());
+    for (index, mode) in [
+        crate::gm_contact::ContactMode::Reveal,
+        crate::gm_contact::ContactMode::Reveal,
+        crate::gm_contact::ContactMode::Conceal,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if index == 2 {
+            app.world_mut().despawn(observer);
+            state.identities.clear();
+        }
+        let sequence = index as u64 + 1;
+        app.world_mut()
+            .resource_mut::<GmActionJournal>()
+            .insert(GmActionGrant {
+                from: HostSlot(1),
+                sequenced_by: HostSlot(1),
+                operator_id: "gm-alpha".into(),
+                correlation: GmActionId::new(format!("observer-activity-{sequence}")).unwrap(),
+                recovery_generation: 0,
+                apply_tick: 42,
+                order: GmActionOrder::new(HostSlot(1), sequence),
+                action: GmAction::SetContactOverride {
+                    ship: ShipKey(SHIP_A.into()),
+                    target: SOURCE.into(),
+                    mode,
+                },
+            })
+            .unwrap();
+        app.world_mut().run_system_once(apply_due_actions).unwrap();
+        let rows = terminal_action_entries(
+            &mut state,
+            Some(app.world().resource::<GmActionLog>()),
+            None,
+            None,
+            None,
+        );
+        assert_eq!(rows.len(), 1);
+        let expected = GmEntityReference {
+            entity_id: SHIP_A.into(),
+            name: if index == 2 {
+                SHIP_A.into()
+            } else {
+                "Observer A".into()
+            },
+        };
+        assert_eq!(rows[0].ships, vec![expected.clone()]);
+        assert_eq!(
+            rows[0].links,
+            vec![GmActivityLink {
+                role: GmActivityLinkRole::Ship,
+                entity: expected
+            }]
+        );
+        assert!(!rows[0].ships.iter().any(|ship| ship.entity_id == SOURCE));
+        let GmActivityDetail::GmAction(detail) = &rows[0].detail else {
+            panic!("contact action")
+        };
+        assert_eq!(
+            detail.outcome,
+            [
+                GmActivityActionOutcome::Applied,
+                GmActivityActionOutcome::NoOp,
+                GmActivityActionOutcome::Refused
+            ][index]
+        );
+        state.history.append(rows);
+    }
+    // Historical named rows remain readable after the live directory disappears;
+    // a refusal first observed after disappearance still has its UUID scope.
+    let retained = state.history.payload();
+    assert_eq!(retained.entries.len(), 3);
+    assert_eq!(retained.entries[0].ships[0].name, "Observer A");
+    assert_eq!(retained.entries[2].ships[0].name, SHIP_A);
+    let wire = crate::core::codec::encode_gm_activity_feed(&retained).unwrap();
+    assert!(wire.contains(SHIP_A));
 }
 
 #[test]

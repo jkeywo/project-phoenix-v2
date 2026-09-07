@@ -226,7 +226,7 @@ export function crewContactRows(sensorsBlips, rawEntities) {
     .filter((blip) => truthModelsRawEntity(rawById.get(blip.uuid)))
     .map((blip) => {
       const raw = rawById.get(blip.uuid);
-      const hullFraction = raw && typeof raw.hull_fraction === 'number' ? raw.hull_fraction : null;
+      const hullFraction = !blip.basic_contact && raw && typeof raw.hull_fraction === 'number' ? raw.hull_fraction : null;
       return {
         id: blip.uuid,
         name: blip.name,
@@ -245,7 +245,7 @@ export function crewContactRows(sensorsBlips, rawEntities) {
         // Truth's `hull.is_some_and(...)` (src/gm_projection.rs) — never
         // `null`, which would falsely diff against Truth's always-boolean
         // `destroyed` field for every hull-less identity (issue #1318 review).
-        destroyed: hullFraction === null ? false : hullFraction <= 0,
+        destroyed: blip.basic_contact ? null : hullFraction === null ? false : hullFraction <= 0,
       };
     });
 }

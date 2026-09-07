@@ -962,6 +962,7 @@ pub fn register_lockstep(app: &mut App) {
             // rather than a change to it.
             (
                 apply_mesh_inbox,
+                crate::gm_contact::prune,
                 crate::gm_action::apply_due_actions,
                 recovery::drive_recovery,
                 slot_recovery::drive_slot_recovery,
@@ -972,7 +973,10 @@ pub fn register_lockstep(app: &mut App) {
         )
         .add_systems(
             FixedLast,
-            seal_tick_frame.before(crate::sim_tick::advance_sim_tick),
+            (crate::gm_contact::prune, seal_tick_frame)
+                .chain()
+                .before(crate::sim_tick::advance_sim_tick)
+                .before(sample_and_publish_digest),
         )
         // Sampled from INSIDE the fixed schedule, once per fixed step, so a
         // frame that runs several steps across a checkpoint boundary cannot skip

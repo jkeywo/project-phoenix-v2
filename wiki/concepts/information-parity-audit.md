@@ -3,12 +3,14 @@ title: Information-Parity Audit
 type: concept
 tags: [ai, backfill, parity, consoles, blackboards, coordination]
 sources: [pasm/spec/DATA_DRIVEN_FINE_SYSTEM_AI.md, src/entities/ai_flag_hosts.rs, src/ai/host.rs, src/ship/helm_ai/, src/ai/server.rs, src/console_ai/core.rs, src/console_ai/server.rs, src/console/captain/server.rs, src/console/comms/server.rs, src/console/repair/server.rs, src/console/navigation/server.rs, src/console/weapons/server.rs, src/console/weapons/blackboard.rs, src/ship/power.rs, src/ship/sensors.rs, src/ship/shields.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/core/messages.rs, gui/console-state.js, gui/console-payload.js, gui/mount-plan.js]
-updated: 2026-08-27
+updated: 2026-09-07
 ---
 
 # Information-Parity Audit
 
 Backfill may derive private policy memory from facts available to the station it replaces, but it must not receive a privileged world view. The server projects authoritative facts into per-ship blackboards and typed coordination messages; both the AI host and the human console consume those same surfaces.
+
+GM contact overrides (#1309) live in `WorldContentRuntime` by observing player ship and target. Each Sensors blackboard exposes only that ship's overrides. Reveal preserves ordinary visible contacts and earned scans, adding a position-only contact only when ordinary sensors would omit it; the GM Crew Knowledge comparison must not enrich that basic contact with hull information from the raw replica. Conceal removes ordinary Sensors contacts, selected detail, scans and warnings. Comms and Objectives retain their independent authored knowledge. Normal removes the pair, while snapshot/restore preserves active pairs and lifecycle pruning removes references to vanished identities.
 
 ## Station checklist
 

@@ -396,7 +396,7 @@
     .gm-effect-log-entry[data-outcome="timed-out"] { color: var(--fire-bright); }
     /* The placement panel (issue #1305), sharing the mission panel's control
        ladder for its reason: one filled-control rung across the GM page. */
-    #gm-spawn-panel, #gm-despawn-panel {
+    #gm-spawn-panel, #gm-despawn-panel, #gm-contact-panel {
       max-width: 44rem; padding: 1.5rem; border: 1px solid var(--edge-control);
       display: grid; gap: .9rem;
     }
@@ -2015,6 +2015,19 @@
              inputs. Rows come from the absolute `gm_spawn` Host Channel
              projection, so a scenario with no palette renders the empty
              sentence and offers nothing placeable. -->
+        <section id="gm-contact-panel" role="region" aria-labelledby="gm-contact-heading">
+          <h2 id="gm-contact-heading" data-i18n="server.gm.contact.heading"></h2>
+          <p data-i18n="server.gm.contact.explanation"></p>
+          <label for="gm-contact-observer" data-i18n="server.gm.contact.observer"></label>
+          <select id="gm-contact-observer"></select>
+          <p id="gm-contact-target" role="status"></p>
+          <p id="gm-contact-mode" role="status"></p>
+          <button id="gm-contact-reveal" type="button" disabled data-i18n="server.gm.contact.reveal"></button>
+          <button id="gm-contact-conceal" type="button" disabled data-i18n="server.gm.contact.conceal"></button>
+          <button id="gm-contact-normal" type="button" disabled data-i18n="server.gm.contact.normal"></button>
+          <p id="gm-contact-feedback" role="status" aria-live="polite"></p>
+          <ol id="gm-contact-results"></ol>
+        </section>
         <section id="gm-despawn-panel" role="region" aria-labelledby="gm-despawn-heading">
           <h2 id="gm-despawn-heading" data-i18n="server.gm.despawn.heading"></h2>
           <p id="gm-despawn-target" role="status"></p>
@@ -2704,6 +2717,7 @@
     import { createGmMissionPanel } from './gui/gm-mission-panel.js';
     import { createGmObjectivePanel } from './gui/gm-objective-panel.js';
     import { createGmSpawnPanel } from './gui/gm-spawn-panel.js';
+    import { createGmContactPanel } from './gui/gm-contact-panel.js';
     import { createGmDespawnPanel } from './gui/gm-despawn-panel.js';
     import { createGmStationPuppet } from './gui/gm-station-puppet.js';
     import { createGmRolePresets } from './gui/gm-role-presets.js';
@@ -2718,6 +2732,7 @@
     // projection needs the panel's `select`; the closure resolves at call time,
     // after both exist.
     let gmDirectEffect = null;
+    let gmContact = null;
     let gmDespawn = null;
     const gmProjection = createGmLocalProjection({
       doc: document,
@@ -2725,6 +2740,7 @@
       onSelectionChanged: (entity) => {
         if (gmDirectEffect) gmDirectEffect.select(entity);
         if (gmDespawn) gmDespawn.select(entity);
+        if (gmContact) gmContact.select(entity);
       },
     });
     const gmActivity = createGmActivityFeed({
@@ -2865,14 +2881,19 @@
       getOperatorName: (id) => typeof window.__hostGmName === 'function'
         ? window.__hostGmName(id) : id,
     });
+    gmContact = createGmContactPanel({ doc: document, t,
+      getOperator: () => typeof window.__hostLocalGm === 'function' ? window.__hostLocalGm() : null,
+      submit: request => window.__hostSetContactOverride(request),
+    });
+    window.__hostGmContactState = gmContact.state;
     gmDespawn = createGmDespawnPanel({ doc: document, t,
       getOperator: () => typeof window.__hostLocalGm === 'function' ? window.__hostLocalGm() : null,
       submit: (request) => window.__hostDespawnEntity(request),
     });
     window.__hostGmDespawnState = gmDespawn.state;
-    window.__hostGmEffectRefresh = function() { gmDirectEffect.refreshAdmission(); gmDespawn.refreshAdmission(); };
+    window.__hostGmEffectRefresh = function() { gmDirectEffect.refreshAdmission(); gmDespawn.refreshAdmission(); gmContact.refreshAdmission(); };
 
-    window.__hostGmEffectReset = function() { gmDirectEffect.reset(); gmDespawn.reset(); };
+    window.__hostGmEffectReset = function() { gmDirectEffect.reset(); gmDespawn.reset(); gmContact.reset(); };
     window.__hostGmEffectState = gmDirectEffect.state;
     window.__hostSemanticActions = hostSemanticActions;
     window.__hostActionFeedback = hostActionFeedback;
@@ -2887,6 +2908,7 @@
         shake:        function(p) { window.__applyShake(p[0], p[1]); },
         gm_entity:    function(p) {
           gmDespawn.update(p);
+          gmContact.update(p);
           if (gmProjection.update(p)) {
             gmActivity.reconcileAvailability();
             gmKnowledgeCompare.updateTruth(gmProjection.state().entities);
@@ -4116,6 +4138,14 @@
           operator_id: gm.id, correlation: request.correlation, objective: request.objective,
           verb: request.verb, recipients: request.recipients })) !== false;
       } catch (_) { return false; }
+    };
+    window.__hostSetContactOverride = function(request) {
+      const operator = localGm();
+      if (!operator || !request || request.operator_id !== operator.id || typeof request.ship !== 'string'
+          || typeof request.target !== 'string' || !['reveal', 'conceal', 'normal'].includes(request.mode)
+          || typeof window.wasm_submit_gm_action !== 'function') return false;
+      return window.wasm_submit_gm_action(JSON.stringify({ operator_id: operator.id, correlation: request.correlation,
+        action: 'set_contact_override', ship: request.ship, target: request.target, mode: request.mode }));
     };
     window.__hostDespawnEntity = function(request) {
       const operator = localGm();

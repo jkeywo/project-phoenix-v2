@@ -625,6 +625,41 @@ describe('GM activity feed presentation and selection links', () => {
     expect(document.querySelectorAll('.gm-activity-entry')).toHaveLength(4);
   });
 
+  it('filters contact actions by their observer and retains historical refused links', () => {
+    const contact = (outcome, index, observer = ship) => entry('gm_action', {
+      type: 'gm_action', data: {
+        operator: { id: 'gm-alpha', name: 'Morgan' }, correlation: `contact-${index}`,
+        action: { type: 'set_contact_override', observer: observer.entity_id,
+          target: SOURCE, mode: index === 2 ? 'conceal' : 'reveal' },
+        outcome, reason: outcome === 'refused' ? 'unknown-entity' : null,
+        order: { sequence: index + 1, origin: 1 },
+      },
+    }, { tick: index + 1, ships: [observer], links: [{ role: 'ship', entity: observer }] });
+    const rows = [contact('applied', 0), contact('no-op', 1),
+      contact('refused', 2, reference(SHIP)),
+      contact('applied', 3, reference(OTHER_SHIP, 'Observer B'))];
+    expect(harness.feed.update(payload(rows))).toBe(true);
+    const category = document.getElementById('gm-activity-category-filter');
+    const shipFilter = document.getElementById('gm-activity-ship-filter');
+    category.value = 'gm_action'; category.dispatchEvent(new Event('change'));
+    shipFilter.value = SHIP; shipFilter.dispatchEvent(new Event('change'));
+    expect([...document.querySelectorAll('.gm-activity-entry')].map(row => row.dataset.tick))
+      .toEqual(['1', '2', '3']);
+    document.querySelector('[data-involvement="ship"]').click();
+    expect(harness.selectEntity).toHaveBeenCalledWith(SHIP);
+    shipFilter.value = OTHER_SHIP; shipFilter.dispatchEvent(new Event('change'));
+    expect([...document.querySelectorAll('.gm-activity-entry')].map(row => row.dataset.tick))
+      .toEqual(['4']);
+    shipFilter.value = SHIP; shipFilter.dispatchEvent(new Event('change'));
+    harness.available.delete(SHIP); harness.feed.reconcileAvailability();
+    expect(shipFilter.value).toBe('all');
+    const refused = document.querySelector('.gm-activity-entry[data-tick="3"]');
+    const historicLink = refused.querySelector('[data-involvement="ship"]');
+    expect(historicLink.disabled).toBe(true);
+    expect(historicLink.textContent).toBe(SHIP);
+    expect(document.querySelectorAll('.gm-activity-entry')).toHaveLength(4);
+  });
+
   it('resets a disappearing selected ship to All while retained links stay readable and disabled', () => {
     harness.feed.update(payload([damage(), gmAction()]));
     const shipFilter = document.getElementById('gm-activity-ship-filter');

@@ -1516,6 +1516,7 @@ pub(crate) fn ai_torpedo_load(
 /// evaluates `LocalShip`), so this — not `tick_sensors_frequency_hint` — is the
 /// emitter behind a human Sensors officer's advisory on the player ship.
 pub(crate) fn tick_frequency_hint_high_fidelity(
+    contact_runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     // The AUTHORED tick period, not `Time::delta` (issue #889). This system is
     // gated by `run_if(ai_tick_ready)`, so it observes one shared AI tick per
     // run — feeding it the frame delta would accumulate only the frames it
@@ -1527,6 +1528,7 @@ pub(crate) fn tick_frequency_hint_high_fidelity(
     mut ships: Query<
         (
             Entity,
+            Option<&crate::entities::spawner::EntityUuid>,
             &crate::ship_plugin::ShipSystemControlSources,
             &crate::server_app::ShipSystemBlackboards,
             &crate::ship_plugin::ShipConfigComponent,
@@ -1551,8 +1553,15 @@ pub(crate) fn tick_frequency_hint_high_fidelity(
     let dt = if hz > 0.0 { 1.0 / hz } else { 0.0 };
     let sensors_sid = crate::ship::system_registry::sensors_system_id();
 
-    for (entity, control_sources, blackboards, ship_config, mut hint_state, ai_config_comp) in
-        ships.iter_mut()
+    for (
+        entity,
+        observer_uuid,
+        control_sources,
+        blackboards,
+        ship_config,
+        mut hint_state,
+        ai_config_comp,
+    ) in ships.iter_mut()
     {
         // Frozen Combat Lock from this ship's viewscreen (issue #829, spec §3),
         // identical to how the low-fidelity twin `tick_sensors_frequency_hint`
@@ -1566,6 +1575,16 @@ pub(crate) fn tick_frequency_hint_high_fidelity(
             _ => None,
         };
 
+        let locked_target = locked_target.filter(|target| {
+            observer_uuid
+                .and_then(|observer| {
+                    contact_runtime.as_ref().map(|runtime| {
+                        crate::gm_contact::mode(&runtime.contact_overrides, &observer.0, target)
+                    })
+                })
+                .unwrap_or_default()
+                != crate::gm_contact::ContactMode::Conceal
+        });
         // Look up the target entity's shield frequency; fall back to 0.5,
         // mirroring `tick_sensors_frequency_hint`'s own fallback.
         let correct_frequency = locked_target

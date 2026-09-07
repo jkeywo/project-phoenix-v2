@@ -178,6 +178,10 @@ pub struct GmEntityProjectionPayload {
     pub results: Vec<crate::gm_action::LoggedGmAction>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub despawn_results: Vec<crate::gm_action::LoggedGmAction>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub contact_overrides: crate::gm_contact::ContactOverrides,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contact_results: Vec<crate::gm_action::LoggedGmAction>,
 }
 
 /// One authored Station interface on a fleet/player ship. `console` is copied
@@ -619,7 +623,28 @@ fn publish_local_projection(
     projected.sort_by(|left, right| left.entity_id.cmp(&right.entity_id));
     projected.dedup_by(|left, right| left.entity_id == right.entity_id);
 
+    let mut contact_results: Vec<_> = [
+        crate::gm_action::GmActionKind::ContactReveal,
+        crate::gm_action::GmActionKind::ContactConceal,
+        crate::gm_action::GmActionKind::ContactNormal,
+    ]
+    .into_iter()
+    .flat_map(|kind| crate::gm_action::projected_results(kind, &action_log, &local_refusals))
+    .collect();
+    contact_results.sort_by(|a, b| {
+        (a.tick, a.order, &a.operator_id, a.correlation.as_str()).cmp(&(
+            b.tick,
+            b.order,
+            &b.operator_id,
+            b.correlation.as_str(),
+        ))
+    });
     let next = GmEntityProjectionPayload {
+        contact_overrides: world_content
+            .as_ref()
+            .map(|runtime| runtime.contact_overrides.clone())
+            .unwrap_or_default(),
+        contact_results,
         despawn_results: crate::gm_action::projected_results(
             crate::gm_action::GmActionKind::WorldDespawn,
             &action_log,

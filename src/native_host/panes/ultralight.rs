@@ -79,7 +79,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::camera::{ClearColorConfig, RenderTarget};
 use bevy::core_pipeline::core_2d::graph::Core2d;
 use bevy::image::Image;
-use bevy::input::keyboard::{Key, KeyCode, KeyboardInput};
+use bevy::input::keyboard::{KeyCode, KeyboardInput};
 use bevy::input::mouse::{AccumulatedMouseScroll, MouseButton};
 use bevy::input::touch::{TouchInput, TouchPhase};
 use bevy::input::ButtonInput;
@@ -412,23 +412,12 @@ impl PaneView for UltralightPaneSurface {
             PaneInput::MouseDown { x, y } => self.view.mouse_down(*x, *y, UlMouseButton::Left),
             PaneInput::MouseUp { x, y } => self.view.mouse_up(*x, *y, UlMouseButton::Left),
             PaneInput::Scroll { dx, dy } => self.view.scroll(*dx, *dy),
-            // Every editing key is a raw key-down with native code 0 and no
-            // modifiers, exactly as `forward_keyboard_text` has always sent them
+            // Editing/dismissal keys are raw key-downs with native code 0 and
+            // no modifiers, as `forward_keyboard_text` has always sent them
             // — the modifiers gap noted there is unchanged by this seam.
             PaneInput::Key(code) => self.view.key(
                 KeyEventType::RawKeyDown,
-                match code {
-                    PaneKeyCode::Back => VirtualKeyCode::Back,
-                    PaneKeyCode::Return => VirtualKeyCode::Return,
-                    PaneKeyCode::Left => VirtualKeyCode::Left,
-                    PaneKeyCode::Right => VirtualKeyCode::Right,
-                    PaneKeyCode::Up => VirtualKeyCode::Up,
-                    PaneKeyCode::Down => VirtualKeyCode::Down,
-                    PaneKeyCode::Home => VirtualKeyCode::Home,
-                    PaneKeyCode::End => VirtualKeyCode::End,
-                    PaneKeyCode::Delete => VirtualKeyCode::Delete,
-                    PaneKeyCode::Tab => VirtualKeyCode::Tab,
-                },
+                pane_virtual_key(*code),
                 0,
                 Modifiers::default(),
             ),
@@ -454,6 +443,22 @@ impl PaneView for UltralightPaneSurface {
         copied
             .map(|rect| rect.map(FrameRect::from))
             .map_err(|e| PaneSurfaceError::Frame(e.to_string()))
+    }
+}
+
+fn pane_virtual_key(code: PaneKeyCode) -> VirtualKeyCode {
+    match code {
+        PaneKeyCode::Back => VirtualKeyCode::Back,
+        PaneKeyCode::Return => VirtualKeyCode::Return,
+        PaneKeyCode::Escape => VirtualKeyCode::Escape,
+        PaneKeyCode::Left => VirtualKeyCode::Left,
+        PaneKeyCode::Right => VirtualKeyCode::Right,
+        PaneKeyCode::Up => VirtualKeyCode::Up,
+        PaneKeyCode::Down => VirtualKeyCode::Down,
+        PaneKeyCode::Home => VirtualKeyCode::Home,
+        PaneKeyCode::End => VirtualKeyCode::End,
+        PaneKeyCode::Delete => VirtualKeyCode::Delete,
+        PaneKeyCode::Tab => VirtualKeyCode::Tab,
     }
 }
 
@@ -2006,9 +2011,9 @@ fn traverse_focus_keys(host: Option<ResMut<PaneHost>>, keys: Res<ButtonInput<Key
 /// either direction. `key_char` is the event that actually puts a character into
 /// a field; a raw key-down alone does not, which is why text is forwarded as
 /// `key_char` and the editing keys (Backspace, Delete, the arrows, Home/End,
-/// Enter, Tab) are forwarded as raw key-downs. Ctrl+Tab is the focus-traversal
-/// command ([`traverse_focus_keys`]), so a Tab is forwarded to the page only when
-/// Ctrl is not held.
+/// Enter, Tab) and Escape dismissal are forwarded as raw key-downs. Ctrl+Tab is
+/// the focus-traversal command ([`traverse_focus_keys`]), so a Tab is forwarded
+/// to the page only when Ctrl is not held.
 fn forward_keyboard_text(
     host: Option<Res<PaneHost>>,
     keycodes: Res<ButtonInput<KeyCode>>,
@@ -2022,38 +2027,8 @@ fn forward_keyboard_text(
     let ctrl = keycodes.pressed(KeyCode::ControlLeft) || keycodes.pressed(KeyCode::ControlRight);
     let focused = host.focus.focused();
     for key in keys.read() {
-        if !key.state.is_pressed() {
-            continue;
-        }
-        let Some(pane) = focused else {
-            continue;
-        };
-        // `key_char` is what actually puts a character into a field; the
-        // editing keys below are raw key-downs. Both shapes are the protocol's,
-        // and the adapter turns them back into the same view calls this made
-        // directly before (issue #1404).
-        let send = |input: PaneInput| host.send(PaneCommand::Input { id: pane, input });
-        match &key.logical_key {
-            Key::Character(text) => send(PaneInput::KeyChar(text.to_string())),
-            Key::Space => send(PaneInput::KeyChar(" ".to_string())),
-            Key::Backspace => send(PaneInput::Key(PaneKeyCode::Back)),
-            Key::Enter => send(PaneInput::Key(PaneKeyCode::Return)),
-            // Caret movement and forward-delete: without these the caret cannot
-            // move within a field and forward-delete is unavailable, so a comms
-            // reply or a waypoint name can only be typed and back-spaced. Each
-            // maps cleanly to an Ultralight virtual key and is forwarded as a raw
-            // key-down like the arms above (issue #1124).
-            Key::ArrowLeft => send(PaneInput::Key(PaneKeyCode::Left)),
-            Key::ArrowRight => send(PaneInput::Key(PaneKeyCode::Right)),
-            Key::ArrowUp => send(PaneInput::Key(PaneKeyCode::Up)),
-            Key::ArrowDown => send(PaneInput::Key(PaneKeyCode::Down)),
-            Key::Home => send(PaneInput::Key(PaneKeyCode::Home)),
-            Key::End => send(PaneInput::Key(PaneKeyCode::End)),
-            Key::Delete => send(PaneInput::Key(PaneKeyCode::Delete)),
-            // Ctrl+Tab is inter-pane focus; a bare Tab is the page's own field
-            // traversal.
-            Key::Tab if !ctrl => send(PaneInput::Key(PaneKeyCode::Tab)),
-            _ => {}
+        if let Some(command) = super::keyboard::pane_keyboard_command(key, ctrl, focused) {
+            host.send(command);
         }
     }
 }
@@ -2714,5 +2689,22 @@ fn stop_pane_host_on_exit(
     }
     if let Some(mut starting) = starting {
         starting.0.stop();
+    }
+}
+
+#[cfg(test)]
+mod keyboard_tests {
+    use super::*;
+
+    #[test]
+    fn escape_maps_to_the_sdk_dismissal_key() {
+        assert!(matches!(
+            pane_virtual_key(PaneKeyCode::Escape),
+            VirtualKeyCode::Escape
+        ));
+        assert!(matches!(
+            pane_virtual_key(PaneKeyCode::Tab),
+            VirtualKeyCode::Tab
+        ));
     }
 }

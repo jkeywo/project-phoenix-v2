@@ -86,6 +86,8 @@ pub mod gamepad;
 #[cfg(any(feature = "ultralight", test))]
 mod hud;
 pub mod identity;
+#[cfg(any(feature = "ultralight", test))]
+mod keyboard;
 pub mod mirror;
 pub mod os_prefs;
 pub mod pane_thread;

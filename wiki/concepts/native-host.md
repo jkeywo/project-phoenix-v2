@@ -2,8 +2,8 @@
 title: Native Host
 type: concept
 tags: [native, viewscreen, lobby, scenario-selection, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile, saved-layouts, media-devices, camera, microphone, saves]
-sources: [src/world/materialization.rs, tests/native_host_lobby/materialization.rs, src/delivery/payload.rs, tests/native_host_catalogue.rs, tests/client/scenario-catalogue-wire.test.js, src/native_host/mod.rs, src/native_host/direct_join.rs, src/native_host/join_codes.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/lobby/handler.rs, src/content_ledger.rs, tests/fixtures/scenario-arbiter-parity.json, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/layout_store.rs, src/native_host/layout_store_systems.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/session_connections.rs, src/native_host/connections.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/frame_stats.rs, src/native_host/panes/hud.rs, gui/viewscreen-hud.html, tests/client/viewscreen-hud.test.js, src/native_host/panes/surface_stats.rs, src/native_host/panes/pane_thread.rs, src/native_host/panes/mirror.rs, src/native_host/panes/upload.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs, src/delivery/args.rs, src/save_slots_store.rs]
-updated: 2026-09-07
+sources: [src/world/materialization.rs, tests/native_host_lobby/materialization.rs, src/delivery/payload.rs, tests/native_host_catalogue.rs, tests/client/scenario-catalogue-wire.test.js, src/native_host/mod.rs, src/native_host/direct_join.rs, src/native_host/join_codes.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/lobby/handler.rs, src/content_ledger.rs, tests/fixtures/scenario-arbiter-parity.json, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/layout_store.rs, src/native_host/layout_store_systems.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/keyboard.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/session_connections.rs, src/native_host/connections.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/frame_stats.rs, src/native_host/panes/hud.rs, gui/viewscreen-hud.html, tests/client/viewscreen-hud.test.js, src/native_host/panes/surface_stats.rs, src/native_host/panes/pane_thread.rs, src/native_host/panes/mirror.rs, src/native_host/panes/upload.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs, src/delivery/args.rs, src/save_slots_store.rs]
+updated: 2026-09-08
 ---
 
 # Native Host
@@ -1213,8 +1213,13 @@ adapter that feeds it real events is the feature-gated
 - **Keyboard focus is Ctrl+Tab / Ctrl+Shift+Tab**, deliberately not plain Tab: a
   console has real form fields and plain Tab must stay the page's own
   field-to-field traversal. Ctrl+Tab is the convention for moving between panes
-  and no console binds it. A bare Tab is forwarded to the page as text; Ctrl+Tab
+  and no console binds it. A bare Tab is forwarded as a raw key-down; Ctrl+Tab
   is consumed as a focus command.
+- **Escape reaches the focused page.** The SDK-independent Bevy keyboard
+  selector in [panes/keyboard.rs](../../src/native_host/panes/keyboard.rs) emits the typed dismissal key; the Ultralight
+  adapter forwards its raw key-down so the shared Settings dialog closes through
+  its ordinary listener. F9 remains host-owned. Text, modifiers and key-release
+  behavior retain the adapter's existing limits.
 - **The focus indicator is a ring plus four corner brackets** drawn on exactly
   the focused pane. Focus is shown by the *presence* of that shape, not by a
   colour change — so it does not rely on colour alone (WCAG 1.4.1): an unfocused

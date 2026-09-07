@@ -50,3 +50,34 @@ On a newly built native executable with the ordinary host bundle:
 No actual view crash, performance improvement or physical pass is implied by
 source inspection. Build/SDK and physical checks were deliberately deferred
 to the integrator's coordinated compiler and computer-use slots.
+
+## Escape forwarding follow-up
+
+Physical acceptance on source `734683cdf2577789dffe8f97ade15ebc758bbee5`
+found that backdrop dismissal worked while Escape did not. The shared Settings
+shell already listens for Escape; the native adapter discarded that logical key.
+The follow-up forwards it through the existing focused-pane input stream and
+maps it to the SDK's Escape key. The shared dialog and browser/phone code are
+unchanged.
+
+The SDK-independent `native_host::panes::keyboard::tests` regressions cover
+Escape to the focused pane, no delivery without focus or on release, reserved
+F9/Ctrl+Tab, and ordinary text/editing/Tab forwarding. The SDK-gated
+`native_host::panes::ultralight::keyboard_tests::escape_maps_to_the_sdk_dismissal_key`
+checks the final key mapping without creating a runtime. These new Rust tests,
+an SDK compile and physical acceptance are queued for the integrator; no passing
+runtime result is implied. The unchanged 14 Settings JavaScript checks recorded
+above remain applicable to the shared shell.
+
+Local source validation for this follow-up passed: `rustfmt --check` on the
+three owned Rust implementation files, `git diff --check`, and PASM `validate`,
+`scan`, and `traceability` through the same installed interpreter recorded
+above (each exit 0). The wiki's 52 source paths, 12 local links and index entry
+resolve. These static checks do not replace the queued Rust/SDK tests.
+Independent read-only source review passed with no actionable findings.
+
+On the corrected native build, open Settings with the mouse and close it with
+Escape in Lobby and after F9 reveal during a mission/ending. Reopen it and check
+Tab plus Enter/Space and backdrop dismissal; Ctrl+Tab must still move pane focus
+and F9 must still toggle chrome. Check Escape while another Station has focus
+to confirm it is delivered to that page, not broadcast to every dialog.

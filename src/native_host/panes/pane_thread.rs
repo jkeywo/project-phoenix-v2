@@ -36,17 +36,17 @@
 //! nobody will ever see — the newest is the only one that matters, and a slot
 //! cannot accumulate.
 //!
-//! # Why [`PaneKeyCode`] is ten variants
+//! # The keys a page receives
 //!
-//! Exactly the ten keys `forward_keyboard_text` forwards today — Backspace,
-//! Enter, the four arrows, Home, End, Delete and a bare Tab — each as a
-//! `RawKeyDown` with native code `0` and default modifiers. Everything else the
-//! operator types travels as [`PaneInput::KeyChar`], which is the event that
+//! Backspace, Enter, Escape, the four arrows, Home, End, Delete and a bare Tab
+//! are forwarded by `forward_keyboard_text`, each as a
+//! `RawKeyDown` with native code `0` and default modifiers. Printable text
+//! travels as [`PaneInput::KeyChar`], which is the event that
 //! actually puts a character into a field.
 //!
 //! Enumerating them rather than passing Ultralight's own `VirtualKeyCode`
-//! through is what keeps this module SDK-free, and keeping it to ten rather than
-//! transcribing the whole table is honesty: a code this side can name but the
+//! through is what keeps this module SDK-free. Keeping only used keys rather
+//! than transcribing the whole table is honesty: a code this side can name but the
 //! adapter never sends would be an untested path pretending to be a supported
 //! one. Widening it is one variant and one match arm, on the day something sends
 //! one.
@@ -214,13 +214,14 @@ impl From<FrameRect> for vellum_ultralight::surface::DirtyRect {
     }
 }
 
-/// The editing keys forwarded to a page as raw key-downs.
+/// The editing and dismissal keys forwarded to a page as raw key-downs.
 ///
-/// See the module note for why the set is exactly these ten.
+/// See the module note for why this contains only forwarded keys.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PaneKeyCode {
     Back,
     Return,
+    Escape,
     Left,
     Right,
     Up,

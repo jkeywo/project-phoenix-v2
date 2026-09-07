@@ -5,12 +5,11 @@
  * alliance_cruiser.toml points TWO Stations at this file: "comms" (primary)
  * and the auxiliary "navigation" — two different crew members can hold
  * either one, and both load this same HTML. `buildConsoleStateInner`'s
- * single-family builder means the payload a given load of this document
- * receives carries exactly ONE of the two families' data, never both: a
- * `familyView(s, 'comms')`/`familyView(s, 'navigation')` call resolves
- * non-empty only for the family this particular Station actually owns (see
- * `gui/console-payload.js`). That is also how this document decides which
- * of its two full-panel `.view`s is on screen — see `tail` below — rather
+ * single-family builder identifies the owned family in `system_ids` and
+ * `system_families`. A human Comms holder can also host visiting Navigation,
+ * whose keyed data joins the payload without changing those authored ids.
+ * The owned family decides which full-panel `.view` is on screen — see
+ * `tail` below — rather
  * than trusting the `console: 'comms'` name this file's own `initConsole`
  * call still hardcodes for outbound correlation (pre-existing; unaffected by
  * which Station actually mounted this load).
@@ -97,10 +96,10 @@ export const renderStation = makeCommsRender({
         : t('console.comms.messages.other', { n: msgCount });
     }
 
-    // Which full-panel view is on screen (issue #1379): whichever family
-    // view actually resolved non-empty says which real Station this load is
-    // — never a client-local toggle (see the module doc comment above).
-    const hasNav = Object.keys(nav).length > 0;
+    // A visiting Navigation view must not replace this Comms Station's view.
+    // system_ids preserves authored ownership when withVisitingSystems adds
+    // its keyed data; the separate Navigation tab owns its own authored ids.
+    const hasNav = (s.system_ids || []).some(id => s.system_families?.[id] === 'navigation');
     const navViewEl = doc.getElementById('nav-view');
     const commsViewEl = doc.getElementById('comms-view');
     if (navViewEl) navViewEl.hidden = !hasNav;

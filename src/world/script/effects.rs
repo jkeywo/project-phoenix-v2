@@ -1480,6 +1480,8 @@ fn open_comms_request(spec: &Map) -> Result<OpenCommsRequest, String> {
         None => crate::core::messages::CommsPriority::Routine,
     };
     Ok(OpenCommsRequest {
+        sender_uuid: None,
+        recipient_ship: None,
         from,
         root_fn,
         display_name: map_str(spec, "display_name"),
@@ -2742,6 +2744,8 @@ mod tests {
         assert_eq!(
             opens,
             vec![OpenCommsRequest {
+                sender_uuid: None,
+                recipient_ship: None,
                 from: "axiom".to_string(),
                 root_fn: "hail_axiom".to_string(),
                 display_name: Some("Axiom Control".to_string()),
@@ -2765,6 +2769,8 @@ mod tests {
         assert_eq!(
             opens,
             vec![OpenCommsRequest {
+                sender_uuid: None,
+                recipient_ship: None,
                 from: "axiom".to_string(),
                 root_fn: "hail".to_string(),
                 display_name: None,

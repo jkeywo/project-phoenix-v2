@@ -166,6 +166,10 @@ pub struct ActiveDialogue {
 /// resolving the name against a different fn.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScriptedDialogue {
+    /// Recipient inherited by every node in this conversation. Older
+    /// conversations remain fleet-wide when their catalogue metadata decodes.
+    #[serde(default)]
+    pub recipient_ship: Option<crate::command_admission::log::ShipKey>,
     /// Content-relative path of the unit defining this thread's node fns — the
     /// same `(script_path, fn_name)` key a
     /// [`ScheduledCall`](crate::world::script::schedule::ScheduledCall) carries,
@@ -203,6 +207,14 @@ pub struct ScriptedDialogue {
 /// reason (anonymous and short fn names are not unique across units).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OpenCommsRequest {
+    /// Bound sender of a GM hail; legacy authored opens resolve by name.
+    #[serde(default)]
+    pub sender_uuid: Option<String>,
+    /// Immutable recipient of this authored conversation, carried into the
+    /// ordinary materialiser and every follow-up. `None` is the existing
+    /// fleet-wide script behaviour.
+    #[serde(default)]
+    pub recipient_ship: Option<crate::command_admission::log::ShipKey>,
     /// Sender entity **reference id** (resolved to the sender UUID at open).
     pub from: String,
     /// The dialogue node fn to enter — the thread's root node.

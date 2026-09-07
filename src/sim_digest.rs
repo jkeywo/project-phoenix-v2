@@ -1458,6 +1458,12 @@ fn fold_comms_scope(world: &World, mut acc: u64) -> u64 {
             acc = fold_str(acc, &message.subject);
             acc = fold_str(acc, &message.body);
             acc = fold_text_params(acc, &message.body_params);
+            if let Some(recipient) = &message.recipient_ship {
+                acc = fold_str(fold_str(acc, "recipient-ship"), &recipient.0);
+            }
+            if message.literal_body {
+                acc = fold_str(acc, "literal-body");
+            }
             acc = fold_u64(acc, u64::from(message.sender_in_range));
             acc = fold_u64(acc, message.responses.len() as u64);
             for response in &message.responses {
@@ -1505,6 +1511,9 @@ fn fold_comms_scope(world: &World, mut acc: u64) -> u64 {
             }
             acc = fold_str(acc, &dialogue.script.script_path);
             acc = fold_optional_str(acc, dialogue.script.origin_layer.as_deref());
+            if let Some(recipient) = &dialogue.script.recipient_ship {
+                acc = fold_str(fold_str(acc, "recipient-ship"), &recipient.0);
+            }
             acc = fold_str(acc, &dialogue.script.node_fn);
             acc = fold_u64(acc, dialogue.script.on_pick.len() as u64);
             for on_pick in &dialogue.script.on_pick {
@@ -1541,6 +1550,9 @@ fn fold_comms_scope(world: &World, mut acc: u64) -> u64 {
     acc = fold_u64(acc, opens.len() as u64);
     for open in opens {
         acc = fold_str(acc, &open.from);
+        if let Some(sender) = &open.sender_uuid {
+            acc = fold_str(fold_str(acc, "bound-sender"), sender);
+        }
         acc = fold_str(acc, &open.root_fn);
         acc = fold_optional_str(acc, open.display_name.as_deref());
         acc = fold_optional_str(acc, open.thread_id.as_deref());
@@ -1548,6 +1560,9 @@ fn fold_comms_scope(world: &World, mut acc: u64) -> u64 {
         acc = fold_u64(acc, u64::from(open.urgent));
         acc = fold_str(acc, &open.script_path);
         acc = fold_optional_str(acc, open.origin_layer.as_deref());
+        if let Some(recipient) = &open.recipient_ship {
+            acc = fold_str(fold_str(acc, "recipient-ship"), &recipient.0);
+        }
     }
     acc
 }

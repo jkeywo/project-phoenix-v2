@@ -20,25 +20,14 @@
  * T2 has no fog-of-war/confidence model yet (issues #1063, #1065, #1070 are
  * the accepted future extension this comparison is built to host without a
  * hard dependency on them landing first). Concretely, today:
- *  - Objectives and Comms are broadcast to every ship identically (neither
- *    `GmPuppetShipProjection.objectives`/`.blackboards` nor the folded
- *    `ClientSimState` values are filtered per ship), so those two categories
- *    are expected to diff as "equal" until a future information-control
- *    feature makes crew knowledge diverge from Truth. That is expected, not
- *    a bug — this module does not invent per-ship filtering to manufacture a
- *    difference. Objectives is a tautological "equal": `ClientSimState.objectives`
- *    is stored verbatim from the SAME `ObjectiveSnapshot` array the ship
- *    projection carries (`gui/sim-state.js`'s `ObjectiveSummary` handler), so
- *    the two arms diff one array against itself by reference, not merely by
- *    value. Comms is "equal" for a related but distinct reason: the crew
- *    arm's `blackboardsOfKind` (`gui/console-state.js`) falls back to the
- *    lexically-first Comms system id, and the producer
- *    (`src/gm_projection.rs`) already sorts `blackboards` by system id before
- *    it reaches the wire, so both arms resolve the identical Comms system
- *    entry. Neither category is wired to genuinely differ today — both are
- *    documented here as the seam a future per-ship filter (#1063/#1065/#1070,
- *    or a Comms Station-preference read) lands in, not as live comparisons
- *    exercising two independent sources (issue #1318 review, findings 1 & 3).
+ *  - Objectives and Comms are filtered for each recipient by their producers.
+ *    Both comparison arms start from the selected ship's own projection, so
+ *    they still show equality rather than contrasting fleet-wide Truth with
+ *    that ship's knowledge. `ClientSimState.objectives` retains the projection's
+ *    ObjectiveSnapshot array. The Comms builder resolves the same lexically-first
+ *    Comms blackboard as the raw arm because the producer sorts system ids.
+ *    These are two presentations of one recipient's data, not independent
+ *    information sources (issue #1318 review, findings 1 & 3).
  *  - Contacts CAN genuinely differ today: `buildSensorsConsoleState` reads
  *    the ship's own sensors radar range/tag filters, so a Truth entity
  *    outside that ship's scan range or hidden by its radar tag filters is
@@ -310,14 +299,9 @@ export function buildKnowledgeCompare(truthEntities, projection, ship, { display
     crewContactRows(sensors.blips, state.asteroids),
     { fields: ['name', ['hull_percent', hullPercentSame], 'destroyed'] },
   );
-  // Objectives: Truth reads the ship projection's own unconditional list;
-  // Crew Knowledge reads the ordinary folded `ClientSimState.objectives`,
-  // which `gui/sim-state.js` stores as the SAME array reference the
-  // projection carried (`this.objectives = d.objectives || []`) — this
-  // category is tautologically equal today (one array diffed against
-  // itself), not merely equal-by-value, and stays that way until a future
-  // per-ship objective-visibility feature makes the two arms diverge (issue
-  // #1318 review, finding 3).
+  // Both arms read the selected ship's recipient-filtered Objective list.
+  // The ordinary fold retains the same array; this comparison does not expose
+  // a separate fleet-wide Truth list (issue #1318 review, finding 3).
   const objectives = diffByIdentity(
     objectiveRows(ship.objectives),
     objectiveRows(state.objectives),
@@ -329,10 +313,8 @@ export function buildKnowledgeCompare(truthEntities, projection, ship, { display
   // to that SAME lexically-first Comms system id when no Station preference
   // is given (`blackboardsOfKind`, gui/console-state.js). With today's single
   // authored Comms system per ship, both arms therefore resolve the
-  // identical entry — structurally "equal", not two independent sources
-  // diffed against each other — until a per-ship Comms filter (#1063/#1065/
-  // #1070) or a Comms Station-preference read lands (issue #1318 review,
-  // finding 1).
+  // identical recipient-filtered entry. There is no separate fleet-wide
+  // Comms Truth source in this comparison (issue #1318 review, finding 1).
   const commsEntry = (ship.blackboards || []).find(([, entry]) => entry && entry.kind === 'Comms');
   const commsTruth = commsEntry ? commsEntry[1].data || {} : {};
   const commsMessages = diffByIdentity(

@@ -449,6 +449,7 @@ fn logged(
         observer: None,
         objective_verb: None,
         objective_recipients: None,
+        comms_recipients: None,
     }
 }
 
@@ -749,6 +750,194 @@ fn system_latch_results_keep_the_semantic_ship_and_exact_system() {
     let wire = serde_json::to_string(&rows).unwrap();
     assert!(wire.contains("set_system_disabled"));
     assert!(!wire.contains("set_session_paused"));
+}
+
+#[test]
+fn comms_activity_uses_durable_audience_for_applied_stale_and_grantless_refusals() {
+    use crate::command_admission::{log::ShipKey, HostSlot};
+    use crate::gm_action::*;
+    use bevy::ecs::system::RunSystemOnce;
+    let mut app = app(32);
+    app.init_resource::<GmActionJournal>()
+        .init_resource::<GmActionLog>()
+        .init_resource::<SimulationPaused>()
+        .init_resource::<LocalGmActionRefusals>()
+        .init_resource::<crate::comms::server::CommsInboxRes>()
+        .init_resource::<crate::comms::server::CommsRuntime>()
+        .init_resource::<crate::world_id::WorldIdMint>();
+    app.world_mut()
+        .resource_mut::<crate::world::config::WorldConfig>()
+        .gm_comms_routes = vec![crate::gm_comms::GmCommsRoute {
+        id: "private".into(),
+        label: "private".into(),
+        visibility: crate::gm_comms::GmCommsVisibility::SelectedShips,
+        senders: vec!["Speaker".into()],
+        hails: Vec::new(),
+    }];
+    let config = crate::ship::config::ShipConfig::from_toml(
+        r#"
+[[station]]
+id = "comms"
+name = "Comms"
+description = ""
+rank = ""
+console = "comms.html"
+[[station.rating]]
+name = "Std"
+automated_systems = []
+[[system]]
+id = "comms"
+kind = "comms"
+station = "comms"
+"#,
+        &["comms"],
+    )
+    .unwrap();
+    let mut entities = Vec::new();
+    for (slot, id, name) in [(1, SHIP_A, "Alliance cruiser"), (2, SOURCE, "Raider")] {
+        entities.push(
+            app.world_mut()
+                .spawn((
+                    crate::server_app::Ship,
+                    crate::lockstep::FleetSlotOf(HostSlot(slot)),
+                    EntityUuid(id.into()),
+                    EntityName(name.into()),
+                    crate::ship::components::ShipConfigComponent(config.clone()),
+                ))
+                .id(),
+        );
+    }
+    app.world_mut().spawn((
+        EntityUuid(ORDINARY_ENTITY.into()),
+        EntityName("Speaker".into()),
+        crate::comms::component::CommsHailable::default(),
+        crate::comms::component::CommsRange(1000.0),
+    ));
+    let action = GmAction::TransmitComms {
+        transmission: crate::gm_comms::GmCommsTransmission {
+            sender: ORDINARY_ENTITY.into(),
+            route: "private".into(),
+            recipients: vec![ShipKey(SHIP_A.into()), ShipKey(SOURCE.into())],
+            content: crate::gm_comms::GmCommsContent::Literal {
+                text: "Exact private text".into(),
+            },
+        },
+    };
+    fixed_then_publish(&mut app);
+    take(&mut app);
+    for sequence in 1..=2 {
+        if sequence == 2 {
+            app.world_mut().despawn(entities[1]);
+        }
+        app.world_mut()
+            .resource_mut::<GmActionJournal>()
+            .insert(GmActionGrant {
+                from: HostSlot(1),
+                sequenced_by: HostSlot(1),
+                operator_id: "gm-alpha".into(),
+                correlation: GmActionId::new(format!("comms-{sequence}")).unwrap(),
+                recovery_generation: 0,
+                apply_tick: 0,
+                order: GmActionOrder::new(HostSlot(1), sequence),
+                action: action.clone(),
+            })
+            .unwrap();
+        app.world_mut().run_system_once(apply_due_actions).unwrap();
+        fixed_then_publish(&mut app);
+    }
+    assert_eq!(
+        app.world()
+            .resource::<crate::comms::server::CommsInboxRes>()
+            .0
+            .messages()
+            .len(),
+        2,
+        "only the first send delivered; stale audience refuses atomically"
+    );
+    // The persisted result log remains sufficient after restoring it and
+    // dropping the journal entirely. Local/owner refusals never had a grant.
+    let saved = serde_json::to_string(app.world().resource::<GmActionLog>()).unwrap();
+    app.insert_resource(serde_json::from_str::<GmActionLog>(&saved).unwrap());
+    app.world_mut().remove_resource::<GmActionJournal>();
+    let request = GmActionRequest {
+        operator_id: "gm-alpha".into(),
+        correlation: GmActionId::new("comms-local").unwrap(),
+        action: action.clone(),
+    };
+    let local = LoggedGmAction::refused_request(&request, 0, GmActionRefusalReason::WrongPhase);
+    let replicated = refusal_for(
+        HostSlot(1),
+        &GmActionProposal {
+            from: HostSlot(1),
+            operator_id: request.operator_id,
+            correlation: GmActionId::new("comms-owner").unwrap(),
+            action,
+        },
+        0,
+        GmActionRefusalReason::UnknownCommsRoute,
+    );
+    let wire = crate::core::codec::encode_mesh_frame(&crate::lockstep::frame::MeshFrame::GmAction(
+        GmActionFrame::Refused(replicated),
+    ))
+    .unwrap();
+    let Some(crate::lockstep::frame::MeshFrame::GmAction(GmActionFrame::Refused(replicated))) =
+        crate::core::codec::decode_mesh_frame(&wire)
+    else {
+        panic!("replicated refusal")
+    };
+    let mut refusals = app.world_mut().resource_mut::<LocalGmActionRefusals>();
+    refusals.push(local);
+    refusals.push(replicated.logged());
+    drop(refusals);
+    fixed_then_publish(&mut app);
+    let payload = take(&mut app).pop().unwrap();
+    let rows: Vec<_> = payload
+        .entries
+        .iter()
+        .filter(|row| row.category == GmActivityCategory::GmAction)
+        .collect();
+    assert_eq!(rows.len(), 4);
+    for row in rows {
+        assert_eq!(
+            row.ships,
+            vec![
+                GmEntityReference {
+                    entity_id: SHIP_A.into(),
+                    name: "Alliance cruiser".into()
+                },
+                GmEntityReference {
+                    entity_id: SOURCE.into(),
+                    name: "Raider".into()
+                }
+            ]
+        );
+        assert_eq!(
+            row.links
+                .iter()
+                .map(|link| &link.entity)
+                .collect::<Vec<_>>(),
+            row.ships.iter().collect::<Vec<_>>()
+        );
+        let GmActivityDetail::GmAction(detail) = &row.detail else {
+            panic!("Comms outcome")
+        };
+        assert!(
+            matches!(&detail.action, GmActivityAction::TransmitComms { sender } if sender == ORDINARY_ENTITY)
+        );
+        assert_eq!(
+            detail.outcome,
+            if detail.correlation == "comms-1" {
+                GmActivityActionOutcome::Applied
+            } else {
+                GmActivityActionOutcome::Refused
+            }
+        );
+    }
+    fixed_then_publish(&mut app);
+    assert!(
+        take(&mut app).is_empty(),
+        "publishing the retained results does not repeat them"
+    );
 }
 
 #[test]

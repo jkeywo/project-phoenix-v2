@@ -327,9 +327,11 @@ templates and closed authored variants. `SpawnPaletteEntity` carries only
 palette/variant ids and resolved position/heading. The shared map placement
 gesture and keyboard controls supply that placement; canonical pending spawns
 enter ordinary scripted `SpawnEntity` dispatch and deterministic UUID minting.
-The activity feed presents event levers, Objective changes, scoped effects and palette placements
-as attributed GM Action details; their fictional consequences remain ordinary
-world-category rows.
+The activity feed presents event levers, Objective changes, scoped effects,
+palette placements and Comms transmissions as attributed GM Action details;
+their fictional consequences remain ordinary world-category rows. Comms action
+results and refusals retain their canonical recipients, so filtering by ship
+still finds a transmission after its recipient leaves or its grant is pruned.
 
 For intended design, see
 [`gm-console-t2.yaml`](../../pasm/spec/design/gm-console-t2.yaml).
@@ -341,8 +343,9 @@ with the GM view. Truth uses `gm_entity`; the selected ship's `gm_station`
 replica passes through the same fold and Sensors/Comms builders used by
 authentic Station consoles. Contacts can differ because of sensor range and
 tag filtering. Both Objective comparison columns use the selected ship's
-recipient-filtered list and therefore show equality; Comms still uses shared
-inputs. The comparison excludes Station-private hull and
+recipient-filtered list and therefore show equality. Comms likewise compares
+the selected ship's recipient-filtered blackboard with the ordinary console
+builder's view of that same blackboard. The comparison excludes Station-private hull and
 blackboard detail, which remains accessible through Station puppeting.
 
 ## Authentic Station puppeting

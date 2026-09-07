@@ -201,6 +201,10 @@ pub enum GmAction {
         system: crate::core::messages::SystemId,
         disabled: bool,
     },
+    /// Exact authored-route Comms intent, appended to preserve old variant indices.
+    TransmitComms {
+        transmission: crate::gm_comms::GmCommsTransmission,
+    },
 }
 
 /// WHICH lever of the authored-event control family one durable result records
@@ -248,6 +252,7 @@ pub enum GmActionKind {
     SystemRestore,
     ContactConceal,
     ContactNormal,
+    Comms,
 }
 
 impl GmActionKind {
@@ -270,7 +275,8 @@ impl GmActionKind {
             | Self::SystemDisable
             | Self::SystemRestore
             | Self::ContactConceal
-            | Self::ContactNormal => true,
+            | Self::ContactNormal
+            | Self::Comms => true,
             Self::SessionPause | Self::StationPuppet | Self::StationCommand => false,
         }
     }
@@ -322,6 +328,7 @@ impl GmAction {
             | Self::DespawnEntity { .. }
             | Self::ObjectiveAction { .. }
             | Self::SetSystemDisabled { .. }
+            | Self::TransmitComms { .. }
             | Self::SetEventPaused { .. }
             | Self::ArmGmEventSkip { .. } => None,
             Self::SetStationPuppet { ship, .. }
@@ -352,6 +359,7 @@ impl GmAction {
             // minted by the reducer a boundary later.
             Self::SpawnPaletteEntity { palette, .. } => Some(palette.as_str()),
             Self::ObjectiveAction { objective, .. } => Some(objective),
+            Self::TransmitComms { transmission } => Some(&transmission.sender),
             Self::SetSessionPaused { .. }
             | Self::SetStationPuppet { .. }
             | Self::IssueStationCommand { .. } => None,
@@ -386,6 +394,7 @@ impl GmAction {
             {
                 Ok(())
             }
+            Self::TransmitComms { transmission } if transmission.valid_shape() => Ok(()),
             // The qualified id shape is checked here rather than only against
             // the live table so a malformed one is refused as an invalid
             // ACTION, not mistaken for an unknown event.
@@ -484,6 +493,7 @@ impl GmAction {
                 crate::gm_contact::ContactMode::Conceal => GmActionKind::ContactConceal,
                 crate::gm_contact::ContactMode::Normal => GmActionKind::ContactNormal,
             },
+            Self::TransmitComms { .. } => GmActionKind::Comms,
         }
     }
 
@@ -502,6 +512,7 @@ impl GmAction {
             | Self::SetSystemDisabled { .. }
             | Self::DespawnEntity { .. }
             | Self::ObjectiveAction { .. }
+            | Self::TransmitComms { .. }
             | Self::ArmGmEventSkip { .. } => None,
         }
     }
@@ -516,6 +527,18 @@ impl GmAction {
     pub fn objective_recipients(&self) -> Option<Vec<String>> {
         match self {
             Self::ObjectiveAction { recipients, .. } => Some(recipients.clone()),
+            _ => None,
+        }
+    }
+    pub fn comms_recipients(&self) -> Option<Vec<String>> {
+        match self {
+            Self::TransmitComms { transmission } => Some(
+                transmission
+                    .recipients
+                    .iter()
+                    .map(|ship| ship.0.clone())
+                    .collect(),
+            ),
             _ => None,
         }
     }
@@ -545,6 +568,7 @@ impl GmAction {
             | Self::SetSystemDisabled { .. }
             | Self::DespawnEntity { .. }
             | Self::ObjectiveAction { .. }
+            | Self::TransmitComms { .. }
             | Self::ArmGmEventSkip { .. }
             // Not session pause: a paused EVENT stops one authored condition
             // being evaluated and leaves the simulation running.
@@ -571,7 +595,8 @@ impl GmAction {
             | Self::SetContactOverride { .. }
             | Self::SetSystemDisabled { .. }
             | Self::DespawnEntity { .. }
-            | Self::ObjectiveAction { .. } => None,
+            | Self::ObjectiveAction { .. }
+            | Self::TransmitComms { .. } => None,
         }
     }
 
@@ -593,6 +618,7 @@ impl GmAction {
             | Self::SetContactOverride { .. }
             | Self::DespawnEntity { .. }
             | Self::ObjectiveAction { .. }
+            | Self::TransmitComms { .. }
             | Self::ArmGmEventSkip { .. } => true,
         }
     }
@@ -726,6 +752,9 @@ pub struct GmActionRefusal {
     pub objective_verb: Option<crate::gm_objective::ObjectiveVerb>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub objective_recipients: Option<Vec<String>>,
+    /// Captured Comms audience, including refusals with no admitted grant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comms_recipients: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observer: Option<String>,
 }
@@ -746,6 +775,7 @@ impl GmActionRefusal {
         .with_lever(self.lever)
         .with_effect(None, self.effect_scope.clone())
         .with_objective(self.objective_verb, self.objective_recipients.clone())
+        .with_comms_recipients(self.comms_recipients.clone())
     }
 }
 
@@ -776,6 +806,22 @@ impl GmActionFrame {
             Self::Granted(grant) => grant.apply_tick,
             Self::Refused(refusal) => refusal.tick,
         }
+    }
+}
+
+/// The exact bounded audience is required only on the Comms result family.
+pub(crate) fn valid_comms_result_scope(kind: GmActionKind, recipients: Option<&[String]>) -> bool {
+    match (kind, recipients) {
+        (GmActionKind::Comms, Some(recipients)) => {
+            !recipients.is_empty()
+                && recipients.len() <= crate::gm_comms::MAX_RECIPIENTS
+                && recipients.iter().all(|id| {
+                    !id.is_empty() && id.len() <= 128 && !id.chars().any(char::is_control)
+                })
+                && recipients.windows(2).all(|pair| pair[0] < pair[1])
+        }
+        (GmActionKind::Comms, None) | (_, Some(_)) => false,
+        (_, None) => true,
     }
 }
 
@@ -876,6 +922,9 @@ pub fn validate_fleet_frame(
                 return Err(GmActionRefusalReason::InvalidAction);
             }
             let is_objective = refusal.action_kind == GmActionKind::ObjectiveControl;
+            if !valid_comms_result_scope(refusal.action_kind, refusal.comms_recipients.as_deref()) {
+                return Err(GmActionRefusalReason::InvalidAction);
+            }
             if is_objective != refusal.objective_verb.is_some()
                 || is_objective != refusal.objective_recipients.is_some()
             {
@@ -987,6 +1036,10 @@ pub enum GmActionRefusalReason {
     UnknownObjective,
     ObjectiveNotActive,
     ObjectiveScopeMismatch,
+    UnknownCommsRoute,
+    UnavailableCommsIdentity,
+    UnavailableCommsRecipient,
+    UnavailableCommsHail,
 }
 
 /// One terminal fact in the GM command log and local activity projection.
@@ -1071,6 +1124,12 @@ pub struct LoggedGmAction {
     pub objective_verb: Option<crate::gm_objective::ObjectiveVerb>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub objective_recipients: Option<Vec<String>>,
+    /// Immutable Comms audience on the result itself: local refusals have no
+    /// grant, and bounded activity/history must not depend on a live journal
+    /// or current Fleet membership. Absent for every other action family so
+    /// their serialized state and digests retain their existing shape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comms_recipients: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observer: Option<String>,
 }
@@ -1100,6 +1159,7 @@ impl LoggedGmAction {
             effect_scope: None,
             objective_verb: None,
             objective_recipients: None,
+            comms_recipients: None,
             observer: None,
         }
     }
@@ -1116,6 +1176,10 @@ impl LoggedGmAction {
     }
     pub fn with_observer(mut self, observer: Option<String>) -> Self {
         self.observer = observer;
+        self
+    }
+    pub fn with_comms_recipients(mut self, recipients: Option<Vec<String>>) -> Self {
+        self.comms_recipients = recipients;
         self
     }
     pub fn with_target(mut self, target: Option<String>) -> Self {
@@ -1176,6 +1240,7 @@ impl LoggedGmAction {
             request.action.objective_verb(),
             request.action.objective_recipients(),
         )
+        .with_comms_recipients(request.action.comms_recipients())
     }
 }
 
@@ -1563,6 +1628,7 @@ impl GmActionJournal {
             || result.order != Some(grant.order)
             || result.objective_verb != grant.action.objective_verb()
             || result.objective_recipients != grant.action.objective_recipients()
+            || result.comms_recipients != grant.action.comms_recipients()
             || result.target.as_deref() != grant.action.target_id()
             || result.observer != grant.action.observer_id()
             || (matches!(grant.action, GmAction::SetSystemDisabled { .. })
@@ -1746,7 +1812,8 @@ impl GmActionJournal {
                         | GmAction::SetContactOverride { .. }
                         | GmAction::SetSystemDisabled { .. }
                         | GmAction::DespawnEntity { .. }
-                        | GmAction::ObjectiveAction { .. } => {}
+                        | GmAction::ObjectiveAction { .. }
+                        | GmAction::TransmitComms { .. } => {}
                     }
                 }
                 entries.push(result.clone());
@@ -1814,7 +1881,8 @@ impl GmActionJournal {
                 | GmAction::SetContactOverride { .. }
                 | GmAction::SetSystemDisabled { .. }
                 | GmAction::DespawnEntity { .. }
-                | GmAction::ObjectiveAction { .. } => GmActionOutcome::Applied,
+                | GmAction::ObjectiveAction { .. }
+                | GmAction::TransmitComms { .. } => GmActionOutcome::Applied,
             };
             entries.push(LoggedGmAction {
                 operator_id: grant.operator_id.clone(),
@@ -1832,6 +1900,7 @@ impl GmActionJournal {
                 effect_scope: grant.action.effect_scope(),
                 objective_verb: grant.action.objective_verb(),
                 objective_recipients: grant.action.objective_recipients(),
+                comms_recipients: grant.action.comms_recipients(),
                 observer: grant.action.observer_id(),
             });
         }
@@ -1918,7 +1987,8 @@ impl GmActionJournal {
                 | GmAction::SetContactOverride { .. }
                 | GmAction::SetSystemDisabled { .. }
                 | GmAction::DespawnEntity { .. }
-                | GmAction::ObjectiveAction { .. } => GmActionOutcome::Applied,
+                | GmAction::ObjectiveAction { .. }
+                | GmAction::TransmitComms { .. } => GmActionOutcome::Applied,
             };
             entries.push(LoggedGmAction {
                 operator_id: grant.operator_id.clone(),
@@ -1936,6 +2006,7 @@ impl GmActionJournal {
                 effect_scope: grant.action.effect_scope(),
                 objective_verb: grant.action.objective_verb(),
                 objective_recipients: grant.action.objective_recipients(),
+                comms_recipients: grant.action.comms_recipients(),
                 observer: grant.action.observer_id(),
             });
         }
@@ -2213,6 +2284,7 @@ pub fn apply_due_actions(
             With<crate::server_app::Ship>,
         >,
         crate::gm_puppet::capability::StationCapabilities,
+        crate::gm_comms::GmCommsParams,
     )>,
     mut virtual_time: Option<ResMut<Time<Virtual>>>,
     mut fixed_time: Option<ResMut<Time<Fixed>>>,
@@ -2303,6 +2375,16 @@ pub fn apply_due_actions(
                             )
                         }
                     }
+                }
+            }
+            GmAction::TransmitComms { .. } if station_grant_after_loss => (
+                GmActionOutcome::Refused,
+                Some(GmActionRefusalReason::NotGameMaster),
+            ),
+            GmAction::TransmitComms { transmission } => {
+                match ship_access.p2().apply(transmission) {
+                    Ok(()) => (GmActionOutcome::Applied, None),
+                    Err(reason) => (GmActionOutcome::Refused, Some(reason)),
                 }
             }
             // A directed effect is RESOLVED here, at the agreed apply tick, and
@@ -2569,6 +2651,7 @@ pub fn apply_due_actions(
                             effect_scope: None,
                             objective_verb: None,
                             objective_recipients: None,
+                            comms_recipients: None,
                             observer: None,
                         })
                         .expect("live GM result matches its canonical grant");
@@ -2749,6 +2832,7 @@ pub fn apply_due_actions(
                         effect_scope: None,
                         objective_verb: None,
                         objective_recipients: None,
+                        comms_recipients: None,
                         observer: None,
                     };
                     journal
@@ -2832,6 +2916,7 @@ pub fn apply_due_actions(
                             effect_scope: None,
                             objective_verb: None,
                             objective_recipients: None,
+                            comms_recipients: None,
                             observer: None,
                         };
                         journal
@@ -2925,6 +3010,7 @@ pub fn apply_due_actions(
                 effect_scope: requested_scope,
                 objective_verb: grant.action.objective_verb(),
                 objective_recipients: grant.action.objective_recipients(),
+                comms_recipients: grant.action.comms_recipients(),
                 observer: grant.action.observer_id(),
             })
             .expect("live GM result matches its canonical grant");
@@ -3020,6 +3106,7 @@ pub(crate) fn refusal_for(
         effect_scope: proposal.action.effect_scope(),
         objective_verb: proposal.action.objective_verb(),
         objective_recipients: proposal.action.objective_recipients(),
+        comms_recipients: proposal.action.comms_recipients(),
         observer: proposal.action.observer_id(),
     }
 }
@@ -5105,6 +5192,7 @@ station = "helm"
             effect_scope: None,
             objective_verb: None,
             objective_recipients: None,
+            comms_recipients: None,
             observer: None,
             action_kind: GmActionKind::SessionPause,
             requested_active: true,
@@ -5259,6 +5347,7 @@ station = "helm"
             effect_scope: None,
             objective_verb: None,
             objective_recipients: None,
+            comms_recipients: None,
             observer: None,
         };
         let pause = LoggedGmAction {
@@ -5277,6 +5366,7 @@ station = "helm"
             effect_scope: None,
             objective_verb: None,
             objective_recipients: None,
+            comms_recipients: None,
             observer: None,
         };
         let station_refused = LoggedGmAction::refused(
@@ -5303,6 +5393,7 @@ station = "helm"
             effect_scope: None,
             objective_verb: None,
             objective_recipients: None,
+            comms_recipients: None,
             observer: None,
         };
         let log = GmActionLog {
@@ -5340,6 +5431,7 @@ station = "helm"
                 effect_scope: None,
                 objective_verb: None,
                 objective_recipients: None,
+                comms_recipients: None,
                 observer: None,
             }),
             Err("pending GM result is not a Station command"),
@@ -6523,6 +6615,183 @@ kind = "{id}"
         }
     }
 
+    fn comms_scope_request() -> GmActionRequest {
+        use crate::command_admission::log::ShipKey;
+        GmActionRequest {
+            operator_id: "gm-2".into(),
+            correlation: GmActionId::new("comms-scope").unwrap(),
+            action: GmAction::TransmitComms {
+                transmission: crate::gm_comms::GmCommsTransmission {
+                    sender: "speaker".into(),
+                    route: "private".into(),
+                    recipients: vec![ShipKey("ship-a".into()), ShipKey("ship-b".into())],
+                    content: crate::gm_comms::GmCommsContent::Literal {
+                        text: "Exact text".into(),
+                    },
+                },
+            },
+        }
+    }
+
+    #[test]
+    fn comms_scope_survives_local_and_replicated_refusals_and_rejects_malformed_frames() {
+        use crate::lockstep::frame::MeshFrame;
+        let request = comms_scope_request();
+        let local =
+            LoggedGmAction::refused_request(&request, 12, GmActionRefusalReason::WrongPhase);
+        assert_eq!(local.comms_recipients, request.action.comms_recipients());
+        let local_json = serde_json::to_string(&local).unwrap();
+        assert_eq!(
+            serde_json::from_str::<LoggedGmAction>(&local_json).unwrap(),
+            local
+        );
+        let proposal = GmActionProposal {
+            from: HostSlot(2),
+            operator_id: request.operator_id,
+            correlation: request.correlation,
+            action: request.action,
+        };
+        let refusal = refusal_for(
+            HostSlot(1),
+            &proposal,
+            12,
+            GmActionRefusalReason::WrongPhase,
+        );
+        assert_eq!(refusal.logged(), local);
+        let roster = crate::lockstep::FleetRoster::with_participants_and_gms(
+            Vec::new(),
+            vec![HostSlot(1), HostSlot(2)],
+            vec![crate::lockstep::FleetGm {
+                host: HostSlot(2),
+                operator_id: "gm-2".into(),
+            }],
+            HostSlot(1),
+            HostSlot(1),
+        )
+        .unwrap();
+        let frame = GmActionFrame::Refused(refusal.clone());
+        assert_eq!(validate_fleet_frame(&frame, &roster), Ok(()));
+        let wire =
+            crate::core::codec::encode_mesh_frame(&MeshFrame::GmAction(frame.clone())).unwrap();
+        assert_eq!(
+            crate::core::codec::decode_mesh_frame(&wire),
+            Some(MeshFrame::GmAction(frame))
+        );
+        for malformed in [serde_json::json!("ship-a"), serde_json::json!([7])] {
+            let mut body: serde_json::Value = serde_json::from_str(&wire).unwrap();
+            body["d"]["comms_recipients"] = malformed;
+            assert!(crate::core::codec::decode_mesh_frame(&body.to_string()).is_none());
+        }
+        let mut absent: serde_json::Value = serde_json::from_str(&wire).unwrap();
+        absent["d"]
+            .as_object_mut()
+            .unwrap()
+            .remove("comms_recipients");
+        assert!(crate::core::codec::decode_mesh_frame(&absent.to_string()).is_none());
+        for recipients in [
+            None,
+            Some(vec![]),
+            Some(vec!["ship-a".into(), "ship-a".into()]),
+            Some(vec!["ship-b".into(), "ship-a".into()]),
+            Some(vec![String::new()]),
+            Some(vec!["x".repeat(129)]),
+            Some(vec!["ship\n".into()]),
+            Some((0..33).map(|i| format!("ship-{i:02}")).collect()),
+        ] {
+            let bad = GmActionRefusal {
+                comms_recipients: recipients,
+                ..refusal.clone()
+            };
+            assert_eq!(
+                validate_fleet_frame(&GmActionFrame::Refused(bad.clone()), &roster),
+                Err(GmActionRefusalReason::InvalidAction)
+            );
+            let wire = crate::core::codec::encode_mesh_frame(&MeshFrame::GmAction(
+                GmActionFrame::Refused(bad),
+            ))
+            .unwrap();
+            assert!(crate::core::codec::decode_mesh_frame(&wire).is_none());
+        }
+        let limit = GmActionRefusal {
+            comms_recipients: Some(
+                (0..32)
+                    .map(|i| format!("{i:02}{}", "x".repeat(126)))
+                    .collect(),
+            ),
+            ..refusal.clone()
+        };
+        assert_eq!(
+            validate_fleet_frame(&GmActionFrame::Refused(limit), &roster),
+            Ok(())
+        );
+        // No other action family may acquire an audience, nor should its old
+        // serialization gain even a null key when this field is absent.
+        let pause = GmActionProposal {
+            action: GmAction::SetSessionPaused { active: true },
+            ..proposal
+        };
+        let old = refusal_for(HostSlot(1), &pause, 12, GmActionRefusalReason::WrongPhase);
+        let old_wire = crate::core::codec::encode_mesh_frame(&MeshFrame::GmAction(
+            GmActionFrame::Refused(old.clone()),
+        ))
+        .unwrap();
+        assert!(!old_wire.contains("comms_recipients"));
+        assert!(!serde_json::to_string(&old.logged())
+            .unwrap()
+            .contains("comms_recipients"));
+        let decoded: LoggedGmAction =
+            serde_json::from_str(&serde_json::to_string(&old.logged()).unwrap()).unwrap();
+        assert_eq!(decoded.comms_recipients, None);
+        let bad = GmActionRefusal {
+            comms_recipients: refusal.comms_recipients,
+            ..old
+        };
+        assert_eq!(
+            validate_fleet_frame(&GmActionFrame::Refused(bad.clone()), &roster),
+            Err(GmActionRefusalReason::InvalidAction)
+        );
+        let bad_wire = crate::core::codec::encode_mesh_frame(&MeshFrame::GmAction(
+            GmActionFrame::Refused(bad),
+        ))
+        .unwrap();
+        assert!(crate::core::codec::decode_mesh_frame(&bad_wire).is_none());
+    }
+
+    #[test]
+    fn comms_scope_is_checked_against_the_canonical_grant_on_restore() {
+        let request = comms_scope_request();
+        let mut journal = GmActionJournal::default();
+        let mut grant = station_grant(1, 12, "comms-scope", request.action);
+        grant.operator_id = request.operator_id;
+        journal.insert(grant).unwrap();
+        journal.restore_applied_frontier(1).unwrap();
+        assert_eq!(
+            journal.applied_results()[0].comms_recipients,
+            Some(vec!["ship-a".into(), "ship-b".into()])
+        );
+        let stored = serde_json::to_value(&journal).unwrap();
+        assert_eq!(
+            serde_json::from_value::<GmActionJournal>(stored.clone()).unwrap(),
+            journal
+        );
+        for metadata in [
+            serde_json::Value::Null,
+            serde_json::json!(["ship-a"]),
+            serde_json::json!(["ship-b", "ship-a"]),
+            serde_json::json!(["ship-a", "ship-c"]),
+        ] {
+            let mut changed = stored.clone();
+            changed["applied_results"][0]["comms_recipients"] = metadata;
+            assert!(serde_json::from_value::<GmActionJournal>(changed).is_err());
+        }
+        let mut absent = stored;
+        absent["applied_results"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("comms_recipients");
+        assert!(serde_json::from_value::<GmActionJournal>(absent).is_err());
+    }
+
     /// A replicated refusal must name the entity it refused, for the same
     /// reason an event-control refusal must name its event.
     #[test]
@@ -6552,6 +6821,7 @@ kind = "{id}"
             effect_scope: None,
             objective_verb: None,
             objective_recipients: None,
+            comms_recipients: None,
             observer: None,
             action_kind: GmActionKind::DirectEffect,
             requested_active: true,

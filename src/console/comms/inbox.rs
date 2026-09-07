@@ -74,6 +74,18 @@ impl CommsInbox {
         removed
     }
 
+    /// Clear only the requesting ship's visible messages. Legacy fleet-wide
+    /// messages retain their existing shared clear semantics.
+    pub fn clear_for_ship(&mut self, ship: Option<&str>) -> usize {
+        let before = self.records.len();
+        self.records.retain(|r| {
+            !r.message.is_for_ship(ship) || (!r.message.is_orphaned && !r.message.is_read)
+        });
+        let removed = before - self.records.len();
+        self.dirty |= removed > 0;
+        removed
+    }
+
     /// Current inbox as an ordered slice of `CommsMessage` references.
     pub fn messages(&self) -> Vec<CommsMessage> {
         self.records.iter().map(|r| r.message.clone()).collect()
@@ -175,9 +187,17 @@ impl CommsInbox {
     /// later message in the same thread does. Empty legacy thread ids fall back
     /// to the message id, matching the client grouping rule.
     pub fn has_live_critical_thread(&self) -> bool {
+        self.has_live_critical_thread_for(None)
+    }
+
+    /// Critical presentation for a particular ship, including legacy fleet traffic.
+    pub fn has_live_critical_thread_for(&self, ship: Option<&str>) -> bool {
         let mut latest = std::collections::BTreeMap::<&str, &CommsMessage>::new();
         for record in &self.records {
             let message = &record.message;
+            if !message.is_for_ship(ship) {
+                continue;
+            }
             let thread = if message.thread_id.is_empty() {
                 message.id.as_str()
             } else {
@@ -222,6 +242,8 @@ mod tests {
             subject: "Distress".into(),
             body: "We are under attack!".into(),
             body_params: Default::default(),
+            recipient_ship: None,
+            literal_body: false,
             responses: vec![
                 crate::core::messages::CommsResponseView {
                     text: "Understood".into(),

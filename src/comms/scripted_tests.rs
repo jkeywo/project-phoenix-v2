@@ -38,6 +38,8 @@ fn scripted_comms_app() -> App {
 
 fn request(root_fn: &str, from: &str) -> OpenCommsRequest {
     OpenCommsRequest {
+        sender_uuid: None,
+        recipient_ship: None,
         from: from.to_string(),
         root_fn: root_fn.to_string(),
         display_name: None,

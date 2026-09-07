@@ -616,7 +616,9 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// `28` — #1307 retains Objective records, recipient scope and terminal status.
 /// Format 29 persists per-observer contact overrides without granting scan knowledge.
 /// `30` — #1312 retains independent GM-disabled System latches.
-pub const SNAPSHOT_FORMAT: u32 = 30;
+/// `31` — #1317 retains per-ship Comms routing, scripted dialogue, literal text,
+/// and the captured audience of durable GM outcomes and refusals.
+pub const SNAPSHOT_FORMAT: u32 = 31;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.

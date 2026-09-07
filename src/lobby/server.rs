@@ -1145,6 +1145,7 @@ pub struct GmLobbyReset<'w> {
     projection: Option<ResMut<'w, crate::gm_action::LastGmSessionProjection>>,
     mission_projection: Option<ResMut<'w, crate::gm_event::LastGmMissionProjection>>,
     spawn_projection: Option<ResMut<'w, crate::gm_spawn::LastGmSpawnProjection>>,
+    comms_projection: Option<ResMut<'w, crate::gm_comms::LastGmCommsProjection>>,
     content: Option<ResMut<'w, crate::world::server::WorldContentRuntime>>,
     direct_effects: Option<ResMut<'w, crate::gm_effect::PendingGmDirectEffects>>,
     paused: Option<ResMut<'w, crate::gm_action::SimulationPaused>>,
@@ -1208,6 +1209,9 @@ pub fn handle_return_to_lobby_system(
         // is Startup-built, so round two's projection is byte-identical to
         // round one's and a stale cache would leave the reset panel empty for
         // the whole of the next mission (issue #1305).
+        if let Some(projection) = gm.comms_projection.as_deref_mut() {
+            *projection = Default::default();
+        }
         if let Some(projection) = gm.spawn_projection.as_deref_mut() {
             *projection = Default::default();
         }

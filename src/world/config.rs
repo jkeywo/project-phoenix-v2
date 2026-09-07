@@ -1030,6 +1030,8 @@ pub struct RawWorld {
     pub gm_palette: Vec<GmPaletteEntry>,
     #[serde(default)]
     pub gm_objective_palette: Vec<crate::gm_objective::RawObjectivePaletteEntry>,
+    #[serde(default)]
+    pub gm_comms_route: Vec<crate::gm_comms::GmCommsRoute>,
     /// Paths to additional world TOML files to load additively at startup.
     #[serde(default)]
     pub extra_worlds: Vec<String>,
@@ -2030,6 +2032,8 @@ pub struct WorldConfig {
     /// an empty id/label/template, and a duplicate variant id by name.
     pub gm_palette: Vec<GmPaletteEntry>,
     pub gm_objective_palette: Vec<crate::gm_objective::ObjectivePaletteEntry>,
+    /// Root-world approved fictional senders, routing and scripted hail roots.
+    pub gm_comms_routes: Vec<crate::gm_comms::GmCommsRoute>,
     /// Every INLINE `[script.*]` Rhai body this world authors, in key order.
     ///
     /// Retained for exactly one reader: [`entity_template_paths`]'s scripted
@@ -2385,6 +2389,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
     // deadlines/routes/workforce above. `"all"` is reserved for the built-in
     // default every browser falls back to (`gui/gm-role-presets.js`'s
     // `GM_ALL_ROLE_PRESET`) and may not be authored.
+    crate::gm_comms::validate_routes(&raw.gm_comms_route)?;
     for (i, preset) in raw.gm_role_preset.iter().enumerate() {
         if preset.id.trim().is_empty() {
             return Err(format!(
@@ -2549,6 +2554,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         gm_role_presets: raw.gm_role_preset,
         gm_palette: raw.gm_palette,
         gm_objective_palette: crate::gm_objective::parse_palette(&raw.gm_objective_palette)?,
+        gm_comms_routes: raw.gm_comms_route,
         script_sources: inline_script_sources(raw.script.as_ref()),
     })
 }

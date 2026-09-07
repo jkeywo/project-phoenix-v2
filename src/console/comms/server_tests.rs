@@ -11,6 +11,8 @@ fn msg(id: &str) -> CommsMessage {
         subject: "Test".into(),
         body: "Body text".into(),
         body_params: Default::default(),
+        recipient_ship: None,
+        literal_body: false,
         responses: vec![crate::core::messages::CommsResponseView {
             text: "OK".into(),
             important: false,
@@ -1630,6 +1632,7 @@ fn seat_ai_dialogue(app: &mut App, sender_uuid: &str) -> (String, String) {
                 },
                 thread_id: id.clone(),
                 script: crate::comms::content::ScriptedDialogue {
+                    recipient_ship: None,
                     script_path: crate::comms::scripted::tests::PATH.to_string(),
                     origin_layer: None,
                     node_fn: "root".to_string(),
@@ -2121,6 +2124,7 @@ fn seat_weighted_dialogue(
                 },
                 thread_id: thread_id.to_string(),
                 script: crate::comms::content::ScriptedDialogue {
+                    recipient_ship: None,
                     script_path: crate::comms::scripted::tests::PATH.to_string(),
                     origin_layer: None,
                     node_fn: "lift_node".to_string(),
@@ -3225,6 +3229,7 @@ fn seat_scripted_dialogue(
                 },
                 thread_id: "scripted-thread".to_string(),
                 script: crate::comms::content::ScriptedDialogue {
+                    recipient_ship: None,
                     script_path: crate::comms::scripted::tests::PATH.to_string(),
                     origin_layer: None,
                     node_fn: "root".to_string(),
@@ -3932,6 +3937,8 @@ fn clear_comms_removes_orphaned_messages_and_broadcasts_update() {
         subject: "Old message".into(),
         body: "Old message body".into(),
         body_params: Default::default(),
+        recipient_ship: None,
+        literal_body: false,
         responses: vec![],
         selected_response: None,
         is_read: false,

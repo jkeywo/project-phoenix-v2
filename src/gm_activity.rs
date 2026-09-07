@@ -172,6 +172,9 @@ pub enum GmActivityAction {
         system: crate::core::messages::SystemId,
         disabled: bool,
     },
+    TransmitComms {
+        sender: String,
+    },
     SpawnPaletteEntity {
         palette: String,
     },
@@ -232,7 +235,7 @@ pub enum GmActivityDetail {
 }
 
 /// One common tick-stamped row. `ships` is semantic scope from actual `Ship`
-/// components or canonical Objective recipient UUIDs. An empty vector is global
+/// components or canonical Objective/Comms recipient UUIDs. An empty vector is global
 /// and therefore matches only All ships; missing display names retain the UUID.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct GmActivityEntry {
@@ -438,6 +441,7 @@ fn action_key(action: &GmActivityAction) -> (u8, bool, &str) {
         // slot the pause row already uses, so damage and healing on one target
         // never collapse onto each other.
         GmActivityAction::ApplyDirectEffect { entity, heal, .. } => (3, *heal, entity.as_str()),
+        GmActivityAction::TransmitComms { sender } => (13, false, sender.as_str()),
         GmActivityAction::DespawnEntity { target } => (7, false, target.as_str()),
         GmActivityAction::ObjectiveAction {
             objective, verb, ..
@@ -1166,6 +1170,10 @@ fn refusal_reason(reason: crate::gm_action::GmActionRefusalReason) -> &'static s
         Reason::UnknownGmPaletteEntry => "unknown-gm-palette-entry",
         Reason::WorldUnavailable => "world-unavailable",
         Reason::UnknownSystem => "unknown-system",
+        Reason::UnknownCommsRoute => "unknown-comms-route",
+        Reason::UnavailableCommsIdentity => "unavailable-comms-identity",
+        Reason::UnavailableCommsRecipient => "unavailable-comms-recipient",
+        Reason::UnavailableCommsHail => "unavailable-comms-hail",
     }
 }
 
@@ -1252,6 +1260,12 @@ fn terminal_action_entries(
                     .iter()
                     .map(|id| reference(id, &state.identities))
                     .collect::<Vec<_>>()
+            } else if fact.action_kind == crate::gm_action::GmActionKind::Comms {
+                fact.comms_recipients
+                    .as_ref()?
+                    .iter()
+                    .map(|id| reference(id, &state.identities))
+                    .collect()
             } else if matches!(
                 fact.action_kind,
                 crate::gm_action::GmActionKind::SystemDisable
@@ -1385,6 +1399,11 @@ fn terminal_action_entries(
                                 _ => crate::gm_contact::ContactMode::Normal,
                             },
                         },
+                        (crate::gm_action::GmActionKind::Comms, _) => {
+                            GmActivityAction::TransmitComms {
+                                sender: fact.target.clone()?,
+                            }
+                        }
                         (crate::gm_action::GmActionKind::WorldDespawn, _) => {
                             GmActivityAction::DespawnEntity {
                                 target: fact.target.clone()?,

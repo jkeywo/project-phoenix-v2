@@ -32,6 +32,10 @@ export const GM_ACTION_REFUSAL_REASON_LABELS = Object.freeze({
   'unknown-station': 'server.gm.session.reason.unknown_station',
   'unknown-system': 'server.gm.session.reason.unknown_system',
   'unknown-gm-palette-entry': 'server.gm.session.reason.unknown_gm_palette_entry',
+  'unknown-comms-route': 'server.gm.comms.reason.route',
+  'unavailable-comms-identity': 'server.gm.comms.reason.identity',
+  'unavailable-comms-recipient': 'server.gm.comms.reason.recipient',
+  'unavailable-comms-hail': 'server.gm.comms.reason.hail',
   'world-unavailable': 'server.gm.session.reason.world_unavailable',
 });
 

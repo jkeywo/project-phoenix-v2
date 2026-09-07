@@ -124,3 +124,9 @@ pub struct GmMissionChanged {
 pub struct GmSpawnChanged {
     pub payload: crate::gm_spawn::GmSpawnProjection,
 }
+
+/// Page-local absolute Comms Studio projection.
+#[derive(bevy::prelude::Message)]
+pub struct GmCommsChanged {
+    pub payload: crate::gm_comms::GmCommsProjection,
+}

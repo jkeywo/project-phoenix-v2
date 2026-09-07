@@ -54,7 +54,7 @@ use {
     crate::asteroids::lifecycle::AsteroidLifecyclePlugin,
     crate::boot::{BootPlan, BootProfile, WorldIngest},
     crate::console_bridge::{
-        AiChatterEvent, AudioConfigChanged, AudioCueEvent, GmActivityFeedChanged,
+        AiChatterEvent, AudioConfigChanged, AudioCueEvent, GmActivityFeedChanged, GmCommsChanged,
         GmEntityProjectionChanged, GmMissionChanged, GmSessionChanged, GmSpawnChanged,
         GmStationProjectionChanged, HudStateChanged, LobbyStateChanged,
     },
@@ -1007,10 +1007,11 @@ pub mod host_channels {
     /// The scenario-authored GM spawn palette and its attributed placement
     /// results (issue #1305) — what the placement panel lists and places.
     pub const GM_SPAWN: &str = "gm_spawn";
+    pub const GM_COMMS: &str = "gm_comms";
 
     /// Every registered host channel name. The JS dispatcher table in
     /// `server.html` must have a handler per entry.
-    pub const ALL: [&str; 13] = [
+    pub const ALL: [&str; 14] = [
         HUD,
         LOBBY,
         CHATTER,
@@ -1024,6 +1025,7 @@ pub mod host_channels {
         GM_SESSION,
         GM_MISSION,
         GM_SPAWN,
+        GM_COMMS,
     ];
 }
 
@@ -1459,6 +1461,7 @@ pub fn wasm_init() {
                 .after(crate::gm_action::publish_session_projection)
                 .after(crate::gm_event::publish_mission_projection)
                 .after(crate::gm_spawn::publish_spawn_projection)
+                .after(crate::gm_comms::publish_comms_projection)
                 .after(crate::gm_activity::publish_frame_activity),
             publish_sim_tick,
             publish_god_mode,
@@ -4860,10 +4863,11 @@ fn flush_host_channels(
     mut gm_session: MessageReader<GmSessionChanged>,
     mut gm_mission: MessageReader<GmMissionChanged>,
     mut gm_spawn: MessageReader<GmSpawnChanged>,
+    mut gm_comms: MessageReader<GmCommsChanged>,
 ) {
     // Declarative channel table: name → drained JSON payloads. Adding a
     // message channel = one row here (see `host_channels`).
-    let message_batches: [(&str, Vec<String>); 11] = [
+    let message_batches: [(&str, Vec<String>); 12] = [
         (
             host_channels::HUD,
             hud.read().map(|m| m.json.clone()).collect(),
@@ -4920,6 +4924,13 @@ fn flush_host_channels(
             gm_mission
                 .read()
                 .filter_map(|event| codec::encode_gm_mission_projection(&event.payload).ok())
+                .collect(),
+        ),
+        (
+            host_channels::GM_COMMS,
+            gm_comms
+                .read()
+                .filter_map(|event| codec::encode_gm_comms_projection(&event.payload).ok())
                 .collect(),
         ),
         (
@@ -5831,6 +5842,7 @@ spawn_on = "game_start"
                 host_channels::GM_SESSION,
                 host_channels::GM_MISSION,
                 host_channels::GM_SPAWN,
+                host_channels::GM_COMMS,
             ]
         );
     }

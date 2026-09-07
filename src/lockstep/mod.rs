@@ -919,6 +919,10 @@ pub fn register_lockstep(app: &mut App) {
             // exact reason: it is a de-duplication cache for a Host Channel
             // push, derived entirely from the authored palette and the GM
             // action log, both of which are already classified.
+            .declare_state::<crate::gm_comms::LastGmCommsProjection>(
+                StateClass::Presentation,
+                "gm-action-state",
+            )
             .declare_state::<crate::gm_spawn::LastGmSpawnProjection>(
                 StateClass::Presentation,
                 "gm-action-state",
@@ -955,6 +959,8 @@ pub fn register_lockstep(app: &mut App) {
         .init_resource::<crate::gm_action::LastGmSessionProjection>()
         .init_resource::<crate::gm_event::LastGmMissionProjection>()
         .init_resource::<crate::gm_spawn::LastGmSpawnProjection>()
+        .init_resource::<crate::gm_comms::LastGmCommsProjection>()
+        .add_message::<crate::console_bridge::GmCommsChanged>()
         .add_message::<crate::console_bridge::GmSessionChanged>()
         .add_message::<crate::console_bridge::GmMissionChanged>()
         .add_message::<crate::console_bridge::GmSpawnChanged>()
@@ -1018,6 +1024,7 @@ pub fn register_lockstep(app: &mut App) {
                 crate::gm_action::publish_session_projection,
                 crate::gm_event::publish_mission_projection,
                 crate::gm_spawn::publish_spawn_projection,
+                crate::gm_comms::publish_comms_projection,
             ),
         )
         // The host-loss Backfill flip (issue #1119). In `SimSet::Input`, at the

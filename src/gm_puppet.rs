@@ -256,6 +256,7 @@ pub fn validate_station_action(
         | GmAction::ObjectiveAction { .. }
         | GmAction::SetContactOverride { .. }
         | GmAction::SetSystemDisabled { .. }
+        | GmAction::TransmitComms { .. }
         | GmAction::SetEventPaused { .. }
         | GmAction::ArmGmEventSkip { .. } => return Ok(()),
         GmAction::SetStationPuppet { station, .. }
@@ -305,6 +306,7 @@ pub fn validate_station_action(
         | GmAction::ObjectiveAction { .. }
         | GmAction::SetContactOverride { .. }
         | GmAction::SetSystemDisabled { .. }
+        | GmAction::TransmitComms { .. }
         | GmAction::SetEventPaused { .. }
         | GmAction::ArmGmEventSkip { .. } => unreachable!(),
     }
@@ -1257,6 +1259,7 @@ station = "tactical"
                     effect_scope: None,
                     objective_verb: None,
                     objective_recipients: None,
+                    comms_recipients: None,
                     observer: None,
                 })
                 .unwrap();

@@ -694,6 +694,8 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
                     subject: "Greetings".into(),
                     body: "Welcome to the sector.".into(),
                     body_params: Default::default(),
+                    recipient_ship: None,
+                    literal_body: false,
                     responses: vec![crate::core::messages::CommsResponseView {
                         text: "Acknowledged".into(),
                         important: true,

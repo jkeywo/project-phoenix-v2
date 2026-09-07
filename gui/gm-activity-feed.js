@@ -113,6 +113,7 @@ function normaliseAction(value) {
   // handed — and the feed renders it verbatim beside the operator who placed it.
   if (value.type === 'set_system_disabled' && typeof value.target === 'string' && value.target && typeof value.system === 'string' && value.system && typeof value.disabled === 'boolean') return { type: value.type, target: value.target, system: value.system, disabled: value.disabled };
   if (value.type === 'set_contact_override' && typeof value.observer === 'string' && value.observer && typeof value.target === 'string' && value.target && ['reveal', 'conceal', 'normal'].includes(value.mode)) return { type: value.type, observer: value.observer, target: value.target, mode: value.mode };
+  if (value.type === 'transmit_comms' && typeof value.sender === 'string' && value.sender) return { type: value.type, sender: value.sender };
   if (value.type === 'despawn_entity' && typeof value.target === 'string' && value.target) {
     return { type: value.type, target: value.target };
   }
@@ -440,6 +441,8 @@ export function createGmActivityFeed({
           action = t('server.gm.activity.action.system_disabled', { target: detail.action.target, system: detail.action.system, verb: t(detail.action.disabled ? 'server.gm.system.disable' : 'server.gm.system.restore') });
         } else if (detail.action.type === 'set_contact_override') {
           action = t('server.gm.activity.action.contact_override', { observer: detail.action.observer, target: detail.action.target, mode: t(`server.gm.contact.${detail.action.mode}`) });
+        } else if (detail.action.type === 'transmit_comms') {
+          action = t('server.gm.activity.action.transmit_comms', { sender: detail.action.sender });
         } else if (detail.action.type === 'despawn_entity') {
           action = t('server.gm.activity.action.despawn_entity', { target: detail.action.target });
         } else if (detail.action.type === 'objective_action') {

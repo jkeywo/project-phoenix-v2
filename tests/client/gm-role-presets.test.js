@@ -138,9 +138,9 @@ describe('facet visibility helpers (M6-compatible panel descriptors)', () => {
 
   it('names a panel this build does not draw yet without erroring — the M6-compatible shape', () => {
     const preset = parseGmRolePresets([
-      { id: 'future', panels: ['gm-comms-panel', 'gm-knowledge-panel'] },
+      { id: 'future', panels: ['gm-future-panel', 'gm-knowledge-panel'] },
     ])[0];
-    expect(isGmPanelVisible(preset, 'gm-comms-panel')).toBe(true);
+    expect(isGmPanelVisible(preset, 'gm-future-panel')).toBe(true);
     expect(isGmPanelVisible(preset, 'gm-knowledge-panel')).toBe(true);
     // A panel this build DOES draw, left off the list, is correctly hidden —
     // the vocabulary is open-ended in both directions.
@@ -157,6 +157,7 @@ function mount() {
     <section id="gm-inspector"></section>
     <section id="gm-activity"></section>
     <section id="gm-station-controls"></section>
+    <section id="gm-comms-panel"></section>
     <button id="gm-session-pause"></button>
     <button id="gm-session-resume"></button>
   `;

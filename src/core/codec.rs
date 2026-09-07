@@ -658,9 +658,8 @@ pub fn encode_mesh_frame(frame: &crate::lockstep::MeshFrame) -> Result<String, s
                     "action": serde_json::to_value(&grant.action)?,
                 }),
             ),
-            crate::gm_action::GmActionFrame::Refused(refusal) => (
-                refusal.tick,
-                serde_json::json!({
+            crate::gm_action::GmActionFrame::Refused(refusal) => {
+                let mut body = serde_json::json!({
                     "from": refusal.sequenced_by.0,
                     "tick": refusal.tick,
                     "kind": "refused",
@@ -687,8 +686,13 @@ pub fn encode_mesh_frame(frame: &crate::lockstep::MeshFrame) -> Result<String, s
                     "objective_verb": refusal.objective_verb,
                     "objective_recipients": refusal.objective_recipients,
                     "observer": refusal.observer,
-                }),
-            ),
+                });
+                // Keep every unaffected action's wire bytes unchanged.
+                if let Some(recipients) = &refusal.comms_recipients {
+                    body["comms_recipients"] = serde_json::to_value(recipients)?;
+                }
+                (refusal.tick, body)
+            }
         },
         MeshFrame::GmJoin(frame) => match frame {
             crate::gm_join::GmJoinFrame::Pause(approval) => (
@@ -894,6 +898,18 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
                         None | Some(serde_json::Value::Null) => None,
                         Some(value) => Some(bounded_gm_target_id(value.as_str()?)?),
                     };
+                    let comms_recipients: Option<Vec<String>> = body
+                        .get("comms_recipients")
+                        .filter(|value| !value.is_null())
+                        .map(|value| serde_json::from_value(value.clone()))
+                        .transpose()
+                        .ok()?;
+                    if !crate::gm_action::valid_comms_result_scope(
+                        action_kind,
+                        comms_recipients.as_deref(),
+                    ) {
+                        return None;
+                    }
                     if matches!(
                         action_kind,
                         crate::gm_action::GmActionKind::ContactReveal
@@ -934,6 +950,7 @@ pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
                             .map(|v| serde_json::from_value(v.clone()))
                             .transpose()
                             .ok()?,
+                        comms_recipients,
                         observer,
                         tick,
                         reason: serde_json::from_value(body.get("reason")?.clone()).ok()?,
@@ -1279,6 +1296,14 @@ pub fn decode_gm_action_request(raw: &str) -> Option<crate::gm_action::GmActionR
                 )?),
                 disabled: object.get("disabled")?.as_bool()?,
             }
+        }
+        "transmit_comms" if object.len() == 4 => {
+            let transmission: crate::gm_comms::GmCommsTransmission =
+                serde_json::from_value(object.get("transmission")?.clone()).ok()?;
+            if !transmission.valid_shape() {
+                return None;
+            }
+            crate::gm_action::GmAction::TransmitComms { transmission }
         }
         "despawn_entity" if object.len() == 4 => crate::gm_action::GmAction::DespawnEntity {
             target: bounded_gm_target_id(object.get("target")?.as_str()?)?,
@@ -1739,6 +1764,7 @@ mod mesh_frame_tests {
                 effect_scope: None,
                 objective_verb: None,
                 objective_recipients: None,
+                comms_recipients: None,
                 observer: None,
             },
         ));
@@ -1760,6 +1786,7 @@ mod mesh_frame_tests {
                 effect_scope: None,
                 objective_verb: None,
                 objective_recipients: None,
+                comms_recipients: None,
                 observer: None,
             },
         ));
@@ -1782,6 +1809,7 @@ mod mesh_frame_tests {
                 effect_scope: None,
                 objective_verb: None,
                 objective_recipients: None,
+                comms_recipients: None,
                 observer: None,
             },
         ));
@@ -2083,6 +2111,7 @@ mod mesh_frame_tests {
                 effect_scope: None,
                 objective_verb: None,
                 objective_recipients: None,
+                comms_recipients: None,
                 observer: None,
             },
         ));
@@ -2216,4 +2245,11 @@ mod mesh_frame_tests {
             );
         }
     }
+}
+
+/// Absolute local GM Comms Studio projection.
+pub fn encode_gm_comms_projection(
+    payload: &crate::gm_comms::GmCommsProjection,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(payload)
 }

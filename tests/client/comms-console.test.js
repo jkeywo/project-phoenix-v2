@@ -21,6 +21,7 @@ import { t } from '../../gui/strings.js';
 import { renderStation as battleshipRender } from '../../gui/battleship/comms.console.js';
 import { renderStation as rawCruiserRender } from '../../gui/cruiser/comms.console.js';
 import { sortedThreadsFrom } from '../../gui/comms-state.js';
+import { withVisitingSystems } from '../../gui/console-state.js';
 import { withConsoleFamilyProjection } from './console-family-fixture.js';
 
 const cruiserRender = (payload, doc) => rawCruiserRender(withConsoleFamilyProjection(payload), doc);
@@ -299,7 +300,7 @@ describe('cruiser comms renderStation', () => {
     expect(el('civilian-traffic').state).toEqual({ civilians: [], auto: true });
   });
 
-  it('shows the Navigation full-panel view and hides Comms when the navigation family resolves non-empty (issue #1379)', () => {
+  it('shows the Navigation full-panel view when authored ownership includes Navigation', () => {
     cruiserRender(payload, document);
     expect(el('nav-view').hidden).toBe(false);
     expect(el('comms-view').hidden).toBe(true);
@@ -310,6 +311,35 @@ describe('cruiser comms renderStation', () => {
     cruiserRender(commsOnly, document);
     expect(el('comms-view').hidden).toBe(false);
     expect(el('nav-view').hidden).toBe(true);
+  });
+
+  it('keeps the real Comms payload visible when a human holder gains and loses visiting Navigation', () => {
+    const state = {
+      stationSystems: { liaison: ['radio'], chart: ['course'] },
+      systemConsoleFamilies: { radio: 'comms', course: 'navigation' },
+      blackboardKinds: { radio: 'Comms', course: 'Navigation' },
+      blackboards: {
+        radio: { ...comms },
+        course: { ...nav },
+      },
+    };
+    const payloadFor = station => JSON.parse(withVisitingSystems(
+      station, state, window.buildConsoleStateInner(station, state),
+    ));
+    for (const host of [null, 'liaison', null]) {
+      state.blackboards.course.host_station = host;
+      const projected = payloadFor('liaison');
+      expect(projected.system_ids).toEqual(['radio']);
+      expect(projected.hosted_systems).toEqual(host ? ['radio', 'course'] : ['radio']);
+      if (host) expect(projected.systems.course).toHaveProperty('waypoint');
+      rawCruiserRender(projected, document);
+      expect(el('comms-view').hidden).toBe(false);
+      expect(el('nav-view').hidden).toBe(true);
+      expect(el('comms-current-message').state.messages).toEqual(comms.messages);
+    }
+    rawCruiserRender(payloadFor('chart'), document);
+    expect(el('nav-view').hidden).toBe(false);
+    expect(el('comms-view').hidden).toBe(true);
   });
 
   // Issue #1379 review finding 1: the auxiliary "navigation" Station owns

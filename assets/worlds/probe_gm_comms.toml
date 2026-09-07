@@ -1,0 +1,63 @@
+# Narrow routing, literal text, dialogue and continuation probe for #1317.
+[global]
+seed = 1317
+title = "world.patrol.global.title"
+description = "world.patrol.global.description"
+command_delay_ticks = 2
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "fleet-ship-1"
+spawn_on = "game_start"
+transform = { position = [0.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "fleet-ship-2"
+spawn_on = "game_start"
+transform = { position = [100.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "fleet-ship-3"
+spawn_on = "game_start"
+transform = { position = [-100.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/station_axiom.toml"
+name = "world.probe_gm_comms.speaker"
+transform = { position = [0.0, 0.0, -120.0] }
+overrides = { comms = { hailable = true, range = 1000.0 }, tags = ["station", "gm_removable"] }
+
+[[gm_comms_route]]
+id = "selected"
+label = "world.probe_gm_comms.route.selected"
+visibility = "selected_ships"
+senders = ["world.probe_gm_comms.speaker"]
+[[gm_comms_route.hail]]
+id = "offer"
+label = "world.probe_gm_comms.hail.offer"
+script_path = "assets/worlds/probe_gm_comms.toml#script.setup"
+root_fn = "offer"
+
+[[gm_comms_route]]
+id = "fleet"
+label = "world.probe_gm_comms.route.fleet"
+visibility = "fleet"
+senders = ["world.probe_gm_comms.speaker"]
+
+[script]
+setup = """
+fn offer(ctx) {
+    #{ message: "world.probe_gm_comms.offer", responses: [
+        #{ text: "world.probe_gm_comms.accept", on_pick: "accept_offer", ai_weight: 0 }
+    ] }
+}
+fn accept_offer(ctx) {
+    ctx.flags.increment("gm_comms_accepted", 1);
+    #{ message: "world.probe_gm_comms.follow_up", responses: [
+        #{ text: "world.probe_gm_comms.close", on_pick: "close_offer", ai_weight: 0 }
+    ] }
+}
+fn close_offer(ctx) { ctx.flags.increment("gm_comms_closed", 1); }
+"""

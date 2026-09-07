@@ -112,6 +112,15 @@ pub(crate) fn open_scripted_comms_threads(
     mut game_over_reason: Option<ResMut<crate::server_app::GameOverReason>>,
     mut world_layers: WorldLayerParams,
     entity_uuid_query: Query<(Entity, &EntityUuid)>,
+    routed_endpoints: Query<(
+        &EntityUuid,
+        Option<&crate::comms::component::CommsHailable>,
+        Has<crate::server_app::Ship>,
+        Has<crate::lockstep::FleetSlotOf>,
+        Has<crate::comms::component::CommsRange>,
+        Option<&crate::entities::spawner::EntitySystemHull>,
+        Option<&crate::ship::components::ShipConfigComponent>,
+    )>,
     mut faction_dispatch: crate::world::server::FactionDispatchParams,
     mut ai_query: Query<
         (
@@ -191,6 +200,43 @@ pub(crate) fn open_scripted_comms_threads(
     let runtime = &mut *runtime;
 
     for req in requests {
+        // An explicit identity is immutable across queueing, restore and name
+        // reuse. A vanished recipient never widens to the rest of the fleet.
+        if req.sender_uuid.as_ref().is_some_and(|sender| {
+            runtime.name_to_uuid.get(&req.from) != Some(sender) || {
+                let mut matches = routed_endpoints
+                    .iter()
+                    .filter(|(uuid, ..)| &uuid.0 == sender);
+                let compatible =
+                    matches
+                        .next()
+                        .is_some_and(|(_, hailable, _, _, range, hull, _)| {
+                            hailable.is_some()
+                                && range
+                                && hull.is_none_or(|h| h.0.total_current() > 0.0)
+                        });
+                !compatible || matches.next().is_some()
+            }
+        }) || req.recipient_ship.as_ref().is_some_and(|ship| {
+            let mut matches = routed_endpoints
+                .iter()
+                .filter(|(uuid, ..)| uuid.0 == ship.0);
+            let compatible =
+                matches
+                    .next()
+                    .is_some_and(|(_, _, is_ship, fleet, _, hull, config)| {
+                        is_ship
+                            && fleet
+                            && hull.is_none_or(|h| h.0.total_current() > 0.0)
+                            && config.is_some_and(|c| {
+                                c.0.system(&crate::ship::system_registry::comms_system_id())
+                                    .is_some()
+                            })
+                    });
+            !compatible || matches.next().is_some()
+        }) {
+            continue;
+        }
         // A spent budget refuses every remaining call this tick by contract, so
         // stop here rather than logging once per request. Deterministic: the trip
         // is a pure function of the tick's call/op sequence, so every peer drops
@@ -393,7 +439,7 @@ pub(crate) fn open_scripted_comms_threads(
         // that matches what is being stamped.
         let available = crate::comms::server::sender_in_range_for_fleet(&comms, &sender_uuid);
         let responses = response_views(&wire_node.responses, available);
-        let msg = CommsMessage::injected(
+        let mut msg = CommsMessage::injected(
             msg_id.clone(),
             sender_uuid,
             sender_name,
@@ -404,6 +450,7 @@ pub(crate) fn open_scripted_comms_threads(
             available,
             req.effective_priority(),
         );
+        msg.recipient_ship = req.recipient_ship.clone();
         channel2_writer.write(CommsChannel2Event::scripted_dialogue(msg));
         comms.active_dialogues.insert(
             msg_id,
@@ -411,6 +458,7 @@ pub(crate) fn open_scripted_comms_threads(
                 current_node: wire_node,
                 thread_id,
                 script: ScriptedDialogue {
+                    recipient_ship: req.recipient_ship.clone(),
                     script_path: req.script_path.clone(),
                     origin_layer: req.origin_layer.clone(),
                     node_fn: req.root_fn.clone(),

@@ -27,6 +27,25 @@ function reference(entity_id, name = entity_id) {
 const ship = reference(SHIP, 'entity.alliance_cruiser.display_name');
 const source = reference(SOURCE, 'Raider');
 
+it('keeps Comms Applied and Refused outcomes under each captured recipient filter', () => {
+  const recipients = [ship, reference(OTHER_SHIP, 'Departed recipient')];
+  const entries = ['applied', 'refused'].map(outcome => entry('gm_action', {
+    type: 'gm_action', data: {
+      operator: { id: 'gm-alpha', name: 'Morgan' }, correlation: `comms-${outcome}`,
+      action: { type: 'transmit_comms', sender: SOURCE }, outcome,
+      reason: outcome === 'refused' ? 'unavailable-comms-recipient' : null,
+      order: { sequence: outcome === 'applied' ? 1 : 2, origin: 1 },
+    },
+  }, { ships: recipients, links: recipients.map(entity => ({ role: 'ship', entity })) }));
+  const parsed = parseGmActivityFeed(JSON.stringify({ capacity: 32, entries }));
+  expect(parsed).toBeDefined();
+  for (const recipient of recipients) {
+    const filtered = filterGmActivityEntries(parsed.entries, { category: 'gm_action', ship: recipient.entity_id });
+    expect(filtered.map(row => row.detail.data.outcome)).toEqual(['applied', 'refused']);
+  }
+  expect(filterGmActivityEntries(parsed.entries, { ship: SOURCE })).toEqual([]);
+});
+
 function entry(category, detail, overrides = {}) {
   return {
     tick: 7,

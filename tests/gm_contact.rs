@@ -312,6 +312,7 @@ fn refusal_and_reconstructed_frontier_keep_both_identities_and_mode() {
         observer: Some("observer".into()),
         objective_verb: None,
         objective_recipients: None,
+        comms_recipients: None,
         verb: None,
         lever: None,
         effect_scope: None,

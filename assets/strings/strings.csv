@@ -2725,3 +2725,37 @@ server.gm.system.no_op,GM System availability control,[Already in the requested 
 server.gm.system.refused,GM System availability control,[Refused]
 server.gm.system.timed_out,GM System availability control,[No result received yet]
 server.gm.activity.action.system_disabled,GM activity System availability action,[{verb} {system} on {target}]
+
+server.gm.comms.heading,GM Comms Studio #1317,"[Comms Studio]"
+server.gm.comms.empty,GM Comms Studio #1317,"[This scenario offers no Comms routes.]"
+server.gm.comms.route,GM Comms Studio #1317,"[Authored routing visibility]"
+server.gm.comms.sender,GM Comms Studio #1317,"[Speak as]"
+server.gm.comms.recipients,GM Comms Studio #1317,"[Recipient ships]"
+server.gm.comms.text,GM Comms Studio #1317,"[Exact transmission text]"
+server.gm.comms.send,GM Comms Studio #1317,"[Send transmission]"
+server.gm.comms.hail,GM Comms Studio #1317,"[Authored scripted hail]"
+server.gm.comms.start_hail,GM Comms Studio #1317,"[Initiate scripted hail]"
+server.gm.comms.history,GM Comms Studio #1317,"[GM Comms results]"
+server.gm.comms.byte_count,GM Comms Studio #1317,"[{count} / {max} UTF-8 bytes]"
+server.gm.comms.preview,GM Comms Studio #1317,"[From {sender} to {recipients}: {text}]"
+server.gm.comms.refused,GM Comms Studio #1317,"[The transmission was refused.]"
+server.gm.comms.result,GM Comms Studio #1317,"[{operator}: {outcome} from {sender} to {recipients}. {reason} ({correlation})]"
+server.gm.comms.outcome.applied,GM Comms Studio #1317,"[Transmission applied]"
+server.gm.comms.outcome.hail_queued,GM Comms Studio #1317,"[Scripted hail queued]"
+server.gm.comms.outcome.refused,GM Comms Studio #1317,"[Refused]"
+server.gm.comms.outcome.pending,GM Comms Studio #1317,"[Pending]"
+server.gm.comms.outcome.no-op,GM Comms Studio #1317,"[No change]"
+server.gm.comms.outcome.timed-out,GM Comms Studio #1317,"[Timed out]"
+server.gm.comms.reason.route,GM Comms Studio #1317,"[This authored Comms route is unavailable.]"
+server.gm.comms.reason.identity,GM Comms Studio #1317,"[This sender is no longer a compatible existing identity.]"
+server.gm.comms.reason.recipient,GM Comms Studio #1317,"[A recipient is unavailable or the fleet membership changed.]"
+server.gm.comms.reason.hail,GM Comms Studio #1317,"[This authored hail root is unavailable.]"
+server.gm.activity.action.transmit_comms,GM activity action #1317,[Comms from {sender}]
+world.probe_gm_comms.speaker,Comms routing probe #1317,[Axiom Liaison]
+world.probe_gm_comms.route.selected,Comms routing probe #1317,[Selected ships only]
+world.probe_gm_comms.route.fleet,Comms routing probe #1317,[Entire fleet]
+world.probe_gm_comms.hail.offer,Comms routing probe #1317,[Docking offer]
+world.probe_gm_comms.offer,Comms routing probe #1317,[Docking assistance is available.]
+world.probe_gm_comms.accept,Comms routing probe #1317,[Accept docking assistance.]
+world.probe_gm_comms.follow_up,Comms routing probe #1317,[Docking assistance acknowledged.]
+world.probe_gm_comms.close,Comms routing probe #1317,[Close this conversation.]

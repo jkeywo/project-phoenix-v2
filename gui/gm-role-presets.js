@@ -43,6 +43,7 @@ export const GM_ALL_ROLE_PRESET = Object.freeze({
  * availability, and a second writer here would race it. */
 export const GM_ROLE_PRESET_PANEL_IDS = Object.freeze([
   'gm-map-panel', 'gm-inspector', 'gm-activity',
+  'gm-comms-panel',
 ]);
 
 /** Quick-action DOM ids this build actually draws. */

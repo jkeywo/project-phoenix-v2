@@ -25,7 +25,7 @@ use uuid::Uuid;
 ///
 /// A versioning boundary, not a gameplay value, so it is a code constant
 /// (AGENTS.md rule 11), exactly like `manifest::SUPPORTED_PACK_FORMAT`.
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).
@@ -1083,6 +1083,13 @@ pub struct CommsMessage {
     /// Not applied to [`subject`](Self::subject), which is a character prefix of
     /// the *id* rather than of the rendered text; see [`Self::injected`].
     pub body_params: BTreeMap<String, String>,
+    /// A routed transmission belongs to this ship's Comms history. `None`
+    /// preserves ordinary fleet-wide authored messages. Routing is immutable
+    /// simulation state, not the identity of whichever host projects it.
+    pub recipient_ship: Option<crate::command_admission::log::ShipKey>,
+    /// Literal transmission text bypasses String Table lookup/interpolation.
+    /// The sender remains the fictional identity on every crew surface.
+    pub literal_body: bool,
     /// Available response options. Empty while awaiting a reply (loading).
     ///
     /// Promoted from `Vec<String>` (issue #761) to a per-response view so the
@@ -1128,6 +1135,10 @@ struct CommsMessageWire {
     body: String,
     #[serde(default)]
     body_params: BTreeMap<String, String>,
+    #[serde(default)]
+    recipient_ship: Option<crate::command_admission::log::ShipKey>,
+    #[serde(default)]
+    literal_body: bool,
     responses: Vec<CommsResponseView>,
     selected_response: Option<usize>,
     is_read: bool,
@@ -1177,6 +1188,8 @@ impl<'de> Deserialize<'de> for CommsMessage {
             subject: wire.subject,
             body: wire.body,
             body_params: wire.body_params,
+            recipient_ship: wire.recipient_ship,
+            literal_body: wire.literal_body,
             responses: wire.responses,
             selected_response: wire.selected_response,
             is_read: wire.is_read,
@@ -1197,7 +1210,7 @@ impl Serialize for CommsMessage {
         use serde::ser::SerializeStruct;
 
         let priority = self.effective_priority();
-        let field_count = if self.body_params.is_empty() { 13 } else { 14 };
+        let field_count = if self.body_params.is_empty() { 15 } else { 16 };
         let mut wire = serializer.serialize_struct("CommsMessage", field_count)?;
         wire.serialize_field("id", &self.id)?;
         wire.serialize_field("sender_uuid", &self.sender_uuid)?;
@@ -1207,6 +1220,8 @@ impl Serialize for CommsMessage {
         if !self.body_params.is_empty() {
             wire.serialize_field("body_params", &self.body_params)?;
         }
+        wire.serialize_field("recipient_ship", &self.recipient_ship)?;
+        wire.serialize_field("literal_body", &self.literal_body)?;
         wire.serialize_field("responses", &self.responses)?;
         wire.serialize_field("selected_response", &self.selected_response)?;
         wire.serialize_field("is_read", &self.is_read)?;
@@ -1263,6 +1278,8 @@ impl CommsMessage {
             sender_name,
             body,
             body_params,
+            recipient_ship: None,
+            literal_body: false,
             responses,
             selected_response: None,
             is_read: false,
@@ -1272,6 +1289,15 @@ impl CommsMessage {
             priority,
             is_urgent: priority.is_urgent(),
         }
+    }
+
+    /// The same recipient verdict used by projection and ordinary Comms
+    /// consumers. A routed message never falls back to the local host when its
+    /// requested ship is absent.
+    pub fn is_for_ship(&self, ship_uuid: Option<&str>) -> bool {
+        self.recipient_ship
+            .as_ref()
+            .is_none_or(|recipient| Some(recipient.0.as_str()) == ship_uuid)
     }
 
     /// Priority used by runtime consumers. The boolean arm exists only for

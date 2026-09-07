@@ -8,7 +8,9 @@
 use crate::ship_plugin::ShipSystemControlSources;
 use bevy::prelude::*;
 
-use crate::core::messages::{CommsBlackboard, ObjectiveSnapshot, SystemBlackboard, SystemId};
+#[cfg(test)]
+use crate::core::messages::SystemId;
+use crate::core::messages::{CommsBlackboard, SystemBlackboard};
 use crate::world::server::{ObjectiveManagerRes, WorldContentRuntime};
 
 use crate::comms::content::ActiveDialogue;
@@ -96,129 +98,94 @@ fn publish_comms_blackboard(
     inbox: Option<Res<CommsInboxRes>>,
     runtime: Option<Res<CommsRuntime>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
-    // Local-ship world conditions for scoring the objective pool (issue #752):
-    // comms hides zero-score doctrine objectives exactly as the captain panel
-    // does, so it needs red-alert + hull to evaluate zero-gates / modifiers.
-    local_conditions_q: Query<
-        (
-            Option<&crate::ship::state::ShipRedAlert>,
-            Option<&crate::entities::spawner::EntitySystemHull>,
-            Option<&EntityUuid>,
-        ),
-        With<crate::server_app::LocalShip>,
-    >,
-    mut ship_q: Query<
+    mut ships: Query<
         (
             bevy::ecs::query::Has<crate::server_app::LocalShip>,
+            Option<&crate::lockstep::FleetSlotOf>,
+            Option<&EntityUuid>,
+            Option<&crate::ship::state::ShipRedAlert>,
+            Option<&crate::entities::spawner::EntitySystemHull>,
             &mut crate::server_app::ShipSystemBlackboards,
-            // Where the human seek landed comms, if anywhere (issue #984).
-            // `Option` because only `LocalShip` carries the component, and
-            // optional access filters no archetype — the matched set, and so
-            // the iteration order, is exactly what it was.
             Option<&crate::ship::components::HumanSeekingHosts>,
         ),
         With<crate::server_app::Ship>,
     >,
 ) {
-    // Comms is fundamentally a player channel: the inbox, runtime, and
-    // objective managers are singleton, player-session-scoped resources. The
-    // shared content is therefore built ONCE from those singletons and
-    // published into the LocalShip's blackboard. Every NPC ship still receives
-    // a comms blackboard entry (AC #831: "NPC ships have comms blackboards")
-    // for architectural consistency with the other per-entity systems, but it
-    // is empty — an NPC carries no player messages, objectives, or contacts.
-    // (Mirrors #830 navigation's `is_local`-gated per-Ship publish.)
-    //
-    // The three `Option<Res>` fallbacks are retained deliberately (issue #831
-    // conservative prune): `ObjectiveManagerRes` is world-load-gated (only
-    // inserted on world load, never `init_resource`d), and the console test
-    // harness exercises the inbox/runtime paths without the full comms server
-    // plugin — matching the #830 precedent that kept `ObjectiveManagerRes`.
-    let mut messages = inbox.as_ref().map(|r| r.0.messages()).unwrap_or_default();
-
-    if let Some(rt) = runtime.as_ref() {
-        for m in messages.iter_mut() {
-            if let Some(flag) = rt.range_flags.get(&m.sender_uuid).copied() {
-                m.sender_in_range = flag;
-            } else if rt.range_active && uuid::Uuid::parse_str(&m.sender_uuid).is_ok() {
-                m.sender_in_range = false;
-            }
-            // Per-response availability tracks sender range (issue #761), the
-            // same authoritative reachability that stamps `sender_in_range`.
-            for r in m.responses.iter_mut() {
-                r.available = m.sender_in_range;
-            }
-        }
-    }
-
-    // Score the active objective pool against the local ship's conditions and
-    // apply the shared player-facing visibility filter (issue #752): mission
-    // objectives are always shown; doctrine objectives are hidden while their
-    // utility score is zero. Comms does not apply the captain boost — that is a
-    // captain-scoped mechanism — so a zero-gated doctrine objective stays hidden
-    // in comms until its own conditions lift it.
-    let (red_alert, hull_fraction, ship_uuid) = local_conditions_q
-        .single()
-        .ok()
-        .map(|(ra, hull, uuid)| {
-            let red_alert = ra.map(|r| r.0).unwrap_or(false);
-            let hull_fraction = hull
-                .map(|h| {
-                    let max = h.0.total_max();
-                    if max > 0.0 {
-                        (h.0.total_current() / max).clamp(0.0, 1.0)
-                    } else {
-                        1.0
-                    }
+    let key = crate::ship::system_registry::comms_system_id();
+    for (is_local, slot, uuid, alert, hull, mut boards, hosts) in &mut ships {
+        let mut bb = CommsBlackboard::default();
+        if is_local || slot.is_some() {
+            bb.messages = inbox
+                .as_ref()
+                .map(|inbox| {
+                    inbox
+                        .0
+                        .messages()
+                        .into_iter()
+                        .filter(|m| m.is_for_ship(uuid.map(|id| id.0.as_str())))
+                        .collect()
                 })
-                .unwrap_or(1.0);
-            (red_alert, hull_fraction, uuid.map_or("", |u| u.0.as_str()))
-        })
-        .unwrap_or((false, 1.0, ""));
-    let conditions = crate::objectives::WorldConditions {
-        red_alert,
-        hull_fraction,
-        attacked: false,
-    };
-    let objectives_snap: Vec<ObjectiveSnapshot> = objectives
-        .as_ref()
-        .map(|o| {
-            o.0.scored_pool_for(&conditions, ship_uuid)
-                .into_iter()
-                .filter(crate::objectives::is_visible_objective)
-                .map(|s| s.snapshot)
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let mut contacts = runtime
-        .as_ref()
-        .map(|rt| rt.contacts.clone())
-        .unwrap_or_default();
-    for contact in contacts.iter_mut() {
-        contact.is_urgent = messages.iter().any(|m| {
-            m.sender_uuid == contact.uuid && m.effective_priority().is_urgent() && !m.is_read
-        });
-    }
-
-    let local_bb = CommsBlackboard {
-        messages,
-        objectives: objectives_snap,
-        contacts,
-        // Filled per ship below: the seek is a property of the hull, not of the
-        // shared player-channel content this local blackboard is built from.
-        host_station: None,
-    };
-
-    let comms_key = SystemId(crate::ship::system_registry::COMMS_SYSTEM_ID.to_string());
-    for (is_local, mut bbs, hosts) in ship_q.iter_mut() {
-        let mut bb = if is_local {
-            local_bb.clone()
-        } else {
-            CommsBlackboard::default()
-        };
-        bb.host_station = hosts.and_then(|h| h.0.get(&comms_key).cloned());
-        bbs.0.insert(comms_key.clone(), SystemBlackboard::Comms(bb));
+                .unwrap_or_default();
+            if let Some(runtime) = runtime.as_deref() {
+                for message in &mut bb.messages {
+                    message.sender_in_range = slot.map_or_else(
+                        || {
+                            crate::comms::server::current_sender_in_range(
+                                runtime,
+                                &message.sender_uuid,
+                            )
+                        },
+                        |slot| {
+                            crate::comms::server::sender_in_range_for_slot(
+                                runtime,
+                                Some(slot.0),
+                                &message.sender_uuid,
+                            )
+                        },
+                    );
+                    for response in &mut message.responses {
+                        response.available = message.sender_in_range;
+                    }
+                }
+                bb.contacts = runtime.contacts.clone();
+                for contact in &mut bb.contacts {
+                    contact.in_range = slot.map_or_else(
+                        || crate::comms::server::current_sender_in_range(runtime, &contact.uuid),
+                        |slot| {
+                            crate::comms::server::sender_in_range_for_slot(
+                                runtime,
+                                Some(slot.0),
+                                &contact.uuid,
+                            )
+                        },
+                    );
+                    contact.is_urgent = bb.messages.iter().any(|m| {
+                        m.sender_uuid == contact.uuid
+                            && m.effective_priority().is_urgent()
+                            && !m.is_read
+                    });
+                }
+            }
+            let conditions = crate::objectives::WorldConditions {
+                red_alert: alert.is_some_and(|a| a.0),
+                hull_fraction: hull.filter(|h| h.0.total_max() > 0.0).map_or(1.0, |h| {
+                    (h.0.total_current() / h.0.total_max()).clamp(0.0, 1.0)
+                }),
+                attacked: false,
+            };
+            bb.objectives = objectives
+                .as_ref()
+                .map(|o| {
+                    o.0.scored_pool_for(&conditions, uuid.map_or("", |id| id.0.as_str()))
+                        .into_iter()
+                        .filter(crate::objectives::is_visible_objective)
+                        .map(|s| s.snapshot)
+                        .collect()
+                })
+                .unwrap_or_default();
+        }
+        bb.host_station = hosts.and_then(|h| h.0.get(&key).cloned());
+        boards.0.insert(key.clone(), SystemBlackboard::Comms(bb));
     }
 }
 
@@ -570,6 +537,20 @@ pub(crate) fn handle_respond_to_message(
             }
         };
 
+        if dialogue
+            .script
+            .recipient_ship
+            .as_ref()
+            .is_some_and(|recipient| hull.uuid.is_none_or(|uuid| uuid.0 != recipient.0))
+            || !inbox.0.iter().any(|message| {
+                message.id == *message_id
+                    && message.is_for_ship(hull.uuid.map(|uuid| uuid.0.as_str()))
+            })
+        {
+            reject(&mut aux.outbox, cmd, message_id, *response_index);
+            continue;
+        }
+
         // Server-side range gate: if range tracking is active, the sender of
         // this message must currently be in range OF THE HULL ANSWERING IT.
         // Out-of-range responses are rejected (issue #761): forced/stale
@@ -915,7 +896,7 @@ pub(crate) fn handle_respond_to_message(
             let available = crate::comms::server::sender_in_range_for_fleet(&comms, &sender_uuid);
             let new_responses =
                 crate::comms::content::response_views(&wire_node.responses, available);
-            let new_msg = CommsMessage::injected(
+            let mut new_msg = CommsMessage::injected(
                 new_msg_id.clone(),
                 sender_uuid,
                 sender_name,
@@ -926,6 +907,7 @@ pub(crate) fn handle_respond_to_message(
                 available,
                 priority,
             );
+            new_msg.recipient_ship = dialogue.script.recipient_ship.clone();
             channel2_writer.write(CommsChannel2Event::scripted_dialogue(new_msg));
             comms.active_dialogues.insert(
                 new_msg_id,
@@ -933,6 +915,7 @@ pub(crate) fn handle_respond_to_message(
                     current_node: wire_node,
                     thread_id,
                     script: crate::comms::content::ScriptedDialogue {
+                        recipient_ship: dialogue.script.recipient_ship.clone(),
                         script_path: sd.script_path.clone(),
                         origin_layer: sd.origin_layer.clone(),
                         node_fn: on_pick_fn,
@@ -1014,29 +997,49 @@ pub(crate) fn handle_respond_to_message(
 /// idempotent, mints no ids and writes no flags, so two hulls clearing on one
 /// tick reach the same state in either order.
 pub(crate) fn handle_clear_comms(
-    ship_query: Query<&crate::core::messages::AdmittedCommands, With<crate::server_app::Ship>>,
+    ship_query: Query<
+        (
+            &crate::core::messages::AdmittedCommands,
+            Option<&EntityUuid>,
+        ),
+        With<crate::server_app::Ship>,
+    >,
     mut inbox: ResMut<CommsInboxRes>,
     mut comms: ResMut<CommsRuntime>,
     mut outbox: Option<ResMut<crate::server_app::SimOutbox>>,
 ) {
-    for cmd in ship_query
-        .iter()
-        .flat_map(|admitted| admitted.for_target(crate::ship::system_registry::COMMS_SYSTEM_ID))
-    {
-        if matches!(
-            cmd.payload,
-            crate::core::messages::SystemControlPayload::ClearComms
-        ) {
-            // Clearing invalidates every live dialogue. Preserve its historical
-            // row when it is still unread, but acknowledge any continuing
-            // Critical interruption before the dialogue authority disappears.
-            let dialogue_ids: Vec<String> = comms.active_dialogues.keys().cloned().collect();
-            for message_id in dialogue_ids {
-                inbox.0.acknowledge_priority(&message_id);
+    for (admitted, uuid) in &ship_query {
+        for cmd in admitted.for_target(crate::ship::system_registry::COMMS_SYSTEM_ID) {
+            if !matches!(
+                cmd.payload,
+                crate::core::messages::SystemControlPayload::ClearComms
+            ) {
+                continue;
             }
-            inbox.0.clear();
+            let ship = uuid.map(|uuid| uuid.0.as_str());
+            let dialogue_ids: Vec<_> = inbox
+                .0
+                .iter()
+                .filter(|m| m.is_for_ship(ship))
+                .map(|m| m.id.clone())
+                .collect();
+            for id in &dialogue_ids {
+                inbox.0.acknowledge_priority(id);
+                comms.active_dialogues.remove(id);
+            }
+            // Retire legacy orphaned dialogue entries too, preserving the
+            // existing clear semantics without touching another ship's thread.
+            comms.active_dialogues.retain(|_, d| {
+                d.script
+                    .recipient_ship
+                    .as_ref()
+                    .is_some_and(|recipient| Some(recipient.0.as_str()) != ship)
+            });
+            comms
+                .pending_ai_responses
+                .retain(|key, _| !dialogue_ids.contains(&key.message_id));
+            inbox.0.clear_for_ship(ship);
             comms.open_hails.clear();
-            comms.active_dialogues.clear();
             if let Some(outbox) = outbox.as_deref_mut() {
                 finish_action_feedback(
                     cmd,
@@ -1053,7 +1056,13 @@ pub(crate) fn handle_clear_comms(
 /// Looks up the message in the inbox, stores it in `OnScreenMessage`, and
 /// pushes `ViewMode::Comms` so the viewscreen switches to the comms overlay.
 pub(crate) fn handle_show_on_screen(
-    ship_query: Query<&crate::core::messages::AdmittedCommands, With<crate::server_app::LocalShip>>,
+    ship_query: Query<
+        (
+            &crate::core::messages::AdmittedCommands,
+            Option<&EntityUuid>,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
     inbox: Res<CommsInboxRes>,
     mut on_screen: ResMut<OnScreenMessage>,
     mut view_mode_q: Query<
@@ -1062,7 +1071,7 @@ pub(crate) fn handle_show_on_screen(
     >,
     mut outbox: Option<ResMut<crate::server_app::SimOutbox>>,
 ) {
-    let Some(admitted) = ship_query.iter().next() else {
+    let Some((admitted, uuid)) = ship_query.iter().next() else {
         return;
     };
     let mut vm = view_mode_q.iter_mut().next();
@@ -1076,7 +1085,9 @@ pub(crate) fn handle_show_on_screen(
         if let Some(message_id) = show_message_id {
             let outcome = if let (Some(vm), Some(msg)) = (
                 vm.as_deref_mut(),
-                inbox.0.messages().into_iter().find(|m| &m.id == message_id),
+                inbox.0.messages().into_iter().find(|m| {
+                    &m.id == message_id && m.is_for_ship(uuid.map(|uuid| uuid.0.as_str()))
+                }),
             ) {
                 let already_on_screen =
                     matches!(vm.view_mode, crate::core::messages::ViewMode::Comms)
@@ -1170,38 +1181,43 @@ pub(crate) fn handle_comms_channel2(
             // readers that already consumed them.
             continue;
         }
-        // The thread is the story's unit — an initial hail and its follow-ups
-        // share one `thread_id` — so it is the event's identity. A message with
-        // no thread is its own thread, the same fallback the client uses.
-        if let Some(msgs) = narrative.as_deref_mut() {
-            let thread_id = if ev.message.thread_id.is_empty() {
-                ev.message.id.clone()
-            } else {
-                ev.message.thread_id.clone()
-            };
-            msgs.write(
-                crate::core::narrative::NarrativeEvent::new(
-                    crate::core::narrative::NarrativeKind::CommsOpened,
-                    thread_id,
-                )
-                .from_actor(crate::core::narrative::NarrativeActor::entity(
-                    ev.message.sender_uuid.clone(),
-                ))
-                // `body` is the message's `strings.csv` id, carried verbatim —
-                // the rendered English never enters the timeline.
-                .text("body", ev.message.body.clone())
-                .text("message_id", ev.message.id.clone())
-                .detail(
-                    "responses",
-                    crate::core::narrative::NarrativeValue::Int(ev.message.responses.len() as i64),
-                )
-                .detail(
-                    "urgent",
-                    crate::core::narrative::NarrativeValue::Flag(ev.message.is_urgent),
-                ),
-            );
+        deliver_comms_message(ev.message.clone(), &mut inbox, narrative.as_deref_mut());
+    }
+}
+
+/// The common delivery edge for an ordinary Channel 2 message and a GM literal
+/// transmission. The inbox is authoritative across PreUpdate and snapshot
+/// capture; a transient event buffer must not be the only record of a send.
+pub(crate) fn deliver_comms_message(
+    message: CommsMessage,
+    inbox: &mut CommsInboxRes,
+    narrative: Option<&mut Messages<crate::core::narrative::NarrativeEvent>>,
+) {
+    if !inbox.0.inject(message.clone()) {
+        return;
+    }
+    if let Some(events) = narrative {
+        use crate::core::narrative::{
+            NarrativeActor, NarrativeEvent, NarrativeKind, NarrativeValue,
+        };
+        let thread = if message.thread_id.is_empty() {
+            &message.id
+        } else {
+            &message.thread_id
+        };
+        let mut event = NarrativeEvent::new(NarrativeKind::CommsOpened, thread.clone())
+            .from_actor(NarrativeActor::entity(message.sender_uuid.clone()))
+            .text("body", message.body.clone())
+            .text("message_id", message.id.clone())
+            .detail(
+                "responses",
+                NarrativeValue::Int(message.responses.len() as i64),
+            )
+            .detail("urgent", NarrativeValue::Flag(message.is_urgent));
+        if let Some(recipient) = message.recipient_ship {
+            event = event.to_target(recipient.0);
         }
-        inbox.0.inject(ev.message.clone());
+        events.write(event);
     }
 }
 
@@ -1570,6 +1586,7 @@ fn has_unread_from_sender_with(
     sender_uuid: &str,
     comms: Option<&CommsRuntime>,
     inbox: Option<&CommsInboxRes>,
+    ship_uuid: Option<&str>,
 ) -> bool {
     let Some(inbox) = inbox else {
         return false;
@@ -1578,15 +1595,19 @@ fn has_unread_from_sender_with(
         .0
         .messages()
         .iter()
-        .any(|m| m.sender_uuid == sender_uuid && !m.is_orphaned)
+        .any(|m| m.is_for_ship(ship_uuid) && m.sender_uuid == sender_uuid && !m.is_orphaned)
     {
         return true;
     }
     comms.is_some_and(|rt| {
-        rt.active_dialogues
-            .keys()
-            .filter_map(|id| inbox.0.sender_uuid_for(id))
-            .any(|s| s == sender_uuid)
+        rt.active_dialogues.iter().any(|(id, dialogue)| {
+            dialogue
+                .script
+                .recipient_ship
+                .as_ref()
+                .is_none_or(|recipient| Some(recipient.0.as_str()) == ship_uuid)
+                && inbox.0.sender_uuid_for(id).as_deref() == Some(sender_uuid)
+        })
     })
 }
 
@@ -1936,6 +1957,7 @@ pub fn operate_comms_ai(
                     &hit.uuid,
                     comms.as_deref(),
                     inbox.as_deref(),
+                    entity_uuid.map(|uuid| uuid.0.as_str()),
                 ),
                 mandatory: hit.mandatory,
             };
@@ -1970,6 +1992,7 @@ pub fn operate_comms_ai(
                         &contact.uuid,
                         comms.as_deref(),
                         inbox.as_deref(),
+                        entity_uuid.map(|uuid| uuid.0.as_str()),
                     ),
                     mandatory: false,
                 };
@@ -2302,7 +2325,12 @@ pub fn operate_comms_response_ai(
 
         // Inbox order is insertion order, so the decision sequence is
         // deterministic on the fixed tick.
-        for message in inbox.0.messages() {
+        for message in inbox
+            .0
+            .messages()
+            .into_iter()
+            .filter(|message| message.is_for_ship(_entity_uuid.map(|uuid| uuid.0.as_str())))
+        {
             // Only messages with an OPEN dialogue awaiting an answer are
             // decided about. `selected_response.is_some()` means it was already
             // answered; no `active_dialogues` entry means the thread is stale

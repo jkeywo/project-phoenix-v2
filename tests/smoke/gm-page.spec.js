@@ -13,6 +13,184 @@ import {
 } from './fixtures';
 import { ts } from './strings';
 
+// #1317: real GM controls, two equal operators and ordinary crew Comms.
+test('GM Comms preserves exact text and recipient dialogue through ordinary crew delivery', { tag: '@core' }, async ({ context }, testInfo) => {
+  test.setTimeout(300_000);
+  const scenario = 'assets/worlds/probe_gm_comms.toml';
+  const errors = [];
+  const boot = async () => {
+    const page = await context.newPage(); errors.push(captureServerPageErrors(page));
+    await page.goto(`/?scenario=${scenario}`); await waitForWasmReady(page); return page;
+  };
+  const owner = await boot();
+  await owner.evaluate(() => window.__hostFleetOpen());
+  await waitForJoinCode(owner, 'fleet-code', 30_000);
+  const code = await owner.locator('#fleet-code').textContent();
+  const member = await boot();
+  await openFleetTab(member);
+  await member.fill('[data-control="fleet-code"]', code);
+  await member.click('[data-control="fleet-join"]');
+  await member.click('#server-settings-btn');
+  const crews = [];
+  for (const ship of [owner, member]) {
+    const host = await readHostPeerId(ship);
+    const comms = await createTestClient(context, host, { name: 'Liaison' });
+    const tactical = await createTestClient(context, host, { name: 'Tactical' });
+    await selectAndWait(comms, 'Comms'); await selectAndWait(tactical, 'Tactical');
+    crews.push({ host, comms, tactical });
+  }
+  const gms = [await boot(), await boot()];
+  for (const gm of gms) await joinFleetAsGm(gm, code);
+  for (const { comms, tactical } of crews) {
+    await comms.send('SetReady', { ready: true }); await tactical.send('SetReady', { ready: true });
+  }
+  for (const gm of gms) await gm.locator('#gm-ready-btn').click();
+  await Promise.all([owner, member, ...gms].map(page => page.waitForFunction(
+    () => window.__saveSlotsPhase === 'InProgress', undefined, { timeout: 30_000 })));
+  const gm = gms[0], otherGm = gms[1];
+  await gm.waitForFunction(() => window.__hostGmCommsState?.().recipients.length === 2
+    && window.__hostGmCommsState().routes.some(route => route.hails.length > 0));
+  const fleet = await gm.evaluate(() => window.__hostGmCommsState().recipients);
+  const alpha = fleet.find(row => row.fleet_slot === 1).id;
+  const beta = fleet.find(row => row.fleet_slot === 2).id;
+  const operator = await gm.evaluate(() => window.__hostLocalGm().id);
+  const otherOperator = await otherGm.evaluate(() => window.__hostLocalGm().id);
+  expect(otherOperator).not.toBe(operator);
+
+  // Mount the shipped crew iframe on the retained Comms tenure.
+  const token = crews[0].comms.token;
+  await crews[0].comms.close();
+  const crewPage = await reconnectRealCrew(context, crews[0].host, token, 'comms');
+  const crewFrame = crewPage.frameLocator('#comms-iframe');
+  const send = async (page, recipients, text) => {
+    await page.locator('#gm-comms-route').selectOption('selected');
+    await page.locator('#gm-comms-recipients').selectOption(recipients);
+    await page.locator('#gm-comms-text').fill(text);
+    const previous = await page.evaluate(() => window.__hostGmCommsState().results.map(row => `${row.operator_id}/${row.correlation}`));
+    await page.locator('#gm-comms-send').click();
+    await page.waitForFunction(previous => window.__hostGmCommsState().results.some(row =>
+      row.operator_id === window.__hostLocalGm().id && row.outcome === 'applied'
+        && !previous.includes(`${row.operator_id}/${row.correlation}`)), previous);
+    return page.evaluate(previous => window.__hostGmCommsState().results.find(row =>
+      row.operator_id === window.__hostLocalGm().id && row.outcome === 'applied'
+        && !previous.includes(`${row.operator_id}/${row.correlation}`)), previous);
+  };
+  const literalId = 'server.gm.comms.heading';
+  const first = await send(gm, [alpha], literalId);
+  expect(first.operator_id).toBe(operator);
+  expect(first.transmission.content.literal.text).toBe(literalId);
+  await expect(crewFrame.locator('ph-comms-current-message .msg .text').filter({ hasText: literalId })).toHaveText(literalId);
+  const betaMessages = async () => (await crews[1].comms.lastMessage('CommsState'))?.data?.messages || [];
+  expect((await betaMessages()).some(message => message.body === literalId)).toBe(false);
+
+  const exact = '  <b>🌒</b> {sender}\n  ';
+  const second = await send(otherGm, [alpha, beta], exact);
+  expect(second.operator_id).toBe(otherOperator);
+  expect(second.transmission.content.literal.text).toBe(exact);
+  await crews[1].comms.page.waitForFunction(text => window.__messages.filter(m => m.type === 'CommsState').at(-1)
+    ?.data.messages.some(m => m.body === text && m.literal_body === true), exact);
+  const received = (await betaMessages()).find(message => message.body === exact);
+  expect(received.recipient_ship).toBe(beta);
+  expect(received.sender_name).not.toBe(otherOperator);
+  expect(received.sender_name).not.toBe(operator);
+  // A retry with the same canonical identity cannot mint another message.
+  expect(await otherGm.evaluate(row => window.__hostTransmitComms({ operator_id: row.operator_id,
+    correlation: row.correlation, transmission: row.transmission }), second)).toBe(true);
+  await otherGm.waitForFunction(correlation => window.__hostGmCommsState().results
+    .some(row => row.correlation === correlation && row.outcome === 'applied'), second.correlation);
+
+  await gm.locator('#gm-comms-recipients').selectOption([alpha]);
+  await gm.locator('#gm-comms-hail').selectOption('offer');
+  const beforeHail = await gm.evaluate(() => window.__hostGmCommsState().results
+    .map(row => `${row.operator_id}/${row.correlation}`));
+  await gm.locator('#gm-comms-start-hail').click();
+  await gm.waitForFunction(previous => window.__hostGmCommsState().results.some(row =>
+    row.operator_id === window.__hostLocalGm().id && row.outcome === 'applied'
+      && row.transmission.content.scripted_hail?.hail === 'offer'
+      && !previous.includes(`${row.operator_id}/${row.correlation}`)), beforeHail);
+  const offer = ts('world.probe_gm_comms.offer');
+  // Earlier literal threads remain in the inbox. Wait for the delivered offer
+  // and open that exact conversation through the ordinary crew control.
+  const channel = crewFrame.locator('ph-comms-hail-list .row').filter({ hasText: offer });
+  await expect(channel.locator('.preview')).toHaveText(offer);
+  await testInfo.attach('comms-inbox-visibility.json', {
+    body: JSON.stringify(await crewFrame.locator('body').evaluate(() => ({
+      commsHidden: document.getElementById('comms-view')?.hidden,
+      navigationHidden: document.getElementById('nav-view')?.hidden,
+      hailsSelected: document.getElementById('comms-seg-hails')?.getAttribute('aria-selected'),
+      threadOpen: document.getElementById('comms-thread-panel')?.classList.contains('open'),
+    })), null, 2), contentType: 'application/json',
+  });
+  await expect(crewFrame.locator('#comms-view')).toBeVisible({ timeout: 10_000 });
+  await expect(channel).toBeVisible({ timeout: 10_000 });
+  await channel.click({ timeout: 10_000 });
+  const response = crewFrame.locator('ph-comms-current-message .resp-btn').filter({ hasText: ts('world.probe_gm_comms.accept') });
+  await expect(response).toBeVisible();
+  await expect(crewFrame.locator('ph-comms-current-message .msg .text').filter({ hasText: offer })).toHaveText(offer);
+  // The real first-run console carries tutorial cards over its response area.
+  // Dismiss each through the ordinary local control before answering the hail.
+  const tutorial = crewFrame.locator('ph-tutorial-overlay');
+  for (let dismissed = 0; dismissed < 16 && await tutorial.isVisible(); dismissed++) {
+    const activeId = await tutorial.evaluate(element => element.state?.active?.id ?? null);
+    await tutorial.locator('#dismiss').click();
+    await expect.poll(() => tutorial.evaluate(element => element.state?.active?.id ?? null))
+      .not.toBe(activeId);
+  }
+  await expect(tutorial).toBeHidden();
+  await response.click();
+  const responseFeedback = crewFrame.locator('.semantic-action-feedback__item[data-action-id="comms.respond"]');
+  await expect(responseFeedback).toHaveAttribute('data-state', /^(Applied|Refused|TimedOut)$/);
+  const authority = {
+    feedback: await responseFeedback.getAttribute('data-state'),
+    crew: await crewPage.evaluate(() => ({ token: sessionStorage.getItem('session-token'), lobby: window.lobbyState })),
+    gms: await Promise.all(gms.map(page => page.evaluate(() => ({
+      operator: window.__hostLocalGm().id,
+      mesh: window.__hostMeshStatus(),
+      ships: window.__hostGmStationState().projection.ships.map(ship => ({
+        ship_id: ship.ship_id, station_ratings: ship.station_ratings, control_sources: ship.control_sources,
+      })),
+    })))),
+  };
+  await testInfo.attach('comms-response-authority.json', {
+    body: JSON.stringify(authority, null, 2), contentType: 'application/json',
+  });
+  expect(authority.feedback, JSON.stringify(authority)).toBe('Applied');
+  await expect(crewFrame.locator('ph-comms-current-message .msg .text').filter({ hasText: ts('world.probe_gm_comms.follow_up') }))
+    .toHaveText(ts('world.probe_gm_comms.follow_up'));
+  expect((await betaMessages()).filter(message => message.body === exact)).toHaveLength(1);
+  expect((await betaMessages()).some(message => message.body === offer || message.body === ts('world.probe_gm_comms.follow_up'))).toBe(false);
+
+  const refused = async (correlation, transmission, reason) => {
+    expect(await otherGm.evaluate(({ correlation, transmission }) => window.__hostTransmitComms({
+      operator_id: window.__hostLocalGm().id, correlation, transmission,
+    }), { correlation, transmission })).toBe(true);
+    await otherGm.waitForFunction(({ correlation, reason, operator }) => window.__hostGmCommsState().results.some(row =>
+      row.operator_id === operator && row.correlation === correlation && row.outcome === 'refused' && row.reason === reason),
+    { correlation, reason, operator: otherOperator });
+  };
+  await refused('comms-missing-sender', { ...second.transmission, sender: 'unavailable-sender' }, 'unavailable-comms-identity');
+  await refused('comms-stale-recipient', { ...second.transmission, recipients: ['departed-ship'] }, 'unavailable-comms-recipient');
+
+  // A departed GM restores the same durable operational history, without resend.
+  const identity = await otherGm.evaluate(() => JSON.parse(localStorage.getItem('phoenix.fleet.gm-identity.v1')));
+  await otherGm.close();
+  const returning = await context.newPage(); errors.push(captureServerPageErrors(returning));
+  await returning.goto(`/?scenario=${scenario}&gm=1`); await waitForWasmReady(returning);
+  await openFleetTab(returning); await returning.fill('[data-control="fleet-code"]', code);
+  await returning.click('[data-control="fleet-join"]');
+  await returning.waitForFunction(() => window.__hostGmStartState?.().admitted === true, undefined, { timeout: 45_000 });
+  expect(await returning.evaluate(() => window.__hostLocalGm().id)).toBe(identity.operatorId);
+  await returning.click('#server-settings-btn');
+  await returning.waitForFunction(correlation => window.__hostGmCommsState?.().results
+    .some(row => row.correlation === correlation && row.outcome === 'applied'), second.correlation);
+  expect(await returning.locator(`#gm-comms-log li[data-correlation="${second.correlation}"] pre`).textContent()).toBe(exact);
+  await returning.locator('#gm-session-resume').click();
+  await returning.waitForFunction(() => !window.wasm_is_paused());
+  expect((await betaMessages()).filter(message => message.body === exact)).toHaveLength(1);
+  expect(await returning.evaluate(() => window.__hostMeshStatus().disagreement)).toBeNull();
+  for (const captured of errors) expect(captured).toEqual([]);
+});
+
 const GM_REMOVAL_WORLD = `
 [global]
 seed = 1306

@@ -6567,6 +6567,7 @@ fn unloading_one_shared_ast_owner_retires_its_dialogue_before_a_response_can_run
                 },
                 thread_id: message.thread_id.clone(),
                 script: ScriptedDialogue {
+                    recipient_ship: None,
                     script_path: "tests/fixtures/layer_shared.rhai".into(),
                     origin_layer: Some(SHARED_X.into()),
                     node_fn: "shared_arrived".into(),

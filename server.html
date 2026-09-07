@@ -397,6 +397,12 @@
     .gm-effect-log-entry[data-outcome="timed-out"] { color: var(--fire-bright); }
     /* The placement panel (issue #1305), sharing the mission panel's control
        ladder for its reason: one filled-control rung across the GM page. */
+    #gm-comms-panel { padding: 1rem; display: grid; gap: .6rem; }
+    #gm-comms-panel label { display: grid; gap: .3rem; }
+    #gm-comms-panel textarea { min-height: 8rem; }
+    #gm-comms-log { max-height: 18rem; overflow: auto; }
+    #gm-comms-log pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+    #gm-comms-feedback[data-state="Refused"] { color: var(--fire-bright); }
     #gm-spawn-panel, #gm-despawn-panel, #gm-contact-panel, #gm-system-panel {
       max-width: 44rem; padding: 1.5rem; border: 1px solid var(--edge-control);
       display: grid; gap: .9rem;
@@ -2055,6 +2061,20 @@
           <p id="gm-despawn-feedback" role="status" aria-live="polite"></p>
           <ol id="gm-despawn-results" aria-live="polite"></ol>
         </section>
+        <section id="gm-comms-panel" role="region" aria-labelledby="gm-comms-heading">
+          <h2 id="gm-comms-heading" data-i18n="server.gm.comms.heading"></h2>
+          <p id="gm-comms-empty" role="status" data-i18n="server.gm.comms.empty"></p>
+          <label><span data-i18n="server.gm.comms.route"></span><select id="gm-comms-route"></select></label>
+          <label><span data-i18n="server.gm.comms.sender"></span><select id="gm-comms-sender"></select></label>
+          <label><span data-i18n="server.gm.comms.recipients"></span><select id="gm-comms-recipients" multiple size="4"></select></label>
+          <label><span data-i18n="server.gm.comms.text"></span><textarea id="gm-comms-text" aria-describedby="gm-comms-count"></textarea></label>
+          <p id="gm-comms-count"></p>
+          <button type="button" id="gm-comms-send" data-i18n="server.gm.comms.send"></button>
+          <label><span data-i18n="server.gm.comms.hail"></span><select id="gm-comms-hail"></select></label>
+          <button type="button" id="gm-comms-start-hail" data-i18n="server.gm.comms.start_hail"></button>
+          <p id="gm-comms-feedback" role="status" aria-live="polite" aria-atomic="true"></p>
+          <ol id="gm-comms-log" role="log" aria-label="" data-i18n-aria-label="server.gm.comms.history"></ol>
+        </section>
         <section id="gm-spawn-panel" role="region" aria-labelledby="gm-spawn-heading">
           <h2 id="gm-spawn-heading" data-i18n="server.gm.spawn.heading"></h2>
           <ul id="gm-spawn-palette" role="list"></ul>
@@ -2732,6 +2752,7 @@
     import { createGmSessionControls } from './gui/gm-session-controls.js';
     import { createGmMissionPanel } from './gui/gm-mission-panel.js';
     import { createGmObjectivePanel } from './gui/gm-objective-panel.js';
+    import { createGmCommsPanel } from './gui/gm-comms-panel.js';
     import { createGmSpawnPanel } from './gui/gm-spawn-panel.js';
     import { createGmSystemPanel } from './gui/gm-system-panel.js';
     import { createGmContactPanel } from './gui/gm-contact-panel.js';
@@ -2843,6 +2864,15 @@
     // The placement panel (issue #1305). It reads the SAME chart the omniscient
     // projection renders into, so the gesture that picks a world position is the
     // one the operator is already looking at rather than a second map.
+    const gmCommsPanel = createGmCommsPanel({ doc: document, t, actionFeedback: hostActionFeedback,
+      confirmAction: gmConfirmations.request,
+      getOperator: () => window.__hostLocalGm?.() || null,
+      getOperatorName: id => window.__hostGmName?.(id) || id,
+      submitTransmission: request => window.__hostTransmitComms?.(request) === true,
+    });
+    window.__hostGmCommsRefresh = gmCommsPanel.refreshAdmission;
+    window.__hostGmCommsReset = gmCommsPanel.reset;
+    window.__hostGmCommsState = gmCommsPanel.state;
     const gmSpawnPanel = createGmSpawnPanel({
       doc: document,
       win: window,
@@ -2972,6 +3002,7 @@
         },
         gm_session:   function(p) { gmSessionControls.update(p); },
         gm_mission:   function(p) { gmMissionPanel.update(p); gmObjectivePanel.update(p); },
+        gm_comms:     function(p) { gmCommsPanel.update(p); },
         gm_spawn:     function(p) { gmSpawnPanel.update(p); },
       },
       strings: { t, has, localiseTree },
@@ -3353,6 +3384,7 @@
       if (typeof window.__hostGmEffectReset === 'function') {
         window.__hostGmEffectReset();
       }
+      window.__hostGmCommsReset?.();
       if (typeof window.__hostGmSpawnReset === 'function') {
         window.__hostGmSpawnReset();
       }
@@ -4210,6 +4242,12 @@
       return window.wasm_submit_gm_action(JSON.stringify({ operator_id: operator.id,
         correlation: request.correlation, action: 'despawn_entity', target: request.target }));
     };
+    window.__hostTransmitComms = function(request) {
+      const gm = window.__hostLocalGm?.();
+      if (!gm || gm.id !== request?.operator_id || typeof window.wasm_submit_gm_action !== 'function') return false;
+      try { return window.wasm_submit_gm_action(JSON.stringify({ ...request, action: 'transmit_comms' })) === true; }
+      catch { return false; }
+    };
     window.__hostSpawnPaletteEntity = function(request) {
       const gm = localGm();
       if (!gm || !request || typeof request !== 'object'
@@ -4722,6 +4760,7 @@
       if (typeof window.__hostGmMissionRefresh === 'function') {
         window.__hostGmMissionRefresh();
       }
+      window.__hostGmCommsRefresh?.();
       if (typeof window.__hostGmSpawnRefresh === 'function') {
         window.__hostGmSpawnRefresh();
       }

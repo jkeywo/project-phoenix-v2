@@ -316,9 +316,18 @@ pub(crate) fn ingest_station_importance(world: &mut World) {
     if red_alert {
         critical_stations.push(core.clone());
     }
+    let local_ship_uuid = {
+        let mut query =
+            world.query_filtered::<&crate::entities::spawner::EntityUuid, With<LocalShip>>();
+        query.iter(world).next().map(|uuid| uuid.0.clone())
+    };
     if world
         .get_resource::<crate::comms::server::CommsInboxRes>()
-        .is_some_and(|inbox| inbox.0.has_live_critical_thread())
+        .is_some_and(|inbox| {
+            inbox
+                .0
+                .has_live_critical_thread_for(local_ship_uuid.as_deref())
+        })
     {
         critical_stations.push(StationId("comms".to_string()));
     }

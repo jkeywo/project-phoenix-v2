@@ -1252,6 +1252,7 @@ fn a_weighted_dialogue_and_its_running_wait_survive_a_save() {
             current_node: node.clone(),
             thread_id: "committee".into(),
             script: ScriptedDialogue {
+                recipient_ship: None,
                 script_path: "falling_skyway.toml#script.main".into(),
                 origin_layer: None,
                 node_fn: "committee_claims".into(),
@@ -1340,6 +1341,7 @@ fn a_node_without_metadata_writes_no_metadata() {
             },
             thread_id: "thread-1".into(),
             script: ScriptedDialogue {
+                recipient_ship: None,
                 script_path: "w.toml#script.main".into(),
                 origin_layer: None,
                 node_fn: "root".into(),

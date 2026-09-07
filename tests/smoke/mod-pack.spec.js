@@ -402,3 +402,71 @@ test('a pack uploaded in a SECOND lobby round still enriches its hull cards', as
   await expect(card.locator('.ship-badge')).not.toHaveClass(/(^|\s)unknown(\s|$)/);
   await expect(card.locator('.ship-stat-value').first()).not.toBeEmpty();
 });
+
+
+// R3: actual browser uploads and crew messages, folded by the production phone
+// reducer rather than assertions over a second hand-built catalogue object.
+test('catalogue parity: two real packs survive selection and a late phone reconnect', async ({ context }) => {
+  await context.route('**/assets/worlds/combat_test.toml', route =>
+    route.fulfill({ contentType: 'text/plain', body: stripHeavyEntities(COMBAT_TEST_TOML) }),
+  );
+  const page = await openScenarioStage(context);
+  const hostId = await readHostPeerId(page);
+  const phone = await createTestClient(context, hostId, { name: 'Catalogue crew', waitFor: 'ScenarioCatalog' });
+  const fold = async client => {
+    const message = await client.lastMessage('ScenarioCatalog');
+    return client.page.evaluate(async message => {
+      const { LobbyState, activePacksView, scenarioOriginBadge } = await import('/gui/lobby-state.js');
+      const state = new LobbyState();
+      state.apply(message);
+      return {
+        packs: state.activePacks,
+        rows: activePacksView(state.activePacks),
+        badges: (state.scenarioCatalog || []).map(s => ({
+          id: s.id, source: s.source, badge: scenarioOriginBadge(s, state.activePacks),
+        })),
+        locked: state.selectionLocked,
+        picker: state.scenarioCatalog,
+      };
+    }, message);
+  };
+  expect((await fold(phone)).packs).toEqual([]);
+  const expected = [];
+  for (const name of ['valid-v1', 'script-valid']) {
+    const manifest = readModPackManifest(name);
+    const id = tomlString(manifest, 'pack', 'id');
+    expected.push({ id, name: tomlString(manifest, 'pack', 'name'), version: tomlString(manifest, 'pack', 'version') });
+    await uploadPack(page, name);
+    await phone.page.waitForFunction(id => window.__messages?.some(
+      m => m.type === 'ScenarioCatalog' && m.data.active_packs?.some(p => p.id === id),
+    ), id);
+    const view = await fold(phone);
+    expect(view.packs).toEqual(expected);
+    expect(view.rows).toEqual(expected.map(({ name, version }) => ({ name, version })));
+    expect(view.badges.find(s => s.source === id).badge).toEqual({ name: expected.at(-1).name });
+    expect(view.badges.filter(s => s.source === 'base').every(s => s.badge === null)).toBe(true);
+  }
+  await scenarioButton(page, 'combat_test').click();
+  const destroyer = page.locator('#landing-ship ph-ship-picker .ship-card[data-template="assets/entities/alliance_destroyer.toml"]');
+  await destroyer.waitFor({ state: 'visible', timeout: 30_000 });
+  await destroyer.click();
+  await expect(page.locator('#lobby-panel')).toBeVisible({ timeout: 60_000 });
+  await phone.page.waitForFunction(() => window.__messages?.some(
+    m => m.type === 'ScenarioCatalog' && m.data.locked_scenario && m.data.locked_ship,
+  ));
+  const locked = await fold(phone);
+  expect(locked.packs).toEqual(expected);
+  expect(locked.picker).toBeNull();
+  await phone.close();
+
+  for (const token of [undefined, phone.token]) {
+    const late = await createTestClient(context, hostId, { token, name: 'Late crew', waitFor: 'Welcome' });
+    await late.page.waitForFunction(() => window.__messages?.some(m => m.type === 'ScenarioCatalog'));
+    const restored = await fold(late);
+    expect(restored.packs).toEqual(expected);
+    expect(restored.rows).toEqual(locked.rows);
+    expect(restored.locked).toEqual(locked.locked);
+    expect(restored.picker).toBeNull();
+    await late.close();
+  }
+});

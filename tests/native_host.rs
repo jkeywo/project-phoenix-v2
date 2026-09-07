@@ -18,7 +18,7 @@ use std::net::TcpStream;
 use project_phoenix::core::codec;
 use project_phoenix::core::messages::PROTOCOL_VERSION;
 use project_phoenix::delivery::args::{ClientSource, HostArgs};
-use project_phoenix::delivery::payload::{catalog_payload, PayloadValue};
+use project_phoenix::delivery::payload::catalog_payload;
 use project_phoenix::delivery::serve::{
     load_content, preload_templates, HostServer, ShutdownSignal,
 };
@@ -196,12 +196,9 @@ fn the_curated_public_manifest_really_does_restrict_what_the_native_host_publish
         "the public demo manifest must publish at least one scenario"
     );
     let scenario = &demo.manifest.scenarios[0];
-    let scenario_id = scenario
-        .get("id")
-        .and_then(PayloadValue::as_text)
-        .expect("a published scenario has an id");
+    let scenario_id = scenario.id.as_str();
     assert!(
-        !scenario.ships().is_empty(),
+        !scenario.ships.is_empty(),
         "the public demo manifest must publish at least one hull"
     );
 
@@ -216,23 +213,20 @@ fn the_curated_public_manifest_really_does_restrict_what_the_native_host_publish
         .manifest
         .scenarios
         .iter()
-        .find(|s| s.get("id").and_then(PayloadValue::as_text) == Some(scenario_id))
+        .find(|s| s.id == scenario_id)
         .unwrap_or_else(|| panic!("{scenario_id} is in the dev catalogue"));
     assert!(
-        base_scenario.ships().len() > scenario.ships().len(),
+        base_scenario.ships.len() > scenario.ships.len(),
         "{scenario_id} authors more hulls in the dev catalogue than the curated \
          manifest publishes"
     );
     let base_hull_paths: Vec<&str> = base_scenario
-        .ships()
+        .ships
         .iter()
-        .filter_map(|s| s.get("template_path").and_then(PayloadValue::as_text))
+        .map(|s| s.template_path.as_str())
         .collect();
-    for ship in scenario.ships() {
-        let hull = ship
-            .get("template_path")
-            .and_then(PayloadValue::as_text)
-            .expect("a published hull has a template_path");
+    for ship in &scenario.ships {
+        let hull = ship.template_path.as_str();
         assert!(
             base_hull_paths.contains(&hull),
             "curated hull {hull} is not among the dev catalogue's hulls for {scenario_id}: \
@@ -244,9 +238,9 @@ fn the_curated_public_manifest_really_does_restrict_what_the_native_host_publish
     // dev catalogue authors for this scenario but the curated manifest does not
     // publish must still be sitting in the world file.
     let curated_hulls: std::collections::HashSet<&str> = scenario
-        .ships()
+        .ships
         .iter()
-        .filter_map(|s| s.get("template_path").and_then(PayloadValue::as_text))
+        .map(|s| s.template_path.as_str())
         .collect();
     let excluded_hull = base_hull_paths
         .iter()
@@ -271,13 +265,10 @@ fn the_curated_public_manifest_really_does_restrict_what_the_native_host_publish
 fn the_enrichment_fields_reach_the_published_hull_once_templates_are_loaded() {
     preload_templates(".").expect("templates preload");
     let content = load_content(".", DEMO_MANIFEST).expect("demo content loads");
-    let ship = &content.manifest.scenarios[0].ships()[0];
-    let keys: Vec<&str> = ship.entries().iter().map(|(k, _)| *k).collect();
-    // The exact enrichment a hull carries is authored, but `class` is on every
-    // shipped Alliance hull and is what the ship picker reads.
-    assert!(keys.contains(&"template_path"), "{keys:?}");
-    assert!(keys.contains(&"label"), "{keys:?}");
-    assert!(keys.contains(&"class"), "{keys:?}");
+    let ship = &content.manifest.scenarios[0].ships[0];
+    assert!(!ship.template_path.is_empty());
+    assert!(ship.label.is_some());
+    assert!(ship.class.is_some());
 }
 
 #[test]

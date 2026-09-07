@@ -1,0 +1,278 @@
+{
+  "_comment": [
+    "Shared exact wire fixtures: native real ZIP installation + Rust browser adapter + phone LobbyState reducer.",
+    "The base manifest curates one of two authored hulls. Pack scenarios/metadata come from committed real ZIP fixtures.",
+    "Crew messages use UTF-8 JSON on both transports. There is no binary ServerMessage codec; postcard is not this wire."
+  ],
+  "base_manifest": "[content]\nid = \"phoenix-base\"\nepoch = 1\n[[scenario]]\nid = \"base\"\nworld = \"assets/worlds/catalogue_base.toml\"\nships = [\"assets/entities/__catalogue_fixture/cruiser.toml\"]\n",
+  "base_world": "[global]\ntitle = \"Base scenario\"\n[[available_ships]]\ntemplate_path = \"assets/entities/__catalogue_fixture/cruiser.toml\"\nlabel = \"Cruiser\"\n[[available_ships]]\ntemplate_path = \"assets/entities/__catalogue_fixture/excluded.toml\"\nlabel = \"Excluded\"\n",
+  "packs": [
+    "valid-v1",
+    "script-valid"
+  ],
+  "snapshots": [
+    {
+      "name": "no-packs",
+      "message": {
+        "type": "ScenarioCatalog",
+        "data": {
+          "scenarios": [
+            {
+              "id": "base",
+              "world": "assets/worlds/catalogue_base.toml",
+              "label": "Base scenario",
+              "ships": [
+                {
+                  "template_path": "assets/entities/__catalogue_fixture/cruiser.toml",
+                  "label": "Cruiser"
+                }
+              ],
+              "source": "base"
+            }
+          ],
+          "locked_scenario": null,
+          "locked_ship": null,
+          "active_packs": []
+        }
+      }
+    },
+    {
+      "name": "one-pack",
+      "message": {
+        "type": "ScenarioCatalog",
+        "data": {
+          "scenarios": [
+            {
+              "id": "base",
+              "world": "assets/worlds/catalogue_base.toml",
+              "label": "Base scenario",
+              "ships": [
+                {
+                  "template_path": "assets/entities/__catalogue_fixture/cruiser.toml",
+                  "label": "Cruiser"
+                }
+              ],
+              "source": "base"
+            },
+            {
+              "id": "aurora_skirmish",
+              "world": "assets/worlds/aurora_skirmish.toml",
+              "label": "Aurora Skirmish",
+              "ships": [],
+              "source": "aurora-skirmish"
+            }
+          ],
+          "locked_scenario": null,
+          "locked_ship": null,
+          "active_packs": [
+            {
+              "id": "aurora-skirmish",
+              "name": "Aurora Skirmish",
+              "version": "1.0.0"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "two-packs",
+      "message": {
+        "type": "ScenarioCatalog",
+        "data": {
+          "scenarios": [
+            {
+              "id": "base",
+              "world": "assets/worlds/catalogue_base.toml",
+              "label": "Base scenario",
+              "ships": [
+                {
+                  "template_path": "assets/entities/__catalogue_fixture/cruiser.toml",
+                  "label": "Cruiser"
+                }
+              ],
+              "source": "base"
+            },
+            {
+              "id": "aurora_skirmish",
+              "world": "assets/worlds/aurora_skirmish.toml",
+              "label": "Aurora Skirmish",
+              "ships": [],
+              "source": "aurora-skirmish"
+            },
+            {
+              "id": "script_valid",
+              "world": "assets/worlds/script_valid.toml",
+              "label": "Script Valid",
+              "ships": [],
+              "source": "script-valid"
+            }
+          ],
+          "locked_scenario": null,
+          "locked_ship": null,
+          "active_packs": [
+            {
+              "id": "aurora-skirmish",
+              "name": "Aurora Skirmish",
+              "version": "1.0.0"
+            },
+            {
+              "id": "script-valid",
+              "name": "Script Valid",
+              "version": "1.0.0"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "scenario-locked",
+      "message": {
+        "type": "ScenarioCatalog",
+        "data": {
+          "scenarios": [
+            {
+              "id": "base",
+              "world": "assets/worlds/catalogue_base.toml",
+              "label": "Base scenario",
+              "ships": [
+                {
+                  "template_path": "assets/entities/__catalogue_fixture/cruiser.toml",
+                  "label": "Cruiser"
+                }
+              ],
+              "source": "base"
+            },
+            {
+              "id": "aurora_skirmish",
+              "world": "assets/worlds/aurora_skirmish.toml",
+              "label": "Aurora Skirmish",
+              "ships": [],
+              "source": "aurora-skirmish"
+            },
+            {
+              "id": "script_valid",
+              "world": "assets/worlds/script_valid.toml",
+              "label": "Script Valid",
+              "ships": [],
+              "source": "script-valid"
+            }
+          ],
+          "locked_scenario": "base",
+          "locked_ship": null,
+          "active_packs": [
+            {
+              "id": "aurora-skirmish",
+              "name": "Aurora Skirmish",
+              "version": "1.0.0"
+            },
+            {
+              "id": "script-valid",
+              "name": "Script Valid",
+              "version": "1.0.0"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "locked",
+      "message": {
+        "type": "ScenarioCatalog",
+        "data": {
+          "scenarios": [
+            {
+              "id": "base",
+              "world": "assets/worlds/catalogue_base.toml",
+              "label": "Base scenario",
+              "ships": [
+                {
+                  "template_path": "assets/entities/__catalogue_fixture/cruiser.toml",
+                  "label": "Cruiser"
+                }
+              ],
+              "source": "base"
+            },
+            {
+              "id": "aurora_skirmish",
+              "world": "assets/worlds/aurora_skirmish.toml",
+              "label": "Aurora Skirmish",
+              "ships": [],
+              "source": "aurora-skirmish"
+            },
+            {
+              "id": "script_valid",
+              "world": "assets/worlds/script_valid.toml",
+              "label": "Script Valid",
+              "ships": [],
+              "source": "script-valid"
+            }
+          ],
+          "locked_scenario": "base",
+          "locked_ship": "assets/entities/__catalogue_fixture/cruiser.toml",
+          "active_packs": [
+            {
+              "id": "aurora-skirmish",
+              "name": "Aurora Skirmish",
+              "version": "1.0.0"
+            },
+            {
+              "id": "script-valid",
+              "name": "Script Valid",
+              "version": "1.0.0"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "pinned",
+      "message": {
+        "type": "ScenarioCatalog",
+        "data": {
+          "scenarios": [
+            {
+              "id": "base",
+              "world": "assets/worlds/catalogue_base.toml",
+              "label": "Base scenario",
+              "ships": [
+                {
+                  "template_path": "assets/entities/__catalogue_fixture/cruiser.toml",
+                  "label": "Cruiser"
+                }
+              ],
+              "source": "base"
+            },
+            {
+              "id": "aurora_skirmish",
+              "world": "assets/worlds/aurora_skirmish.toml",
+              "label": "Aurora Skirmish",
+              "ships": [],
+              "source": "aurora-skirmish"
+            },
+            {
+              "id": "script_valid",
+              "world": "assets/worlds/script_valid.toml",
+              "label": "Script Valid",
+              "ships": [],
+              "source": "script-valid"
+            }
+          ],
+          "locked_scenario": "base",
+          "locked_ship": "assets/entities/__catalogue_fixture/pinned.toml",
+          "active_packs": [
+            {
+              "id": "aurora-skirmish",
+              "name": "Aurora Skirmish",
+              "version": "1.0.0"
+            },
+            {
+              "id": "script-valid",
+              "name": "Script Valid",
+              "version": "1.0.0"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

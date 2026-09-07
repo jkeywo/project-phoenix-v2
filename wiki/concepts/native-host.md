@@ -2,7 +2,7 @@
 title: Native Host
 type: concept
 tags: [native, viewscreen, lobby, scenario-selection, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile, saved-layouts, media-devices, camera, microphone, saves]
-sources: [src/native_host/mod.rs, src/native_host/direct_join.rs, src/native_host/join_codes.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/lobby/handler.rs, src/content_ledger.rs, tests/fixtures/scenario-arbiter-parity.json, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/layout_store.rs, src/native_host/layout_store_systems.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/frame_stats.rs, src/native_host/panes/pane_thread.rs, src/native_host/panes/mirror.rs, src/native_host/panes/upload.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs, src/delivery/args.rs, src/save_slots_store.rs]
+sources: [src/delivery/payload.rs, tests/native_host_catalogue.rs, tests/client/scenario-catalogue-wire.test.js, src/native_host/mod.rs, src/native_host/direct_join.rs, src/native_host/join_codes.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/lobby/handler.rs, src/content_ledger.rs, tests/fixtures/scenario-arbiter-parity.json, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/layout_store.rs, src/native_host/layout_store_systems.rs, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/native_host/panes/routing.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/frame_stats.rs, src/native_host/panes/pane_thread.rs, src/native_host/panes/mirror.rs, src/native_host/panes/upload.rs, src/native_host/panes/recovery.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs, src/delivery/args.rs, src/save_slots_store.rs]
 updated: 2026-09-07
 ---
 
@@ -25,6 +25,16 @@ catalogue restriction and the startup version pin are shared rather than forked.
 Since issue #1326 there is a third invocation — `--lobby` opens the same
 authoritative host with **no world**, waiting for a scenario to be picked. See
 [The world need not be known at boot](#the-world-need-not-be-known-at-boot).
+
+The native scenario surface and crew messages share
+[ScenarioCatalogPayload](../../src/core/messages.rs) with the browser host.
+[The catalogue projection](../../src/delivery/payload.rs) carries enriched
+curated hulls, each scenario's source (base or pack id), and installed pack
+id/name/version rows in load order. Real native shelf installation rebuilds
+and broadcasts that snapshot. Identify receives it after selection too, so a
+fresh or reconnecting phone keeps the active-pack list with the picker closed.
+A direct --world boot has no pre-load catalogue or pre-applied-pack CLI path;
+its ordinary Welcome and the phone's default empty pack list are unchanged.
 
 ## Where the code is
 
@@ -95,7 +105,7 @@ rule and the ingest had to move inside a process that is already ticking.
 |---|---|
 | The rule (first-valid-wins, hulls scoped to their scenario) | `lobby::scenario_arbiter` — pure, Bevy-free, a deliberate transcription of the JS |
 | The catalogue | `delivery::serve::ManifestSource::merged_catalog`, the same `build_merged_catalog` call `wasm_get_scenario_catalog` makes |
-| The Bevy adapter | `native_host::world_load` — one drain system and one exclusive load, `.after(LobbySystemSet)` and `.before(SimSet::Input)` |
+| The Bevy adapter | `native_host::world_load` — selection drain, exclusive load and post-selection catalogue greeting, `.after(LobbySystemSet)` and `.before(SimSet::Input)` |
 
 The two implementations of that rule are held together by
 `tests/fixtures/scenario-arbiter-parity.json`, one case table read by both the

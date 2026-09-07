@@ -19,11 +19,9 @@
     "rejected. `selection` is the selection the call RETURNS — which on ignored",
     "and rejected is the held one, normalised, never a half-write.",
     "",
-    "Note (recorded rather than fixed): ServerMessage::ScenarioCatalog carries no",
-    "`active_packs` field, so a native host's catalogue message cannot state the",
-    "mod packs a browser host's synthesized one does. It is inert today — a native",
-    "host applies no packs — so this is a note for slice #1328, not a gap the",
-    "table can pin."
+    "Catalogue wire parity (source and active_packs) is pinned separately by",
+    "scenario-catalogue-wire.json, real native pack installation, and LobbyState.",
+    "Both hosts apply packs; this table remains solely the arbitration contract."
   ],
   "catalog": [
     {

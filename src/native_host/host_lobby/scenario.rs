@@ -30,12 +30,11 @@
 //!   namespaces are distinct). The enum therefore outgrew this module's name;
 //!   it is here because this is where the surface first had anything to say.
 //!
-//! # The three catalogue fields are the phone's own
+//! # The catalogue snapshot is the phone's own
 //!
-//! `scenarios`, `locked_scenario` and `locked_ship` are the fields of
-//! [`ServerMessage::ScenarioCatalog`](crate::core::messages::ServerMessage::ScenarioCatalog),
-//! and [`crate::native_host::world_load`] builds both from one value so the
-//! viewscreen and every phone in the room cannot be looking at two different
+//! The surface flattens the crew wire's typed ScenarioCatalogPayload, including
+//! source provenance and active packs. Native world load projects it once, so
+//! the viewscreen and every phone in the room cannot be looking at two different
 //! catalogues. `locked_ship` in particular reports a pinned `--ship` ahead of an
 //! arbitrated one, because that is the hull the host will actually fly — a
 //! picker offering a choice the host has already overruled is a lie whoever is
@@ -43,7 +42,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::core::messages::ScenarioCatalogWire;
+use crate::core::messages::ScenarioCatalogPayload;
 
 /// The scenario picker's whole state, as one snapshot the surface renders.
 ///
@@ -52,15 +51,11 @@ use crate::core::messages::ScenarioCatalogWire;
 /// fields carry the wire message's names rather than the view model's: the
 /// payload is the host's answer, and the mapping into the view model's argument
 /// shape is one line on the page.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ScenarioPanelPayload {
-    /// Every scenario this host publishes, in manifest order.
-    pub scenarios: Vec<ScenarioCatalogWire>,
-    /// The arbiter's locked scenario id, or `None` while the pick is open.
-    pub locked_scenario: Option<String>,
-    /// The locked hull's `template_path` — a pinned `--ship` first, then the
-    /// arbitrated pick.
-    pub locked_ship: Option<String>,
+    /// The crew wire's complete snapshot, including provenance and active packs.
+    #[serde(flatten)]
+    pub catalog: ScenarioCatalogPayload,
     /// The picker is closed for good: a world has been ingested.
     ///
     /// `scenarioCatalogView`'s third argument, and the native twin of
@@ -288,6 +283,7 @@ impl HostLobbyRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::messages::ScenarioCatalogWire;
 
     fn wire(id: &str) -> ScenarioCatalogWire {
         ScenarioCatalogWire {
@@ -296,6 +292,7 @@ mod tests {
             label: Some(format!("{id} label")),
             description: None,
             ships: Vec::new(),
+            source: "base".into(),
         }
     }
 
@@ -305,9 +302,11 @@ mod tests {
         // `scenarioCatalogView(catalog, preSelection, locked)` reads, so the
         // native surface cannot be deciding anything the browser does not.
         let payload = ScenarioPanelPayload {
-            scenarios: vec![wire("combat_test")],
-            locked_scenario: Some("combat_test".into()),
-            locked_ship: None,
+            catalog: ScenarioCatalogPayload {
+                scenarios: vec![wire("combat_test")],
+                locked_scenario: Some("combat_test".into()),
+                ..Default::default()
+            },
             locked: false,
         };
         let json = payload.to_json();

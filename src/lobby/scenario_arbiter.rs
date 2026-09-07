@@ -56,7 +56,6 @@
 //! inbound messages and acts on a completed selection is
 //! [`crate::native_host::world_load`].
 
-use crate::core::messages::ScenarioCatalogWire;
 use crate::world::manifest::{ScenarioCatalog, ScenarioCatalogEntry};
 
 /// What the host has locked so far. Both fields start `None`; each is written
@@ -219,27 +218,6 @@ pub fn curated_ships_for(catalog: &ScenarioCatalog, selection: &ScenarioSelectio
                 .collect()
         })
         .unwrap_or_default()
-}
-
-/// Render a catalogue for the crew wire.
-///
-/// The Rust twin of `server.html`'s `scenarioCatalogMessage()`, which builds the
-/// same [`ServerMessage::ScenarioCatalog`](crate::core::messages::ServerMessage::ScenarioCatalog)
-/// payload out of the JS array `wasm_get_scenario_catalog` returns, so a phone's
-/// `gui/lobby-state.js` folds a native host's catalogue exactly as it folds a
-/// browser host's.
-pub fn catalog_wire(catalog: &ScenarioCatalog) -> Vec<ScenarioCatalogWire> {
-    catalog
-        .scenarios
-        .iter()
-        .map(|entry| ScenarioCatalogWire {
-            id: entry.id.clone(),
-            world: entry.world.clone(),
-            label: entry.label.clone(),
-            description: entry.description.clone(),
-            ships: entry.ships.clone(),
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -550,7 +528,7 @@ mod tests {
 
     #[test]
     fn the_wire_catalogue_carries_every_entry_and_its_hulls() {
-        let wire = catalog_wire(&catalog());
+        let wire = crate::delivery::payload::catalog_payload(&catalog());
         assert_eq!(wire.len(), 2);
         assert_eq!(wire[0].id, "combat_test");
         assert_eq!(wire[0].world, "assets/worlds/combat_test.toml");

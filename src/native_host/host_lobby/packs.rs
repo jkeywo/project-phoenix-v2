@@ -73,23 +73,8 @@ impl From<&ShelfPack> for OfferedPack {
     }
 }
 
-/// One pack already in this session's overlay stack, oldest → newest.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct InstalledPack {
-    pub id: String,
-    pub name: String,
-    pub version: String,
-}
-
-impl From<&ActivePack> for InstalledPack {
-    fn from(pack: &ActivePack) -> Self {
-        Self {
-            id: pack.id.clone(),
-            name: pack.name.clone(),
-            version: pack.version.clone(),
-        }
-    }
-}
+/// The same id/name/version row published to every phone.
+pub use crate::core::messages::ActivePackWire as InstalledPack;
 
 /// One thing wrong (or worth knowing) about the last pack an operator chose.
 ///

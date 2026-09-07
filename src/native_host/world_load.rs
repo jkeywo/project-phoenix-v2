@@ -210,7 +210,11 @@ impl Plugin for NativeWorldLoadPlugin {
 
         app.init_resource::<LobbySelection>().add_systems(
             FixedUpdate,
-            (drain_scenario_selection, apply_pending_world_load)
+            (
+                drain_scenario_selection.run_if(awaiting_world),
+                apply_pending_world_load.run_if(awaiting_world),
+                greet_catalogue,
+            )
                 .chain()
                 .in_set(NativeWorldLoadSet)
                 // After the lobby, so a participant who identifies and picks in
@@ -236,7 +240,7 @@ impl Plugin for NativeWorldLoadPlugin {
                 // only `.after(tick_countdown)`, which is *inside*
                 // `LobbySystemSet` — already upstream of this set.
                 .before(crate::lobby::server::drain_lobby_outbox)
-                .run_if(awaiting_world),
+                .run_if(resource_exists::<LobbyScenarioCatalog>),
         );
     }
 }
@@ -245,7 +249,7 @@ impl Plugin for NativeWorldLoadPlugin {
 ///
 /// A `--world` host never runs either system (it has a `WorldConfig` before the
 /// first fixed step and no `LobbyScenarioCatalog` at all), and a host that has
-/// loaded one stops running them the moment it does — a second `SelectScenario`
+/// loaded one stops running the selection/load pair the moment it does — a second `SelectScenario`
 /// from a late phone is then the deliberate no-op `lobby::handler` already
 /// documents.
 fn awaiting_world(
@@ -279,14 +283,9 @@ fn drain_scenario_selection(
     // shows the decision that has actually been made rather than a live choice.
     let pinned_ship: Option<String> = settings.as_ref().and_then(|s| s.ship_path.clone());
     let mut changed = false;
-    let mut greet: Vec<String> = Vec::new();
 
     for message in inbound.read() {
         match &message.msg {
-            // A participant arriving before a world exists needs the catalogue
-            // to pick from, exactly as `server.html`'s `sendCatalogTo` hands it
-            // to a fresh datachannel.
-            ClientMessage::Identify { token, .. } => greet.push(token.clone()),
             ClientMessage::SelectScenario { scenario_id } => {
                 let (outcome, next) =
                     scenario_arbiter::select_scenario(&selection.0, &catalog.0, scenario_id);
@@ -309,12 +308,6 @@ fn drain_scenario_selection(
         }
     }
 
-    for token in greet {
-        outbox.0.push((
-            Target::Token(token),
-            catalog_message(&catalog.0, &selection.0, pinned_ship.as_deref()),
-        ));
-    }
     if changed {
         outbox.0.push((
             Target::All,
@@ -341,6 +334,26 @@ fn drain_scenario_selection(
     });
 }
 
+/// Rehydrate a fresh/reconnecting phone before or after world selection. The
+/// selection systems stop at world load; the catalogue's pack roster does not.
+fn greet_catalogue(
+    mut inbound: MessageReader<InboundMessage>,
+    catalog: Res<LobbyScenarioCatalog>,
+    selection: Res<LobbySelection>,
+    settings: Option<Res<LobbyBootSettings>>,
+    mut outbox: ResMut<LobbyOutbox>,
+) {
+    let pinned = settings.as_ref().and_then(|s| s.ship_path.as_deref());
+    for message in inbound.read() {
+        if let ClientMessage::Identify { token, .. } = &message.msg {
+            outbox.0.push((
+                Target::Token(token.clone()),
+                catalog_message(&catalog.0, &selection.0, pinned),
+            ));
+        }
+    }
+}
+
 /// What this host is publishing about its own selection, in the one place both
 /// audiences read it from.
 ///
@@ -349,14 +362,10 @@ fn drain_scenario_selection(
 /// [`ServerMessage::ScenarioCatalog`](crate::core::messages::ServerMessage::ScenarioCatalog),
 /// and the viewscreen's own picker, through
 /// [`ScenarioPanelPayload`](crate::native_host::host_lobby::ScenarioPanelPayload)
-/// (issue #1328). Both are rendered from these three fields, built once — so
+/// (issue #1328). Both carry the same typed snapshot, built once — so
 /// "the viewscreen shows a different catalogue from the phones" is not a
 /// question this host can be asked.
-pub(crate) struct PublishedCatalog {
-    scenarios: Vec<crate::core::messages::ScenarioCatalogWire>,
-    locked_scenario: Option<String>,
-    locked_ship: Option<String>,
-}
+pub(crate) struct PublishedCatalog(crate::core::messages::ScenarioCatalogPayload);
 
 /// Render what this host is publishing.
 ///
@@ -376,13 +385,14 @@ pub(crate) fn published_catalog(
     selection: &ScenarioSelection,
     pinned_ship: Option<&str>,
 ) -> PublishedCatalog {
-    PublishedCatalog {
-        scenarios: scenario_arbiter::catalog_wire(catalog),
-        locked_scenario: selection.scenario().map(str::to_string),
-        locked_ship: pinned_ship
+    PublishedCatalog(crate::delivery::payload::catalogue_snapshot(
+        crate::delivery::payload::catalog_payload(catalog),
+        &crate::entities::config_cache::active_packs(),
+        selection.scenario().map(str::to_string),
+        pinned_ship
             .map(str::to_string)
             .or_else(|| selection.ship().map(str::to_string)),
-    }
+    ))
 }
 
 impl PublishedCatalog {
@@ -397,14 +407,10 @@ impl PublishedCatalog {
     /// "the viewscreen and the phones are looking at two catalogues" split this
     /// type exists to close.
     pub(crate) fn wire(self) -> ServerMessage {
-        ServerMessage::ScenarioCatalog {
-            scenarios: self.scenarios,
-            locked_scenario: self.locked_scenario,
-            locked_ship: self.locked_ship,
-        }
+        ServerMessage::ScenarioCatalog(self.0)
     }
 
-    /// The same three answers as the viewscreen picker's snapshot (issue
+    /// The same catalogue as the viewscreen picker's snapshot (issue
     /// #1328), plus the one thing a phone has no use for: whether a world has
     /// landed and closed the picker for good.
     pub(crate) fn surface(
@@ -412,9 +418,7 @@ impl PublishedCatalog {
         locked: bool,
     ) -> crate::native_host::host_lobby::ScenarioPanelPayload {
         crate::native_host::host_lobby::ScenarioPanelPayload {
-            scenarios: self.scenarios,
-            locked_scenario: self.locked_scenario,
-            locked_ship: self.locked_ship,
+            catalog: self.0,
             locked,
         }
     }

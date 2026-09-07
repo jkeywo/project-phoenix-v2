@@ -3839,23 +3839,6 @@ pub fn wasm_get_available_ships() -> Array {
     arr
 }
 
-/// Set one `delivery::payload` field on a JS object.
-///
-/// The bridge's ONLY way of writing a catalogue field. It takes the key from
-/// the payload rather than naming one, which is what makes the "native and
-/// browser hosts publish the same catalogue" claim of PRD #855 structural
-/// rather than a promise: a field added to `delivery::payload` reaches this
-/// surface automatically, and a field named only here cannot exist.
-#[cfg(target_arch = "wasm32")]
-fn set_payload_field(obj: &Object, key: &str, value: &crate::delivery::payload::PayloadValue) {
-    use crate::delivery::payload::PayloadValue;
-    let js = match value {
-        PayloadValue::Text(s) => JsValue::from_str(s),
-        PayloadValue::Number(n) => JsValue::from_f64(*n),
-    };
-    Reflect::set(obj, &JsValue::from_str(key), &js).ok();
-}
-
 /// Enrich one `AvailableShipEntry` into a JS `{ template_path, label, class,
 /// hull_id, power_rating, name }` object, reading the extra metadata from the
 /// cached entity config when it is available.
@@ -3867,11 +3850,12 @@ fn set_payload_field(obj: &Object, key: &str, value: &crate::delivery::payload::
 /// `delivery::payload::ship_payload`'s, not this function's.
 #[cfg(target_arch = "wasm32")]
 fn ship_entry_to_js(ship: &crate::world::config::AvailableShipEntry) -> Object {
-    let obj = Object::new();
-    for (key, value) in crate::delivery::payload::ship_payload(ship).entries() {
-        set_payload_field(&obj, key, value);
-    }
-    obj
+    let payload = crate::delivery::payload::ship_payload(ship);
+    crate::core::codec::encode_catalog_ship(&payload)
+        .ok()
+        .and_then(|json| js_sys::JSON::parse(&json).ok())
+        .map(Object::from)
+        .unwrap_or_default()
 }
 
 /// Deliver the base scenario manifest (`assets/scenarios.toml`) to Rust.
@@ -4200,32 +4184,47 @@ pub fn wasm_get_scenario_catalog() -> Array {
         );
     }
     let catalog = merged.catalog;
-    // The published shape — including `source`, which flattens
-    // `ScenarioCatalogEntry::origin`'s `None` to the literal `"base"` for the
-    // phone's mod badge (issue #990) — is `delivery::payload`'s, so this loop
-    // names no field of its own and the native host publishes the same document.
-    for scenario in crate::delivery::payload::catalog_payload(&catalog) {
-        let obj = Object::new();
-        for (key, value) in scenario.entries() {
-            set_payload_field(&obj, key, value);
-        }
-        let ships = Array::new();
-        for ship in scenario.ships() {
-            let ship_obj = Object::new();
-            for (key, value) in ship.entries() {
-                set_payload_field(&ship_obj, key, value);
-            }
-            ships.push(&ship_obj);
-        }
-        Reflect::set(
-            &obj,
-            &JsValue::from_str(crate::delivery::payload::SHIPS_KEY),
-            &ships,
-        )
-        .ok();
-        arr.push(&obj);
-    }
-    arr
+    crate::core::codec::encode_scenario_catalog(&crate::delivery::payload::catalog_payload(
+        &catalog,
+    ))
+    .ok()
+    .and_then(|json| js_sys::JSON::parse(&json).ok())
+    .map(|value| Array::from(&value))
+    .unwrap_or_default()
+}
+
+/// Publish the browser picker's current enriched catalogue through the same
+/// typed message and pack projection as the native host. Taking the current
+/// picker snapshot preserves asynchronous template enrichment and curation.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_scenario_catalog_message(
+    scenarios_json: &str,
+    locked_scenario: Option<String>,
+    locked_ship: Option<String>,
+) -> Result<String, JsValue> {
+    browser_scenario_catalog_message(scenarios_json, locked_scenario, locked_ship)
+        .map_err(|error| JsValue::from_str(&error.to_string()))
+}
+
+/// Target-free adapter so fixtures exercise the browser's real decode/project/
+/// encode path, rather than a second JavaScript message implementation.
+pub fn browser_scenario_catalog_message(
+    scenarios_json: &str,
+    locked_scenario: Option<String>,
+    locked_ship: Option<String>,
+) -> Result<String, serde_json::Error> {
+    use crate::core::codec::{JsonCodec, MessageCodec};
+    let scenarios = crate::core::codec::decode_scenario_catalog(scenarios_json)?;
+    let payload = crate::delivery::payload::catalogue_snapshot(
+        scenarios,
+        &crate::entities::config_cache::active_packs(),
+        locked_scenario,
+        locked_ship,
+    );
+    JsonCodec.encode_server(&crate::core::messages::ServerMessage::ScenarioCatalog(
+        payload,
+    ))
 }
 
 /// This host's delivery version stamp, as the JSON `phoenix-host` serves at

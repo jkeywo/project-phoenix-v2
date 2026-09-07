@@ -33,7 +33,7 @@ entities:
     implementation:
       status: declared
       paths: [src/core/messages.rs, server.html, gui/scenario-arbiter.js, gui/lobby-state.js]
-      symbols: [ScenarioCatalogWire]
+      symbols: [ScenarioCatalogPayload, ScenarioCatalogWire, ActivePackWire]
       tests: [npx vitest run]
 
   - state: scenario-ship-catalog-state
@@ -41,7 +41,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Scenario and Ship Catalog State
-      summary: Host-known selectable world and per-world available-ship catalog. Built from the base scenario manifest before any world is loaded, so the selectable scenarios and each scenario's ships are available pre-load; a loaded world still exposes its own available ships.
+      summary: Host-known selectable world and per-world available-ship catalog. Built from base and installed pack manifests in load order before world load. The shared typed projection carries curated enriched hulls, source provenance and active-pack metadata to both hosts and phones; a loaded world still exposes its own available ships.
     architecture:
       classification: authoritative
       owner: world-available-ship-catalog
@@ -49,8 +49,8 @@ entities:
       replicas: [lobby-session-replica]
     implementation:
       status: declared
-      paths: [src/world/manifest.rs, src/world/config.rs, src/server/bridge.rs, server.html]
-      symbols: [ScenarioCatalog, build_catalog, WorldConfig]
+      paths: [src/world/manifest.rs, src/world/config.rs, src/core/messages.rs, src/delivery/payload.rs, src/server/bridge.rs, src/native_host/world_load.rs, server.html]
+      symbols: [ScenarioCatalog, build_catalog, build_merged_catalog, ScenarioCatalogPayload, catalogue_snapshot, WorldConfig]
       tests: [cargo test]
 
   - component: scenario-ship-selection-arbiter
@@ -58,7 +58,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Scenario and Ship Selection Arbiter
-      summary: Authoritative first-writer-wins arbiter for scenario and player-ship selection from either the server screen or a connected client. Realized in the host browser runtime (issue 755, Option A) rather than a pre-world Bevy system, because Bevy only starts after the world is loaded; it validates each request against the pre-load catalog and drives the existing world-load path once scenario and ship are both locked.
+      summary: Authoritative first-writer-wins arbiter for scenario and player-ship selection from either the server screen or a connected client. Realized before Bevy starts in the browser host and by the running world-less native host; it validates each request against the pre-load catalog and drives the existing world-load path once scenario and ship are both locked.
       rationale:
         - "[ai] Selection is deliberately not a vote and does not require a special captain role before the ship topology exists."
     architecture:
@@ -68,10 +68,10 @@ entities:
       reads: [scenario-ship-catalog-state]
       consumes: [select-scenario-command, select-player-ship-command]
       produces: [world-load-request-state]
-      runs_in: [host-browser-runtime]
+      runs_in: [host-browser-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [gui/scenario-arbiter.js, server.html, src/world/manifest.rs]
+      paths: [gui/scenario-arbiter.js, server.html, src/world/manifest.rs, src/lobby/scenario_arbiter.rs, src/native_host/world_load.rs]
       symbols: [build_catalog, ScenarioCatalog]
       tests: [npx vitest run, cargo test]
 

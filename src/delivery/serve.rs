@@ -1123,7 +1123,6 @@ mod tests {
     use super::*;
     use crate::core::messages::PROTOCOL_VERSION;
     use crate::delivery::http::CLIENT_STAMP_HEADER;
-    use crate::delivery::payload::PayloadValue;
 
     const MANIFEST: &str = "\
 [content]
@@ -1402,11 +1401,8 @@ world = \"assets/worlds/pack_only.toml\"
         assert_eq!(content.manifest.manifest_path, "assets/scenarios.toml");
         assert_eq!(content.manifest.scenarios.len(), 1);
         let scenario = &content.manifest.scenarios[0];
-        assert_eq!(
-            scenario.get("label").and_then(PayloadValue::as_text),
-            Some("Combat Test")
-        );
-        assert_eq!(scenario.ships().len(), 2);
+        assert_eq!(scenario.label.as_deref(), Some("Combat Test"));
+        assert_eq!(scenario.ships.len(), 2);
         assert!(content.findings.is_empty());
     }
 
@@ -1424,13 +1420,11 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
 ";
         let fx = Fixture::new("curated", curated);
         let content = load_content(&fx.path(), "assets/scenarios.toml").unwrap();
-        let ships = content.manifest.scenarios[0].ships();
+        let ships = &content.manifest.scenarios[0].ships;
         assert_eq!(ships.len(), 1);
         assert_eq!(
-            ships[0]
-                .get("template_path")
-                .and_then(PayloadValue::as_text),
-            Some("assets/entities/alliance_destroyer.toml")
+            ships[0].template_path,
+            "assets/entities/alliance_destroyer.toml"
         );
         // The world file still authors both hulls — curation filtered the
         // catalogue, it did not rewrite the content.

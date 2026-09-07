@@ -1,0 +1,21 @@
+{
+  "type": "ScenarioCatalog",
+  "data": {
+    "scenarios": [
+      {
+        "id": "base",
+        "world": "assets/worlds/catalogue_base.toml",
+        "label": "Base scenario",
+        "ships": [
+          {
+            "template_path": "assets/entities/__catalogue_fixture/cruiser.toml",
+            "label": "Cruiser"
+          }
+        ],
+        "description": null
+      }
+    ],
+    "locked_scenario": null,
+    "locked_ship": null
+  }
+}

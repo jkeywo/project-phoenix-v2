@@ -17,11 +17,13 @@ entities:
       status: implemented
       confidence: confirmed
       title: Delivery Catalogue Payload
-      summary: The single ordered field list for a published scenario/ship catalogue entry, walked by the wasm bridge's JS object construction and by the JSON encoder alike, so the browser host and the native host publish the same document by construction rather than by agreement.
+      summary: One typed catalogue snapshot for native broadcasts, browser-host messages and the native scenario surface. Delivery and the browser picker use its same enriched scenario/ship representation, including source provenance and ordered active-pack id/name/version metadata.
       rationale:
         - "[ai] PRD #855's first implementation decision is that native and browser hosts consume the same content manifest and protocol contracts. That is only true if one place says what a catalogue field is called; before this, wasm_get_scenario_catalog and ship_entry_to_js named every field themselves, so a second publisher would necessarily have been a second field list."
-        - "[ai] The payload holds (key, value) pairs rather than a serde struct because the wasm surface is a JS object built with Reflect::set and the native surface is JSON: a shared serde type would still have left the JS side spelling out keys. Neither surface carries a field name of its own now."
-        - "[ai] The enrichment fields (class, hull_id, power_rating, name) read config_cache::get_cached_entity_config, whose signature is identical on both targets — the browser fills that cache by fetch, the native host by insert_native_config — so this is genuinely the same code path and not a target-conditional twin."
+        - "[ai] Issue #1407 replaces the key/value inventory with serde wire types and JSON.parse at the wasm boundary. The browser passes its current enriched picker snapshot into the Rust message adapter; neither message assembly nor the native arbiter carries another catalogue field inventory."
+        - "[ai] Every snapshot carries source (base for a base entry) and active_packs in overlay load order. Absent source defaults to base and absent active_packs defaults to empty. Frozen v3 JSON fixtures are read by both receiver shapes with the same locks, hulls and optional-field meanings, so PROTOCOL_VERSION stays 3. Crew transports carry UTF-8 JSON; there is no binary ServerMessage codec, and postcard digest bytes are not this contract."
+        - "[ai] Catalogue publication continues for Identify after selection on both hosts. A fresh or reconnecting phone receives the locked snapshot and active-pack roster; selection/load remains gated once a world exists. Native --world has no pre-load catalogue or pre-applied-pack CLI path, so its Welcome and the phone default empty roster remain unchanged."
+        - "[ai] Hull enrichment (class, hull_id, mass, power_rating, name) reads config_cache::catalog_entity_config, which sees the display-only preload store before activation and the runtime cache after it. Missing templates leave enrichment absent on both hosts."
     architecture:
       kind: contract
       authority: authoritative
@@ -29,11 +31,15 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [src/delivery/payload.rs, src/core/codec.rs, src/server/bridge.rs]
+      paths: [src/delivery/payload.rs, src/core/messages.rs, src/core/codec.rs, src/server/bridge.rs, src/native_host/world_load.rs]
       symbols:
         [
-          ShipPayload,
-          ScenarioPayload,
+          CatalogShipWire,
+          ScenarioCatalogWire,
+          ScenarioCatalogPayload,
+          ActivePackWire,
+          catalogue_snapshot,
+          browser_scenario_catalog_message,
           ship_payload,
           scenario_payload,
           catalog_payload,
@@ -42,7 +48,7 @@ entities:
           wasm_get_scenario_catalog,
           wasm_delivery_stamp,
         ]
-      tests: [cargo test, tests/native_host.rs]
+      tests: [cargo test, tests/native_host.rs, tests/native_host_catalogue.rs, tests/client/scenario-catalogue-wire.test.js, tests/smoke/mod-pack.spec.js]
 
   - component: delivery-version-pin
     core:
@@ -190,7 +196,7 @@ entities:
         - "[ai] The re-Welcome reuses handler::welcome_message rather than constructing a second Welcome, and clears the ready flags, the seats, the lobby-chosen ratings and the eligibility reports first — the same FOUR lines handle_return_to_lobby runs when a new round picks a new hull, plus its per-player ReadyChanged { ready: false }, and for the same reason: a seat claimed against the pre-load fallback was claimed on a ship this host is not flying. The ready flags are the easy one to omit and the one with teeth, because SessionManager::all_ready ignores seats entirely — it asks only whether every connected non-spectator is ready — so a flag set before the load survives a seat-only wipe and can start a mission with a seatless crew. Unreachable through the shipped phone client (it readies from a console it has already claimed, and a runtime load is round one), but the claim being made is PARITY with handle_return_to_lobby, and parity means all four. Idempotence needs no new client code: replaceFrom REPLACES rather than merges and the Welcome arm emits MOUNT_CONSOLES unconditionally."
         - "[ai] A REFUSED load resets the content ledger as well as removing WorldConfig and PreCompiledScripts. ingest_world froze it over the refused world's file set and install_world_selection froze it again after re-recording the hull, both BEFORE the failure points — so left alone, frozen_or_live would go on answering for a world this host does not have, and that is what snapshot::versions answers a fleet peer's content check with and what a save is bound to. reset is the whole undo rather than a restore because ingest_world opens every attempt, the next successful one included, with exactly that reset; what it discards is the template preload's records, which the next load's own eager record re-reads from disk regardless."
         - "[ai] --ship given with --lobby SATISFIES the hull half of the selection, so a scenario lock alone loads the world. An explicit hull already outranks whatever the arbiter locks, so the alternative was making a scripted run wait for a SelectPlayerShip whose content cannot matter. The published catalogue reports the pinned hull as locked for the same reason: a picker offering a choice the host has already overruled is a lie the phone acts on. That report resolves in the SAME precedence order the load does — pinned first, arbitrated second — because the one combination where the two differ (--lobby --ship B, a phone picking A) is exactly the combination the field exists for: reported the other way round the host flies B while telling every phone the locked hull is A."
-        - "[ai] The Rust arbiter and gui/scenario-arbiter.js are now held together by tests/fixtures/scenario-arbiter-parity.json — one case table read by both the vitest suite and lobby::scenario_arbiter's own tests. It was written because the transcription had already drifted where prose said it could not: the JS's normalizeSelection coerces a falsy field to null, so an empty string is not a lock, and the port omitted that — an empty id locked a native host while a browser host still treated it as open. NOTE for slice #1328: ServerMessage::ScenarioCatalog carries no active_packs field, so a native host's catalogue cannot state the mod packs a browser host's synthesized one does. Inert today (a native host applies no packs), recorded rather than added."
+        - "[ai] The Rust arbiter and gui/scenario-arbiter.js are now held together by tests/fixtures/scenario-arbiter-parity.json — one case table read by both the vitest suite and lobby::scenario_arbiter's own tests. It was written because the transcription had already drifted where prose said it could not: the JS's normalizeSelection coerces a falsy field to null, so an empty string is not a lock, and the port omitted that — an empty id locked a native host while a browser host still treated it as open."
         - "[ai] Issue #1328 gave the arbitration a THIRD sender without giving it a third rule: the host's own lobby surface, whose picks arrive as ClientMessages under LOCAL_CONSOLE_TOKEN and are arbitrated first-valid-wins alongside the phones' — see native-host-lobby-surface for the seam. What this component gained is one refactor, published_catalog: the ScenarioCatalog message and the viewscreen's panel payload are built from one value rather than two, so the operator in front of the screen and the phones in the room cannot be shown different catalogues, and the --ship precedence is resolved once for both."
         - "[ai] --lobby is an explicit flag rather than a reinterpretation of a bare invocation. A bare phoenix-host is PRD #855's delivery-only host — the mode the shipped Windows bundle uses — and silently turning it into a windowed authoritative host would delete that mode. --lobby and --world are refused together because they are the same decision made at two moments and one of them would have to be ignored."
         - "[ai] What is NOT claimed: that a runtime-loaded host reaches InProgress on the same tick a --solo --world host does. It does not, and never could — the mission starts when the crew ready up, which is already true of every crewed boot. spawn_game_start_entities mints on the phase-transition tick on both paths."
@@ -229,7 +235,8 @@ entities:
           select_player_ship,
           world_path_for,
           curated_ships_for,
-          catalog_wire,
+          published_catalog,
+          greet_catalogue,
           welcome_message,
           ManifestSource,
           ingest_world,

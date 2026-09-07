@@ -256,11 +256,11 @@ entities:
       owns: [scenario-ship-catalog-state]
       produces: [scenario-ship-catalog-state]
       reads: [world-configuration-state]
-      runs_in: [host-browser-runtime]
+      runs_in: [host-browser-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [src/world/manifest.rs, src/world/config.rs, src/server/bridge.rs, server.html]
-      symbols: [AvailableShipEntry, ScenarioCatalog, build_catalog]
+      paths: [src/world/manifest.rs, src/world/config.rs, src/delivery/payload.rs, src/core/messages.rs, src/server/bridge.rs, src/native_host/world_load.rs, server.html]
+      symbols: [AvailableShipEntry, ScenarioCatalog, build_catalog, build_merged_catalog, CatalogShipWire, ScenarioCatalogWire, ScenarioCatalogPayload, catalogue_snapshot]
       tests: [cargo test]
 
   - component: entity-template-schema-validator

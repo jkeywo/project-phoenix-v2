@@ -609,7 +609,7 @@ fn a_participant_picks_the_scenario_and_readies_the_mission_through_the_ordinary
     // way `server.html`'s `sendCatalogTo` hands it to a fresh datachannel.
     let dispatched = handle.drain_outbound();
     let catalogued = dispatched.iter().any(|(target, msg, _)| {
-        matches!(msg, ServerMessage::ScenarioCatalog { .. })
+        matches!(msg, ServerMessage::ScenarioCatalog(..))
             && target == &Target::Token(TOKEN.to_string())
     });
     assert!(
@@ -1225,7 +1225,7 @@ fn an_explicit_hull_outranks_the_lobbys_pick() {
         .drain_outbound()
         .into_iter()
         .filter_map(|(_, msg, _)| match msg {
-            ServerMessage::ScenarioCatalog { locked_ship, .. } => Some(locked_ship),
+            ServerMessage::ScenarioCatalog(catalog) => Some(catalog.locked_ship),
             _ => None,
         })
         .next_back()
@@ -1284,11 +1284,9 @@ fn a_pinned_hull_completes_the_selection_on_the_scenario_lock_alone() {
         .drain_outbound()
         .into_iter()
         .filter_map(|(_, msg, _)| match msg {
-            ServerMessage::ScenarioCatalog {
-                locked_scenario,
-                locked_ship,
-                ..
-            } => Some((locked_scenario, locked_ship)),
+            ServerMessage::ScenarioCatalog(catalog) => {
+                Some((catalog.locked_scenario, catalog.locked_ship))
+            }
             _ => None,
         })
         .next_back()

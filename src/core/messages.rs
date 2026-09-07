@@ -3211,22 +3211,65 @@ pub enum IntentKind {
     ManoeuvreBegun,
 }
 
-/// One selectable scenario in the pre-load catalog as delivered to phones
-/// over the wire (issue #755). Mirrors `world::manifest::ScenarioCatalogEntry`
-/// but lives here as a serde wire type so it can ride inside
-/// [`ServerMessage::ScenarioCatalog`]. `ships` reuses the world's
-/// [`AvailableShipEntry`] shape so the phone picker presents ships identically
-/// to the host page.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// A published hull with optional picker enrichment shared by every host.
+/// Missing fields retain the older path/label-only JSON meaning.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct CatalogShipWire {
+    pub template_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub class: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hull_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mass: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub power_rating: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+/// Display provenance defaults to the pre-pack catalogue's base content.
+pub fn base_scenario_source() -> String {
+    "base".to_string()
+}
+
+/// A selectable scenario and the manifest pack that supplied it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ScenarioCatalogWire {
     pub id: String,
     pub world: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(default)]
-    pub ships: Vec<crate::world::config::AvailableShipEntry>,
+    pub ships: Vec<CatalogShipWire>,
+    #[serde(default = "base_scenario_source")]
+    pub source: String,
+}
+
+/// Crew-visible metadata in overlay load order, oldest to newest.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActivePackWire {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+}
+
+/// The complete catalogue snapshot shared by both hosts and the native picker.
+/// Absent additive fields retain the pre-pack JSON vocabulary's meaning.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ScenarioCatalogPayload {
+    #[serde(default)]
+    pub scenarios: Vec<ScenarioCatalogWire>,
+    #[serde(default)]
+    pub locked_scenario: Option<String>,
+    #[serde(default)]
+    pub locked_ship: Option<String>,
+    #[serde(default)]
+    pub active_packs: Vec<ActivePackWire>,
 }
 
 /// One row of the post-mission report as it travels to a player surface
@@ -3647,11 +3690,7 @@ pub enum ServerMessage {
     /// every phone can render the scenario/ship picker and reflect the
     /// first-valid-wins outcome. `locked_scenario` / `locked_ship` are `None`
     /// until a participant's selection is accepted.
-    ScenarioCatalog {
-        scenarios: Vec<ScenarioCatalogWire>,
-        locked_scenario: Option<String>,
-        locked_ship: Option<String>,
-    },
+    ScenarioCatalog(ScenarioCatalogPayload),
     /// Broadcast to all when a station's active rating changes.
     /// Clients use this to update AUTO/read-only badges for system fragments
     /// belonging to the affected station.

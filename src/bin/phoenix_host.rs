@@ -242,13 +242,10 @@ fn main() {
         content.manifest.stamp.protocol,
     );
     for scenario in &content.manifest.scenarios {
-        let id = scenario
-            .get("id")
-            .and_then(project_phoenix::delivery::payload::PayloadValue::as_text)
-            .unwrap_or("?");
+        let id = &scenario.id;
         eprintln!(
             "phoenix-host:   scenario {id} ({} hulls)",
-            scenario.ships().len()
+            scenario.ships.len()
         );
     }
     for finding in &content.findings {

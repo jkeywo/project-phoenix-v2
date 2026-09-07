@@ -523,15 +523,19 @@ fn the_native_lobby_renders_the_web_hosts_own_lobby_over_the_bridge() {
     // page a viewscreen is showing.
     bridge.push_scenario(
         ScenarioPanelPayload {
-            scenarios: vec![ScenarioCatalogWire {
-                id: "combat_test".to_string(),
-                world: "assets/worlds/combat_test.toml".to_string(),
-                label: Some("Combat Test".to_string()),
-                description: None,
-                ships: Vec::new(),
-            }],
-            locked_scenario: None,
-            locked_ship: None,
+            catalog: project_phoenix::core::messages::ScenarioCatalogPayload {
+                scenarios: vec![ScenarioCatalogWire {
+                    id: "combat_test".to_string(),
+                    world: "assets/worlds/combat_test.toml".to_string(),
+                    label: Some("Combat Test".to_string()),
+                    description: None,
+                    ships: Vec::new(),
+                    source: "base".into(),
+                }],
+                locked_scenario: None,
+                locked_ship: None,
+                active_packs: vec![],
+            },
             locked: false,
         }
         .to_json(),

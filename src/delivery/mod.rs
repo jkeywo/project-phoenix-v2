@@ -7,8 +7,8 @@
 //! the two "consume the same content manifest, snapshots, and protocol
 //! contracts", so this module is built to make forking them awkward:
 //!
-//! * [`payload`] holds the ONE list of catalogue field names, walked by the
-//!   wasm bridge's `Reflect::set` loop and by the JSON encoder alike.
+//! * [`payload`] projects shared serde wire types for delivery, both
+//!   pickers and every crew catalogue message.
 //! * [`stamp`] holds the version pin, built from numbers that already existed
 //!   (`messages::PROTOCOL_VERSION`, the manifest's `[content]` identity).
 //! * The catalogue itself is `world::manifest`'s, unchanged — the native host

@@ -2,8 +2,8 @@
 title: Game Phases
 type: concept
 tags: [phases, lobby, loading, in-progress, game-over, reconnect]
-sources: [src/core/messages.rs, src/lobby/start_policy.rs, src/lobby/handler.rs, src/lobby/server.rs, src/lockstep/mod.rs, src/server/bridge.rs, src/server_app/registration.rs, src/server_app/broadcast_publish.rs]
-updated: 2026-08-31
+sources: [src/delivery/payload.rs, tests/native_host_catalogue.rs, tests/client/scenario-catalogue-wire.test.js, src/core/messages.rs, src/lobby/start_policy.rs, src/lobby/handler.rs, src/lobby/server.rs, src/lockstep/mod.rs, src/server/bridge.rs, src/server_app/registration.rs, src/server_app/broadcast_publish.rs]
+updated: 2026-09-07
 ---
 
 # Game Phases
@@ -13,6 +13,14 @@ updated: 2026-08-31
 decide which messages and simulation work are valid.
 
 ## Lobby
+
+Before world load, both hosts publish the same typed catalogue snapshot:
+scenario provenance, curated hulls, active-pack metadata and first-valid-wins
+locks. The native surface uses that snapshot too. After both locks are set,
+the phone closes its picker while keeping the pack roster; a later Identify
+receives the locked snapshot on either host that offered a catalogue. The
+shared wire fixture is tested through the actual phone reducer and native
+pack-install path.
 
 Players identify, set their names, claim a direct station or Spectator role,
 choose an authored station rating, and set readiness. When every connected

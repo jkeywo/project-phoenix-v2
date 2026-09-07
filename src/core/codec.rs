@@ -342,10 +342,7 @@ pub fn decode_handshake_frame(
 // the same reason everything above does: `serde_json` is confined to this
 // module (AGENTS.md constraint 1), so a host that wants JSON asks for it here.
 //
-// Field NAMES for the catalogue entries come from `delivery::payload`, never
-// from this file — that is the whole point of that module's ordered entry
-// lists, and it is why a new catalogue field cannot reach the browser surface
-// while skipping the native one.
+// Catalogue field names and defaults are the serde wire types' own.
 
 fn stamp_json(stamp: &crate::delivery::stamp::DeliveryStamp) -> serde_json::Value {
     serde_json::json!({
@@ -355,34 +352,25 @@ fn stamp_json(stamp: &crate::delivery::stamp::DeliveryStamp) -> serde_json::Valu
     })
 }
 
-fn payload_value_json(value: &crate::delivery::payload::PayloadValue) -> serde_json::Value {
-    use crate::delivery::payload::PayloadValue;
-    match value {
-        PayloadValue::Text(s) => serde_json::Value::String(s.clone()),
-        PayloadValue::Number(n) => serde_json::Number::from_f64(*n)
-            .map(serde_json::Value::Number)
-            .unwrap_or(serde_json::Value::Null),
-    }
+/// Encode the shared catalogue entries for the browser host's picker.
+pub fn encode_scenario_catalog(
+    scenarios: &[crate::core::messages::ScenarioCatalogWire],
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(scenarios)
 }
 
-fn ship_json(ship: &crate::delivery::payload::ShipPayload) -> serde_json::Value {
-    let mut obj = serde_json::Map::new();
-    for (key, value) in ship.entries() {
-        obj.insert((*key).to_string(), payload_value_json(value));
-    }
-    serde_json::Value::Object(obj)
+/// Decode the browser's current enriched picker snapshot before publication.
+pub fn decode_scenario_catalog(
+    json: &str,
+) -> Result<Vec<crate::core::messages::ScenarioCatalogWire>, serde_json::Error> {
+    serde_json::from_str(json)
 }
 
-fn scenario_json(scenario: &crate::delivery::payload::ScenarioPayload) -> serde_json::Value {
-    let mut obj = serde_json::Map::new();
-    for (key, value) in scenario.entries() {
-        obj.insert((*key).to_string(), payload_value_json(value));
-    }
-    obj.insert(
-        crate::delivery::payload::SHIPS_KEY.to_string(),
-        serde_json::Value::Array(scenario.ships().iter().map(ship_json).collect()),
-    );
-    serde_json::Value::Object(obj)
+/// Encode a hull with the same optional enrichment on every surface.
+pub fn encode_catalog_ship(
+    ship: &crate::core::messages::CatalogShipWire,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(ship)
 }
 
 /// Encode a host's own version stamp — the body of `/host/stamp.json`.
@@ -419,11 +407,7 @@ pub fn encode_delivery_manifest(manifest: &crate::delivery::DeliveryManifest) ->
     serde_json::json!({
         "stamp": stamp_json(&manifest.stamp),
         "manifest_path": manifest.manifest_path,
-        "scenarios": manifest
-            .scenarios
-            .iter()
-            .map(scenario_json)
-            .collect::<Vec<_>>(),
+        "scenarios": manifest.scenarios,
     })
     .to_string()
 }

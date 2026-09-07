@@ -748,20 +748,23 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
         ),
         (
             ServerMessageDiscriminants::ScenarioCatalog,
-            ServerMessage::ScenarioCatalog {
+            ServerMessage::ScenarioCatalog(ScenarioCatalogPayload {
                 scenarios: vec![crate::core::messages::ScenarioCatalogWire {
                     id: "default".into(),
                     world: "assets/worlds/default.toml".into(),
                     label: Some("Starbase Alpha".into()),
                     description: None,
-                    ships: vec![crate::world::config::AvailableShipEntry {
+                    ships: vec![CatalogShipWire {
                         template_path: "assets/entities/alliance_cruiser.toml".into(),
                         label: Some("Cruiser".into()),
+                        ..Default::default()
                     }],
+                    source: "base".into(),
                 }],
                 locked_scenario: None,
                 locked_ship: None,
-            },
+                active_packs: vec![],
+            }),
         ),
         (
             ServerMessageDiscriminants::RatingChanged,
@@ -6096,4 +6099,100 @@ fn a_refused_join_carries_the_same_machine_code_the_native_host_answers_with() {
     assert_eq!(value["ok"], serde_json::Value::Bool(false));
     assert_eq!(value["code"], "protocol-mismatch");
     assert!(value["detail"].as_str().unwrap().contains("protocol"));
+}
+
+/// Version 3's frozen receiver: fields introduced by #1407 are deliberately
+/// absent. This tests the actual old JSON rules, not a new type with defaults.
+#[derive(Debug, serde::Deserialize, PartialEq)]
+#[serde(tag = "type", content = "data")]
+enum LegacyCatalogueMessage {
+    ScenarioCatalog {
+        scenarios: Vec<LegacyCatalogueEntry>,
+        locked_scenario: Option<String>,
+        locked_ship: Option<String>,
+    },
+}
+
+#[derive(Debug, serde::Deserialize, PartialEq)]
+struct LegacyCatalogueEntry {
+    id: String,
+    world: String,
+    #[serde(default)]
+    label: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    ships: Vec<crate::world::config::AvailableShipEntry>,
+}
+
+#[test]
+fn catalogue_v3_json_remains_readable_with_explicit_base_and_empty_pack_defaults() {
+    let old = include_str!("../../tests/fixtures/scenario-catalogue-v3.json");
+    let message = JsonCodec.decode_server(old).unwrap();
+    let ServerMessage::ScenarioCatalog(ref catalog) = message else {
+        unreachable!()
+    };
+    assert_eq!(catalog.scenarios[0].source, "base");
+    assert!(catalog.active_packs.is_empty());
+    assert_eq!(catalog.scenarios[0].ships[0].class, None);
+    assert_eq!(catalog.scenarios[0].ships[0].mass, None);
+    let encoded = JsonCodec.encode_server(&message).unwrap();
+    let old_reader: LegacyCatalogueMessage = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(
+        old_reader,
+        serde_json::from_str::<LegacyCatalogueMessage>(old).unwrap()
+    );
+}
+
+#[test]
+fn catalogue_additions_preserve_v3_json_locks_hulls_and_utf8_wire_roundtrips() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/scenario-catalogue-wire.json"
+    ))
+    .unwrap();
+    for snapshot in fixture["snapshots"].as_array().unwrap() {
+        let expected = &snapshot["message"];
+        let message = JsonCodec.decode_server(&expected.to_string()).unwrap();
+        assert_server_roundtrip(&JsonCodec, message.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, message.clone());
+        // The crew transports carry UTF-8 JSON, including the native binary's
+        // transport. There is no binary ServerMessage codec; postcard digests
+        // are not peer messages and cannot establish wire compatibility.
+        let bytes = JsonCodec.encode_server(&message).unwrap().into_bytes();
+        let decoded = JsonCodec
+            .decode_server(std::str::from_utf8(&bytes).unwrap())
+            .unwrap();
+        assert_eq!(decoded, message);
+        let old_reader: LegacyCatalogueMessage = serde_json::from_slice(&bytes).unwrap();
+        let ServerMessage::ScenarioCatalog(current) = message else {
+            unreachable!()
+        };
+        let LegacyCatalogueMessage::ScenarioCatalog {
+            scenarios,
+            locked_scenario,
+            locked_ship,
+        } = old_reader;
+        assert_eq!(locked_scenario, current.locked_scenario);
+        assert_eq!(locked_ship, current.locked_ship);
+        assert_eq!(scenarios.len(), current.scenarios.len());
+        for (old, new) in scenarios.iter().zip(&current.scenarios) {
+            assert_eq!(
+                (&old.id, &old.world, &old.label, &old.description),
+                (&new.id, &new.world, &new.label, &new.description)
+            );
+            assert_eq!(
+                old.ships
+                    .iter()
+                    .map(|s| (&s.template_path, &s.label))
+                    .collect::<Vec<_>>(),
+                new.ships
+                    .iter()
+                    .map(|s| (&s.template_path, &s.label))
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+    // Retaining v3 is intentional: neither receiver misreads the other's JSON.
+    // A future incompatible edit must change this assertion and the join pin.
+    assert_eq!(PROTOCOL_VERSION, 3);
 }

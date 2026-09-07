@@ -651,9 +651,9 @@ pub struct PhaserBankState {
     /// True if this bank's locked target is within `beam_range` and inside
     /// the bank's `fire_arc_deg` (manual-fire arc).
     pub fire_ready: bool,
-    /// True if the bank is in its post-shot cooldown.
+    /// True while the bank is firing or in its post-shot cooldown.
     pub on_cooldown: bool,
-    /// Seconds remaining on the cooldown timer (0.0 when ready).
+    /// Seconds remaining after the beam ends; zero does not imply readiness.
     pub cooldown_remaining: f32,
     /// Shared readiness + blocking-reason contract (issue #764).
     #[serde(default)]

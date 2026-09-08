@@ -1124,6 +1124,7 @@ fn startup_restore_failed_layer_is_terminal_without_retry() {
             path: FAILED_LAYER.into(),
             loader_path: None,
             declared_entity_uuids: vec![],
+            owned_objective_ids: vec![],
             flags: Default::default(),
         });
     let (mut app, store) = stage_restore_record(&run);

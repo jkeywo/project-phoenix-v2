@@ -55,7 +55,7 @@ fn named(app: &mut App, name: &str) -> (Entity, String) {
     )
 }
 fn grant(sequence: u64, tick: u64, target: &str, doctrine: &str) -> GmActionGrant {
-    let from = HostSlot(if sequence % 2 == 0 { 2 } else { 3 });
+    let from = HostSlot(if sequence.is_multiple_of(2) { 2 } else { 3 });
     GmActionGrant {
         from,
         sequenced_by: HostSlot(1),

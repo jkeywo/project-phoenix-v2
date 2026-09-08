@@ -568,6 +568,22 @@ impl MeshOrigin {
     }
 }
 
+/// Owner-local sequence used when minting ordered slot claims. The browser
+/// queues slot ordinals; only the scheduled owner mints the tie-break value.
+#[derive(Resource, Default, Debug)]
+pub struct SlotClaimSequence(u64);
+
+impl SlotClaimSequence {
+    pub fn next_claim(&mut self) -> u64 {
+        self.0 += 1;
+        self.0
+    }
+
+    pub fn reset(&mut self) {
+        self.0 = 0;
+    }
+}
+
 /// Frames a transport has received and this host has not applied yet, each with
 /// the slot the delivering connection authenticated it to (issue #1120).
 #[derive(Resource, Default, Debug)]
@@ -950,10 +966,12 @@ pub fn register_lockstep(app: &mut App) {
             // and ratings that flip are classified where they already live. The
             // queue is empty on any host that has lost nobody, which is every
             // host in a healthy fleet and every solo run.
-            .declare_state::<host_loss::PendingHostLoss>(StateClass::Timer, "fleet-lockstep-state");
+            .declare_state::<host_loss::PendingHostLoss>(StateClass::Timer, "fleet-lockstep-state")
+            .declare_state::<SlotClaimSequence>(StateClass::Timer, "fleet-lockstep-state");
     }
     app.init_resource::<FleetRoster>()
         .init_resource::<MeshInbox>()
+        .init_resource::<SlotClaimSequence>()
         .init_resource::<MeshOutbox>()
         .init_resource::<MeshDiagnostics>()
         .init_resource::<MeshAgreement>()
@@ -2263,6 +2281,38 @@ pub fn mesh_command(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn slot_claim_sequence_is_owned_by_the_world_and_resets_for_a_new_fleet() {
+        let mut world = bevy::prelude::World::new();
+        world.init_resource::<super::SlotClaimSequence>();
+        assert_eq!(
+            world
+                .resource_mut::<super::SlotClaimSequence>()
+                .next_claim(),
+            1
+        );
+        assert_eq!(
+            world
+                .resource_mut::<super::SlotClaimSequence>()
+                .next_claim(),
+            2
+        );
+        world.resource_mut::<super::SlotClaimSequence>().reset();
+        assert_eq!(
+            world
+                .resource_mut::<super::SlotClaimSequence>()
+                .next_claim(),
+            1
+        );
+        let mut other = bevy::prelude::World::new();
+        other.init_resource::<super::SlotClaimSequence>();
+        assert_eq!(
+            other
+                .resource_mut::<super::SlotClaimSequence>()
+                .next_claim(),
+            1
+        );
+    }
     use super::*;
     use crate::core::messages::{StationId, SystemControlPayload, SystemId};
 

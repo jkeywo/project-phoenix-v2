@@ -31,6 +31,9 @@
 
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 
+#[path = "common/default_pool.rs"]
+mod default_pool;
+
 use bevy::prelude::*;
 
 use project_phoenix::command_admission::log::{CommandOrder, ShipKey};
@@ -79,7 +82,7 @@ fn args() -> HeadlessArgs {
         ship_path: SHIP.into(),
         max_ticks: TICKS,
         seed: Some(SEED),
-        deterministic: true,
+        deterministic: default_pool::deterministic(),
         ..Default::default()
     }
 }
@@ -547,6 +550,19 @@ fn two_crews_on_two_hosts_play_one_mission_and_agree_on_every_tick() {
          minted), so the agreement above is about ships flying in a straight \
          line — check the probe world still puts a hostile in range"
     );
+    for host in &hosts {
+        // Fleet activation deliberately replaces the process-local bootstrap
+        // override with the authored shared seed. Check that independent
+        // contract, not the aggregate RNG value being observed.
+        let fleet_seed = host
+            .app
+            .world()
+            .resource::<project_phoenix::world::config::WorldConfig>()
+            .global
+            .seed
+            .expect("the Fleet fixture authors its shared seed");
+        default_pool::observe(&host.app, WORLD, fleet_seed);
+    }
 }
 
 /// **AC2 and AC6.** The two hosts' command logs are byte-identical.
@@ -895,4 +911,13 @@ fn a_peer_may_not_drive_a_ship_its_slot_does_not_fly() {
          the receiver must drop a command whose ShipKey is not the sending \
          slot's own hull, or one host can drive another's ship or an NPC"
     );
+}
+
+/// Fresh-process counterpart; the original guard retains its pinned default.
+#[test]
+fn default_pool_keeps_two_crews_in_lockstep() {
+    default_pool::run_guards(&[(
+        "two_crews_on_two_hosts_play_one_mission_and_agree_on_every_tick",
+        2,
+    )]);
 }

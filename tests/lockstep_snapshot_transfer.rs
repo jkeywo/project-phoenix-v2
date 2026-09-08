@@ -30,6 +30,9 @@
 
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 
+#[path = "common/default_pool.rs"]
+mod default_pool;
+
 use bevy::prelude::{App, Entity, Fixed, FixedUpdate, ResMut, Resource, Time, With};
 
 use project_phoenix::command_admission::{
@@ -86,7 +89,7 @@ fn args() -> HeadlessArgs {
         side_b: vec!["destroyer".into()],
         max_ticks: 4_000,
         seed: Some(SEED),
-        deterministic: true,
+        deterministic: default_pool::deterministic(),
         ..Default::default()
     }
 }
@@ -1619,6 +1622,8 @@ fn a_record_transfers_between_hosts_and_the_two_agree_after_restore() {
         ticks > CAPTURE_AT,
         "the receiver continued past the restore tick"
     );
+    default_pool::observe(&live, DUEL, SEED);
+    default_pool::observe(&receiver, DUEL, SEED);
 }
 
 #[derive(Resource, Default)]
@@ -2123,4 +2128,13 @@ fn the_content_identity_gate_refuses_mismatched_content() {
         before,
         "the content gate must run before any state is written"
     );
+}
+
+/// Real chunk transfer and progressed continuation on a fresh ordinary pool.
+#[test]
+fn default_pool_preserves_cross_peer_restore_continuation() {
+    default_pool::run_guards(&[(
+        "a_record_transfers_between_hosts_and_the_two_agree_after_restore",
+        2,
+    )]);
 }

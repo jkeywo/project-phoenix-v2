@@ -51,6 +51,9 @@
 
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 
+#[path = "common/default_pool.rs"]
+mod default_pool;
+
 use project_phoenix::command_admission::HostSlot;
 use project_phoenix::headless::{build_headless_app, run, world_digest, HeadlessArgs};
 use project_phoenix::lockstep::{FleetRoster, FleetShip, FleetSlotOf};
@@ -114,7 +117,7 @@ fn args_for(world: &str) -> HeadlessArgs {
         ship_path: "assets/entities/alliance_cruiser.toml".into(),
         max_ticks: TICKS,
         seed: Some(SEED),
-        deterministic: true,
+        deterministic: default_pool::deterministic(),
         ..Default::default()
     }
 }
@@ -346,6 +349,9 @@ fn a_stationless_gm_joining_two_ship_hosts_matches_their_digest_every_tick() {
         "only {} distinct GM digests over {TICKS} ticks — the comparison is vacuous",
         distinct.len()
     );
+    for app in [&first_ship_host, &second_ship_host, &gm_host] {
+        default_pool::observe(app, WORLD, SEED);
+    }
 }
 
 /// GM-only is the M1 tracer topology: one full simulation participant, zero
@@ -643,4 +649,13 @@ fn the_digest_does_not_care_which_ship_a_host_projects_through_a_backfill_decisi
              `console::comms::server::operate_comms_response_ai`."
         );
     }
+}
+
+/// A stationless GM must agree with both ordinary ship peers on the default pool.
+#[test]
+fn default_pool_keeps_a_stationless_gm_in_agreement() {
+    default_pool::run_guards(&[(
+        "a_stationless_gm_joining_two_ship_hosts_matches_their_digest_every_tick",
+        3,
+    )]);
 }

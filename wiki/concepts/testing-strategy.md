@@ -156,3 +156,7 @@ guards. The initialized graph has 1,929 complete conflict rows: zero added and
 39 removed against the original 1,968 allowance. The diagnostic owner-alias
 correction passed six registry tests and all four enumeration tests; the integrator owns
 final combined gates.
+Cross-peer default-pool counterparts now reuse the original two-crew mesh,
+stationless GM versus two ship peers, and chunked snapshot continuation guards.
+Their three fresh-child parents and three pinned companions passed in the SDK-enabled native configuration, with seven completed-App reports using 16 workers and MultiThreaded FixedUpdate. The ordinary headless gate is separate. See `docs/default-pool-perturbations.md`; ordinary pinned guards and
+all production schedules remain unchanged.

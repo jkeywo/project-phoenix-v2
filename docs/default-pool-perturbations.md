@@ -52,3 +52,53 @@ The separate default/default/pinned equivalence proof and fixed-executor work
 cover other parts of slice 4 and its prerequisites. These guards add perturbation
 and resume coverage; they do not establish the full #1400 PRD or authorize
 parallelizing the production simulation.
+
+## Cross-peer default-pool arms (#1400 stories 6–7)
+
+Three additional parent tests reuse the same exact-child helper. The ordinary
+pinned guards retain their scenarios, tick windows and assertions; only their
+child's explicit environment selects the default pool. No runtime registration,
+ordering edge or debt allowance changes.
+
+- `lockstep_mesh::default_pool_keeps_two_crews_in_lockstep` runs the real
+  two-host crew-command/combat guard, preserving per-tick digest agreement,
+  admitted input and combat anti-vacuity checks. It reports both final Apps.
+- `local_ship_neutrality::default_pool_keeps_a_stationless_gm_in_agreement`
+  compares two ship hosts and a stationless GM with one frozen topology on
+  every advancing tick. It reports all three final Apps.
+- `lockstep_snapshot_transfer::default_pool_preserves_cross_peer_restore_continuation`
+  retains shuffled chunk delivery, real snapshot reconciliation and 120 frames
+  of compared continuation after the live 400-frame capture. It reports the
+  original and restored Apps, requiring actual progression beyond capture.
+
+Each parent launches exactly one existing guard in a fresh process and requires
+its complete expected observation count: two, three and two respectively. The
+shared helper verifies actual compute workers greater than one, MultiThreaded
+FixedUpdate, actual seed, nonzero mission tick and equal final boundaries/digests.
+The guards themselves compare intermediate states, so final convergence cannot
+hide a transient divergence. Existing pinned invocations emit no new observations.
+
+The focused SDK-enabled native run passed all three parents and their three
+unchanged pinned companions. Its seven child reports used 16 compute workers
+and MultiThreaded FixedUpdate: the two-crew mesh agreed at tick 1200, the three
+GM/ship replicas at tick 1199, and the restore pair at tick 519. Build and all
+six child-test invocations exited zero with source/artifact/dependency guards.
+The first attempt exposed an observer-only seed expectation error: ordinary
+Fleet activation uses the authored seed 1116, not the process bootstrap override.
+The corrected observer checks WorldConfig independently of SimRng; the failed
+attempt remains recorded. No mission assertions or production inputs changed.
+
+This run used `--locked --offline --jobs 6 --features host,headless,perf,ultralight`
+and frozen exact executables after one three-binary no-run build. The ordinary
+headless configuration remains a separate final integration gate. To select
+these parents in that configuration:
+
+```sh
+cargo test --locked --features headless --test lockstep_mesh --test local_ship_neutrality --test lockstep_snapshot_transfer -- default_pool_
+```
+
+Expect three passing parents, three exact child processes and seven completed
+App reports; zero matching tests is not proof. Run the three unchanged pinned
+original guards as the bounded companion check. This fills cross-peer execution
+coverage, not every admitted ambiguity's semantic-order proof or a browser/
+native cross-target guarantee. Retained scheduler debt remains separate.

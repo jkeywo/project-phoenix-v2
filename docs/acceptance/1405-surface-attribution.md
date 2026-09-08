@@ -10,9 +10,29 @@ content bundle, scenario, seed and display profile. Record actual window sizes,
 station claims, asset readiness and competing processes. Begin with quiet 1080p
 Combat Test and Falling Skyway runs: renderer only, chrome only, one Station
 console, and two Station consoles. Do not count a pane parked in its join lobby
-as a Station console. The two-console matrix does not close #1404's separate
-three-Station hardware acceptance. No concurrent build or asset generation is a
+as a Station console. The default two-console matrix does not close three-Station
+hardware acceptance. No concurrent build or asset generation is a
 valid comparative capture.
+
+For three consoles, use `profile-native.ps1 -Condition three` with a profile
+seating **helm, tactical and engineering**, all authored Stations on the harness's
+Alliance Destroyer. The receipt requires each console to be visible, ready and
+on Backfill before warm-up and throughout measurement. A missing or lost third
+console invalidates the run. The profile must name the rig's actual monitors;
+physical windows, DPI and asset readiness retain their existing checks.
+
+`profile-native-matrix.ps1 -ThreeStations -Experiment scale2` selects the separate
+three-console comparison. Supply the same required receipt/content/hardware/
+bundle arguments as the default matrix and a `three.toml` in `-ProfileDirectory`.
+For each scenario and repetition it runs **native scale / scale2 / native scale**
+with that same three-console profile, recording the actual experiment on every
+run. Controls have an empty experiment even when the parent shell has one set.
+Without `-Experiment`, the three runs measure native-scale control variation.
+Without `-ThreeStations`, the original renderer/chrome/one/two matrix remains the
+default; its optional `-Experiment` is forwarded to each run. Renderer-only
+controls do not substitute for matching three-console controls. These harness
+modes prepare evidence; physical legibility, input comfort and measured benefit
+still require the bridge run described below.
 
 ## Enable and finish
 

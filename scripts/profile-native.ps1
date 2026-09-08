@@ -7,7 +7,7 @@ param(
     [Parameter(Mandatory)][string]$Output,
     [string]$ClientDirectory,
     [ValidateSet('combat_test', 'falling_skyway')][string]$World = 'combat_test',
-    [ValidateSet('renderer', 'chrome', 'one', 'two')][string]$Condition = 'renderer',
+    [ValidateSet('renderer', 'chrome', 'one', 'two', 'three')][string]$Condition = 'renderer',
     [ValidateRange(40, 3600)][int]$WarmupSeconds = 40,
     [ValidateRange(30, 3600)][int]$MeasureSeconds = 30,
     [ValidateRange(1024, 65535)][int]$Port = 18180,
@@ -51,7 +51,11 @@ $manifest = [ordered]@{
     hardware=$hardwareData; warmupSeconds=$WarmupSeconds; measureSeconds=$MeasureSeconds
     isolatedState=$true; completedObservation=$false; frameCaptureComplete=$false; exitCode=$null
     harnessPid=$PID; maxBackgroundCpuCores=$MaxBackgroundCpuCores
-    stationIntent=@(switch ($Condition) { 'one' { 'helm' } 'two' { 'helm'; 'tactical' } })
+    stationIntent=@(switch ($Condition) {
+        'one' { 'helm' }
+        'two' { 'helm'; 'tactical' }
+        'three' { 'helm'; 'tactical'; 'engineering' }
+    })
 }
 if ($DryRun) { $manifest | ConvertTo-Json -Depth 10; return }
 if (Get-Process -Name cargo,rustc,cl,link,lld-link,trunk -ErrorAction SilentlyContinue) {

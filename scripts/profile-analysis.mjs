@@ -21,18 +21,27 @@ export function summarizeSamples(samples) {
   };
 }
 
-export function buildNativeMatrix(repetitions = 3) {
+export function buildNativeMatrix(repetitions = 3, { threeStations = false, experiment = '' } = {}) {
   if (!Number.isInteger(repetitions) || repetitions < 1) throw new Error('Invalid repetition count');
+  if (typeof threeStations !== 'boolean' || typeof experiment !== 'string') throw new Error('Invalid matrix options');
   const conditions = ['renderer', 'chrome', 'one', 'two'];
   const tasks = [];
   for (let repetition = 0; repetition < repetitions; repetition++) {
     const worlds = repetition % 2 ? ['falling_skyway', 'combat_test'] : ['combat_test', 'falling_skyway'];
     for (const world of worlds) {
-      tasks.push({ world, condition: 'renderer', repetition, control: 'before' });
-      for (let offset = 0; offset < conditions.length; offset++) {
-        tasks.push({ world, condition: conditions[(offset + repetition) % conditions.length], repetition, control: null });
+      if (threeStations) {
+        // Hold the real console workload constant. Renderer-only controls cannot
+        // establish either render-scale benefit or three-Station variation.
+        tasks.push({ world, condition: 'three', repetition, control: 'before', experiment: '' });
+        tasks.push({ world, condition: 'three', repetition, control: null, experiment });
+        tasks.push({ world, condition: 'three', repetition, control: 'after', experiment: '' });
+        continue;
       }
-      tasks.push({ world, condition: 'renderer', repetition, control: 'after' });
+      tasks.push({ world, condition: 'renderer', repetition, control: 'before', experiment });
+      for (let offset = 0; offset < conditions.length; offset++) {
+        tasks.push({ world, condition: conditions[(offset + repetition) % conditions.length], repetition, control: null, experiment });
+      }
+      tasks.push({ world, condition: 'renderer', repetition, control: 'after', experiment });
     }
   }
   return tasks;
@@ -102,6 +111,16 @@ export function backgroundCpu(samples, ignoredPids) {
 export function validateRun({ manifest, processSamples = [], diagnostics = [], frames = [], workload = [], stderr = '' }) {
   const reasons = [];
   const require = (condition, reason) => { if (!condition) reasons.push(reason); };
+  const stationIntents = {
+    renderer: [], chrome: [], one: ['helm'], two: ['helm', 'tactical'],
+    three: ['helm', 'tactical', 'engineering'],
+  };
+  const requiredStations = stationIntents[manifest.condition];
+  require(Array.isArray(requiredStations), 'Unknown native workload condition');
+  require(Array.isArray(manifest.stationIntent) && Array.isArray(requiredStations)
+    && manifest.stationIntent.length === requiredStations.length
+    && requiredStations.every(station => manifest.stationIntent.includes(station)),
+  'Station intent does not match the declared native workload');
   require(manifest.exitCode === 0, 'Host did not exit successfully');
   require(manifest.completedObservation === true, 'Observation did not finish');
   require(manifest.sourceClean === true, 'Source had uncommitted changes');

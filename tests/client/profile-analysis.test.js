@@ -146,6 +146,48 @@ describe('profile evidence', () => {
     }
     expect(matrix.filter(t => !t.control && t.repetition === 0)[0].condition)
       .not.toBe(matrix.filter(t => !t.control && t.repetition === 1)[0].condition);
+    expect(matrix.every(task => task.experiment === '')).toBe(true);
+    expect(buildNativeMatrix(1, { experiment: 'noforce' }).every(task => task.experiment === 'noforce')).toBe(true);
+  });
+  it('brackets a three-console experiment with native-scale controls of the same workload', () => {
+    const matrix = buildNativeMatrix(3, { threeStations: true, experiment: 'scale2' });
+    expect(matrix).toHaveLength(18);
+    for (let i = 0; i < matrix.length; i += 3) {
+      const [before, variant, after] = matrix.slice(i, i + 3);
+      expect([before.condition, variant.condition, after.condition]).toEqual(['three', 'three', 'three']);
+      expect([before.world, after.world]).toEqual([variant.world, variant.world]);
+      expect([before.repetition, after.repetition]).toEqual([variant.repetition, variant.repetition]);
+      expect([before.control, variant.control, after.control]).toEqual(['before', null, 'after']);
+      expect([before.experiment, variant.experiment, after.experiment]).toEqual(['', 'scale2', '']);
+    }
+    expect(matrix[0].world).not.toBe(matrix[6].world);
+    expect(buildNativeMatrix(1, { threeStations: true }).every(task => task.experiment === '')).toBe(true);
+    expect(() => buildNativeMatrix(1, { threeStations: 'three' })).toThrow();
+    expect(() => buildNativeMatrix(1, { experiment: 2 })).toThrow();
+  });
+  it('requires all three declared Station consoles throughout the observation', () => {
+    const stations = ['helm', 'tactical', 'engineering'];
+    const three = () => {
+      const input = valid();
+      input.manifest.condition = 'three';
+      input.manifest.stationIntent = stations.slice();
+      input.diagnostics = input.diagnostics.flatMap(row => stations.map(station => ({
+        ...row, data: { ...row.data, station },
+      })));
+      return input;
+    };
+    expect(validateRun(three()).comparable).toBe(true);
+    for (const station of stations) {
+      const missing = three();
+      missing.diagnostics = missing.diagnostics.filter(row => row.data.station !== station);
+      expect(validateRun(missing).comparable).toBe(false);
+      const lost = three();
+      lost.diagnostics.find(row => row.data.station === station && row.elapsedSeconds === 55).data.stage = 'console-not-confirmed';
+      expect(validateRun(lost).comparable).toBe(false);
+      const underdeclared = three();
+      underdeclared.manifest.stationIntent = stations.filter(id => id !== station);
+      expect(validateRun(underdeclared).reasons).toContain('Station intent does not match the declared native workload');
+    }
   });
   it('does not count a reused process id as continuous compiler CPU', () => {
     expect(compilerContention([

@@ -12,9 +12,11 @@ leaving `deterministic` false; passing `--seed` to the CLI would instead pin the
 
 All roles fly the exact `native_headless_digest.rs` inputs: Combat Test, its
 first available hull, seed 20260894, and 240 updates at a manual 1/60-second
-frame period. The test checks that the mission left the lobby, a player ship
-spawned, and the completed `SimTick` boundary agrees before comparing the real
-`world_digest`. Child records include their actual pool size and fixed executor
+frame period. The test checks that the mission left the lobby and a player ship
+spawned. It compares every recorded `(SimTick, world_digest)` observation across
+all 240 updates, as well as the final completed boundary, so final convergence
+cannot hide an intermediate divergence. Child records include the complete
+observation sequence, their actual pool size and fixed executor
 kinds. A machine whose ordinary compute pool has only one worker fails with
 an environment explanation; it cannot provide evidence of multithreaded
 execution, and the test does not alter its pool allocation to hide that fact.

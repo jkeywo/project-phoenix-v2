@@ -133,7 +133,13 @@ exemption or production order follows automatically from this output.
 
 The initialized post-split graph reports 1,929 rows. Full name/access/multiplicity comparison finds zero added rows and 39 removed rows against the original 1,968 capture. The real Rust bootstrap serializer produces the pinned fingerprint, and the ordinary live-subset/history gate passes. The independent initial capture retains the original fingerprint while the current allowance may shrink under the checked subset law. The later bootstrap correction passed six focused tests and the actual live/history gate against the unchanged pre-introduction local main in the SDK-enabled configuration; final combined validation remains separate. Typed stream/namespace ownership and the baseline-preserving Projectile edge carry their own restore and default/pinned behavior tests. Final integration remains the integrator's responsibility.
 
-## Scoped Tactical commutativity
+## Historical scoped Tactical commutativity
+
+This section records the annotation proof before the declared Input execution
+order landed. Its opposed-order interventions and unforced registration describe
+that earlier source. The current guards vary actual plugin registration under
+the declared order; see [Tactical declared-order proof](tactical-declared-order-proof.md).
+The bounded commutation evidence below remains the basis for the five annotations.
 
 The ordinary source-bound Tactical baseline ran retarget, lock-clear and real
 target-death/reacquisition in two fresh 16-worker default processes and one

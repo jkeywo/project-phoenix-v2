@@ -807,13 +807,13 @@ pub fn render_media_setup_report(
     render_media_setup_report_inner(discovered, profile, !discovered.is_empty(), None)
 }
 
-/// A completed output scan can be empty. Camera/mic support is explicitly absent
+/// A completed output scan can be empty. Camera/mic results are explicitly omitted
 /// rather than misreporting those unqueried assignments as disconnected devices.
 pub fn render_output_setup_report(
     discovered: &[DiscoveredMediaDevice],
     profile: Option<&super::bridge_profile::BridgeProfile>,
 ) -> String {
-    let mut out = "\nOutput backend: CPAL. Camera preview and microphone metering are not implemented.\nUnnamed/duplicate output names cannot be tested safely; assign unique OS names.\n".to_string();
+    let mut out = "\nOutput backend: CPAL. This report covers outputs only.\nUnnamed/duplicate output names cannot be tested safely; assign unique OS names.\n".to_string();
     out.push_str(&render_media_setup_report_inner(
         discovered,
         profile,

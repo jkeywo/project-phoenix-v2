@@ -6,12 +6,13 @@
 //! native Window host via `DefaultPlugins`) into each pane as a
 //! `navigator.getGamepads()` snapshot in the W3C **standard** shape, so the
 //! client page's existing `gui/gamepad-input.js` runtime — its selection,
-//! bindings, neutral gates and hotplug-by-poll — works unchanged.
+//! bindings, neutral gates and hotplug-by-poll — uses the same input path.
 //!
 //! A native pane is exactly one console (one station), so its runtime drives its
 //! own station with no focus routing to resolve: the pad the operator SELECTED
-//! for that screen always reaches the station on it. The host feeds every
-//! connected pad to every pane; each pane picks its own selected slot.
+//! for that screen always reaches the station on it. The host publishes device
+//! availability to every pane and sends live inputs only to its exclusive owner
+//! (the per-pane filtering is in `operator::NativeOperators`).
 //!
 //! This module is the **pure** half — the Bevy-free shape of the snapshot, so
 //! the wire form `gamepad-input.js` reads is unit-tested without gilrs. The
@@ -32,8 +33,7 @@ pub const STANDARD_AXES: usize = 4;
 pub struct PadReading {
     /// Hardware descriptor for preference matching; identical devices remain ambiguous.
     pub id: String,
-    /// The browser slot this pad occupies — the value the page's per-station
-    /// selection setting stores, kept stable across frames by the adapter so a
+    /// The live browser slot this pad occupies, kept stable across frames so a
     /// plugged-in pad keeps its slot for the session.
     pub slot: usize,
     /// Buttons 0–15 in W3C order, each `(pressed, analog value)`.

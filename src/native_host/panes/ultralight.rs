@@ -1474,8 +1474,8 @@ fn sync_viewscreen_hud_presence(
 
 /// Stable browser-slot numbering for the host's gamepads (native gamepad route).
 ///
-/// The page's per-station selection setting stores a slot index, so a slot must
-/// stay pointed at the same physical pad for the session: a `gilrs` entity keeps
+/// Selection resolves a saved hardware descriptor to a live slot. That slot
+/// stays pointed at the same physical pad for the session: a `gilrs` entity keeps
 /// the slot it was first seen on. `had_any` records whether a pad has ever
 /// existed, so unplug can remain held until the pane thread observes it.
 #[derive(Default)]

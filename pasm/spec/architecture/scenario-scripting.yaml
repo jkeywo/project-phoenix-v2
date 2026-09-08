@@ -335,6 +335,7 @@ entities:
       confidence: confirmed
       title: Rhai Script Loader and Cross-Reference Validation (M1, #994)
       rationale:
+        - "ScriptActivationGate is derived boot state owned by WorldPlugin and scoped to one Bevy App. compile_world_scripts resets it on each materialization pass and records a failure before either immediate spawn adapter can run. Both setup_world and spawn_world_entities refuse a failed gate; compiling another App cannot clear or set it. Extracted spawn helpers validate their supplied composition without reading process-global script state."
         - "Issue #1415 registers compile_world_scripts before both immediate spawn halves through world::materialization::register, directly in the supplied Startup or RuntimeWorldLoad schedule. Precompiled native scripts and browser compilation keep the same activation gate and deferred-command boundaries; GameStart, supporting-layer activation and the native transaction retain their own lifecycle ownership."
         - "Issue #1046 scans literal `ctx.effects.spawn_entity` template references from the exact path-sorted `ScriptSource` set the loader resolved. `CompiledScripts.spawned_templates` retains the resolved sibling or inline-virtual path and 1-based line. A validation pass that receives this set uses it instead of re-scanning `WorldConfig`'s inline-only bodies, so sibling `.rhai` spawns are covered and inline references are not duplicated. Computed paths remain legal and are guarded only when dispatched at runtime."
         - "Issue #1047 binds the TEMPLATE half of each literal script spawn too. Under Activate, `world::load` compiles the root and EACH statically loaded `extra_worlds` child against its own path/text and the injected resolver (the root raw transform never leaks into children), retains each `CompiledScripts`, supplies each exact `spawned_templates` list to composition validation, and returns every script digest on the root `LedgerPlan`. Native `boot::ingest_world` applies that plan, then eagerly resolves root and children from `WorldConfig.entities` plus their own `CompiledScripts.spawned_templates` before the single freeze. Those child compiled sets are PREFREEZE data, not runtime registrations: additive layer activation recompiles and owns the child's runtime set. A broken child set is rejected at boot because only the root set crosses into `PreCompiledScripts`. The compiled set is authoritative when present; the inline `WorldConfig` scan is only the compatibility fallback for a caller with no compiled scripts. A computed template path cannot be known at load, so dispatch reports it once when the frozen set does not cover it and deliberately does NOT fold it late: a late fold would make save compatibility depend on how many waves had spawned and a fresh resume could not reproduce it. Browser inline roots remain covered by the existing pre-init template preload; bringing a root sibling `.rhai` reference into that same pre-init set is the separately tracked parity residual #1248."
@@ -348,14 +349,16 @@ entities:
       paths:
         - src/content_ledger.rs
         - src/world/materialization.rs
+        - src/world/server.rs
+        - src/server_app/world_setup.rs
         - src/world/config.rs
         - src/world/dispatch.rs
         - src/world/script/load.rs
         - src/world/script/validate.rs
         - src/world/validate.rs
         - tests/snapshot_resume.rs
-      symbols: [ScriptResolver, CompiledScripts, ResolvedScriptSpawnRef, resolved_script_spawn_refs, lift_world_scripts, compile_scripts, load_world_scripts, script_ledger_key, eager_record_world_entities_with_scripts, note_uncovered_spawn, validate_registrations, validate_script_triggers, validate_flag_opassign, FLAG_OPASSIGN_NOT_COMPOSABLE]
-      tests: [cargo test, "cargo test --lib world::load::tests::activate_retains_a_childs_sibling_scripts_digest_and_spawn_provenance", "cargo test --features headless --test snapshot_resume a_save_whose_script_only_hull_template_changed_is_refused_on_content"]
+      symbols: [ScriptActivationGate, ScriptResolver, CompiledScripts, ResolvedScriptSpawnRef, resolved_script_spawn_refs, lift_world_scripts, compile_scripts, load_world_scripts, script_ledger_key, eager_record_world_entities_with_scripts, note_uncovered_spawn, validate_registrations, validate_script_triggers, validate_flag_opassign, FLAG_OPASSIGN_NOT_COMPOSABLE]
+      tests: [cargo test, "cargo test --lib world::server::tests::script_activation_is_local_to_each_app_and_resets_on_a_script_free_reload", "cargo test --lib world::load::tests::activate_retains_a_childs_sibling_scripts_digest_and_spawn_provenance", "cargo test --features headless --test snapshot_resume a_save_whose_script_only_hull_template_changed_is_refused_on_content"]
 
   - component: scenario-script-editor-host
     core:

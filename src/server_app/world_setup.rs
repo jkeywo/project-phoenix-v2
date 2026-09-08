@@ -175,7 +175,11 @@ pub(crate) fn setup_world(
     mut world: ResMut<WorldResource>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     id_mint: crate::world_id::LiveMint<'_, { crate::world_id::IdNamespace::Entity as usize }>,
+    script_gate: Option<Res<crate::world::server::ScriptActivationGate>>,
 ) {
+    if script_gate.is_some_and(|gate| gate.blocks_spawn("setup_world")) {
+        return;
+    }
     let Some(world_config) = world_config else {
         return;
     };

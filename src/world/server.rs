@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use rhai::{Map, AST};
 
@@ -723,45 +722,27 @@ pub struct ScriptRuntimeParams<'w> {
     pub sim_tick: Option<Res<'w, crate::sim_tick::SimTick>>,
 }
 
-/// Set fresh by [`compile_world_scripts`] at every world load: `true` when the
-/// world's scripts failed to compile/validate. Read by
-/// [`world_activation_blocked`] so a script-error world spawns zero entities,
-/// atomically with the composition gate.
-///
-/// A module-level `AtomicBool` static — NOT a Bevy resource — so the two
-/// `Startup` spawn systems' access sets (and therefore their scheduling) are
-/// untouched: making the gate a resource the spawn systems must borrow would add
-/// ordering edges and perturb Startup determinism for the entire script-free
-/// shipped set. The static keeps the flag out of the ECS access set entirely.
-///
-/// It must be thread-*safe*, not merely a `thread_local!`: `compile_world_scripts`
-/// and the spawn systems run on Bevy's multithreaded native executor and can land
-/// on different worker threads, so a `true` written on worker A would be invisible
-/// to a `thread_local!` read on worker B — the gate could read `false` and spawn
-/// despite a script error, and (worse) the spawn decision would become
-/// non-deterministic across lockstep peers (which worker runs which system). The
-/// atomic makes the write visible across workers. The `.chain()` ordering in
-/// `WorldPlugin` (with finding-1's matching `.after` on `setup_world`) sequences
-/// `compile_world_scripts` before both spawn systems within the Startup run, and
-/// the `Release`/`Acquire` pairing publishes that write to the reads.
-///
-/// `compile_world_scripts` writes it `false` UNCONDITIONALLY at the top of every
-/// world load (before the `script`-key check), so a script-free world — and any
-/// app, e.g. a bare-`App` fixture, that never runs the system — reads `false`.
-static SCRIPT_ACTIVATION_BLOCKED: AtomicBool = AtomicBool::new(false);
-
-/// Record whether the just-loaded world's scripts blocked activation. Written
-/// only by [`compile_world_scripts`], once per load. `Release` so the write is
-/// published to the `Acquire` read in [`script_activation_blocked`] on any worker.
-fn set_script_activation_blocked(blocked: bool) {
-    SCRIPT_ACTIVATION_BLOCKED.store(blocked, Ordering::Release);
+/// Per-world script validation result, rebuilt at every materialization pass.
+/// The shared materialization chain publishes this resource before both spawn
+/// systems, including when they run on different Bevy workers. Keeping the gate
+/// on the App prevents another world's compile from clearing or setting it.
+/// Bare spawn helpers validate their supplied composition without borrowing a
+/// different App's script result.
+#[derive(Resource, Default)]
+pub(crate) struct ScriptActivationGate {
+    blocked: bool,
 }
 
-/// Whether the current world's scripts blocked activation (see
-/// [`SCRIPT_ACTIVATION_BLOCKED`]). `Acquire` to observe `compile_world_scripts`'
-/// `Release` write across worker threads.
-fn script_activation_blocked() -> bool {
-    SCRIPT_ACTIVATION_BLOCKED.load(Ordering::Acquire)
+impl ScriptActivationGate {
+    pub(crate) fn blocks_spawn(&self, system: &str) -> bool {
+        if self.blocked {
+            bevy::log::error!(
+                target: "world",
+                "{system}: spawn blocked: world scripts failed activation; spawning zero entities"
+            );
+        }
+        self.blocked
+    }
 }
 
 pub struct WorldPlugin;
@@ -770,6 +751,10 @@ impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
         use crate::authoritative::{DeclareState, StateClass};
         app.declare_state::<ObjectiveManagerRes>(StateClass::Folded, "objective-runtime-state");
+        app.declare_state::<ScriptActivationGate>(
+            StateClass::Derived,
+            "scenario-script-loader-validation",
+        );
         // The comms half of the pre-#816 WorldPlugin lives in
         // `CommsWorldPlugin`. Added here so every app that installs the
         // world also gets comms, and so the cross-plugin ordering
@@ -1087,8 +1072,8 @@ pub(crate) fn insert_raw_world_source_resource(
 /// the `CompiledScripts` came from.
 ///
 /// Findings fold into the SAME atomic activation gate the composition findings
-/// use: on a script error this records the block (read by
-/// [`world_activation_blocked`]) so a script-error world spawns zero entities,
+/// use: on a script error this records the [`ScriptActivationGate`] read by
+/// both immediate spawn systems so a script-error world spawns zero entities,
 /// and inserts no runtime. Headless additionally hard-fails the build for a
 /// script error (see `build_headless_app`), so a broken script never reaches a
 /// running authoritative host.
@@ -1105,9 +1090,9 @@ pub(crate) fn compile_world_scripts(
     raw: Option<Res<RawWorldSource>>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
 ) {
-    // Reset the per-load gate: every world load writes it fresh, so a script-free
-    // world (or an app that never runs this system) reads `false`.
-    set_script_activation_blocked(false);
+    // The materialization chain flushes this per-App result before spawning.
+    // Reset even on a script-free reload of an App that previously failed.
+    commands.insert_resource(ScriptActivationGate::default());
 
     // Prefer scripts already compiled at build time (issue #1214): the headless
     // path runs the world through `world::load::load` once and hands the result
@@ -1195,7 +1180,7 @@ pub(crate) fn compile_world_scripts(
             }
         }
         // Block activation atomically with the composition gate — spawn nothing.
-        set_script_activation_blocked(true);
+        commands.insert_resource(ScriptActivationGate { blocked: true });
         return;
     }
 
@@ -1284,7 +1269,11 @@ pub(crate) fn spawn_world_entities(
     world_config: Option<ResMut<crate::world::config::WorldConfig>>,
     mut runtime: Option<ResMut<WorldContentRuntime>>,
     id_mint: crate::world_id::LiveMint<'_, { crate::world_id::IdNamespace::Entity as usize }>,
+    script_gate: Option<Res<ScriptActivationGate>>,
 ) {
+    if script_gate.is_some_and(|gate| gate.blocks_spawn("spawn_world_entities")) {
+        return;
+    }
     let Some(mut world_config) = world_config else {
         return; // No unified WorldConfig (native tests, hardcoded fallback).
     };
@@ -1322,7 +1311,7 @@ pub(crate) fn spawn_world_entities(
     );
 }
 
-/// The `Startup` atomic-activation gate, shared by **both** immediate-spawn
+/// The composition half of the atomic-activation gate, shared by **both** immediate-spawn
 /// systems: `spawn_world_entities` (asteroid fields + named entries) and
 /// `setup_world` in `server_app.rs` (the anonymous non-asteroid remainder —
 /// stars, planets, nebulae).
@@ -1330,7 +1319,8 @@ pub(crate) fn spawn_world_entities(
 /// Returns `true` when this world must spawn nothing, having logged every
 /// blocking finding. `system` names the caller so the log says which half was
 /// stopped; the answer itself is identical for both, because it reads only the
-/// parsed [`crate::world::config::WorldConfig`].
+/// parsed [`crate::world::config::WorldConfig`]. The scheduling adapters also
+/// consult their App's [`ScriptActivationGate`] before invoking either helper.
 ///
 /// Both callers matter. The two systems are registered independently with no
 /// ordering relationship between them, and each answers a failed entity
@@ -1393,20 +1383,8 @@ pub fn world_activation_blocked(
         &templates,
     );
     let errors = findings.iter().filter(|f| f.is_error()).count();
-    // The scripting seam (issue #984, Rhai M6 phase 2a) folds into the SAME
-    // atomic gate: a world whose scripts failed to compile/validate must spawn
-    // nothing either. `compile_world_scripts` runs earlier in the `Startup`
-    // chain and sets this flag fresh per load; a script-free world never trips
-    // it, so this branch is inert for the whole shipped set.
-    let script_blocked = script_activation_blocked();
-    if errors == 0 && !script_blocked {
+    if errors == 0 {
         return false;
-    }
-    if script_blocked {
-        bevy::log::error!(
-            target: "world",
-            "{system}: spawn blocked: world scripts failed activation; spawning zero entities"
-        );
     }
     for f in findings.iter().filter(|f| f.is_error()) {
         bevy::log::error!(target: "world", "world validation [error] {}: {}", f.category, f.message);

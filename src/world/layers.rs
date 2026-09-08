@@ -33,7 +33,7 @@
 //! `WorldScriptRuntime` — creating that resource when the base world authored no
 //! script of its own. A layer whose scripts carry an ERROR finding is refused
 //! outright ([`LayerLoadOutcome::ParseFailed`]) rather than half-merged: the
-//! boot-time `SCRIPT_ACTIVATION_BLOCKED` gate belongs to base-world activation and
+//! boot-time `ScriptActivationGate` belongs to base-world activation and
 //! must not be tripped by a layer arriving mid-run.
 //!
 //! ## What the merge does NOT touch
@@ -273,7 +273,7 @@ where
     // all, rather than merged with its logic missing — the same all-or-nothing the
     // boot path applies to a base world, expressed the one way a mid-run load can.
     //
-    // It deliberately does NOT trip `SCRIPT_ACTIVATION_BLOCKED`: that atomic gate
+    // It deliberately does NOT trip `ScriptActivationGate`: that per-world gate
     // stops the base world's Startup SPAWN pass, which is long finished by the time
     // a layer arrives, so setting it here would be a global refusal for one broken
     // supporting file. Refusing this layer (and marking it broken so it is not

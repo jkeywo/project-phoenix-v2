@@ -2833,7 +2833,6 @@ fn raw_root_sibling_spawn_composition_error_blocks_script_runtime() {
     let world_config = crate::world::config::parse_world(&world_toml).expect("world parses");
     let raw_value: toml::Value = toml::from_str(&world_toml).expect("valid toml");
 
-    set_script_activation_blocked(false);
     let mut app = App::new();
     app.insert_resource(world_config)
         .insert_resource(RawWorldSource {
@@ -2844,14 +2843,13 @@ fn raw_root_sibling_spawn_composition_error_blocks_script_runtime() {
     app.update();
 
     assert!(
-        script_activation_blocked(),
+        app.world().resource::<ScriptActivationGate>().blocked,
         "the resolved sibling spawn finding joins the existing atomic gate"
     );
     assert!(
         !app.world().contains_resource::<WorldScriptRuntime>(),
         "a rejected root installs no script runtime"
     );
-    set_script_activation_blocked(false);
 }
 
 #[test]
@@ -2864,7 +2862,6 @@ fn precompiled_root_scripts_are_not_composition_gated_a_second_time_at_startup()
     ]);
     assert_eq!(compiled.spawned_templates.len(), 1);
 
-    set_script_activation_blocked(false);
     let mut app = App::new();
     app.insert_resource(crate::world::config::WorldConfig::default())
         .insert_resource(PreCompiledScripts(Some(compiled)))
@@ -2872,11 +2869,80 @@ fn precompiled_root_scripts_are_not_composition_gated_a_second_time_at_startup()
     app.update();
 
     assert!(
-        !script_activation_blocked(),
+        !app.world().resource::<ScriptActivationGate>().blocked,
         "LoadPolicy::Activate already gated the precompiled branch"
     );
     assert!(app.world().contains_resource::<WorldScriptRuntime>());
-    set_script_activation_blocked(false);
+}
+
+#[test]
+fn script_activation_is_local_to_each_app_and_resets_on_a_script_free_reload() {
+    #[derive(bevy::ecs::schedule::ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
+    struct SpawnFixture;
+
+    let path = std::env::temp_dir().join(format!(
+        "phoenix_script_gate_template_{}.toml",
+        std::process::id()
+    ));
+    std::fs::write(&path, "").expect("write the minimal spawn template");
+    let mut config = crate::world::config::WorldConfig::default();
+    for name in [Some("named".to_string()), None] {
+        config.entities.push(crate::world::config::WorldEntity {
+            template_path: path.to_string_lossy().into_owned(),
+            name,
+            ..Default::default()
+        });
+    }
+    let make_app = |source: &str| {
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin)
+            .insert_resource(config.clone())
+            .init_resource::<crate::lobby::server::WorldResource>()
+            .insert_resource(RawWorldSource {
+                path: "fixture/script_gate.toml".to_string(),
+                toml: toml::from_str(source).unwrap(),
+            })
+            .add_systems(Update, compile_world_scripts)
+            .add_systems(
+                SpawnFixture,
+                (crate::server_app::setup_world, spawn_world_entities).chain(),
+            );
+        app
+    };
+    let count_spawned = |app: &mut App| {
+        let mut query = app.world_mut().query::<&EntityUuid>();
+        query.iter(app.world()).count()
+    };
+
+    let mut invalid = make_app("[script]\nsetup = 'fn broken('\n");
+    invalid.update();
+    assert!(invalid.world().resource::<ScriptActivationGate>().blocked);
+    let mut valid = make_app("");
+    valid.update();
+
+    // A second App's successful compile must neither clear the first App's
+    // failure nor be blocked by it. Both actual spawn adapters run here.
+    invalid.world_mut().run_schedule(SpawnFixture);
+    valid.world_mut().run_schedule(SpawnFixture);
+    assert_eq!(count_spawned(&mut invalid), 0);
+    assert_eq!(count_spawned(&mut valid), 2);
+    assert_eq!(
+        valid
+            .world()
+            .resource::<crate::lobby::server::WorldResource>()
+            .0
+            .entities
+            .len(),
+        1,
+        "the valid world exercises the anonymous spawn half as well"
+    );
+
+    invalid.world_mut().resource_mut::<RawWorldSource>().toml = toml::from_str("").unwrap();
+    invalid.update();
+    assert!(!invalid.world().resource::<ScriptActivationGate>().blocked);
+    invalid.world_mut().run_schedule(SpawnFixture);
+    assert_eq!(count_spawned(&mut invalid), 2);
+    let _ = std::fs::remove_file(path);
 }
 
 /// Whether the objective manager reports `id` as `Completed`.

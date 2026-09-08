@@ -3067,7 +3067,12 @@ test('two equal GMs puppet a human-held Station without blocking its player', { 
   await expectHeldCaptain();
   const token = captain.token;
   await captain.close();
-  await ship.waitForFunction(token => !(0, eval)('tokenConns').has(token), token);
+  await ship.waitForFunction(
+    // eslint-disable-next-line no-eval
+    token => (0, eval)('hostConnections').targets(`token:${token}`, 'reliable').length === 0,
+    token,
+    { timeout: 15_000 },
+  );
   const reconnected = await reconnectRealCrew(context, hostId, token, 'captain');
   await expect(reconnected.frameLocator('#captain-iframe').locator('ph-red-alert #alert-btn')).toBeEnabled();
   expect(errors).toEqual([]);

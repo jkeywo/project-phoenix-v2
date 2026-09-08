@@ -39,7 +39,7 @@ pub fn sync_console_assignments(
     bus: Option<Res<PaneBusResource>>,
     sessions: Option<ResMut<Sessions>>,
     mut assignments: ResMut<ConsoleAssignments>,
-    mut inbound: MessageWriter<InboundMessage>,
+    mut inbound: ResMut<Messages<InboundMessage>>,
 ) {
     let (Some(layout), Some(bus), Some(mut sessions)) = (layout, bus, sessions) else {
         return;
@@ -66,6 +66,15 @@ pub fn sync_console_assignments(
             .iter()
             .any(|p| p.token == token && p.connected)
             && sessions.0.station_for_token(&token) != Some(&station)
+            // The initial auto-claim dispatcher runs immediately before this
+            // return-to-lobby repair. Both routes can observe the same newly
+            // registered session before FixedUpdate handles its first claim.
+            && !inbound.iter_current_update_messages().any(|message| {
+                message.token == token
+                    && matches!(&message.msg,
+                        crate::core::messages::ClientMessage::SelectStation { station: claimed }
+                            if claimed == &station.0)
+            })
         {
             inbound.write(InboundMessage {
                 token,

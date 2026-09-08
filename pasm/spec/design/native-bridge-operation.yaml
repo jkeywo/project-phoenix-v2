@@ -44,4 +44,4 @@ entities:
     implementation:
       status: declared
       paths: [gui/gm-workspace.js, gui/native-gm-workspace.js, gui/host-lobby-view.js, gui/host-lobby-render.js, src/gm_action.rs, src/gm_roster.rs, src/native_host/bridge_layout.rs, src/native_host/native_gm/mod.rs, src/native_host/native_gm/start.rs, src/native_host/native_gm/bridge.rs, src/native_host/native_gm/recovery.rs]
-      tests: [tests/native_host_gm.rs, tests/client/native-gm-workspace.test.js, tests/client/native-gm-bridge.test.js, tests/client/gm-monitor-row.test.js, docs/acceptance/controllers-native-gm.md]
+      tests: [tests/native_host_gm.rs, tests/native_gm_ultralight.rs, tests/client/native-gm-workspace.test.js, tests/client/native-gm-bridge.test.js, tests/client/gm-monitor-row.test.js, docs/acceptance/controllers-native-gm.md]

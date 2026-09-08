@@ -246,8 +246,10 @@ pub fn handle_sensors_messages(
                         snapshot.0.entities.iter().any(|target| {
                             target.uuid == *uuid
                                 && target.radar_icon.is_some()
-                                && (target.x() - physics.x).hypot(target.z() - physics.z)
-                                    <= bb.radar_range
+                                && crate::simmath::hypot(
+                                    target.x() - physics.x,
+                                    target.z() - physics.z,
+                                ) <= bb.radar_range
                                 && (bb.radar_shows.is_empty()
                                     || target.tags.iter().any(|tag| {
                                         bb.radar_shows
@@ -1482,7 +1484,7 @@ pub fn operate_sensors_ai(
         candidates.retain(|candidate| {
             let dx = candidate.position[0] - physics.x;
             let dz = candidate.position[2] - physics.z;
-            dx.hypot(dz) <= selector.horizon
+            crate::simmath::hypot(dx, dz) <= selector.horizon
         });
         // Reveal supplies position and detectability only; authored eligibility still decides.
         if let Some(rows) =
@@ -1498,10 +1500,10 @@ pub fn operate_sensors_ai(
                     let mut facts = crate::world::flags::AiFacts::new();
                     facts.set_fact(crate::entities::ai_flag_hosts::DETECTABLE, 1.0);
                     facts.set_fact(crate::entities::ai_flag_hosts::SOURCE_RADAR, 1.0);
-                    selector.horizon = selector.horizon.max(
-                        (transform.translation.x - physics.x)
-                            .hypot(transform.translation.z - physics.z),
-                    );
+                    selector.horizon = selector.horizon.max(crate::simmath::hypot(
+                        transform.translation.x - physics.x,
+                        transform.translation.z - physics.z,
+                    ));
                     candidates.push(SelectorCandidate {
                         uuid: uuid.clone(),
                         position: transform.translation.to_array(),

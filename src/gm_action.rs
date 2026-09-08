@@ -6366,7 +6366,7 @@ kind = "{id}"
             "the damage phase drains these in order and the second only has 40 left"
         );
         let results = effect_results(&app);
-        assert_eq!(results[0].expect("resolved").destroyed, false);
+        assert!(!results[0].expect("resolved").destroyed);
         let second = results[1].expect("resolved");
         assert!(second.destroyed, "the second press is the one that kills");
         assert_eq!(second.discarded_milli_hp, 20_000);

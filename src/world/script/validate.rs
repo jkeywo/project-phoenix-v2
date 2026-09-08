@@ -164,14 +164,11 @@ pub fn validate_gm_events(script_triggers: &[ScriptTrigger]) -> Vec<WorldFinding
             findings.push(gm_event_finding(&st.source_path, &controls.id, message));
             continue;
         }
-        let skip_placement = controls
-            .skip
-            .then(|| {
-                crate::world::config::GmEventControls::validate_skip_condition(
-                    &st.trigger.condition,
-                )
-            })
-            .unwrap_or(Ok(()));
+        let skip_placement = if controls.skip {
+            crate::world::config::GmEventControls::validate_skip_condition(&st.trigger.condition)
+        } else {
+            Ok(())
+        };
         if let Err(message) = skip_placement {
             findings.push(gm_event_finding(&st.source_path, &controls.id, message));
             continue;

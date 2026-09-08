@@ -890,10 +890,11 @@ station = "comms"
     else {
         panic!("replicated refusal")
     };
-    let mut refusals = app.world_mut().resource_mut::<LocalGmActionRefusals>();
-    refusals.push(local);
-    refusals.push(replicated.logged());
-    drop(refusals);
+    {
+        let mut refusals = app.world_mut().resource_mut::<LocalGmActionRefusals>();
+        refusals.push(local);
+        refusals.push(replicated.logged());
+    }
     fixed_then_publish(&mut app);
     let payload = take(&mut app).pop().unwrap();
     let rows: Vec<_> = payload

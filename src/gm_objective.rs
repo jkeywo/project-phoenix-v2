@@ -75,8 +75,8 @@ pub fn parse_palette(
 pub fn apply_command(
     manager: &mut crate::objectives::ObjectiveManager,
     command: ActionCmd,
-    mut balance: Option<&mut Messages<crate::core::balance::BalanceEvent>>,
-    mut layers: Option<&mut crate::world::server::WorldLayerMap>,
+    balance: Option<&mut Messages<crate::core::balance::BalanceEvent>>,
+    layers: Option<&mut crate::world::server::WorldLayerMap>,
 ) -> bool {
     let (id, status, changed) = match command {
         ActionCmd::AddObjective {
@@ -103,7 +103,7 @@ pub fn apply_command(
                 command_stance,
             );
             if changed {
-                if let (Some(path), Some(layers)) = (origin_layer, layers.as_deref_mut()) {
+                if let (Some(path), Some(layers)) = (origin_layer, layers) {
                     if let Some(layer) = layers.0.get_mut(&path) {
                         layer.owned_objective_ids.push(id.clone());
                     }
@@ -122,7 +122,7 @@ pub fn apply_command(
         _ => return false,
     };
     if changed {
-        if let Some(events) = balance.as_deref_mut() {
+        if let Some(events) = balance {
             if status == ObjectiveStatus::Completed {
                 events.write(crate::core::balance::BalanceEvent::ObjectiveCompleted {
                     objective_id: id.clone(),

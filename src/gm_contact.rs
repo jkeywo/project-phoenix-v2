@@ -37,7 +37,7 @@ pub fn viewscreen_contacts(
             }
             let dx = entity.x() - x;
             let dz = entity.z() - z;
-            let distance = dx.hypot(dz);
+            let distance = crate::simmath::hypot(dx, dz);
             let ordinary = distance <= range
                 && entity.tags.iter().any(|tag| shows.contains(tag))
                 && (entity.radar_icon.is_some() || entity.region_colour.is_some())

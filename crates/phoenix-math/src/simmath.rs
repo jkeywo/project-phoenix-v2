@@ -98,6 +98,12 @@ pub fn atan2(y: f32, x: f32) -> f32 {
     libm::atan2f(y, x)
 }
 
+/// `x.hypot(y)`, routed through the shared pure-Rust libm.
+#[inline]
+pub fn hypot(x: f32, y: f32) -> f32 {
+    libm::hypotf(x, y)
+}
+
 /// `base.powf(exponent)`, routed through the shared pure-Rust libm.
 #[inline]
 pub fn powf(base: f32, exponent: f32) -> f32 {
@@ -164,6 +170,18 @@ mod tests {
             let (s, c) = sin_cos(x);
             assert_eq!(s.to_bits(), sin(x).to_bits());
             assert_eq!(c.to_bits(), cos(x).to_bits());
+        }
+    }
+
+    /// Keep distance calculations finite and nonzero when squaring would
+    /// overflow or underflow, as well as pinning the ordinary result.
+    #[test]
+    fn hypot_preserves_scaled_distances() {
+        for scale in [2.0_f32.powi(-100), 1.0, 2.0_f32.powi(100)] {
+            assert_eq!(
+                hypot(3.0 * scale, 4.0 * scale).to_bits(),
+                (5.0 * scale).to_bits(),
+            );
         }
     }
 }

@@ -34,7 +34,7 @@ fn retained_host(deferred: bool) -> (App, LoopbackHandle, Vec<String>) {
     );
     for (index, token) in CREW.iter().enumerate() {
         handle.send(
-            *token,
+            token,
             ClientMessage::Identify {
                 token: (*token).into(),
                 name: format!("Crew {index}"),
@@ -64,7 +64,7 @@ fn retained_host(deferred: bool) -> (App, LoopbackHandle, Vec<String>) {
     assert_eq!(seats.len(), 2);
     for (token, station) in CREW.iter().zip(&seats) {
         handle.send(
-            *token,
+            token,
             ClientMessage::SelectStation {
                 station: station.clone(),
             },

@@ -351,6 +351,7 @@ pub(crate) fn discard_blocked_model_rig_overstep(
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)] // UUIDs isolate temporary fixture directories, never simulation identities.
 mod tests {
     use super::*;
     use crate::entities::config::{MeshConfig, MeshShape};

@@ -1306,7 +1306,8 @@ Bevy supplies physical gamepad snapshots through `panes::gamepad`.
 `panes::gamepad_discovery` retains startup connection events until the ordinary
 input consumer creates their Gamepad components. Snapshot publication repeats
 for late and rebuilt panes. The host grants one console per connected device;
-closing a console releases its lease and unplugging neutralizes input while
+moving or rebuilding a console transfers its lease atomically to the replacement
+pane. Closing a console releases its lease and unplugging neutralizes input while
 retaining its preference. Matching uses a device descriptor rather than a saved
 slot; ambiguous identical controllers require selection. Keyboard retains the
 focused input router and Ultralight vibration remains unavailable.
@@ -1323,7 +1324,7 @@ A local pane is "just another logical client", so a pane *failing* must ride the
 same disconnect → Backfill → reconnect machinery a dropped phone does — never a
 native-only fatal error. #1125 routes three new triggers into that path and
 recreates a crashed pane on the same identity. Nothing in the simulation gains a
-pane-shaped branch: the whole of it is `PaneBus::close`/`recreate` and the
+pane-shaped branch: the whole of it is `PaneBus::close`/`rebuild` and the
 runtime display watcher, and the sim sees only the ordinary `PlayerDisconnected`
 and reconnect `Identify`.
 
@@ -1347,13 +1348,14 @@ and reconnect `Identify`.
   that emptiness as "the viewscreen" printed *the shared 3-D view has nowhere to
   draw, no station is affected* about a screen whose stations the layout law
   was, on the same frame, reporting as `StationMonitorGone`.
-- **Recreation, on the same identity.** A crash's `PaneBus::recreate` opens a
+- **Recreation, on the same identity.** A crash's `PaneBus::rebuild` opens a
   fresh pane carrying the **same session token** (a new `PaneId`, ids are never
   reissued), republishes its document at a fresh nonce, and enqueues its view for
   `open_pending_views` to build next frame in the crashed pane's stored slot. The
-  page reloads and its `Identify` is a *reconnect* — `handle_identify`'s
-  reconnect-yield restores the held station (still Backfill, still unclaimed) to
-  the human and pushes the current projection. This is the in-process analogue of
+  page reloads and its `Identify` is a *reconnect* — `handle_identify` restores
+  the held station and pushes the current projection. Host-assigned screens keep
+  their station reserved through this gap; participant panes reclaim only if
+  nobody else claimed it during reload. This is the in-process analogue of
   a phone redialling on its saved token; a pane's reconnect needs **no** #1112
   transport.
 

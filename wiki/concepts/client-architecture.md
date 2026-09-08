@@ -2,7 +2,7 @@
 title: Client Architecture
 type: concept
 tags: [client, javascript, iframe, console, console-family, state, accessibility, keyboard, gamepad, feedback, gm, host-channel, vitest]
-sources: [src/gm_objective.rs, gui/gm-objective-panel.js, gui/gm-mission-panel.js, gui/gm-direct-effect-panel.js, gui/gm-effect-scope.js, gui/gm-spawn-panel.js, gui/gm-knowledge-compare.js, gui/gm-role-presets.js, client.html, server.html, gui/mount-plan.js, gui/hero-bar.js, gui/reducer-result.js, gui/lobby-state.js, gui/sim-state.js, gui/comms-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/gm-local-projection.js, gui/gm-activity-feed.js, gui/entity-inspector.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/semantic-controls-remapper.js, gui/host-actions.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/server-settings.js, gui/gamepad-input.js, gui/client-semantic-actions.js, gui/composite-action-routing.js, gui/stations/captain-actions.js, gui/stations/helm-actions.js, gui/stations/tactical-actions.js, gui/stations/comms-actions.js, gui/stations/sensors-actions.js, gui/stations/navigation-actions.js, gui/stations/navigation-action-control.js, gui/stations/engineering-actions.js, gui/stations/engineering-action-control.js, gui/components/ph-navigation-map.js, gui/components/ph-civilian-traffic.js, gui/operator-profile.js, gui/action-map.js, gui/console-core.js, gui/console-latency.js, gui/iframe-bridge.js, gui/client-router.js, gui/coordination-popup.js, gui/accessibility-profile.js, gui/roving-tabindex.js, gui/focus-trap.js, gui/tokens.css, src/core/messages.rs, src/command_admission/mod.rs, src/gm_action.rs, src/gm_projection.rs, src/gm_activity.rs, src/server/bridge.rs, src/console/captain/server.rs, src/console/navigation/server.rs, src/console/repair/dispatch.rs, src/console/repair/external_server.rs, src/civilian/server.rs, src/science/server.rs, src/ship/helm_admission.rs, src/ship/sensors.rs, src/ship/shields.rs, src/ship/power.rs, src/tractor/server.rs, src/umbilical/server.rs, src/ship/system_registry.rs, src/dock/server.rs, src/entities/spawner.rs, src/lobby/server.rs, tests/client/]
+sources: [gui/gamepad-presentation.js, gui/gm-workspace.js, gui/native-gm-workspace.js, src/native_host/panes/operator.rs, src/gm_objective.rs, gui/gm-objective-panel.js, gui/gm-mission-panel.js, gui/gm-direct-effect-panel.js, gui/gm-effect-scope.js, gui/gm-spawn-panel.js, gui/gm-knowledge-compare.js, gui/gm-role-presets.js, client.html, server.html, gui/mount-plan.js, gui/hero-bar.js, gui/reducer-result.js, gui/lobby-state.js, gui/sim-state.js, gui/comms-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/gm-local-projection.js, gui/gm-activity-feed.js, gui/entity-inspector.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/semantic-controls-remapper.js, gui/host-actions.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/server-settings.js, gui/gamepad-input.js, gui/client-semantic-actions.js, gui/composite-action-routing.js, gui/stations/captain-actions.js, gui/stations/helm-actions.js, gui/stations/tactical-actions.js, gui/stations/comms-actions.js, gui/stations/sensors-actions.js, gui/stations/navigation-actions.js, gui/stations/navigation-action-control.js, gui/stations/engineering-actions.js, gui/stations/engineering-action-control.js, gui/components/ph-navigation-map.js, gui/components/ph-civilian-traffic.js, gui/operator-profile.js, gui/action-map.js, gui/console-core.js, gui/console-latency.js, gui/iframe-bridge.js, gui/client-router.js, gui/coordination-popup.js, gui/accessibility-profile.js, gui/roving-tabindex.js, gui/focus-trap.js, gui/tokens.css, src/core/messages.rs, src/command_admission/mod.rs, src/gm_action.rs, src/gm_projection.rs, src/gm_activity.rs, src/server/bridge.rs, src/console/captain/server.rs, src/console/navigation/server.rs, src/console/repair/dispatch.rs, src/console/repair/external_server.rs, src/civilian/server.rs, src/science/server.rs, src/ship/helm_admission.rs, src/ship/sensors.rs, src/ship/shields.rs, src/ship/power.rs, src/tractor/server.rs, src/umbilical/server.rs, src/ship/system_registry.rs, src/dock/server.rs, src/entities/spawner.rs, src/lobby/server.rs, tests/client/]
 updated: 2026-09-07
 ---
 
@@ -182,8 +182,12 @@ binding choices add no Station or command authority.
 
 `gui/gamepad-input.js` is the only Gamepad API reader. The parent client samples
 one snapshot per animation frame and activates semantic actions only in the
-currently active console iframe. A player must explicitly choose a connected
-`mapping === "standard"` browser slot; no selected slot means no gamepad input.
+currently active console iframe. The v1 profile retains the selected device
+descriptor (`id` and mapping), not authority over an enumeration slot. An
+unambiguous available match can reconnect automatically; identical matches need
+explicit selection. Native host leases identify devices assigned to other
+consoles and filter their input before publication. No selected, connected,
+leased standard controller means no gamepad input.
 Ownership also carries an ephemeral connection generation, so disconnect clears
 edge state and raises a persistent client-level accessible warning outside
 Settings, and a new device reusing the same index cannot inherit control. The
@@ -218,10 +222,13 @@ the Gamepad API or bypasses the semantic registry with a direct command.
 
 `gui/operator-profile.js` is the one current-version private browser profile.
 It whitelists Accessibility effects and assistance, exactly two bindings for
-each known semantic action, the preferred logical gamepad slot and continuous
-tuning, feedback preferences, and sparse future GM confirmation choices. It
-contains no player/session identity, Station ownership, hardware id or save
-data and has no message builder. The parent snapshots it after each supported
+each known semantic action, preferred controller descriptor, continuous tuning,
+the default-on hide-touch-controls choice, feedback preferences and GM
+confirmation choices. It contains no player/session credentials, Station
+authority or save data and has no simulation message builder. Native panes use
+the same schema through the host-local `panes::operator` store; browser profiles
+remain private to their browser. Legacy slot-only values require fresh device
+selection instead of acquiring a possibly different controller. The parent snapshots it after each supported
 setting change and exports/imports the same JSON from Controls. Import first
 normalises bounded private preferences and validates every supplied binding
 against the registry's reserved-chord and overlapping-context conflict rules.
@@ -232,6 +239,14 @@ the resulting valid candidate is stored and atomically applied. The old
 `phoenix-accessibility-v1` value migrates only when no current profile exists;
 a corrupt current record yields authored defaults rather than silently
 resurrecting the old value.
+
+`gui/gamepad-presentation.js` derives controller help from the semantic registry
+and current remaps. Settings and the claimed-station lobby guide share that
+content and refresh it for the active console context. Helm joystick and lateral
+thrust visibility are evaluated independently against connected hardware and
+usable bindings; disconnect or missing bindings restores the corresponding
+control. Ordinary clients use Change station through release confirmation;
+host-assigned native screens retain their console tabs without release controls.
 
 ## Module inventory (`gui/`)
 

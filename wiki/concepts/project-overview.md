@@ -44,9 +44,10 @@ routes at compile time while retaining the host's own presentation controls.
 
 ## Delivery and testing
 
-The browser host is built to WebAssembly with Trunk. `phoenix-host` can serve a
-version-pinned client bundle and scenario catalogue on a LAN, but the browser
-host or headless runner still owns simulation authority. CI validates Rust,
+The browser host is built to WebAssembly with Trunk. A bare `phoenix-host` serves
+a version-pinned client bundle and scenario catalogue on a LAN. With `--world`
+or `--lobby`, that same native process owns the simulation and draws its
+viewscreen; Ultralight builds can also show local station consoles. CI validates Rust,
 client JavaScript, PASM, WASM/smoke rendering, asset performance, and the
 ratified Cruiser balance matrix.
 

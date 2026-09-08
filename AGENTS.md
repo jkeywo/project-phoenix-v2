@@ -299,10 +299,11 @@ cargo build --release --features host --bin phoenix-host
 #     eligible monitor plus an off state, so pressing one opens THAT STATION'S
 #     CONSOLE ON THAT MONITOR AT RUNTIME — a Station window and a seated pane
 #     created on demand, not at init — and off closes it and frees the screen.
-#     The console is an ordinary participant: it joins and claims through the
-#     normal flow, may be released and re-claimed by anyone, and admission
-#     cannot tell it from a phone. The station id in the layout decides only
-#     WHICH console document opens on WHICH glass, never who may sit there.
+#     A host-assigned console uses an ordinary session token with a host-owned
+#     station reservation. Session admission refuses switching, voluntary release
+#     and competing claims. ConsoleAssignments retains that reservation and token
+#     through moves, rebuilds and unplug; Backfill covers disconnection. Host Off
+#     releases it. Manually opened participant panes retain ordinary selection.
 #     A windowed host with a --client-dir therefore carries a PANE BUS whether
 #     or not it was given a --pane, and (with --rendezvous) pairs it with the
 #     relay through PairedTransport rather than replacing it — before #1331 the
@@ -402,9 +403,9 @@ cargo build --release --features host --bin phoenix-host
 #     and a screen that changed SIZE holding exactly what it held is
 #     ConsoleResized. Never attribute a geometry change to a split change. The
 #     rebuilt page reclaims its seat through handle_identify's reconnect-yield ON
-#     THE SAME TOKEN, but only while nobody else claimed it during the page load
-#     — that gap is #1125's, disclosed rather than removed, and every sentence
-#     about the reconnect (Display, rustdoc, strings.csv description) says so.
+#     THE SAME TOKEN. Host-assigned stations remain reserved during that load;
+#     the no-competing-holder condition applies only to ordinary participant
+#     panes. Host Off, not a surface failure, releases assigned station authority.
 #     A --profile's participant console COSTS A SLOT and the lobby has no control
 #     that frees one, so the greyed row says which occupant is unreclaimable
 #     (server.station_row.full_authored, fed by the payload's `reserved` list)

@@ -2792,7 +2792,10 @@ station = "navigation"
         &["navigation"],
     )
     .expect("valid authored hull data");
-    let mut app = seeking_config_app(config, &["captain"]);
+    let mut app = seeking_config_app(config.clone(), &["captain"]);
+    // Fleet adoption validates the frozen rating against the selected hull,
+    // which must match the ShipConfigComponent installed by this fixture.
+    app.insert_resource(crate::ship_plugin::PendingShipConfig(config));
     let navigation_system = crate::core::messages::SystemId("navigation".into());
 
     // Freeze the fleet: the fixture's own ship (tagged `FleetSlotOf(SOLO)`) is

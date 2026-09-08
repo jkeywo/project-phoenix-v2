@@ -2283,6 +2283,40 @@ mod tests {
         )
     }
 
+    /// The adoption boundary validates the frozen Helm rating against selected
+    /// content. Use a world-local selected hull, avoiding the process-global
+    /// native template cache in these unit fixtures.
+    fn selected_hull_roster(world: &mut World) -> FleetRoster {
+        let hull = crate::ship::config::ShipConfig::from_toml(
+            r#"
+[[station]]
+id = "helm"
+name = "Helm"
+description = ""
+rank = ""
+[[station.rating]]
+name = "Std"
+automated_systems = []
+[[system]]
+id = "helm"
+kind = "helm_thrust"
+station = "helm"
+"#,
+            &["helm_thrust"],
+        )
+        .expect("the selected hull supports the frozen Helm rating");
+        world.insert_resource(crate::ship_plugin::PendingShipConfig(hull));
+        let mut roster = roster();
+        roster
+            .ships
+            .iter_mut()
+            .find(|ship| ship.host == HostSlot(2))
+            .unwrap()
+            .ship_path = None;
+        assert!(crew::roster_crew_matches_hulls(world, &roster));
+        roster
+    }
+
     /// The roster walks in slot order whatever order it was handed in, because
     /// that order decides which authored spawn each ship takes — and therefore
     /// what the mint gives it.
@@ -2388,7 +2422,7 @@ mod tests {
         let mut config = crate::world::config::WorldConfig::default();
         config.global.seed = Some(7);
         app.insert_resource(config);
-        let saved = roster();
+        let saved = selected_hull_roster(app.world_mut());
         assert!(join_fleet(app.world_mut(), saved.clone(), 6));
         assert!(app.world().contains_resource::<FleetLockstep>());
         assert_eq!(app.world().resource::<CommandDelay>().0, 6);
@@ -2418,7 +2452,7 @@ mod tests {
         let mut config = crate::world::config::WorldConfig::default();
         config.global.seed = Some(11);
         app.insert_resource(config);
-        let frozen = roster();
+        let frozen = selected_hull_roster(app.world_mut());
         assert!(join_fleet(app.world_mut(), frozen.clone(), 6));
         app.world_mut()
             .resource_mut::<Time<bevy::time::Virtual>>()
@@ -2572,7 +2606,8 @@ mod tests {
         let mut config = crate::world::config::WorldConfig::default();
         config.global.seed = Some(13);
         app.insert_resource(config);
-        assert!(join_fleet(app.world_mut(), roster(), 6));
+        let frozen = selected_hull_roster(app.world_mut());
+        assert!(join_fleet(app.world_mut(), frozen, 6));
         let retained = MeshFrame::Digest(DigestFrame {
             from: HostSlot(1),
             tick: 1,

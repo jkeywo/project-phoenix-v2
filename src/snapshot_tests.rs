@@ -866,6 +866,10 @@ station = "captain"
             .insert_resource(crate::gm_puppet::StationPuppetActivity::default());
         app.world_mut().spawn((
             crate::server_app::Ship,
+            // This fixture is a player ship. The canonical station capability
+            // gate otherwise correctly treats an untagged partial hull as an
+            // NPC whose console producers have not been installed.
+            crate::lockstep::FleetSlotOf(HostSlot(1)),
             crate::entities::spawner::EntityUuid("player-1".into()),
             crate::ship::components::ShipConfigComponent(config),
             ratings,

@@ -11,7 +11,7 @@ version = "0.1.0"
 description = "Development tooling for project-phoenix-v2. Ships no Python; exists to pull PASM."
 requires-python = ">=3.11"
 dependencies = [
-  "pasm @ git+https://github.com/jkeywo/vellum@bde9b3724a4f4536cc601852cee3bf26bb6e3d46#subdirectory=pasm",
+  "pasm @ git+https://github.com/jkeywo/vellum@606b0c06a6e6419a5b2a8c4f5bfb255146f87814#subdirectory=pasm",
 ]
 
 [tool.uv]

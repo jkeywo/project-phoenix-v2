@@ -23,18 +23,18 @@ resolver = "2"
 # so the repo carries a single vellum revision rather than one per crate. Adding
 # a second vellum consumer that pins a different rev now fails structurally.
 [workspace.dependencies]
-vellum-perf = { git = "https://github.com/jkeywo/vellum", rev = "bde9b3724a4f4536cc601852cee3bf26bb6e3d46", features = ["json"] }
-vellum-rng = { git = "https://github.com/jkeywo/vellum", rev = "bde9b3724a4f4536cc601852cee3bf26bb6e3d46" }
-vellum-replay = { git = "https://github.com/jkeywo/vellum", rev = "bde9b3724a4f4536cc601852cee3bf26bb6e3d46" }
-vellum-digest = { git = "https://github.com/jkeywo/vellum", rev = "bde9b3724a4f4536cc601852cee3bf26bb6e3d46" }
-vellum-save = { git = "https://github.com/jkeywo/vellum", rev = "bde9b3724a4f4536cc601852cee3bf26bb6e3d46", features = ["run"] }
-vellum-script = { git = "https://github.com/jkeywo/vellum", rev = "bde9b3724a4f4536cc601852cee3bf26bb6e3d46" }
+vellum-perf = { git = "https://github.com/jkeywo/vellum", rev = "606b0c06a6e6419a5b2a8c4f5bfb255146f87814", features = ["json"] }
+vellum-rng = { git = "https://github.com/jkeywo/vellum", rev = "606b0c06a6e6419a5b2a8c4f5bfb255146f87814" }
+vellum-replay = { git = "https://github.com/jkeywo/vellum", rev = "606b0c06a6e6419a5b2a8c4f5bfb255146f87814" }
+vellum-digest = { git = "https://github.com/jkeywo/vellum", rev = "606b0c06a6e6419a5b2a8c4f5bfb255146f87814" }
+vellum-save = { git = "https://github.com/jkeywo/vellum", rev = "606b0c06a6e6419a5b2a8c4f5bfb255146f87814", features = ["run"] }
+vellum-script = { git = "https://github.com/jkeywo/vellum", rev = "606b0c06a6e6419a5b2a8c4f5bfb255146f87814" }
 # vellum-ultralight (issue #1122): the shared Ultralight pane plumbing, pinned to
 # the same rev as the crates above. Its SDK-linking `ultralight` feature is OFF
 # here — the crate's pure half (the JS-bridge escaping and record splitting
 # `native_host::panes` uses) has no dependencies and compiles everywhere, wasm
 # included; only this repo's own `ultralight` feature pulls `ul-next`.
-vellum-ultralight = { git = "https://github.com/jkeywo/vellum", rev = "bde9b3724a4f4536cc601852cee3bf26bb6e3d46" }
+vellum-ultralight = { git = "https://github.com/jkeywo/vellum", rev = "606b0c06a6e6419a5b2a8c4f5bfb255146f87814" }
 
 [lib]
 crate-type = ["cdylib", "rlib"]

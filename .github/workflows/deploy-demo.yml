@@ -42,7 +42,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Rust and cache
-        uses: jkeywo/vellum/actions/setup-fleet-rust@582a61206d39c13d051d2e73bf463bb5d167d484
+        uses: jkeywo/vellum/actions/setup-fleet-rust@606b0c06a6e6419a5b2a8c4f5bfb255146f87814
         with:
           targets: wasm32-unknown-unknown
 
@@ -137,7 +137,7 @@ jobs:
       # the dev bundle is — the only differences are the dist/ mutations
       # after this point.
       - name: Install Rust and cache
-        uses: jkeywo/vellum/actions/setup-fleet-rust@582a61206d39c13d051d2e73bf463bb5d167d484
+        uses: jkeywo/vellum/actions/setup-fleet-rust@606b0c06a6e6419a5b2a8c4f5bfb255146f87814
         with:
           targets: wasm32-unknown-unknown
 
@@ -439,7 +439,7 @@ jobs:
           path: dist/
 
       - name: Install Rust and cache
-        uses: jkeywo/vellum/actions/setup-fleet-rust@582a61206d39c13d051d2e73bf463bb5d167d484
+        uses: jkeywo/vellum/actions/setup-fleet-rust@606b0c06a6e6419a5b2a8c4f5bfb255146f87814
 
       - name: Build phoenix-host (release)
         run: cargo build --release --features host --bin phoenix-host

@@ -2047,8 +2047,13 @@ test('authored field and layer fixture supports aggregate and Region inspection 
   // dispatches the same TouchEvents a phone sends instead of calling
   // navigationSelect.
   const map = page.locator('#gm-entity-map');
-  await page.evaluate((uuid) => {
+  await page.evaluate(async (uuid) => {
     const surface = document.getElementById('gm-entity-map');
+    // The projection updates state before the map's RAF builds hit geometry.
+    // Let that newly added Region paint before deriving touch coordinates from
+    // its larger range. Two frames cover either ordering of the map's RAF and
+    // this callback; otherwise the tap can hit the previous field-only chart.
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const region = surface.state.regions.find((entry) => entry.uuid === uuid);
     const canvas = surface.shadowRoot.querySelector('canvas');
     const rect = canvas.getBoundingClientRect();
@@ -2076,7 +2081,11 @@ test('authored field and layer fixture supports aggregate and Region inspection 
       changedTouches: [point],
     }));
   }, mapped.layered.uuid);
-  await page.waitForSelector('#gm-entity-card:not([hidden])');
+  await page.waitForFunction((uuid) => {
+    const card = document.getElementById('gm-entity-card');
+    return card && !card.hidden && card.dataset.entityId === uuid
+      && document.getElementById('gm-entity-map').dataset.selectedEntityId === uuid;
+  }, mapped.layered.uuid);
   const touched = await page.evaluate(() => {
     const card = document.getElementById('gm-entity-card');
     return {

@@ -575,8 +575,8 @@ mod tests {
         }
 
         assert_eq!(
-            identity, 20,
-            "expected the 10 shipped hull ladders' two generated tiers each to ship \
+            identity, 22,
+            "expected the 10 shipped hull ladders and docking variant's two generated tiers each to ship \
              no sidecar of their own"
         );
         assert_eq!(

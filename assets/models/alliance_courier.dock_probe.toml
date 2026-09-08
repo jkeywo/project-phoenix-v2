@@ -28,3 +28,19 @@ direction = [-1.0, 0.0, 0.0]
 [markers.dock_starboard]
 position = [5.0, 0.0, 0.0]
 direction = [1.0, 0.0, 0.0]
+
+# The docking fixtures share the courier's simplified geometry (#1239), but
+# retain this variant's identity base and authoritative dock markers. Do not
+# reuse the default courier billboard: it was captured with a different base.
+[[lod]]
+max_distance = 15.0
+model = "assets/models/alliance_courier.glb"
+
+[[lod]]
+max_distance = 100.0
+model = "assets/models/alliance_courier_lod1.glb"
+tier_rig = "identity"
+
+[[lod]]
+model = "assets/models/alliance_courier_lod2.glb"
+tier_rig = "identity"

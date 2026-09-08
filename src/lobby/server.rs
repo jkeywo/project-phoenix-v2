@@ -1914,10 +1914,16 @@ impl Plugin for LobbyOutboxPlugin {
     }
 }
 
-pub(crate) fn drain_lobby_outbox(world: &mut World) {
-    let entries = std::mem::take(&mut world.resource_mut::<LobbyOutbox>().0);
+// #1400: this boundary owns only the pending lobby queue and outbound bus.
+// Keep the existing start/countdown/reconnect edges and FIFO message order;
+// exclusive World access would hide those two actual dependencies.
+pub(crate) fn drain_lobby_outbox(
+    mut outbox: ResMut<LobbyOutbox>,
+    mut outbound: MessageWriter<OutboundMessage>,
+) {
+    let entries = std::mem::take(&mut outbox.0);
     for (target, msg) in entries {
-        world.write_message(OutboundMessage {
+        outbound.write(OutboundMessage {
             target,
             msg,
             delivery: DeliveryClass::Reliable,
@@ -1943,6 +1949,8 @@ mod result_application_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    include!("outbox_access_tests.rs");
 
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);

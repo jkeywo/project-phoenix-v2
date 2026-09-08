@@ -152,7 +152,7 @@ access and the shared snapshot/digest cells are unchanged.
 The post-split focused native run passed 69 tests, including actual access,
 first-draw/mint restore and rollback, Fleet re-adoption, native runtime load,
 Projectile identity/recoil/continuation, pool equivalence and perturbation/resume
-guards. The initialized graph has 1,929 complete conflict rows: zero added and
+guards. That post-split graph had 1,929 complete conflict rows: zero added and
 39 removed against the original 1,968 allowance. The diagnostic owner-alias
 correction passed six registry tests and all four enumeration tests; the integrator owns
 final combined gates.
@@ -160,3 +160,8 @@ Cross-peer default-pool counterparts now reuse the original two-crew mesh,
 stationless GM versus two ship peers, and chunked snapshot continuation guards.
 Their three fresh-child parents and three pinned companions passed in the SDK-enabled native configuration, with seven completed-App reports using 16 workers and MultiThreaded FixedUpdate. The ordinary headless gate is separate. See `docs/default-pool-perturbations.md`; ordinary pinned guards and
 all production schedules remain unchanged.
+
+The narrow lobby-outbox access follow-up is covered by
+`src/lobby/outbox_access_tests.rs` and `tests/lobby_outbox_ordering.rs`.
+The latter records ordered mission-start/reconnect messages and every advancing
+authoritative boundary for source-bound before/after comparison. Both source-bound SDK-enabled stages passed: all 90 boundaries and lifecycle messages match across default/default/pinned runs. The current captured graph has 1,711 rows, with the 29 new typed vectors replacing 247 exclusive markers; all 21 deferred instances and all dependency edges match. The original allowance is unchanged, and final combined/ordinary-headless gates remain separate.

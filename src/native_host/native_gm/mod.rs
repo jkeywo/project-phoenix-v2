@@ -68,7 +68,10 @@ impl Plugin for NativeGmPlugin {
             ))
             .add_systems(
                 PreUpdate,
-                drain_records.before(crate::gm_action::apply_due_actions),
+                (sync_lobby_role_intent, drain_records)
+                    .chain()
+                    .after(super::host_lobby::drain_surface_records)
+                    .before(crate::gm_action::apply_due_actions),
             )
             .add_systems(
                 PostUpdate,
@@ -206,6 +209,141 @@ mod tests {
         assert!(world.resource::<GmRoster>().operators().is_empty());
         assert!(!world.resource::<NativeGmAuthority>().connected);
         assert!(!world.contains_resource::<crate::gm_projection::NativeGmPresentation>());
+    }
+
+    #[test]
+    fn enabling_gm_on_the_final_countdown_tick_blocks_launch_and_keeps_loaded() {
+        use crate::native_host::host_lobby::{
+            drain_surface_records, pump_host_lobby, HostLobbyBridge, HostLobbyBridgeResource,
+        };
+        use crate::native_host::panes::RecordingSurface;
+
+        let mut configured = fixture();
+        let mut layout = configured
+            .remove_resource::<BridgeLayoutResource>()
+            .unwrap();
+        layout.layout = layout
+            .layout
+            .apply(&LayoutAction::SetGameMaster { monitor: None })
+            .unwrap();
+        let surface = configured.remove_resource::<NativeGmSurface>().unwrap();
+        let gm_bridge = surface.bridge.clone();
+        let lobby_bridge = HostLobbyBridge::new();
+        let mut app = App::new();
+        app.add_plugins((crate::lobby::LobbyPlugin, bevy::time::TimePlugin))
+            .insert_resource(layout)
+            .insert_resource(surface)
+            .insert_resource(HostLobbyBridgeResource(lobby_bridge.clone()))
+            .init_resource::<NativeGmLifecycle>()
+            .init_resource::<NativeGmAuthority>()
+            .init_resource::<crate::gm_action::SimulationPaused>()
+            .init_resource::<crate::world::config::WorldConfig>()
+            .add_systems(
+                PreUpdate,
+                (drain_surface_records, sync_lobby_role_intent, drain_records).chain(),
+            )
+            .add_systems(PostUpdate, sync_presence);
+        crate::sim_tick::register_sim_tick(&mut app);
+        crate::ship::test_support::drive_one_fixed_step_per_update(
+            &mut app,
+            std::time::Duration::from_secs(1),
+        );
+        app.update();
+        {
+            let mut sessions = app.world_mut().resource_mut::<crate::lobby::Sessions>();
+            sessions.0.register("crew".into(), "Ada".into()).unwrap();
+            sessions.0.set_ready("crew", true);
+        }
+        {
+            let mut countdown = app
+                .world_mut()
+                .resource_mut::<crate::lobby::CountdownTimer>();
+            countdown.remaining_secs = 0.001;
+            countdown.pending_phase = Some(GamePhase::InProgress);
+        }
+        let mut lobby_surface = RecordingSurface::ready();
+        lobby_surface.queue_record(r#"{"kind":"set-game-master","monitor":"GM@1920x1080"}"#);
+        pump_host_lobby(&lobby_bridge, &mut lobby_surface);
+        gm_bridge.activate(PaneId(7));
+        let mut gm_surface = RecordingSurface::ready();
+        gm_surface.queue_record(r#"{"kind":"loaded"}"#);
+        gm_bridge.pump(PaneId(7), &mut gm_surface);
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<State<GamePhase>>().get(),
+            &GamePhase::Lobby
+        );
+        assert!(matches!(
+            app.world().resource::<NextState<GamePhase>>(),
+            NextState::Unchanged
+        ));
+        assert_eq!(
+            app.world()
+                .resource::<crate::lobby::CountdownTimer>()
+                .remaining_secs,
+            0.0
+        );
+        let gm = &app.world().resource::<GmRoster>().operators()[0];
+        assert!(
+            gm.connected,
+            "the first Loaded record was accepted after role enable"
+        );
+        assert!(!gm.ready);
+    }
+}
+
+/// Commit a lobby role change before the fixed tick evaluates readiness. The
+/// surface itself is created later in Update, so every new placement first
+/// enters the roster as unready. Keeping this separate from full presence
+/// publication also lets the first Loaded record see the enabled role.
+fn sync_lobby_role_intent(
+    layout: Option<Res<BridgeLayoutResource>>,
+    phase: Res<State<GamePhase>>,
+    mut state: ResMut<NativeGmLifecycle>,
+    mut authority: ResMut<NativeGmAuthority>,
+    mut roster: ResMut<GmRoster>,
+    mut outbound: MessageWriter<crate::lobby::OutboundMessage>,
+) {
+    if *phase.get() != GamePhase::Lobby {
+        return;
+    }
+    let assigned = layout
+        .as_ref()
+        .and_then(|layout| layout.layout.game_master_monitor());
+    if state.enabled == assigned.is_some() && state.desired_monitor.as_ref() == assigned {
+        return;
+    }
+    state.enabled = assigned.is_some();
+    state.desired_monitor = assigned.cloned();
+    state.ready = false;
+    authority.connected = false;
+    let mut rows: Vec<_> = roster
+        .operators()
+        .iter()
+        .filter(|gm| gm.id != NATIVE_GM_OPERATOR_ID)
+        .cloned()
+        .collect();
+    if state.enabled {
+        rows.push(GmOperator {
+            id: NATIVE_GM_OPERATOR_ID.into(),
+            name: "GM".into(),
+            connected: false,
+            ready: false,
+        });
+    }
+    let Ok(replacement) = GmRoster::try_new(rows) else {
+        return;
+    };
+    if *roster != replacement {
+        outbound.write(crate::lobby::OutboundMessage {
+            target: crate::lobby::Target::All,
+            delivery: crate::core::messages::DeliveryClass::Reliable,
+            msg: crate::core::messages::ServerMessage::GmRosterChanged {
+                gms: replacement.projection(),
+            },
+        });
+        *roster = replacement;
     }
 }
 

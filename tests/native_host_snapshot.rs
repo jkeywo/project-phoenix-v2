@@ -53,10 +53,9 @@
 //!
 //! # Why no `RunTelemetry` observer
 //!
-//! `sim_digest::fold_collisions` folds "absent" and "present but empty"
-//! differently, so the native↔headless comparison has to install the same
-//! collector on both sides. Here both sides are native hosts, so both fold
-//! "absent" and the scaffolding would only add a way to get it wrong.
+//! Both native hosts carry the shared fixed-tick CollisionHistory that the
+//! digest and snapshot read (#1316). Optional report telemetry has no bearing
+//! on the comparison and no report observer is installed by this test.
 
 #![cfg(all(feature = "server", not(target_arch = "wasm32")))]
 

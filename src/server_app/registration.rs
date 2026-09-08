@@ -264,6 +264,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         ),
     ));
     crate::sim_tick::register_sim_tick(app);
+    crate::core::collision_history::register(app);
     crate::save_slots_lifecycle::register(app);
     app.add_systems(First, crate::sim_tick::reconcile_fixed_timestep);
 

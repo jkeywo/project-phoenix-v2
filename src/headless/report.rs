@@ -32,13 +32,9 @@ use super::args::{HeadlessArgs, ReportFormat};
 
 /// The telemetry accumulator, re-exported from its portable home.
 ///
-/// The type moved to `crate::core::telemetry` (issue #904) so that
-/// `crate::sim_digest` — which folds this resource's collision attribution —
-/// can compile for `wasm32`, where the `headless` module does not exist. The
-/// collector systems below and the report builder that reads them stay here;
-/// only the plain-field struct moved. Every existing
-/// `headless::report::RunTelemetry` path still resolves through this
-/// re-export.
+/// This report is separate from the shared fixed-tick collision history the
+/// digest and saves read (#1316). Its collectors and frame-time reporting keep
+/// their existing scope. The re-export preserves existing callers.
 pub use crate::core::telemetry::RunTelemetry;
 
 /// `ServerMessage`'s variant name, for counting.
@@ -124,7 +120,7 @@ fn referenced_ship_uuids(event: &BalanceEvent) -> Vec<&String> {
 /// `Res<SimTick>` for the same reason too — see that function's doc.
 pub fn collect_balance_events(
     mut telemetry: ResMut<RunTelemetry>,
-    mut reader: MessageReader<BalanceEvent>,
+    events: Res<Messages<BalanceEvent>>,
     time: Res<Time>,
     sim_tick: Res<crate::sim_tick::SimTick>,
     named_q: Query<(&EntityUuid, &EntityName)>,
@@ -132,7 +128,8 @@ pub fn collect_balance_events(
 ) {
     let tick = sim_tick.0;
     let sim_t = time.elapsed_secs_f64();
-    for event in reader.read() {
+    let mut cursor = std::mem::take(&mut telemetry.balance_cursor);
+    for event in cursor.read(&events) {
         // Snapshot the `EntityName` and faction of every ship any variant
         // names, while the ship is still alive — a destroyed NPC is gone before
         // the report is built. Every variant contributes whichever uuids it
@@ -168,6 +165,7 @@ pub fn collect_balance_events(
             event: event.clone(),
         });
     }
+    telemetry.balance_cursor = cursor;
 }
 
 /// Records every authored mission-timeline event (issue #1338), stamping it

@@ -6,6 +6,9 @@
 //! surrogate) owes the simulation, so a test builds all five and asserts they land on the same
 //! four-asset/three-message floor — and that only the two render-stack profiles
 //! took the real render-stack path.
+//! The floor test then attaches the ordinary shared simulation, as each adapter
+//! does after `boot::build`, to check collision attribution without a report
+//! collector. Collision history belongs to that simulation layer, not the renderer.
 //!
 //! Everything runs off an in-memory world fixture, so no filesystem, GPU, browser
 //! or window is involved and the tests are native-`cargo test` clean. NativeHost
@@ -132,8 +135,29 @@ fn assert_render_contract(app: &App, label: &str) {
 #[test]
 fn all_five_profiles_register_the_same_asset_and_message_floor() {
     for (profile, label) in PROFILES {
-        let app = build(plan_for(profile)).unwrap_or_else(|e| panic!("{label} build failed: {e}"));
+        let mut app =
+            build(plan_for(profile)).unwrap_or_else(|e| panic!("{label} build failed: {e}"));
         assert_render_contract(&app, label);
+        // `boot::build` deliberately leaves simulation plugins to the adapters.
+        // Exercise their real shared registration rather than installing the
+        // collision resource directly or moving it into the render/core floor.
+        crate::server_app::add_simulation_plugins_with(
+            &mut app,
+            crate::server_app::SimPluginOptions {
+                render: false,
+                ..Default::default()
+            },
+        );
+        assert!(
+            !app.world()
+                .contains_resource::<crate::core::telemetry::RunTelemetry>(),
+            "{label}: registration proof must not install a headless report collector"
+        );
+        assert!(
+            app.world()
+                .contains_resource::<crate::core::collision_history::CollisionHistory>(),
+            "{label}: collision attribution must exist without a headless report collector"
+        );
     }
     crate::content_ledger::reset();
 }
@@ -347,6 +371,8 @@ fn an_unreadable_world_is_a_load_error_for_every_profile() {
 #[test]
 fn host_preloaded_ingest_neither_reads_the_reader_nor_inserts_the_world() {
     use crate::world::config::WorldConfig;
+    crate::content_ledger::reset();
+    crate::content_ledger::record("preloaded.toml", "preloaded");
 
     // A reader carrying nothing: under `FromReader` this is the unreadable-world
     // load error above. `HostPreloaded` must not consult it at all — the host
@@ -373,7 +399,74 @@ fn host_preloaded_ingest_neither_reads_the_reader_nor_inserts_the_world() {
         !app.world().contains_resource::<PreCompiledScripts>(),
         "HostPreloaded must not insert PreCompiledScripts"
     );
+    assert!(!crate::content_ledger::is_frozen());
+    assert!(app
+        .world()
+        .contains_resource::<super::PendingHostContentFreeze>());
+    assert!(crate::content_ledger::snapshot()
+        .get("preloaded.toml")
+        .is_some());
     crate::content_ledger::reset();
+}
+
+#[test]
+fn host_preloaded_content_freezes_after_scripts_and_matches_reader_boot() {
+    use crate::content_ledger;
+    use crate::world::server::{
+        compile_world_scripts, freeze_host_preloaded_content, RawWorldSource,
+    };
+
+    const INLINE_SCRIPT: &str = "[global]\nseed = 1\n[script]\nsetup = \"fn unused(ctx) {}\"\n";
+    for source in [CLEAN_WORLD, INLINE_SCRIPT, BROKEN_SCRIPT_WORLD] {
+        let mut plan = plan_with(BootProfile::BrowserAutomation, source);
+        let mut reader_world = World::new();
+        super::ingest_world(&mut reader_world, &plan).unwrap();
+        let expected = content_ledger::frozen_or_live();
+
+        // Reproduce the real browser boundary: JS has recorded the raw world,
+        // but Startup still owes compilation. Do not precompile its scripts or
+        // copy a native ledger into this side of the comparison.
+        content_ledger::reset();
+        content_ledger::record(WORLD_PATH, source);
+        plan.world_ingest = WorldIngest::HostPreloaded;
+        let mut app = App::new();
+        super::ingest_world(app.world_mut(), &plan).unwrap();
+        assert!(!content_ledger::is_frozen());
+        let expected_at_spawn = expected.clone();
+        app.insert_resource(crate::world::config::parse_world(source).unwrap())
+            .insert_resource(RawWorldSource {
+                path: WORLD_PATH.into(),
+                toml: toml::from_str(source).unwrap(),
+            })
+            .add_systems(
+                Startup,
+                (
+                    compile_world_scripts,
+                    freeze_host_preloaded_content,
+                    move |world: &mut World| {
+                        assert!(content_ledger::is_frozen());
+                        assert_eq!(content_ledger::frozen_or_live(), expected_at_spawn);
+                        assert!(!world.contains_resource::<super::PendingHostContentFreeze>());
+                    },
+                )
+                    .chain(),
+            )
+            // The browser has one host thread and its preload ledger is local
+            // to it. This native fixture runs that same thread arrangement.
+            .edit_schedule(Startup, |schedule| {
+                schedule.set_executor_kind(bevy::ecs::schedule::ExecutorKind::SingleThreaded);
+            });
+        app.update();
+        assert_eq!(content_ledger::frozen_or_live(), expected);
+        content_ledger::record("runtime-only.toml", "late content");
+        freeze_host_preloaded_content(app.world_mut());
+        assert_eq!(
+            content_ledger::frozen_or_live(),
+            expected,
+            "freeze is one-shot"
+        );
+    }
+    content_ledger::reset();
 }
 
 #[test]
@@ -381,8 +474,8 @@ fn deferred_ingest_reads_nothing_inserts_nothing_and_does_not_freeze(/* issue #1
     use crate::world::config::WorldConfig;
 
     // The native host's world-less boot. Like `HostPreloaded` it must not read
-    // the reader or insert either resource — but unlike it, it must ALSO leave
-    // the content ledger unfrozen: freezing is what seals the content digest for
+    // the reader or insert either resource. It also leaves the content ledger
+    // unfrozen, without requesting a Startup freeze: freezing seals the digest for
     // the world being loaded, and there is no world yet. The runtime load
     // (`native_host::world_load`) calls this same `ingest_world` again under
     // `FromReader`, which resets and freezes in the documented order.

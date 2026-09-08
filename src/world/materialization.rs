@@ -22,6 +22,7 @@ pub fn register(app: &mut App, schedule: impl ScheduleLabel) -> &mut App {
             super::server::insert_world_config_resource,
             super::server::insert_raw_world_source_resource,
             super::server::compile_world_scripts,
+            super::server::freeze_host_preloaded_content,
             // The script activation gate must precede BOTH spawn halves.
             // Anonymous entries mint before named/asteroid entries; reversing
             // them assigns the same IDs to different entities (#984).

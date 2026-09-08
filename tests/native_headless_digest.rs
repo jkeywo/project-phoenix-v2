@@ -61,7 +61,6 @@ use bevy::prelude::*;
 
 use project_phoenix::boot::NativeRenderSurface;
 use project_phoenix::core::telemetry::RunTelemetry;
-use project_phoenix::headless::report::{collect_balance_events, collect_outbound};
 use project_phoenix::headless::{build_headless_app, HeadlessArgs};
 use project_phoenix::native_host::{
     build_native_host_app, preload_content_templates, NativeHostConfig,
@@ -120,17 +119,9 @@ fn assert_native_and_headless_agree(surface: NativeRenderSurface) {
         .0
         .clone();
 
-    // The one piece of scaffolding this comparison needs, and it is the OBSERVER
-    // rather than the simulation. `sim_digest::fold_collisions` reads
-    // `RunTelemetry` — the batch runner's collision tracer — and deliberately
-    // folds "absent" and "present but empty" as different numbers. A live host
-    // produces no run report and so carries no `RunTelemetry`; headless always
-    // does. Installing the same collector on both sides is what makes the two
-    // digests comparable at all, and it adds nothing to `FixedUpdate`: both
-    // systems run in `Last` and only read.
-    native
-        .insert_resource(RunTelemetry::default())
-        .add_systems(Last, (collect_outbound, collect_balance_events).chain());
+    // Collision attribution belongs to ordinary shared boot on both hosts;
+    // an optional headless report is no longer prerequisite scaffolding.
+    assert!(!native.world().contains_resource::<RunTelemetry>());
 
     pump(&mut native, FRAMES);
 
@@ -146,6 +137,7 @@ fn assert_native_and_headless_agree(surface: NativeRenderSurface) {
         ..Default::default()
     })
     .expect("the headless app assembles");
+    assert!(headless.world().contains_resource::<RunTelemetry>());
     // `build_headless_app` already installs `ManualDuration` at the same `dt`
     // this uses; re-inserting it is a no-op that keeps the two loops identical.
     pump(&mut headless, FRAMES);

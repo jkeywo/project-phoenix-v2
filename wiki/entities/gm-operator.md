@@ -2,7 +2,7 @@
 title: GM Operator
 type: entity
 tags: [gm, operator, identity, reconnect, roster, readiness, force-start, action, pause, puppeting, backfill, host-mesh, map, activity, damage, destruction, objectives, triggers, red-alert, connections, regions, asteroids]
-sources: [gui/gm-confirmation.js, gui/gm-confirmation-settings.js, gui/gm-confirmation.css, src/gm_objective.rs, gui/gm-objective-panel.js, src/gm_event.rs, src/gm_effect.rs, src/gm_spawn.rs, src/world/config.rs, src/world/content.rs, src/world/script/, gui/gm-mission-panel.js, gui/gm-direct-effect-panel.js, gui/gm-effect-scope.js, gui/gm-spawn-panel.js, gui/gm-knowledge-compare.js, gui/gm-role-presets.js, pasm/spec/design/gm-console-t2.yaml, src/gm_roster.rs, src/gm_action.rs, src/gm_join.rs, src/gm_projection.rs, src/gm_activity.rs, src/gm_puppet.rs, src/objectives.rs, src/world/server.rs, src/ship/helm_ai/mod.rs, src/entities/config.rs, src/entities/tags.rs, src/asteroids/lifecycle.rs, src/boot/mod.rs, src/lobby/start_policy.rs, src/core/balance.rs, src/core/messages.rs, src/core/codec.rs, src/command_admission/log.rs, src/lobby/server.rs, src/lockstep/frame.rs, src/lockstep/host_loss.rs, src/lockstep/mod.rs, src/lockstep/snapshot_relay.rs, src/server/bridge.rs, src/server_app/broadcast.rs, src/server_app/world_setup.rs, src/snapshot.rs, src/sim_digest.rs, src/headless/replay.rs, gui/host-channel.js, gui/gm-local-projection.js, gui/gm-activity-feed.js, gui/gm-station-puppet.js, gui/entity-inspector.js, gui/components/ph-navigation-map.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/console-state.js, gui/console-core.js, gui/sim-state.js, gui/host-mesh.js, gui/fleet-session.js, gui/lobby-state.js, server.html, client.html]
+sources: [tests/smoke/gm-m2.spec.js, tests/smoke/gm-m2-evidence.js, docs/acceptance/1316-m2-combat-test.md, assets/worlds/combat_test.toml, gui/gm-confirmation.js, gui/gm-confirmation-settings.js, gui/gm-confirmation.css, src/gm_objective.rs, gui/gm-objective-panel.js, src/gm_event.rs, src/gm_effect.rs, src/gm_spawn.rs, src/world/config.rs, src/world/content.rs, src/world/script/, gui/gm-mission-panel.js, gui/gm-direct-effect-panel.js, gui/gm-effect-scope.js, gui/gm-spawn-panel.js, gui/gm-knowledge-compare.js, gui/gm-role-presets.js, pasm/spec/design/gm-console-t2.yaml, src/gm_roster.rs, src/gm_action.rs, src/gm_join.rs, src/gm_projection.rs, src/gm_activity.rs, src/gm_puppet.rs, src/objectives.rs, src/world/server.rs, src/ship/helm_ai/mod.rs, src/entities/config.rs, src/entities/tags.rs, src/asteroids/lifecycle.rs, src/boot/mod.rs, src/lobby/start_policy.rs, src/core/balance.rs, src/core/messages.rs, src/core/codec.rs, src/command_admission/log.rs, src/lobby/server.rs, src/lockstep/frame.rs, src/lockstep/host_loss.rs, src/lockstep/mod.rs, src/lockstep/snapshot_relay.rs, src/server/bridge.rs, src/server_app/broadcast.rs, src/server_app/world_setup.rs, src/snapshot.rs, src/sim_digest.rs, src/headless/replay.rs, gui/host-channel.js, gui/gm-local-projection.js, gui/gm-activity-feed.js, gui/gm-station-puppet.js, gui/entity-inspector.js, gui/components/ph-navigation-map.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/console-state.js, gui/console-core.js, gui/sim-state.js, gui/host-mesh.js, gui/fleet-session.js, gui/lobby-state.js, server.html, client.html]
 updated: 2026-09-07
 ---
 
@@ -55,6 +55,18 @@ while the dialog is open, but only normal admission determines the result.
 Continuous Station control releases go through normal admission immediately
 and retire any unsent held value for the same control, including while another
 action's dialog is open.
+
+## M2 recording automation
+
+`tests/smoke/gm-m2.spec.js` drives Combat Test through the real GM controls and
+keeps its normal initial export and GameOver autosave. The companion collector
+observes submissions, confirmation decisions and crew traffic. The recording
+is limited to GM actions with fixed initial crew seats and ratings, because
+ordinary manual exports omit human-command history. The invocation and
+artifact contract and local milestone evidence are in
+`docs/acceptance/1316-m2-combat-test.md`. The native verifier checks the restored
+origin before replaying requests, then compares the actual final results and
+digest; collector evidence separately covers the absence of omitted crew input.
 
 ## First-time mid-session admission
 

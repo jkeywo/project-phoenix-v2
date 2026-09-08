@@ -250,9 +250,10 @@ pub enum WorldIngest {
     /// into the content ledger — resetting it at world-*selection* time, not here
     /// — and `WorldPlugin`'s `Startup` systems insert the `WorldConfig`, the
     /// `RawWorldSource`, and compile the scripts. Boot neither reads, resets, nor
-    /// inserts; it owns only the two order-critical calls the host cannot place
+    /// inserts the world; it owns the two order-critical steps the host cannot place
     /// itself at the right moment: the Rhai hashing-seed pin (before any engine)
-    /// and the content-ledger freeze (after the preload, before anything spawns).
+    /// and a pending content-ledger freeze, completed at Startup after the root
+    /// scripts have been compiled and recorded, before anything spawns.
     ///
     /// The [`BootPlan`]'s `world_path`, `reader`, `script_resolver` and
     /// `raw_transform` are unused in this mode — a `HostPreloaded` plan still
@@ -276,6 +277,12 @@ pub enum WorldIngest {
     /// makes "no frozen digest yet" safe rather than merely tolerable.
     Deferred,
 }
+
+/// A preloaded host still owes the root-script half of its content identity.
+/// Consumed once by WorldPlugin's Startup chain after script compilation and
+/// before either spawn pass. Reader-based and deferred boots never insert it.
+#[derive(Resource)]
+pub(crate) struct PendingHostContentFreeze;
 
 /// Everything [`build`] needs that is not implied by the [`BootProfile`].
 ///
@@ -824,7 +831,9 @@ fn register_render_contract(app: &mut App) {
 /// Two modes, per the plan's [`WorldIngest`]. Under
 /// [`HostPreloaded`](WorldIngest::HostPreloaded) the host loaded the world by
 /// another route (the browser's JS preload), so boot runs step 1 and then only the
-/// freeze from step 5 — it does not reset, read, or insert. The order below is the
+/// pending freeze from step 5 — it does not reset, read, or insert the world.
+/// Startup completes that freeze after compiling the preloaded root scripts.
+/// The order below is the
 /// [`FromReader`](WorldIngest::FromReader) path (headless and the parity tests).
 ///
 /// The order, and why it is this order:
@@ -871,12 +880,14 @@ pub(crate) fn ingest_world(world: &mut World, plan: &BootPlan) -> Result<(), Boo
         // The host already ingested the world by another route (the browser's JS
         // preload + `WorldPlugin`'s Startup systems — see
         // [`WorldIngest::HostPreloaded`]). Boot does not read, reset, or insert
-        // anything; it owns only the freeze that seals the content digest after
-        // the preload and before anything spawns. The host reset the ledger and
+        // the world; it requests the freeze that seals the content digest after
+        // preload AND script compilation, before anything spawns. Freezing here
+        // omitted the root's compiled script record from browser saves (#1316).
+        // The host reset the ledger and
         // streamed its records in at world-selection time, so a reset here would
         // wipe them.
         WorldIngest::HostPreloaded => {
-            crate::content_ledger::freeze();
+            world.insert_resource(PendingHostContentFreeze);
             return Ok(());
         }
         // No world yet (issue #1326) — the seed pin above is the whole of boot's

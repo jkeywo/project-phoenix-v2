@@ -45,8 +45,9 @@
 //! disagree on content merely because one had streamed further than the
 //! other. That is not the drift this ledger exists to report. [`freeze`]
 //! snapshots the ledger once the world's *declared* file set is fully known —
-//! after wasm's JS-driven preload completes (`wasm_init`), after native's
-//! eager walk of the world's referenced templates
+//! after wasm's JS-driven preload AND root-script compilation complete (the
+//! `WorldPlugin` Startup chain), after native's eager walk of the world's
+//! referenced templates and available hulls
 //! ([`eager_record_world_entities`]) — and [`frozen_or_live`] is what
 //! `content_digest` callers read, so the digest a save is checked against is
 //! fixed at load time regardless of how much of the world has since streamed
@@ -269,7 +270,8 @@ impl ContentLedger {
 }
 
 /// Eagerly resolve and record every entity template a world can spawn — its
-/// `[[entity]]` roster AND the templates its inline scripts name — recursively
+/// `[[entity]]` roster, available hulls, palette AND the templates its inline
+/// scripts name — recursively
 /// through nested asteroid-field variants.
 ///
 /// Native's answer to the browser's JS-driven preload: without this, native only
@@ -360,12 +362,20 @@ pub fn eager_record_world_entities_with_scripts(
         .gm_palette
         .iter()
         .map(|entry| entry.template_path.clone());
+    // Every playable hull is part of the browser's preload and the native
+    // template-cache gate, even when this crew selects a different hull. The
+    // frozen identity must cover that same declared set before a save is made.
+    let available_paths = world_config
+        .available_ships
+        .iter()
+        .map(|ship| ship.template_path.clone());
     let mut queue: Vec<String> = world_config
         .entities
         .iter()
         .map(|e| e.template_path.clone())
         .chain(scripted_paths)
         .chain(palette_paths)
+        .chain(available_paths)
         .collect();
     let mut visited: HashSet<String> = HashSet::new();
 
@@ -457,6 +467,38 @@ mod tests {
         );
         reset();
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_eager_walk_records_unselected_available_hulls() {
+        use crate::entities::loader::{FsTemplateLoader, TemplateLoader};
+
+        let world = crate::world::config::parse_world(
+            "[global]\nseed = 1\n\n[[available_ships]]\ntemplate_path = \"assets/entities/alliance_courier.toml\"\n",
+        )
+        .unwrap();
+        assert!(world.entities.is_empty());
+        assert!(world.gm_palette.is_empty());
+        assert!(crate::world::config::script_spawned_templates(&world).is_empty());
+
+        // Resolve the browser's actual declared set independently, including
+        // the composed hull and its model sidecars, without selecting a ship.
+        reset();
+        for path in crate::world::config::entity_template_paths(&world, &[]) {
+            FsTemplateLoader
+                .load_template(&path)
+                .expect("declared hull exists");
+        }
+        let declared = snapshot();
+        assert!(declared
+            .get("assets/entities/alliance_courier.toml")
+            .is_some());
+        reset();
+        eager_record_world_entities(&world);
+        freeze();
+        assert_eq!(frozen_or_live(), declared);
+        reset();
+    }
+
     // ── Script-spawned templates (issue #1047) ───────────────────────────────
 
     /// The issue's exact shape: a world where ONLY a script names a template.

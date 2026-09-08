@@ -1138,11 +1138,9 @@ pub(crate) fn compile_world_scripts(
             crate::world::script::load::load_world_scripts(&raw.path, &raw.toml, &resolver);
         // The compiled set's digest used to be written from inside the loader;
         // since issue #1241 it comes back as data and its caller applies it. This
-        // is the BROWSER's caller, so the write lands exactly where it always did
-        // — the same statement, the same thread, the same tick. The ledger is
-        // already frozen by `wasm_init` on this target, so a browser save binds
-        // through the world TOML's inline blocks rather than through this record;
-        // that was true before the lift and is true after it.
+        // is the browser's caller. The following Startup system seals the
+        // preloaded content only after this write, so native and browser saves
+        // bind to the same compiled root-script record (#1316).
         if let Some(digest) = &compiled.ledger_digest {
             digest.apply();
         }
@@ -1206,6 +1204,20 @@ pub(crate) fn compile_world_scripts(
     // script-free world.
     if let Some(runtime) = WorldScriptRuntime::from_compiled(compiled) {
         commands.insert_resource(runtime);
+    }
+}
+
+/// Complete a preloaded host's one-time content boundary after compiling the
+/// root scripts, including the script-free and blocked-script paths. Reader
+/// boots already froze their full declared set and are deliberately untouched.
+/// Exclusive execution keeps this thread-local ledger operation on the host
+/// thread; the explicit Startup edges place it before either spawn pass.
+pub(crate) fn freeze_host_preloaded_content(world: &mut World) {
+    if world
+        .remove_resource::<crate::boot::PendingHostContentFreeze>()
+        .is_some()
+    {
+        crate::content_ledger::freeze();
     }
 }
 

@@ -346,10 +346,10 @@ pub fn load_world_scripts(
     // twice. What this closes is the sibling-`.rhai` case, where the *text* is
     // recorded by `OverlayScriptResolver` but nothing recorded the compiled set,
     // and the case where two different source sets compile to the same text
-    // shape. On wasm the ledger is frozen in `wasm_init` before `Startup` runs,
-    // so a browser save binds through the world TOML's inline blocks (the whole
-    // shipped set) rather than through this record — moving that freeze past
-    // `Startup` is `server/bridge.rs`'s call, not this loader's.
+    // shape. The browser caller applies this record during Startup before
+    // freeze_host_preloaded_content seals the ledger; reader-based native boot
+    // applies it from the load plan before its own freeze. The loader itself
+    // remains side-effect-free in both paths.
     compiled.ledger_digest = (!sources.is_empty()).then(|| crate::content_ledger::LedgerDigest {
         key: script_ledger_key(world_path),
         digest: compiled.content_hash,

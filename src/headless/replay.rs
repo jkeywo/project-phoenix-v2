@@ -116,6 +116,9 @@ use crate::headless::digest::{state_digest, DigestLedger, Divergence};
 use crate::lobby::InboundMessage;
 use crate::sim_tick::SimTick;
 
+/// Bounded continuation proof from two ordinary browser save exports.
+pub mod recorded_gm;
+
 /// The credential a re-injected command is submitted under.
 ///
 /// The log deliberately never carries one — a session token is a bearer

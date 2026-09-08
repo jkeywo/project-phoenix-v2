@@ -49,19 +49,62 @@ entities:
       classification: observational
       owner: balance-event-emitter
       writers: [balance-event-emitter]
-      readers: [headless-telemetry-collector]
+      readers: [headless-telemetry-collector, shared-collision-history-collector]
     implementation:
       status: declared
       paths: [src/core/balance.rs]
       symbols: [BalanceEvent]
       tests: [cargo test]
 
+  - component: shared-collision-history-collector
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Shared Collision History Collector
+      summary: Commits collision attribution in producer order once per logical tick on browser, native and headless hosts, before peer digests and save capture.
+      rationale:
+        - "Issue #1316: moving RunTelemetry's type into shared code did not install its headless Last collector on browser hosts. Real browser exports therefore folded an absent marker while native replay folded present-empty report telemetry. CollisionHistory is a separate shared owner; reports and their frame-time collectors remain optional."
+        - "The FixedLast collector precedes seal_tick_frame, sample_and_publish_digest and advance_sim_tick. Save capture follows that advance, so all these readers include this tick's collisions even when one rendered frame runs multiple fixed steps. The collector also runs on the terminal fixed step after GameOver transition."
+        - "Each reader has its own cursor. Restore replaces the captured records and rebases the collision and optional report cursors past unread bootstrap messages without deleting the shared stream; restored entry events emitted afterward remain available. Ordinary OnEnter(InProgress) resets history and its cursor for a second mission."
+        - "The history retains every applied collision for the mission with no silent ring-buffer truncation; storage is proportional to produced collisions, as the previous headless attribution history was, and its allocation is released at the next mission start. This is a #1316 target-neutral capture correction, not a #1400 census exemption or scheduling-debt allowance."
+    architecture:
+      kind: accumulator
+      authority: authoritative
+      reads: [balance-event-stream]
+      owns: [collision-attribution-history]
+      runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/core/collision_history.rs, src/server_app/registration.rs, src/snapshot.rs]
+      symbols: [CollisionHistory, CollisionRecord]
+      tests: [cargo test --features headless --lib core::collision_history, cargo test --features headless --test collision_history]
+
+  - state: collision-attribution-history
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Collision Attribution History
+      summary: Ordered collision victim and damage attribution retained through digests and saved continuations on every simulation host.
+      rationale:
+        - "DeferredFold: the ordered row count, victim, amount, shield_absorbed and hull_damage use the existing collision fold bytes. Tick, sim_t and victim_is_asteroid are captured attribution metadata; the message cursor is derived and is neither captured nor folded. Optional RunTelemetry is report state and no longer determines this authoritative resource's presence."
+        - "PhoenixSnapshot.collisions keeps its existing row schema. Simulation rules advance from 0.4 to 0.5 because old browser records omitted history and headless saves collected it too late; snapshot format remains 32. Old artifacts are refused by the ordinary rules gate and are never rewritten."
+    architecture:
+      classification: authoritative
+      owner: shared-collision-history-collector
+      writers: [shared-collision-history-collector]
+      readers: [authoritative-state-digest, t2-peer-local-save-slot-lifecycle]
+      runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/core/collision_history.rs, src/sim_digest.rs, src/snapshot.rs]
+      symbols: [CollisionHistory, CollisionRecord]
+
   - component: headless-telemetry-collector
     core:
       status: implemented
       confidence: confirmed
       title: Headless Telemetry Collector
-      summary: Headless-only system that drains the BalanceEvent stream each tick, stamping every event with tick and sim-time and snapshotting each referenced ship's display-name key and faction, into the run telemetry buffer.
+      summary: Headless-only Last collector that reads the BalanceEvent stream each frame, stamping report events with tick and sim-time and snapshotting each referenced ship's display-name key and faction into optional report telemetry.
     architecture:
       kind: telemetry-collector
       authority: observational

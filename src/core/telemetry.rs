@@ -1,5 +1,4 @@
-//! Run telemetry accumulator — the resource a run's exit summary and its
-//! canonical digest both read.
+//! Optional report telemetry, independent of authoritative collision history.
 //!
 //! # Why this is here and not under `headless`
 //!
@@ -8,25 +7,22 @@
 //! while the only reader was the headless exit summary. It stopped being the
 //! right home when `crate::sim_digest` — the canonical authoritative-state
 //! digest (issue #901) — became a *cross-target* artifact (issue #904): the
-//! digest folds this resource's collision attribution, so a digest module
+//! digest then folded this resource's collision attribution, so a digest module
 //! that has to compile for `wasm32` cannot name a type that only exists in a
 //! native, `headless`-featured build.
 //!
-//! The alternative considered and rejected was a `cfg`-conditional
-//! `fold_collisions` — real on native, a fixed "absent" marker on wasm. That
-//! would have made the fold itself a function of the target, which is
-//! precisely the property a cross-target digest exists to deny. Moving the
-//! *type* (25 lines of plain fields) keeps one fold with one definition on
-//! every target; the collector systems and the report builder stay in
-//! `headless::report`, which is still where they belong.
+//! Moving the type alone did not install a collector on browser hosts. #1316
+//! gives authoritative attribution its own shared fixed-tick accumulator in
+//! [`super::collision_history`]. This report remains optional: its frame-time
+//! reader, message counts and timeline cannot affect the simulation digest.
 //!
 //! `headless::report` re-exports this type, so every existing
 //! `headless::report::RunTelemetry` path still resolves.
 
-use bevy::prelude::Resource;
+use bevy::{ecs::message::MessageCursor, prelude::Resource};
 use std::collections::BTreeMap;
 
-use crate::core::balance::StampedBalanceEvent;
+use crate::core::balance::{BalanceEvent, StampedBalanceEvent};
 use crate::core::narrative::StampedNarrativeEvent;
 
 /// Accumulates everything the exit summary needs, tick by tick.
@@ -40,6 +36,9 @@ use crate::core::narrative::StampedNarrativeEvent;
 /// call sites in `headless::report` instead.
 #[derive(Resource, Default)]
 pub struct RunTelemetry {
+    /// Report-only balance reader position. Restore resets this cursor without
+    /// deleting shared events or changing the independent authoritative reader.
+    pub balance_cursor: MessageCursor<BalanceEvent>,
     /// Count of each `ServerMessage` variant seen, keyed by variant name.
     /// `BTreeMap` so the report is byte-identical across runs.
     pub message_counts: BTreeMap<String, u64>,
@@ -57,9 +56,8 @@ pub struct RunTelemetry {
     /// reason: it is bounded by what the scenario authored, not by broadcast
     /// rate, and the report's timeline projection is built from it.
     ///
-    /// **Nothing authoritative reads this.** `crate::sim_digest` folds this
-    /// resource's collision attribution and nothing else, and no fold stage
-    /// walks this vector — see `crate::core::narrative`'s determinism note.
+    /// **Nothing authoritative reads this.** No fold stage walks report
+    /// telemetry — see `crate::core::narrative`'s determinism note.
     /// Adding one here would make an after-action surface part of the
     /// authoritative digest, which is exactly what issue #1338's third
     /// acceptance criterion forbids.

@@ -140,7 +140,8 @@
 //! **Folded (collision attribution):** every collision the run applied, as
 //! `(victim uuid, damage, shield absorbed, hull damage)` in the order the
 //! balance tracer saw them — the record's own AC5 line, and #896's fingerprint
-//! design. This is read from `RunTelemetry`, which used to be why this module
+//! design. This is read from shared `CollisionHistory`, independently of report
+//! telemetry. That report resource used to be why this module
 //! lived under `headless`; issue #904 moved that resource to
 //! `crate::core::telemetry` and this module out to the crate root, because a
 //! digest that only exists on native cannot make a native↔wasm claim. Nothing
@@ -230,9 +231,8 @@ use crate::civilian::{CivilianState, CivilianTraffic};
 use crate::comms::server::{CommsInboxRes, CommsRuntime};
 use crate::console::command::server::ShipStationStances;
 use crate::console::repair::external_server::ExternalRepairDispatch;
-use crate::core::balance::BalanceEvent;
+use crate::core::collision_history::CollisionHistory;
 use crate::core::messages::{CommsPriority, GamePhase};
-use crate::core::telemetry::RunTelemetry;
 use crate::dock::DockControl;
 use crate::entities::spawner::{EntitySystemHull, EntityUuid};
 use crate::infrastructure::{InfrastructureCondition, InfrastructureState};
@@ -391,7 +391,7 @@ pub fn fold_serde<T: serde::Serialize>(acc: u64, value: &T) -> u64 {
 /// Compute the canonical authoritative-state digest for `app`'s current state.
 ///
 /// Call this only between `App::update()` calls — the `RenderInterp` bracket
-/// (see the module docs). An app with no `RunTelemetry` folds that resource's
+/// (see the module docs). An app with no `CollisionHistory` folds the legacy
 /// "absent" marker rather than failing — which is what lets the cross-target
 /// probe (`crate::cross_target_probe`, issue #904) fold through the very same
 /// function a headless run does, on a target where `headless` does not exist.
@@ -2262,33 +2262,17 @@ fn fold_hull(acc: u64, hull: Option<&SystemHull>) -> u64 {
 /// record's AC5 line, and the part of `RunFingerprint` that is actually about
 /// physics.
 fn fold_collisions(world: &World, mut acc: u64) -> u64 {
-    let Some(telemetry) = world.get_resource::<RunTelemetry>() else {
+    let Some(history) = world.get_resource::<CollisionHistory>() else {
+        // Preserve the old absent marker for intentionally partial probes;
+        // every ordinary simulation host installs the shared history.
         return fold_str(acc, "run-telemetry:absent");
     };
-    let collisions: Vec<_> = telemetry
-        .balance_events
-        .iter()
-        .filter_map(|stamped| match &stamped.event {
-            BalanceEvent::DamageApplied {
-                weapon,
-                victim,
-                amount,
-                shield_absorbed,
-                hull_damage,
-                ..
-            } if weapon == crate::core::balance::WEAPON_KIND_COLLISION => {
-                Some((victim.clone(), *amount, *shield_absorbed, *hull_damage))
-            }
-            _ => None,
-        })
-        .collect();
-
-    acc = fold_u64(acc, collisions.len() as u64);
-    for (victim, amount, shield_absorbed, hull_damage) in collisions {
-        acc = fold_str(acc, &victim);
-        acc = fold_f32(acc, amount);
-        acc = fold_f32(acc, shield_absorbed);
-        acc = fold_f32(acc, hull_damage);
+    acc = fold_u64(acc, history.records().len() as u64);
+    for record in history.records() {
+        acc = fold_str(acc, &record.victim);
+        acc = fold_f32(acc, record.amount);
+        acc = fold_f32(acc, record.shield_absorbed);
+        acc = fold_f32(acc, record.hull_damage);
     }
     acc
 }

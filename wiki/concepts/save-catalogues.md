@@ -2,8 +2,8 @@
 title: Peer-Local Save Catalogues
 type: concept
 tags: [save, snapshot, persistence, autosave, browser, native, catalogue]
-sources: [src/save_slots.rs, src/save_slots_lifecycle.rs, src/startup_restore.rs, src/save_slots_store.rs, src/snapshot.rs, src/gm_action.rs, src/sim_digest.rs, src/headless/replay.rs, src/server/bridge.rs, src/server_app/world_setup.rs, src/lockstep/mod.rs, src/ship/coordination_systems.rs, src/bin/phoenix_host.rs, src/delivery/args.rs, src/entities/config.rs, src/world/config.rs, gui/save-slots.js, gui/browser-save-identity.js, gui/browser-save-identity-worker.js, server.html, tests/save_slots_persistence.rs, tests/smoke/save-slots.spec.js]
-updated: 2026-09-07
+sources: [src/save_slots.rs, src/save_slots_lifecycle.rs, src/startup_restore.rs, src/save_slots_store.rs, src/snapshot.rs, src/core/collision_history.rs, tests/collision_history.rs, src/gm_action.rs, src/sim_digest.rs, src/headless/replay.rs, src/headless/replay/recorded_gm.rs, tests/recorded_gm_exports.rs, src/server/bridge.rs, src/server_app/world_setup.rs, src/lockstep/mod.rs, src/ship/coordination_systems.rs, src/bin/phoenix_host.rs, src/delivery/args.rs, src/entities/config.rs, src/world/config.rs, gui/save-slots.js, gui/browser-save-identity.js, gui/browser-save-identity-worker.js, server.html, tests/save_slots_persistence.rs, tests/smoke/save-slots.spec.js]
+updated: 2026-09-08
 ---
 
 # Peer-Local Save Catalogues
@@ -22,6 +22,15 @@ first in-progress tick, every authored interval, and the first observed
 `GameOver` tick. `[global] autosave_interval_secs` defaults to 30 simulation
 seconds and world loading accepts it only when it converts to a positive whole
 number of `sim_tick_hz` ticks.
+
+`src/core/collision_history.rs` owns collision attribution on every simulation
+host. It collects in `FixedLast` before peer digest sampling and tick advance,
+so capture includes the collision events from the step just completed. The
+snapshot preserves all collision rows; restore replaces history and advances
+each collision/report reader past bootstrap messages without clearing their
+shared input stream. Optional headless `RunTelemetry` does not affect the
+digest. Rules `0.5` name this correction; the collision row shape still uses
+snapshot format `32`, and older rules are refused.
 
 A named manual request is local intent for the peer's next fixed boundary. It
 captures only while the phase is `InProgress`; a request that reaches its
@@ -134,6 +143,23 @@ scenario and then applies the same hull and `GameStart` identity checks as a
 catalogue row; exports may copy an incompatible but intact row because
 compatibility gates starting, not transport. The native CLI can export any
 selected local slot to a newly created file.
+
+## Recorded GM continuation
+
+`src/headless/replay/recorded_gm.rs` provides the bounded #1316 native verifier
+for two ordinary browser save exports. It uses shared boot and snapshot restore,
+retains frozen crew and selected ratings, then appends the final journal's new
+GM requests to the restored origin and derives their effects. Exact initial
+digest, final tick/frontier, final digest and actual terminal outcomes must all
+match. This path is distinct from the ordinary fresh-session load described
+above: no old crew is cleared and no live network wait set is installed.
+
+`tests/recorded_gm_exports.rs` owns the full native regressions and the ignored
+file-driven entry point used by a browser evidence collector. The
+[recording contract and JSON schema](../../docs/acceptance/1316-recorded-gm-replay.md)
+describe its GM-only input scope and refusal boundaries. Ordinary exports omit
+crew input/seat history, so a successful comparison requires separate collector
+evidence of immutable crew and absence of ordinary human commands.
 
 ## Related
 

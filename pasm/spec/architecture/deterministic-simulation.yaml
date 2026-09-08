@@ -384,7 +384,7 @@ entities:
         - digest-fold-order-policy
         - digest-float-canonicalisation-policy
         - digest-exclusion-classes
-      reads: [game-phase-state, world-configuration-state]
+      reads: [game-phase-state, world-configuration-state, collision-attribution-history]
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: observed

@@ -1259,8 +1259,8 @@ pub fn wasm_init() {
     // world-ingestion order — differing only by the `BootProfile` the WebDriver
     // probe chose. The world itself is NOT read here: the JS preload parsed it into
     // the config cache and `WorldPlugin`'s Startup systems insert it, so the plan is
-    // `HostPreloaded` and boot only pins the Rhai hashing seed and freezes the
-    // content ledger (both of which this function used to do inline). The
+    // `HostPreloaded`: boot pins the Rhai hashing seed and requests the content
+    // freeze after Startup compiles the root scripts, before any spawn. The
     // `world_path`/`reader`/`script_resolver` a `HostPreloaded` plan carries are the
     // browser's genuine ones, kept for shape and future use but consulted by no boot
     // in this mode — see `WorldIngest::HostPreloaded`.

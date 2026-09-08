@@ -47,7 +47,7 @@
 //! | the `WorldResource` projection | [`PhoenixSnapshot::world`] (the whole `WorldData`) |
 //! | the `EntityUuid` namespace | [`PhoenixSnapshot::entities`] |
 //! | the `AsteroidUuid` namespace | [`PhoenixSnapshot::asteroids`] |
-//! | collision attribution from `RunTelemetry` | [`PhoenixSnapshot::collisions`] |
+//! | shared collision attribution | [`PhoenixSnapshot::collisions`] |
 //!
 //! Two entries are deliberately *wider* than the fold rather than equal to it,
 //! and both are widened toward the record, never away from it:
@@ -203,7 +203,7 @@ use crate::comms::server::{CommsInboxRes, CommsRuntime};
 use crate::console::repair::server::{RepairQueueEntry, RepairRequestQueue, ShipRepairTeams};
 use crate::console::weapons::beam::{ActiveBeam, ActiveBeamSlot, PhaserCooldown};
 use crate::console::weapons::torpedo::TorpedoSystemResource;
-use crate::core::balance::{BalanceEvent, StampedBalanceEvent, VictimKind, WEAPON_KIND_COLLISION};
+pub use crate::core::collision_history::CollisionRecord;
 use crate::core::messages::{CommsMessage, GamePhase, SystemId, TeamSlot, WorldData};
 use crate::core::telemetry::RunTelemetry;
 use crate::dossier::evidence::EvidenceLog;
@@ -656,7 +656,12 @@ pub const SNAPSHOT_FORMAT: u32 = 32;
 /// ordered journal can change both the current clock state and future logical
 /// boundaries. A pre-#1292 save recorded a narrower digest even when its payload
 /// otherwise parses, so the rules dimension names that change explicitly.
-pub const SIMULATION_RULES: &str = "0.4";
+///
+/// `"0.5"` — issue #1316 commits collision attribution on every simulation
+/// host before fixed-boundary digests and saves. The old browser omitted that
+/// history and headless collected it after the save boundary. The row schema is
+/// unchanged, but those older authoritative folds cannot continue as this run.
+pub const SIMULATION_RULES: &str = "0.5";
 
 /// The authored data, computed rather than remembered.
 ///
@@ -1838,25 +1843,6 @@ pub struct WindowSlot {
     pub hp: i32,
     pub max_hp: i32,
     pub y: f32,
-}
-
-/// One collision the run applied, in the shape the digest attributes it.
-///
-/// Only collisions are stored, not the whole `RunTelemetry` stream: the rest of
-/// that resource is a *report* artifact (message counts, ndjson lines, name
-/// tables), and a report is something a resumed run rebuilds rather than
-/// something it inherits. Collisions are here because `fold_collisions` puts
-/// them in the authoritative fold — #896's finding that contact attribution is
-/// the part of physics a divergence shows up in first.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct CollisionRecord {
-    pub tick: u64,
-    pub sim_t: f64,
-    pub victim: String,
-    pub victim_is_asteroid: bool,
-    pub amount: f32,
-    pub shield_absorbed: f32,
-    pub hull_damage: f32,
 }
 
 /// One active world layer in the capture's authoritative activation order.
@@ -4583,33 +4569,10 @@ fn capture_asteroid_window(world: &World) -> Option<AsteroidWindowState> {
 }
 
 fn capture_collisions(world: &World) -> Vec<CollisionRecord> {
-    let Some(telemetry) = world.get_resource::<RunTelemetry>() else {
-        return Vec::new();
-    };
-    telemetry
-        .balance_events
-        .iter()
-        .filter_map(|stamped| match &stamped.event {
-            BalanceEvent::DamageApplied {
-                weapon,
-                victim,
-                victim_kind,
-                amount,
-                shield_absorbed,
-                hull_damage,
-                ..
-            } if weapon == WEAPON_KIND_COLLISION => Some(CollisionRecord {
-                tick: stamped.tick,
-                sim_t: stamped.sim_t,
-                victim: victim.clone(),
-                victim_is_asteroid: matches!(victim_kind, VictimKind::Asteroid),
-                amount: *amount,
-                shield_absorbed: *shield_absorbed,
-                hull_damage: *hull_damage,
-            }),
-            _ => None,
-        })
-        .collect()
+    world
+        .get_resource::<crate::core::collision_history::CollisionHistory>()
+        .map(|history| history.records().to_vec())
+        .unwrap_or_default()
 }
 
 // ── The stored artifact ──────────────────────────────────────────────────────
@@ -5984,6 +5947,11 @@ fn run_restored_phase_entry_effects(world: &mut World, phase: GamePhase) {
 }
 
 fn restore_collisions(world: &mut World, snapshot: &PhoenixSnapshot) {
+    crate::core::collision_history::restore(world, &snapshot.collisions);
+    let cursor = world
+        .get_resource::<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>()
+        .map(bevy::ecs::message::Messages::get_cursor_current)
+        .unwrap_or_default();
     let Some(mut telemetry) = world.get_resource_mut::<RunTelemetry>() else {
         return;
     };
@@ -5991,26 +5959,15 @@ fn restore_collisions(world: &mut World, snapshot: &PhoenixSnapshot) {
     // run's telemetry is the capture's, not the capture's plus whatever the
     // bootstrap happened to generate on its way to the restore point.
     telemetry.balance_events.clear();
-    for record in &snapshot.collisions {
-        telemetry.balance_events.push(StampedBalanceEvent {
-            tick: record.tick,
-            sim_t: record.sim_t,
-            event: BalanceEvent::DamageApplied {
-                attacker: None,
-                victim: record.victim.clone(),
-                victim_kind: if record.victim_is_asteroid {
-                    VictimKind::Asteroid
-                } else {
-                    VictimKind::Ship
-                },
-                weapon: WEAPON_KIND_COLLISION.to_string(),
-                amount: record.amount,
-                shield_absorbed: record.shield_absorbed,
-                hull_damage: record.hull_damage,
-                system_hit: None,
-            },
-        });
-    }
+    telemetry.balance_events.extend(
+        snapshot
+            .collisions
+            .iter()
+            .map(CollisionRecord::stamped_event),
+    );
+    // Its report reader must also forget unread bootstrap events, without
+    // clearing the shared message channel or swallowing restored entry events.
+    telemetry.balance_cursor = cursor;
 }
 
 /// Overwrite each captured entity's state, despawning anything the capture did

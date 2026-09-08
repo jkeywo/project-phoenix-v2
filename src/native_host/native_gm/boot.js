@@ -5,11 +5,17 @@ const channels = ['metadata', 'gm_entity', 'gm_activity', 'gm_station', 'gm_sess
 const listeners = new Set();
 const latest = new Map();
 let operator = null;
+let phase = 'Lobby';
+let hostLobbyUnavailable = false;
 const send = value => window.phoenixNativeGmOut.send(JSON.stringify(value));
 window.__phoenixNativeGmChannels = Object.fromEntries(channels.map(channel => [channel, json => {
   const payload = JSON.parse(json);
   latest.set(channel, payload);
-  if (channel === 'metadata') operator = payload.gms.find(gm => gm.id === 'native-gm') || null;
+  if (channel === 'metadata') {
+    operator = payload.gms.find(gm => gm.id === 'native-gm') || null;
+    phase = payload.phase;
+    hostLobbyUnavailable = payload.host_lobby_unavailable === true;
+  }
   for (const listener of listeners) listener(channel, payload);
 }]));
 window.phoenixNativeGm = {
@@ -18,6 +24,10 @@ window.phoenixNativeGm = {
   submitAction(request) { if (!operator?.connected) return false; return send({kind: 'action', request: JSON.stringify(request)}) !== false; },
   setReady(ready) { send({kind: 'ready', ready: !!ready}); },
   forceStart() { send({kind: 'force-start'}); },
+  returnToHostLobby() {
+    if (phase !== 'Lobby' || !hostLobbyUnavailable || !operator?.connected) return false;
+    return send({kind: 'recovery-host-lobby'}) !== false;
+  },
 };
 // The browser places collective readiness in its lobby overlay. The native GM
 // always shows the workspace, so reuse those controls inside it.

@@ -272,6 +272,18 @@ impl HostLobbyBridge {
         self.lock().records.drain(..).collect()
     }
 
+    /// Host-local recovery uses the same typed layout record and one reader as
+    /// a lobby button. It never edits layout state from a second dispatch path.
+    pub(crate) fn submit_record(&self, record: &super::HostLobbyRecord) -> bool {
+        match crate::core::codec::encode_host_lobby_record(record) {
+            Ok(json) => {
+                self.record(&json);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
     fn record(&self, json: &str) {
         let mut inner = self.lock();
         if inner.records.len() >= RECORD_CAP {

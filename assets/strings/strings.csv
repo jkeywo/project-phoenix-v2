@@ -1,4 +1,5 @@
 id,context,en
+server.gm.return_to_host_lobby,Native prelaunch recovery button when only the saved GM monitor remains. Disables the GM role through host layout and restores the host lobby on the freed monitor,[Return to host lobby]
 settings.gm.confirmation.station,GM takeover or release; {action} {ship} {station},[{action}: {ship} / {station}]
 settings.gm.confirmation.station_command,GM authentic Station command confirmation; {ship} {station},[Send the latest control intent to {ship} / {station}.]
 settings.gm.confirmation.spawn,GM placement confirmation; {name} {x} {z},[Place {name} at {x}; {z}.]

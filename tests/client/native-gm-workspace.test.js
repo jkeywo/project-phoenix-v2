@@ -11,6 +11,7 @@ function mount() {
     submitAction: vi.fn(() => true),
     setReady: vi.fn(() => true),
     forceStart: vi.fn(() => true),
+    returnToHostLobby: vi.fn(() => true),
     subscribe: fn => { listener = fn; return () => { listener = null; }; },
   };
   const view = mountNativeGmWorkspace({ bridge, win: window, doc: document });
@@ -107,5 +108,27 @@ describe('native GM workspace over the shared GM presenters', () => {
     expect(document.getElementById('gm-start-result').textContent).toBe(
       t('server.gm.start.force_applied', { name: 'GM' }));
     app.view.dispose();
+  });
+  it('offers host-lobby recovery only before launch while the viewscreen is unavailable', () => {
+    const app = mount();
+    const button = document.getElementById('gm-return-to-host-lobby');
+    expect(button.hidden).toBe(true);
+    app.receive('metadata', {phase: 'Lobby', host_lobby_unavailable: true, gms: []});
+    expect(button.hidden).toBe(false);
+    expect(button.textContent).toBe(t('server.gm.return_to_host_lobby'));
+    button.click();
+    button.dispatchEvent(new Event('click'));
+    expect(app.bridge.returnToHostLobby).toHaveBeenCalledTimes(1);
+    expect(button.disabled).toBe(true);
+    app.receive('metadata', {phase: 'InProgress', host_lobby_unavailable: true, gms: []});
+    expect(button.hidden).toBe(true);
+    button.dispatchEvent(new Event('click'));
+    app.receive('metadata', {phase: 'Lobby', host_lobby_unavailable: false, gms: []});
+    expect(button.hidden).toBe(true);
+    button.dispatchEvent(new Event('click'));
+    expect(app.bridge.returnToHostLobby).toHaveBeenCalledTimes(1);
+    expect(app.bridge.submitAction).not.toHaveBeenCalled();
+    app.view.dispose();
+    expect(document.getElementById('gm-return-to-host-lobby')).toBeNull();
   });
 });

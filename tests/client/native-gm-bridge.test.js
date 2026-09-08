@@ -39,11 +39,29 @@ describe('native GM private bridge boot', () => {
       { id: 'native-gm', name: 'GM', connected: true, ready: false },
     ] }));
     expect(window.phoenixNativeGm.getOperator().id).toBe('native-gm');
+    expect(window.phoenixNativeGm.returnToHostLobby()).toBe(false);
     const request = { operator_id: 'native-gm', correlation: 'pause-1', action: 'set_session_paused', active: true };
     expect(window.phoenixNativeGm.submitAction(request)).toBe(true);
     expect(JSON.parse(send.mock.lastCall[0])).toEqual({kind: 'action', request: JSON.stringify(request)});
     window.__phoenixNativeGmChannels.metadata(JSON.stringify({phase: 'InProgress', gms: []}));
     expect(window.phoenixNativeGm.submitAction(request)).toBe(false);
     expect(receive).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects recovery transport intents after launch or with a working viewscreen', () => {
+    document.body.innerHTML = '<main id="gm-console"><section id="gm-start-controls"></section></main>';
+    const send = vi.fn(() => true);
+    window.phoenixNativeGmOut = {send};
+    new Function('mountNativeGmWorkspace', boot)(vi.fn());
+    const gms = [{id: 'native-gm', name: 'GM', connected: true}];
+    const metadata = value => window.__phoenixNativeGmChannels.metadata(JSON.stringify({...value, gms}));
+    metadata({phase: 'Lobby', host_lobby_unavailable: false});
+    expect(window.phoenixNativeGm.returnToHostLobby()).toBe(false);
+    metadata({phase: 'InProgress', host_lobby_unavailable: true});
+    expect(window.phoenixNativeGm.returnToHostLobby()).toBe(false);
+    metadata({phase: 'Lobby', host_lobby_unavailable: true});
+    expect(window.phoenixNativeGm.returnToHostLobby()).toBe(true);
+    expect(send.mock.lastCall).toEqual([JSON.stringify({kind: 'recovery-host-lobby'})]);
+    expect(send).toHaveBeenCalledTimes(2); // loaded + explicit recovery
   });
 });

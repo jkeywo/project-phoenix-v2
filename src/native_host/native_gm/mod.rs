@@ -1,6 +1,7 @@
 //! A local GM beside the ship in the same authoritative native simulation.
 pub mod bridge;
 pub mod document;
+pub mod recovery;
 pub mod start;
 
 use super::bridge_display::BridgeLayoutResource;
@@ -33,12 +34,14 @@ pub enum NativeGmRecord {
     Ready { ready: bool },
     ForceStart,
     SurfaceFault,
+    RecoveryHostLobby,
     Action { request: String },
 }
 
 #[derive(Serialize)]
 pub struct NativeGmMetadata {
     pub phase: GamePhase,
+    pub host_lobby_unavailable: bool,
     pub role_presets: Vec<crate::world::config::GmRolePresetEntry>,
     pub gms: Vec<GmOperator>,
     pub start_policy: start::NativeGmReadinessTotals,
@@ -359,6 +362,9 @@ fn drain_records(world: &mut World) {
             continue;
         }
         match record {
+            NativeGmRecord::RecoveryHostLobby => {
+                recovery::request(world);
+            }
             NativeGmRecord::SurfaceFault => {
                 surface.bridge.fault();
                 break;
@@ -480,6 +486,11 @@ fn sync_presence(
     }
     if let Ok(json) = codec::encode_native_gm_metadata(&NativeGmMetadata {
         phase: phase.get().clone(),
+        host_lobby_unavailable: recovery::host_lobby_unavailable(
+            phase.get(),
+            state.enabled,
+            layout.as_deref(),
+        ),
         role_presets: config
             .as_ref()
             .map(|c| c.gm_role_presets.clone())

@@ -332,6 +332,14 @@ pub fn decode_host_lobby_record(
     serde_json::from_str(s)
 }
 
+/// Queue a typed local recovery intent through the existing host-lobby reader.
+#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+pub fn encode_host_lobby_record(
+    record: &crate::native_host::host_lobby::HostLobbyRecord,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(record)
+}
+
 // ── Batch inbound decode (issue #602) ───────────────────────────────────────
 
 /// A single decode failure from the bridge inbound drain, with truncated

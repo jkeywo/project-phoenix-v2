@@ -59,9 +59,20 @@ export function mountNativeGmWorkspace({ bridge, win = window, doc = win.documen
   const readyButton = doc.getElementById('gm-ready-btn');
   const forceButton = doc.getElementById('gm-force-start-btn');
   const result = doc.getElementById('gm-start-result');
+  const recoveryButton = doc.createElement('button');
+  recoveryButton.id = 'gm-return-to-host-lobby';
+  recoveryButton.type = 'button';
+  recoveryButton.hidden = true;
+  recoveryButton.textContent = t('server.gm.return_to_host_lobby');
+  doc.getElementById('gm-start-controls')?.append(recoveryButton);
+  let recoveryPending = false;
   const inLobby = () => metadata.phase === 'Lobby';
   function renderStart() {
     const operator = getOperator();
+    const recoveryAvailable = inLobby() && metadata.host_lobby_unavailable === true;
+    recoveryButton.hidden = !recoveryAvailable;
+    if (!recoveryAvailable) recoveryPending = false;
+    recoveryButton.disabled = !operator || recoveryPending || !recoveryAvailable;
     doc.getElementById('gm-start-controls')?.setAttribute('aria-hidden', operator ? 'false' : 'true');
     if (readyButton) {
       readyButton.textContent = t(operator?.ready ? 'server.gm.start.unready' : 'server.gm.start.ready');
@@ -96,8 +107,14 @@ export function mountNativeGmWorkspace({ bridge, win = window, doc = win.documen
     const accepted = bridge.forceStart();
     if (result) result.textContent = accepted === false ? t('server.gm.start.force_refused') : '';
   }
+  function returnToHostLobby() {
+    if (disposed || !getOperator() || !inLobby() || metadata.host_lobby_unavailable !== true || recoveryPending) return;
+    recoveryPending = bridge.returnToHostLobby?.() === true;
+    renderStart();
+  }
   readyButton?.addEventListener('click', setReady);
   forceButton?.addEventListener('click', forceStart);
+  recoveryButton.addEventListener('click', returnToHostLobby);
   const unsubscribe = bridge.subscribe((channel, payload) => {
     if (disposed) return;
     if (channel === 'metadata') {
@@ -124,6 +141,8 @@ export function mountNativeGmWorkspace({ bridge, win = window, doc = win.documen
       if (typeof unsubscribe === 'function') unsubscribe();
       readyButton?.removeEventListener('click', setReady);
       forceButton?.removeEventListener('click', forceStart);
+      recoveryButton.removeEventListener('click', returnToHostLobby);
+      recoveryButton.remove();
       workspace.reset();
     },
   };

@@ -6425,7 +6425,7 @@ fn catalogue_additions_preserve_v3_json_locks_hulls_and_utf8_wire_roundtrips() {
             );
         }
     }
-    // Retaining v3 is intentional: neither receiver misreads the other's JSON.
-    // A future incompatible edit must change this assertion and the join pin.
-    assert_eq!(PROTOCOL_VERSION, 3);
+    // The legacy v3 catalogue remains readable under the current v4 join pin;
+    // assigned-station authority changed the protocol, not this JSON shape.
+    assert_eq!(PROTOCOL_VERSION, 4);
 }

@@ -1572,7 +1572,9 @@ mod mesh_frame_tests {
     use crate::command_admission::{CommandOrder, HostSlot, ShipKey};
     use crate::core::messages::{SystemControlPayload, SystemId};
     use crate::lobby::start_policy::{StartGrant, StartGrantMode};
-    use crate::lockstep::{DigestFrame, HostLossFrame, MeshCommand, MeshFrame, TickFrame};
+    use crate::lockstep::{
+        DigestFrame, HostLossFrame, MeshCommand, MeshFrame, TickFrame, HOST_MESH_PROTOCOL,
+    };
 
     fn tick_frame() -> MeshFrame {
         MeshFrame::Tick(TickFrame {
@@ -1610,7 +1612,10 @@ mod mesh_frame_tests {
     fn a_tick_frame_round_trips_through_the_shared_envelope() {
         let frame = tick_frame();
         let text = super::encode_mesh_frame(&frame).expect("encodes");
-        assert!(text.contains("\"m\":11"), "the revision travels: {text}");
+        assert!(
+            text.contains(&format!("\"m\":{HOST_MESH_PROTOCOL}")),
+            "the revision travels: {text}"
+        );
         assert!(text.contains("\"t\":\"tick\""), "{text}");
         assert!(
             text.contains("\"tick\":412"),
@@ -1723,7 +1728,10 @@ mod mesh_frame_tests {
             tick: 418,
         });
         let text = super::encode_mesh_frame(&frame).expect("encodes");
-        assert!(text.contains("\"m\":11"), "the revision travels: {text}");
+        assert!(
+            text.contains(&format!("\"m\":{HOST_MESH_PROTOCOL}")),
+            "the revision travels: {text}"
+        );
         assert!(text.contains("\"t\":\"host-loss\""), "{text}");
         assert!(
             text.contains("\"lost\":3"),
@@ -1775,7 +1783,10 @@ mod mesh_frame_tests {
             },
         ));
         let text = super::encode_mesh_frame(&frame).expect("encodes");
-        assert!(text.contains("\"m\":11"), "the revision travels: {text}");
+        assert!(
+            text.contains(&format!("\"m\":{HOST_MESH_PROTOCOL}")),
+            "the revision travels: {text}"
+        );
         assert!(text.contains("\"t\":\"gm-action\""), "{text}");
         assert!(text.contains("\"operator_id\":\"gm-1\""), "{text}");
         assert!(text.contains("\"tick\":419"), "{text}");
@@ -1960,7 +1971,10 @@ mod mesh_frame_tests {
         ];
         for frame in frames {
             let text = super::encode_mesh_frame(&frame).expect("encodes");
-            assert!(text.contains("\"m\":11"), "the revision travels: {text}");
+            assert!(
+                text.contains(&format!("\"m\":{HOST_MESH_PROTOCOL}")),
+                "the revision travels: {text}"
+            );
             assert!(text.contains("\"t\":\"gm-join\""), "{text}");
             assert_eq!(super::decode_mesh_frame(&text), Some(frame));
         }

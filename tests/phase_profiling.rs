@@ -59,6 +59,7 @@ fn external_profiling_preserves_state_and_census_and_captures_the_default_execut
     assert_binary_capture();
 }
 
+#[allow(clippy::disallowed_methods)] // UUID names a temporary capture file, not a sim entity.
 fn assert_binary_capture() {
     let capture_path =
         std::env::temp_dir().join(format!("phoenix-phase-{}.json", uuid::Uuid::new_v4()));

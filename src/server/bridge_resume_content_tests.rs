@@ -233,7 +233,23 @@ fn browser_preinit_refuses_missing_or_invalid_source_declarations() {
         begin_preload(text);
         let before = content_ledger::snapshot();
         let refusal = browser_resume_versions(WORLD, text, &NoSiblingScripts).unwrap_err();
-        assert!(refusal.starts_with("the scenario"));
+        let expected = match toml::from_str::<toml::Value>(text) {
+            Ok(raw) => {
+                crate::world::script::load::lift_world_scripts(WORLD, &raw, &NoSiblingScripts)
+                    .1
+                    .into_iter()
+                    .filter(|finding| finding.is_error())
+                    .map(|finding| finding.message)
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            }
+            Err(error) => error.to_string(),
+        };
+        assert!(!expected.is_empty());
+        assert_eq!(
+            refusal, expected,
+            "preserve the original diagnostic verbatim"
+        );
         assert_eq!(content_ledger::snapshot(), before);
         assert!(!content_ledger::is_frozen());
     }

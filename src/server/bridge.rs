@@ -3004,8 +3004,8 @@ fn browser_resume_versions(
     resolver: &dyn crate::world::script::load::ScriptResolver,
 ) -> Result<vellum_save::Versions, String> {
     if !crate::content_ledger::is_frozen() {
-        let raw: toml::Value = toml::from_str(world_toml)
-            .map_err(|error| format!("the scenario could not be prepared: {error}"))?;
+        let raw: toml::Value =
+            toml::from_str(world_toml).map_err(|error: toml::de::Error| error.to_string())?;
         let (sources, findings) =
             crate::world::script::load::lift_world_scripts(path, &raw, resolver);
         if crate::world::validate::has_error(&findings) {
@@ -3014,10 +3014,7 @@ fn browser_resume_versions(
                 .filter(|finding| finding.is_error())
                 .map(|finding| finding.message.as_str())
                 .collect();
-            return Err(format!(
-                "the scenario's scripts could not be prepared: {}",
-                messages.join("; ")
-            ));
+            return Err(messages.join("; "));
         }
         if let Some(digest) =
             crate::world::script::load::script_source_ledger_digest(path, &sources)

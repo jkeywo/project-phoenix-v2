@@ -248,7 +248,7 @@ impl PaneSurface for RecordingSurface {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::codec::{JsonCodec, MessageCodec};
+    use crate::core::codec::JsonCodec;
     use crate::core::messages::{DeliveryClass, ServerMessage};
     use crate::lobby::handler::Target;
     use crate::native_host::panes::identity::PaneIdentity;

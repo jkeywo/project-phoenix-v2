@@ -64,7 +64,7 @@ export {
 import { TEXT_SCALE_MIN, TEXT_SCALE_MAX, TEXT_SCALE_STEP } from './accessibility-profile.js';
 import {
   mountOverlayShell,
-  renderTabBar,
+  renderSettingsOverlay,
   makeSectionBuilders,
   makeRowBuilder,
   VOLUME_MIN,
@@ -1055,29 +1055,11 @@ export function mountSettings({
     });
     activeTab = view.activeTab;
 
-    overlay.innerHTML = '';
-
-    const popup = doc.createElement('div');
-    popup.className = 'settings-popup';
-    overlay.appendChild(popup);
-
-    const tabBar = doc.createElement('div');
-    tabBar.className = 'settings-tabs';
-    popup.appendChild(tabBar);
-
-    const body = doc.createElement('div');
-    body.className = 'settings-body';
-    popup.appendChild(body);
-
-    renderTabBar(doc, tabBar, view.tabs, activeTab, 'settings-tab', selectTab);
-
-    if (activeTab === 'debug') buildDebugTab(body, view);
-    else if (activeTab === 'audio') buildAudioTab(body);
-    else if (activeTab === 'controls') buildControlsTab(body, view);
-    else if (activeTab === 'accessibility') buildAccessibilityTab(body, view);
-    else if (activeTab === 'gameplay') buildGameplayTab(body, view);
-    else if (activeTab === 'station-help') buildStationHelpTab(body, view);
-    else if (activeTab === 'ship-manual') buildShipManualTab(body);
+    const renderers = { debug: body => buildDebugTab(body, view), audio: buildAudioTab, controls: body => buildControlsTab(body, view), accessibility: body => buildAccessibilityTab(body, view), gameplay: body => buildGameplayTab(body, view), "station-help": body => buildStationHelpTab(body, view), "ship-manual": buildShipManualTab };
+    renderSettingsOverlay(doc, overlay, {
+      tabs: view.tabs.map(tab => ({ ...tab, render: renderers[tab.id] })),
+      activeTab, onSelect: selectTab, prefix: 'settings',
+    });
   }
 
   function visibleGamepadStatus(gamepad) {

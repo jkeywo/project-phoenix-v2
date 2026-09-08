@@ -61,7 +61,7 @@
 
 use std::collections::VecDeque;
 
-use crate::core::codec::{JsonCodec, MessageCodec};
+use crate::core::codec::JsonCodec;
 use crate::core::messages::{
     ClientMessage, DeliveryClass, ServerMessage, ServerMessageDiscriminants,
 };

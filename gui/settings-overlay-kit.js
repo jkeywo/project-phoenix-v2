@@ -10,14 +10,13 @@
  * in element ids and CSS class names. That shell lives here now; both mount
  * functions call it instead of rebuilding it.
  *
- * What is DELIBERATELY NOT here: the two pages' tab BODIES. The host paints
+ * The shared renderer accepts tab descriptors with body callbacks. The host paints
  * its Debug/Cheat and Audio tabs synchronously from direct WASM binding calls
  * and repaints them from a `requestAnimationFrame` poll; the client fires a
  * `ClientMessage` and repaints only when the host's next state push says the
  * flag actually moved. That push-vs-poll split is a real behavioural
- * difference, not incidental duplication, so `buildDebugTab`, `buildAudioTab`
- * and friends stay in their own files. Collapsing them into one descriptor
- * would fork that behaviour rather than share it.
+ * difference, so each adapter supplies its body callbacks while this module
+ * owns the overlay tree, tab strip, and active-descriptor dispatch.
  *
  * DOM-free and window-free at import time, so vitest can import it in Node.
  */
@@ -189,6 +188,31 @@ export function renderTabBar(doc, container, tabs, activeTabId, tabClass, onSele
     });
     container.appendChild(el);
   }
+}
+
+/** Rebuild either settings overlay from its visible tab descriptors. Body
+ * callbacks retain their adapter's push/poll behavior and current state. */
+export function renderSettingsOverlay(doc, overlay, {
+  tabs, activeTab, onSelect, prefix, headingId = null,
+}) {
+  overlay.innerHTML = '';
+  const popup = doc.createElement('div');
+  popup.className = `${prefix}-popup`;
+  overlay.appendChild(popup);
+  if (headingId) {
+    const heading = doc.createElement('div');
+    heading.className = `${prefix}-title`;
+    heading.textContent = t(headingId);
+    popup.appendChild(heading);
+  }
+  const tabBar = doc.createElement('div');
+  tabBar.className = `${prefix}-tabs`;
+  popup.appendChild(tabBar);
+  const body = doc.createElement('div');
+  body.className = `${prefix}-body`;
+  popup.appendChild(body);
+  renderTabBar(doc, tabBar, tabs, activeTab, `${prefix}-tab`, onSelect);
+  tabs.find(tab => tab.id === activeTab)?.render?.(body);
 }
 
 /**

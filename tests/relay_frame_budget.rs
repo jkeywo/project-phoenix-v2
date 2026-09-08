@@ -24,7 +24,7 @@
 mod common;
 
 use bevy::prelude::*;
-use project_phoenix::core::codec::{JsonCodec, MessageCodec};
+use project_phoenix::core::codec::JsonCodec;
 use project_phoenix::core::messages::{DeliveryClass, ServerMessage};
 use project_phoenix::headless::{build_headless_app, run, HeadlessArgs};
 use project_phoenix::lobby::OutboundMessage;

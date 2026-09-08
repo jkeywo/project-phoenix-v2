@@ -43,7 +43,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use crate::core::codec::{self, JsonCodec, MessageCodec};
+use crate::core::codec::{self, JsonCodec};
 use crate::core::messages::ClientMessage;
 use crate::delivery::serve::HostedDocuments;
 use crate::native_host::connections::{ConnectionLeg, SharedConnections};

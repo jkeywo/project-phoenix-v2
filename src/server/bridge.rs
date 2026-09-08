@@ -58,7 +58,7 @@ use {
         GmEntityProjectionChanged, GmMissionChanged, GmSessionChanged, GmSpawnChanged,
         GmStationProjectionChanged, HudStateChanged, LobbyStateChanged,
     },
-    crate::core::codec::{self, JsonCodec, MessageCodec},
+    crate::core::codec::{self, JsonCodec},
     crate::core::messages::{self, DeliveryClass},
     crate::entities::config_cache::ConfigCachePlugin,
     crate::gm_activity::GmActivityPlugin,
@@ -4331,7 +4331,7 @@ pub fn browser_scenario_catalog_message(
     locked_scenario: Option<String>,
     locked_ship: Option<String>,
 ) -> Result<String, serde_json::Error> {
-    use crate::core::codec::{JsonCodec, MessageCodec};
+    use crate::core::codec::JsonCodec;
     let scenarios = crate::core::codec::decode_scenario_catalog(scenarios_json)?;
     let payload = crate::delivery::payload::catalogue_snapshot(
         scenarios,

@@ -12,7 +12,7 @@ use crate::core::balance::{
     aggregate_ledgers, classify, closing_damage_rates, ledgers_to_json, BalanceEvent, DamageLedger,
     OutcomeReport, SideMargins, StampedBalanceEvent, CLOSING_WINDOW_SECS,
 };
-use crate::core::codec::{JsonCodec, MessageCodec};
+use crate::core::codec::JsonCodec;
 use crate::core::messages::{GamePhase, ServerMessage, ServerMessageDiscriminants};
 use crate::core::narrative::{
     fold_narrative, NarrativeEvent, NarrativeTimeline, StampedNarrativeEvent,

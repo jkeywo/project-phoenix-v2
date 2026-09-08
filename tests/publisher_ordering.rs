@@ -172,7 +172,6 @@ fn seed_transition(app: &mut App, ships: &[Entity], phase: usize) {
             .0
             .set_group_allocation(&group, if phase == 0 { floor } else { floor + 1 })
             .unwrap();
-        drop(power);
         let count = app
             .world()
             .get::<ShipShields>(ship)
@@ -230,7 +229,6 @@ fn seed_lock_boundary(app: &mut App, local: Entity, phase: usize) {
         panic!("real aggregate required")
     };
     board.combat_lock = Some(old);
-    drop(maps);
     app.world_mut()
         .get_mut::<TacticalRadarSelection>(local)
         .unwrap()

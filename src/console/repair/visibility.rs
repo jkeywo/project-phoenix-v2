@@ -1907,7 +1907,7 @@ station = "engineering"
                 }
             }
             observed.push(
-                serde_json::to_value(&messages.iter().map(|r| &r.message).collect::<Vec<_>>())
+                serde_json::to_value(messages.iter().map(|r| &r.message).collect::<Vec<_>>())
                     .unwrap(),
             );
             assert_eq!(

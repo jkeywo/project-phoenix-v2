@@ -229,13 +229,11 @@ fn prepare_power_shields(app: &mut App, ships: &[Entity]) {
             power.0.set_group_allocation(&id, 2).unwrap();
         }
         power.0.battery_charge = capacity;
-        drop(power);
         app.world_mut().get_mut::<ShipRedAlert>(*ship).unwrap().0 = true;
         let mut shields = app.world_mut().get_mut::<ShipShields>(*ship).unwrap();
         assert!(shields.0.facings.len() > index);
         let bearing = shields.0.facings[index].center_deg.to_radians();
         shields.0.set_focused_facing(None);
-        drop(shields);
         app.world_mut()
             .get_mut::<PendingShieldsThreatBearing>(*ship)
             .unwrap()

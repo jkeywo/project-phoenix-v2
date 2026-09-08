@@ -63,12 +63,11 @@ pub fn prepare_navigation_and_repair(
         let navigation_z = physics.z + 200.0;
         assert!(navigation_x.is_finite() && navigation_z.is_finite());
         let anchor = format!("producer-fixture-navigation-{index}");
-        assert!(app
+        assert!(!app
             .world()
             .resource::<WorldConfig>()
             .anchors
-            .get(&anchor)
-            .is_none());
+            .contains_key(&anchor));
 
         let config = &app.world().get::<ShipConfigComponent>(ship).unwrap().0;
         let hull = &app.world().get::<EntitySystemHull>(ship).unwrap().0;

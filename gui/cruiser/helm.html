@@ -69,6 +69,10 @@
       .panel-inner { padding: 8px; gap: 8px; }
       .console-body .ctrl-col { padding: 8px; gap: 8px; }
       .console-body .movement-col { padding-block: 4px; gap: 4px; }
+      /* Dock and tow can coexist; leave room for fallback-font line metrics
+         without shrinking the controls or hiding either status. */
+      .dock-panel { padding-top: 4px; margin-top: 0; }
+      .btn-row { gap: 4px; }
     }
     @media (orientation: portrait) {
       .panel-inner { padding: 10px 12px; gap: 8px; }

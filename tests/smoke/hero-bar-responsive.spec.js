@@ -20,6 +20,11 @@ test('the Station bar is a phone strip, a phone rail and a desktop rail', async 
   await captain.waitForSelector('#station-list .station-row', { timeout: 15_000 });
   await captain.click('#station-list .station-row:has-text("Captain") button.claim-btn');
   await captain.waitForSelector('#ready-btn:not([style*="display: none"])', { timeout: 5_000 });
+  await expect.poll(() => captain.evaluate(() => {
+    const ready = document.getElementById('ready-btn').getBoundingClientRect();
+    const diagnostics = document.getElementById('conn-diag-row').getBoundingClientRect();
+    return ready.bottom <= diagnostics.top;
+  })).toBe(true);
   await captain.click('#ready-btn');
   await captain.waitForSelector('#station-hero[aria-hidden="false"]', { timeout: 10_000 });
   // The cog is re-parented on the render that raises the bar, so wait for the

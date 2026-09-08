@@ -169,7 +169,8 @@ test('a dropped link reports its reconnect attempts on the diagnostics readout',
     .toMatch(/attempt \d/);
 
   await client.evaluate(() => window.__transportShim.revive());
-  await client.click('#retry-now-btn');
+  // Restoring the radio lets the pending automatic retry complete. Clicking
+  // Retry now here races that success, which correctly hides the button.
   await waitForConnected(client);
 });
 

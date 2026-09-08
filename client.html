@@ -1158,6 +1158,10 @@
       position: fixed;
       inset: 0;
       z-index: 5;
+      /* The diagnostics remain usable outside the connection-gated console.
+         Reserve their measured height: a phone's READY bar spans the width,
+         so anchoring the copy button on the left does not prevent overlap. */
+      bottom: calc(1.6rem + var(--connection-diagnostics-height, 0px));
       overflow: hidden;
       /* Top padding clears the settings cog (issue #940): `.settings-btn` is
          40px of ink by 44px tall at a 4px inset, so it reaches 48px down from
@@ -4826,6 +4830,14 @@
       // browser has no clipboard to write to — an inert button that silently
       // does nothing is worse than no button.
       const diagCopyBtn = document.getElementById('conn-diag-copy');
+      const diagRow = document.getElementById('conn-diag-row');
+      if (diagRow) {
+        new ResizeObserver(() => {
+          document.documentElement.style.setProperty(
+            '--connection-diagnostics-height', `${diagRow.getBoundingClientRect().height}px`,
+          );
+        }).observe(diagRow);
+      }
       if (diagnostics && diagCopyBtn && navigator.clipboard && navigator.clipboard.writeText) {
         diagCopyBtn.style.display = '';
         diagCopyBtn.textContent = t('client.diag_copy');

@@ -268,6 +268,7 @@ test('MOD import refuses a semantic-invalid archive and retains its source', asy
 
   // A real semantic-invalid ZIP is refused, but its exact source stays loaded
   // for repair and the non-colour alert receives focus.
+  await page.getByRole('button', { name: /Import a ZIP mod pack/i }).focus();
   const chooserPromise = page.waitForEvent('filechooser');
   await page.keyboard.press('i');
   const chooser = await chooserPromise;

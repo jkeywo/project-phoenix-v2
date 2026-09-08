@@ -1298,19 +1298,22 @@ test('M1 exits through a retained deterministic GM peer trace', async ({ context
       { peer: 'gm-1', role: 'gm', operator: 'gm-1', page: gmOne },
       { peer: 'gm-2-reconnect', role: 'gm', operator: 'gm-2', page: gmTwoReturning },
     ];
-    for (const { page } of finalPeers) {
-      await page.waitForFunction(
+    const mesh = await Promise.all(finalPeers.map(async ({ page }) => {
+      const healthy = await page.waitForFunction(
         () => {
           const mesh = window.__hostMeshStatus?.();
-          return mesh?.in_fleet === true && mesh.stalled === false && mesh.disagreement == null;
+          return mesh?.in_fleet === true && mesh.stalled === false && mesh.disagreement == null
+            ? mesh : false;
         },
         undefined,
         { timeout: 60_000 },
       );
-    }
-    const mesh = await Promise.all(finalPeers.map(({ page }) => (
-      page.evaluate(() => window.__hostMeshStatus())
-    )));
+      // Keep the state that satisfied the gate. A later read may legitimately
+      // be waiting for the next tick's inputs even though this peer recovered.
+      const status = await healthy.jsonValue();
+      await healthy.dispose();
+      return status;
+    }));
     expect(mesh.map((status) => status.slot).sort((a, b) => a - b)).toEqual([1, 2, 3]);
     expect(mesh.every((status) => status.disagreement == null)).toBe(true);
     report.roster.final = await publicRoster(gmOne);

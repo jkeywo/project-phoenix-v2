@@ -12,6 +12,12 @@ The client (`client.html`) is **pure HTML/CSS/JS — no WASM or Bevy**. It conne
 
 ## Data flow
 
+The active crew lobby reserves space for the connection diagnostics beneath it.
+`client.html` observes `#conn-diag-row` with `ResizeObserver` and uses its height
+in the lobby's bottom inset, keeping the copy control clear of READY even when
+the readout wraps on a phone. The diagnostics stay outside the connection-gated
+console container so they remain usable during a disconnect.
+
 ```
 DataChannel message (JSON, reliable or lossy)
   → gui/rendezvous-transport.js decodes + localiseTree()

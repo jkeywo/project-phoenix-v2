@@ -2810,3 +2810,9 @@ server.gm_monitor_row.before_launch,Native GM screen lifecycle explanation in lo
 server.gm_monitor_row.during_mission,Native GM screen lifecycle explanation in mission,[The GM screen can move; its role stays enabled until the mission ends.]
 server.bridge_layout.gm_monitor_occupied,Native GM screen assignment refused; {monitor},[Screen {monitor} is already in use.]
 server.bridge_layout.gm_role_frozen,Native GM role changed after launch,[Enable or disable the GM screen before launching the mission.]
+settings.controls.gamepad.hide_touch,Controller preference beside gamepad selection,Hide touch controls when using a controller
+settings.controls.gamepad.device_assigned,Controller held by another native console; {slot} {owner},[Controller {slot} — assigned to {owner}]
+settings.controls.gamepad.status_assigned,Controller is owned by another native console,[This controller is assigned to another console.]
+settings.controls.gamepad.status_ambiguous,Identical controllers cannot be matched safely,[Select a controller: more than one device matches the saved preference.]
+settings.controls.gamepad.status_pending,Native controller selection waiting on the host,[Waiting for the host to assign this controller.]
+settings.controls.profile.native_storage_error,Native profile storage error visible outside Settings,[Could not load or save controller settings. Current controls remain available; changes may be lost when this console closes.]

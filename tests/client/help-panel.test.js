@@ -42,6 +42,21 @@ describe('helpSections', () => {
 });
 
 describe('renderStationHelp', () => {
+  it('shows the active gamepad remap only while the selected controller is connected', () => {
+    const registry = createCaptainActionRegistry();
+    registry.setBinding('captain.red-alert', 1, { type: 'gamepad', input: 'button', control: 'face-top' });
+    const render = (connected) => {
+      const root = makeDoc().createElement('div');
+      renderStationHelp(root, 'captain', registry.list(), { gamepadConnected: connected });
+      const flatten = (el) => [el.textContent].concat(...el.children.map(flatten));
+      return flatten(root).join('\n');
+    };
+    expect(render(false)).not.toContain(t('input.gamepad.face_top'));
+    expect(render(true)).toContain(t('input.gamepad.face_top'));
+    registry.setBinding('captain.red-alert', 1, { type: 'gamepad', input: 'button', control: 'face-left' });
+    expect(render(true)).toContain(t('input.gamepad.face_left'));
+    expect(render(false)).not.toContain(t('input.gamepad.face_left'));
+  });
   it('renders only the selected station help into the caller-owned Settings body', () => {
     const doc = makeDoc();
     const root = doc.createElement('div');

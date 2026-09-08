@@ -31,7 +31,7 @@ async function installFabricatedGamepads(page) {
           mapping: spec.mapping === undefined ? 'standard' : spec.mapping,
           buttons,
           axes: spec.axes || [0, 0, 0, 0],
-          id: `fabricated-hardware-${spec.index}`,
+          id: spec.id || `fabricated-hardware-${spec.index}`,
         };
       }
     };
@@ -203,6 +203,53 @@ test('selected continuous Helm axis steers authoritatively and reconnects neutra
     () => window.__observedHelmSteering.some((value) => value < 0),
   )), { timeout: 5_000 }).toBe(true);
 
+  await helm.close();
+  await serverPage.close();
+});
+
+test('@core saved controller restores at startup, updates help and hides only usable Helm controls', async ({ context }) => {
+  test.setTimeout(180_000);
+  const serverPage = await context.newPage();
+  await serverPage.goto('/?scenario=assets/worlds/default.toml', { waitUntil: 'domcontentloaded' });
+  await waitForWasmReady(serverPage);
+  const hostId = await readHostPeerId(serverPage);
+  const helm = await context.newPage();
+  await installFabricatedGamepads(helm);
+  await helm.addInitScript(() => {
+    if (window !== window.parent) return;
+    window.__setFabricatedGamepads([{ index: 2, id: 'saved controller' }]);
+    localStorage.setItem('phoenix-operator-profile-v1', JSON.stringify({
+      kind: 'project-phoenix/operator-profile', version: 1,
+      gamepad: { preferredSlot: 0, preferredDevice: { id: 'saved controller', mapping: 'standard' } },
+    }));
+  });
+  await helm.goto(`/client/#${hostId}`, { waitUntil: 'domcontentloaded' });
+  await helm.waitForSelector('#station-list .station-row', { timeout: 15_000 });
+  await helm.click('#station-list .station-row:has-text("Helm") button.claim-btn');
+  await helm.waitForSelector('#ready-btn:not([style*="display: none"])', { timeout: 5_000 });
+  await helm.click('#ready-btn');
+  await expect(helm.locator('#helm-ui')).toHaveClass(/active/, { timeout: 10_000 });
+  const frame = helm.frameLocator('#helm-iframe');
+  await expect(frame.locator('ph-helm-joystick')).toBeHidden();
+  await expect(frame.locator('ph-lateral-thrust-joystick')).toBeHidden();
+
+  await helm.click('#settings-btn');
+  await helm.click('.settings-tab[data-tab="controls"]');
+  await expect(helm.locator('[data-control="semantic-gamepad-select"]')).toHaveValue('2');
+  await expect(helm.locator('[data-control="gamepad-hide-touch"]')).toBeChecked();
+  await helm.locator('[data-control="gamepad-hide-touch"]').uncheck();
+  await expect(frame.locator('ph-helm-joystick')).toBeVisible();
+  await helm.locator('[data-control="gamepad-hide-touch"]').check();
+  await helm.click('.settings-tab[data-tab="station-help"]');
+  await expect(helm.locator('.settings-documentation')).toContainText(ts('input.gamepad.left_stick_x'));
+  await setPads(helm, []);
+  await expect(helm.locator('.settings-documentation')).not.toContainText(ts('input.gamepad.left_stick_x'));
+  await helm.keyboard.press('Escape');
+  await expect(frame.locator('ph-helm-joystick')).toBeVisible();
+  await expect(frame.locator('ph-lateral-thrust-joystick')).toBeVisible();
+  await setPads(helm, [{ index: 1, id: 'saved controller' }]);
+  await expect(frame.locator('ph-helm-joystick')).toBeHidden();
+  await expect(frame.locator('ph-lateral-thrust-joystick')).toBeHidden();
   await helm.close();
   await serverPage.close();
 });

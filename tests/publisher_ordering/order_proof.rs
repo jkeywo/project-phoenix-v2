@@ -291,11 +291,10 @@ impl Proof {
                 let mut external = Vec::new();
                 for (a, b, access) in schedule.graph().conflicting_systems().iter() {
                     assert!(
-                        result["order"] == "ordinary"
-                            || !PAIRS.iter().any(|(x, y)| (names[a] == SYSTEMS[*x]
-                                && names[b] == SYSTEMS[*y])
-                                || (names[b] == SYSTEMS[*x] && names[a] == SYSTEMS[*y])),
-                        "test-local order must remove exactly its internal pair"
+                        !PAIRS.iter().any(|(x, y)| (names[a] == SYSTEMS[*x]
+                            && names[b] == SYSTEMS[*y])
+                            || (names[b] == SYSTEMS[*x] && names[a] == SYSTEMS[*y])),
+                        "the three annotated pairs must be absent even in ordinary order"
                     );
                     if SYSTEMS.contains(&names[a].as_str()) != SYSTEMS.contains(&names[b].as_str())
                     {

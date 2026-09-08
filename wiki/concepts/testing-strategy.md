@@ -177,16 +177,21 @@ The narrow lobby-outbox access follow-up is covered by
 The latter records ordered mission-start/reconnect messages and every advancing
 authoritative boundary for source-bound before/after comparison. Both source-bound SDK-enabled stages passed: all 90 boundaries and lifecycle messages match across default/default/pinned runs. That pre-rebase capture had 1,711 rows, with the 29 new typed vectors replacing 247 exclusive markers; all 21 deferred instances and all dependency edges matched. The original allowance is unchanged, and final combined/ordinary-headless gates remain separate.
 
-The finalized 2026-09-08 worktree capture reports 1,543 remaining ambiguities
+The finalized 2026-09-08 worktree capture reports 1,540 remaining ambiguities
 after typed reconnect projection, five Tactical pair annotations, the
 reserved-torpedo loading edge, Comms/ObjectiveSummary ordering before the
-simulation outbox drain, and Viewscreen ordering before aggregate publication. The live
+simulation outbox drain, Viewscreen ordering before aggregate publication, and
+three Power/Shields/Repair publisher pair annotations. The live
 subset/history gate passes against the original 1,968-row ledger. This remains
 partial #1400 work: passing debt accounting is not proof that the remaining
 conflicts commute. The focused SDK-enabled publisher proof passed twelve fresh
-children covering the three Power/Shields/Repair pairs, and the foreign-consumer
-proof passed nine children covering five pairs. Their complete advancing traces
-and graph receipts are retained; neither fixture adds a production annotation.
+children before and after those three annotations. Complete setup, gameplay,
+wire/cache traces and child graph reports match across both stages. The full
+graph loses exactly the three named conflict vectors and retains every node and
+edge; five capture-local type-set IDs are matched by their unique complete
+metadata. The foreign-consumer proof also passed nine children covering five
+pairs and retains its unannotated scope. Full traces and graph receipts remain
+available with the bounded proof.
 See [Publisher order proof](../../docs/publisher-order-proof.md) and
 [Foreign admitted-command consumer proof](../../docs/admitted-foreign-consumer-proof.md).
 The reconnect change also preserves complete Shields/Weapons traces against

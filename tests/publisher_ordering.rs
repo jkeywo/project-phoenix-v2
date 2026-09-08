@@ -1,4 +1,4 @@
-//! Bounded #1400 proof: three existing publishers, no production annotation.
+//! Bounded #1400 proof of the three annotated existing publisher pairs.
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 
 use bevy::{ecs::message::MessageCursor, prelude::*};

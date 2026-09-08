@@ -313,7 +313,11 @@ impl Plugin for ShipShieldsPlugin {
                     receive_shields_coordination
                         .in_set(crate::sim_sets::SimSet::Modifiers)
                         .after(crate::ship_plugin::process_coordination_lag),
-                    publish_shields_blackboard.in_set(crate::sim_sets::SimSet::Publish),
+                    // Repair writes a distinct registered key. The proof retains
+                    // physical mutable-container incompatibility and Publish order.
+                    publish_shields_blackboard
+                        .in_set(crate::sim_sets::SimSet::Publish)
+                        .ambiguous_with(crate::console::repair::server::publish_repair_blackboard),
                 ),
             )
             .add_plugins(shields_state_broadcaster());
@@ -788,7 +792,7 @@ pub fn shields_delta_projection(
 /// `SensorsThreatState` is the one producer both paths ultimately derive
 /// from, and it clears to `None` itself (`ship::sensors::tick_sensors_threat_warning`)
 /// the moment Sensors reports no hostile in range.
-fn publish_shields_blackboard(
+pub(crate) fn publish_shields_blackboard(
     mut ships_q: Query<
         (
             &ShipShields,

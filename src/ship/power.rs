@@ -326,7 +326,12 @@ impl Plugin for ShipPowerPlugin {
                     (drain_scripted_power_orders, mirror_weapons_cold_flags)
                         .chain()
                         .in_set(crate::sim_sets::SimSet::Modifiers),
-                    publish_power_blackboard.in_set(crate::sim_sets::SimSet::Publish),
+                    // Distinct registered keys; tests/publisher_ordering.rs checks
+                    // the exact shared access and ordinary/opposed-order outputs.
+                    publish_power_blackboard
+                        .in_set(crate::sim_sets::SimSet::Publish)
+                        .ambiguous_with(crate::ship::shields::publish_shields_blackboard)
+                        .ambiguous_with(crate::console::repair::server::publish_repair_blackboard),
                 ),
             )
             .add_plugins(power_state_broadcaster());
@@ -841,7 +846,7 @@ pub fn mirror_weapons_cold_flags(
 
 // ── Blackboard publish (issue #561) ──────────────────────────────────────────
 
-fn publish_power_blackboard(
+pub(crate) fn publish_power_blackboard(
     power_res: Option<Res<ShipPowerSystem>>,
     config_res: Option<Res<PowerConfigResource>>,
     multipliers_res: Option<Res<PowerMultiplierResource>>,

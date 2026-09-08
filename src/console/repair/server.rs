@@ -415,7 +415,7 @@ pub fn tick_repair_teams(
 /// them an empty team set. Only ships with `[behaviour]` carry
 /// `ShipSystemBlackboards`, so the query naturally scopes to AI-bearing ships;
 /// the wire broadcaster stays `LocalShip`-filtered.
-fn publish_repair_blackboard(
+pub(crate) fn publish_repair_blackboard(
     mut ship_q: Query<
         (
             Option<&ShipRepairTeams>,

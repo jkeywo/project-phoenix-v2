@@ -3,6 +3,27 @@ use bevy::{ecs::schedule::LogLevel, prelude::*};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
+/// Complete ordinary plugin construction before inspecting its schedules.
+/// Finish hooks may register systems; inspecting only Plugin::build omits them.
+/// Never wait for asynchronous readiness or run Startup/a frame to obtain it.
+pub(super) fn prepare_inspection(app: &mut App) -> Result<(), String> {
+    use bevy::app::PluginsState;
+    match app.plugins_state() {
+        PluginsState::Adding => {
+            return Err(
+                "inspection requires ready plugins; no frame or readiness wait is allowed".into(),
+            );
+        }
+        PluginsState::Ready => {
+            app.finish();
+            app.cleanup();
+        }
+        PluginsState::Finished => app.cleanup(),
+        PluginsState::Cleaned => {}
+    }
+    Ok(())
+}
+
 /// Full type names are stable across registration order; numeric ECS IDs are not.
 /// Repeated identical rows are intentional: two instances of a system must not
 /// collapse into one permission in the debt ledger.
@@ -13,10 +34,11 @@ pub struct Ambiguity {
     pub access: Vec<String>,
 }
 
-/// Initialize, but never run, the real FixedUpdate schedule and read Bevy's
+/// Finish/clean ready plugins, then initialize but never run FixedUpdate and read Bevy's
 /// unordered conflicting pairs. Existing explicit ambiguous_with declarations
 /// are honored by Bevy; this function adds no exemption of its own.
 pub fn fixed_update_census(app: &mut App) -> Result<Vec<Ambiguity>, String> {
+    prepare_inspection(app)?;
     app.world_mut()
         .try_schedule_scope(FixedUpdate, |world, schedule| {
             schedule
@@ -158,6 +180,7 @@ struct StrictAuditRebuild;
 /// Once debt reaches zero, exercise Bevy's own strict build check as well.
 /// Only this test helper changes the inspected app's build setting.
 pub fn require_unambiguous_fixed_update(app: &mut App) -> Result<(), String> {
+    prepare_inspection(app)?;
     app.world_mut()
         .try_schedule_scope(FixedUpdate, |world, schedule| {
             let mut settings = schedule.get_build_settings();

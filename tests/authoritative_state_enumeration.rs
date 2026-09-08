@@ -903,7 +903,11 @@ fn physical_rng_and_mint_handles_resolve_only_to_existing_canonical_owners() {
         .collect();
     let rng = std::any::type_name::<project_phoenix::sim_rng::SimRng>();
     let mint = std::any::type_name::<project_phoenix::world_id::WorldIdMint>();
-    assert_eq!(census.aliases().len(), 11);
+    let replication =
+        std::any::type_name::<project_phoenix::core::broadcast::ReplicationLifecycleRegistry>();
+    let requests = std::any::type_name::<project_phoenix::core::broadcast::ReconnectRequests>();
+    assert_eq!(census.aliases().len(), 12);
+    assert_eq!(census.alias_owner(requests), Some(replication));
     assert_eq!(
         census
             .aliases()
@@ -934,17 +938,16 @@ fn physical_rng_and_mint_handles_resolve_only_to_existing_canonical_owners() {
             "alias must not create a canonical row"
         );
         assert_eq!(census.get(alias), census.entries().get(owner).copied());
-        assert_eq!(
-            census.get(alias),
-            Some((
-                StateClass::Folded,
-                if *owner == rng {
-                    "sim-rng-state"
-                } else {
-                    "world-id-mint-state"
-                }
-            ))
-        );
+        let expected = if *owner == rng {
+            (StateClass::Folded, "sim-rng-state")
+        } else if *owner == mint {
+            (StateClass::Folded, "world-id-mint-state")
+        } else {
+            assert_eq!(*alias, requests, "only the exact reconnect scratch alias");
+            assert_eq!(*owner, replication, "existing replication cache owner");
+            (StateClass::Cache, "digest-exclusion-classes")
+        };
+        assert_eq!(census.get(alias), Some(expected));
     }
     // No prefix/generic-family allowance: a new physical instantiation remains unclassified.
     let unknown = std::any::type_name::<project_phoenix::sim_rng::StreamRng<999>>();

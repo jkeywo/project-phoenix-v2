@@ -141,8 +141,10 @@ checkpoint rollback and aggregate coherence; the census test keeps same-stream
 conflicts and checks different-stream independence. The focused post-split
 run below validates this source; prior graph receipts retain its base.
 
-The stream and namespace handles have eleven explicit full-type-path ownership
-aliases: seven to `SimRng`, four to `WorldIdMint`. They add no canonical
+The state enumeration has twelve explicit full-type-path ownership aliases:
+seven stream handles to `SimRng`, four namespace handles to `WorldIdMint`, and
+reconnect request scratch to the existing `ReplicationLifecycleRegistry` Cache
+owner. They add no canonical
 `StateCensus.entries()` rows. Alias lookup inherits the existing owner class and
 PASM identity and rejects missing owners, chains, shadowing and conflicting
 bindings. The enumeration guard recognizes only exact physical aliases, so an
@@ -166,9 +168,10 @@ The narrow lobby-outbox access follow-up is covered by
 The latter records ordered mission-start/reconnect messages and every advancing
 authoritative boundary for source-bound before/after comparison. Both source-bound SDK-enabled stages passed: all 90 boundaries and lifecycle messages match across default/default/pinned runs. That pre-rebase capture had 1,711 rows, with the 29 new typed vectors replacing 247 exclusive markers; all 21 deferred instances and all dependency edges matched. The original allowance is unchanged, and final combined/ordinary-headless gates remain separate.
 
-The 2026-09-08 worktree capture reports 1,685 remaining ambiguities after the
-five Tactical pair annotations, the reserved-torpedo loading edge and the
-Comms/ObjectiveSummary ordering before the simulation outbox drain. The live
+The finalized 2026-09-08 worktree capture reports 1,543 remaining ambiguities
+after typed reconnect projection, five Tactical pair annotations, the
+reserved-torpedo loading edge, Comms/ObjectiveSummary ordering before the
+simulation outbox drain, and Viewscreen ordering before aggregate publication. The live
 subset/history gate passes against the original 1,968-row ledger. This remains
 partial #1400 work: passing debt accounting is not proof that the remaining
 conflicts commute. The focused SDK-enabled publisher proof passed twelve fresh
@@ -177,3 +180,7 @@ proof passed nine children covering five pairs. Their complete advancing traces
 and graph receipts are retained; neither fixture adds a production annotation.
 See [Publisher order proof](../../docs/publisher-order-proof.md) and
 [Foreign admitted-command consumer proof](../../docs/admitted-foreign-consumer-proof.md).
+The reconnect change also preserves complete Shields/Weapons traces against
+the earlier 1,685-row baseline and passes real delayed Repair/Identify coverage.
+See [Typed reconnect projection proof](../../docs/reconnect-projection-proof.md)
+for the actual plugin-finalized graph and focused diagnostic-test status.

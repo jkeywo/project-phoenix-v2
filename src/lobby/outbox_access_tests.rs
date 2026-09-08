@@ -37,46 +37,57 @@ fn outbox_access_empty_single_and_multiple_drains_keep_fifo_and_delivery() {
     }
 }
 
-#[derive(Resource, Default)]
-struct OutboxReconnectWitness(Vec<String>);
+struct OutboxReconnectWitness;
 
-fn outbox_reconnect_projection(world: &mut World, token: &str) -> Vec<ServerMessage> {
-    assert!(
-        world
-            .resource::<LobbyOutbox>()
-            .0
-            .iter()
-            .any(|(target, msg)| {
-                target == &Target::Token(token.into())
-                    && matches!(msg, ServerMessage::Welcome { .. })
-            }),
-        "the real reconnect callback must still see the pending Welcome before the drain"
-    );
-    world
-        .resource_mut::<OutboxReconnectWitness>()
+fn outbox_reconnect_projection(
+    requests: Res<crate::core::broadcast::ReconnectRequests>,
+    outbox: Res<LobbyOutbox>,
+) -> crate::core::broadcast::ReconnectBatch {
+    requests
         .0
-        .push(token.into());
-    vec![ServerMessage::BlackboardUpdate { updates: vec![] }]
+        .iter()
+        .map(|token| {
+            assert!(
+                outbox.0.iter().any(|(target, msg)| {
+                    target == &Target::Token(token.clone())
+                        && matches!(msg, ServerMessage::Welcome { .. })
+                }),
+                "the real reconnect projection must still see the pending Welcome before the drain"
+            );
+            vec![ServerMessage::BlackboardUpdate { updates: vec![] }]
+        })
+        .collect()
 }
 
 #[test]
 fn outbox_access_start_and_reconnect_keep_the_existing_boundary_order() {
-    use crate::core::broadcast::{RegisterReplicationLifecycle, ReplicationLifecycleAdapter};
+    use crate::core::broadcast::{register_reconnect_projection, ReconnectBoundary};
     let mut app = test_app();
-    app.init_resource::<OutboxReconnectWitness>()
-        .init_resource::<crate::server_app::SimOutbox>()
-        .register_replication_lifecycle(
-            ReplicationLifecycleAdapter::new("outbox-regression")
-                .with_reconnect(outbox_reconnect_projection),
-        )
-        // The production registration's existing edges, without adding any.
-        .add_systems(
-            FixedUpdate,
-            crate::server_app::refresh_caches_on_midgame_reconnect
-                .after(crate::lobby::LobbySystemSet)
-                .before(drain_lobby_outbox)
-                .before(crate::sim_sets::SimSet::Broadcast),
-        );
+    app.init_resource::<crate::server_app::SimOutbox>();
+    register_reconnect_projection::<
+        OutboxReconnectWitness,
+        (
+            Res<'static, crate::core::broadcast::ReconnectRequests>,
+            Res<'static, LobbyOutbox>,
+        ),
+    >(&mut app, "outbox-regression", |params| {
+        let (requests, outbox) = params
+            .downcast::<(
+                Res<crate::core::broadcast::ReconnectRequests>,
+                Res<LobbyOutbox>,
+            )>()
+            .unwrap();
+        outbox_reconnect_projection(requests, outbox)
+    });
+    // The production boundary retains the same lobby/drain/broadcast edges.
+    app.configure_sets(
+        FixedUpdate,
+        ReconnectBoundary
+            .after(crate::lobby::LobbySystemSet)
+            .before(drain_lobby_outbox)
+            .before(crate::sim_sets::SimSet::Broadcast),
+    );
+    app.finish();
     let identify = |token: &str| ClientMessage::Identify {
         token: token.into(),
         name: token.into(),
@@ -126,10 +137,6 @@ fn outbox_access_start_and_reconnect_keep_the_existing_boundary_order() {
             Target::Token("second".into())
         ]
     );
-    assert_eq!(
-        app.world().resource::<OutboxReconnectWitness>().0,
-        ["captain", "second"]
-    );
     let snapshots: Vec<_> = app
         .world_mut()
         .resource_mut::<crate::server_app::SimOutbox>()
@@ -147,5 +154,9 @@ fn outbox_access_start_and_reconnect_keep_the_existing_boundary_order() {
     assert!(!tick(&mut app)
         .iter()
         .any(|m| matches!(m.msg, ServerMessage::Welcome { .. })));
-    assert_eq!(app.world().resource::<OutboxReconnectWitness>().0.len(), 2);
+    assert!(app
+        .world_mut()
+        .resource_mut::<crate::server_app::SimOutbox>()
+        .drain()
+        .is_empty());
 }

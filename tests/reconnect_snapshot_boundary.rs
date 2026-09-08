@@ -770,8 +770,17 @@ fn observe_prior_lock_and_live_ammo_on_reconnect() {
         count_weapons(&apps[i], &mut weapons_counts[i]);
     }
     let mut trace = Vec::new();
+    let mut viewscreen_changes_delivered = 0;
     for frame in 0..12 {
         let before = [weapons_source(&mut apps[0]), weapons_source(&mut apps[1])];
+        let viewscreen_id = project_phoenix::ship::system_registry::viewscreen_system_id();
+        let previous_viewscreens = apps.each_ref().map(|app| {
+            app.world()
+                .resource::<LastBroadcastBlackboards>()
+                .0
+                .get(&viewscreen_id)
+                .cloned()
+        });
         if frame == 0 {
             assert_eq!(before[0]["lock"], json!(target));
             identify(&mut apps[0], OWNER);
@@ -810,8 +819,47 @@ fn observe_prior_lock_and_live_ammo_on_reconnect() {
             );
         }
         let output = [read(&apps[0], &mut all[0]), read(&apps[1], &mut all[1])];
+        for i in 0..2 {
+            let entity = ship(&mut apps[i]);
+            let world = apps[i].world();
+            let current = world
+                .get::<project_phoenix::server_app::ShipSystemBlackboards>(entity)
+                .unwrap()
+                .0
+                .get(&viewscreen_id)
+                .expect("actual Viewscreen projection");
+            assert_eq!(
+                world
+                    .resource::<LastBroadcastBlackboards>()
+                    .0
+                    .get(&viewscreen_id),
+                Some(current),
+                "the aggregate broadcaster observes this tick's Viewscreen"
+            );
+            if previous_viewscreens[i].as_ref() != Some(current) {
+                let expected = json!([viewscreen_id, current]);
+                assert!(
+                    output[i].iter().any(|row| {
+                        row["target"] == "All"
+                            && row["delivery"] == "Snapshot"
+                            && row["message"]["type"] == "BlackboardUpdate"
+                            && row["message"]["data"]["updates"]
+                                .as_array()
+                                .is_some_and(|updates| updates.contains(&expected))
+                    }),
+                    "a changed Viewscreen reaches the wire in the same tick"
+                );
+                if i == 0 {
+                    viewscreen_changes_delivered += 1;
+                }
+            }
+        }
         trace.push(json!({"frame":frame,"tick":apps[0].world().resource::<SimTick>().0,"digest":digests[0],"before":before,"after":after,"cache":cache[0],"unaffected_snapshot_output":other[0],"reconnect_output":output[0],"control_output":output[1]}));
     }
+    assert!(
+        viewscreen_changes_delivered >= 2,
+        "lock and Science target transitions"
+    );
     println!(
         "\nPHOENIX_RECONNECT_WEAPONS_TRACE={}",
         json!({"delay":delay,"apply_tick":apply_tick,"frames":trace})

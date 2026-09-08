@@ -57,10 +57,24 @@ pub(crate) fn register_blackboard_replication_lifecycle(app: &mut App) {
         )
         .register_replication_lifecycle(
             ReplicationLifecycleAdapter::new(BLACKBOARD_REPLICATION_KEY)
-                .with_reset(reset_blackboard_replication)
-                .with_reconnect(reconnect_blackboard_projection),
+                .with_reset(reset_blackboard_replication),
         );
+    crate::core::broadcast::register_reconnect_projection::<
+        BlackboardReconnect,
+        BlackboardReconnectParams<'static, 'static>,
+    >(app, BLACKBOARD_REPLICATION_KEY, |params| {
+        let (requests, inputs, query) = params
+            .downcast::<BlackboardReconnectParams>()
+            .expect("registered owner parameter type");
+        reconnect_blackboard_projection(requests, inputs, query)
+    });
 }
+struct BlackboardReconnect;
+type BlackboardReconnectParams<'w, 's> = (
+    Res<'w, crate::core::broadcast::ReconnectRequests>,
+    crate::console::repair::visibility::HullProjectionInputs<'w, 's>,
+    Query<'w, 's, &'static ShipSystemBlackboards, With<LocalShip>>,
+);
 
 fn reset_blackboard_replication(world: &mut World) {
     *world.resource_mut::<LastBroadcastBlackboards>() = LastBroadcastBlackboards::default();
@@ -71,40 +85,49 @@ fn reset_blackboard_replication(world: &mut World) {
 
 /// Build every current Blackboard the reconnecting session is permitted to
 /// receive. This reads no delta cache and writes no projection cache.
-fn reconnect_blackboard_projection(world: &mut World, token: &str) -> Vec<ServerMessage> {
+fn reconnect_blackboard_projection(
+    requests: Res<crate::core::broadcast::ReconnectRequests>,
+    inputs: crate::console::repair::visibility::HullProjectionInputs,
+    query: Query<&ShipSystemBlackboards, With<LocalShip>>,
+) -> crate::core::broadcast::ReconnectBatch {
     use crate::console::repair::visibility;
-    use crate::lobby::Sessions;
-
-    let hull_visibility = visibility::hull_visibility(world);
-    let station = world
-        .get_resource::<Sessions>()
-        .and_then(|sessions| sessions.0.station_for_token(token).cloned());
-    let mut query = world.query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
-    let Ok(blackboards) = query.single(world) else {
+    if requests.0.is_empty() {
         return Vec::new();
-    };
-
-    let mut updates: Vec<_> = blackboards
+    }
+    let hull_visibility = inputs.visibility();
+    requests
         .0
         .iter()
-        .map(|(system_id, blackboard)| {
-            (
-                system_id.clone(),
-                visibility::project_blackboard_for_token(
-                    hull_visibility.as_ref(),
-                    station.as_ref(),
-                    blackboard,
-                ),
-            )
+        .map(|token| {
+            let station = inputs
+                .sessions
+                .as_ref()
+                .and_then(|s| s.0.station_for_token(token));
+            let Ok(blackboards) = query.single() else {
+                return Vec::new();
+            };
+            let mut updates: Vec<_> = blackboards
+                .0
+                .iter()
+                .map(|(id, board)| {
+                    (
+                        id.clone(),
+                        visibility::project_blackboard_for_token(
+                            hull_visibility.as_ref(),
+                            station,
+                            board,
+                        ),
+                    )
+                })
+                .collect();
+            updates.sort_by(|a, b| a.0.cmp(&b.0));
+            if updates.is_empty() {
+                Vec::new()
+            } else {
+                vec![ServerMessage::BlackboardUpdate { updates }]
+            }
         })
-        .collect();
-    updates.sort_by(|a, b| a.0.cmp(&b.0));
-
-    if updates.is_empty() {
-        Vec::new()
-    } else {
-        vec![ServerMessage::BlackboardUpdate { updates }]
-    }
+        .collect()
 }
 
 /// Returns a [`SimBroadcaster`] pre-configured with the `ModifierAdded` and
@@ -674,7 +697,7 @@ pub fn broadcast_blackboard_updates(
 /// `handle_identify_system` (in `LobbySystemSet`) queues a `Welcome { .. }` into
 /// `LobbyOutbox` targeted at that player's
 /// token. Detect this and push a full-state resync to *just that token* via
-/// [`crate::core::broadcast::resync_registered_replication_for_token`]
+/// [`crate::core::broadcast::ReconnectBoundary`]
 /// (issue #613).
 ///
 /// This replaces the #599 quick fix, which reset every then-registered shared
@@ -683,24 +706,26 @@ pub fn broadcast_blackboard_updates(
 /// `Audience::All` paths resent full state to *every other* connected client.
 /// The targeted resync leaves the shared caches untouched, so
 /// every other client's next tick remains a normal delta.
-pub(crate) fn refresh_caches_on_midgame_reconnect(world: &mut World) {
-    let state = world.resource::<State<GamePhase>>();
-    if *state.get() != GamePhase::InProgress {
-        return;
-    }
-    let reconnecting_tokens: Vec<String> = {
-        let lobby_outbox = world.resource::<LobbyOutbox>();
-        lobby_outbox
-            .0
-            .iter()
-            .filter_map(|(target, msg)| match (target, msg) {
-                (Target::Token(token), ServerMessage::Welcome { .. }) => Some(token.clone()),
-                _ => None,
-            })
-            .collect()
-    };
-    for token in reconnecting_tokens {
-        crate::core::broadcast::resync_registered_replication_for_token(world, &token);
+/// Owner finalization installs this collector, coherent capture and delivery
+/// as one safe PipeSystem under this function's original logical name. Do not
+/// also register the collector separately: its LobbyOutbox observation belongs
+/// to the same indivisible schedule node as the owner projections and sink.
+pub(crate) fn refresh_caches_on_midgame_reconnect(
+    state: Res<State<GamePhase>>,
+    outbox: Res<LobbyOutbox>,
+    mut requests: ResMut<crate::core::broadcast::ReconnectRequests>,
+) {
+    requests.0.clear();
+    if *state.get() == GamePhase::InProgress {
+        requests.0.extend(
+            outbox
+                .0
+                .iter()
+                .filter_map(|(target, msg)| match (target, msg) {
+                    (Target::Token(token), ServerMessage::Welcome { .. }) => Some(token.clone()),
+                    _ => None,
+                }),
+        );
     }
 }
 

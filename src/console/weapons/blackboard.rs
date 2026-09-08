@@ -55,10 +55,30 @@ pub(crate) fn register_weapons_replication_lifecycle(app: &mut App) {
         .declare_state::<WeaponsUpdateFirstTick>(StateClass::Cache, "digest-exclusion-classes")
         .register_replication_lifecycle(
             ReplicationLifecycleAdapter::new(WEAPONS_REPLICATION_KEY)
-                .with_reset(reset_weapons_replication)
-                .with_reconnect(reconnect_weapons_projection),
+                .with_reset(reset_weapons_replication),
         );
+    crate::core::broadcast::register_reconnect_projection::<
+        WeaponsReconnect,
+        WeaponsReconnectParams<'static, 'static>,
+    >(app, WEAPONS_REPLICATION_KEY, |params| {
+        let (requests, sessions, configs, inputs) = params
+            .downcast::<WeaponsReconnectParams>()
+            .expect("registered owner parameter type");
+        reconnect_weapons_projection(requests, sessions, configs, inputs)
+    });
 }
+struct WeaponsReconnect;
+type WeaponsReconnectParams<'w, 's> = (
+    Res<'w, crate::core::broadcast::ReconnectRequests>,
+    Option<Res<'w, crate::lobby::Sessions>>,
+    Query<
+        'w,
+        's,
+        &'static crate::ship_plugin::ShipConfigComponent,
+        With<crate::server_app::LocalShip>,
+    >,
+    WeaponsProjectionInputs<'w, 's>,
+);
 
 fn reset_weapons_replication(world: &mut World) {
     *world.resource_mut::<LastWeaponsUpdate>() = LastWeaponsUpdate::default();
@@ -71,29 +91,30 @@ fn reset_weapons_replication(world: &mut World) {
 /// rule as the live broadcaster's `Audience::HoldingWeapons`. The projection
 /// reads no delta cache and writes no cache, so one reconnect cannot perturb
 /// another client's next live update.
-fn reconnect_weapons_projection(world: &mut World, token: &str) -> Vec<ServerMessage> {
-    let weapons_station = {
-        let mut q = world.query_filtered::<
-            &crate::ship_plugin::ShipConfigComponent,
-            With<crate::server_app::LocalShip>,
-        >();
-        q.single(world)
-            .ok()
-            .and_then(|config| config.0.weapons_station())
-    };
-    let holds_weapons_station = weapons_station.as_ref().is_some_and(|station| {
-        world
-            .get_resource::<crate::lobby::Sessions>()
-            .and_then(|sessions| sessions.0.holder_for_station(station))
-            == Some(token)
-    });
-    if !holds_weapons_station {
-        return Vec::new();
-    }
-
-    vec![weapons_update_message(compute_current_weapons_update(
-        world,
-    ))]
+fn reconnect_weapons_projection(
+    requests: Res<crate::core::broadcast::ReconnectRequests>,
+    sessions: Option<Res<crate::lobby::Sessions>>,
+    configs: Query<&crate::ship_plugin::ShipConfigComponent, With<crate::server_app::LocalShip>>,
+    inputs: WeaponsProjectionInputs,
+) -> crate::core::broadcast::ReconnectBatch {
+    let station = configs.single().ok().and_then(|c| c.0.weapons_station());
+    requests
+        .0
+        .iter()
+        .map(|token| {
+            let owns = station.as_ref().is_some_and(|station| {
+                sessions
+                    .as_ref()
+                    .and_then(|s| s.0.holder_for_station(station))
+                    == Some(token.as_str())
+            });
+            if owns {
+                vec![weapons_update_message(inputs.compute())]
+            } else {
+                Vec::new()
+            }
+        })
+        .collect()
 }
 
 /// True on the first tick of the weapons broadcaster, then cleared.
@@ -122,308 +143,350 @@ impl Default for WeaponsUpdateFirstTick {
 /// this function only computes the current snapshot and never reads or
 /// writes the cache resources.
 pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
-    // Extract all resource values as owned copies/clones so we can
-    // release the immutable borrows before calling world.query_filtered.
-    let (ship_x, ship_z, ship_yaw) = {
-        let mut q = world.query_filtered::<&ShipPhysics, With<crate::server_app::LocalShip>>();
-        q.single(world)
-            .ok()
-            .copied()
-            .map(|p| (p.x, p.z, p.yaw))
-            .unwrap_or((0.0, 0.0, 0.0))
-    };
-    // Combat Lock from the local ship's own frozen viewscreen blackboard, not
-    // the live `TacticalRadarSelection` (spec §3). `weapons_update_broadcaster`
-    // runs in `SimSet::Broadcast`, i.e. *after* the viewscreen aggregators in
-    // `SimSet::PublishAggregate`, so this reads the current tick's lock with no
-    // lag; the reconnect projector reads whatever the last completed tick
-    // aggregated.
-    let target_uuid: Option<String> = {
-        let mut q = world
-            .query_filtered::<&crate::server_app::ShipSystemBlackboards, With<crate::server_app::LocalShip>>();
-        q.single(world).ok().and_then(viewscreen_combat_lock)
-    };
-    // The whole per-bank beam map (issue #790), not a single (active?, bank)
-    // pair: a hull with overlapping arcs can be burning several banks at once.
-    let active_beam: ActiveBeam = {
-        let mut q = world.query_filtered::<&ActiveBeam, With<crate::server_app::LocalShip>>();
-        q.single(world).ok().cloned().unwrap_or_default()
-    };
-    let bank_cooldowns: std::collections::HashMap<String, f32> = {
-        let mut q = world.query_filtered::<&PhaserCooldown, With<crate::server_app::LocalShip>>();
-        q.single(world)
-            .ok()
-            .map(|cd| cd.per_bank.clone())
-            .unwrap_or_default()
-    };
-    // Per-entity component on `LocalShip` is authoritative (#832): every ship
-    // with a `[torpedoes]` block carries its own `TorpedoSystemResource`
-    // component; a ship without one legitimately has no tubes. Raw tubes +
-    // effective homing range are captured here; the `TorpedoTubeState` list
-    // (with the readiness contract) is built below, once `target_live_pos` and
-    // the offline probe are resolved.
-    let (raw_tubes, torpedo_effective_range): (Vec<crate::weapons::torpedo::TorpedoTube>, f32) = {
-        let mut q =
-            world.query_filtered::<&TorpedoSystemResource, With<crate::server_app::LocalShip>>();
-        q.single(world)
-            .ok()
-            .map(|ts| (ts.0.tubes.clone(), ts.0.config.speed * ts.0.config.lifespan))
-            .unwrap_or_default()
-    };
-    let torpedo_count = {
-        // Per-entity component on `LocalShip` is authoritative (#832).
-        let mut q =
-            world.query_filtered::<&TorpedoSystemResource, With<crate::server_app::LocalShip>>();
-        q.single(world)
-            .ok()
-            .map(|ts| ts.0.torpedoes_remaining)
-            .unwrap_or_default()
-    };
-    let phaser_mode = world.resource::<CurrentPhaserMode>().0;
-    let phaser_frequency = {
-        let mut q = world
-            .query_filtered::<&crate::ship::state::ShipPhaserFrequency, With<crate::server_app::LocalShip>>();
-        q.single(world).ok().map(|f| f.0).unwrap_or(0.5)
-    };
-    let banks_config = {
-        // Per-entity component on `LocalShip` is authoritative (#832): the player
-        // ship unconditionally carries a `PhaserCombatConfigResource` component
-        // (config-derived or defaulted) at spawn.
-        let mut q = world
-            .query_filtered::<&PhaserCombatConfigResource, With<crate::server_app::LocalShip>>();
-        q.single(world)
-            .ok()
-            .map(|cc| cc.0.banks.clone())
-            .unwrap_or_default()
-    };
+    let mut state = bevy::ecs::system::SystemState::<WeaponsProjectionInputs>::new(world);
+    state.get(world).compute()
+}
 
-    // Query live ECS Transform for the target — WorldResource is a
-    // stale spawn-time snapshot and doesn't contain NPC ships that
-    // spawn after the scene loads.
-    let target_live_pos: Option<(f32, f32)> = match &target_uuid {
-        None => None,
-        Some(uuid) => {
-            let uuid = uuid.clone();
-            let mut pos = None;
-            let mut entity_qs = world.query_filtered::<
-                        (&crate::entities::spawner::EntityUuid, &Transform),
-                        Without<AsteroidUuid>,
-                    >();
-            for (u, t) in entity_qs.iter(world) {
-                if u.0 == uuid {
-                    pos = Some((t.translation.x, t.translation.z));
-                    break;
-                }
-            }
-            if pos.is_none() {
-                let mut asteroid_qs = world.query_filtered::<
-                            (&AsteroidUuid, &Transform),
-                            Without<crate::entities::spawner::EntityUuid>,
-                        >();
-                for (u, t) in asteroid_qs.iter(world) {
+/// Independent singleton queries preserve each optional subsystem's fallback;
+/// no combined required tuple can suppress a valid hull without one weapon.
+#[derive(bevy::ecs::system::SystemParam)]
+struct WeaponsProjectionInputs<'w, 's> {
+    physics: Query<'w, 's, &'static ShipPhysics, With<crate::server_app::LocalShip>>,
+    boards: Query<
+        'w,
+        's,
+        &'static crate::server_app::ShipSystemBlackboards,
+        With<crate::server_app::LocalShip>,
+    >,
+    beams: Query<'w, 's, &'static ActiveBeam, With<crate::server_app::LocalShip>>,
+    cooldowns: Query<'w, 's, &'static PhaserCooldown, With<crate::server_app::LocalShip>>,
+    torpedoes: Query<'w, 's, &'static TorpedoSystemResource, With<crate::server_app::LocalShip>>,
+    frequency: Query<
+        'w,
+        's,
+        &'static crate::ship::state::ShipPhaserFrequency,
+        With<crate::server_app::LocalShip>,
+    >,
+    config: Query<'w, 's, &'static PhaserCombatConfigResource, With<crate::server_app::LocalShip>>,
+    controls: Query<'w, 's, &'static ShipSystemControlSources, With<crate::server_app::LocalShip>>,
+    blasters: Query<'w, 's, &'static BlasterSystemResource, With<crate::server_app::LocalShip>>,
+    mode: Option<Res<'w, CurrentPhaserMode>>,
+    entities: Query<
+        'w,
+        's,
+        (
+            &'static crate::entities::spawner::EntityUuid,
+            &'static Transform,
+        ),
+        Without<AsteroidUuid>,
+    >,
+    asteroids: Query<
+        'w,
+        's,
+        (&'static AsteroidUuid, &'static Transform),
+        Without<crate::entities::spawner::EntityUuid>,
+    >,
+    names: Query<
+        'w,
+        's,
+        (
+            &'static crate::entities::spawner::EntityUuid,
+            &'static crate::entities::spawner::EntityName,
+        ),
+    >,
+}
+impl WeaponsProjectionInputs<'_, '_> {
+    fn compute(&self) -> LastWeaponsUpdate {
+        // Preserve the live builder's independent singleton fallbacks and
+        // owned intermediate values; all ECS inputs are read-only.
+        let (ship_x, ship_z, ship_yaw) = {
+            let q = &self.physics;
+            q.single()
+                .ok()
+                .copied()
+                .map(|p| (p.x, p.z, p.yaw))
+                .unwrap_or((0.0, 0.0, 0.0))
+        };
+        // Combat Lock from the local ship's own frozen viewscreen blackboard, not
+        // the live `TacticalRadarSelection` (spec §3). `weapons_update_broadcaster`
+        // runs in `SimSet::Broadcast`, i.e. *after* the viewscreen aggregators in
+        // `SimSet::PublishAggregate`, so this reads the current tick's lock with no
+        // lag; the reconnect projector reads whatever the last completed tick
+        // aggregated.
+        let target_uuid: Option<String> = {
+            let q = &self.boards;
+            q.single().ok().and_then(viewscreen_combat_lock)
+        };
+        // The whole per-bank beam map (issue #790), not a single (active?, bank)
+        // pair: a hull with overlapping arcs can be burning several banks at once.
+        let active_beam: ActiveBeam = {
+            let q = &self.beams;
+            q.single().ok().cloned().unwrap_or_default()
+        };
+        let bank_cooldowns: std::collections::HashMap<String, f32> = {
+            let q = &self.cooldowns;
+            q.single()
+                .ok()
+                .map(|cd| cd.per_bank.clone())
+                .unwrap_or_default()
+        };
+        // Per-entity component on `LocalShip` is authoritative (#832): every ship
+        // with a `[torpedoes]` block carries its own `TorpedoSystemResource`
+        // component; a ship without one legitimately has no tubes. Raw tubes +
+        // effective homing range are captured here; the `TorpedoTubeState` list
+        // (with the readiness contract) is built below, once `target_live_pos` and
+        // the offline probe are resolved.
+        let (raw_tubes, torpedo_effective_range): (Vec<crate::weapons::torpedo::TorpedoTube>, f32) = {
+            let q = &self.torpedoes;
+            q.single()
+                .ok()
+                .map(|ts| (ts.0.tubes.clone(), ts.0.config.speed * ts.0.config.lifespan))
+                .unwrap_or_default()
+        };
+        let torpedo_count = {
+            // Per-entity component on `LocalShip` is authoritative (#832).
+            let q = &self.torpedoes;
+            q.single()
+                .ok()
+                .map(|ts| ts.0.torpedoes_remaining)
+                .unwrap_or_default()
+        };
+        let phaser_mode = self
+            .mode
+            .as_ref()
+            .expect("Weapons projection requires CurrentPhaserMode after audience acceptance")
+            .0;
+        let phaser_frequency = {
+            let q = &self.frequency;
+            q.single().ok().map(|f| f.0).unwrap_or(0.5)
+        };
+        let banks_config = {
+            // Per-entity component on `LocalShip` is authoritative (#832): the player
+            // ship unconditionally carries a `PhaserCombatConfigResource` component
+            // (config-derived or defaulted) at spawn.
+            let q = &self.config;
+            q.single()
+                .ok()
+                .map(|cc| cc.0.banks.clone())
+                .unwrap_or_default()
+        };
+
+        // Query live ECS Transform for the target — WorldResource is a
+        // stale spawn-time snapshot and doesn't contain NPC ships that
+        // spawn after the scene loads.
+        let target_live_pos: Option<(f32, f32)> = match &target_uuid {
+            None => None,
+            Some(uuid) => {
+                let uuid = uuid.clone();
+                let mut pos = None;
+                let entity_qs = &self.entities;
+                for (u, t) in entity_qs.iter() {
                     if u.0 == uuid {
                         pos = Some((t.translation.x, t.translation.z));
                         break;
                     }
                 }
-            }
-            pos
-        }
-    };
-
-    // Look up the display name for the locked target.
-    let target_name: Option<String> = match &target_uuid {
-        None => None,
-        Some(uuid) => {
-            let uuid = uuid.clone();
-            let mut name = None;
-            let mut name_qs = world.query::<(
-                &crate::entities::spawner::EntityUuid,
-                &crate::entities::spawner::EntityName,
-            )>();
-            for (u, n) in name_qs.iter(world) {
-                if u.0 == uuid {
-                    name = Some(n.0.clone());
-                    break;
+                if pos.is_none() {
+                    let asteroid_qs = &self.asteroids;
+                    for (u, t) in asteroid_qs.iter() {
+                        if u.0 == uuid {
+                            pos = Some((t.translation.x, t.translation.z));
+                            break;
+                        }
+                    }
                 }
+                pos
             }
-            name
-        }
-    };
-
-    // Per-system offline state for the LocalShip, used by the phaser, blaster,
-    // and torpedo readiness contracts below. Cloned once as owned data so the
-    // probe closure does not hold a borrow on `world` (which the queries below
-    // need mutably).
-    let local_control: Option<crate::ship::control_source::ControlSourceResolver> = {
-        let mut q =
-            world.query_filtered::<&ShipSystemControlSources, With<crate::server_app::LocalShip>>();
-        q.single(world).ok().map(|cs| cs.0.clone())
-    };
-    let ship_offline = |sysid: Option<crate::core::messages::SystemId>| -> bool {
-        match sysid {
-            None => false,
-            Some(id) => local_control
-                .as_ref()
-                .map(|c| c.is_offline(&id))
-                .unwrap_or(false),
-        }
-    };
-
-    // Blaster bank states, with the shared readiness contract (issue #764).
-    // Computed here where ship physics + the frozen combat-lock target position
-    // are already resolved, rather than re-querying in the broadcaster.
-    let blasters: Vec<BlasterBankState> = {
-        let raw: Vec<crate::weapons::blaster::BlasterSystem> = {
-            let mut q = world
-                .query_filtered::<&BlasterSystemResource, With<crate::server_app::LocalShip>>();
-            q.single(world)
-                .ok()
-                .map(|r| r.0.clone())
-                .unwrap_or_default()
         };
-        raw.iter()
-            .map(|b| {
-                let is_online = !ship_offline(
-                    crate::ship::system_registry::blaster_bank_system_id(&b.config.id),
-                );
-                b.bank_state(ship_x, ship_z, ship_yaw, target_live_pos, is_online)
-            })
-            .collect()
-    };
 
-    // Torpedo tube states, with the shared readiness contract (issue #764).
-    let physics = ShipPhysics {
-        x: ship_x,
-        z: ship_z,
-        yaw: ship_yaw,
-        ..Default::default()
-    };
-    let tubes: Vec<TorpedoTubeState> = raw_tubes
-        .iter()
-        .map(|t| {
-            let remaining = match &t.load_state {
-                crate::weapons::torpedo::TubeLoadState::Loading { remaining, .. }
-                | crate::weapons::torpedo::TubeLoadState::Unloading { remaining, .. } => *remaining,
-                _ => 0.0,
-            };
-            let is_online =
-                !ship_offline(crate::ship::system_registry::torpedo_tube_system_id(&t.id));
-            let readiness = tube_readiness(
-                t,
-                torpedo_effective_range,
-                physics,
-                target_live_pos,
-                is_online,
-            );
-            TorpedoTubeState {
-                id: t.id.clone(),
-                loaded: t.is_loaded(),
-                reload_secs: remaining,
-                state: t.load_state.label().to_string(),
-                progress: t.load_state.progress(),
-                load_time: t.load_time,
-                volley_max: t.volley_max,
-                loaded_count: t.loaded_count,
-                target_count: t.target_count,
-                load_progress: t.load_progress(),
-                readiness,
-                active_barrels: t.active_barrels.clone(),
-                pattern_step: t.pattern_step,
-                pattern_len: t.pattern_len(),
+        // Look up the display name for the locked target.
+        let target_name: Option<String> = match &target_uuid {
+            None => None,
+            Some(uuid) => {
+                let uuid = uuid.clone();
+                let mut name = None;
+                let name_qs = &self.names;
+                for (u, n) in name_qs.iter() {
+                    if u.0 == uuid {
+                        name = Some(n.0.clone());
+                        break;
+                    }
+                }
+                name
             }
-        })
-        .collect();
+        };
 
-    // Reach is the authored range, unscaled (issue #955).
-    let banks: Vec<PhaserBankState> = if banks_config.is_empty() {
-        let effective_phaser_range =
-            crate::entities::config::PhaserCombatConfig::DEFAULT_PHASER_RANGE;
-        // Default (no-config) bank is a 180° forward arc, facing 0 — matches
-        // `radar::is_fire_ready_with_range`.
-        let geometry = target_live_pos.map(|(tx, tz)| {
-            crate::weapons::phaser::target_geometry(
-                tx,
-                tz,
-                ship_x,
-                ship_z,
-                ship_yaw,
-                effective_phaser_range,
-                0.0,
-                180.0,
-            )
-        });
-        let cd = bank_cooldowns.get("").copied().unwrap_or(0.0);
-        let on_cooldown = active_beam.is_bank_firing("") || cd > 0.0;
-        let is_online = !ship_offline(crate::ship::system_registry::phaser_bank_system_id(""));
-        let fire_ready = geometry.map(|g| g.in_range && g.in_arc).unwrap_or(false);
-        let readiness = crate::core::messages::WeaponReadiness::evaluate(
-            is_online,
-            on_cooldown,
-            false,
-            false,
-            geometry,
-        );
-        vec![PhaserBankState {
-            id: String::new(),
-            fire_ready,
-            on_cooldown,
-            cooldown_remaining: cd,
-            readiness,
-        }]
-    } else {
-        banks_config
+        // Per-system offline state for the LocalShip, used by the phaser, blaster,
+        // and torpedo readiness contracts below. Cloned once as owned data so the
+        // probe closure does not hold a borrow on `world` (which the queries below
+        // need mutably).
+        let local_control: Option<crate::ship::control_source::ControlSourceResolver> = {
+            let q = &self.controls;
+            q.single().ok().map(|cs| cs.0.clone())
+        };
+        let ship_offline = |sysid: Option<crate::core::messages::SystemId>| -> bool {
+            match sysid {
+                None => false,
+                Some(id) => local_control
+                    .as_ref()
+                    .map(|c| c.is_offline(&id))
+                    .unwrap_or(false),
+            }
+        };
+
+        // Blaster bank states, with the shared readiness contract (issue #764).
+        // Computed here where ship physics + the frozen combat-lock target position
+        // are already resolved, rather than re-querying in the broadcaster.
+        let blasters: Vec<BlasterBankState> = {
+            let raw: Vec<crate::weapons::blaster::BlasterSystem> = {
+                let q = &self.blasters;
+                q.single().ok().map(|r| r.0.clone()).unwrap_or_default()
+            };
+            raw.iter()
+                .map(|b| {
+                    let is_online = !ship_offline(
+                        crate::ship::system_registry::blaster_bank_system_id(&b.config.id),
+                    );
+                    b.bank_state(ship_x, ship_z, ship_yaw, target_live_pos, is_online)
+                })
+                .collect()
+        };
+
+        // Torpedo tube states, with the shared readiness contract (issue #764).
+        let physics = ShipPhysics {
+            x: ship_x,
+            z: ship_z,
+            yaw: ship_yaw,
+            ..Default::default()
+        };
+        let tubes: Vec<TorpedoTubeState> = raw_tubes
             .iter()
-            .map(|b| {
-                let effective_bank_range = if b.beam_range > 0.0 {
-                    b.beam_range
-                } else {
-                    crate::entities::config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
+            .map(|t| {
+                let remaining = match &t.load_state {
+                    crate::weapons::torpedo::TubeLoadState::Loading { remaining, .. }
+                    | crate::weapons::torpedo::TubeLoadState::Unloading { remaining, .. } => {
+                        *remaining
+                    }
+                    _ => 0.0,
                 };
-                let geometry = target_live_pos.map(|(tx, tz)| {
-                    crate::weapons::phaser::target_geometry(
-                        tx,
-                        tz,
-                        ship_x,
-                        ship_z,
-                        ship_yaw,
-                        effective_bank_range,
-                        b.facing_deg,
-                        b.fire_arc_deg,
-                    )
-                });
-                let cd = bank_cooldowns.get(b.id.as_str()).copied().unwrap_or(0.0);
-                let on_cooldown = active_beam.is_bank_firing(&b.id) || cd > 0.0;
                 let is_online =
-                    !ship_offline(crate::ship::system_registry::phaser_bank_system_id(&b.id));
-                let fire_ready = geometry.map(|g| g.in_range && g.in_arc).unwrap_or(false);
-                let readiness = crate::core::messages::WeaponReadiness::evaluate(
+                    !ship_offline(crate::ship::system_registry::torpedo_tube_system_id(&t.id));
+                let readiness = tube_readiness(
+                    t,
+                    torpedo_effective_range,
+                    physics,
+                    target_live_pos,
                     is_online,
-                    on_cooldown,
-                    false,
-                    false,
-                    geometry,
                 );
-                PhaserBankState {
-                    id: b.id.clone(),
-                    fire_ready,
-                    on_cooldown,
-                    cooldown_remaining: cd,
+                TorpedoTubeState {
+                    id: t.id.clone(),
+                    loaded: t.is_loaded(),
+                    reload_secs: remaining,
+                    state: t.load_state.label().to_string(),
+                    progress: t.load_state.progress(),
+                    load_time: t.load_time,
+                    volley_max: t.volley_max,
+                    loaded_count: t.loaded_count,
+                    target_count: t.target_count,
+                    load_progress: t.load_progress(),
                     readiness,
+                    active_barrels: t.active_barrels.clone(),
+                    pattern_step: t.pattern_step,
+                    pattern_len: t.pattern_len(),
                 }
             })
-            .collect()
-    };
+            .collect();
 
-    LastWeaponsUpdate {
-        target_uuid,
-        target_name,
-        banks,
-        tubes,
-        torpedo_count,
-        phaser_mode,
-        blasters,
-        phaser_frequency,
+        // Reach is the authored range, unscaled (issue #955).
+        let banks: Vec<PhaserBankState> = if banks_config.is_empty() {
+            let effective_phaser_range =
+                crate::entities::config::PhaserCombatConfig::DEFAULT_PHASER_RANGE;
+            // Default (no-config) bank is a 180° forward arc, facing 0 — matches
+            // `radar::is_fire_ready_with_range`.
+            let geometry = target_live_pos.map(|(tx, tz)| {
+                crate::weapons::phaser::target_geometry(
+                    tx,
+                    tz,
+                    ship_x,
+                    ship_z,
+                    ship_yaw,
+                    effective_phaser_range,
+                    0.0,
+                    180.0,
+                )
+            });
+            let cd = bank_cooldowns.get("").copied().unwrap_or(0.0);
+            let on_cooldown = active_beam.is_bank_firing("") || cd > 0.0;
+            let is_online = !ship_offline(crate::ship::system_registry::phaser_bank_system_id(""));
+            let fire_ready = geometry.map(|g| g.in_range && g.in_arc).unwrap_or(false);
+            let readiness = crate::core::messages::WeaponReadiness::evaluate(
+                is_online,
+                on_cooldown,
+                false,
+                false,
+                geometry,
+            );
+            vec![PhaserBankState {
+                id: String::new(),
+                fire_ready,
+                on_cooldown,
+                cooldown_remaining: cd,
+                readiness,
+            }]
+        } else {
+            banks_config
+                .iter()
+                .map(|b| {
+                    let effective_bank_range = if b.beam_range > 0.0 {
+                        b.beam_range
+                    } else {
+                        crate::entities::config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
+                    };
+                    let geometry = target_live_pos.map(|(tx, tz)| {
+                        crate::weapons::phaser::target_geometry(
+                            tx,
+                            tz,
+                            ship_x,
+                            ship_z,
+                            ship_yaw,
+                            effective_bank_range,
+                            b.facing_deg,
+                            b.fire_arc_deg,
+                        )
+                    });
+                    let cd = bank_cooldowns.get(b.id.as_str()).copied().unwrap_or(0.0);
+                    let on_cooldown = active_beam.is_bank_firing(&b.id) || cd > 0.0;
+                    let is_online =
+                        !ship_offline(crate::ship::system_registry::phaser_bank_system_id(&b.id));
+                    let fire_ready = geometry.map(|g| g.in_range && g.in_arc).unwrap_or(false);
+                    let readiness = crate::core::messages::WeaponReadiness::evaluate(
+                        is_online,
+                        on_cooldown,
+                        false,
+                        false,
+                        geometry,
+                    );
+                    PhaserBankState {
+                        id: b.id.clone(),
+                        fire_ready,
+                        on_cooldown,
+                        cooldown_remaining: cd,
+                        readiness,
+                    }
+                })
+                .collect()
+        };
+
+        LastWeaponsUpdate {
+            target_uuid,
+            target_name,
+            banks,
+            tubes,
+            torpedo_count,
+            phaser_mode,
+            blasters,
+            phaser_frequency,
+        }
     }
 }
 

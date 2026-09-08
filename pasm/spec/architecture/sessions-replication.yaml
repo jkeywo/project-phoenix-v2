@@ -176,9 +176,10 @@ entities:
       title: Host State Broadcaster
       summary: Host-side broadcaster that emits phase-gated, audience-scoped snapshots and reliable events from authoritative simulation and lobby state.
       rationale:
+        - "[ai] #1400 orders the aggregate Blackboard broadcaster after the LocalShip Viewscreen publisher within PublishAggregate. A current combat-lock or Science-target change must update the delta cache and outgoing snapshot in the same tick. Reconnect's typed access exposed the previously incidental order; this edge preserves the validated prior-lock Weapons inputs and does not move either publisher to another phase."
         - Simulation producers choose Snapshot or Reliable at the point where cadence and loss semantics are known. SimOutbox stores that producer-owned class behind explicit push_snapshot/push_reliable insertion methods; its raw queue is private and the forwarding broadcaster never classifies by payload variant.
         - Reconnect projections are latest-state snapshots targeted at the reconnecting token. Entity-lifecycle, combat, comms, objective, and scenario events remain reliable because losing one is not repaired by the next periodic projection.
-        - Replication owners register cache resets and reconnect projection functions under stable semantic keys. The generic runner invokes those adapters in lexical key order and supplies the reconnecting token target without knowing cache resources or message variants.
+        - Replication owners register cache resets and reconnect projection functions under stable semantic keys. The generic transport delivery orders request occurrences then lexical owner keys and supplies each token target without knowing cache resources or message variants.
     architecture:
       kind: replication-service
       authority: authoritative
@@ -190,7 +191,7 @@ entities:
     implementation:
       status: declared
       paths: [src/core/broadcast, src/core/broadcast/lifecycle.rs, src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/lobby/server.rs, src/server/bridge.rs]
-      symbols: [SimBroadcaster, LobbyBroadcaster, SimOutbox, push_snapshot, push_reliable, Audience, Cadence, reconnect_registered_replication, reset_registered_replication, resync_registered_replication_for_token]
+      symbols: [SimBroadcaster, LobbyBroadcaster, SimOutbox, push_snapshot, push_reliable, Audience, Cadence, register_reconnect_projection, ReconnectBoundary, reset_registered_replication]
       tests: [cargo test, tests/smoke/snapshot-channel.spec.js]
 
   - component: replication-lifecycle-registry
@@ -200,7 +201,10 @@ entities:
       title: Replication Lifecycle Registry
       summary: Stable-keyed host catalogue through which each replication owner contributes its run reset and targeted reconnect projection beside its live publisher.
       rationale:
-        - A BTreeMap orders adapters by semantic owner key, so plugin insertion order cannot change the sequence of reconnect snapshots.
+        - A BTreeMap orders reset adapters by semantic owner key. Reconnect delivery orders request occurrence and then semantic owner key, so duplicate token requests survive and plugin insertion order cannot change the payload sequence.
+        - "[ai] Each reconnect owner registers concrete parameters constrained by Bevy ReadOnlySystemParam; no caller supplies an unconstrained builder. The private finish hook builds one FunctionSystem from safe DynParamBuilder entries, holding the complete actual Query/Res read union while projecting every owner and Welcome occurrence. This preserves coherent source observation: an ECS writer cannot run between Blackboard and Hull projections. The dynamic parameter wrapper does not itself carry ReadOnlySystem, so the concrete registration bound and initialized access-union test enforce the contract. No custom unsafe or exclusive World parameter is used."
+        - "[ai] Stable owner key, marker TypeId and concrete parameter TypeId are bound before finalization, with duplicate/late registration refused. The generic sink preserves request ordinal then lexical owner and payload order; an empty request cohort does not invoke projectors. One safe PipeSystem sequences the targeted Welcome collector, coherent capture and delivery under the original refresh_caches_on_midgame_reconnect full logical name. Its actual union of access sets preserves the old callback body's indivisible boundary, including source request collection; no separate stage nodes remain. The existing after-Lobby/before-Lobby-drain/before-Broadcast edges are retained, with no new authoritative phase pin, diagnostic name alias or ambiguity exemption. Normal App::finish is automatic; bare test harnesses explicitly finalize before running the schedule."
+        - "[ai] Reconnect request scratch is physical transport bookkeeping explicitly aliased to the existing ReplicationLifecycleRegistry Cache owner in StateCensus; captured payloads remain ordinary system output, not another ECS resource. Canonical entries and digest folds remain unchanged. Run reset still invokes only owner reset hooks. Targeted projection reads source data without resetting or modifying any live recipient cache. This migration requires native source-bound trace comparison and validation of the fully finalized graph."
         - Adapters may register reset only, reconnect only, or both. This keeps UUID pruning specialized rather than inventing a generic lifecycle operation that unrelated caches do not have.
         - The Blackboard adapter owns LastBroadcastBlackboards and the per-recipient Repair projection cache. Its reconnect projection sorts every current SystemId, applies the same Repair visibility function as the live path, and reads but never mutates either cache.
         - The entity-state adapter is registered beside sim_state_broadcaster under the stable `entity-state` key. It owns LastBroadcastEntityPositions and LastBroadcastEntityHealth and resets them at a run boundary; it has no reconnect projector because Welcome already carries the current world snapshot. UUID pruning remains an explicit owner operation called only from entity-despawn paths.
@@ -215,8 +219,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/core/broadcast/lifecycle.rs, src/server_app/broadcast.rs, src/server_app/broadcast_publish.rs, src/console/repair/visibility.rs, src/console/repair/server.rs, src/ship/shields.rs, src/console/weapons/blackboard.rs, src/console/weapons/server.rs]
-      symbols: [ReplicationLifecycleRegistry, ReplicationLifecycleAdapter, RegisterReplicationLifecycle, LastBroadcastBlackboards, LastBroadcastEntityPositions, LastBroadcastEntityHealth, LastBroadcastHull, LastWeaponsUpdate, WeaponsUpdateFirstTick, register_entity_state_replication_lifecycle, prune_entity_replication_caches, register_hull_replication_lifecycle, register_shields_replication_lifecycle, register_weapons_replication_lifecycle]
+      paths: [src/core/broadcast/reconnect.rs, src/core/broadcast/lifecycle.rs, src/server_app/broadcast.rs, src/server_app/broadcast_publish.rs, src/console/repair/visibility.rs, src/console/repair/server.rs, src/ship/shields.rs, src/console/weapons/blackboard.rs, src/console/weapons/server.rs]
+      symbols: [register_reconnect_projection, ReconnectRequests, ReconnectBoundary, ReplicationLifecycleRegistry, ReplicationLifecycleAdapter, RegisterReplicationLifecycle, LastBroadcastBlackboards, LastBroadcastEntityPositions, LastBroadcastEntityHealth, LastBroadcastHull, LastWeaponsUpdate, WeaponsUpdateFirstTick, register_entity_state_replication_lifecycle, prune_entity_replication_caches, register_hull_replication_lifecycle, register_shields_replication_lifecycle, register_weapons_replication_lifecycle]
       messages: [BlackboardUpdate, SystemHullUpdate, ShieldStatus, WeaponsUpdate]
       tests: [cargo test]
 

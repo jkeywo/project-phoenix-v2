@@ -74,12 +74,22 @@ impl ScheduleBuildPass for Observe {
     }
 }
 
-/// Capture a fresh inspection App by ordinary initialization, without running it.
+/// Capture a fresh inspection App after ordinary plugin finish/cleanup and
+/// schedule initialization, without running Startup or a frame.
 /// Bevy keeps executable edges private. An appended read-only build pass observes
 /// the graph after its existing passes (including automatic deferred barriers).
 /// Refuse an already initialized schedule rather than perturb it to force a rebuild.
-/// No edge, system, condition, ambiguity policy or executor setting is changed.
+/// Apart from normal plugin finalization, the observer changes no edge, system,
+/// condition, ambiguity policy or executor setting.
 pub fn fixed_update_graph(app: &mut App) -> Result<Capture, String> {
+    // Check before finish hooks can dirty an already initialized schedule.
+    if app
+        .get_schedule(FixedUpdate)
+        .is_some_and(|schedule| schedule.systems().is_ok())
+    {
+        return Err("graph capture requires a fresh, uninitialized inspection App".into());
+    }
+    super::prepare_inspection(app)?;
     app.world_mut()
         .try_schedule_scope(FixedUpdate, |world, schedule| {
             if schedule.systems().is_ok() {

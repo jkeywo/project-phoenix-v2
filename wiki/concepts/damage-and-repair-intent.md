@@ -2,8 +2,8 @@
 title: Damage and Repair Information
 type: concept
 tags: [damage, repair, engineering, station, information]
-sources: [src/ship/impulse_boost_systems.rs, src/ship/physics_systems.rs, src/modifiers/coordination.rs, src/modifiers/cache.rs, src/ship/control_source.rs, src/gm_action.rs, src/gm_projection.rs, src/snapshot.rs, src/sim_digest.rs, gui/gm-system-panel.js, pasm/spec/architecture/engineering-damage.yaml, src/ship/damage_sync.rs, src/ship/coordination_systems.rs, src/console/repair/server.rs, src/console/repair/visibility.rs, src/modifiers/repair_teams.rs, gui/console-state.js, gui/components/ph-repair-teams.js]
-updated: 2026-09-07
+sources: [src/core/broadcast/reconnect.rs, src/ship/impulse_boost_systems.rs, src/ship/physics_systems.rs, src/modifiers/coordination.rs, src/modifiers/cache.rs, src/ship/control_source.rs, src/gm_action.rs, src/gm_projection.rs, src/snapshot.rs, src/sim_digest.rs, gui/gm-system-panel.js, pasm/spec/architecture/engineering-damage.yaml, src/ship/damage_sync.rs, src/ship/coordination_systems.rs, src/console/repair/server.rs, src/console/repair/visibility.rs, src/modifiers/repair_teams.rs, gui/console-state.js, gui/components/ph-repair-teams.js]
+updated: 2026-09-08
 ---
 
 # Damage and Repair Information
@@ -26,7 +26,20 @@ reconnect resync:
 publisher and registers its reset and reconnect projector under the stable
 `hull` lifecycle key. Reconnect reads the same `HullVisibility` projection
 without mutating the cache, so another session's return cannot perturb an
-existing recipient's next live delta.
+existing recipient's next live delta. The reconnect owner now exposes typed,
+read-only inputs through `register_reconnect_projection`; generic delivery
+retains each request occurrence (including duplicate tokens), then lexical
+owner order. One safe `PipeSystem` sequences the targeted Welcome collector,
+coherent owner capture and transport sink under the original
+`refresh_caches_on_midgame_reconnect` logical name. Its complete access union
+prevents an ECS writer from splitting request collection, Blackboard and Hull
+observations, or delivery. Request scratch is separate from the live Hull and
+Repair caches. Normal plugin finalization seals registration.
+Scheduled privacy/order/coherence fixtures and complete advancing reconnect
+traces pass in the SDK-enabled native configuration. The real Repair/Identify
+regression covers a two-tick command delay, team travel and actual repair with
+role-filtered visibility. See [Typed reconnect projection proof](../../docs/reconnect-projection-proof.md)
+for source binding, diagnostic-test status and remaining validation limits.
 
 ## Requests, dispatch, and repair
 

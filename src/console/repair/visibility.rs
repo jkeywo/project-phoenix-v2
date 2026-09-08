@@ -121,10 +121,24 @@ pub(crate) fn register_hull_replication_lifecycle(app: &mut App) {
         .declare_state::<LastBroadcastHull>(StateClass::Cache, "digest-exclusion-classes")
         .register_replication_lifecycle(
             ReplicationLifecycleAdapter::new(HULL_REPLICATION_KEY)
-                .with_reset(reset_hull_replication)
-                .with_reconnect(reconnect_hull_projection),
+                .with_reset(reset_hull_replication),
         );
+    crate::core::broadcast::register_reconnect_projection::<
+        HullReconnect,
+        HullReconnectParams<'static, 'static>,
+    >(app, HULL_REPLICATION_KEY, |params| {
+        let (requests, inputs) = params
+            .downcast::<HullReconnectParams>()
+            .expect("registered owner parameter type");
+        reconnect_hull_projection(requests, inputs)
+    });
 }
+
+struct HullReconnect;
+type HullReconnectParams<'w, 's> = (
+    Res<'w, crate::core::broadcast::ReconnectRequests>,
+    HullProjectionInputs<'w, 's>,
+);
 
 fn reset_hull_replication(world: &mut World) {
     *world.resource_mut::<LastBroadcastHull>() = LastBroadcastHull::default();
@@ -135,8 +149,56 @@ fn reset_hull_replication(world: &mut World) {
 /// This deliberately reads no delta cache and writes no projection cache, so
 /// another session's reconnect cannot perturb any connected client's next
 /// live delta.
-fn reconnect_hull_projection(world: &mut World, token: &str) -> Vec<ServerMessage> {
-    hull_update_for_token(world, token).into_iter().collect()
+fn reconnect_hull_projection(
+    requests: Res<crate::core::broadcast::ReconnectRequests>,
+    inputs: HullProjectionInputs,
+) -> crate::core::broadcast::ReconnectBatch {
+    if requests.0.is_empty() {
+        return Vec::new();
+    }
+    let visibility = inputs.visibility();
+    requests
+        .0
+        .iter()
+        .map(|token| {
+            let Some(vis) = visibility.as_ref() else {
+                return Vec::new();
+            };
+            let station = inputs
+                .sessions
+                .as_ref()
+                .and_then(|s| s.0.station_for_token(token));
+            let projection = vis.projection_for(station);
+            vec![ServerMessage::SystemHullUpdate {
+                entries: projection.entries,
+                aggregate_fraction: projection.aggregate_fraction,
+                destroyed_fraction: projection.destroyed_fraction,
+            }]
+        })
+        .collect()
+}
+
+/// Shared read-only inputs for live and reconnect visibility, including the
+/// historical first matching complete LocalShip tuple and optional team data.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct HullProjectionInputs<'w, 's> {
+    pub(crate) sessions: Option<Res<'w, Sessions>>,
+    hulls: Query<
+        'w,
+        's,
+        (
+            &'static crate::entities::spawner::EntitySystemHull,
+            &'static crate::ship_plugin::ShipConfigComponent,
+            Option<&'static super::server::ShipRepairTeams>,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
+}
+impl HullProjectionInputs<'_, '_> {
+    pub(crate) fn visibility(&self) -> Option<HullVisibility> {
+        let (hull, config, teams) = self.hulls.iter().next()?;
+        Some(ship_hull_visibility(&hull.0, &config.0, teams))
+    }
 }
 
 /// Last-sent repair blackboard projection per session token.
@@ -591,23 +653,8 @@ pub fn ship_hull_visibility(
 
 /// Build a [`HullVisibility`] for the `LocalShip`, or `None` before spawn.
 pub fn hull_visibility(world: &mut World) -> Option<HullVisibility> {
-    use crate::entities::spawner::EntitySystemHull;
-    use crate::server_app::LocalShip;
-    use crate::ship_plugin::ShipConfigComponent;
-
-    let mut q = world.query_filtered::<(
-        &EntitySystemHull,
-        &ShipConfigComponent,
-        Option<&super::server::ShipRepairTeams>,
-    ), With<LocalShip>>();
-    let (hull, config, entity_teams) = {
-        let (hull, config, teams) = q.iter(world).next()?;
-        (hull.0.clone(), config.0.clone(), teams.cloned())
-    };
-
-    // Issue #830: the LocalShip carries its own `ShipRepairTeams` component;
-    // the global-Resource fallback is gone.
-    Some(ship_hull_visibility(&hull, &config, entity_teams.as_ref()))
+    let mut state = bevy::ecs::system::SystemState::<HullProjectionInputs>::new(world);
+    state.get(world).visibility()
 }
 
 /// Every connected session token paired with the station it currently holds.
@@ -1761,6 +1808,127 @@ station = "engineering"
         assert!(
             reconnect.rows.contains(&"helm-radar".to_string()),
             "an on-site Engineering reconnect must receive the detail live publication reveals"
+        );
+    }
+
+    #[test]
+    fn scheduled_reconnect_projects_real_repair_and_hull_for_duplicate_private_requests() {
+        use crate::core::messages::DeliveryClass;
+        use crate::server_app::{ShipSystemBlackboards, SimOutbox};
+        let mut app = world_app(RepairTeams::new(1));
+        crate::server_app::register_blackboard_replication_lifecycle(&mut app);
+        let entity = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
+            .single(app.world())
+            .unwrap();
+        let repair = RepairBlackboard {
+            system_hull: vec![status("core", 60.0), status("helm-radar", 30.0)],
+            damageable_systems: vec![SystemId("core".into()), SystemId("helm-radar".into())],
+            aggregate_hull_fraction: Some(0.3),
+            ..Default::default()
+        };
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(ShipSystemBlackboards(
+                [(SystemId("repair".into()), SystemBlackboard::Repair(repair))]
+                    .into_iter()
+                    .collect(),
+            ));
+        // Populate the real shared Hull delta cache before targeted projection.
+        let live = sent_hull(&mut app);
+        assert_eq!(rows_for(&live, "pilot"), &vec!["helm-radar".to_owned()]);
+        app.world_mut().resource_mut::<SimOutbox>().drain();
+        let cache_before = app.world().resource::<LastBroadcastHull>().0.clone();
+        let boards_before = app
+            .world()
+            .get::<ShipSystemBlackboards>(entity)
+            .unwrap()
+            .0
+            .clone();
+        app.finish();
+        let mut observed = Vec::new();
+        for arrived in [false, true] {
+            if arrived {
+                let world = app.world_mut();
+                let mut query = world.query::<(
+                    &mut crate::entities::spawner::EntitySystemHull,
+                    &mut super::super::server::ShipRepairTeams,
+                )>();
+                let (mut hull, mut teams) = query.get_mut(world, entity).unwrap();
+                teams
+                    .0
+                    .dispatch(0, SystemId("helm-radar".into()), "Radar".into());
+                teams.0.tick(6.0, &mut hull.0, None);
+                assert!(teams.0.on_site_systems().any(|id| id.0 == "helm-radar"));
+            }
+            crate::core::broadcast::reconnect::test_reconnect_welcomes(
+                &mut app,
+                &["eng", "pilot", "eng", "stranger"],
+            );
+            app.world_mut().run_schedule(FixedUpdate);
+            let messages = app.world_mut().resource_mut::<SimOutbox>().drain();
+            assert_eq!(messages.len(), 8, "two lexical owners for every occurrence");
+            for (pair, token) in messages
+                .chunks_exact(2)
+                .zip(["eng", "pilot", "eng", "stranger"])
+            {
+                for row in pair {
+                    assert_eq!(row.target, Target::Token(token.into()));
+                    assert_eq!(row.delivery, DeliveryClass::Snapshot);
+                }
+                let ServerMessage::BlackboardUpdate { updates } = &pair[0].message else {
+                    panic!("blackboards precede hull")
+                };
+                let SystemBlackboard::Repair(board) = &updates[0].1 else {
+                    panic!("real Repair board")
+                };
+                assert_eq!(
+                    board
+                        .system_hull
+                        .iter()
+                        .any(|r| r.system_id.0 == "helm-radar"),
+                    token == "eng" && arrived
+                );
+                if token != "eng" {
+                    assert!(board.system_hull.is_empty());
+                    assert!(board.damageable_systems.is_empty());
+                    assert!(board.aggregate_hull_fraction.is_none());
+                }
+                let ServerMessage::SystemHullUpdate { entries, .. } = &pair[1].message else {
+                    panic!("Hull owner second")
+                };
+                assert_eq!(
+                    entries.iter().any(|r| r.system_id.0 == "helm-radar"),
+                    token == "pilot" || (token == "eng" && arrived)
+                );
+                if token == "stranger" {
+                    assert!(entries.is_empty());
+                }
+            }
+            observed.push(
+                serde_json::to_value(&messages.iter().map(|r| &r.message).collect::<Vec<_>>())
+                    .unwrap(),
+            );
+            assert_eq!(
+                app.world().resource::<LastBroadcastHull>().0,
+                cache_before,
+                "all recipients' live cache stays unchanged"
+            );
+            assert!(app
+                .world()
+                .resource::<LastVisibleRepairBlackboard>()
+                .projections
+                .is_empty());
+            assert_eq!(
+                app.world().get::<ShipSystemBlackboards>(entity).unwrap().0,
+                boards_before,
+                "projection cannot rewrite its source"
+            );
+        }
+        assert_ne!(
+            observed[0], observed[1],
+            "real team arrival changes permitted detail"
         );
     }
 

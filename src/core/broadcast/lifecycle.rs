@@ -15,24 +15,15 @@ use std::collections::BTreeMap;
 
 use bevy::prelude::*;
 
-use crate::core::messages::ServerMessage;
-
 /// Reset one producer's replication bookkeeping without changing source state.
 pub type ResetReplication = fn(&mut World);
-
-/// Build one producer's current permitted projection for `token`.
-///
-/// The caller supplies routing and delivery after the generic runner has
-/// collected every adapter; an adapter owns only its source-state query and
-/// payload shape.
-pub type ReconnectProjection = fn(&mut World, &str) -> Vec<ServerMessage>;
 
 /// One owner's lifecycle hooks, identified by a stable semantic key.
 #[derive(Clone, Copy)]
 pub struct ReplicationLifecycleAdapter {
     key: &'static str,
     reset: Option<ResetReplication>,
-    reconnect: Option<ReconnectProjection>,
+    pub(super) reconnect: bool,
 }
 
 impl ReplicationLifecycleAdapter {
@@ -41,7 +32,7 @@ impl ReplicationLifecycleAdapter {
         Self {
             key,
             reset: None,
-            reconnect: None,
+            reconnect: false,
         }
     }
 
@@ -51,29 +42,29 @@ impl ReplicationLifecycleAdapter {
         self.reset = Some(reset);
         self
     }
-
-    /// Attach this owner's targeted reconnect projection.
-    #[must_use]
-    pub fn with_reconnect(mut self, reconnect: ReconnectProjection) -> Self {
-        self.reconnect = Some(reconnect);
-        self
-    }
 }
 
 /// Build-time lifecycle catalogue, ordered by stable owner key.
 #[derive(Resource, Default)]
 pub struct ReplicationLifecycleRegistry {
-    adapters: BTreeMap<&'static str, ReplicationLifecycleAdapter>,
+    pub(super) adapters: BTreeMap<&'static str, ReplicationLifecycleAdapter>,
+    pub(super) projector_types: std::collections::HashSet<std::any::TypeId>,
+    pub(super) projections: BTreeMap<&'static str, super::reconnect::Projection>,
+    pub(super) finalized: bool,
 }
 
 impl ReplicationLifecycleRegistry {
     fn register(&mut self, adapter: ReplicationLifecycleAdapter) {
         assert!(
+            !self.finalized,
+            "replication registration after reconnect finalization"
+        );
+        assert!(
             !adapter.key.trim().is_empty(),
             "replication lifecycle key must not be empty"
         );
         assert!(
-            adapter.reset.is_some() || adapter.reconnect.is_some(),
+            adapter.reset.is_some() || adapter.reconnect,
             "replication lifecycle '{}' has no reset or reconnect adapter",
             adapter.key
         );
@@ -153,46 +144,6 @@ pub fn reset_registered_replication(world: &mut World) {
     }
 }
 
-/// Build every registered reconnect projection in stable key order.
-pub fn reconnect_registered_replication(world: &mut World, token: &str) -> Vec<ServerMessage> {
-    let projectors: Vec<ReconnectProjection> = world
-        .get_resource::<ReplicationLifecycleRegistry>()
-        .map(|registry| {
-            registry
-                .adapters
-                .values()
-                .filter_map(|adapter| adapter.reconnect)
-                .collect()
-        })
-        .unwrap_or_default();
-
-    projectors
-        .into_iter()
-        .flat_map(|project| project(world, token))
-        .collect()
-}
-
-/// Route every registered reconnect projection to one session as snapshots.
-///
-/// This is the only generic reconnect delivery seam. It knows the target token
-/// and delivery class, but no owner cache types, source components, audience
-/// policies, or `ServerMessage` variants.
-pub fn resync_registered_replication_for_token(world: &mut World, token: &str) {
-    let messages = reconnect_registered_replication(world, token);
-    if messages.is_empty() {
-        return;
-    }
-
-    let target = crate::lobby::Target::Token(token.to_string());
-    world
-        .resource_mut::<crate::server_app::SimOutbox>()
-        .extend_snapshot(
-            messages
-                .into_iter()
-                .map(|message| (target.clone(), message)),
-        );
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -208,37 +159,16 @@ mod tests {
         world.resource_mut::<Trace>().0.push("reset:zulu".into());
     }
 
-    fn reconnect_alpha(world: &mut World, token: &str) -> Vec<ServerMessage> {
-        world
-            .resource_mut::<Trace>()
-            .0
-            .push(format!("reconnect:alpha:{token}"));
-        vec![ServerMessage::GameStarted]
-    }
-
-    fn reconnect_zulu(world: &mut World, token: &str) -> Vec<ServerMessage> {
-        world
-            .resource_mut::<Trace>()
-            .0
-            .push(format!("reconnect:zulu:{token}"));
-        vec![ServerMessage::GameStarted]
-    }
-
     #[test]
-    fn runners_use_key_order_not_registration_order() {
+    fn reset_uses_key_order_not_registration_order() {
         let mut app = App::new();
         app.init_resource::<Trace>();
         app.register_replication_lifecycle(
-            ReplicationLifecycleAdapter::new("zulu")
-                .with_reset(reset_zulu)
-                .with_reconnect(reconnect_zulu),
+            ReplicationLifecycleAdapter::new("zulu").with_reset(reset_zulu),
         );
         app.register_replication_lifecycle(
-            ReplicationLifecycleAdapter::new("alpha")
-                .with_reset(reset_alpha)
-                .with_reconnect(reconnect_alpha),
+            ReplicationLifecycleAdapter::new("alpha").with_reset(reset_alpha),
         );
-
         assert_eq!(
             app.world()
                 .resource::<ReplicationLifecycleRegistry>()
@@ -246,40 +176,37 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["alpha", "zulu"]
         );
-
         reset_registered_replication(app.world_mut());
-        let projections = reconnect_registered_replication(app.world_mut(), "crew-token");
-
-        assert_eq!(projections.len(), 2);
         assert_eq!(
             app.world().resource::<Trace>().0,
-            vec![
-                "reset:alpha",
-                "reset:zulu",
-                "reconnect:alpha:crew-token",
-                "reconnect:zulu:crew-token",
-            ]
+            vec!["reset:alpha", "reset:zulu"]
         );
     }
 
     #[test]
-    fn owners_may_register_only_the_lifecycle_operations_they_have() {
+    fn reset_is_optional_for_a_projection_owner() {
+        use super::super::reconnect::{
+            register_reconnect_projection, ReconnectBatch, ReconnectRequests,
+        };
+        struct ProjectionOwner;
+        fn project(requests: Res<ReconnectRequests>) -> ReconnectBatch {
+            requests.0.iter().map(|_| vec![]).collect()
+        }
         let mut app = App::new();
         app.init_resource::<Trace>();
         app.register_replication_lifecycle(
             ReplicationLifecycleAdapter::new("reset-only").with_reset(reset_alpha),
         );
-        app.register_replication_lifecycle(
-            ReplicationLifecycleAdapter::new("reconnect-only").with_reconnect(reconnect_zulu),
+        register_reconnect_projection::<ProjectionOwner, Res<'static, ReconnectRequests>>(
+            &mut app,
+            "projection-only",
+            |p| project(p.downcast::<Res<ReconnectRequests>>().unwrap()),
         );
-
         reset_registered_replication(app.world_mut());
-        let projections = reconnect_registered_replication(app.world_mut(), "one");
-
-        assert_eq!(projections.len(), 1);
+        assert_eq!(app.world().resource::<Trace>().0, vec!["reset:alpha"]);
         assert_eq!(
-            app.world().resource::<Trace>().0,
-            vec!["reset:alpha", "reconnect:zulu:one"]
+            app.world().resource::<ReplicationLifecycleRegistry>().len(),
+            2
         );
     }
 

@@ -1341,11 +1341,13 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
 
     app.add_systems(
         FixedUpdate,
-        broadcast_blackboard_updates.in_set(crate::sim_sets::SimSet::PublishAggregate),
+        broadcast_blackboard_updates
+            .in_set(crate::sim_sets::SimSet::PublishAggregate)
+            .after(publish_viewscreen_blackboard),
     )
-    .add_systems(
+    .configure_sets(
         FixedUpdate,
-        refresh_caches_on_midgame_reconnect
+        crate::core::broadcast::ReconnectBoundary
             .after(crate::lobby::LobbySystemSet)
             .before(crate::lobby::server::drain_lobby_outbox)
             .before(crate::sim_sets::SimSet::Broadcast),

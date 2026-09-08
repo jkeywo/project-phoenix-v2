@@ -567,7 +567,6 @@ fn test_app() -> App {
                 .after(crate::lobby::LobbySystemSet)
                 .before(broadcast_world_setup_on_start),
             broadcast_world_setup_on_start.after(crate::lobby::LobbySystemSet),
-            refresh_caches_on_midgame_reconnect.after(crate::lobby::LobbySystemSet),
         ),
     )
     .add_systems(
@@ -661,6 +660,14 @@ fn test_app() -> App {
         crate::ship::power::PowerBrownoutState::default(),
     ));
     app.insert_resource(ShipEntity(ship));
+    app.configure_sets(
+        FixedUpdate,
+        crate::core::broadcast::ReconnectBoundary
+            .after(crate::lobby::LobbySystemSet)
+            .before(crate::lobby::server::drain_lobby_outbox)
+            .before(crate::sim_sets::SimSet::Broadcast),
+    );
+    crate::core::broadcast::finalize_reconnect_projections(&mut app);
     app
 }
 

@@ -411,45 +411,62 @@ fn current_shield_status(world: &mut World) -> Option<crate::core::messages::Ser
         .query_filtered::<&ShipShields, With<crate::server_app::LocalShip>>()
         .single(world)
         .ok()?;
-    let facings = shield_facing_statuses(&shields.0.snapshot());
-    let frequency = shields.frequency();
-    Some(crate::core::messages::ServerMessage::ShieldStatus { facings, frequency })
+    Some(shield_status_message(shields))
+}
+
+fn shield_status_message(shields: &ShipShields) -> crate::core::messages::ServerMessage {
+    crate::core::messages::ServerMessage::ShieldStatus {
+        facings: shield_facing_statuses(&shields.0.snapshot()),
+        frequency: shields.frequency(),
+    }
 }
 
 fn register_shields_replication_lifecycle(app: &mut App) {
-    use crate::core::broadcast::{RegisterReplicationLifecycle, ReplicationLifecycleAdapter};
-
-    app.register_replication_lifecycle(
-        ReplicationLifecycleAdapter::new(SHIELDS_REPLICATION_KEY)
-            .with_reconnect(reconnect_shields_projection),
-    );
+    crate::core::broadcast::register_reconnect_projection::<
+        ShieldsReconnect,
+        ShieldsReconnectParams<'static, 'static>,
+    >(app, SHIELDS_REPLICATION_KEY, |params| {
+        let (requests, sessions, configs, shields) = params
+            .downcast::<ShieldsReconnectParams>()
+            .expect("registered owner parameter type");
+        reconnect_shields_projection(requests, sessions, configs, shields)
+    });
 }
 
 /// Project Shields only when `token` is the holder resolved by the same
 /// authored-System audience as the periodic live broadcaster. No cache exists
 /// or is mutated by this one-shot reconnect projection.
+struct ShieldsReconnect;
+type ShieldsReconnectParams<'w, 's> = (
+    Res<'w, crate::core::broadcast::ReconnectRequests>,
+    Option<Res<'w, crate::lobby::Sessions>>,
+    Query<'w, 's, &'static ShipConfigComponent, With<crate::server_app::LocalShip>>,
+    Query<'w, 's, &'static ShipShields, With<crate::server_app::LocalShip>>,
+);
 fn reconnect_shields_projection(
-    world: &mut World,
-    token: &str,
-) -> Vec<crate::core::messages::ServerMessage> {
-    let ship_config = {
-        let mut query =
-            world.query_filtered::<&ShipConfigComponent, With<crate::server_app::LocalShip>>();
-        query.single(world).ok().cloned()
-    };
-    let is_holder = world
-        .get_resource::<crate::lobby::Sessions>()
-        .and_then(|sessions| {
-            shields_status_audience()
-                .resolve(&sessions.0, ship_config.as_ref().map(|config| &config.0))
+    requests: Res<crate::core::broadcast::ReconnectRequests>,
+    sessions: Option<Res<crate::lobby::Sessions>>,
+    configs: Query<&ShipConfigComponent, With<crate::server_app::LocalShip>>,
+    shields: Query<&ShipShields, With<crate::server_app::LocalShip>>,
+) -> crate::core::broadcast::ReconnectBatch {
+    let config = configs.single().ok();
+    requests
+        .0
+        .iter()
+        .map(|token| {
+            let holder = sessions
+                .as_ref()
+                .and_then(|s| shields_status_audience().resolve(&s.0, config.map(|c| &c.0)))
+                .is_some_and(|target| target == crate::lobby::Target::Token(token.clone()));
+            if !holder {
+                return Vec::new();
+            }
+            let Ok(shields) = shields.single() else {
+                return Vec::new();
+            };
+            vec![shield_status_message(shields)]
         })
-        .is_some_and(|target| target == crate::lobby::Target::Token(token.to_string()));
-
-    if !is_holder {
-        return Vec::new();
-    }
-
-    current_shield_status(world).into_iter().collect()
+        .collect()
 }
 
 pub fn shields_state_broadcaster() -> SimBroadcaster {

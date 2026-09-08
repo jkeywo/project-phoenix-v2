@@ -4,7 +4,13 @@ Issue #1400's first slice measures unordered conflicting access in the ordinary
 headless FixedUpdate graph. It does not change execution, RNG streams, minting,
 or declare that conflicting systems commute.
 
-`src/headless/determinism_audit.rs` initializes the schedule without running it.
+`src/headless/determinism_audit.rs` finishes and cleans up ready plugins before
+initializing the schedule, without running Startup or a simulation frame.
+This includes systems registered by ordinary plugin finish hooks. Unready
+plugins are refused without a readiness wait; already cleaned Apps retain their
+current lifecycle state. Graph capture still refuses an initialized schedule
+before a finish hook could dirty it. The `inspection_lifecycle` regressions
+exercise actual late system/resource access and once-only hooks.
 It resolves Bevy's conflict records to full system and component/resource names,
 sorts each pair and the output, and retains repeated same-named instances.
 Exclusive World access has an explicit marker. Existing Bevy ambiguity

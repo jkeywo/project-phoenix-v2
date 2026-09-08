@@ -158,6 +158,55 @@ fn inert_registration_does_not_change_the_actual_census() {
         FixedUpdate,
         inert_registration_probe.in_set(project_phoenix::sim_sets::SimSet::Input),
     );
+    let graph =
+        project_phoenix::headless::determinism_audit::graph::fixed_update_graph(&mut perturbed)
+            .unwrap();
+    let probes: Vec<_> = graph
+        .nodes
+        .iter()
+        .filter(|node| node.kind == "system" && node.name == probe_name)
+        .collect();
+    assert_eq!(
+        probes.len(),
+        1,
+        "the actual inert system must be registered"
+    );
+    let probe = probes[0];
+    assert!(!probe.exclusive && !probe.has_deferred);
+    let reaches = |from: &str, to: &str| {
+        let mut pending = vec![from];
+        let mut seen = std::collections::BTreeSet::new();
+        while let Some(node) = pending.pop() {
+            if node == to {
+                return true;
+            }
+            if seen.insert(node) {
+                pending.extend(
+                    graph
+                        .effective_dependency
+                        .iter()
+                        .filter(|edge| edge[0] == node)
+                        .map(|edge| edge[1].as_str()),
+                );
+            }
+        }
+        false
+    };
+    let mut expected_probe_rows: Vec<_> = graph
+        .nodes
+        .iter()
+        .filter(|node| node.kind == "system" && node.exclusive)
+        .filter(|node| !reaches(&probe.id, &node.id) && !reaches(&node.id, &probe.id))
+        .map(|node| {
+            let mut systems = [probe_name.to_owned(), node.name.clone()];
+            systems.sort();
+            Ambiguity {
+                systems,
+                access: vec!["<exclusive World access>".into()],
+            }
+        })
+        .collect();
+    expected_probe_rows.sort();
     let actual = fixed_update_census(&mut perturbed).unwrap();
     let (probe_rows, production_rows): (Vec<_>, Vec<_>) = actual
         .into_iter()
@@ -165,7 +214,10 @@ fn inert_registration_does_not_change_the_actual_census() {
     // Preserve every production pair, access vector and repeated instance.
     // The production census remains unfiltered; this partition is test-only.
     assert_eq!(production_rows, expected);
-    assert!(!probe_rows.is_empty());
+    // A typed replacement may remove the last unordered exclusive callback.
+    // Compare the exact expected multiset, retaining every actual instance,
+    // rather than requiring that obsolete exclusive access survive forever.
+    assert_eq!(probe_rows, expected_probe_rows);
     for row in probe_rows {
         assert_eq!(row.access, ["<exclusive World access>"]);
         let others: Vec<_> = row
@@ -176,8 +228,8 @@ fn inert_registration_does_not_change_the_actual_census() {
         assert_eq!(others.len(), 1);
         assert!(exclusive_names.contains(others[0]));
     }
-    // Bevy conservatively conflicts even this no-access probe with exclusive
-    // World systems. Adding it changes no production access or ordering.
+    // Bevy conservatively conflicts this no-access probe with unordered
+    // exclusive World systems. Adding it changes no production access or ordering.
     // This digest assertion covers registration/initialization only: neither
     // app has run a mission tick, so it is not a measured simulation proof.
     assert_eq!(
@@ -567,6 +619,151 @@ fn instance_graph_refuses_initialized_schedule_without_forcing_rebuild() {
             .unwrap_err()
             .contains("uninitialized")
     );
+}
+
+mod inspection_lifecycle {
+    use super::*;
+    use bevy::app::PluginsState;
+    use project_phoenix::headless::determinism_audit::graph::fixed_update_graph;
+
+    #[derive(Resource, Default)]
+    struct Hooks {
+        finish: usize,
+        cleanup: usize,
+    }
+    #[derive(Resource, Default)]
+    struct LateAccess(usize);
+    fn existing_writer(mut value: ResMut<LateAccess>) {
+        value.0 += 1;
+    }
+    fn finish_writer(mut value: ResMut<LateAccess>) {
+        value.0 += 1;
+    }
+    fn forbidden_frame() {
+        panic!("inspection must not run Startup or Update");
+    }
+    struct LatePlugin {
+        ready: bool,
+    }
+    impl Plugin for LatePlugin {
+        fn build(&self, app: &mut App) {
+            app.init_resource::<Hooks>()
+                .init_resource::<LateAccess>()
+                .add_systems(Startup, forbidden_frame)
+                .add_systems(Update, forbidden_frame)
+                .add_systems(FixedUpdate, existing_writer);
+        }
+        fn ready(&self, _: &App) -> bool {
+            self.ready
+        }
+        fn finish(&self, app: &mut App) {
+            app.world_mut().resource_mut::<Hooks>().finish += 1;
+            app.add_systems(FixedUpdate, finish_writer);
+        }
+        fn cleanup(&self, app: &mut App) {
+            app.world_mut().resource_mut::<Hooks>().cleanup += 1;
+        }
+    }
+    fn fixture(ready: bool) -> App {
+        let mut app = App::new();
+        app.add_plugins(LatePlugin { ready });
+        app
+    }
+    fn assert_hooks(app: &mut App, finish: usize, cleanup: usize) {
+        let hooks = app.world().resource::<Hooks>();
+        assert_eq!((hooks.finish, hooks.cleanup), (finish, cleanup));
+        assert_eq!(app.world().resource::<LateAccess>().0, 0);
+    }
+    fn assert_late_conflict(rows: &[Ambiguity]) {
+        assert_eq!(rows.len(), 1);
+        let mut names = [
+            std::any::type_name_of_val(&existing_writer).to_owned(),
+            std::any::type_name_of_val(&finish_writer).to_owned(),
+        ];
+        names.sort();
+        assert_eq!(rows[0].systems, names);
+        assert_eq!(rows[0].access, [std::any::type_name::<LateAccess>()]);
+    }
+
+    #[test]
+    fn finish_registered_system_and_access_are_included_without_running_a_frame() {
+        let mut census_app = fixture(true);
+        assert_late_conflict(&fixed_update_census(&mut census_app).unwrap());
+        assert_hooks(&mut census_app, 1, 1);
+
+        let mut graph_app = fixture(true);
+        let graph = fixed_update_graph(&mut graph_app).unwrap();
+        let late = graph
+            .nodes
+            .iter()
+            .filter(|node| {
+                node.kind == "system" && node.name == std::any::type_name_of_val(&finish_writer)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(late.len(), 1);
+        assert!(!late[0].exclusive);
+        assert_eq!(graph.conflicts.len(), 1);
+        assert!(graph.conflicts[0].instances.contains(&late[0].id));
+        assert_eq!(
+            graph.conflicts[0].access,
+            [std::any::type_name::<LateAccess>()]
+        );
+        assert_hooks(&mut graph_app, 1, 1);
+
+        let mut strict_app = fixture(true);
+        assert!(require_unambiguous_fixed_update(&mut strict_app).is_err());
+        assert_hooks(&mut strict_app, 1, 1);
+    }
+
+    #[test]
+    fn finished_and_cleaned_apps_do_not_repeat_plugin_hooks() {
+        let mut app = fixture(true);
+        app.finish();
+        assert_eq!(app.plugins_state(), PluginsState::Finished);
+        assert_late_conflict(&fixed_update_census(&mut app).unwrap());
+        assert_eq!(app.plugins_state(), PluginsState::Cleaned);
+        assert_late_conflict(&fixed_update_census(&mut app).unwrap());
+        assert_hooks(&mut app, 1, 1);
+        assert!(fixed_update_graph(&mut app)
+            .unwrap_err()
+            .contains("uninitialized"));
+        assert_hooks(&mut app, 1, 1);
+    }
+
+    #[test]
+    fn not_ready_plugins_are_refused_without_finish_cleanup_or_frames() {
+        for inspect in [
+            fixed_update_census as fn(&mut App) -> Result<Vec<Ambiguity>, String>,
+            |app| fixed_update_graph(app).map(|_| Vec::new()),
+            |app| require_unambiguous_fixed_update(app).map(|_| Vec::new()),
+        ] {
+            let mut app = fixture(false);
+            assert!(inspect(&mut app).unwrap_err().contains("ready plugins"));
+            assert_eq!(app.plugins_state(), PluginsState::Adding);
+            assert_hooks(&mut app, 0, 0);
+        }
+    }
+
+    #[test]
+    fn already_initialized_graph_is_refused_before_finish_can_dirty_it() {
+        let mut app = fixture(true);
+        app.world_mut()
+            .schedule_scope(FixedUpdate, |world, schedule| {
+                schedule.initialize(world).unwrap();
+            });
+        assert!(fixed_update_graph(&mut app)
+            .unwrap_err()
+            .contains("uninitialized"));
+        assert_hooks(&mut app, 0, 0);
+        assert_eq!(
+            app.get_schedule(FixedUpdate)
+                .unwrap()
+                .systems()
+                .unwrap()
+                .count(),
+            1
+        );
+    }
 }
 
 fn cycle_stream_writer(

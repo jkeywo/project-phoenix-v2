@@ -3,7 +3,7 @@ title: WeaponsPlugin
 type: concept
 tags: [weapons, tactical, phaser, torpedo, blaster, targeting, ai]
 sources: [src/console/weapons/mod.rs, src/console/weapons/server.rs, src/console/weapons/beam.rs, src/console/weapons/torpedo.rs, src/console/weapons/blaster.rs, src/console/weapons/blackboard.rs, src/console/weapons/shared.rs, tests/projectile_ship_traversal.rs, src/console/helm/server.rs, src/weapons/, src/server_app/registration.rs, src/server_app/world_setup.rs, gui/sim-state.js, gui/console-state.js, gui/weapon-cooldown.js, pasm/spec/architecture/weapons.yaml]
-updated: 2026-09-07
+updated: 2026-09-08
 ---
 
 # WeaponsPlugin
@@ -57,11 +57,23 @@ traces across both storage orders and fresh default/default/pinned processes.
 
 Beam processing is phased so read-only shooter/LOS preparation completes before damage and lifetime updates. Torpedo processing similarly builds one target snapshot before advancing every ship's torpedoes. Both paths route shields and hull damage through the shared damage model, publish lifecycle events through `SimOutbox`, and leave the LocalShip present when defeat is latched.
 
+The magazine consumes load claims after that tick's projectile lifecycle. A newly
+reserved round therefore starts with its full authored load time and advances
+on the next tick. `tests/reconnect_snapshot_boundary.rs` checks that boundary
+and the shared 10 Hz Weapons cache while exercising an ordinary load/unload
+and reconnect; a reconnect does not reset that cache.
+
 Weapon reach, arcs, cooldowns, load times, payloads, colours, and AI policy parameters come from entity TOML. `src/server_app/world_setup.rs` projects the selected hull's authored configuration into runtime components/resources; renderer-only beam appearance stays separate from hit authority.
 
 ## Publication
 
 Publish systems build per-system blackboards plus the Tactical radar aggregate. `weapons_update_broadcaster` sends the LocalShip summary at 10 Hz to the projected weapons holder. Client panels render the authored bank/tube ids and arcs from `ShipClientConfig`; they do not own firing state.
+
+Tactical radar sorts its emitted blips and region overlays by UUID. The initial
+world reconciliation and ECS archetype traversal can enumerate the same data
+in different orders; neither order determines the wire payload or keyboard
+cycling order. The publisher's regression reverses both storage sources and
+compares the complete projection.
 
 `gui/sim-state.js` retains the Welcome's Phaser and Blaster bank configuration. `gui/console-state.js` uses `gui/weapon-cooldown.js` to join authored cooldown durations onto live bank states by bank id, separately for each weapon family, before the shared Tactical renderer passes them to the controls. The same helper supplies the bounded remaining-time percentage for both progress bars; the `tactical-weapons-projection` component in `pasm/spec/architecture/weapons.yaml` records the presentation contract.
 

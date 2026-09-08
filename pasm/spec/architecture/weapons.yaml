@@ -6,6 +6,8 @@ entities:
       title: Tactical Fine System Operator
       summary: Applies Tactical authority and availability separately to phaser banks, blaster banks, torpedo tubes, tactical radar, and torpedo magazine rather than treating Tactical as one indestructible system.
       rationale:
+        - "[ai] #1400 orders the magazine claim consumer after the production ProjectileLifecycle instance and after the tube's load-request producer. A newly reserved round retains its full authored load time on that tick and first advances on the following tick. The reconnect fixture checks that boundary and unchanged shared Weapons caches; neither tick duration nor authored loading values change."
+        - "[ai] #1400 sorts Tactical radar blips and region overlays by stable UUID at publication. ECS archetype order and the initial WorldResource reconciliation order cannot determine snapshot bytes or keyboard cycling. The real-publisher regression reverses both storage sources and compares complete projections; objective visibility and all projected values remain owner-scoped."
         - "Issue #781 made each AI-capable phaser and blaster bank resolve its OWN inline stateless open-fire policy-or-idle (per-bank-weapon-policy): a bank observes the authoritative target, readiness, frequency, range, and arc and emits the SAME typed Tactical input a human does (FirePhaser / ChargeBlasterStart) through admission, never spawning attacks or mutating damage directly. The bank is the unit of AI decision — banks are Vec entries, so the resolved policies attach ship-level keyed by bank id — and one idle bank does not disarm another."
     architecture:
       kind: system-operator

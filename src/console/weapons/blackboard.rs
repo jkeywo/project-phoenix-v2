@@ -1150,6 +1150,12 @@ pub(crate) fn publish_tactical_radar_blackboard(
                 .collect();
         }
 
+        // World snapshots and ECS archetypes have independent storage orders.
+        // Stable identities keep unchanged radar data byte-identical across
+        // hosts and prevent spurious Blackboard deltas (#1400).
+        blips.sort_by(|a, b| a.uuid.cmp(&b.uuid));
+        regions.sort_by(|a, b| a.uuid.cmp(&b.uuid));
+
         entity_bbs.0.insert(
             crate::ship::system_registry::tactical_radar_system_id(),
             SystemBlackboard::TacticalRadar(crate::core::messages::TacticalRadarBlackboard {
@@ -1511,6 +1517,71 @@ fn blip_default_color(icon: &str) -> [f32; 3] {
 #[cfg(test)]
 mod lifecycle_tests {
     use super::*;
+
+    #[test]
+    fn tactical_radar_projection_is_independent_of_snapshot_and_ecs_storage_order() {
+        use crate::entities::spawner::EntityUuid;
+        use bevy::ecs::system::RunSystemOnce;
+
+        fn observe(reverse: bool) -> SystemBlackboard {
+            let mut app = App::new();
+            let mut entities: Vec<_> = ["contact-a", "contact-b"]
+                .into_iter()
+                .map(|id| crate::core::messages::EntitySnapshot {
+                    uuid: id.into(),
+                    tags: vec!["ship".into()],
+                    shape: Some("sphere".into()),
+                    radius: Some(if id == "contact-a" { 10.0 } else { 20.0 }),
+                    ..Default::default()
+                })
+                .collect();
+            if reverse {
+                entities.reverse();
+            }
+            for entity in &entities {
+                app.world_mut().spawn((
+                    EntityUuid(entity.uuid.clone()),
+                    Transform::from_xyz(20.0, 0.0, 0.0),
+                ));
+            }
+            app.insert_resource(WorldResource(crate::core::messages::WorldData {
+                entities,
+                ..Default::default()
+            }))
+            .insert_resource(crate::lobby::server::ShipClientConfigResource(
+                crate::core::messages::ShipClientConfig {
+                    tactical_radar_range: 100.0,
+                    tactical_radar_shows: vec!["ship".into()],
+                    ..Default::default()
+                },
+            ));
+            let viewer = app
+                .world_mut()
+                .spawn((
+                    crate::server_app::Ship,
+                    crate::server_app::LocalShip,
+                    crate::server_app::ShipSystemBlackboards::default(),
+                ))
+                .id();
+            app.world_mut()
+                .run_system_once(publish_tactical_radar_blackboard)
+                .unwrap();
+            let board = app
+                .world()
+                .get::<crate::server_app::ShipSystemBlackboards>(viewer)
+                .unwrap()
+                .0[&crate::ship::system_registry::tactical_radar_system_id()]
+                .clone();
+            let SystemBlackboard::TacticalRadar(radar) = &board else {
+                panic!("actual Tactical radar publication")
+            };
+            assert_eq!(radar.blips.len(), 2);
+            assert_eq!(radar.regions.len(), 2);
+            board
+        }
+
+        assert_eq!(observe(false), observe(true));
+    }
 
     #[test]
     fn tactical_objective_annotations_and_regions_use_the_observing_ship_scope() {

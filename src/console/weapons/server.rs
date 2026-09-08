@@ -315,7 +315,8 @@ impl Plugin for WeaponsPlugin {
                     // its own state mutations are seen.
                     handle_torpedo_magazine_inter_system
                         .in_set(crate::sim_sets::SimSet::Physics)
-                        .after(handle_load_tube),
+                        .after(handle_load_tube)
+                        .after(ProjectileLifecycle),
                     // Blaster fire CONSUME (issue #781): reads per-ship
                     // `AdmittedCommands` that both the human (via
                     // `admit_system_commands`) and the AI decider

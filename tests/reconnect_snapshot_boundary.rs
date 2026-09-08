@@ -690,11 +690,39 @@ fn observe_prior_lock_and_live_ammo_on_reconnect() {
         );
         control(app, &system.0, SystemControlPayload::LoadTube);
     }
+    let mut previous_remaining = [None; 2];
     for _ in 0..delay + 3 {
-        for app in &mut apps {
+        for (index, app) in apps.iter_mut().enumerate() {
             step(app);
+            let entity = ship(app);
+            let torpedoes = &app.world().get::<TorpedoSystemResource>(entity).unwrap().0;
+            let tube = torpedoes
+                .tubes
+                .iter()
+                .find(|tube| tube.id == tube_id)
+                .unwrap();
+            if let TubeLoadState::Loading { remaining, total } = tube.load_state {
+                let expected = previous_remaining[index].map_or(tube.load_time, |previous: f32| {
+                    previous - app.world().resource::<Time<Fixed>>().delta_secs()
+                });
+                assert_eq!(total, tube.load_time);
+                assert_eq!(
+                    remaining, expected,
+                    "a reserved round starts after lifecycle and advances next tick"
+                );
+                previous_remaining[index] = Some(remaining);
+            } else {
+                assert!(previous_remaining[index].is_none());
+            }
         }
+        assert_eq!(
+            weapons_source(&mut apps[0]),
+            weapons_source(&mut apps[1]),
+            "reserved loading starts at the same lifecycle boundary"
+        );
+        assert_eq!(caches(&apps[0]), caches(&apps[1]));
     }
+    assert!(previous_remaining.iter().all(Option::is_some));
     for app in &mut apps {
         let entity = ship(app);
         let torp = &app.world().get::<TorpedoSystemResource>(entity).unwrap().0;

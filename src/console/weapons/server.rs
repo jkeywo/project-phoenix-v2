@@ -186,6 +186,7 @@ impl Plugin for WeaponsPlugin {
                     // no ordering in which one clobbers the other, because only one
                     // of them ever produces a command.
                     handle_set_target
+                        .in_set(crate::sim_sets::FixedStep::HandleSetTarget)
                         .in_set(crate::sim_sets::SimSet::Input)
                         .after(ai_target_selection),
                     // Phaser auto-fire DECIDE (issue #846): emits to
@@ -202,6 +203,7 @@ impl Plugin for WeaponsPlugin {
                     // unique instances and opposed full-App orders; expanding a
                     // shared access requires a new proof, not another exemption.
                     ai_phaser_auto_fire
+                        .in_set(crate::sim_sets::FixedStep::AiPhaserAutoFire)
                         .in_set(crate::sim_sets::SimSet::Input)
                         .ambiguous_with(handle_set_target)
                         .ambiguous_with(ai_target_selection)
@@ -221,11 +223,18 @@ impl Plugin for WeaponsPlugin {
                     // nobody re-resolved. Stays in `Input` so it keeps reading
                     // pre-physics `Transform`s, like the other three.
                     tick_weapons_arc_request
+                        .in_set(crate::sim_sets::FixedStep::TickWeaponsArcRequest)
                         .in_set(crate::sim_sets::SimSet::Input)
                         .run_if(crate::ai::cadence::ai_tick_ready),
-                    handle_set_phaser_mode.in_set(crate::sim_sets::SimSet::Input),
-                    handle_set_phaser_frequency.in_set(crate::sim_sets::SimSet::Input),
-                    handle_set_torpedo_volley_target.in_set(crate::sim_sets::SimSet::Input),
+                    handle_set_phaser_mode
+                        .in_set(crate::sim_sets::FixedStep::HandleSetPhaserMode)
+                        .in_set(crate::sim_sets::SimSet::Input),
+                    handle_set_phaser_frequency
+                        .in_set(crate::sim_sets::FixedStep::HandleSetPhaserFrequency)
+                        .in_set(crate::sim_sets::SimSet::Input),
+                    handle_set_torpedo_volley_target
+                        .in_set(crate::sim_sets::FixedStep::HandleSetTorpedoVolleyTarget)
+                        .in_set(crate::sim_sets::SimSet::Input),
                     // Tactical AI target selection (issues #697, #700, #887).
                     //
                     // Stays in `SimSet::Input` — where the pre-split
@@ -238,9 +247,12 @@ impl Plugin for WeaponsPlugin {
                     // `Input` is what makes the lock land pre-physics, on the tick
                     // it was decided, exactly as the direct write used to.
                     ai_target_selection
+                        .in_set(crate::sim_sets::FixedStep::AiTargetSelection)
                         .in_set(crate::sim_sets::SimSet::Input)
                         .run_if(crate::ai::cadence::ai_tick_ready),
-                    tick_npc_auto_match_frequency.in_set(crate::sim_sets::SimSet::Input),
+                    tick_npc_auto_match_frequency
+                        .in_set(crate::sim_sets::FixedStep::TickNpcAutoMatchFrequency)
+                        .in_set(crate::sim_sets::SimSet::Input),
                     // Applies a Sensors frequency hint a backfilled Tactical
                     // consumed off the channel-3 bus last tick (issue #873).
                     // Ordered AFTER the omniscient auto-match so an advisory
@@ -248,6 +260,7 @@ impl Plugin for WeaponsPlugin {
                     // is the modelled information path, the auto-match is the
                     // fallback for a ship with nobody on Sensors at all.
                     apply_tactical_frequency_hint
+                        .in_set(crate::sim_sets::FixedStep::ApplyTacticalFrequencyHint)
                         .in_set(crate::sim_sets::SimSet::Input)
                         .after(tick_npc_auto_match_frequency),
                     receive_tactical_coordination
@@ -258,6 +271,7 @@ impl Plugin for WeaponsPlugin {
                     // with the human path at `handle_fire_blaster` (Physics).
                     // Stays in `Input` so it reads pre-physics `Transform`s.
                     tick_blaster_auto_fire
+                        .in_set(crate::sim_sets::FixedStep::TickBlasterAutoFire)
                         .in_set(crate::sim_sets::SimSet::Input)
                         .ambiguous_with(handle_set_target)
                         .ambiguous_with(ai_target_selection)
@@ -278,23 +292,35 @@ impl Plugin for WeaponsPlugin {
                     // phase, which would make a `SystemTypeSet` ordering
                     // ambiguous and panic at schedule build.
                     (
-                        tick_beams_prepare,
-                        tick_beams_apply_damage,
-                        tick_beams_tick_lifetimes,
+                        tick_beams_prepare.in_set(crate::sim_sets::FixedStep::TickBeamsPrepare),
+                        tick_beams_apply_damage
+                            .in_set(crate::sim_sets::FixedStep::TickBeamsApplyDamage),
+                        tick_beams_tick_lifetimes
+                            .in_set(crate::sim_sets::FixedStep::TickBeamsTickLifetimes),
                     )
                         .chain()
                         .in_set(crate::sim_sets::SimSet::Damage),
-                    handle_blaster_hits.in_set(crate::sim_sets::SimSet::Damage),
+                    handle_blaster_hits
+                        .in_set(crate::sim_sets::FixedStep::HandleBlasterHits)
+                        .in_set(crate::sim_sets::SimSet::Damage),
                     // Weapons fire/load consumers (issue #846): read per-ship
                     // `AdmittedCommands` that the AI deciders (SimSet::Input)
                     // wrote this tick. Running here in Physics means admission's
                     // `clear_before_input` has already run, and the AI deciders
                     // (Input) have already emitted — so commands from either
                     // origin survive the tick.
-                    handle_fire_phaser.in_set(crate::sim_sets::SimSet::Physics),
-                    handle_fire_torpedo.in_set(crate::sim_sets::SimSet::Physics),
-                    handle_load_tube.in_set(crate::sim_sets::SimSet::Physics),
-                    handle_unload_tube.in_set(crate::sim_sets::SimSet::Physics),
+                    handle_fire_phaser
+                        .in_set(crate::sim_sets::FixedStep::HandleFirePhaser)
+                        .in_set(crate::sim_sets::SimSet::Physics),
+                    handle_fire_torpedo
+                        .in_set(crate::sim_sets::FixedStep::HandleFireTorpedo)
+                        .in_set(crate::sim_sets::SimSet::Physics),
+                    handle_load_tube
+                        .in_set(crate::sim_sets::FixedStep::HandleLoadTube)
+                        .in_set(crate::sim_sets::SimSet::Physics),
+                    handle_unload_tube
+                        .in_set(crate::sim_sets::FixedStep::HandleUnloadTube)
+                        .in_set(crate::sim_sets::SimSet::Physics),
                     // Torpedo tick split into two phases (issue #724),
                     // connected by the one-tick `TorpedoTargetSnapshot`
                     // resource: the builder writes it, the lifecycle reads
@@ -303,8 +329,11 @@ impl Plugin for WeaponsPlugin {
                     // chain above: the weapons test harness registers a
                     // second instance of each phase.
                     (
-                        build_torpedo_target_snapshot,
-                        tick_torpedo_lifecycle.in_set(ProjectileLifecycle),
+                        build_torpedo_target_snapshot
+                            .in_set(crate::sim_sets::FixedStep::BuildTorpedoTargetSnapshot),
+                        tick_torpedo_lifecycle
+                            .in_set(crate::sim_sets::FixedStep::TickTorpedoLifecycle)
+                            .in_set(ProjectileLifecycle),
                     )
                         .chain()
                         .in_set(crate::sim_sets::SimSet::Physics),
@@ -314,6 +343,7 @@ impl Plugin for WeaponsPlugin {
                     // build_torpedo_target_snapshot / tick_torpedo_lifecycle so
                     // its own state mutations are seen.
                     handle_torpedo_magazine_inter_system
+                        .in_set(crate::sim_sets::FixedStep::HandleTorpedoMagazineInterSystem)
                         .in_set(crate::sim_sets::SimSet::Physics)
                         .after(handle_load_tube)
                         .after(ProjectileLifecycle),
@@ -325,6 +355,7 @@ impl Plugin for WeaponsPlugin {
                     // armed volley launches the same tick (mirrors the Input →
                     // Physics phaser flow).
                     handle_fire_blaster
+                        .in_set(crate::sim_sets::FixedStep::HandleFireBlaster)
                         .in_set(crate::sim_sets::SimSet::Physics)
                         .before(tick_blaster_system),
                     // #1400's source-bound simultaneous-fire baseline observes
@@ -333,6 +364,7 @@ impl Plugin for WeaponsPlugin {
                     // recoil order. Lifecycle -> ApplyDeferred -> fire already
                     // exists in the initialized graph; do not bypass it.
                     tick_blaster_system
+                        .in_set(crate::sim_sets::FixedStep::TickBlasterSystem)
                         .in_set(crate::sim_sets::SimSet::Physics)
                         .before(ProjectileLifecycle),
                 ),
@@ -343,11 +375,16 @@ impl Plugin for WeaponsPlugin {
                 // disjoint ShipSystemBlackboards keys, so there is no
                 // ordering dependency between them — bare tuple, no chain().
                 (
-                    publish_weapons_core_blackboard,
-                    publish_tactical_radar_blackboard,
-                    publish_phaser_bank_blackboards,
-                    publish_torpedo_tube_blackboards,
-                    publish_torpedo_magazine_blackboard,
+                    publish_weapons_core_blackboard
+                        .in_set(crate::sim_sets::FixedStep::PublishWeaponsCoreBlackboard),
+                    publish_tactical_radar_blackboard
+                        .in_set(crate::sim_sets::FixedStep::PublishTacticalRadarBlackboard),
+                    publish_phaser_bank_blackboards
+                        .in_set(crate::sim_sets::FixedStep::PublishPhaserBankBlackboards),
+                    publish_torpedo_tube_blackboards
+                        .in_set(crate::sim_sets::FixedStep::PublishTorpedoTubeBlackboards),
+                    publish_torpedo_magazine_blackboard
+                        .in_set(crate::sim_sets::FixedStep::PublishTorpedoMagazineBlackboard),
                 )
                     .in_set(crate::sim_sets::SimSet::Publish),
             );

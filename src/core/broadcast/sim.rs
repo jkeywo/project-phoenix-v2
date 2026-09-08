@@ -20,7 +20,9 @@ impl BroadcastKind for Sim {
     fn add_dispatch(app: &mut App) {
         app.add_systems(
             FixedUpdate,
-            dispatch::<Sim>.in_set(crate::sim_sets::SimSet::Broadcast),
+            dispatch::<Sim>
+                .in_set(crate::sim_sets::SimSet::Broadcast)
+                .in_set(crate::sim_sets::FixedStep::SimDispatch),
         );
     }
 }
@@ -31,6 +33,43 @@ impl BroadcastKind for Sim {
 /// producers. Each producer is called at the requested cadence and its output
 /// is routed to the `Target` resolved from the `Audience`.
 pub type SimBroadcaster = Broadcaster<Sim>;
+
+/// Production callback order inside the one simulation dispatch (#1400).
+/// Preserve the canonical composition's wire order even when the owning
+/// plugins register in a different order. This does not order ECS systems.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SimProducer {
+    Repair,
+    Power,
+    Shields,
+    Weapons,
+    SimState,
+    Modifier,
+    Outbox,
+}
+
+impl SimProducer {
+    fn rank(self) -> usize {
+        match self {
+            Self::Repair => 0,
+            Self::Power => 1,
+            Self::Shields => 2,
+            Self::Weapons => 3,
+            Self::SimState => 4,
+            Self::Modifier => 5,
+            Self::Outbox => 6,
+        }
+    }
+}
+
+impl SimBroadcaster {
+    /// Build the registration for one production owner. Its single callback
+    /// keeps its own audience, cadence and message sequence. Duplicate owners
+    /// are refused; unlabelled generic registrations retain insertion order.
+    pub(crate) fn for_producer(owner: SimProducer) -> Self {
+        Self::for_order(owner.rank())
+    }
+}
 
 // ── Tests ──────────────────────────────────────────────────────────────────
 
@@ -174,5 +213,127 @@ mod tests {
             count2, 0,
             "tick 2: expected 0 messages after drain, got {count2}"
         );
+    }
+
+    fn named_producer(owner: SimProducer, cadence: Cadence) -> SimBroadcaster {
+        SimBroadcaster::for_producer(owner).register(Audience::All, cadence, move |world| {
+            world.resource_mut::<Calls>().0.push(owner);
+            vec![ServerMessage::PlayerLeft {
+                token: format!("{owner:?}"),
+            }]
+        })
+    }
+
+    #[derive(Resource, Default)]
+    struct Calls(Vec<SimProducer>);
+
+    fn tokens(messages: &[OutboundMessage]) -> Vec<&str> {
+        messages
+            .iter()
+            .map(|message| {
+                assert_eq!(message.delivery, DeliveryClass::Snapshot);
+                let ServerMessage::PlayerLeft { token } = &message.msg else {
+                    panic!("fixture producers emit their own identity");
+                };
+                token.as_str()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn production_producers_keep_canonical_call_and_delivery_order_when_registered_backwards() {
+        use SimProducer::{
+            Modifier, Outbox as OutboxProducer, Power, Repair, Shields, SimState, Weapons,
+        };
+        let expected = [
+            Repair,
+            Power,
+            Shields,
+            Weapons,
+            SimState,
+            Modifier,
+            OutboxProducer,
+        ];
+        let mut app = dispatch_app(SimBroadcaster::new());
+        app.init_resource::<Calls>();
+        for owner in expected.into_iter().rev() {
+            app.add_plugins(named_producer(owner, Cadence::OnEvent));
+        }
+        for _ in 0..2 {
+            app.world_mut().resource_mut::<Calls>().0.clear();
+            app.world_mut().resource_mut::<Outbox>().0.clear();
+            let messages = tick_and_collect(&mut app);
+            assert_eq!(app.world().resource::<Calls>().0, expected);
+            assert_eq!(
+                tokens(&messages),
+                ["Repair", "Power", "Shields", "Weapons", "SimState", "Modifier", "Outbox"]
+            );
+        }
+    }
+
+    #[test]
+    fn ranked_insertion_keeps_existing_cadence_timers_attached_to_their_producers() {
+        use std::time::Duration;
+        let mut app = dispatch_app(named_producer(
+            SimProducer::Power,
+            Cadence::Period(Duration::from_millis(3)),
+        ));
+        app.init_resource::<Calls>();
+        // Insert on both sides of Power. A timer-index mismatch changes which
+        // real callback runs at one of the following observed millisecond ticks.
+        app.add_plugins(named_producer(SimProducer::Repair, Cadence::Once));
+        app.add_plugins(named_producer(
+            SimProducer::Shields,
+            Cadence::Period(Duration::from_millis(2)),
+        ));
+        for expected in [
+            vec!["Repair"],
+            vec!["Shields"],
+            vec!["Power"],
+            vec!["Shields"],
+            vec![],
+            vec!["Power", "Shields"],
+        ] {
+            app.world_mut().resource_mut::<Outbox>().0.clear();
+            let messages = tick_and_collect(&mut app);
+            assert_eq!(tokens(&messages), expected);
+        }
+    }
+
+    #[test]
+    fn generic_registrations_preserve_insertion_order_across_plugins_and_around_ranked_owners() {
+        let build = || {
+            let first = SimBroadcaster::new()
+                .register(Audience::All, Cadence::OnEvent, |_| {
+                    vec![ServerMessage::PlayerLeft { token: "z".into() }]
+                })
+                .register(Audience::All, Cadence::OnEvent, |_| {
+                    vec![ServerMessage::PlayerLeft { token: "a".into() }]
+                });
+            let mut app = dispatch_app(first);
+            app.add_plugins(SimBroadcaster::new().register(
+                Audience::All,
+                Cadence::OnEvent,
+                |_| vec![ServerMessage::PlayerLeft { token: "m".into() }],
+            ));
+            app
+        };
+        let mut plain = build();
+        let messages = tick_and_collect(&mut plain);
+        assert_eq!(tokens(&messages), ["z", "a", "m"]);
+
+        let mut app = build();
+        app.init_resource::<Calls>();
+        app.add_plugins(named_producer(SimProducer::Power, Cadence::OnEvent));
+        app.add_plugins(named_producer(SimProducer::Repair, Cadence::OnEvent));
+        let messages = tick_and_collect(&mut app);
+        assert_eq!(tokens(&messages), ["Repair", "Power", "z", "a", "m"]);
+    }
+
+    #[test]
+    #[should_panic(expected = "a production broadcast owner must register exactly one producer")]
+    fn duplicate_production_owner_is_refused() {
+        let mut app = dispatch_app(named_producer(SimProducer::Repair, Cadence::OnEvent));
+        app.add_plugins(named_producer(SimProducer::Repair, Cadence::Once));
     }
 }

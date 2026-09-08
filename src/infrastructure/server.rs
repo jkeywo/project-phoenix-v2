@@ -73,7 +73,9 @@ impl Plugin for InfrastructurePlugin {
             );
         app.add_systems(
             FixedUpdate,
-            tick_infrastructure_condition.in_set(crate::sim_sets::SimSet::Modifiers),
+            tick_infrastructure_condition
+                .in_set(crate::sim_sets::FixedStep::TickInfrastructureCondition)
+                .in_set(crate::sim_sets::SimSet::Modifiers),
         );
     }
 }

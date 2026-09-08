@@ -3,7 +3,7 @@ title: Broadcaster Seam
 type: concept
 tags: [broadcast, messages, networking, audience, cadence, delivery-class, snapshot, reliable]
 sources: [src/core/broadcast/, src/server_app/components.rs, src/server_app/broadcast.rs, src/server_app/broadcast_publish.rs, src/console/weapons/blackboard.rs, src/console/weapons/server.rs, src/ship/power.rs, src/ship/shields.rs, src/console/repair/server.rs, src/console/repair/visibility.rs, src/lobby/server.rs, src/debug_overlay.rs]
-updated: 2026-08-28
+updated: 2026-09-08
 ---
 
 # Broadcaster Seam
@@ -28,6 +28,14 @@ messages take the direct `LobbyOutboxPlugin` path described below.
 The system-derived variants require the current `ShipConfig`; they do not infer station identity from a matching string.
 
 `Cadence` supports periodic `Hz`/`Period`, drain-on-every-tick `OnEvent`, and one-shot `Once` producers.
+
+Production simulation factories name a typed `SimProducer` owner through
+`SimBroadcaster::for_producer`. Its explicit order is Repair, Power, Shields,
+Weapons, SimState, Modifier and Outbox, preserving canonical wire delivery even
+when the owning plugins register differently. The registry inserts each entry
+and its cadence timer together and refuses duplicate owners. Generic
+`Broadcaster::new().register(...)` callbacks keep insertion order; when combined
+with typed owners they follow those owners without reordering one another.
 
 ## Simulation publishers
 

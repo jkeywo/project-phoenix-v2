@@ -33,6 +33,36 @@ fn print_fixed_update_census() {
     println!("{}", serde_json::to_string_pretty(&rows).unwrap());
 }
 
+/// Record the built executor's sequence, including its actual deferred barriers.
+/// Graph node ids and registration order are not substitutes for this sequence.
+#[test]
+#[ignore = "explicit executable baseline capture; never changes schedule policy"]
+fn print_fixed_update_execution_order() {
+    let mut app = simulation();
+    let graph =
+        project_phoenix::headless::determinism_audit::graph::fixed_update_graph(&mut app).unwrap();
+    let schedule = app.get_schedule(FixedUpdate).unwrap();
+    assert_eq!(
+        schedule.get_executor_kind(),
+        bevy::ecs::schedule::ExecutorKind::SingleThreaded
+    );
+    let order: Vec<_> = schedule
+        .systems()
+        .unwrap()
+        .map(|(key, _)| {
+            let id = format!("{:?}", bevy::ecs::schedule::NodeId::System(key));
+            graph
+                .nodes
+                .iter()
+                .find(|node| node.kind == "system" && node.id == id)
+                .expect("every executable instance is captured")
+                .clone()
+        })
+        .collect();
+    assert_eq!(order.len(), schedule.systems_len());
+    println!("{}", serde_json::to_string_pretty(&order).unwrap());
+}
+
 #[test]
 fn live_debt_is_a_subset_and_the_allowlist_does_not_grow() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));

@@ -108,11 +108,16 @@ impl Plugin for DemolitionPlugin {
                 // cadence (rule 7), BEFORE the handler consumes the tick, and only
                 // when the shot would be the safe one.
                 operate_demolition_ai
+                    .in_set(crate::sim_sets::FixedStep::OperateDemolitionAi)
                     .in_set(crate::sim_sets::SimSet::Input)
                     .run_if(crate::ai::cadence::ai_tick_ready)
                     .before(handle_demolition_commands),
-                handle_demolition_commands.in_set(crate::sim_sets::SimSet::Input),
-                publish_demolition_blackboard.in_set(crate::sim_sets::SimSet::Publish),
+                handle_demolition_commands
+                    .in_set(crate::sim_sets::FixedStep::HandleDemolitionCommands)
+                    .in_set(crate::sim_sets::SimSet::Input),
+                publish_demolition_blackboard
+                    .in_set(crate::sim_sets::FixedStep::PublishDemolitionBlackboard)
+                    .in_set(crate::sim_sets::SimSet::Publish),
             ),
         );
     }

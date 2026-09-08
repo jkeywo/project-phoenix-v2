@@ -12,7 +12,8 @@
 //! that race.
 //!
 //! #1400's default-pool parent launches the existing duel seed sweep and
-//! Combat Test round-trip as exact tests in fresh child processes. Their
+//! Combat Test round-trip, pending script callback and ordered same-tick callback
+//! restore guards as exact tests in fresh child processes. Their
 //! capture, storage, restore, verification and continuation bounds stay intact;
 //! every ordinary test in this binary retains its pinned configuration.
 //!
@@ -43,6 +44,11 @@ fn default_pool_preserves_snapshot_resume_guards() {
             "a_bounded_combat_test_resumes_with_its_streamed_belts_intact",
             2,
         ),
+        (
+            "a_pending_script_callback_survives_a_resume_and_fires_on_its_own_tick",
+            2,
+        ),
+        ("same_tick_ordered_script_callbacks_survive_a_resume", 2),
     ]);
 }
 
@@ -3606,7 +3612,7 @@ fn scripted_args() -> HeadlessArgs {
         ship_path: "assets/entities/alliance_cruiser.toml".into(),
         max_ticks: 4_000,
         seed: Some(SEED),
-        deterministic: true,
+        deterministic: default_pool::deterministic(),
         ..Default::default()
     }
 }
@@ -3753,6 +3759,134 @@ fn a_pending_script_callback_survives_a_resume_and_fires_on_its_own_tick() {
         world_counter(&resumed, "relief_arrived"),
         "and the live world agrees on how many times it fired"
     );
+    default_pool::observe(&live, SCRIPTED, SEED);
+    default_pool::observe(&resumed, SCRIPTED, SEED);
+}
+
+/// Two callbacks due together have a noncommutative authored effect sequence.
+/// The second reads the first's flag write; only order 12 declares victory.
+#[test]
+fn same_tick_ordered_script_callbacks_survive_a_resume() {
+    use project_phoenix::{core::balance::Outcome, sim_tick::SimTick};
+    const WORLD: &str = "tests/fixtures/worlds/scripted_order_resume.toml";
+    let args = HeadlessArgs {
+        world_path: WORLD.into(),
+        ..scripted_args()
+    };
+    let mut live = boot(&args);
+    step(&mut live, SCRIPT_CAPTURE_AT);
+    let payload = capture(live.world());
+    let digest = world_digest(live.world());
+    let pending = scenario_of(&payload).script_callbacks.clone();
+    assert_eq!(phase_of(&live), GamePhase::InProgress);
+    assert_eq!(
+        pending.len(),
+        2,
+        "both authored callbacks are still pending"
+    );
+    let fire_tick = pending[0].fire_tick;
+    assert!(fire_tick > payload.tick);
+    assert_eq!(pending[1].fire_tick, fire_tick, "one actual due boundary");
+    assert_ne!(
+        (&pending[0].script_path, &pending[0].fn_name),
+        (&pending[1].script_path, &pending[1].fn_name),
+        "distinct stable callback identities"
+    );
+    assert_eq!(pending[0].script_path, pending[1].script_path);
+    for name in ["armed_first", "armed_second"] {
+        assert_eq!(world_counter(&live, name), 1);
+    }
+    for name in ["ordered_effects", "ran_first", "ran_second"] {
+        assert_eq!(world_counter(&live, name), 0);
+    }
+
+    let mut resumed = boot_to_restore_point(&args, &payload);
+    assert_eq!(
+        queued_callbacks(&resumed),
+        0,
+        "fresh bootstrap has not scheduled either callback"
+    );
+    for name in [
+        "armed_first",
+        "armed_second",
+        "ordered_effects",
+        "ran_first",
+        "ran_second",
+    ] {
+        assert_eq!(world_counter(&resumed, name), 0);
+    }
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+    assert_eq!(
+        scenario_of(&capture(resumed.world())).script_callbacks,
+        pending,
+        "restore preserves complete callback identity, order and due tick"
+    );
+    assert_eq!(world_digest(resumed.world()), digest);
+    let mut first_fired = None;
+    for frame in 1..=SCRIPT_CONTINUE_FOR {
+        let before = live.world().resource::<SimTick>().0;
+        assert_eq!(resumed.world().resource::<SimTick>().0, before);
+        live.update();
+        resumed.update();
+        assert_eq!(
+            live.world().resource::<SimTick>().0,
+            before + 1,
+            "one logical step per observed frame"
+        );
+        assert_eq!(resumed.world().resource::<SimTick>().0, before + 1);
+        assert_eq!(
+            world_digest(live.world()),
+            world_digest(resumed.world()),
+            "full continuation frame {frame}"
+        );
+        let should_have_fired = before >= fire_tick;
+        for app in [&live, &resumed] {
+            assert_eq!(world_counter(app, "armed_first"), 1);
+            assert_eq!(world_counter(app, "armed_second"), 1);
+            assert_eq!(
+                world_counter(app, "ran_first"),
+                i64::from(should_have_fired)
+            );
+            assert_eq!(
+                world_counter(app, "ran_second"),
+                i64::from(should_have_fired)
+            );
+            assert_eq!(
+                world_counter(app, "ordered_effects"),
+                if should_have_fired { 12 } else { 0 }
+            );
+            assert_eq!(queued_callbacks(app), if should_have_fired { 0 } else { 2 });
+            if should_have_fired {
+                assert_eq!(phase_of(app), GamePhase::GameOver);
+                assert_eq!(
+                    app.world().resource::<GameOverReason>().1,
+                    Some(Outcome::Victory)
+                );
+            } else {
+                assert_eq!(scenario_of(&capture(app.world())).script_callbacks, pending);
+                assert_ne!(phase_of(app), GamePhase::GameOver);
+            }
+        }
+        if should_have_fired && first_fired.is_none() {
+            assert_eq!(
+                before, fire_tick,
+                "both callbacks fire at the exact saved tick"
+            );
+            first_fired = Some(before);
+        }
+    }
+    assert_eq!(first_fired, Some(fire_tick));
+    for app in [&live, &resumed] {
+        assert!(
+            app.world().resource::<SimTick>().0 > fire_tick + 1,
+            "continuation observes later ticks too, so a replay cannot hide"
+        );
+        assert_eq!(world_counter(app, "ordered_effects"), 12);
+        assert_eq!(queued_callbacks(app), 0);
+    }
+    default_pool::observe(&live, WORLD, SEED);
+    default_pool::observe(&resumed, WORLD, SEED);
 }
 
 /// AC "resumed actions fire once rather than duplicating, disappearing, or

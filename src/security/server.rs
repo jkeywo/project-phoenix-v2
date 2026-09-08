@@ -236,15 +236,22 @@ impl Plugin for SecurityPlugin {
                 // emitting Dispatch / Recall BEFORE `handle_security_commands`
                 // consumes the tick.
                 operate_security_ai
+                    .in_set(crate::sim_sets::FixedStep::OperateSecurityAi)
                     .in_set(crate::sim_sets::SimSet::Input)
                     .run_if(crate::ai::cadence::ai_tick_ready)
                     .before(handle_security_commands),
-                handle_security_commands.in_set(crate::sim_sets::SimSet::Input),
+                handle_security_commands
+                    .in_set(crate::sim_sets::FixedStep::HandleSecurityCommands)
+                    .in_set(crate::sim_sets::SimSet::Input),
                 // The team clock runs in `Modifiers`, after the operators have
                 // moved, so a target that drifted out of reach this tick is seen
                 // to have done so this tick.
-                tick_security_teams.in_set(crate::sim_sets::SimSet::Modifiers),
-                publish_security_blackboard.in_set(crate::sim_sets::SimSet::Publish),
+                tick_security_teams
+                    .in_set(crate::sim_sets::FixedStep::TickSecurityTeams)
+                    .in_set(crate::sim_sets::SimSet::Modifiers),
+                publish_security_blackboard
+                    .in_set(crate::sim_sets::FixedStep::PublishSecurityBlackboard)
+                    .in_set(crate::sim_sets::SimSet::Publish),
             ),
         );
     }

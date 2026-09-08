@@ -1,6 +1,9 @@
 //! #1400: four actual producers / six pairs, without production annotations.
 //! Accepted prefixes exercise ordinary continuation, not network authentication.
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
+mod common;
+#[path = "common/declared_order.rs"]
+mod declared_order;
 use bevy::{ecs::message::MessageCursor, prelude::*};
 use project_phoenix::{
     ai::{cadence::AiSnapshotReady, server::AiHighFidelity},
@@ -15,7 +18,7 @@ use project_phoenix::{
         },
     },
     entities::spawner::{EntitySystemHull, EntityUuid},
-    headless::{build_headless_app, HeadlessArgs},
+    headless::HeadlessArgs,
     lobby::OutboundMessage,
     server_app::{LocalShip, Ship, ShipSystemBlackboards},
     ship::{
@@ -298,7 +301,8 @@ fn four_producers_preserve_prefix_effects_and_consumer_subsequences() {
     let mut reference = None;
     let mut ordinary = None;
     let mut completed = Vec::new();
-    for order in ["ordinary", "forward", "reverse"] {
+    let mut registration_roles = std::collections::BTreeMap::new();
+    for order in ["ordinary", "shuffle-a", "shuffle-b"] {
         for mode in ["default-1", "default-2", "pinned"] {
             let output = std::process::Command::new(std::env::current_exe().unwrap())
                 .args([
@@ -332,6 +336,7 @@ fn four_producers_preserve_prefix_effects_and_consumer_subsequences() {
             assert_eq!(report["schema"], 1);
             assert_eq!(report["seed"], SEED);
             assert_eq!(report["order"], order);
+            declared_order::observe_role(&mut registration_roles, &report["graph"]);
             assert_eq!(report["mode"], mode);
             assert_eq!(report["ships"].as_array().unwrap().len(), 2);
             assert_eq!(report["positive_producers"], 8);
@@ -378,14 +383,16 @@ fn producer_order_child() {
         mode.as_str(),
         "default-1" | "default-2" | "pinned"
     ));
-    let mut app = build_headless_app(&HeadlessArgs {
-        world_path: "assets/worlds/probe_fleet_duel.toml".into(),
-        ship_path: "assets/entities/alliance_cruiser.toml".into(),
-        seed: Some(SEED),
-        deterministic: mode == "pinned",
-        ..Default::default()
-    })
-    .unwrap();
+    let mut app = declared_order::build(
+        HeadlessArgs {
+            world_path: "assets/worlds/probe_fleet_duel.toml".into(),
+            ship_path: "assets/entities/alliance_cruiser.toml".into(),
+            seed: Some(SEED),
+            deterministic: mode == "pinned",
+            ..Default::default()
+        },
+        &order,
+    );
     probes::install(&mut app);
     let proof = graph_proof::install(&mut app, &order);
     let period = sim_tick_period(app.world().resource::<WorldConfig>().global.sim_tick_hz);

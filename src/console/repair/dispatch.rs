@@ -79,10 +79,12 @@ pub fn register_repair_dispatch(app: &mut App) {
         // different slot, a different arrival time and a different on-site
         // visibility projection depending on that edge.
         (
-            handle_dispatch_repair_team,
-            handle_recall_repair_team,
-            handle_set_repair_priority,
-            handle_set_repair_target_priority,
+            handle_dispatch_repair_team
+                .in_set(crate::sim_sets::FixedStep::HandleDispatchRepairTeam),
+            handle_recall_repair_team.in_set(crate::sim_sets::FixedStep::HandleRecallRepairTeam),
+            handle_set_repair_priority.in_set(crate::sim_sets::FixedStep::HandleSetRepairPriority),
+            handle_set_repair_target_priority
+                .in_set(crate::sim_sets::FixedStep::HandleSetRepairTargetPriority),
         )
             .chain()
             .in_set(crate::sim_sets::SimSet::Physics)

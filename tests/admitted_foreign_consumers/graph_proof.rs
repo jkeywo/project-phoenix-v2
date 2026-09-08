@@ -1,4 +1,4 @@
-//! Reuse actual production instances/access metadata; add only empty test ordering sets.
+//! Observe actual production instances and declared order without adding edges.
 use bevy::{
     ecs::{
         component::ComponentId,
@@ -16,7 +16,7 @@ use project_phoenix::headless::determinism_audit::Ambiguity;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
 
@@ -67,26 +67,6 @@ pub fn candidates() -> Vec<Candidate> {
 
 fn selected(pair: &Candidate) -> bool {
     pair.producer == PRODUCER && CONSUMERS.contains(&pair.consumer.as_str())
-}
-
-// These nine historical candidates now have consumer-before-producer paths.
-// The reserved-load edge shares Bevy's existing deferred flush with these
-// Physics producers. Keep the original inventory, and assert the exact new
-// direction rather than treating them as new commutativity permissions.
-fn ordered_by_reserved_load(pair: &Candidate) -> bool {
-    pair.consumer == "project_phoenix::console::weapons::torpedo::handle_load_tube"
-        && [
-            "project_phoenix::console_ai::server::ai_power_allocation",
-            "project_phoenix::console_ai::server::ai_shield_focus",
-            "project_phoenix::console_ai::server::ai_torpedo_auto_fire",
-            "project_phoenix::ship::helm_ai::boost::ai_helm_boost",
-            "project_phoenix::ship::helm_ai::engines::ai_helm_thrust",
-            "project_phoenix::ship::helm_ai::impulse::ai_helm_impulse",
-            "project_phoenix::ship::helm_ai::lateral::ai_helm_lateral_thrust",
-            "project_phoenix::ship::helm_ai::steering::ai_helm_steering",
-            "project_phoenix::ship::helm_ai::vertical::ai_helm_vertical_thrust",
-        ]
-        .contains(&pair.producer.as_str())
 }
 
 fn key(graph: &ScheduleGraph, name: &str) -> SystemKey {
@@ -171,9 +151,6 @@ fn conflict(world: &World, graph: &ScheduleGraph, a: SystemKey, b: SystemKey) ->
     })
 }
 
-#[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
-struct Between(usize);
-
 #[derive(Debug)]
 struct Observe {
     order: String,
@@ -244,31 +221,25 @@ impl ScheduleBuildPass for Observe {
                 ],
                 "a new access invalidates the exact family premise: {pair:?}"
             );
+            let expected = crate::declared_order::before(&pair.producer, &pair.consumer);
+            let (forward, reverse) = (reaches(a, b), reaches(b, a));
+            assert_eq!(
+                (forward, reverse),
+                (expected, !expected),
+                "frozen declared direction: {pair:?}"
+            );
             if selected(pair) {
-                let (forward, reverse) = (reaches(a, b), reaches(b, a));
-                match self.order.as_str() {
-                    "ordinary" => assert!(!forward && !reverse),
-                    "producer-first" => assert!(forward && !reverse),
-                    "consumer-first" => assert!(!forward && reverse),
-                    _ => unreachable!(),
-                }
-                coverage.push(json!({"pair":pair,"raw":raw,"incompatible":true,
-                    "producer_before":forward,"consumer_before":reverse}));
-            } else if ordered_by_reserved_load(pair) {
-                assert!(
-                    reaches(b, a) && !reaches(a, b),
-                    "reserved-load baseline direction must remain: {pair:?}"
-                );
-                ordered.push(json!({"pair":pair,"raw":raw,"consumer_before_producer":true}));
-            } else if self.order == "ordinary" {
-                assert!(
-                    !reaches(a, b) && !reaches(b, a),
-                    "reconcile changed candidate paths explicitly: {pair:?}"
-                );
+                coverage.push(json!({"pair":pair,"raw":raw,"incompatible":true,"producer_before":forward,"consumer_before":reverse}));
+            } else {
+                ordered.push(json!({"pair":pair,"raw":raw,"producer_before":forward,"consumer_before":reverse}));
             }
         }
-        assert_eq!(coverage.len(), 5, "initial behavioral tranche only");
-        assert_eq!(ordered.len(), 9, "exact reviewed reserved-load graph delta");
+        assert_eq!(coverage.len(), 5);
+        assert_eq!(
+            ordered.len(),
+            270,
+            "graph coverage does not claim behavioral coverage"
+        );
         let selected_keys: HashSet<_> = std::iter::once(PRODUCER)
             .chain(CONSUMERS)
             .map(|name| key(graph, name))
@@ -297,17 +268,14 @@ impl ScheduleBuildPass for Observe {
         );
         *self.result.lock().unwrap() = Some(json!({"order":self.order,
             "authorized_candidates":275,"behavioral_tranche":coverage,"uncovered":pairs.into_iter().filter(|p|!selected(p)).collect::<Vec<_>>(),
-            "ordered_candidates":ordered,"raw_external":raw_external,"existing_paths":paths}));
+            "ordered_candidates":ordered,"raw_external":raw_external,"existing_paths":paths,"graph":crate::declared_order::capture(graph,dag,&self.order)}));
         Ok(())
     }
 }
 
 pub struct Proof(Arc<Mutex<Option<Value>>>);
 pub fn install(app: &mut App, order: &str) -> Proof {
-    assert!(matches!(
-        order,
-        "ordinary" | "producer-first" | "consumer-first"
-    ));
+    assert!(matches!(order, "ordinary" | "shuffle-a" | "shuffle-b"));
     let result = Arc::new(Mutex::new(None));
     app.world_mut().schedule_scope(FixedUpdate, |_, schedule| {
         assert!(
@@ -320,17 +288,8 @@ pub fn install(app: &mut App, order: &str) -> Proof {
             .iter()
             .map(|name| type_set(graph, key(graph, name)))
             .collect();
-        for (index, consumer) in consumers.into_iter().enumerate() {
-            match order {
-                "producer-first" => {
-                    schedule.configure_sets(Between(index).after(producer).before(consumer));
-                }
-                "consumer-first" => {
-                    schedule.configure_sets(Between(index).after(consumer).before(producer));
-                }
-                _ => {}
-            }
-        }
+        assert_eq!(consumers.len(), 5);
+        let _ = producer;
         schedule.add_build_pass(Observe {
             order: order.to_owned(),
             result: result.clone(),
@@ -372,9 +331,8 @@ impl Proof {
                 for row in result["behavioral_tranche"].as_array().unwrap() {
                     let count = debt.iter().filter(|d| json!(d) == row["raw"]).count();
                     assert_eq!(
-                        count,
-                        usize::from(result["order"] == "ordinary"),
-                        "no production annotation is added by this baseline fixture"
+                        count, 0,
+                        "declared production order resolves this exact raw conflict"
                     );
                 }
                 result["reported_debt"] = json!(debt);
@@ -389,18 +347,5 @@ pub fn assert_preserved(ordinary: &Value, forced: &Value) {
         ordinary["raw_external"], forced["raw_external"],
         "every external raw vector and duplicate remains declared"
     );
-    fn multiset(value: &Value) -> BTreeMap<String, usize> {
-        let mut counts = BTreeMap::new();
-        for row in value.as_array().unwrap() {
-            *counts.entry(row.to_string()).or_default() += 1;
-        }
-        counts
-    }
-    let paths = multiset(&forced["existing_paths"]);
-    for (path, count) in multiset(&ordinary["existing_paths"]) {
-        assert!(
-            paths.get(&path).copied().unwrap_or_default() >= count,
-            "existing effective path disappeared: {path}"
-        );
-    }
+    crate::declared_order::assert_graph(&ordinary["graph"], &forced["graph"]);
 }

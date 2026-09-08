@@ -1,0 +1,37 @@
+# #1400 test-only ordered deferred effects across snapshot restore.
+# Preserve ordinary60Hz and shipped cruiser data. Two timer handlers schedule
+# distinct callbacks at the same due tick; only first-then-second yields12.
+[global]
+seed = 864
+ai_helm_tick_hz = 30.0
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+[script]
+setup = """
+on_timer(1, "arm_first");
+on_timer(1, "arm_second");
+fn arm_first(ctx) {
+    ctx.flags.increment("armed_first", 1);
+    ctx.schedule.after(4, |ctx| {
+        ctx.flags.increment("ran_first", 1);
+        ctx.flags.ordered_effects = 1;
+    });
+}
+fn arm_second(ctx) {
+    ctx.flags.increment("armed_second", 1);
+    ctx.schedule.after(4, |ctx| {
+        ctx.flags.increment("ran_second", 1);
+        ctx.flags.ordered_effects = ctx.flags.ordered_effects * 10 + 2;
+        if ctx.flags.ordered_effects == 12 {
+            ctx.effects.game_over("", "victory");
+        } else {
+            ctx.effects.game_over("", "defeat");
+        }
+    });
+}
+"""

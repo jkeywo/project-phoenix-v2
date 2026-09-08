@@ -931,12 +931,18 @@ pub fn register_external_repair(app: &mut App) {
             // AI cadence (rule 7), emitting Dispatch / Recall BEFORE
             // `handle_external_repair_commands` consumes the tick.
             operate_external_repair_ai
+                .in_set(crate::sim_sets::FixedStep::OperateExternalRepairAi)
                 .in_set(crate::sim_sets::SimSet::Input)
                 .run_if(crate::ai::cadence::ai_tick_ready)
                 .before(handle_external_repair_commands),
-            handle_external_repair_commands.in_set(crate::sim_sets::SimSet::Input),
-            tick_external_repair.in_set(crate::sim_sets::SimSet::Modifiers),
+            handle_external_repair_commands
+                .in_set(crate::sim_sets::FixedStep::HandleExternalRepairCommands)
+                .in_set(crate::sim_sets::SimSet::Input),
+            tick_external_repair
+                .in_set(crate::sim_sets::FixedStep::TickExternalRepair)
+                .in_set(crate::sim_sets::SimSet::Modifiers),
             apply_external_repair
+                .in_set(crate::sim_sets::FixedStep::ApplyExternalRepair)
                 .in_set(crate::sim_sets::SimSet::Modifiers)
                 .after(tick_external_repair)
                 .before(crate::infrastructure::tick_infrastructure_condition),

@@ -42,7 +42,6 @@ fn test_app() -> App {
     .init_resource::<SimOutbox>()
     .init_resource::<Outbox>()
     .add_plugins(RepairPlugin)
-    .add_plugins(repair_state_broadcaster())
     .add_systems(PostUpdate, collect);
     // One fixed step per update, 200 ms of sim time each (issue #895), so
     // the Hz-based repair broadcast timer fires within a single harness

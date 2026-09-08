@@ -251,6 +251,7 @@ pub fn add_simulation_plugins(app: &mut App) {
 
 /// [`add_simulation_plugins`] with explicit control over the optional slices.
 pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
+    crate::sim_sets::configure_fixed_order(app);
     // The logical simulation tick (issue #895). The whole `SimSet` chain lives
     // in `FixedUpdate`, so the simulation advances zero or more whole steps per
     // rendered frame on the `[global] sim_tick_hz` clock rather than once per
@@ -1079,7 +1080,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         // per transition — inherently unconditional, no per-`next_state.set` taps.
         // In the fixed schedule so its events land in tick order with the rest of
         // the balance stream.
-        .add_systems(FixedUpdate, emit_phase_change_balance_events)
+        .add_systems(FixedUpdate, emit_phase_change_balance_events.in_set(crate::sim_sets::FixedStep::EmitPhaseChangeBalanceEvents))
         // The authored mission timeline (issue #1338). Chained and ordered after
         // `SimSet::Broadcast` — the last set of the tick — so every emitter sees
         // the state this tick finished with: the Objective the trigger pipeline
@@ -1091,8 +1092,8 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         .add_systems(
             FixedUpdate,
             (
-                crate::narrative::emit_scenario_narrative,
-                crate::narrative::emit_authored_and_marked_entity_narrative,
+                crate::narrative::emit_scenario_narrative.in_set(crate::sim_sets::FixedStep::EmitScenarioNarrative),
+                crate::narrative::emit_authored_and_marked_entity_narrative.in_set(crate::sim_sets::FixedStep::EmitAuthoredAndMarkedEntityNarrative),
                 // The ship's-computer message (issue #1342): applies this
                 // tick's `show_message(..)` requests, checks the active
                 // message's simulation-time expiry, and emits the
@@ -1129,7 +1130,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         .insert_resource(GameOverReason(None, None))
         .add_systems(
             FixedUpdate,
-            (reconcile_runtime_entities, broadcast_world_setup_on_start)
+            (reconcile_runtime_entities.in_set(crate::sim_sets::FixedStep::ReconcileRuntimeEntities), broadcast_world_setup_on_start.in_set(crate::sim_sets::FixedStep::BroadcastWorldSetupOnStart))
                 .chain()
                 .after(crate::lobby::LobbySystemSet)
                 .before(crate::sim_sets::SimSet::Input),
@@ -1184,7 +1185,9 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     }
     app.add_systems(
         FixedUpdate,
-        apply_god_mode_toggle.in_set(crate::sim_sets::SimSet::Input),
+        apply_god_mode_toggle
+            .in_set(crate::sim_sets::FixedStep::ApplyGodModeToggle)
+            .in_set(crate::sim_sets::SimSet::Input),
     );
 
     // Crew-rating replication across the fleet (issue #1119): the same ownerless
@@ -1220,6 +1223,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 .before(crate::command_admission::AdmissionSet),
             // Applies the admitted command on every peer's copy of the ship.
             crate::lobby::crew_replication::apply_assigned_station_rating
+                .in_set(crate::sim_sets::FixedStep::ApplyAssignedStationRating)
                 .in_set(crate::sim_sets::SimSet::Input),
         ),
     );
@@ -1342,6 +1346,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     app.add_systems(
         FixedUpdate,
         broadcast_blackboard_updates
+            .in_set(crate::sim_sets::FixedStep::BroadcastBlackboardUpdates)
             .in_set(crate::sim_sets::SimSet::PublishAggregate)
             .after(publish_viewscreen_blackboard),
     )
@@ -1355,31 +1360,38 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     .add_systems(
         FixedUpdate,
         (
-            handle_collisions.in_set(crate::sim_sets::SimSet::Damage),
-            sim_processing_anchor,
+            handle_collisions
+                .in_set(crate::sim_sets::FixedStep::HandleCollisions)
+                .in_set(crate::sim_sets::SimSet::Damage),
+            sim_processing_anchor.in_set(crate::sim_sets::FixedStep::SimProcessingAnchor),
         )
             .after(crate::lobby::LobbySystemSet),
     )
     .add_systems(
         FixedUpdate,
         crate::modifiers::coordination::translate_power_modifiers
+            .in_set(crate::sim_sets::FixedStep::TranslatePowerModifiers)
             .in_set(crate::sim_sets::SimSet::Modifiers),
     )
     .add_systems(
         FixedUpdate,
         crate::modifiers::coordination::translate_impulse_modifiers
+            .in_set(crate::sim_sets::FixedStep::TranslateImpulseModifiers)
             .in_set(crate::sim_sets::SimSet::Modifiers),
     )
     .add_systems(
         FixedUpdate,
         crate::modifiers::coordination::apply_radar_damage_modifiers
+            .in_set(crate::sim_sets::FixedStep::ApplyRadarDamageModifiers)
             .in_set(crate::sim_sets::SimSet::Modifiers),
     )
     .add_systems(
         FixedUpdate,
         (
-            clear_last_attacker_on_death,
-            clear_last_attacker_on_red_alert_off,
+            clear_last_attacker_on_death
+                .in_set(crate::sim_sets::FixedStep::ClearLastAttackerOnDeath),
+            clear_last_attacker_on_red_alert_off
+                .in_set(crate::sim_sets::FixedStep::ClearLastAttackerOnRedAlertOff),
             // `publish_viewscreen_blackboard` (LocalShip) and
             // `aggregate_doctrine_blackboards` (BehaviourSection) both write the
             // SAME viewscreen blackboard entry, and after #842 the game-start
@@ -1389,7 +1401,9 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             // developing combat). Pin the LocalShip writer to run *after* the
             // doctrine writer so it can MERGE the two objective pools (scenario ∪
             // template doctrine) instead of one silently erasing the other.
-            publish_viewscreen_blackboard.after(crate::ai::server::aggregate_doctrine_blackboards),
+            publish_viewscreen_blackboard
+                .in_set(crate::sim_sets::FixedStep::PublishViewscreenBlackboard)
+                .after(crate::ai::server::aggregate_doctrine_blackboards),
         )
             .in_set(crate::sim_sets::SimSet::PublishAggregate),
     )

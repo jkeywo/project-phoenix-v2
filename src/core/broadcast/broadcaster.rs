@@ -62,6 +62,9 @@ pub struct BroadcastRegistry<M: BroadcastKind> {
     pub registrations: Vec<Registration>,
     /// Per-registration cadence timers (index-matched to `registrations`).
     pub timers: Vec<Option<Timer>>,
+    /// Explicit production ranks, index-matched to entries and timers. Generic
+    /// registrations have no rank and retain insertion order after ranked ones.
+    orders: Vec<Option<usize>>,
     _marker: PhantomData<M>,
 }
 
@@ -70,14 +73,31 @@ impl<M: BroadcastKind> BroadcastRegistry<M> {
         Self {
             registrations: Vec::new(),
             timers: Vec::new(),
+            orders: Vec::new(),
             _marker: PhantomData,
         }
     }
 
-    fn add(&mut self, reg: Registration) {
+    fn add(&mut self, reg: Registration, order: Option<usize>) {
         let timer = cadence_timer(&reg.cadence);
-        self.registrations.push(reg);
-        self.timers.push(timer);
+        let at = match order {
+            Some(rank) => {
+                assert!(
+                    !self.orders.contains(&Some(rank)),
+                    "a production broadcast owner must register exactly one producer"
+                );
+                self.orders
+                    .iter()
+                    .position(|other| other.is_none_or(|other| other > rank))
+                    .unwrap_or(self.orders.len())
+            }
+            None => self.orders.len(),
+        };
+        // Inserting all three together keeps every timer attached to its owner,
+        // including when a later plugin inserts before an existing producer.
+        self.registrations.insert(at, reg);
+        self.timers.insert(at, timer);
+        self.orders.insert(at, order);
     }
 }
 
@@ -108,6 +128,7 @@ pub(crate) fn cadence_timer(cadence: &Cadence) -> Option<Timer> {
 /// is routed to the `Target` resolved from the `Audience`.
 pub struct Broadcaster<M: BroadcastKind> {
     pending: Vec<Registration>,
+    order: Option<usize>,
     _marker: PhantomData<M>,
 }
 
@@ -121,7 +142,17 @@ impl<M: BroadcastKind> Broadcaster<M> {
     pub fn new() -> Self {
         Self {
             pending: Vec::new(),
+            order: None,
             _marker: PhantomData,
+        }
+    }
+
+    /// Internal mechanism for a phase's typed production-owner constructor.
+    /// Generic callers keep `new().register(..)` and insertion order.
+    pub(super) fn for_order(order: usize) -> Self {
+        Self {
+            order: Some(order),
+            ..Self::new()
         }
     }
 
@@ -170,11 +201,14 @@ impl<M: BroadcastKind> Plugin for Broadcaster<M> {
         }
         let mut registry = app.world_mut().resource_mut::<BroadcastRegistry<M>>();
         for reg in &self.pending {
-            registry.add(Registration {
-                audience: reg.audience.clone(),
-                cadence: reg.cadence.clone(),
-                producer: reg.producer.clone(),
-            });
+            registry.add(
+                Registration {
+                    audience: reg.audience.clone(),
+                    cadence: reg.cadence.clone(),
+                    producer: reg.producer.clone(),
+                },
+                self.order,
+            );
         }
     }
 }

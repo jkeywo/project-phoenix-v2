@@ -1,4 +1,4 @@
-//! #1400 Tactical baseline plus opposed test-local orders of the same systems.
+//! #1400 Tactical behavior under declared order and actual registration changes.
 //! No simulation observer systems, cadence overrides, or digest fixtures.
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 
@@ -17,7 +17,7 @@ use project_phoenix::{
         },
     },
     entities::spawner::{EntitySystemHull, EntityUuid, FactionComponent},
-    headless::{build_headless_app, HeadlessArgs},
+    headless::HeadlessArgs,
     lobby::{server::InboundMessage, Sessions},
     server_app::{LocalShip, Ship, ShipSystemBlackboards},
     ship::{
@@ -30,6 +30,10 @@ use project_phoenix::{
     sim_tick::SimTick,
 };
 use serde_json::{json, Value};
+
+mod common;
+#[path = "common/declared_order.rs"]
+mod declared_order;
 
 #[path = "tactical_target_ordering/order_proof.rs"]
 mod order_proof;
@@ -241,7 +245,8 @@ fn tactical_target_baseline_child() {
         max_ticks: 600,
         ..Default::default()
     };
-    let mut app = build_headless_app(&args).expect("ordinary headless app");
+    let order = std::env::var("PHOENIX_TACTICAL_TEST_ORDER").unwrap_or_else(|_| "ordinary".into());
+    let mut app = declared_order::build(args, &order);
     let period = project_phoenix::sim_tick::sim_tick_period(
         app.world()
             .resource::<project_phoenix::world::config::WorldConfig>()
@@ -251,7 +256,6 @@ fn tactical_target_baseline_child() {
     app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(period));
     app.finish();
     app.cleanup();
-    let order = std::env::var("PHOENIX_TACTICAL_TEST_ORDER").unwrap_or_else(|_| "ordinary".into());
     let proof = order_proof::install(&mut app, &order);
     assert_eq!(
         app.world()
@@ -498,7 +502,7 @@ fn tactical_target_baseline_child() {
     // its timeline in the parent's captured stdout as well as its exit status.
     println!(
         "\n{PREFIX}{}",
-        json!({"schema":1,"role":role,"case":case,"world":WORLD,"hull":HULL,"seed":140013,"shooter":shooter,"compute_threads":threads,"fixed_update_executor":format!("{:?}",app.get_schedule(FixedUpdate).unwrap().get_executor_kind()),"transition_tick":transition_tick,"death_tick":death_tick,"reacquired_tick":reacquired_tick,"ticks":ticks,"orders":orders,"order_proof":order_proof})
+        json!({"schema":1,"process":std::process::id(),"role":role,"case":case,"world":WORLD,"hull":HULL,"seed":140013,"shooter":shooter,"compute_threads":threads,"fixed_update_executor":format!("{:?}",app.get_schedule(FixedUpdate).unwrap().get_executor_kind()),"transition_tick":transition_tick,"death_tick":death_tick,"reacquired_tick":reacquired_tick,"ticks":ticks,"orders":orders,"order_proof":order_proof})
     );
     if case == "death-reacquire" {
         assert!(

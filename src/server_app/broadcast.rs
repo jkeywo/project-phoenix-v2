@@ -17,6 +17,7 @@
 //! before splitting — so this is a real seam, not an arbitrary line cut.
 
 use super::*;
+use crate::core::broadcast::sim::SimProducer;
 
 /// Stable lifecycle key for the `SimState` entity position/health delta pair.
 pub(crate) const ENTITY_STATE_REPLICATION_KEY: &str = "entity-state";
@@ -95,7 +96,8 @@ pub(crate) fn prune_entity_replication_caches(
 /// Broadcasts `SimState` at 10 Hz to all players (`Audience::All`).
 /// Registered by [`add_simulation_plugins`] and the test harness in `test_app()`.
 pub fn sim_state_broadcaster() -> SimBroadcaster {
-    SimBroadcaster::new().register(Audience::All, Cadence::Hz(10.0), |world: &mut World| {
+    let broadcaster = SimBroadcaster::for_producer(SimProducer::SimState);
+    broadcaster.register(Audience::All, Cadence::Hz(10.0), |world: &mut World| {
         let entity_states = build_sim_state_entity_states(world);
         let station_hosts = build_station_host_snapshots(world);
         let station_health = build_station_health_snapshots(world);

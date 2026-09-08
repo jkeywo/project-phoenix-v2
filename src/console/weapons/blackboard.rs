@@ -1,3 +1,4 @@
+use crate::core::broadcast::sim::SimProducer;
 use crate::simmath;
 use bevy::prelude::*;
 
@@ -515,7 +516,7 @@ fn weapons_update_message(current: LastWeaponsUpdate) -> ServerMessage {
 }
 
 pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
-    crate::core::broadcast::SimBroadcaster::new().register(
+    crate::core::broadcast::SimBroadcaster::for_producer(SimProducer::Weapons).register(
         crate::core::broadcast::Audience::HoldingWeapons,
         crate::core::broadcast::Cadence::Hz(10.0),
         |world: &mut World| {

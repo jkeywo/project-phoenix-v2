@@ -153,13 +153,16 @@ impl Plugin for CommandPlugin {
                 // every consumer below (and the removal reconcile in particular)
                 // reads this tick's active contributions (issue #1110).
                 project_active_objective_stances
+                    .in_set(crate::sim_sets::FixedStep::ProjectActiveObjectiveStances)
                     .in_set(crate::sim_sets::SimSet::Input)
                     .before(reconcile_station_stances),
                 // A stored id no longer in the effective catalogue — a hull
                 // change, or an objective-contributed stance whose objective just
                 // ended (#1110) — is dropped FIRST, so the input handlers below
                 // never act on a stale selection (issue #1108 criterion 4).
-                reconcile_station_stances.in_set(crate::sim_sets::SimSet::Input),
+                reconcile_station_stances
+                    .in_set(crate::sim_sets::FixedStep::ReconcileStationStances)
+                    .in_set(crate::sim_sets::SimSet::Input),
                 // An uncrewed Command seat chooses a stance through ordinary AI
                 // (issue #1109). It runs AFTER the catalogue reconcile (so it
                 // never picks a stale id) and BEFORE the applier (so its emitted
@@ -175,6 +178,7 @@ impl Plugin for CommandPlugin {
                 // stance for a whole `ai_snapshot_hz` period — an authoritative
                 // difference that moves the digest (issue #1346).
                 operate_command_ai
+                    .in_set(crate::sim_sets::FixedStep::OperateCommandAi)
                     .in_set(crate::sim_sets::SimSet::Input)
                     .after(reconcile_station_stances)
                     .after(crate::sim_sets::RedAlertApplied)
@@ -182,6 +186,7 @@ impl Plugin for CommandPlugin {
                     .run_if(crate::ai::cadence::ai_snapshot_ready),
                 // A human Command operator's stance pick lands next…
                 handle_set_station_stance
+                    .in_set(crate::sim_sets::FixedStep::HandleSetStationStance)
                     .in_set(crate::sim_sets::SimSet::Input)
                     .after(reconcile_station_stances),
                 // …then the alert-level neutral-to-neutral switch runs, so a
@@ -194,6 +199,7 @@ impl Plugin for CommandPlugin {
                 // defers it a tick, which is the same digest-visible difference
                 // by a quieter route.
                 apply_alert_change_to_stances
+                    .in_set(crate::sim_sets::FixedStep::ApplyAlertChangeToStances)
                     .in_set(crate::sim_sets::SimSet::Input)
                     .after(handle_set_station_stance)
                     .after(crate::sim_sets::RedAlertApplied),
@@ -203,9 +209,12 @@ impl Plugin for CommandPlugin {
                 // alert-neutral. Runs EVERY tick (not cadence-gated) so no
                 // control-source edge is missed.
                 reconcile_directed_target_control
+                    .in_set(crate::sim_sets::FixedStep::ReconcileDirectedTargetControl)
                     .in_set(crate::sim_sets::SimSet::Input)
                     .after(apply_alert_change_to_stances),
-                publish_command_blackboard.in_set(crate::sim_sets::SimSet::Publish),
+                publish_command_blackboard
+                    .in_set(crate::sim_sets::FixedStep::PublishCommandBlackboard)
+                    .in_set(crate::sim_sets::SimSet::Publish),
             ),
         );
     }

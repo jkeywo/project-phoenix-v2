@@ -2,7 +2,7 @@
 title: Testing Strategy
 type: concept
 tags: [tests, rust, javascript, playwright, pasm, ci]
-sources: [AGENTS.md, .github/workflows/ci.yml, tests/client/, tests/smoke/, tests/headless_runner.rs, src/core/codec_tests.rs, scripts/prepare-gm-live-event.mjs, docs/acceptance/1320-gm-live-event.md, src/perf/phase.rs, src/perf/phase_trace.rs, src/headless/app.rs, src/bin/phoenix_headless.rs, tests/phase_profiling.rs, docs/phase-timing-reduction.md, tests/common/default_pool.rs, docs/default-pool-perturbations.md, src/server_app/components.rs, tests/admitted_producer_ordering.rs]
+sources: [AGENTS.md, .github/workflows/ci.yml, tests/client/, tests/smoke/, tests/headless_runner.rs, src/core/codec_tests.rs, scripts/prepare-gm-live-event.mjs, docs/acceptance/1320-gm-live-event.md, src/perf/phase.rs, src/perf/phase_trace.rs, src/headless/app.rs, src/bin/phoenix_headless.rs, tests/phase_profiling.rs, docs/phase-timing-reduction.md, tests/common/default_pool.rs, docs/default-pool-perturbations.md, src/server_app/components.rs, src/sim_sets/order.rs, src/sim_sets/order/pass.rs, tests/fixed_update_ambiguities.rs, tests/pool_equivalence.rs, tests/admitted_producer_ordering.rs, tests/captain_sensors_ordering.rs, tests/tactical_target_ordering.rs, tests/snapshot_resume.rs, tests/fixtures/worlds/scripted_order_resume.toml, docs/script-callback-order-proof.md, docs/declared-fixed-order.md, pasm/spec/architecture/deterministic-simulation.yaml]
 updated: 2026-09-08
 ---
 
@@ -37,18 +37,31 @@ The archetype-order, schedule-order, registration-order and snapshot-resume
 binaries retain their pinned guards and add `default_pool_` parents for #1400.
 `tests/common/default_pool.rs` runs exact original guards in fresh child
 processes, checking actual compute-worker count, executor, seed, tick and
-authoritative digest. The focused post-split run passed these default-pool
-and retained pinned guards. Scope, continuation limits and the targeted command
+authoritative digest. `tests/pool_equivalence.rs` compares the mission's full
+frame/tick digest sequence across two default processes and one pinned process.
+Scope, continuation limits and the targeted command
 are in [Default-pool perturbations](../../docs/default-pool-perturbations.md).
 
-`tests/admitted_producer_ordering.rs` exercises four actual NPC command producers
-(Power, Shields, Navigation and Repair) and their six pairwise conflicts. Nine
-fresh processes cover ordinary and both forced orders under default and pinned
-pools. All nine 380-tick gameplay traces matched. The fixture also checks actual
-foreign-prefix responses, consumer effects, repair travel/work and preserved
-production ordering/deferred visibility from the live graph. Its bounded
-coverage and reproduced command are in
-[Four admitted-command producers](../../docs/admitted-producer-six-proof.md).
+The Tactical, publisher, admitted-producer, foreign-consumer and Captain/Sensors proof
+binaries vary actual plugin registration order under default and pinned pools.
+They check the declared production order alongside complete gameplay, wire,
+refusal, control-tenure and RNG/mint observations. Their graph checks retain
+duplicate system registrations and compare full access and membership metadata.
+Earlier opposed-order commutation receipts describe the pre-declaration source;
+the current fixtures preserve the explicit order while perturbing registration.
+See [Tactical ordering](../../docs/fixed-update-ambiguity-audit.md),
+[Publishers](../../docs/publisher-order-proof.md),
+[four admitted producers](../../docs/admitted-producer-six-proof.md),
+[foreign consumers](../../docs/admitted-foreign-consumer-proof.md) and
+[Captain/Sensors](../../docs/captain-sensors-order-proof.md) for bounded coverage.
+
+The pending-script callback and same-tick ordered-callback resume guards use two
+actual Apps under both pinned and fresh default-pool configurations. The small
+`scripted_order_resume.toml` world makes two same-due effects noncommutative:
+only their saved order produces victory. The fixture observes the complete
+restored queue and every continuation tick's digest, counters and terminal
+outcome, continuing after execution to catch a replay. See
+[Script callback order](../../docs/script-callback-order-proof.md) for its scope.
 
 ## Client JavaScript
 
@@ -122,79 +135,62 @@ there is no separate logging duel or claim that it captures emitted log text.
 The headless perf-capture path uses `src/perf/phase_trace.rs` to observe actual
 FixedUpdate/system spans outside App and `src/perf/phase.rs` for pure reduction.
 Per-phase execution intervals and an adjacent coverage report keep unattributed
-work visible. `tests/phase_profiling.rs` passed real coverage, binary-path and
-measured/unmeasured state/census checks on the preserved declaration-stage source;
-the phase implementation is unchanged in the post-split candidate.
+work visible. `tests/phase_profiling.rs` covers real span attribution, the binary
+capture path and measured/unmeasured state and census equivalence.
 See [the scope and metric meanings](../../docs/phase-timing-reduction.md).
 
 ## Interior-write access proof
 
-The component module's interior_write_access_tests initialize the actual damage
-systems and GM reducer, checking Bevy's resource-write metadata. Torpedo lifecycle
-exposes RNG and mint writes; blaster hits and collisions expose only RNG writes.
-The GM reducer exposes its Comms mint, while direct effects retain event-local
-RNG reads. These checks do not execute a mission or certify an unordered pair as
-commutative. The post-split census and bounded continuation guards passed.
+The component module's `interior_write_access_tests` initialize actual damage
+systems and the GM reducer, checking Bevy's resource-write metadata. Torpedo
+lifecycle exposes RNG and mint writes; blaster hits and collisions expose RNG
+writes. The GM reducer exposes its Comms mint, while event-local effects retain
+seed reads. These access checks do not certify unordered pairs as commutative.
 
-The instance-level FixedUpdate diagnostic in
-`src/headless/determinism_audit/graph.rs` exports authored and flattened edges,
-nested membership and actual deferred barriers without running the inspection
-App. See `docs/fixed-update-ambiguity-audit.md` for the capture command and its
-capture-local identity limits. Both structural tests and the actual capture passed.
+Named live RNG and mint handles expose the actual generator or namespace cells
+to the scheduler while preserving the serialized aggregates. `sim_rng::install`
+and the mint's installation path provide synchronous seed/restore boundaries;
+live handles reject missing or stale state. Their unit tests cover first-use
+restoration, checkpoint rollback and aggregate coherence. The ambiguity guard
+retains same-cell conflicts and checks independence between distinct cells.
 
-#1400's named live RNG handles keep the existing serialized aggregate while
-making scheduler writes specific to actual generator cells. `sim_rng::install`
-is the synchronous seed/restore boundary; `LiveStream` refuses missing or stale
-seeded handles. `sim_rng::live_stream_tests` covers actual first-draw restoration,
-checkpoint rollback and aggregate coherence; the census test keeps same-stream
-conflicts and checks different-stream independence. The focused post-split
-run below validates this source; prior graph receipts retain its base.
+The State Census has twelve explicit full-type-path ownership aliases: seven
+stream handles to `SimRng`, four namespace handles to `WorldIdMint`, and reconnect
+request scratch to the existing `ReplicationLifecycleRegistry` Cache owner.
+Aliases add no canonical `StateCensus.entries()` rows. Alias lookup inherits the
+owner's class and PASM identity and rejects missing owners, chains, shadowing
+and conflicting bindings; undeclared physical instantiations remain errors.
 
-The state enumeration has twelve explicit full-type-path ownership aliases:
-seven stream handles to `SimRng`, four namespace handles to `WorldIdMint`, and
-reconnect request scratch to the existing `ReplicationLifecycleRegistry` Cache
-owner. They add no canonical
-`StateCensus.entries()` rows. Alias lookup inherits the existing owner class and
-PASM identity and rejects missing owners, chains, shadowing and conflicting
-bindings. The enumeration guard recognizes only exact physical aliases, so an
-undeclared instantiation still fails classification. Typed mutable scheduler
-access and the shared snapshot/digest cells are unchanged.
+Typed lobby/reconnect projections retain the existing cache and output owners.
+`tests/lobby_outbox_ordering.rs` records ordered lifecycle messages and every
+advancing authoritative boundary. The Shields, Weapons and delayed Repair
+reconnect guards check consumer-visible continuation; their seams and limits
+are described in [Typed reconnect projection](../../docs/reconnect-projection-proof.md).
 
-The post-split focused native run passed 69 tests, including actual access,
-first-draw/mint restore and rollback, Fleet re-adoption, native runtime load,
-Projectile identity/recoil/continuation, pool equivalence and perturbation/resume
-guards. That post-split graph had 1,929 complete conflict rows: zero added and
-39 removed against the original 1,968 allowance. The diagnostic owner-alias
-correction passed six registry tests and all four enumeration tests; the integrator owns
-final combined gates.
-Cross-peer default-pool counterparts now reuse the original two-crew mesh,
-stationless GM versus two ship peers, and chunked snapshot continuation guards.
-Their three fresh-child parents and three pinned companions passed in the SDK-enabled native configuration, with seven completed-App reports using 16 workers and MultiThreaded FixedUpdate. The ordinary headless gate is separate. See `docs/default-pool-perturbations.md`; ordinary pinned guards and
-all production schedules remain unchanged.
+## Declared FixedUpdate order
 
-The narrow lobby-outbox access follow-up is covered by
-`src/lobby/outbox_access_tests.rs` and `tests/lobby_outbox_ordering.rs`.
-The latter records ordered mission-start/reconnect messages and every advancing
-authoritative boundary for source-bound before/after comparison. Both source-bound SDK-enabled stages passed: all 90 boundaries and lifecycle messages match across default/default/pinned runs. That pre-rebase capture had 1,711 rows, with the 29 new typed vectors replacing 247 exclusive markers; all 21 deferred instances and all dependency edges matched. The original allowance is unchanged, and final combined/ordinary-headless gates remain separate.
+`src/sim_sets/order.rs` records typed owner sequences within the existing fixed
+phases and at named early and late boundaries. Each `FixedStep` marker stays on
+the original system registration beside its existing conditions and phase.
+`order::pass::DeclaredOrder` adds execution edges after Bevy's automatic deferred
+insertion, preserving command publication as a separate contract. Its unit
+fixtures observe resource visibility at an existing flush and the absence of
+publication at a new execution-only edge, and reject contradictory order.
 
-The finalized 2026-09-08 worktree capture reports 1,540 remaining ambiguities
-after typed reconnect projection, five Tactical pair annotations, the
-reserved-torpedo loading edge, Comms/ObjectiveSummary ordering before the
-simulation outbox drain, Viewscreen ordering before aggregate publication, and
-three Power/Shields/Repair publisher pair annotations. The live
-subset/history gate passes against the original 1,968-row ledger. This remains
-partial #1400 work: passing debt accounting is not proof that the remaining
-conflicts commute. The focused SDK-enabled publisher proof passed twelve fresh
-children before and after those three annotations. Complete setup, gameplay,
-wire/cache traces and child graph reports match across both stages. The full
-graph loses exactly the three named conflict vectors and retains every node and
-edge; five capture-local type-set IDs are matched by their unique complete
-metadata. The foreign-consumer proof also passed nine children covering five
-pairs and retains its unannotated scope. Full traces and graph receipts remain
-available with the bounded proof.
-See [Publisher order proof](../../docs/publisher-order-proof.md) and
-[Foreign admitted-command consumer proof](../../docs/admitted-foreign-consumer-proof.md).
-The reconnect change also preserves complete Shields/Weapons traces against
-the earlier 1,685-row baseline and passes real delayed Repair/Identify coverage.
-See [Typed reconnect projection proof](../../docs/reconnect-projection-proof.md)
-for the actual plugin-finalized graph and focused diagnostic-test status.
+The fresh-App diagnostic in `src/headless/determinism_audit/graph.rs` completes
+ordinary plugin finish/cleanup before capturing authored and flattened edges,
+nested membership, full conflicts and actual deferred barriers. Capture-local
+identities preserve repeated instances. The ignored execution-order diagnostic
+in `tests/fixed_update_ambiguities.rs` also exposes actual executable order for
+comparing ordered deferred command buffers. Inspection initializes the schedule
+without running Startup or a simulation frame.
+
+The isolated ambiguity test preserves full names, access vectors and instance
+multiplicity. It compares against a verified pre-change allowance, which may
+shrink and may not grow. The current allowance is empty, so the standing gate
+enables Bevy's ambiguity errors.
+A zero census alone does not prove gameplay or deferred visibility. Final
+validation combines structural comparison with the mission, perturbation,
+restore and cross-peer guards. See
+[Declared FixedUpdate order](../../docs/declared-fixed-order.md) and
+[Ambiguity audit](../../docs/fixed-update-ambiguity-audit.md) for the contracts.

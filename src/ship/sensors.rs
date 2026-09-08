@@ -119,7 +119,9 @@ impl Plugin for ShipSensorsPlugin {
                     // applier must consume *after* the AI emit or AI commands
                     // would be silently lost. The `.before` edge on the decide
                     // system below is the one explicit ordering between them.
-                    handle_sensors_messages.in_set(crate::sim_sets::SimSet::Physics),
+                    handle_sensors_messages
+                        .in_set(crate::sim_sets::FixedStep::HandleSensorsMessages)
+                        .in_set(crate::sim_sets::SimSet::Physics),
                     // Decide only (issue #828): emits admitted
                     // SetScienceTarget / ClearScienceTarget payloads; the
                     // single applier is `handle_sensors_messages` above.
@@ -128,13 +130,22 @@ impl Plugin for ShipSensorsPlugin {
                     // `Option<Res<AiSnapshotReady>>` check enforced in
                     // production, minus its evaluate-every-tick fallback.
                     operate_sensors_ai
+                        .in_set(crate::sim_sets::FixedStep::OperateSensorsAi)
                         .in_set(crate::sim_sets::SimSet::Input)
                         .before(handle_sensors_messages)
                         .run_if(crate::ai::cadence::ai_snapshot_ready),
-                    tick_sensors_frequency_hint.in_set(crate::sim_sets::SimSet::Input),
-                    tick_sensors_threat_warning.in_set(crate::sim_sets::SimSet::Input),
-                    publish_sensors_blackboard.in_set(crate::sim_sets::SimSet::Publish),
-                    publish_sensor_radar_blackboard.in_set(crate::sim_sets::SimSet::Publish),
+                    tick_sensors_frequency_hint
+                        .in_set(crate::sim_sets::FixedStep::TickSensorsFrequencyHint)
+                        .in_set(crate::sim_sets::SimSet::Input),
+                    tick_sensors_threat_warning
+                        .in_set(crate::sim_sets::FixedStep::TickSensorsThreatWarning)
+                        .in_set(crate::sim_sets::SimSet::Input),
+                    publish_sensors_blackboard
+                        .in_set(crate::sim_sets::FixedStep::PublishSensorsBlackboard)
+                        .in_set(crate::sim_sets::SimSet::Publish),
+                    publish_sensor_radar_blackboard
+                        .in_set(crate::sim_sets::FixedStep::PublishSensorRadarBlackboard)
+                        .in_set(crate::sim_sets::SimSet::Publish),
                 ),
             );
     }

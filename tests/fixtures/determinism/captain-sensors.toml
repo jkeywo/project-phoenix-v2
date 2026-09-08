@@ -1,0 +1,28 @@
+# Test-only placement; every hull, suite, selector and target uses its shipped template.
+[global]
+seed = 1400021
+command_delay_ticks = 2
+[player_spawn]
+position = [-100.0, 0.0, 0.0]
+[[entity]]
+template_path = "assets/entities/alliance_destroyer.toml"
+id = "player"
+spawn_on = "game_start"
+[[entity]]
+template_path = "assets/entities/alliance_destroyer.toml"
+id = "scanner-a"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+[[entity]]
+template_path = "assets/entities/alliance_destroyer.toml"
+id = "scanner-b"
+transform = { position = [150.0, 0.0, 0.0] }
+spawn_on = "game_start"
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+id = "subject-a"
+transform = { position = [0.0, 0.0, 70.0] }
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+id = "subject-b"
+transform = { position = [150.0, 0.0, 70.0] }

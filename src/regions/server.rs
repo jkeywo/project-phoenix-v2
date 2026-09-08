@@ -53,8 +53,11 @@ impl Plugin for RegionPlugin {
             .add_systems(
                 FixedUpdate,
                 (
-                    update_region_membership.in_set(crate::sim_sets::SimSet::Physics),
+                    update_region_membership
+                        .in_set(crate::sim_sets::FixedStep::UpdateRegionMembership)
+                        .in_set(crate::sim_sets::SimSet::Physics),
                     apply_damage_zone_damage
+                        .in_set(crate::sim_sets::FixedStep::ApplyDamageZoneDamage)
                         .in_set(crate::sim_sets::SimSet::Physics)
                         .after(update_region_membership),
                 ),

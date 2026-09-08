@@ -140,7 +140,9 @@ impl Plugin for CivilianPlugin {
             );
         app.add_systems(
             FixedUpdate,
-            tick_civilian_traffic.in_set(crate::sim_sets::SimSet::Input),
+            tick_civilian_traffic
+                .in_set(crate::sim_sets::FixedStep::TickCivilianTraffic)
+                .in_set(crate::sim_sets::SimSet::Input),
         );
     }
 }

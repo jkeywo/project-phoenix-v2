@@ -21,6 +21,7 @@
 //! digest exclusions, so the suppression logic here never feeds the digest.
 
 use super::*;
+use crate::core::broadcast::sim::SimProducer;
 
 /// Stable lifecycle key for the wire projection of per-System blackboards.
 pub(crate) const BLACKBOARD_REPLICATION_KEY: &str = "blackboards";
@@ -143,7 +144,8 @@ fn reconnect_blackboard_projection(
 /// the LocalShip entity, falling back to the global Resource for tests that
 /// only insert the Resource form.
 pub fn modifier_events_broadcaster() -> SimBroadcaster {
-    SimBroadcaster::new().register(Audience::All, Cadence::OnEvent, |world: &mut World| {
+    let broadcaster = SimBroadcaster::for_producer(SimProducer::Modifier);
+    broadcaster.register(Audience::All, Cadence::OnEvent, |world: &mut World| {
         use crate::modifiers::ModifierEvent;
         let events: Vec<ModifierEvent> = {
             let mut q =
@@ -182,7 +184,8 @@ pub fn modifier_events_broadcaster() -> SimBroadcaster {
 /// When populated (by any simulation system) the queued entries are flushed
 /// directly to `OutboundMessage` with their original `Target` routing.
 pub fn sim_outbox_broadcaster() -> SimBroadcaster {
-    SimBroadcaster::new().register(Audience::All, Cadence::OnEvent, |world: &mut World| {
+    let broadcaster = SimBroadcaster::for_producer(SimProducer::Outbox);
+    broadcaster.register(Audience::All, Cadence::OnEvent, |world: &mut World| {
         let entries = world.resource_mut::<SimOutbox>().drain();
         for entry in entries {
             world.write_message(OutboundMessage {

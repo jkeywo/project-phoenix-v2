@@ -57,10 +57,12 @@ impl Plugin for CaptainPlugin {
                 // the derived slower snapshot cadence, `[global] ai_snapshot_hz`
                 // base ticks apart.
                 operate_captain_ai
+                    .in_set(crate::sim_sets::FixedStep::OperateCaptainAi)
                     .in_set(crate::sim_sets::SimSet::Input)
                     .before(handle_set_red_alert)
                     .run_if(crate::ai::cadence::ai_snapshot_ready),
                 backfill_captain_prefers_cinematic_view
+                    .in_set(crate::sim_sets::FixedStep::BackfillCaptainPrefersCinematicView)
                     .in_set(crate::sim_sets::SimSet::Input)
                     .before(handle_set_view)
                     .run_if(crate::ai::cadence::ai_snapshot_ready),
@@ -70,13 +72,21 @@ impl Plugin for CaptainPlugin {
                 // "current alert level" contract survives an unrelated system
                 // joining the set (issue #1346's determinism regression).
                 handle_set_red_alert
+                    .in_set(crate::sim_sets::FixedStep::HandleSetRedAlert)
                     .in_set(crate::sim_sets::SimSet::Input)
                     .in_set(crate::sim_sets::RedAlertApplied),
-                handle_set_view.in_set(crate::sim_sets::SimSet::Input),
-                handle_set_objective_priority.in_set(crate::sim_sets::SimSet::Input),
+                handle_set_view
+                    .in_set(crate::sim_sets::FixedStep::HandleSetView)
+                    .in_set(crate::sim_sets::SimSet::Input),
+                handle_set_objective_priority
+                    .in_set(crate::sim_sets::FixedStep::HandleSetObjectivePriority)
+                    .in_set(crate::sim_sets::SimSet::Input),
                 crate::ship::combat_activity::update_combat_activity
+                    .in_set(crate::sim_sets::FixedStep::UpdateCombatActivity)
                     .in_set(crate::sim_sets::SimSet::Broadcast),
-                publish_captain_blackboard.in_set(crate::sim_sets::SimSet::Publish),
+                publish_captain_blackboard
+                    .in_set(crate::sim_sets::FixedStep::PublishCaptainBlackboard)
+                    .in_set(crate::sim_sets::SimSet::Publish),
             ),
         );
     }

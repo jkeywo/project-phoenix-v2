@@ -1,5 +1,38 @@
 # Four admitted-command producers: six-pair fixture (#1400)
 
+## Declared-order stability source revision
+
+The current test source replaces the historical opposed-order roles below with
+ordinary registration, `RegistrationOrder::Shuffled(17)` and `Shuffled(991)`;
+the publisher proof also retains a separate physics-last role. Each role runs
+in two fresh default-pool processes and one pinned process. These are existing
+headless test seams, with no shipping flag or test-created ordering edge.
+Execution of this revision is pending; the results below remain historical
+receipts for their original source, not validation of this revision.
+
+The expected directions come from the frozen actual execution inventory in
+`tests/fixtures/determinism/declared-owner-order.json`. Every selected conflicting
+pair must follow that direction in every role while retaining its complete raw
+access vector. Full gameplay, state, wire, RNG/mint and positive coverage
+assertions remain. This now proves declared-order stability, not commutativity.
+
+Raw system instances, containing-set nodes/hierarchy and effective edges remain
+in every report. Concrete IDs
+may change with registration: comparison requires a unique complete metadata
+correspondence including the actual ancestor-set semantic membership multiset,
+rejects any still-ambiguous repeated concrete identities, and retains
+all prior concrete dependency paths and deferred writer-to-consumer visibility
+obligations. Automatic ApplyDeferred instances are retained in raw output but
+are not assigned a cross-registration identity. Anonymous condition-set allocation
+numbers also remain raw; correspondence uses their actual descendant metadata
+multiset and ordered condition names, preserving distinct set multiplicity. The producer's exact eight
+probes retain their individual admission/before/producer/after assertions;
+incidental probe/barrier paths remain diagnostic output. Physical external
+conflict vectors and multiplicities remain compared even when declared order
+removes those rows from the reported ambiguity census.
+
+## Historical proof and receipts
+
 This fixture passed targeted native execution on the integrated worktree at
 `a1619a9389b6eaf5aafacd06dfcd260619c006fa`. It adds no production ordering,
 commutativity annotation, allowance change, or shipped authored value.

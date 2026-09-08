@@ -1,12 +1,15 @@
 //! Bounded #1400 proof of the three annotated existing publisher pairs.
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 
+mod common;
+#[path = "common/declared_order.rs"]
+mod declared_order;
 use bevy::{ecs::message::MessageCursor, prelude::*};
 use project_phoenix::{
     console::repair::server::ShipRepairTeams,
     core::messages::{ClientMessage, PowerGroupId, ServerMessage, SystemBlackboard, SystemId},
     entities::spawner::{EntitySystemHull, EntityUuid},
-    headless::{build_headless_app, HeadlessArgs},
+    headless::HeadlessArgs,
     lobby::server::{InboundMessage, OutboundMessage},
     server_app::{LastBroadcastBlackboards, LocalShip, Ship, ShipSystemBlackboards},
     ship::{control_source::ControlSource, power::ShipPowerSystem, shields::ShipShields},
@@ -269,11 +272,12 @@ fn assert_lock_boundary(app: &mut App, local: Entity, phase: usize, first: bool)
 }
 
 #[test]
-fn three_publishers_preserve_maps_consumers_and_wire_in_opposed_orders() {
+fn three_publishers_preserve_maps_consumers_and_wire_under_declared_order_registration_changes() {
     let mut reference: Option<Value> = None;
     let mut external: Option<Value> = None;
     let mut external_edges: Option<Value> = None;
-    for order in ["ordinary", "forward", "reverse", "rotated"] {
+    let mut registration_roles = std::collections::BTreeMap::new();
+    for order in ["ordinary", "shuffle-a", "shuffle-b", "physics-last"] {
         for mode in ["default-1", "default-2", "pinned"] {
             let output = std::process::Command::new(std::env::current_exe().unwrap())
                 .args([
@@ -303,6 +307,7 @@ fn three_publishers_preserve_maps_consumers_and_wire_in_opposed_orders() {
             assert_eq!(rows.len(), 1);
             let report: Value = serde_json::from_str(rows[0]).unwrap();
             assert_eq!(report["order"], order);
+            declared_order::observe_role(&mut registration_roles, &report["graph"]["graph"]);
             assert_eq!(report["mode"], mode);
             assert_eq!(report["seed"], SEED);
             assert_ne!(report["process"], std::process::id());
@@ -323,21 +328,21 @@ fn three_publishers_preserve_maps_consumers_and_wire_in_opposed_orders() {
                 reference = Some(observations);
             }
             if let Some(expected) = &external {
-                assert_eq!(&report["graph"]["external_conflicts"], expected);
+                assert_eq!(&report["graph"]["raw_external"], expected);
             } else {
-                external = Some(report["graph"]["external_conflicts"].clone());
+                external = Some(report["graph"]["raw_external"].clone());
             }
             if let Some(expected) = &external_edges {
-                assert_eq!(&report["graph"]["external_edges"], expected);
+                declared_order::assert_graph(expected, &report["graph"]["graph"]);
             } else {
-                external_edges = Some(report["graph"]["external_edges"].clone());
+                external_edges = Some(report["graph"]["graph"].clone());
             }
         }
     }
 }
 
 #[test]
-#[ignore = "fresh-process parent owns each actual pool and test-local order"]
+#[ignore = "fresh-process parent owns each actual pool and registration perturbation"]
 fn publisher_order_child() {
     let mode = std::env::var("PHOENIX_PUBLISHER_MODE").unwrap();
     assert!(matches!(
@@ -345,14 +350,16 @@ fn publisher_order_child() {
         "default-1" | "default-2" | "pinned"
     ));
     let order = std::env::var("PHOENIX_PUBLISHER_ORDER").unwrap();
-    let mut app = build_headless_app(&HeadlessArgs {
-        world_path: "assets/worlds/probe_fleet_duel.toml".into(),
-        ship_path: "assets/entities/alliance_cruiser.toml".into(),
-        seed: Some(SEED),
-        deterministic: mode == "pinned",
-        ..Default::default()
-    })
-    .unwrap();
+    let mut app = declared_order::build(
+        HeadlessArgs {
+            world_path: "assets/worlds/probe_fleet_duel.toml".into(),
+            ship_path: "assets/entities/alliance_cruiser.toml".into(),
+            seed: Some(SEED),
+            deterministic: mode == "pinned",
+            ..Default::default()
+        },
+        &order,
+    );
     let proof = order_proof::install(&mut app, &order);
     let period = sim_tick_period(app.world().resource::<WorldConfig>().global.sim_tick_hz);
     app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(period));

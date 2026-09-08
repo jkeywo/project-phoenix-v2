@@ -1,4 +1,4 @@
-//! Test-local ordering of the existing production instances, never replacement systems.
+//! Declared-order stability of existing production instances across registration changes.
 use bevy::{
     ecs::{
         component::ComponentId,
@@ -25,8 +25,6 @@ const SYSTEMS: [&str; 3] = [
     "project_phoenix::console::repair::server::publish_repair_blackboard",
 ];
 const PAIRS: [(usize, usize); 3] = [(0, 1), (0, 2), (1, 2)];
-#[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
-struct Between(usize);
 
 fn keys(graph: &ScheduleGraph) -> Vec<SystemKey> {
     SYSTEMS
@@ -115,7 +113,7 @@ impl ScheduleBuildPass for Observe {
             );
             let AccessConflicts::Individual(indices) = first.access.get_conflicts(&second.access)
             else {
-                panic!("new unbounded overlap invalidates the commutativity proof");
+                panic!("new unbounded overlap invalidates the declared-order proof");
             };
             let mut access: Vec<_> = indices
                 .ones()
@@ -139,30 +137,25 @@ impl ScheduleBuildPass for Observe {
             );
             let forward = reachable(&edges, ids[a], ids[b]);
             let reverse = reachable(&edges, ids[b], ids[a]);
-            if self.order == "ordinary" {
-                assert!(!forward && !reverse);
-            } else {
-                let permutation = permutation(&self.order);
-                let first = permutation.iter().position(|x| *x == a).unwrap();
-                let second = permutation.iter().position(|x| *x == b).unwrap();
-                assert_eq!((forward, reverse), (first < second, first > second));
-            }
+            let expected = crate::declared_order::before(SYSTEMS[a], SYSTEMS[b]);
+            assert_eq!((forward, reverse), (expected, !expected));
             pairs.push(json!({"systems":[SYSTEMS[a],SYSTEMS[b]],"access":access,"incompatible":true,"forward_path":forward,"reverse_path":reverse}));
         }
-        // Independently retain every other unordered raw conflict incident on
-        // these three instances. The final census must still contain exactly
-        // this multiset: no external pair is excused by the three test-local paths.
+        // Retain complete physical external vectors even when production order
+        // resolves every reported row; separately check the unordered census subset.
         let mut external = Vec::new();
+        let mut raw_external = Vec::new();
         for &a in &ids {
             for (b, system, _) in graph.systems.iter() {
-                if ids.contains(&b) || reachable(&edges, a, b) || reachable(&edges, b, a) {
+                if ids.contains(&b) {
                     continue;
                 }
                 let first = graph.systems.get(a).unwrap();
                 let second = graph.systems.get(b).unwrap();
                 let names = [first.system.name().as_string(), system.name().as_string()];
+                let previous = raw_external.len();
                 if first.system.is_exclusive() || second.system.is_exclusive() {
-                    external.push(debt(world, names, std::iter::empty()));
+                    raw_external.push(debt(world, names, std::iter::empty()));
                 } else if !first.access.is_compatible(&second.access) {
                     let access = match first.access.get_conflicts(&second.access) {
                         AccessConflicts::All => Vec::new(),
@@ -170,13 +163,20 @@ impl ScheduleBuildPass for Observe {
                             indices.ones().map(ComponentId::new).collect()
                         }
                     };
-                    external.push(debt(world, names, access.into_iter()));
+                    raw_external.push(debt(world, names, access.into_iter()));
+                }
+                if raw_external.len() > previous
+                    && !reachable(&edges, a, b)
+                    && !reachable(&edges, b, a)
+                {
+                    external.push(raw_external.last().unwrap().clone());
                 }
             }
         }
+        raw_external.sort();
         external.sort();
         assert!(
-            !external.is_empty(),
+            !raw_external.is_empty(),
             "external-conflict preservation must not be vacuous"
         );
         let mut external_edges: Vec<_> = edges
@@ -187,7 +187,7 @@ impl ScheduleBuildPass for Observe {
         external_edges.sort();
         *self.result.lock().unwrap() = Some(
             json!({"order":self.order,"unique_instances":3,"pairs":pairs,
-                "external_conflicts":external,"external_edges":external_edges}),
+                "external_conflicts":external,"raw_external":raw_external,"external_edges":external_edges,"graph":crate::declared_order::capture(graph,dag,&self.order)}),
         );
         Ok(())
     }
@@ -197,7 +197,7 @@ pub struct Proof(Arc<Mutex<Option<Value>>>);
 pub fn install(app: &mut App, order: &str) -> Proof {
     assert!(matches!(
         order,
-        "ordinary" | "forward" | "reverse" | "rotated"
+        "ordinary" | "shuffle-a" | "shuffle-b" | "physics-last"
     ));
     let result = Arc::new(Mutex::new(None));
     app.world_mut().schedule_scope(FixedUpdate, |_, schedule| {
@@ -208,7 +208,7 @@ pub fn install(app: &mut App, order: &str) -> Proof {
         let graph = schedule.graph();
         let ids = keys(graph);
         // Resolve each existing direct SystemTypeSet, checking multiplicity so
-        // a future repeated registration cannot broaden these test-local edges.
+        // a future repeated registration cannot silently broaden the selected owners.
         let sets: Vec<InternedSystemSet> =
             ids.iter()
                 .map(|id| {
@@ -252,17 +252,7 @@ pub fn install(app: &mut App, order: &str) -> Proof {
                     interned[0]
                 })
                 .collect();
-        // SystemTypeSets cannot themselves be configured (Bevy config.rs).
-        // Empty ordinary sets can refer to them through before/after; Bevy's
-        // DagGroups::flatten connects an empty set's incoming/outgoing neighbors.
-        // They add no runnable system or access. The build observer checks the
-        // resulting actual system paths, so an ineffective bridge cannot pass.
-        if order != "ordinary" {
-            let permutation = permutation(order);
-            for (index, pair) in permutation.windows(2).enumerate() {
-                schedule.configure_sets(Between(index).after(sets[pair[0]]).before(sets[pair[1]]));
-            }
-        }
+        assert_eq!(sets.len(), 3);
         schedule.add_build_pass(Observe {
             order: order.to_owned(),
             result: result.clone(),
@@ -314,14 +304,5 @@ impl Proof {
                 schedule.remove_build_pass::<Observe>();
             });
         result
-    }
-}
-
-fn permutation(order: &str) -> [usize; 3] {
-    match order {
-        "forward" => [0, 1, 2],
-        "reverse" => [2, 1, 0],
-        "rotated" => [1, 2, 0],
-        _ => panic!("unexpected order"),
     }
 }

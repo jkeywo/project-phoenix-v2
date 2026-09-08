@@ -355,7 +355,9 @@ fn build_headless_inner(
 
     app.add_systems(
         FixedUpdate,
-        headless_auto_start.before(crate::sim_sets::SimSet::Input),
+        headless_auto_start
+            .in_set(crate::sim_sets::FixedStep::HeadlessAutoStart)
+            .before(crate::sim_sets::SimSet::Input),
     );
 
     // Console input-to-feedback latency (issue #1169). `DebugPlugin` installs

@@ -57,12 +57,15 @@ impl Plugin for CommsConsolePlugin {
         app.add_systems(
             FixedUpdate,
             (
-                publish_comms_blackboard.in_set(crate::sim_sets::SimSet::Publish),
+                publish_comms_blackboard
+                    .in_set(crate::sim_sets::FixedStep::PublishCommsBlackboard)
+                    .in_set(crate::sim_sets::SimSet::Publish),
                 // `Input`, not `Physics`, and explicitly before `handle_hail`:
                 // the `Hail` command the Comms AI emits must be consumed in the
                 // SAME tick, exactly as `ai_torpedo_load` is ordered before
                 // `handle_set_torpedo_volley_target` (issue #753).
                 operate_comms_ai
+                    .in_set(crate::sim_sets::FixedStep::OperateCommsAi)
                     .in_set(crate::sim_sets::SimSet::Input)
                     .before(handle_hail)
                     .run_if(crate::ai::cadence::ai_tick_ready),
@@ -82,6 +85,7 @@ impl Plugin for CommsConsolePlugin {
                 // cycle — `handle_hail` already precedes
                 // `handle_respond_to_message`.
                 operate_comms_response_ai
+                    .in_set(crate::sim_sets::FixedStep::OperateCommsResponseAi)
                     .in_set(crate::sim_sets::SimSet::Input)
                     .after(operate_comms_ai)
                     .after(handle_hail)

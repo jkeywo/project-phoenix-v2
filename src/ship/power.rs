@@ -1,3 +1,4 @@
+use crate::core::broadcast::sim::SimProducer;
 use bevy::prelude::*;
 
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
@@ -313,22 +314,33 @@ impl Plugin for ShipPowerPlugin {
                     // `tick_shields` lives in the later `Modifiers` set, so set
                     // ordering sufficed there.)
                     handle_power_messages
+                        .in_set(crate::sim_sets::FixedStep::HandlePowerMessages)
                         .in_set(crate::sim_sets::SimSet::Physics)
                         .before(tick_power_system),
-                    tick_power_system.in_set(crate::sim_sets::SimSet::Physics),
-                    tick_power_brownout_advisory.in_set(crate::sim_sets::SimSet::Modifiers),
+                    tick_power_system
+                        .in_set(crate::sim_sets::FixedStep::TickPowerSystem)
+                        .in_set(crate::sim_sets::SimSet::Physics),
+                    tick_power_brownout_advisory
+                        .in_set(crate::sim_sets::FixedStep::TickPowerBrownoutAdvisory)
+                        .in_set(crate::sim_sets::SimSet::Modifiers),
                     // The scenario's half of the restraint lever, and its
                     // mirror (issue #1398). Both in `Modifiers`, chained: a
                     // scripted order lands and is mirrored in the same tick, so
                     // an `on_flag_set` handler chaining off it fires on the next
                     // pipeline pass exactly as an Engineering officer's order
                     // does.
-                    (drain_scripted_power_orders, mirror_weapons_cold_flags)
+                    (
+                        drain_scripted_power_orders
+                            .in_set(crate::sim_sets::FixedStep::DrainScriptedPowerOrders),
+                        mirror_weapons_cold_flags
+                            .in_set(crate::sim_sets::FixedStep::MirrorWeaponsColdFlags),
+                    )
                         .chain()
                         .in_set(crate::sim_sets::SimSet::Modifiers),
                     // Distinct registered keys; tests/publisher_ordering.rs checks
                     // the exact shared access and ordinary/opposed-order outputs.
                     publish_power_blackboard
+                        .in_set(crate::sim_sets::FixedStep::PublishPowerBlackboard)
                         .in_set(crate::sim_sets::SimSet::Publish)
                         .ambiguous_with(crate::ship::shields::publish_shields_blackboard)
                         .ambiguous_with(crate::console::repair::server::publish_repair_blackboard),
@@ -350,7 +362,7 @@ impl Plugin for ShipPowerPlugin {
 /// on the LocalShip entity, falling back to the global `ShipPowerSystem`
 /// resource for test harnesses that only insert the Resource form.
 pub fn power_state_broadcaster() -> SimBroadcaster {
-    SimBroadcaster::new().register(
+    SimBroadcaster::for_producer(SimProducer::Power).register(
         Audience::HoldingSystem(SystemId("power-reactor".into())),
         Cadence::Hz(10.0),
         |world: &mut World| {

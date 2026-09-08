@@ -40,6 +40,7 @@ impl Plugin for NavigationPlugin {
             // Input, before the existing origin-blind civilian consumer, so its
             // `OrderCivilian` lands on exactly the same tick as a console press.
             operate_civilian_order_ai
+                .in_set(crate::sim_sets::FixedStep::OperateCivilianOrderAi)
                 .in_set(crate::sim_sets::SimSet::Input)
                 .run_if(crate::ai::cadence::ai_tick_ready)
                 .before(crate::civilian::tick_civilian_traffic),
@@ -47,6 +48,7 @@ impl Plugin for NavigationPlugin {
         .add_systems(
             FixedUpdate,
             handle_navigation_waypoint
+                .in_set(crate::sim_sets::FixedStep::HandleNavigationWaypoint)
                 .in_set(crate::sim_sets::SimSet::Physics)
                 .after(operate_navigation_ai),
         )
@@ -56,11 +58,14 @@ impl Plugin for NavigationPlugin {
         // entity is no longer present.
         .add_systems(
             FixedUpdate,
-            refresh_anchored_waypoint.in_set(crate::sim_sets::SimSet::Modifiers),
+            refresh_anchored_waypoint
+                .in_set(crate::sim_sets::FixedStep::RefreshAnchoredWaypoint)
+                .in_set(crate::sim_sets::SimSet::Modifiers),
         )
         .add_systems(
             FixedUpdate,
             operate_navigation_ai
+                .in_set(crate::sim_sets::FixedStep::OperateNavigationAi)
                 .in_set(crate::sim_sets::SimSet::Physics)
                 .run_if(crate::ai::cadence::ai_tick_ready),
         )
@@ -73,13 +78,16 @@ impl Plugin for NavigationPlugin {
         .add_systems(
             FixedUpdate,
             issue_navigate_to_clearance
+                .in_set(crate::sim_sets::FixedStep::IssueNavigateToClearance)
                 .in_set(crate::sim_sets::SimSet::Physics)
                 .after(operate_navigation_ai)
                 .after(handle_navigation_waypoint),
         )
         .add_systems(
             FixedUpdate,
-            publish_navigation_blackboard.in_set(crate::sim_sets::SimSet::Publish),
+            publish_navigation_blackboard
+                .in_set(crate::sim_sets::FixedStep::PublishNavigationBlackboard)
+                .in_set(crate::sim_sets::SimSet::Publish),
         );
     }
 }

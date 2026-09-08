@@ -194,23 +194,33 @@ impl Plugin for TransporterPlugin {
                 // cadence and emits before the command handler consumes the
                 // tick's admitted commands.
                 operate_transporter_ai
+                    .in_set(crate::sim_sets::FixedStep::OperateTransporterAi)
                     .in_set(crate::sim_sets::SimSet::Input)
                     .run_if(crate::ai::cadence::ai_tick_ready)
                     .before(handle_transporter_commands),
-                handle_transporter_commands.in_set(crate::sim_sets::SimSet::Input),
+                handle_transporter_commands
+                    .in_set(crate::sim_sets::FixedStep::HandleTransporterCommands)
+                    .in_set(crate::sim_sets::SimSet::Input),
                 // Latch discovery once the contact has been scanned, before the
                 // verdict reads it.
-                reveal_civilian_contacts.in_set(crate::sim_sets::SimSet::Modifiers),
+                reveal_civilian_contacts
+                    .in_set(crate::sim_sets::FixedStep::RevealCivilianContacts)
+                    .in_set(crate::sim_sets::SimSet::Modifiers),
                 // Decide whether the transport runs this tick and advance the
                 // recovery. Ordered after the reveal so a scan that lands this
                 // tick discovers the contact before the verdict reads it.
                 tick_transport
+                    .in_set(crate::sim_sets::FixedStep::TickTransport)
                     .in_set(crate::sim_sets::SimSet::Modifiers)
                     .after(reveal_civilian_contacts),
                 // Attribute a casualty when a carrier is destroyed with civilians
                 // still aboard.
-                record_civilian_casualties.in_set(crate::sim_sets::SimSet::Publish),
-                publish_transporter_blackboard.in_set(crate::sim_sets::SimSet::Publish),
+                record_civilian_casualties
+                    .in_set(crate::sim_sets::FixedStep::RecordCivilianCasualties)
+                    .in_set(crate::sim_sets::SimSet::Publish),
+                publish_transporter_blackboard
+                    .in_set(crate::sim_sets::FixedStep::PublishTransporterBlackboard)
+                    .in_set(crate::sim_sets::SimSet::Publish),
             ),
         );
     }

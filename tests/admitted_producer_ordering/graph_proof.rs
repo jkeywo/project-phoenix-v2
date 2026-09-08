@@ -1,4 +1,4 @@
-//! Reuse actual production instances/access metadata; add only empty test ordering sets.
+//! Preserve declared production order under actual registration perturbations.
 use bevy::{
     ecs::{
         component::ComponentId,
@@ -155,9 +155,6 @@ fn conflict(world: &World, graph: &ScheduleGraph, a: SystemKey, b: SystemKey) ->
     })
 }
 
-#[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
-struct Between(usize);
-
 #[derive(Debug)]
 struct Observe {
     order: String,
@@ -273,7 +270,7 @@ impl ScheduleBuildPass for Observe {
                 let system = &graph.systems.get(id).unwrap().system;
                 json!({"id":format!("{id:?}"),"name":system.name().as_string(),
                 "exclusive":system.is_exclusive(),"has_deferred":system.has_deferred(),
-                "apply_deferred":deferred.contains(&id),"probe":probe_keys.contains(&id)})
+                "apply_deferred":deferred.contains(&id),"probe":probe_keys.contains(&id),"membership":crate::declared_order::membership(graph,id)})
             })
             .collect();
         instances.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
@@ -331,20 +328,12 @@ impl ScheduleBuildPass for Observe {
                 "new shared access invalidates this bounded premise"
             );
             let (forward, reverse) = (reaches(a, b), reaches(b, a));
-            let ai = PRODUCERS
-                .iter()
-                .position(|n| *n == pair.systems[0])
-                .unwrap();
-            let bi = PRODUCERS
-                .iter()
-                .position(|n| *n == pair.systems[1])
-                .unwrap();
-            match self.order.as_str() {
-                "ordinary" => assert!(!forward && !reverse, "new baseline edge: {pair:?}"),
-                "forward" => assert_eq!((forward, reverse), (ai < bi, ai > bi)),
-                "reverse" => assert_eq!((forward, reverse), (ai > bi, ai < bi)),
-                _ => unreachable!(),
-            }
+            let expected = crate::declared_order::before(&pair.systems[0], &pair.systems[1]);
+            assert_eq!(
+                (forward, reverse),
+                (expected, !expected),
+                "frozen declared direction: {pair:?}"
+            );
             coverage.push(json!({"pair":pair,"raw":raw,"incompatible":true,"forward":forward,"reverse":reverse}));
         }
         assert_eq!(coverage.len(), 6);
@@ -380,7 +369,7 @@ impl ScheduleBuildPass for Observe {
         *self.result.lock().unwrap() = Some(json!({"order":self.order,
             "authorized_candidates":6,"behavioral_tranche":coverage,
             "raw_external":raw_external,"existing_paths":paths,
-            "instances":instances,"effective_edges":effective_edges,
+            "instances":instances,"effective_edges":effective_edges,"hierarchy":crate::declared_order::hierarchy(graph),
             "production_instances":production_instances,"production_paths":production_paths,
             "deferred_visibility":deferred_visibility,"probe_boundaries":probe_boundaries}));
         Ok(())
@@ -389,7 +378,7 @@ impl ScheduleBuildPass for Observe {
 
 pub struct Proof(Arc<Mutex<Option<Value>>>);
 pub fn install(app: &mut App, order: &str) -> Proof {
-    assert!(matches!(order, "ordinary" | "forward" | "reverse"));
+    assert!(matches!(order, "ordinary" | "shuffle-a" | "shuffle-b"));
     let result = Arc::new(Mutex::new(None));
     app.world_mut().schedule_scope(FixedUpdate, |_, schedule| {
         assert!(
@@ -397,18 +386,11 @@ pub fn install(app: &mut App, order: &str) -> Proof {
             "install before first execution"
         );
         let graph = schedule.graph();
-        let mut producers: Vec<_> = PRODUCERS
+        let producers: Vec<_> = PRODUCERS
             .iter()
             .map(|name| type_set(graph, key(graph, name)))
             .collect();
-        if order == "reverse" {
-            producers.reverse();
-        }
-        if order != "ordinary" {
-            for (i, pair) in producers.windows(2).enumerate() {
-                schedule.configure_sets(Between(i).after(pair[0]).before(pair[1]));
-            }
-        }
+        assert_eq!(producers.len(), 4);
         schedule.add_build_pass(Observe {
             order: order.to_owned(),
             result: result.clone(),
@@ -450,9 +432,8 @@ impl Proof {
                 for row in result["behavioral_tranche"].as_array().unwrap() {
                     let count = debt.iter().filter(|d| json!(d) == row["raw"]).count();
                     assert_eq!(
-                        count,
-                        usize::from(result["order"] == "ordinary"),
-                        "no production annotation is added by this baseline fixture"
+                        count, 0,
+                        "declared production order resolves this exact raw conflict"
                     );
                 }
                 result["reported_debt"] = json!(debt);
@@ -474,27 +455,7 @@ pub fn assert_preserved(ordinary: &Value, forced: &Value) -> Value {
         }
         counts
     }
-    // IDs are used only after the complete same-source production inventory,
-    // including names and flags, has matched. This is not a cross-build ID law.
-    assert_eq!(
-        ordinary["production_instances"], forced["production_instances"],
-        "same-source production instance IDs/names/access flags must match before comparing paths"
-    );
-    assert!(!ordinary["production_instances"]
-        .as_array()
-        .unwrap()
-        .is_empty());
-    for field in ["production_paths", "deferred_visibility"] {
-        let baseline = multiset(&ordinary[field]);
-        assert!(!baseline.is_empty(), "nonempty {field} obligations");
-        let actual = multiset(&forced[field]);
-        for (path, count) in baseline {
-            assert!(
-                actual.get(&path).copied().unwrap_or_default() >= count,
-                "existing {field} obligation disappeared: {path}"
-            );
-        }
-    }
+    crate::declared_order::assert_graph(ordinary, forced);
     // Keep and expose all displaced raw name paths, including their original
     // multiplicity, without claiming an incidental probe/barrier identity law.
     let paths = multiset(&forced["existing_paths"]);

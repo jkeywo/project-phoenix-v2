@@ -1,4 +1,4 @@
-//! Test-local ordering of the existing production instances, never replacement systems.
+//! Declared-order stability of the existing Tactical instances across registrations.
 use bevy::{
     ecs::{
         component::ComponentId,
@@ -26,9 +26,6 @@ const SYSTEMS: [&str; 4] = [
     "project_phoenix::console::weapons::blaster::tick_blaster_auto_fire",
 ];
 const PAIRS: [(usize, usize); 5] = [(0, 2), (0, 3), (1, 2), (1, 3), (2, 3)];
-
-#[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
-struct Between(usize);
 
 fn keys(graph: &ScheduleGraph) -> Vec<SystemKey> {
     SYSTEMS
@@ -152,31 +149,29 @@ impl ScheduleBuildPass for Observe {
             );
             let forward = reachable(&edges, ids[a], ids[b]);
             let reverse = reachable(&edges, ids[b], ids[a]);
-            match self.order.as_str() {
-                "ordinary" => assert!(
-                    !forward && !reverse,
-                    "production adds no order to a commutative pair"
-                ),
-                "selection-first" => assert!(forward && !reverse),
-                "fire-first" => assert!(!forward && reverse),
-                _ => unreachable!(),
-            }
+            let expected = crate::declared_order::before(SYSTEMS[a], SYSTEMS[b]);
+            assert_eq!(
+                (forward, reverse),
+                (expected, !expected),
+                "the actual declared path follows the frozen owner order"
+            );
             pairs.push(json!({"systems":[SYSTEMS[a],SYSTEMS[b]],"access":access,"incompatible":true,"forward_path":forward,"reverse_path":reverse}));
         }
-        // Independently retain every other unordered raw conflict incident on
-        // these four instances. The final census must still contain exactly
-        // this multiset: no external pair is excused by the five annotations.
+        // Retain complete physical external vectors even when production order
+        // resolves every reported row; separately check the unordered census subset.
         let mut external = Vec::new();
+        let mut raw_external = Vec::new();
         for &a in &ids {
             for (b, system, _) in graph.systems.iter() {
-                if ids.contains(&b) || reachable(&edges, a, b) || reachable(&edges, b, a) {
+                if ids.contains(&b) {
                     continue;
                 }
                 let first = graph.systems.get(a).unwrap();
                 let second = graph.systems.get(b).unwrap();
                 let names = [first.system.name().as_string(), system.name().as_string()];
+                let previous = raw_external.len();
                 if first.system.is_exclusive() || second.system.is_exclusive() {
-                    external.push(debt(world, names, std::iter::empty()));
+                    raw_external.push(debt(world, names, std::iter::empty()));
                 } else if !first.access.is_compatible(&second.access) {
                     let access = match first.access.get_conflicts(&second.access) {
                         AccessConflicts::All => Vec::new(),
@@ -184,17 +179,24 @@ impl ScheduleBuildPass for Observe {
                             indices.ones().map(ComponentId::new).collect()
                         }
                     };
-                    external.push(debt(world, names, access.into_iter()));
+                    raw_external.push(debt(world, names, access.into_iter()));
+                }
+                if raw_external.len() > previous
+                    && !reachable(&edges, a, b)
+                    && !reachable(&edges, b, a)
+                {
+                    external.push(raw_external.last().unwrap().clone());
                 }
             }
         }
+        raw_external.sort();
         external.sort();
         assert!(
-            !external.is_empty(),
+            !raw_external.is_empty(),
             "external-conflict preservation must not be vacuous"
         );
         *self.result.lock().unwrap() = Some(
-            json!({"order":self.order,"unique_instances":4,"pairs":pairs,"selection_before_applier":true,"external_conflicts":external}),
+            json!({"order":self.order,"unique_instances":4,"pairs":pairs,"selection_before_applier":true,"external_conflicts":external,"raw_external":raw_external,"graph":crate::declared_order::capture(graph,dag,&self.order)}),
         );
         Ok(())
     }
@@ -202,10 +204,7 @@ impl ScheduleBuildPass for Observe {
 
 pub struct Proof(Arc<Mutex<Option<Value>>>);
 pub fn install(app: &mut App, order: &str) -> Proof {
-    assert!(matches!(
-        order,
-        "ordinary" | "selection-first" | "fire-first"
-    ));
+    assert!(matches!(order, "ordinary" | "shuffle-a" | "shuffle-b"));
     let result = Arc::new(Mutex::new(None));
     app.world_mut().schedule_scope(FixedUpdate, |_, schedule| {
         assert!(
@@ -215,7 +214,7 @@ pub fn install(app: &mut App, order: &str) -> Proof {
         let graph = schedule.graph();
         let ids = keys(graph);
         // Resolve each existing direct SystemTypeSet, checking multiplicity so
-        // a future repeated registration cannot broaden these test-local edges.
+        // a future repeated registration cannot silently broaden the selected owners.
         let sets: Vec<InternedSystemSet> =
             ids.iter()
                 .map(|id| {
@@ -259,21 +258,9 @@ pub fn install(app: &mut App, order: &str) -> Proof {
                     interned[0]
                 })
                 .collect();
-        // SystemTypeSets cannot themselves be configured (Bevy config.rs).
-        // Empty ordinary sets can refer to them through before/after; Bevy's
-        // DagGroups::flatten connects an empty set's incoming/outgoing neighbors.
-        // They add no runnable system or access. The build observer checks the
-        // resulting actual system paths, so an ineffective bridge cannot pass.
-        if order != "ordinary" {
-            let permutation = if order == "selection-first" {
-                [0, 1, 2, 3]
-            } else {
-                [3, 2, 0, 1]
-            };
-            for (index, pair) in permutation.windows(2).enumerate() {
-                schedule.configure_sets(Between(index).after(sets[pair[0]]).before(sets[pair[1]]));
-            }
-        }
+        assert_eq!(sets.len(), SYSTEMS.len());
+        // Registration changes are selected before constructing the real App.
+        // This observer adds no edges, systems, access or run conditions.
         schedule.add_build_pass(Observe {
             order: order.to_owned(),
             result: result.clone(),
@@ -291,7 +278,7 @@ impl Proof {
             .expect("actual build pass must run");
         app.world_mut()
             .schedule_scope(FixedUpdate, |world, schedule| {
-                // Every pair is an actual access conflict but no longer a debt row.
+                // These physical conflicts have declared paths and are absent from the census.
                 // Do not inspect graph.systems here: initialization moved instances
                 // into the executable. Their stable names are exposed by systems().
                 let names: std::collections::HashMap<_, _> = schedule
@@ -305,9 +292,9 @@ impl Proof {
                         !PAIRS.iter().any(|(x, y)| (names[a] == SYSTEMS[*x]
                             && names[b] == SYSTEMS[*y])
                             || (names[b] == SYSTEMS[*x] && names[a] == SYSTEMS[*y])),
-                        "exact annotations must suppress their own five debt rows"
+                        "the five annotated pairs must remain absent from the ambiguity census"
                     );
-                    if SYSTEMS.contains(&names[a].as_str()) || SYSTEMS.contains(&names[b].as_str())
+                    if SYSTEMS.contains(&names[a].as_str()) != SYSTEMS.contains(&names[b].as_str())
                     {
                         external.push(debt(
                             world,
@@ -347,10 +334,11 @@ pub fn per_target(report: &Value) -> Value {
 }
 
 #[test]
-fn opposed_tactical_orders_preserve_every_target_subsequence_and_gameplay_tick() {
+fn declared_tactical_order_preserves_every_target_subsequence_and_gameplay_tick() {
     for case in ["retarget", "clear", "death-reacquire"] {
         let mut reference: Option<Value> = None;
-        for order in ["selection-first", "fire-first"] {
+        let mut registration_roles = std::collections::BTreeMap::new();
+        for order in ["ordinary", "shuffle-a", "shuffle-b"] {
             for role in ["default-1", "default-2", "pinned"] {
                 let output = std::process::Command::new(std::env::current_exe().unwrap())
                     .args([
@@ -358,6 +346,7 @@ fn opposed_tactical_orders_preserve_every_target_subsequence_and_gameplay_tick()
                         "tactical_target_baseline_child",
                         "--ignored",
                         "--nocapture",
+                        "--test-threads=1",
                     ])
                     .env("PHOENIX_TACTICAL_BASELINE_ROLE", role)
                     .env("PHOENIX_TACTICAL_BASELINE_CASE", case)
@@ -381,8 +370,30 @@ fn opposed_tactical_orders_preserve_every_target_subsequence_and_gameplay_tick()
                 assert_eq!(report["role"], role);
                 assert_eq!(report["case"], case);
                 assert_eq!(report["order_proof"]["order"], order);
-                println!("\nPHOENIX_TACTICAL_FORCED={}", rows[0]);
+                println!("\nPHOENIX_TACTICAL_REGISTRATION={}", rows[0]);
+                assert_eq!(report["seed"], 140013);
+                assert_ne!(report["process"], std::process::id());
+                assert!(report["process"].as_u64().unwrap() > 0);
+                if role == "pinned" {
+                    assert_eq!(report["compute_threads"], 1);
+                    assert_eq!(report["fixed_update_executor"], "SingleThreaded");
+                } else {
+                    assert!(report["compute_threads"].as_u64().unwrap() > 1);
+                    assert_eq!(report["fixed_update_executor"], "MultiThreaded");
+                }
+                crate::declared_order::observe_role(
+                    &mut registration_roles,
+                    &report["order_proof"]["graph"],
+                );
                 if let Some(first) = &reference {
+                    crate::declared_order::assert_graph(
+                        &first["order_proof"]["graph"],
+                        &report["order_proof"]["graph"],
+                    );
+                    assert_eq!(
+                        first["order_proof"]["raw_external"], report["order_proof"]["raw_external"],
+                        "all raw external conflicts and multiplicities remain visible"
+                    );
                     assert_eq!(
                         first["ticks"], report["ticks"],
                         "{case}/{order}/{role}: actual gameplay differs"

@@ -131,6 +131,7 @@ impl Plugin for ShipPlugin {
                 // `run_if(ai_tick_ready)` latch so state time advances on
                 // the fixed AI cadence, never per frame (AC4).
                 ai_policy_state_tick
+                    .in_set(crate::sim_sets::FixedStep::AiPolicyStateTick)
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(crate::lobby::LobbySystemSet)
                     .after(crate::sim_sets::AiTickLabel)
@@ -175,6 +176,7 @@ impl Plugin for ShipPlugin {
                     // whenever they run, the frame they read was built this tick
                     // (they share the same `run_if` latch).
                     build_helm_ai_surfaces_frame
+                        .in_set(crate::sim_sets::FixedStep::BuildHelmAiSurfacesFrame)
                         .in_set(crate::sim_sets::SimSet::Physics)
                         .after(crate::sim_sets::AiTickLabel)
                         .before(helm_motion_planner)
@@ -201,6 +203,7 @@ impl Plugin for ShipPlugin {
                     // `.before(process_helm_inputs)`: its emitted admitted
                     // command must be applied this tick (issue #824).
                     ai_helm_lateral_thrust
+                        .in_set(crate::sim_sets::FixedStep::AiHelmLateralThrust)
                         .in_set(crate::sim_sets::SimSet::Physics)
                         .after(crate::sim_sets::AiTickLabel)
                         .before(process_helm_inputs)
@@ -231,8 +234,11 @@ impl Plugin for ShipPlugin {
                     // every ship's intent components. Runs after every AI
                     // emitter (each declares `.before(process_helm_inputs)`) and
                     // before every intent/`LastHelmInput` reader below.
-                    process_helm_inputs.in_set(crate::sim_sets::SimSet::Physics),
+                    process_helm_inputs
+                        .in_set(crate::sim_sets::FixedStep::ProcessHelmInputs)
+                        .in_set(crate::sim_sets::SimSet::Physics),
                     publish_joystick_to_engines
+                        .in_set(crate::sim_sets::FixedStep::PublishJoystickToEngines)
                         .in_set(crate::sim_sets::SimSet::Physics)
                         .after(process_helm_inputs),
                     // A `LastHelmInput` thrust/steering pair reader. Since #824
@@ -240,15 +246,21 @@ impl Plugin for ShipPlugin {
                     // one `.after` edge is the whole torn-pair contract
                     // (`helm_ai_last_input_pair_is_not_torn` pins it).
                     operate_helm_engine_ai
+                        .in_set(crate::sim_sets::FixedStep::OperateHelmEngineAi)
                         .in_set(crate::sim_sets::SimSet::Physics)
                         .after(process_helm_inputs),
-                    detect_reached_objective_completion.in_set(crate::sim_sets::SimSet::Broadcast),
-                    tick_impulse.in_set(crate::sim_sets::SimSet::Physics),
+                    detect_reached_objective_completion
+                        .in_set(crate::sim_sets::FixedStep::DetectReachedObjectiveCompletion)
+                        .in_set(crate::sim_sets::SimSet::Broadcast),
+                    tick_impulse
+                        .in_set(crate::sim_sets::FixedStep::TickImpulse)
+                        .in_set(crate::sim_sets::SimSet::Physics),
                     // `tick_boost` reads the `LastHelmInput` pair for drain
                     // scaling — `.after(process_helm_inputs)` is the torn-pair
                     // edge (see above); the boost-transition ordering edge is
                     // declared as `.before(tick_boost)` on `apply_helm_commands`.
                     tick_boost
+                        .in_set(crate::sim_sets::FixedStep::TickBoost)
                         .in_set(crate::sim_sets::SimSet::Physics)
                         .after(process_helm_inputs),
                     handle_impulse_messages.in_set(crate::sim_sets::SimSet::Input),
@@ -269,20 +281,30 @@ impl Plugin for ShipPlugin {
                     // are covered by `.after(process_helm_inputs)` /
                     // `.after(apply_helm_commands)` respectively.)
                     integrate_ship_physics
+                        .in_set(crate::sim_sets::FixedStep::IntegrateShipPhysics)
                         .in_set(crate::sim_sets::SimSet::Physics)
                         .after(process_helm_inputs)
                         .after(apply_helm_commands)
                         .after(tick_impulse)
                         .after(tick_boost),
                     sync_ship_position
+                        .in_set(crate::sim_sets::FixedStep::SyncShipPosition)
                         .in_set(crate::sim_sets::SimSet::Physics)
                         .after(process_helm_inputs)
                         .after(integrate_ship_physics),
-                    handle_station_rating_change.in_set(crate::sim_sets::SimSet::Input),
-                    handle_coordination_enqueue.in_set(crate::sim_sets::SimSet::Input),
+                    handle_station_rating_change
+                        .in_set(crate::sim_sets::FixedStep::HandleStationRatingChange)
+                        .in_set(crate::sim_sets::SimSet::Input),
+                    handle_coordination_enqueue
+                        .in_set(crate::sim_sets::FixedStep::HandleCoordinationEnqueue)
+                        .in_set(crate::sim_sets::SimSet::Input),
                     process_coordination_lag.in_set(crate::sim_sets::SimSet::Modifiers),
-                    sync_console_damage_tiers.in_set(crate::sim_sets::SimSet::Damage),
-                    detect_damage_tier_crossings.in_set(crate::sim_sets::SimSet::Damage),
+                    sync_console_damage_tiers
+                        .in_set(crate::sim_sets::FixedStep::SyncConsoleDamageTiers)
+                        .in_set(crate::sim_sets::SimSet::Damage),
+                    detect_damage_tier_crossings
+                        .in_set(crate::sim_sets::FixedStep::DetectDamageTierCrossings)
+                        .in_set(crate::sim_sets::SimSet::Damage),
                 )
                     .after(crate::lobby::LobbySystemSet),
             );
@@ -294,6 +316,7 @@ impl Plugin for ShipPlugin {
         app.add_systems(
             FixedUpdate,
             flush_coordination_popups
+                .in_set(crate::sim_sets::FixedStep::FlushCoordinationPopups)
                 .in_set(crate::sim_sets::SimSet::Modifiers)
                 .after(process_coordination_lag),
         );
@@ -319,7 +342,11 @@ impl Plugin for ShipPlugin {
         // is idempotent and runs every tick rather than on change.
         app.add_systems(
             FixedUpdate,
-            (write_scenario_detail_floor, resolve_human_seeking_hosts)
+            (
+                write_scenario_detail_floor,
+                resolve_human_seeking_hosts
+                    .in_set(crate::sim_sets::FixedStep::ResolveHumanSeekingHosts),
+            )
                 .chain()
                 .in_set(crate::sim_sets::SimSet::Input)
                 .after(crate::lobby::LobbySystemSet)
@@ -335,7 +362,8 @@ impl Plugin for ShipPlugin {
             (
                 crate::gm_puppet::prune_removed_station_puppets,
                 crate::gm_puppet::prepare_station_puppet_fidelity,
-                crate::gm_puppet::reconcile_station_puppet_control,
+                crate::gm_puppet::reconcile_station_puppet_control
+                    .in_set(crate::sim_sets::FixedStep::ReconcileStationPuppetControl),
             )
                 .chain()
                 .after(crate::lobby::LobbySystemSet)
@@ -352,11 +380,14 @@ impl Plugin for ShipPlugin {
         // exactly what it is: hull damage.
         .add_systems(
             FixedUpdate,
-            crate::gm_effect::apply_gm_direct_effects.in_set(crate::sim_sets::SimSet::Damage),
+            crate::gm_effect::apply_gm_direct_effects
+                .in_set(crate::sim_sets::FixedStep::ApplyGmDirectEffects)
+                .in_set(crate::sim_sets::SimSet::Damage),
         )
         .add_systems(
             FixedUpdate,
             crate::gm_puppet::enforce_station_puppet_control
+                .in_set(crate::sim_sets::FixedStep::EnforceStationPuppetControl)
                 .in_set(crate::sim_sets::SimSet::Input)
                 .after(handle_station_rating_change)
                 .after(resolve_human_seeking_hosts),
@@ -364,8 +395,10 @@ impl Plugin for ShipPlugin {
         .add_systems(
             FixedUpdate,
             (
-                crate::gm_puppet::settle_station_puppet_feedback,
-                crate::gm_puppet::settle_removed_station_feedback,
+                crate::gm_puppet::settle_station_puppet_feedback
+                    .in_set(crate::sim_sets::FixedStep::SettleStationPuppetFeedback),
+                crate::gm_puppet::settle_removed_station_feedback
+                    .in_set(crate::sim_sets::FixedStep::SettleRemovedStationFeedback),
             )
                 .chain()
                 .in_set(crate::sim_sets::SimSet::Broadcast),
@@ -425,7 +458,10 @@ impl Plugin for ShipPlugin {
         //   torn pair and needs no edge.)
         app.add_systems(
             FixedUpdate,
-            (ai_helm_thrust, ai_helm_steering)
+            (
+                ai_helm_thrust.in_set(crate::sim_sets::FixedStep::AiHelmThrust),
+                ai_helm_steering.in_set(crate::sim_sets::FixedStep::AiHelmSteering),
+            )
                 .in_set(crate::sim_sets::SimSet::Physics)
                 .after(crate::lobby::LobbySystemSet)
                 .after(crate::sim_sets::AiTickLabel)
@@ -445,6 +481,7 @@ impl Plugin for ShipPlugin {
         app.add_systems(
             FixedUpdate,
             ai_helm_impulse
+                .in_set(crate::sim_sets::FixedStep::AiHelmImpulse)
                 .in_set(crate::sim_sets::SimSet::Physics)
                 .after(crate::lobby::LobbySystemSet)
                 .after(crate::sim_sets::AiTickLabel)
@@ -464,6 +501,7 @@ impl Plugin for ShipPlugin {
         app.add_systems(
             FixedUpdate,
             ai_helm_vertical_thrust
+                .in_set(crate::sim_sets::FixedStep::AiHelmVerticalThrust)
                 .in_set(crate::sim_sets::SimSet::Physics)
                 .after(crate::lobby::LobbySystemSet)
                 .after(crate::sim_sets::AiTickLabel)
@@ -487,6 +525,7 @@ impl Plugin for ShipPlugin {
         app.add_systems(
             FixedUpdate,
             ai_helm_boost
+                .in_set(crate::sim_sets::FixedStep::AiHelmBoost)
                 .in_set(crate::sim_sets::SimSet::Physics)
                 .after(crate::lobby::LobbySystemSet)
                 .after(crate::sim_sets::AiTickLabel)

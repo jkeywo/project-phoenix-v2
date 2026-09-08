@@ -37,6 +37,7 @@ struct Observation {
     sim_tick: u64,
     phase: GamePhase,
     digest: u64,
+    ticks: Vec<(u64, u64)>,
     compute_threads: usize,
     executors: BTreeMap<String, Option<String>>,
 }
@@ -92,6 +93,7 @@ fn default_pool_twice_and_pinned_executor_reach_the_same_digest() {
             first.digest, other.digest,
             "same mission and boundary must agree across fresh default/pinned runs:\n{observations:#?}"
         );
+        assert_eq!(first.ticks, other.ticks, "every completed tick must agree");
     }
 }
 
@@ -193,8 +195,13 @@ fn pool_proof_child() {
 
     // Do not use the early-GameOver run helper: the prior equivalence test
     // pumps exactly 240 frames, even if a future scenario ends early.
+    let mut ticks = Vec::new();
     for _ in 0..FRAMES {
         app.update();
+        ticks.push((
+            app.world().resource::<SimTick>().0,
+            world_digest(app.world()),
+        ));
     }
     let sim_tick = app.world().resource::<SimTick>().0;
     assert!(
@@ -221,6 +228,7 @@ fn pool_proof_child() {
         sim_tick,
         phase,
         digest: world_digest(app.world()),
+        ticks,
         compute_threads,
         executors,
     };

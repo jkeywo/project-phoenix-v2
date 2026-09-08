@@ -182,9 +182,12 @@ impl Plugin for SciencePlugin {
                 // After the condition tick, so a scan taken on the tick a
                 // repair lands reads the repaired number. See the module doc.
                 tick_scans
+                    .in_set(crate::sim_sets::FixedStep::TickScans)
                     .in_set(crate::sim_sets::SimSet::Modifiers)
                     .after(crate::infrastructure::tick_infrastructure_condition),
-                publish_scan_blackboard.in_set(crate::sim_sets::SimSet::Publish),
+                publish_scan_blackboard
+                    .in_set(crate::sim_sets::FixedStep::PublishScanBlackboard)
+                    .in_set(crate::sim_sets::SimSet::Publish),
             ),
         );
     }

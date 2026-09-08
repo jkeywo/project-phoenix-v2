@@ -113,6 +113,7 @@ impl Plugin for ConsoleAiPlugin {
                 // AdmittedCommands before Input each tick, so the applier
                 // must consume same-tick after this emit.
                 ai_shield_focus
+                    .in_set(crate::sim_sets::FixedStep::AiShieldFocus)
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(crate::sim_sets::AiTickLabel)
                     .before(crate::ship::shields::handle_shields_messages)
@@ -125,6 +126,7 @@ impl Plugin for ConsoleAiPlugin {
                 // AdmittedCommands before Input each tick, so the applier must
                 // consume same-tick after this emit.
                 ai_power_allocation
+                    .in_set(crate::sim_sets::FixedStep::AiPowerAllocation)
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(crate::sim_sets::AiTickLabel)
                     .before(crate::ship::power::handle_power_messages)
@@ -148,6 +150,7 @@ impl Plugin for ConsoleAiPlugin {
                 // shields/power siblings above carry the identical edge for
                 // the identical reason.
                 ai_torpedo_auto_fire
+                    .in_set(crate::sim_sets::FixedStep::AiTorpedoAutoFire)
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(crate::sim_sets::AiTickLabel)
                     .before(crate::console::weapons::handle_fire_torpedo)
@@ -168,6 +171,7 @@ impl Plugin for ConsoleAiPlugin {
                 // quantising both halves does not insert an extra tick between
                 // them.
                 ai_torpedo_load
+                    .in_set(crate::sim_sets::FixedStep::AiTorpedoLoad)
                     .in_set(crate::sim_sets::SimSet::Input)
                     .before(crate::console::weapons::handle_set_torpedo_volley_target)
                     .run_if(crate::ai::cadence::ai_tick_ready),
@@ -177,6 +181,7 @@ impl Plugin for ConsoleAiPlugin {
                 // It stays under `ai_tick_ready` because its reaction-delay
                 // model advances by the authored tick period, not `Time::delta`.
                 tick_frequency_hint_high_fidelity
+                    .in_set(crate::sim_sets::FixedStep::TickFrequencyHintHighFidelity)
                     .in_set(crate::sim_sets::SimSet::Input)
                     .run_if(crate::ai::cadence::ai_tick_ready),
             ),

@@ -30,7 +30,9 @@ impl Plugin for HelmPlugin {
             )
             .add_systems(
                 FixedUpdate,
-                publish_helm_blackboard.in_set(crate::sim_sets::SimSet::Publish),
+                publish_helm_blackboard
+                    .in_set(crate::sim_sets::FixedStep::PublishHelmBlackboard)
+                    .in_set(crate::sim_sets::SimSet::Publish),
             );
     }
 }

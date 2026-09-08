@@ -226,17 +226,23 @@ impl Plugin for DockPlugin {
                 // (rule 7), emitting Dock / Undock BEFORE `handle_dock_commands`
                 // consumes the tick.
                 operate_dock_ai
+                    .in_set(crate::sim_sets::FixedStep::OperateDockAi)
                     .in_set(crate::sim_sets::SimSet::Input)
                     .run_if(crate::ai::cadence::ai_tick_ready)
                     .before(handle_dock_commands),
-                handle_dock_commands.in_set(crate::sim_sets::SimSet::Input),
+                handle_dock_commands
+                    .in_set(crate::sim_sets::FixedStep::HandleDockCommands)
+                    .in_set(crate::sim_sets::SimSet::Input),
                 // Decide the dock and fly the own ship onto its mate, after the
                 // tractor rig so a hull that is both a docking ship and a tractor
                 // target has a deterministic last writer (see module docs).
                 tick_dock
+                    .in_set(crate::sim_sets::FixedStep::TickDock)
                     .in_set(crate::sim_sets::SimSet::Modifiers)
                     .after(crate::tractor::server::move_coupled_target),
-                publish_dock_blackboard.in_set(crate::sim_sets::SimSet::Publish),
+                publish_dock_blackboard
+                    .in_set(crate::sim_sets::FixedStep::PublishDockBlackboard)
+                    .in_set(crate::sim_sets::SimSet::Publish),
             ),
         );
     }

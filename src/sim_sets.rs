@@ -1,5 +1,8 @@
 use bevy::prelude::*;
 
+mod order;
+pub(crate) use order::{configure_fixed_order, FixedStep};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
 pub enum SimSet {
     Input,

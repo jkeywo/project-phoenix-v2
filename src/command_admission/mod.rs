@@ -289,7 +289,10 @@ pub enum AdmissionGate {
 /// of the seam, and only an app with a real game phase has one.
 pub fn register_admission_seam(app: &mut App, gate: AdmissionGate) {
     log::register_command_log(app);
-    let systems = (admit_system_commands, clear_inter_system_queue)
+    let systems = (
+        admit_system_commands.in_set(crate::sim_sets::FixedStep::AdmitSystemCommands),
+        clear_inter_system_queue,
+    )
         .in_set(AdmissionSet)
         .after(crate::lobby::LobbySystemSet)
         .before(crate::sim_sets::SimSet::Input);

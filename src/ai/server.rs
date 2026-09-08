@@ -1029,6 +1029,7 @@ impl Plugin for AiPlugin {
         app.add_systems(
             FixedUpdate,
             build_world_snapshot
+                .in_set(crate::sim_sets::FixedStep::BuildWorldSnapshot)
                 .in_set(crate::sim_sets::SimSet::Physics)
                 .before(crate::sim_sets::AiTickLabel)
                 .run_if(ai_snapshot_ready),
@@ -1036,6 +1037,7 @@ impl Plugin for AiPlugin {
         app.add_systems(
             FixedUpdate,
             aggregate_doctrine_blackboards
+                .in_set(crate::sim_sets::FixedStep::AggregateDoctrineBlackboards)
                 .in_set(crate::sim_sets::SimSet::PublishAggregate)
                 .run_if(ai_snapshot_ready),
         );
@@ -1043,9 +1045,11 @@ impl Plugin for AiPlugin {
             FixedUpdate,
             (
                 simulate_low_lod_ships
+                    .in_set(crate::sim_sets::FixedStep::SimulateLowLodShips)
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .before(lod_ai_ships),
                 lod_ai_ships
+                    .in_set(crate::sim_sets::FixedStep::LodAiShips)
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .before(build_world_snapshot)
                     .before(crate::sim_sets::AiTickLabel),
@@ -1054,11 +1058,13 @@ impl Plugin for AiPlugin {
         app.add_systems(
             FixedUpdate,
             (
-                register_ai_tokens_on_spawn,
+                register_ai_tokens_on_spawn
+                    .in_set(crate::sim_sets::FixedStep::RegisterAiTokensOnSpawn),
                 emit_attacked_on_new_attacker
+                    .in_set(crate::sim_sets::FixedStep::EmitAttackedOnNewAttacker)
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .in_set(crate::sim_sets::AiTickLabel),
-                unregister_on_despawn,
+                unregister_on_despawn.in_set(crate::sim_sets::FixedStep::UnregisterOnDespawn),
             ),
         );
     }

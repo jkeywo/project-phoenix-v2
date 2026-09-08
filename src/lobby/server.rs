@@ -439,11 +439,14 @@ impl Plugin for LobbyPlugin {
             .add_systems(
                 FixedUpdate,
                 (
-                    enforce_fleet_managed_countdown,
-                    handle_disconnect,
-                    tick_countdown,
-                    apply_pending_start_grants,
-                    update_game_state_cache,
+                    enforce_fleet_managed_countdown
+                        .in_set(crate::sim_sets::FixedStep::EnforceFleetManagedCountdown),
+                    handle_disconnect.in_set(crate::sim_sets::FixedStep::HandleDisconnect),
+                    tick_countdown.in_set(crate::sim_sets::FixedStep::TickCountdown),
+                    apply_pending_start_grants
+                        .in_set(crate::sim_sets::FixedStep::ApplyPendingStartGrants),
+                    update_game_state_cache
+                        .in_set(crate::sim_sets::FixedStep::UpdateGameStateCache),
                 )
                     .chain()
                     .in_set(LobbySystemSet),
@@ -462,6 +465,7 @@ impl Plugin for LobbyPlugin {
             .add_systems(
                 FixedUpdate,
                 handle_identify_system
+                    .in_set(crate::sim_sets::FixedStep::HandleIdentifySystem)
                     .in_set(LobbySystemSet)
                     .after(handle_disconnect)
                     .before(tick_countdown),
@@ -470,13 +474,19 @@ impl Plugin for LobbyPlugin {
             .add_systems(
                 FixedUpdate,
                 (
-                    handle_select_station_system,
-                    handle_release_station_system,
-                    handle_set_ready_system,
-                    handle_set_spectator_system,
-                    handle_set_afk_system,
-                    handle_set_station_rating_system,
-                    handle_report_station_eligibility_system,
+                    handle_select_station_system
+                        .in_set(crate::sim_sets::FixedStep::HandleSelectStationSystem),
+                    handle_release_station_system
+                        .in_set(crate::sim_sets::FixedStep::HandleReleaseStationSystem),
+                    handle_set_ready_system
+                        .in_set(crate::sim_sets::FixedStep::HandleSetReadySystem),
+                    handle_set_spectator_system
+                        .in_set(crate::sim_sets::FixedStep::HandleSetSpectatorSystem),
+                    handle_set_afk_system.in_set(crate::sim_sets::FixedStep::HandleSetAfkSystem),
+                    handle_set_station_rating_system
+                        .in_set(crate::sim_sets::FixedStep::HandleSetStationRatingSystem),
+                    handle_report_station_eligibility_system
+                        .in_set(crate::sim_sets::FixedStep::HandleReportStationEligibilitySystem),
                 )
                     .in_set(LobbySystemSet)
                     .after(handle_disconnect)
@@ -491,6 +501,7 @@ impl Plugin for LobbyPlugin {
             .add_systems(
                 FixedUpdate,
                 handle_set_name_system
+                    .in_set(crate::sim_sets::FixedStep::HandleSetNameSystem)
                     .in_set(LobbySystemSet)
                     .after(handle_disconnect)
                     .before(tick_countdown)
@@ -1948,6 +1959,7 @@ impl Plugin for LobbyOutboxPlugin {
         app.add_systems(
             FixedUpdate,
             drain_lobby_outbox
+                .in_set(crate::sim_sets::FixedStep::DrainLobbyOutbox)
                 .after(tick_countdown)
                 .after(apply_pending_start_grants),
         );

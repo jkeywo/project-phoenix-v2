@@ -174,7 +174,9 @@ pub fn finalize_reconnect_projections(app: &mut App) {
     // not a diagnostic alias or permission to ignore a different system.
     app.add_systems(
         FixedUpdate,
-        PipeSystem::new(collector, capture_delivery, name).in_set(ReconnectBoundary),
+        PipeSystem::new(collector, capture_delivery, name)
+            .in_set(ReconnectBoundary)
+            .in_set(crate::sim_sets::FixedStep::RefreshCachesOnMidgameReconnect),
     );
 }
 

@@ -1,3 +1,4 @@
+use crate::core::broadcast::sim::SimProducer;
 use bevy::prelude::*;
 
 use crate::command_admission::ai_emit::emit_ai_command;
@@ -191,15 +192,19 @@ impl Plugin for RepairPlugin {
                 // projection — i.e. two hosts of one fleet folding different
                 // `ShipRepairTeams` state into the digest from identical input.
                 tick_repair_teams
+                    .in_set(crate::sim_sets::FixedStep::TickRepairTeams)
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(super::dispatch::handle_dispatch_repair_team)
                     .after(super::dispatch::handle_recall_repair_team)
                     .after(super::dispatch::handle_set_repair_priority)
                     .after(super::dispatch::handle_set_repair_target_priority),
                 operate_repair_ai
+                    .in_set(crate::sim_sets::FixedStep::OperateRepairAi)
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .run_if(crate::ai::cadence::ai_tick_ready),
-                publish_repair_blackboard.in_set(crate::sim_sets::SimSet::Publish),
+                publish_repair_blackboard
+                    .in_set(crate::sim_sets::FixedStep::PublishRepairBlackboard)
+                    .in_set(crate::sim_sets::SimSet::Publish),
             ),
         )
         .add_plugins(repair_state_broadcaster());
@@ -332,7 +337,7 @@ impl RepairHumanAlerted {
 /// dropped the global-Resource fallback). Stays `LocalShip`-filtered: this is
 /// the player's own repair wire, and NPC team state never reaches a client.
 pub fn repair_state_broadcaster() -> SimBroadcaster {
-    SimBroadcaster::new().register(
+    SimBroadcaster::for_producer(SimProducer::Repair).register(
         Audience::HoldingSystem(SystemId("repair".into())),
         Cadence::Hz(10.0),
         |world: &mut World| {

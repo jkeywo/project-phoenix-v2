@@ -840,6 +840,7 @@ impl Plugin for WorldPlugin {
         app.add_systems(
             FixedUpdate,
             broadcast_objective_summary
+                .in_set(crate::sim_sets::FixedStep::BroadcastObjectiveSummary)
                 .in_set(crate::sim_sets::SimSet::Broadcast)
                 .after(crate::comms::server::broadcast_comms_state)
                 .before(
@@ -860,20 +861,20 @@ impl Plugin for WorldPlugin {
         .add_systems(
             FixedUpdate,
             (
-                anchor_mission_clock,
+                anchor_mission_clock.in_set(crate::sim_sets::FixedStep::AnchorMissionClock),
                 // Immediately after the anchor and before anything reads the
                 // table: a `[[deadline]]` is due N seconds into the MISSION,
                 // so it is keyed off the same first-InProgress-tick moment
                 // (issue #1024). Runs its body exactly once per mission.
-                arm_mission_deadlines,
+                arm_mission_deadlines.in_set(crate::sim_sets::FixedStep::ArmMissionDeadlines),
                 // Beside the deadline arm, and for its reason: a
                 // `[[workforce]]`'s authored strike status is the situation
                 // the crew ARRIVE INTO, so it must be true before the first
                 // handler runs and before any operation is offered
                 // (issue #1035). Runs its body exactly once per mission.
-                arm_mission_workforces,
-                collect_world_events,
-                tick_trigger_pipeline,
+                arm_mission_workforces.in_set(crate::sim_sets::FixedStep::ArmMissionWorkforces),
+                collect_world_events.in_set(crate::sim_sets::FixedStep::CollectWorldEvents),
+                tick_trigger_pipeline.in_set(crate::sim_sets::FixedStep::TickTriggerPipeline),
             )
                 .chain()
                 .in_set(crate::sim_sets::SimSet::Physics),
@@ -886,7 +887,9 @@ impl Plugin for WorldPlugin {
         // one-tick event bridge `AiEntityAttacked` already uses).
         .add_systems(
             FixedUpdate,
-            crate::ai::server::advance_objective_cursors.in_set(crate::sim_sets::SimSet::Modifiers),
+            crate::ai::server::advance_objective_cursors
+                .in_set(crate::sim_sets::FixedStep::AdvanceObjectiveCursors)
+                .in_set(crate::sim_sets::SimSet::Modifiers),
         )
         // The scripted-callback drain (issue #984, Rhai M6 phase 2b):
         // `after(n, |ctx| …)` callbacks that scripted handlers scheduled are
@@ -899,6 +902,7 @@ impl Plugin for WorldPlugin {
         .add_systems(
             FixedUpdate,
             tick_script_callbacks
+                .in_set(crate::sim_sets::FixedStep::TickScriptCallbacks)
                 .in_set(crate::sim_sets::SimSet::Physics)
                 .after(tick_trigger_pipeline)
                 .before(tick_delayed_actions),
@@ -906,16 +910,20 @@ impl Plugin for WorldPlugin {
         .add_systems(
             FixedUpdate,
             tick_delayed_actions
+                .in_set(crate::sim_sets::FixedStep::TickDelayedActions)
                 .in_set(crate::sim_sets::SimSet::Physics)
                 .after(tick_trigger_pipeline),
         )
         .add_systems(
             FixedUpdate,
-            apply_pending_scenario_loads.in_set(crate::sim_sets::SimSet::Physics),
+            apply_pending_scenario_loads
+                .in_set(crate::sim_sets::FixedStep::ApplyPendingScenarioLoads)
+                .in_set(crate::sim_sets::SimSet::Physics),
         )
         .add_systems(
             FixedUpdate,
             apply_world_layer_changes
+                .in_set(crate::sim_sets::FixedStep::ApplyWorldLayerChanges)
                 .in_set(crate::sim_sets::SimSet::Physics)
                 .before(collect_world_events)
                 .before(tick_script_callbacks),

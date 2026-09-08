@@ -1009,7 +1009,11 @@ impl Plugin for AsteroidLifecyclePlugin {
             // spawned rock is visible to rapier the same tick it appears.
             .add_systems(
                 FixedUpdate,
-                (check_destroyed_asteroids, update_asteroid_window)
+                (
+                    check_destroyed_asteroids
+                        .in_set(crate::sim_sets::FixedStep::CheckDestroyedAsteroids),
+                    update_asteroid_window.in_set(crate::sim_sets::FixedStep::UpdateAsteroidWindow),
+                )
                     .chain()
                     .before(bevy_rapier3d::plugin::PhysicsSet::SyncBackend),
             );

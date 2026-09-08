@@ -74,7 +74,9 @@ impl Plugin for DossierPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             FixedUpdate,
-            publish_dossier_blackboard.in_set(crate::sim_sets::SimSet::Publish),
+            publish_dossier_blackboard
+                .in_set(crate::sim_sets::FixedStep::PublishDossierBlackboard)
+                .in_set(crate::sim_sets::SimSet::Publish),
         );
     }
 }

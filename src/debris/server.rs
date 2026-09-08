@@ -253,6 +253,7 @@ impl Plugin for DebrisPlugin {
                 // tick the `urgent_flag` rises — could be taken against last
                 // tick's position on one host and this tick's on another.
                 tick_debris_drift
+                    .in_set(crate::sim_sets::FixedStep::TickDebrisDrift)
                     .in_set(crate::sim_sets::SimSet::Modifiers)
                     .before(crate::science::server::tick_scans),
                 // Then the plot, after the scan that may have moved it. The

@@ -1050,6 +1050,7 @@ pub fn register_lockstep(app: &mut App) {
         .add_systems(
             FixedUpdate,
             host_loss::apply_host_loss_backfill
+                .in_set(crate::sim_sets::FixedStep::ApplyHostLossBackfill)
                 .in_set(crate::sim_sets::SimSet::Input)
                 .after(crate::lobby::LobbySystemSet)
                 .after(crate::ship_plugin::handle_station_rating_change)

@@ -2,6 +2,9 @@
 //! No production annotation, replacement consumer, admission bypass claim or allowance edit.
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 
+mod common;
+#[path = "common/declared_order.rs"]
+mod declared_order;
 use bevy::{ecs::message::MessageCursor, prelude::*};
 use project_phoenix::{
     ai::cadence::AiSnapshotReady,
@@ -16,7 +19,7 @@ use project_phoenix::{
         },
     },
     entities::spawner::EntityUuid,
-    headless::{build_headless_app, HeadlessArgs},
+    headless::HeadlessArgs,
     lobby::{OutboundMessage, Target},
     server_app::{LocalShip, Ship, ShipSystemBlackboards},
     ship::{
@@ -310,10 +313,11 @@ fn assert_feedback(
 }
 
 #[test]
-fn five_foreign_consumers_preserve_effects_in_opposed_orders() {
+fn five_foreign_consumers_preserve_effects_under_declared_order_registration_changes() {
     let mut expected = None;
     let mut ordinary_graph = None;
-    for order in ["ordinary", "producer-first", "consumer-first"] {
+    let mut registration_roles = std::collections::BTreeMap::new();
+    for order in ["ordinary", "shuffle-a", "shuffle-b"] {
         for mode in ["default-1", "default-2", "pinned"] {
             let output = std::process::Command::new(std::env::current_exe().unwrap())
                 .args([
@@ -343,6 +347,7 @@ fn five_foreign_consumers_preserve_effects_in_opposed_orders() {
             assert_eq!(rows.len(), 1);
             let report: Value = serde_json::from_str(rows[0]).unwrap();
             assert_eq!(report["order"], order);
+            declared_order::observe_role(&mut registration_roles, &report["graph"]["graph"]);
             assert_eq!(report["mode"], mode);
             assert_eq!(report["seed"], SEED);
             assert!(report["process"].as_u64().unwrap() > 0);
@@ -375,7 +380,7 @@ fn five_foreign_consumers_preserve_effects_in_opposed_orders() {
 }
 
 #[test]
-#[ignore = "fresh-process parent owns default pools and test-local order"]
+#[ignore = "fresh-process parent owns default pools and registration perturbation"]
 fn foreign_consumer_child() {
     let order = std::env::var("PHOENIX_FOREIGN_ORDER").unwrap();
     let mode = std::env::var("PHOENIX_FOREIGN_MODE").unwrap();
@@ -383,14 +388,16 @@ fn foreign_consumer_child() {
         mode.as_str(),
         "default-1" | "default-2" | "pinned"
     ));
-    let mut app = build_headless_app(&HeadlessArgs {
-        world_path: "assets/worlds/combat_test.toml".into(),
-        ship_path: "assets/entities/alliance_destroyer.toml".into(),
-        seed: Some(SEED),
-        deterministic: mode == "pinned",
-        ..Default::default()
-    })
-    .unwrap();
+    let mut app = declared_order::build(
+        HeadlessArgs {
+            world_path: "assets/worlds/combat_test.toml".into(),
+            ship_path: "assets/entities/alliance_destroyer.toml".into(),
+            seed: Some(SEED),
+            deterministic: mode == "pinned",
+            ..Default::default()
+        },
+        &order,
+    );
     let proof = graph_proof::install(&mut app, &order);
     let period = sim_tick_period(app.world().resource::<WorldConfig>().global.sim_tick_hz);
     app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(period));

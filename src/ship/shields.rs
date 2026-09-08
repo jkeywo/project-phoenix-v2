@@ -1,3 +1,4 @@
+use crate::core::broadcast::sim::SimProducer;
 use crate::simmath;
 use bevy::prelude::*;
 
@@ -297,8 +298,12 @@ impl Plugin for ShipShieldsPlugin {
                     // `ai_shield_focus.before(handle_shields_messages)` edge;
                     // set ordering keeps this before `tick_shields`
                     // (Modifiers) and `publish_shields_blackboard` (Publish).
-                    handle_shields_messages.in_set(crate::sim_sets::SimSet::Physics),
-                    emit_shields_coordination.in_set(crate::sim_sets::SimSet::Input),
+                    handle_shields_messages
+                        .in_set(crate::sim_sets::FixedStep::HandleShieldsMessages)
+                        .in_set(crate::sim_sets::SimSet::Physics),
+                    emit_shields_coordination
+                        .in_set(crate::sim_sets::FixedStep::EmitShieldsCoordination)
+                        .in_set(crate::sim_sets::SimSet::Input),
                     // `translate_power_modifiers` is ALSO in `Modifiers`, so
                     // set membership alone leaves their order unspecified and
                     // `tick_shields` would read a one-tick-stale
@@ -308,6 +313,7 @@ impl Plugin for ShipShieldsPlugin {
                     // `ShipShieldsPlugin` without the simulation's modifier
                     // translators.
                     tick_shields
+                        .in_set(crate::sim_sets::FixedStep::TickShields)
                         .in_set(crate::sim_sets::SimSet::Modifiers)
                         .after(crate::modifiers::coordination::translate_power_modifiers),
                     receive_shields_coordination
@@ -316,6 +322,7 @@ impl Plugin for ShipShieldsPlugin {
                     // Repair writes a distinct registered key. The proof retains
                     // physical mutable-container incompatibility and Publish order.
                     publish_shields_blackboard
+                        .in_set(crate::sim_sets::FixedStep::PublishShieldsBlackboard)
                         .in_set(crate::sim_sets::SimSet::Publish)
                         .ambiguous_with(crate::console::repair::server::publish_repair_blackboard),
                 ),
@@ -474,7 +481,7 @@ fn reconnect_shields_projection(
 }
 
 pub fn shields_state_broadcaster() -> SimBroadcaster {
-    SimBroadcaster::new().register(
+    SimBroadcaster::for_producer(SimProducer::Shields).register(
         shields_status_audience(),
         Cadence::Hz(10.0),
         |world: &mut World| current_shield_status(world).into_iter().collect(),

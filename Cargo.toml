@@ -186,7 +186,7 @@ debug = ["bevy/debug"]
 # only avoids instantiating `RenderPlugin`.
 # Existing --perf-capture needs real worker spans and names in release too.
 # Runtime capture stays opt-in; ordinary host/browser builds omit this feature.
-headless = ["dep:bevy_ecs", "dep:indexmap", "bevy/debug"]
+headless = ["dep:bevy_ecs", "bevy/debug"]
 # The 55 shipped Falling Skyway end-to-end simulations are intentionally
 # manual-only. Ordinary native CI still compiles them (they are `#[ignore]`
 # without this feature) but does not spend ~20 minutes executing one scenario's
@@ -250,6 +250,8 @@ ultralight = ["host", "vellum-ultralight/ultralight"]
 # `crate::simmath::…` import paths resolve unchanged.
 phoenix-math = { path = "crates/phoenix-math" }
 bevy = { version = "0.18.1", features = ["webgl2", "webp"] }
+# Bevy's public schedule-build-pass signature, on every simulation host.
+indexmap = { version = "2.14.0", default-features = false }
 # PNG encoding for the `capture-billboard` tool (optional; enabled by the
 # `capture` feature). Matches the version Bevy already resolves.
 image = { version = "0.25", optional = true }
@@ -480,8 +482,6 @@ bevy = { version = "0.18.1", features = ["debug"] }
 # Enable ONLY ECS spans, not bevy/trace's unrelated renderer/logging layers.
 # This is Bevy's already-pinned ECS crate, unified with the ordinary engine.
 bevy_ecs = { version = "0.18.1", default-features = false, features = ["trace"], optional = true }
-# Public read-only schedule build-pass signature; already unified by Bevy.
-indexmap = { version = "2.14.0", default-features = false, optional = true }
 bevy_rapier3d = { version = "0.33" }
 # The native host's crew path (issue #1113): one outbound `wss:` client socket
 # to the rendezvous service, which is how a browser client joins a native host.

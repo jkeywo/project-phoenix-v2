@@ -208,20 +208,27 @@ impl Plugin for TractorPlugin {
                 // ReleaseTractor BEFORE `handle_tractor_commands` consumes the
                 // tick's admitted commands, so an AI engage lands the same tick.
                 operate_tractor_ai
+                    .in_set(crate::sim_sets::FixedStep::OperateTractorAi)
                     .in_set(crate::sim_sets::SimSet::Input)
                     .run_if(crate::ai::cadence::ai_tick_ready)
                     .before(handle_tractor_commands),
-                handle_tractor_commands.in_set(crate::sim_sets::SimSet::Input),
+                handle_tractor_commands
+                    .in_set(crate::sim_sets::FixedStep::HandleTractorCommands)
+                    .in_set(crate::sim_sets::SimSet::Input),
                 // Decide whether the coupling holds this tick, from the live
                 // lock, range, power and damage.
-                tick_tractor.in_set(crate::sim_sets::SimSet::Modifiers),
+                tick_tractor
+                    .in_set(crate::sim_sets::FixedStep::TickTractor)
+                    .in_set(crate::sim_sets::SimSet::Modifiers),
                 finish_tractor_action_feedback
+                    .in_set(crate::sim_sets::FixedStep::FinishTractorActionFeedback)
                     .in_set(crate::sim_sets::SimSet::Modifiers)
                     .after(tick_tractor),
                 // Then place the held target — after the tick that decided the
                 // hold, so a beam that dropped this tick moves nothing, exactly
                 // as any after-integration correction is ordered after the tick that decided it.
                 move_coupled_target
+                    .in_set(crate::sim_sets::FixedStep::MoveCoupledTarget)
                     .in_set(crate::sim_sets::SimSet::Modifiers)
                     .after(tick_tractor),
                 // Carry (or lift) the operator's tow-load helm penalty from
@@ -231,6 +238,7 @@ impl Plugin for TractorPlugin {
                 // `MaxYawRate` modifier that `integrate_ship_physics` reads on
                 // the next tick, exactly like impulse and power do.
                 apply_tow_load_penalty
+                    .in_set(crate::sim_sets::FixedStep::ApplyTowLoadPenalty)
                     .in_set(crate::sim_sets::SimSet::Modifiers)
                     .after(tick_tractor),
                 // Bank an arrest-decline target's condition (issue #1158) —
@@ -239,10 +247,13 @@ impl Plugin for TractorPlugin {
                 // the same ordering the infrastructure tick keeps so its payoff lands
                 // the same tick.
                 arrest_held_declines
+                    .in_set(crate::sim_sets::FixedStep::ArrestHeldDeclines)
                     .in_set(crate::sim_sets::SimSet::Modifiers)
                     .after(tick_tractor)
                     .before(crate::infrastructure::tick_infrastructure_condition),
-                publish_tractor_blackboard.in_set(crate::sim_sets::SimSet::Publish),
+                publish_tractor_blackboard
+                    .in_set(crate::sim_sets::FixedStep::PublishTractorBlackboard)
+                    .in_set(crate::sim_sets::SimSet::Publish),
             ),
         );
     }

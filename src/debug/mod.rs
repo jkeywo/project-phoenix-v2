@@ -271,6 +271,7 @@ impl Plugin for DebugPlugin {
         app.add_systems(
             FixedUpdate,
             scenario::publish_scenario_state
+                .in_set(crate::sim_sets::FixedStep::PublishScenarioState)
                 .after(scenario::record_trigger_fires)
                 .run_if(in_state(crate::core::messages::GamePhase::InProgress))
                 .run_if(|flag: Res<DebugScenarioStateEnabled>| flag.0),

@@ -418,9 +418,14 @@ impl Plugin for CommsWorldPlugin {
                     // before the router, placing both AI and human response
                     // paths after cleanup.
                     retire_dialogues_for_pending_layer_unloads
+                        .in_set(crate::sim_sets::FixedStep::RetireDialoguesForPendingLayerUnloads)
                         .in_set(crate::sim_sets::SimSet::Input),
-                    handle_hail.in_set(crate::sim_sets::SimSet::Input),
-                    handle_respond_to_message.in_set(crate::sim_sets::SimSet::Input),
+                    handle_hail
+                        .in_set(crate::sim_sets::FixedStep::HandleHail)
+                        .in_set(crate::sim_sets::SimSet::Input),
+                    handle_respond_to_message
+                        .in_set(crate::sim_sets::FixedStep::HandleRespondToMessage)
+                        .in_set(crate::sim_sets::SimSet::Input),
                     // CLEAR WINS on a tie (issue #786). `handle_hail` and
                     // `handle_clear_comms` both take `ResMut<CommsRuntime>` and
                     // both write `open_hails`; if a Hail and a ClearComms land
@@ -431,6 +436,7 @@ impl Plugin for CommsWorldPlugin {
                     // is the same class of bug #785 fixed for repair. Clear-wins
                     // matches the inbox semantics the two share.
                     handle_clear_comms
+                        .in_set(crate::sim_sets::FixedStep::HandleClearComms)
                         .in_set(crate::sim_sets::SimSet::Input)
                         .after(handle_hail),
                     // Deterministic same-tick viewscreen ordering (issue #769):
@@ -439,6 +445,7 @@ impl Plugin for CommsWorldPlugin {
                     // both land in one tick (comms show is the later, winning
                     // request on a tie).
                     handle_show_on_screen
+                        .in_set(crate::sim_sets::FixedStep::HandleShowOnScreen)
                         .in_set(crate::sim_sets::SimSet::Input)
                         .after(crate::console::captain::server::handle_set_view),
                     handle_comms_channel2.in_set(crate::sim_sets::SimSet::Broadcast),
@@ -447,6 +454,7 @@ impl Plugin for CommsWorldPlugin {
                     // Flush this tick's Comms state before the shared outbox
                     // drain, including in compositions without WorldPlugin.
                     broadcast_comms_state
+                        .in_set(crate::sim_sets::FixedStep::BroadcastCommsState)
                         .in_set(crate::sim_sets::SimSet::Broadcast)
                         .before(
                             crate::core::broadcast::broadcaster::dispatch::<
@@ -472,6 +480,7 @@ impl Plugin for CommsWorldPlugin {
             .add_systems(
                 FixedUpdate,
                 crate::comms::scripted::open_scripted_comms_threads
+                    .in_set(crate::sim_sets::FixedStep::OpenScriptedCommsThreads)
                     .after(crate::world::server::tick_script_callbacks)
                     .before(crate::world::server::tick_delayed_actions)
                     .in_set(crate::sim_sets::SimSet::Physics),

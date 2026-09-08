@@ -2597,6 +2597,7 @@
        stay below. Same self-registering pattern as the two modules around
        it. -->
   <script type="module" src="gui/host-catalog-templates.js"></script>
+  <script type="module" src="gui/host-content-fetch.js"></script>
   <!-- Host scenario-picker renderer (issue #1328): every DOM write inside
        #world-list that used to be inline in renderScenarioLockState below.
        Extracted for the reason gui/host-lobby-render.js was — the NATIVE host
@@ -7160,14 +7161,15 @@ async function preloadAndStart(scenarioPath, curatedShips = []) {
     // Step 1: Set up the config request callback
     window.set_config_request_callback = wasmBindings.set_config_request_callback;
     set_config_request_callback(handleConfigRequest);
+    window.registerContentFetch(wasmBindings, settleContentPreload);
 
     // Step 2: Fetch and load the unified world TOML (map + scenario in one file)
-    const worldResponse = await fetch(scenarioPath);
-    if (!worldResponse.ok) {
-      console.error('Failed to fetch world:', worldResponse.status);
-      throw new Error('World fetch failed');
+    let worldToml = wasmBindings.wasm_preload_world_source(scenarioPath);
+    if (worldToml == null) {
+      const worldResponse = await fetch(scenarioPath, { signal: AbortSignal.timeout(30000) });
+      if (!worldResponse.ok) throw new Error(scenarioPath + ': HTTP ' + worldResponse.status);
+      worldToml = await worldResponse.text();
     }
-    const worldToml = await worldResponse.text();
 
     // Step 3: Load the world — parses both the map half (anchors, [[entity]],
     // global config) and the scenario half (spawns, triggers, comms) from one
@@ -7178,17 +7180,10 @@ async function preloadAndStart(scenarioPath, curatedShips = []) {
     window.wasm_is_preload_complete = wasmBindings.wasm_is_preload_complete;
 
     wasm_load_world(scenarioPath, worldToml, curatedShips);
+    settleContentPreload();
 
   } catch (e) {
-    console.error('Preload failed:', e);
-    if (spinner) spinner.style.display = 'none';
-    // Show error to user — use wasm-spinner element so we don't destroy #qr-link
-    const errDiv = document.getElementById('wasm-spinner');
-    if (errDiv) {
-      errDiv.innerHTML = '<div style="color: #f44; padding: 2rem; text-align: center; font-family: monospace;">' +
-        escapeHtml(t('server.preload.failed')) + '</div>';
-      errDiv.style.display = 'flex';
-    }
+    showFatalError(String(e));
     return;
   }
 }
@@ -7213,40 +7208,34 @@ function handleConfigRequest(path) {
     ? wasmBindings.wasm_push_sidecar_toml
     : (isComplexity ? wasm_load_complexity : wasm_load_config);
 
-  fetch(path)
+  fetch(path, { signal: AbortSignal.timeout(30000) })
     .then(response => response.ok ? response.text() : Promise.reject(new Error(`HTTP ${response.status}`)))
     .then(toml => {
-      let complete = false;
-      try {
-        // Every preload loader returns true when the last entity, complexity,
-        // or authoritative primary-rig dependency is loaded.
-        complete = loader(path, toml) === true;
-      } catch (e) {
-        console.error(`Failed to parse config at ${path}:`, e);
-        // Rust already cleaned up in_flight/pending in the Err path.
-        // Check if all other paths finished before this one errored.
-        complete = wasm_is_preload_complete();
-      }
-      if (complete) finishInit();
+      try { loader(path, toml); }
+      catch (error) { wasmBindings.wasm_fail_preload_fetch(path, String(error)); }
+      settleContentPreload();
     })
-    .catch(err => {
-      console.error(`Failed to fetch config at ${path}:`, err);
-      // Fetch failed — call the loader with empty string so Rust can
-      // remove this path from in_flight/pending and know whether preload is done.
-      let complete = false;
-      try {
-        complete = loader(path, '') === true;
-      } catch (_) {
-        complete = wasm_is_preload_complete();
-      }
-      if (complete) finishInit();
+    .catch(error => {
+      // Optional primary rig absence retains its existing empty-body contract.
+      // Required templates/fragments retain a refusal even if empty TOML parses.
+      if (!isPrimaryRig) wasmBindings.wasm_fail_preload_fetch(path, String(error));
+      try { loader(path, ''); }
+      catch (failure) { wasmBindings.wasm_fail_preload_fetch(path, String(failure)); }
+      settleContentPreload();
     });
+}
+
+function settleContentPreload() {
+  if (_finishInitCalled) return;
+  const error = wasmBindings.wasm_preload_error();
+  if (error) { showFatalError(error); return; }
+  if (wasmBindings.wasm_is_preload_complete()) finishInit();
 }
 
 // Finish initialization after preload completes
   let _finishInitCalled = false;
 function finishInit() {
-  if (_finishInitCalled) return;
+  if (_finishInitCalled || !wasmBindings.wasm_is_preload_complete()) return;
   _finishInitCalled = true;
   // The world is now being loaded into the (one-shot) WASM/Bevy instance.
   // A later Game Over → return re-enters driveWorldLoad, which checks this to
@@ -7730,55 +7719,6 @@ async function startServer() {
 
   set_message_callback(routeOutbound);
 
-  // Register the runtime fetch callback. The same callback serves three flows:
-  //  - World TOMLs (e.g. patrol.toml) loaded additively by load_world effects.
-  //  - Sibling Rhai scripts declared by those additive world TOMLs.
-  //  - Later/generated model-rig sidecars under assets/models/*.toml. Primary
-  //    authoritative rigs already arrived through config preload before
-  //    wasm_init; this runtime route is the defensive path for later content.
-  // Sidecar paths (assets/models/<stem>.<variant>.toml) are routed to
-  // wasm_push_sidecar_toml; everything else uses the durable world/script
-  // content cache. An
-  // empty string on 404 tells Rust to stop re-requesting (renderer then falls
-  // back to an identity base rig).
-  if (typeof wasmBindings.set_world_fetch_callback === 'function') {
-    const isSidecarPath = (p) =>
-      typeof wasmBindings.wasm_push_sidecar_toml === 'function' &&
-      /^assets\/models\/.+\.toml$/.test(p);
-    const pushToml = (path, toml) => {
-      if (isSidecarPath(path)) {
-        wasmBindings.wasm_push_sidecar_toml(path, toml);
-      } else {
-        wasmBindings.wasm_push_world_toml(path, toml);
-      }
-    };
-    wasmBindings.set_world_fetch_callback(function(path, optional) {
-      fetch(path)
-        .then(r => {
-          if (r.ok) return r.text();
-          // `optional` marks a read that is ITSELF an existence test — the
-          // legacy ladder-convention probe, which asks whether a generated LOD
-          // tier ships a rig sidecar. Absence is one of its two valid answers,
-          // and the empty string is how Rust hears it, so a 404 resolves here
-          // rather than being reported as a failed fetch. Any OTHER status is
-          // still a fault, and so is a 404 on a file we expected to exist.
-          if (optional && r.status === 404) return '';
-          return Promise.reject(new Error('HTTP ' + r.status));
-        })
-        .then(toml => { pushToml(path, toml); })
-        .catch(err => {
-          console.error('[Phoenix] Failed to fetch TOML at ' + path + ':', err);
-          if (!isSidecarPath(path) && typeof wasmBindings.wasm_fail_world_fetch === 'function') {
-            wasmBindings.wasm_fail_world_fetch(path, String(err));
-          } else {
-            // Optional rig sidecars retain their established empty-string
-            // absence signal; runtime worlds/scripts have an explicit failure.
-            pushToml(path, '');
-          }
-        });
-    });
-  }
-  
   // Flush before wasm_init: App::run() in WASM unwinds the JS stack by
   // throwing, so any code after wasm_init() never executes.
   for (const [handle, json] of msgQueue.splice(0)) dispatchToWasm(handle, json);

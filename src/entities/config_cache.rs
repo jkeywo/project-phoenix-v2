@@ -87,6 +87,9 @@ thread_local! {
 
     /// Whether all pending configs have been loaded.
     static PRELOAD_COMPLETE: RefCell<bool> = const { RefCell::new(false) };
+    static WORLD_PRELOAD_ROOT: RefCell<Option<(String, String, Vec<String>)>> = const { RefCell::new(None) };
+    static WORLD_PRELOAD_PENDING: RefCell<bool> = const { RefCell::new(false) };
+    static PRELOAD_FAILURE: RefCell<Option<String>> = const { RefCell::new(None) };
 
     /// The loaded unified `WorldConfig` (PRD #337/#338 slice 1).
     /// Set by `wasm_load_world` from a single-pass parse of the world TOML.
@@ -673,11 +676,78 @@ pub fn set_config_request_callback(callback: Function) {
 fn settle_preload_complete() -> bool {
     let complete = PENDING_QUEUE.with(|q| q.borrow().is_empty())
         && IN_FLIGHT.with(|q| q.borrow().is_empty())
-        && SIDECAR_PRELOAD_PENDING.with(|q| q.borrow().is_empty());
+        && SIDECAR_PRELOAD_PENDING.with(|q| q.borrow().is_empty())
+        && !WORLD_PRELOAD_PENDING.with(|pending| *pending.borrow())
+        && PRELOAD_FAILURE.with(|failure| failure.borrow().is_none());
     PRELOAD_COMPLETE.with(|flag| {
         *flag.borrow_mut() = complete;
     });
     complete
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn preload_error() -> String {
+    PRELOAD_FAILURE.with(|failure| failure.borrow().clone().unwrap_or_default())
+}
+
+/// The first failure is retained so no later completion can accept a partial
+/// content ledger. Overlay-only templates legitimately have no HTTP body.
+#[cfg(target_arch = "wasm32")]
+pub fn fail_preload_fetch(path: String, message: String) {
+    if mod_pack_overlay_get(&path).is_none() {
+        PRELOAD_FAILURE.with(|failure| {
+            failure
+                .borrow_mut()
+                .get_or_insert(format!("{path}: {message}"));
+        });
+        settle_preload_complete();
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn advance_world_preload() {
+    let Some((path, text, curated)) = WORLD_PRELOAD_ROOT.with(|root| root.borrow().clone()) else {
+        return;
+    };
+    if crate::content_ledger::is_frozen() || !preload_error().is_empty() {
+        return;
+    }
+    let result = super::world_preload::discover(
+        &path,
+        &text,
+        &curated,
+        &|path| match world_fetch_state(path) {
+            WorldFetchState::Ready(source) => Ok(Some(source)),
+            WorldFetchState::Failed(message) => Err(message),
+            _ => Ok(None),
+        },
+        &production_script_resolver(),
+    );
+    match result {
+        Ok(dependencies) => {
+            WORLD_PRELOAD_PENDING
+                .with(|pending| *pending.borrow_mut() = !dependencies.pending.is_empty());
+            for template in dependencies.templates {
+                mark_entity_template(&template);
+                // A sibling may promote an already-delivered include fragment
+                // to an entity root. No HTTP completion remains to drain it.
+                if let Some(source) = raw_template_text(&template) {
+                    let _ = wasm_load_config(template, source);
+                } else {
+                    queue_and_fire(template);
+                }
+            }
+            for source in dependencies.pending {
+                request_world_fetch(source);
+            }
+        }
+        Err(error) => {
+            PRELOAD_FAILURE.with(|failure| {
+                failure.borrow_mut().get_or_insert(error);
+            });
+        }
+    }
+    settle_preload_complete();
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -793,14 +863,18 @@ pub fn wasm_load_config(path: String, toml_str: String) -> Result<JsValue, JsVal
     }
 
     for message in &failures {
+        PRELOAD_FAILURE.with(|failure| {
+            failure
+                .borrow_mut()
+                .get_or_insert(format!("{path}: {message}"));
+        });
         web_sys::console::error_1(&JsValue::from_str(&format!(
             "Entity template failed to load: {message}"
         )));
     }
 
-    // Check if preload is complete. A failed template still counts as
-    // "processed" — `drain_resolved_templates` settles it — so a bad TOML must
-    // not permanently block finishInit().
+    // Failed dependencies are settled but retain a terminal diagnostic. The
+    // page displays it instead of starting with a partial frozen content set.
     if settle_preload_complete() {
         // Return TRUE so handleConfigRequest calls finishInit().
         Ok(JsValue::TRUE)
@@ -844,6 +918,12 @@ pub fn wasm_load_world(
     // `clear_catalog_templates`). Done before the parse so a world that fails
     // to parse still leaves the two caches unambiguous.
     clear_catalog_templates();
+    WORLD_PRELOAD_ROOT.with(|root| {
+        *root.borrow_mut() = Some((path.clone(), toml_str.clone(), curated_ships.clone()))
+    });
+    WORLD_PRELOAD_PENDING.with(|pending| *pending.borrow_mut() = true);
+    PRELOAD_FAILURE.with(|failure| *failure.borrow_mut() = None);
+    PRELOAD_COMPLETE.with(|complete| *complete.borrow_mut() = false);
     let world_config = crate::world::config::parse_world(&toml_str).map_err(|e| {
         web_sys::console::error_1(&JsValue::from_str(&format!(
             "Failed to parse world TOML at {}: {}",
@@ -868,8 +948,8 @@ pub fn wasm_load_world(
         mark_entity_template(&p);
         queue_and_fire(p);
     }
-
-    Ok(JsValue::TRUE)
+    advance_world_preload();
+    Ok(JsValue::from_bool(settle_preload_complete()))
 }
 
 /// Get a clone of the loaded unified `WorldConfig`, if any.
@@ -905,6 +985,7 @@ pub fn wasm_push_world_toml(path: String, toml_str: String) {
     FETCHED_WORLD_SOURCE.with(|m| {
         m.borrow_mut().entry(path).or_insert(toml_str);
     });
+    advance_world_preload();
 }
 
 /// Record a terminal runtime-content fetch failure without overloading the
@@ -919,6 +1000,7 @@ pub fn wasm_fail_world_fetch(path: String, message: String) {
     WORLD_FETCH_FAILURES.with(|m| {
         m.borrow_mut().entry(path).or_insert(message);
     });
+    advance_world_preload();
 }
 
 /// Authoritative state of one runtime world/script fetch.

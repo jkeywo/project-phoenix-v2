@@ -1215,6 +1215,12 @@ pub fn wasm_validate_stations(template_path: &str, toml_str: &str) -> Result<JsV
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_init() {
+    if !crate::entities::config_cache::wasm_is_preload_complete() {
+        web_sys::console::error_1(&JsValue::from_str(
+            "Content preload is incomplete; refusing to initialise",
+        ));
+        return;
+    }
     // Route Rust panics through console.error with a useful message + location.
     // Without this, a panic in any Bevy system traps the wasm instance and
     // every subsequent JS→WASM call surfaces as a bare "RuntimeError: memory
@@ -2951,6 +2957,9 @@ pub fn wasm_snapshot_status() -> String {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_prepare_resume(slot: String) -> String {
+    if !crate::entities::config_cache::wasm_is_preload_complete() {
+        return "scenario content preload is incomplete".to_string();
+    }
     let Some((path, toml)) = SNAPSHOT_WORLD.with(|w| w.borrow().clone()) else {
         // No world means no content digest, so there is nothing to check the
         // save against. Refusing beats guessing.
@@ -3241,6 +3250,9 @@ pub fn wasm_import_save_slot(text: String, display_name: String) -> String {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_prepare_import(text: String) -> String {
+    if !crate::entities::config_cache::wasm_is_preload_complete() {
+        return "incompatible\tscenario content preload is incomplete".to_string();
+    }
     let Some((path, toml)) = SNAPSHOT_WORLD.with(|w| w.borrow().clone()) else {
         // Same guard as `wasm_prepare_resume`: no world means no content digest,
         // so there is nothing to check the save against.
@@ -3794,11 +3806,34 @@ pub fn wasm_load_world(
     // once per world selection, so it is the natural "a new load is starting"
     // boundary — see `content_ledger`'s reset-semantics docs.
     crate::content_ledger::reset();
+    let toml_str = crate::entities::config_cache::mod_pack_overlay_get(&path).unwrap_or(toml_str);
     crate::content_ledger::record(&path, &toml_str);
     SNAPSHOT_WORLD.with(|slot| {
         *slot.borrow_mut() = Some((path.clone(), toml_str.clone()));
     });
     crate::entities::config_cache::wasm_load_world(path, toml_str, curated_ships)
+}
+
+/// Authoritative resident world source, including pack-only scenarios.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_preload_world_source(path: String) -> Option<String> {
+    match crate::entities::config_cache::world_fetch_state(&path) {
+        crate::entities::config_cache::WorldFetchState::Ready(source) => Some(source),
+        _ => None,
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_preload_error() -> String {
+    crate::entities::config_cache::preload_error()
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_fail_preload_fetch(path: String, message: String) {
+    crate::entities::config_cache::fail_preload_fetch(path, message);
 }
 
 /// Register the JS callback used by Rust to request runtime world/script content.

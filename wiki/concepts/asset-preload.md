@@ -2,8 +2,8 @@
 title: Asset Preload
 type: concept
 tags: [assets, gltf, sidecar, preload, lobby, loading-phase]
-sources: [src/server/asset_preload.rs, src/server/pfx.rs, src/server_app/registration.rs, src/server_app_render.rs, src/entities/config_cache.rs, src/entities/model_rig.rs, src/entities/model_markers.rs, src/lobby/server.rs, src/core/messages.rs, server.html, client.html]
-updated: 2026-09-07
+sources: [src/server/asset_preload.rs, src/server/pfx.rs, src/server_app/registration.rs, src/server_app_render.rs, src/entities/config_cache.rs, src/entities/world_preload.rs, gui/host-content-fetch.js, src/entities/model_rig.rs, src/entities/model_markers.rs, src/lobby/server.rs, src/core/messages.rs, server.html, client.html]
+updated: 2026-09-08
 ---
 
 # Asset Preload
@@ -11,6 +11,18 @@ updated: 2026-09-07
 The server discovers and pre-caches render assets referenced by the selected scenario while the session is still in Lobby/Loading. A game does not enter `InProgress` until the manifest reaches a terminal state.
 
 ## Pipeline
+
+Before the browser creates its App, `entities::world_preload::discover` resolves
+the root and its direct static `extra_worlds`, lifts their exact script sources,
+and records the shared script-source digest. Literal spawn templates enter the
+existing template/include queue. Resident fragments promoted to templates are
+resolved again as roots. The world-fetch callback is registered before discovery;
+active pack content takes precedence over fetched base bytes. All required
+sources and composed templates must be ready before local-slot/import version
+checks or `wasm_init`. Missing required content retains a path-specific terminal
+refusal; requests time out after 30 seconds. This content gate precedes the
+renderer asset gate below. Computed runtime spawn paths retain their existing
+post-freeze diagnostics.
 
 1. `discover_base_assets` walks `WorldConfig`, referenced entity templates, script template paths, asteroid type lists, PFX defaults, and sub-world declarations.
 2. `begin_asset_preload` starts Bevy loads for GLBs/images and asks the host page to fetch plain-TOML model sidecars and sub-worlds.

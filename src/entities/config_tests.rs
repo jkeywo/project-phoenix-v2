@@ -3156,7 +3156,7 @@ fn harrow_warhawk_authors_no_boost_drive_and_no_helm_radar() {
 /// like the natural lever and would have been erased by every scenario that
 /// actually fields this hull. That is asserted against the shipped world files
 /// rather than described, because the claim is about THEM: each replaces the
-/// doctrine list wholesale and none authors `use_impulse`, so
+/// doctrine list wholesale and their spawn scripts do not author `use_impulse`, so
 /// `effective_use_impulse(&directive)` resolves TRUE for their non-Patrol directives.
 /// The fix therefore has to live on the fine system's own policy, which is
 /// what the test above pins.
@@ -3193,15 +3193,20 @@ fn harrow_warhawk_scenarios_cannot_re_enable_the_impulse_drive() {
             "behaviour: #{ doctrine: [",
         ),
     ] {
+        let parsed: toml::Value = toml::from_str(world).expect("the shipped scenario parses");
+        let script = parsed
+            .get("script")
+            .expect("the scenario authors its spawn doctrine in script")
+            .to_string();
         assert!(
-            world.contains(doctrine_marker),
+            script.contains(doctrine_marker),
             "precondition: {name} must replace a spawned hull's doctrine list \
                  for this to be the scenario shape under test"
         );
         assert!(
-            !world.contains("use_impulse"),
-            "{name} authors `use_impulse` somewhere — if a scenario has started \
-                 speaking about the drive, re-read whether the battleship's \
+            !script.contains("use_impulse"),
+            "{name}'s spawn script authors `use_impulse` — if its spawn overrides \
+                 have started speaking about the drive, re-read whether the battleship's \
                  `[helm_console.impulse_ai]` idle is still the whole story"
         );
     }

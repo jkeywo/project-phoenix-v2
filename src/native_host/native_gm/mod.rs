@@ -149,6 +149,33 @@ mod tests {
     }
 
     #[test]
+    fn host_cannot_disable_gm_after_launch_is_queued_for_the_next_transition() {
+        let mut world = fixture();
+        world.resource_mut::<NativeGmLifecycle>().enabled = true;
+        world.insert_resource(NextState::Pending(GamePhase::InProgress));
+        world.init_resource::<Messages<crate::lobby::InboundMessage>>();
+        world.init_resource::<Messages<AppExit>>();
+        let bridge = crate::native_host::host_lobby::HostLobbyBridge::new();
+        assert!(bridge.submit_record(
+            &crate::native_host::host_lobby::HostLobbyRecord::SetGameMaster { monitor: None },
+        ));
+        world.insert_resource(crate::native_host::host_lobby::HostLobbyBridgeResource(
+            bridge,
+        ));
+        world
+            .run_system_once(crate::native_host::host_lobby::drain_surface_records)
+            .unwrap();
+        let layout = world.resource::<BridgeLayoutResource>();
+        assert!(layout.layout.game_master_monitor().is_some());
+        assert!(layout.notices.iter().any(|notice| matches!(
+            notice,
+            crate::native_host::host_lobby::layout::LayoutNotice::Refused(
+                crate::native_host::bridge_layout::LayoutRefusal::GameMasterRoleFrozen
+            )
+        )));
+    }
+
+    #[test]
     fn loss_retains_identity_and_recovery_never_resumes_the_simulation() {
         let mut world = fixture();
         let bridge = world.resource::<NativeGmSurface>().bridge.clone();

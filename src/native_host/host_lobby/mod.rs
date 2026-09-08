@@ -946,6 +946,7 @@ fn apply_mod_pack_choice(
 pub(crate) fn drain_surface_records(
     native_gm: Option<Res<super::native_gm::NativeGmLifecycle>>,
     phase: Option<Res<State<GamePhase>>>,
+    next_phase: Option<Res<NextState<GamePhase>>>,
     bridge: Option<Res<HostLobbyBridgeResource>>,
     mut inbound: MessageWriter<crate::lobby::InboundMessage>,
     force_start: Option<ResMut<crate::server::bridge::PendingForceStart>>,
@@ -1157,10 +1158,12 @@ pub(crate) fn drain_surface_records(
             }
         }
         let result = if matches!(&action, crate::native_host::bridge_layout::LayoutAction::SetGameMaster { monitor } if monitor.is_some() != native_gm.as_ref().map_or(layout.layout.game_master_monitor().is_some(), |gm| gm.enabled))
-            && phase
+            && (phase
                 .as_ref()
                 .is_some_and(|phase| phase.get() != &GamePhase::Lobby)
-        {
+                || next_phase.as_deref().is_some_and(
+                    |next| matches!(next, NextState::Pending(phase) if phase != &GamePhase::Lobby),
+                )) {
             Err(crate::native_host::bridge_layout::LayoutRefusal::GameMasterRoleFrozen)
         } else {
             layout.layout.apply(&action)

@@ -35,11 +35,53 @@ kit does not request duplicate builds or a second concurrent Cargo process.
       pass. Record the focused window when OS focus limits background input.
 - [ ] A ship host, a second ship host, and two equal GM peers in a disposable
       fleet. Join with the displayed fleet code and ordinary crew joins/Station
-      claims. Use Combat Test (`assets/worlds/combat_test.toml`) for the main
-      run; record the hull and selected Station ratings. Use another shipped
-      world/hull when its authored equipment or dialogue is required below.
-      Enter play through normal readiness. No console commands granting seats,
-      fake gamepads or direct simulation mutation count as physical evidence.
+      claims. Use the prepared two-ship Combat Test variant described below;
+      ordinary `assets/worlds/combat_test.toml` has only one GameStart ship slot.
+      Record the generated world/hash, seed, hulls and selected Station ratings.
+      Use another shipped world/hull when its authored equipment or dialogue is
+      required below. Enter play through normal readiness. No console commands
+      granting seats, fake gamepads or direct simulation mutation count as
+      physical evidence.
+
+Prepare the same reviewed two-ship variant used by [#1320](1320-gm-live-event.md)
+from the actual integrated Combat Test, after its GM authoring and the #1320
+preparation increment have been adopted. Before building the event bundle:
+
+```sh
+node scripts/prepare-gm-live-event.mjs
+node scripts/prepare-gm-live-event.mjs --check
+```
+
+Retain the generator's source, slot and output hashes. It writes
+`assets/worlds/prepared/gm_live_event_two_ship.toml` and
+`assets/scenarios.gm-live-event.toml`, preserving the ordinary world and base
+catalogue. These outputs are excluded from Git; regenerate after authoring
+changes. The normal Trunk/client build copies the prepared assets. Serve the
+candidate and open both ship hosts at
+`/?manifest=assets/scenarios.gm-live-event.toml`, selecting the offered scenario
+and Alliance Cruiser hulls. Verify the served world and manifest against the
+recorded hashes. A second joined host alone does not supply a second Fleet hull.
+
+**Native topology precheck: pending.** Before the human event, require an actual
+PASS from the existing #1320 precheck on the candidate's relevant source/content.
+The integrator supplies its guarded execution receipt and determines whether
+existing evidence still applies; this kit does not request a duplicate build.
+The exact test selection is:
+
+```sh
+cargo test --features headless --test gm_live_event_precheck prepared_event_has_two_authored_fleet_hulls_and_equal_peer_digests -- --ignored --exact --nocapture
+```
+
+Execution stays within the shared compiler reservation. Retain the true exit 0,
+**one passed / zero failed / zero ignored**, and the `GM_LIVE_EVENT_PRECHECK`
+JSON emitted after the assertions. It checks two distinct Fleet hulls at their
+authored positions, different LocalShip projections, and equal advancing ticks
+and digests through the ordinary two-peer headless/mesh path. A queued command,
+zero-match result or successful compilation is not a PASS. Record the tested
+revision and content hashes; an earlier isolated result does not by itself
+validate the final candidate. Missing or failed precheck evidence leaves this
+setup **Blocked**. Its Backfill crews do not replace the ordinary human joins,
+Station claims, physical devices or observations required by this kit.
 
 Labels below are descriptive; current unapproved UI copy may have draft square
 brackets. Record the exact visible label and action when they differ. If a
@@ -254,6 +296,8 @@ Profile A storage/browser owner -> selected physical pad:
 Profile B storage/browser owner -> selected physical pad:
 World/hull/seed; Station ratings; two GM identifiers:
 Prerequisite #1316/#1315 and automated evidence links + exact revisions:
+Prepared world/manifest source and output hashes; served-asset check:
+#1320 native precheck revision, true exit/test count and JSON evidence (pending until run):
 
 One row per numbered step AND per family matrix row:
 Case | surface/profile/pad | action/contexts/bindings | setup | expected |

@@ -164,4 +164,11 @@ all production schedules remain unchanged.
 The narrow lobby-outbox access follow-up is covered by
 `src/lobby/outbox_access_tests.rs` and `tests/lobby_outbox_ordering.rs`.
 The latter records ordered mission-start/reconnect messages and every advancing
-authoritative boundary for source-bound before/after comparison. Both source-bound SDK-enabled stages passed: all 90 boundaries and lifecycle messages match across default/default/pinned runs. The current captured graph has 1,711 rows, with the 29 new typed vectors replacing 247 exclusive markers; all 21 deferred instances and all dependency edges match. The original allowance is unchanged, and final combined/ordinary-headless gates remain separate.
+authoritative boundary for source-bound before/after comparison. Both source-bound SDK-enabled stages passed: all 90 boundaries and lifecycle messages match across default/default/pinned runs. That pre-rebase capture had 1,711 rows, with the 29 new typed vectors replacing 247 exclusive markers; all 21 deferred instances and all dependency edges matched. The original allowance is unchanged, and final combined/ordinary-headless gates remain separate.
+
+The 2026-09-08 combined capture reports 1,690 remaining ambiguities after the
+five Tactical pair annotations and the reserved-torpedo loading edge. The live
+subset/history gate passes against the original 1,968-row ledger. This remains
+partial #1400 work: passing debt accounting is not proof that the remaining
+conflicts commute. New publisher and foreign-consumer proofs are still being
+developed in the T2 worktree.

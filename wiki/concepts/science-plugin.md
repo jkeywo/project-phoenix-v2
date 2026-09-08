@@ -24,7 +24,7 @@ system in `src/ship/sensors.rs`:
 - `handle_sensors_messages` (`src/ship/sensors.rs:157`) consumes admitted
   `SetScienceTarget` / `ClearScienceTarget` command payloads and writes the
   ship's own `SensorRadarSelection`.
-- `operate_sensors_ai` (`src/ship/sensors.rs:975`) is the AI decide-and-emit
+- `operate_sensors_ai` (`src/ship/sensors.rs:1086`) is the AI decide-and-emit
   system (issue #828): rather than writing `SensorRadarSelection` directly, it
   emits an admitted `SetScienceTarget` / `ClearScienceTarget` through the same
   command-admission seam the human path uses, so AI and human converge on one

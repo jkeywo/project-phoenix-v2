@@ -50,6 +50,9 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity }) {
   roster.setAttribute('aria-labelledby', 'gm-roster-heading');
   roster.append(element('h2', 'gm-roster-heading', 'server.gm.shell.roster'));
   if (win.__phoenixGmPage || doc.documentElement.classList.contains('phoenix-gm-page')) {
+    // Readiness must remain above a growing roster and the spawn palette.
+    // The ordinary viewscreen keeps these controls in its own lobby.
+    move(roster, 'gm-start-controls');
     move(roster, 'gm-join-controls');
     roster.querySelector('#gm-join-controls')?.removeAttribute('style');
   }
@@ -59,7 +62,6 @@ export function mountGmWorkspaceShell({ doc, win, t, has, selectEntity }) {
   move(roster, 'gm-spawn-panel');
   // The viewscreen still needs its lobby controls. Move them only on a GM page.
   if (win.__phoenixGmPage || doc.documentElement.classList.contains('phoenix-gm-page')) {
-    move(roster, 'gm-start-controls');
     move(roster, 'manual-save-panel');
   }
   desk.prepend(roster);

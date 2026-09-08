@@ -32,8 +32,11 @@ The role and lethal-confirmation segments drive the existing private selectors
 and confirmation profile. Scenario-authored role presets still filter panels.
 
 The browser lobby's Ready, Force Start, GM admission prompt and manual save
-controls move into the roster on the GM route. This keeps them reachable without
-covering the Station Bar. The authentic Station iframe remains outside the desk
+controls move into the roster on the GM route, with readiness above the roster
+and spawn palette. Native GM startup removes the host landing, scenario and
+WASM-loading overlays because their browser dismissal code does not run on that
+surface. This keeps Ready visible and clickable without covering the Station
+Bar. The authentic Station iframe remains outside the desk
 at 1280×720, with its existing console URL and command adapter. Inspector tabs
 present the existing knowledge comparison, without adding a new projection.
 

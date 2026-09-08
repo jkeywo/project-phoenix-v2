@@ -23,6 +23,12 @@ const ACTIONS = Object.freeze({
 });
 
 export function mountNativeGmWorkspace({ bridge, win = window, doc = win.document }) {
+  // The reused host markup includes launch overlays that its browser boot
+  // normally dismisses. That boot never runs on this private native surface.
+  // World selection belongs to the viewscreen, not the GM's Ready controls.
+  for (const id of ['landing-panel', 'scenario-panel', 'wasm-spinner']) {
+    doc.getElementById(id)?.remove();
+  }
   let metadata = { phase: 'Lobby', gms: [] };
   let disposed = false;
   let lastStartResult = null;

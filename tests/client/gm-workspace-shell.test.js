@@ -19,6 +19,7 @@ function mount() {
 it('keeps shared control identities in the six desk regions and the authentic iframe outside them', () => {
   mount();
   expect(document.querySelector('#gm-roster #gm-force-start-btn')).not.toBeNull();
+  expect(document.getElementById('gm-roster-heading').nextElementSibling.id).toBe('gm-start-controls');
   expect(document.querySelector('#gm-inspector #gm-station-toggle')).not.toBeNull();
   expect(document.querySelector('#gm-station-surface #gm-station-frame')).not.toBeNull();
   expect(document.querySelector('#gm-inspector #gm-station-frame')).toBeNull();

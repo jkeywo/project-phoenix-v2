@@ -24,6 +24,9 @@ function mount() {
 describe('native GM workspace over the shared GM presenters', () => {
   beforeEach(() => {
     document.body.innerHTML = `
+      <div id="landing-panel">Host landing</div>
+      <div id="scenario-panel">Host world picker</div>
+      <div id="wasm-spinner">Host simulation loading</div>
       <section id="gm-start-controls"><button id="gm-ready-btn"></button>
         <button id="gm-force-start-btn"></button><p id="gm-start-policy"></p>
         <p id="gm-start-result"></p></section>
@@ -60,6 +63,9 @@ describe('native GM workspace over the shared GM presenters', () => {
 
   it('uses authoritative readiness and permits no launch action after the lobby', () => {
     const app = mount();
+    expect(document.getElementById('landing-panel')).toBeNull();
+    expect(document.getElementById('scenario-panel')).toBeNull();
+    expect(document.getElementById('wasm-spinner')).toBeNull();
     document.getElementById('gm-ready-btn').click();
     expect(app.bridge.setReady).toHaveBeenCalledWith(true);
     app.operator({ ready: true });

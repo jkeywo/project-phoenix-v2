@@ -2,7 +2,7 @@
 title: Testing Strategy
 type: concept
 tags: [tests, rust, javascript, playwright, pasm, ci]
-sources: [AGENTS.md, .github/workflows/ci.yml, tests/client/, tests/smoke/, tests/headless_runner.rs, src/core/codec_tests.rs, scripts/prepare-gm-live-event.mjs, docs/acceptance/1320-gm-live-event.md, src/perf/phase.rs, src/perf/phase_trace.rs, src/headless/app.rs, src/bin/phoenix_headless.rs, tests/phase_profiling.rs, docs/phase-timing-reduction.md, tests/common/default_pool.rs, docs/default-pool-perturbations.md, src/server_app/components.rs]
+sources: [AGENTS.md, .github/workflows/ci.yml, tests/client/, tests/smoke/, tests/headless_runner.rs, src/core/codec_tests.rs, scripts/prepare-gm-live-event.mjs, docs/acceptance/1320-gm-live-event.md, src/perf/phase.rs, src/perf/phase_trace.rs, src/headless/app.rs, src/bin/phoenix_headless.rs, tests/phase_profiling.rs, docs/phase-timing-reduction.md, tests/common/default_pool.rs, docs/default-pool-perturbations.md, src/server_app/components.rs, tests/admitted_producer_ordering.rs]
 updated: 2026-09-08
 ---
 
@@ -40,6 +40,15 @@ processes, checking actual compute-worker count, executor, seed, tick and
 authoritative digest. The focused post-split run passed these default-pool
 and retained pinned guards. Scope, continuation limits and the targeted command
 are in [Default-pool perturbations](../../docs/default-pool-perturbations.md).
+
+`tests/admitted_producer_ordering.rs` exercises four actual NPC command producers
+(Power, Shields, Navigation and Repair) and their six pairwise conflicts. Nine
+fresh processes cover ordinary and both forced orders under default and pinned
+pools. All nine 380-tick gameplay traces matched. The fixture also checks actual
+foreign-prefix responses, consumer effects, repair travel/work and preserved
+production ordering/deferred visibility from the live graph. Its bounded
+coverage and reproduced command are in
+[Four admitted-command producers](../../docs/admitted-producer-six-proof.md).
 
 ## Client JavaScript
 

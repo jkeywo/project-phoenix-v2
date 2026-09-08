@@ -1,0 +1,64 @@
+{
+  "schema": 1,
+  "scope": "Four actual producers, six pairs only. Historical source inventory; live raw vectors and paths must still match. No annotations.",
+  "historicalAudit": {
+    "path": "C:\\Coding\\project-phoenix-v2\\.claude\\worktrees\\t2-tactical-baseline-1400\\.t2-batch\\admitted-commands-only-audit-r1\\classified-pairs-and-paths.json",
+    "sha256": "951EF29D6DCFAF4549BF00C5B3AF26004F435E96CAA5FCE69680018B748C19DC"
+  },
+  "pairs": [
+    {
+      "systems": [
+        "project_phoenix::console_ai::server::ai_power_allocation",
+        "project_phoenix::console_ai::server::ai_shield_focus"
+      ],
+      "access": [
+        "project_phoenix::core::messages::AdmittedCommands"
+      ]
+    },
+    {
+      "systems": [
+        "project_phoenix::console::navigation::server::operate_navigation_ai",
+        "project_phoenix::console_ai::server::ai_power_allocation"
+      ],
+      "access": [
+        "project_phoenix::core::messages::AdmittedCommands"
+      ]
+    },
+    {
+      "systems": [
+        "project_phoenix::console::repair::server::operate_repair_ai",
+        "project_phoenix::console_ai::server::ai_power_allocation"
+      ],
+      "access": [
+        "project_phoenix::core::messages::AdmittedCommands"
+      ]
+    },
+    {
+      "systems": [
+        "project_phoenix::console::navigation::server::operate_navigation_ai",
+        "project_phoenix::console_ai::server::ai_shield_focus"
+      ],
+      "access": [
+        "project_phoenix::core::messages::AdmittedCommands"
+      ]
+    },
+    {
+      "systems": [
+        "project_phoenix::console::repair::server::operate_repair_ai",
+        "project_phoenix::console_ai::server::ai_shield_focus"
+      ],
+      "access": [
+        "project_phoenix::core::messages::AdmittedCommands"
+      ]
+    },
+    {
+      "systems": [
+        "project_phoenix::console::navigation::server::operate_navigation_ai",
+        "project_phoenix::console::repair::server::operate_repair_ai"
+      ],
+      "access": [
+        "project_phoenix::core::messages::AdmittedCommands"
+      ]
+    }
+  ]
+}

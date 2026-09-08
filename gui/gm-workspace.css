@@ -13,7 +13,7 @@
 #gm-console.gm-desk p:empty, #gm-console.gm-desk ol:empty { display: none; }
 #gm-console .gm-station-bar {
   display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-5);
-  min-height: 76px; padding: var(--space-4) var(--space-5); padding-right: var(--settings-cog-keepout);
+  min-height: 76px; padding: var(--space-4) var(--space-5); padding-right: var(--settings-cog-keepout, var(--space-5));
   border-bottom: 1px solid var(--edge); background: var(--surface-panel);
 }
 #gm-console #gm-peer-summary { margin-right: auto; font-family: var(--font-mono); }
@@ -93,7 +93,7 @@
   #gm-console.gm-desk #gm-workspace > section { grid-area: auto; max-height: 600px; }
   #gm-console.gm-desk #gm-map-panel { height: 480px; }
 }
-#gm-console.gm-desk .gm-station-bar { padding-left: var(--settings-cog-keepout); padding-right: var(--space-5); }
+#gm-console.gm-desk .gm-station-bar { padding-left: var(--settings-cog-keepout, var(--space-5)); padding-right: var(--space-5); }
 #gm-console.gm-desk #gm-role-preset-label { flex: 0 1 auto; max-width: 200px; }
 #gm-console.gm-desk #gm-workspace > #gm-comms-panel { display: grid; }
 #gm-console.gm-desk #manual-save-panel { position: static; width: 100%; max-width: none; padding: var(--space-4) 0; background: transparent; border: 0; }

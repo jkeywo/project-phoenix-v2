@@ -80,7 +80,7 @@
 
 use bevy::prelude::*;
 use project_phoenix::authoritative::{StateCensus, StateClass};
-use project_phoenix::headless::{HeadlessArgs, build_headless_app, run};
+use project_phoenix::headless::{build_headless_app, run, HeadlessArgs};
 
 /// `rng_coverage.toml` (issue #837), same as
 /// `tests/registration_order_determinism.rs`: two NPCs in weapons range, an

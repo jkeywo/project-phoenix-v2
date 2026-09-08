@@ -164,8 +164,8 @@ fn register_sim_set_plugins(app: &mut App, opts: SimPluginOptions) {
         registrars.push(probe_b);
     }
     if let RegistrationOrder::Shuffled(seed) = opts.registration_order {
-        use rand::SeedableRng;
         use rand::seq::SliceRandom;
+        use rand::SeedableRng;
         let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
         registrars.shuffle(&mut rng);
     }

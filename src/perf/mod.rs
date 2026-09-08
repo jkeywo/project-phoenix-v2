@@ -99,14 +99,14 @@ pub mod browser;
 pub mod console;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod mesh;
+#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+pub mod native_frames;
 /// Pure phase-interval reduction for the external headless producer (#1400).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod phase;
 /// Worker-visible span collection owned by the headless harness, never the App.
 #[cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 pub mod phase_trace;
-#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
-pub mod native_frames;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod tick;
 

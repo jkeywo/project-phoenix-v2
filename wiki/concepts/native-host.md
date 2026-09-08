@@ -760,20 +760,22 @@ itself (one process, one bundle, nothing to disagree about), and is a pipe onto
 which captures whatever it finds and delegates to it whenever the document is
 visible (a pane always is).
 
-This is not about smoothness. An offscreen Ultralight view services rAF inside a
-*rendering update*, and only runs one when the page is dirty. The client page's
-whole render loop is a single outstanding rAF (`scheduleRender`'s `_renderFrame`
-guard), so a pane that reaches a quiet moment deadlocks against itself: no
-rendering update, so the callback never fires; the callback never fires, so
-nothing mutates the DOM; nothing mutates the DOM, so there is no rendering
-update. `_renderFrame` stays non-null, every later `scheduleRender()` returns at
-its first line, and the console is frozen at its last paint while its transport
-goes on delivering perfectly good state. It presented as roughly one pane in
-four (5 failures in 13 runs of `tests/native_host_pane_ultralight.rs`) coming up
-with the lobby still over a Station it knew it held. Timers are not starved that
-way — `Renderer::update()` runs them whether or not anything painted, which is
-why the page's own 500 ms name-field debounce fired in exactly the runs whose
-rAF never did.
+The timer override predates the explicit display refresh in Vellum. With the
+earlier adapter, an offscreen Ultralight view serviced rAF inside a rendering
+update, which could stop when the page became quiet. The client's single
+outstanding rAF (`scheduleRender`'s `_renderFrame` guard) then stayed non-null:
+later state arrived through the transport, but `scheduleRender()` returned
+without repainting. This was observed as 5 failures in 13 runs of
+`tests/native_host_pane_ultralight.rs`, with the lobby still over a Station the
+pane knew it held. `Renderer::update()` continued servicing timers, including
+the page's 500 ms name-field debounce, in those same runs.
+
+The pinned Vellum revision `606b0c06a6e6419a5b2a8c4f5bfb255146f87814`
+now calls `refresh_display(0)` immediately before each ordinary
+`Renderer::render()` in its `crates/vellum-ultralight/src/runtime.rs`.
+That advances rAF, CSS animations and smooth scrolling on the default display.
+Phoenix retains its timer and iframe compatibility overrides; the dependency
+change does not establish completed hardware acceptance.
 
 The override is per window. Station iframes therefore import
 `gui/native-pane-raf.js` through `gui/components/ph-element.js` before any

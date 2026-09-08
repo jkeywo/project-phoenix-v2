@@ -21,7 +21,7 @@ system in `src/ship/sensors.rs`:
   (`src/ship/sensors.rs:20`; also reachable via the
   `crate::sensors_plugin::SensorRadarSelection` alias). Every ship — player and
   NPC — carries its own.
-- `handle_sensors_messages` (`src/ship/sensors.rs:156`) consumes admitted
+- `handle_sensors_messages` (`src/ship/sensors.rs:157`) consumes admitted
   `SetScienceTarget` / `ClearScienceTarget` command payloads and writes the
   ship's own `SensorRadarSelection`.
 - `operate_sensors_ai` (`src/ship/sensors.rs:975`) is the AI decide-and-emit
@@ -40,7 +40,7 @@ fallback), and emits the same admitted `ScanTarget` command as the console.
 
 The emitter does not decide whether the scan is legal and does not write or
 latch scan state. `science::server::tick_scans`
-(`src/science/server.rs:203`) remains the sole applier: it evaluates the
+(`src/science/server.rs:207`) remains the sole applier: it evaluates the
 hull-authored suite, power, interference, and range, then writes the reading and
 the scenario's `scan.<entity-id>.taken` flag only on success. A refusal leaves
 the objective active, so Backfill retries on the next deterministic Sensors

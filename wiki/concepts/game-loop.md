@@ -26,10 +26,11 @@ ledger ratchet. It reuses `tests/registration_order_determinism.rs` for the
 existing long-run digest perturbation guard. Operating instructions and CI base
 selection are in `docs/fixed-update-ambiguity-audit.md`.
 
-The checked-in initial allowance is the original 1,968-row capture. After the
-typed stream/namespace changes and evidenced Projectile order, the live census
-contains 1,929 rows: no additions and 39 removals. Retained debt is not a claim
-that every unordered pair is commutative.
+The checked-in initial allowance is the original 1,968-row capture. On the
+preserved #1400 worker source, the typed stream/namespace changes and evidenced
+Projectile order produced 1,929 rows: no additions and 39 removals. This is
+worker-source evidence; the integrator owns the census check on the combined
+candidate. Retained debt is not a claim that every unordered pair is commutative.
 
 Deterministic native/headless boot uses `BootPlan::single_threaded` in
 `src/boot/mod.rs` to select Bevy's actual `SingleThreaded` executor on
@@ -40,8 +41,10 @@ setting is shared. Normal boot and the browser adapters leave the policy off;
 frame Update retains its default executor. `tests/fixed_executor_policy.rs`
 checks the complete headless and native Contract boot schedules in separate
 processes, including CLI `--deterministic`, implied `--seed` and normal modes.
-This #1400 slice does not establish default-pool digest equivalence; native
-execution and any observed fixture changes still require validation.
+The targeted executor checks, bounded default-pool equivalence and
+perturbation/resume guards passed on the #1400 worker source. They do not
+establish unrestricted scheduler commutativity. Validation on the combined
+integration candidate remains the integrator's responsibility.
 
 ## Per-frame work (frame-rate–driven)
 
@@ -203,6 +206,6 @@ rendered frames and checking that `wasm_sim_tick()` does not advance.
 The own-binary test in `tests/pool_equivalence.rs` compares two fresh default-pool
 runs and one explicitly deterministic run at the same Combat Test boundary used
 by `native_headless_digest`. This proof and the default-pool perturbation/resume
-arms passed the focused post-split run. They preserve the existing pinned guards
+arms passed the focused post-split run on the #1400 worker source. They preserve the existing pinned guards
 and do not establish unrestricted scheduler commutativity. See
 [the proof scope](../../docs/pool-equivalence-proof.md).

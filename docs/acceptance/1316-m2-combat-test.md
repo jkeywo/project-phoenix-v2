@@ -64,6 +64,33 @@ a general attended-session replay format or the human acceptance run for
 
 ## Local milestone evidence
 
+The latest local run, r5c on 8 September 2026, passed exactly one browser case
+in 2.2 minutes, with zero retries, and its native replay child exited 0. Two
+operators (`gm-1`, `gm-2`) directed Combat Test, seed 475, with four unchanged
+crew witnesses. The ordinary exports span tick 25 to tick 3066 and
+113 applied actions. Native replay matched every action result and the final
+digest `14338432081949084171`; the initial digest was
+`496071060238843454`.
+
+The native, Trunk and client r5c bindings share source-metadata SHA256
+`D6F4596143F6C6A4EA2850751AF501ED8F902CF65BB0C9D3522D82D3A7D2AFF5`
+and runtime-manifest SHA256
+`8543618364AE2211D1B4C3214327110C1E21B0BA5BCCC739EE2F312D49C7026A`.
+They bind the unchanged Vellum revision
+`606b0c06a6e6419a5b2a8c4f5bfb255146f87814`, rules 0.5 and snapshot format 32.
+The SDK-enabled targeted native selection passed 17 tests; its separate manual
+browser-export replay driver was retained as one ignored test and then executed
+explicitly and successfully by this browser case.
+
+The Playwright report and trace, ordinary exports, crew-input witnesses,
+browser observations, native child receipt and replay report are retained under
+`.t2-batch/t2-final-browser-r5c/`; `.t2-batch/m2-r5c-summary.json` records their
+hashes. This is local M2 evidence within the GM-only, unchanged-crew scope above.
+It does not claim remote CI, general attended replay or the human acceptance
+sessions for #1320 and #1323.
+
+### Earlier r4 result (historical)
+
 The integrated run on 8 September 2026 passed the complete browser case and its
 native replay, with zero retries. Two operators (`gm-1`, `gm-2`) directed Combat
 Test, seed 475, with four unchanged crew witnesses. The ordinary exports span

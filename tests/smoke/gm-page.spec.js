@@ -12,10 +12,77 @@ import {
   waitForJoinCode,
 } from './fixtures';
 import { ts } from './strings';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 const GM_NPC_WORLD = readFileSync(path.resolve(__dirname, '../fixtures/worlds/gm_npc_doctrine.toml'), 'utf8');
+
+// Generated acceptance assets are deliberately absent from ordinary CI. Run
+// after prepare-gm-live-event.mjs with PHOENIX_GM_PRECHECK=1 on the served bundle.
+test('prepared GM event admits crew and delivers Comms to both live Fleet hulls', async ({ context }, testInfo) => {
+  test.skip(process.env.PHOENIX_GM_PRECHECK !== '1', 'requires generated #1320 acceptance assets');
+  test.setTimeout(240_000);
+  const scenario = 'assets/worlds/prepared/gm_live_event_two_ship.toml';
+  const preparedWorld = readFileSync(path.resolve(__dirname, '../../', scenario), 'utf8');
+  const pages = [];
+  const boot = async () => {
+    const page = await context.newPage();
+    pages.push(page);
+    await page.goto(`/?scenario=${scenario}&ship=assets/entities/alliance_cruiser.toml`);
+    await waitForWasmReady(page);
+    return page;
+  };
+  const owner = await boot();
+  await owner.evaluate(() => window.__hostFleetOpen());
+  await waitForJoinCode(owner, 'fleet-code', 30_000);
+  const code = await owner.locator('#fleet-code').textContent();
+  const member = await boot();
+  await openFleetTab(member);
+  await member.fill('[data-control="fleet-code"]', code);
+  await member.click('[data-control="fleet-join"]');
+  await member.click('#server-settings-btn');
+  const crews = [];
+  for (const ship of [owner, member]) {
+    const crew = await createTestClient(context, await readHostPeerId(ship), { name: 'Prepared Comms' });
+    await selectAndWait(crew, 'comms');
+    crews.push(crew);
+  }
+  const gm = await boot();
+  await joinFleetAsGm(gm, code);
+  for (const crew of crews) await crew.send('SetReady', { ready: true });
+  await gm.locator('#gm-ready-btn').click();
+  await Promise.all(pages.map(page => page.waitForFunction(
+    () => window.__saveSlotsPhase === 'InProgress', undefined, { timeout: 30_000 })));
+  for (const crew of crews) expectFixtureWorld(await crew.waitForMessage('WorldSetup', 10_000), preparedWorld);
+  await gm.waitForFunction(() => window.__hostGmCommsState?.().recipients.length === 2,
+    undefined, { timeout: 30_000 });
+  const recipients = await gm.evaluate(() => window.__hostGmCommsState().recipients);
+  expect(recipients.map(row => row.fleet_slot).sort()).toEqual([1, 2]);
+  expect(new Set(recipients.map(row => row.id)).size).toBe(2);
+  const text = 'Prepared Fleet Comms receipt';
+  await gm.locator('#gm-comms-route').selectOption('starbase-selected');
+  await gm.locator('#gm-comms-recipients').selectOption(recipients.map(row => row.id));
+  await gm.locator('#gm-comms-text').fill(text);
+  await gm.locator('#gm-comms-send').click();
+  const delivered = [];
+  for (const crew of crews) {
+    await crew.page.waitForFunction(text => window.__messages.filter(row => row.type === 'CommsState').at(-1)
+      ?.data.messages.some(message => message.body === text), text);
+    delivered.push((await crew.lastMessage('CommsState')).data.messages.find(message => message.body === text).recipient_ship);
+  }
+  expect(new Set(delivered)).toEqual(new Set(recipients.map(row => row.id)));
+  expect(delivered[0]).toBe(recipients.find(row => row.fleet_slot === 1).id);
+  expect(delivered[1]).toBe(recipients.find(row => row.fleet_slot === 2).id);
+  const slots = await Promise.all([owner, member].map(page => page.evaluate(() => window.__hostMeshStatus().slot)));
+  expect(slots).toEqual([1, 2]);
+  const receiptPath = testInfo.outputPath('prepared-fleet-receipt.json');
+  writeFileSync(receiptPath, JSON.stringify({ scenario,
+    worldSha256: createHash('sha256').update(preparedWorld).digest('hex'),
+    slots, recipients, delivered }, null, 2));
+  await testInfo.attach('prepared-fleet-receipt', { contentType: 'application/json', path: receiptPath });
+  for (const crew of crews) await crew.close();
+});
 
 test('equal GMs apply authored NPC doctrine through real AI and reject stale or unauthorized requests', { tag: '@core' }, async ({ context }) => {
   test.setTimeout(180_000);

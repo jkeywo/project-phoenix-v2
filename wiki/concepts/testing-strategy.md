@@ -3,7 +3,7 @@ title: Testing Strategy
 type: concept
 tags: [tests, rust, javascript, playwright, pasm, ci]
 sources: [AGENTS.md, .github/workflows/ci.yml, tests/client/, tests/smoke/, tests/headless_runner.rs, src/core/codec_tests.rs, scripts/prepare-gm-live-event.mjs, docs/acceptance/1320-gm-live-event.md, src/perf/phase.rs, src/perf/phase_trace.rs, src/headless/app.rs, src/bin/phoenix_headless.rs, tests/phase_profiling.rs, docs/phase-timing-reduction.md, tests/common/default_pool.rs, docs/default-pool-perturbations.md, src/server_app/components.rs]
-updated: 2026-09-07
+updated: 2026-09-08
 ---
 
 # Testing Strategy
@@ -166,9 +166,14 @@ The narrow lobby-outbox access follow-up is covered by
 The latter records ordered mission-start/reconnect messages and every advancing
 authoritative boundary for source-bound before/after comparison. Both source-bound SDK-enabled stages passed: all 90 boundaries and lifecycle messages match across default/default/pinned runs. That pre-rebase capture had 1,711 rows, with the 29 new typed vectors replacing 247 exclusive markers; all 21 deferred instances and all dependency edges matched. The original allowance is unchanged, and final combined/ordinary-headless gates remain separate.
 
-The 2026-09-08 combined capture reports 1,690 remaining ambiguities after the
-five Tactical pair annotations and the reserved-torpedo loading edge. The live
+The 2026-09-08 worktree capture reports 1,685 remaining ambiguities after the
+five Tactical pair annotations, the reserved-torpedo loading edge and the
+Comms/ObjectiveSummary ordering before the simulation outbox drain. The live
 subset/history gate passes against the original 1,968-row ledger. This remains
 partial #1400 work: passing debt accounting is not proof that the remaining
-conflicts commute. New publisher and foreign-consumer proofs are still being
-developed in the T2 worktree.
+conflicts commute. The focused SDK-enabled publisher proof passed twelve fresh
+children covering the three Power/Shields/Repair pairs, and the foreign-consumer
+proof passed nine children covering five pairs. Their complete advancing traces
+and graph receipts are retained; neither fixture adds a production annotation.
+See [Publisher order proof](../../docs/publisher-order-proof.md) and
+[Foreign admitted-command consumer proof](../../docs/admitted-foreign-consumer-proof.md).

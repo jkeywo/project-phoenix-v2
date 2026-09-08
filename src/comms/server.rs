@@ -444,7 +444,15 @@ impl Plugin for CommsWorldPlugin {
                     handle_comms_channel2.in_set(crate::sim_sets::SimSet::Broadcast),
                     auto_clear_on_screen_message.in_set(crate::sim_sets::SimSet::Broadcast),
                     update_comms_range_flags.in_set(crate::sim_sets::SimSet::Broadcast),
-                    broadcast_comms_state.in_set(crate::sim_sets::SimSet::Broadcast),
+                    // Flush this tick's Comms state before the shared outbox
+                    // drain, including in compositions without WorldPlugin.
+                    broadcast_comms_state
+                        .in_set(crate::sim_sets::SimSet::Broadcast)
+                        .before(
+                            crate::core::broadcast::broadcaster::dispatch::<
+                                crate::core::broadcast::Sim,
+                            >,
+                        ),
                 )
                     .chain(),
             )

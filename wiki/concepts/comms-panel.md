@@ -2,8 +2,8 @@
 title: Comms Panel
 type: concept
 tags: [comms, client, inbox, hails, priority, localisation, input, feedback]
-sources: [gui/cruiser/comms.console.js, gui/stations/comms-console.js, gui/stations/comms-actions.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/comms-state.js, gui/components/ph-comms-contact-list.js, gui/components/ph-comms-hail-list.js, gui/components/ph-comms-current-message.js, gui/console-state.js, gui/action-map.js, src/command_admission/mod.rs, src/console/comms/server.rs, src/console/comms/inbox.rs, src/comms/content.rs, src/comms/scripted.rs, src/core/messages.rs, src/gm_comms.rs, gui/gm-comms-panel.js, docs/gm-comms-authoring.md, assets/strings/strings.csv]
-updated: 2026-09-07
+sources: [gui/cruiser/comms.console.js, gui/stations/comms-console.js, gui/stations/comms-actions.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/comms-state.js, gui/components/ph-comms-contact-list.js, gui/components/ph-comms-hail-list.js, gui/components/ph-comms-current-message.js, gui/console-state.js, gui/action-map.js, src/command_admission/mod.rs, src/console/comms/server.rs, src/console/comms/inbox.rs, src/comms/content.rs, src/comms/server.rs, src/world/server.rs, tests/publisher_ordering.rs, src/comms/scripted.rs, src/core/messages.rs, src/gm_comms.rs, gui/gm-comms-panel.js, docs/gm-comms-authoring.md, assets/strings/strings.csv]
+updated: 2026-09-08
 ---
 
 # Comms Panel
@@ -25,6 +25,11 @@ Hail, response, clear, and show-on-screen use correlated commands. Their existin
 `CommsPriority` is authoritative. `critical` is a generic continuing interruption and wins the panel's automatic current-thread selection, but it remains normal non-modal content, so an explicit local message selection can inspect another thread. Reply/clear effects change the authoritative state; optimistic client dismissal is not the source of truth.
 
 ## Server path
+
+The Comms state publisher runs before ObjectiveSummary and both precede the
+simulation broadcaster's outbox drain. A newly resolved Comms host receives
+its reliable state on that same tick. `tests/publisher_ordering.rs` checks the
+actual host transition and wire delivery across ordinary and opposed schedules.
 
 `CommsConsolePlugin` owns admitted hail/reply application and the two Backfill hosts. Both human and AI paths converge on `handle_hail` and `handle_respond_to_message`. Scripted `on_pick` effects enter the normal world command/dispatch pipeline, so a reply cannot bypass scenario authority.
 

@@ -1,0 +1,1107 @@
+{
+  "schema": 1,
+  "source_census_sha256": "AFB8E64538203DAC8A8C64130F97925AAC8B074C6B2C7686807CD7D9AEDFA7A9",
+  "scope": "Exact reviewed foreign-consumer candidates; inclusion is not behavioral proof or an ambiguity annotation.",
+  "pairs": [
+    {
+      "producer": "project_phoenix::console_ai::server::ai_power_allocation",
+      "consumer": "project_phoenix::console::navigation::server::handle_navigation_waypoint"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_power_allocation",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_dispatch_repair_team"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_power_allocation",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_recall_repair_team"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_power_allocation",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_set_repair_priority"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_power_allocation",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_set_repair_target_priority"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_power_allocation",
+      "consumer": "project_phoenix::console::weapons::beam::handle_fire_phaser"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_power_allocation",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_fire_torpedo"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_power_allocation",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_load_tube"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_power_allocation",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_unload_tube"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_power_allocation",
+      "consumer": "project_phoenix::ship::sensors::handle_sensors_messages"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_power_allocation",
+      "consumer": "project_phoenix::ship::shields::handle_shields_messages"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_shield_focus",
+      "consumer": "project_phoenix::console::navigation::server::handle_navigation_waypoint"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_shield_focus",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_dispatch_repair_team"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_shield_focus",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_recall_repair_team"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_shield_focus",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_set_repair_priority"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_shield_focus",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_set_repair_target_priority"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_shield_focus",
+      "consumer": "project_phoenix::console::weapons::beam::handle_fire_phaser"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_shield_focus",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_fire_torpedo"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_shield_focus",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_load_tube"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_shield_focus",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_unload_tube"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_shield_focus",
+      "consumer": "project_phoenix::ship::helm_admission::process_helm_inputs"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_shield_focus",
+      "consumer": "project_phoenix::ship::power::handle_power_messages"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_shield_focus",
+      "consumer": "project_phoenix::ship::sensors::handle_sensors_messages"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_torpedo_auto_fire",
+      "consumer": "project_phoenix::console::navigation::server::handle_navigation_waypoint"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_torpedo_auto_fire",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_dispatch_repair_team"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_torpedo_auto_fire",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_recall_repair_team"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_torpedo_auto_fire",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_set_repair_priority"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_torpedo_auto_fire",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_set_repair_target_priority"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_torpedo_auto_fire",
+      "consumer": "project_phoenix::console::weapons::beam::handle_fire_phaser"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_torpedo_auto_fire",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_load_tube"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_torpedo_auto_fire",
+      "consumer": "project_phoenix::ship::sensors::handle_sensors_messages"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_torpedo_load",
+      "consumer": "project_phoenix::console::captain::server::handle_set_objective_priority"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_torpedo_load",
+      "consumer": "project_phoenix::console::captain::server::handle_set_red_alert"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_torpedo_load",
+      "consumer": "project_phoenix::console::captain::server::handle_set_view"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_torpedo_load",
+      "consumer": "project_phoenix::console::command::server::handle_set_station_stance"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_torpedo_load",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_frequency"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_torpedo_load",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_mode"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_torpedo_load",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_target"
+    },
+    {
+      "producer": "project_phoenix::console_ai::server::ai_torpedo_load",
+      "consumer": "project_phoenix::server_app::components::apply_god_mode_toggle"
+    },
+    {
+      "producer": "project_phoenix::console::captain::server::backfill_captain_prefers_cinematic_view",
+      "consumer": "project_phoenix::civilian::server::tick_civilian_traffic"
+    },
+    {
+      "producer": "project_phoenix::console::captain::server::backfill_captain_prefers_cinematic_view",
+      "consumer": "project_phoenix::console::captain::server::handle_set_objective_priority"
+    },
+    {
+      "producer": "project_phoenix::console::captain::server::backfill_captain_prefers_cinematic_view",
+      "consumer": "project_phoenix::console::captain::server::handle_set_red_alert"
+    },
+    {
+      "producer": "project_phoenix::console::captain::server::backfill_captain_prefers_cinematic_view",
+      "consumer": "project_phoenix::console::command::server::handle_set_station_stance"
+    },
+    {
+      "producer": "project_phoenix::console::captain::server::backfill_captain_prefers_cinematic_view",
+      "consumer": "project_phoenix::console::comms::server::handle_hail"
+    },
+    {
+      "producer": "project_phoenix::console::captain::server::backfill_captain_prefers_cinematic_view",
+      "consumer": "project_phoenix::console::comms::server::handle_respond_to_message"
+    },
+    {
+      "producer": "project_phoenix::console::captain::server::backfill_captain_prefers_cinematic_view",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_frequency"
+    },
+    {
+      "producer": "project_phoenix::console::captain::server::backfill_captain_prefers_cinematic_view",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_mode"
+    },
+    {
+      "producer": "project_phoenix::console::captain::server::backfill_captain_prefers_cinematic_view",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_target"
+    },
+    {
+      "producer": "project_phoenix::console::captain::server::backfill_captain_prefers_cinematic_view",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_set_torpedo_volley_target"
+    },
+    {
+      "producer": "project_phoenix::console::captain::server::backfill_captain_prefers_cinematic_view",
+      "consumer": "project_phoenix::demolition::server::handle_demolition_commands"
+    },
+    {
+      "producer": "project_phoenix::console::captain::server::backfill_captain_prefers_cinematic_view",
+      "consumer": "project_phoenix::server_app::components::apply_god_mode_toggle"
+    },
+    {
+      "producer": "project_phoenix::console::captain::server::operate_captain_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_objective_priority"
+    },
+    {
+      "producer": "project_phoenix::console::captain::server::operate_captain_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_view"
+    },
+    {
+      "producer": "project_phoenix::console::captain::server::operate_captain_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_frequency"
+    },
+    {
+      "producer": "project_phoenix::console::captain::server::operate_captain_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_mode"
+    },
+    {
+      "producer": "project_phoenix::console::captain::server::operate_captain_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_target"
+    },
+    {
+      "producer": "project_phoenix::console::captain::server::operate_captain_ai",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_set_torpedo_volley_target"
+    },
+    {
+      "producer": "project_phoenix::console::captain::server::operate_captain_ai",
+      "consumer": "project_phoenix::server_app::components::apply_god_mode_toggle"
+    },
+    {
+      "producer": "project_phoenix::console::command::server::operate_command_ai",
+      "consumer": "project_phoenix::civilian::server::tick_civilian_traffic"
+    },
+    {
+      "producer": "project_phoenix::console::command::server::operate_command_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_objective_priority"
+    },
+    {
+      "producer": "project_phoenix::console::command::server::operate_command_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_view"
+    },
+    {
+      "producer": "project_phoenix::console::command::server::operate_command_ai",
+      "consumer": "project_phoenix::console::comms::server::handle_hail"
+    },
+    {
+      "producer": "project_phoenix::console::command::server::operate_command_ai",
+      "consumer": "project_phoenix::console::comms::server::handle_respond_to_message"
+    },
+    {
+      "producer": "project_phoenix::console::command::server::operate_command_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_frequency"
+    },
+    {
+      "producer": "project_phoenix::console::command::server::operate_command_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_mode"
+    },
+    {
+      "producer": "project_phoenix::console::command::server::operate_command_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_target"
+    },
+    {
+      "producer": "project_phoenix::console::command::server::operate_command_ai",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_set_torpedo_volley_target"
+    },
+    {
+      "producer": "project_phoenix::console::command::server::operate_command_ai",
+      "consumer": "project_phoenix::demolition::server::handle_demolition_commands"
+    },
+    {
+      "producer": "project_phoenix::console::command::server::operate_command_ai",
+      "consumer": "project_phoenix::server_app::components::apply_god_mode_toggle"
+    },
+    {
+      "producer": "project_phoenix::console::comms::server::operate_comms_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_objective_priority"
+    },
+    {
+      "producer": "project_phoenix::console::comms::server::operate_comms_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_view"
+    },
+    {
+      "producer": "project_phoenix::console::comms::server::operate_comms_ai",
+      "consumer": "project_phoenix::console::command::server::handle_set_station_stance"
+    },
+    {
+      "producer": "project_phoenix::console::comms::server::operate_comms_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_frequency"
+    },
+    {
+      "producer": "project_phoenix::console::comms::server::operate_comms_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_mode"
+    },
+    {
+      "producer": "project_phoenix::console::comms::server::operate_comms_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_target"
+    },
+    {
+      "producer": "project_phoenix::console::comms::server::operate_comms_ai",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_set_torpedo_volley_target"
+    },
+    {
+      "producer": "project_phoenix::console::comms::server::operate_comms_ai",
+      "consumer": "project_phoenix::server_app::components::apply_god_mode_toggle"
+    },
+    {
+      "producer": "project_phoenix::console::comms::server::operate_comms_response_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_objective_priority"
+    },
+    {
+      "producer": "project_phoenix::console::comms::server::operate_comms_response_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_view"
+    },
+    {
+      "producer": "project_phoenix::console::comms::server::operate_comms_response_ai",
+      "consumer": "project_phoenix::console::command::server::handle_set_station_stance"
+    },
+    {
+      "producer": "project_phoenix::console::comms::server::operate_comms_response_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_frequency"
+    },
+    {
+      "producer": "project_phoenix::console::comms::server::operate_comms_response_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_mode"
+    },
+    {
+      "producer": "project_phoenix::console::comms::server::operate_comms_response_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_target"
+    },
+    {
+      "producer": "project_phoenix::console::comms::server::operate_comms_response_ai",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_set_torpedo_volley_target"
+    },
+    {
+      "producer": "project_phoenix::console::comms::server::operate_comms_response_ai",
+      "consumer": "project_phoenix::server_app::components::apply_god_mode_toggle"
+    },
+    {
+      "producer": "project_phoenix::console::navigation::server::operate_civilian_order_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_objective_priority"
+    },
+    {
+      "producer": "project_phoenix::console::navigation::server::operate_civilian_order_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_red_alert"
+    },
+    {
+      "producer": "project_phoenix::console::navigation::server::operate_civilian_order_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_view"
+    },
+    {
+      "producer": "project_phoenix::console::navigation::server::operate_civilian_order_ai",
+      "consumer": "project_phoenix::console::command::server::handle_set_station_stance"
+    },
+    {
+      "producer": "project_phoenix::console::navigation::server::operate_civilian_order_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_frequency"
+    },
+    {
+      "producer": "project_phoenix::console::navigation::server::operate_civilian_order_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_mode"
+    },
+    {
+      "producer": "project_phoenix::console::navigation::server::operate_civilian_order_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_target"
+    },
+    {
+      "producer": "project_phoenix::console::navigation::server::operate_civilian_order_ai",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_set_torpedo_volley_target"
+    },
+    {
+      "producer": "project_phoenix::console::navigation::server::operate_civilian_order_ai",
+      "consumer": "project_phoenix::server_app::components::apply_god_mode_toggle"
+    },
+    {
+      "producer": "project_phoenix::console::navigation::server::operate_navigation_ai",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_dispatch_repair_team"
+    },
+    {
+      "producer": "project_phoenix::console::navigation::server::operate_navigation_ai",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_recall_repair_team"
+    },
+    {
+      "producer": "project_phoenix::console::navigation::server::operate_navigation_ai",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_set_repair_priority"
+    },
+    {
+      "producer": "project_phoenix::console::navigation::server::operate_navigation_ai",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_set_repair_target_priority"
+    },
+    {
+      "producer": "project_phoenix::console::navigation::server::operate_navigation_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_fire_phaser"
+    },
+    {
+      "producer": "project_phoenix::console::navigation::server::operate_navigation_ai",
+      "consumer": "project_phoenix::console::weapons::blaster::handle_fire_blaster"
+    },
+    {
+      "producer": "project_phoenix::console::navigation::server::operate_navigation_ai",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_fire_torpedo"
+    },
+    {
+      "producer": "project_phoenix::console::navigation::server::operate_navigation_ai",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_load_tube"
+    },
+    {
+      "producer": "project_phoenix::console::navigation::server::operate_navigation_ai",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_unload_tube"
+    },
+    {
+      "producer": "project_phoenix::console::navigation::server::operate_navigation_ai",
+      "consumer": "project_phoenix::ship::helm_admission::process_helm_inputs"
+    },
+    {
+      "producer": "project_phoenix::console::navigation::server::operate_navigation_ai",
+      "consumer": "project_phoenix::ship::power::handle_power_messages"
+    },
+    {
+      "producer": "project_phoenix::console::navigation::server::operate_navigation_ai",
+      "consumer": "project_phoenix::ship::sensors::handle_sensors_messages"
+    },
+    {
+      "producer": "project_phoenix::console::navigation::server::operate_navigation_ai",
+      "consumer": "project_phoenix::ship::shields::handle_shields_messages"
+    },
+    {
+      "producer": "project_phoenix::console::repair::external_server::operate_external_repair_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_objective_priority"
+    },
+    {
+      "producer": "project_phoenix::console::repair::external_server::operate_external_repair_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_red_alert"
+    },
+    {
+      "producer": "project_phoenix::console::repair::external_server::operate_external_repair_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_view"
+    },
+    {
+      "producer": "project_phoenix::console::repair::external_server::operate_external_repair_ai",
+      "consumer": "project_phoenix::console::command::server::handle_set_station_stance"
+    },
+    {
+      "producer": "project_phoenix::console::repair::external_server::operate_external_repair_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_frequency"
+    },
+    {
+      "producer": "project_phoenix::console::repair::external_server::operate_external_repair_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_mode"
+    },
+    {
+      "producer": "project_phoenix::console::repair::external_server::operate_external_repair_ai",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_set_torpedo_volley_target"
+    },
+    {
+      "producer": "project_phoenix::console::repair::external_server::operate_external_repair_ai",
+      "consumer": "project_phoenix::server_app::components::apply_god_mode_toggle"
+    },
+    {
+      "producer": "project_phoenix::console::repair::server::operate_repair_ai",
+      "consumer": "project_phoenix::console::navigation::server::handle_navigation_waypoint"
+    },
+    {
+      "producer": "project_phoenix::console::repair::server::operate_repair_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_fire_phaser"
+    },
+    {
+      "producer": "project_phoenix::console::repair::server::operate_repair_ai",
+      "consumer": "project_phoenix::console::weapons::blaster::handle_fire_blaster"
+    },
+    {
+      "producer": "project_phoenix::console::repair::server::operate_repair_ai",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_fire_torpedo"
+    },
+    {
+      "producer": "project_phoenix::console::repair::server::operate_repair_ai",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_load_tube"
+    },
+    {
+      "producer": "project_phoenix::console::repair::server::operate_repair_ai",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_unload_tube"
+    },
+    {
+      "producer": "project_phoenix::console::repair::server::operate_repair_ai",
+      "consumer": "project_phoenix::ship::helm_admission::process_helm_inputs"
+    },
+    {
+      "producer": "project_phoenix::console::repair::server::operate_repair_ai",
+      "consumer": "project_phoenix::ship::power::handle_power_messages"
+    },
+    {
+      "producer": "project_phoenix::console::repair::server::operate_repair_ai",
+      "consumer": "project_phoenix::ship::sensors::handle_sensors_messages"
+    },
+    {
+      "producer": "project_phoenix::console::repair::server::operate_repair_ai",
+      "consumer": "project_phoenix::ship::shields::handle_shields_messages"
+    },
+    {
+      "producer": "project_phoenix::console::weapons::beam::ai_phaser_auto_fire",
+      "consumer": "project_phoenix::console::captain::server::handle_set_objective_priority"
+    },
+    {
+      "producer": "project_phoenix::console::weapons::beam::ai_phaser_auto_fire",
+      "consumer": "project_phoenix::console::captain::server::handle_set_view"
+    },
+    {
+      "producer": "project_phoenix::console::weapons::beam::ai_phaser_auto_fire",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_set_torpedo_volley_target"
+    },
+    {
+      "producer": "project_phoenix::console::weapons::beam::ai_phaser_auto_fire",
+      "consumer": "project_phoenix::server_app::components::apply_god_mode_toggle"
+    },
+    {
+      "producer": "project_phoenix::console::weapons::blaster::tick_blaster_auto_fire",
+      "consumer": "project_phoenix::console::captain::server::handle_set_objective_priority"
+    },
+    {
+      "producer": "project_phoenix::console::weapons::blaster::tick_blaster_auto_fire",
+      "consumer": "project_phoenix::console::captain::server::handle_set_view"
+    },
+    {
+      "producer": "project_phoenix::console::weapons::blaster::tick_blaster_auto_fire",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_frequency"
+    },
+    {
+      "producer": "project_phoenix::console::weapons::blaster::tick_blaster_auto_fire",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_mode"
+    },
+    {
+      "producer": "project_phoenix::console::weapons::blaster::tick_blaster_auto_fire",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_set_torpedo_volley_target"
+    },
+    {
+      "producer": "project_phoenix::console::weapons::blaster::tick_blaster_auto_fire",
+      "consumer": "project_phoenix::server_app::components::apply_god_mode_toggle"
+    },
+    {
+      "producer": "project_phoenix::console::weapons::server::ai_target_selection",
+      "consumer": "project_phoenix::console::captain::server::handle_set_objective_priority"
+    },
+    {
+      "producer": "project_phoenix::console::weapons::server::ai_target_selection",
+      "consumer": "project_phoenix::console::captain::server::handle_set_red_alert"
+    },
+    {
+      "producer": "project_phoenix::console::weapons::server::ai_target_selection",
+      "consumer": "project_phoenix::console::captain::server::handle_set_view"
+    },
+    {
+      "producer": "project_phoenix::console::weapons::server::ai_target_selection",
+      "consumer": "project_phoenix::console::command::server::handle_set_station_stance"
+    },
+    {
+      "producer": "project_phoenix::console::weapons::server::ai_target_selection",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_frequency"
+    },
+    {
+      "producer": "project_phoenix::console::weapons::server::ai_target_selection",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_mode"
+    },
+    {
+      "producer": "project_phoenix::console::weapons::server::ai_target_selection",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_set_torpedo_volley_target"
+    },
+    {
+      "producer": "project_phoenix::console::weapons::server::ai_target_selection",
+      "consumer": "project_phoenix::server_app::components::apply_god_mode_toggle"
+    },
+    {
+      "producer": "project_phoenix::demolition::server::operate_demolition_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_objective_priority"
+    },
+    {
+      "producer": "project_phoenix::demolition::server::operate_demolition_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_red_alert"
+    },
+    {
+      "producer": "project_phoenix::demolition::server::operate_demolition_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_view"
+    },
+    {
+      "producer": "project_phoenix::demolition::server::operate_demolition_ai",
+      "consumer": "project_phoenix::console::command::server::handle_set_station_stance"
+    },
+    {
+      "producer": "project_phoenix::demolition::server::operate_demolition_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_frequency"
+    },
+    {
+      "producer": "project_phoenix::demolition::server::operate_demolition_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_mode"
+    },
+    {
+      "producer": "project_phoenix::demolition::server::operate_demolition_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_target"
+    },
+    {
+      "producer": "project_phoenix::demolition::server::operate_demolition_ai",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_set_torpedo_volley_target"
+    },
+    {
+      "producer": "project_phoenix::demolition::server::operate_demolition_ai",
+      "consumer": "project_phoenix::server_app::components::apply_god_mode_toggle"
+    },
+    {
+      "producer": "project_phoenix::dock::server::operate_dock_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_objective_priority"
+    },
+    {
+      "producer": "project_phoenix::dock::server::operate_dock_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_red_alert"
+    },
+    {
+      "producer": "project_phoenix::dock::server::operate_dock_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_view"
+    },
+    {
+      "producer": "project_phoenix::dock::server::operate_dock_ai",
+      "consumer": "project_phoenix::console::command::server::handle_set_station_stance"
+    },
+    {
+      "producer": "project_phoenix::dock::server::operate_dock_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_frequency"
+    },
+    {
+      "producer": "project_phoenix::dock::server::operate_dock_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_mode"
+    },
+    {
+      "producer": "project_phoenix::dock::server::operate_dock_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_target"
+    },
+    {
+      "producer": "project_phoenix::dock::server::operate_dock_ai",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_set_torpedo_volley_target"
+    },
+    {
+      "producer": "project_phoenix::dock::server::operate_dock_ai",
+      "consumer": "project_phoenix::server_app::components::apply_god_mode_toggle"
+    },
+    {
+      "producer": "project_phoenix::security::server::operate_security_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_objective_priority"
+    },
+    {
+      "producer": "project_phoenix::security::server::operate_security_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_red_alert"
+    },
+    {
+      "producer": "project_phoenix::security::server::operate_security_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_view"
+    },
+    {
+      "producer": "project_phoenix::security::server::operate_security_ai",
+      "consumer": "project_phoenix::console::command::server::handle_set_station_stance"
+    },
+    {
+      "producer": "project_phoenix::security::server::operate_security_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_frequency"
+    },
+    {
+      "producer": "project_phoenix::security::server::operate_security_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_mode"
+    },
+    {
+      "producer": "project_phoenix::security::server::operate_security_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_target"
+    },
+    {
+      "producer": "project_phoenix::security::server::operate_security_ai",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_set_torpedo_volley_target"
+    },
+    {
+      "producer": "project_phoenix::security::server::operate_security_ai",
+      "consumer": "project_phoenix::server_app::components::apply_god_mode_toggle"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::boost::ai_helm_boost",
+      "consumer": "project_phoenix::console::navigation::server::handle_navigation_waypoint"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::boost::ai_helm_boost",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_dispatch_repair_team"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::boost::ai_helm_boost",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_recall_repair_team"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::boost::ai_helm_boost",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_set_repair_priority"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::boost::ai_helm_boost",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_set_repair_target_priority"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::boost::ai_helm_boost",
+      "consumer": "project_phoenix::console::weapons::beam::handle_fire_phaser"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::boost::ai_helm_boost",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_load_tube"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::boost::ai_helm_boost",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_unload_tube"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::boost::ai_helm_boost",
+      "consumer": "project_phoenix::ship::power::handle_power_messages"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::boost::ai_helm_boost",
+      "consumer": "project_phoenix::ship::sensors::handle_sensors_messages"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::boost::ai_helm_boost",
+      "consumer": "project_phoenix::ship::shields::handle_shields_messages"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::engines::ai_helm_thrust",
+      "consumer": "project_phoenix::console::navigation::server::handle_navigation_waypoint"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::engines::ai_helm_thrust",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_dispatch_repair_team"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::engines::ai_helm_thrust",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_recall_repair_team"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::engines::ai_helm_thrust",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_set_repair_priority"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::engines::ai_helm_thrust",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_set_repair_target_priority"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::engines::ai_helm_thrust",
+      "consumer": "project_phoenix::console::weapons::beam::handle_fire_phaser"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::engines::ai_helm_thrust",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_load_tube"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::engines::ai_helm_thrust",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_unload_tube"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::engines::ai_helm_thrust",
+      "consumer": "project_phoenix::ship::power::handle_power_messages"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::engines::ai_helm_thrust",
+      "consumer": "project_phoenix::ship::sensors::handle_sensors_messages"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::engines::ai_helm_thrust",
+      "consumer": "project_phoenix::ship::shields::handle_shields_messages"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::impulse::ai_helm_impulse",
+      "consumer": "project_phoenix::console::navigation::server::handle_navigation_waypoint"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::impulse::ai_helm_impulse",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_dispatch_repair_team"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::impulse::ai_helm_impulse",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_recall_repair_team"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::impulse::ai_helm_impulse",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_set_repair_priority"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::impulse::ai_helm_impulse",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_set_repair_target_priority"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::impulse::ai_helm_impulse",
+      "consumer": "project_phoenix::console::weapons::beam::handle_fire_phaser"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::impulse::ai_helm_impulse",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_load_tube"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::impulse::ai_helm_impulse",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_unload_tube"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::impulse::ai_helm_impulse",
+      "consumer": "project_phoenix::ship::power::handle_power_messages"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::impulse::ai_helm_impulse",
+      "consumer": "project_phoenix::ship::sensors::handle_sensors_messages"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::impulse::ai_helm_impulse",
+      "consumer": "project_phoenix::ship::shields::handle_shields_messages"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::lateral::ai_helm_lateral_thrust",
+      "consumer": "project_phoenix::console::navigation::server::handle_navigation_waypoint"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::lateral::ai_helm_lateral_thrust",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_dispatch_repair_team"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::lateral::ai_helm_lateral_thrust",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_recall_repair_team"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::lateral::ai_helm_lateral_thrust",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_set_repair_priority"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::lateral::ai_helm_lateral_thrust",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_set_repair_target_priority"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::lateral::ai_helm_lateral_thrust",
+      "consumer": "project_phoenix::console::weapons::beam::handle_fire_phaser"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::lateral::ai_helm_lateral_thrust",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_load_tube"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::lateral::ai_helm_lateral_thrust",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_unload_tube"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::lateral::ai_helm_lateral_thrust",
+      "consumer": "project_phoenix::ship::power::handle_power_messages"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::lateral::ai_helm_lateral_thrust",
+      "consumer": "project_phoenix::ship::sensors::handle_sensors_messages"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::lateral::ai_helm_lateral_thrust",
+      "consumer": "project_phoenix::ship::shields::handle_shields_messages"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::steering::ai_helm_steering",
+      "consumer": "project_phoenix::console::navigation::server::handle_navigation_waypoint"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::steering::ai_helm_steering",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_dispatch_repair_team"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::steering::ai_helm_steering",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_recall_repair_team"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::steering::ai_helm_steering",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_set_repair_priority"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::steering::ai_helm_steering",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_set_repair_target_priority"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::steering::ai_helm_steering",
+      "consumer": "project_phoenix::console::weapons::beam::handle_fire_phaser"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::steering::ai_helm_steering",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_load_tube"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::steering::ai_helm_steering",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_unload_tube"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::steering::ai_helm_steering",
+      "consumer": "project_phoenix::ship::power::handle_power_messages"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::steering::ai_helm_steering",
+      "consumer": "project_phoenix::ship::sensors::handle_sensors_messages"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::steering::ai_helm_steering",
+      "consumer": "project_phoenix::ship::shields::handle_shields_messages"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::vertical::ai_helm_vertical_thrust",
+      "consumer": "project_phoenix::console::navigation::server::handle_navigation_waypoint"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::vertical::ai_helm_vertical_thrust",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_dispatch_repair_team"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::vertical::ai_helm_vertical_thrust",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_recall_repair_team"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::vertical::ai_helm_vertical_thrust",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_set_repair_priority"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::vertical::ai_helm_vertical_thrust",
+      "consumer": "project_phoenix::console::repair::dispatch::handle_set_repair_target_priority"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::vertical::ai_helm_vertical_thrust",
+      "consumer": "project_phoenix::console::weapons::beam::handle_fire_phaser"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::vertical::ai_helm_vertical_thrust",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_load_tube"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::vertical::ai_helm_vertical_thrust",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_unload_tube"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::vertical::ai_helm_vertical_thrust",
+      "consumer": "project_phoenix::ship::power::handle_power_messages"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::vertical::ai_helm_vertical_thrust",
+      "consumer": "project_phoenix::ship::sensors::handle_sensors_messages"
+    },
+    {
+      "producer": "project_phoenix::ship::helm_ai::vertical::ai_helm_vertical_thrust",
+      "consumer": "project_phoenix::ship::shields::handle_shields_messages"
+    },
+    {
+      "producer": "project_phoenix::ship::sensors::operate_sensors_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_objective_priority"
+    },
+    {
+      "producer": "project_phoenix::ship::sensors::operate_sensors_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_red_alert"
+    },
+    {
+      "producer": "project_phoenix::ship::sensors::operate_sensors_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_view"
+    },
+    {
+      "producer": "project_phoenix::ship::sensors::operate_sensors_ai",
+      "consumer": "project_phoenix::console::command::server::handle_set_station_stance"
+    },
+    {
+      "producer": "project_phoenix::ship::sensors::operate_sensors_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_frequency"
+    },
+    {
+      "producer": "project_phoenix::ship::sensors::operate_sensors_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_mode"
+    },
+    {
+      "producer": "project_phoenix::ship::sensors::operate_sensors_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_target"
+    },
+    {
+      "producer": "project_phoenix::ship::sensors::operate_sensors_ai",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_set_torpedo_volley_target"
+    },
+    {
+      "producer": "project_phoenix::ship::sensors::operate_sensors_ai",
+      "consumer": "project_phoenix::server_app::components::apply_god_mode_toggle"
+    },
+    {
+      "producer": "project_phoenix::tractor::server::operate_tractor_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_objective_priority"
+    },
+    {
+      "producer": "project_phoenix::tractor::server::operate_tractor_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_red_alert"
+    },
+    {
+      "producer": "project_phoenix::tractor::server::operate_tractor_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_view"
+    },
+    {
+      "producer": "project_phoenix::tractor::server::operate_tractor_ai",
+      "consumer": "project_phoenix::console::command::server::handle_set_station_stance"
+    },
+    {
+      "producer": "project_phoenix::tractor::server::operate_tractor_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_frequency"
+    },
+    {
+      "producer": "project_phoenix::tractor::server::operate_tractor_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_mode"
+    },
+    {
+      "producer": "project_phoenix::tractor::server::operate_tractor_ai",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_set_torpedo_volley_target"
+    },
+    {
+      "producer": "project_phoenix::tractor::server::operate_tractor_ai",
+      "consumer": "project_phoenix::server_app::components::apply_god_mode_toggle"
+    },
+    {
+      "producer": "project_phoenix::transporter::server::operate_transporter_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_objective_priority"
+    },
+    {
+      "producer": "project_phoenix::transporter::server::operate_transporter_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_red_alert"
+    },
+    {
+      "producer": "project_phoenix::transporter::server::operate_transporter_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_view"
+    },
+    {
+      "producer": "project_phoenix::transporter::server::operate_transporter_ai",
+      "consumer": "project_phoenix::console::command::server::handle_set_station_stance"
+    },
+    {
+      "producer": "project_phoenix::transporter::server::operate_transporter_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_frequency"
+    },
+    {
+      "producer": "project_phoenix::transporter::server::operate_transporter_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_mode"
+    },
+    {
+      "producer": "project_phoenix::transporter::server::operate_transporter_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_target"
+    },
+    {
+      "producer": "project_phoenix::transporter::server::operate_transporter_ai",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_set_torpedo_volley_target"
+    },
+    {
+      "producer": "project_phoenix::transporter::server::operate_transporter_ai",
+      "consumer": "project_phoenix::server_app::components::apply_god_mode_toggle"
+    },
+    {
+      "producer": "project_phoenix::umbilical::server::operate_umbilical_ai",
+      "consumer": "project_phoenix::civilian::server::tick_civilian_traffic"
+    },
+    {
+      "producer": "project_phoenix::umbilical::server::operate_umbilical_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_objective_priority"
+    },
+    {
+      "producer": "project_phoenix::umbilical::server::operate_umbilical_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_red_alert"
+    },
+    {
+      "producer": "project_phoenix::umbilical::server::operate_umbilical_ai",
+      "consumer": "project_phoenix::console::captain::server::handle_set_view"
+    },
+    {
+      "producer": "project_phoenix::umbilical::server::operate_umbilical_ai",
+      "consumer": "project_phoenix::console::command::server::handle_set_station_stance"
+    },
+    {
+      "producer": "project_phoenix::umbilical::server::operate_umbilical_ai",
+      "consumer": "project_phoenix::console::comms::server::handle_hail"
+    },
+    {
+      "producer": "project_phoenix::umbilical::server::operate_umbilical_ai",
+      "consumer": "project_phoenix::console::comms::server::handle_respond_to_message"
+    },
+    {
+      "producer": "project_phoenix::umbilical::server::operate_umbilical_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_frequency"
+    },
+    {
+      "producer": "project_phoenix::umbilical::server::operate_umbilical_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_phaser_mode"
+    },
+    {
+      "producer": "project_phoenix::umbilical::server::operate_umbilical_ai",
+      "consumer": "project_phoenix::console::weapons::beam::handle_set_target"
+    },
+    {
+      "producer": "project_phoenix::umbilical::server::operate_umbilical_ai",
+      "consumer": "project_phoenix::console::weapons::torpedo::handle_set_torpedo_volley_target"
+    },
+    {
+      "producer": "project_phoenix::umbilical::server::operate_umbilical_ai",
+      "consumer": "project_phoenix::demolition::server::handle_demolition_commands"
+    },
+    {
+      "producer": "project_phoenix::umbilical::server::operate_umbilical_ai",
+      "consumer": "project_phoenix::server_app::components::apply_god_mode_toggle"
+    }
+  ]
+}

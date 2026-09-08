@@ -841,7 +841,10 @@ impl Plugin for WorldPlugin {
             FixedUpdate,
             broadcast_objective_summary
                 .in_set(crate::sim_sets::SimSet::Broadcast)
-                .after(crate::comms::server::broadcast_comms_state),
+                .after(crate::comms::server::broadcast_comms_state)
+                .before(
+                    crate::core::broadcast::broadcaster::dispatch::<crate::core::broadcast::Sim>,
+                ),
         )
         // The comms half of the Physics set is registered by
         // `CommsWorldPlugin`, ordered against these systems from that side.

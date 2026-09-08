@@ -210,7 +210,7 @@ perf = []
 # now DEPENDS on `server` instead of standing alone: without that dependency
 # `--no-default-features --features host` compiles a `main` that names a module
 # which is not there, a combination CI never builds and nothing would catch.
-host = ["server", "dep:tungstenite", "dep:windows"]
+host = ["server", "dep:tungstenite", "dep:windows", "dep:cpal"]
 # Capture feature: builds the `capture-billboard` tool, a native headless
 # renderer that bakes a model's far-LOD billboard atlas (see src/bin). Pulls in
 # the `image` crate for PNG encoding; kept out of the default/wasm builds because
@@ -479,6 +479,7 @@ bevy = { version = "0.18.1", features = ["debug"] }
 # `the_deterministic_build_runs_rapier_serially` in tests/headless_runner.rs is
 # the guard that makes silently re-adding it fail.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+cpal = { version = "0.15.3", optional = true }
 # Enable ONLY ECS spans, not bevy/trace's unrelated renderer/logging layers.
 # This is Bevy's already-pinned ECS crate, unified with the ordinary engine.
 bevy_ecs = { version = "0.18.1", default-features = false, features = ["trace"], optional = true }

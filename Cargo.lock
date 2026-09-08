@@ -5066,6 +5066,7 @@ dependencies = [
  "bevy_ecs",
  "bevy_rapier3d",
  "console_error_panic_hook",
+ "cpal",
  "crossbeam-channel",
  "directories",
  "getrandom 0.3.4",

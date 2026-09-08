@@ -582,3 +582,20 @@ fn the_media_report_confirms_a_clean_match_and_shows_a_warning() {
         "{report}"
     );
 }
+
+#[test]
+fn a_completed_empty_output_scan_reports_missing_outputs_not_an_absent_backend() {
+    let profile = report_profile(vec![entry(
+        "comms",
+        Some("camera:BRIO"),
+        &["mic:Yeti"],
+        &["output:Headset"],
+    )]);
+    let report = render_output_setup_report(&[], Some(&profile));
+    assert!(report.contains("Output backend: CPAL"));
+    assert!(report.contains("output:Headset"));
+    assert!(report.contains("not connected"));
+    assert!(!report.contains(enumerate_note()));
+    assert!(!report.contains("assigned camera"));
+    assert!(!report.contains("assigned microphone"));
+}

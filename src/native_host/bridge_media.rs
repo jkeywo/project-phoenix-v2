@@ -804,16 +804,41 @@ pub fn render_media_setup_report(
     discovered: &[DiscoveredMediaDevice],
     profile: Option<&super::bridge_profile::BridgeProfile>,
 ) -> String {
+    render_media_setup_report_inner(discovered, profile, !discovered.is_empty(), false)
+}
+
+/// A completed output scan can be empty. Camera/mic support is explicitly absent
+/// rather than misreporting those unqueried assignments as disconnected devices.
+pub fn render_output_setup_report(
+    discovered: &[DiscoveredMediaDevice],
+    profile: Option<&super::bridge_profile::BridgeProfile>,
+) -> String {
+    let mut out = "\nOutput backend: CPAL. Camera preview and microphone metering are not implemented.\nUnnamed/duplicate output names cannot be tested safely; assign unique OS names.\n".to_string();
+    out.push_str(&render_media_setup_report_inner(
+        discovered, profile, true, true,
+    ));
+    out
+}
+
+fn render_media_setup_report_inner(
+    discovered: &[DiscoveredMediaDevice],
+    profile: Option<&super::bridge_profile::BridgeProfile>,
+    scan_completed: bool,
+    output_only: bool,
+) -> String {
     let mut out = String::new();
     out.push_str(&format!(
         "\nMedia devices — discovered {} device(s):\n",
         discovered.len()
     ));
-    if discovered.is_empty() {
+    if !scan_completed {
         out.push_str(enumerate_note());
         out.push('\n');
     } else {
         for kind in [MediaKind::Camera, MediaKind::Microphone, MediaKind::Output] {
+            if output_only && kind != MediaKind::Output {
+                continue;
+            }
             let of_kind: Vec<&DiscoveredMediaDevice> =
                 discovered.iter().filter(|d| d.kind == kind).collect();
             out.push_str(&format!("  {}(s):\n", kind.label()));
@@ -843,7 +868,7 @@ pub fn render_media_setup_report(
     }
 
     match validate_media(media_entries) {
-        Ok(validated) => {
+        Ok(mut validated) => {
             out.push_str("\nMedia assignments:\n");
             for surface in &validated.surfaces {
                 out.push_str(&format!(
@@ -855,10 +880,20 @@ pub fn render_media_setup_report(
             for warning in &validated.warnings {
                 out.push_str(&format!("  - warning: {warning}\n"));
             }
-            if !discovered.is_empty() {
+            if scan_completed {
+                if output_only {
+                    for surface in &mut validated.surfaces {
+                        surface.camera = None;
+                        surface.microphones.clear();
+                    }
+                }
                 let resolved = resolve_media(&validated, discovered);
                 if resolved.problems.is_empty() {
-                    out.push_str("Media assignments match the connected devices.\n");
+                    out.push_str(if output_only {
+                        "Output assignments match the connected outputs.\n"
+                    } else {
+                        "Media assignments match the connected devices.\n"
+                    });
                 } else {
                     out.push_str("Media problems:\n");
                     for problem in &resolved.problems {

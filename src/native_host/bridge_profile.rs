@@ -1472,7 +1472,7 @@ pub fn render_setup_report_with_media(
 }
 
 /// The display half of the `--setup` report — the original #1123 body.
-fn render_display_setup_report(
+pub(super) fn render_display_setup_report(
     discovered: &[DiscoveredMonitor],
     profile: Option<&BridgeProfile>,
 ) -> String {

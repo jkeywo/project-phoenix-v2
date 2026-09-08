@@ -149,6 +149,26 @@ fn main() {
     // was given, and exit. A standalone diagnostic — it opens no HTTP listener
     // and runs no world, so it short-circuits here before any content is read.
     if args.setup {
+        if let Some(surface) = args.test_output.as_deref() {
+            let result = native_host::media_output::OutputDevices::scan().and_then(|devices| {
+                devices.test_surface(
+                    bridge_profile.as_ref().expect("parser requires --profile"),
+                    surface,
+                )
+            });
+            match result {
+                Ok(lines) => {
+                    for line in lines {
+                        println!("{line}");
+                    }
+                }
+                Err(error) => {
+                    eprintln!("phoenix-host: {error}");
+                    std::process::exit(1);
+                }
+            }
+            return;
+        }
         std::process::exit(native_host::bridge_display::run_setup(bridge_profile));
     }
 

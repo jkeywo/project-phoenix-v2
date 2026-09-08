@@ -51,6 +51,7 @@ impl Delivery {
             skip_bundle_check: true,
             sim: None,
             setup: false,
+            test_output: None,
             profile: None,
         })
         .expect("the local delivery host binds");

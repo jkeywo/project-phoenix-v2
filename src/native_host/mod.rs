@@ -111,6 +111,8 @@ pub mod layout_store;
 /// accepted lobby change back to it, both gated off for a run an operator gave
 /// an explicit `--profile`.
 pub mod layout_store_systems;
+#[cfg(feature = "host")]
+pub mod media_output;
 /// The **mod-pack shelf** (issue #1366) — pure, Bevy-free, and filesystem-free
 /// by construction: it takes a directory LISTING and answers "what is on the
 /// shelf", so every rule about which files are offered is an ordinary

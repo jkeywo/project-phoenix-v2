@@ -2404,7 +2404,21 @@ fn setup_enumerate(
         return;
     }
     let discovered = identify(&raws);
+    #[cfg(not(feature = "host"))]
     let report = super::bridge_profile::render_setup_report(&discovered, profile.0.as_ref());
+    #[cfg(feature = "host")]
+    let report = {
+        let mut report =
+            super::bridge_profile::render_display_setup_report(&discovered, profile.0.as_ref());
+        match super::media_output::OutputDevices::scan() {
+            Ok(outputs) => report.push_str(&super::bridge_media::render_output_setup_report(
+                &outputs.discovered,
+                profile.0.as_ref(),
+            )),
+            Err(error) => report.push_str(&format!("\nOutput enumeration unavailable: {error}\n")),
+        }
+        report
+    };
     // The accessibility half of the report (issue #1128): per-pane reflow
     // headroom at the supported scaling extremes, the keyboard-focus order across
     // monitors, and the OS accessibility preferences the panes and reticle start

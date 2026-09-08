@@ -64,6 +64,7 @@ fn args() -> HostArgs {
         skip_bundle_check: false,
         sim: None,
         setup: false,
+        test_output: None,
         profile: None,
     }
 }

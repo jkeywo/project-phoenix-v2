@@ -204,7 +204,7 @@ export function checkProbe(probe, opts = {}) {
     findings.push(finding(
       'error',
       path,
-      `non-hashed asset cached for a year (${cache}) — its name does not change ` +
+      `non-hashed asset cached for ${maxAgeOf(cache)}s (${cache}) — its name does not change ` +
       'when its bytes do, so a deploy could not evict it',
     ));
   }

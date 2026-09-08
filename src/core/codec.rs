@@ -1544,6 +1544,29 @@ pub fn encode_mesh_status(
     .to_string()
 }
 
+/// Absolute local GM Comms Studio projection.
+pub fn encode_gm_comms_projection(
+    payload: &crate::gm_comms::GmCommsProjection,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(payload)
+}
+
+#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+pub fn decode_native_gm_record(
+    json: &str,
+) -> Option<crate::native_host::native_gm::NativeGmRecord> {
+    if json.len() > 128 * 1024 {
+        return None;
+    }
+    serde_json::from_str(json).ok()
+}
+#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+pub fn encode_native_gm_metadata(
+    value: &crate::native_host::native_gm::NativeGmMetadata,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(value)
+}
+
 #[cfg(test)]
 mod mesh_frame_tests {
     use crate::command_admission::{CommandOrder, HostSlot, ShipKey};
@@ -2270,27 +2293,4 @@ mod mesh_frame_tests {
             );
         }
     }
-}
-
-/// Absolute local GM Comms Studio projection.
-pub fn encode_gm_comms_projection(
-    payload: &crate::gm_comms::GmCommsProjection,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(payload)
-}
-
-#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
-pub fn decode_native_gm_record(
-    json: &str,
-) -> Option<crate::native_host::native_gm::NativeGmRecord> {
-    if json.len() > 128 * 1024 {
-        return None;
-    }
-    serde_json::from_str(json).ok()
-}
-#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
-pub fn encode_native_gm_metadata(
-    value: &crate::native_host::native_gm::NativeGmMetadata,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(value)
 }

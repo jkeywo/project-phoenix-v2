@@ -266,7 +266,7 @@ mod tests {
             system(Some(SimSet::Input), 3, 4),
             system(Some(SimSet::Input), 2, 9),
         ]);
-        let result = reduce(&[input.clone()]).unwrap();
+        let result = reduce(std::slice::from_ref(&input)).unwrap();
         let observed = result[0].phases[0].timing;
         assert_eq!(observed.observed, Duration::from_millis(10));
         assert_eq!(observed.envelope, Duration::from_millis(10));

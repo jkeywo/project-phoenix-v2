@@ -125,6 +125,7 @@ export function mountNativeGmWorkspace({ bridge, win = window, doc = win.documen
       if (!value || !Array.isArray(value.gms) || typeof value.phase !== 'string') return;
       const previousPhase = metadata.phase;
       metadata = value;
+      win.__hostGmShellMetadata?.(metadata);
       if (metadata.phase === 'Lobby' && previousPhase !== 'Lobby') workspace.reset();
       if (Array.isArray(metadata.role_presets)) win.__hostGmRolePresetsSetAvailable(metadata.role_presets);
       workspace.refreshAdmission();
@@ -144,6 +145,7 @@ export function mountNativeGmWorkspace({ bridge, win = window, doc = win.documen
       recoveryButton.removeEventListener('click', returnToHostLobby);
       recoveryButton.remove();
       workspace.reset();
+      workspace.dispose();
     },
   };
 }

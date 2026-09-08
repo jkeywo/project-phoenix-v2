@@ -25,8 +25,11 @@ import {
 } from './action-feedback.js';
 import { createHostActionRegistry } from './host-actions.js';
 import { t, has } from './strings.js';
+import { mountGmWorkspaceShell } from './gm-workspace-shell.js';
 
 export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
+  const shell = mountGmWorkspaceShell({ doc, win, t, has, selectEntity: id => gmProjection.select(id) });
+  win.__hostGmShellMetadata = shell.metadata;
   // Late-bound because the panel needs the projection's selection and the
   // projection needs the panel's `select`; the closure resolves at call time,
   // after both exist.
@@ -39,6 +42,7 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
     doc: doc,
     t,
     onSelectionChanged: (entity) => {
+      shell.selection(entity);
       if (gmDirectEffect) gmDirectEffect.select(entity);
       if (gmDespawn) gmDespawn.select(entity);
       if (gmContact) gmContact.select(entity);
@@ -249,6 +253,7 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
       if (gmProjection.update(p)) {
         gmActivity.reconcileAvailability();
         gmKnowledgeCompare.updateTruth(gmProjection.state().entities);
+        shell.refresh(gmProjection.state());
       }
       // The directed-effect results ride the same payload, so they fold
       // even if the entity list itself was rejected as malformed.
@@ -259,16 +264,19 @@ export function mountGmWorkspace({ win = window, doc = win.document } = {}) {
     gm_station:   function(p) {
       if (gmStationPuppet.update(p)) {
         gmKnowledgeCompare.updateStations(gmStationPuppet.state().projection);
+        shell.refresh(null, gmStationPuppet.state().projection);
       }
     },
     gm_session:   function(p) { gmSessionControls.update(p); },
     gm_mission:   function(p) { gmMissionPanel.update(p); gmObjectivePanel.update(p); },
-    gm_comms:     function(p) { gmCommsPanel.update(p); },
-    gm_spawn:     function(p) { gmSpawnPanel.update(p); },
+    gm_comms:     function(p) { gmCommsPanel.update(p); shell.refresh(); },
+    gm_spawn:     function(p) { gmSpawnPanel.update(p); shell.refresh(); },
   };
   return {
     handlers,
+    dispose() { shell.dispose(); },
     refreshAdmission() {
+      shell.refresh();
       gmSessionControls.refreshAdmission();
       win.__hostGmMissionRefresh();
       gmCommsPanel.refreshAdmission();

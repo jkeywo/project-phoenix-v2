@@ -1,0 +1,147 @@
+/* Shared desktop GM desk. Dimensions describe the artboard; visual values use tokens. */
+#gm-console.gm-desk {
+  padding: 0; gap: 0; background: var(--surface-void); color: var(--ink);
+  font-family: var(--font-display); font-size: calc(var(--text-md) * var(--a11y-text-scale));
+  scroll-padding: var(--space-5);
+}
+.gm-desk * { box-sizing: border-box; }
+#gm-console.gm-desk [hidden] { display: none !important; }
+#gm-console.gm-desk h1 { font-size: calc(var(--text-xl) * var(--a11y-text-scale)); color: var(--gold); }
+#gm-console.gm-desk h2 { font-size: calc(var(--text-lg) * var(--a11y-text-scale)); }
+#gm-console.gm-desk h3, #gm-console.gm-desk h4 { font-size: calc(var(--text-sm) * var(--a11y-text-scale)); color: var(--ink-dim); }
+#gm-console.gm-desk p { margin: var(--space-2) 0; overflow-wrap: anywhere; }
+#gm-console.gm-desk p:empty, #gm-console.gm-desk ol:empty { display: none; }
+#gm-console .gm-station-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-5);
+  min-height: 76px; padding: var(--space-4) var(--space-5); padding-right: var(--settings-cog-keepout);
+  border-bottom: 1px solid var(--edge); background: var(--surface-panel);
+}
+#gm-console #gm-peer-summary { margin-right: auto; font-family: var(--font-mono); }
+#gm-console #gm-lethal-label, #gm-console #gm-role-preset-label { display: grid; gap: var(--space-2); }
+#gm-console.gm-desk #gm-session-controls { display: flex; align-items: center; flex-wrap: wrap; border: 0; padding: 0; gap: var(--space-2); max-width: 260px; }
+#gm-console.gm-desk #gm-session-heading, #gm-console.gm-desk #gm-session-log-heading,
+#gm-console.gm-desk #gm-session-log { display: none; }
+#gm-console.gm-desk #gm-session-actions { gap: var(--space-2); }
+#gm-console.gm-desk #gm-workspace {
+  display: grid; grid-template-columns: 300px minmax(0, 1fr) 340px;
+  grid-template-rows: minmax(0, 1fr) 236px; gap: var(--space-5); padding: var(--space-5);
+  height: calc(100vh - 88px); min-height: 580px; flex: 0 0 auto;
+}
+#gm-console.gm-desk #gm-workspace > section {
+  min-width: 0; min-height: 0; max-width: none; padding: var(--space-5);
+  background: var(--surface-panel); border: 1px solid var(--edge);
+  display: flex; flex-direction: column; gap: var(--space-4); overflow: auto;
+}
+#gm-console.gm-desk #gm-roster { grid-area: 1 / 1; }
+#gm-console.gm-desk #gm-map-panel { grid-area: 1 / 2; overflow: hidden; }
+#gm-console.gm-desk #gm-inspector { grid-area: 1 / 3; }
+#gm-console.gm-desk #gm-mission-panel { grid-area: 2 / 1; }
+#gm-console.gm-desk #gm-comms-panel { grid-area: 2 / 2; }
+#gm-console.gm-desk #gm-activity { grid-area: 2 / 3; }
+#gm-console.gm-desk #gm-entity-map { flex: 1; min-height: 0; height: auto; width: 100%; background: var(--surface-abyss); }
+#gm-console.gm-desk #gm-map-legend { font-size: var(--text-xs); }
+#gm-console.gm-desk #gm-selection-chip { color: var(--gold); font-family: var(--font-mono); }
+#gm-console.gm-desk #gm-inspector section, #gm-console.gm-desk #gm-spawn-panel {
+  width: 100%; max-width: none; padding: var(--space-4) 0; border: 0;
+  border-top: 1px solid var(--edge); gap: var(--space-3); flex-shrink: 0;
+}
+#gm-console.gm-desk #gm-entity-card dl { grid-template-columns: auto minmax(0, 1fr); gap: var(--space-3); }
+#gm-console.gm-desk #gm-entity-card { padding: 0; }
+#gm-console.gm-desk input, #gm-console.gm-desk select, #gm-console.gm-desk textarea {
+  min-width: 0; max-width: 100%; color: var(--ink); background: var(--surface-panel-up);
+  border: 1px solid var(--edge-bright); padding: var(--space-3); font: inherit;
+}
+#gm-console.gm-desk button.btn {
+  min-width: 0; max-width: 100%; padding: var(--space-3) var(--space-4); margin: 0;
+  min-height: var(--control-hit-min); height: auto; border: 0;
+  font-size: calc(var(--text-xs) * var(--a11y-text-scale)); color: var(--ink);
+  background: var(--surface-panel-up); white-space: normal; overflow-wrap: anywhere;
+}
+#gm-console.gm-desk button[aria-pressed="true"], #gm-console.gm-desk button[aria-selected="true"] { color: var(--gold); background: var(--surface-lift); }
+#gm-console.gm-desk #gm-inspector-tabs { display: flex; gap: var(--space-2); }
+#gm-console.gm-desk #gm-inspector-tabs button { flex: 1; }
+#gm-console.gm-desk #gm-inspector[data-view="crew"] th:nth-child(2),
+#gm-console.gm-desk #gm-inspector[data-view="crew"] td:nth-child(2),
+#gm-console.gm-desk #gm-inspector[data-view="crew"] th:nth-child(4),
+#gm-console.gm-desk #gm-inspector[data-view="crew"] td:nth-child(4) { display: none; }
+#gm-console.gm-desk .gm-knowledge-category { overflow: auto; }
+#gm-console.gm-desk #gm-comms-panel { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-content: start; }
+#gm-console.gm-desk #gm-comms-heading, #gm-console.gm-desk #gm-comms-empty,
+#gm-console.gm-desk #gm-comms-feedback, #gm-console.gm-desk #gm-comms-log { grid-column: 1 / -1; }
+#gm-console.gm-desk #gm-comms-panel .gm-comms-draft { grid-column: 1 / 3; }
+#gm-console.gm-desk #gm-comms-panel textarea { min-height: 64px; resize: vertical; }
+#gm-console.gm-desk #gm-comms-recipients { height: 64px; }
+#gm-console.gm-desk #gm-activity-filters { gap: var(--space-2); }
+#gm-console.gm-desk .gm-activity-filter { min-width: 0; flex: 1; }
+#gm-console.gm-desk .gm-activity-filter select { min-width: 0; width: 100%; }
+#gm-console.gm-desk #gm-activity-list { overflow: visible; max-height: none; }
+#gm-console.gm-desk .gm-activity-entry { padding: var(--space-3); }
+#gm-console.gm-desk .gm-roster-row { border-bottom: 1px solid var(--edge); padding: var(--space-3) 0; }
+#gm-console.gm-desk .gm-roster-row > button { width: 100%; text-align: left; justify-content: flex-start; }
+#gm-console.gm-desk .gm-station-pills { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+#gm-console.gm-desk .gm-station-pills span { font-size: var(--text-xs); border: 1px solid var(--edge); padding: var(--space-2); }
+#gm-console.gm-desk .gm-station-pills [data-rating="Backfill"] { color: var(--ink-dim); }
+#gm-console.gm-desk #gm-station-controls { grid-template-columns: minmax(0, 1fr); }
+#gm-console.gm-desk #gm-station-surface { flex: 0 0 auto; width: 100%; overflow: auto; }
+#gm-console.gm-desk #gm-station-frame { width: 1280px; height: 720px; max-width: none; }
+#gm-console.gm-desk #gm-start-controls { position: static; padding: var(--space-4) 0; }
+@media (max-width: 1300px) {
+  #gm-console.gm-desk #gm-workspace { grid-template-columns: 260px minmax(0, 1fr) 320px; }
+}
+@media (max-width: 1000px) {
+  #gm-console.gm-desk #gm-workspace { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
+  #gm-console.gm-desk #gm-workspace > section { grid-area: auto; max-height: 600px; }
+  #gm-console.gm-desk #gm-map-panel { height: 480px; }
+}
+#gm-console.gm-desk .gm-station-bar { padding-left: var(--settings-cog-keepout); padding-right: var(--space-5); }
+#gm-console.gm-desk #gm-role-preset-label { flex: 0 1 auto; max-width: 200px; }
+#gm-console.gm-desk #gm-workspace > #gm-comms-panel { display: grid; }
+#gm-console.gm-desk #manual-save-panel { position: static; width: 100%; max-width: none; padding: var(--space-4) 0; background: transparent; border: 0; }
+#gm-console.gm-desk #gm-entity-identity { font-family: var(--font-mono); font-size: var(--text-xs); }
+#gm-console.gm-desk #gm-comms-panel[data-empty="true"] > label,
+#gm-console.gm-desk #gm-comms-panel[data-empty="true"] > button,
+#gm-console.gm-desk #gm-comms-panel[data-empty="true"] > #gm-comms-count,
+#gm-console.gm-desk #gm-spawn-panel[data-empty="true"] > #gm-spawn-hint,
+#gm-console.gm-desk #gm-spawn-panel[data-empty="true"] > #gm-spawn-exact-heading,
+#gm-console.gm-desk #gm-spawn-panel[data-empty="true"] > #gm-spawn-exact-form { display: none; }
+#gm-console.gm-desk button.btn { background: var(--edge-bright); }
+#gm-console.gm-desk button[aria-pressed="true"], #gm-console.gm-desk button[aria-selected="true"] { background: var(--gold); }
+html.phoenix-gm-page #lobby-panel { display: none !important; }
+#gm-console.gm-desk #gm-action-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+#gm-console.gm-desk #gm-system-pills { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+#gm-console.gm-desk #gm-system-pills span { padding: var(--space-2); border: 1px solid var(--edge); color: var(--cyan); font-size: var(--text-xs); }
+#gm-console.gm-desk #gm-session-history #gm-session-log { display: block; }
+#gm-console.gm-desk #gm-session-history summary { cursor: pointer; }
+#gm-console.gm-desk #gm-armed-chip { color: var(--gold); }
+#gm-console.gm-desk .gm-segment { display: flex; gap: var(--space-1); flex-wrap: wrap; }
+#gm-console.gm-desk .gm-segment-source { position: absolute; width: 1px; height: 1px; padding: 0; clip-path: inset(50%); overflow: hidden; }
+#gm-console.gm-desk #gm-session-clock { font-family: var(--font-mono); font-size: var(--text-xs); }
+#gm-console.gm-desk #gm-role-preset-label { max-width: 280px; }
+
+#gm-console.gm-desk #gm-scenario-title { max-width: 190px; color: var(--ink-dim); font-size: var(--text-xs); }
+#gm-console.gm-desk .gm-station-bar { flex-shrink: 0; gap: var(--space-3); }
+#gm-console.gm-desk #gm-scenario-title { max-width: 120px; }
+#gm-console.gm-desk #gm-session-state { position: absolute; width: 1px; height: 1px; clip-path: inset(50%); overflow: hidden; }
+#gm-console.gm-desk #gm-inspector-tabs button { letter-spacing: var(--tracking-tight); text-transform: none; overflow-wrap: normal; }
+#gm-console.gm-desk #gm-operator-identity { max-width: 100px; font-size: var(--text-xs); color: var(--gold); }
+#gm-console.gm-desk #gm-workspace > section {
+  background: linear-gradient(180deg, var(--surface-raised), var(--surface-base));
+  clip-path: polygon(var(--cham-panel) 0, calc(100% - var(--cham-panel)) 0, 100% var(--cham-panel), 100% calc(100% - var(--cham-panel)), calc(100% - var(--cham-panel)) 100%, var(--cham-panel) 100%, 0 calc(100% - var(--cham-panel)), 0 var(--cham-panel));
+}
+#gm-console.gm-desk #gm-join-controls { position: static; inset: auto; width: 100%; max-width: none; min-width: 0; padding: var(--space-4); margin: 0; }
+/* The authentic 720px Station must fit a 720px host after scrolling to it. */
+#gm-console.gm-desk { scroll-padding: 0; }
+#gm-console.gm-desk #gm-station-frame { display: block; border: 0; scroll-margin: 0; }
+#gm-console.gm-desk #gm-join-controls { background: var(--surface-panel); border: 1px solid var(--edge-bright); color: var(--ink); font: inherit; }
+#gm-console.gm-desk #gm-map-chips p { background: var(--surface-panel); border: 1px solid var(--edge); padding: var(--space-2) var(--space-3); }
+
+#gm-console.gm-desk #gm-workspace > #gm-map-panel { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; }
+#gm-console.gm-desk #gm-map-heading { grid-area: 1 / 1; }
+#gm-console.gm-desk #gm-entity-pending { grid-area: 2 / 1; }
+#gm-console.gm-desk #gm-entity-map { grid-area: 3 / 1; height: 100%; }
+#gm-console.gm-desk #gm-map-chips { grid-area: 3 / 1; align-self: end; z-index: 1; display: flex; flex-wrap: wrap; gap: var(--space-3); padding: var(--space-5); pointer-events: none; }
+#gm-console.gm-desk #gm-map-legend { grid-area: 4 / 1; }
+
+#gm-console.gm-desk #gm-session-controls { flex: 0 0 190px; }
+#gm-console.gm-desk #gm-session-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+#gm-console.gm-desk #gm-knowledge-scope { display: grid; gap: var(--space-2); }

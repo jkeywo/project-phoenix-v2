@@ -4671,6 +4671,7 @@
     function publishGmRoster(roster) {
       if (typeof window.wasm_set_gm_roster !== 'function') return;
       const gms = roster && Array.isArray(roster.gms) ? roster.gms : [];
+      window.__hostGmShellMetadata?.({ gms });
       try {
         const refusal = window.wasm_set_gm_roster(JSON.stringify(gms));
         if (refusal) console.warn(`[fleet] GM roster refused: ${refusal}`);

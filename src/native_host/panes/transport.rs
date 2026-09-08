@@ -517,6 +517,10 @@ impl PaneBus {
     /// A failed rebuild is a closed console and releases the active lease.
     pub fn rebuild(&self, id: PaneId) -> Option<(PaneId, String)> {
         let mut state = self.lock();
+        // A fault may have been queued before a display move already replaced
+        // this pane. Only its current open incarnation can be rebuilt; cloning
+        // a closed predecessor again would mint a second live same-token view.
+        state.registry.get_mut(id)?;
         Self::close_in_state(&mut state, id);
         let rebuilt = Self::recreate_in_state(&mut state, id);
         if let Some((replacement, _)) = &rebuilt {
@@ -1065,6 +1069,32 @@ mod tests {
                 .gamepads_for_pane(competitor, PADS)
                 .contains("\"nativeOwned\":false"));
         }
+    }
+
+    #[test]
+    fn queued_fault_cannot_rebuild_a_pane_already_replaced_by_a_move() {
+        use super::super::recovery::{service_faults, PaneFault};
+        const PADS: &str = "window.__phoenixSetGamepads([{\"index\":0,\"id\":\"pad\",\"buttons\":[],\"axes\":[1]}])";
+        const SELECT: &str = r#"{"type":"NativeOperator","operation":"select","index":0}"#;
+        let bus = PaneBus::default();
+        let original = bus.open(identity(1));
+        bus.observe_gamepads(PADS);
+        assert!(bus.submit_operator_record(original, SELECT));
+        let token = bus.token_of(original).unwrap();
+        bus.fault(original, PaneFault::ViewCrashed);
+        let replacement = bus.rebuild(original).unwrap().0;
+        let outcomes = service_faults(&bus);
+        assert_eq!(outcomes.len(), 1);
+        assert!(outcomes[0].recreated.is_none());
+        assert_eq!(bus.open_count(), 1);
+        assert_eq!(bus.token_of(replacement).as_deref(), Some(token.as_str()));
+        assert!(bus.rebuild(original).is_none());
+        assert!(bus
+            .gamepads_for_pane(replacement, PADS)
+            .contains("\"nativeOwned\":true"));
+        let competitor = bus.open(identity(2));
+        assert!(bus.submit_operator_record(competitor, SELECT));
+        assert!(bus.take_operator_replies(competitor)[0].contains("refused"));
     }
 
     #[test]

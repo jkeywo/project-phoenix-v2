@@ -52,7 +52,8 @@ use crate::world::server::{
 /// and `balance_events` is the ledger the shared apply path writes.
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct ScriptedCommsAux<'w> {
-    id_mint: Option<Res<'w, crate::world_id::WorldIdMint>>,
+    id_mint: crate::world_id::LiveMint<'w, { crate::world_id::IdNamespace::Entity as usize }>,
+    message_mint: crate::world_id::LiveMint<'w, { crate::world_id::IdNamespace::Message as usize }>,
     balance_events:
         Option<ResMut<'w, bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>>,
     time: Option<Res<'w, bevy::time::Time>>,
@@ -191,7 +192,10 @@ pub(crate) fn open_scripted_comms_threads(
     let empty_anchors: HashMap<String, [f32; 3]> = HashMap::new();
     let template_loader = crate::entities::loader::WasmTemplateLoader;
     let uuid_source = || {
-        crate::world_id::mint_id_with(aux.id_mint.as_deref(), crate::world_id::IdNamespace::Entity)
+        crate::world_id::mint_live_id_with(
+            aux.id_mint.as_deref(),
+            crate::world_id::IdNamespace::Entity,
+        )
     };
 
     // Reborrow as a plain `&mut` so `runtime.flags` (the flag overlay base) and
@@ -420,14 +424,14 @@ pub(crate) fn open_scripted_comms_threads(
         };
 
         let thread_id = req.thread_id.clone().unwrap_or_else(|| {
-            crate::world_id::mint_id_with(
-                aux.id_mint.as_deref(),
+            crate::world_id::mint_live_id_with(
+                aux.message_mint.as_deref(),
                 crate::world_id::IdNamespace::Message,
             )
         });
         let (wire_node, on_pick) = project_node(&node);
-        let msg_id = crate::world_id::mint_id_with(
-            aux.id_mint.as_deref(),
+        let msg_id = crate::world_id::mint_live_id_with(
+            aux.message_mint.as_deref(),
             crate::world_id::IdNamespace::Message,
         );
         // The FLEET's reading, not this host's (issue #1343): this stamp is

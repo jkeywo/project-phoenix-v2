@@ -2,6 +2,7 @@ use super::*;
 use crate::comms::content::OpenCommsRequest;
 use crate::comms::server::CommsInboxRes;
 use crate::console::comms::server::handle_comms_channel2;
+use crate::world_id::InstallWorldIdMint;
 
 /// The virtual path an inline `[script] setup = …` block compiles under.
 /// Shared with the `console::comms::server` tests that seat a scripted
@@ -684,7 +685,7 @@ ctx.effects.spawn_entity(#{
     }
     app.world_mut().insert_resource(sr);
     app.world_mut()
-        .insert_resource(crate::world_id::WorldIdMint::default());
+        .insert_world_id_mint(crate::world_id::WorldIdMint::default());
 
     hail(&mut app);
     let script = only_message(&app);
@@ -968,7 +969,7 @@ fn seat_default_world(app: &mut App) {
     }
     app.world_mut().insert_resource(sr);
     app.world_mut()
-        .insert_resource(crate::world_id::WorldIdMint::default());
+        .insert_world_id_mint(crate::world_id::WorldIdMint::default());
 }
 
 /// Hailing Starbase Alpha delivers the SAME message the `[[comms]]`

@@ -11,6 +11,11 @@
 //! made in a process shared with forty other tests is a claim about whoever won
 //! that race.
 //!
+//! #1400's default-pool parent launches the existing duel seed sweep and
+//! Combat Test round-trip as exact tests in fresh child processes. Their
+//! capture, storage, restore, verification and continuation bounds stay intact;
+//! every ordinary test in this binary retains its pinned configuration.
+//!
 //! # What is asserted here, and what is deliberately not
 //!
 //! Asserted: that a capture round-trips through a `Store`, that a fresh app
@@ -26,6 +31,20 @@
 //! of it here would prove nothing this repository owns.
 
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
+
+#[path = "common/default_pool.rs"]
+mod default_pool;
+
+#[test]
+fn default_pool_preserves_snapshot_resume_guards() {
+    default_pool::run_guards(&[
+        ("the_bounded_duel_resumes_across_several_seeds", 6),
+        (
+            "a_bounded_combat_test_resumes_with_its_streamed_belts_intact",
+            2,
+        ),
+    ]);
+}
 
 use bevy::prelude::{Messages, NextState, State};
 use project_phoenix::content_ledger;
@@ -139,7 +158,7 @@ fn args(world: &str, ships: (&str, &str)) -> HeadlessArgs {
         side_b: vec![ships.1.into()],
         max_ticks: 4_000,
         seed: Some(SEED),
-        deterministic: true,
+        deterministic: default_pool::deterministic(),
         ..Default::default()
     }
 }
@@ -153,7 +172,7 @@ fn combat_test_args() -> HeadlessArgs {
         ship_path: "assets/entities/alliance_destroyer.toml".into(),
         max_ticks: 4_000,
         seed: Some(SEED),
-        deterministic: true,
+        deterministic: default_pool::deterministic(),
         ..Default::default()
     }
 }
@@ -911,6 +930,8 @@ fn resume_round_trip(world: &str, args: HeadlessArgs, slot: &str, continue_for: 
             "[{world}] the two worlds diverged {frame} frame(s) after the restore"
         );
     }
+    default_pool::observe(&live, world, args.seed.expect("guard seed"));
+    default_pool::observe(&resumed, world, args.seed.expect("guard seed"));
 }
 
 /// The acceptance criterion on the readable world, continuation and all.

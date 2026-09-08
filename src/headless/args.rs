@@ -102,7 +102,10 @@ PERFORMANCE
                           capture JSON here ('-' for stdout). Absent, no
                           measurement is collected at all. Sampling brackets the
                           harness loop from outside, so a measured run steps
-                          identically to an unmeasured one.
+                          identically to an unmeasured one. FixedUpdate system
+                          spans add observed per-phase intervals, not inclusive
+                          phase wall time. Coverage and unattributed work are
+                          retained in <PATH>.phases.json (stderr with '-').
     --perf-scenario <N>   Scenario the capture is filed under, and the baseline
                           it is compared against, at perf/baselines/<N>.ron
                           [default: headless-default]. A missing baseline is not an
@@ -110,9 +113,9 @@ PERFORMANCE
                           warnings-only and never changes the exit code.
 
 DETERMINISM
-    --deterministic       Pin the scheduler to one thread, so system execution
-                          order is fixed run to run. A fixed timestep alone gives
-                          wall-clock independence, not reproducibility.
+    --deterministic       Use Bevy's SingleThreaded executor for fixed schedules
+                          and their shared StateTransition, plus a one-thread
+                          task pool. A fixed timestep alone is not reproducibility.
     --seed <N>            Master seed for the simulation RNG (u64). Implies
                           --deterministic. Every RNG site — damage distribution,
                           region effects, entity UUIDs — derives its own stream
@@ -214,7 +217,7 @@ pub struct HeadlessArgs {
     pub report_path: Option<String>,
     pub report_format: ReportFormat,
     pub fail_on_game_over: bool,
-    /// Pin the scheduler to a single thread. Implied by `seed`, which needs a
+    /// Select serial fixed executors and a one-thread pool. Implied by `seed`, which needs a
     /// fixed system execution order to be worth anything.
     pub deterministic: bool,
     /// Master RNG seed from `--seed`. `None` falls through to the world TOML's

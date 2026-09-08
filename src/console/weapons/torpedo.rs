@@ -605,7 +605,7 @@ pub(crate) fn handle_fire_torpedo(
     // Torpedo ids are minted from the tick-scoped counter (issue #907), same
     // reason as the blaster's projectile ids: an id that is a function of
     // draw order made two instances diverge even on the same seed.
-    id_mint: Option<Res<crate::world_id::WorldIdMint>>,
+    id_mint: crate::world_id::LiveMint<'_, { crate::world_id::IdNamespace::Projectile as usize }>,
     // The read-only AI-host world context — flag chain, sessions, and origin
     // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
     // runs this host must register it (`register_ai_host_env`) or fail loudly at
@@ -788,7 +788,7 @@ pub(crate) fn handle_fire_torpedo(
                 continue;
             }
 
-            let uuid = crate::world_id::mint_id_with(
+            let uuid = crate::world_id::mint_live_id_with(
                 id_mint.as_deref(),
                 crate::world_id::IdNamespace::Projectile,
             );
@@ -1273,10 +1273,14 @@ pub(crate) fn tick_torpedo_lifecycle(
     mut balance_events: Option<ResMut<Messages<crate::core::balance::BalanceEvent>>>,
     // Seeded RNG + log filter, bundled: separately they put this system one
     // over Bevy's 16-parameter ceiling.
-    ambient: crate::server_app::SimRngAndLog,
+    // Only torpedo lifecycle allocates identities among the damage bundle users.
+    (ambient, id_mint): (
+        crate::server_app::SimRngAndLog<'_, { crate::sim_rng::SimStream::TorpedoDamage as usize }>,
+        crate::world_id::LiveMint<'_, { crate::world_id::IdNamespace::Projectile as usize }>,
+    ),
 ) {
     let sim_rng = &ambient.rng;
-    let id_mint = ambient.id_mint.as_deref();
+    let id_mint = id_mint.as_deref();
     let log = &ambient.log;
     let dt = time.delta_secs();
     // Alias so the `world.0.entities` read sites below read naturally.
@@ -1348,7 +1352,7 @@ pub(crate) fn tick_torpedo_lifecycle(
         };
         any_ship_component = true;
         let result = torpedo_sys.0.tick(dt, target_positions, &mut || {
-            crate::world_id::mint_id_with(id_mint, crate::world_id::IdNamespace::Projectile)
+            crate::world_id::mint_live_id_with(id_mint, crate::world_id::IdNamespace::Projectile)
         });
         for expired_uuid in result.expired {
             outbox.push_reliable((
@@ -1395,7 +1399,7 @@ pub(crate) fn tick_torpedo_lifecycle(
     // `TorpedoSystemResource` (no Ship entity carrying it) still work.
     if !any_ship_component {
         let result = torpedo_sys_res.0.tick(dt, target_positions, &mut || {
-            crate::world_id::mint_id_with(id_mint, crate::world_id::IdNamespace::Projectile)
+            crate::world_id::mint_live_id_with(id_mint, crate::world_id::IdNamespace::Projectile)
         });
         for expired_uuid in result.expired {
             outbox.push_reliable((
@@ -1599,20 +1603,16 @@ pub(crate) fn tick_torpedo_lifecycle(
             let mut hull_applied = 0.0f32;
             if hull_damage > 0.0 {
                 let before = hull_comp.0.total_current();
-                hull_applied = crate::sim_rng::with_stream(
-                    sim_rng.as_deref(),
-                    crate::sim_rng::SimStream::TorpedoDamage,
-                    |rng| {
-                        hull_comp.0.apply_damage(hull_damage, rng);
-                        let absorbed = before - hull_comp.0.total_current();
-                        // Distribute the same absorbed amount across per-arc
-                        // hull (issue #514).
-                        if let Some(ref mut arc_hull) = target_arc_hull {
-                            arc_hull.0.apply_damage(absorbed, rng);
-                        }
-                        absorbed
-                    },
-                );
+                hull_applied = crate::sim_rng::with_live_stream(sim_rng.as_deref(), |rng| {
+                    hull_comp.0.apply_damage(hull_damage, rng);
+                    let absorbed = before - hull_comp.0.total_current();
+                    // Distribute the same absorbed amount across per-arc
+                    // hull (issue #514).
+                    if let Some(ref mut arc_hull) = target_arc_hull {
+                        arc_hull.0.apply_damage(absorbed, rng);
+                    }
+                    absorbed
+                });
             }
 
             // Human-readable logging alongside the structured BalanceEvent

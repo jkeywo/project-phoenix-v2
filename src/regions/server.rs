@@ -203,7 +203,7 @@ fn apply_damage_zone_damage(
     mut balance_events: Option<
         ResMut<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>,
     >,
-    sim_rng: Option<Res<crate::sim_rng::SimRng>>,
+    sim_rng: crate::sim_rng::LiveStream<'_, { crate::sim_rng::SimStream::RegionDamage as usize }>,
     // See `tick_beams_apply_damage` (issue #838): forget the killed uuid from
     // the registry so the reconcile sweep does not re-emit `EntityDespawned`.
     mut tracked: Option<ResMut<crate::server_app::TrackedEntities>>,
@@ -300,24 +300,17 @@ fn apply_damage_zone_damage(
                 }
 
                 let (hull_applied, ship_destroyed) = if hull_amount > 0.0 {
-                    crate::sim_rng::with_stream(
-                        sim_rng.as_deref(),
-                        crate::sim_rng::SimStream::RegionDamage,
-                        |rng| {
-                            let result = crate::ship::damage::apply_hull_damage(
-                                &mut hull.0,
-                                hull_amount,
-                                rng,
-                            );
-                            // Distribute the same absorbed amount across
-                            // per-arc hull (issue #514). Skipped for NPCs (no
-                            // `EntityShipArcHull`).
-                            if let Some(ref mut arc_hull) = arc_hull_opt {
-                                arc_hull.0.apply_damage(result.0, rng);
-                            }
-                            result
-                        },
-                    )
+                    crate::sim_rng::with_live_stream(sim_rng.as_deref(), |rng| {
+                        let result =
+                            crate::ship::damage::apply_hull_damage(&mut hull.0, hull_amount, rng);
+                        // Distribute the same absorbed amount across
+                        // per-arc hull (issue #514). Skipped for NPCs (no
+                        // `EntityShipArcHull`).
+                        if let Some(ref mut arc_hull) = arc_hull_opt {
+                            arc_hull.0.apply_damage(result.0, rng);
+                        }
+                        result
+                    })
                 } else {
                     (0.0, false)
                 };

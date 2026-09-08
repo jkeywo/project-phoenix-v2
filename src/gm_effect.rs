@@ -31,6 +31,8 @@
 //! on the grant's canonical [`crate::gm_action::GmActionOrder`] sequence, not
 //! from a running [`crate::sim_rng::SimStream`]. See that function for why.
 
+#[cfg(test)]
+use crate::sim_rng::InstallSimRng;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -1224,7 +1226,7 @@ kind = "{system}"
     fn damage_app(tick: u64, seed: u64) -> App {
         let mut app = App::new();
         app.insert_resource(crate::sim_tick::SimTick(tick))
-            .insert_resource(crate::sim_rng::SimRng::new(
+            .insert_sim_rng(crate::sim_rng::SimRng::new(
                 seed,
                 crate::sim_rng::SeedSource::Cli,
             ))

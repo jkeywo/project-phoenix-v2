@@ -5,7 +5,7 @@
 //! consumer. What lives here is the part the crate excludes by charter: the
 //! collectors, and where the baseline files live.
 //!
-//! Six collectors, one contract:
+//! Collectors, one contract:
 //!
 //! - [`tick`] — the headless harness loop, native.
 //! - [`native_frames`] — opt-in native App cadence and fixed-update catch-up.
@@ -17,7 +17,7 @@
 //!   bridges samples the PRD #1144 debug pipeline already holds into a
 //!   `Recorder`, so one run cannot report two different numbers for one thing.
 //!
-//! [`baseline`] is another piece and not a collector: recording a baseline
+//! [`baseline`] is not a collector: recording a baseline
 //! *from* a capture, so the numbers a runner is held to are the numbers that
 //! runner produced.
 //!
@@ -99,6 +99,12 @@ pub mod browser;
 pub mod console;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod mesh;
+/// Pure phase-interval reduction for the external headless producer (#1400).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod phase;
+/// Worker-visible span collection owned by the headless harness, never the App.
+#[cfg(all(feature = "headless", not(target_arch = "wasm32")))]
+pub mod phase_trace;
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub mod native_frames;
 #[cfg(not(target_arch = "wasm32"))]

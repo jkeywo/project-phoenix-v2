@@ -274,7 +274,8 @@ pub(crate) struct CommsRespondAux<'w> {
     /// dispatch pass, and the follow-up message ids minted below it. Replaces
     /// the seeded `SimRng` this bundle used to carry — nothing in this system
     /// draws a random number any more, it only mints identities.
-    id_mint: Option<Res<'w, crate::world_id::WorldIdMint>>,
+    id_mint: crate::world_id::LiveMint<'w, { crate::world_id::IdNamespace::Entity as usize }>,
+    message_mint: crate::world_id::LiveMint<'w, { crate::world_id::IdNamespace::Message as usize }>,
     balance_events:
         Option<ResMut<'w, bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>>,
     /// The mission-timeline ledger (issue #1338). Bundled here for the same
@@ -628,7 +629,7 @@ pub(crate) fn handle_respond_to_message(
         // Seeded, for the same reason the trigger pipeline is: a spawned
         // entity's UUID keys the balance ledgers in the headless report.
         let uuid_source = || {
-            crate::world_id::mint_id_with(
+            crate::world_id::mint_live_id_with(
                 aux.id_mint.as_deref(),
                 crate::world_id::IdNamespace::Entity,
             )
@@ -880,8 +881,8 @@ pub(crate) fn handle_respond_to_message(
                 .unwrap_or_default()
                 .after_response();
             let (wire_node, on_pick) = crate::world::script::comms::project_node(&node);
-            let new_msg_id = crate::world_id::mint_id_with(
-                aux.id_mint.as_deref(),
+            let new_msg_id = crate::world_id::mint_live_id_with(
+                aux.message_mint.as_deref(),
                 crate::world_id::IdNamespace::Message,
             );
             // The FLEET's reading, not this host's (issue #1343). The stamp is
@@ -1654,7 +1655,8 @@ pub struct CommsResponseContext<'w> {
     tick: Option<Res<'w, crate::sim_tick::SimTick>>,
     base_interval: Option<Res<'w, crate::ai::cadence::AiBaseInterval>>,
     world_config: Option<Res<'w, crate::world::config::WorldConfig>>,
-    sim_rng: Option<Res<'w, crate::sim_rng::SimRng>>,
+    sim_rng:
+        crate::sim_rng::LiveStream<'w, { crate::sim_rng::SimStream::CommsBackfillChoice as usize }>,
 }
 
 /// Backfill Comms AI: rank and issue hails through the AUTHORED selector
@@ -2621,7 +2623,7 @@ struct WeightedChoiceInputs<'a> {
 ///      authors no weights never moves that stream at all.
 fn weighted_backfill_choice(
     inputs: WeightedChoiceInputs<'_>,
-    sim_rng: Option<&crate::sim_rng::SimRng>,
+    sim_rng: Option<&crate::sim_rng::CommsChoiceRng>,
 ) -> WeightedChoiceOutcome {
     use crate::comms::ai_choice;
 
@@ -2675,11 +2677,7 @@ fn weighted_backfill_choice(
 
     // Due. One draw, one answer. `>=` rather than `==` because this host runs on
     // the shared AI cadence and may not be evaluated on the exact due tick.
-    let draw = crate::sim_rng::with_stream(
-        sim_rng,
-        crate::sim_rng::SimStream::CommsBackfillChoice,
-        |rng| rng.below(total),
-    );
+    let draw = crate::sim_rng::with_live_stream(sim_rng, |rng| rng.below(total));
     match ai_choice::pick_by_draw(&pool, draw) {
         Some(index) => WeightedChoiceOutcome::Answer(index),
         // Unreachable for a draw below the total, and a hold rather than a panic

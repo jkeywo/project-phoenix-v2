@@ -762,7 +762,10 @@ pub(crate) fn handle_fire_phaser(
     entity_q: Query<(&crate::entities::spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
     // `Option<Res<_>>` for the reason `sim_rng::with_stream` documents: a bare
     // `Res` fails Bevy parameter validation in every bare-`App` unit fixture.
-    sim_rng: Option<Res<crate::sim_rng::SimRng>>,
+    sim_rng: crate::sim_rng::LiveStream<
+        '_,
+        { crate::sim_rng::SimStream::BeamCycleJitter as usize },
+    >,
     mut outbound: Option<
         ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
     >,
@@ -999,11 +1002,9 @@ pub(crate) fn handle_fire_phaser(
             // mechanism merely existing.
             let jitter = bank_cfg.map(|b| b.cycle_jitter).unwrap_or(0.0);
             let factor = if jitter > 0.0 {
-                crate::sim_rng::with_stream(
-                    sim_rng.as_deref(),
-                    crate::sim_rng::SimStream::BeamCycleJitter,
-                    |rng| 1.0 + (crate::ship::damage::unit_f32(rng) * 2.0 - 1.0) * jitter,
-                )
+                crate::sim_rng::with_live_stream(sim_rng.as_deref(), |rng| {
+                    1.0 + (crate::ship::damage::unit_f32(rng) * 2.0 - 1.0) * jitter
+                })
             } else {
                 1.0
             };
@@ -1840,19 +1841,17 @@ pub(crate) struct BeamApplySinks<'w> {
     pub tracked: Option<ResMut<'w, crate::server_app::TrackedEntities>>,
 }
 
-/// The ambient read-only scalars the beam damage chokepoint consults — the
-/// seeded RNG it draws hull distribution from, the log filter its lines gate on,
-/// God Mode, and Instagib — bundled as one `SystemParam` (issue #1185).
+/// The ambient resources used by beam damage: a mutable seeded RNG declaration
+/// for hull-distribution draws, plus read-only log, God Mode and Instagib inputs.
+/// Optional fields preserve bare-App fixtures that omit these resources.
 ///
-/// This is the beam twin of [`crate::server_app::SimRngAndLog`], but it must NOT
-/// reuse that struct: `SimRngAndLog` also reads `WorldIdMint`, which this system
-/// does not, and folding it in would add a resource access this system never had
-/// — the one thing this additive refactor may not do. Every field keeps its
-/// `Option<Res<_>>` shape, so the access set is unchanged; the system
-/// destructures it back to its original locals at entry.
+/// Like [`crate::server_app::SimRngAndLog`], this bundle declares stream writes
+/// even though the helper draws through an immutable reference. It remains a
+/// separate bundle because beam damage also reads Instagib. Neither bundle
+/// carries the identity mint; torpedo lifecycle declares that writer separately.
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct BeamApplyAmbient<'w> {
-    pub sim_rng: Option<Res<'w, crate::sim_rng::SimRng>>,
+    pub sim_rng: crate::sim_rng::LiveStream<'w, { crate::sim_rng::SimStream::BeamDamage as usize }>,
     pub log: Option<Res<'w, crate::logging::LogFilterConfig>>,
     pub god_mode: Option<Res<'w, crate::server_app::GodMode>>,
     pub instagib: Option<Res<'w, crate::server_app::Instagib>>,
@@ -2126,10 +2125,8 @@ pub(crate) fn tick_beams_apply_damage(
 
             let mut hull_applied_total = 0.0f32;
             let ship_destroyed = if damage_to_hull > 0.0 {
-                let (hull_applied, destroyed) = crate::sim_rng::with_stream(
-                    sim_rng.as_deref(),
-                    crate::sim_rng::SimStream::BeamDamage,
-                    |rng| {
+                let (hull_applied, destroyed) =
+                    crate::sim_rng::with_live_stream(sim_rng.as_deref(), |rng| {
                         let result = crate::ship::damage::apply_hull_damage(
                             &mut hull_comp.0,
                             damage_to_hull,
@@ -2142,8 +2139,7 @@ pub(crate) fn tick_beams_apply_damage(
                             arc_hull.0.apply_damage(result.0, rng);
                         }
                         result
-                    },
-                );
+                    });
                 hull_applied_total = hull_applied;
                 // A crewed hull: GameOver on kill, and never despawned — the
                 // run ends instead and the report reads from the wreck.

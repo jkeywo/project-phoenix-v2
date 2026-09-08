@@ -130,6 +130,7 @@ pub enum StateClass {
 #[derive(Resource, Default, Debug, Clone)]
 pub struct StateCensus {
     entries: BTreeMap<&'static str, (StateClass, &'static str)>,
+    aliases: BTreeMap<&'static str, &'static str>,
 }
 
 impl StateCensus {
@@ -138,15 +139,55 @@ impl StateCensus {
     /// (see the type docs on idempotency). Prefer [`App::declare_state`], which
     /// resolves `type_path` from `T` for you.
     pub fn declare(&mut self, type_path: &'static str, class: StateClass, pasm: &'static str) {
+        assert!(
+            !self.aliases.contains_key(type_path),
+            "canonical declaration cannot shadow an ownership alias"
+        );
         self.entries.insert(type_path, (class, pasm));
     }
 
     /// The declaration for `type_path`, if any.
     pub fn get(&self, type_path: &str) -> Option<(StateClass, &'static str)> {
-        self.entries.get(type_path).copied()
+        let owner = self.aliases.get(type_path).copied().unwrap_or(type_path);
+        self.entries.get(owner).copied()
     }
 
-    /// Every declaration, in full-path order (`BTreeMap` iteration).
+    /// Declare physical storage access as an alias of an existing canonical
+    /// owner. Aliases inherit its classification/PASM and never add fold entries.
+    pub fn declare_alias(
+        &mut self,
+        alias: &'static str,
+        owner: &'static str,
+    ) -> Result<(), &'static str> {
+        if self.entries.contains_key(alias) {
+            return Err("alias shadows canonical owner");
+        }
+        if !self.entries.contains_key(owner) {
+            return Err("alias needs an existing canonical owner; chains are forbidden");
+        }
+        if let Some(existing) = self.aliases.get(alias) {
+            return if *existing == owner {
+                Ok(())
+            } else {
+                Err("conflicting alias owner")
+            };
+        }
+        self.aliases.insert(alias, owner);
+        Ok(())
+    }
+
+    /// Exact full-path physical aliases, separate from canonical fold entries.
+    pub fn aliases(&self) -> &BTreeMap<&'static str, &'static str> {
+        &self.aliases
+    }
+
+    /// Resolve only an explicitly declared physical alias; unknown types are
+    /// never inferred from a generic prefix, short name or shared PASM label.
+    pub fn alias_owner(&self, alias: &str) -> Option<&'static str> {
+        self.aliases.get(alias).copied()
+    }
+
+    /// Every canonical declaration, in full-path order (`BTreeMap` iteration).
     pub fn entries(&self) -> &BTreeMap<&'static str, (StateClass, &'static str)> {
         &self.entries
     }
@@ -170,9 +211,21 @@ pub trait DeclareState {
     /// Declare that `T` is authoritative-state of class `class`, recorded by
     /// PASM `state` entity `pasm`. Returns `&mut Self` for chaining.
     fn declare_state<T: 'static>(&mut self, class: StateClass, pasm: &'static str) -> &mut Self;
+    /// Bind one physical handle to an already declared canonical owner.
+    fn declare_state_alias<Alias: 'static, Owner: 'static>(&mut self) -> &mut Self;
 }
 
 impl DeclareState for App {
+    fn declare_state_alias<Alias: 'static, Owner: 'static>(&mut self) -> &mut Self {
+        self.world_mut()
+            .resource_mut::<StateCensus>()
+            .declare_alias(
+                std::any::type_name::<Alias>(),
+                std::any::type_name::<Owner>(),
+            )
+            .expect("invalid physical state owner binding");
+        self
+    }
     fn declare_state<T: 'static>(&mut self, class: StateClass, pasm: &'static str) -> &mut Self {
         if !self.world().contains_resource::<StateCensus>() {
             self.init_resource::<StateCensus>();
@@ -231,5 +284,76 @@ mod tests {
         app.declare_state::<Alpha>(StateClass::Folded, "alpha-state")
             .declare_state::<Alpha>(StateClass::Folded, "alpha-state");
         assert_eq!(app.world().resource::<StateCensus>().len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod owner_alias_tests {
+    use super::*;
+    struct Owner;
+    struct OtherOwner;
+    struct Handle<const I: usize>;
+
+    #[test]
+    fn physical_aliases_leave_the_exact_canonical_map_unchanged() {
+        let mut app = App::new();
+        app.declare_state::<Owner>(StateClass::Folded, "owner-state");
+        let before = app.world().resource::<StateCensus>().entries().clone();
+        app.declare_state_alias::<Handle<0>, Owner>()
+            .declare_state_alias::<Handle<1>, Owner>()
+            .declare_state_alias::<Handle<0>, Owner>();
+        let census = app.world().resource::<StateCensus>();
+        assert_eq!(census.entries(), &before);
+        assert_eq!(census.len(), before.len());
+        assert_eq!(census.aliases().len(), 2);
+        for alias in [
+            std::any::type_name::<Handle<0>>(),
+            std::any::type_name::<Handle<1>>(),
+        ] {
+            assert_eq!(
+                census.alias_owner(alias),
+                Some(std::any::type_name::<Owner>())
+            );
+            assert_eq!(
+                census.get(alias),
+                census.get(std::any::type_name::<Owner>())
+            );
+        }
+        assert_eq!(census.get(std::any::type_name::<Handle<2>>()), None);
+        assert_eq!(census.alias_owner("Handle<0>"), None);
+    }
+
+    #[test]
+    fn alias_rejects_unknown_owners_chains_shadowing_and_conflicting_ownership() {
+        let mut census = StateCensus::default();
+        let owner = std::any::type_name::<Owner>();
+        let other = std::any::type_name::<OtherOwner>();
+        let first = std::any::type_name::<Handle<0>>();
+        let second = std::any::type_name::<Handle<1>>();
+        assert!(census.declare_alias(first, owner).is_err());
+        census.declare(owner, StateClass::Folded, "owner");
+        census.declare(other, StateClass::Cache, "other");
+        census.declare_alias(first, owner).unwrap();
+        let before = census.aliases().clone();
+        assert!(census.declare_alias(first, other).is_err());
+        assert!(census.declare_alias(second, first).is_err());
+        assert!(census.declare_alias(owner, other).is_err());
+        assert!(census.declare_alias(second, second).is_err());
+        assert_eq!(census.aliases(), &before);
+        // Classification is inherited, never copied into a separately mutable row.
+        census.declare(owner, StateClass::DeferredFold, "owner-revised");
+        assert_eq!(
+            census.get(first),
+            Some((StateClass::DeferredFold, "owner-revised"))
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "canonical declaration cannot shadow an ownership alias")]
+    fn canonical_declaration_cannot_reclassify_an_alias() {
+        let mut census = StateCensus::default();
+        census.declare("owner", StateClass::Folded, "owner");
+        census.declare_alias("alias", "owner").unwrap();
+        census.declare("alias", StateClass::Derived, "different");
     }
 }

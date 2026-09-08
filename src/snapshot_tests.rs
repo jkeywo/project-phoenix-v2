@@ -1,4 +1,5 @@
 use super::*;
+use crate::sim_rng::InstallSimRng;
 
 use crate::command_admission::HostSlot;
 use crate::gm_action::{
@@ -1100,7 +1101,7 @@ fn an_armed_direct_effect_survives_capture_and_lands_once_on_both_sides() {
             .insert_resource(crate::gm_action::GmActionLog::default());
         app.world_mut()
             .insert_resource(crate::gm_effect::PendingGmDirectEffects::default());
-        app.world_mut().insert_resource(crate::sim_rng::SimRng::new(
+        app.world_mut().insert_sim_rng(crate::sim_rng::SimRng::new(
             4242,
             crate::sim_rng::SeedSource::Cli,
         ));
@@ -1230,7 +1231,7 @@ fn an_armed_scoped_effect_restores_against_the_same_station_it_named() {
             .insert_resource(crate::gm_action::GmActionLog::default());
         app.world_mut()
             .insert_resource(crate::gm_effect::PendingGmDirectEffects::default());
-        app.world_mut().insert_resource(crate::sim_rng::SimRng::new(
+        app.world_mut().insert_sim_rng(crate::sim_rng::SimRng::new(
             4242,
             crate::sim_rng::SeedSource::Cli,
         ));

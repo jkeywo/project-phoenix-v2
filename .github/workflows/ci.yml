@@ -77,6 +77,25 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # The ambiguity ratchet reads the trusted pre-change ledger locally.
+          fetch-depth: 0
+
+      - name: Select trusted ambiguity baseline
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          if [ -n "$PR_BASE" ]; then
+            base="$PR_BASE"
+          elif [ -n "$PUSH_BEFORE" ]; then
+            base="$PUSH_BEFORE"
+          else
+            # Scheduled/manual runs compare to the checked-out commit's parent.
+            base="$(git rev-parse --verify HEAD^)"
+          fi
+          git rev-parse --verify "${base}^{commit}" >/dev/null
+          echo "PHOENIX_AMBIGUITY_BASE_REF=$base" >> "$GITHUB_ENV"
 
       # Shared step: toolchain + cache. rust-toolchain.toml pins the channel at
       # cargo time, so this installs components and warms the cache. The action

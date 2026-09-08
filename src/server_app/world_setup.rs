@@ -174,7 +174,7 @@ pub(crate) fn setup_world(
     mut commands: Commands,
     mut world: ResMut<WorldResource>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
-    id_mint: Option<Res<crate::world_id::WorldIdMint>>,
+    id_mint: crate::world_id::LiveMint<'_, { crate::world_id::IdNamespace::Entity as usize }>,
 ) {
     let Some(world_config) = world_config else {
         return;
@@ -202,7 +202,7 @@ pub(crate) fn spawn_anonymous_entities_internal(
     world: &mut WorldResource,
     world_config: &crate::world::config::WorldConfig,
     config_cache: &crate::entities::config_cache::ConfigCache,
-    id_mint: Option<&crate::world_id::WorldIdMint>,
+    id_mint: Option<&crate::world_id::EntityMint>,
 ) -> usize {
     // Atomic-activation guard (issues #750/#752/#906/#969/#973). This system owns one
     // half of the immediate spawn; `spawn_world_entities` owns the other, and
@@ -262,7 +262,8 @@ pub(crate) fn spawn_anonymous_entities_internal(
             }
         };
 
-        let uuid = crate::world_id::mint_id_with(id_mint, crate::world_id::IdNamespace::Entity);
+        let uuid =
+            crate::world_id::mint_live_id_with(id_mint, crate::world_id::IdNamespace::Entity);
         let pos = match crate::world::config::resolve_entity_position_with(
             entity_inst,
             &world_config.anchors,
@@ -420,7 +421,7 @@ pub(crate) fn spawn_game_start_entities(
     mut sessions: Option<ResMut<crate::lobby::Sessions>>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     mut has_spawned: Local<bool>,
-    id_mint: Option<Res<crate::world_id::WorldIdMint>>,
+    id_mint: crate::world_id::LiveMint<'_, { crate::world_id::IdNamespace::Entity as usize }>,
     roster: Option<Res<crate::lockstep::FleetRoster>>,
     gm_join_bootstrap: Option<Res<crate::gm_join::GmJoinBootstrap>>,
     fleet_session: Option<Res<crate::lockstep::FleetLockstep>>,
@@ -542,8 +543,10 @@ pub(crate) fn spawn_game_start_entities(
         // trigger/GM lookups must resolve to the entity that actually spawned.
         // A row skipped by its `when` predicate consumes neither a mint nor a
         // saved identity.
-        let minted_uuid =
-            crate::world_id::mint_id_with(id_mint.as_deref(), crate::world_id::IdNamespace::Entity);
+        let minted_uuid = crate::world_id::mint_live_id_with(
+            id_mint.as_deref(),
+            crate::world_id::IdNamespace::Entity,
+        );
         let registered_uuid = entity_inst
             .name
             .as_ref()

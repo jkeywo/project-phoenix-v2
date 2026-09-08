@@ -482,7 +482,7 @@ pub struct PlayerDeathLatch<'w> {
     pub reason: Option<ResMut<'w, GameOverReason>>,
 }
 
-/// The ambient resources every damage chokepoint reads: the seeded RNG it
+/// The ambient resources every damage chokepoint uses: the seeded RNG it
 /// draws hull distribution from, the log filter its `plog!` lines are gated
 /// on, and (issue #900) the God Mode flag that zeroes damage to the local
 /// ship.
@@ -494,18 +494,16 @@ pub struct PlayerDeathLatch<'w> {
 /// `App` unit-test fixture inserts none of them, and a bare `Res` would fail
 /// parameter validation there.
 #[derive(bevy::ecs::system::SystemParam)]
-pub struct SimRngAndLog<'w> {
-    pub rng: Option<Res<'w, crate::sim_rng::SimRng>>,
+pub struct SimRngAndLog<
+    'w,
+    const STREAM: usize = { crate::sim_rng::SimStream::CollisionDamage as usize },
+> {
+    pub rng: crate::sim_rng::LiveStream<'w, STREAM>,
     pub log: Option<Res<'w, crate::logging::LogFilterConfig>>,
     pub god_mode: Option<Res<'w, GodMode>>,
-    /// The tick-scoped id mint (issue #907). Rides in this bundle because the
-    /// two weapon systems that mint projectile ids are the same two that were
-    /// already at Bevy's parameter ceiling, and a projectile id is minted in
-    /// the same breath as the damage draw beside it.
-    pub id_mint: Option<Res<'w, crate::world_id::WorldIdMint>>,
 }
 
-impl SimRngAndLog<'_> {
+impl<const STREAM: usize> SimRngAndLog<'_, STREAM> {
     /// True while the local ship's God Mode is on (issue #900). `false` when
     /// the resource is absent (a bare-`App` fixture that never registered
     /// it) — the same "missing means off" default the old thread-local gave.
@@ -542,3 +540,71 @@ pub struct ShipSystemBlackboards(
 /// run before this anchor so that `broadcast::dispatch::<Sim>` (which has
 /// `.after(sim_processing_anchor)`) drains their `SimOutbox` writes.
 pub fn sim_processing_anchor() {}
+
+#[cfg(test)]
+mod interior_write_access_tests {
+    use super::*;
+    use bevy::ecs::system::{IntoSystem, System};
+
+    fn assert_writes<R: Resource, Mint: Resource, M>(
+        system: impl IntoSystem<(), (), M>,
+        rng: bool,
+        mint: bool,
+    ) {
+        let mut world = World::new();
+        crate::sim_rng::install(
+            &mut world,
+            crate::sim_rng::SimRng::new(1400, crate::sim_rng::SeedSource::Cli),
+        );
+        crate::world_id::install(&mut world, crate::world_id::WorldIdMint::default());
+        let rng_id = world.components().resource_id::<R>().unwrap();
+        let mint_id = world.components().resource_id::<Mint>().unwrap();
+        let mut system = IntoSystem::into_system(system);
+        let access = system.initialize(&mut world);
+        assert_eq!(
+            access.combined_access().has_resource_write(rng_id),
+            rng,
+            "{} RNG",
+            system.name()
+        );
+        assert_eq!(
+            access.combined_access().has_resource_write(mint_id),
+            mint,
+            "{} mint",
+            system.name()
+        );
+    }
+
+    #[test]
+    fn actual_damage_systems_expose_rng_without_spurious_mint_writes() {
+        assert_writes::<crate::sim_rng::TorpedoRng, crate::world_id::ProjectileMint, _>(
+            crate::console::weapons::torpedo::tick_torpedo_lifecycle,
+            true,
+            true,
+        );
+        assert_writes::<crate::sim_rng::BlasterRng, crate::world_id::ProjectileMint, _>(
+            crate::console::weapons::blaster::handle_blaster_hits,
+            true,
+            false,
+        );
+        assert_writes::<crate::sim_rng::CollisionRng, crate::world_id::MessageMint, _>(
+            crate::server_app::collision::handle_collisions,
+            true,
+            false,
+        );
+    }
+
+    #[test]
+    fn actual_gm_reducer_exposes_comms_mint_and_event_local_rng_stays_read_only() {
+        assert_writes::<crate::sim_rng::CollisionRng, crate::world_id::MessageMint, _>(
+            crate::gm_action::apply_due_actions,
+            false,
+            true,
+        );
+        assert_writes::<crate::sim_rng::CollisionRng, crate::world_id::MessageMint, _>(
+            crate::gm_effect::apply_gm_direct_effects,
+            false,
+            false,
+        );
+    }
+}

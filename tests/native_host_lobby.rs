@@ -578,6 +578,35 @@ fn a_runtime_load_mints_the_same_world_entity_ids_as_a_boot_load() {
          resolve an authored name through, so a disagreement here is two hosts \
          of one mission targeting different entities from the same script line"
     );
+
+    use bevy::ecs::system::RunSystemOnce;
+    use project_phoenix::sim_rng::{with_live_stream, LiveStream, SimRng, SimStream};
+    fn live_draw(rng: LiveStream<{ SimStream::BeamCycleJitter as usize }>) -> u32 {
+        with_live_stream(rng.as_deref(), |stream| stream.next_u32())
+    }
+    assert_eq!(booted.world().resource::<SimRng>().seed(), SEED);
+    assert_eq!(runtime.world().resource::<SimRng>().seed(), SEED);
+    let before = booted.world().resource::<SimRng>().state();
+    assert_eq!(runtime.world().resource::<SimRng>().state(), before);
+    let reference = SimRng::from_state(before).unwrap();
+    let expected = reference.stream(SimStream::BeamCycleJitter).next_u32();
+    assert_eq!(
+        booted.world_mut().run_system_once(live_draw).unwrap(),
+        expected
+    );
+    assert_eq!(
+        runtime.world_mut().run_system_once(live_draw).unwrap(),
+        expected,
+        "runtime load must rebind the live generator after the lobby schedules initialized"
+    );
+    assert_eq!(
+        booted.world().resource::<SimRng>().state(),
+        reference.state()
+    );
+    assert_eq!(
+        runtime.world().resource::<SimRng>().state(),
+        reference.state()
+    );
 }
 
 #[test]

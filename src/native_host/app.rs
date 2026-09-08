@@ -171,8 +171,8 @@ pub struct NativeHostConfig {
     /// process publishing a curated catalogue over HTTP and simultaneously
     /// flying something that catalogue excludes.
     pub curated_ships: Vec<String>,
-    /// Pin Bevy's task pool to one thread, so this host's system execution order
-    /// is fixed run to run — [`BootPlan::single_threaded`].
+    /// Select serial fixed executors (including shared StateTransition) and a
+    /// one-thread task pool — [`BootPlan::single_threaded`].
     ///
     /// `false` for a shipped host: a rendered viewscreen is not reproduced
     /// tick-for-tick and the multithreaded pool is worth having. `true` is for a
@@ -717,7 +717,7 @@ pub fn build_native_host_app(
     // OS-seeded default until `world_load` applies the same precedence to the
     // world it ingests.
     if let Some(sim_rng) = sim_rng {
-        app.insert_resource(sim_rng);
+        crate::sim_rng::install(app.world_mut(), sim_rng);
     }
     app.add_plugins(WorldPlugin);
 

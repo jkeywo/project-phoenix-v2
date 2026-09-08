@@ -34,6 +34,10 @@
 //! keeps `--deterministic` meaning what it says. Do not add unrelated tests
 //! here.
 //!
+//! #1400 adds a default-pool parent that re-runs the same canonical/two-shuffle
+//! guard in a fresh process. The original tests and mutation proof remain
+//! pinned in the ordinary process; no production registration edges change.
+//!
 //! # Scope
 //!
 //! Ordering only. The parent issue's other half — wall-clock and RNG gating —
@@ -84,6 +88,17 @@
 
 mod common;
 
+#[path = "common/default_pool.rs"]
+mod default_pool;
+
+#[test]
+fn default_pool_preserves_registration_order_guard() {
+    default_pool::run_guards(&[(
+        "the_same_seed_reaches_the_same_state_with_registration_order_shuffled",
+        3,
+    )]);
+}
+
 use bevy::ecs::schedule::{NodeId, Schedules, SystemKey, SystemSetKey};
 use bevy::prelude::*;
 use common::SimFixture;
@@ -118,13 +133,15 @@ fn build_and_run(
         world_path: WORLD.into(),
         max_ticks: TICKS,
         seed: Some(SEED),
-        deterministic: true,
+        deterministic: default_pool::deterministic(),
         ..Default::default()
     };
-    SimFixture::new(args)
+    let app = SimFixture::new(args)
         .registration_order(registration_order)
         .extra_registration_probes(extra_registration_probes)
-        .build_and_run()
+        .build_and_run();
+    default_pool::observe(&app, WORLD, SEED);
+    app
 }
 
 fn fingerprint_with_order(registration_order: RegistrationOrder) -> RunFingerprint {

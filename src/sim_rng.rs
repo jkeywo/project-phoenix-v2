@@ -26,12 +26,14 @@
 //!
 //! # Interior mutability
 //!
-//! Streams live behind per-stream `Mutex`es so call sites can take
-//! `Option<Res<SimRng>>` rather than `Option<ResMut<SimRng>>`. That matters
-//! for the UUID path: `world::dispatch::DispatchContext::uuid_source` is a
-//! `&dyn Fn() -> String`, which cannot close over a `&mut`. Contention is nil
-//! — the streams are per-site by construction, and seeded runs are
-//! single-threaded anyway.
+//! Live ECS writers use `LiveStream<INDEX>`: mutable access to one actual
+//! generator cell and an immutable aggregate identity check. SimRng retains
+//! those same cells for coherent snapshots and standalone algorithms. Replacing
+//! a live seed/state must use `install` / `InstallSimRng`, which replaces every
+//! handle synchronously. Missing or stale handles in a seeded App are invariant
+//! failures, never an entropy fallback. Seed-only consumers remain reads.
+//! Distinct stream storage does not assert that the enclosing gameplay systems
+//! commute through their other resources, and same-stream writers still conflict.
 //!
 //! # The generator
 //!
@@ -62,9 +64,9 @@
 //! declared-but-unused stream — see its own docs for why retiring it would
 //! cost more than it saves.
 
-use bevy::prelude::Resource;
+use bevy::prelude::{FromWorld, Resource, World};
 use serde::{Deserialize, Serialize};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 use vellum_rng::Pcg32;
 
 /// One independent RNG stream. One variant per call site that draws numbers.
@@ -204,7 +206,7 @@ pub struct SimRng {
     seed: u64,
     source: SeedSource,
     /// Indexed by `SimStream as usize`, built from [`SimStream::ALL`].
-    streams: Vec<Mutex<Pcg32>>,
+    streams: Vec<Arc<Mutex<Pcg32>>>,
 }
 
 /// Everything about a [`SimRng`] that can leave the process: the master seed,
@@ -240,7 +242,7 @@ impl SimRng {
             source,
             streams: SimStream::ALL
                 .iter()
-                .map(|s| Mutex::new(stream_generator(seed, s.name())))
+                .map(|s| Arc::new(Mutex::new(stream_generator(seed, s.name()))))
                 .collect(),
         }
     }
@@ -336,7 +338,11 @@ impl SimRng {
         Some(Self {
             seed: state.seed,
             source: state.source,
-            streams: state.streams.into_iter().map(Mutex::new).collect(),
+            streams: state
+                .streams
+                .into_iter()
+                .map(|stream| Arc::new(Mutex::new(stream)))
+                .collect(),
         })
     }
 }
@@ -344,10 +350,12 @@ impl SimRng {
 /// Run `f` against `stream`, falling back to a throwaway OS-seeded generator
 /// when the resource is absent.
 ///
-/// Every simulation system takes `Option<Res<SimRng>>` rather than a bare
-/// `Res`, for the same reason they take `Option<Res<LogFilterConfig>>`: a bare
-/// `Res` fails Bevy parameter validation in every bare-`App` unit test in this
-/// crate. Determinism plumbing must not break test fixtures.
+/// This aggregate accessor remains for standalone callers. Ordinary ECS writers
+/// use `LiveStream` and `with_live_stream`; no aggregate draw fallback is exposed
+/// by that parameter. Full-state reads and fingerprint's intentional all-stream
+/// advancement remain outside schedule execution. The public standalone accessor
+/// cannot statically prohibit a future Res<SimRng> caller from misusing it;
+/// audited scheduled call sites must continue to use the restricted live API.
 ///
 /// Issue #903: the `None` arm draws OS entropy, which is why the fn carries
 /// the `disallowed_methods` allow — a bare-`App` fixture that never inserted
@@ -680,5 +688,224 @@ mod tests {
         assert_eq!(rng.source().as_str(), "world");
         assert_eq!(SeedSource::Cli.as_str(), "cli");
         assert_eq!(SeedSource::Random.as_str(), "random");
+    }
+}
+
+/// A scheduler-visible owner of one actual stream cell. The aggregate SimRng
+/// retains read access for coherent boundary snapshots; it is not a second RNG.
+/// Runtime writers cannot choose another stream through this restricted handle.
+#[derive(Resource, Debug)]
+pub struct StreamRng<const INDEX: usize> {
+    generator: Arc<Mutex<Pcg32>>,
+}
+impl<const INDEX: usize> FromWorld for StreamRng<INDEX> {
+    fn from_world(world: &mut World) -> Self {
+        let rng = world.resource::<SimRng>();
+        Self {
+            generator: rng.streams[INDEX].clone(),
+        }
+    }
+}
+/// A live stream's actual mutable scheduler access plus an immutable aggregate
+/// identity check. An incomplete/stale seeded installation is an invariant error,
+/// never a reason to silently draw OS entropy in an otherwise seeded App.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct LiveStream<'w, const INDEX: usize> {
+    stream: Option<bevy::prelude::ResMut<'w, StreamRng<INDEX>>>,
+    aggregate: Option<bevy::prelude::Res<'w, SimRng>>,
+}
+impl<const INDEX: usize> LiveStream<'_, INDEX> {
+    pub fn as_deref(&self) -> Option<&StreamRng<INDEX>> {
+        match (&self.aggregate, &self.stream) {
+            (None, None) => None,
+            (Some(aggregate), Some(stream)) => {
+                assert!(
+                    Arc::ptr_eq(&aggregate.streams[INDEX], &stream.generator),
+                    "stale RNG stream handle: replace seeded worlds with sim_rng::install"
+                );
+                Some(stream)
+            }
+            _ => panic!("incomplete RNG stream installation: use sim_rng::install"),
+        }
+    }
+}
+pub type CollisionRng = StreamRng<{ SimStream::CollisionDamage as usize }>;
+pub type RegionRng = StreamRng<{ SimStream::RegionDamage as usize }>;
+pub type BeamRng = StreamRng<{ SimStream::BeamDamage as usize }>;
+pub type TorpedoRng = StreamRng<{ SimStream::TorpedoDamage as usize }>;
+pub type BlasterRng = StreamRng<{ SimStream::BlasterDamage as usize }>;
+pub type BeamCycleRng = StreamRng<{ SimStream::BeamCycleJitter as usize }>;
+pub type CommsChoiceRng = StreamRng<{ SimStream::CommsBackfillChoice as usize }>;
+
+/// Replace the aggregate and every live stream handle together at an exclusive
+/// boot/fleet/restore boundary. Never retain handles from a replaced seed/state.
+pub fn install(world: &mut World, rng: SimRng) {
+    macro_rules! stream {
+        ($kind:ident, $stream:ident) => {
+            world.insert_resource($kind {
+                generator: rng.streams[SimStream::$stream as usize].clone(),
+            });
+        };
+    }
+    stream!(CollisionRng, CollisionDamage);
+    stream!(RegionRng, RegionDamage);
+    stream!(BeamRng, BeamDamage);
+    stream!(TorpedoRng, TorpedoDamage);
+    stream!(BlasterRng, BlasterDamage);
+    stream!(BeamCycleRng, BeamCycleJitter);
+    stream!(CommsChoiceRng, CommsBackfillChoice);
+    world.insert_resource(rng);
+}
+
+/// Same no-resource fallback and draw conditions as with_stream. A live handle
+/// contains the generator itself, not a lock token authorizing a hidden write.
+#[allow(clippy::disallowed_methods)]
+pub fn with_live_stream<R, const INDEX: usize>(
+    stream: Option<&StreamRng<INDEX>>,
+    f: impl FnOnce(&mut Pcg32) -> R,
+) -> R {
+    match stream {
+        Some(stream) => f(&mut stream.generator.lock().unwrap_or_else(|e| e.into_inner())),
+        None => f(&mut stream_generator(
+            rand::random::<u64>(),
+            SimStream::ALL[INDEX].name(),
+        )),
+    }
+}
+
+/// Seed/reseed an ECS App or World without leaving old live handles installed.
+/// Standalone SimRng values remain usable by pure algorithms and snapshots.
+pub trait InstallSimRng {
+    fn insert_sim_rng(&mut self, rng: SimRng) -> &mut Self;
+}
+impl InstallSimRng for World {
+    fn insert_sim_rng(&mut self, rng: SimRng) -> &mut Self {
+        install(self, rng);
+        self
+    }
+}
+impl InstallSimRng for bevy::prelude::App {
+    fn insert_sim_rng(&mut self, rng: SimRng) -> &mut Self {
+        install(self.world_mut(), rng);
+        self
+    }
+}
+
+#[cfg(test)]
+mod live_stream_tests {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+
+    fn draw_beam(rng: LiveStream<{ SimStream::BeamDamage as usize }>) -> u32 {
+        with_live_stream(rng.as_deref(), |stream| stream.next_u32())
+    }
+    fn draw_cycle(rng: LiveStream<{ SimStream::BeamCycleJitter as usize }>) -> u32 {
+        with_live_stream(rng.as_deref(), |stream| stream.next_u32())
+    }
+
+    #[test]
+    fn live_streams_share_the_exact_aggregate_state_and_preserve_other_positions() {
+        let mut world = World::new();
+        install(&mut world, SimRng::new(1400, SeedSource::Cli));
+        let reference = SimRng::new(1400, SeedSource::Cli);
+        for _ in 0..4 {
+            assert_eq!(
+                world.run_system_once(draw_cycle).unwrap(),
+                reference.stream(SimStream::BeamCycleJitter).next_u32()
+            );
+            assert_eq!(
+                world.run_system_once(draw_beam).unwrap(),
+                reference.stream(SimStream::BeamDamage).next_u32()
+            );
+        }
+        assert_eq!(world.resource::<SimRng>().state(), reference.state());
+        assert_eq!(
+            ron::to_string(&world.resource::<SimRng>().state()).unwrap(),
+            ron::to_string(&reference.state()).unwrap()
+        );
+        // The legacy fingerprint can advance the aggregate outside execution;
+        // the next real typed draw must see that exact same cell, not a clone.
+        world
+            .resource::<SimRng>()
+            .stream(SimStream::BeamDamage)
+            .next_u32();
+        reference.stream(SimStream::BeamDamage).next_u32();
+        assert_eq!(
+            world.run_system_once(draw_beam).unwrap(),
+            reference.stream(SimStream::BeamDamage).next_u32()
+        );
+    }
+
+    #[test]
+    fn reseed_restore_and_rollback_replace_live_cells_before_the_next_draw() {
+        let mut world = World::new();
+        install(&mut world, SimRng::new(1, SeedSource::Random));
+        world.run_system_once(draw_beam).unwrap();
+        install(&mut world, SimRng::new(1400, SeedSource::World));
+        let checkpoint = world.resource::<SimRng>().state();
+        let reference = SimRng::from_state(checkpoint.clone()).unwrap();
+        assert_eq!(
+            world.run_system_once(draw_beam).unwrap(),
+            reference.stream(SimStream::BeamDamage).next_u32()
+        );
+        let resumed = world.resource::<SimRng>().state();
+        // Successful restore of a progressed state, then rejected-transfer
+        // rollback to the earlier checkpoint use the same replacement entry.
+        for state in [resumed, checkpoint] {
+            let reference = SimRng::from_state(state.clone()).unwrap();
+            install(&mut world, SimRng::from_state(state).unwrap());
+            assert_eq!(
+                world.run_system_once(draw_cycle).unwrap(),
+                reference.stream(SimStream::BeamCycleJitter).next_u32()
+            );
+            assert_eq!(
+                world.run_system_once(draw_beam).unwrap(),
+                reference.stream(SimStream::BeamDamage).next_u32()
+            );
+            assert_eq!(world.resource::<SimRng>().state(), reference.state());
+        }
+    }
+    #[test]
+    fn real_snapshot_restore_and_checkpoint_rollback_rebind_the_next_draw() {
+        let mut world = World::new();
+        install(&mut world, SimRng::new(1400, SeedSource::Cli));
+        world.run_system_once(draw_beam).unwrap();
+        let checkpoint = crate::snapshot::capture(&world);
+        world.run_system_once(draw_cycle).unwrap();
+        world.run_system_once(draw_beam).unwrap();
+        let progressed = crate::snapshot::capture(&world);
+        install(&mut world, SimRng::new(999, SeedSource::World));
+        // The recovery rollback uses this same actual restore entry point;
+        // this fixture isolates first-draw rebinding, not network admission.
+        for snapshot in [&progressed, &checkpoint] {
+            let expected = SimRng::from_state(snapshot.rng.clone().unwrap()).unwrap();
+            crate::snapshot::restore(&mut world, snapshot);
+            assert_eq!(
+                world.run_system_once(draw_beam).unwrap(),
+                expected.stream(SimStream::BeamDamage).next_u32()
+            );
+            assert_eq!(
+                world.run_system_once(draw_cycle).unwrap(),
+                expected.stream(SimStream::BeamCycleJitter).next_u32()
+            );
+            assert_eq!(world.resource::<SimRng>().state(), expected.state());
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "incomplete RNG stream installation")]
+    fn aggregate_without_live_handle_cannot_fall_back_to_entropy() {
+        let mut world = World::new();
+        world.insert_resource(SimRng::new(1400, SeedSource::Cli));
+        world.run_system_once(draw_beam).unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "stale RNG stream handle")]
+    fn replacing_only_the_aggregate_cannot_draw_the_old_seed() {
+        let mut world = World::new();
+        install(&mut world, SimRng::new(1, SeedSource::Cli));
+        world.insert_resource(SimRng::new(1400, SeedSource::Cli));
+        world.run_system_once(draw_beam).unwrap();
     }
 }

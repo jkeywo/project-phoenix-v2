@@ -23,8 +23,8 @@ pub mod replay;
 pub mod report;
 
 pub use app::{
-    build_headless_app, build_headless_app_with, run, run_sampled, BuildError,
-    SimRegistrationOverrides,
+    build_headless_app, build_headless_app_with, build_headless_app_with_external_logging, run,
+    run_sampled, run_sampled_with_phases, BuildError, SimRegistrationOverrides,
 };
 pub use args::{parse_args, HeadlessArgs, ParseOutcome, ReportFormat, HELP};
 pub use digest::{state_digest, world_digest, DigestLedger, Divergence, FoldKey, Namespace};
@@ -34,3 +34,5 @@ pub use replay::{
     replay_artifact, verify_artifact, ArtifactError, PhoenixSim, ReplayArtifact, ReplayError,
 };
 pub use report::{build_report, RunReport};
+
+pub mod determinism_audit;

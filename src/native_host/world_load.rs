@@ -720,7 +720,7 @@ fn load_selected_world(
     // `add_simulation_plugins_with` left behind. Nothing has consumed the
     // stream: the simulation sets are gated on `GamePhase::InProgress` and this
     // host has been sitting in `Lobby`.
-    world.insert_resource(sim_rng);
+    crate::sim_rng::install(world, sim_rng);
 
     // `update_session_with_config` recomputes the station roster only while it
     // is empty — deliberately, so a running mission's roster is never rewritten
@@ -754,13 +754,13 @@ fn load_selected_world(
 /// id minted after the load.
 fn park_mint(world: &mut World) -> Option<WorldIdMintState> {
     let live = world.get_resource::<WorldIdMint>()?.state();
-    world.insert_resource(WorldIdMint::default());
+    crate::world_id::install(world, WorldIdMint::default());
     Some(live)
 }
 
 /// Put back what [`park_mint`] took.
 fn restore_mint(world: &mut World, saved: Option<WorldIdMintState>) {
     if let Some(state) = saved {
-        world.insert_resource(WorldIdMint::from_state(state));
+        crate::world_id::install(world, WorldIdMint::from_state(state));
     }
 }

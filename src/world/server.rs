@@ -1283,7 +1283,7 @@ pub(crate) fn spawn_world_entities(
     mut commands: Commands,
     world_config: Option<ResMut<crate::world::config::WorldConfig>>,
     mut runtime: Option<ResMut<WorldContentRuntime>>,
-    id_mint: Option<Res<crate::world_id::WorldIdMint>>,
+    id_mint: crate::world_id::LiveMint<'_, { crate::world_id::IdNamespace::Entity as usize }>,
 ) {
     let Some(mut world_config) = world_config else {
         return; // No unified WorldConfig (native tests, hardcoded fallback).
@@ -1296,7 +1296,7 @@ pub(crate) fn spawn_world_entities(
     // template resolution so it works even when the config cache is empty
     // (e.g. in unit tests).
     let new_names = crate::world::config::assign_named_entity_uuids(&world_config.entities, || {
-        crate::world_id::mint_id_with(id_mint.as_deref(), crate::world_id::IdNamespace::Entity)
+        crate::world_id::mint_live_id_with(id_mint.as_deref(), crate::world_id::IdNamespace::Entity)
     });
     for (name, uuid) in &new_names {
         world_config.name_to_uuid.insert(name.clone(), uuid.clone());
@@ -1454,7 +1454,7 @@ pub fn spawn_immediate_entities_internal(
     world_config: &crate::world::config::WorldConfig,
     config_cache: &crate::entities::config_cache::ConfigCache,
     flags: Option<&crate::world::flags::FlagStore>,
-    id_mint: Option<&crate::world_id::WorldIdMint>,
+    id_mint: Option<&crate::world_id::EntityMint>,
 ) -> Vec<Entity> {
     // Atomic-activation guard (issues #750/#752/#906/#969/#973): if this world's
     // composition is invalid, spawn NOTHING — a composition error must never
@@ -1538,7 +1538,8 @@ pub fn spawn_immediate_entities_internal(
                 }
             }
         }
-        let uuid = crate::world_id::mint_id_with(id_mint, crate::world_id::IdNamespace::Entity);
+        let uuid =
+            crate::world_id::mint_live_id_with(id_mint, crate::world_id::IdNamespace::Entity);
         let pos = match resolve_position(entity_inst, &world_config.anchors, &named_positions) {
             Ok(p) => p,
             Err(e) => {
@@ -2261,7 +2262,7 @@ pub(crate) fn tick_trigger_pipeline(
     entity_uuid_query: Query<(Entity, &EntityUuid)>,
     mut faction_dispatch: FactionDispatchParams,
     time: Option<Res<bevy::time::Time>>,
-    id_mint: Option<Res<crate::world_id::WorldIdMint>>,
+    id_mint: crate::world_id::LiveMint<'_, { crate::world_id::IdNamespace::Entity as usize }>,
     mut balance_events: Option<
         ResMut<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>,
     >,
@@ -2277,8 +2278,9 @@ pub(crate) fn tick_trigger_pipeline(
     let empty_anchors: HashMap<String, [f32; 3]> = HashMap::new();
     // Seeded UUID source for `SpawnEntity` dispatch. Bound once per system run
     // because `DispatchContext::uuid_source` is a `&dyn Fn`.
-    let uuid_source =
-        || crate::world_id::mint_id_with(id_mint.as_deref(), crate::world_id::IdNamespace::Entity);
+    let uuid_source = || {
+        crate::world_id::mint_live_id_with(id_mint.as_deref(), crate::world_id::IdNamespace::Entity)
+    };
     // Template source for `SpawnEntity` dispatch (issue #715), built once per
     // system run. `WasmTemplateLoader` unconditionally: it serves the
     // preloaded config cache first and, on native, falls back to the
@@ -3990,7 +3992,7 @@ pub(crate) fn tick_delayed_actions(
         ),
         With<BehaviourSection>,
     >,
-    id_mint: Option<Res<crate::world_id::WorldIdMint>>,
+    id_mint: crate::world_id::LiveMint<'_, { crate::world_id::IdNamespace::Entity as usize }>,
     mut balance_events: Option<
         ResMut<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>,
     >,
@@ -4020,8 +4022,9 @@ pub(crate) fn tick_delayed_actions(
     // Same template source as `tick_trigger_pipeline` (issue #715): one
     // `WasmTemplateLoader` per system run, both targets.
     let template_loader = crate::entities::loader::WasmTemplateLoader;
-    let uuid_source =
-        || crate::world_id::mint_id_with(id_mint.as_deref(), crate::world_id::IdNamespace::Entity);
+    let uuid_source = || {
+        crate::world_id::mint_live_id_with(id_mint.as_deref(), crate::world_id::IdNamespace::Entity)
+    };
 
     // Ready/still-pending is a pure decision (`world::delayed`); only the
     // elapsed-clock read above and the dispatch below touch Bevy.
@@ -4143,7 +4146,7 @@ pub(crate) fn tick_script_callbacks(
     // `uuid_source` the trigger path holds — else a spawn from an `after(..)`
     // callback would fall back to the process-global mint and diverge (R2). `None`
     // for a bare-`App` fixture, exactly like `tick_delayed_actions`.
-    id_mint: Option<Res<crate::world_id::WorldIdMint>>,
+    id_mint: crate::world_id::LiveMint<'_, { crate::world_id::IdNamespace::Entity as usize }>,
     mut balance_events: Option<
         ResMut<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>,
     >,
@@ -4214,8 +4217,9 @@ pub(crate) fn tick_script_callbacks(
     // `WasmTemplateLoader`, and an empty base-anchors fallback.
     let empty_anchors: HashMap<String, [f32; 3]> = HashMap::new();
     let template_loader = crate::entities::loader::WasmTemplateLoader;
-    let uuid_source =
-        || crate::world_id::mint_id_with(id_mint.as_deref(), crate::world_id::IdNamespace::Entity);
+    let uuid_source = || {
+        crate::world_id::mint_live_id_with(id_mint.as_deref(), crate::world_id::IdNamespace::Entity)
+    };
 
     // Reborrow the `WorldContentRuntime` `ResMut` as a plain `&mut` so `runtime.flags`
     // (the flag overlay base) and `&mut runtime` (the apply path) can be borrowed
@@ -4653,7 +4657,7 @@ fn apply_loaded_layer(
     layer_map: &mut WorldLayerMap,
     runtime: &mut WorldContentRuntime,
     script_runtime: Option<&mut WorldScriptRuntime>,
-    id_mint: Option<&crate::world_id::WorldIdMint>,
+    id_mint: Option<&crate::world_id::EntityMint>,
     now_tick: u64,
     root_tick_hz: f32,
 ) {
@@ -4875,7 +4879,7 @@ fn apply_world_layer_changes(
     // from at unload (issue #1045). `Option` because a script-free world has
     // none — every shipped world, until one authors a scripted layer.
     mut script_runtime: Option<ResMut<WorldScriptRuntime>>,
-    id_mint: Option<Res<crate::world_id::WorldIdMint>>,
+    id_mint: crate::world_id::LiveMint<'_, { crate::world_id::IdNamespace::Entity as usize }>,
     // Layer-owned objective cleanup on unload (issue #751). `Option` so bare
     // `App` fixtures without an `ObjectiveManagerRes` still run the loader.
     mut objectives: Option<ResMut<ObjectiveManagerRes>>,
@@ -5003,7 +5007,7 @@ fn apply_world_layer_changes(
                     &script_resolver,
                     &validation,
                     || {
-                        crate::world_id::mint_id_with(
+                        crate::world_id::mint_live_id_with(
                             id_mint.as_deref(),
                             crate::world_id::IdNamespace::Entity,
                         )
@@ -5135,7 +5139,7 @@ fn apply_world_layer_changes(
                                 &script_resolver,
                                 &validation,
                                 || {
-                                    crate::world_id::mint_id_with(
+                                    crate::world_id::mint_live_id_with(
                                         id_mint.as_deref(),
                                         crate::world_id::IdNamespace::Entity,
                                     )

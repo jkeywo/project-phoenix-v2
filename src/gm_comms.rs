@@ -187,7 +187,7 @@ pub struct GmCommsParams<'w, 's> {
     inbox: Option<ResMut<'w, CommsInboxRes>>,
     comms: Option<Res<'w, CommsRuntime>>,
     script: Option<ResMut<'w, WorldScriptRuntime>>,
-    mint: Option<Res<'w, crate::world_id::WorldIdMint>>,
+    mint: crate::world_id::LiveMint<'w, { crate::world_id::IdNamespace::Message as usize }>,
     narrative: Option<ResMut<'w, Messages<crate::core::narrative::NarrativeEvent>>>,
 }
 
@@ -241,7 +241,7 @@ impl GmCommsParams<'_, '_> {
                 let comms = self.comms.as_deref().ok_or(Refusal::WorldUnavailable)?;
                 let mint = self.mint.as_deref().ok_or(Refusal::WorldUnavailable)?;
                 for ship in &intent.recipients {
-                    let id = crate::world_id::mint_id_with(
+                    let id = crate::world_id::mint_live_id_with(
                         Some(mint),
                         crate::world_id::IdNamespace::Message,
                     );

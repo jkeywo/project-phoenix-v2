@@ -80,7 +80,7 @@
 
 use bevy::prelude::*;
 use project_phoenix::authoritative::{StateCensus, StateClass};
-use project_phoenix::headless::{build_headless_app, run, HeadlessArgs};
+use project_phoenix::headless::{HeadlessArgs, build_headless_app, run};
 
 /// `rng_coverage.toml` (issue #837), same as
 /// `tests/registration_order_determinism.rs`: two NPCs in weapons range, an
@@ -749,7 +749,11 @@ fn every_registered_type_maps_to_the_digest_record() {
             // from PASM as short names); the exhaustive baseline is consulted by
             // the FULL path, so collapsing generics can never hide one another.
             let short = short_name(full);
-            !authoritative.contains(short.as_str())
+            app.world()
+                .resource::<StateCensus>()
+                .alias_owner(full)
+                .is_none()
+                && !authoritative.contains(short.as_str())
                 && !excluded.contains(short.as_str())
                 && !baseline.contains(*full)
         })
@@ -811,7 +815,11 @@ fn the_committed_baseline_names_only_types_still_registered_and_unclassified() {
             // checked against the entry's short name, preserving the exact
             // "is it now classified elsewhere" semantics.
             let short = short_name(full);
-            !registered.contains(*full)
+            app.world()
+                .resource::<StateCensus>()
+                .alias_owner(full)
+                .is_some()
+                || !registered.contains(*full)
                 || authoritative.contains(short.as_str())
                 || excluded.contains(short.as_str())
         })
@@ -876,4 +884,76 @@ fn ac5_reviewer_answers_match_the_pasm_record() {
          in for the digest boundary. See digest-boundary-reviewer-answers in \
          pasm/spec/architecture/deterministic-simulation.yaml."
     );
+}
+
+#[test]
+fn physical_rng_and_mint_handles_resolve_only_to_existing_canonical_owners() {
+    let mut app = build_headless_app(&HeadlessArgs {
+        world_path: WORLD.into(),
+        seed: Some(SEED),
+        deterministic: true,
+        ..Default::default()
+    })
+    .unwrap();
+    app.world_mut()
+        .register_resource::<project_phoenix::sim_rng::StreamRng<999>>();
+    let census = app.world().resource::<StateCensus>();
+    let registered: std::collections::BTreeSet<_> = registered_crate_local_type_names(&app)
+        .into_iter()
+        .collect();
+    let rng = std::any::type_name::<project_phoenix::sim_rng::SimRng>();
+    let mint = std::any::type_name::<project_phoenix::world_id::WorldIdMint>();
+    assert_eq!(census.aliases().len(), 11);
+    assert_eq!(
+        census
+            .aliases()
+            .values()
+            .filter(|owner| **owner == rng)
+            .count(),
+        7
+    );
+    assert_eq!(
+        census
+            .aliases()
+            .values()
+            .filter(|owner| **owner == mint)
+            .count(),
+        4
+    );
+    for (alias, owner) in census.aliases() {
+        assert!(
+            registered.contains(*alias),
+            "physical alias must actually register: {alias}"
+        );
+        assert!(
+            registered.contains(*owner),
+            "canonical physical owner must register: {owner}"
+        );
+        assert!(
+            !census.entries().contains_key(alias),
+            "alias must not create a canonical row"
+        );
+        assert_eq!(census.get(alias), census.entries().get(owner).copied());
+        assert_eq!(
+            census.get(alias),
+            Some((
+                StateClass::Folded,
+                if *owner == rng {
+                    "sim-rng-state"
+                } else {
+                    "world-id-mint-state"
+                }
+            ))
+        );
+    }
+    // No prefix/generic-family allowance: a new physical instantiation remains unclassified.
+    let unknown = std::any::type_name::<project_phoenix::sim_rng::StreamRng<999>>();
+    assert!(
+        registered.contains(unknown),
+        "undeclared physical type is actually registered"
+    );
+    assert_eq!(census.alias_owner(unknown), None);
+    assert_eq!(census.get(unknown), None);
+    assert!(!census_authoritative_short_names(&app).contains(&short_name(unknown)));
+    assert!(!census_excluded_short_names(&app).contains(&short_name(unknown)));
 }

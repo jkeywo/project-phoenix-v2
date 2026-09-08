@@ -1,0 +1,408 @@
+[
+  {
+    "systems": [
+      "project_phoenix::console::weapons::beam::tick_beams_apply_damage",
+      "project_phoenix::server_app::collision::handle_collisions"
+    ],
+    "addedAccess": [
+      "project_phoenix::sim_rng::SimRng"
+    ],
+    "completeOldAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::ai::server::AiEntityDestroyed>",
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>",
+      "bevy_state::state::resources::NextState<project_phoenix::core::messages::GamePhase>",
+      "project_phoenix::entities::spawner::EntityShipArcHull",
+      "project_phoenix::entities::spawner::EntitySystemHull",
+      "project_phoenix::lobby::server::WorldResource",
+      "project_phoenix::server_app::components::GameOverReason",
+      "project_phoenix::server_app::components::SimOutbox",
+      "project_phoenix::server_app::components::TrackedEntities",
+      "project_phoenix::ship::shields::ShipShields",
+      "project_phoenix::ship::state::ShipPhysics"
+    ],
+    "completeNewAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::ai::server::AiEntityDestroyed>",
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>",
+      "bevy_state::state::resources::NextState<project_phoenix::core::messages::GamePhase>",
+      "project_phoenix::entities::spawner::EntityShipArcHull",
+      "project_phoenix::entities::spawner::EntitySystemHull",
+      "project_phoenix::lobby::server::WorldResource",
+      "project_phoenix::server_app::components::GameOverReason",
+      "project_phoenix::server_app::components::SimOutbox",
+      "project_phoenix::server_app::components::TrackedEntities",
+      "project_phoenix::ship::shields::ShipShields",
+      "project_phoenix::ship::state::ShipPhysics",
+      "project_phoenix::sim_rng::SimRng"
+    ]
+  },
+  {
+    "systems": [
+      "project_phoenix::comms::scripted::open_scripted_comms_threads",
+      "project_phoenix::console::weapons::blaster::tick_blaster_system"
+    ],
+    "addedAccess": [
+      "project_phoenix::world_id::WorldIdMint"
+    ],
+    "completeOldAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>"
+    ],
+    "completeNewAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>",
+      "project_phoenix::world_id::WorldIdMint"
+    ]
+  },
+  {
+    "systems": [
+      "project_phoenix::console::weapons::blaster::tick_blaster_system",
+      "project_phoenix::console::weapons::torpedo::tick_torpedo_lifecycle"
+    ],
+    "addedAccess": [
+      "project_phoenix::world_id::WorldIdMint"
+    ],
+    "completeOldAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>",
+      "project_phoenix::server_app::components::SimOutbox",
+      "project_phoenix::ship::state::ShipPhysics"
+    ],
+    "completeNewAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>",
+      "project_phoenix::server_app::components::SimOutbox",
+      "project_phoenix::ship::state::ShipPhysics",
+      "project_phoenix::world_id::WorldIdMint"
+    ]
+  },
+  {
+    "systems": [
+      "project_phoenix::console::weapons::blaster::tick_blaster_system",
+      "project_phoenix::console::weapons::torpedo::handle_fire_torpedo"
+    ],
+    "addedAccess": [
+      "project_phoenix::world_id::WorldIdMint"
+    ],
+    "completeOldAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>",
+      "project_phoenix::server_app::components::SimOutbox",
+      "project_phoenix::ship::state::ShipPhysics"
+    ],
+    "completeNewAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>",
+      "project_phoenix::server_app::components::SimOutbox",
+      "project_phoenix::ship::state::ShipPhysics",
+      "project_phoenix::world_id::WorldIdMint"
+    ]
+  },
+  {
+    "systems": [
+      "project_phoenix::console::weapons::blaster::tick_blaster_system",
+      "project_phoenix::world::server::tick_trigger_pipeline"
+    ],
+    "addedAccess": [
+      "project_phoenix::world_id::WorldIdMint"
+    ],
+    "completeOldAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>"
+    ],
+    "completeNewAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>",
+      "project_phoenix::world_id::WorldIdMint"
+    ]
+  },
+  {
+    "systems": [
+      "project_phoenix::console::weapons::beam::tick_beams_apply_damage",
+      "project_phoenix::console::weapons::blaster::handle_blaster_hits"
+    ],
+    "addedAccess": [
+      "project_phoenix::sim_rng::SimRng"
+    ],
+    "completeOldAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::ai::server::AiEntityDestroyed>",
+      "bevy_ecs::message::messages::Messages<project_phoenix::console::weapons::server::AsteroidDestroyedVfx>",
+      "bevy_ecs::message::messages::Messages<project_phoenix::console::weapons::server::ShipDestroyedVfx>",
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>",
+      "bevy_state::state::resources::NextState<project_phoenix::core::messages::GamePhase>",
+      "project_phoenix::entities::spawner::EntityShipArcHull",
+      "project_phoenix::entities::spawner::EntitySystemHull",
+      "project_phoenix::lobby::server::WorldResource",
+      "project_phoenix::server_app::components::GameOverReason",
+      "project_phoenix::server_app::components::SimOutbox",
+      "project_phoenix::server_app::components::TrackedEntities",
+      "project_phoenix::ship::shields::ShipShields"
+    ],
+    "completeNewAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::ai::server::AiEntityDestroyed>",
+      "bevy_ecs::message::messages::Messages<project_phoenix::console::weapons::server::AsteroidDestroyedVfx>",
+      "bevy_ecs::message::messages::Messages<project_phoenix::console::weapons::server::ShipDestroyedVfx>",
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>",
+      "bevy_state::state::resources::NextState<project_phoenix::core::messages::GamePhase>",
+      "project_phoenix::entities::spawner::EntityShipArcHull",
+      "project_phoenix::entities::spawner::EntitySystemHull",
+      "project_phoenix::lobby::server::WorldResource",
+      "project_phoenix::server_app::components::GameOverReason",
+      "project_phoenix::server_app::components::SimOutbox",
+      "project_phoenix::server_app::components::TrackedEntities",
+      "project_phoenix::ship::shields::ShipShields",
+      "project_phoenix::sim_rng::SimRng"
+    ]
+  },
+  {
+    "systems": [
+      "project_phoenix::console::weapons::blaster::tick_blaster_system",
+      "project_phoenix::world::server::tick_delayed_actions"
+    ],
+    "addedAccess": [
+      "project_phoenix::world_id::WorldIdMint"
+    ],
+    "completeOldAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>"
+    ],
+    "completeNewAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>",
+      "project_phoenix::world_id::WorldIdMint"
+    ]
+  },
+  {
+    "systems": [
+      "project_phoenix::console::weapons::beam::tick_beams_apply_damage",
+      "project_phoenix::gm_effect::apply_gm_direct_effects"
+    ],
+    "addedAccess": [
+      "project_phoenix::sim_rng::SimRng"
+    ],
+    "completeOldAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::ai::server::AiEntityDestroyed>",
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>",
+      "bevy_state::state::resources::NextState<project_phoenix::core::messages::GamePhase>",
+      "project_phoenix::entities::spawner::EntityShipArcHull",
+      "project_phoenix::entities::spawner::EntitySystemHull",
+      "project_phoenix::lobby::server::WorldResource",
+      "project_phoenix::server_app::components::GameOverReason",
+      "project_phoenix::server_app::components::SimOutbox",
+      "project_phoenix::server_app::components::TrackedEntities"
+    ],
+    "completeNewAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::ai::server::AiEntityDestroyed>",
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>",
+      "bevy_state::state::resources::NextState<project_phoenix::core::messages::GamePhase>",
+      "project_phoenix::entities::spawner::EntityShipArcHull",
+      "project_phoenix::entities::spawner::EntitySystemHull",
+      "project_phoenix::lobby::server::WorldResource",
+      "project_phoenix::server_app::components::GameOverReason",
+      "project_phoenix::server_app::components::SimOutbox",
+      "project_phoenix::server_app::components::TrackedEntities",
+      "project_phoenix::sim_rng::SimRng"
+    ]
+  },
+  {
+    "systems": [
+      "project_phoenix::gm_effect::apply_gm_direct_effects",
+      "project_phoenix::server_app::collision::handle_collisions"
+    ],
+    "addedAccess": [
+      "project_phoenix::sim_rng::SimRng"
+    ],
+    "completeOldAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::ai::server::AiEntityDestroyed>",
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>",
+      "bevy_state::state::resources::NextState<project_phoenix::core::messages::GamePhase>",
+      "project_phoenix::entities::spawner::EntityShipArcHull",
+      "project_phoenix::entities::spawner::EntitySystemHull",
+      "project_phoenix::lobby::server::WorldResource",
+      "project_phoenix::server_app::components::GameOverReason",
+      "project_phoenix::server_app::components::SimOutbox",
+      "project_phoenix::server_app::components::TrackedEntities"
+    ],
+    "completeNewAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::ai::server::AiEntityDestroyed>",
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>",
+      "bevy_state::state::resources::NextState<project_phoenix::core::messages::GamePhase>",
+      "project_phoenix::entities::spawner::EntityShipArcHull",
+      "project_phoenix::entities::spawner::EntitySystemHull",
+      "project_phoenix::lobby::server::WorldResource",
+      "project_phoenix::server_app::components::GameOverReason",
+      "project_phoenix::server_app::components::SimOutbox",
+      "project_phoenix::server_app::components::TrackedEntities",
+      "project_phoenix::sim_rng::SimRng"
+    ]
+  },
+  {
+    "systems": [
+      "project_phoenix::console::weapons::torpedo::handle_fire_torpedo",
+      "project_phoenix::world::server::tick_delayed_actions"
+    ],
+    "addedAccess": [
+      "project_phoenix::world_id::WorldIdMint"
+    ],
+    "completeOldAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>",
+      "project_phoenix::world::server::WorldContentRuntime",
+      "project_phoenix::world::server::WorldLayerMap"
+    ],
+    "completeNewAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>",
+      "project_phoenix::world::server::WorldContentRuntime",
+      "project_phoenix::world::server::WorldLayerMap",
+      "project_phoenix::world_id::WorldIdMint"
+    ]
+  },
+  {
+    "systems": [
+      "project_phoenix::console::weapons::blaster::handle_blaster_hits",
+      "project_phoenix::server_app::collision::handle_collisions"
+    ],
+    "addedAccess": [
+      "project_phoenix::sim_rng::SimRng"
+    ],
+    "completeOldAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::ai::server::AiEntityDestroyed>",
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>",
+      "bevy_state::state::resources::NextState<project_phoenix::core::messages::GamePhase>",
+      "project_phoenix::entities::spawner::EntityShipArcHull",
+      "project_phoenix::entities::spawner::EntitySystemHull",
+      "project_phoenix::lobby::server::WorldResource",
+      "project_phoenix::server_app::components::GameOverReason",
+      "project_phoenix::server_app::components::SimOutbox",
+      "project_phoenix::server_app::components::TrackedEntities",
+      "project_phoenix::ship::shields::ShipShields"
+    ],
+    "completeNewAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::ai::server::AiEntityDestroyed>",
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>",
+      "bevy_state::state::resources::NextState<project_phoenix::core::messages::GamePhase>",
+      "project_phoenix::entities::spawner::EntityShipArcHull",
+      "project_phoenix::entities::spawner::EntitySystemHull",
+      "project_phoenix::lobby::server::WorldResource",
+      "project_phoenix::server_app::components::GameOverReason",
+      "project_phoenix::server_app::components::SimOutbox",
+      "project_phoenix::server_app::components::TrackedEntities",
+      "project_phoenix::ship::shields::ShipShields",
+      "project_phoenix::sim_rng::SimRng"
+    ]
+  },
+  {
+    "systems": [
+      "project_phoenix::console::weapons::torpedo::handle_fire_torpedo",
+      "project_phoenix::world::server::tick_trigger_pipeline"
+    ],
+    "addedAccess": [
+      "project_phoenix::world_id::WorldIdMint"
+    ],
+    "completeOldAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>",
+      "project_phoenix::world::server::WorldContentRuntime",
+      "project_phoenix::world::server::WorldLayerMap"
+    ],
+    "completeNewAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>",
+      "project_phoenix::world::server::WorldContentRuntime",
+      "project_phoenix::world::server::WorldLayerMap",
+      "project_phoenix::world_id::WorldIdMint"
+    ]
+  },
+  {
+    "systems": [
+      "project_phoenix::console::weapons::blaster::tick_blaster_system",
+      "project_phoenix::world::server::tick_script_callbacks"
+    ],
+    "addedAccess": [
+      "project_phoenix::world_id::WorldIdMint"
+    ],
+    "completeOldAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>"
+    ],
+    "completeNewAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>",
+      "project_phoenix::world_id::WorldIdMint"
+    ]
+  },
+  {
+    "systems": [
+      "project_phoenix::console::weapons::blaster::handle_blaster_hits",
+      "project_phoenix::gm_effect::apply_gm_direct_effects"
+    ],
+    "addedAccess": [
+      "project_phoenix::sim_rng::SimRng"
+    ],
+    "completeOldAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::ai::server::AiEntityDestroyed>",
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>",
+      "bevy_state::state::resources::NextState<project_phoenix::core::messages::GamePhase>",
+      "project_phoenix::entities::spawner::EntityShipArcHull",
+      "project_phoenix::entities::spawner::EntitySystemHull",
+      "project_phoenix::lobby::server::WorldResource",
+      "project_phoenix::server_app::components::GameOverReason",
+      "project_phoenix::server_app::components::SimOutbox",
+      "project_phoenix::server_app::components::TrackedEntities"
+    ],
+    "completeNewAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::ai::server::AiEntityDestroyed>",
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>",
+      "bevy_state::state::resources::NextState<project_phoenix::core::messages::GamePhase>",
+      "project_phoenix::entities::spawner::EntityShipArcHull",
+      "project_phoenix::entities::spawner::EntitySystemHull",
+      "project_phoenix::lobby::server::WorldResource",
+      "project_phoenix::server_app::components::GameOverReason",
+      "project_phoenix::server_app::components::SimOutbox",
+      "project_phoenix::server_app::components::TrackedEntities",
+      "project_phoenix::sim_rng::SimRng"
+    ]
+  },
+  {
+    "systems": [
+      "project_phoenix::comms::scripted::open_scripted_comms_threads",
+      "project_phoenix::console::weapons::torpedo::handle_fire_torpedo"
+    ],
+    "addedAccess": [
+      "project_phoenix::world_id::WorldIdMint"
+    ],
+    "completeOldAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>",
+      "project_phoenix::world::server::WorldContentRuntime",
+      "project_phoenix::world::server::WorldLayerMap"
+    ],
+    "completeNewAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>",
+      "project_phoenix::world::server::WorldContentRuntime",
+      "project_phoenix::world::server::WorldLayerMap",
+      "project_phoenix::world_id::WorldIdMint"
+    ]
+  },
+  {
+    "systems": [
+      "project_phoenix::regions::server::apply_damage_zone_damage",
+      "project_phoenix::ship::helm_ai::ai_policy_state_tick"
+    ],
+    "addedAccess": [
+      "project_phoenix::sim_rng::SimRng"
+    ],
+    "completeOldAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>",
+      "project_phoenix::ship::shields::ShipShields"
+    ],
+    "completeNewAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>",
+      "project_phoenix::ship::shields::ShipShields",
+      "project_phoenix::sim_rng::SimRng"
+    ]
+  },
+  {
+    "systems": [
+      "project_phoenix::console::weapons::torpedo::handle_fire_torpedo",
+      "project_phoenix::world::server::tick_script_callbacks"
+    ],
+    "addedAccess": [
+      "project_phoenix::world_id::WorldIdMint"
+    ],
+    "completeOldAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>",
+      "project_phoenix::world::server::WorldContentRuntime",
+      "project_phoenix::world::server::WorldLayerMap"
+    ],
+    "completeNewAccess": [
+      "bevy_ecs::message::messages::Messages<project_phoenix::core::balance::BalanceEvent>",
+      "project_phoenix::world::server::WorldContentRuntime",
+      "project_phoenix::world::server::WorldLayerMap",
+      "project_phoenix::world_id::WorldIdMint"
+    ]
+  }
+]

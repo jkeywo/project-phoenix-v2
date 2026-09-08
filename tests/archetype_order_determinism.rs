@@ -60,8 +60,23 @@
 //! is precisely the kind of nondeterminism this guard exists to rule out.
 //! Cargo gives every integration-test file its own process. Do not add
 //! unrelated tests here.
+//!
+//! #1400 adds a default-pool parent below. It re-runs these same two guards in
+//! fresh child processes; the ordinary tests remain pinned. The child checks
+//! its actual compute pool and executor before claiming a default-pool result.
 
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
+
+#[path = "common/default_pool.rs"]
+mod default_pool;
+
+#[test]
+fn default_pool_preserves_archetype_order_guards() {
+    default_pool::run_guards(&[
+        ("the_digest_does_not_move_when_an_archetype_is_added", 2),
+        ("the_perturbation_really_moves_the_archetype_layout", 2),
+    ]);
+}
 
 use bevy::prelude::*;
 use project_phoenix::entities::spawner::EntityUuid;
@@ -161,7 +176,7 @@ fn args() -> HeadlessArgs {
         world_path: WORLD.into(),
         max_ticks: TICKS,
         seed: Some(SEED),
-        deterministic: true,
+        deterministic: default_pool::deterministic(),
         ..Default::default()
     }
 }
@@ -180,6 +195,7 @@ fn run_world(perturbed: bool) -> (u64, usize) {
         app.add_systems(FixedUpdate, perturb_archetype_order.in_set(SimSet::Input));
     }
     run(&mut app, args.max_ticks);
+    default_pool::observe(&app, WORLD, SEED);
     let digest = world_digest(app.world());
     let archetypes = app.world().archetypes().len();
     (digest, archetypes)

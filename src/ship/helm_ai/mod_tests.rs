@@ -6,6 +6,7 @@ use crate::ship::components::HELM_AI_MAX_DT_SECS;
 use crate::ship::control_source::{ControlSource, ControlSourceResolver};
 use crate::ship::physics::ShipPhysicsConfig;
 use crate::ship::test_support::*;
+use crate::sim_rng::InstallSimRng;
 use crate::simmath;
 
 // ── Table-driven per-axis wiring guard (issue #1208) ──────────────────────
@@ -8202,7 +8203,7 @@ fn the_recovery_leg_is_flown_as_a_powered_turning_orbit() {
 fn the_orbit_direction_is_deterministic_from_the_seed_without_being_constant() {
     fn direction_for(seed: u64, ship: uuid::Uuid) -> f32 {
         let (mut app, bogey) = fly_through_app([0.0, 0.0, -200.0]);
-        app.insert_resource(crate::sim_rng::SimRng::new(
+        app.insert_sim_rng(crate::sim_rng::SimRng::new(
             seed,
             crate::sim_rng::SeedSource::Cli,
         ));
@@ -9447,7 +9448,7 @@ fn the_combat_orbit_direction_is_deterministic_from_the_seed_without_being_const
     fn direction_for(seed: u64, ship: uuid::Uuid) -> f32 {
         let ring = cruiser_steering_param(COMBAT_ORBIT_RANGE_PARAM);
         let (mut app, _bogey) = broadside_app(ORBIT_BOGEY);
-        app.insert_resource(crate::sim_rng::SimRng::new(
+        app.insert_sim_rng(crate::sim_rng::SimRng::new(
             seed,
             crate::sim_rng::SeedSource::Cli,
         ));
@@ -10706,7 +10707,7 @@ fn the_bow_hold_tracks_a_moving_target() {
 fn resuming_the_orbit_after_a_torpedo_run_redraws_the_circulation() {
     fn round_trip(seed: u64) -> (f32, f32) {
         let (mut app, _uuid, bogey) = opportunity_app();
-        app.insert_resource(crate::sim_rng::SimRng::new(
+        app.insert_sim_rng(crate::sim_rng::SimRng::new(
             seed,
             crate::sim_rng::SeedSource::Cli,
         ));

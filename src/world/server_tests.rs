@@ -5,6 +5,7 @@ use crate::console::comms::server::handle_comms_channel2;
 use crate::core::messages::*;
 use crate::lobby::LobbyPlugin;
 use crate::world::content::TriggerCondition;
+use crate::world_id::InstallWorldIdMint;
 
 // ── Embedded Rhai script fixtures (issues #984/#1033, hoisted #1191) ──────
 //
@@ -1179,7 +1180,7 @@ fn scripted_and_dispatched_spawn_mint_the_same_entity_uuid() {
         // A fresh mint (tick 0, every sequence 0): the spawn is the first Entity
         // id minted, so its sequence is deterministic and shared by both paths.
         app.world_mut()
-            .insert_resource(crate::world_id::WorldIdMint::default());
+            .insert_world_id_mint(crate::world_id::WorldIdMint::default());
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
             runtime
@@ -1206,7 +1207,7 @@ fn scripted_and_dispatched_spawn_mint_the_same_entity_uuid() {
     let dispatched_uuid = {
         let mut app = ai_trigger_test_app();
         app.world_mut()
-            .insert_resource(crate::world_id::WorldIdMint::default());
+            .insert_world_id_mint(crate::world_id::WorldIdMint::default());
         dispatch_delayed_actions(
             &mut app,
             None,
@@ -1520,7 +1521,7 @@ fn a_name_freed_by_a_scripted_destroy_is_reusable_by_a_later_spawn() {
 
     let mut app = ai_trigger_test_app();
     app.world_mut()
-        .insert_resource(crate::world_id::WorldIdMint::default());
+        .insert_world_id_mint(crate::world_id::WorldIdMint::default());
     let old_uuid = "band-old-uuid-1033";
     let old = register_named_entity(&mut app, "band", old_uuid);
     {

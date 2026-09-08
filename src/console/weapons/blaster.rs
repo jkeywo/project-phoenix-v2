@@ -619,7 +619,7 @@ pub(crate) fn tick_blaster_system(
     // instance but not across two. `Option<Res<_>>` for the same reason as
     // every other determinism resource — a bare `Res` fails parameter
     // validation in the bare-`App` weapons fixtures.
-    id_mint: Option<Res<crate::world_id::WorldIdMint>>,
+    id_mint: crate::world_id::LiveMint<'_, { crate::world_id::IdNamespace::Projectile as usize }>,
 ) {
     let dt = time.delta_secs();
     // Only the server-gated screenshake push below (issue #638) reads this;
@@ -747,7 +747,7 @@ pub(crate) fn tick_blaster_system(
                 // shot, and those ids key the in-flight/hit bookkeeping. Now a
                 // tick-scoped mint (issue #907).
                 &mut || {
-                    crate::world_id::mint_id_with(
+                    crate::world_id::mint_live_id_with(
                         id_mint.as_deref(),
                         crate::world_id::IdNamespace::Projectile,
                     )
@@ -880,7 +880,10 @@ pub(crate) fn handle_blaster_hits(
     sinks: BlasterHitSinks,
     // Seeded RNG + log filter + God Mode (issue #900), bundled: separately
     // they put this system one over Bevy's 16-parameter ceiling.
-    ambient: crate::server_app::SimRngAndLog,
+    ambient: crate::server_app::SimRngAndLog<
+        '_,
+        { crate::sim_rng::SimStream::BlasterDamage as usize },
+    >,
 ) {
     // Restore the pre-#1185 locals so the body below is byte-for-byte unchanged.
     let DirectFireGeometry {
@@ -1056,10 +1059,8 @@ pub(crate) fn handle_blaster_hits(
             // inside the local/non-local arms.
             let mut ship_destroyed = false;
             if hull_damage > 0.0 {
-                let (hull_applied, destroyed) = crate::sim_rng::with_stream(
-                    sim_rng.as_deref(),
-                    crate::sim_rng::SimStream::BlasterDamage,
-                    |rng| {
+                let (hull_applied, destroyed) =
+                    crate::sim_rng::with_live_stream(sim_rng.as_deref(), |rng| {
                         let result = crate::ship::damage::apply_hull_damage(
                             &mut hull_comp.0,
                             hull_damage,
@@ -1069,8 +1070,7 @@ pub(crate) fn handle_blaster_hits(
                             ah.0.apply_damage(result.0, rng);
                         }
                         result
-                    },
-                );
+                    });
                 hull_applied_total = hull_applied;
                 ship_destroyed = destroyed;
                 if is_local {

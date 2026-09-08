@@ -17,8 +17,9 @@ fn main() {
 
 #[cfg(not(target_arch = "wasm32"))]
 use project_phoenix::headless::{
-    build_headless_app, build_report, parse_args, replay::drive_run, run_sampled, HeadlessArgs,
-    ParseOutcome, ReplayArtifact, HELP,
+    build_headless_app, build_headless_app_with_external_logging, build_report, parse_args,
+    replay::drive_run, run_sampled, run_sampled_with_phases, HeadlessArgs, ParseOutcome,
+    ReplayArtifact, HELP,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use project_phoenix::perf::{self, tick::TickSampler};
@@ -61,6 +62,17 @@ fn main() {
     // was, `--perf-capture` included.
     let started = std::time::Instant::now();
     let mut sampler = None;
+    let mut phase_profiler = if args.perf_capture_path.is_some() && args.record_path.is_none() {
+        match perf::phase_trace::PhaseProfiler::install(&args.log_spec) {
+            Ok(profiler) => Some(profiler),
+            Err(error) => {
+                eprintln!("phoenix-headless: {error}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        None
+    };
     let mut app = if args.record_path.is_some() {
         match record(&args) {
             Ok(app) => app,
@@ -70,7 +82,12 @@ fn main() {
             }
         }
     } else {
-        let mut app = match build_headless_app(&args) {
+        let built = if phase_profiler.is_some() {
+            build_headless_app_with_external_logging(&args)
+        } else {
+            build_headless_app(&args)
+        };
+        let mut app = match built {
             Ok(app) => app,
             Err(e) => {
                 eprintln!("phoenix-headless: {e}");
@@ -80,7 +97,15 @@ fn main() {
         // The collector only exists when it was asked for, so an ordinary run
         // is byte-for-byte the run it always was.
         sampler = args.perf_capture_path.as_ref().map(|_| TickSampler::new());
-        run_sampled(&mut app, args.max_ticks, sampler.as_mut());
+        if let (Some(sampler), Some(profiler)) = (sampler.as_mut(), phase_profiler.as_mut()) {
+            if let Err(error) = run_sampled_with_phases(&mut app, args.max_ticks, sampler, profiler)
+            {
+                eprintln!("phoenix-headless: phase capture failed: {error}");
+                std::process::exit(1);
+            }
+        } else {
+            run_sampled(&mut app, args.max_ticks, sampler.as_mut());
+        }
         app
     };
     let report = build_report(&mut app, &args, started.elapsed().as_secs_f64());
@@ -101,6 +126,18 @@ fn main() {
             .get_resource::<project_phoenix::debug::ConsoleLatencyTracker>()
         {
             perf::console::sample_console_latency(sampler.recorder_mut(), tracker);
+        }
+        if let Some(profiler) = &phase_profiler {
+            let coverage = serde_json::to_string_pretty(profiler.coverage())
+                .expect("phase coverage serializes");
+            if path == "-" {
+                eprintln!("phase-coverage: {coverage}");
+            } else if let Err(error) =
+                std::fs::write(format!("{path}.phases.json"), format!("{coverage}\n"))
+            {
+                eprintln!("phoenix-headless: could not write phase coverage: {error}");
+                std::process::exit(1);
+            }
         }
         let capture = sampler.finish(&args.perf_scenario, perf::profile(perf::tick::RUNTIME));
         let json = capture.to_json();

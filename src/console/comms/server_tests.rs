@@ -2,6 +2,7 @@ use super::*;
 use crate::comms::server::CommsInboxRes;
 use crate::core::messages::CommsMessage;
 use crate::server_app::{LocalShip, Ship, ShipSystemBlackboards};
+use crate::sim_rng::InstallSimRng;
 
 fn msg(id: &str) -> CommsMessage {
     CommsMessage {
@@ -2084,7 +2085,7 @@ fn lift_responses() -> Vec<crate::comms::content::CommsResponse> {
 fn weighted_response_app(seed: u64) -> App {
     let mut app = comms_ai_response_app();
     app.insert_resource(crate::sim_tick::SimTick(0));
-    app.insert_resource(crate::sim_rng::SimRng::new(
+    app.insert_sim_rng(crate::sim_rng::SimRng::new(
         seed,
         crate::sim_rng::SeedSource::Cli,
     ));
@@ -2646,7 +2647,7 @@ fn weighted_fleet_app(seed: u64, local: crate::command_admission::HostSlot) -> A
     .insert_resource(CommsRuntime::default())
     .insert_resource(CommsInboxRes(crate::console::comms::CommsInbox::new()))
     .insert_resource(crate::sim_tick::SimTick(0))
-    .insert_resource(crate::sim_rng::SimRng::new(
+    .insert_sim_rng(crate::sim_rng::SimRng::new(
         seed,
         crate::sim_rng::SeedSource::Cli,
     ))

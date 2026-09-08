@@ -139,6 +139,20 @@ pub fn build_headless_app_with(
     args: &HeadlessArgs,
     sim_overrides: SimRegistrationOverrides,
 ) -> Result<App, BuildError> {
+    build_headless_inner(args, sim_overrides, false)
+}
+
+/// Build only after the external profiling subscriber has been installed.
+/// Ordinary headless/native/browser boots retain their own LogPlugin.
+pub fn build_headless_app_with_external_logging(args: &HeadlessArgs) -> Result<App, BuildError> {
+    build_headless_inner(args, SimRegistrationOverrides::default(), true)
+}
+
+fn build_headless_inner(
+    args: &HeadlessArgs,
+    sim_overrides: SimRegistrationOverrides,
+    external_logging: bool,
+) -> Result<App, BuildError> {
     // When `--side-a` is given, its first entry chooses the player ship
     // (issue #844): resolve it to a template path and use it in place of
     // `--ship` so the preload, `PendingShipConfig`, and `SelectedShipResource`
@@ -225,7 +239,7 @@ pub fn build_headless_app_with(
         world_path: args.world_path.clone(),
         reader: Box::new(crate::world::load::FsReader),
         script_resolver: Box::new(crate::entities::config_cache::production_script_resolver()),
-        // `--deterministic`/`--seed` pins the scheduler to one thread; the seeded
+        // `--deterministic`/`--seed` pins fixed executors and the task pool; the seeded
         // `SimRng` inserted below is the other half. The contract is same binary,
         // same machine.
         single_threaded: args.deterministic,
@@ -235,7 +249,12 @@ pub fn build_headless_app_with(
         // profile can carry, and boot never consults it here.
         native_surface: NativeRenderSurface::Contract,
     };
-    let mut app = crate::boot::build(plan).map_err(map_boot_error)?;
+    let mut app = if external_logging {
+        crate::boot::build_headless_with_external_logging(plan)
+    } else {
+        crate::boot::build(plan)
+    }
+    .map_err(map_boot_error)?;
 
     // Marker-contract warnings (issue #758) and the AI-declaration manifest
     // (issue #885a), both gathered by the preload BEFORE any subscriber existed.
@@ -318,7 +337,7 @@ pub fn build_headless_app_with(
         },
     );
     // After the plugins, so it overrides their OS-seeded `init_resource`.
-    app.insert_resource(sim_rng);
+    crate::sim_rng::install(app.world_mut(), sim_rng);
     app.add_plugins(WorldPlugin);
 
     // Frame clock. `ManualDuration` makes every `Time` clock advance by exactly
@@ -436,7 +455,26 @@ pub fn run(app: &mut App, max_ticks: u64) -> u64 {
 /// observe it and a measured run steps identically to an unmeasured one. The
 /// sampler is passed in rather than created here because the caller owns the
 /// capture the run produces.
-pub fn run_sampled(app: &mut App, max_ticks: u64, mut sampler: Option<&mut TickSampler>) -> u64 {
+pub fn run_sampled(app: &mut App, max_ticks: u64, sampler: Option<&mut TickSampler>) -> u64 {
+    run_sampled_inner(app, max_ticks, sampler, None).expect("no phase producer can fail")
+}
+
+/// Same frame loop with an external span collector drained only after update.
+pub fn run_sampled_with_phases(
+    app: &mut App,
+    max_ticks: u64,
+    sampler: &mut TickSampler,
+    profiler: &mut crate::perf::phase_trace::PhaseProfiler,
+) -> Result<u64, String> {
+    run_sampled_inner(app, max_ticks, Some(sampler), Some(profiler))
+}
+
+fn run_sampled_inner(
+    app: &mut App,
+    max_ticks: u64,
+    mut sampler: Option<&mut TickSampler>,
+    mut profiler: Option<&mut crate::perf::phase_trace::PhaseProfiler>,
+) -> Result<u64, String> {
     app.finish();
     app.cleanup();
     let mut ticks = 0;
@@ -447,11 +485,14 @@ pub fn run_sampled(app: &mut App, max_ticks: u64, mut sampler: Option<&mut TickS
         app.update();
         if let Some(sampler) = sampler.as_deref_mut() {
             sampler.tick_end();
+            if let Some(profiler) = profiler.as_deref_mut() {
+                profiler.drain_after_frame(app, sampler.recorder_mut())?;
+            }
         }
         ticks += 1;
         if app.world().resource::<State<GamePhase>>().get() == &GamePhase::GameOver {
             break;
         }
     }
-    ticks
+    Ok(ticks)
 }

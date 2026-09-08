@@ -45,8 +45,25 @@
 //! `TaskPoolPlugin` to a single thread, but task pools are process-global and
 //! initialised by whichever app builds first. Cargo gives every integration
 //! test file its own process. Do not add unrelated tests here.
+//!
+//! #1400's default-pool parent re-runs the exact guards in fresh child
+//! processes, preserving their assertions and the ordinary pinned tests.
 
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
+
+#[path = "common/default_pool.rs"]
+mod default_pool;
+
+#[test]
+fn default_pool_preserves_schedule_order_guards() {
+    default_pool::run_guards(&[
+        (
+            "the_digest_does_not_move_when_an_inert_system_joins_the_input_set",
+            2,
+        ),
+        ("the_stage_breakdown_agrees_scope_by_scope", 2),
+    ]);
+}
 
 use bevy::prelude::*;
 use project_phoenix::headless::{build_headless_app, run, HeadlessArgs};
@@ -81,7 +98,7 @@ fn args() -> HeadlessArgs {
         world_path: WORLD.into(),
         max_ticks: TICKS,
         seed: Some(SEED),
-        deterministic: true,
+        deterministic: default_pool::deterministic(),
         ..Default::default()
     }
 }
@@ -95,6 +112,7 @@ fn run_world(perturbed: bool) -> u64 {
         app.add_systems(FixedUpdate, inert_probe.in_set(SimSet::Input));
     }
     run(&mut app, args.max_ticks);
+    default_pool::observe(&app, WORLD, SEED);
     world_digest(app.world())
 }
 
@@ -135,6 +153,8 @@ fn the_stage_breakdown_agrees_scope_by_scope() {
     perturbed.add_systems(FixedUpdate, inert_probe.in_set(SimSet::Input));
     run(&mut clean, args.max_ticks);
     run(&mut perturbed, args.max_ticks);
+    default_pool::observe(&clean, WORLD, SEED);
+    default_pool::observe(&perturbed, WORLD, SEED);
 
     let mine = digest_stages(clean.world());
     let theirs = digest_stages(perturbed.world());

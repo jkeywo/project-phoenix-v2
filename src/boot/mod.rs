@@ -59,7 +59,7 @@
 //! must precede any script engine. Whether a broken world *aborts* the build or
 //! merely *blocks activation* downstream is a [`BootProfile`] property.
 
-use bevy::app::{PanicHandlerPlugin, TaskPoolPlugin};
+use bevy::app::{FixedMain, PanicHandlerPlugin, TaskPoolPlugin};
 use bevy::asset::{AssetApp, AssetPlugin};
 use bevy::diagnostic::{DiagnosticsPlugin, FrameCountPlugin};
 use bevy::image::Image;
@@ -311,8 +311,10 @@ pub struct BootPlan {
     /// The sibling-`.rhai` script resolver for this target
     /// ([`crate::entities::config_cache::production_script_resolver`] in production).
     pub script_resolver: Box<dyn ScriptResolver>,
-    /// Pin Bevy's [`TaskPoolPlugin`] to a single thread, so the executor runs
-    /// systems in a fixed order run to run.
+    /// Pin Bevy's [`TaskPoolPlugin`] to one thread and select the actual
+    /// `SingleThreaded` executor for the fixed-family schedules (#1400).
+    /// `StateTransition` is also pinned: Phoenix runs that same schedule at
+    /// both frame and fixed boundaries, so its executor setting is shared.
     ///
     /// A headless `--deterministic`/`--seed` run asks for this — reproducing a
     /// byte-identical digest needs the system execution order fixed, not just
@@ -413,6 +415,18 @@ struct RenderStackApplied;
 /// `wasm_init`) — this function owns only what actually differs per profile plus
 /// the world-ingestion order.
 pub fn build(plan: BootPlan) -> Result<App, BootError> {
+    build_inner(plan, false)
+}
+
+/// The profiling harness owns its process-global subscriber before any cached
+/// system spans are constructed. Only that headless caller omits LogPlugin.
+#[cfg(all(feature = "headless", not(target_arch = "wasm32")))]
+pub(crate) fn build_headless_with_external_logging(plan: BootPlan) -> Result<App, BootError> {
+    assert_eq!(plan.profile, BootProfile::Headless);
+    build_inner(plan, true)
+}
+
+fn build_inner(plan: BootPlan, external_logging: bool) -> Result<App, BootError> {
     let mut app = App::new();
 
     // Command/system errors WARN rather than abort the process (Bevy 0.18's
@@ -456,18 +470,41 @@ pub fn build(plan: BootPlan) -> Result<App, BootError> {
             plan.single_threaded,
         );
     } else {
-        core_plugins(
+        core_plugins_with_logging(
             &mut app,
             plan.profile,
             &plan.log_filter,
             plan.single_threaded,
+            external_logging,
         );
         render_surrogate(&mut app);
     }
 
+    if plan.single_threaded {
+        pin_fixed_executors(&mut app);
+    }
     ingest_world(app.world_mut(), &plan)?;
 
     Ok(app)
+}
+
+/// Change schedule policy, never registrations or ordering edges. These labels
+/// remain the same schedules when later plugins add their simulation systems.
+fn pin_fixed_executors(app: &mut App) {
+    use bevy::ecs::schedule::{ExecutorKind, ScheduleLabel};
+    for label in [
+        FixedMain.intern(),
+        FixedFirst.intern(),
+        FixedPreUpdate.intern(),
+        FixedUpdate.intern(),
+        FixedPostUpdate.intern(),
+        FixedLast.intern(),
+        bevy::state::state::StateTransition.intern(),
+    ] {
+        app.edit_schedule(label, |schedule| {
+            schedule.set_executor_kind(ExecutorKind::SingleThreaded);
+        });
+    }
 }
 
 // ── core_plugins ─────────────────────────────────────────────────────────────
@@ -484,15 +521,27 @@ pub fn build(plan: BootPlan) -> Result<App, BootError> {
 /// `single_threaded` pins the task pool to one thread, for a headless
 /// deterministic run — see [`BootPlan::single_threaded`].
 fn core_plugins(app: &mut App, profile: BootProfile, log_filter: &str, single_threaded: bool) {
+    core_plugins_with_logging(app, profile, log_filter, single_threaded, false);
+}
+
+fn core_plugins_with_logging(
+    app: &mut App,
+    profile: BootProfile,
+    log_filter: &str,
+    single_threaded: bool,
+    external_logging: bool,
+) {
     let task_pool = task_pool_plugin(single_threaded);
-    app.add_plugins((
-        PanicHandlerPlugin,
-        LogPlugin {
+    app.add_plugins(PanicHandlerPlugin);
+    if !external_logging {
+        app.add_plugins(LogPlugin {
             // Our own `LogCat`s gate the `plog!` call sites; this filter governs
             // only bevy-internal events. The caller has already `warn`-prefixed it.
             filter: log_filter.to_string(),
             ..default()
-        },
+        });
+    }
+    app.add_plugins((
         task_pool,
         FrameCountPlugin,
         TimePlugin,
@@ -512,9 +561,9 @@ fn core_plugins(app: &mut App, profile: BootProfile, log_filter: &str, single_th
 /// [`BootPlan::single_threaded`] has exactly one implementation.
 ///
 /// Both arms are a `TaskPoolPlugin`, so a caller can drop it into a plugin
-/// tuple or into `DefaultPlugins::set` without a type dance. A deterministic run
-/// needs a fixed system execution order, which a one-thread pool gives and the
-/// multithreaded default does not.
+/// tuple or into `DefaultPlugins::set` without a type dance. A one-thread pool
+/// alone does not select Bevy's serial executor; `pin_fixed_executors` applies
+/// that distinct schedule policy after either plugin composition path.
 fn task_pool_plugin(single_threaded: bool) -> TaskPoolPlugin {
     if single_threaded {
         TaskPoolPlugin {

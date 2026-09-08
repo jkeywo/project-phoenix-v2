@@ -15,6 +15,11 @@ use crate::weapons::torpedo::{TorpedoConfig, TorpedoSystem};
 /// rather than an inline literal (code review finding #679).
 const NPC_FREQ_MATCH_DELAY: f32 = 2.0;
 
+// A singleton production instance set avoids system-type ambiguity in the
+// weapons harness, which deliberately registers another lifecycle instance.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+struct ProjectileLifecycle;
+
 // ── Resources ─────────────────────────────────────────────────────────────
 
 /// Rendering config for the phaser beam (colour, max range).
@@ -284,7 +289,10 @@ impl Plugin for WeaponsPlugin {
                     // `.after(...)` for the same reason as the beam-tick
                     // chain above: the weapons test harness registers a
                     // second instance of each phase.
-                    (build_torpedo_target_snapshot, tick_torpedo_lifecycle)
+                    (
+                        build_torpedo_target_snapshot,
+                        tick_torpedo_lifecycle.in_set(ProjectileLifecycle),
+                    )
                         .chain()
                         .in_set(crate::sim_sets::SimSet::Physics),
                     // Magazine consumer runs in Physics — reads channel-2 claims
@@ -305,7 +313,14 @@ impl Plugin for WeaponsPlugin {
                     handle_fire_blaster
                         .in_set(crate::sim_sets::SimSet::Physics)
                         .before(tick_blaster_system),
-                    tick_blaster_system.in_set(crate::sim_sets::SimSet::Physics),
+                    // #1400's source-bound simultaneous-fire baseline observes
+                    // blaster -> delayed torpedo -> immediate torpedo in both
+                    // default/pinned executors. Preserve that Projectile ID and
+                    // recoil order. Lifecycle -> ApplyDeferred -> fire already
+                    // exists in the initialized graph; do not bypass it.
+                    tick_blaster_system
+                        .in_set(crate::sim_sets::SimSet::Physics)
+                        .before(ProjectileLifecycle),
                 ),
             )
             .add_systems(

@@ -29,11 +29,12 @@
 //! moved, adopts it and resets every sequence to zero. Every mint after that
 //! point in the step gets `(namespace, that tick, next seq)`.
 //!
-//! Minting takes `&self`, not `&mut self`. The interior `Mutex` is the same
-//! shape `SimRng` uses and for the same reason: a spawn site that had to hold a
-//! `ResMut` would conflict with every other spawn site in the schedule, and the
-//! resulting ambiguity in system ordering is precisely the non-determinism this
-//! module exists to remove.
+//! Ordinary systems use [`LiveMint`] to declare mutable ownership of exactly
+//! one namespace cell. The aggregate observes those same cells at exclusive
+//! snapshot/reset boundaries; [`install`] synchronously binds replacements.
+//! Standalone aggregate minting remains available outside schedule execution.
+//! Mutexes protect memory, not sequence assignment: unordered same-namespace
+//! writers still need a justified order.
 //!
 //! # Namespace is part of the minted id
 //!
@@ -104,7 +105,7 @@
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 /// The declared namespace sequence. **Append only.**
 ///
@@ -309,13 +310,13 @@ impl std::fmt::Display for WorldId {
 /// module docs for why minting takes `&self`.
 #[derive(Resource, Debug)]
 pub struct WorldIdMint {
-    inner: Mutex<MintState>,
+    cells: [Arc<Mutex<NamespaceState>>; IdNamespace::ALL.len()],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct MintState {
+struct NamespaceState {
     tick: u64,
-    next_seq: [u64; IdNamespace::ALL.len()],
+    next_seq: u64,
 }
 
 /// Everything about a [`WorldIdMint`] that can leave the process: the tick it
@@ -323,7 +324,7 @@ struct MintState {
 ///
 /// This is the shape a world snapshot stores (#862), mirroring
 /// [`crate::sim_rng::SimRngState`]'s role for `SimRng` — the mint's own state
-/// is behind a private `Mutex<MintState>`, so [`WorldIdMint::state`] /
+/// is held in private namespace cells, so [`WorldIdMint::state`] /
 /// [`WorldIdMint::from_state`] are the accessor pair that lets a snapshot
 /// resume minting from where a run got to, rather than restarting every
 /// namespace's counter from zero at tick 0.
@@ -338,112 +339,178 @@ pub struct WorldIdMintState {
 
 impl Default for WorldIdMint {
     fn default() -> Self {
-        Self {
-            inner: Mutex::new(MintState {
-                tick: 0,
-                next_seq: [0; IdNamespace::ALL.len()],
-            }),
-        }
+        Self::from_state(WorldIdMintState {
+            tick: 0,
+            next_seq: [0; IdNamespace::ALL.len()],
+        })
     }
 }
 
 impl WorldIdMint {
-    /// Adopt `tick` and reset every sequence, if the tick has moved.
-    ///
-    /// Idempotent within a tick: calling it twice in the same step does not
-    /// re-issue an already-minted sequence number. That matters because ids
-    /// minted outside the fixed schedules (a `Startup` spawn, a frame-driven
-    /// system) carry the last-synced tick and continue its sequence rather than
-    /// restarting it — which is what keeps them unique without needing a
-    /// separate "off-tick" namespace.
+    /// Adopt a changed tick atomically across all namespaces; repeated adoption
+    /// within one tick preserves every counter, including off-tick continuation.
     pub fn begin_tick(&self, tick: u64) {
-        let mut state = self.lock();
-        if state.tick != tick {
-            state.tick = tick;
-            state.next_seq = [0; IdNamespace::ALL.len()];
+        let mut cells = self.lock_all();
+        if cells[0].tick != tick {
+            for cell in &mut cells {
+                cell.tick = tick;
+                cell.next_seq = 0;
+            }
         }
     }
 
-    /// Mint the next id in `namespace` for the tick currently being minted.
+    /// Standalone/exclusive aggregate operation. Ordinary ECS writers use a
+    /// restricted LiveMint handle, not this namespace-selecting aggregate API.
     pub fn mint(&self, namespace: IdNamespace) -> WorldId {
-        let mut state = self.lock();
-        let slot = &mut state.next_seq[namespace.code() as usize];
-        let seq = *slot;
-        // Saturate rather than wrap — see `SEQ_LIMIT`.
-        *slot = (*slot + 1).min(SEQ_LIMIT - 1);
-        WorldId {
-            namespace,
-            tick: state.tick,
-            seq,
-        }
+        mint_cell(&self.cells[namespace.code() as usize], namespace)
     }
-
-    /// The tick this mint is currently issuing ids for.
     pub fn tick(&self) -> u64 {
-        self.lock().tick
+        self.lock_all()[0].tick
     }
-
-    /// How many ids `namespace` has minted for the current tick.
-    ///
-    /// Read by the digest (`headless::digest::fold_run_scope`), which folds
-    /// these counters for the same reason it folds `SimRng`'s stream positions:
-    /// a divergent spawn count is then caught on the tick it happens rather
-    /// than on the tick the next id is minted.
     pub fn minted_so_far(&self, namespace: IdNamespace) -> u64 {
-        self.lock().next_seq[namespace.code() as usize]
-    }
-
-    /// Poisoning is recovered from rather than propagated, for the same reason
-    /// `SimRng::stream` does it: a panic elsewhere has already failed the run,
-    /// and turning it into a second panic inside a spawn path buries the first.
-    fn lock(&self) -> std::sync::MutexGuard<'_, MintState> {
-        self.inner
+        self.cells[namespace.code() as usize]
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(|e| e.into_inner())
+            .next_seq
     }
-
-    /// Capture the mint's exact state: the tick it is minting for and every
-    /// namespace's next sequence number.
-    ///
-    /// The lock is held for the single read of `tick` and `next_seq` together,
-    /// the same coherent-snapshot discipline `SimRng::state` documents (#897):
-    /// there is only one guard here (unlike `SimRng`'s six per-stream guards),
-    /// but the principle is the same — the tick and every sequence must come
-    /// from one instant, not from separate locks that a concurrent `mint` could
-    /// interleave between.
+    fn lock_all(&self) -> Vec<MutexGuard<'_, NamespaceState>> {
+        self.cells
+            .iter()
+            .map(|cell| cell.lock().unwrap_or_else(|e| e.into_inner()))
+            .collect()
+    }
+    /// Lock every actual cell before reading any, preserving a coherent boundary
+    /// snapshot and the existing tick/next_seq serialized shape and ordering.
     pub fn state(&self) -> WorldIdMintState {
-        let state = self.lock();
+        let cells = self.lock_all();
         WorldIdMintState {
-            tick: state.tick,
-            next_seq: state.next_seq,
+            tick: cells[0].tick,
+            next_seq: std::array::from_fn(|i| cells[i].next_seq),
         }
     }
-
-    /// Rebuild a mint from a captured [`WorldIdMintState`], resuming the tick
-    /// and every namespace's sequence exactly where they were.
-    ///
-    /// Unlike [`crate::sim_rng::SimRng::from_state`] this takes no length
-    /// check: `next_seq`'s size is fixed by the [`IdNamespace::ALL`] array type
-    /// itself, so a state whose shape disagrees with the current build fails to
-    /// deserialise rather than needing a runtime rejection here.
     pub fn from_state(state: WorldIdMintState) -> Self {
         Self {
-            inner: Mutex::new(MintState {
-                tick: state.tick,
-                next_seq: state.next_seq,
+            cells: std::array::from_fn(|i| {
+                Arc::new(Mutex::new(NamespaceState {
+                    tick: state.tick,
+                    next_seq: state.next_seq[i],
+                }))
             }),
         }
     }
 }
 
+fn mint_cell(cell: &Mutex<NamespaceState>, namespace: IdNamespace) -> WorldId {
+    let mut state = cell.lock().unwrap_or_else(|e| e.into_inner());
+    let seq = state.next_seq;
+    state.next_seq = (seq + 1).min(SEQ_LIMIT - 1);
+    WorldId {
+        namespace,
+        tick: state.tick,
+        seq,
+    }
+}
+
+/// Physical ownership of one existing namespace cell, folded through the
+/// aggregate once. Neither reset nor another namespace is exposed by this type.
+#[derive(Resource, Debug)]
+pub struct NamespaceMint<const INDEX: usize> {
+    cell: Arc<Mutex<NamespaceState>>,
+}
+pub type EntityMint = NamespaceMint<{ IdNamespace::Entity as usize }>;
+pub type AsteroidMint = NamespaceMint<{ IdNamespace::Asteroid as usize }>;
+pub type MessageMint = NamespaceMint<{ IdNamespace::Message as usize }>;
+pub type ProjectileMint = NamespaceMint<{ IdNamespace::Projectile as usize }>;
+impl<const INDEX: usize> bevy::prelude::FromWorld for NamespaceMint<INDEX> {
+    fn from_world(world: &mut bevy::prelude::World) -> Self {
+        Self {
+            cell: world.resource::<WorldIdMint>().cells[INDEX].clone(),
+        }
+    }
+}
+impl<const INDEX: usize> NamespaceMint<INDEX> {
+    pub fn mint(&self) -> WorldId {
+        mint_cell(&self.cell, IdNamespace::ALL[INDEX])
+    }
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct LiveMint<'w, const INDEX: usize> {
+    mint: Option<ResMut<'w, NamespaceMint<INDEX>>>,
+    aggregate: Option<Res<'w, WorldIdMint>>,
+}
+impl<const INDEX: usize> LiveMint<'_, INDEX> {
+    pub fn as_deref(&self) -> Option<&NamespaceMint<INDEX>> {
+        match (&self.aggregate, &self.mint) {
+            (None, None) => None,
+            (Some(aggregate), Some(mint)) => {
+                assert!(
+                    Arc::ptr_eq(&aggregate.cells[INDEX], &mint.cell),
+                    "stale namespace mint: use world_id::install"
+                );
+                Some(mint)
+            }
+            _ => panic!("incomplete namespace mint installation: use world_id::install"),
+        }
+    }
+}
+
+pub fn install(world: &mut bevy::prelude::World, mint: WorldIdMint) {
+    macro_rules! cell {
+        ($kind:ident, $namespace:ident) => {
+            world.insert_resource($kind {
+                cell: mint.cells[IdNamespace::$namespace as usize].clone(),
+            });
+        };
+    }
+    cell!(EntityMint, Entity);
+    cell!(AsteroidMint, Asteroid);
+    cell!(MessageMint, Message);
+    cell!(ProjectileMint, Projectile);
+    world.insert_resource(mint);
+}
+
+pub trait InstallWorldIdMint {
+    fn insert_world_id_mint(&mut self, mint: WorldIdMint) -> &mut Self;
+}
+impl InstallWorldIdMint for bevy::prelude::World {
+    fn insert_world_id_mint(&mut self, mint: WorldIdMint) -> &mut Self {
+        install(self, mint);
+        self
+    }
+}
+impl InstallWorldIdMint for bevy::prelude::App {
+    fn insert_world_id_mint(&mut self, mint: WorldIdMint) -> &mut Self {
+        install(self.world_mut(), mint);
+        self
+    }
+}
+
+/// The argument namespace is checked, never used to widen the handle's access.
+/// Keeping it explicit at call sites preserves the existing authored intention.
+pub fn mint_live_id_with<const INDEX: usize>(
+    mint: Option<&NamespaceMint<INDEX>>,
+    namespace: IdNamespace,
+) -> String {
+    assert_eq!(
+        namespace,
+        IdNamespace::ALL[INDEX],
+        "namespace outside live mint capability"
+    );
+    match mint {
+        Some(mint) => mint.mint().render(),
+        None => fallback_mint().mint(namespace).render(),
+    }
+}
 /// Adopt the current [`SimTick`](crate::sim_tick::SimTick) at the top of every
 /// fixed step.
 ///
 /// `FixedFirst`, so every sim system in the step below it mints against the
-/// index of the step it is actually running in. `Res`, not `ResMut`, because
-/// the mint's state lives behind its own lock — this system therefore conflicts
-/// with nothing and never constrains the schedule.
-pub fn sync_world_id_mint(tick: Res<crate::sim_tick::SimTick>, mint: Res<WorldIdMint>) {
+/// index of the step it is actually running in. The reset changes the mint's
+/// authoritative counters, so `ResMut` exposes that write to Bevy even though
+/// `begin_tick` uses interior mutability. The reset remains idempotent within
+/// a tick and stays ahead of the FixedUpdate allocation sites (issue #1400).
+pub fn sync_world_id_mint(tick: Res<crate::sim_tick::SimTick>, mint: ResMut<WorldIdMint>) {
     mint.begin_tick(tick.0);
 }
 
@@ -467,7 +534,7 @@ fn fallback_mint() -> &'static WorldIdMint {
 /// Mint one id, in string form, from an optional mint resource.
 ///
 /// This is what call sites use. It is the twin of `sim_rng::with_stream`: take
-/// `Option<Res<WorldIdMint>>`, pass `.as_deref()`, get a deterministic id.
+/// Standalone callers may pass an aggregate. Ordinary ECS writers instead use `LiveMint` and `mint_live_id_with`.
 pub fn mint_id_with(mint: Option<&WorldIdMint>, namespace: IdNamespace) -> String {
     match mint {
         Some(m) => m.mint(namespace).render(),
@@ -758,5 +825,81 @@ mod tests {
                 .mint(IdNamespace::Entity),
             WorldId::new(IdNamespace::Entity, 42, 0)
         );
+    }
+}
+
+#[cfg(test)]
+mod live_namespace_tests {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+    use bevy::prelude::World;
+
+    fn entity(mint: LiveMint<'_, { IdNamespace::Entity as usize }>) -> String {
+        mint_live_id_with(mint.as_deref(), IdNamespace::Entity)
+    }
+    fn projectile(mint: LiveMint<'_, { IdNamespace::Projectile as usize }>) -> String {
+        mint_live_id_with(mint.as_deref(), IdNamespace::Projectile)
+    }
+
+    #[test]
+    fn live_namespaces_share_counters_and_follow_atomic_tick_reset() {
+        let mut world = World::new();
+        install(&mut world, WorldIdMint::default());
+        let reference = WorldIdMint::default();
+        for tick in [0, 0, 42, 42, 43] {
+            world.resource::<WorldIdMint>().begin_tick(tick);
+            reference.begin_tick(tick);
+            assert_eq!(
+                world.run_system_once(projectile).unwrap(),
+                reference.mint(IdNamespace::Projectile).render()
+            );
+            assert_eq!(
+                world.run_system_once(entity).unwrap(),
+                reference.mint(IdNamespace::Entity).render()
+            );
+            assert_eq!(world.resource::<WorldIdMint>().state(), reference.state());
+        }
+    }
+
+    #[test]
+    fn snapshot_restore_and_checkpoint_rollback_rebind_the_next_identity() {
+        let mut world = World::new();
+        install(&mut world, WorldIdMint::default());
+        world.resource::<WorldIdMint>().begin_tick(42);
+        world.run_system_once(entity).unwrap();
+        let checkpoint = crate::snapshot::capture(&world);
+        world.run_system_once(projectile).unwrap();
+        world.run_system_once(entity).unwrap();
+        let progressed = crate::snapshot::capture(&world);
+        for snapshot in [&progressed, &checkpoint] {
+            let expected = WorldIdMint::from_state(snapshot.mint.clone().unwrap());
+            crate::snapshot::restore(&mut world, snapshot);
+            assert_eq!(
+                world.run_system_once(entity).unwrap(),
+                expected.mint(IdNamespace::Entity).render()
+            );
+            assert_eq!(
+                world.run_system_once(projectile).unwrap(),
+                expected.mint(IdNamespace::Projectile).render()
+            );
+            assert_eq!(world.resource::<WorldIdMint>().state(), expected.state());
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "incomplete namespace mint installation")]
+    fn aggregate_without_live_namespace_cannot_fall_back() {
+        let mut world = World::new();
+        world.insert_resource(WorldIdMint::default());
+        world.run_system_once(entity).unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "stale namespace mint")]
+    fn replacing_only_aggregate_cannot_mint_from_old_counter() {
+        let mut world = World::new();
+        install(&mut world, WorldIdMint::default());
+        world.insert_resource(WorldIdMint::default());
+        world.run_system_once(entity).unwrap();
     }
 }

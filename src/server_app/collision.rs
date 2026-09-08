@@ -402,22 +402,18 @@ pub(crate) fn handle_collisions(
 
         let mut ship_destroyed = false;
         let hull_applied = if total_hull > 0.0 {
-            crate::sim_rng::with_stream(
-                ambient.rng.as_deref(),
-                crate::sim_rng::SimStream::CollisionDamage,
-                |rng| {
-                    let (applied, destroyed) = apply_hull_damage(&mut hull_comp.0, total_hull, rng);
-                    // Distribute the same absorbed amount across the per-arc
-                    // hull pool (issue #514) so arc tier tracking follows
-                    // overall hull damage. Skipped when the ship has no
-                    // `EntityShipArcHull` (NPCs).
-                    if let Some(ref mut arc_hull) = arc_hull_opt {
-                        arc_hull.0.apply_damage(applied, rng);
-                    }
-                    ship_destroyed = destroyed;
-                    applied
-                },
-            )
+            crate::sim_rng::with_live_stream(ambient.rng.as_deref(), |rng| {
+                let (applied, destroyed) = apply_hull_damage(&mut hull_comp.0, total_hull, rng);
+                // Distribute the same absorbed amount across the per-arc
+                // hull pool (issue #514) so arc tier tracking follows
+                // overall hull damage. Skipped when the ship has no
+                // `EntityShipArcHull` (NPCs).
+                if let Some(ref mut arc_hull) = arc_hull_opt {
+                    arc_hull.0.apply_damage(applied, rng);
+                }
+                ship_destroyed = destroyed;
+                applied
+            })
         } else {
             0.0
         };

@@ -765,7 +765,11 @@ fn comms_activity_uses_durable_audience_for_applied_stale_and_grantless_refusals
         .init_resource::<LocalGmActionRefusals>()
         .init_resource::<crate::comms::server::CommsInboxRes>()
         .init_resource::<crate::comms::server::CommsRuntime>()
-        .init_resource::<crate::world_id::WorldIdMint>();
+        .init_resource::<crate::world_id::WorldIdMint>()
+        .init_resource::<crate::world_id::EntityMint>()
+        .init_resource::<crate::world_id::AsteroidMint>()
+        .init_resource::<crate::world_id::MessageMint>()
+        .init_resource::<crate::world_id::ProjectileMint>();
     app.world_mut()
         .resource_mut::<crate::world::config::WorldConfig>()
         .gm_comms_routes = vec![crate::gm_comms::GmCommsRoute {

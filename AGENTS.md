@@ -88,6 +88,10 @@ cargo fmt -- --check                           # CI: test job, step 1
 # ignored and compiles not one extra line.
 cargo clippy --workspace --all-targets \
   --features server,viewer,debug,headless,perf,host,capture -- -D warnings   # CI: test job, step 2
+# Before the native suite, set PHOENIX_AMBIGUITY_BASE_REF to the verified
+# pre-change/local-main commit (PowerShell: $env:PHOENIX_AMBIGUITY_BASE_REF = '<sha>').
+# The ambiguity ratchet has no implicit HEAD/self-comparison fallback. CI sets
+# the PR base/push-before SHA; first ledger introduction needs full local history.
 cargo test --workspace --features headless     # CI: test job, step 3
 npm run debug-surfaces:check                   # CI: editor-test job (Rust -> JS drift)
 npx vitest run                                 # CI: editor-test job (tests/client/*.test.js)

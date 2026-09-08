@@ -8,6 +8,7 @@ use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, Target, WorldRe
 use crate::modifiers::ShipModifiers;
 use crate::server_app::{ShipImpulse, SimOutbox};
 use crate::ship::damage::SystemHull;
+use crate::sim_rng::InstallSimRng;
 use crate::simmath;
 
 #[derive(Resource, Default)]
@@ -5350,7 +5351,7 @@ fn an_unjittered_bank_does_not_move_the_beam_cycle_jitter_stream() {
     use crate::sim_rng::{SimRng, SimStream};
 
     let mut app = test_app();
-    app.insert_resource(SimRng::new(4242, crate::sim_rng::SeedSource::Cli));
+    app.insert_sim_rng(SimRng::new(4242, crate::sim_rng::SeedSource::Cli));
     let npc_uuid = "00000000-0000-0000-0000-0000000009b1";
     let target_uuid_str = "00000000-0000-0000-0000-0000000009b2";
     let (npc_entity, _target) = setup_npc_shooter(&mut app, npc_uuid, target_uuid_str, 0.0, -10.0);

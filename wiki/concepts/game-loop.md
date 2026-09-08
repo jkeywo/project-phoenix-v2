@@ -2,8 +2,8 @@
 title: Game Loop
 type: concept
 tags: [loop, ticks, simulation, rates, determinism, lockstep, fleet]
-sources: [src/server_app/registration.rs, src/sim_tick.rs, src/ai/cadence.rs, src/command_admission/log.rs, src/gm_action.rs, src/lockstep/mod.rs, src/lockstep/session.rs, src/ship/physics.rs, src/server/bridge.rs, gui/host-actions.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/server-settings.js, AGENTS.md]
-updated: 2026-09-01
+sources: [src/headless/determinism_audit.rs, tests/fixed_update_ambiguities.rs, tests/registration_order_determinism.rs, docs/fixed-update-ambiguity-audit.md, src/server_app/registration.rs, src/sim_tick.rs, src/ai/cadence.rs, src/command_admission/log.rs, src/gm_action.rs, src/lockstep/mod.rs, src/lockstep/session.rs, src/ship/physics.rs, src/server/bridge.rs, gui/host-actions.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/server-settings.js, AGENTS.md, src/boot/mod.rs, tests/fixed_executor_policy.rs, src/headless/args.rs, src/native_host/app.rs, tests/pool_equivalence.rs, docs/pool-equivalence-proof.md]
+updated: 2026-09-07
 ---
 
 # Game Loop
@@ -14,6 +14,34 @@ the whole `SimSet` chain is configured in
 Bevy's `FixedUpdate`, stepping zero or more whole ticks per frame at the
 TOML-authored `[global] sim_tick_hz` (serde default 60 Hz). `SimTick`
 (`src/sim_tick.rs`) counts the steps.
+
+## FixedUpdate ambiguity audit
+
+The #1400 census helper in `src/headless/determinism_audit.rs` initializes the
+ordinary headless schedule without running it and reports Bevy's unordered
+conflicts using full system and access names, including exclusive World access
+and duplicate instance counts. `tests/fixed_update_ambiguities.rs` owns the
+isolated test binary, actual inert-registration comparison and trusted-history
+ledger ratchet. It reuses `tests/registration_order_determinism.rs` for the
+existing long-run digest perturbation guard. Operating instructions and CI base
+selection are in `docs/fixed-update-ambiguity-audit.md`.
+
+The checked-in initial allowance is the original 1,968-row capture. After the
+typed stream/namespace changes and evidenced Projectile order, the live census
+contains 1,929 rows: no additions and 39 removals. Retained debt is not a claim
+that every unordered pair is commutative.
+
+Deterministic native/headless boot uses `BootPlan::single_threaded` in
+`src/boot/mod.rs` to select Bevy's actual `SingleThreaded` executor on
+FixedFirst, FixedPreUpdate, FixedUpdate, FixedPostUpdate, FixedLast and FixedMain,
+alongside the existing one-thread task pool. It also pins StateTransition:
+Phoenix runs that same schedule at frame and fixed boundaries, and its executor
+setting is shared. Normal boot and the browser adapters leave the policy off;
+frame Update retains its default executor. `tests/fixed_executor_policy.rs`
+checks the complete headless and native Contract boot schedules in separate
+processes, including CLI `--deterministic`, implied `--seed` and normal modes.
+This #1400 slice does not establish default-pool digest equivalence; native
+execution and any observed fixture changes still require validation.
 
 ## Per-frame work (frame-rate–driven)
 
@@ -169,3 +197,12 @@ rendered frames and checking that `wasm_sim_tick()` does not advance.
 
 - [Ship Physics](./ship-physics.md) — what runs each helm tick
 - [Message Flow](./message-flow.md)
+
+## Default-pool proof
+
+The own-binary test in `tests/pool_equivalence.rs` compares two fresh default-pool
+runs and one explicitly deterministic run at the same Combat Test boundary used
+by `native_headless_digest`. This proof and the default-pool perturbation/resume
+arms passed the focused post-split run. They preserve the existing pinned guards
+and do not establish unrestricted scheduler commutativity. See
+[the proof scope](../../docs/pool-equivalence-proof.md).

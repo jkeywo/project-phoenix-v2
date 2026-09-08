@@ -193,6 +193,10 @@ pub fn register_sim_tick(app: &mut App) {
     // `FixedFirst`, so every sim system in the step mints against the index of
     // the step it is running in (see `world_id::sync_world_id_mint`).
     app.init_resource::<crate::world_id::WorldIdMint>()
+        .init_resource::<crate::world_id::EntityMint>()
+        .init_resource::<crate::world_id::AsteroidMint>()
+        .init_resource::<crate::world_id::MessageMint>()
+        .init_resource::<crate::world_id::ProjectileMint>()
         .add_systems(FixedFirst, crate::world_id::sync_world_id_mint);
 }
 
@@ -407,7 +411,7 @@ mod tests {
 
         /// Shaped exactly like `server_app::spawn_game_start_entities`
         /// minting the player ship's `WorldId` from `OnEnter`.
-        fn mint_player_ship(mint: Res<WorldIdMint>, mut minted: ResMut<Minted>) {
+        fn mint_player_ship(mint: ResMut<WorldIdMint>, mut minted: ResMut<Minted>) {
             minted.0 = Some(mint.mint(IdNamespace::Entity));
         }
 

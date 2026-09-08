@@ -58,6 +58,10 @@
 //! uses (`src/server/bridge.rs`), reused rather than re-invented: a withheld
 //! tick simply never starts.
 
+#[cfg(test)]
+use crate::sim_rng::InstallSimRng;
+#[cfg(test)]
+use crate::world_id::InstallWorldIdMint;
 use bevy::prelude::*;
 
 use crate::command_admission::log::{
@@ -1165,10 +1169,13 @@ pub fn join_fleet(world: &mut World, roster: FleetRoster, delay: u64) -> bool {
         // whose digest folds every stream position. Fleet activation therefore
         // requires the world's canonical authored seed and replaces the random
         // resource before any participant frame can be sealed.
-        world.insert_resource(crate::sim_rng::SimRng::new(
-            authored_seed.expect("checked above"),
-            crate::sim_rng::SeedSource::World,
-        ));
+        crate::sim_rng::install(
+            world,
+            crate::sim_rng::SimRng::new(
+                authored_seed.expect("checked above"),
+                crate::sim_rng::SeedSource::World,
+            ),
+        );
         if let Some(mint) = world.get_resource::<crate::world_id::WorldIdMint>() {
             mint.begin_tick(FLEET_ACTIVATION_TICK);
         }
@@ -2455,8 +2462,8 @@ mod tests {
             config.global.seed = Some(77);
             app.insert_resource(config);
             app.insert_resource(crate::sim_tick::SimTick(bootstrap_tick));
-            app.insert_resource(SimRng::new(bootstrap_rng, SeedSource::World));
-            app.insert_resource(WorldIdMint::default());
+            app.insert_sim_rng(SimRng::new(bootstrap_rng, SeedSource::World));
+            app.insert_world_id_mint(WorldIdMint::default());
             let immediate = app
                 .world()
                 .resource::<WorldIdMint>()
@@ -2511,6 +2518,41 @@ mod tests {
             apps[1].world().resource::<WorldIdMint>().state(),
             "the same post-activation mint state produces identical GameStart ids"
         );
+
+        use bevy::ecs::system::RunSystemOnce;
+        fn first_live_draw(
+            rng: crate::sim_rng::LiveStream<
+                { crate::sim_rng::SimStream::BeamCycleJitter as usize },
+            >,
+        ) -> u32 {
+            crate::sim_rng::with_live_stream(rng.as_deref(), |stream| stream.next_u32())
+        }
+        for app in &mut apps {
+            let reference = SimRng::new(77, SeedSource::World);
+            assert_eq!(
+                app.world_mut().run_system_once(first_live_draw).unwrap(),
+                reference
+                    .stream(crate::sim_rng::SimStream::BeamCycleJitter)
+                    .next_u32(),
+                "first live draw must use the adopted authored seed, not bootstrap handles"
+            );
+            let continued = app.world().resource::<SimRng>().state();
+            let same_roster = app.world().resource::<FleetRoster>().clone();
+            assert!(join_fleet(app.world_mut(), same_roster, 6));
+            assert_eq!(
+                app.world().resource::<SimRng>().state(),
+                continued,
+                "same-roster adoption must not reset any stream"
+            );
+            assert_eq!(
+                app.world_mut().run_system_once(first_live_draw).unwrap(),
+                reference
+                    .stream(crate::sim_rng::SimStream::BeamCycleJitter)
+                    .next_u32(),
+                "repeated adoption continues the existing live cell"
+            );
+            assert_eq!(app.world().resource::<SimRng>().state(), reference.state());
+        }
     }
 
     #[test]

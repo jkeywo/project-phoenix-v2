@@ -92,6 +92,7 @@
 //! output moves those numbers; that is a deliberate, reviewed re-bless, not a
 //! failure to paper over.
 
+use crate::sim_rng::InstallSimRng;
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
@@ -100,9 +101,9 @@ use crate::entities::spawner::{EntitySystemHull, EntityUuid};
 use crate::ship::damage::SystemHull;
 use crate::ship::state::{ShipPhysics, ShipRedAlert};
 use crate::sim_digest::{world_digest, DigestLedger};
-use crate::sim_rng::{SeedSource, SimRng, SimStream};
+use crate::sim_rng::{SeedSource, SimRng};
 use crate::sim_tick::{sim_tick_period, SimTick};
-use crate::world_id::{mint_id_with, IdNamespace, WorldIdMint};
+use crate::world_id::{mint_live_id_with, EntityMint, IdNamespace, LiveMint};
 
 // ── The pinned shape of the run ──────────────────────────────────────────────
 
@@ -251,7 +252,7 @@ fn probe_hull() -> SystemHull {
 /// `commands` rather than direct world access so the start-up spawns and the
 /// mid-run spawns go through the identical path — a mid-run mint that used a
 /// different code path would be proving something else.
-fn spawn_probe_ship(commands: &mut Commands, mint: Option<&WorldIdMint>, slot: usize) {
+fn spawn_probe_ship(commands: &mut Commands, mint: Option<&EntityMint>, slot: usize) {
     // Positions and headings come from `simmath` over the slot index, so the
     // *initial conditions themselves* are a cross-target claim rather than a
     // table of literals both targets trivially agree on.
@@ -267,7 +268,7 @@ fn spawn_probe_ship(commands: &mut Commands, mint: Option<&WorldIdMint>, slot: u
     let yaw = crate::simmath::atan2(x, z);
 
     commands.spawn((
-        EntityUuid(mint_id_with(mint, IdNamespace::Entity)),
+        EntityUuid(mint_live_id_with(mint, IdNamespace::Entity)),
         ProbeSlot(slot),
         Transform::from_xyz(x, 0.0, z),
         GlobalTransform::default(),
@@ -323,7 +324,7 @@ fn spawn_probe_hazard(commands: &mut Commands) {
     ));
 }
 
-fn probe_startup(mut commands: Commands, mint: Option<Res<WorldIdMint>>) {
+fn probe_startup(mut commands: Commands, mint: LiveMint<'_, { IdNamespace::Entity as usize }>) {
     spawn_probe_hazard(&mut commands);
     for slot in 0..INITIAL_SHIPS {
         spawn_probe_ship(&mut commands, mint.as_deref(), slot);
@@ -362,7 +363,7 @@ fn probe_apply_command_log(tick: Res<SimTick>, mut ships: Query<(&ProbeSlot, &mu
 fn probe_spawn_scheduled(
     tick: Res<SimTick>,
     mut commands: Commands,
-    mint: Option<Res<WorldIdMint>>,
+    mint: LiveMint<'_, { IdNamespace::Entity as usize }>,
     existing: Query<&ProbeSlot>,
 ) {
     let Some(index) = SPAWN_TICKS.iter().position(|t| *t == tick.0) else {
@@ -454,7 +455,10 @@ fn probe_steer(
 /// that had regressed.
 fn probe_resolve_contacts(
     context: ReadRapierContext,
-    sim_rng: Option<Res<SimRng>>,
+    sim_rng: crate::sim_rng::LiveStream<
+        '_,
+        { crate::sim_rng::SimStream::CollisionDamage as usize },
+    >,
     bodies: Query<(
         Entity,
         Option<&EntityUuid>,
@@ -524,7 +528,7 @@ fn probe_resolve_contacts(
             continue;
         };
         alert.0 = true;
-        crate::sim_rng::with_stream(sim_rng.as_deref(), SimStream::CollisionDamage, |rng| {
+        crate::sim_rng::with_live_stream(sim_rng.as_deref(), |rng| {
             hull.0.apply_damage(0.9, rng);
         });
     }
@@ -559,7 +563,7 @@ pub fn build_probe_app(cfg: &ProbeConfig) -> App {
     })
     .add_plugins(RapierPhysicsPlugin::<()>::default().in_fixed_schedule());
 
-    app.insert_resource(SimRng::new(cfg.seed, SeedSource::Cli));
+    app.insert_sim_rng(SimRng::new(cfg.seed, SeedSource::Cli));
     app.insert_resource(ProbeMutation(cfg.mutate_at));
 
     app.configure_sets(

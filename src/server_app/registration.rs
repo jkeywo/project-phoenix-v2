@@ -164,8 +164,8 @@ fn register_sim_set_plugins(app: &mut App, opts: SimPluginOptions) {
         registrars.push(probe_b);
     }
     if let RegistrationOrder::Shuffled(seed) = opts.registration_order {
-        use rand::seq::SliceRandom;
         use rand::SeedableRng;
+        use rand::seq::SliceRandom;
         let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
         registrars.shuffle(&mut rng);
     }
@@ -505,6 +505,19 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 StateClass::Folded,
                 "world-id-mint-state",
             )
+            // Physical access handles inherit existing owners; the canonical
+            // StateCensus entries and authoritative fold boundary stay unchanged.
+            .declare_state_alias::<crate::sim_rng::CollisionRng, crate::sim_rng::SimRng>()
+            .declare_state_alias::<crate::sim_rng::RegionRng, crate::sim_rng::SimRng>()
+            .declare_state_alias::<crate::sim_rng::BeamRng, crate::sim_rng::SimRng>()
+            .declare_state_alias::<crate::sim_rng::TorpedoRng, crate::sim_rng::SimRng>()
+            .declare_state_alias::<crate::sim_rng::BlasterRng, crate::sim_rng::SimRng>()
+            .declare_state_alias::<crate::sim_rng::BeamCycleRng, crate::sim_rng::SimRng>()
+            .declare_state_alias::<crate::sim_rng::CommsChoiceRng, crate::sim_rng::SimRng>()
+            .declare_state_alias::<crate::world_id::EntityMint, crate::world_id::WorldIdMint>()
+            .declare_state_alias::<crate::world_id::AsteroidMint, crate::world_id::WorldIdMint>()
+            .declare_state_alias::<crate::world_id::MessageMint, crate::world_id::WorldIdMint>()
+            .declare_state_alias::<crate::world_id::ProjectileMint, crate::world_id::WorldIdMint>()
             .declare_state::<GamePhase>(StateClass::Folded, "game-phase-state")
             .declare_state::<GameOverReason>(StateClass::Folded, "game-over-reason-state")
             // The structured post-mission report (issue #1344). Authoritative,
@@ -986,6 +999,13 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         // an unconfigured app (browser host, unit tests) behaves as it always did;
         // headless overrides it with a configured one via `insert_resource`.
         .init_resource::<crate::sim_rng::SimRng>()
+        .init_resource::<crate::sim_rng::CollisionRng>()
+        .init_resource::<crate::sim_rng::RegionRng>()
+        .init_resource::<crate::sim_rng::BeamRng>()
+        .init_resource::<crate::sim_rng::TorpedoRng>()
+        .init_resource::<crate::sim_rng::BlasterRng>()
+        .init_resource::<crate::sim_rng::BeamCycleRng>()
+        .init_resource::<crate::sim_rng::CommsChoiceRng>()
         .insert_resource(crate::entities::config_cache::FactionRegistryResource(
             crate::entities::config_cache::get_faction_registry(),
         ))

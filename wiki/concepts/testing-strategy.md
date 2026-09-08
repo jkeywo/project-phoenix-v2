@@ -2,7 +2,7 @@
 title: Testing Strategy
 type: concept
 tags: [tests, rust, javascript, playwright, pasm, ci]
-sources: [AGENTS.md, .github/workflows/ci.yml, tests/client/, tests/smoke/, tests/headless_runner.rs, src/core/codec_tests.rs, scripts/prepare-gm-live-event.mjs, docs/acceptance/1320-gm-live-event.md]
+sources: [AGENTS.md, .github/workflows/ci.yml, tests/client/, tests/smoke/, tests/headless_runner.rs, src/core/codec_tests.rs, scripts/prepare-gm-live-event.mjs, docs/acceptance/1320-gm-live-event.md, src/perf/phase.rs, src/perf/phase_trace.rs, src/headless/app.rs, src/bin/phoenix_headless.rs, tests/phase_profiling.rs, docs/phase-timing-reduction.md, tests/common/default_pool.rs, docs/default-pool-perturbations.md, src/server_app/components.rs]
 updated: 2026-09-07
 ---
 
@@ -32,6 +32,14 @@ idle-crew fixture takes Tactical designation before its operate objective
 opens, so Backfill cannot complete a deliberately deferred rescue. Civilian
 loss fixtures leave the traffic on its authored lanes while protecting only
 the observing crew. These setup boundaries live in `tests/headless_runner.rs`.
+
+The archetype-order, schedule-order, registration-order and snapshot-resume
+binaries retain their pinned guards and add `default_pool_` parents for #1400.
+`tests/common/default_pool.rs` runs exact original guards in fresh child
+processes, checking actual compute-worker count, executor, seed, tick and
+authoritative digest. The focused post-split run passed these default-pool
+and retained pinned guards. Scope, continuation limits and the targeted command
+are in [Default-pool perturbations](../../docs/default-pool-perturbations.md).
 
 ## Client JavaScript
 
@@ -99,3 +107,52 @@ there is no separate logging duel or claim that it captures emitted log text.
 - [PASM Runtime](./pasm-runtime.md)
 - [Build and Deployment](./build-and-deployment.md)
 - [Codec Seam](./codec-seam.md)
+
+## Observed phase timing
+
+The headless perf-capture path uses `src/perf/phase_trace.rs` to observe actual
+FixedUpdate/system spans outside App and `src/perf/phase.rs` for pure reduction.
+Per-phase execution intervals and an adjacent coverage report keep unattributed
+work visible. `tests/phase_profiling.rs` passed real coverage, binary-path and
+measured/unmeasured state/census checks on the preserved declaration-stage source;
+the phase implementation is unchanged in the post-split candidate.
+See [the scope and metric meanings](../../docs/phase-timing-reduction.md).
+
+## Interior-write access proof
+
+The component module's interior_write_access_tests initialize the actual damage
+systems and GM reducer, checking Bevy's resource-write metadata. Torpedo lifecycle
+exposes RNG and mint writes; blaster hits and collisions expose only RNG writes.
+The GM reducer exposes its Comms mint, while direct effects retain event-local
+RNG reads. These checks do not execute a mission or certify an unordered pair as
+commutative. The post-split census and bounded continuation guards passed.
+
+The instance-level FixedUpdate diagnostic in
+`src/headless/determinism_audit/graph.rs` exports authored and flattened edges,
+nested membership and actual deferred barriers without running the inspection
+App. See `docs/fixed-update-ambiguity-audit.md` for the capture command and its
+capture-local identity limits. Both structural tests and the actual capture passed.
+
+#1400's named live RNG handles keep the existing serialized aggregate while
+making scheduler writes specific to actual generator cells. `sim_rng::install`
+is the synchronous seed/restore boundary; `LiveStream` refuses missing or stale
+seeded handles. `sim_rng::live_stream_tests` covers actual first-draw restoration,
+checkpoint rollback and aggregate coherence; the census test keeps same-stream
+conflicts and checks different-stream independence. The focused post-split
+run below validates this source; prior graph receipts retain its base.
+
+The stream and namespace handles have eleven explicit full-type-path ownership
+aliases: seven to `SimRng`, four to `WorldIdMint`. They add no canonical
+`StateCensus.entries()` rows. Alias lookup inherits the existing owner class and
+PASM identity and rejects missing owners, chains, shadowing and conflicting
+bindings. The enumeration guard recognizes only exact physical aliases, so an
+undeclared instantiation still fails classification. Typed mutable scheduler
+access and the shared snapshot/digest cells are unchanged.
+
+The post-split focused native run passed 69 tests, including actual access,
+first-draw/mint restore and rollback, Fleet re-adoption, native runtime load,
+Projectile identity/recoil/continuation, pool equivalence and perturbation/resume
+guards. The initialized graph has 1,929 complete conflict rows: zero added and
+39 removed against the original 1,968 allowance. The diagnostic owner-alias
+correction passed six registry tests and all four enumeration tests; the integrator owns
+final combined gates.

@@ -788,6 +788,7 @@ dependencies = [
  "slotmap",
  "smallvec",
  "thiserror 2.0.18",
+ "tracing",
  "variadics_please",
 ]
 
@@ -5062,6 +5063,7 @@ name = "project-phoenix"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_ecs",
  "bevy_rapier3d",
  "console_error_panic_hook",
  "crossbeam-channel",
@@ -5069,6 +5071,7 @@ dependencies = [
  "getrandom 0.3.4",
  "glam 0.30.10",
  "image",
+ "indexmap",
  "js-sys",
  "libm",
  "nalgebra",

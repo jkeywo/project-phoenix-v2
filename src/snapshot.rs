@@ -5504,13 +5504,13 @@ fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut
 
     if let Some(state) = snapshot.rng.clone() {
         match SimRng::from_state(state) {
-            Some(rng) => world.insert_resource(rng),
+            Some(rng) => crate::sim_rng::install(world, rng),
             None => report.gaps.push(RestoreGap::RngStreamsMoved),
         }
     }
 
     if let Some(state) = snapshot.mint.clone() {
-        world.insert_resource(WorldIdMint::from_state(state));
+        crate::world_id::install(world, WorldIdMint::from_state(state));
     }
 
     let mut restored_phase_entry: Option<GamePhase> = None;

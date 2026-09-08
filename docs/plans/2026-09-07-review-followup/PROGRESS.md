@@ -1,5 +1,9 @@
 # Execution record
 
+The original batch's ledger is retained below. See [FOLLOWUPS.md](FOLLOWUPS.md)
+for the 8 September implementation, new controlled measurements, native UI
+acceptance and remaining combined-integration work.
+
 User approved implementation on 7 September 2026. Integration worktree: codex/review-followup-plan. Code, documentation, profiling evidence and required validation are all part of this batch; the conditional experiments retain the stopping criteria in the approved plan.
 
 ## Current work

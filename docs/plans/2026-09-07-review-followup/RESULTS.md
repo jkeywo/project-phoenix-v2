@@ -1,5 +1,10 @@
 # Review and profiling results — 7 September 2026
 
+This is the original batch's historical result. The subsequent streaming fixes,
+three-console raster measurements and native UI follow-ups are recorded in
+[FOLLOWUPS.md](FOLLOWUPS.md); its evidence supersedes the unresolved follow-up
+status below without replacing these frozen baselines.
+
 The controlled captures demonstrate unnecessary repeated HUD work and support P2's revision-based reduction. They do not establish 60 Hz Station rendering; subsequent bounded native and browser acceptance is recorded separately below. Named renderer and headless attribution support **no functional optimization in P5/P6** on the evidence collected; Combat's occasional streaming spikes remain unresolved. P3 and the P4 presentation pilot are not adopted.
 
 All comparative captures finished before the user released the quiet-machine window. This document records those frozen results. Subsequent functional fixes and their visual validation are separate; implementation and final-gate status remain in [PROGRESS.md](C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/docs/plans/2026-09-07-review-followup/PROGRESS.md).

@@ -62,7 +62,8 @@
 //!    ordinary contracts, the page mounts that Station's console iframe from
 //!    `gui/`, the iframe has `__updateConsole` installed (`gui/iframe-bridge.js`
 //!    pushes state through exactly that), and a click on a control *inside the
-//!    iframe* produces the expected `ControlSystem` on the pane's own token.
+//!    iframe* produces the expected `ControlSystemCorrelated` on the pane's own
+//!    token, retaining the button's action correlation.
 //! 6. **Two panes are storage-isolated** — criterion 2's "isolated state". Both
 //!    documents come from ONE origin, this host's, so the browser's own
 //!    same-origin rules do not separate them; Ultralight keys `localStorage` on
@@ -111,11 +112,11 @@ const PANE_SIZE: (u32, u32) = (1280, 900);
 ///
 /// Pinned by name rather than chosen relationally, unlike
 /// `tests/native_host_panes.rs`: this test needs a console with a control that
-/// is present unconditionally, produces a `ControlSystem` with no target lock or
-/// prior selection, and is idempotent. The Captain's Red Alert button is that
-/// control — `gui/components/ph-red-alert.js` sends `set_red_alert` with an
+/// is present unconditionally, produces a `ControlSystemCorrelated` with no
+/// target lock or prior selection, and is idempotent. The Captain's Red Alert
+/// button is that control — `gui/components/ph-red-alert.js` sends `set_red_alert` with an
 /// explicit desired state, and `gui/action-map.js` turns it into
-/// `ControlSystem { target: "red-alert", … }`.
+/// `ControlSystemCorrelated { target: "red-alert", … }`.
 const STATION: &str = "captain";
 const RED_ALERT_SYSTEM: &str = "red-alert";
 
@@ -632,14 +633,17 @@ fn two_panes_load_real_console_pages_join_operate_a_station_and_share_no_storage
     );
     // Record what the console iframe posts up to the page, so a failure below
     // says WHERE the path broke: no message at all is a click that never
-    // reached the button, and a `console_action` with no `ControlSystem` after
-    // it is `gui/action-map.js` or the injected link.
+    // reached the button, and a `console_action` with no correlated command
+    // after it is `gui/action-map.js` or the injected link.
     surfaces[0]
         .1
         .view_mut()
         .evaluate(
             "window.__paneProbe=[];window.addEventListener('message',function(e){\
-             try{window.__paneProbe.push(JSON.stringify(e.data));}catch(_){}});'ok'",
+             try{window.__paneProbe.push(JSON.stringify(e.data));\
+             if(e.data.type==='console_action'){var a=JSON.parse(e.data.payload);\
+             if(a.action==='set_red_alert')window.__paneRedAlertCorrelation=a.correlation;}\
+             }catch(_){}});'ok'",
         )
         .expect("the page takes a probe");
 
@@ -650,12 +654,17 @@ fn two_panes_load_real_console_pages_join_operate_a_station_and_share_no_storage
     let deadline = Instant::now() + PATIENCE;
     while Instant::now() < deadline && commanded.is_none() {
         for msg in frame(&mut app, &mut surfaces) {
-            if let ClientMessage::ControlSystem { target, payload } = msg {
-                commanded = Some((target, payload));
+            if let ClientMessage::ControlSystemCorrelated {
+                correlation,
+                target,
+                payload,
+            } = msg
+            {
+                commanded = Some((correlation, target, payload));
             }
         }
     }
-    let (target, payload) = commanded.unwrap_or_else(|| {
+    let (correlation, target, payload) = commanded.unwrap_or_else(|| {
         let probe = surfaces[0]
             .1
             .view_mut()
@@ -672,11 +681,21 @@ fn two_panes_load_real_console_pages_join_operate_a_station_and_share_no_storage
             )
             .unwrap_or_else(|e| format!("<unreadable: {e}>"));
         panic!(
-            "a click inside the console iframe produced no ControlSystem — the console's own \
+            "a click inside the console iframe produced no ControlSystemCorrelated — the console's own \
              postMessage, gui/action-map.js and the injected link are the path it takes. \
              The page received: {probe}. The page's UI click sound: {audio}"
         )
     });
+    let posted_correlation = surfaces[0]
+        .1
+        .view_mut()
+        .evaluate("String(window.__paneRedAlertCorrelation || '')")
+        .expect("the console action's correlation can be inspected");
+    assert_eq!(
+        correlation.as_str(),
+        posted_correlation,
+        "the host must receive the correlation minted by the clicked console control"
+    );
     assert_eq!(
         target.0, RED_ALERT_SYSTEM,
         "the command must name the system the clicked control drives"
@@ -688,7 +707,9 @@ fn two_panes_load_real_console_pages_join_operate_a_station_and_share_no_storage
         ),
         "the Captain's console sends an explicit desired state: got {payload:?}"
     );
-    println!("[pane] console click round-tripped: ControlSystem {{ target: {target:?} }}");
+    println!(
+        "[pane] console click round-tripped: ControlSystemCorrelated {{ target: {target:?} }}"
+    );
 
     // ── 6: the two panes share no storage ───────────────────────────────────
     //

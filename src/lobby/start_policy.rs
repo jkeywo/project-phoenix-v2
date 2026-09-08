@@ -145,6 +145,17 @@ pub fn evaluate_start_policy(
     }
 }
 
+/// Standalone native hosts own both cohorts locally. An enabled GM whose
+/// screen is unavailable remains in the roster and blocks automatic launch.
+/// Fleet hosts continue using their canonical collective start grant instead.
+pub fn local_lobby_ready(crew: ReadinessTally, gms: &GmRoster) -> bool {
+    gms.operators().iter().all(|gm| gm.connected && gm.ready)
+        && matches!(
+            evaluate_start_policy([crew], gms, true, StartTrigger::Automatic),
+            StartPolicyDecision::Start { .. }
+        )
+}
+
 /// Maximum accepted fixed-tick start id. This is a protocol bound, not a
 /// gameplay value; it follows the public operator/session id bound.
 pub const MAX_START_GRANT_ID_CHARS: usize = 64;

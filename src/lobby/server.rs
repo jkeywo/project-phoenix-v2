@@ -1540,11 +1540,13 @@ fn handle_disconnect(
 /// processed later in the same fixed tick sees `local_start_allowed == false`.
 fn enforce_fleet_managed_countdown(
     managed: Res<FleetManagedLobby>,
+    gms: Res<crate::gm_roster::GmRoster>,
     mut timer: ResMut<CountdownTimer>,
     mut outbox: ResMut<LobbyOutbox>,
 ) {
-    timer.local_start_allowed = !managed.enabled;
-    if managed.enabled && timer.remaining_secs > 0.0 {
+    timer.local_start_allowed =
+        !managed.enabled && gms.operators().iter().all(|gm| gm.connected && gm.ready);
+    if !timer.local_start_allowed && timer.remaining_secs > 0.0 {
         timer.remaining_secs = 0.0;
         timer.pending_phase = None;
         outbox.0.push((
@@ -1839,7 +1841,47 @@ fn tick_countdown(
     mut next_state: ResMut<NextState<GamePhase>>,
     mut outbox: ResMut<LobbyOutbox>,
     sessions: Option<Res<Sessions>>,
+    gms: Option<Res<crate::gm_roster::GmRoster>>,
+    phase: Res<State<GamePhase>>,
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
+    #[cfg(feature = "server")] preload: Option<
+        Res<crate::server::asset_preload::AssetPreloadResource>,
+    >,
+    model_rigs: Option<Res<crate::entities::model_markers::ModelRigReadiness>>,
 ) {
+    let gm_changed = gms.as_ref().is_some_and(|gms| gms.is_changed());
+    let empty_gms = crate::gm_roster::GmRoster::default();
+    let gms = gms.as_deref().unwrap_or(&empty_gms);
+    let all_ready = sessions
+        .as_ref()
+        .is_none_or(|s| crate::lobby::start_policy::local_lobby_ready(s.0.readiness_tally(), gms));
+    // Ready on a private GM surface is not a crew SetReady message. The same
+    // countdown must therefore also respond to that cohort becoming ready.
+    if timer.remaining_secs <= 0.0
+        && timer.local_start_allowed
+        && (!gms.is_empty() || gm_changed)
+        && all_ready
+        && *phase.get() == GamePhase::Lobby
+        && matches!(*next_state, NextState::Unchanged)
+        && world_config.is_some()
+    {
+        #[cfg(feature = "server")]
+        let preload_ready = preload.as_ref().is_none_or(|p| !p.started || p.complete);
+        #[cfg(not(feature = "server"))]
+        let preload_ready = true;
+        let ready = (crate::debug_overlay::is_playwright_automation() || preload_ready)
+            && model_rigs.as_ref().is_none_or(|rigs| rigs.is_ready());
+        timer.remaining_secs = 5.0;
+        timer.pending_phase = Some(if ready {
+            GamePhase::InProgress
+        } else {
+            GamePhase::Loading
+        });
+        outbox.0.push((
+            Target::All,
+            ServerMessage::GameStartCountdown { remaining_secs: 5 },
+        ));
+    }
     if timer.remaining_secs <= 0.0 {
         return;
     }
@@ -1850,17 +1892,15 @@ fn tick_countdown(
         return;
     }
 
-    // Cancel if not all connected players are ready anymore.
-    if let Some(ref sessions) = sessions {
-        if !sessions.0.all_ready() {
-            timer.remaining_secs = 0.0;
-            timer.pending_phase = None;
-            outbox.0.push((
-                Target::All,
-                ServerMessage::GameStartCountdown { remaining_secs: 0 },
-            ));
-            return;
-        }
+    // Cancel if either local participant cohort is no longer ready.
+    if sessions.is_some() && !all_ready {
+        timer.remaining_secs = 0.0;
+        timer.pending_phase = None;
+        outbox.0.push((
+            Target::All,
+            ServerMessage::GameStartCountdown { remaining_secs: 0 },
+        ));
+        return;
     }
 
     let prev = timer.remaining_secs;
@@ -1951,6 +1991,74 @@ mod tests {
     use super::*;
 
     include!("outbox_access_tests.rs");
+
+    fn local_gm(app: &mut App, connected: bool, ready: bool) {
+        app.insert_resource(
+            crate::gm_roster::GmRoster::try_new(vec![crate::gm_roster::GmOperator {
+                id: "native-gm".into(),
+                name: "GM".into(),
+                connected,
+                ready,
+            }])
+            .unwrap(),
+        );
+    }
+
+    #[test]
+    fn local_gm_readiness_starts_and_cancels_the_shared_countdown() {
+        let mut app = test_app();
+        app.insert_resource(crate::world::config::WorldConfig::default());
+        local_gm(&mut app, true, false);
+        push(
+            &mut app,
+            "crew",
+            ClientMessage::Identify {
+                token: "crew".into(),
+                name: "Ada".into(),
+            },
+        );
+        tick(&mut app);
+        push(&mut app, "crew", ClientMessage::SetReady { ready: true });
+        tick(&mut app);
+        assert_eq!(app.world().resource::<CountdownTimer>().remaining_secs, 0.0);
+        local_gm(&mut app, true, true);
+        let out = tick(&mut app);
+        assert!(out.iter().any(|m| matches!(
+            m.msg,
+            ServerMessage::GameStartCountdown { remaining_secs: 5 }
+        )));
+        local_gm(&mut app, false, true);
+        let out = tick(&mut app);
+        assert_eq!(app.world().resource::<CountdownTimer>().remaining_secs, 0.0);
+        assert!(out.iter().any(|m| matches!(
+            m.msg,
+            ServerMessage::GameStartCountdown { remaining_secs: 0 }
+        )));
+        local_gm(&mut app, true, false);
+        tick(&mut app);
+        assert_eq!(app.world().resource::<CountdownTimer>().remaining_secs, 0.0);
+    }
+
+    #[test]
+    fn local_gm_can_ready_an_ai_ship_only_after_a_world_is_selected() {
+        let mut app = test_app();
+        local_gm(&mut app, true, true);
+        tick(&mut app);
+        assert_eq!(app.world().resource::<CountdownTimer>().remaining_secs, 0.0);
+        app.insert_resource(crate::world::config::WorldConfig::default());
+        tick(&mut app);
+        assert!(app.world().resource::<CountdownTimer>().remaining_secs > 0.0);
+        // Several fixed ticks can run before the queued phase transition.
+        // A completed countdown must not restart within that same frame.
+        app.world_mut()
+            .resource_mut::<CountdownTimer>()
+            .remaining_secs = 0.0;
+        app.world_mut()
+            .resource_mut::<NextState<GamePhase>>()
+            .set(GamePhase::InProgress);
+        app.world_mut().run_schedule(FixedUpdate);
+        assert_eq!(app.world().resource::<CountdownTimer>().remaining_secs, 0.0);
+    }
 
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);

@@ -77,3 +77,37 @@ for exclusive-assignment checks; include identical models if available.
 An actual embedded-view crash needs a reproducible runtime fault or diagnostic
 harness. Record that case separately from unplug testing; automated recovery
 tests do not establish that a real SDK crash was observed.
+
+## Automated validation — 8 September 2026
+
+Implementation checks passed on the integrated code through `04c254be`.
+Acceptance corrections through `7b75c8bc` were checked separately below.
+
+| Check | Result |
+| --- | --- |
+| Workspace Rust suite, `--features headless` | 8,018 passed; 93 explicitly ignored |
+| Full Vitest suite | 7,216 passed |
+| Native GM queue framing regression | 4 passed, including overflow and multiline payloads |
+| Chromium controller, lobby and GM regression | 34 passed on `7b75c8bc` |
+| Actual Ultralight GM workspace and host lobby | Both passed after the GM framing correction |
+| Actual Ultralight participant panes | Passed on `7b75c8bc`, including correlated console input, storage isolation and recovery |
+| Formatting, required Clippy configuration, strings and generated-data drift checks | Passed |
+| PASM validate, scan and traceability | Passed |
+| Wiki lint | 64 pages and 1,357 references checked; no broken or unindexed entries |
+
+The native suite used `PHOENIX_AMBIGUITY_BASE_REF=a57bcca4dac4569ab0d1f1ee788f2f31149b67c8`.
+The browser and embedded checks used the matching Trunk/client bundle built from
+`04c254be`; subsequent changes corrected the native GM queue and test fixtures.
+The final native check used `host,ultralight`. After returning from the shared
+build directory's other worktree, `src/lib.rs` was timestamp-refreshed without
+changing its SHA-256. Cargo reported a fresh library build from this checkout,
+and its dependency record included the expected native pane and GM sources.
+
+The final browser command was run from `tests/smoke` with an owned server port:
+
+```text
+npx playwright test semantic-action-helm.spec.js lobby.spec.js gm-page.spec.js gm-confirmation.spec.js --project=chromium --reporter=line
+```
+
+Physical controller and multi-monitor acceptance remains unverified. The
+checkboxes above remain open for that hardware pass.
